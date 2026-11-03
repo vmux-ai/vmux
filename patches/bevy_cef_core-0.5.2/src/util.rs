@@ -267,7 +267,6 @@ pub fn raw_media_request(url: &str) -> Option<PathBuf> {
     path.is_absolute().then_some(path)
 }
 
-/// MIME type for raw-media serving (kept local to avoid a patch→vmux_ecs dep).
 pub fn raw_media_mime(path: &std::path::Path) -> &'static str {
     let ext = path
         .extension()

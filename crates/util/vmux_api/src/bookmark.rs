@@ -81,6 +81,8 @@ pub struct BookmarkMenuFolderRequest {
 #[vmux_api::ui_event(Eq)]
 pub struct BookmarkOpenRequest {
     pub url: String,
+    #[serde(default)]
+    pub force_new: bool,
 }
 
 #[vmux_api::ui_event(Eq)]

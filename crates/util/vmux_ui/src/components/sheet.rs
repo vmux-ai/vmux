@@ -1,6 +1,7 @@
 use dioxus::prelude::*;
 
 use crate::cn::cn;
+use crate::components::dropdown::DropdownToggleIndicator;
 use crate::components::icon::Icon;
 use crate::components::tree_row::{SIDEBAR_CARD_CHEVRON_CLOSED, SIDEBAR_CARD_CHEVRON_OPEN};
 
@@ -124,6 +125,7 @@ pub fn SheetSelectorRow(
             onclick: move |event| onclick.call(event),
             {leading}
             span { class: text_class, "{label}" }
+            DropdownToggleIndicator { open }
         }
     }
 }

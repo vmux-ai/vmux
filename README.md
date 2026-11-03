@@ -1,123 +1,148 @@
 <h1 align="center">Vmux</h1>
-<p align="center"><b>One architecture. Every platform. Every process.</b></p>
-<p align="center">The same Rust, ECS, plugins, and types from UI to service to agent.</p>
+<p align="center"><b>Any prompt. Anything, done.</b></p>
+<p align="center">A browser for getting things done with agents.</p>
 
 <p align="center">
   <img src="icon.png" alt="Vmux icon" width="256" />
 </p>
 
-Most "cross-platform" products are several applications wearing the same design system: Electron
-on desktop, React Native on mobile, Next.js on the web, another service behind them, and another
-API for agents. They may share TypeScript and domain types, but not state, lifecycle, routing,
-permissions, extension points, or architecture.
+Give Vmux a goal. It turns the work into a persistent session and brings the agents, context, and
+tools needed to finish it into one browser.
 
-That is why "add one feature" becomes changing the renderer, preload bridge, IPC handlers,
-main-process services, daemon protocol, CLI, mobile app, and automation API.
+Use it to:
 
-```text
-Typical cross-platform stack = Shared types + Separate applications
-Vmux                         = Shared application architecture + Platform adapters
+- Build an app or ship a website.
+- Investigate a bug or make a decision.
+- Plan a trip, from booking a flight to reserving a hotel room.
 
-Typical boundary = Domain model → UI DTO → IPC DTO → RPC DTO → tool schema
-Vmux boundary    = One Rust type → UI · ECS · IPC · QUIC · CLI · MCP
-```
+Every goal becomes a session you can manage from start to finish:
 
-```text
-Electron product                  Vmux feature plugin
-├── renderer state + UI           ├── state
-├── preload API                   ├── systems
-├── IPC handlers                  ├── UI
-├── main-process service          ├── commands
-├── daemon protocol               ├── tools
-├── CLI + automation schema       └── wire contracts
-└── mobile implementation
-```
-
-Vmux gives that feature one home. The feature owns its state, behavior, UI, commands, agent tools,
-and protocol together. Desktop, mobile, the background service, the CLI, and the MCP server compose
-the parts they need instead of rebuilding the feature behind another interface. For each contract,
-one Rust type is the source of truth across every boundary it crosses; transport changes, meaning
-does not.
-
-**ECS turns integration from dependencies into data.** Attach a component to add behavior. Install
-a plugin to add a capability. Swap an adapter to change platforms. Existing features do not need
-to know who extended them or be rewired around every new surface.
-
-> Electron gets you to the first window. Vmux keeps every next surface from becoming another app.
-
-## Why it is different
-
-| | Vmux |
-|---|---|
-| **One model everywhere** | Desktop, mobile, daemon, CLI, and MCP are Bevy apps composed from the same typed feature plugins. |
-| **One feature, every interface** | A feature owns its state, systems, page, commands, tools, and wire contracts together. Each runtime selects what it needs. |
-| **One contract end to end** | The same Rust type can be an ECS message, UI event, process payload, network request, CLI operation, or agent tool contract. |
-| **Composition over integration** | Attach a component to add behavior, install a plugin to add a capability, or swap an adapter to change platforms. Existing features need no rewiring. |
-| **Decoupled by construction** | Features meet in the ECS world through typed data and messages, not inside each other's APIs. |
-| **Predictable for agents** | Before code exists, its owner, state, behavior, messages, and composition point already have a known shape. |
-| **UI-independent** | Long-running work has stable identity, snapshots, subscriptions, and a reconnect protocol. Every UI is disposable. |
-| **Native without losing the web** | Rust is the application. Dioxus, Chromium, terminals, and editors are composable surfaces. |
-
-> Electron is cross-platform UI. Vmux is cross-platform architecture.
-
-## One platform, every runtime
+- See what is active, waiting, or finished.
+- Resume any session with its history and context intact.
+- Group related work by project instead of reconstructing it from tabs.
+- Jump directly from a session into its browser, code, terminal, files, or Git changes.
 
 ```text
-Application = Plugin Graph
-Target      = Composition Profile
-Boundary    = Rust Type
+┌──────────────────────┬──────────────────────────────┬──────────────────────┐
+│ To do                │ In progress                  │ Done                 │
+├──────────────────────┼──────────────────────────────┼──────────────────────┤
+│ Plan a trip          │ Fix the checkout bug         │ Ship the website     │
+│                      │                              │                      │
+│ Browser · Tools      │ Agent · Code · Terminal      │ Browser · Code       │
+│                      │ Git · Browser                │                      │
+└──────────────────────┴──────────────────────────────┴──────────────────────┘
+                         persistent sessions
 ```
 
-The same feature is composed differently for each target.
+Watch the work, steer it, or take over at any point. Close a page, switch projects, or leave the
+app; the session remains ready to continue.
+
+## One workspace for every session
+
+Vmux combines browser simplicity with the layout power of tmux and the control of an IDE.
+
+Open pages in tabs, stacks, or splits. Move between a conversation, its project, code, Git changes,
+terminals, and live websites without rebuilding context. Agents use the same workspace and tools
+you do.
+
+The result is one interaction model for both software development and everyday web tasks.
+
+## Architecture
+
+Vmux stands for **Vibe Multiplexer**. The browser runs on a reusable Rust application framework:
+an ECS host, declarative UI, typed contracts, and interchangeable transports.
+
+### Built from proven patterns
+
+- winit: cross-platform native windows, input, and event loops.
+- Tauri and Wry: WebView lifecycle and IPC.
+- Chromium and CEF: managed browser surfaces and web compatibility.
+- tmux and IDEs: panes, stacks, code, terminals, and a Git client.
+- React and Dioxus: React-like declarative UI components, written in Rust.
+- Game engines and Bevy ECS: composition over inheritance with components, resources, systems, and plugins.
+
+### Declarative UI over an ECS host
+
+Pages are declarative Rust written with
+[Dioxus RSX](https://dioxuslabs.com/learn/0.7/essentials/ui/rsx/). They render typed state and emit
+typed intent; business state and long-running work stay in the authoritative
+[Bevy ECS](https://bevyengine.org/learn/book/ecs/) host.
+
+Vmux borrows composition over inheritance from the Bevy game engine: components add capabilities,
+systems add behavior, and plugins assemble applications.
+
+```mermaid
+flowchart LR
+    subgraph host["Host · local / service / cloud"]
+        ecs["Bevy ECS<br/>state · capabilities<br/>systems · plugins<br/>effects"]
+    end
+
+    subgraph ui["Shared Dioxus RSX in a tmux-like layout"]
+        platforms["desktop · mobile · web"]
+        layout["tabs · stacks · panes"]
+        pages["declarative pages"]
+        platforms --> layout --> pages
+    end
+
+    ecs -- "UiState · typed contract" --> pages
+    pages -- "typed messages · same contract" --> ecs
+```
+
+A session, project, page, or Git repository is represented by an entity. Components describe what
+it is and what it can do. Systems react to typed events, update state, perform effects, and publish
+the resulting UI state.
+
+Because the UI depends on the contract rather than host location, pages can close, move, or
+reconnect without becoming the source of truth.
+
+### Typed once. Transported anywhere.
+
+UI state, commands, events, and service requests are defined once as Rust types.
 
 ```text
-Feature
-├── Core systems
-├── UI plugin
-├── Service plugin
-├── Persistence plugin
-├── CLI plugin
-├── MCP plugin
-└── Platform adapters
+Rust contract
+├── In-process
+├── Process IPC
+├── QUIC
+├── CLI
+└── MCP
 ```
 
-Desktop, mobile, web, daemon, server, CLI, MCP, tools, and games are not separate architectures.
-They are different plugin compositions of the same kind of Bevy application.
+The transport changes; the contract and its meaning do not. Local UI, remote UI, CLI, and agents
+use the same capabilities through different adapters.
 
-The IDE and agent harness are the platform's creation and control plane.
+JavaScript powers web surfaces, not the application architecture. React's declarative ideas are
+expressed through Dioxus RSX while Rust owns state, services, and composition.
+
+### One feature, one home
+
+Each feature owns its complete vertical slice.
 
 ```text
-Vmux platform
-├── Runtime
-├── Plugin framework
-├── Typed contracts
-├── Build and package system
-├── IDE
-└── Agent harness
+Feature plugin
+├── Components and resources
+├── Systems
+├── Declarative UI
+├── Typed events and state
+├── Commands and agent tools
+├── Persistence
+└── Transport adapters
 ```
 
-> A composable application platform for every runtime.
+Desktop, mobile, background services, CLI, MCP, and remote runtimes install the plugins they need
+instead of rebuilding the feature behind another interface.
 
-> One architecture, from pixels to servers.
+```text
+Application = Plugin graph
+Runtime     = Composition profile
+Boundary    = Typed contract
+```
 
-> Every executable is a plugin composition.
+Chromium pages, Dioxus UI, terminals, editors, and GPU-rendered views are composable surfaces
+coordinated by the same native Rust runtime. Long-running work belongs to sessions and projects,
+not to a particular window or renderer.
 
-> Build the whole product with one application model.
-
-Self-hosting is one proof of the platform, not its definition. The intended customization loop lets
-an agent change Vmux, build a personal distribution, and switch to that build through a custom
-channel. The same environment can bootstrap an entirely new application from the framework.
-
-> Vmux can build itself because Vmux itself is just another composition.
-
-## Product
-
-- **Co-work with agents** — People and agents build side by side in one shared space — from hands-on pairing to full autonomy, you set the balance.
-- **Browser simplicity, tmux power** — Looks like the browser you already know; split, stack, and tile panes like tmux underneath.
-- **IDE power underneath** — Keyboard-driven workflows and deep environment control — and agents drive the whole workspace over MCP.
-- **3D workspace** — Powered by Bevy. Flip your panes into a live, GPU-rendered 3D scene — same workspace, still interactive.
-
-See [the architecture](docs/architecture.md) for the runtime, ECS, plugin, rendering, and
+See [the architecture](docs/architecture.md) for the ECS, plugin, rendering, persistence, and
 local/remote model.
 
 ## Install
@@ -126,24 +151,22 @@ local/remote model.
 curl -fsSL https://vmux.ai/install | sh
 ```
 
-Requires macOS 13.0 (Ventura) or later.
+Requires macOS 13.0 or later.
 
 ## Development
 
 ```sh
-# Check prerequisites
 make doctor
-
-# Run macOS app
 make
 ```
 
-The first build through `make` in a linked worktree automatically seeds its build cache from the main worktree.
+The first build through `make` in a linked worktree automatically seeds its build cache from the
+main worktree.
 
 See [Makefile](Makefile) for all targets.
 
 ## License
 
-Copyright (c) 2024-2025 Junichi Sugiura
+Copyright (c) 2024-2026 Junichi Sugiura
 
 Licensed under the [GNU General Public License v3.0 or later](LICENSE).

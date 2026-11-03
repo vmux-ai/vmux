@@ -1,3 +1,5 @@
+use sha2::Digest;
+
 #[cfg(host)]
 pub use host::{
     FileGit, GitCheckForUpdatesRequest, GitDiffSource, GitError, GitPlugin, GitRepository,
@@ -22,6 +24,10 @@ pub const GIT_PAGE_URL: &str = "git://";
 pub struct GitUrl;
 
 impl GitUrl {
+    pub fn file_hash(path: &[u8]) -> String {
+        format!("diff-{:x}", sha2::Sha256::digest(path))
+    }
+
     pub fn is_page(value: &str) -> bool {
         value.starts_with(GIT_PAGE_URL)
     }
@@ -102,6 +108,14 @@ mod host;
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn file_hash_matches_githubs_pull_request_diff_anchor() {
+        assert_eq!(
+            GitUrl::file_hash(b".github/workflows/ci.yml"),
+            "diff-b803fcb7f17ed9235f1e5cb1fcd2f5d3b2838429d4368ae4c57ce4436577f03f"
+        );
+    }
 
     #[test]
     fn git_url_round_trips_an_absolute_repository_path() {

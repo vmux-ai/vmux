@@ -41,17 +41,20 @@ impl Highlighter {
         let syntax = assets.syntax(path);
         let mut light = HighlightLines::new(syntax, &assets.light);
         let mut dark = HighlightLines::new(assets.syntax(path), &assets.dark);
-        LinesWithEndings::from(content)
-            .map(|line| {
-                let light = light
-                    .highlight_line(line, &assets.syntaxes)
-                    .unwrap_or_default();
-                let dark = dark
-                    .highlight_line(line, &assets.syntaxes)
-                    .unwrap_or_default();
-                Self::spans(light, dark)
-            })
-            .collect()
+        let mut lines = Vec::new();
+        for (index, line) in LinesWithEndings::from(content).enumerate() {
+            if index % 256 == 0 && super::runtime::GitRuntime::canceled() {
+                break;
+            }
+            let light = light
+                .highlight_line(line, &assets.syntaxes)
+                .unwrap_or_default();
+            let dark = dark
+                .highlight_line(line, &assets.syntaxes)
+                .unwrap_or_default();
+            lines.push(Self::spans(light, dark));
+        }
+        lines
     }
 
     pub(crate) fn line(text: &str, path: &Path) -> Vec<StyledSpan> {

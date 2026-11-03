@@ -14,7 +14,10 @@ use cef::{
 };
 use std::os::raw::c_int;
 
-pub use bin_emit_event_handler::{BinEmitEventHandler, BinIpcEventRaw};
+pub use bin_emit_event_handler::{
+    BinDocumentContextHandler, BinEmitEventHandler, BinIpcBlocked, BinIpcContext, BinIpcEpoch,
+    BinIpcEventRaw, BinIpcNavigationRevision, BinIpcSurfaceGeneration,
+};
 pub use js_emit_event_handler::{IpcEventRaw, JsEmitEventHandler};
 pub use snapshot_result_handler::{SnapshotResultHandler, SnapshotResultRaw};
 

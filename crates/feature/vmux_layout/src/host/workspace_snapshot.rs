@@ -13,7 +13,7 @@ use crate::stack::{ActiveTabParam, LayoutFocus, Stack};
 pub struct TabGather<'w, 's> {
     pub active_tab: ActiveTabParam<'w, 's>,
     pub focus: LayoutFocus<'w, 's>,
-    pub all_children: Query<'w, 's, &'static Children>,
+    pub surfaces: crate::hosted_page::StackSurface<'w, 's>,
     pub pane_children: Query<'w, 's, &'static Children, With<Pane>>,
     pub stack_q: Query<'w, 's, Entity, With<Stack>>,
     pub browser_meta: Query<'w, 's, &'static PageMetadata, With<Browser>>,
@@ -70,19 +70,17 @@ impl TabGather<'_, '_> {
                         ],
                     )
                 };
-                if let Ok(tab_kids) = self.all_children.get(child) {
-                    for browser_e in tab_kids.iter() {
-                        if let Ok(meta) = self.browser_meta.get(browser_e) {
-                            bar_tabs.push(CommandBarTab {
-                                title: meta.title.clone(),
-                                url: meta.url.clone(),
-                                pane_id: pane_e.to_bits(),
-                                tab_index: tab_index as u32,
-                                is_active: stack_is_active,
-                                location: location.clone(),
-                            });
-                        }
-                    }
+                if let Some(browser) = self.surfaces.current(child)
+                    && let Ok(meta) = self.browser_meta.get(browser)
+                {
+                    bar_tabs.push(CommandBarTab {
+                        title: meta.title.clone(),
+                        url: meta.url.clone(),
+                        pane_id: pane_e.to_bits(),
+                        tab_index: tab_index as u32,
+                        is_active: stack_is_active,
+                        location: location.clone(),
+                    });
                 }
                 tab_index += 1;
             }

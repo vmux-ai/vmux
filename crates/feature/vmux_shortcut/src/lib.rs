@@ -58,9 +58,6 @@ pub struct ShortcutProbePressRequest {
 #[vmux_api::ui_event]
 pub struct ShortcutProbeClearRequest;
 
-#[vmux_api::ui_event]
-pub struct ShortcutCloseRequest;
-
 #[vmux_api::ui_event(Copy, Eq)]
 pub struct ShortcutCollectionViewRequest {
     pub view: vmux_ecs::CollectionView,

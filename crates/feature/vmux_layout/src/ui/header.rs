@@ -4,14 +4,16 @@ use dioxus::prelude::*;
 use vmux_api::bookmark::{
     BookmarkAddRequest, BookmarkPinUrlRequest, BookmarkToggleRequest, BookmarkUnpinRequest,
 };
-use vmux_ecs::event::team::{TeamMemberRow, TeamOpenRequest};
+use vmux_ecs::event::team::{ProfileRow, TeamMemberRow, TeamOpenRequest, TeamProfileSwitchRequest};
 use vmux_ui::cn::cn;
 use vmux_ui::components::avatar::Avatar;
 use vmux_ui::components::context_menu::{ContextMenuContent, ContextMenuItem, ContextMenuTrigger};
+use vmux_ui::components::dropdown::{DropdownAlign, DropdownOption, DropdownPopup};
 use vmux_ui::components::icon::Icon;
 use vmux_ui::hooks::send;
 use vmux_ui::i18n::translate;
 
+use super::LayoutDropdown;
 use super::bookmark::LayoutContextMenu;
 use super::extension::ExtensionBar;
 use super::remote::RemoteControl;
@@ -27,9 +29,11 @@ use crate::event::{
 #[component]
 pub(crate) fn HeaderView() -> Element {
     let layout = LayoutUi::current();
-    let ui = layout.value();
-    let state = ui.layout.unwrap_or_default();
-    if !ui.overlay_ready(&layout.error()) || !state.header_visible() {
+    let geometry = layout.use_selector(|ui| ui.layout);
+    let Some(state) = geometry() else {
+        return rsx! {};
+    };
+    if !state.header_visible() {
         return rsx! {};
     }
     let header_vars = format!(
@@ -44,7 +48,7 @@ pub(crate) fn HeaderView() -> Element {
         div {
             class: "pointer-events-auto fixed top-[var(--vmux-header-top)] left-[var(--vmux-header-left)] right-[var(--vmux-header-right)] h-[var(--vmux-header-height)] overflow-hidden",
             style: "{header_vars}",
-            HeaderContent {}
+            div { class: "h-[76px]", HeaderContent {} }
         }
     }
 }
@@ -52,24 +56,58 @@ pub(crate) fn HeaderView() -> Element {
 #[component]
 fn HeaderContent() -> Element {
     let layout = LayoutUi::current();
-    let ui = layout.value();
-    let stacks_state = ui.stacks.unwrap_or_default();
-    let tab_strip = ui.tab_strip.unwrap_or_default();
+    let header = layout.use_selector(|ui| {
+        (
+            ui.stacks.clone(),
+            ui.tab_strip.clone(),
+            ui.header.clone(),
+            ui.extensions.clone(),
+            ui.remote.clone(),
+            ui.reload_revision,
+        )
+    });
+    let (stacks_state, tab_strip, header, extensions, remote, reload_key) = header();
+    let stacks_state = stacks_state.unwrap_or_default();
+    let projected_active = stacks_state
+        .stacks
+        .iter()
+        .find(|row| row.is_active)
+        .cloned();
+    let tab_strip = tab_strip.unwrap_or_default();
     let crate::event::HeaderState {
-        active: active_row,
-        metadata: active_metadata,
+        address: page_address,
+        active: retained_active,
+        metadata: retained_metadata,
         bookmarked: is_bookmarked,
         pinned_uuid,
         user,
         agents: _,
-    } = ui.header;
-    let extensions = ui.extensions.extensions;
-    let remote = ui.remote;
-    let reload_key = ui.reload_revision;
+        profiles,
+    } = header;
+    let active_row = projected_active.or(retained_active);
+    let active_metadata = active_row
+        .as_ref()
+        .map(|row| vmux_ecs::PageMetadata {
+            title: row.title.clone(),
+            url: row.url.clone(),
+            icon: row.icon.clone(),
+            bg_color: row.bg_color.clone(),
+        })
+        .or(retained_metadata);
+    let extensions = extensions.extensions;
     let stacks_error = layout.error();
     let tabs_error = stacks_error.clone();
-    let tab_order = use_memo(move || layout.value().tab_strip.unwrap_or_default().order);
-    let tab_drag = TabDrag::use_state(tab_order);
+    let tab_order = layout.use_selector(|ui| ui.tab_strip.clone().unwrap_or_default().order);
+    let tab_active = layout.use_selector(|ui| {
+        ui.tab_strip.as_ref().and_then(|strip| {
+            strip
+                .tabs
+                .iter()
+                .find(|row| row.tab.is_active)
+                .map(|row| row.tab.id.clone())
+        })
+    });
+    let tab_drag = TabDrag::use_state(tab_order, tab_active);
     let StackNavigationState {
         stacks: _,
         can_go_back,
@@ -157,6 +195,7 @@ fn HeaderContent() -> Element {
                         }
                     }
                     HeaderAddressBar {
+                        page_address,
                         active_row: active_row.clone(),
                         bg_color: active_bg_color.clone(),
                     }
@@ -207,7 +246,7 @@ fn HeaderContent() -> Element {
                             }
                         }
                     }
-                    TeamFacepile { user }
+                    TeamFacepile { user, profiles }
                     ExtensionBar { extensions }
                     RemoteControl { remote }
                 }
@@ -239,7 +278,7 @@ fn Tab(row: TabStripRow, index: usize, drag: TabDrag) -> Element {
         display_title
     };
     let tooltip = display_title.clone();
-    let is_active = tab.is_active;
+    let is_active = drag.is_selected(&tab.id, tab.is_active);
     let skirt_classes = "relative \
         before:content-[''] before:absolute before:bottom-0 before:-left-2 before:h-2 before:w-2 before:pointer-events-none \
         before:[background:radial-gradient(circle_at_top_left,transparent_0,transparent_8px,var(--tab-bg)_8px)] \
@@ -267,12 +306,12 @@ fn Tab(row: TabStripRow, index: usize, drag: TabDrag) -> Element {
                 .to_string(),
             cn([
                 skirt_classes,
-                "mt-1 flex h-8 w-full items-center gap-2 rounded-t-md border-b-0 px-3 transition-[height,margin,background-color,border-color,border-radius,color,box-shadow] duration-150 ease-out",
+                "mt-1 flex h-8 w-full items-center gap-2 rounded-t-md border-b-0 px-3",
             ]),
             cn([
                 "min-w-0 flex-1",
                 trunc,
-                "text-ui font-medium text-foreground transition-colors duration-150 ease-out",
+                "text-ui font-medium text-foreground",
             ]),
             "flex h-4 w-4 cursor-pointer shrink-0 items-center justify-center rounded-sm opacity-0 transition-opacity group-hover:opacity-100 focus-visible:opacity-100 hover:bg-foreground/10".to_string(),
         )
@@ -280,13 +319,13 @@ fn Tab(row: TabStripRow, index: usize, drag: TabDrag) -> Element {
         (
             String::new(),
             cn([
-                "my-1 flex h-7 w-full items-center gap-2 rounded-lg px-3 text-muted-foreground transition-[height,margin,background-color,border-color,border-radius,color,box-shadow] duration-150 ease-out",
+                "my-1 flex h-7 w-full items-center gap-2 rounded-lg px-3 text-muted-foreground",
                 inactive_hover_classes,
             ]),
             cn([
                 "min-w-0 flex-1",
                 trunc,
-                "text-ui transition-colors duration-150 ease-out",
+                "text-ui",
             ]),
             "flex h-4 w-4 cursor-pointer shrink-0 items-center justify-center rounded-sm opacity-0 transition-opacity group-hover:opacity-100 focus-visible:opacity-100 hover:bg-foreground/10".to_string(),
         )
@@ -309,7 +348,7 @@ fn Tab(row: TabStripRow, index: usize, drag: TabDrag) -> Element {
             onpointerdown: {
                 let source_id = tab.id.clone();
                 move |event| {
-                    drag.begin(
+                    drag.press(
                         &event,
                         source_id.clone(),
                         index,
@@ -396,6 +435,7 @@ fn Tab(row: TabStripRow, index: usize, drag: TabDrag) -> Element {
 
 #[component]
 fn NewTabButton() -> Element {
+    let mut pressed = use_signal(|| false);
     rsx! {
         div { class: "relative h-7 w-7 shrink-0",
             WindowDragRegion {
@@ -410,7 +450,15 @@ fn NewTabButton() -> Element {
                 aria_label: translate("layout-new-tab"),
                 title: translate("layout-new-tab"),
                 class: "absolute inset-0 flex appearance-none cursor-pointer items-center justify-center rounded-md border-0 bg-foreground/[0.04] text-muted-foreground shadow-none outline-none transition-colors hover:bg-foreground/[0.09] hover:text-foreground active:bg-foreground/[0.12] focus-visible:bg-foreground/[0.09] focus-visible:text-foreground",
+                onpointerdown: move |event: Event<PointerData>| {
+                    if event.trigger_button() == Some(dioxus::html::input_data::MouseButton::Primary) {
+                        pressed.set(true);
+                        let _ = send(&TabCreateRequest);
+                    }
+                },
+                onpointercancel: move |_| pressed.set(false),
                 onclick: move |_| {
+                    if pressed() { pressed.set(false); return; }
                     let _ = send(&TabCreateRequest);
                 },
                 Icon { class: "h-4 w-4",
@@ -452,7 +500,20 @@ fn NavButton(
 }
 
 #[component]
-fn HeaderAddressBar(active_row: Option<StackRow>, bg_color: Option<String>) -> Element {
+fn HeaderAddressBar(
+    active_row: Option<StackRow>,
+    bg_color: Option<String>,
+    page_address: Option<vmux_api::address::PageAddress>,
+) -> Element {
+    let dismiss_revision =
+        LayoutUi::current().use_selector(|state| state.overlay_dismiss_revision)();
+    if let Some(address) = page_address {
+        return rsx! {
+            div { class: "flex h-8 min-w-0 flex-1 items-center", onclick: move |_| { let _ = send(&HeaderAddressFocusRequest); },
+                vmux_ui::components::address::AddressTrail { state: address, dismiss_revision, onpopup: move |active| { let _ = send(&crate::event::LayoutOverlayEvent { id: "page-address".to_string(), active }); } }
+            }
+        };
+    }
     let has_content = active_row.as_ref().is_some_and(|row| !row.url.is_empty());
     let address = active_row.map(|row| row.address).unwrap_or_default();
     let empty_class = if bg_color.is_some() {
@@ -483,7 +544,8 @@ fn HeaderAddressBar(active_row: Option<StackRow>, bg_color: Option<String>) -> E
 }
 
 #[component]
-fn TeamFacepile(user: Option<TeamMemberRow>) -> Element {
+fn TeamFacepile(user: Option<TeamMemberRow>, profiles: Vec<ProfileRow>) -> Element {
+    let mut open = use_signal(|| false);
     if user.is_none() {
         return rsx! {};
     }
@@ -491,11 +553,19 @@ fn TeamFacepile(user: Option<TeamMemberRow>) -> Element {
         div {
             class: "flex shrink-0 items-center pl-3 pr-3",
             if let Some(user) = user {
-                div {
+                LayoutDropdown {
+                    id: "profiles",
+                    keyboard_navigation: true,
+                    open: open(),
+                    on_dismiss: move |_| open.set(false),
+                    class: "shrink-0",
+                button {
+                    r#type: "button",
+                    "data-vmux-dropdown-trigger": "true",
                     class: "flex items-center gap-1.5 rounded-full bg-foreground/10 py-0.5 pl-0.5 pr-2.5 cursor-pointer transition-opacity hover:opacity-80",
                     title: translate("team-profiles"),
                     onclick: move |_| {
-                        let _ = send(&TeamOpenRequest);
+                        open.set(!open());
                     },
                     Avatar {
                         src: None,
@@ -505,6 +575,26 @@ fn TeamFacepile(user: Option<TeamMemberRow>) -> Element {
                         class: "size-5 text-[9px]",
                     }
                     span { class: "whitespace-nowrap text-xs font-medium text-foreground", "{user.name}" }
+                }
+                if open() {
+                    DropdownPopup { align: DropdownAlign::End, class: "w-64 p-1.5",
+                        for profile in profiles {
+                            DropdownOption {
+                                key: "{profile.id}",
+                                label: profile.name.clone(),
+                                selected: profile.is_active,
+                                onclick: move |_| {
+                                    open.set(false);
+                                    if !profile.is_active { let _ = send(&TeamProfileSwitchRequest { profile_id: profile.id.clone() }); }
+                                },
+                                leading: rsx! { Avatar { src: None, seed: profile.name.clone(), background: profile.color, alt: profile.name, class: "size-5 text-[8px]" } },
+                            }
+                        }
+                        DropdownOption { label: translate("team-profiles"), selected: false,
+                            onclick: move |_| { open.set(false); let _ = send(&TeamOpenRequest); },
+                        }
+                    }
+                }
                 }
             }
         }

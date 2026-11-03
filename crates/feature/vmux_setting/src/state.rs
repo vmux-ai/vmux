@@ -1,6 +1,6 @@
-pub const EXPLORER_DEFAULT_WIDTH: u32 = 240;
-pub const EXPLORER_MIN_WIDTH: u32 = 160;
-pub const EXPLORER_MAX_WIDTH: u32 = 600;
+pub const EXPLORER_DEFAULT_WIDTH: u32 = vmux_api::editor::TreeWidth::DEFAULT;
+pub const EXPLORER_MIN_WIDTH: u32 = vmux_api::editor::TreeWidth::MIN;
+pub const EXPLORER_MAX_WIDTH: u32 = vmux_api::editor::TreeWidth::MAX;
 
 #[vmux_api::ui_state(Default, version = 2)]
 pub struct SettingsUiState {

@@ -1,6 +1,7 @@
 #![allow(non_snake_case)]
 
 use dioxus::prelude::*;
+use vmux_ui::components::manager::{ManagerPage, WorkspaceBreadcrumbHeader, WorkspacePage};
 use vmux_ui::hooks::use_theme;
 use vmux_ui::i18n::translate;
 
@@ -20,19 +21,25 @@ pub fn Page() -> Element {
     rsx! {
         document::Title { "Any prompt. Anything, done." }
         document::Meta { name: "description", content: "Any prompt. Anything, done." }
-        main {
-            class: "flex min-h-0 flex-1 flex-col overflow-y-auto overscroll-contain bg-background px-5 py-8 text-foreground sm:px-8",
-            div { class: "m-auto flex w-full max-w-2xl flex-col gap-3",
-                div { class: "flex flex-col items-start gap-1 px-1 text-left",
-                    h1 { class: "text-2xl font-semibold tracking-tight text-foreground", "vmux" }
-                    p { class: "text-ui text-muted-foreground", {translate("start-tagline")} }
-                }
-                div { class: "relative w-full",
-                    CommandPalette {
-                        state,
-                        surface: CommandPaletteSurface::Start,
-                        on_close: move |_| {},
-                        on_activity: move |_| {},
+        ManagerPage {
+            WorkspaceBreadcrumbHeader {
+                current: WorkspacePage::Start.option(),
+                options: WorkspacePage::options(),
+            }
+            div {
+                class: "flex min-h-0 flex-1 flex-col overflow-y-auto overscroll-contain bg-background px-5 py-8 text-foreground sm:px-8",
+                div { class: "m-auto flex w-full max-w-2xl flex-col gap-3",
+                    div { class: "flex flex-col items-start gap-1 px-1 text-left",
+                        h1 { class: "text-2xl font-semibold tracking-tight text-foreground", "vmux" }
+                        p { class: "text-ui text-muted-foreground", {translate("start-tagline")} }
+                    }
+                    div { class: "relative w-full",
+                        CommandPalette {
+                            state,
+                            surface: CommandPaletteSurface::Start,
+                            on_close: move |_| {},
+                            on_activity: move |_| {},
+                        }
                     }
                 }
             }

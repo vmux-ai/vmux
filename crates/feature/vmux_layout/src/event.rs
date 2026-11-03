@@ -20,6 +20,8 @@ pub struct LayoutGeometry {
     pub header_height: f32,
     #[serde(default = "default_side_sheet_width")]
     pub side_sheet_width: f32,
+    #[serde(default = "default_side_sheet_width")]
+    pub side_sheet_content_width: f32,
     #[serde(default = "default_pane_gap")]
     pub pane_gap: f32,
     #[serde(default)]
@@ -793,11 +795,14 @@ pub struct ActiveWorkspaceProject {
 
 #[vmux_api::contract(Default)]
 pub struct HeaderState {
+    #[serde(default)]
+    pub address: Option<vmux_api::address::PageAddress>,
     pub active: Option<StackRow>,
     pub metadata: Option<PageMetadata>,
     pub bookmarked: bool,
     pub pinned_uuid: Option<String>,
     pub user: Option<vmux_ecs::event::team::TeamMemberRow>,
+    pub profiles: Vec<vmux_ecs::event::team::ProfileRow>,
     pub agents: Vec<vmux_ecs::event::team::TeamMemberRow>,
 }
 

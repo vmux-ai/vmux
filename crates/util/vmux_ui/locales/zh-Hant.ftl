@@ -1091,3 +1091,5 @@ project-clone-invalid = 請輸入有效的GitHub儲存庫
 project-restore = 還原專案
 project-archived = 已封存
 common-select = 選取
+
+common-show-more = 顯示更多

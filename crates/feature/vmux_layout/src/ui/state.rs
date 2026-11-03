@@ -26,8 +26,11 @@ impl LayoutUi {
         use_context::<Self>()
     }
 
-    pub(crate) fn value(self) -> LayoutUiState {
-        (self.state)()
+    pub(crate) fn use_selector<S>(self, select: impl Fn(&LayoutUiState) -> S + 'static) -> Memo<S>
+    where
+        S: Clone + PartialEq + 'static,
+    {
+        use_memo(move || select(&self.state.read()))
     }
 
     pub(crate) fn error(self) -> Option<String> {

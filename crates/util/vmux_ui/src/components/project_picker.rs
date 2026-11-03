@@ -3,7 +3,9 @@ use vmux_api::space::{ProjectBranch, ProjectRow};
 
 use crate::cn::cn;
 use crate::components::avatar::IdentityOrb;
-use crate::components::dropdown::{DropdownOption, DropdownPopup, DropdownTrigger};
+use crate::components::dropdown::{
+    DropdownOpenMode, DropdownOption, DropdownPopup, DropdownTrigger,
+};
 use crate::components::prompt_box::{
     PROMPT_MENU_INDENT, PROMPT_MENU_ROW, PromptMenuRow, PromptPopup, PromptPopupPlacement,
 };
@@ -18,7 +20,9 @@ pub fn ProjectSelectTrigger(
     open: bool,
     #[props(default)] seed: String,
     #[props(default)] class: String,
-    onclick: EventHandler<MouseEvent>,
+    #[props(default)] open_mode: DropdownOpenMode,
+    #[props(default)] on_hover_open: Option<EventHandler<()>>,
+    onclick: EventHandler<()>,
 ) -> Element {
     let leading = if seed.is_empty() {
         rsx! { BuiltinIconView {
@@ -37,6 +41,8 @@ pub fn ProjectSelectTrigger(
             label,
             title,
             open,
+            open_mode,
+            on_hover_open,
             class: cn([class.as_str()]),
             leading,
             onclick,

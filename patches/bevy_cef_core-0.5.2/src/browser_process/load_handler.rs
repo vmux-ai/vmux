@@ -12,6 +12,8 @@ use std::os::raw::c_int;
 #[derive(Clone, Debug)]
 pub struct WebviewLoadingStateEvent {
     pub webview: Entity,
+    pub surface_generation: u64,
+    pub navigation_epoch: u64,
     pub is_loading: bool,
     pub can_go_back: bool,
     pub can_go_forward: bool,
@@ -24,6 +26,7 @@ pub struct WebviewCommittedNavigationEvent {
     pub webview: Entity,
     pub url: String,
     pub is_main_frame: bool,
+    pub navigation_epoch: Option<u64>,
     pub transition: CefTransitionCore,
     pub qualifiers: CefTransitionQualifiers,
 }
@@ -35,6 +38,7 @@ pub struct WebviewLoadHandlerBuilder {
     webview: Entity,
     tx: WebviewLoadingStateSenderInner,
     nav_tx: WebviewCommittedNavigationSenderInner,
+    bin_ipc_context: crate::browser_process::client_handler::BinIpcContext,
 }
 
 impl WebviewLoadHandlerBuilder {
@@ -42,12 +46,14 @@ impl WebviewLoadHandlerBuilder {
         webview: Entity,
         tx: WebviewLoadingStateSenderInner,
         nav_tx: WebviewCommittedNavigationSenderInner,
+        bin_ipc_context: crate::browser_process::client_handler::BinIpcContext,
     ) -> LoadHandler {
         LoadHandler::new(Self {
             object: core::ptr::null_mut(),
             webview,
             tx,
             nav_tx,
+            bin_ipc_context,
         })
     }
 }
@@ -73,6 +79,7 @@ impl Clone for WebviewLoadHandlerBuilder {
             webview: self.webview,
             tx: self.tx.clone(),
             nav_tx: self.nav_tx.clone(),
+            bin_ipc_context: self.bin_ipc_context.clone(),
         }
     }
 }
@@ -94,6 +101,8 @@ impl ImplLoadHandler for WebviewLoadHandlerBuilder {
         let loading = is_loading != 0;
         let _ = self.tx.send_blocking(WebviewLoadingStateEvent {
             webview: self.webview,
+            surface_generation: self.bin_ipc_context.surface_generation(),
+            navigation_epoch: self.bin_ipc_context.navigation_epoch(),
             is_loading: loading,
             can_go_back: can_go_back != 0,
             can_go_forward: can_go_forward != 0,
@@ -109,11 +118,15 @@ impl ImplLoadHandler for WebviewLoadHandlerBuilder {
         let Some(frame) = frame else { return };
         let is_main_frame = frame.is_main() != 0;
         let url = cef::CefString::from(&frame.url()).to_string();
+        if is_main_frame {
+            self.bin_ipc_context.commit(&url);
+        }
         let (transition, qualifiers) = decode_transition(transition_type.get_raw());
         let _ = self.nav_tx.send_blocking(WebviewCommittedNavigationEvent {
             webview: self.webview,
             url,
             is_main_frame,
+            navigation_epoch: Some(self.bin_ipc_context.navigation_epoch()),
             transition,
             qualifiers,
         });

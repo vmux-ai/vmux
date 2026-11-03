@@ -66,7 +66,7 @@ fn emit(
     runtimes: Query<Ref<Team>, With<Runtime>>,
     mut emits: MessageWriter<UiStateEmit>,
 ) {
-    let refresh = refreshes.read().next().is_some();
+    let refresh = refreshes.read().count() > 0;
     let Ok(team) = runtimes.single() else {
         return;
     };

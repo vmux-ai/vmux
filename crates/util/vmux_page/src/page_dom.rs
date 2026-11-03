@@ -14,8 +14,12 @@ pub type PageComponent = fn() -> Element;
 
 pub struct PageDom {
     dom: VirtualDom,
+    component: PageComponent,
+    contexts: crate::instance::Contexts,
     mutations: MutationState,
     unflushed: bool,
+    rebuilt: bool,
+    snapshots: vmux_ui::hooks::UiStateSnapshots,
 }
 
 impl PageDom {
@@ -23,12 +27,18 @@ impl PageDom {
         Self::install_event_converter();
 
         let dom = VirtualDom::new(app);
-        instance.provide_to(&dom);
+        let contexts = instance.provide_to(&dom);
+        let snapshots = vmux_ui::hooks::UiStateSnapshots::default();
+        dom.provide_root_context(snapshots.clone());
 
         Self {
             dom,
+            component: app,
+            contexts,
             mutations: MutationState::default(),
             unflushed: false,
+            rebuilt: false,
+            snapshots,
         }
     }
 
@@ -41,34 +51,61 @@ impl PageDom {
     }
 
     pub fn rebuild(&mut self) -> Vec<u8> {
+        self.rebuild_with_waker(Waker::noop())
+    }
+
+    pub fn rebuild_with_waker(&mut self, waker: &Waker) -> Vec<u8> {
+        if self.rebuilt {
+            self.snapshots.capture();
+            let dom = VirtualDom::new(self.component);
+            self.contexts.provide_to(&dom);
+            dom.provide_root_context(self.snapshots.clone());
+            self.dom = dom;
+        }
+        self.rebuilt = true;
+        self.mutations = MutationState::default();
         self.dom.rebuild(&mut self.mutations);
+        self.snapshots.finish_restore();
         self.unflushed = true;
-        self.mutations.export_memory()
+        let mutations = self.mutations.export_memory();
+        self.arm_waker(waker);
+        mutations
     }
 
     pub fn render(&mut self) -> Option<Vec<u8>> {
-        if self.unflushed || !self.has_work() {
+        self.render_with_waker(Waker::noop())
+    }
+
+    pub fn render_with_waker(&mut self, waker: &Waker) -> Option<Vec<u8>> {
+        if self.unflushed || !self.has_work(waker) {
             return None;
         }
 
         self.dom.render_immediate(&mut self.mutations);
         self.unflushed = true;
 
-        Some(self.mutations.export_memory())
+        let mutations = self.mutations.export_memory();
+        self.arm_waker(waker);
+        Some(mutations)
     }
 
     pub fn update_instance(&mut self, instance: crate::Instance) {
-        instance.provide_to(&self.dom);
+        self.contexts = instance.provide_to(&self.dom);
         self.dom.mark_all_dirty();
     }
 
-    fn has_work(&mut self) -> bool {
-        let mut context = Context::from_waker(Waker::noop());
+    fn has_work(&mut self, waker: &Waker) -> bool {
+        let mut context = Context::from_waker(waker);
 
         matches!(
             std::pin::pin!(self.dom.wait_for_work()).poll(&mut context),
             Poll::Ready(())
         )
+    }
+
+    fn arm_waker(&mut self, waker: &Waker) {
+        let mut context = Context::from_waker(waker);
+        let _ = std::pin::pin!(self.dom.wait_for_work()).poll(&mut context);
     }
 
     pub fn flushed(&mut self) {
@@ -131,6 +168,65 @@ mod tests {
     fn InstanceContext() -> Element {
         let value = consume_context::<String>();
         rsx! { div { "{value}" } }
+    }
+
+    #[derive(Clone, Default)]
+    struct ActiveScopes(Rc<Cell<usize>>);
+
+    impl ActiveScopes {
+        fn enter(&self) {
+            self.0.set(self.0.get() + 1);
+        }
+
+        fn leave(&self) {
+            self.0.set(self.0.get() - 1);
+        }
+    }
+
+    #[component]
+    fn Tracked() -> Element {
+        let scopes = consume_context::<ActiveScopes>();
+        let mounted = scopes.clone();
+        use_hook(move || mounted.enter());
+        use_drop(move || scopes.leave());
+        rsx! { div { "tracked" } }
+    }
+
+    #[test]
+    fn full_rebuild_releases_the_previous_component_scopes() {
+        let scopes = ActiveScopes::default();
+        let provided = scopes.clone();
+        let mut page = PageDom::mount(
+            Tracked,
+            crate::Instance::from(move |scope: crate::PageScope<'_>| {
+                scope.provide(provided.clone());
+            }),
+        );
+        page.rebuild();
+        assert_eq!(scopes.0.get(), 1);
+        page.flushed();
+        page.rebuild();
+
+        assert_eq!(scopes.0.get(), 1);
+        drop(page);
+        assert_eq!(scopes.0.get(), 0);
+    }
+
+    #[test]
+    fn document_recovery_reapplies_the_latest_instance_context() {
+        let mut page = PageDom::mount(
+            InstanceContext,
+            crate::Instance::from(|scope: crate::PageScope<'_>| scope.provide("first".to_string())),
+        );
+        page.rebuild();
+        page.flushed();
+        page.update_instance(crate::Instance::from(|scope: crate::PageScope<'_>| {
+            scope.provide("updated".to_string());
+        }));
+        let recovered = page.rebuild();
+
+        assert!(String::from_utf8_lossy(&recovered).contains("updated"));
+        assert!(!String::from_utf8_lossy(&recovered).contains("first"));
     }
 
     #[test]

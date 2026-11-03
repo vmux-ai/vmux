@@ -2876,12 +2876,16 @@ mod tests {
     #[test]
     fn in_pane_new_split_without_url_opens_the_start_page() {
         let mut app = build_in_pane_app();
-        app.world_mut().spawn((
-            crate::space::Space,
-            vmux_ecs::Active,
-            vmux_ecs::EffectiveStartupUrl("vmux://start/".to_string()),
-        ));
-        let (_tab, pane, _stack) = build_single_pane(&mut app);
+        let space = app
+            .world_mut()
+            .spawn((
+                crate::space::Space,
+                vmux_ecs::Active,
+                vmux_ecs::EffectiveStartupUrl("vmux://start/".to_string()),
+            ))
+            .id();
+        let (tab, pane, _stack) = build_single_pane(&mut app);
+        app.world_mut().entity_mut(tab).insert(ChildOf(space));
 
         app.world_mut()
             .resource_mut::<Messages<OpenRequest>>()

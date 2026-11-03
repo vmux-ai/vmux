@@ -407,7 +407,7 @@ fn emit_media(
     mut refreshes: MessageReader<RepublishChatUiState>,
     mut runtimes: Query<(Ref<Media>, &mut ChatUiStateProjection), With<ChatRuntime>>,
 ) {
-    let refresh = refreshes.read().next().is_some();
+    let refresh = refreshes.read().count() > 0;
     let Ok((media, mut projection)) = runtimes.single_mut() else {
         return;
     };
@@ -423,7 +423,7 @@ fn emit_attachments(
     focus: Single<Ref<ChatPromptFocusRevision>, With<ChatRuntime>>,
     mut projection: Single<&mut ChatUiStateProjection, With<ChatRuntime>>,
 ) {
-    let refresh = refreshes.read().next().is_some();
+    let refresh = refreshes.read().count() > 0;
     if refresh || attachments.is_changed() {
         let payload = ChatAttachments {
             attachments: attachments.0.clone(),

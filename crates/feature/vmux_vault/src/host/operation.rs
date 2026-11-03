@@ -733,7 +733,7 @@ fn drain(
             if let Some(target) = target {
                 stack_requests.write(vmux_layout::stack::OpenRequest {
                     url: Some(progress.url.clone()),
-                    focus_existing: false,
+                    policy: vmux_layout::stack::OpenPolicy::ReplaceStartup,
                 });
                 if let Ok(mut subscriber) = subscribers.get_mut(target) {
                     subscriber.authorize(context.operation_id, progress);

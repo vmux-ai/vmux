@@ -31,6 +31,7 @@ pub enum BuiltinIcon {
     ListTodo,
     Search,
     Globe,
+    Archive,
 }
 
 impl BuiltinIcon {

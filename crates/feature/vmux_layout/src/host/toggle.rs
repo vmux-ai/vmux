@@ -1,11 +1,12 @@
 use super::Header;
+use super::deadline::{DeadlineOwner, DeadlineScheduler};
 use crate::Open;
 use crate::event::CEF_RESERVED_HEIGHT_PX;
 use crate::settings::LayoutSettings;
 use crate::side_sheet::{SideSheet, SideSheetPosition};
 use crate::window::VmuxWindow;
 use bevy::prelude::*;
-use bevy::winit::{EventLoopProxyWrapper, WinitUserEvent};
+use bevy::winit::EventLoopProxyWrapper;
 use bevy_cef::prelude::HostWindow;
 #[cfg(test)]
 use vmux_ecs::manifest::FeaturePlugin;
@@ -22,7 +23,8 @@ impl Plugin for TogglePlugin {
         if !app.is_plugin_added::<vmux_command::CommandRuntimePlugin>() {
             app.add_plugins(vmux_command::CommandRuntimePlugin);
         }
-        app.add_message::<ToggleLayoutRequest>()
+        app.init_resource::<DeadlineScheduler>()
+            .add_message::<ToggleLayoutRequest>()
             .add_systems(
                 Update,
                 (
@@ -54,9 +56,10 @@ impl TryFrom<&vmux_command::CommandInvocation> for ToggleLayoutRequest {
 pub struct LayoutHidden;
 
 #[derive(Component)]
-struct LayoutTransition {
+pub(super) struct LayoutTransition {
     hide: bool,
     elapsed: f32,
+    started: std::time::Duration,
     header_start: f32,
     side_sheet_start: f32,
     pad_top_start: f32,
@@ -66,8 +69,11 @@ struct LayoutTransition {
 impl LayoutTransition {
     const DURATION: f32 = 0.2;
 
-    fn progress(&mut self, delta: f32) -> f32 {
-        self.elapsed = (self.elapsed + delta).min(Self::DURATION);
+    fn progress(&mut self, now: std::time::Duration) -> f32 {
+        self.elapsed = now
+            .saturating_sub(self.started)
+            .as_secs_f32()
+            .min(Self::DURATION);
         let linear = self.elapsed / Self::DURATION;
         1.0 - (1.0 - linear).powi(3)
     }
@@ -107,6 +113,7 @@ fn sync_window_padding(
 
 fn handle_visibility_requests(
     mut reader: MessageReader<ToggleLayoutRequest>,
+    time: Res<Time>,
     focused_window: crate::window::FocusedWindow,
     hidden_windows: Query<(), With<LayoutHidden>>,
     header_q: Query<(Entity, &Node), With<Header>>,
@@ -161,6 +168,7 @@ fn handle_visibility_requests(
         commands.entity(window).insert(LayoutTransition {
             hide,
             elapsed: 0.0,
+            started: time.elapsed(),
             header_start,
             side_sheet_start,
             pad_top_start,
@@ -183,6 +191,7 @@ fn handle_visibility_requests(
 
 fn animate(
     time: Res<Time>,
+    scheduler: Res<DeadlineScheduler>,
     settings: Res<LayoutSettings>,
     proxy: Option<Res<EventLoopProxyWrapper>>,
     mut transitions: Query<(Entity, &mut LayoutTransition), With<Window>>,
@@ -195,7 +204,7 @@ fn animate(
     mut commands: Commands,
 ) {
     for (window, mut transition) in &mut transitions {
-        let progress = transition.progress(time.delta_secs());
+        let progress = transition.progress(time.elapsed());
         let header_end = if transition.hide {
             0.0
         } else {
@@ -279,8 +288,28 @@ fn animate(
                 }
             }
             commands.entity(window).remove::<LayoutTransition>();
-        } else if let Some(proxy) = proxy.as_deref() {
-            let _ = proxy.send_event(WinitUserEvent::WakeUp);
+            scheduler.cancel(DeadlineOwner::LayoutAnimation(window));
+        } else {
+            scheduler.schedule(
+                DeadlineOwner::LayoutAnimation(window),
+                std::time::Instant::now() + std::time::Duration::from_millis(16),
+                proxy.as_deref(),
+            );
+        }
+    }
+}
+
+#[cfg(test)]
+impl LayoutTransition {
+    pub(super) fn finished() -> Self {
+        Self {
+            hide: false,
+            elapsed: Self::DURATION,
+            started: std::time::Duration::ZERO,
+            header_start: 0.0,
+            side_sheet_start: 0.0,
+            pad_top_start: 0.0,
+            pad_left_start: 0.0,
         }
     }
 }
@@ -295,6 +324,27 @@ mod tests {
         window::VmuxWindow,
     };
     use bevy::window::{Monitor, MonitorSelection, PrimaryWindow, WindowMode};
+
+    #[test]
+    fn layout_animation_starts_at_input_time_after_an_idle_gap() {
+        let started = std::time::Duration::from_secs(10);
+        let mut transition = LayoutTransition {
+            hide: true,
+            elapsed: 0.0,
+            started,
+            header_start: 80.0,
+            side_sheet_start: 240.0,
+            pad_top_start: 0.0,
+            pad_left_start: 0.0,
+        };
+        let first = transition.progress(started);
+        assert_eq!(LayoutTransition::value(80.0, 0.0, first), 80.0);
+        let middle = transition.progress(started + std::time::Duration::from_millis(100));
+        assert_eq!(LayoutTransition::value(80.0, 0.0, middle), 10.0);
+        assert!(!transition.complete());
+        transition.progress(started + std::time::Duration::from_millis(200));
+        assert!(transition.complete());
+    }
 
     #[test]
     fn visible_fullscreen_layout_clears_top_left_padding() {
@@ -411,16 +461,14 @@ mod tests {
     #[test]
     fn toggle_changes_only_the_focused_window() {
         let mut app = App::new();
-        app.add_plugins(MinimalPlugins)
-            .add_message::<ToggleLayoutRequest>()
+        app.add_plugins((MinimalPlugins, TogglePlugin))
             .insert_resource(LayoutSettings {
                 radius: 0.0,
                 window: WindowSettings { padding: 16.0 },
                 pane: PaneSettings { gap: 0.0 },
                 side_sheet: SideSheetSettings::default(),
                 focus_ring: FocusRingSettings::default(),
-            })
-            .add_systems(Update, (handle_visibility_requests, animate).chain());
+            });
         let first_window = app.world_mut().spawn(Window::default()).id();
         let second_window = app.world_mut().spawn(Window::default()).id();
         app.world_mut()

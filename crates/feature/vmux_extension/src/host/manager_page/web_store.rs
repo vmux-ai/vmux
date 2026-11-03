@@ -125,7 +125,7 @@ fn browse_request(
     };
     requests.write(vmux_layout::stack::OpenRequest {
         url: Some(url),
-        focus_existing: false,
+        policy: vmux_layout::stack::OpenPolicy::ReplaceStartup,
     });
 }
 

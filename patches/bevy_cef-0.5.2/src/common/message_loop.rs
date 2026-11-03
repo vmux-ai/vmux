@@ -469,11 +469,13 @@ mod cef_pump_timer {
     }
 
     extern "C" fn pump(_timer: CFRunLoopTimerRef, _info: *mut c_void) {
-        let should_pump = pump_state()
-            .lock()
-            .unwrap()
-            .as_mut()
-            .is_some_and(|state| state.should_pump(Instant::now()));
+        let now = Instant::now();
+        let mut guard = pump_state().lock().unwrap();
+        let Some(state) = guard.as_mut() else {
+            return;
+        };
+        let should_pump = state.should_pump(now);
+        drop(guard);
         if should_pump {
             cef::do_message_loop_work();
         }

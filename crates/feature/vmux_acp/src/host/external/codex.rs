@@ -67,7 +67,7 @@ impl Reader {
         FileConversation::read(path, cursor, tail_bytes, CodexConversationDecoder)
     }
 
-    fn archives(&self) -> Result<Option<HashMap<String, ArchiveState>>, String> {
+    pub(super) fn archives(&self) -> Result<Option<HashMap<String, ArchiveState>>, String> {
         let Some(path) = self.state_database()? else {
             return Ok(None);
         };

@@ -1,3 +1,4 @@
+use std::cell::Cell;
 use std::rc::Rc;
 
 use vmux_ui::hooks::EventListenerError;
@@ -7,15 +8,20 @@ pub struct Embedding {
     pub assets: Rc<dyn Assets>,
     pub waker: Rc<dyn Wake>,
     pub lifecycle: Rc<dyn LifecycleSink>,
+    pub navigation_revision: Rc<Cell<u64>>,
+    pub ipc_epoch: Rc<Cell<u64>>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum LifecycleUpdate {
     Mounted,
+    Ready(u64),
     Remounted,
+    Navigated(u64),
     FramePending,
-    FrameDelivered,
-    FrameApplied,
+    FrameDelivered(u64),
+    FrameApplied(u64),
+    FrameFailed(u64),
     UiEventHandled,
     HostEventDelivered,
     ListenerRegistered,
@@ -33,6 +39,10 @@ pub trait LifecycleSink {
 
 pub trait Wake {
     fn wake(&self);
+
+    fn task_waker(&self) -> std::task::Waker {
+        std::task::Waker::noop().clone()
+    }
 }
 
 pub trait Assets {
@@ -40,7 +50,13 @@ pub trait Assets {
 }
 
 pub trait Outbox {
-    fn send(&self, id: &str, bytes: &[u8]) -> Result<(), EventListenerError>;
+    fn send(
+        &self,
+        id: &str,
+        bytes: &[u8],
+        navigation_revision: u64,
+        ipc_epoch: u64,
+    ) -> Result<(), EventListenerError>;
 
     fn set_page(&self, _url: &str) {}
 

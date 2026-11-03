@@ -89,7 +89,7 @@ fn ServiceDashboard(
     memory: ProcessUsageUiState,
 ) -> Element {
     rsx! {
-        div { class: "grid min-h-0 gap-3 xl:grid-cols-2",
+        div { class: "grid min-h-0 items-start gap-3 xl:grid-cols-2",
             UsageChart {
                 class: "xl:col-span-2".to_string(),
                 usage: cpu,

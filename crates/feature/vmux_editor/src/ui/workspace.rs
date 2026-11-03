@@ -28,7 +28,7 @@ use vmux_ecs::event::*;
 use vmux_ecs::scroll::{EDGE_TRIGGER_K, ScrollWindow};
 use vmux_git::ui::{DiffView, GitFooter};
 use vmux_setting::EXPLORER_DEFAULT_WIDTH;
-use vmux_ui::directory::DirectoryNavigator;
+use vmux_ui::directory::{DirectoryKeys, DirectoryNavigator};
 use vmux_ui::focus::FocusClaim;
 use vmux_ui::hooks::{PressedKey, send, use_theme};
 use vmux_ui::i18n::{TranslationValue, translate, translate_with};
@@ -42,8 +42,8 @@ pub fn Page() -> Element {
     FileUi::use_root();
     let project_url = try_consume_context::<vmux_ecs::PageMetadata>()
         .map(|metadata| metadata.url)
-        .filter(|url| crate::project::ProjectRoute::is_page(url));
-    if project_url.is_some() {
+        .unwrap_or_default();
+    if crate::project::ProjectRoute::is_page(&project_url) {
         return rsx! { ProjectPage {} };
     }
     rsx! { EditorWorkspace {} }
@@ -54,6 +54,13 @@ fn EditorWorkspace() -> Element {
     let ui = FileUi::current();
     let mut handled_document_revision = use_signal(|| 0u64);
     let meta_state = ui.use_value(|state| state.document.meta.as_ref());
+    let checkout_state = ui.use_value(|state| state.document.checkout.as_ref());
+    let read_only = use_memo(move || {
+        checkout_state
+            .read()
+            .as_ref()
+            .is_some_and(|state| state.read_only)
+    });
     let directory_state = ui.use_value(|state| state.document.directory.as_ref());
     let media_state = ui.use_value(|state| state.document.media.as_ref());
     let note_state = ui.use_value(|state| state.document.note.as_ref());
@@ -120,12 +127,7 @@ fn EditorWorkspace() -> Element {
     });
     let doc_title = use_memo(move || {
         if let Some(directory) = directory_state.read().as_ref() {
-            return directory
-                .path
-                .rsplit('/')
-                .find(|part| !part.is_empty())
-                .unwrap_or(&directory.path)
-                .to_string();
+            return directory.path.clone();
         }
         if let Some(note) = note_state.read().as_ref()
             && !note.title.is_empty()
@@ -404,10 +406,11 @@ fn EditorWorkspace() -> Element {
     let explorer_panel = ui.use_value(|state| state.explorer.explorer_panel.as_ref());
     let explorer_panel_effect = ui.use_field(|state| state.explorer.explorer_panel.as_ref());
     let explorer_visible = use_memo(move || {
-        explorer_panel
-            .read()
-            .as_ref()
-            .is_some_and(|panel| panel.visible)
+        let panel = explorer_panel.read();
+        let Some(panel) = panel.as_ref() else {
+            return false;
+        };
+        panel.visible && (mode() != Mode::Dir || panel.search)
     });
     let explorer_width = use_memo(move || {
         explorer_panel
@@ -526,8 +529,52 @@ fn EditorWorkspace() -> Element {
     let mut panel_focus_revision = use_signal(|| 0u64);
     let mut last_scroll_req = use_signal(|| 0u32);
     let explorer = ExplorerPane::new(explorer_visible, explorer_width);
+    let directory_keys = DirectoryKeys {
+        on_next: EventHandler::new(move |_| {
+            let _ = send(&FileDirectoryNextRequest);
+        }),
+        on_previous: EventHandler::new(move |_| {
+            let _ = send(&FileDirectoryPreviousRequest);
+        }),
+        on_activate: EventHandler::new(move |_| {
+            let _ = send(&FileDirectoryActivateRequest);
+        }),
+        on_parent: EventHandler::new(move |_| {
+            let _ = send(&FileDirectoryParentRequest);
+        }),
+        on_toggle_hidden: EventHandler::new(move |_| {
+            let _ = send(&FileDirectoryToggleHiddenRequest);
+        }),
+    };
     let tidy = ui.use_value(|state| Some(&state.explorer.tidy));
     let is_markdown = use_memo(move || document_kind() == FileDocumentKind::Markdown);
+    let reading_note = use_memo(move || file_view_mode() == FileViewMode::Note && is_markdown());
+    let outline_rows = use_memo(move || {
+        outline
+            .read()
+            .as_ref()
+            .map(|event| event.items.clone())
+            .unwrap_or_default()
+    });
+    let outline_navigation = super::outline_navigation::OutlineNavigation::use_state(
+        reading_note,
+        note_blocks,
+        outline_rows,
+        git_path,
+    );
+    use_effect(move || {
+        if file_view_mode() != FileViewMode::Editor {
+            return;
+        }
+        let row = last_scroll_req();
+        let layouts = line_layouts.read();
+        if let Some(line) = layouts
+            .iter()
+            .find(|line| line.row <= row && row < line.row + u32::from(line.rows))
+        {
+            outline_navigation.follow(line.line_no);
+        }
+    });
 
     let keys = use_file_keys(panel.into());
     use_context_provider(|| keys);
@@ -572,7 +619,7 @@ fn EditorWorkspace() -> Element {
             last_scroll_req.set(0);
             let _ = send(&FileScrollEvent {
                 top_row: 0,
-                needs_rows: true,
+                needs_rows: viewport_state.peek().is_none(),
             });
             hover_diag.set(None);
             note_cursor.reset();
@@ -642,6 +689,9 @@ fn EditorWorkspace() -> Element {
                 return;
             }
             view_mode_revision.set(event.revision);
+            if mode() != Mode::Text {
+                return;
+            }
             if event.mode != FileViewMode::Note {
                 note_cursor.set_editing(false);
             }
@@ -669,6 +719,9 @@ fn EditorWorkspace() -> Element {
     let keymap_event = FileUi::current().use_field(|state| state.viewport.keymap.as_ref());
     use_effect(move || {
         keymap_event.for_each(|event| {
+            if mode() != Mode::Text {
+                return;
+            }
             if event.keymap == KeymapKind::Vim
                 && file_view_mode() == FileViewMode::Note
                 && is_markdown()
@@ -750,6 +803,9 @@ fn EditorWorkspace() -> Element {
     use_effect(move || {
         directory_event.for_each(|d| {
             hover_diag.set(None);
+            if sidebar_view() != SidebarView::Search {
+                DirectoryKeys::focus();
+            }
             let index = usize::try_from(d.selected).unwrap_or_default();
             ScrollIntoView::nearest(&format!("dir-row-{index}"));
         })
@@ -772,18 +828,6 @@ fn EditorWorkspace() -> Element {
         .as_ref()
         .map(|event| event.items.clone())
         .unwrap_or_default();
-    let breadcrumb_path = match error().is_empty() {
-        true => git_path(),
-        false => String::new(),
-    };
-    let breadcrumb_outline = match mode() {
-        Mode::Text => outline
-            .read()
-            .as_ref()
-            .map(|event| event.items.clone())
-            .unwrap_or_default(),
-        Mode::Dir | Mode::Media(_) => Vec::new(),
-    };
     let breadcrumb_caret_line = match file_view_mode() == FileViewMode::Note && is_markdown() {
         true => source_cursor().line,
         false => cursor().line,
@@ -813,6 +857,10 @@ fn EditorWorkspace() -> Element {
 
     rsx! {
         if !doc_title().is_empty() {
+            document::Title { "{doc_title}" }
+        }
+        if !git_path().is_empty() {
+            document::Link { rel: "icon", href: vmux_ui::file_icon::FilePath(&git_path()).icon(mode() == Mode::Dir).favicon() }
         }
         div {
             id: PAGE_ID,
@@ -829,31 +877,17 @@ fn EditorWorkspace() -> Element {
 
             PaneWidth {}
 
-            EditorBreadcrumbs {
-                display_path: path(),
-                abs_path: breadcrumb_path,
-                repo_root: git_repo_root(),
-                branch: git_state().branch,
-                leaf_is_dir: mode() == Mode::Dir,
-                outline: breadcrumb_outline,
-                caret_line: breadcrumb_caret_line,
-                search_active: sidebar_view() == SidebarView::Search,
-                onsearch: move |_| {
-                    let search = sidebar_view() != SidebarView::Search;
-                    if search && !explorer_visible() {
-                        let _ = send(&ExplorerPanelSetVisible { visible: true });
-                    }
-                    let _ = send(&ExplorerPanelViewSet { search });
-                },
-            }
+            EditorBreadcrumbs {}
 
         div {
             class: "flex min-h-0 flex-1 flex-row overflow-hidden",
 
-            ExplorerSidebar {
-                pane: explorer,
-                caret_line: breadcrumb_caret_line,
-                view: sidebar_view,
+            if mode() != Mode::Dir || sidebar_view() == SidebarView::Search {
+                ExplorerSidebar {
+                    pane: explorer,
+                    caret_line: outline_navigation.current_line().unwrap_or(breadcrumb_caret_line),
+                    view: sidebar_view,
+                }
             }
 
         div {
@@ -865,7 +899,7 @@ fn EditorWorkspace() -> Element {
             onmousedown: move |e: Event<MouseData>| {
                 match mode() {
                     Mode::Text => {
-                        e.prevent_default();
+                        if !reading_note() || note_cursor.editing() { e.prevent_default(); }
                         if file_view_mode() == FileViewMode::Note
                             && is_markdown()
                         {
@@ -885,6 +919,9 @@ fn EditorWorkspace() -> Element {
 
             onkeydown: move |e: Event<KeyboardData>| {
                 let current_mode = mode();
+                if current_mode == Mode::Dir && directory_keys.offer(&e) {
+                    return;
+                }
                 if current_mode != Mode::Dir && keys.offer(&e) {
                     return;
                 }
@@ -1109,20 +1146,13 @@ fn EditorWorkspace() -> Element {
                             rsx! {
                                 div {
                                     id: SCROLL_ID,
-                                    class: "file-mode-note-enter min-h-0 flex-1 overflow-auto px-8 py-8",
+                                    class: "file-mode-note-enter min-h-0 flex-1 overflow-auto px-6 py-4",
+                                    onmounted: move |_| outline_navigation.measure(),
+                                    onresize: move |_| outline_navigation.measure(),
+                                    onscroll: move |_| outline_navigation.measure(),
                                     onclick: move |event| {
-                                        if keymap() == KeymapKind::Vim {
-                                            event.prevent_default();
-                                            let line = source_cursor().line;
-                                            if let Some(index) = note_blocks.read().as_slice().block_index_for_line(line) {
-                                                note_cursor.activate(index, line);
-                                            }
-                                            return;
-                                        }
-                                        if note_cursor.editing() {
-                                            note_cursor.reset();
-                                            EditorFocus::container();
-                                        }
+                                        if vmux_ui::dom::DomSelection::in_document() { return; }
+                                        note_cursor.place_nearest(note_blocks.read().clone(), event.client_coordinates(), event.modifiers().shift());
                                     },
                                     onpointermove: move |event: Event<PointerData>| {
                                         if !note_dragging() {
@@ -1194,6 +1224,7 @@ fn EditorWorkspace() -> Element {
                                         }
                                         textarea {
                                             id: EditorFocus::FILE_INPUT_ID,
+                                            readonly: read_only(),
                                             value: "{typed}",
                                             onmounted: move |event: Event<MountedData>| {
                                                 dom.field_mounted(event.data());
@@ -1309,7 +1340,8 @@ fn EditorWorkspace() -> Element {
                             };
                             let cursor_key =
                                 format!("{}:{}:{:?}", cursor().row, cursor().col, ed_mode());
-                            let spacer = total_rows() as f64 * ch;
+                            let source_ready = cell.measured() && viewport_state.read().is_some();
+                            let spacer = if source_ready { total_rows() as f64 * ch } else { 160.0 };
                             let preedit = PreeditField::from(ime);
                             let txtcol = preedit.text_color();
                             let field_caret = preedit.caret_class();
@@ -1383,13 +1415,14 @@ fn EditorWorkspace() -> Element {
                                             needs_rows,
                                         });
                                     },
-                                    StickyScope {
+                                    if source_ready { StickyScope {
                                         lines: sticky_lines(),
                                         cell_height: ch,
                                         gutter_chars: gw,
                                         on_pick: move |row: u32| dom.center_row(row, ch),
-                                    }
+                                    } }
                                     div { class: "relative", style: "height:{spacer}px;",
+                                        if source_ready {
                                         EditorLines {
                                             lines,
                                             line_layouts,
@@ -1516,8 +1549,10 @@ fn EditorWorkspace() -> Element {
                                         textarea {
                                             id: EditorFocus::FILE_INPUT_ID,
                                             value: "{typed}",
+                                            readonly: read_only(),
                                             onmounted: move |event: Event<MountedData>| {
                                                 dom.field_mounted(event.data());
+                                                if file_view_mode() != FileViewMode::Note || !is_markdown() { EditorFocus::file(); }
                                             },
                                             class: "absolute z-10 min-w-[2ch] resize-none overflow-hidden whitespace-pre border-0 bg-transparent p-0 outline-none {field_caret}",
                                             style: "left:{cx}px;top:{cy}px;height:{ch}px;color:{txtcol};",
@@ -1635,6 +1670,9 @@ fn EditorWorkspace() -> Element {
                                                     }
                                                 }
                                             })
+                                        }
+                                        } else {
+                                            EditorLoadingSkeleton {}
                                         }
                                     }
                                 }
@@ -1795,8 +1833,10 @@ fn EditorHeader(
 ) -> Element {
     rsx! {
         div {
-            class: "flex h-9 shrink-0 items-center gap-2 bg-foreground/[0.025] px-3 font-sans text-xs text-muted-foreground",
-            ExplorerToggleButton { pane, mode }
+            class: "flex h-8 shrink-0 items-center gap-2 px-3 font-sans text-xs text-muted-foreground",
+            if mode() != Mode::Dir {
+                ExplorerToggleButton { pane, mode }
+            }
             EditorTabStrip { tabs: editor_tabs }
             if find_open {
                 FindBar {
@@ -1924,6 +1964,17 @@ pub enum Mode {
     Media(MediaKind),
 }
 
+#[component]
+fn EditorLoadingSkeleton() -> Element {
+    rsx! {
+        div { aria_busy: true, class: "flex flex-col gap-2 px-4 py-3",
+            for width in ["w-8/12", "w-6/12", "w-10/12", "w-7/12", "w-9/12"] {
+                vmux_ui::components::skeleton::Skeleton { class: "h-3 {width} bg-foreground/[0.05]" }
+            }
+        }
+    }
+}
+
 struct PointerDrag;
 
 impl PointerDrag {
@@ -1955,6 +2006,88 @@ impl NoteCursorActivation {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use dioxus::core::{Mutation, VirtualDom};
+    use dioxus::html::{EventData, Location, Modifiers, SerializedKeyboardData};
+    use std::cell::RefCell;
+    use std::rc::Rc;
+
+    #[component]
+    fn DirectoryKeyContainer(requests: Rc<RefCell<Vec<&'static str>>>) -> Element {
+        let next = Rc::clone(&requests);
+        let previous = Rc::clone(&requests);
+        let activate = Rc::clone(&requests);
+        let parent = Rc::clone(&requests);
+        let hidden = Rc::clone(&requests);
+        let keys = DirectoryKeys {
+            on_next: EventHandler::new(move |_| next.borrow_mut().push("next")),
+            on_previous: EventHandler::new(move |_| previous.borrow_mut().push("previous")),
+            on_activate: EventHandler::new(move |_| activate.borrow_mut().push("activate")),
+            on_parent: EventHandler::new(move |_| parent.borrow_mut().push("parent")),
+            on_toggle_hidden: EventHandler::new(move |_| hidden.borrow_mut().push("hidden")),
+        };
+        rsx! { div { onkeydown: move |event| { keys.offer(&event); } } }
+    }
+
+    #[test]
+    fn directory_keys_work_on_the_outer_container_and_preserve_command_shortcuts() {
+        dioxus::html::set_event_converter(Box::new(dioxus::html::SerializedHtmlEventConverter));
+        let requests = Rc::new(RefCell::new(Vec::new()));
+        let mut dom = VirtualDom::new_with_props(
+            DirectoryKeyContainer,
+            DirectoryKeyContainerProps {
+                requests: Rc::clone(&requests),
+            },
+        );
+        let rendered = dom.rebuild_to_vec();
+        let container = rendered
+            .edits
+            .iter()
+            .find_map(|edit| match edit {
+                Mutation::NewEventListener { name, id } if name == "keydown" => Some(*id),
+                _ => None,
+            })
+            .unwrap();
+        for key in [
+            Key::ArrowDown,
+            Key::ArrowUp,
+            Key::ArrowRight,
+            Key::ArrowLeft,
+            Key::Character("j".to_string()),
+            Key::Character("k".to_string()),
+            Key::Character("l".to_string()),
+            Key::Character("h".to_string()),
+            Key::Character(".".to_string()),
+        ] {
+            let data = EventData::Keyboard(SerializedKeyboardData::new(
+                key,
+                Code::Unidentified,
+                Location::Standard,
+                false,
+                Modifiers::empty(),
+                false,
+            ));
+            dom.runtime()
+                .handle_event("keydown", Event::new(data.into_any(), true), container);
+        }
+        assert_eq!(
+            *requests.borrow(),
+            [
+                "next", "previous", "activate", "parent", "next", "previous", "activate", "parent",
+                "hidden"
+            ]
+        );
+        let data = EventData::Keyboard(SerializedKeyboardData::new(
+            Key::ArrowLeft,
+            Code::ArrowLeft,
+            Location::Standard,
+            false,
+            Modifiers::META,
+            false,
+        ));
+        dom.runtime()
+            .handle_event("keydown", Event::new(data.into_any(), true), container);
+        assert_eq!(requests.borrow().len(), 9);
+    }
 
     #[test]
     fn drag_requires_deliberate_pointer_movement() {

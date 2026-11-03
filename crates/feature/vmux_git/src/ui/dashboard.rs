@@ -3,6 +3,7 @@
 use dioxus::html::input_data::MouseButton;
 use dioxus::prelude::*;
 use vmux_api::space::ProjectRow;
+use vmux_ui::scroll::SectionNavigation;
 
 use super::branches::BranchesCard;
 use super::changes::ChangesCard;
@@ -12,17 +13,19 @@ use super::shortcuts::GitShortcutHelp;
 use super::state::GitPageState;
 use super::status::RepositoryHeader;
 use crate::event::{GitBranchFileEntry, GitRepositorySnapshot};
-use crate::state::{GitBranchCollection, GitCatalogProgress, GitOperationEligibility, GitPanel};
+use crate::state::{
+    GitBranchCollection, GitCatalogProgress, GitOperationEligibility, GitPanel, HeaderDropdown,
+};
 
 #[component]
 pub(super) fn GitDashboard() -> Element {
     let state = use_context::<GitPageState>();
-    let repository_loaded = state.use_selector(|state| state.snapshot.repository.is_some());
-    let active_branch_file = state.active_branch_file;
-    let branch_reveal_path = use_signal(String::new);
+    let snapshot = state.snapshot;
+    let repository_loaded = use_memo(move || snapshot.read().repository.is_some());
+    let navigation = SectionNavigation::with_active(state.active_branch_file);
     let file_query = use_signal(String::new);
     let viewed_count = use_signal(|| 0usize);
-    let mut list_width = use_signal(|| 336.0_f64);
+    let mut list_width = use_signal(|| f64::from(vmux_api::editor::TreeWidth::DEFAULT));
     let mut resizing = use_signal(|| false);
     let mut resize_origin = use_signal(|| None::<(f64, f64)>);
     let split_style = format!("--git-list-width:{}px;", list_width());
@@ -36,9 +39,9 @@ pub(super) fn GitDashboard() -> Element {
         main { class: "flex min-h-0 flex-1 flex-col bg-transparent",
             div {
                 id: "git-dashboard-split",
-                class: "grid min-h-0 flex-1 grid-cols-1 grid-rows-[minmax(12rem,0.7fr)_minmax(18rem,1.3fr)] sm:grid-cols-[minmax(18rem,var(--git-list-width))_0.75rem_minmax(0,1fr)] sm:grid-rows-1",
+                class: "grid min-h-0 flex-1 grid-cols-1 grid-rows-[minmax(12rem,0.7fr)_minmax(18rem,1.3fr)] sm:grid-cols-[minmax(10rem,var(--git-list-width))_0.75rem_minmax(0,1fr)] sm:grid-rows-1",
                 style: "{split_style}",
-                GitListPane { active_branch_file, branch_reveal_path, file_query }
+                GitListPane { navigation, file_query }
                 div {
                     class: "group relative z-30 hidden h-full w-full cursor-col-resize items-center justify-center sm:flex",
                     onpointerdown: move |event: Event<PointerData>| {
@@ -52,8 +55,7 @@ pub(super) fn GitDashboard() -> Element {
                     div { class: "pointer-events-none h-10 w-1 rounded-full bg-foreground/20 opacity-0 transition-opacity duration-150 group-hover:opacity-100" }
                 }
                 GitDiffPane {
-                    active_branch_file,
-                    branch_reveal_path,
+                    navigation,
                     viewed_count,
                 }
             }
@@ -70,13 +72,13 @@ pub(super) fn GitDashboard() -> Element {
                         resizing.set(false);
                         return;
                     }
-                    let width = (width + event.client_coordinates().x - start).clamp(288.0, 640.0);
+                    let width = (width + event.client_coordinates().x - start).clamp(f64::from(vmux_api::editor::TreeWidth::MIN), f64::from(vmux_api::editor::TreeWidth::MAX));
                     list_width.set(width);
                 },
                 onpointerup: move |event: Event<PointerData>| {
                     if let Some((start, width)) = resize_origin() {
                         list_width.set(
-                            (width + event.client_coordinates().x - start).clamp(288.0, 640.0),
+                            (width + event.client_coordinates().x - start).clamp(f64::from(vmux_api::editor::TreeWidth::MIN), f64::from(vmux_api::editor::TreeWidth::MAX)),
                         );
                     }
                     resize_origin.set(None);
@@ -95,6 +97,7 @@ pub(super) fn GitDashboard() -> Element {
 #[derive(Clone, PartialEq)]
 struct HeaderState {
     repository: Option<GitRepositorySnapshot>,
+    open_dropdown: HeaderDropdown,
     projects: Vec<ProjectRow>,
     focused_panel: GitPanel,
     selected_branch: String,
@@ -112,12 +115,17 @@ struct HeaderState {
 #[component]
 fn GitHeader(viewed_count: ReadSignal<usize>, file_query: Signal<String>) -> Element {
     let state = use_context::<GitPageState>();
-    let header = state.use_selector(|state| {
-        let snapshot = &state.snapshot;
-        let controller = &state.controller;
+    let snapshot = state.snapshot;
+    let controller = state.controller;
+    let projects = state.projects;
+    let header_dropdown = state.header_dropdown;
+    let header = use_memo(move || {
+        let snapshot = snapshot.read();
+        let controller = controller.read();
         HeaderState {
             repository: snapshot.repository.clone(),
-            projects: state.projects.rows.clone(),
+            open_dropdown: header_dropdown(),
+            projects: projects.read().rows.clone(),
             focused_panel: controller.focused_panel,
             selected_branch: controller.selected_branch.clone(),
             selected_branch_base: snapshot.branch_files_base_ref.clone(),
@@ -138,6 +146,7 @@ fn GitHeader(viewed_count: ReadSignal<usize>, file_query: Signal<String>) -> Ele
     rsx! {
         RepositoryHeader {
             repository,
+            open_dropdown: header.open_dropdown,
             projects: header.projects,
             focused_panel: header.focused_panel,
             selected_branch: header.selected_branch,
@@ -181,15 +190,13 @@ struct ListState {
 }
 
 #[component]
-fn GitListPane(
-    active_branch_file: Signal<String>,
-    branch_reveal_path: Signal<String>,
-    file_query: Signal<String>,
-) -> Element {
+fn GitListPane(navigation: SectionNavigation, file_query: Signal<String>) -> Element {
     let state = use_context::<GitPageState>();
-    let list = state.use_selector(|state| {
-        let snapshot = &state.snapshot;
-        let controller = &state.controller;
+    let snapshot = state.snapshot;
+    let controller = state.controller;
+    let list = use_memo(move || {
+        let snapshot = snapshot.read();
+        let controller = controller.read();
         ListState {
             repository: snapshot.repository.clone(),
             panel: controller.focused_panel,
@@ -218,8 +225,8 @@ fn GitListPane(
         return rsx! {};
     };
     rsx! {
-        aside { class: "relative z-20 flex min-h-0 flex-col overflow-visible bg-transparent",
-            div { class: "min-h-0 flex-1",
+        aside { class: "relative z-20 flex min-h-0 flex-col overflow-hidden bg-transparent",
+            div { class: "flex min-h-0 flex-1 flex-col overflow-hidden",
                 if list.panel == GitPanel::Files {
                     ChangesCard {
                         repository,
@@ -238,13 +245,14 @@ fn GitListPane(
                         files_has_more: list.branch_files_has_more,
                         files_error: list.branch_files_error,
                         selected_path_bytes: list.selected_branch_path_bytes,
-                        active_path: active_branch_file,
+                        active_path: navigation.active,
                         file_query,
                         onfileselect: move |path: String| {
-                            let mut active_branch_file = active_branch_file;
-                            let mut branch_reveal_path = branch_reveal_path;
-                            active_branch_file.set(path.clone());
-                            branch_reveal_path.set(path);
+                            let fragment = state.snapshot.peek().branch_files.iter()
+                                .find(|entry| entry.path == path)
+                                .map(|entry| crate::GitUrl::file_hash(&entry.path_bytes))
+                                .unwrap_or_else(|| crate::GitUrl::file_hash(path.as_bytes()));
+                            navigation.select(path, fragment);
                         },
                     }
                 } else if list.panel == GitPanel::Commits {
@@ -282,18 +290,17 @@ struct DiffState {
     branch_files: Vec<GitBranchFileEntry>,
     branch_diff_paths: Vec<String>,
     branch_files_error: String,
+    branch_loading: bool,
 }
 
 #[component]
-fn GitDiffPane(
-    active_branch_file: Signal<String>,
-    branch_reveal_path: Signal<String>,
-    viewed_count: Signal<usize>,
-) -> Element {
+fn GitDiffPane(navigation: SectionNavigation, viewed_count: Signal<usize>) -> Element {
     let state = use_context::<GitPageState>();
-    let selected = state.use_selector(|state| {
-        let snapshot = &state.snapshot;
-        let controller = &state.controller;
+    let snapshot = state.snapshot;
+    let controller = state.controller;
+    let selected = use_memo(move || {
+        let snapshot = snapshot.read();
+        let controller = controller.read();
         DiffState {
             repository: snapshot.repository.clone(),
             panel: controller.focused_panel,
@@ -308,6 +315,7 @@ fn GitDiffPane(
             branch_files: snapshot.branch_files.clone(),
             branch_diff_paths: snapshot.branch_diff_paths.clone(),
             branch_files_error: snapshot.branch_files_error.clone(),
+            branch_loading: snapshot.loading || snapshot.branch_files_loading,
         }
     });
     let repo_root = use_memo(move || selected.read().workspace.clone());
@@ -320,12 +328,57 @@ fn GitDiffPane(
     let diff = state.diff;
     use_effect(move || {
         selected_branch.read();
-        let mut active_branch_file = active_branch_file;
-        let mut branch_reveal_path = branch_reveal_path;
         let mut viewed_count = viewed_count;
-        active_branch_file.set(String::new());
-        branch_reveal_path.set(String::new());
+        navigation.reset();
         viewed_count.set(0);
+    });
+    let location = state.location;
+    let mut handled_fragment = use_signal(String::new);
+    use_effect(move || {
+        let fragment = location.read().fragment.clone();
+        if fragment.is_empty() {
+            handled_fragment.set(String::new());
+            navigation.receive("", String::new());
+            return;
+        }
+        let snapshot = snapshot.read();
+        let controller = controller.read();
+        let key = format!(
+            "{}\0{}\0{fragment}",
+            snapshot.workspace, controller.selected_branch
+        );
+        if *handled_fragment.peek() == key {
+            return;
+        }
+        if controller.focused_panel != GitPanel::Branches
+            || controller.selected_branch.is_empty()
+            || snapshot.branch_files_reference != controller.selected_branch
+        {
+            return;
+        }
+        let mut selected_file = None;
+        for entry in &snapshot.branch_files {
+            if crate::GitUrl::file_hash(&entry.path_bytes) == fragment {
+                selected_file = Some((entry.path.clone(), entry.path_bytes.clone()));
+                break;
+            }
+        }
+        if selected_file.is_none() {
+            for path in &snapshot.branch_diff_paths {
+                if crate::GitUrl::file_hash(path.as_bytes()) == fragment {
+                    selected_file = Some((path.clone(), path.as_bytes().to_vec()));
+                    break;
+                }
+            }
+        }
+        let Some((path, path_bytes)) = selected_file else {
+            return;
+        };
+        handled_fragment.set(key);
+        if !navigation.receive(&fragment, path) {
+            return;
+        }
+        let _ = vmux_ui::hooks::send(&crate::event::GitBranchFileSelectRequest { path_bytes });
     });
     let selected_state = selected();
     let Some(repository) = selected_state.repository else {
@@ -338,13 +391,20 @@ fn GitDiffPane(
                     base_ref: selected_state.selected_branch_base,
                     files: selected_state.branch_files,
                     expected_paths: selected_state.branch_diff_paths,
-                    active_path: active_branch_file,
                     repo_root,
                     selected_branch,
-                    reveal_path: branch_reveal_path,
+                    reveal_path: navigation.reveal,
+                    onactivefile: move |path: String| {
+                        let snapshot = state.snapshot.peek();
+                        let Some(entry) = snapshot.branch_files.iter().find(|entry| entry.path == path) else {
+                            return;
+                        };
+                        navigation.follow(path, crate::GitUrl::file_hash(&entry.path_bytes));
+                    },
                     diff_viewport: diff.viewport,
                     diff_rows: diff.rows,
-                    loading: (diff.loading)(),
+                    rows_from: diff.rows_from,
+                    loading: (diff.loading)() || selected_state.branch_loading,
                     error: selected_state.branch_files_error,
                     onviewedchange: Some(EventHandler::new(move |count| {
                         let mut viewed_count = viewed_count;
@@ -358,6 +418,7 @@ fn GitDiffPane(
                     selected_commit,
                     diff_viewport: diff.viewport,
                     diff_rows: diff.rows,
+                    rows_from: diff.rows_from,
                     loading: (diff.loading)(),
                 }
             } else if selected_state.panel == GitPanel::Stash {
@@ -367,6 +428,7 @@ fn GitDiffPane(
                     selected_stash,
                     diff_viewport: diff.viewport,
                     diff_rows: diff.rows,
+                    rows_from: diff.rows_from,
                     loading: (diff.loading)(),
                 }
             } else {
@@ -377,6 +439,7 @@ fn GitDiffPane(
                     selected_abs_path,
                     diff_viewport: diff.viewport,
                     diff_rows: diff.rows,
+                    rows_from: diff.rows_from,
                     loading: (diff.loading)(),
                 }
             }
@@ -387,7 +450,8 @@ fn GitDiffPane(
 #[component]
 fn GitShortcutOverlay() -> Element {
     let state = use_context::<GitPageState>();
-    let visible = state.use_selector(|state| state.controller.shortcut_help_visible);
+    let controller = state.controller;
+    let visible = use_memo(move || controller.read().shortcut_help_visible);
     rsx! {
         if visible() {
             GitShortcutHelp {}

@@ -1091,3 +1091,5 @@ project-clone-invalid = 올바른 GitHub 저장소를 입력하세요
 project-restore = 프로젝트 복원
 project-archived = 보관됨
 common-select = 선택
+
+common-show-more = 더 보기

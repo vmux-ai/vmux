@@ -393,14 +393,19 @@ fn mark_bookmarks_dirty(
     mut removed_collapsed: RemovedComponents<Collapsed>,
     mut removed_child_of: RemovedComponents<ChildOf>,
 ) {
-    let removed_child_of_bookmark = removed_child_of
-        .read()
-        .any(|entity| bookmark_items.get(entity).is_ok());
-    let any_removed = removed_pin.read().next().is_some()
-        | removed_bookmark.read().next().is_some()
-        | removed_folder.read().next().is_some()
-        | removed_collapsed.read().next().is_some()
-        | removed_child_of_bookmark;
+    let mut removed_child_of_bookmark = false;
+    for entity in removed_child_of.read() {
+        removed_child_of_bookmark |= bookmark_items.get(entity).is_ok();
+    }
+    let pin_removed = removed_pin.read().count() > 0;
+    let bookmark_removed = removed_bookmark.read().count() > 0;
+    let folder_removed = removed_folder.read().count() > 0;
+    let collapsed_removed = removed_collapsed.read().count() > 0;
+    let any_removed = pin_removed
+        || bookmark_removed
+        || folder_removed
+        || collapsed_removed
+        || removed_child_of_bookmark;
     if any_removed || !changed.is_empty() {
         auto.dirty = true;
     }

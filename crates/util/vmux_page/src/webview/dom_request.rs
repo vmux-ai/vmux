@@ -1,4 +1,4 @@
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 
 use dioxus_core::ElementId;
@@ -6,10 +6,18 @@ use dioxus_html::geometry::PixelsVector2D;
 use dioxus_html::{ScrollBehavior, ScrollLogicalPosition, ScrollToOptions};
 use serde::Serialize;
 
-#[derive(Serialize)]
+#[derive(Clone, Serialize)]
 #[serde(tag = "kind", rename_all = "camelCase")]
 pub(crate) enum DomRequest {
     Remount,
+    AnimateHeight {
+        element: String,
+        duration_ms: u32,
+    },
+    AnimateLayout {
+        element: String,
+        duration_ms: u32,
+    },
     Focus {
         element: String,
     },
@@ -25,7 +33,9 @@ pub(crate) enum DomRequest {
     ScrollTo {
         element: String,
         top: f64,
+        behavior: &'static str,
     },
+    PreserveScroll,
     SelectAll {
         element: String,
     },
@@ -55,6 +65,15 @@ pub(crate) enum DomRequest {
         x: f64,
         y: f64,
     },
+    SectionAtTop {
+        element: String,
+        token: u64,
+    },
+    ScrollSection {
+        container: String,
+        element: String,
+        behavior: &'static str,
+    },
     FocusNode {
         node: usize,
         focus: bool,
@@ -76,6 +95,28 @@ pub(crate) enum DomRequest {
         token: u64,
         what: Measure,
     },
+}
+
+#[derive(Clone, Serialize)]
+pub(crate) struct QueuedDomRequest {
+    epoch: u64,
+    revision: u64,
+    #[serde(flatten)]
+    request: DomRequest,
+}
+
+impl QueuedDomRequest {
+    #[cfg(test)]
+    pub(crate) fn request(&self) -> &DomRequest {
+        &self.request
+    }
+
+    pub(crate) fn retryable(&self) -> bool {
+        !matches!(
+            self.request,
+            DomRequest::ToggleMedia { .. } | DomRequest::RunScript { .. }
+        )
+    }
 }
 
 #[derive(Clone, Copy, Serialize)]
@@ -141,20 +182,46 @@ impl DomRequest {
     }
 }
 
-#[derive(Clone, Default)]
-pub(crate) struct RequestQueue(Rc<RefCell<Vec<DomRequest>>>);
+#[derive(Clone)]
+pub(crate) struct RequestQueue {
+    queued: Rc<RefCell<Vec<QueuedDomRequest>>>,
+    ipc_epoch: Rc<Cell<u64>>,
+    navigation_revision: Rc<Cell<u64>>,
+}
+
+impl Default for RequestQueue {
+    fn default() -> Self {
+        Self::new(Rc::new(Cell::new(1)), Rc::new(Cell::new(1)))
+    }
+}
 
 impl RequestQueue {
+    pub(crate) fn new(ipc_epoch: Rc<Cell<u64>>, navigation_revision: Rc<Cell<u64>>) -> Self {
+        Self {
+            queued: Rc::default(),
+            ipc_epoch,
+            navigation_revision,
+        }
+    }
+
+    pub(crate) fn stamp(&self, request: DomRequest) -> QueuedDomRequest {
+        QueuedDomRequest {
+            epoch: self.ipc_epoch.get(),
+            revision: self.navigation_revision.get(),
+            request,
+        }
+    }
+
     pub(crate) fn push(&self, request: DomRequest) {
-        let Ok(mut queued) = self.0.try_borrow_mut() else {
+        let Ok(mut queued) = self.queued.try_borrow_mut() else {
             return;
         };
 
-        queued.push(request);
+        queued.push(self.stamp(request));
     }
 
-    pub(crate) fn take(&self) -> Vec<DomRequest> {
-        let Ok(mut queued) = self.0.try_borrow_mut() else {
+    pub(crate) fn take(&self) -> Vec<QueuedDomRequest> {
+        let Ok(mut queued) = self.queued.try_borrow_mut() else {
             return Vec::new();
         };
 
@@ -169,6 +236,10 @@ mod tests {
     #[test]
     fn every_request_kind_is_a_case_the_shim_handles() {
         let requests = [
+            DomRequest::AnimateHeight {
+                element: "e".into(),
+                duration_ms: 160,
+            },
             DomRequest::Remount,
             DomRequest::Focus {
                 element: "e".into(),
@@ -185,7 +256,9 @@ mod tests {
             DomRequest::ScrollTo {
                 element: "e".into(),
                 top: 0.0,
+                behavior: "instant",
             },
+            DomRequest::PreserveScroll,
             DomRequest::SelectAll {
                 element: "e".into(),
             },
@@ -212,5 +285,16 @@ mod tests {
                 "the shim has no case for `{kind}`, so the page ignores it"
             );
         }
+    }
+
+    #[test]
+    fn queued_request_carries_document_identity() {
+        let queue = RequestQueue::new(Rc::new(Cell::new(7)), Rc::new(Cell::new(11)));
+        let request = queue.stamp(DomRequest::Remount);
+
+        let json = serde_json::to_value(&request).unwrap();
+
+        assert_eq!(json["epoch"], 7);
+        assert_eq!(json["revision"], 11);
     }
 }

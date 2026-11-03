@@ -73,10 +73,11 @@ fn spawn_bridge_pages(
     mut initialized: Local<bool>,
 ) {
     let (prepared, server) = runtime.into_inner();
+    let page_removed = world.removed_pages.read().count() > 0;
     let should_reconcile = !*initialized
         || prepared.is_changed()
         || !world.added_primary_window.is_empty()
-        || world.removed_pages.read().count() > 0
+        || page_removed
         || shutdown.as_ref().is_some_and(|state| state.is_changed());
     *initialized = true;
     if !should_reconcile {

@@ -43,6 +43,7 @@ fn switch_tab(
     leaf_panes: Query<Entity, (With<Pane>, Without<PaneSplit>)>,
     pane_children: Query<&Children, With<Pane>>,
     stacks: Query<(), With<Stack>>,
+    scope: crate::window::WindowScope,
     mut chosen: MessageWriter<StackInPaneChosen>,
     mut close: MessageWriter<CloseStackRequest>,
     mut commands: Commands,
@@ -51,7 +52,7 @@ fn switch_tab(
     let request = &trigger.event().payload;
     let target = leaf_panes
         .iter()
-        .find(|pane| pane.to_bits() == request.pane)
+        .find(|pane| pane.to_bits() == request.pane && scope.contains_current_space(webview, *pane))
         .and_then(|pane| pane_children.get(pane).ok())
         .and_then(|children| {
             children
@@ -68,14 +69,13 @@ fn switch_tab(
     } else {
         None
     };
-    chosen.write(StackInPaneChosen {
-        pane_bits: request.pane,
-        index: request.index,
-    });
-    if let (Some(source), Some(target)) = (source, target)
-        && source != target
-    {
-        close.write(CloseStackRequest::tidying(source));
+    if let Some(target) = target {
+        chosen.write(StackInPaneChosen { stack: target });
+        if let Some(source) = source
+            && source != target
+        {
+            close.write(CloseStackRequest::tidying(source));
+        }
     }
     commands.trigger(CommandBarDismiss::new(webview, true));
 }

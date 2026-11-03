@@ -1,10 +1,11 @@
 use std::fmt::Write;
 
 pub use vmux_api::git::{
-    DiffKind, DiffLine, FileGitState, FileStatus, GitDiffRow, GitDiffViewport, GitFileStatus,
-    GitLineMarker, GitLineStatus, GitOperationError, GitOperationResult, StyledSpan,
+    DiffKind, DiffLine, FileGitBranch, FileGitState, FileStatus, GitDiffRow, GitDiffViewport,
+    GitFileStatus, GitLineMarker, GitLineStatus, GitOperationError, GitOperationResult, StyledSpan,
 };
 use vmux_api::input::KeyModifiers;
+pub use vmux_api::page_location::PageLocationUiState;
 
 use crate::state::{GitBranchCollection, GitBranchPrompt, GitPanel};
 
@@ -75,6 +76,9 @@ pub struct GitShortcutHelpRequest {
     pub visible: bool,
 }
 
+#[vmux_api::ui_event]
+pub struct FileGitBranchesRequest;
+
 #[vmux_api::ui_event(Eq)]
 pub struct GitFileSelectRequest {
     pub path_bytes: Vec<u8>,
@@ -107,12 +111,17 @@ pub struct GitCatalogNextRequest {
 
 #[vmux_api::ui_event(Copy, Eq)]
 pub struct GitDiffRevealRequest {
+    pub generation: u64,
+    pub revision: u64,
     pub start: u32,
     pub end: u32,
 }
 
-#[vmux_api::ui_event]
-pub struct GitDiffNextRequest;
+#[vmux_api::ui_event(Copy, Eq)]
+pub struct GitDiffNextRequest {
+    pub generation: u64,
+    pub revision: u64,
+}
 
 #[vmux_api::ui_event]
 pub struct GitDiffRetryRequest;
@@ -176,6 +185,37 @@ pub struct GitCommitSubmitRequest;
 #[vmux_api::ui_event(Eq)]
 pub struct GitRepositoryRequest {
     pub path: String,
+    pub label: String,
+    pub branch: String,
+    pub commit: String,
+    pub request_id: u64,
+}
+
+impl GitRepositoryRequest {
+    pub fn at(path: impl Into<String>) -> Self {
+        Self {
+            path: path.into(),
+            label: String::new(),
+            branch: String::new(),
+            commit: String::new(),
+            request_id: 0,
+        }
+    }
+
+    pub fn project(path: String, label: String, branch: String) -> Self {
+        Self {
+            path,
+            label,
+            branch,
+            commit: String::new(),
+            request_id: 0,
+        }
+    }
+
+    pub fn with_commit(mut self, commit: Option<String>) -> Self {
+        self.commit = commit.unwrap_or_default();
+        self
+    }
 }
 #[vmux_api::ui_event(Eq)]
 pub struct GitRepositoryPickerRequest {
@@ -368,6 +408,34 @@ pub struct GitRepositorySnapshot {
 }
 
 impl GitRepositorySnapshot {
+    pub(crate) fn loading(request: &GitRepositoryRequest) -> Self {
+        let repo_name = if request.label.trim().is_empty() {
+            std::path::Path::new(&request.path)
+                .file_name()
+                .map(|name| name.to_string_lossy().into_owned())
+                .unwrap_or_else(|| request.path.clone())
+        } else {
+            request.label.clone()
+        };
+        Self {
+            path: request.path.clone(),
+            repo_root: request.path.clone(),
+            repo_name,
+            is_worktree: false,
+            branch: request.branch.clone(),
+            base_ref: String::new(),
+            upstream: String::new(),
+            ahead: 0,
+            behind: 0,
+            files: Vec::new(),
+            commits: Vec::new(),
+            branches: Vec::new(),
+            remote_branches: Vec::new(),
+            tags: Vec::new(),
+            stashes: Vec::new(),
+        }
+    }
+
     pub(crate) fn catalog_len(&self, catalog: GitCatalog) -> usize {
         match catalog {
             GitCatalog::LocalBranches => self.branches.len(),

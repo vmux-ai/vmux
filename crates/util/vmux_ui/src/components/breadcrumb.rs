@@ -1,6 +1,8 @@
 use crate::cn::cn;
 use crate::components::avatar::IdentityOrb;
-use crate::components::dropdown::{DropdownAlign, DropdownOption, DropdownSelector};
+use crate::components::dropdown::{
+    DropdownAlign, DropdownOpenMode, DropdownOption, DropdownSelector,
+};
 use crate::i18n::translate;
 use crate::icon::BuiltinIconView;
 use dioxus::prelude::*;
@@ -78,6 +80,44 @@ pub fn BreadcrumbSeparator() -> Element {
 }
 
 #[component]
+pub fn BreadcrumbDropdown(
+    label: String,
+    open: bool,
+    on_open_change: EventHandler<bool>,
+    children: Element,
+    #[props(default)] title: String,
+    #[props(default)] class: String,
+    #[props(default)] active: bool,
+    #[props(default = rsx! {})] leading: Element,
+    #[props(default)] popup_class: String,
+    #[props(default = true)] truncate: bool,
+) -> Element {
+    let root_class = cn(["w-fit min-w-0 max-w-full", class.as_str()]);
+    let popup_class = cn([
+        "max-h-80 min-w-48 overflow-y-auto p-1",
+        popup_class.as_str(),
+    ]);
+    rsx! {
+        DropdownSelector {
+            label,
+            truncate,
+            title,
+            open,
+            class: root_class,
+            active,
+            open_mode: DropdownOpenMode::Hover,
+            leading,
+            align: DropdownAlign::Start,
+            match_width: true,
+            popup_class,
+            on_open_change: move |next| on_open_change.call(next),
+            on_dismiss: move |_| on_open_change.call(false),
+            {children}
+        }
+    }
+}
+
+#[component]
 pub fn BreadcrumbSelector(
     label: String,
     options: Vec<BreadcrumbOption>,
@@ -85,24 +125,25 @@ pub fn BreadcrumbSelector(
     #[props(default)] value: String,
     #[props(default)] class: String,
     #[props(default)] active: bool,
+    #[props(default)] on_open_change: Option<EventHandler<bool>>,
     #[props(default = rsx! {})] leading: Element,
 ) -> Element {
     let mut open = use_signal(|| false);
-    let root_class = cn(["w-fit min-w-0 max-w-full", class.as_str()]);
     let selected_value = value.clone();
     let selected_label = label.clone();
     rsx! {
-        DropdownSelector {
+        BreadcrumbDropdown {
             label,
             open: open(),
-            class: root_class,
+            class,
             active,
             leading,
-            align: DropdownAlign::Start,
-            match_width: true,
-            popup_class: "max-h-80 min-w-48 overflow-y-auto p-1".to_string(),
-            ontoggle: move |_| open.set(!open()),
-            on_dismiss: move |_| open.set(false),
+            on_open_change: move |next| {
+                open.set(next);
+                if let Some(handler) = on_open_change {
+                    handler.call(next);
+                }
+            },
             for option in options {
                 {
                     let selected = if selected_value.is_empty() {
@@ -118,6 +159,9 @@ pub fn BreadcrumbSelector(
                             selected,
                             onclick: move |_| {
                                 open.set(false);
+                                if let Some(handler) = on_open_change {
+                                    handler.call(false);
+                                }
                                 onselect.call(option_value.clone());
                             },
                             leading: rsx! {

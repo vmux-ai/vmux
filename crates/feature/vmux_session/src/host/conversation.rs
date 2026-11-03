@@ -190,7 +190,7 @@ fn emit_snapshot(
     mut refreshes: MessageReader<RepublishChatUiState>,
     mut runtimes: ChatProjectionOutput,
 ) {
-    let refresh = refreshes.read().next().is_some();
+    let refresh = refreshes.read().count() > 0;
     let Ok((snapshot, transcript, mut projection)) = runtimes.single_mut() else {
         return;
     };

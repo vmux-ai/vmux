@@ -1074,3 +1074,5 @@ project-clone-invalid = 有効なGitHubリポジトリを入力してくださ�
 project-restore = プロジェクトを復元
 project-archived = アーカイブ済み
 common-select = 選択
+
+common-show-more = もっと見る

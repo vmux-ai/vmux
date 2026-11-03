@@ -1,7 +1,96 @@
 pub(crate) const WRY_HOST_SHIM: &str = r#"
 (function () {
+  globalThis.__vmuxIpcEpoch = 1;
+  let navigationRevision = null;
+  let applyingRevision = null;
+  let appliedFrame = null;
+  let failedFrame = null;
+  let failedRevision = null;
+  const applyingMessages = [];
+  const applyingMetadata = new Map();
+  const queueMessage = (messages, metadata, message) => {
+    const kind = message.body.startsWith('title:')
+      ? 'title'
+      : message.body.startsWith('favicon:')
+        ? 'favicon'
+        : message.body.startsWith('log:')
+          ? 'log'
+          : null;
+    if (kind) {
+      metadata.set(kind, message);
+      return;
+    }
+    messages.push(message);
+  };
+  const sendMessage = (message) => {
+    window.ipc.postMessage(message.epoch + ':' + message.revision + ':' + message.body);
+  };
+  const flushMessages = (messages, metadata) => {
+    for (const message of metadata.values()) {
+      sendMessage(message);
+    }
+    metadata.clear();
+    for (const message of messages.splice(0)) {
+      sendMessage(message);
+    }
+  };
+  const postMessage = (body) => {
+    const revision = applyingRevision ?? navigationRevision;
+    if (revision === null) return;
+    const message = {
+      epoch: globalThis.__vmuxIpcEpoch,
+      revision,
+      body,
+    };
+    if (applyingRevision !== null) {
+      queueMessage(applyingMessages, applyingMetadata, message);
+      return;
+    }
+    sendMessage(message);
+  };
+  const commitNavigationRevision = (revision) => {
+    const changed = navigationRevision !== revision;
+    navigationRevision = revision;
+    applyingRevision = null;
+    flushMessages(applyingMessages, applyingMetadata);
+    return changed;
+  };
+  const abandonApplyingRevision = () => {
+    applyingRevision = null;
+    applyingMessages.length = 0;
+    applyingMetadata.clear();
+  };
   const report = (kind, text) => {
-    try { window.ipc.postMessage('log:' + kind + ':' + text); } catch (e) {}
+    try { postMessage('log:' + kind + ':' + text); } catch (e) {}
+  };
+  let lastLayoutGeometry = '';
+  let layoutGeometryReports = 0;
+  const reportLayoutGeometry = () => {
+    if (location.hostname !== 'layout' || layoutGeometryReports >= 12) return;
+    const selectors = ['html', 'body', '#main', '#main > div', '#vmux-side-sheet', '[style*="--vmux-header-top"]'];
+    const nodes = selectors.map(selector => {
+      const element = document.querySelector(selector);
+      if (!element) return { selector, missing: true };
+      const rect = element.getBoundingClientRect();
+      const computed = getComputedStyle(element);
+      const properties = ['position', 'top', 'left', 'right', 'bottom', 'height', 'display', 'align-items', 'justify-content', 'transform', 'translate', 'filter', 'contain', 'container-type', '--vmux-header-top', '--vmux-side-sheet-top'];
+      return {
+        selector,
+        rect: [rect.x, rect.y, rect.width, rect.height],
+        inline: element.getAttribute('style'),
+        class: element.className,
+        computed: Object.fromEntries(properties.map(property => [property, computed.getPropertyValue(property)])),
+      };
+    });
+    const geometry = JSON.stringify({
+      viewport: [innerWidth, innerHeight, devicePixelRatio, scrollX, scrollY],
+      nodes,
+      sheets: Array.from(document.styleSheets).map(sheet => ({ href: sheet.href, disabled: sheet.disabled })),
+    });
+    if (geometry === lastLayoutGeometry) return;
+    lastLayoutGeometry = geometry;
+    layoutGeometryReports += 1;
+    report('warn', 'layout DOM geometry ' + geometry);
   };
   const encoder = new TextEncoder();
   const nativeOpen = XMLHttpRequest.prototype.open;
@@ -16,6 +105,7 @@ pub(crate) const WRY_HOST_SHIM: &str = r#"
     }
     const selected = !(document.getSelection() || { isCollapsed: true }).isCollapsed;
     this.setRequestHeader('x-vmux-selected', selected ? '1' : '0');
+    this.setRequestHeader('x-vmux-ipc-epoch', globalThis.__vmuxIpcEpoch);
     const el = document.activeElement;
     if (el && typeof el.selectionStart === 'number' && /^[\w:.-]+$/.test(el.id)) {
       const bytes = (upto) => encoder.encode(el.value.slice(0, upto)).length;
@@ -23,6 +113,10 @@ pub(crate) const WRY_HOST_SHIM: &str = r#"
         'x-vmux-caret',
         el.id + ':' + bytes(el.selectionStart) + ':' + bytes(el.selectionEnd),
       );
+    }
+    const revision = applyingRevision ?? navigationRevision;
+    if (revision !== null) {
+      this.setRequestHeader('x-vmux-navigation', revision);
     }
     return nativeSend.call(this, body);
   };
@@ -101,6 +195,37 @@ pub(crate) const WRY_HOST_SHIM: &str = r#"
       range.setEnd(node, offset);
       return [[...range.cloneContents().textContent].length, 0, 0, 0];
     }
+    const walker = document.createTreeWalker(el, NodeFilter.SHOW_TEXT);
+    let nearest = null;
+    let distance = Infinity;
+    for (let text = walker.nextNode(); text; text = walker.nextNode()) {
+      const range = document.createRange();
+      range.selectNodeContents(text);
+      for (const rect of range.getClientRects()) {
+        if (rect.width <= 0 || rect.height <= 0) continue;
+        const dx = Math.max(rect.left - x, x - rect.right, 0);
+        const dy = Math.max(rect.top - y, y - rect.bottom, 0);
+        const squared = dx * dx + dy * dy;
+        if (squared < distance) { distance = squared; nearest = rect; }
+      }
+    }
+    if (nearest) {
+      const px = Math.min(Math.max(x, nearest.left + 0.25), nearest.right - 0.25);
+      const py = Math.min(Math.max(y, nearest.top + 0.25), nearest.bottom - 0.25);
+      if (document.caretPositionFromPoint) {
+        const position = document.caretPositionFromPoint(px, py);
+        if (position) { node = position.offsetNode; offset = position.offset; }
+      } else if (document.caretRangeFromPoint) {
+        const range = document.caretRangeFromPoint(px, py);
+        if (range) { node = range.startContainer; offset = range.startOffset; }
+      }
+      if (node && el.contains(node)) {
+        const range = document.createRange();
+        range.selectNodeContents(el);
+        range.setEnd(node, offset);
+        return [[...range.cloneContents().textContent].length, 0, 0, 0];
+      }
+    }
     const rect = el.getBoundingClientRect();
     if (rect.width <= 0) return [0, 0, 0, 0];
     const length = [...(el.textContent || '')].length;
@@ -110,17 +235,233 @@ pub(crate) const WRY_HOST_SHIM: &str = r#"
   const prepareRemount = () => {
     const previous = window.interpreter;
     const root = previous.root.cloneNode(false);
-    const interpreter = new NativeInterpreter(previous.baseUri, false);
+    const interpreter = window.vmuxCreateInterpreter();
     interpreter.initialize(root);
     return { previousRoot: previous.root, root, interpreter };
   };
-  const commitRemount = (remount) => {
+  const sectionAtTop = (element) => {
+    const container = document.getElementById(element);
+    if (!container) return [];
+    const bounds = container.getBoundingClientRect();
+    if (bounds.height <= 0) return [];
+    const top = bounds.top + 32;
+    let selected = null;
+    for (const section of container.querySelectorAll('[data-vmux-scroll-section]')) {
+      const rect = section.getBoundingClientRect();
+      if (rect.height <= 0) continue;
+      if (selected === null || rect.top <= top) selected = section;
+      if (rect.top > top) break;
+    }
+    if (selected === null) return [];
+    return [Number(selected.dataset.vmuxScrollSection), 0, 0, 0];
+  };
+  const commitRemount = (remount, revision) => {
     remount.previousRoot.replaceWith(remount.root);
     window.interpreter = remount.interpreter;
+    return commitNavigationRevision(revision);
   };
+  let pageTransition = null;
+  const transitionRemount = async (remount, revision) => {
+    if (pageTransition !== null) return commitRemount(remount, revision);
+    document.documentElement.classList.add('vmux-page-transition');
+    try {
+      const transition = document.startViewTransition(() => commitRemount(remount, revision));
+      pageTransition = transition;
+      transition.finished.finally(() => {
+        if (pageTransition === transition) pageTransition = null;
+        document.documentElement.classList.remove('vmux-page-transition');
+      }).catch(() => {});
+      try {
+        await transition.updateCallbackDone;
+      } catch (error) {
+        if (!remount.root.isConnected) return commitRemount(remount, revision);
+      }
+      return navigationRevision === revision;
+    } catch (error) {
+      pageTransition = null;
+      document.documentElement.classList.remove('vmux-page-transition');
+      if (!remount.root.isConnected) return commitRemount(remount, revision);
+      return navigationRevision === revision;
+    }
+  };
+  const visibleScrollAnchor = (container, viewport) => {
+    const x = Math.min(viewport.right - 1, viewport.left + 8);
+    const y = Math.min(viewport.bottom - 1, viewport.top + 1);
+    const anchor = document.elementsFromPoint(x, y)
+      .map(element => element.closest('[data-vmux-scroll-anchor]'))
+      .find(element => element && container.contains(element));
+    if (!anchor) return null;
+    const rect = anchor.getBoundingClientRect();
+    return anchor.id ? { id: anchor.id, top: rect.top, scrollTop: container.scrollTop } : null;
+  };
+  const captureScrollAnchors = () => {
+    const captures = [];
+    const containers = document.querySelectorAll('[data-vmux-preserve-scroll]');
+    for (let containerIndex = 0; containerIndex < containers.length; containerIndex += 1) {
+      const container = containers[containerIndex];
+      const viewport = container.getBoundingClientRect();
+      const anchor = visibleScrollAnchor(container, viewport);
+      if (anchor) captures.push({ container, id: anchor.id, top: anchor.top, scrollTop: anchor.scrollTop });
+    }
+    return captures;
+  };
+  const restoreScrollAnchors = async (captures) => {
+    if (!captures.length) return;
+    const changed = captures.some(capture => {
+      if (!capture.container.isConnected) return false;
+      if (Math.abs(capture.container.scrollTop - capture.scrollTop) > 0.5) return false;
+      const anchor = document.getElementById(capture.id);
+      return anchor && capture.container.contains(anchor)
+        && Math.abs(anchor.getBoundingClientRect().top - capture.top) > 0.5;
+    });
+    if (!changed) return;
+    await new Promise((resolve) => requestAnimationFrame(resolve));
+    for (const capture of captures) {
+      if (!capture.container.isConnected) continue;
+      if (Math.abs(capture.container.scrollTop - capture.scrollTop) > 0.5) continue;
+      const anchor = document.getElementById(capture.id);
+      if (!anchor || !capture.container.contains(anchor)) continue;
+      const delta = anchor.getBoundingClientRect().top - capture.top;
+      if (Math.abs(delta) <= 0.5) continue;
+      capture.container.scrollTop += delta;
+    }
+  };
+  const requestMatchesDocument = (request) =>
+    String(request.epoch) === String(globalThis.__vmuxIpcEpoch)
+      && String(request.revision) === String(applyingRevision ?? navigationRevision);
+  class HeightAnimation {
+    static active = new WeakMap();
+    static capture(requests) {
+      const reduced = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+      const captures = [];
+      for (const request of requests) {
+        if (request.kind !== 'animateHeight') continue;
+        const element = document.getElementById(request.element);
+        if (!element?.isConnected) continue;
+        const rect = element.getBoundingClientRect();
+        const body = element.querySelector('[data-vmux-height-body]');
+        const bodyRect = body?.getBoundingClientRect();
+        const container = element.closest('[data-vmux-preserve-scroll]');
+        const viewport = container?.getBoundingClientRect();
+        const header = body?.previousElementSibling;
+        const headerRect = header?.getBoundingClientRect();
+        const pinned = headerRect && viewport && Math.abs(headerRect.top - viewport.top) <= 2;
+        const bodyTop = bodyRect ? bodyRect.top - rect.top : 0;
+        const visibleOffset = bodyRect && viewport ? Math.max(0, viewport.top + bodyTop - bodyRect.top) : 0;
+        const previous = this.active.get(element);
+        if (previous) {
+          previous.animation.cancel();
+          this.finish(element, previous);
+        }
+        captures.push({ request, element, height: rect.height, body: reduced ? null : body?.cloneNode(true), bodyTop, visibleOffset, container, header, pinned, viewportHeight: viewport?.height, motion: !reduced && typeof element.animate === 'function' });
+      }
+      return captures;
+    }
+    static finish(element, state) {
+      state.overlay?.remove();
+      if (this.active.get(element) !== state) return;
+      element.style.position = state.position;
+      element.style.overflow = state.overflow;
+      this.active.delete(element);
+      state.animation.cancel();
+    }
+    static align(capture) {
+      const { element, container, header, pinned } = capture;
+      if (!container?.isConnected || !header?.isConnected) return;
+      const top = Math.max(0, element.getBoundingClientRect().top - container.getBoundingClientRect().top + container.scrollTop);
+      if (Math.abs(top - container.scrollTop) <= 1) return;
+      if (pinned) container.scrollTop = top;
+      else container.scrollTo({ top, behavior: 'instant' });
+    }
+    static apply(captures) {
+      for (const capture of captures) {
+        const { element, request } = capture;
+        if (!element.isConnected || !requestMatchesDocument(request)) continue;
+        const height = element.getBoundingClientRect().height;
+        if (!Number.isFinite(height)) continue;
+        if (!capture.motion || Math.abs(height - capture.height) < 0.5) {
+          this.align(capture);
+          continue;
+        }
+        const state = { position: element.style.position, overflow: element.style.overflow, overlay: null, animation: null };
+        try {
+          if (height < capture.height && capture.body) {
+            const overlay = capture.body;
+            overlay.removeAttribute('data-vmux-height-body');
+            for (const node of [overlay, ...overlay.querySelectorAll('[id], [data-dioxus-id]')]) {
+              node.removeAttribute('id');
+              node.removeAttribute('data-dioxus-id');
+            }
+            overlay.inert = true;
+            overlay.setAttribute('aria-hidden', 'true');
+            Object.assign(overlay.style, { position: 'absolute', top: capture.bodyTop + 'px', left: '0', width: '100%', pointerEvents: 'none', transform: 'translateY(-' + capture.visibleOffset + 'px)' });
+            element.appendChild(overlay);
+            state.overlay = overlay;
+          }
+          element.style.position = 'relative';
+          element.style.overflow = 'clip';
+          const limit = Math.max(36, capture.viewportHeight || Math.max(capture.height, height));
+          state.animation = element.animate([{ height: Math.min(capture.height, limit) + 'px' }, { height: Math.min(height, limit) + 'px' }], {
+            duration: Math.min(300, request.duration_ms), easing: 'cubic-bezier(0.2, 0.7, 0.2, 1)', fill: 'both',
+          });
+          this.active.set(element, state);
+          state.animation.finished.then(() => this.finish(element, state), () => this.finish(element, state));
+          this.align(capture);
+        } catch (_) {
+          state.overlay?.remove();
+          element.style.position = state.position;
+          element.style.overflow = state.overflow;
+        }
+      }
+    }
+  }
+  class LayoutMovement {
+    static active = new WeakMap();
+    static capture(requests) {
+      if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) return [];
+      const captures = [];
+      for (const request of requests) {
+        if (request.kind !== 'animateLayout') continue;
+        const container = document.getElementById(request.element);
+        if (!container) continue;
+        const rects = new Map();
+        for (const element of container.querySelectorAll('[data-vmux-stack-row]')) {
+          const rect = element.getBoundingClientRect();
+          rects.set(element.dataset.vmuxStackRow, { left: rect.left, top: rect.top });
+          this.active.get(element)?.cancel();
+          this.active.delete(element);
+        }
+        captures.push({ request, rects });
+      }
+      return captures;
+    }
+    static apply(captures) {
+      for (const { request, rects } of captures) {
+        if (!requestMatchesDocument(request)) continue;
+        const container = document.getElementById(request.element);
+        if (!container) continue;
+        for (const element of container.querySelectorAll('[data-vmux-stack-row]')) {
+          const previous = rects.get(element.dataset.vmuxStackRow);
+          if (!previous || typeof element.animate !== 'function') continue;
+          const next = element.getBoundingClientRect();
+          const dx = previous.left - next.left;
+          const dy = previous.top - next.top;
+          if (Math.abs(dx) + Math.abs(dy) < 0.5) continue;
+          const animation = element.animate([{ transform: `translate(${dx}px, ${dy}px)` }, { transform: 'translate(0px, 0px)' }], { duration: request.duration_ms, easing: 'cubic-bezier(0.2, 0, 0, 1)' });
+          this.active.set(element, animation);
+          animation.finished.finally(() => { if (this.active.get(element) === animation) this.active.delete(element); }).catch(() => {});
+        }
+      }
+    }
+  }
   const applyDomRequest = (request) => {
+    if (!requestMatchesDocument(request)) return;
     switch (request.kind) {
       case 'remount':
+        return;
+      case 'preserveScroll':
+      case 'animateHeight':
+      case 'animateLayout':
         return;
       case 'focusNode':
         window.interpreter.setFocus(request.node, request.focus);
@@ -136,12 +477,13 @@ pub(crate) const WRY_HOST_SHIM: &str = r#"
         });
         return;
       case 'measureNode':
-        window.ipc.postMessage(
+        postMessage(
           'measured:' + request.token + ':' + measureNode(request.node, request.what).join(','),
         );
         return;
       case 'revealElement':
         requestAnimationFrame(() => {
+          if (!requestMatchesDocument(request)) return;
           for (const id of request.elements) {
             const target = document.getElementById(id);
             if (target) {
@@ -152,12 +494,25 @@ pub(crate) const WRY_HOST_SHIM: &str = r#"
         });
         return;
       case 'textOffsetAtPoint':
-        window.ipc.postMessage(
+        postMessage(
           'measured:' +
             request.token +
             ':' +
             textOffsetAtPoint(request.element, request.x, request.y).join(','),
         );
+        return;
+      case 'sectionAtTop':
+        postMessage('measured:' + request.token + ':' + sectionAtTop(request.element).join(','));
+        return;
+      case 'scrollSection':
+        requestAnimationFrame(() => {
+          if (!requestMatchesDocument(request)) return;
+          const container = document.getElementById(request.container);
+          const element = document.getElementById(request.element);
+          if (!container || !element || !container.contains(element)) return;
+          const top = element.getBoundingClientRect().top - container.getBoundingClientRect().top + container.scrollTop - 16;
+          container.scrollTo({ top: Math.max(0, top), behavior: window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 'instant' : request.behavior });
+        });
         return;
       case 'runScript':
         Function(request.script)();
@@ -185,18 +540,19 @@ pub(crate) const WRY_HOST_SHIM: &str = r#"
         for (let node = el.parentElement; node; node = node.parentElement) {
           if (node.scrollWidth > node.clientWidth) horizontal.push([node, node.scrollLeft]);
         }
-        el.scrollIntoView({ block: 'nearest', inline: 'nearest' });
+        el.scrollIntoView({ block: 'nearest', inline: 'nearest', behavior: 'instant' });
         for (const [node, left] of horizontal) node.scrollLeft = left;
         break;
       }
       case 'scrollTo':
-        el.scrollTo({ top: request.top, behavior: 'instant' });
+        el.scrollTo({ top: request.top, behavior: window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 'instant' : request.behavior });
         break;
       case 'selectAll':
         el.setSelectionRange(0, el.value.length);
         break;
       case 'offerText':
         requestAnimationFrame(() => {
+          if (!requestMatchesDocument(request)) return;
           el.focus();
           el.setSelectionRange(0, el.value.length);
           el.scrollLeft = 0;
@@ -211,6 +567,7 @@ pub(crate) const WRY_HOST_SHIM: &str = r#"
       }
       case 'caretToEnd':
         requestAnimationFrame(() => {
+          if (!requestMatchesDocument(request)) return;
           const end = el.value.length;
           el.setSelectionRange(end, end);
           el.scrollLeft = el.scrollWidth;
@@ -239,51 +596,155 @@ pub(crate) const WRY_HOST_SHIM: &str = r#"
     if (!editable) event.preventDefault();
   }, true);
   const pumpEdits = async () => {
-    let applied = false;
+    let retryDelay = 50;
+    let lastError = '';
     for (;;) {
+      let frameSequence = null;
+      let frameRevision = null;
       try {
+        const headers = {
+          'x-vmux-applied-frame': appliedFrame || '0',
+          'x-vmux-navigation': failedRevision ?? navigationRevision ?? '0',
+          'x-vmux-frame-epoch': String(globalThis.__vmuxIpcEpoch),
+          'x-vmux-frame-capability': String(globalThis.__vmuxFrameCapability),
+        };
+        if (failedFrame !== null) {
+          headers['x-vmux-failed-frame'] = failedFrame;
+        }
         const response = await fetch('/__edits', {
-          headers: { 'x-vmux-applied': applied ? '1' : '0' },
+          headers,
         });
-        applied = false;
-        if (!response.ok) { await new Promise((r) => setTimeout(r, 50)); continue; }
+        appliedFrame = null;
+        const revision = response.headers.get('x-vmux-navigation');
+        const responseEpoch = response.headers.get('x-vmux-frame-epoch');
+        const responseCapability = response.headers.get('x-vmux-frame-capability');
+        if (response.status === 412) {
+          if (
+            revision !== null
+            && responseEpoch !== null
+            && responseCapability === String(globalThis.__vmuxFrameCapability)
+          ) {
+            navigationRevision = revision;
+            globalThis.__vmuxIpcEpoch = Number(responseEpoch);
+            abandonApplyingRevision();
+            appliedFrame = null;
+            failedFrame = null;
+            failedRevision = null;
+            retryDelay = 50;
+            continue;
+          }
+          throw new Error('edits resynchronization omitted its identity');
+        }
+        if (response.status === 409) {
+          report('error', 'page frame failed after repeated attempts');
+          abandonApplyingRevision();
+          failedFrame = null;
+          failedRevision = null;
+          await new Promise((resolve) => setTimeout(resolve, retryDelay));
+          retryDelay = Math.min(retryDelay * 2, 2000);
+          continue;
+        }
+        if (!response.ok) throw new Error('edits request failed with ' + response.status);
         const frame = await response.arrayBuffer();
-        if (frame.byteLength < 4) continue;
+        if (!revision) continue;
+        if (
+          responseEpoch !== String(globalThis.__vmuxIpcEpoch)
+          || responseCapability !== String(globalThis.__vmuxFrameCapability)
+        ) {
+          throw new Error('edits response belongs to a stale document');
+        }
+        frameRevision = revision;
+        frameSequence = response.headers.get('x-vmux-frame');
+        if (!frameSequence) throw new Error('edits response omitted its frame sequence');
+        failedFrame = null;
+        failedRevision = null;
+        if (frame.byteLength < 4) throw new Error('edits frame is shorter than its header');
         const length = new DataView(frame).getUint32(0, true);
+        if (length > frame.byteLength - 4) throw new Error('edits frame has an invalid request length');
         const edits = frame.slice(4 + length);
         let requests = [];
         let remount = null;
         if (length) {
           const json = new TextDecoder().decode(new Uint8Array(frame, 4, length));
           requests = JSON.parse(json);
+          if (!Array.isArray(requests)) throw new Error('edits requests are not an array');
+          requests = requests.filter(
+            (request) =>
+              String(request.epoch) === String(globalThis.__vmuxIpcEpoch)
+                && String(request.revision) === String(revision),
+          );
           for (const queued of requests) {
             if (queued.kind === 'remount') remount = prepareRemount();
           }
         }
+        const preserveScroll = requests.some((request) => request.kind === 'preserveScroll');
+        const heightAnimations = remount ? [] : HeightAnimation.capture(requests);
+        const layoutMovements = remount ? [] : LayoutMovement.capture(requests);
+        const scrollAnchors = remount || !edits.byteLength || !preserveScroll
+          ? []
+          : captureScrollAnchors();
+        applyingRevision = revision;
+        let navigated = false;
         if (remount) {
           if (edits.byteLength) remount.interpreter.run_from_bytes(edits);
           const reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
           const sharedComposer = remount.previousRoot.querySelector('.vmux-agent-composer-shared')
             && remount.root.querySelector('.vmux-agent-composer-shared');
-          if (typeof document.startViewTransition === 'function' && !reducedMotion && sharedComposer) {
-            document.documentElement.classList.add('vmux-page-transition');
-            const transition = document.startViewTransition(() => commitRemount(remount));
-            transition.finished.finally(() => {
-              document.documentElement.classList.remove('vmux-page-transition');
-            });
-            await transition.updateCallbackDone;
+          if (
+            navigationRevision !== null
+            && typeof document.startViewTransition === 'function'
+            && !reducedMotion
+            && sharedComposer
+          ) {
+            navigated = await transitionRemount(remount, revision);
           } else {
-            commitRemount(remount);
+            navigated = commitRemount(remount, revision);
           }
         } else if (edits.byteLength) {
           window.interpreter.run_from_bytes(edits);
         }
-        for (const queued of requests) {
-          if (queued.kind !== 'remount') applyDomRequest(queued);
+        HeightAnimation.apply(heightAnimations);
+        LayoutMovement.apply(layoutMovements);
+        await restoreScrollAnchors(scrollAnchors);
+        if (
+          responseEpoch !== String(globalThis.__vmuxIpcEpoch)
+          || responseCapability !== String(globalThis.__vmuxFrameCapability)
+        ) {
+          throw new Error('edits response became stale while applying');
         }
-        applied = edits.byteLength > 0;
+        for (const queued of requests) {
+          if (queued.kind === 'remount') continue;
+          try {
+            applyDomRequest(queued);
+          } catch (error) {
+            report('error', 'dom request ' + queued.kind + ': ' + String(error));
+          }
+        }
+        if (!remount) navigated = commitNavigationRevision(revision);
+        if (navigated) reportMetadata();
+        requestAnimationFrame(reportLayoutGeometry);
+        appliedFrame = frameSequence;
+        failedFrame = null;
+        failedRevision = null;
+        retryDelay = 50;
+        lastError = '';
       } catch (e) {
-        await new Promise((r) => setTimeout(r, 50));
+        abandonApplyingRevision();
+        if (frameSequence !== null) {
+          failedFrame = frameSequence;
+          failedRevision = frameRevision;
+        }
+        const interpreter = window.interpreter;
+        const operation = interpreter ? interpreter.op & 255 : null;
+        const operand = interpreter && interpreter.u32buf ? interpreter.u32buf[interpreter.u32bufp - 1] : null;
+        const message = [e && e.name, e && e.message, e && e.stack].filter(Boolean).join(': ') +
+          ' frame=' + frameSequence + ' revision=' + frameRevision + ' operation=' + operation + ' operand=' + operand;
+        if (message !== lastError) {
+          report('error', 'pumpEdits: ' + message);
+          lastError = message;
+        }
+        await new Promise((resolve) => setTimeout(resolve, retryDelay));
+        retryDelay = Math.min(retryDelay * 2, 2000);
       }
     }
   };
@@ -306,24 +767,45 @@ pub(crate) const WRY_HOST_SHIM: &str = r#"
       if (href === null) return;
       if (sameDocumentFragment(href)) return;
       event.preventDefault();
-      window.ipc.postMessage('link:' + href);
+      postMessage('link:' + href);
     });
   };
   const reportInteractions = () => {
     document.addEventListener('pointerdown', () => {
-      window.ipc.postMessage('interaction:');
+      postMessage('interaction:');
     }, true);
   };
-  const reportFavicon = () => {
+  let lastTitle;
+  let lastIcon;
+  const reportMetadata = () => {
+    const title = document.title;
     const icon = document.querySelector('link[rel~="icon"][href]');
-    window.ipc.postMessage('favicon:' + (icon ? icon.href : ''));
+    const iconHref = icon ? icon.href : '';
+    if (title !== lastTitle) {
+      lastTitle = title;
+      postMessage('title:' + title);
+    }
+    if (iconHref !== lastIcon) {
+      lastIcon = iconHref;
+      postMessage('favicon:' + iconHref);
+    }
   };
-  const watchFavicon = () => {
-    reportFavicon();
-    window.__vmuxFaviconObserver = new MutationObserver(reportFavicon);
-    window.__vmuxFaviconObserver.observe(document.head, {
+  const watchMetadata = () => {
+    let scheduled = false;
+    const schedule = () => {
+      if (scheduled) return;
+      scheduled = true;
+      queueMicrotask(() => {
+        scheduled = false;
+        reportMetadata();
+      });
+    };
+    reportMetadata();
+    window.__vmuxMetadataObserver = new MutationObserver(schedule);
+    window.__vmuxMetadataObserver.observe(document.head, {
       attributes: true,
       childList: true,
+      characterData: true,
       subtree: true,
     });
   };
@@ -334,10 +816,10 @@ pub(crate) const WRY_HOST_SHIM: &str = r#"
       started = true;
       holdLinks();
       reportInteractions();
-      watchFavicon();
+      watchMetadata();
       pumpEdits();
     },
-    binEmit(buffer) { window.ipc.postMessage(toBase64(buffer)); },
+    binEmit(buffer) { postMessage(toBase64(buffer)); },
     binListen(id, callback) {
       const existing = listeners.get(id) || [];
       existing.push(callback);

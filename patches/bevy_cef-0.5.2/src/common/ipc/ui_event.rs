@@ -2,12 +2,67 @@ use async_channel::{Receiver, Sender};
 use bevy::prelude::*;
 use bevy_cef_core::prelude::*;
 use rkyv::bytecheck::CheckBytes;
+use std::collections::HashMap;
 use std::marker::PhantomData;
 use std::ops::{Deref, DerefMut};
-use vmux_api::{UiEvent, UiEventPermissions};
+use vmux_api::{BinEvent, UiEvent, UiEventPermissions};
 
 #[derive(Resource, Default)]
 pub struct BinIpcEventRawBuffer(pub Vec<BinIpcEventRaw>);
+
+#[derive(Resource, Default)]
+struct PendingUiInputs {
+    queued: Vec<PendingUiInput>,
+}
+
+struct PendingUiInput {
+    sequence: usize,
+    webview: Entity,
+    generation: u64,
+    revision: u64,
+    epoch: Option<u64>,
+    allowed_while_blocked: bool,
+    dispatch: UiInputDispatch,
+}
+
+type UiInputDispatch = Box<dyn FnOnce(&mut World) + Send + Sync>;
+
+#[derive(Resource, Default)]
+struct UiEventDecoders(HashMap<&'static str, UiEventDecoder>);
+
+struct UiEventDecoder {
+    permission: &'static str,
+    allowed_while_blocked: bool,
+    decode: fn(&BinIpcEventRaw) -> Option<UiInputDispatch>,
+}
+
+impl UiEventDecoders {
+    fn register<E>(&mut self)
+    where
+        E: UiEvent + rkyv::Archive + Send + Sync + 'static,
+        E::Archived: rkyv::Deserialize<E, rkyv::api::high::HighDeserializer<rkyv::rancor::Error>>
+            + for<'a> CheckBytes<rkyv::api::high::HighValidator<'a, rkyv::rancor::Error>>,
+    {
+        self.0.entry(E::id()).or_insert_with(|| UiEventDecoder {
+            permission: E::PERMISSION,
+            allowed_while_blocked: E::id() == vmux_api::PageReady::id(),
+            decode: |event| {
+                let payload = decode_ui_event::<E>(event, true)?;
+                let webview = event.webview;
+                Some(Box::new(move |world| {
+                    world.trigger(UiInput { webview, payload });
+                }))
+            },
+        });
+    }
+}
+
+#[derive(SystemSet, Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum UiEventSystems {
+    Drain,
+    Decode,
+    Flush,
+}
 
 fn drain_bin_ipc_events(
     receiver: ResMut<BinIpcEventRawReceiver>,
@@ -67,7 +122,9 @@ where
     T: UiEventList + Send + Sync + 'static,
 {
     fn build(&self, app: &mut App) {
-        app.init_resource::<BinIpcEventRawBuffer>();
+        app.init_resource::<BinIpcEventRawBuffer>()
+            .init_resource::<PendingUiInputs>()
+            .init_resource::<UiEventDecoders>();
         T::register_events(app);
     }
 }
@@ -78,15 +135,10 @@ where
     E::Archived: rkyv::Deserialize<E, rkyv::api::high::HighDeserializer<rkyv::rancor::Error>>
         + for<'a> CheckBytes<rkyv::api::high::HighValidator<'a, rkyv::rancor::Error>>,
 {
-    app.add_systems(
-        Update,
-        (move |commands: Commands,
-               buffer: Res<BinIpcEventRawBuffer>,
-               permissions: Query<&UiEventPermissions>| {
-            receive_ui_events::<E>(commands, buffer, permissions);
-        })
-        .after(drain_bin_ipc_events),
-    );
+    app.init_resource::<UiEventDecoders>();
+    app.world_mut()
+        .resource_mut::<UiEventDecoders>()
+        .register::<E>();
 }
 
 macro_rules! impl_bin_event_list {
@@ -145,23 +197,101 @@ where
     rkyv::from_bytes::<E, rkyv::rancor::Error>(&event.payload).ok()
 }
 
-fn receive_ui_events<E>(
-    mut commands: Commands,
+fn navigation_matches(event: &BinIpcEventRaw, current: Option<(u64, u64, Option<u64>)>) -> bool {
+    let (Some(generation), Some(revision)) = (event.surface_generation, event.navigation_revision)
+    else {
+        return false;
+    };
+    current.is_some_and(|current| {
+        current.0 == generation && current.1 == revision && current.2 == event.ipc_epoch
+    })
+}
+
+fn decode_ui_events(
     buffer: Res<BinIpcEventRawBuffer>,
+    decoders: Res<UiEventDecoders>,
     permissions: Query<&UiEventPermissions>,
-) where
-    E: UiEvent + rkyv::Archive + Send + Sync + 'static,
-    E::Archived: rkyv::Deserialize<E, rkyv::api::high::HighDeserializer<rkyv::rancor::Error>>
-        + for<'a> CheckBytes<rkyv::api::high::HighValidator<'a, rkyv::rancor::Error>>,
-{
-    for event in &buffer.0 {
-        let permitted = page_has_permission(permissions.iter(), &event.page_url, E::PERMISSION);
-        if let Some(payload) = decode_ui_event::<E>(event, permitted) {
-            commands.queue_silenced(bevy::ecs::system::command::trigger(UiInput {
-                webview: event.webview,
-                payload,
-            }));
+    browsers: Option<NonSend<Browsers>>,
+    blocked: Query<(), With<BinIpcBlocked>>,
+    revisions: Query<(
+        &BinIpcSurfaceGeneration,
+        &BinIpcNavigationRevision,
+        Option<&BinIpcEpoch>,
+    )>,
+    mut pending: ResMut<PendingUiInputs>,
+) {
+    for (sequence, event) in buffer.0.iter().enumerate() {
+        let Some(decoder) = decoders.0.get(event.id.as_str()) else {
+            continue;
+        };
+        if blocked.contains(event.webview) && !decoder.allowed_while_blocked {
+            continue;
         }
+        let current = browsers
+            .as_ref()
+            .and_then(|browsers| browsers.bin_ipc_context(&event.webview))
+            .map(|(generation, revision, epoch)| (generation, revision, Some(epoch)))
+            .or_else(|| {
+                revisions
+                    .get(event.webview)
+                    .ok()
+                    .map(|(generation, revision, epoch)| {
+                        (generation.0, revision.0, epoch.map(|epoch| epoch.0))
+                    })
+            });
+        if !navigation_matches(event, current) {
+            continue;
+        }
+        let permitted =
+            page_has_permission(permissions.iter(), &event.page_url, decoder.permission);
+        if permitted && let Some(dispatch) = (decoder.decode)(event) {
+            let (Some(generation), Some(revision)) =
+                (event.surface_generation, event.navigation_revision)
+            else {
+                continue;
+            };
+            let webview = event.webview;
+            let epoch = event.ipc_epoch;
+            pending.queued.push(PendingUiInput {
+                sequence,
+                webview,
+                generation,
+                revision,
+                epoch,
+                allowed_while_blocked: decoder.allowed_while_blocked,
+                dispatch,
+            });
+        }
+    }
+}
+
+fn has_pending_ui_inputs(pending: Res<PendingUiInputs>) -> bool {
+    !pending.queued.is_empty()
+}
+
+fn flush_ui_events(world: &mut World) {
+    let mut queued = std::mem::take(&mut world.resource_mut::<PendingUiInputs>().queued);
+    queued.sort_by_key(|input| input.sequence);
+    for input in queued {
+        if !input.allowed_while_blocked && world.get::<BinIpcBlocked>(input.webview).is_some() {
+            continue;
+        }
+        let current = world
+            .get_non_send::<Browsers>()
+            .and_then(|browsers| browsers.bin_ipc_context(&input.webview))
+            .map(|(generation, revision, epoch)| (generation, revision, Some(epoch)))
+            .or_else(|| {
+                Some((
+                    world.get::<BinIpcSurfaceGeneration>(input.webview)?.0,
+                    world.get::<BinIpcNavigationRevision>(input.webview)?.0,
+                    world.get::<BinIpcEpoch>(input.webview).map(|epoch| epoch.0),
+                ))
+            });
+        if current != Some((input.generation, input.revision, input.epoch)) {
+            continue;
+        }
+        (input.dispatch)(world);
+        world.flush();
     }
 }
 
@@ -173,13 +303,42 @@ impl Plugin for BinIpcRawEventPlugin {
         app.insert_resource(BinIpcEventRawSender(tx))
             .insert_resource(BinIpcEventRawReceiver(rx))
             .init_resource::<BinIpcEventRawBuffer>()
-            .add_systems(Update, drain_bin_ipc_events);
+            .init_resource::<PendingUiInputs>()
+            .init_resource::<UiEventDecoders>()
+            .configure_sets(
+                Update,
+                (
+                    UiEventSystems::Drain,
+                    UiEventSystems::Decode,
+                    UiEventSystems::Flush,
+                )
+                    .chain(),
+            )
+            .add_observer(block_bin_ipc)
+            .add_observer(unblock_bin_ipc)
+            .add_systems(Update, drain_bin_ipc_events.in_set(UiEventSystems::Drain))
+            .add_systems(Update, decode_ui_events.in_set(UiEventSystems::Decode))
+            .add_systems(
+                Update,
+                flush_ui_events
+                    .run_if(has_pending_ui_inputs)
+                    .in_set(UiEventSystems::Flush),
+            );
     }
 }
 
-/// Public because CEF's client handler is no longer the only producer: the wry-hosted layout
-/// decodes the same envelope out of a string IPC body and pushes onto this channel, so that both
-/// engines land in one `UiInput` path rather than each growing a routing layer.
+fn block_bin_ipc(trigger: On<Add, BinIpcBlocked>, browsers: Option<NonSend<Browsers>>) {
+    if let Some(browsers) = browsers {
+        browsers.set_bin_ipc_blocked(&trigger.entity, true);
+    }
+}
+
+fn unblock_bin_ipc(trigger: On<Remove, BinIpcBlocked>, browsers: Option<NonSend<Browsers>>) {
+    if let Some(browsers) = browsers {
+        browsers.set_bin_ipc_blocked(&trigger.entity, false);
+    }
+}
+
 #[derive(Resource)]
 pub struct BinIpcEventRawSender(pub Sender<BinIpcEventRaw>);
 
@@ -193,6 +352,15 @@ mod tests {
 
     #[derive(Resource)]
     struct EventTarget(Entity);
+
+    #[derive(Resource, Default)]
+    struct Received(Vec<u32>);
+
+    #[derive(Resource, Default)]
+    struct ReadyReceived(bool);
+
+    #[derive(Resource, Default)]
+    struct ReceivedOrder(Vec<u32>);
 
     #[vmux_api::ui_event(Eq)]
     struct AlphaEvent {
@@ -213,6 +381,53 @@ mod tests {
         commands.entity(target.0).despawn();
     }
 
+    fn advance_navigation(mut revisions: Query<&mut BinIpcNavigationRevision>) {
+        for mut revision in &mut revisions {
+            revision.0 = revision.0.wrapping_add(1);
+        }
+    }
+
+    fn capture(trigger: On<UiInput<AlphaEvent>>, mut received: ResMut<Received>) {
+        received.0.push(trigger.event().payload.value);
+    }
+
+    fn capture_ready(_: On<UiInput<vmux_api::PageReady>>, mut received: ResMut<ReadyReceived>) {
+        received.0 = true;
+    }
+
+    fn capture_alpha_order(trigger: On<UiInput<AlphaEvent>>, mut received: ResMut<ReceivedOrder>) {
+        received.0.push(trigger.event().payload.value);
+    }
+
+    fn capture_beta_order(trigger: On<UiInput<BetaEvent>>, mut received: ResMut<ReceivedOrder>) {
+        received.0.push(trigger.event().payload.value);
+    }
+
+    fn capture_and_block(
+        trigger: On<UiInput<AlphaEvent>>,
+        mut received: ResMut<Received>,
+        mut commands: Commands,
+    ) {
+        received.0.push(trigger.event().payload.value);
+        if trigger.event().payload.value == 1 {
+            commands
+                .entity(trigger.event().webview)
+                .insert(BinIpcBlocked);
+        }
+    }
+
+    fn register_decoder<E>(app: &mut App)
+    where
+        E: UiEvent + rkyv::Archive + Send + Sync + 'static,
+        E::Archived: rkyv::Deserialize<E, rkyv::api::high::HighDeserializer<rkyv::rancor::Error>>
+            + for<'a> CheckBytes<rkyv::api::high::HighValidator<'a, rkyv::rancor::Error>>,
+    {
+        app.init_resource::<UiEventDecoders>();
+        app.world_mut()
+            .resource_mut::<UiEventDecoders>()
+            .register::<E>();
+    }
+
     #[test]
     fn event_for_a_page_closed_in_the_same_frame_is_ignored() {
         let payload = AlphaEvent { value: 7 };
@@ -222,27 +437,341 @@ mod tests {
         let mut app = App::new();
         let target = app
             .world_mut()
-            .spawn(UiEventPermissions {
-                url: "vmux://allowed/",
-                owns_subtree: false,
-                permissions: &[AlphaEvent::PERMISSION],
-            })
+            .spawn((
+                UiEventPermissions {
+                    url: "vmux://allowed/",
+                    owns_subtree: false,
+                    permissions: &[AlphaEvent::PERMISSION],
+                },
+                BinIpcSurfaceGeneration(3),
+                BinIpcNavigationRevision(7),
+            ))
             .id();
         app.insert_resource(EventTarget(target))
+            .init_resource::<PendingUiInputs>()
             .insert_resource(BinIpcEventRawBuffer(vec![BinIpcEventRaw {
                 webview: target,
                 page_url: "vmux://allowed/".to_string(),
+                surface_generation: Some(3),
+                navigation_revision: Some(7),
+                ipc_epoch: None,
                 id: AlphaEvent::id().to_string(),
                 payload: bytes,
             }]))
             .add_systems(
                 Update,
-                (despawn_event_target, receive_ui_events::<AlphaEvent>).chain(),
+                (despawn_event_target, decode_ui_events, flush_ui_events).chain(),
             );
+        register_decoder::<AlphaEvent>(&mut app);
 
         app.update();
 
         assert!(app.world().get_entity(target).is_err());
+    }
+
+    #[test]
+    fn matching_document_event_is_delivered() {
+        let payload = AlphaEvent { value: 7 };
+        let bytes = rkyv::to_bytes::<rkyv::rancor::Error>(&payload)
+            .expect("serialize")
+            .into_vec();
+        let mut app = App::new();
+        let target = app
+            .world_mut()
+            .spawn((
+                UiEventPermissions {
+                    url: "vmux://allowed/",
+                    owns_subtree: false,
+                    permissions: &[AlphaEvent::PERMISSION],
+                },
+                BinIpcSurfaceGeneration(3),
+                BinIpcNavigationRevision(7),
+            ))
+            .id();
+        app.init_resource::<Received>()
+            .init_resource::<PendingUiInputs>()
+            .insert_resource(BinIpcEventRawBuffer(vec![BinIpcEventRaw {
+                webview: target,
+                page_url: "vmux://allowed/".to_string(),
+                surface_generation: Some(3),
+                navigation_revision: Some(7),
+                ipc_epoch: None,
+                id: AlphaEvent::id().to_string(),
+                payload: bytes,
+            }]))
+            .add_observer(capture)
+            .add_systems(Update, (decode_ui_events, flush_ui_events).chain());
+        register_decoder::<AlphaEvent>(&mut app);
+
+        app.update();
+
+        assert_eq!(app.world().resource::<Received>().0, vec![7]);
+    }
+
+    #[test]
+    fn different_event_types_keep_their_arrival_order() {
+        let alpha = rkyv::to_bytes::<rkyv::rancor::Error>(&AlphaEvent { value: 1 })
+            .expect("serialize")
+            .into_vec();
+        let beta = rkyv::to_bytes::<rkyv::rancor::Error>(&BetaEvent { value: 2 })
+            .expect("serialize")
+            .into_vec();
+        let mut app = App::new();
+        let target = app
+            .world_mut()
+            .spawn((
+                UiEventPermissions {
+                    url: "vmux://allowed/",
+                    owns_subtree: false,
+                    permissions: &[AlphaEvent::PERMISSION, BetaEvent::PERMISSION],
+                },
+                BinIpcSurfaceGeneration(3),
+                BinIpcNavigationRevision(7),
+            ))
+            .id();
+        app.init_resource::<ReceivedOrder>()
+            .init_resource::<PendingUiInputs>()
+            .insert_resource(BinIpcEventRawBuffer(vec![
+                BinIpcEventRaw {
+                    webview: target,
+                    page_url: "vmux://allowed/".to_string(),
+                    surface_generation: Some(3),
+                    navigation_revision: Some(7),
+                    ipc_epoch: None,
+                    id: AlphaEvent::id().to_string(),
+                    payload: alpha,
+                },
+                BinIpcEventRaw {
+                    webview: target,
+                    page_url: "vmux://allowed/".to_string(),
+                    surface_generation: Some(3),
+                    navigation_revision: Some(7),
+                    ipc_epoch: None,
+                    id: BetaEvent::id().to_string(),
+                    payload: beta,
+                },
+            ]))
+            .add_observer(capture_alpha_order)
+            .add_observer(capture_beta_order)
+            .add_systems(Update, (decode_ui_events, flush_ui_events).chain());
+        register_decoder::<AlphaEvent>(&mut app);
+        register_decoder::<BetaEvent>(&mut app);
+
+        app.update();
+
+        assert_eq!(app.world().resource::<ReceivedOrder>().0, vec![1, 2]);
+    }
+
+    #[test]
+    fn duplicate_event_registration_dispatches_once() {
+        let payload = rkyv::to_bytes::<rkyv::rancor::Error>(&AlphaEvent { value: 7 })
+            .expect("serialize")
+            .into_vec();
+        let mut app = App::new();
+        let target = app
+            .world_mut()
+            .spawn((
+                UiEventPermissions {
+                    url: "vmux://allowed/",
+                    owns_subtree: false,
+                    permissions: &[AlphaEvent::PERMISSION],
+                },
+                BinIpcSurfaceGeneration(3),
+                BinIpcNavigationRevision(7),
+            ))
+            .id();
+        app.add_plugins(UiEventPlugin::<(AlphaEvent,)>::default())
+            .add_plugins(UiEventPlugin::<(AlphaEvent, BetaEvent)>::default())
+            .init_resource::<Received>()
+            .insert_resource(BinIpcEventRawBuffer(vec![BinIpcEventRaw {
+                webview: target,
+                page_url: "vmux://allowed/".to_string(),
+                surface_generation: Some(3),
+                navigation_revision: Some(7),
+                ipc_epoch: None,
+                id: AlphaEvent::id().to_string(),
+                payload,
+            }]))
+            .add_observer(capture)
+            .add_systems(Update, (decode_ui_events, flush_ui_events).chain());
+
+        app.update();
+
+        assert_eq!(app.world().resource::<Received>().0, vec![7]);
+    }
+
+    #[test]
+    fn earlier_event_commands_invalidate_later_events_in_the_same_batch() {
+        let first = rkyv::to_bytes::<rkyv::rancor::Error>(&AlphaEvent { value: 1 })
+            .expect("serialize")
+            .into_vec();
+        let second = rkyv::to_bytes::<rkyv::rancor::Error>(&AlphaEvent { value: 2 })
+            .expect("serialize")
+            .into_vec();
+        let mut app = App::new();
+        let target = app
+            .world_mut()
+            .spawn((
+                UiEventPermissions {
+                    url: "vmux://allowed/",
+                    owns_subtree: false,
+                    permissions: &[AlphaEvent::PERMISSION],
+                },
+                BinIpcSurfaceGeneration(3),
+                BinIpcNavigationRevision(7),
+            ))
+            .id();
+        app.init_resource::<Received>()
+            .init_resource::<PendingUiInputs>()
+            .insert_resource(BinIpcEventRawBuffer(vec![
+                BinIpcEventRaw {
+                    webview: target,
+                    page_url: "vmux://allowed/".to_string(),
+                    surface_generation: Some(3),
+                    navigation_revision: Some(7),
+                    ipc_epoch: None,
+                    id: AlphaEvent::id().to_string(),
+                    payload: first,
+                },
+                BinIpcEventRaw {
+                    webview: target,
+                    page_url: "vmux://allowed/".to_string(),
+                    surface_generation: Some(3),
+                    navigation_revision: Some(7),
+                    ipc_epoch: None,
+                    id: AlphaEvent::id().to_string(),
+                    payload: second,
+                },
+            ]))
+            .add_observer(capture_and_block)
+            .add_systems(Update, (decode_ui_events, flush_ui_events).chain());
+        register_decoder::<AlphaEvent>(&mut app);
+
+        app.update();
+
+        assert_eq!(app.world().resource::<Received>().0, vec![1]);
+    }
+
+    #[test]
+    fn event_is_revalidated_before_deferred_delivery() {
+        let payload = AlphaEvent { value: 7 };
+        let bytes = rkyv::to_bytes::<rkyv::rancor::Error>(&payload)
+            .expect("serialize")
+            .into_vec();
+        let mut app = App::new();
+        let target = app
+            .world_mut()
+            .spawn((
+                UiEventPermissions {
+                    url: "vmux://allowed/",
+                    owns_subtree: false,
+                    permissions: &[AlphaEvent::PERMISSION],
+                },
+                BinIpcSurfaceGeneration(3),
+                BinIpcNavigationRevision(7),
+            ))
+            .id();
+        app.init_resource::<Received>()
+            .init_resource::<PendingUiInputs>()
+            .insert_resource(BinIpcEventRawBuffer(vec![BinIpcEventRaw {
+                webview: target,
+                page_url: "vmux://allowed/".to_string(),
+                surface_generation: Some(3),
+                navigation_revision: Some(7),
+                ipc_epoch: None,
+                id: AlphaEvent::id().to_string(),
+                payload: bytes,
+            }]))
+            .add_observer(capture)
+            .add_systems(
+                Update,
+                (decode_ui_events, advance_navigation, flush_ui_events).chain(),
+            );
+        register_decoder::<AlphaEvent>(&mut app);
+
+        app.update();
+
+        assert!(app.world().resource::<Received>().0.is_empty());
+    }
+
+    #[test]
+    fn page_ready_is_delivered_while_the_surface_is_blocked() {
+        let payload = rkyv::to_bytes::<rkyv::rancor::Error>(&vmux_api::PageReady {})
+            .expect("serialize")
+            .into_vec();
+        let mut app = App::new();
+        let target = app
+            .world_mut()
+            .spawn((
+                UiEventPermissions {
+                    url: "vmux://allowed/",
+                    owns_subtree: false,
+                    permissions: &[vmux_api::PageReady::PERMISSION],
+                },
+                BinIpcBlocked,
+                BinIpcSurfaceGeneration(3),
+                BinIpcNavigationRevision(7),
+                BinIpcEpoch(2),
+            ))
+            .id();
+        app.init_resource::<ReadyReceived>()
+            .init_resource::<PendingUiInputs>()
+            .insert_resource(BinIpcEventRawBuffer(vec![BinIpcEventRaw {
+                webview: target,
+                page_url: "vmux://allowed/".to_string(),
+                surface_generation: Some(3),
+                navigation_revision: Some(7),
+                ipc_epoch: Some(2),
+                id: vmux_api::PageReady::id().to_string(),
+                payload,
+            }]))
+            .add_observer(capture_ready)
+            .add_systems(Update, (decode_ui_events, flush_ui_events).chain());
+        register_decoder::<vmux_api::PageReady>(&mut app);
+
+        app.update();
+
+        assert!(app.world().resource::<ReadyReceived>().0);
+    }
+
+    #[test]
+    fn stale_interaction_epoch_is_rejected_after_unblock() {
+        let payload = AlphaEvent { value: 7 };
+        let bytes = rkyv::to_bytes::<rkyv::rancor::Error>(&payload)
+            .expect("serialize")
+            .into_vec();
+        let mut app = App::new();
+        let target = app
+            .world_mut()
+            .spawn((
+                UiEventPermissions {
+                    url: "vmux://allowed/",
+                    owns_subtree: false,
+                    permissions: &[AlphaEvent::PERMISSION],
+                },
+                BinIpcSurfaceGeneration(3),
+                BinIpcNavigationRevision(7),
+                BinIpcEpoch(2),
+            ))
+            .id();
+        app.init_resource::<Received>()
+            .init_resource::<PendingUiInputs>()
+            .insert_resource(BinIpcEventRawBuffer(vec![BinIpcEventRaw {
+                webview: target,
+                page_url: "vmux://allowed/".to_string(),
+                surface_generation: Some(3),
+                navigation_revision: Some(7),
+                ipc_epoch: Some(1),
+                id: AlphaEvent::id().to_string(),
+                payload: bytes,
+            }]))
+            .add_observer(capture)
+            .add_systems(Update, (decode_ui_events, flush_ui_events).chain());
+        register_decoder::<AlphaEvent>(&mut app);
+
+        app.update();
+
+        assert!(app.world().resource::<Received>().0.is_empty());
     }
 
     #[test]
@@ -254,6 +783,9 @@ mod tests {
         let raw = BinIpcEventRaw {
             webview: Entity::PLACEHOLDER,
             page_url: String::new(),
+            surface_generation: None,
+            navigation_revision: None,
+            ipc_epoch: None,
             id: BetaEvent::id().to_string(),
             payload: bytes,
         };
@@ -270,6 +802,9 @@ mod tests {
         let raw = BinIpcEventRaw {
             webview: Entity::PLACEHOLDER,
             page_url: String::new(),
+            surface_generation: None,
+            navigation_revision: None,
+            ipc_epoch: None,
             id: AlphaEvent::id().to_string(),
             payload: bytes,
         };
@@ -288,11 +823,33 @@ mod tests {
         let raw = BinIpcEventRaw {
             webview: Entity::PLACEHOLDER,
             page_url: "vmux://other/".to_string(),
+            surface_generation: None,
+            navigation_revision: None,
+            ipc_epoch: None,
             id: RestrictedEvent::id().to_string(),
             payload: bytes,
         };
 
         assert!(decode_ui_event::<RestrictedEvent>(&raw, false).is_none());
+    }
+
+    #[test]
+    fn navigation_revision_rejects_buffered_events_from_an_old_page() {
+        let raw = BinIpcEventRaw {
+            webview: Entity::PLACEHOLDER,
+            page_url: "vmux://allowed/".to_string(),
+            surface_generation: Some(3),
+            navigation_revision: Some(7),
+            ipc_epoch: Some(4),
+            id: AlphaEvent::id().to_string(),
+            payload: Vec::new(),
+        };
+
+        assert!(navigation_matches(&raw, Some((3, 7, Some(4)))));
+        assert!(!navigation_matches(&raw, Some((3, 7, Some(5)))));
+        assert!(!navigation_matches(&raw, Some((3, 8, Some(4)))));
+        assert!(!navigation_matches(&raw, Some((4, 7, Some(4)))));
+        assert!(!navigation_matches(&raw, None));
     }
 
     #[test]

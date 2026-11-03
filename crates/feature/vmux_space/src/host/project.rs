@@ -4,7 +4,7 @@ use bevy::winit::{EventLoopProxyWrapper, WinitUserEvent};
 use bevy_cef::prelude::UiInput;
 use vmux_command::{CommandBarProjectRoots, WriteCommandBarSnapshots};
 use vmux_ecs::event::space::{ProjectActivateRequest, ProjectPickerRequest};
-use vmux_ecs::event::{ProjectRow, ProjectRowKind, ProjectTreeToggle};
+use vmux_ecs::event::{ProjectNavigation, ProjectRow, ProjectRowKind, ProjectTreeToggle};
 use vmux_ecs::page::PageReady;
 use vmux_ecs::persistence::PersistenceAppExt;
 use vmux_ecs::{PageMetadata, UiStateWrite};
@@ -41,6 +41,7 @@ impl Plugin for SpaceProjectPlugin {
                         .in_set(WriteCommandBarSnapshots)
                         .after(refresh_active_projects),
                     publish_git_projects.after(refresh_active_projects),
+                    publish_navigation.after(refresh_active_projects),
                     finish_picks,
                 ),
             );
@@ -58,12 +59,18 @@ fn spawn_repository_roots(mut commands: Commands) {
 fn tree_toggle(
     trigger: On<UiInput<ProjectTreeToggle>>,
     space_of_pane: SpaceOfPane,
+    scope: vmux_layout::window::WindowScope,
     mut expanded: Query<&mut ExpandedProjectDirs>,
     mut commands: Commands,
 ) {
     let Some(space) = space_of_pane.resolve(&trigger.event().payload.pane_id) else {
         return;
     };
+    if trigger.event().webview != Entity::PLACEHOLDER
+        && scope.current_space(trigger.event().webview) != Some(space)
+    {
+        return;
+    }
     let path = &trigger.event().payload.path;
     if let Ok(mut dirs) = expanded.get_mut(space) {
         dirs.toggle(path);
@@ -423,6 +430,42 @@ fn publish_git_projects(
             &vmux_git::state::GitProjects {
                 rows: rows.0.clone(),
             },
+        ));
+    }
+}
+
+#[derive(Component, Default)]
+struct ProjectNavigationProjection(Vec<ProjectRow>);
+
+fn publish_navigation(
+    projects: Res<ActiveProjectRows>,
+    views: Query<(
+        Entity,
+        &PageMetadata,
+        Option<&ProjectNavigationProjection>,
+        Ref<PageReady>,
+    )>,
+    mut commands: Commands,
+) {
+    let changed = projects.is_changed();
+    let mut projection = None;
+    for (entity, page, current, ready) in &views {
+        if !page.url.starts_with("file://") && !page.url.starts_with("vmux://knowledge") {
+            continue;
+        }
+        if !changed && current.is_some() && !ready.is_added() {
+            continue;
+        }
+        let rows = projection.get_or_insert_with(|| projects.rows.clone());
+        if current.is_some_and(|current| current.0.as_slice() == rows.as_slice()) {
+            continue;
+        }
+        commands
+            .entity(entity)
+            .insert(ProjectNavigationProjection(rows.clone()));
+        commands.trigger(UiStateWrite::<ProjectNavigation>::from_event(
+            entity,
+            &ProjectNavigation { rows: rows.clone() },
         ));
     }
 }

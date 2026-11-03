@@ -51,17 +51,36 @@ fn package_binary_paths_honor_target_dir_and_triple() {
     let cache = temp.path().join("cef sdk");
     let log = temp.path().join("cargo.log");
     let dist = temp.path().join("web dist");
-    fs::create_dir_all(dist.join("assets")).expect("create web assets");
+    fs::create_dir_all(dist.join("assets/favicons")).expect("create favicon assets");
+    fs::create_dir_all(dist.join("assets/tool-logos")).expect("create tool logo assets");
     fs::create_dir_all(dist.join("wasm")).expect("create wasm assets");
     fs::write(dist.join("index.html"), "").expect("write index");
     fs::write(dist.join(".dx-profile"), "release").expect("write profile");
     fs::write(dist.join("assets/app.js"), "").expect("write js");
+    for asset in [
+        "assets/index.css",
+        "assets/theme.css",
+        "assets/favicons/tools.svg",
+        "assets/tool-logos/acp.png",
+        "assets/tool-logos/homebrew.svg",
+        "assets/tool-logos/mcp.png",
+        "assets/tool-logos/npm.svg",
+    ] {
+        fs::write(dist.join(asset), "").expect("write required web asset");
+    }
     fs::write(dist.join("wasm/app.wasm"), "").expect("write wasm");
     fs::write(
         dist.join(".bundle-stamp"),
         concat!(
             "a4d451ec23463726f72c43d64c710968f6b602cd653b4de8adee1b556240a829  .dx-profile\n",
             "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855  assets/app.js\n",
+            "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855  assets/favicons/tools.svg\n",
+            "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855  assets/index.css\n",
+            "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855  assets/theme.css\n",
+            "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855  assets/tool-logos/acp.png\n",
+            "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855  assets/tool-logos/homebrew.svg\n",
+            "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855  assets/tool-logos/mcp.png\n",
+            "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855  assets/tool-logos/npm.svg\n",
             "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855  index.html\n",
             "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855  wasm/app.wasm\n",
         ),

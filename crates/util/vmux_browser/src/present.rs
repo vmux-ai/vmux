@@ -10,12 +10,13 @@ use vmux_command::CommandBarPanelActive;
 use vmux_command::{CommandBarNativeSize, PendingCommandBarReveal};
 use vmux_ecs::overlay::{OverlayState, WindowOverlay};
 use vmux_ecs::page::PageReady;
-use vmux_history::LastActivatedAt;
 use vmux_layout::Browser;
+use vmux_layout::active_pane::ActiveStack;
 use vmux_layout::{
     Header, LayoutCef, Open, PendingWebviewReveal,
     bookmark::{BookmarkContextMenuActive, BookmarkTextInputActive},
     pane::Pane,
+    presentation::Layer as PresentationLayer,
     side_sheet::SideSheet,
     stack::{LayoutFocus, Stack},
     tab::Tab,
@@ -53,6 +54,7 @@ impl Plugin for PresentPlugin {
                 sync_osr_webview_focus,
             )
                 .chain()
+                .after(vmux_layout::presentation::StackMotionSet)
                 .after(LayoutSystems::Layout),
         );
     }
@@ -67,18 +69,19 @@ type LayoutKeyboardCapture = Or<(
 pub(crate) type LayoutKeyboardHost = (With<LayoutCef>, LayoutKeyboardCapture);
 
 #[derive(bevy::ecs::system::SystemParam)]
-struct WindowFrameQueries<'w, 's> {
+pub(crate) struct WindowFrameQueries<'w, 's> {
+    stack_rect: Query<'w, 's, &'static vmux_layout::presentation::StackRect>,
     hierarchy: WindowHierarchy<'w, 's>,
     child_of: Query<'w, 's, &'static ChildOf>,
     focus: LayoutFocus<'w, 's>,
     pane_rect: Query<'w, 's, &'static ComputedNode, With<Pane>>,
     header_rect: Query<'w, 's, (Entity, &'static ComputedNode), (With<Header>, With<Open>)>,
-    tabs: Query<'w, 's, (Entity, &'static LastActivatedAt), With<Tab>>,
-    all_children: Query<'w, 's, &'static Children>,
+    tabs: Query<'w, 's, (), With<Tab>>,
+    layers: Query<'w, 's, &'static PresentationLayer>,
 }
 
 impl WindowFrameQueries<'_, '_> {
-    fn tab_ancestor(&self, start: Entity) -> Option<Entity> {
+    pub(crate) fn tab_ancestor(&self, start: Entity) -> Option<Entity> {
         let mut entity = start;
         loop {
             if self.tabs.contains(entity) {
@@ -88,46 +91,59 @@ impl WindowFrameQueries<'_, '_> {
         }
     }
 
-    fn active_tab(&self, tab: Entity) -> Option<Entity> {
-        let space = self.child_of.get(tab).ok()?.get();
-        let children = self.all_children.get(space).ok()?;
-        let mut latest = None;
-        for entity in children.iter() {
-            let Ok((entity, activated_at)) = self.tabs.get(entity) else {
-                continue;
-            };
-            if latest
-                .is_none_or(|(_, current): (Entity, LastActivatedAt)| activated_at.0 > current.0)
-            {
-                latest = Some((entity, *activated_at));
+    pub(crate) fn presentation(&self, start: Entity) -> PresentationLayer {
+        let mut entity = start;
+        let mut resolved = PresentationLayer::Current;
+        for _ in 0..32 {
+            if let Ok(layer) = self.layers.get(entity) {
+                match *layer {
+                    PresentationLayer::Hidden => return PresentationLayer::Hidden,
+                    PresentationLayer::Retained => resolved = PresentationLayer::Retained,
+                    PresentationLayer::Incoming if resolved != PresentationLayer::Retained => {
+                        resolved = PresentationLayer::Incoming;
+                    }
+                    PresentationLayer::Current | PresentationLayer::Incoming => {}
+                }
             }
+            let Ok(parent) = self.child_of.get(entity) else {
+                break;
+            };
+            entity = parent.parent();
         }
-        latest.map(|(entity, _)| entity)
+        resolved
     }
 
-    fn tab_is_visible(&self, tab: Option<Entity>) -> bool {
-        let Some(tab) = tab else {
-            return true;
-        };
-        active_candidate(self.active_tab(tab), tab)
+    pub(crate) fn page_is_active(&self, page: Entity) -> bool {
+        matches!(
+            self.presentation(page),
+            PresentationLayer::Current | PresentationLayer::Incoming
+        )
     }
 }
 
 fn sync_keyboard_target(
+    presentation: WindowFrameQueries,
     focus: vmux_layout::stack::FocusedStack,
-    child_of_q: Query<&ChildOf>,
     status_q: Query<(), With<Header>>,
     side_sheet_q: Query<(), With<SideSheet>>,
     modal_q: Query<(Entity, &Node, Has<KeyboardOwner>), With<WindowOverlay>>,
     layout_keyboard_q: Query<(Entity, &HostWindow), LayoutKeyboardHost>,
     focused_window: vmux_layout::window::FocusedWindow,
-    content_q: Query<(Entity, Has<KeyboardOwner>), With<Browser>>,
+    content_q: Query<
+        (
+            Entity,
+            Has<KeyboardOwner>,
+            Has<vmux_layout::hosted_page::SurfaceHandoff>,
+            Has<vmux_layout::hosted_page::SurfaceBlocked>,
+        ),
+        With<Browser>,
+    >,
     mut commands: Commands,
 ) {
     if let Some(modal) = modal_q.iter().find_map(|(entity, node, keyboard_target)| {
         (node.display != Display::None && keyboard_target).then_some(entity)
     }) {
-        for (browser_e, has_kb) in &content_q {
+        for (browser_e, has_kb, _, _) in &content_q {
             if browser_e != modal && has_kb {
                 commands.entity(browser_e).try_remove::<KeyboardOwner>();
             }
@@ -139,7 +155,7 @@ fn sync_keyboard_target(
         .iter()
         .any(|(_, host)| Some(host.0) == focused_window.entity())
     {
-        for (browser_e, has_kb) in &content_q {
+        for (browser_e, has_kb, _, _) in &content_q {
             if has_kb {
                 commands.entity(browser_e).try_remove::<KeyboardOwner>();
             }
@@ -147,27 +163,34 @@ fn sync_keyboard_target(
         return;
     }
 
-    let active_stack_opt = focus.stack;
-    let Some(active_stack_entity) = active_stack_opt else {
-        return;
-    };
-    for (browser_e, has_kb) in &content_q {
-        if status_q.contains(browser_e) || side_sheet_q.contains(browser_e) {
+    let focused_target = focus.stack.and_then(|stack| {
+        content_q
+            .iter()
+            .find(|(browser, _, handing_off, blocked)| {
+                !*handing_off
+                    && !*blocked
+                    && !status_q.contains(*browser)
+                    && !side_sheet_q.contains(*browser)
+                    && presentation
+                        .child_of
+                        .get(*browser)
+                        .is_ok_and(|parent| parent.parent() == stack)
+                    && presentation.presentation(*browser).interactive()
+            })
+            .map(|(browser, _, _, _)| browser)
+    });
+    let target = focused_target;
+
+    for (browser, has_keyboard, _, _) in &content_q {
+        if status_q.contains(browser) || side_sheet_q.contains(browser) {
             continue;
         }
-
-        let in_active = child_of_q
-            .get(browser_e)
-            .ok()
-            .map(|co| co.get() == active_stack_entity)
-            .unwrap_or(false);
-
-        if in_active {
-            if !has_kb {
-                commands.entity(browser_e).try_insert(KeyboardOwner);
+        if target == Some(browser) {
+            if !has_keyboard {
+                commands.entity(browser).try_insert(KeyboardOwner);
             }
-        } else if has_kb {
-            commands.entity(browser_e).try_remove::<KeyboardOwner>();
+        } else if has_keyboard {
+            commands.entity(browser).try_remove::<KeyboardOwner>();
         }
     }
 }
@@ -193,6 +216,14 @@ fn sync_children_to_ui(
         ),
         With<Browser>,
     >,
+    readiness: Query<
+        (
+            Has<PageReady>,
+            Has<vmux_ecs::page::HostsPage>,
+            Has<vmux_layout::hosted_page::SurfacePresentationReady>,
+        ),
+        With<Browser>,
+    >,
     queries: WindowFrameQueries,
     roots: Query<(Entity, &HostWindow, &ComputedNode), With<VmuxWindow>>,
     mut commands: Commands,
@@ -215,6 +246,8 @@ fn sync_children_to_ui(
         presented,
     ) in browser_q.iter_mut()
     {
+        let (ready, hosted, presentation_ready) =
+            readiness.get(browser).unwrap_or((false, false, false));
         let Some(host_window) = queries.hierarchy.get(browser) else {
             if presented {
                 commands.entity(browser).remove::<PagePresented>();
@@ -241,6 +274,11 @@ fn sync_children_to_ui(
             Ok(cn) => cn,
             Err(_) => self_computed,
         };
+        let computed = queries
+            .stack_rect
+            .get(parent)
+            .map(|rect| &rect.0)
+            .unwrap_or(computed);
 
         if glass_size_px.x <= 0.0 || glass_size_px.y <= 0.0 {
             if presented {
@@ -253,10 +291,7 @@ fn sync_children_to_ui(
 
         let under_inactive_tab = parent != glass_entity
             && !is_cef_ui
-            && match queries.tab_ancestor(parent) {
-                Some(tab) => queries.active_tab(tab) != Some(tab),
-                None => false,
-            };
+            && queries.presentation(parent) == PresentationLayer::Hidden;
 
         let size_px = computed.size;
         let renderable = webview_layout_is_renderable(
@@ -267,14 +302,20 @@ fn sync_children_to_ui(
         match hidden_webview_sizing(renderable, under_inactive_tab) {
             HiddenWebviewSizing::Render => {}
             HiddenWebviewSizing::HideKeepSize => {
-                tf.scale = Vec3::splat(1.0e-6);
+                let hidden = Vec3::splat(1.0e-6);
+                if tf.scale != hidden {
+                    tf.scale = hidden;
+                }
                 if presented {
                     commands.entity(browser).remove::<PagePresented>();
                 }
                 continue;
             }
             HiddenWebviewSizing::Collapse => {
-                tf.scale = Vec3::splat(1.0e-6);
+                let hidden = Vec3::splat(1.0e-6);
+                if tf.scale != hidden {
+                    tf.scale = hidden;
+                }
                 if webview_size.0 != Vec2::ONE {
                     webview_size.0 = Vec2::ONE;
                 }
@@ -285,31 +326,42 @@ fn sync_children_to_ui(
             }
         }
 
-        let is_active_stack = if parent != glass_entity && !is_cef_ui {
-            active_candidate(queries.focus.stack(pane_entity), parent)
-        } else {
-            true
-        };
-
-        let is_inactive_stack = parent != glass_entity && !is_cef_ui && !is_active_stack;
+        let branch_presentation = queries.presentation(parent);
+        let is_active_stack = matches!(
+            branch_presentation,
+            PresentationLayer::Current | PresentationLayer::Incoming
+        );
+        let is_inactive_stack = parent != glass_entity
+            && !is_cef_ui
+            && branch_presentation == PresentationLayer::Hidden;
 
         let is_inactive_tab = under_inactive_tab;
 
-        let should_present = !is_inactive_stack && !is_inactive_tab;
-        if should_present && !presented {
-            commands.entity(browser).insert(PagePresented);
-        } else if !should_present && presented {
+        let pending_reveal = pending_webview_reveal || pending_command_bar_reveal;
+        let should_present = !pending_reveal && !is_inactive_stack && !is_inactive_tab;
+        if should_present {
+            if !presented {
+                commands.entity(browser).insert(PagePresented);
+            }
+            if ready && !hosted && !is_windowed && !presentation_ready {
+                commands
+                    .entity(browser)
+                    .insert(vmux_layout::hosted_page::SurfacePresentationReady);
+            }
+        } else if presented {
             commands.entity(browser).remove::<PagePresented>();
         }
 
         let sx = size_px.x / glass_size_px.x;
         let sy = size_px.y / glass_size_px.y;
-        let new_scale = if is_inactive_stack || is_inactive_tab {
+        let new_scale = if pending_reveal || is_inactive_stack || is_inactive_tab {
             Vec3::splat(1e-6)
         } else {
             Vec3::new(sx, sy, 1.0)
         };
-        tf.scale = new_scale;
+        if tf.scale != new_scale {
+            tf.scale = new_scale;
+        }
 
         let delta_px = computed.center - glass_rect.center;
 
@@ -337,7 +389,10 @@ fn sync_children_to_ui(
         } else {
             0.0
         };
-        tf.translation = Vec3::new(tx + history_swipe_tx, ty, z);
+        let translation = Vec3::new(tx + history_swipe_tx, ty, z);
+        if tf.translation != translation {
+            tf.translation = translation;
+        }
 
         if modal.is_some() && is_windowed {
             continue;
@@ -348,10 +403,6 @@ fn sync_children_to_ui(
             webview_size.0 = dip;
         }
     }
-}
-
-fn active_candidate(active: Option<Entity>, candidate: Entity) -> bool {
-    active.is_none_or(|active| active == candidate)
 }
 
 struct AgentRingColor;
@@ -385,9 +436,9 @@ impl AgentRingColor {
 
 fn windowed_ring_for(
     stack: Entity,
-    focus: &vmux_layout::active_pane::ActiveStack,
+    focus: &ActiveStack,
     visible_pane_count: usize,
-    agent: Option<(&str, vmux_layout::active_pane::ActiveStack)>,
+    agent: Option<(&str, ActiveStack)>,
     settings: &AppSettings,
     scale: f32,
 ) -> (f32, [f32; 3]) {
@@ -417,6 +468,12 @@ fn sync_windowed_frames(
             &ChildOf,
             Option<&Visibility>,
             Has<PendingWebviewReveal>,
+            Has<vmux_layout::hosted_page::SurfaceBlocked>,
+            Has<vmux_ecs::PageTransition>,
+            Has<PageReady>,
+            Has<vmux_layout::hosted_page::SurfacePaintReady>,
+            Has<vmux_layout::hosted_page::SurfacePresentationReady>,
+            Option<&BinIpcSurfaceGeneration>,
         ),
         (
             With<Browser>,
@@ -432,12 +489,25 @@ fn sync_windowed_frames(
     capturing: Query<(), (With<LayoutCef>, LayoutPointerCapture)>,
     mut commands: Commands,
 ) {
-    let force_raise =
-        !added_hidden_windows.is_empty() || removed_hidden_windows.read().next().is_some();
+    let hidden_window_removed = removed_hidden_windows.read().count() > 0;
+    let force_raise = !added_hidden_windows.is_empty() || hidden_window_removed;
     let mut hidden = Vec::new();
     let mut visible = Vec::new();
     memory.visible_frames.clear();
-    for (entity, self_computed, child_of, visibility, pending_reveal) in &browser_q {
+    for (
+        entity,
+        self_computed,
+        child_of,
+        visibility,
+        pending_reveal,
+        surface_blocked,
+        transitioning,
+        ready,
+        paint_ready,
+        presentation_ready,
+        generation,
+    ) in &browser_q
+    {
         let parent = child_of.get();
         let pane_entity = queries
             .child_of
@@ -445,44 +515,39 @@ fn sync_windowed_frames(
             .map(|co| co.get())
             .unwrap_or(parent);
         let computed = queries.pane_rect.get(pane_entity).unwrap_or(self_computed);
+        let computed = queries
+            .stack_rect
+            .get(parent)
+            .map(|rect| &rect.0)
+            .unwrap_or(computed);
         let tab = queries.tab_ancestor(parent);
-        let tab_active = queries.tab_is_visible(tab);
-        let stack_active = active_candidate(queries.focus.stack(pane_entity), parent);
-        let focused_stack = focus.stack == Some(parent);
-        let renderable = computed.size.x > 0.0 && computed.size.y > 0.0;
-        let state = (
-            renderable,
-            focused_stack,
-            tab_active,
-            stack_active,
-            pending_reveal,
+        let presentation = queries.presentation(parent);
+        let tab_active = presentation.visible();
+        let previous = presentation == PresentationLayer::Retained;
+        let stack_active = matches!(
+            presentation,
+            PresentationLayer::Current | PresentationLayer::Incoming
         );
-        if memory.visibility_state.get(&entity) != Some(&state) {
-            bevy::log::warn!(
-                ?entity,
-                ?parent,
-                ?pane_entity,
-                ?tab,
-                ?focus.stack,
-                ?computed.size,
-                ?visibility,
-                pending_reveal,
-                renderable,
-                focused_stack,
-                tab_active,
-                stack_active,
-                "cef_visibility"
-            );
-            memory.visibility_state.insert(entity, state);
-        }
-        if !windowed_page_is_visible(renderable, focused_stack, tab_active, stack_active) {
+        let renderable = webview_layout_is_renderable(
+            computed.size,
+            visibility,
+            pending_reveal || transitioning,
+        );
+        if !windowed_page_is_visible(renderable, tab_active, stack_active, previous) {
+            memory.sync_interactivity(&browsers, entity, generation, false);
             commands
                 .entity(entity)
                 .remove::<(PaneFrame, FocusRing, AllCorners)>();
             hidden.push(entity);
             continue;
         }
-        visible.push(entity);
+        let shown = !pending_reveal;
+        let blocked = surface_blocked || transitioning || !shown || !presentation.interactive();
+        if shown {
+            visible.push(entity);
+        } else {
+            hidden.push(entity);
+        }
         let host_window = queries.hierarchy.get(entity);
         let header_frame = host_window.and_then(|host_window| {
             queries.header_rect.iter().find_map(|(header, rect)| {
@@ -516,18 +581,31 @@ fn sync_windowed_frames(
         let was_raised = memory.raised_frame.contains_key(&entity);
         let first_native_frame = browser_ready && !was_raised;
         let reveal = windowed_page_needs_reveal(became_visible, browser_ready, was_raised);
-        browsers.set_windowed_frame(
-            &entity,
-            frame.left,
-            frame.top,
-            frame.width,
-            frame.height,
-            scale,
+        let key = (
+            frame.left.round() as i32,
+            frame.top.round() as i32,
+            frame.width.round() as i32,
+            frame.height.round() as i32,
+            scale.to_bits(),
         );
-        if reveal {
+        if !browser_ready || memory.raised_frame.get(&entity) != Some(&key) {
+            browsers.set_windowed_frame(
+                &entity,
+                frame.left,
+                frame.top,
+                frame.width,
+                frame.height,
+                scale,
+            );
+        }
+        if reveal && shown {
             browsers.set_windowed_hidden(&entity, false);
         }
-        browsers.set_windowed_z_position(&entity, windowed_page_z_position(!capturing.is_empty()));
+        memory.sync_interactivity(&browsers, entity, generation, !blocked);
+        browsers.set_windowed_z_position(
+            &entity,
+            windowed_page_z_position(!capturing.is_empty() || transitioning, presentation),
+        );
         let all_corners = windowed_page_all_corners(header_frame.is_none(), visible_pane_count);
         browsers.set_windowed_corner_radius(
             &entity,
@@ -562,25 +640,35 @@ fn sync_windowed_frames(
             [cover_rgb.red, cover_rgb.green, cover_rgb.blue],
         );
         if browser_ready {
-            if host_window == focused_window.entity() {
+            if shown && ready && !paint_ready {
+                commands
+                    .entity(entity)
+                    .insert(vmux_layout::hosted_page::SurfacePaintReady);
+            }
+            if shown && ready && !presentation_ready {
+                commands
+                    .entity(entity)
+                    .insert(vmux_layout::hosted_page::SurfacePresentationReady);
+            }
+            if shown && host_window == focused_window.entity() && !blocked {
                 memory.visible_frames.push(frame);
             }
-            let key = (
-                frame.left.round() as i32,
-                frame.top.round() as i32,
-                frame.width.round() as i32,
-                frame.height.round() as i32,
-            );
             memory.raised_frame.insert(entity, key);
-            if force_raise || became_visible || first_native_frame {
+            if shown && (force_raise || became_visible || first_native_frame) {
                 browsers.raise_windowed_to_front(&entity);
             }
-            if reveal {
+            if reveal && shown {
                 browsers.nudge_windowed_repaint(&entity);
             }
         }
     }
     let current_windowed: Vec<Entity> = visible.iter().chain(&hidden).copied().collect();
+    memory
+        .raised_frame
+        .retain(|entity, _| current_windowed.contains(entity));
+    memory
+        .interactivity
+        .retain(|entity, _| current_windowed.contains(entity));
     for entity in last_windowed_pages
         .iter()
         .filter(|entity| !current_windowed.contains(entity))
@@ -612,15 +700,23 @@ fn windowed_page_needs_reveal(became_visible: bool, browser_ready: bool, was_rai
 
 fn windowed_page_is_visible(
     renderable: bool,
-    focused_stack: bool,
     tab_active: bool,
     stack_active: bool,
+    stack_previous: bool,
 ) -> bool {
-    renderable && (focused_stack || (tab_active && stack_active))
+    renderable && tab_active && (stack_active || stack_previous)
 }
 
-fn windowed_page_z_position(layout_captures_pointer: bool) -> f64 {
-    if layout_captures_pointer { 0.0 } else { 500.0 }
+fn windowed_page_z_position(layout_captures_pointer: bool, presentation: PresentationLayer) -> f64 {
+    if layout_captures_pointer {
+        return 0.0;
+    }
+    match presentation {
+        PresentationLayer::Retained => 600.0,
+        PresentationLayer::Incoming => 400.0,
+        PresentationLayer::Current => 500.0,
+        PresentationLayer::Hidden => 0.0,
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -633,10 +729,28 @@ pub(crate) struct WindowedFrameRect {
 
 #[derive(Default)]
 struct FrameSyncMemory {
-    raised_frame: std::collections::HashMap<Entity, (i32, i32, i32, i32)>,
+    raised_frame: std::collections::HashMap<Entity, (i32, i32, i32, i32, u32)>,
+    interactivity: std::collections::HashMap<Entity, (u64, bool)>,
     visible_pages: Vec<Entity>,
     visible_frames: Vec<WindowedFrameRect>,
-    visibility_state: std::collections::HashMap<Entity, (bool, bool, bool, bool, bool)>,
+}
+
+impl FrameSyncMemory {
+    fn sync_interactivity(
+        &mut self,
+        browsers: &Browsers,
+        entity: Entity,
+        generation: Option<&BinIpcSurfaceGeneration>,
+        interactive: bool,
+    ) {
+        let generation = generation.map_or(0, |generation| generation.0);
+        let next = (generation, interactive);
+        if self.interactivity.get(&entity) == Some(&next) {
+            return;
+        }
+        browsers.set_windowed_interactive(&entity, interactive);
+        self.interactivity.insert(entity, next);
+    }
 }
 
 #[derive(Component, Clone, Copy, PartialEq, Debug, Default)]
@@ -748,7 +862,9 @@ fn sync_windowed_layout(
     focused_window: vmux_layout::window::FocusedWindow,
     mut last_raised_frame: Local<std::collections::HashMap<Entity, (i32, i32, i32, i32)>>,
 ) {
+    let mut current = std::collections::HashSet::new();
     for (entity, host_window) in &layout_q {
+        current.insert(entity);
         let window_entity = host_window.map(|h| h.0).or(focused_window.entity());
         let Some(window_entity) = window_entity else {
             continue;
@@ -772,6 +888,7 @@ fn sync_windowed_layout(
             }
         }
     }
+    last_raised_frame.retain(|entity, _| current.contains(entity));
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -898,6 +1015,15 @@ fn sync_windowed_command_bar(
         *was_open = false;
         return;
     };
+    if shown_inline {
+        publish_command_bar_route(false, None, 1.0);
+        if is_windowed {
+            browsers.set_windowed_focus(&entity, false);
+            hide_windowed_command_bar(&browsers, entity);
+        }
+        *was_open = false;
+        return;
+    }
     let state = OverlayState::resolve(node.display, *visibility, has_keyboard_target, shown_inline);
     let open = state.is_shown();
     let owns_input = state.owns_input();
@@ -1061,22 +1187,24 @@ fn sync_webview_resize(
     windows: Query<&Window>,
     focused_window: vmux_layout::window::FocusedWindow,
     proxy: Option<Res<EventLoopProxyWrapper>>,
-    mut last_entries: Local<Vec<(u64, Vec2, f32)>>,
+    mut last_entries: Local<std::collections::HashMap<u64, (Vec2, f32)>>,
     mut window_resized: MessageReader<WindowResized>,
-    mut first_run: Local<Option<std::time::Instant>>,
+    mut pending_create: Local<std::collections::HashSet<Entity>>,
 ) {
     let force = window_resized.read().count() > 0;
     if force {
         last_entries.clear();
     }
     let mut pushed_any = false;
-    let mut awaiting_create = false;
+    let mut awaiting_create = std::collections::HashSet::new();
+    let mut seen = std::collections::HashSet::new();
     for (entity, size) in webviews.iter() {
         if !browsers.has_browser(entity) {
-            awaiting_create = true;
+            awaiting_create.insert(entity);
             continue;
         }
         let key = entity.to_bits();
+        seen.insert(key);
         let window_entity = host_window
             .get(entity)
             .ok()
@@ -1087,38 +1215,29 @@ fn sync_webview_resize(
             .map(|w| w.resolution.scale_factor())
             .filter(|s| s.is_finite() && *s > 0.0)
             .unwrap_or(1.0);
-        if last_entries
-            .iter()
-            .any(|(k, s, sf)| *k == key && *s == size.0 && (*sf - device_scale_factor).abs() < 0.01)
-        {
+        if last_entries.get(&key).is_some_and(|(last_size, scale)| {
+            *last_size == size.0 && (*scale - device_scale_factor).abs() < 0.01
+        }) {
             continue;
         }
         browsers.resize(&entity, size.0, device_scale_factor);
         pushed_any = true;
-        if let Some(entry) = last_entries.iter_mut().find(|(k, _, _)| *k == key) {
-            entry.1 = size.0;
-            entry.2 = device_scale_factor;
-        } else {
-            last_entries.push((key, size.0, device_scale_factor));
-        }
+        last_entries.insert(key, (size.0, device_scale_factor));
     }
-    let within_startup_grace = first_run
-        .get_or_insert_with(std::time::Instant::now)
-        .elapsed()
-        < std::time::Duration::from_secs(10);
-    if windowed_reconcile_should_wake(pushed_any, awaiting_create, within_startup_grace)
+    last_entries.retain(|key, _| seen.contains(key));
+    let newly_awaiting = awaiting_create
+        .iter()
+        .any(|entity| !pending_create.contains(entity));
+    *pending_create = awaiting_create;
+    if windowed_reconcile_should_wake(pushed_any, newly_awaiting)
         && let Some(proxy) = proxy.as_ref()
     {
         let _ = proxy.send_event(WinitUserEvent::WakeUp);
     }
 }
 
-fn windowed_reconcile_should_wake(
-    pushed_any: bool,
-    awaiting_create: bool,
-    within_startup_grace: bool,
-) -> bool {
-    pushed_any || (awaiting_create && within_startup_grace)
+fn windowed_reconcile_should_wake(pushed_any: bool, newly_awaiting: bool) -> bool {
+    pushed_any || newly_awaiting
 }
 
 fn sync_osr_webview_focus(
@@ -1137,6 +1256,8 @@ fn sync_osr_webview_focus(
             Has<BookmarkTextInputActive>,
             Has<BookmarkContextMenuActive>,
             Has<CommandBarPanelActive>,
+            Has<Header>,
+            Has<SideSheet>,
         ),
         With<WebviewSource>,
     >,
@@ -1144,9 +1265,8 @@ fn sync_osr_webview_focus(
     host_windows: Query<&HostWindow>,
     focused_window: vmux_layout::window::FocusedWindow,
     focus: vmux_layout::stack::FocusedStack,
-    layout_focus: LayoutFocus,
+    presentation: WindowFrameQueries,
     stacks: Query<(), With<Stack>>,
-    child_of_q: Query<&ChildOf>,
 
     mut ready: Local<Vec<Entity>>,
     mut auxiliary: Local<Vec<Entity>>,
@@ -1157,6 +1277,7 @@ fn sync_osr_webview_focus(
     let mut layout_shells = Vec::new();
     let mut modal_keyboard_target = None;
     let mut layout_keyboard_target = None;
+    let mut page_keyboard_target = None;
     let focused_window = focused_window.entity();
     let window = focused_window.and_then(|window| windows.get(window).ok());
     let window_visible = window.is_some_and(|window| window.visible);
@@ -1174,6 +1295,8 @@ fn sync_osr_webview_focus(
         bookmark_text_input_active,
         bookmark_context_menu_active,
         command_bar_panel_active,
+        is_header,
+        is_side_sheet,
     ) in webviews.iter()
     {
         if !browsers.has_browser(entity) {
@@ -1205,6 +1328,8 @@ fn sync_osr_webview_focus(
             }
             if is_modal && has_keyboard_target {
                 modal_keyboard_target = Some((entity, is_windowed));
+            } else if !is_layout && !is_header && !is_side_sheet && has_keyboard_target {
+                page_keyboard_target = Some(entity);
             }
         } else if keep_hidden_osr_webview_warm(is_modal, is_windowed, window_visible) {
             browsers.set_osr_not_hidden(&entity);
@@ -1213,18 +1338,18 @@ fn sync_osr_webview_focus(
         }
     }
     if ready.is_empty() {
+        if last_active.is_some() || !last_ready_set.is_empty() {
+            browsers.sync_osr_focus_to_active_pane(None, &[]);
+            *last_active = None;
+            last_ready_set.clear();
+        }
         return;
     }
     ready.sort_by_key(|e| e.to_bits());
-    let active_stack_opt = focus.stack;
-    let active_stack = active_stack_opt.and_then(|tab| {
-        ready
-            .iter()
-            .copied()
-            .find(|&b| child_of_q.get(b).ok().map(|co| co.get()) == Some(tab))
+    let fallback = focus.stack.is_none().then_some(ready[0]);
+    let active = layout_keyboard_target.or_else(|| {
+        choose_osr_active_webview(modal_keyboard_target, page_keyboard_target, fallback)
     });
-    let active = layout_keyboard_target
-        .or_else(|| choose_osr_active_webview(modal_keyboard_target, active_stack, ready[0]));
 
     if !window_visible || !window_focused {
         if last_active.is_some() || *last_ready_set != *ready {
@@ -1250,14 +1375,21 @@ fn sync_osr_webview_focus(
         let mut parent_is_stack = false;
         let mut pane_is_leaf = false;
         let mut is_active = false;
-        let is_prev = false;
+        let mut is_prev = false;
 
-        if let Ok(parent) = child_of_q.get(e).map(|co| co.get()) {
+        if let Ok(parent) = presentation.child_of.get(e).map(|co| co.get()) {
             parent_is_stack = stacks.contains(parent);
-            if parent_is_stack && let Ok(pane) = child_of_q.get(parent).map(|co| co.get()) {
-                pane_is_leaf = layout_focus.is_leaf(pane);
+            if parent_is_stack
+                && let Ok(pane) = presentation.child_of.get(parent).map(|co| co.get())
+            {
+                pane_is_leaf = presentation.focus.is_leaf(pane);
                 if pane_is_leaf {
-                    is_active = active_candidate(layout_focus.stack(pane), parent);
+                    let layer = presentation.presentation(e);
+                    is_active = matches!(
+                        layer,
+                        PresentationLayer::Current | PresentationLayer::Incoming
+                    );
+                    is_prev = layer == PresentationLayer::Retained;
                 }
             }
         }
@@ -1318,7 +1450,7 @@ fn keep_hidden_osr_webview_warm(is_modal: bool, is_windowed: bool, window_visibl
 fn choose_osr_active_webview(
     modal_keyboard_target: Option<(Entity, bool)>,
     active_stack: Option<Entity>,
-    fallback: Entity,
+    fallback: Option<Entity>,
 ) -> Option<Entity> {
     if modal_keyboard_target.is_some_and(|(_, is_windowed)| is_windowed) {
         None
@@ -1326,7 +1458,7 @@ fn choose_osr_active_webview(
         modal_keyboard_target
             .map(|(entity, _)| entity)
             .or(active_stack)
-            .or(Some(fallback))
+            .or(fallback)
     }
 }
 
@@ -1366,8 +1498,9 @@ mod tests {
     use super::*;
 
     use crate::tests::test_app_settings_with_radius;
+    use bevy::ecs::system::RunSystemOnce;
 
-    use vmux_layout::active_pane::ActiveStack;
+    use vmux_history::LastActivatedAt;
 
     #[test]
     fn the_user_ring_outranks_an_agent_ring_on_the_same_pane() {
@@ -1429,28 +1562,70 @@ mod tests {
     }
 
     #[test]
-    fn unresolved_stack_focus_keeps_the_candidate_visible() {
-        let candidate = Entity::from_bits(1);
-        let other = Entity::from_bits(2);
-
-        assert!(active_candidate(None, candidate));
-        assert!(active_candidate(Some(candidate), candidate));
-        assert!(!active_candidate(Some(other), candidate));
-    }
-
-    #[test]
     fn windowed_visibility_uses_layout_state() {
-        assert!(windowed_page_is_visible(true, false, true, true));
-        assert!(windowed_page_is_visible(true, true, false, false));
+        assert!(windowed_page_is_visible(true, true, true, false));
+        assert!(windowed_page_is_visible(true, true, false, true));
         assert!(!windowed_page_is_visible(false, true, true, true));
-        assert!(!windowed_page_is_visible(true, false, false, true));
-        assert!(!windowed_page_is_visible(true, false, true, false));
+        assert!(!windowed_page_is_visible(true, false, true, true));
+        assert!(!windowed_page_is_visible(true, true, false, false));
     }
 
     #[test]
     fn windowed_page_stays_above_layout_until_layout_captures_pointer() {
-        assert_eq!(windowed_page_z_position(false), 500.0);
-        assert_eq!(windowed_page_z_position(true), 0.0);
+        assert_eq!(
+            windowed_page_z_position(false, PresentationLayer::Current),
+            500.0
+        );
+        assert_eq!(
+            windowed_page_z_position(true, PresentationLayer::Current),
+            0.0
+        );
+    }
+
+    #[test]
+    fn retained_tab_stays_above_its_incoming_replacement() {
+        assert!(
+            windowed_page_z_position(false, PresentationLayer::Retained)
+                > windowed_page_z_position(false, PresentationLayer::Incoming)
+        );
+    }
+
+    #[test]
+    fn page_inherits_the_layout_projection() {
+        let mut app = App::new();
+        let tab = app
+            .world_mut()
+            .spawn((Tab::default(), PresentationLayer::Incoming))
+            .id();
+        let page = app.world_mut().spawn((Browser, ChildOf(tab))).id();
+
+        let layer = app
+            .world_mut()
+            .run_system_once(move |queries: WindowFrameQueries| queries.presentation(page))
+            .unwrap();
+
+        assert_eq!(layer, PresentationLayer::Incoming);
+    }
+
+    #[test]
+    fn retained_ancestor_overrides_an_incoming_descendant() {
+        let mut app = App::new();
+        let tab = app
+            .world_mut()
+            .spawn((Tab::default(), PresentationLayer::Retained))
+            .id();
+        let stack = app
+            .world_mut()
+            .spawn((Stack::default(), PresentationLayer::Incoming, ChildOf(tab)))
+            .id();
+        let page = app.world_mut().spawn((Browser, ChildOf(stack))).id();
+
+        let layer = app
+            .world_mut()
+            .run_system_once(move |queries: WindowFrameQueries| queries.presentation(page))
+            .unwrap();
+
+        assert_eq!(layer, PresentationLayer::Retained);
     }
 
     #[test]
@@ -1540,7 +1715,12 @@ mod tests {
             .id();
         let tab = app
             .world_mut()
-            .spawn((Tab::default(), LastActivatedAt(1), ChildOf(glass)))
+            .spawn((
+                Tab::default(),
+                LastActivatedAt(1),
+                PresentationLayer::Current,
+                ChildOf(glass),
+            ))
             .id();
         let pane = app
             .world_mut()
@@ -1555,7 +1735,12 @@ mod tests {
             .id();
         let stack = app
             .world_mut()
-            .spawn((Stack::default(), LastActivatedAt(1), ChildOf(pane)))
+            .spawn((
+                Stack::default(),
+                LastActivatedAt(1),
+                PresentationLayer::Current,
+                ChildOf(pane),
+            ))
             .id();
         let page = app
             .world_mut()
@@ -1577,6 +1762,114 @@ mod tests {
         let page_z = app.world().get::<Transform>(page).unwrap().translation.z;
 
         assert!(layout_z > page_z);
+        assert!(app.world().get::<PagePresented>(page).is_some());
+    }
+
+    #[test]
+    fn pending_tab_reveal_keeps_the_previous_osr_surface_presented() {
+        let mut app = App::new();
+        app.add_plugins((MinimalPlugins, vmux_layout::LayoutContractPlugin))
+            .add_systems(Update, sync_children_to_ui);
+
+        let window = app.world_mut().spawn_empty().id();
+        let glass = app
+            .world_mut()
+            .spawn((
+                VmuxWindow,
+                HostWindow(window),
+                ComputedNode {
+                    size: Vec2::new(1200.0, 800.0),
+                    ..default()
+                },
+            ))
+            .id();
+        let previous_tab = app
+            .world_mut()
+            .spawn((
+                Tab::default(),
+                LastActivatedAt(1),
+                PresentationLayer::Retained,
+                ChildOf(glass),
+            ))
+            .id();
+        let previous_pane = app
+            .world_mut()
+            .spawn((
+                Pane,
+                ComputedNode {
+                    size: Vec2::new(1200.0, 740.0),
+                    ..default()
+                },
+                ChildOf(previous_tab),
+            ))
+            .id();
+        let previous_stack = app
+            .world_mut()
+            .spawn((
+                Stack::default(),
+                LastActivatedAt(1),
+                PresentationLayer::Current,
+                ChildOf(previous_pane),
+            ))
+            .id();
+        let previous_page = app
+            .world_mut()
+            .spawn((
+                Browser,
+                Transform::default(),
+                ComputedNode {
+                    size: Vec2::new(1200.0, 740.0),
+                    ..default()
+                },
+                WebviewSize(Vec2::ONE),
+                ChildOf(previous_stack),
+            ))
+            .id();
+        let incoming_tab = app
+            .world_mut()
+            .spawn((
+                Tab::default(),
+                LastActivatedAt(2),
+                PresentationLayer::Incoming,
+                vmux_layout::presentation::Transition::retain(previous_tab),
+                ChildOf(glass),
+            ))
+            .id();
+        let incoming_pane = app
+            .world_mut()
+            .spawn((
+                Pane,
+                ComputedNode {
+                    size: Vec2::new(1200.0, 740.0),
+                    ..default()
+                },
+                ChildOf(incoming_tab),
+            ))
+            .id();
+        let incoming_stack = app
+            .world_mut()
+            .spawn((
+                Stack::default(),
+                LastActivatedAt(2),
+                PresentationLayer::Current,
+                ChildOf(incoming_pane),
+            ))
+            .id();
+        app.world_mut().spawn((
+            Browser,
+            Transform::default(),
+            ComputedNode {
+                size: Vec2::new(1200.0, 740.0),
+                ..default()
+            },
+            WebviewSize(Vec2::ONE),
+            ChildOf(incoming_stack),
+        ));
+
+        app.update();
+
+        assert!(app.world().get::<PagePresented>(previous_page).is_some());
+        assert!(app.world().get::<Transform>(previous_page).unwrap().scale.x > 0.5);
     }
 
     #[test]
@@ -1602,7 +1895,7 @@ mod tests {
         let modal = Entity::from_bits(2);
 
         assert_eq!(
-            choose_osr_active_webview(Some((modal, false)), Some(pane), pane),
+            choose_osr_active_webview(Some((modal, false)), Some(pane), Some(pane)),
             Some(modal)
         );
     }
@@ -1613,8 +1906,19 @@ mod tests {
         let modal = Entity::from_bits(2);
 
         assert_eq!(
-            choose_osr_active_webview(Some((modal, true)), Some(pane), pane),
+            choose_osr_active_webview(Some((modal, true)), Some(pane), Some(pane)),
             None
+        );
+    }
+
+    #[test]
+    fn focused_stack_without_a_ready_surface_does_not_focus_another_page() {
+        let fallback = Entity::from_bits(1);
+
+        assert_eq!(choose_osr_active_webview(None, None, None), None);
+        assert_eq!(
+            choose_osr_active_webview(None, None, Some(fallback)),
+            Some(fallback)
         );
     }
 
@@ -1641,6 +1945,76 @@ mod tests {
 
         assert!(app.world().get::<KeyboardOwner>(modal).is_some());
         assert!(app.world().get::<KeyboardOwner>(page).is_none());
+    }
+
+    #[test]
+    fn only_the_focused_stack_owns_page_keyboard_input() {
+        let mut app = App::new();
+        app.add_plugins(vmux_layout::LayoutContractPlugin)
+            .add_systems(Update, sync_keyboard_target);
+        let focused_stack = app
+            .world_mut()
+            .spawn((Stack::default(), PresentationLayer::Current))
+            .id();
+        let other_stack = app
+            .world_mut()
+            .spawn((Stack::default(), PresentationLayer::Current))
+            .id();
+        app.world_mut().spawn(
+            ActiveStack {
+                stack: Some(focused_stack),
+                ..Default::default()
+            }
+            .local_bundle(),
+        );
+        let focused_page = app
+            .world_mut()
+            .spawn((Browser, ChildOf(focused_stack)))
+            .id();
+        let other_page = app
+            .world_mut()
+            .spawn((Browser, KeyboardOwner, ChildOf(other_stack)))
+            .id();
+
+        app.update();
+
+        assert!(app.world().get::<KeyboardOwner>(focused_page).is_some());
+        assert!(app.world().get::<KeyboardOwner>(other_page).is_none());
+    }
+
+    #[test]
+    fn retained_page_releases_keyboard_while_the_incoming_stack_loads() {
+        let mut app = App::new();
+        app.add_plugins(vmux_layout::LayoutContractPlugin)
+            .add_systems(Update, sync_keyboard_target);
+        let retained_stack = app
+            .world_mut()
+            .spawn((Stack::default(), PresentationLayer::Retained))
+            .id();
+        let incoming_stack = app
+            .world_mut()
+            .spawn((Stack::default(), PresentationLayer::Incoming))
+            .id();
+        app.world_mut().spawn(
+            ActiveStack {
+                stack: Some(incoming_stack),
+                ..Default::default()
+            }
+            .local_bundle(),
+        );
+        let retained_page = app
+            .world_mut()
+            .spawn((Browser, KeyboardOwner, ChildOf(retained_stack)))
+            .id();
+        let incoming_page = app
+            .world_mut()
+            .spawn((Browser, ChildOf(incoming_stack)))
+            .id();
+
+        app.update();
+
+        assert!(app.world().get::<KeyboardOwner>(retained_page).is_none());
+        assert!(app.world().get::<KeyboardOwner>(incoming_page).is_none());
     }
 
     #[test]
@@ -1878,9 +2252,8 @@ mod tests {
 
     #[test]
     fn windowed_reconcile_wakes_until_hosted_pages_are_sized() {
-        assert!(windowed_reconcile_should_wake(true, false, false));
-        assert!(windowed_reconcile_should_wake(false, true, true));
-        assert!(!windowed_reconcile_should_wake(false, true, false));
-        assert!(!windowed_reconcile_should_wake(false, false, true));
+        assert!(windowed_reconcile_should_wake(true, false));
+        assert!(windowed_reconcile_should_wake(false, true));
+        assert!(!windowed_reconcile_should_wake(false, false));
     }
 }

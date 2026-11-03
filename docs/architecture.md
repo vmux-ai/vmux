@@ -509,6 +509,16 @@ interpreted within that window's tree. Closing a window removes only its tree an
 another window if the primary closes. The primary tree and geometry persist across launches;
 additional windows are runtime workspaces.
 
+Native page frames keep their top edge fixed in their parent view's coordinate system.
+Flipped AppKit parents use a flexible maximum-Y margin, so restoring the window's height cannot
+shift a page down by the size difference before ECS observes another resize.
+
+UI input carries its originating surface. The layout resolves that origin to one native window,
+its current Space, and a concrete Stack before applying the request; later systems do not retarget
+it through global focus. Menu, shortcut, and agent commands without a surface intentionally use
+`FocusedWindow`. Creating another window captures the source Space before focus moves, so startup
+state and side-sheet state cannot be read from the empty destination tree.
+
 Space IDs are global identities. Every window may attach its own `Space` view for the same ID;
 selecting a space that is not attached creates a fresh local tab and pane tree. Names, project
 settings, and history are shared by ID, while tabs, panes, focus, expansion, side sheets, and
@@ -521,9 +531,111 @@ other layout state remain local to each window. Only the primary window's views 
 - **Stack** — several leaves in one pane, cycled like browser tabs.
 - **Browser** — the leaf: a web page, a terminal, or an agent.
 
+Each Stack owns three page components with one reducer. `PageNavigation` is the requested page
+identity; projected `PageMetadata` updates immediately for the URL, breadcrumb, tab, and side sheet.
+`Current` is the committed surface and its metadata. `Transition` exists only while one incoming
+surface advances through loading, paint, presentation, animation, and commit acknowledgements.
+Readiness stays inside `Transition` so acknowledgements cannot form invalid cross-request component
+combinations, while
+paint updates do not mark `PageNavigation` or `Current` changed and therefore do not invalidate
+unrelated layout projections. Metadata projection, surface removal, and handoff settlement run only
+when their source components change; transition deadlines are checked at a bounded cadence rather
+than polling every surface on every frame. A failed or superseded request discards the incoming
+surface and leaves `Current` untouched. Request IDs reject acknowledgements from stale surfaces.
+Layout projections observe `Current` changes even when the requested metadata stays the same, so
+committing a presented surface clears the side sheet's pending-page indication immediately.
+The side sheet's loading ring follows the selected page. Inactive restored pages without a
+materialized surface do not keep that ring active while the visible page is ready.
+Native-page transitions fade the two retained surfaces by painting the incoming surface above the
+opaque committed surface. Commit waits for the platform to acknowledge the incoming surface at full
+opacity, so no frame exposes the window background. Content pages use the same lifecycle with an
+immediate presentation step. Feature page-open handlers create or retarget the incoming surface;
+they never despawn the committed surface themselves. Only the page reducer retires it after
+presentation commits.
+
+Stack and Tab replacement uses one presentation transition. Selection changes immediately, while
+the projection keeps the outgoing branch visible until a ready presented surface exists under the
+incoming branch. The same projection drives Bevy layout, CEF visibility, OSR focus, and native
+window frames. Settlement removes the transition and retires the outgoing branch in one frame, so
+navigation, close, restore, and reuse cannot expose the window background through separate paths.
+
+Page intent commits to ECS immediately: the selected Stack, optimistic URL metadata, breadcrumb,
+and side-sheet projection change in the input frame. Surface creation and data refresh continue
+behind that committed intent. `UiStatePlugin` retains a small route-keyed snapshot cache for every
+typed page state. Reopening a route replays that snapshot before a background refresh, so cached
+content remains usable and loading placeholders describe only data that has never existed. Page
+readiness is deferred until the current render has registered its state listeners. Incoming pages
+remain input-inert but may exchange typed initialization events, and presentation waits for a paint
+after the first host snapshot. This gives every vmux page one stale-while-revalidate lifecycle
+instead of feature-specific loading gates.
+
+Native interaction-state updates are repeatable: each update changes the IPC epoch and the
+document's inert state without adding persistent JavaScript bindings.
+Page-local navigation uses `PageLocationRequest` and `PageLocationUiState`, with the fragment
+stored in `PageMetadata`. Fragment-only changes update the hosted URL and the committed Stack
+without rebuilding the document or changing its data-cache identity. Pages resolve that shared
+location to their own file or section and use the common scroll transport; Settings can consume
+the same location state for its section navigation.
+Git file selection and the editor Outline share `SectionNavigation`: clicks request smooth
+scrolling, scrolling publishes the current section, and echoed location updates do not restart
+navigation. Notes resolve `#L<line>` to a rendered block and measure the heading at the viewport
+edge in one DOM request. Outline following preserves the editor caret. The editor contributes a typed address trail to its window header. The page and window use the
+same breadcrumb menus; windows without a visible header retain the page row. Every address
+request carries its owning surface, document revision, and URL. The window accepts requests only
+for its current surface, then forwards them to that surface's editor handlers. Path overflow
+collapses whole directories using measured widths and keeps the filename intact. Search sits at
+the end of the trail and Checkout beside the selected branch. Layout and address state flush
+before native presentation in the same frame; the final flush retains updates arriving later.
+Tab presses select immediately and host projection reconciles that selection.
+Accepted lifecycle batches also carry the current document revision into paint state; an old
+mount notification discarded during an interaction-epoch change cannot leave the first paint
+waiting on revision zero.
+Dirty pages flush against the native document's own parked poll; asynchronously mirrored frame
+telemetry does not gate delivery. Start keeps prepared replacement surfaces so closing the last
+view can reuse a loaded page while its workspace context refreshes.
+Rebuilding the same document preserves its guarded host-state listeners. Only replacing the
+page component clears those bindings, so an input-epoch change or frame retry cannot leave a
+mounted page subscribed to a registry that no longer exists.
+Full document recovery replaces the VirtualDom and reapplies its supplied contexts. Rebuilding
+an already-mounted VirtualDom leaves prior component scopes alive, so their queued updates must
+not be allowed to address nodes in the replacement document.
+Before replacing those scopes, the page captures their retained typed UI state. The replacement
+document starts from that state, so an interaction change with an unacknowledged frame cannot flash
+loaded content back to skeletons. Capturing happens only during recovery; replacing the page creates
+a fresh state store.
+The requirement to replace the document is latched outside the transient DOM request queue. A later
+navigation or input-epoch update may clear transient requests, but the full rebuild still carries one
+remount stamped with its current identity. Full rebuild edits never append into the previous tree.
+
+Custom-scheme asset requests enter the response queue in the same update that receives them.
+Pending responses wake the reactive host loop and keep the CEF pump responsive until delivery;
+after delivery, both return to their normal idle policy.
+
+Start's branch lookups share one pending read per project across their requesting surfaces.
+They run on the bounded Git background workers, so synchronous Git subprocesses cannot occupy
+the asset loader's shared IO task pool during startup.
+
+```mermaid
+stateDiagram-v2
+    [*] --> Stable
+    Stable --> Loading: open
+    Loading --> Painted: loaded + painted
+    Painted --> Presented: native surface visible
+    Presented --> Transitioning: animated surface
+    Presented --> Committed: immediate surface
+    Transitioning --> Committed: animation finished
+    Committed --> Stable: atomic commit
+    Loading --> Stable: failed or superseded
+    Painted --> Stable: failed or superseded
+    Presented --> Stable: failed or superseded
+```
+
 **The selection invariant: at most one `Active` child per parent.** Focus is found by
-walking `Active` down the tree. Small `ensure_active_*` systems check topology every frame,
-so if a human or an agent destroys a node the gap heals next frame.
+walking `Active` down the tree. `LastActivatedAt` records MRU order and selection intent; one
+layout reducer projects it into `Active`. Consumers use that projection and consult MRU only while
+repairing an incomplete restored tree. Native adapters never infer selection independently. Small
+`ensure_active_*` systems run when selection or topology changes, so if a human or an agent destroys
+a node the gap heals in the same update without scanning the tree on unrelated frames.
 
 A tab is owned by its Space *entity*, not a loose string key, which sandboxes mutations
 inside that Space. Cross-space leaks are impossible by construction — the legacy model
@@ -824,6 +936,22 @@ schedule work in proportion to the total repository history or block the ECS sch
 review advances one file and one bounded line window at a time; viewport demand requests another
 window. A large lockfile therefore cannot produce an unbounded first render, and an idle review
 cannot silently materialize the rest of the branch in the page DOM.
+The rendered diff subscribes to its scroll window independently of host data. Moving into a
+loaded region replaces virtual spacers with its rows even when no new data arrives.
+File selection uses smooth scrolling and a stable `#diff-<SHA-256 of path>` anchor, matching
+GitHub's pull-request file view. Scroll requests carry their own revision so repeated selection
+of one file works and data refreshes cannot restart a completed scroll.
+Viewed toggles and fold controls recompute the file header's offset after changing the collapsed
+sections and move the render window to that offset. Native height transitions compensate the scroll
+offset for a header already pinned to the viewport, and reveal a header elsewhere only when needed.
+Their height transition captures the rendered body before the DOM edit and keeps an inert copy
+only while closing. Native height animation lasts 160 ms, cancels cleanly when reversed, and is
+limited to the visible viewport so long diffs still visibly open. Completion removes the animation's
+filled height, allowing a later expansion to use its natural size. Reduced motion keeps header
+alignment without animation; the model and its row virtualization commit immediately.
+Reopening a repository retains the cached file list and diff across repeated restores while
+refreshing them in the background. Repository and branch-file reads keep the diff surface in
+its loading state until their own first result arrives.
 
 The host counts columns in **display cells** — `DisplayCells`, one per narrow character and
 two per wide one — because wrapping and selection are grid problems and the host has no
@@ -1076,6 +1204,38 @@ the Sessions page or one of their imported Sessions is present, debounce into on
 the changed provider, and bound untrusted history traversal.
 The Session manager publishes only to its active page and leases Git metadata for every displayed
 repository while that page remains active.
+Composer workspace context resolves the Session named by the page URL even before runtime attachment
+has bound the Stack. Unpublished context is retried after the first ready frame, so a late binding
+cannot leave project and branch controls as placeholders. Branch menus enqueue their checkout reads
+through `vmux_git::GitRuntime` and finish empty results rather than leaving a loading request open.
+Project dashboards and resume suggestions use the same catalog stage and staleness projection.
+Embedded Session groups show five entries at a time, with stale groups initially collapsed.
+Resume suggestions restrict host contributions to the visible entries, so keyboard selection
+cannot reach hidden sessions; each status has its own explicit expansion limit.
+The Project page reads its Code preview through a route- and revision-bound directory task,
+independent of an open editor. Empty and failed reads complete that task, and results from a
+previous route cannot replace the current preview.
+
+Code opens the owning Space's working directory and prefers its README, then a bounded set of
+entry files, before falling back to directory columns. Directory pages use paths as page titles
+and show columns without a duplicate Explorer tree. The outer editor container and the columns
+share directory key handling; text view-mode updates cannot steal directory focus.
+Git diff file placeholders come from the file catalog before the first diff viewport arrives,
+so publishing file names does not create an empty interval while their bodies are still pending.
+Editor route changes seed shared preferences into cold document state and retain the previous
+presentation until the new mode's content is ready. Source rows wait for character measurements;
+cursor and rendered-note state are projected together. Another checkout is a read-only preview
+until project activation aligns the Space with that checkout, and the host rejects mutation and
+Save requests while that preview remains active.
+Page item close and reopen requests precede Stack fallback. Archive capture runs before source
+destruction; the Editor persists ordered paths and selection and keeps unsaved buffers and Undo
+in an in-memory archive companion. Restore transfers those into the new surface without saving.
+Layout animation clocks start at the request, and one deadline scheduler drives their 16 ms wakes.
+Sidebar content keeps its configured width while the reserved width and outer clip change, so pins
+do not reflow through a zero-width column. Stack presentation rectangles interpolate structural
+moves and resize and are consumed by both hosted child placement and native windowed frames.
+Sidebar rows preserve their identity and animate from their previous DOM rectangles.
+Ready Git pages retry checkout-context publication when parent or slot binding arrives late.
 
 `vmux_profile` owns profile identity and filesystem locations. Tool inventory is a separate
 capability in `vmux_tool`; consumers depend on it directly instead of reaching through a

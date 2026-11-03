@@ -24,7 +24,6 @@ use vmux_ui::dom::DomCaret;
 use vmux_ui::hooks::send;
 use vmux_ui::i18n::{TranslationValue, translate, translate_with};
 use vmux_ui::icon::{LineIcon, LineIconView, PageIconView};
-use vmux_ui::navigation::PageNavigation;
 use vmux_ui::platform::Platform;
 
 use crate::event::{
@@ -183,7 +182,7 @@ pub(super) fn BookmarksSection(
                     if !pins.is_empty() {
                         div {
                             "data-bookmark-drop": "",
-                            class: "mb-1 grid w-full grid-cols-[repeat(auto-fill,2rem)] justify-start gap-1.5",
+                            class: "mb-1 grid w-full grid-cols-[repeat(auto-fill,2rem)] justify-center gap-1.5",
                             for (index, pin) in pins.iter().enumerate() {
                                 PinTile {
                                     key: "{pin.row.uuid}",
@@ -594,7 +593,10 @@ fn PinTile(row: BookmarkRow, index: usize, active: bool) -> Element {
                                     event.stop_propagation();
                                     return;
                                 }
-                                PageNavigation::click(u.clone(), &event);
+                                let _ = send(&BookmarkOpenRequest {
+                                    url: u.clone(),
+                                    force_new: event.modifiers().meta(),
+                                });
                             }
                         },
                         title: "{row.metadata.title}",
@@ -611,7 +613,7 @@ fn PinTile(row: BookmarkRow, index: usize, active: bool) -> Element {
                         ContextMenuItem {
                             index: 0usize,
                             value: Into::<ReadSignal<String>>::into(menu_val),
-                            on_select: { let u = url_open.clone(); move |_: String| { let _ = send(&BookmarkOpenRequest { url: u.clone() }); } },
+                            on_select: { let u = url_open.clone(); move |_: String| { let _ = send(&BookmarkOpenRequest { url: u.clone(), force_new: false }); } },
                             attributes: vec![],
                             {translate("common-open")}
                         }
@@ -1131,11 +1133,14 @@ fn BookmarkEntry(entry: BookmarkEntryState, edit: BookmarkEditState) -> Element 
                                 },
                                 on_activate: {
                                     let u = url_open.clone();
-                                    move |event| {
+                                    move |event: MouseEvent| {
                                         if bookmark_drag_blocks_click(drag_state) {
                                             return;
                                         }
-                                        PageNavigation::click(u.clone(), &event);
+                                        let _ = send(&BookmarkOpenRequest {
+                                            url: u.clone(),
+                                            force_new: event.modifiers().meta(),
+                                        });
                                     }
                                 },
                             }
@@ -1147,7 +1152,7 @@ fn BookmarkEntry(entry: BookmarkEntryState, edit: BookmarkEditState) -> Element 
                     ContextMenuItem {
                         index: 0usize,
                         value: Into::<ReadSignal<String>>::into(menu_val),
-                        on_select: { let u = url_open.clone(); move |_: String| { let _ = send(&BookmarkOpenRequest { url: u.clone() }); } },
+                        on_select: { let u = url_open.clone(); move |_: String| { let _ = send(&BookmarkOpenRequest { url: u.clone(), force_new: false }); } },
                         attributes: vec![],
                         {translate("common-open")}
                     }

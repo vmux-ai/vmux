@@ -793,6 +793,18 @@ pub struct ResumableSessionEntry {
     pub project: String,
     pub branch: String,
     pub cross_runtime: bool,
+    #[serde(default)]
+    pub stage: String,
+    #[serde(default)]
+    pub stage_name: String,
+    #[serde(default)]
+    pub stage_order: u32,
+    #[serde(default)]
+    pub runtime: String,
+    #[serde(default)]
+    pub terminal: bool,
+    #[serde(default)]
+    pub stale: bool,
 }
 #[vmux_api::contract(Default)]
 pub struct ResumableSessions {

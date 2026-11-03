@@ -8,6 +8,8 @@ use vmux_ecs::host_spawn::HostSpawnRoute;
 #[cfg(host)]
 use vmux_ecs::manifest::FeaturePlugin;
 #[cfg(all(host, not(target_os = "android")))]
+use vmux_ecs::page::PrewarmPage;
+#[cfg(all(host, not(target_os = "android")))]
 use vmux_ecs::persistence::WorkspaceStoreValidator;
 
 #[cfg(host)]
@@ -71,7 +73,7 @@ impl Plugin for SessionPlugin {
         ));
         #[cfg(all(host, not(target_os = "android")))]
         app.add_plugins(crate::DomainPlugin)
-            .add_systems(PreStartup, spawn_store_validator)
+            .add_systems(PreStartup, (spawn_store_validator, prewarm))
             .add_systems(Startup, register_route);
         #[cfg(host)]
         app.add_plugins((
@@ -84,6 +86,15 @@ impl Plugin for SessionPlugin {
             transcript::Plugin,
         ));
     }
+}
+
+#[cfg(all(host, not(target_os = "android")))]
+fn prewarm(mut commands: Commands) {
+    commands.spawn(PrewarmPage::exact(
+        vmux_api::VmuxRoute::SESSIONS_ROOT,
+        vmux_ui::i18n::translate("sessions-title"),
+        1,
+    ));
 }
 
 #[cfg(all(host, not(target_os = "android")))]

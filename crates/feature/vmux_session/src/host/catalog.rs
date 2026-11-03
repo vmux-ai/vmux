@@ -7,15 +7,18 @@ use bevy_app::{App, Plugin, PostUpdate, Update};
 use bevy_cef::prelude::{UiEventPlugin, UiInput};
 use bevy_ecs::prelude::*;
 use bevy_ecs::system::SystemParam;
-use vmux_ecs::page::{Activity, PageReady};
-use vmux_ecs::{KeyboardOwner, PageMetadata, PageOpenRequest, PageOpenTarget};
+use vmux_ecs::page::{Activity, HostsPage, PageReady};
+use vmux_ecs::{
+    EntityTarget, KeyboardOwner, PageMetadata, PageOpenRequest, PageOpenSet, PageOpenTarget,
+    PageTransition,
+};
 use vmux_ecs::{UiState, UiStatePlugin, UiStateWrite};
 use vmux_git::RepoInfoCache;
 use vmux_session::{
     AgentId, ArchiveRequest, CatalogSnapshot, CleanupRequest, CleanupTarget, CreateRequest,
     Created, DescriptionUpdateRequest, ProviderArchiveRequest, ProviderCatalog, ProviderKind,
     ProviderSessionId, ProviderSessionKey, ProviderSessionRestoreRequest,
-    ProviderStageChangeRequest, RenameRequest, Route, SessionId, SessionSummary,
+    ProviderStageChangeRequest, RenameRequest, Route, Session, SessionId, SessionSummary,
     SessionSummaryProjection, StageChangeRequest, StageId,
 };
 
@@ -62,7 +65,13 @@ impl Plugin for CatalogPlugin {
             .add_observer(restore_deleted)
             .add_observer(scope_projection)
             .add_observer(ready)
-            .add_systems(Update, (finish_directory_pickers, cleanup_inactive_views))
+            .add_systems(
+                Update,
+                (sync_manager_views, cleanup_inactive_views)
+                    .chain()
+                    .after(PageOpenSet::HandleKnownPages),
+            )
+            .add_systems(Update, finish_directory_pickers)
             .add_systems(
                 PostUpdate,
                 (
@@ -80,6 +89,24 @@ impl Plugin for CatalogPlugin {
 #[require(SessionCatalogView, SessionCatalogUiStateComponent)]
 pub struct SessionManagerView;
 
+#[derive(Component, Clone)]
+struct SessionManagerFallback {
+    session: Entity,
+    work_dir: Option<String>,
+}
+
+impl SessionManagerFallback {
+    fn capture(
+        target: &EntityTarget<Session>,
+        work_dir: Option<&vmux_command::CommandBarWorkDirectory>,
+    ) -> Self {
+        Self {
+            session: target.entity(),
+            work_dir: work_dir.map(|work_dir| work_dir.0.clone()),
+        }
+    }
+}
+
 type SessionCatalogUiStateComponent = UiState<SessionCatalogUiState>;
 type SessionDetailUiStateComponent = UiState<SessionDetailUiState>;
 type SessionScopeUiStateComponent = UiState<SessionScopeUiState>;
@@ -94,6 +121,135 @@ struct SessionDetailView;
 #[derive(Component, Clone, Debug, PartialEq, Eq)]
 #[require(SessionCatalogView, SessionScopeUiStateComponent)]
 struct SessionScopeView(PathBuf);
+
+#[derive(bevy::ecs::system::SystemParam)]
+struct ManagerLocations<'w, 's> {
+    parents: Query<'w, 's, &'static ChildOf>,
+    targets: Query<'w, 's, &'static EntityTarget<Session>>,
+    work_dirs: Query<'w, 's, &'static vmux_command::CommandBarWorkDirectory>,
+    fallbacks: Query<'w, 's, &'static SessionManagerFallback>,
+    sessions: Query<'w, 's, &'static SessionId, With<Session>>,
+    page_containers: Query<'w, 's, &'static PageMetadata, Without<HostsPage>>,
+}
+
+#[derive(bevy::ecs::system::SystemParam)]
+struct ManagerChanges<'w, 's> {
+    changed_views: Query<'w, 's, Entity, (With<HostsPage>, Changed<PageMetadata>)>,
+    changed_containers: Query<'w, 's, Entity, (Without<HostsPage>, Changed<PageMetadata>)>,
+    added_transitions: Query<'w, 's, Entity, Added<PageTransition>>,
+    removed_transitions: RemovedComponents<'w, 's, PageTransition>,
+}
+
+fn sync_manager_views(
+    views: Query<(Entity, &PageMetadata, Has<SessionManagerView>), With<HostsPage>>,
+    mut changes: ManagerChanges,
+    locations: ManagerLocations,
+    children: Query<&Children>,
+    transitions: Query<(), With<PageTransition>>,
+    mut commands: Commands,
+) {
+    let mut dirty = HashSet::new();
+    dirty.extend(changes.changed_views.iter());
+    for container in &changes.changed_containers {
+        if let Ok(children) = children.get(container) {
+            dirty.extend(children.iter().filter(|child| views.contains(*child)));
+        }
+    }
+    for transition in changes
+        .added_transitions
+        .iter()
+        .chain(changes.removed_transitions.read())
+    {
+        let Ok(parent) = locations.parents.get(transition) else {
+            continue;
+        };
+        let Ok(children) = children.get(parent.parent()) else {
+            continue;
+        };
+        dirty.extend(children.iter().filter(|child| views.contains(*child)));
+    }
+    for entity in dirty {
+        let Ok((entity, page, manager)) = views.get(entity) else {
+            continue;
+        };
+        let stack = locations
+            .parents
+            .get(entity)
+            .ok()
+            .map(ChildOf::parent)
+            .filter(|parent| locations.page_containers.contains(*parent));
+        let route = stack
+            .and_then(|stack| locations.page_containers.get(stack).ok())
+            .and_then(|page| Route::parse(&page.url));
+        let target_manager = matches!(route.as_ref(), Some(Route::Manager));
+        let transitioning = stack
+            .and_then(|stack| children.get(stack).ok())
+            .is_some_and(|children| children.iter().any(|child| transitions.contains(child)));
+        if transitioning && !target_manager {
+            if manager {
+                commands.entity(entity).remove::<(
+                    SessionManagerView,
+                    SessionCatalogView,
+                    SessionCatalogUiStateComponent,
+                )>();
+            }
+            continue;
+        }
+        let manager_route =
+            target_manager && matches!(Route::parse(&page.url), Some(Route::Manager));
+        if manager_route && let Some(stack) = stack {
+            let captured = locations.targets.get(stack).ok().map(|target| {
+                SessionManagerFallback::capture(target, locations.work_dirs.get(stack).ok())
+            });
+            let mut entity = commands.entity(stack);
+            if locations.fallbacks.get(stack).is_err()
+                && let Some(captured) = captured.clone()
+            {
+                entity.insert(captured);
+            }
+            entity
+                .remove::<EntityTarget<Session>>()
+                .remove::<vmux_command::CommandBarWorkDirectory>();
+            if !transitioning && captured.is_none() {
+                entity.remove::<SessionManagerFallback>();
+            }
+        } else if let (Some(stack), Some(Route::Session(id))) = (stack, route.as_ref()) {
+            let mut restored = false;
+            if locations.targets.get(stack).is_err()
+                && let Ok(fallback) = locations.fallbacks.get(stack)
+                && locations
+                    .sessions
+                    .get(fallback.session)
+                    .is_ok_and(|candidate| candidate == id)
+            {
+                let mut entity = commands.entity(stack);
+                entity.insert(EntityTarget::<Session>::new(fallback.session));
+                match fallback.work_dir.clone() {
+                    Some(work_dir) => {
+                        entity.insert(vmux_command::CommandBarWorkDirectory(work_dir));
+                    }
+                    None => {
+                        entity.remove::<vmux_command::CommandBarWorkDirectory>();
+                    }
+                }
+                entity.remove::<SessionManagerFallback>();
+                restored = true;
+            }
+            if !transitioning && !restored && locations.targets.get(stack).is_ok() {
+                commands.entity(stack).remove::<SessionManagerFallback>();
+            }
+        }
+        match (manager_route, manager) {
+            (true, false) => {
+                commands.entity(entity).try_insert(SessionManagerView);
+            }
+            (false, true) => {
+                commands.entity(entity).remove::<SessionManagerView>();
+            }
+            _ => {}
+        }
+    }
+}
 
 #[derive(EntityEvent, Clone, Debug)]
 pub struct ScopeProjectionRequest {
@@ -687,7 +843,8 @@ fn publish(
         (
             With<SessionCatalogUiStateComponent>,
             With<PageReady>,
-            Added<KeyboardOwner>,
+            With<KeyboardOwner>,
+            Or<(Added<SessionCatalogUiStateComponent>, Added<KeyboardOwner>)>,
         ),
     >,
     mut commands: Commands,
@@ -782,7 +939,8 @@ fn sync_repositories(
     claimed: Query<
         (),
         (
-            Added<KeyboardOwner>,
+            With<KeyboardOwner>,
+            Or<(Added<SessionCatalogUiStateComponent>, Added<KeyboardOwner>)>,
             Or<(With<SessionCatalogView>, With<SessionDetailView>)>,
         ),
     >,
@@ -814,7 +972,7 @@ fn sync_repositories(
         let path = Path::new(&session.cwd);
         let info = cache
             .as_mut()
-            .and_then(|cache| cache.bypass_change_detection().snapshot(path));
+            .and_then(|cache| cache.bypass_change_detection().cached(path));
         let repository = match info {
             Some(info) => SessionRepository {
                 id: session.id.clone(),
@@ -848,37 +1006,47 @@ fn sync_repositories(
     }
 }
 
+#[derive(bevy::ecs::system::SystemParam)]
+struct CatalogContent<'w> {
+    catalog: Res<'w, CatalogSnapshot>,
+    repositories: Res<'w, SessionRepositories>,
+}
+
 fn ready(
     trigger: On<UiInput<PageReady>>,
+    content: CatalogContent,
+    spares: Query<(), With<vmux_ecs::page::PrewarmedPage>>,
     views: CatalogViews,
     pages: Query<&PageMetadata>,
     scopes: Query<&SessionScopeView>,
-    catalog: Res<CatalogSnapshot>,
-    repositories: Res<SessionRepositories>,
     mut commands: Commands,
 ) {
     let target = trigger.event().webview;
+    if spares.contains(target) {
+        return;
+    }
     if views.manager_contains(target) {
         commands.entity(target).insert(SessionCatalogView);
         commands.trigger(UiStateWrite::<SessionCatalogUiState>::from_event(
-            target, &*catalog,
+            target,
+            &*content.catalog,
         ));
         commands.trigger(UiStateWrite::<SessionCatalogUiState>::from_event(
             target,
-            &*repositories,
+            &*content.repositories,
         ));
     }
     if views.chats.contains(target)
         && let Ok(page) = pages.get(target)
     {
         commands.entity(target).insert(SessionDetailView);
-        let state = SessionDetailUiState::project(page, &catalog, &repositories);
+        let state = SessionDetailUiState::project(page, &content.catalog, &content.repositories);
         commands.trigger(UiStateWrite::<SessionDetailUiState>::from_event(
             target, &state,
         ));
     }
     if let Ok(scope) = scopes.get(target) {
-        let state = SessionScopeUiState::project(&scope.0, &catalog);
+        let state = SessionScopeUiState::project(&scope.0, &content.catalog);
         commands.trigger(UiStateWrite::<SessionScopeUiState>::from_event(
             target, &state,
         ));
@@ -1243,6 +1411,117 @@ mod tests {
         let published = app.world().resource::<Published>();
         assert_eq!(published.catalogs, vec![manager]);
         assert_eq!(published.details, vec![session]);
+    }
+
+    #[test]
+    fn transitioning_manager_route_gains_ownership_before_activation() {
+        let mut app = App::new();
+        app.add_plugins(CatalogPlugin);
+        let session = app.world_mut().spawn_empty().id();
+        let stack = app
+            .world_mut()
+            .spawn((
+                PageMetadata {
+                    url: Route::Manager.url(),
+                    ..Default::default()
+                },
+                EntityTarget::<Session>::new(session),
+                vmux_command::CommandBarWorkDirectory("/tmp/project".into()),
+            ))
+            .id();
+        let webview = app
+            .world_mut()
+            .spawn((
+                HostsPage,
+                PageTransition,
+                PageMetadata {
+                    url: Route::Manager.url(),
+                    ..Default::default()
+                },
+                ChildOf(stack),
+            ))
+            .id();
+
+        app.update();
+
+        assert!(app.world().entity(webview).contains::<SessionManagerView>());
+        assert!(app.world().get::<EntityTarget<Session>>(stack).is_none());
+        assert!(
+            app.world()
+                .get::<vmux_command::CommandBarWorkDirectory>(stack)
+                .is_none()
+        );
+
+        app.world_mut().entity_mut(webview).insert(PageMetadata {
+            url: Route::Session(SessionId("session-1".into())).url(),
+            ..Default::default()
+        });
+        app.update();
+
+        let entity = app.world().entity(webview);
+        assert!(!entity.contains::<SessionManagerView>());
+        assert!(!entity.contains::<SessionCatalogView>());
+        assert!(!entity.contains::<SessionCatalogUiStateComponent>());
+    }
+
+    #[test]
+    fn leaving_manager_drops_global_authority_before_the_new_page_paints() {
+        let mut app = App::new();
+        app.add_plugins(CatalogPlugin);
+        let session = app.world_mut().spawn_empty().id();
+        let stack = app
+            .world_mut()
+            .spawn((
+                PageMetadata {
+                    url: Route::Session(SessionId("session-1".into())).url(),
+                    ..Default::default()
+                },
+                EntityTarget::<Session>::new(session),
+            ))
+            .id();
+        let webview = app
+            .world_mut()
+            .spawn((
+                HostsPage,
+                SessionManagerView,
+                PageTransition,
+                PageMetadata {
+                    url: Route::Manager.url(),
+                    ..Default::default()
+                },
+                ChildOf(stack),
+            ))
+            .id();
+
+        app.update();
+
+        let entity = app.world().entity(webview);
+        assert!(!entity.contains::<SessionManagerView>());
+        assert!(!entity.contains::<SessionCatalogView>());
+        assert!(app.world().get::<EntityTarget<Session>>(stack).is_some());
+    }
+
+    #[test]
+    fn hidden_prewarm_manager_route_stays_unclaimed() {
+        let mut app = App::new();
+        app.add_plugins(CatalogPlugin);
+        let webview = app
+            .world_mut()
+            .spawn((
+                HostsPage,
+                PageMetadata {
+                    url: Route::Manager.url(),
+                    ..Default::default()
+                },
+            ))
+            .id();
+
+        app.update();
+
+        let entity = app.world().entity(webview);
+        assert!(!entity.contains::<SessionManagerView>());
+        assert!(!entity.contains::<SessionCatalogView>());
+        assert!(!entity.contains::<SessionCatalogUiStateComponent>());
     }
 
     #[test]

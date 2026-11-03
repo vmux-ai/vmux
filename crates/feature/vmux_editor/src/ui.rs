@@ -16,6 +16,7 @@ mod markdown;
 mod menu;
 mod note;
 mod note_text;
+mod outline_navigation;
 mod project;
 mod project_manager;
 mod sidebar;
@@ -28,16 +29,18 @@ mod workspace;
 
 #[vmux_page::page(
     component = Page,
-    states = ["ThemeUiState", "FileUiState", "KeyClaimsUiState"],
+    states = ["ThemeUiState", "FileUiState", "ProjectNavigation", "KeyClaimsUiState", "PageLocationUiState"],
     dom_group = "editor",
-    subtree
+    subtree,
+    reactive_takes,
+    takes = vmux_ecs::WorkspaceKind
 )]
 pub(crate) struct FilePage;
 
 #[vmux_page::page(
     page = "projects",
     component = Page,
-    states = ["ThemeUiState", "FileUiState", "ProjectUiState", "SessionScopeUiState", "GitUiState", "KeyClaimsUiState"],
+    states = ["ThemeUiState", "FileUiState", "ProjectUiState", "ProjectFilesUiState", "SessionScopeUiState", "GitUiState", "KeyClaimsUiState", "PageLocationUiState"],
     dom_group = "editor",
     subtree,
     takes = vmux_ecs::PageMetadata
@@ -47,8 +50,10 @@ pub(crate) struct ProjectsPage;
 #[vmux_page::page(
     file = "../vmux_knowledge/src/feature.ron",
     component = Page,
-    states = ["ThemeUiState", "FileUiState", "KeyClaimsUiState"],
+    states = ["ThemeUiState", "FileUiState", "ProjectNavigation", "KeyClaimsUiState", "PageLocationUiState"],
     dom_group = "editor",
-    subtree
+    subtree,
+    reactive_takes,
+    takes = vmux_ecs::WorkspaceKind
 )]
 pub(crate) struct KnowledgePage;

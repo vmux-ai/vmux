@@ -3,11 +3,10 @@ use std::path::{Path, PathBuf};
 use bevy::ecs::system::SystemParam;
 use bevy::prelude::*;
 use bevy::tasks::{IoTaskPool, Task, futures_lite::future};
-use bevy_cef::prelude::{Browsers, UiEventPlugin, UiInput};
+use bevy_cef::prelude::{UiEventPlugin, UiInput};
 use vmux_api::chat::{SlashCommand, SlashCommandEntry};
 use vmux_api::command_bar::{CommandBarOpenEvent, CommandBarPromptContext, OpenId};
 use vmux_api::open_target::OpenTarget;
-use vmux_api::space::ProjectBranch;
 use vmux_command::{
     ClaimedUrl, CommandBarContextSnapshot, CommandBarPagesSnapshot, CommandBarProjectRoots,
     CommandBarWorkSnapshot, ContributedAgentModels, ContributedAgentModes, ContributedCommand,
@@ -39,25 +38,31 @@ impl Plugin for StartPlugin {
                 .hosted(vmux_ecs::page::HostedPage::page(Self::URL, "Start")),
         )
         .add_message::<InlineTransitionRequested>()
+        .add_systems(Startup, prewarm)
         .add_systems(
             Update,
             (mark_launcher, begin_inline, ApplyDeferred, sync_pages).chain(),
         );
         app.add_plugins(UiEventPlugin::<(
             StartSelectWorkspace,
-            vmux_api::command_bar::StartBranchesRequest,
             vmux_api::command_bar::StartGoToBranch,
         )>::default())
             .add_observer(select_workspace)
-            .add_observer(branches_request)
             .add_observer(go_to_branch)
             .add_observer(apply_chosen_project)
             .add_observer(focus_command_bar)
-            .add_systems(
-                Update,
-                (finish_workspace_pickers, read_branches, finish_branch_reads),
-            );
+            .add_plugins(crate::branches::Plugin)
+            .add_systems(Update, finish_workspace_pickers);
     }
+}
+
+fn prewarm(mut commands: Commands) {
+    commands.spawn(vmux_ecs::page::PrewarmPage::host(
+        "start",
+        StartPlugin::URL,
+        "Start",
+        2,
+    ));
 }
 
 #[derive(Component)]
@@ -332,97 +337,6 @@ fn finish_workspace_pickers(
     }
 }
 
-#[derive(Component)]
-struct StartBranchQuery {
-    webview: Entity,
-    project: String,
-}
-
-#[derive(Component)]
-struct StartBranchRead {
-    webview: Entity,
-    project: String,
-    task: Task<Vec<ProjectBranch>>,
-}
-
-fn read_branches(
-    queries: Query<(Entity, &StartBranchQuery), Added<StartBranchQuery>>,
-    proxy: Option<Res<bevy::winit::EventLoopProxyWrapper>>,
-    mut commands: Commands,
-) {
-    for (entity, query) in &queries {
-        let project = query.project.trim().to_string();
-        if project.is_empty() {
-            commands.entity(entity).despawn();
-            continue;
-        }
-        let root = PathBuf::from(&project);
-        let wake = vmux_ecs::wake::Wake::beside(proxy.as_deref());
-        let task = IoTaskPool::get().spawn(async move {
-            let _wake = wake;
-            let mut branches = Vec::new();
-            if let Ok(checkout) = vmux_git::worktree::CheckoutInfo::try_from(root.as_path())
-                && let Ok(holders) = checkout.branch_holders()
-            {
-                branches.reserve(holders.len());
-                for holder in holders {
-                    let checkout = holder.checkout_path();
-                    let label = holder.checkout_label();
-                    branches.push(ProjectBranch {
-                        branch: holder.branch,
-                        checkout,
-                        label,
-                        insertions: holder.change.insertions,
-                        deletions: holder.change.deletions,
-                    });
-                }
-            }
-            branches
-        });
-        commands.entity(entity).insert(StartBranchRead {
-            webview: query.webview,
-            project,
-            task,
-        });
-        commands.entity(entity).remove::<StartBranchQuery>();
-    }
-}
-
-fn branches_request(
-    trigger: On<UiInput<vmux_api::command_bar::StartBranchesRequest>>,
-    mut commands: Commands,
-) {
-    commands.spawn(StartBranchQuery {
-        webview: trigger.event().webview,
-        project: trigger.event().payload.project.clone(),
-    });
-}
-
-fn finish_branch_reads(
-    mut reads: Query<(Entity, &mut StartBranchRead)>,
-    browsers: NonSend<Browsers>,
-    mut commands: Commands,
-) {
-    for (entity, mut read) in &mut reads {
-        let Some(branches) = future::block_on(future::poll_once(&mut read.task)) else {
-            continue;
-        };
-        commands.entity(entity).despawn();
-        if !browsers.can_emit_to(&read.webview) {
-            continue;
-        }
-        commands.trigger(vmux_ecs::UiStateWrite::<
-            vmux_api::command_bar::CommandBarUiState,
-        >::from_event(
-            read.webview,
-            &vmux_api::command_bar::StartProjectBranches {
-                project: read.project.clone(),
-                branches,
-            },
-        ));
-    }
-}
-
 fn go_to_branch(
     trigger: On<UiInput<vmux_api::command_bar::StartGoToBranch>>,
     child_of: Query<&ChildOf>,
@@ -578,12 +492,17 @@ fn sync_pages(
     });
     let git_changed = last_git.0 != cwd || last_git.1 != git_info;
     let focus_changed = focused.is_changed();
+    let page_removed = removed_pages.read().count() > 0;
+    let command_removed = removed_commands.read().count() > 0;
+    let claim_removed = removed_claims.read().count() > 0;
+    let model_removed = removed_models.read().count() > 0;
+    let mode_removed = removed_modes.read().count() > 0;
     let contributions_changed = !contribution_changes.is_empty()
-        || removed_pages.read().next().is_some()
-        || removed_commands.read().next().is_some()
-        || removed_claims.read().next().is_some()
-        || removed_models.read().next().is_some()
-        || removed_modes.read().next().is_some();
+        || page_removed
+        || command_removed
+        || claim_removed
+        || model_removed
+        || mode_removed;
     let changed = contributions_changed
         || focus_changed
         || prompt_context.changed(tab_gather.active_tab.get())
@@ -676,6 +595,7 @@ fn begin_inline(
             .entity(request.stack)
             .try_insert(crate::StartInlineTransition {
                 webview: request.webview,
+                navigation: None,
             });
         commands
             .entity(request.webview)

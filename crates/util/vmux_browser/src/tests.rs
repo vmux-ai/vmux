@@ -1,12 +1,42 @@
 use super::*;
 use crate::host::*;
-use vmux_ecs::PageMetadata;
 use vmux_ecs::overlay::WindowOverlay;
+use vmux_ecs::{PageMetadata, PageOpenHandled, PageOpenRequest, PageOpenTarget, PageOpenTask};
 use vmux_flex::prelude::{ComputedNode, Node, UiRect, Val};
 use vmux_layout::stack::Stack;
 use vmux_setting::AppSettings;
 
 use vmux_ecs::PageIdentity;
+
+#[derive(Resource, Default)]
+struct SeenPageOpens(Vec<String>);
+
+fn record_page_opens(
+    tasks: Query<(Entity, &PageOpenTask), Without<PageOpenHandled>>,
+    mut seen: ResMut<SeenPageOpens>,
+    mut commands: Commands,
+) {
+    for (entity, task) in &tasks {
+        seen.0.push(task.url.clone());
+        commands.entity(entity).insert(PageOpenHandled);
+    }
+}
+
+#[test]
+fn a_handoff_waits_for_the_frame_from_its_new_navigation() {
+    let mut lifecycle = HostedPageLifecycle {
+        navigation_revision: 2,
+        frame_revision_applied: 1,
+        frames_applied: 2,
+        hydration_frame_count: Some(2),
+        ..Default::default()
+    };
+
+    assert!(!lifecycle.painted_after(1));
+    lifecycle.frame_revision_applied = 2;
+    assert!(lifecycle.painted_after(1));
+    assert!(!lifecycle.painted_after(2));
+}
 
 #[test]
 fn pending_navigation_updates_keep_only_the_latest_request() {
@@ -37,6 +67,38 @@ fn pending_navigation_updates_keep_only_the_latest_request() {
     let pending = pending.iter(world).collect::<Vec<_>>();
     assert_eq!(pending.len(), 1);
     assert_eq!(pending[0].request_id, [2; 16]);
+}
+
+#[test]
+fn page_open_keeps_only_the_latest_request_for_a_stack() {
+    let mut app = App::new();
+    app.add_plugins((MinimalPlugins, crate::page::PagePlugin))
+        .init_resource::<SeenPageOpens>()
+        .add_systems(
+            Update,
+            record_page_opens.in_set(PageOpenSet::HandleKnownPages),
+        );
+    let stack = app.world_mut().spawn(Stack::default()).id();
+    for (url, request_id) in [
+        ("vmux://sessions/", Some([1; 16])),
+        ("vmux://projects/", None),
+    ] {
+        app.world_mut().write_message(PageOpenRequest {
+            target: PageOpenTarget::Stack(stack),
+            url: url.to_string(),
+            request_id,
+        });
+    }
+
+    app.update();
+
+    assert_eq!(
+        app.world().resource::<SeenPageOpens>().0,
+        ["vmux://projects/"]
+    );
+    let world = app.world_mut();
+    let mut awaiting = world.query::<&PageOpenAwaitSnapshot>();
+    assert_eq!(awaiting.iter(world).count(), 0);
 }
 
 #[test]
@@ -106,6 +168,15 @@ fn agent_cli_url_redirects_tab_to_session_id() {
             ChildOf(stack),
         ))
         .id();
+    app.world_mut()
+        .entity_mut(stack)
+        .insert(vmux_layout::page_slot::Current::new(
+            Some(child),
+            PageMetadata {
+                url: "vmux://sessions/vibe/".to_string(),
+                ..default()
+            },
+        ));
 
     app.update();
 
@@ -211,7 +282,7 @@ fn appearance_change_updates_cef_color_scheme() {
 fn every_cef_browser_is_windowed_with_no_overlay_markers() {
     let mut app = App::new();
     app.world_mut().insert_non_send(Browsers::default());
-    BrowserPlugin::configure_backend(&mut app);
+    BrowserPlugin::configure_schedule(&mut app);
     let page = app
         .world_mut()
         .spawn((Browser, WebviewSource::new("https://example.com")))
@@ -269,6 +340,7 @@ mod browser_navigate_flow {
         LastActivatedAt, PageMetadata, PageOpenDeferred, PageOpenError, PageOpenHandled,
         PageOpenId, PageOpenSet, PageOpenTask,
     };
+    use vmux_flex::prelude::Visibility;
     use vmux_layout::active_pane::ActiveStack;
     use vmux_layout::pane::Pane;
     use vmux_layout::settings::{
@@ -353,12 +425,31 @@ mod browser_navigate_flow {
 
     fn handle_test_known_page_open(
         tasks: Query<(Entity, &PageOpenTask), PendingPageOpen>,
+        navigations: Query<&vmux_ecs::PageNavigation>,
+        time: Res<Time>,
         mut commands: Commands,
     ) {
         for (entity, task) in &tasks {
+            if !navigations
+                .get(task.stack)
+                .is_ok_and(|navigation| navigation.matches(task.id))
+            {
+                continue;
+            }
             if task.url.starts_with("vmux://terminal/") {
                 commands.entity(task.stack).despawn_children();
-                commands.spawn((Browser, Terminal, ChildOf(task.stack)));
+                commands.spawn((
+                    Browser,
+                    Terminal,
+                    vmux_layout::hosted_page::SurfaceHandoff::new(
+                        Vec::new(),
+                        task.id,
+                        0,
+                        time.elapsed(),
+                    ),
+                    Visibility::Hidden,
+                    ChildOf(task.stack),
+                ));
                 commands.entity(entity).insert(PageOpenHandled);
             } else if task.url.starts_with("vmux://sessions/") {
                 commands.entity(task.stack).despawn_children();
@@ -371,7 +462,7 @@ mod browser_navigate_flow {
     struct CapturedNavigateUrls(Vec<String>);
 
     #[test]
-    fn browser_navigate_triggers_request_navigate_with_url() {
+    fn browser_navigate_routes_the_url_through_page_open() {
         let mut app = App::new();
         app.add_plugins((MinimalPlugins, vmux_command::CommandPlugin, ConsumerPlugin));
         app.insert_resource(test_settings())
@@ -383,7 +474,13 @@ mod browser_navigate_flow {
             .spawn(vmux_layout::stack::Stack::bundle())
             .insert(ChildOf(pane))
             .id();
-        app.world_mut().spawn(Browser).insert(ChildOf(stack));
+        let view = app.world_mut().spawn(Browser).insert(ChildOf(stack)).id();
+        app.world_mut()
+            .entity_mut(stack)
+            .insert(vmux_layout::page_slot::Current::new(
+                Some(view),
+                PageMetadata::default(),
+            ));
 
         set_focus(&mut app, Some(pane), Some(stack));
 
@@ -409,7 +506,11 @@ mod browser_navigate_flow {
         app.update();
 
         let captured = app.world().resource::<CapturedNavigateUrls>();
-        assert_eq!(captured.0, vec!["https://example.com".to_string()]);
+        assert!(captured.0.is_empty());
+        assert_eq!(
+            app.world().get::<PageMetadata>(stack).unwrap().url,
+            "https://example.com"
+        );
     }
 
     #[test]
@@ -911,9 +1012,13 @@ mod browser_navigate_flow {
             ))
             .id();
 
+        let navigation = PageOpenId::new();
+        app.world_mut()
+            .entity_mut(stack)
+            .insert(vmux_ecs::PageNavigation::new(navigation));
         app.world_mut().spawn((
             PageOpenTask {
-                id: PageOpenId::new(),
+                id: navigation,
                 stack,
                 url: "vmux://terminal/bad".to_string(),
                 request_id: None,
@@ -1011,11 +1116,11 @@ mod browser_navigate_flow {
 }
 
 mod open_in_place_flow {
-    use crate::{OpenRequest, ZoomRequest};
+    use crate::{OpenRequest, ZoomChange, ZoomRequest};
     use bevy::ecs::message::Messages;
     use bevy::prelude::*;
     use bevy_cef::prelude::RequestNavigate;
-    use vmux_ecs::{PageOpenRequest, PageOpenTarget};
+    use vmux_ecs::{PageMetadata, PageOpenRequest, PageOpenTarget};
     use vmux_history::LastActivatedAt;
     use vmux_layout::Browser;
     use vmux_layout::pane::Pane;
@@ -1139,9 +1244,17 @@ mod open_in_place_flow {
             .spawn(Stack::bundle())
             .insert((ChildOf(pane), LastActivatedAt(1)))
             .id();
-        app.world_mut()
+        let view = app
+            .world_mut()
             .spawn((Browser, Terminal))
-            .insert(ChildOf(stack));
+            .insert(ChildOf(stack))
+            .id();
+        app.world_mut()
+            .entity_mut(stack)
+            .insert(vmux_layout::page_slot::Current::new(
+                Some(view),
+                PageMetadata::default(),
+            ));
         app.world_mut().spawn(
             vmux_layout::active_pane::ActiveStack {
                 tab: Some(tab),
@@ -1177,17 +1290,20 @@ mod open_in_place_flow {
             .spawn(Stack::bundle())
             .insert((ChildOf(pane), LastActivatedAt(1)))
             .id();
+        let metadata = PageMetadata {
+            url: native_url.to_string(),
+            title: native_url.to_string(),
+            icon: vmux_api::PageIcon::None,
+            bg_color: None,
+        };
+        let view = app
+            .world_mut()
+            .spawn((Browser, metadata.clone()))
+            .insert(ChildOf(stack))
+            .id();
         app.world_mut()
-            .spawn((
-                Browser,
-                vmux_ecs::PageMetadata {
-                    url: native_url.to_string(),
-                    title: native_url.to_string(),
-                    icon: vmux_api::PageIcon::None,
-                    bg_color: None,
-                },
-            ))
-            .insert(ChildOf(stack));
+            .entity_mut(stack)
+            .insert(vmux_layout::page_slot::Current::new(Some(view), metadata));
         app.world_mut().spawn(
             vmux_layout::active_pane::ActiveStack {
                 tab: Some(tab),
@@ -1200,20 +1316,22 @@ mod open_in_place_flow {
     }
 
     #[test]
-    fn in_place_with_explicit_url_triggers_request_navigate() {
+    fn in_place_with_explicit_url_routes_through_page_open() {
         let mut app = build_app();
         build_focused_stack(&mut app);
 
         app.world_mut()
             .resource_mut::<Messages<OpenRequest>>()
-            .write(OpenRequest {
-                url: Some("https://example.com".into()),
-            });
+            .write(OpenRequest::focused(Some("https://example.com".into())));
 
         app.update();
 
         let captured = app.world().resource::<CapturedNavigateUrls>();
-        assert_eq!(captured.0, vec!["https://example.com".to_string()]);
+        assert!(captured.0.is_empty());
+        let page_opens = app.world().resource::<CapturedPageOpenRequests>();
+        assert_eq!(page_opens.0.len(), 1);
+        assert_eq!(page_opens.0[0].url, "https://example.com");
+        assert!(matches!(page_opens.0[0].target, PageOpenTarget::Stack(_)));
     }
 
     #[test]
@@ -1223,9 +1341,7 @@ mod open_in_place_flow {
 
         app.world_mut()
             .resource_mut::<Messages<OpenRequest>>()
-            .write(OpenRequest {
-                url: Some("vmux://sessions/vibe".into()),
-            });
+            .write(OpenRequest::focused(Some("vmux://sessions/vibe".into())));
 
         app.update();
 
@@ -1238,41 +1354,39 @@ mod open_in_place_flow {
     }
 
     #[test]
-    fn in_place_from_plain_vmux_to_web_navigates_in_place() {
+    fn in_place_from_plain_vmux_to_web_uses_page_open() {
         let mut app = build_app();
         build_focused_native_stack(&mut app, "vmux://history/");
 
         app.world_mut()
             .resource_mut::<Messages<OpenRequest>>()
-            .write(OpenRequest {
-                url: Some("https://mistral.ai".into()),
-            });
+            .write(OpenRequest::focused(Some("https://mistral.ai".into())));
 
         app.update();
 
         let page_opens = app.world().resource::<CapturedPageOpenRequests>();
-        assert!(page_opens.0.is_empty());
+        assert_eq!(page_opens.0.len(), 1);
+        assert_eq!(page_opens.0[0].url, "https://mistral.ai");
         let navigates = app.world().resource::<CapturedNavigateUrls>();
-        assert_eq!(navigates.0, vec!["https://mistral.ai".to_string()]);
+        assert!(navigates.0.is_empty());
     }
 
     #[test]
-    fn in_place_from_web_to_plain_vmux_navigates_in_place() {
+    fn in_place_from_web_to_plain_vmux_uses_page_open() {
         let mut app = build_app();
         build_focused_native_stack(&mut app, "https://example.com/");
 
         app.world_mut()
             .resource_mut::<Messages<OpenRequest>>()
-            .write(OpenRequest {
-                url: Some("vmux://history/".into()),
-            });
+            .write(OpenRequest::focused(Some("vmux://history/".into())));
 
         app.update();
 
         let page_opens = app.world().resource::<CapturedPageOpenRequests>();
-        assert!(page_opens.0.is_empty());
+        assert_eq!(page_opens.0.len(), 1);
+        assert_eq!(page_opens.0[0].url, "vmux://history/");
         let navigates = app.world().resource::<CapturedNavigateUrls>();
-        assert_eq!(navigates.0, vec!["vmux://history/".to_string()]);
+        assert!(navigates.0.is_empty());
     }
 
     #[test]
@@ -1282,9 +1396,7 @@ mod open_in_place_flow {
 
         app.world_mut()
             .resource_mut::<Messages<OpenRequest>>()
-            .write(OpenRequest {
-                url: Some("vmux://settings/".into()),
-            });
+            .write(OpenRequest::focused(Some("vmux://settings/".into())));
 
         app.update();
 
@@ -1303,9 +1415,7 @@ mod open_in_place_flow {
 
         app.world_mut()
             .resource_mut::<Messages<OpenRequest>>()
-            .write(OpenRequest {
-                url: Some("vmux://terminal/".into()),
-            });
+            .write(OpenRequest::focused(Some("vmux://terminal/".into())));
 
         app.update();
 
@@ -1324,9 +1434,7 @@ mod open_in_place_flow {
 
         app.world_mut()
             .resource_mut::<Messages<OpenRequest>>()
-            .write(OpenRequest {
-                url: Some("file:///tmp/x".into()),
-            });
+            .write(OpenRequest::focused(Some("file:///tmp/x".into())));
 
         app.update();
 
@@ -1345,9 +1453,7 @@ mod open_in_place_flow {
 
         app.world_mut()
             .resource_mut::<Messages<OpenRequest>>()
-            .write(OpenRequest {
-                url: Some("https://google.com".into()),
-            });
+            .write(OpenRequest::focused(Some("https://google.com".into())));
 
         app.update();
 
@@ -1366,7 +1472,7 @@ mod open_in_place_flow {
 
         app.world_mut()
             .resource_mut::<Messages<ZoomRequest>>()
-            .write(ZoomRequest::In);
+            .write(ZoomRequest::focused(ZoomChange::In));
 
         app.update();
 
@@ -1385,7 +1491,7 @@ mod open_in_place_flow {
 
         app.world_mut()
             .resource_mut::<Messages<ZoomRequest>>()
-            .write(ZoomRequest::Reset);
+            .write(ZoomRequest::focused(ZoomChange::Reset));
 
         app.update();
 
@@ -1409,12 +1515,15 @@ mod open_in_place_flow {
 
         app.world_mut()
             .resource_mut::<Messages<OpenRequest>>()
-            .write(OpenRequest { url: None });
+            .write(OpenRequest::focused(None));
 
         app.update();
 
         let captured = app.world().resource::<CapturedNavigateUrls>();
-        assert_eq!(captured.0, vec!["https://startup.example".to_string()]);
+        assert!(captured.0.is_empty());
+        let page_opens = app.world().resource::<CapturedPageOpenRequests>();
+        assert_eq!(page_opens.0.len(), 1);
+        assert_eq!(page_opens.0[0].url, "https://startup.example");
     }
 
     #[test]
@@ -1424,7 +1533,7 @@ mod open_in_place_flow {
 
         app.world_mut()
             .resource_mut::<Messages<OpenRequest>>()
-            .write(OpenRequest { url: None });
+            .write(OpenRequest::focused(None));
 
         app.update();
 

@@ -1,9 +1,11 @@
+use dioxus::core::Task;
 use dioxus::core::current_scope_id;
 use dioxus::prelude::*;
 use dioxus_primitives::dioxus_attributes::attributes;
 use dioxus_primitives::merge_attributes;
 
 use crate::cn::cn;
+use crate::icon::{LineIcon, LineIconView};
 
 const DROPDOWN_CONNECTION_WATCHER: &str = r#"
 const watchConnection = globalThis.__vmuxDropdownWatchConnection ??= (() => {
@@ -234,6 +236,8 @@ if (popup && root) {
   unwatch = watchConnection(id, popup, cleanup);
   entries.set(id, { cleanup });
   place();
+  popup.querySelector('[data-vmux-dropdown-selected="true"]')?.scrollIntoView({ block: 'nearest' });
+  place();
 }
 "#;
 
@@ -260,18 +264,60 @@ pub enum DropdownPlacement {
     Top,
 }
 
+#[derive(Clone, Copy, Default, PartialEq, Eq)]
+pub enum DropdownOpenMode {
+    #[default]
+    Click,
+    Hover,
+}
+
+impl DropdownOpenMode {
+    fn activates_on_click(self, open: bool) -> bool {
+        self == Self::Click || !open
+    }
+}
+
+#[component]
+pub fn DropdownToggleIndicator(open: bool) -> Element {
+    rsx! {
+        LineIconView {
+            icon: LineIcon::ChevronDown,
+            class: if open {
+                "size-3 shrink-0 rotate-180 text-muted-foreground/60 opacity-100 transition-[opacity,transform]".to_string()
+            } else {
+                "size-3 shrink-0 text-muted-foreground/60 opacity-0 transition-[opacity,transform] group-hover:opacity-100 group-focus-visible:opacity-100".to_string()
+            },
+        }
+    }
+}
+
 #[component]
 pub fn DropdownTrigger(
     label: String,
     open: bool,
-    onclick: EventHandler<MouseEvent>,
+    onclick: EventHandler<()>,
+    #[props(default)] on_hover_open: Option<EventHandler<()>>,
     #[props(default)] title: String,
     #[props(default)] active: bool,
     #[props(default)] disabled: bool,
+    #[props(default)] open_mode: DropdownOpenMode,
     #[props(default)] class: String,
+    #[props(default = true)] truncate: bool,
     #[props(default = rsx! {})] leading: Element,
     #[props(default = rsx! {})] trailing: Element,
 ) -> Element {
+    let mut hover_task = use_signal(|| None::<Task>);
+    use_effect(use_reactive!(|(open, open_mode)| {
+        let _ = (open, open_mode);
+        if let Some(task) = hover_task.write().take() {
+            task.cancel();
+        }
+    }));
+    use_drop(move || {
+        if let Some(task) = hover_task.write().take() {
+            task.cancel();
+        }
+    });
     let tone = if active {
         "font-medium text-foreground"
     } else {
@@ -289,9 +335,39 @@ pub fn DropdownTrigger(
             title,
             aria_expanded: open,
             disabled,
-            onclick: move |event| onclick.call(event),
+            onmouseenter: move |_| {
+                if open_mode == DropdownOpenMode::Hover
+                    && !open
+                    && let Some(on_hover_open) = on_hover_open
+                {
+                    if let Some(task) = hover_task.write().take() {
+                        task.cancel();
+                    }
+                    hover_task.set(Some(spawn(async move {
+                        crate::platform::Platform::sleep(120).await;
+                        on_hover_open.call(());
+                    })));
+                }
+            },
+            onmouseleave: move |_| {
+                if open_mode == DropdownOpenMode::Hover
+                    && let Some(task) = hover_task.write().take() {
+                        task.cancel();
+                    }
+            },
+            onclick: move |_| {
+                if open_mode == DropdownOpenMode::Hover {
+                    if let Some(task) = hover_task.write().take() {
+                        task.cancel();
+                    }
+                    if !open_mode.activates_on_click(open) {
+                        return;
+                    }
+                }
+                onclick.call(());
+            },
             {leading}
-            span { class: "min-w-0 truncate", "{label}" }
+            span { class: if truncate { "min-w-0 truncate" } else { "shrink-0 whitespace-nowrap" }, "{label}" }
             {trailing}
         }
     }
@@ -317,6 +393,7 @@ pub fn DropdownOption(
         button {
             r#type: "button",
             "data-vmux-dropdown-option": "",
+            "data-vmux-dropdown-selected": if selected { "true" } else { "false" },
             class: cn([
                 "flex min-h-8 w-full min-w-0 items-center gap-2 rounded-md px-2 py-1.5 text-left text-xs transition-colors data-[vmux-dropdown-active=true]:bg-foreground/[0.07] data-[vmux-dropdown-active=true]:text-foreground",
                 tone,
@@ -340,7 +417,7 @@ pub fn DropdownOption(
 pub fn DropdownSelector(
     label: String,
     open: bool,
-    ontoggle: EventHandler<()>,
+    on_open_change: EventHandler<bool>,
     on_dismiss: EventHandler<()>,
     children: Element,
     #[props(default)] title: String,
@@ -348,9 +425,11 @@ pub fn DropdownSelector(
     #[props(default)] disabled: bool,
     #[props(default)] class: String,
     #[props(default)] trigger_class: String,
+    #[props(default = true)] truncate: bool,
     #[props(default)] popup_class: String,
     #[props(default)] align: DropdownAlign,
     #[props(default)] placement: DropdownPlacement,
+    #[props(default)] open_mode: DropdownOpenMode,
     #[props(default)] match_width: bool,
     #[props(default)] horizontal_inset: f64,
     #[props(default = 4.0)] gap: f64,
@@ -361,18 +440,27 @@ pub fn DropdownSelector(
         Dropdown {
             open,
             keyboard_navigation: true,
+            dismiss_on_mouseleave: open_mode == DropdownOpenMode::Hover,
             class,
             on_dismiss: move |_| on_dismiss.call(()),
             DropdownTrigger {
                 label,
+                truncate,
                 title,
                 open,
                 active,
                 disabled,
+                open_mode,
                 class: trigger_class,
                 leading,
-                trailing,
-                onclick: move |_| ontoggle.call(()),
+                trailing: rsx! {
+                    {trailing}
+                    if open_mode == DropdownOpenMode::Click {
+                        DropdownToggleIndicator { open }
+                    }
+                },
+                on_hover_open: move |_| on_open_change.call(true),
+                onclick: move |_| on_open_change.call(!open),
             }
             if open {
                 DropdownPopup {
@@ -390,7 +478,12 @@ pub fn DropdownSelector(
 }
 
 #[derive(Clone, Copy)]
-struct DropdownContext(EventHandler<()>);
+struct DropdownContext {
+    dismiss: EventHandler<()>,
+    hover_enter: EventHandler<()>,
+    hover_leave: EventHandler<()>,
+    manual: bool,
+}
 
 impl DropdownPlacement {
     fn as_str(self) -> &'static str {
@@ -440,6 +533,8 @@ __VMUX_DROPDOWN_CONNECTION_WATCHER__
 const id = '{}';
 const popup = document.getElementById(id);
 if (popup) {{
+  const root = popup.closest('[data-vmux-dropdown-root]');
+  const manual = popup.getAttribute('popover') === 'manual';
   const entries = globalThis.__vmuxDropdownToggleEntries ??= new Map();
   entries.get(id)?.cleanup();
   let active = true;
@@ -449,6 +544,8 @@ if (popup) {{
     active = false;
     unwatch();
     popup.removeEventListener('beforetoggle', beforetoggle);
+    document.removeEventListener('pointerdown', pointerdown, true);
+    document.removeEventListener('keydown', keydown, true);
     window.removeEventListener('blur', dismiss, true);
     if (entries.get(id)?.cleanup === cleanup) entries.delete(id);
   }};
@@ -460,10 +557,25 @@ if (popup) {{
   const beforetoggle = event => {{
     if (event.newState === 'closed') dismiss();
   }};
+  const pointerdown = event => {{
+    const path = event.composedPath();
+    if (path.includes(popup) || (root && path.includes(root))) return;
+    dismiss();
+  }};
+  const keydown = event => {{
+    if (event.key !== 'Escape' || popup.getAttribute('popover') !== 'manual') return;
+    event.preventDefault();
+    event.stopPropagation();
+    dismiss();
+  }};
   entries.set(id, {{ cleanup }});
   unwatch = watchConnection(id, popup, cleanup);
   popup.addEventListener('beforetoggle', beforetoggle);
-  window.addEventListener('blur', dismiss, true);
+  if (manual) {{
+    document.addEventListener('pointerdown', pointerdown, true);
+    document.addEventListener('keydown', keydown, true);
+    window.addEventListener('blur', dismiss, true);
+  }}
 }}
 "#,
             self.id()
@@ -498,10 +610,62 @@ pub fn Dropdown(
     open: bool,
     #[props(default)] class: String,
     #[props(default)] keyboard_navigation: bool,
+    #[props(default)] dismiss_on_mouseleave: bool,
     on_dismiss: EventHandler<()>,
     children: Element,
 ) -> Element {
-    use_context_provider(|| DropdownContext(on_dismiss));
+    let mut leave_task = use_signal(|| None::<Task>);
+    let mut dismissing = use_signal(|| false);
+    use_effect(use_reactive!(|(open, dismiss_on_mouseleave)| {
+        let _ = (open, dismiss_on_mouseleave);
+        if let Some(task) = leave_task.write().take() {
+            task.cancel();
+        }
+        if open && *dismissing.peek() {
+            dismissing.set(false);
+        }
+    }));
+    use_drop(move || {
+        if let Some(task) = leave_task.write().take() {
+            task.cancel();
+        }
+    });
+    let dismiss = use_callback(move |()| {
+        if *dismissing.peek() {
+            return;
+        }
+        dismissing.set(true);
+        if let Some(task) = leave_task.write().take() {
+            task.cancel();
+        }
+        on_dismiss.call(());
+    });
+    let hover_enter = use_callback(move |()| {
+        if !dismiss_on_mouseleave {
+            return;
+        }
+        if let Some(task) = leave_task.write().take() {
+            task.cancel();
+        }
+    });
+    let hover_leave = use_callback(move |()| {
+        if !dismiss_on_mouseleave || !open {
+            return;
+        }
+        if let Some(task) = leave_task.write().take() {
+            task.cancel();
+        }
+        leave_task.set(Some(spawn(async move {
+            crate::platform::Platform::sleep(120).await;
+            dismiss.call(());
+        })));
+    });
+    use_context_provider(|| DropdownContext {
+        dismiss,
+        hover_enter,
+        hover_leave,
+        manual: dismiss_on_mouseleave,
+    });
     let root_id = format!("vmux-dropdown-root-{}", current_scope_id().0);
     let layer = if open { "z-[100]" } else { "z-auto" };
     let root_class = cn([
@@ -516,11 +680,13 @@ pub fn Dropdown(
             "data-vmux-dropdown-root": "",
             "data-vmux-dropdown-open": if open { "true" } else { "false" },
             "data-vmux-dropdown-keyboard": if keyboard_navigation { "true" } else { "false" },
+            onmouseenter: move |_| hover_enter.call(()),
+            onmouseleave: move |_| hover_leave.call(()),
             onkeydown: move |event: KeyboardEvent| {
                 if open && event.key() == Key::Escape {
                     event.prevent_default();
                     event.stop_propagation();
-                    on_dismiss.call(());
+                    dismiss.call(());
                 }
             },
             if open {
@@ -545,10 +711,10 @@ pub fn DropdownPopup(
     children: Element,
 ) -> Element {
     let owner = DropdownPopupOwner(current_scope_id().0);
-    let dismiss = use_context::<DropdownContext>().0;
+    let context = use_context::<DropdownContext>();
     let base = attributes!(div {
         id: owner.id(),
-        popover: "auto",
+        popover: if context.manual { "manual" } else { "auto" },
         class: "invisible fixed left-0 top-0 z-[1000] isolate m-0 origin-top rounded-lg bg-popover shadow-[0_12px_32px_rgba(0,0,0,0.28)] [backdrop-filter:none] [-webkit-backdrop-filter:none] animate-[dx-fade-zoom-in_120ms_ease-out_forwards] will-change-[transform,opacity] motion-reduce:animate-none",
         "data-vmux-dropdown-popup": "",
     });
@@ -570,10 +736,12 @@ pub fn DropdownPopup(
                         .await
                         .is_ok_and(|message| message == "dismissed")
                     {
-                        dismiss.call(());
+                        context.dismiss.call(());
                     }
                 });
             },
+            onmouseenter: move |_| context.hover_enter.call(()),
+            onmouseleave: move |_| context.hover_leave.call(()),
             onclick: move |event| {
                 if let Some(handler) = onclick {
                     handler.call(event);
@@ -601,4 +769,16 @@ fn DropdownKeyboardNavigation(root_id: String) -> Element {
         }
     });
     rsx! {}
+}
+
+#[cfg(test)]
+mod tests {
+    use super::DropdownOpenMode;
+
+    #[test]
+    fn hover_open_trigger_click_keeps_the_popup_open() {
+        assert!(!DropdownOpenMode::Hover.activates_on_click(true));
+        assert!(DropdownOpenMode::Hover.activates_on_click(false));
+        assert!(DropdownOpenMode::Click.activates_on_click(true));
+    }
 }

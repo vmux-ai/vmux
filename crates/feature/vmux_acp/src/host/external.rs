@@ -1,6 +1,6 @@
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::io::{BufRead, Read};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::{Mutex, mpsc};
 use std::time::{Duration, Instant};
 
@@ -62,6 +62,8 @@ pub(super) fn add(app: &mut App) {
                 archive,
                 finish_archives,
                 watch,
+                refresh_codex_archives,
+                finish_codex_archives,
                 request_changed_conversations,
                 scan,
                 finish,
@@ -242,8 +244,11 @@ fn request_catalogs(
     mut state: ResMut<CatalogRequests>,
     mut requests: MessageWriter<ServiceRequest>,
 ) {
-    let package_changed = package_changes.read().next().is_some();
-    let tool_changed = tool_changes.read().any(|changed| changed.0.is("acp"));
+    let package_changed = package_changes.read().count() > 0;
+    let mut tool_changed = false;
+    for changed in tool_changes.read() {
+        tool_changed |= changed.0.is("acp");
+    }
     let registry_changed = agents.iter().any(|agent| agent.is_changed());
     if !Activity::present(activity) {
         let (request_ids, launched) = state.cancel();
@@ -677,6 +682,7 @@ struct Runtime {
     watched: HashMap<PathBuf, bool>,
     sources: HashSet<SourceKind>,
     watch_codex_activity: bool,
+    manager: bool,
 }
 
 impl Runtime {
@@ -684,7 +690,7 @@ impl Runtime {
         let Some(watcher) = self.watcher.as_mut() else {
             return;
         };
-        let desired = paths.watches(&self.sources, self.watch_codex_activity);
+        let desired = paths.watches(&self.sources, self.watch_codex_activity, self.manager);
         let stale = self
             .watched
             .keys()
@@ -727,16 +733,33 @@ impl Runtime {
 #[derive(Component)]
 struct ScanRequested(HashSet<SourceKind>);
 
-impl ScanRequested {
-    fn one(source: SourceKind) -> Self {
-        Self(HashSet::from([source]))
-    }
-}
-
 #[derive(Component)]
 struct ScanTask {
     started_at: Instant,
     task: Task<Vec<SourceRead>>,
+}
+
+#[derive(Component)]
+struct CodexArchiveRefreshRequested;
+
+#[derive(Component)]
+struct CodexArchiveRefreshTask {
+    started_at: Instant,
+    task: Task<Result<Option<HashMap<String, ArchiveState>>, String>>,
+}
+
+impl CodexArchiveRefreshTask {
+    fn spawn(root: PathBuf, wake: Option<bevy::winit::EventLoopProxy<WinitUserEvent>>) -> Self {
+        let started_at = Instant::now();
+        let task = IoTaskPool::get().spawn(async move {
+            let result = codex::Reader::at(&root).archives();
+            if let Some(wake) = wake {
+                let _ = wake.send_event(WinitUserEvent::WakeUp);
+            }
+            result
+        });
+        Self { started_at, task }
+    }
 }
 
 #[derive(Component)]
@@ -985,10 +1008,13 @@ impl SourcePaths {
         &self,
         sources: &HashSet<SourceKind>,
         watch_codex_activity: bool,
+        manager: bool,
     ) -> Vec<(PathBuf, bool)> {
         let mut watches = Vec::new();
-        if sources.contains(&SourceKind::Codex) || watch_codex_activity {
+        if manager && sources.contains(&SourceKind::Codex) {
             watches.push((self.codex.clone(), false));
+        }
+        if sources.contains(&SourceKind::Codex) || watch_codex_activity {
             watches.push((self.codex.join("sessions"), true));
         }
         if sources.contains(&SourceKind::Claude) {
@@ -1000,34 +1026,58 @@ impl SourcePaths {
         watches
     }
 
-    fn sources(&self, paths: &[PathBuf]) -> HashSet<SourceKind> {
-        let codex = self.codex.join("session_index.jsonl");
+    fn change(&self, kind: &notify::EventKind, path: &Path) -> Option<SourceChange> {
+        let codex_index = self.codex.join("session_index.jsonl");
         let codex_sessions = self.codex.join("sessions");
-        let claude = self.claude.join("history.jsonl");
+        let claude_history = self.claude.join("history.jsonl");
         let vibe = self.vibe.join("logs/session");
-        let mut sources = HashSet::new();
-        for path in paths {
-            if path == &self.codex
-                || path == &codex
-                || path == &codex_sessions
-                || path.starts_with(&codex_sessions)
-                || path.parent() == Some(self.codex.as_path())
-                || self.codex.starts_with(path)
-            {
-                sources.insert(SourceKind::Codex);
-            }
-            if path == &self.claude
-                || path == &claude
-                || path.parent() == Some(self.claude.as_path())
-                || self.claude.starts_with(path)
-            {
-                sources.insert(SourceKind::Claude);
-            }
-            if path == &vibe || path.starts_with(&vibe) || vibe.starts_with(path) {
-                sources.insert(SourceKind::Vibe);
-            }
+        if path == self.codex || path == codex_index {
+            return Some(SourceChange::Scan(SourceKind::Codex));
         }
-        sources
+        if path == codex_sessions {
+            return Some(SourceChange::Scan(SourceKind::Codex));
+        }
+        if path.starts_with(&codex_sessions) {
+            if kind.is_modify()
+                && path.extension().and_then(|extension| extension.to_str()) == Some("jsonl")
+            {
+                return Some(SourceChange::CodexActivity(path.to_path_buf()));
+            }
+            if kind.is_create() || kind.is_remove() {
+                return Some(SourceChange::Scan(SourceKind::Codex));
+            }
+            return None;
+        }
+        if Self::codex_state(path, &self.codex) {
+            return Some(SourceChange::CodexArchives);
+        }
+        if path == self.claude || path == claude_history {
+            return Some(SourceChange::Scan(SourceKind::Claude));
+        }
+        if path == vibe || path.starts_with(&vibe) || vibe.starts_with(path) {
+            return Some(SourceChange::Scan(SourceKind::Vibe));
+        }
+        None
+    }
+
+    fn changes(&self, event: &notify::Event) -> Vec<SourceChange> {
+        event
+            .paths
+            .iter()
+            .filter_map(|path| self.change(&event.kind, path))
+            .collect()
+    }
+
+    fn codex_state(path: &Path, root: &Path) -> bool {
+        if path.parent() != Some(root) {
+            return false;
+        }
+        path.file_name()
+            .and_then(|name| name.to_str())
+            .is_some_and(|name| {
+                name.starts_with("state_")
+                    && (name.ends_with(".sqlite") || name.ends_with(".sqlite-wal"))
+            })
     }
 }
 
@@ -1184,9 +1234,11 @@ impl SourceWatchEvents {
     }
 }
 
+#[derive(Clone, Debug, PartialEq, Eq)]
 enum SourceChange {
     Scan(SourceKind),
     CodexActivity(PathBuf),
+    CodexArchives,
 }
 
 #[derive(Message)]
@@ -1211,6 +1263,7 @@ impl ProviderConversationChanged {
 struct SourceChanges {
     scans: HashSet<SourceKind>,
     codex_activity: HashSet<PathBuf>,
+    codex_archives: bool,
 }
 
 impl SourceChanges {
@@ -1222,31 +1275,33 @@ impl SourceChanges {
             SourceChange::CodexActivity(path) => {
                 self.codex_activity.insert(path);
             }
+            SourceChange::CodexArchives => self.codex_archives = true,
         }
     }
 
     fn extend(&mut self, changes: Self) {
         self.scans.extend(changes.scans);
         self.codex_activity.extend(changes.codex_activity);
+        self.codex_archives |= changes.codex_archives;
     }
 
     fn is_empty(&self) -> bool {
-        self.scans.is_empty() && self.codex_activity.is_empty()
+        self.scans.is_empty() && self.codex_activity.is_empty() && !self.codex_archives
     }
 
     fn debounce(&self) -> Duration {
-        if self.codex_activity.is_empty() {
-            SCAN_DEBOUNCE
-        } else {
+        if self.scans.is_empty() && !self.codex_archives && !self.codex_activity.is_empty() {
             ACTIVITY_REFRESH_INTERVAL
+        } else {
+            SCAN_DEBOUNCE
         }
     }
 
     fn max_latency(&self) -> Duration {
-        if self.codex_activity.is_empty() {
-            SCAN_MAX_LATENCY
-        } else {
+        if self.scans.is_empty() && !self.codex_archives && !self.codex_activity.is_empty() {
             ACTIVITY_REFRESH_INTERVAL
+        } else {
+            SCAN_MAX_LATENCY
         }
     }
 }
@@ -1313,13 +1368,17 @@ fn activate(
         return;
     }
     if let Ok((entity, mut runtime, paths)) = runtime.single_mut() {
-        if runtime.sources != sources || runtime.watch_codex_activity != watch_codex_activity {
+        if runtime.sources != sources
+            || runtime.watch_codex_activity != watch_codex_activity
+            || runtime.manager != manager
+        {
             let requested = sources
                 .difference(&runtime.sources)
                 .copied()
                 .collect::<HashSet<_>>();
             runtime.sources = sources;
             runtime.watch_codex_activity = watch_codex_activity;
+            runtime.manager = manager;
             runtime.ensure_watches(paths);
             if !requested.is_empty() {
                 commands.entity(entity).insert(ScanRequested(requested));
@@ -1342,20 +1401,8 @@ fn activate(
             if !event.kind.is_create() && !event.kind.is_modify() && !event.kind.is_remove() {
                 return;
             }
-            let mut sources = watched_paths.sources(&event.paths);
-            if event.kind.is_modify()
-                && event
-                    .paths
-                    .iter()
-                    .all(|path| path.starts_with(watched_paths.codex.join("sessions")))
-            {
-                sources.remove(&SourceKind::Codex);
-                for path in event.paths {
-                    let _ = sender.send(SourceChange::CodexActivity(path));
-                }
-            }
-            for source in sources {
-                let _ = sender.send(SourceChange::Scan(source));
+            for change in watched_paths.changes(&event) {
+                let _ = sender.send(change);
             }
         });
     let mut runtime = Runtime {
@@ -1364,6 +1411,7 @@ fn activate(
         watched: HashMap::new(),
         sources: sources.clone(),
         watch_codex_activity,
+        manager,
     };
     runtime.ensure_watches(&paths);
     let mut entity = commands.spawn((Name::new("ACP provider session catalog"), runtime, paths));
@@ -1404,17 +1452,23 @@ fn mark_activation_dirty(
     mut removed_targets: RemovedComponents<vmux_ecs::EntityTarget<Session>>,
     mut dirty: ResMut<ActivationDirty>,
 ) {
+    let manager_removed = removed_managers.read().count() > 0;
+    let view_removed = removed_views.read().count() > 0;
+    let ready_removed = removed_ready.read().count() > 0;
+    let session_removed = removed_sessions.read().count() > 0;
+    let provider_removed = removed_providers.read().count() > 0;
+    let target_removed = removed_targets.read().count() > 0;
     let changed = acp.is_changed()
         || !managers.is_empty()
         || !views.is_empty()
         || !sessions.is_empty()
         || !targets.is_empty()
-        || removed_managers.read().next().is_some()
-        || removed_views.read().next().is_some()
-        || removed_ready.read().next().is_some()
-        || removed_sessions.read().next().is_some()
-        || removed_providers.read().next().is_some()
-        || removed_targets.read().next().is_some();
+        || manager_removed
+        || view_removed
+        || ready_removed
+        || session_removed
+        || provider_removed
+        || target_removed;
     if changed {
         dirty.0 = true;
     }
@@ -1447,6 +1501,12 @@ fn watch(
         .retain(|source| runtime.sources.contains(source));
     if !runtime.sources.contains(&SourceKind::Codex) && !runtime.watch_codex_activity {
         changes.codex_activity.clear();
+    }
+    if changes.scans.contains(&SourceKind::Codex) {
+        changes.codex_archives = false;
+    }
+    if changes.codex_archives && runtime.manager && runtime.sources.contains(&SourceKind::Codex) {
+        commands.entity(entity).insert(CodexArchiveRefreshRequested);
     }
     runtime.ensure_watches(paths);
     for path in changes.codex_activity {
@@ -1553,7 +1613,6 @@ fn finish_archives(
     mut snapshot: ResMut<SourceSnapshot>,
     mut overlay: ResMut<ArchiveOverlay>,
     runtime: Single<Entity, With<Runtime>>,
-    mut requested: Query<&mut ScanRequested, With<Runtime>>,
     mut completed: MessageWriter<ProviderArchiveCompleted>,
     mut commands: Commands,
 ) {
@@ -1572,13 +1631,9 @@ fn finish_archives(
                 }) {
                     session.archive = Some(archive);
                 }
-                if let Ok(mut requested) = requested.get_mut(*runtime) {
-                    requested.0.insert(SourceKind::Codex);
-                } else {
-                    commands
-                        .entity(*runtime)
-                        .insert(ScanRequested::one(SourceKind::Codex));
-                }
+                commands
+                    .entity(*runtime)
+                    .insert(CodexArchiveRefreshRequested);
             }
             Err(error) => {
                 bevy::log::warn!("failed to archive Codex session: {error}");
@@ -1593,6 +1648,60 @@ fn finish_archives(
         });
         commands.entity(entity).despawn();
     }
+}
+
+fn refresh_codex_archives(
+    runtime: Single<
+        (Entity, &SourcePaths),
+        (
+            With<Runtime>,
+            With<CodexArchiveRefreshRequested>,
+            Without<CodexArchiveRefreshTask>,
+        ),
+    >,
+    proxy: Option<Res<EventLoopProxyWrapper>>,
+    mut commands: Commands,
+) {
+    let (entity, paths) = *runtime;
+    let task = CodexArchiveRefreshTask::spawn(
+        paths.codex.clone(),
+        proxy.as_deref().map(|proxy| (**proxy).clone()),
+    );
+    commands
+        .entity(entity)
+        .remove::<CodexArchiveRefreshRequested>()
+        .insert(task);
+}
+
+fn finish_codex_archives(
+    task: Single<(Entity, &mut CodexArchiveRefreshTask)>,
+    mut snapshot: ResMut<SourceSnapshot>,
+    mut overlay: ResMut<ArchiveOverlay>,
+    mut commands: Commands,
+) {
+    let (entity, mut task) = task.into_inner();
+    let Some(result) = future::block_on(future::poll_once(&mut task.task)) else {
+        return;
+    };
+    match result {
+        Ok(Some(archives)) => {
+            if let Some(current) = snapshot.0.get(&SourceKind::Codex) {
+                let mut sessions = current.clone();
+                for session in &mut sessions {
+                    if let Some(archive) = archives.get(&session.sid) {
+                        session.archive = Some(*archive);
+                    }
+                }
+                overlay.apply(SourceKind::Codex, task.started_at, &mut sessions);
+                if current != &sessions {
+                    snapshot.0.insert(SourceKind::Codex, sessions);
+                }
+            }
+        }
+        Ok(None) => {}
+        Err(error) => bevy::log::warn!("failed to refresh Codex archives: {error}"),
+    }
+    commands.entity(entity).remove::<CodexArchiveRefreshTask>();
 }
 
 fn scan(
@@ -1687,7 +1796,9 @@ fn project(
     mut removed_duplicates: RemovedComponents<SessionDuplicate>,
     mut catalog: ResMut<ProviderCatalog>,
 ) {
-    let removed = removed.read().next().is_some() || removed_duplicates.read().next().is_some();
+    let session_removed = removed.read().count() > 0;
+    let duplicate_removed = removed_duplicates.read().count() > 0;
+    let removed = session_removed || duplicate_removed;
     if !snapshot.is_changed()
         && !acp.is_changed()
         && changed.is_empty()
@@ -2331,6 +2442,7 @@ mod tests {
             watched: HashMap::new(),
             sources: SourceKind::ALL.into_iter().collect(),
             watch_codex_activity: false,
+            manager: true,
         };
 
         runtime.ensure_watches(&paths);
@@ -2357,6 +2469,7 @@ mod tests {
             watched: HashMap::new(),
             sources: SourceKind::ALL.into_iter().collect(),
             watch_codex_activity: false,
+            manager: true,
         };
 
         runtime.ensure_watches(&paths);
@@ -2373,6 +2486,37 @@ mod tests {
         assert_eq!(
             runtime.watched.get(&paths.codex.join("sessions")),
             Some(&true)
+        );
+    }
+
+    #[test]
+    fn codex_watch_classifies_only_catalog_inputs() {
+        let home = tempfile::tempdir().unwrap();
+        let paths = SourcePaths {
+            codex: home.path().join(".codex"),
+            claude: home.path().join(".claude"),
+            vibe: home.path().join(".vibe"),
+        };
+        let modified = notify::EventKind::Modify(notify::event::ModifyKind::Any);
+        let rollout = paths
+            .codex
+            .join("sessions/2026/11/01/rollout-session-id.jsonl");
+
+        assert_eq!(
+            paths.change(&modified, &paths.codex.join("logs_2.sqlite-wal")),
+            None
+        );
+        assert_eq!(
+            paths.change(&modified, &paths.codex.join("state_5.sqlite-wal")),
+            Some(SourceChange::CodexArchives)
+        );
+        assert_eq!(
+            paths.change(&modified, &paths.codex.join("session_index.jsonl")),
+            Some(SourceChange::Scan(SourceKind::Codex))
+        );
+        assert_eq!(
+            paths.change(&modified, &rollout),
+            Some(SourceChange::CodexActivity(rollout))
         );
     }
 

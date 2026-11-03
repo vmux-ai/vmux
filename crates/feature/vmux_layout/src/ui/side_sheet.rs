@@ -29,9 +29,9 @@ use super::window_drag::WindowDragRegion;
 #[component]
 fn SideSheetGrab(mut resizing: Signal<bool>) -> Element {
     let handle_class = if resizing() {
-        "h-9 w-1 rounded-full bg-foreground/45 scale-110"
+        "h-9 w-1 scale-110 rounded-full bg-foreground/45 opacity-100"
     } else {
-        "h-8 w-1 rounded-full bg-foreground/25 transition-[background-color,transform] duration-150 group-hover:bg-foreground/35"
+        "h-8 w-1 rounded-full bg-foreground/35 opacity-0 transition-[background-color,opacity,transform] duration-150 group-hover:opacity-100"
     };
     rsx! {
         div {
@@ -74,9 +74,11 @@ impl StackReveal {
 #[component]
 pub(super) fn SideSheetView() -> Element {
     let layout = LayoutUi::current();
-    let ui = layout.value();
-    let state = ui.layout.unwrap_or_default();
-    if !ui.overlay_ready(&layout.error()) || !state.side_sheet_open {
+    let geometry = layout.use_selector(|ui| ui.layout);
+    let Some(state) = geometry() else {
+        return rsx! {};
+    };
+    if !state.side_sheet_open {
         return rsx! {};
     }
 
@@ -86,28 +88,57 @@ pub(super) fn SideSheetView() -> Element {
 #[component]
 fn SideSheetContent() -> Element {
     let layout = LayoutUi::current();
-    let ui = layout.value();
-    let state = ui.layout.unwrap_or_default();
-    let side_sheet = ui.side_sheet.unwrap_or_default();
+    let sheet = layout.use_selector(|ui| {
+        (
+            ui.layout,
+            ui.side_sheet.clone(),
+            ui.spaces.clone(),
+            ui.bookmarks.clone(),
+            ui.bookmark_edit.clone(),
+            ui.space_form.clone(),
+            ui.active_session.clone(),
+            ui.update.clone(),
+        )
+    });
+    let (
+        geometry,
+        side_sheet,
+        spaces,
+        bookmarks,
+        bookmark_edit,
+        space_form,
+        active_session,
+        update_phase,
+    ) = sheet();
+    let state = geometry.unwrap_or_default();
+    let side_sheet = side_sheet.unwrap_or_default();
     let active_space = side_sheet.active_space;
-    let spaces = ui.spaces;
     let panes = side_sheet.panes;
-    let bookmarks = ui.bookmarks;
-    let bookmark_edit = ui.bookmark_edit;
-    let space_form = ui.space_form;
-    let active_session = ui.active_session;
+    let stack_order = panes
+        .iter()
+        .flat_map(|pane| pane.stacks.iter().map(|stack| (pane.id, stack.id)))
+        .collect::<Vec<_>>();
+    use_effect(use_reactive!(|stack_order| {
+        let _ = stack_order;
+        vmux_ui::animation::Movement::transition("vmux-side-sheet");
+    }));
     let side_sheet_error = layout.error();
-    let update_phase = ui.update;
     let reveal = StackReveal {
         settled: use_signal(|| None::<StackRevealTarget>),
     };
+    let reveal_target = layout.use_selector(|ui| {
+        (
+            ui.layout.unwrap_or_default().side_sheet_open,
+            ui.side_sheet.as_ref().and_then(|sheet| sheet.reveal),
+        )
+    });
     use_effect(move || {
-        let ui = layout.value();
-        if !ui.layout.unwrap_or_default().side_sheet_open {
+        let (open, target) = reveal_target();
+        if !open {
             reveal.forget();
             return;
         }
-        let Some(target) = ui.side_sheet.unwrap_or_default().reveal else {
+        let Some(target) = target else {
             return;
         };
         reveal.follow(target);
@@ -116,12 +147,13 @@ fn SideSheetContent() -> Element {
     let sheet_left = state.window_pad_left;
     let mut sheet_resizing = use_signal(|| false);
     let side_sheet_vars = format!(
-        "--vmux-side-sheet-width:{}px;--vmux-side-sheet-left:{}px;--vmux-side-sheet-top:{}px;--vmux-side-sheet-bottom:{}px;--vmux-side-sheet-pad-top:{}px;",
+        "--vmux-side-sheet-width:{}px;--vmux-side-sheet-left:{}px;--vmux-side-sheet-top:{}px;--vmux-side-sheet-bottom:{}px;--vmux-side-sheet-pad-top:{}px;--vmux-side-sheet-content-width:{}px;",
         host_sheet_width,
         state.window_pad_left,
         state.window_pad_top,
         state.window_pad_bottom,
         crate::event::SPACES_ROW_HEIGHT_PX,
+        state.side_sheet_content_width.max(host_sheet_width),
     );
     let active_pane = side_sheet.active_pane;
     let drag_state = use_signal(|| None::<BookmarkDragState>);
@@ -132,7 +164,7 @@ fn SideSheetContent() -> Element {
     rsx! {
         aside {
             id: "vmux-side-sheet",
-            class: "@container pointer-events-auto fixed left-[var(--vmux-side-sheet-left)] top-[var(--vmux-side-sheet-top)] bottom-[var(--vmux-side-sheet-bottom)] min-h-0 overflow-visible w-[var(--vmux-side-sheet-width)]",
+            class: "pointer-events-auto fixed left-[var(--vmux-side-sheet-left)] top-[var(--vmux-side-sheet-top)] bottom-[var(--vmux-side-sheet-bottom)] min-h-0 overflow-visible w-[var(--vmux-side-sheet-width)]",
             style: "{side_sheet_vars}",
             WindowDragRegion {
                 id: "side-sheet-titlebar",
@@ -141,7 +173,8 @@ fn SideSheetContent() -> Element {
                 style: "left:80px;right:4px;",
             }
             SideSheetGrab { resizing: sheet_resizing }
-            div { class: "flex h-full min-h-0 flex-col pt-[var(--vmux-side-sheet-pad-top)]",
+            div { class: "h-full min-h-0 w-full overflow-hidden",
+            div { class: "@container flex h-full min-h-0 w-[var(--vmux-side-sheet-content-width)] flex-col pt-[var(--vmux-side-sheet-pad-top)]",
                 div {
                     class: "scrollbar-hidden flex min-h-0 flex-1 flex-col overflow-x-hidden overflow-y-auto pb-3 pl-2 pt-2 text-foreground @max-[12rem]:pl-1 @max-[12rem]:pt-1",
                     ..BookmarkDragState::listeners(drag_state),
@@ -178,6 +211,7 @@ fn SideSheetContent() -> Element {
                 if let Some(phase) = update_phase {
                     UpdateNoticeFooter { phase }
                 }
+            }
             }
         }
         if sheet_resizing() {
@@ -420,7 +454,8 @@ fn SpaceRenameInput(form: SpaceFormState) -> Element {
     let submission = SpaceRenameSubmission(form.clone());
     let enter = submission.clone();
     let blur = submission.clone();
-    let dismiss_revision = LayoutUi::current().value().overlay_dismiss_revision;
+    let dismiss_revision =
+        LayoutUi::current().use_selector(|state| state.overlay_dismiss_revision)();
     let mut observed_dismiss_revision = use_signal(|| dismiss_revision);
     use_effect(move || {
         if dismiss_revision <= *observed_dismiss_revision.peek() {
@@ -568,7 +603,7 @@ fn PaneSection(pane: SideSheetPane, index: usize) -> Element {
                     Collapsible { expanded,
                         div { class: "flex flex-col",
                             for stack in pane.stacks.iter() {
-                                SideSheetStackRow { stack: stack.clone(), pane_id }
+                                SideSheetStackRow { key: "{stack.id}", stack: stack.clone(), pane_id }
                             }
                             NewStackRow { pane_id }
                         }

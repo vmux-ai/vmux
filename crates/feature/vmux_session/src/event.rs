@@ -713,6 +713,7 @@ mod tests {
                 branch: "main".into(),
                 cross_runtime: true,
                 url: "vmux://sessions/claude/sid-9".into(),
+                ..Default::default()
             }],
             offset: 0,
             total: 1,

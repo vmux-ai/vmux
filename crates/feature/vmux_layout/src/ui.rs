@@ -46,11 +46,8 @@ pub fn Page() -> Element {
     use_theme();
     let layout_ui = LayoutUi::use_state();
     layout_ui.provide();
-    let center_offset = layout_ui
-        .value()
-        .layout
-        .unwrap_or_default()
-        .main_cef_center_offset();
+    let layout = layout_ui.use_selector(|state| state.layout.unwrap_or_default());
+    let center_offset = layout().main_cef_center_offset();
 
     rsx! {
         div {
@@ -66,15 +63,21 @@ pub fn Page() -> Element {
 
 #[component]
 fn ExtensionPopup() -> Element {
-    let ui = LayoutUi::current().value();
-    if ui.extension_popup.id.is_empty() {
+    let popup = LayoutUi::current().use_selector(|state| {
+        (
+            state.extension_popup.clone(),
+            state.extension_popup_size.clone(),
+        )
+    });
+    let (popup, preferred_size) = popup();
+    if popup.id.is_empty() {
         return rsx! {};
     }
 
     rsx! {
         ExtensionPopupModal {
-            popup: ui.extension_popup,
-            preferred_size: ui.extension_popup_size,
+            popup,
+            preferred_size,
         }
     }
 }
@@ -88,7 +91,8 @@ pub(super) fn LayoutDropdown(
     on_dismiss: EventHandler<()>,
     children: Element,
 ) -> Element {
-    let dismiss_revision = LayoutUi::current().value().overlay_dismiss_revision;
+    let dismiss_revision =
+        LayoutUi::current().use_selector(|state| state.overlay_dismiss_revision)();
     let mut observed_dismiss_revision = use_signal(|| dismiss_revision);
     use_effect(move || {
         if dismiss_revision <= *observed_dismiss_revision.peek() {

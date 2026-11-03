@@ -3,8 +3,9 @@ use std::path::{Path, PathBuf};
 use bevy::prelude::*;
 use bevy_cef::prelude::*;
 use vmux_ecs::page_open::{PageOpenError, PageOpenHandled, PageOpenSet, PageOpenTask};
+use vmux_ecs::persistence::PageRestore;
 use vmux_ecs::profile::Projects;
-use vmux_ecs::{LastVisitedAt, PageMetadata, Url};
+use vmux_ecs::{LastVisitedAt, PageMetadata, PageNavigation, Url};
 use vmux_flex::prelude::*;
 use vmux_layout::Browser;
 
@@ -20,7 +21,12 @@ pub(super) struct PageOpenPlugin;
 impl Plugin for PageOpenPlugin {
     fn build(&self, app: &mut App) {
         app.add_message::<vmux_ecs::event::RecordVisitRequest>()
-            .add_systems(Update, handle_file.in_set(PageOpenSet::HandleKnownPages));
+            .add_systems(
+                Update,
+                handle_file
+                    .in_set(PageOpenSet::HandleKnownPages)
+                    .after(vmux_layout::warm_page::PrewarmPageOpenSet),
+            );
     }
 }
 
@@ -28,27 +34,77 @@ type PendingPageOpen = (Without<PageOpenHandled>, Without<PageOpenError>);
 type RecentVisits<'w, 's> =
     Query<'w, 's, (&'static PageMetadata, &'static LastVisitedAt), (With<Url>, Without<FileView>)>;
 
+type ExistingViews<'w, 's> = Query<
+    'w,
+    's,
+    (
+        &'static FileView,
+        &'static mut PageMetadata,
+        Option<&'static vmux_ecs::WorkspaceKind>,
+        Has<vmux_layout::hosted_page::SurfaceBlocked>,
+        Has<vmux_layout::hosted_page::SurfaceHandoff>,
+        Has<vmux_ecs::PageTransition>,
+    ),
+>;
+
 #[derive(bevy::ecs::system::SystemParam)]
 struct FileOpenContext<'w, 's> {
+    restored: Query<'w, 's, &'static super::explorer::ArchivedEditorState>,
+    tabs: vmux_layout::tab::TabHierarchy<'w, 's>,
+    navigations: Query<'w, 's, &'static PageNavigation>,
     children: Query<'w, 's, &'static Children>,
-    views: Query<'w, 's, (&'static FileView, &'static mut PageMetadata)>,
+    currents: Query<'w, 's, &'static vmux_layout::page_slot::Current>,
+    transitions: Query<'w, 's, (), With<vmux_layout::page_slot::Transition>>,
+    views: ExistingViews<'w, 's>,
+    stack_workspaces: Query<'w, 's, (Option<&'static vmux_ecs::WorkspaceKind>, Has<PageRestore>)>,
     visits: RecentVisits<'w, 's>,
     projects: Projects<'w, 's>,
+    time: Res<'w, Time>,
     commands: Commands<'w, 's>,
     record_writer: MessageWriter<'w, vmux_ecs::event::RecordVisitRequest>,
 }
 
-fn new_file_view_bundle(url: &str, path: PathBuf) -> impl Bundle {
+impl FileOpenContext<'_, '_> {
+    fn reusable_view(&self, stack: Entity) -> Option<Entity> {
+        if self.transitions.contains(stack) {
+            return None;
+        }
+        if let Ok(current) = self.currents.get(stack) {
+            return current
+                .surface()
+                .filter(|surface| self.settled_view(*surface));
+        }
+        let children = self.children.get(stack).ok()?;
+        let mut reusable = children.iter().filter(|child| self.settled_view(*child));
+        let view = reusable.next()?;
+        reusable.next().is_none().then_some(view)
+    }
+
+    fn settled_view(&self, entity: Entity) -> bool {
+        self.views
+            .get(entity)
+            .is_ok_and(|(_, _, _, blocked, handoff, transition)| {
+                !blocked && !handoff && !transition
+            })
+    }
+}
+
+fn new_file_view_bundle(
+    url: &str,
+    path: PathBuf,
+    workspace: vmux_ecs::WorkspaceKind,
+) -> impl Bundle {
+    let file = FileView { path };
+    let icon = file.page_icon();
     let title = if url.starts_with("vmux://") {
         url.to_string()
     } else {
-        path.file_name()
-            .map(|name| name.to_string_lossy().to_string())
-            .unwrap_or_else(|| path.to_string_lossy().to_string())
+        file.page_title()
     };
     (
         (
-            FileView { path },
+            file,
+            workspace,
             FileViewport {
                 top_row: 0,
                 rows: 0,
@@ -65,7 +121,7 @@ fn new_file_view_bundle(url: &str, path: PathBuf) -> impl Bundle {
             PageMetadata {
                 title,
                 url: url.to_string(),
-                icon: vmux_api::PageIcon::None,
+                icon,
                 bg_color: None,
             },
             vmux_ecs::page::HostsPage,
@@ -89,10 +145,17 @@ fn new_file_view_bundle(url: &str, path: PathBuf) -> impl Bundle {
 }
 
 fn handle_file(
-    tasks: Query<(Entity, &PageOpenTask), PendingPageOpen>,
+    tasks: Query<(Entity, &PageOpenTask, Has<PageRestore>), PendingPageOpen>,
     mut context: FileOpenContext,
 ) {
-    for (entity, task) in &tasks {
+    for (entity, task, restoring) in &tasks {
+        if !context
+            .navigations
+            .get(task.stack)
+            .is_ok_and(|navigation| navigation.matches(task.id))
+        {
+            continue;
+        }
         let knowledge_root = vmux_knowledge::KnowledgeVault::user().into_root();
         let knowledge_landing = if task.url.trim_end_matches('/')
             == vmux_knowledge::KnowledgePlugin::URL.trim_end_matches('/')
@@ -101,11 +164,28 @@ fn handle_file(
         } else {
             None
         };
+        let restored_path = context
+            .restored
+            .get(task.stack)
+            .ok()
+            .map(|state| PathBuf::from(&state.active));
+        let file_landing = if task.url.trim_end_matches('/') == "file:" {
+            context
+                .tabs
+                .startup_dir(task.stack)
+                .filter(|path| !path.is_empty())
+                .map(PathBuf::from)
+                .or_else(|| std::env::current_dir().ok())
+                .map(|directory| CodeLanding::select(&directory))
+        } else {
+            None
+        };
         let Some(target) = FilePageTarget::resolve(
             &task.url,
             context.projects.path(),
             &knowledge_root,
             knowledge_landing.as_deref(),
+            file_landing.as_deref(),
         ) else {
             continue;
         };
@@ -115,19 +195,41 @@ fn handle_file(
             });
             continue;
         };
-        let clean_url = task.url.split('#').next().unwrap_or(&task.url).to_string();
-        let page_url = if clean_url.trim_end_matches('/')
+        let path = restored_path.unwrap_or(path);
+        let (persisted_workspace, stack_restoring) = context
+            .stack_workspaces
+            .get(task.stack)
+            .unwrap_or((None, false));
+        let workspace = if task.url.trim_end_matches('/')
             == vmux_knowledge::KnowledgePlugin::URL.trim_end_matches('/')
+        {
+            vmux_ecs::WorkspaceKind::Knowledge
+        } else if restoring || stack_restoring {
+            persisted_workspace.copied().unwrap_or_else(|| {
+                let knowledge_root = vmux_path::PathIdentity::resolve(&knowledge_root);
+                let path = vmux_path::PathIdentity::resolve(&path);
+                if path.as_path().starts_with(knowledge_root.as_path()) {
+                    vmux_ecs::WorkspaceKind::Knowledge
+                } else {
+                    vmux_ecs::WorkspaceKind::Editor
+                }
+            })
+        } else {
+            vmux_ecs::WorkspaceKind::Editor
+        };
+        context.commands.entity(task.stack).insert(workspace);
+        let clean_url = task.url.split('#').next().unwrap_or(&task.url).to_string();
+        let page_url = if clean_url.trim_end_matches('/') == "file:"
+            || context.restored.contains(task.stack)
+            || clean_url.trim_end_matches('/')
+                == vmux_knowledge::KnowledgePlugin::URL.trim_end_matches('/')
         {
             FileView { path: path.clone() }.url()
         } else {
             clean_url.clone()
         };
         if !path.is_dir() {
-            let title = path
-                .file_name()
-                .map(|name| name.to_string_lossy().to_string())
-                .unwrap_or_else(|| path.to_string_lossy().to_string());
+            let title = FileView { path: path.clone() }.page_title();
             context
                 .record_writer
                 .write(vmux_ecs::event::RecordVisitRequest {
@@ -136,14 +238,14 @@ fn handle_file(
                 });
         }
         let pending = PendingGoto::from_url(&task.url);
-        let view = match context
-            .children
-            .get(task.stack)
-            .ok()
-            .and_then(|children| children.iter().find(|&child| context.views.contains(child)))
-        {
+        let view = match context.reusable_view(task.stack) {
             Some(view) => {
-                if let Ok((file_view, mut metadata)) = context.views.get_mut(view) {
+                if let Ok((file_view, mut metadata, current_workspace, _, _, _)) =
+                    context.views.get_mut(view)
+                {
+                    if current_workspace.copied() != Some(workspace) {
+                        context.commands.entity(view).insert(workspace);
+                    }
                     if file_view.path != path {
                         let request = FileNavigateRequest::new(view, path, 0);
                         let request = if page_url.starts_with("vmux://") {
@@ -161,13 +263,41 @@ fn handle_file(
                 view
             }
             None => {
-                context.commands.entity(task.stack).despawn_children();
-                context
+                let previous = context
+                    .children
+                    .get(task.stack)
+                    .map(|children| children.iter().collect::<Vec<_>>())
+                    .unwrap_or_default();
+                for surface in &previous {
+                    context
+                        .commands
+                        .entity(*surface)
+                        .try_insert(vmux_layout::hosted_page::SurfaceBlocked);
+                }
+                let view = context
                     .commands
-                    .spawn((new_file_view_bundle(&page_url, path), ChildOf(task.stack)))
-                    .id()
+                    .spawn((
+                        new_file_view_bundle(&page_url, path, workspace),
+                        ChildOf(task.stack),
+                    ))
+                    .id();
+                context.commands.entity(view).insert((
+                    vmux_layout::hosted_page::SurfaceHandoff::new(
+                        previous,
+                        task.id,
+                        0,
+                        context.time.elapsed(),
+                    ),
+                    Visibility::Hidden,
+                ));
+                view
             }
         };
+        let restored_stack = task.stack;
+        context.commands.queue(super::explorer::RestoreEditors {
+            stack: restored_stack,
+            view,
+        });
         if let Some(pending) = pending {
             context.commands.entity(view).insert(pending);
         }
@@ -186,6 +316,7 @@ impl FilePageTarget {
         projects: Result<&Path, String>,
         knowledge_root: &Path,
         knowledge_landing: Option<&Path>,
+        file_landing: Option<&Path>,
     ) -> Option<Self> {
         if ProjectRoute::is_page(url) {
             return Some(match projects {
@@ -210,6 +341,12 @@ impl FilePageTarget {
             return None;
         }
         if url.trim_end_matches('/') == "file:" {
+            if let Some(path) = file_landing {
+                return Some(Self {
+                    path: Some(path.to_path_buf()),
+                    error: String::new(),
+                });
+            }
             return Some(match projects {
                 Ok(projects) => Self {
                     path: Some(projects.to_path_buf()),
@@ -222,6 +359,38 @@ impl FilePageTarget {
             path: vmux_path::FileUrl::parse(url).and_then(|file| file.path()),
             error: format!("malformed file URL '{url}'"),
         })
+    }
+}
+
+struct CodeLanding;
+
+impl CodeLanding {
+    fn select(directory: &Path) -> PathBuf {
+        for entry in [
+            "README.md",
+            "readme.md",
+            "README.mdx",
+            "readme.mdx",
+            "README.rst",
+            "README.txt",
+            "README",
+            "src/main.rs",
+            "src/lib.rs",
+            "src/main.tsx",
+            "src/main.ts",
+            "src/index.tsx",
+            "src/index.ts",
+            "src/index.js",
+            "main.py",
+            "main.go",
+            "index.html",
+        ] {
+            let path = directory.join(entry);
+            if path.is_file() {
+                return path;
+            }
+        }
+        directory.to_path_buf()
     }
 }
 
@@ -283,12 +452,40 @@ mod tests {
 
     fn app() -> App {
         let mut app = App::new();
-        app.add_plugins((MinimalPlugins, NavigationPlugin, TabsPlugin, PageOpenPlugin));
+        app.add_plugins((
+            MinimalPlugins,
+            NavigationPlugin,
+            TabsPlugin,
+            PageOpenPlugin,
+            vmux_layout::hosted_page::HostedPagePlugin,
+        ));
         app.world_mut().spawn(crate::lsp::manager::LspManager::new(
             crate::lsp::LspDiagnosticsSender::default(),
             crate::lsp::server_request::ServerInputSender::default(),
         ));
         app
+    }
+
+    struct PageOpenFixture;
+
+    impl PageOpenFixture {
+        fn task(app: &mut App, stack: Entity, url: &str) -> PageOpenTask {
+            let id = PageOpenId::new();
+            app.world_mut()
+                .entity_mut(stack)
+                .insert(PageNavigation::new(id));
+            PageOpenTask {
+                id,
+                stack,
+                url: url.to_string(),
+                request_id: None,
+            }
+        }
+
+        fn spawn(app: &mut App, stack: Entity, url: &str) -> Entity {
+            let task = Self::task(app, stack, url);
+            app.world_mut().spawn(task).id()
+        }
     }
 
     struct EditorStack {
@@ -310,13 +507,28 @@ mod tests {
         }
 
         fn open(&mut self, url: &str) {
-            self.app.world_mut().spawn(PageOpenTask {
-                id: PageOpenId::new(),
-                stack: self.stack,
-                url: url.to_string(),
-                request_id: None,
-            });
+            PageOpenFixture::spawn(&mut self.app, self.stack, url);
             self.app.update();
+            let incoming = self
+                .app
+                .world()
+                .get::<Children>(self.stack)
+                .unwrap()
+                .iter()
+                .find(|child| {
+                    self.app
+                        .world()
+                        .get::<vmux_layout::hosted_page::SurfaceHandoff>(*child)
+                        .is_some()
+                });
+            if let Some(incoming) = incoming {
+                self.app.world_mut().entity_mut(incoming).insert((
+                    vmux_ecs::page::PageReady {},
+                    vmux_layout::hosted_page::SurfacePaintReady,
+                    vmux_layout::hosted_page::SurfacePresentationReady,
+                ));
+                self.app.update();
+            }
             self.app.update();
         }
 
@@ -382,12 +594,7 @@ mod tests {
     fn file_open_records_history_visit() {
         let mut app = app();
         let stack = app.world_mut().spawn_empty().id();
-        app.world_mut().spawn(PageOpenTask {
-            id: PageOpenId::new(),
-            stack,
-            url: "file:///etc/hostname#L3".to_string(),
-            request_id: None,
-        });
+        PageOpenFixture::spawn(&mut app, stack, "file:///etc/hostname#L3");
         app.update();
         let messages = app
             .world()
@@ -400,12 +607,69 @@ mod tests {
     }
 
     #[test]
-    fn files_root_opens_the_projects_directory() {
+    fn inner_editor_close_and_reopen_keep_the_page_and_page_archive_restores_all_tabs() {
+        let mut stack = EditorStack::showing("file:///tmp/first.rs");
+        stack.open("file:///tmp/second.rs");
+        let page = stack.page();
+        let close = vmux_ecs::page::CloseItemRequest::new(page);
+        stack.app.world_mut().trigger(close.clone());
+        stack.app.world_mut().flush();
+        stack.app.update();
+        assert!(close.handled());
+        assert_eq!(stack.pages(), vec![page]);
+        assert_eq!(
+            stack.open_editors(page),
+            vec![PathBuf::from("/tmp/first.rs")]
+        );
+        let reopen = vmux_ecs::page::ReopenItemRequest::new(page, 0);
+        stack.app.world_mut().trigger(reopen.clone());
+        stack.app.world_mut().flush();
+        stack.app.update();
+        assert!(reopen.handled());
+        assert_eq!(
+            stack.open_editors(page),
+            vec![
+                PathBuf::from("/tmp/first.rs"),
+                PathBuf::from("/tmp/second.rs")
+            ]
+        );
+        let archive = stack.app.world_mut().spawn_empty().id();
+        stack
+            .app
+            .world_mut()
+            .trigger(vmux_ecs::page::ArchiveCaptureRequest {
+                archive,
+                source: page,
+            });
+        stack.app.world_mut().flush();
+        stack.app.world_mut().entity_mut(page).despawn();
+        stack
+            .app
+            .world_mut()
+            .trigger(vmux_ecs::page::ArchiveRestoreRequest {
+                stack: stack.stack,
+                archive,
+            });
+        stack.app.world_mut().flush();
+        stack.open("file:///tmp/second.rs");
+        let restored = stack.page();
+        assert_eq!(
+            stack.open_editors(restored),
+            vec![
+                PathBuf::from("/tmp/first.rs"),
+                PathBuf::from("/tmp/second.rs")
+            ]
+        );
+        assert_eq!(stack.path(restored), PathBuf::from("/tmp/second.rs"));
+    }
+
+    #[test]
+    fn files_root_uses_projects_only_without_a_working_directory() {
         let projects = tempfile::tempdir().unwrap();
         let knowledge = tempfile::tempdir().unwrap();
 
         let target =
-            FilePageTarget::resolve("file://", Ok(projects.path()), knowledge.path(), None)
+            FilePageTarget::resolve("file://", Ok(projects.path()), knowledge.path(), None, None)
                 .unwrap();
 
         assert_eq!(target.path.as_deref(), Some(projects.path()));
@@ -413,18 +677,49 @@ mod tests {
     }
 
     #[test]
+    fn code_page_opens_the_readme_in_the_owning_spaces_working_directory() {
+        let working = tempfile::tempdir().unwrap();
+        let readme = working.path().join("README.md");
+        std::fs::write(&readme, "# Workspace\n").unwrap();
+        std::fs::create_dir(working.path().join("src")).unwrap();
+        std::fs::write(working.path().join("src/main.rs"), "fn main() {}\n").unwrap();
+        let mut stack = EditorStack::empty();
+        let tab = stack
+            .app
+            .world_mut()
+            .spawn(vmux_layout::tab::Tab {
+                name: "Workspace".to_string(),
+                startup_dir: Some(working.path().to_string_lossy().into_owned()),
+            })
+            .id();
+        stack
+            .app
+            .world_mut()
+            .entity_mut(stack.stack)
+            .insert(ChildOf(tab));
+
+        stack.open("file://");
+
+        let page = stack.page();
+        assert_eq!(stack.path(page), readme);
+        assert_eq!(stack.url(page), FileView { path: readme }.url());
+    }
+
+    #[test]
+    fn code_landing_uses_an_entry_file_then_the_directory_without_a_readme() {
+        let working = tempfile::tempdir().unwrap();
+        assert_eq!(CodeLanding::select(working.path()), working.path());
+        std::fs::create_dir(working.path().join("src")).unwrap();
+        let entry = working.path().join("src/main.rs");
+        std::fs::write(&entry, "fn main() {}\n").unwrap();
+        assert_eq!(CodeLanding::select(working.path()), entry);
+    }
+
+    #[test]
     fn claims_files_url_and_attaches_fileview() {
         let mut app = app();
         let stack = app.world_mut().spawn_empty().id();
-        let task = app
-            .world_mut()
-            .spawn(PageOpenTask {
-                id: PageOpenId::new(),
-                stack,
-                url: "file:///etc/hostname".to_string(),
-                request_id: None,
-            })
-            .id();
+        let task = PageOpenFixture::spawn(&mut app, stack, "file:///etc/hostname");
         app.update();
         assert!(app.world().get::<PageOpenHandled>(task).is_some());
         let mut query = app.world_mut().query::<(&ChildOf, &FileView)>();
@@ -437,18 +732,53 @@ mod tests {
     }
 
     #[test]
+    fn opening_editor_retains_the_previous_surface_until_paint() {
+        let mut app = app();
+        let navigation = PageOpenId::new();
+        let stack = app
+            .world_mut()
+            .spawn(vmux_ecs::PageNavigation::new(navigation))
+            .id();
+        let previous = app.world_mut().spawn((Browser, ChildOf(stack))).id();
+        app.world_mut().spawn(PageOpenTask {
+            id: navigation,
+            stack,
+            url: "file:///etc/hostname".to_string(),
+            request_id: None,
+        });
+
+        app.update();
+
+        assert!(app.world().get_entity(previous).is_ok());
+        assert!(
+            app.world()
+                .get::<vmux_layout::hosted_page::SurfaceBlocked>(previous)
+                .is_some()
+        );
+        let incoming = app
+            .world()
+            .get::<Children>(stack)
+            .unwrap()
+            .iter()
+            .find(|child| *child != previous)
+            .unwrap();
+        assert!(app.world().get::<FileView>(incoming).is_some());
+        assert!(
+            app.world()
+                .get::<vmux_layout::hosted_page::SurfaceHandoff>(incoming)
+                .is_some()
+        );
+        assert_eq!(
+            app.world().get::<Visibility>(incoming),
+            Some(&Visibility::Hidden)
+        );
+    }
+
+    #[test]
     fn ignores_non_files_url() {
         let mut app = app();
         let stack = app.world_mut().spawn_empty().id();
-        let task = app
-            .world_mut()
-            .spawn(PageOpenTask {
-                id: PageOpenId::new(),
-                stack,
-                url: "vmux://terminal/".to_string(),
-                request_id: None,
-            })
-            .id();
+        let task = PageOpenFixture::spawn(&mut app, stack, "vmux://terminal/");
         app.update();
         assert!(app.world().get::<PageOpenHandled>(task).is_none());
     }
@@ -478,6 +808,68 @@ mod tests {
             vmux_path::FileUrl::parse(&stack.url(page)).and_then(|url| url.path()),
             Some(expected)
         );
+        assert_eq!(
+            stack.app.world().get::<vmux_ecs::WorkspaceKind>(page),
+            Some(&vmux_ecs::WorkspaceKind::Knowledge)
+        );
+    }
+
+    #[test]
+    fn opening_the_same_knowledge_file_as_code_updates_its_workspace_context() {
+        let mut stack = EditorStack::showing(vmux_knowledge::KnowledgePlugin::URL);
+        let page = stack.page();
+        let file_url = stack.url(page);
+
+        stack.open(&file_url);
+
+        assert_eq!(stack.pages(), vec![page]);
+        assert_eq!(
+            stack.app.world().get::<vmux_ecs::WorkspaceKind>(page),
+            Some(&vmux_ecs::WorkspaceKind::Editor)
+        );
+        assert_eq!(
+            stack
+                .app
+                .world()
+                .get::<vmux_ecs::WorkspaceKind>(stack.stack),
+            Some(&vmux_ecs::WorkspaceKind::Editor)
+        );
+    }
+
+    #[test]
+    fn restoring_a_knowledge_file_accepts_task_or_stack_restore_ownership() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("note.md");
+        std::fs::write(&path, "# Note\n").unwrap();
+        for restore_on_stack in [false, true] {
+            let mut stack = EditorStack::empty();
+            stack
+                .app
+                .world_mut()
+                .entity_mut(stack.stack)
+                .insert(vmux_ecs::WorkspaceKind::Knowledge);
+            let url = vmux_path::FileUrl::from_path(&path, None, None, None);
+            let task = PageOpenFixture::task(&mut stack.app, stack.stack, &url);
+            if restore_on_stack {
+                stack
+                    .app
+                    .world_mut()
+                    .entity_mut(stack.stack)
+                    .insert(PageRestore);
+                stack.app.world_mut().spawn(task);
+            } else {
+                stack.app.world_mut().spawn((task, PageRestore));
+            }
+
+            stack.app.update();
+            stack.app.update();
+
+            let page = stack.page();
+            assert_eq!(
+                stack.app.world().get::<vmux_ecs::WorkspaceKind>(page),
+                Some(&vmux_ecs::WorkspaceKind::Knowledge)
+            );
+        }
     }
 
     #[test]
@@ -551,7 +943,7 @@ mod tests {
     }
 
     #[test]
-    fn a_stack_holding_no_editor_page_gets_a_fresh_one() {
+    fn a_stack_holding_no_editor_page_retires_its_surface_after_the_new_one_paints() {
         let mut stack = EditorStack::empty();
         let occupant = stack.app.world_mut().spawn(ChildOf(stack.stack)).id();
         stack.open("file:///etc/hostname");

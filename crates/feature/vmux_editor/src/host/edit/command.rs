@@ -266,6 +266,40 @@ pub enum EditCommand {
     AddCaretVertically(VerticalDirection),
 }
 
+impl EditCommand {
+    pub(crate) fn allowed_in_preview(&self) -> bool {
+        matches!(
+            self,
+            Self::Move(_)
+                | Self::Select(_)
+                | Self::SelectTextObject(_)
+                | Self::SwapSelectionEnds
+                | Self::SetSearch { .. }
+                | Self::SearchWord { .. }
+                | Self::OpenFind { .. }
+                | Self::ClearSearchHighlight
+                | Self::SetMark(_)
+                | Self::GotoMark { .. }
+                | Self::JumpList { .. }
+                | Self::ChangeList { .. }
+                | Self::ScrollViewport(_)
+                | Self::ScrollCursorTo(_)
+                | Self::SetMode(_)
+                | Self::GotoDefinition
+                | Self::FindReferences
+                | Self::Hover
+                | Self::FoldToggle
+                | Self::FoldOpen
+                | Self::FoldClose
+                | Self::Op {
+                    operator: Operator::Yank,
+                    ..
+                }
+                | Self::ExYank(_)
+        )
+    }
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum VerticalDirection {
     Up,

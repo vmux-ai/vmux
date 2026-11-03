@@ -51,7 +51,7 @@ pub enum UpdateStatus {
     },
 }
 
-#[vmux_api::ui_state(Default, patch = LayoutUiStatePatch, version = 4)]
+#[vmux_api::ui_state(Default, patch = LayoutUiStatePatch, version = 5)]
 pub struct LayoutUiState {
     pub layout: Option<LayoutGeometry>,
     pub stacks: Option<StackNavigationState>,
@@ -154,35 +154,9 @@ impl vmux_api::UiStateProjection<LayoutUiStatePatch> for LayoutUiState {
     }
 }
 
-impl LayoutUiState {
-    pub fn overlay_ready(&self, error: &Option<String>) -> bool {
-        let received = |ready| ready || error.is_some();
-        let layout_ready = received(self.layout.is_some());
-        let stacks_ready = received(self.stacks.is_some());
-        let tabs_ready = received(self.tab_strip.is_some());
-        let side_sheet_ready = received(self.side_sheet.is_some());
-        let layout = self.layout.unwrap_or_default();
-
-        layout_ready
-            && (!layout.header_visible() || (stacks_ready && tabs_ready))
-            && (!layout.side_sheet_open || side_sheet_ready)
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    fn state(header_open: bool, side_sheet_open: bool) -> LayoutUiState {
-        LayoutUiState {
-            layout: Some(LayoutGeometry {
-                header_open,
-                side_sheet_open,
-                ..Default::default()
-            }),
-            ..Default::default()
-        }
-    }
 
     #[test]
     fn patches_build_a_retained_tree() {
@@ -204,35 +178,5 @@ mod tests {
         assert_eq!(state.bookmark_menu.rename.revision, 4);
         assert_eq!(state.bookmark_menu.rename.uuid, "bookmark");
         assert_eq!(state.reload_revision, 7);
-    }
-
-    #[test]
-    fn overlay_waits_for_layout_state() {
-        assert!(!LayoutUiState::default().overlay_ready(&None));
-    }
-
-    #[test]
-    fn overlay_waits_for_visible_header_state() {
-        let mut state = state(true, false);
-
-        assert!(!state.overlay_ready(&None));
-        state.stacks = Some(Default::default());
-        assert!(!state.overlay_ready(&None));
-        state.tab_strip = Some(Default::default());
-        assert!(state.overlay_ready(&None));
-    }
-
-    #[test]
-    fn overlay_waits_for_visible_side_sheet_state() {
-        let mut state = state(false, true);
-
-        assert!(!state.overlay_ready(&None));
-        state.side_sheet = Some(Default::default());
-        assert!(state.overlay_ready(&None));
-    }
-
-    #[test]
-    fn closed_overlay_needs_only_layout_state() {
-        assert!(state(false, false).overlay_ready(&None));
     }
 }

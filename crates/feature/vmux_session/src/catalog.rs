@@ -544,8 +544,9 @@ fn project(
         conversation_title,
     ) in &sessions
     {
-        let conversation =
-            ConversationPreview::from(conversation_title, &transcripts.get(entity).messages);
+        let conversation = transcripts.read(entity, |transcript| {
+            ConversationPreview::from(conversation_title, &transcript.messages)
+        });
         let agent_name = agent
             .map(|agent| {
                 let fallback = profile

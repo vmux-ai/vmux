@@ -568,7 +568,7 @@ fn poll_loads(
         let repo_root = repo_root.to_string_lossy().into_owned();
         commands.trigger(UiInput {
             webview: entity,
-            payload: GitRepositoryRequest { path: repo_root },
+            payload: GitRepositoryRequest::at(repo_root),
         });
     }
 }

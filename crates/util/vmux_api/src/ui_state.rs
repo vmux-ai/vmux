@@ -2,11 +2,39 @@ pub trait UiState: crate::HostEvent + Clone + Send + Sync + 'static {
     type Update: Clone + Send + Sync + 'static;
 
     fn from_updates(previous: Option<Self>, updates: Vec<Self::Update>) -> Self;
-    fn retained(&self) -> Option<Self>;
+    fn retain(&mut self);
+
+    fn navigation_seed(&self) -> Option<Self> {
+        None
+    }
+    fn navigation_ready(&self) -> bool {
+        true
+    }
+
+    fn retained(&self) -> Option<Self> {
+        let mut retained = self.clone();
+        retained.retain();
+        Some(retained)
+    }
 }
 
 pub trait UiStateProjection<P>: Default {
     fn apply(&mut self, patch: P);
+
+    fn retain(&mut self) {}
+
+    fn navigation_seed(&self) -> Option<Self> {
+        None
+    }
+    fn navigation_ready(&self) -> bool {
+        true
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
+pub enum UiStateFrame<S, U> {
+    Snapshot(S),
+    Updates(Vec<U>),
 }
 
 pub trait UiStatePatch<T>: 'static {
@@ -58,6 +86,10 @@ mod tests {
                 self.text = text;
             }
         }
+
+        fn retain(&mut self) {
+            self.text.clear();
+        }
     }
 
     #[test]
@@ -78,5 +110,9 @@ mod tests {
 
         assert_eq!(state.value, 7);
         assert_eq!(state.text, "ready");
+
+        let state = TestProjectedState::from_updates(Some(state), vec![9u32.into()]);
+        assert_eq!(state.value, 9);
+        assert!(state.text.is_empty());
     }
 }

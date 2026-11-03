@@ -67,6 +67,7 @@ impl Plugin for SpacePlugin {
         .add_plugins(super::SpaceToolPlugin)
         .add_plugins(LayoutContractPlugin)
         .add_plugins(vmux_ecs::UiStatePlugin::<SpacesUiState>::default())
+        .add_plugins(vmux_ecs::UiStatePlugin::<vmux_ecs::event::ProjectNavigation>::default())
         .add_message::<CommandBarOpenRequest>()
         .add_message::<SpaceAttachRequest>()
         .add_message::<SpaceCreateRequest>()
@@ -193,7 +194,7 @@ fn open_command_bar(
     locale: Option<Res<ResolvedLocale>>,
     mut open: MessageWriter<CommandBarOpenRequest>,
 ) {
-    if requests.read().next().is_some() {
+    if requests.read().count() > 0 {
         let locale = locale
             .as_deref()
             .map(|locale| locale.0.clone())
@@ -655,14 +656,26 @@ fn project_activate(
     trigger: On<UiInput<ProjectActivateRequest>>,
     active: FocusedSpace,
     space_of_pane: SpaceOfPane,
+    scope: vmux_layout::window::WindowScope,
     spaces: Query<&SpaceId, With<Space>>,
     settings: Option<ResMut<AppSettings>>,
     mut saves: MessageWriter<SettingsSaveRequest>,
 ) {
+    let webview = trigger.event().webview;
     let pane_id = trigger.event().payload.pane_id;
-    let space = match pane_id {
-        Some(pane_id) => space_of_pane.resolve(&pane_id.to_string()),
-        None => active.entity(),
+    let space = if webview == Entity::PLACEHOLDER {
+        match pane_id {
+            Some(pane_id) => space_of_pane.resolve(&pane_id.to_string()),
+            None => active.entity(),
+        }
+    } else {
+        let origin = scope.current_space(webview);
+        match pane_id {
+            Some(pane_id) => space_of_pane
+                .resolve(&pane_id.to_string())
+                .filter(|space| Some(*space) == origin),
+            None => origin,
+        }
     };
     let space_id = space.and_then(|space| spaces.get(space).ok());
     let (Some(space_id), Some(mut settings)) = (space_id, settings) else {
@@ -680,15 +693,24 @@ fn project_activate(
 fn project_forget(
     trigger: On<UiInput<ProjectForgetRequest>>,
     active: FocusedSpace,
+    scope: vmux_layout::window::WindowScope,
+    spaces: Query<&SpaceId, With<Space>>,
     settings: Option<ResMut<AppSettings>>,
     mut saves: MessageWriter<SettingsSaveRequest>,
 ) {
-    let (Some(space_id), Some(mut settings)) = (active.id(), settings) else {
+    let webview = trigger.event().webview;
+    let space = if webview == Entity::PLACEHOLDER {
+        active.entity()
+    } else {
+        scope.current_space(webview)
+    };
+    let space_id = space.and_then(|space| spaces.get(space).ok());
+    let (Some(space_id), Some(mut settings)) = (space_id, settings) else {
         return;
     };
     let changed = settings
         .bypass_change_detection()
-        .forget_space_project(space_id, trigger.event().payload.path.trim());
+        .forget_space_project(&space_id.0, trigger.event().payload.path.trim());
     if changed {
         settings.set_changed();
         saves.write(SettingsSaveRequest);
@@ -1615,9 +1637,8 @@ mod tests {
     }
 
     fn run_project_request<T: Send + Sync + 'static>(app: &mut App, request: T) {
-        let webview = app.world_mut().spawn_empty().id();
         app.world_mut().trigger(UiInput {
-            webview,
+            webview: Entity::PLACEHOLDER,
             payload: request,
         });
         app.update();

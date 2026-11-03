@@ -24,9 +24,9 @@ pub use overlay::{Overlay, OverlayShownInline, OverlayState, WindowOverlay};
 pub use page_metadata::{PageIdentity, PageMetadata};
 #[cfg(all(host, feature = "host"))]
 pub use page_open::{
-    CefPageAttachRequest, PageOpenDeferred, PageOpenError, PageOpenHandled, PageOpenId,
-    PageOpenRequest, PageOpenSet, PageOpenTarget, PageOpenTask, PendingPrompt,
-    PendingPromptAttachments,
+    CefPageAttachRequest, PageNavigation, PageOpenDeferred, PageOpenError, PageOpenHandled,
+    PageOpenId, PageOpenRequest, PageOpenSet, PageOpenTarget, PageOpenTask, PageTransition,
+    PendingPrompt, PendingPromptAttachments,
 };
 #[cfg(all(host, feature = "host"))]
 pub use primitives::PrimitivesPlugin;
@@ -34,7 +34,8 @@ pub use process_id::ProcessId;
 #[cfg(all(host, feature = "host"))]
 pub use process_id::ProcessPresentationRequest;
 #[cfg(all(host, feature = "host"))]
-pub use ui_state::{UiState, UiStatePlugin, UiStateWrite};
+pub use ui_state::{UiState, UiStateFlushSet, UiStatePlugin, UiStateWrite, UiStateWriter};
+pub use workspace::WorkspaceKind;
 #[cfg(all(host, feature = "host"))]
 pub use workspace::{ComputeFocusSet, StackCommandSet, TabCommandSet};
 
@@ -64,6 +65,7 @@ pub mod overlay;
 pub mod page;
 #[cfg(all(host, feature = "host"))]
 mod page_driver;
+pub mod page_location;
 pub mod page_metadata;
 #[cfg(all(host, feature = "host"))]
 pub mod page_open;
@@ -86,5 +88,4 @@ pub mod terminal;
 mod ui_state;
 #[cfg(all(host, feature = "host"))]
 pub mod wake;
-#[cfg(all(host, feature = "host"))]
 pub mod workspace;

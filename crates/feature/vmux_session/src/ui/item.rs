@@ -29,7 +29,6 @@ pub fn UserBubble(
     #[props(extends = GlobalAttributes)] attributes: Vec<Attribute>,
     children: Element,
 ) -> Element {
-    let you = translate("team-you");
     rsx! {
         div { class: "chat-message-enter chat-user-bubble group flex w-full flex-row-reverse items-start justify-start gap-3 px-1 py-1 text-sm [contain-intrinsic-size:auto_160px] [contain:layout_paint_style] [content-visibility:auto]", ..attributes,
             Avatar {
@@ -37,11 +36,10 @@ pub fn UserBubble(
                 seed: avatar_name.clone(),
                 background: avatar_color,
                 alt: avatar_name.clone(),
-                class: "mt-0.5 h-8 w-8 text-[10px]".to_string(),
+                class: "mt-1 h-6 w-6 text-[8px]".to_string(),
             }
-            div { class: "relative min-w-0 max-w-[80%] flex-none pl-8",
-                div { class: "mb-1 text-right text-xs font-semibold text-foreground", "{you}" }
-                div { class: "flex min-w-0 flex-col items-end gap-2 text-left", {children} }
+            div { class: "relative min-w-0 max-w-[80%] flex-none",
+                div { class: "flex min-w-0 flex-col gap-2 rounded-2xl bg-foreground/[0.045] px-4 py-3 text-left", {children} }
                 MessageMeta { text: copy_text, created_at_ms, right: true }
             }
         }
@@ -66,10 +64,10 @@ pub fn AssistantTurn(
                 seed: agent_id,
                 background: avatar_background,
                 alt: name.clone(),
-                class: "mt-0.5 h-8 w-8 text-[10px]".to_string(),
+                class: "mt-0.5 h-6 w-6 text-[8px]".to_string(),
             }
-            div { class: "relative min-w-0 flex-1 pr-8",
-                div { class: "mb-1 text-xs font-semibold text-foreground", "{name}" }
+            div { class: "relative min-w-0 flex-1",
+                div { class: "mb-1 text-xs font-medium text-muted-foreground", "{name}" }
                 div { class: "flex min-w-0 flex-col gap-2.5", {children} }
                 MessageMeta { text: copy_text, created_at_ms }
             }
@@ -211,7 +209,7 @@ pub fn ChatItemRow(
                     }
                 }
                 if !text.is_empty() {
-                    div { class: "whitespace-pre-wrap px-1.5", "{text}" }
+                    div { class: "whitespace-pre-wrap break-words", "{text}" }
                 }
                 if !attachments.is_empty() {
                     div { class: "flex w-full flex-col gap-2",
@@ -289,14 +287,6 @@ pub fn TurnView(
             })
         })
         .flatten();
-    let latest_finished_tools = if turn.running {
-        None
-    } else {
-        turn.rows.last().and_then(|row| match row {
-            ChatTurnRow::FinishedTools { index, .. } => Some(*index),
-            _ => None,
-        })
-    };
     let duration_label = turn.duration_secs.map(|duration| {
         if turn.step_count == 0 {
             let elapsed = Elapsed(duration).to_string();
@@ -340,14 +330,14 @@ pub fn TurnView(
                         TurnBlock {
                             key: "{row.index()}",
                             streaming: live_text_index == Some(row.index()),
-                            expanded: latest_finished_tools == Some(row.index()),
+                            expanded: false,
                             row,
                         }
                     }
                     if turn.running && !reconnecting {
                         WorkingIndicator {}
                     } else if let Some(label) = duration_label {
-                        div { class: "flex items-center gap-2 text-sm text-muted-foreground/70",
+                        div { class: "flex items-center gap-2 text-xs text-muted-foreground/70",
                             span { class: "h-1.5 w-1.5 rounded-full bg-[color:var(--agent-accent)]" }
                             span { class: "tabular-nums", "{label}" }
                         }
@@ -391,7 +381,7 @@ pub fn WorkingIndicator() -> Element {
     let verb_text = verb();
     let elapsed_text = Elapsed(elapsed()).to_string();
     rsx! {
-        div { class: "flex items-center gap-2 px-1 text-sm text-muted-foreground",
+        div { class: "flex items-center gap-2 px-1 text-xs text-muted-foreground",
             span { class: "animate-pulse font-medium motion-reduce:animate-none", "{verb_text}" }
             span { class: "flex items-end gap-0.5 text-[color:var(--agent-accent)]",
                 span { class: "h-1 w-1 animate-bounce rounded-full bg-current motion-reduce:animate-none" }
@@ -524,7 +514,7 @@ fn FinishedToolCalls(calls: Vec<ChatToolCall>, open: bool) -> Element {
     let count = calls.len() as i64;
     rsx! {
         details { class: "disclosure", open,
-            summary { class: "flex cursor-pointer select-none items-center gap-2 rounded-xl px-2 py-1 text-sm text-muted-foreground list-none transition-colors hover:bg-foreground/[0.025] [&::-webkit-details-marker]:hidden",
+            summary { class: "flex cursor-pointer select-none items-center gap-2 rounded-xl px-2 py-1 text-xs text-muted-foreground list-none transition-colors hover:bg-foreground/[0.025] [&::-webkit-details-marker]:hidden",
                 span { class: "font-medium",
                     {translate_with("agent-tool-calls", &[("count", TranslationValue::Number(count))])}
                 }
@@ -553,7 +543,7 @@ fn ToolCall(call: ChatToolCall) -> Element {
                 activity: call.activity,
             }
             div { class: "min-w-0",
-                details { open: call.live, class: "disclosure text-sm text-muted-foreground",
+                details { open: false, class: "disclosure text-xs text-muted-foreground",
                     summary { class: ROW_SUMMARY,
                         span { class: "shrink-0 font-medium", "{label}" }
                         if let Some(command) = &command {
@@ -678,10 +668,10 @@ pub fn TurnBlock(
                 StreamingMarkdown { key: "{key}", text, streaming }
             }
         }
-        ChatTurnRow::Thinking { text, latest, .. } => rsx! {
+        ChatTurnRow::Thinking { text, .. } => rsx! {
             div { key: "{key}", class: "agent-row-hover grid grid-cols-[1.5rem_minmax(0,1fr)] items-start gap-2.5 rounded-xl px-2 py-1.5 transition-colors",
                 ActivityIconView { kind: ActivityIcon::Thinking }
-                details { open: latest, class: "disclosure min-w-0 text-sm text-muted-foreground",
+                details { open: false, class: "disclosure min-w-0 text-xs text-muted-foreground",
                     summary { class: ROW_SUMMARY,
                         span { class: "font-medium", {translate("agent-thinking")} }
                         DisclosureIcon {}

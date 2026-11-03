@@ -343,7 +343,7 @@ fn restart(
     connections: Query<&ConnectionState>,
     mut commands: Commands,
 ) {
-    if requests.read().next().is_none() {
+    if requests.read().count() == 0 {
         return;
     }
     let Ok((entity, mut state)) = sessions.single_mut() else {

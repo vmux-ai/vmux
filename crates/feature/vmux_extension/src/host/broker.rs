@@ -831,7 +831,7 @@ fn create_page_request(
     let Some(url) = url else {
         return Ok(vmux_layout::stack::OpenRequest {
             url: None,
-            focus_existing: false,
+            policy: vmux_layout::stack::OpenPolicy::ReplaceStartup,
         });
     };
     let parsed = url::Url::parse(url)
@@ -848,7 +848,7 @@ fn create_page_request(
     }
     Ok(vmux_layout::stack::OpenRequest {
         url: Some(url.to_string()),
-        focus_existing: false,
+        policy: vmux_layout::stack::OpenPolicy::ReplaceStartup,
     })
 }
 

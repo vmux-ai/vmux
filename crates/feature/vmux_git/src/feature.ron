@@ -15,6 +15,8 @@
             bookmark: Some(40),
             permissions: [
                 "PageReady",
+                "PageLocationRequest",
+                "PageLocationUiState",
                 "ThemeUiState",
                 "GitUiState",
                 "GitKeyRequest",

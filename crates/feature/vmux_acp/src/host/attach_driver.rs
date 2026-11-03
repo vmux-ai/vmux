@@ -1,5 +1,6 @@
 use bevy::prelude::*;
 use vmux_api::PageIcon;
+use vmux_api::protocol::AgentAttachment;
 use vmux_session::SessionId;
 
 #[derive(Bundle)]
@@ -71,3 +72,9 @@ pub(super) struct AcpAttachmentIcon(pub(super) PageIcon);
 
 #[derive(Component)]
 pub(super) struct AcpResume(pub(super) Option<String>);
+
+#[derive(Component)]
+pub(super) struct DeferredAttachmentPrompt {
+    pub(super) text: Option<String>,
+    pub(super) attachments: Vec<AgentAttachment>,
+}

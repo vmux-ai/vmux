@@ -150,7 +150,7 @@ impl CommandBarResultItem {
             Self::Search { engine, query } => {
                 row.title = format!("Search with {}", engine.name);
                 row.url = engine.query_url(query);
-                row.icon = PageIcon::Builtin(BuiltinIcon::Globe);
+                row.icon = PageIcon::None;
                 row.trailing = "\u{21b5}".to_string();
             }
             Self::File {

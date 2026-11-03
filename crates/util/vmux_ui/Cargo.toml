@@ -10,6 +10,7 @@ build = "build.rs"
 default = []
 
 [dependencies]
+base64 = "0.22"
 sys-locale = { workspace = true }
 tokio = { workspace = true, features = ["time"] }
 vmux_clipboard = { path = "../vmux_clipboard" }

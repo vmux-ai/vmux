@@ -6,6 +6,7 @@ use vmux_ui::file_icon::TypeIcon;
 use vmux_ui::hooks::send;
 use vmux_ui::i18n::translate;
 use vmux_ui::icon::{LineIcon, LineIconView};
+use vmux_ui::scroll::Target;
 
 use crate::event::GitDiffRow;
 use crate::event::{GitBranchFileEntry, GitDiffViewport, GitRepositorySnapshot};
@@ -16,12 +17,13 @@ pub(super) fn BranchDiffCard(
     base_ref: String,
     files: Vec<GitBranchFileEntry>,
     expected_paths: Vec<String>,
-    active_path: Signal<String>,
+    onactivefile: EventHandler<String>,
     repo_root: ReadSignal<String>,
     selected_branch: ReadSignal<String>,
-    reveal_path: ReadSignal<String>,
+    reveal_path: ReadSignal<Target>,
     diff_viewport: ReadSignal<Option<GitDiffViewport>>,
     diff_rows: ReadSignal<Vec<GitDiffRow>>,
+    rows_from: ReadSignal<Option<u32>>,
     loading: bool,
     error: String,
     #[props(default)] onviewedchange: Option<EventHandler<usize>>,
@@ -33,18 +35,18 @@ pub(super) fn BranchDiffCard(
         format!("{}…{}", base_ref, selected_branch_value)
     };
     let has_files = !files.is_empty();
-    let available = !selected_branch_value.is_empty() && (loading || has_files);
+    let available = loading || !selected_branch_value.is_empty() && has_files;
     let empty = if selected_branch_value.is_empty() {
         translate("git-no-branches")
     } else {
         translate("git-no-changes")
     };
-    let active_files = files;
     rsx! {
         RevisionDiffCard {
             repo_root,
             diff_viewport,
             diff_rows,
+            rows_from,
             loading,
             available,
             title: comparison,
@@ -55,13 +57,7 @@ pub(super) fn BranchDiffCard(
             error,
             show_header: false,
             reveal_path: Some(reveal_path),
-            onactivefile: Some(EventHandler::new(move |path: String| {
-                if !active_files.iter().any(|file| file.path == path) {
-                    return;
-                }
-                let mut active_path = active_path;
-                active_path.set(path);
-            })),
+            onactivefile: Some(onactivefile),
             onviewedchange,
             expected_paths,
         }
@@ -75,6 +71,7 @@ pub(super) fn CommitDiffCard(
     selected_commit: ReadSignal<String>,
     diff_viewport: ReadSignal<Option<GitDiffViewport>>,
     diff_rows: ReadSignal<Vec<GitDiffRow>>,
+    rows_from: ReadSignal<Option<u32>>,
     loading: bool,
 ) -> Element {
     let selected_commit = selected_commit();
@@ -92,6 +89,7 @@ pub(super) fn CommitDiffCard(
             repo_root,
             diff_viewport,
             diff_rows,
+            rows_from,
             loading,
             available: selected.is_some(),
             title,
@@ -116,6 +114,7 @@ pub(super) fn StashDiffCard(
     selected_stash: ReadSignal<String>,
     diff_viewport: ReadSignal<Option<GitDiffViewport>>,
     diff_rows: ReadSignal<Vec<GitDiffRow>>,
+    rows_from: ReadSignal<Option<u32>>,
     loading: bool,
 ) -> Element {
     let selected_stash = selected_stash();
@@ -129,6 +128,7 @@ pub(super) fn StashDiffCard(
             repo_root,
             diff_viewport,
             diff_rows,
+            rows_from,
             loading,
             available: selected.is_some(),
             title: selected
@@ -151,6 +151,7 @@ fn RevisionDiffCard(
     repo_root: ReadSignal<String>,
     diff_viewport: ReadSignal<Option<GitDiffViewport>>,
     diff_rows: ReadSignal<Vec<GitDiffRow>>,
+    rows_from: ReadSignal<Option<u32>>,
     loading: bool,
     available: bool,
     title: String,
@@ -160,7 +161,7 @@ fn RevisionDiffCard(
     icon: LineIcon,
     error: String,
     show_header: bool,
-    reveal_path: Option<ReadSignal<String>>,
+    reveal_path: Option<ReadSignal<Target>>,
     #[props(default)] onactivefile: Option<EventHandler<String>>,
     #[props(default)] onviewedchange: Option<EventHandler<usize>>,
     #[props(default)] expected_paths: Vec<String>,
@@ -202,6 +203,7 @@ fn RevisionDiffCard(
                     identity,
                     viewport: diff_viewport,
                     display_rows: diff_rows,
+                    rows_from,
                     reveal_path,
                     onactivefile,
                     onviewedchange,
@@ -224,6 +226,7 @@ pub(super) fn DiffCard(
     selected_abs_path: ReadSignal<String>,
     diff_viewport: ReadSignal<Option<GitDiffViewport>>,
     diff_rows: ReadSignal<Vec<GitDiffRow>>,
+    rows_from: ReadSignal<Option<u32>>,
     loading: bool,
 ) -> Element {
     rsx! {
@@ -239,8 +242,51 @@ pub(super) fn DiffCard(
                     {translate("git-select-file")}
                 }
             } else {
-                DiffView { repo_root, path: selected_abs_path, path_bytes: selected_path_bytes(), identity: selected_path(), viewport: diff_viewport, display_rows: diff_rows, loading, visible: true, reveal_path: None }
+                DiffView { repo_root, path: selected_abs_path, path_bytes: selected_path_bytes(), identity: selected_path(), viewport: diff_viewport, display_rows: diff_rows, rows_from, loading, visible: true, reveal_path: None }
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use dioxus::core::{Mutation, VirtualDom};
+
+    #[component]
+    fn PendingBranchReview() -> Element {
+        let mut active_path = use_signal(String::new);
+        let repo_root = use_signal(String::new);
+        let selected_branch = use_signal(String::new);
+        let reveal_path = use_signal(Target::default);
+        let diff_viewport = use_signal(|| None);
+        let diff_rows = use_signal(Vec::new);
+        let rows_from = use_signal(|| None);
+        rsx! {
+            BranchDiffCard {
+                base_ref: String::new(),
+                files: Vec::new(),
+                expected_paths: Vec::new(),
+                onactivefile: move |path: String| active_path.set(path),
+                repo_root,
+                selected_branch,
+                reveal_path,
+                diff_viewport,
+                diff_rows,
+                rows_from,
+                loading: true,
+                error: String::new(),
+            }
+        }
+    }
+
+    #[test]
+    fn pending_branch_selection_keeps_the_diff_surface_mounted() {
+        let mut dom = VirtualDom::new(PendingBranchReview);
+        let rendered = dom.rebuild_to_vec();
+        assert!(rendered.edits.iter().any(|edit| matches!(
+            edit,
+            Mutation::NewEventListener { name, .. } if name == "scroll"
+        )));
     }
 }

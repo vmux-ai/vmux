@@ -132,6 +132,7 @@ impl ManagerPresentation {
 
 #[derive(Clone, PartialEq)]
 pub(super) enum SessionFilter {
+    Current,
     Stage(String),
     Archived,
     Agent(String),
@@ -153,7 +154,11 @@ impl SessionFilter {
     pub fn stage(filters: &[Self]) -> Option<&str> {
         filters.iter().find_map(|filter| match filter {
             Self::Stage(id) => Some(id.as_str()),
-            Self::Archived | Self::Agent(_) | Self::Project(_) | Self::Updated(_) => None,
+            Self::Current
+            | Self::Archived
+            | Self::Agent(_)
+            | Self::Project(_)
+            | Self::Updated(_) => None,
         })
     }
 
@@ -164,7 +169,7 @@ impl SessionFilter {
     }
 
     pub fn set_stage(filters: &mut Vec<Self>, stage: Option<String>) {
-        filters.retain(|filter| !matches!(filter, Self::Stage(_) | Self::Archived));
+        filters.retain(|filter| !matches!(filter, Self::Current | Self::Stage(_) | Self::Archived));
         if let Some(stage) = stage {
             filters.insert(0, Self::Stage(stage));
         }
@@ -172,6 +177,10 @@ impl SessionFilter {
 
     pub fn upsert(filters: &mut Vec<Self>, selected: Self) {
         match selected {
+            Self::Current => {
+                Self::set_stage(filters, None);
+                filters.insert(0, Self::Current);
+            }
             Self::Stage(stage) => Self::set_stage(filters, Some(stage)),
             Self::Archived => {
                 Self::set_stage(filters, None);
@@ -194,6 +203,10 @@ impl SessionFilter {
 
     fn presentation(&self, stages: &[StageSummary]) -> SessionFilterPresentation {
         match self {
+            Self::Current => SessionFilterPresentation {
+                label: translate("session-stage-active"),
+                dot: "bg-success".to_string(),
+            },
             Self::Stage(id) => {
                 let name = stages
                     .iter()
@@ -224,7 +237,14 @@ impl SessionFilter {
                 dot: String::new(),
             },
             Self::Project(project) => SessionFilterPresentation {
-                label: format!("{} · {project}", translate("resume-column-project")),
+                label: format!(
+                    "{} · {}",
+                    translate("resume-column-project"),
+                    std::path::Path::new(project)
+                        .file_name()
+                        .and_then(|name| name.to_str())
+                        .unwrap_or(project)
+                ),
                 dot: String::new(),
             },
             Self::Updated(updated) => SessionFilterPresentation {
@@ -241,11 +261,18 @@ impl SessionFilter {
 
     fn matches(&self, session: &SessionSummary, repositories: &SessionRepositories) -> bool {
         match self {
-            Self::Stage(_) | Self::Archived => true,
+            Self::Current | Self::Stage(_) | Self::Archived => true,
             Self::Agent(agent) => SessionFilterValue::agent(session) == *agent,
-            Self::Project(project) => repositories
-                .get(&session.id)
-                .is_some_and(|repository| repository.project == *project),
+            Self::Project(project) => {
+                if project.starts_with('/')
+                    && std::path::Path::new(&session.cwd).starts_with(project)
+                {
+                    return true;
+                }
+                repositories.get(&session.id).is_some_and(|repository| {
+                    repository.project == *project || repository.project_url == *project
+                })
+            }
             Self::Updated(updated) => updated.matches(session.last_activated_at),
         }
     }
@@ -422,13 +449,19 @@ impl StageGroup {
     ) -> Vec<Self> {
         let selected_stage = filters.iter().find_map(|filter| match filter {
             SessionFilter::Stage(id) => Some(id.as_str()),
-            SessionFilter::Archived
+            SessionFilter::Current
+            | SessionFilter::Archived
             | SessionFilter::Agent(_)
             | SessionFilter::Project(_)
             | SessionFilter::Updated(_) => None,
         });
         let mut filtered = Vec::new();
         for group in groups {
+            if filters.contains(&SessionFilter::Current)
+                && (group.stage.terminal || group.stage.id == "stale")
+            {
+                continue;
+            }
             if selected_stage.is_some_and(|stage| stage != group.stage.id.as_str()) {
                 continue;
             }

@@ -4,9 +4,8 @@ use std::path::{Path, PathBuf};
 
 use bevy::prelude::*;
 use bevy_cef::prelude::*;
-use vmux_api::BinEvent;
+use vmux_api::{BinEvent, UiEventPermissions};
 #[cfg(ui)]
-use vmux_api::UiEventPermissions;
 use vmux_ecs::event::*;
 
 use super::*;
@@ -608,6 +607,7 @@ fn opening_a_file_leaves_a_hidden_explorer_collapsed() {
 struct SentReveals {
     revision: u64,
     reveals: Vec<ExplorerReveal>,
+    state: Option<FileUiState>,
 }
 
 impl SentReveals {
@@ -618,16 +618,39 @@ impl SentReveals {
             .insert_non_send(browsers)
             .init_resource::<Self>()
             .add_observer(Self::record);
+        app.world_mut().entity_mut(webview).insert((
+            bevy_cef::prelude::BinIpcSurfaceGeneration(1),
+            bevy_cef::prelude::BinIpcNavigationRevision(1),
+            bevy_cef::prelude::BinIpcEpoch(1),
+            vmux_ecs::PageMetadata {
+                url: "file:///repo".to_string(),
+                ..Default::default()
+            },
+        ));
+        app.world_mut().spawn(UiEventPermissions {
+            url: "file:///repo",
+            owns_subtree: false,
+            permissions: &["FileUiState"],
+        });
     }
 
     fn record(emit: On<BinHostEmitEvent>, mut sent: ResMut<Self>) {
         if emit.id() != FileUiState::id() {
             return;
         }
-        let decoded = rkyv::from_bytes::<FileUiState, rkyv::rancor::Error>(emit.payload());
-        let Ok(event) = decoded else {
-            return;
+        emit.mark_delivered();
+        let frame = rkyv::from_bytes::<
+            vmux_api::UiStateFrame<FileUiState, <FileUiState as vmux_api::UiState>::Update>,
+            rkyv::rancor::Error,
+        >(emit.payload())
+        .unwrap();
+        let event = match frame {
+            vmux_api::UiStateFrame::Snapshot(state) => state,
+            vmux_api::UiStateFrame::Updates(updates) => {
+                <FileUiState as vmux_api::UiState>::from_updates(sent.state.take(), updates)
+            }
         };
+        sent.state = Some(event.clone());
         let Some(focus) = event.explorer.explorer_focus else {
             return;
         };

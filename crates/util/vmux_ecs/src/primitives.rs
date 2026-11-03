@@ -3,6 +3,7 @@ use moonshine_save::prelude::Save;
 
 use super::persistence::PersistenceAppExt;
 use crate::PageMetadata;
+use crate::WorkspaceKind;
 use crate::component::{
     ActivateRequest, Active, ArchivedAt, CollectionView, CreatedAt, Cwd, Description,
     LastActivatedAt, Order,
@@ -16,6 +17,7 @@ pub struct PrimitivesPlugin;
 impl Plugin for PrimitivesPlugin {
     fn build(&self, app: &mut App) {
         app.register_persisted::<PageMetadata>()
+            .register_persisted::<WorkspaceKind>()
             .register_type::<PageIcon>()
             .register_type::<BuiltinIcon>()
             .register_persisted::<Cwd>()
@@ -68,6 +70,7 @@ mod tests {
         assert!(filter.is_allowed::<Cwd>());
         assert!(filter.is_allowed::<Description>());
         assert!(filter.is_allowed::<CollectionView>());
+        assert!(filter.is_allowed::<WorkspaceKind>());
     }
 
     #[test]

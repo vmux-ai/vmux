@@ -61,6 +61,7 @@
                 "PageReady",
                 "ThemeUiState",
                 "LayoutUiState",
+                "PageAddressRequest",
                 "SideSheetResizeEvent",
                 "WindowDragRegionEvent",
                 "HeaderBackRequest",

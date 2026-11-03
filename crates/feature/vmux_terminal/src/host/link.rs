@@ -30,7 +30,7 @@ fn term_open(
     }
     stack_requests.write(OpenRequest {
         url: Some(url),
-        focus_existing: false,
+        policy: vmux_layout::stack::OpenPolicy::ReplaceStartup,
     });
     if let Some(proxy) = proxy.as_ref() {
         let _ = (**proxy).send_event(WinitUserEvent::WakeUp);
@@ -208,7 +208,7 @@ mod tests {
             request,
             OpenRequest {
                 url: Some(url),
-                focus_existing: false,
+                policy: vmux_layout::stack::OpenPolicy::ReplaceStartup,
             } if url == "https://vmux.ai"
         )));
     }

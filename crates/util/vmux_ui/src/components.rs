@@ -1,3 +1,4 @@
+pub mod address;
 pub mod agent_menu;
 pub mod alert_dialog;
 pub mod avatar;

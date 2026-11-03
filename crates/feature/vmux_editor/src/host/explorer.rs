@@ -20,6 +20,7 @@ pub use search::GlobalSearchRequest;
 use search::SearchPlugin;
 use tree::{ExplorerDirLoadRequest, TreePlugin};
 
+pub(crate) use tabs::{ArchivedEditorState, RestoreEditors};
 mod entry;
 mod fs;
 mod outline;
@@ -232,6 +233,12 @@ pub(super) struct ExplorerState {
 }
 
 impl ExplorerState {
+    pub(crate) fn restore_editors(&mut self, paths: Vec<PathBuf>, active: &Path) {
+        self.open_editors = paths;
+        self.note_open(active);
+        self.active_editor = Some(active.to_path_buf());
+        self.active_editor_is_dir = active.is_dir();
+    }
     fn note_open(&mut self, path: &Path) {
         if !self.open_editors.iter().any(|open| open == path) {
             self.open_editors.push(path.to_path_buf());

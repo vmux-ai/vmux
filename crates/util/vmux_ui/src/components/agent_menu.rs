@@ -68,7 +68,7 @@ fn AgentMenuRow(
                 seed: option.title.clone(),
                 background: String::new(),
                 alt: option.title.clone(),
-                class: "h-7 w-7 text-[8px]",
+                class: "h-5 w-5 text-[7px]",
             }
             span { class: "min-w-0 flex-1 truncate", "{option.title}" }
             if current {

@@ -90,6 +90,5 @@ pub struct RestoreKeyboardToStack {
 
 #[derive(Message, Clone, Copy, Debug)]
 pub struct StackInPaneChosen {
-    pub pane_bits: u64,
-    pub index: usize,
+    pub stack: Entity,
 }

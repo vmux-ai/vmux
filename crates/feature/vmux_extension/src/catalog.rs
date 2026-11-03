@@ -339,7 +339,7 @@ fn open_page(
     for _ in requests.read() {
         pages.write(vmux_layout::stack::OpenRequest {
             url: Some(vmux_tool::EXTENSIONS_URL.to_string()),
-            focus_existing: true,
+            policy: vmux_layout::stack::OpenPolicy::FocusReusable,
         });
     }
 }

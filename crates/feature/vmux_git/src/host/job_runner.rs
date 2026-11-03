@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Condvar, Mutex};
@@ -14,16 +14,23 @@ use super::job::{
     HunkJob, MergeJob, PullJob, PushJob, RebaseJob, RepositoryJob, RevertJob, StageAllJob,
     StageJob, StashDropJob, StashPopJob, StashPushJob, UnstageJob,
 };
-use super::repository::{BranchFilesCatalog, GitCatalogPage, GitRepository, RepositorySummary};
-use super::runtime::{GitRuntime, GitTask};
+use super::repository::{
+    BranchFilesCatalog, DiffSource, GitCatalogPage, GitCatalogSnapshot, GitError, GitRepository,
+    RepositorySummary,
+};
+use super::runtime::{GitCancellationGroup, GitCancellationParticipant, GitRuntime, GitTask};
 use crate::event::{
-    DiffLine, GitCatalog, GitDiffViewport, GitFileStatus, GitOperationError, GitOperationResult,
+    GitCatalog, GitDiffViewport, GitFileStatus, GitOperationError, GitOperationResult,
     GitRepositorySnapshot,
 };
-use crate::state::GitUiState;
+use crate::state::{
+    GitBranchFilesPagePatch, GitBranchFilesPatch, GitCatalogEntries, GitCatalogPatch, GitUiState,
+};
 use vmux_path::PathIdentity;
 
 const REPOSITORY_LOAD_CACHE_CAPACITY: usize = 128;
+const REPOSITORY_LOAD_ALIAS_CAPACITY: usize = REPOSITORY_LOAD_CACHE_CAPACITY * 4;
+const CATALOG_SNAPSHOT_CAPACITY: usize = 128;
 
 pub(super) struct JobPlugin;
 
@@ -32,7 +39,7 @@ impl Plugin for JobPlugin {
         app.init_resource::<GitRuntime>()
             .init_resource::<RepositoryLoads>()
             .init_resource::<RepositoryLoadEpoch>()
-            .add_observer(queue_job_failure)
+            .init_resource::<CatalogSnapshots>()
             .add_systems(
                 Update,
                 (
@@ -90,13 +97,6 @@ impl Plugin for JobPlugin {
     }
 }
 
-#[derive(EntityEvent)]
-pub(super) struct GitJobFailure {
-    #[event_target]
-    pub(super) webview: Entity,
-    pub(super) message: String,
-}
-
 #[derive(Component)]
 #[relationship(relationship_target = GitJobs)]
 pub(super) struct GitJob {
@@ -107,6 +107,10 @@ pub(super) struct GitJob {
 impl GitJob {
     pub(super) fn new(webview: Entity) -> Self {
         Self { webview }
+    }
+
+    pub(super) fn owner(&self) -> Entity {
+        self.webview
     }
 }
 
@@ -155,17 +159,73 @@ impl<T: Send + Sync + 'static> GitJobTask<T> {
 struct RepositoryOutput(Result<Arc<RepositorySummary>, GitOperationError>);
 
 #[derive(Resource, Clone, Default)]
-struct RepositoryLoads(Arc<Mutex<HashMap<PathBuf, Arc<RepositoryLoad>>>>);
+pub(super) struct RepositoryLoads(Arc<Mutex<RepositoryLoadCache>>);
+
+#[derive(Default)]
+struct RepositoryLoadCache {
+    loads: HashMap<PathBuf, Arc<RepositoryLoad>>,
+    aliases: HashMap<PathIdentity, RepositoryLoadAlias>,
+    alias_order: VecDeque<PathIdentity>,
+}
+
+struct RepositoryLoadAlias {
+    requested_resolved: PathIdentity,
+    root: PathBuf,
+}
+
+impl RepositoryLoadCache {
+    fn remember_alias(
+        &mut self,
+        requested: PathIdentity,
+        requested_resolved: PathIdentity,
+        root: PathBuf,
+    ) {
+        self.alias_order.retain(|alias| alias != &requested);
+        self.alias_order.push_back(requested.clone());
+        self.aliases.insert(
+            requested,
+            RepositoryLoadAlias {
+                requested_resolved,
+                root,
+            },
+        );
+        while self.alias_order.len() > REPOSITORY_LOAD_ALIAS_CAPACITY {
+            let Some(expired) = self.alias_order.pop_front() else {
+                break;
+            };
+            self.aliases.remove(&expired);
+        }
+    }
+
+    fn retain_loading(&mut self) {
+        self.loads.retain(|_, load| load.loading());
+        self.aliases
+            .retain(|_, alias| self.loads.contains_key(&alias.root));
+        self.alias_order
+            .retain(|alias| self.aliases.contains_key(alias));
+    }
+}
 
 struct RepositoryLoad {
     state: Mutex<RepositoryLoadState>,
     ready: Condvar,
+    cancellation: GitCancellationGroup,
 }
 
 struct RepositoryLoadState {
     epoch: u64,
     loading: bool,
     result: Option<Result<Arc<RepositorySummary>, GitOperationError>>,
+}
+
+impl RepositoryLoadState {
+    fn canceled(&self) -> bool {
+        self.result.as_ref().is_some_and(|result| {
+            result
+                .as_ref()
+                .is_err_and(|error| error.message == "git command canceled")
+        })
+    }
 }
 
 impl RepositoryLoad {
@@ -177,6 +237,7 @@ impl RepositoryLoad {
                 result: None,
             }),
             ready: Condvar::new(),
+            cancellation: GitCancellationGroup::default(),
         }
     }
 
@@ -191,24 +252,25 @@ impl RepositoryLoad {
         epoch: u64,
         leader: bool,
     ) -> Result<Arc<RepositorySummary>, GitOperationError> {
+        let participant = self.cancellation.join();
         if leader {
-            return self.finish(repository, is_worktree);
+            return self.finish(repository, is_worktree, participant);
         }
         let mut state = self.state.lock().map_err(|_| Self::coordinator_error())?;
         loop {
             if !state.loading {
-                if epoch <= state.epoch {
+                if epoch <= state.epoch && !state.canceled() {
                     return state
                         .result
                         .as_ref()
                         .cloned()
                         .unwrap_or_else(|| Err(Self::coordinator_error()));
                 }
-                state.epoch = epoch;
+                state.epoch = state.epoch.max(epoch);
                 state.loading = true;
                 state.result = None;
                 drop(state);
-                return self.finish(repository, is_worktree);
+                return self.finish(repository, is_worktree, participant);
             }
             if GitRuntime::canceled() {
                 return Err(GitOperationError {
@@ -227,21 +289,25 @@ impl RepositoryLoad {
         &self,
         repository: &GitRepository,
         is_worktree: bool,
+        participant: GitCancellationParticipant,
     ) -> Result<Arc<RepositorySummary>, GitOperationError> {
-        let result = catch_unwind(AssertUnwindSafe(|| {
-            GitRepositorySnapshot::load_discovered_summary(
-                repository.path(),
-                repository,
-                is_worktree,
-            )
-            .map(Arc::new)
-            .map_err(|error| GitOperationError { message: error.0 })
-        }))
-        .unwrap_or_else(|_| {
-            Err(GitOperationError {
-                message: "Git repository load worker panicked".to_string(),
+        let result = participant
+            .run(|| {
+                catch_unwind(AssertUnwindSafe(|| {
+                    GitRepositorySnapshot::load_discovered_summary(
+                        repository.path(),
+                        repository,
+                        is_worktree,
+                    )
+                    .map(Arc::new)
+                    .map_err(|error| GitOperationError { message: error.0 })
+                }))
             })
-        });
+            .unwrap_or_else(|_| {
+                Err(GitOperationError {
+                    message: "Git repository load worker panicked".to_string(),
+                })
+            });
         let mut state = self.state.lock().map_err(|_| Self::coordinator_error())?;
         state.loading = false;
         state.result = Some(result.clone());
@@ -254,26 +320,58 @@ impl RepositoryLoad {
             message: "Git repository load coordinator failed".to_string(),
         }
     }
+
+    fn cached(&self) -> Option<Arc<RepositorySummary>> {
+        self.state
+            .lock()
+            .ok()?
+            .result
+            .as_ref()?
+            .as_ref()
+            .ok()
+            .cloned()
+    }
 }
 
 impl RepositoryLoads {
+    pub(super) fn cached(&self, path: &Path) -> Option<GitRepositorySnapshot> {
+        let requested = PathIdentity::lexical(path);
+        let requested_resolved = PathIdentity::resolve(path);
+        let load = {
+            let cache = self.0.lock().ok()?;
+            let root = match cache.aliases.get(&requested) {
+                Some(alias) if alias.requested_resolved == requested_resolved => alias.root.clone(),
+                Some(_) => return None,
+                None => requested.clone().into_path_buf(),
+            };
+            Arc::clone(cache.loads.get(&root)?)
+        };
+        let summary = load.cached()?;
+        let mut snapshot = summary.snapshot.clone();
+        snapshot.path = path.to_string_lossy().into_owned();
+        Some(snapshot)
+    }
+
     fn read(&self, path: &Path, epoch: u64) -> Result<Arc<RepositorySummary>, GitOperationError> {
         let (repository, is_worktree) = GitRepository::discover_with_worktree(path)
             .map_err(|error| GitOperationError { message: error.0 })?;
         let root = PathIdentity::resolve(repository.path()).into_path_buf();
+        let requested = PathIdentity::lexical(path);
+        let requested_resolved = PathIdentity::resolve(path);
         let (load, leader) = {
-            let mut loads = self
+            let mut cache = self
                 .0
                 .lock()
                 .map_err(|_| RepositoryLoad::coordinator_error())?;
-            match loads.get(&root) {
+            cache.remember_alias(requested, requested_resolved, root.clone());
+            match cache.loads.get(&root) {
                 Some(load) => (Arc::clone(load), false),
                 None => {
-                    if loads.len() >= REPOSITORY_LOAD_CACHE_CAPACITY {
-                        loads.retain(|_, load| load.loading());
+                    if cache.loads.len() >= REPOSITORY_LOAD_CACHE_CAPACITY {
+                        cache.retain_loading();
                     }
                     let load = Arc::new(RepositoryLoad::new(epoch));
-                    loads.insert(root.clone(), Arc::clone(&load));
+                    cache.loads.insert(root.clone(), Arc::clone(&load));
                     (load, true)
                 }
             }
@@ -285,12 +383,109 @@ impl RepositoryLoads {
 #[derive(Resource, Default)]
 struct RepositoryLoadEpoch(u64);
 
+#[derive(Resource, Clone, Default)]
+struct CatalogSnapshots(Arc<Mutex<CatalogSnapshotCache>>);
+
+#[derive(Default)]
+struct CatalogSnapshotCache {
+    snapshots: HashMap<CatalogSnapshotKey, Arc<GitCatalogSnapshot>>,
+    order: VecDeque<CatalogSnapshotKey>,
+}
+
+impl CatalogSnapshotCache {
+    fn insert(&mut self, key: CatalogSnapshotKey, snapshot: Arc<GitCatalogSnapshot>) {
+        self.order.retain(|candidate| !candidate.same_catalog(&key));
+        self.snapshots
+            .retain(|candidate, _| !candidate.same_catalog(&key));
+        self.order.push_back(key.clone());
+        self.snapshots.insert(key, snapshot);
+        while self.order.len() > CATALOG_SNAPSHOT_CAPACITY {
+            if let Some(expired) = self.order.pop_front() {
+                self.snapshots.remove(&expired);
+            }
+        }
+    }
+}
+
+#[derive(Clone, PartialEq, Eq, Hash)]
+struct CatalogSnapshotKey {
+    owner: Entity,
+    repository: PathBuf,
+    catalog: u8,
+    branch: String,
+    revision: u32,
+}
+
+impl CatalogSnapshotKey {
+    fn same_catalog(&self, other: &Self) -> bool {
+        self.owner == other.owner
+            && self.repository == other.repository
+            && self.catalog == other.catalog
+            && self.branch == other.branch
+    }
+}
+
+impl CatalogSnapshots {
+    fn page(
+        &self,
+        owner: Entity,
+        repository: &GitRepository,
+        job: &CatalogJob,
+    ) -> Result<GitCatalogPage, GitOperationError> {
+        if job.catalog == GitCatalog::Commits {
+            return repository
+                .catalog_page(job.catalog, &job.current_branch, job.offset, job.limit)
+                .map_err(|error| GitOperationError { message: error.0 });
+        }
+        let key = CatalogSnapshotKey {
+            owner,
+            repository: repository.path().to_path_buf(),
+            catalog: match job.catalog {
+                GitCatalog::LocalBranches => 0,
+                GitCatalog::RemoteBranches => 1,
+                GitCatalog::Tags => 2,
+                GitCatalog::Commits => 3,
+                GitCatalog::Stashes => 4,
+            },
+            branch: if job.catalog == GitCatalog::LocalBranches {
+                job.current_branch.clone()
+            } else {
+                String::new()
+            },
+            revision: job.revision,
+        };
+        let cached = self
+            .0
+            .lock()
+            .ok()
+            .and_then(|cache| cache.snapshots.get(&key).cloned());
+        let snapshot = match cached {
+            Some(snapshot) => snapshot,
+            None => {
+                let snapshot = repository
+                    .catalog_snapshot(job.catalog, &job.current_branch)
+                    .map_err(|error| GitOperationError { message: error.0 })?
+                    .ok_or_else(|| GitOperationError {
+                        message: "catalog does not support snapshots".to_string(),
+                    })?;
+                let snapshot = Arc::new(snapshot);
+                if let Ok(mut cache) = self.0.lock() {
+                    cache.insert(key, Arc::clone(&snapshot));
+                }
+                snapshot
+            }
+        };
+        Ok(snapshot.page(job.offset, job.limit))
+    }
+}
+
 #[derive(Component)]
 struct CatalogOutput {
     catalog: GitCatalog,
     repo_root: String,
     offset: usize,
     revision: u32,
+    generation: u64,
     result: Result<GitCatalogPage, GitOperationError>,
 }
 
@@ -305,13 +500,51 @@ struct BranchFilesOutput {
 struct DiffOutput {
     viewport: GitDiffViewport,
     branch_paths: Vec<Vec<u8>>,
-    branch_lines: Option<Arc<Vec<DiffLine>>>,
+    source: Option<DiffSource>,
     branch_top_line: u32,
     branch_page_complete: bool,
 }
 
+impl DiffOutput {
+    fn take_viewport(&mut self) -> GitDiffViewport {
+        std::mem::replace(
+            &mut self.viewport,
+            GitDiffViewport {
+                generation: 0,
+                revision: 0,
+                first_line: 0,
+                total_lines: 0,
+                has_more: false,
+                lines: Vec::new(),
+                markers: Vec::new(),
+                error: String::new(),
+            },
+        )
+    }
+
+    fn failure(job: &DiffJob, error: GitError) -> Self {
+        Self {
+            viewport: GitDiffViewport {
+                generation: job.generation,
+                revision: 0,
+                first_line: job.top_line,
+                total_lines: 0,
+                has_more: false,
+                lines: Vec::new(),
+                markers: Vec::new(),
+                error: error.0,
+            },
+            branch_paths: job.branch_paths.clone(),
+            source: None,
+            branch_top_line: job.branch_top_line,
+            branch_page_complete: false,
+        }
+    }
+}
+
 #[derive(Component, Clone, Debug)]
 struct OperationOutput {
+    repository: PathBuf,
     result: GitOperationResult,
     status: Option<Result<GitFileStatus, GitOperationError>>,
 }
@@ -324,6 +557,7 @@ impl OperationOutput {
         message: &str,
     ) -> Self {
         Self {
+            repository: repository.path().to_path_buf(),
             result: GitOperationResult {
                 operation: operation.to_string(),
                 ok: true,
@@ -337,9 +571,14 @@ impl OperationOutput {
         }
     }
 
-    fn from_result(operation: &str, result: Result<String, super::repository::GitError>) -> Self {
+    fn from_result(
+        repository: &GitRepository,
+        operation: &str,
+        result: Result<String, GitError>,
+    ) -> Self {
         match result {
             Ok(message) => Self {
+                repository: repository.path().to_path_buf(),
                 result: GitOperationResult {
                     operation: operation.to_string(),
                     ok: true,
@@ -347,12 +586,13 @@ impl OperationOutput {
                 },
                 status: None,
             },
-            Err(error) => Self::failure(operation, error),
+            Err(error) => Self::failure(repository.path(), operation, error),
         }
     }
 
-    fn failure(operation: &str, error: super::repository::GitError) -> Self {
+    fn failure(repository: impl Into<PathBuf>, operation: &str, error: GitError) -> Self {
         Self {
+            repository: repository.into(),
             result: GitOperationResult {
                 operation: operation.to_string(),
                 ok: false,
@@ -365,15 +605,6 @@ impl OperationOutput {
 
 #[derive(Component)]
 struct FailureOutput(GitOperationError);
-
-fn queue_job_failure(trigger: On<GitJobFailure>, mut commands: Commands) {
-    commands.spawn((
-        GitJob::new(trigger.event().webview),
-        FailureOutput(GitOperationError {
-            message: trigger.event().message.clone(),
-        }),
-    ));
-}
 
 fn poll_jobs<T: Component>(mut jobs: Query<(Entity, &mut GitJobTask<T>)>, mut commands: Commands) {
     for (entity, mut task) in &mut jobs {
@@ -401,6 +632,7 @@ fn cancel_orphaned_jobs(
         Option<&super::state::GitState>,
         Option<&super::status::FileGit>,
     )>,
+    load_revisions: Query<&super::state::GitRepositoryLoadRevision>,
     mut commands: Commands,
 ) {
     for (entity, job, repository) in &jobs {
@@ -415,7 +647,9 @@ fn cancel_orphaned_jobs(
         let Some((state, repository)) = state.zip(repository) else {
             continue;
         };
-        if state.snapshot.nonce != repository.revision
+        if !load_revisions
+            .get(job.webview)
+            .is_ok_and(|revision| revision.matches(repository.revision))
             || PathIdentity::lexical(Path::new(&state.snapshot.workspace))
                 != PathIdentity::lexical(&repository.path)
         {
@@ -463,10 +697,16 @@ fn deliver_repository_outputs(
                         false => format!("Git · {} · {}", snapshot.repo_name, snapshot.branch),
                     };
                 }
-                states.set_repository(webview, snapshot, request.refresh_catalogs);
+                if let Some(patch) =
+                    states.set_repository(webview, snapshot, request.refresh_catalogs)
+                {
+                    commands.trigger(vmux_ecs::UiStateWrite::<GitUiState>::from_event(
+                        webview, &patch,
+                    ));
+                }
             }
             Err(error) => {
-                states.apply_error(webview, error);
+                states.fail_repository(webview, error);
             }
         }
         commands.entity(entity).despawn();
@@ -474,99 +714,122 @@ fn deliver_repository_outputs(
 }
 
 fn deliver_catalog_outputs(
-    outputs: Query<(Entity, &GitJob, &CatalogOutput)>,
-    mut states: Query<&mut super::state::GitState>,
+    mut outputs: Query<(Entity, &GitJob, &mut CatalogOutput)>,
+    mut states: Query<(
+        &mut super::state::GitState,
+        &mut super::state::GitCatalogRevision,
+    )>,
+    mut ui_state: Option<vmux_ecs::UiStateWriter<GitUiState>>,
     mut commands: Commands,
 ) {
-    for (entity, job, output) in &outputs {
-        let Ok(mut state) = states.get_mut(job.webview) else {
+    for (entity, job, mut output) in &mut outputs {
+        let Ok((mut state, mut revision)) = states.get_mut(job.webview) else {
             commands.entity(entity).despawn();
             continue;
         };
-        if state.snapshot.workspace != output.repo_root || state.snapshot.nonce != output.revision {
+        if state.snapshot.workspace != output.repo_root {
             commands.entity(entity).despawn();
             continue;
         }
-        match &output.result {
+        let catalog = output.catalog;
+        let offset = u32::try_from(output.offset).unwrap_or(u32::MAX);
+        if state.snapshot.nonce != output.revision {
+            if revision.finish(catalog, output.generation) {
+                let mut progress = state.snapshot.catalog(catalog);
+                progress.loading = false;
+                state
+                    .bypass_change_detection()
+                    .snapshot
+                    .catalog_mut(catalog)
+                    .clone_from(&progress);
+                if let Some(ui_state) = ui_state.as_mut() {
+                    ui_state.push(
+                        job.webview,
+                        GitCatalogPatch {
+                            catalog,
+                            offset,
+                            entries: None,
+                            progress,
+                            message: None,
+                        },
+                    );
+                }
+            }
+            commands.entity(entity).despawn();
+            continue;
+        }
+        if !revision.finish(catalog, output.generation) {
+            commands.entity(entity).despawn();
+            continue;
+        }
+        let patch = match &mut output.result {
             Ok(page) => {
-                let Some(repository) = state.snapshot.repository.as_mut() else {
+                if state.snapshot.repository.is_none() {
                     commands.entity(entity).despawn();
                     continue;
-                };
-                let has_more = match page {
-                    GitCatalogPage::LocalBranches(entries, has_more) => {
-                        if output.offset == 0 {
-                            if repository.branches.as_slice() != entries.as_slice() {
-                                repository.branches.clone_from(entries);
-                            }
-                        } else {
-                            repository.branches.extend(entries.clone());
-                        }
-                        *has_more
-                    }
-                    GitCatalogPage::RemoteBranches(entries, has_more) => {
-                        if output.offset == 0 {
-                            if repository.remote_branches.as_slice() != entries.as_slice() {
-                                repository.remote_branches.clone_from(entries);
-                            }
-                        } else {
-                            repository.remote_branches.extend(entries.clone());
-                        }
-                        *has_more
-                    }
+                }
+                let (entries, has_more) = match page {
+                    GitCatalogPage::LocalBranches(entries, has_more) => (
+                        GitCatalogEntries::LocalBranches(std::mem::take(entries)),
+                        *has_more,
+                    ),
+                    GitCatalogPage::RemoteBranches(entries, has_more) => (
+                        GitCatalogEntries::RemoteBranches(std::mem::take(entries)),
+                        *has_more,
+                    ),
                     GitCatalogPage::Tags(entries, has_more) => {
-                        if output.offset == 0 {
-                            if repository.tags.as_slice() != entries.as_slice() {
-                                repository.tags.clone_from(entries);
-                            }
-                        } else {
-                            repository.tags.extend(entries.clone());
-                        }
-                        *has_more
+                        (GitCatalogEntries::Tags(std::mem::take(entries)), *has_more)
                     }
-                    GitCatalogPage::Commits(entries, has_more) => {
-                        if output.offset == 0 {
-                            if repository.commits.as_slice() != entries.as_slice() {
-                                repository.commits.clone_from(entries);
-                            }
-                        } else {
-                            repository.commits.extend(entries.clone());
-                        }
-                        *has_more
-                    }
-                    GitCatalogPage::Stashes(entries, has_more) => {
-                        if output.offset == 0 {
-                            if repository.stashes.as_slice() != entries.as_slice() {
-                                repository.stashes.clone_from(entries);
-                            }
-                        } else {
-                            repository.stashes.extend(entries.clone());
-                        }
-                        *has_more
-                    }
+                    GitCatalogPage::Commits(entries, has_more) => (
+                        GitCatalogEntries::Commits(std::mem::take(entries)),
+                        *has_more,
+                    ),
+                    GitCatalogPage::Stashes(entries, has_more) => (
+                        GitCatalogEntries::Stashes(std::mem::take(entries)),
+                        *has_more,
+                    ),
                 };
-                let progress = state.snapshot.catalog_mut(output.catalog);
-                progress.initialized = true;
-                progress.loaded = true;
-                progress.loading = false;
-                progress.has_more = has_more;
-                progress.failed = false;
+                GitCatalogPatch {
+                    catalog,
+                    offset,
+                    entries: Some(entries),
+                    progress: crate::state::GitCatalogProgress {
+                        initialized: true,
+                        loaded: true,
+                        loading: false,
+                        has_more,
+                        failed: false,
+                    },
+                    message: None,
+                }
             }
-            Err(error) => {
-                let progress = state.snapshot.catalog_mut(output.catalog);
-                progress.loaded = false;
-                progress.loading = false;
-                progress.has_more = false;
-                progress.failed = true;
-                state.snapshot.message.clone_from(&error.message);
-            }
+            Err(error) => GitCatalogPatch {
+                catalog,
+                offset,
+                entries: None,
+                progress: crate::state::GitCatalogProgress {
+                    initialized: state.snapshot.catalog(catalog).initialized,
+                    loaded: false,
+                    loading: false,
+                    has_more: false,
+                    failed: true,
+                },
+                message: Some(error.message.clone()),
+            },
+        };
+        state
+            .bypass_change_detection()
+            .snapshot
+            .apply_catalog_patch(&patch);
+        if let Some(ui_state) = ui_state.as_mut() {
+            ui_state.push(job.webview, patch);
         }
         commands.entity(entity).despawn();
     }
 }
 
 fn deliver_diff_outputs(
-    outputs: Query<(Entity, &GitJob, &DiffOutput)>,
+    mut outputs: Query<(Entity, &GitJob, &mut DiffOutput)>,
     presented: Query<(), With<vmux_ecs::PagePresented>>,
     mut views: Query<(
         &mut super::state::GitState,
@@ -575,21 +838,26 @@ fn deliver_diff_outputs(
     )>,
     mut files: super::status::FileGitStates,
     mut diffs: Query<&mut super::diff::GitDiffQuery>,
+    mut ui_state: Option<vmux_ecs::UiStateWriter<GitUiState>>,
     mut commands: Commands,
 ) {
-    for (entity, job, output) in &outputs {
+    for (entity, job, mut output) in &mut outputs {
         let webview = job.webview;
         let Ok(mut query) = diffs.get_mut(webview) else {
             commands.entity(entity).despawn();
             continue;
         };
         let succeeded = output.viewport.error.is_empty();
-        let mut event = output.viewport.clone();
+        let mut event = output.take_viewport();
         if !query.accepts(event.generation) {
             commands.entity(entity).despawn();
             continue;
         }
-        query.complete_load();
+        event.revision = query.complete_load();
+        let next_request = crate::event::GitDiffNextRequest {
+            generation: event.generation,
+            revision: event.revision,
+        };
         let loaded_lines = u32::try_from(event.lines.len()).unwrap_or(u32::MAX);
         let branch_has_more = query.complete_branch(
             &output.branch_paths,
@@ -597,7 +865,7 @@ fn deliver_diff_outputs(
             loaded_lines,
             output.branch_page_complete,
             succeeded,
-            output.branch_lines.clone(),
+            output.source.clone(),
         );
         if !output.branch_paths.is_empty() {
             event.has_more = branch_has_more;
@@ -605,6 +873,7 @@ fn deliver_diff_outputs(
                 event.total_lines = event.first_line;
             }
         }
+        query.cache_source(output.source.clone(), event.has_more);
         if let Ok((mut view, mut revealed, mut projection)) = views.get_mut(webview) {
             if view.snapshot.can_append_diff(&event) {
                 let snapshot = &mut view.bypass_change_detection().snapshot;
@@ -612,9 +881,9 @@ fn deliver_diff_outputs(
                     .append_diff_patch(event, &revealed.0)
                     .expect("appendability was checked");
                 projection.capture(snapshot, &revealed.0);
-                commands.trigger(vmux_ecs::UiStateWrite::<GitUiState>::from_event(
-                    webview, &append,
-                ));
+                if let Some(ui_state) = ui_state.as_mut() {
+                    ui_state.push(webview, append);
+                }
             } else {
                 view.snapshot.diff_loading = false;
                 view.snapshot.diff_viewport = Some(event);
@@ -627,7 +896,7 @@ fn deliver_diff_outputs(
             {
                 commands.trigger(bevy_cef::prelude::UiInput {
                     webview,
-                    payload: crate::event::GitDiffNextRequest,
+                    payload: next_request,
                 });
             }
             commands.entity(entity).despawn();
@@ -646,7 +915,9 @@ fn deliver_branch_files_outputs(
     mut states: Query<(
         &mut super::state::GitState,
         &crate::state::GitPageControllerState,
+        &mut super::state::GitCatalogRevision,
     )>,
+    mut ui_state: Option<vmux_ecs::UiStateWriter<GitUiState>>,
     mut commands: Commands,
 ) {
     for (entity, job, mut output) in &mut outputs {
@@ -658,37 +929,51 @@ fn deliver_branch_files_outputs(
             commands.entity(entity).despawn();
             continue;
         }
-        let Ok((mut state, controller)) = states.get_mut(job.webview) else {
+        let Ok((mut state, controller, mut revision)) = states.get_mut(job.webview) else {
             commands.entity(entity).despawn();
             continue;
         };
-        match &mut output.result {
+        let reference = output.reference.clone();
+        let patch = match &mut output.result {
             Ok(catalog) => {
                 let base_ref = catalog.base_ref().to_string();
                 let diff_paths = catalog.path_labels();
                 let page = query.replace(std::mem::take(catalog));
-                state
-                    .snapshot
-                    .branch_files_reference
-                    .clone_from(&output.reference);
-                state.snapshot.branch_files_base_ref = base_ref;
-                state.snapshot.branch_diff_paths = diff_paths;
-                state.snapshot.branch_files = page.files;
-                state.snapshot.branch_files_total = page.total;
-                state.snapshot.branch_files_has_more = page.has_more;
-                state.snapshot.branch_files_error.clear();
-            }
-            Err(error) => {
-                state.snapshot.branch_files_has_more = false;
-                state.snapshot.branch_files_error = std::mem::take(&mut error.message);
-                if controller.focused_panel == crate::state::GitPanel::Branches
-                    && controller.selected_branch == output.reference
-                {
-                    state.snapshot.diff_loading = false;
+                GitBranchFilesPatch {
+                    reference: reference.clone(),
+                    base_ref: Some(base_ref),
+                    diff_paths: Some(diff_paths),
+                    page: Some(GitBranchFilesPagePatch {
+                        offset: 0,
+                        files: page.files,
+                        total: page.total,
+                        has_more: page.has_more,
+                    }),
+                    diff_loading: None,
+                    loading: false,
+                    error: String::new(),
                 }
             }
+            Err(error) => GitBranchFilesPatch {
+                reference: reference.clone(),
+                base_ref: None,
+                diff_paths: None,
+                page: None,
+                diff_loading: (controller.focused_panel == crate::state::GitPanel::Branches
+                    && controller.selected_branch == reference)
+                    .then_some(false),
+                loading: false,
+                error: std::mem::take(&mut error.message),
+            },
+        };
+        state
+            .bypass_change_detection()
+            .snapshot
+            .apply_branch_files_patch(&patch);
+        revision.advance();
+        if let Some(ui_state) = ui_state.as_mut() {
+            ui_state.push(job.webview, patch);
         }
-        state.snapshot.branch_files_loading = false;
         commands.entity(entity).despawn();
     }
 }
@@ -705,6 +990,10 @@ fn deliver_operation_outputs(
     for (entity, job, output) in &outputs {
         let webview = job.webview;
         if states.contains(webview) {
+            if !states.repository_matches(webview, &output.repository) {
+                commands.entity(entity).despawn();
+                continue;
+            }
             let branch = if output.result.operation == "new branch" && output.result.ok {
                 pending_branches
                     .get_mut(webview)
@@ -741,7 +1030,7 @@ fn deliver_operation_outputs(
                     },
                 ));
             }
-        } else if files.contains(webview) {
+        } else if files.repository_matches(webview, &output.repository) {
             let refresh = files.apply_result(webview, output.result.clone(), wake.clone());
             match &output.status {
                 Some(Ok(status)) => files.apply_status(webview, status.clone()),
@@ -756,17 +1045,75 @@ fn deliver_operation_outputs(
     }
 }
 
+type Failures<'w, 's> = Query<
+    'w,
+    's,
+    (
+        Entity,
+        &'static GitJob,
+        &'static FailureOutput,
+        Option<&'static RepositoryJob>,
+        Option<&'static CatalogJob>,
+        Option<&'static BranchFilesJob>,
+        Option<&'static DiffJob>,
+        Option<&'static GitRepository>,
+    ),
+>;
+
 fn deliver_failure_outputs(
-    outputs: Query<(Entity, &GitJob, &FailureOutput)>,
+    outputs: Failures,
+    branch_queries: Query<&super::diff::GitBranchFilesQuery>,
+    diff_queries: Query<&super::diff::GitDiffQuery>,
     mut states: super::state::GitStates,
     mut files: super::status::FileGitStates,
     mut commands: Commands,
 ) {
-    for (entity, job, output) in &outputs {
-        if states.contains(job.webview) {
-            states.apply_error(job.webview, &output.0);
+    for (entity, job, output, repository, catalog, branch_files, diff, authority) in &outputs {
+        if let Some(repository) = repository {
+            if states.repository_requested_at(job.webview, &repository.path, repository.revision) {
+                states.fail_repository(job.webview, &output.0);
+            }
+        } else if states.contains(job.webview) {
+            let current = authority.is_some_and(|repository| {
+                states.repository_matches(job.webview, repository.path())
+            });
+            if !current {
+                commands.entity(entity).despawn();
+                continue;
+            }
+            if let Some(catalog) = catalog {
+                states.fail_catalog(job.webview, catalog.catalog, catalog.generation, &output.0);
+            } else if let Some(branch_files) = branch_files
+                && branch_queries.get(job.webview).is_ok_and(|query| {
+                    query.accepts(branch_files.generation, &branch_files.reference)
+                })
+            {
+                states.fail_branch_files(job.webview, &output.0);
+            } else if let Some(diff) = diff
+                && diff_queries
+                    .get(job.webview)
+                    .is_ok_and(|query| query.accepts(diff.generation))
+            {
+                states.fail_diff(job.webview, diff.generation, &output.0);
+            } else if catalog.is_none() && branch_files.is_none() && diff.is_none() {
+                states.apply_error(job.webview, &output.0);
+            }
         } else if files.contains(job.webview) {
-            files.apply_error(job.webview, output.0.message.clone());
+            let current = authority
+                .is_some_and(|repository| files.repository_matches(job.webview, repository.path()));
+            if !current {
+                commands.entity(entity).despawn();
+                continue;
+            }
+            if let Some(diff) = diff
+                && diff_queries
+                    .get(job.webview)
+                    .is_ok_and(|query| files.accepts_diff(job.webview, diff.generation, query))
+            {
+                files.fail_diff(job.webview, diff.generation, output.0.message.clone());
+            } else if diff.is_none() {
+                files.apply_error(job.webview, output.0.message.clone());
+            }
         }
         commands.entity(entity).despawn();
     }
@@ -776,21 +1123,34 @@ fn deliver_failure_outputs(
 struct PendingGitJobs<'w, 's, J: Component> {
     queues: Query<'w, 's, (Entity, &'static GitJobs)>,
     pending: Query<'w, 's, &'static J>,
+    owners: Query<'w, 's, &'static GitJob>,
     repositories: Query<'w, 's, &'static GitRepository>,
     running: Query<'w, 's, (), With<GitJobRunning>>,
     reads: Query<'w, 's, (), With<super::job::GitReadJob>>,
     presented: Query<'w, 's, (), With<vmux_ecs::PagePresented>>,
+    transitioning: Query<'w, 's, (), With<vmux_ecs::PageTransition>>,
+    keyboard_owners: Query<'w, 's, (), With<vmux_ecs::KeyboardOwner>>,
     wake: Option<Res<'w, EventLoopProxyWrapper>>,
     runtime: Res<'w, GitRuntime>,
 }
 
 impl<J: Component + Clone> PendingGitJobs<'_, '_, J> {
+    fn owner(&self, entity: Entity) -> Option<Entity> {
+        self.owners.get(entity).ok().map(|job| job.webview)
+    }
+
+    fn owner_accepts_reads(&self, owner: Entity) -> bool {
+        self.presented.contains(owner)
+            || self.transitioning.contains(owner)
+            || self.keyboard_owners.contains(owner)
+    }
+
     fn candidate(&self, owner: Entity, queue: &GitJobs) -> Option<Entity> {
         if queue.iter().any(|entity| self.running.contains(entity)) {
             return None;
         }
         for entity in queue.iter() {
-            if self.reads.contains(entity) && !self.presented.contains(owner) {
+            if self.reads.contains(entity) && !self.owner_accepts_reads(owner) {
                 continue;
             }
             return Some(entity);
@@ -883,32 +1243,38 @@ fn start_repository_jobs(
     let epoch = epoch.0;
     for (entity, job, wake) in ready {
         let loads = loads.clone();
-        let Some(task) = jobs.spawn(wake, move || RepositoryOutput(loads.read(&job.path, epoch)))
-        else {
+        let Some(task) = jobs.spawn(wake, move || {
+            let result = loads.read(&job.path, epoch);
+            RepositoryOutput(result)
+        }) else {
             continue;
         };
         commands.entity(entity).insert((GitJobRunning, task));
     }
 }
 
-fn start_catalog_jobs(jobs: PendingGitJobs<CatalogJob>, mut commands: Commands) {
+fn start_catalog_jobs(
+    jobs: PendingGitJobs<CatalogJob>,
+    snapshots: Res<CatalogSnapshots>,
+    mut commands: Commands,
+) {
     for (entity, job, repository, wake) in jobs.ready_with_repository() {
+        let Some(owner) = jobs.owner(entity) else {
+            continue;
+        };
         let repo_root = repository.path().to_string_lossy().into_owned();
+        let snapshots = snapshots.as_ref().clone();
         let Some(task) = jobs.spawn(wake, move || CatalogOutput {
             catalog: job.catalog,
             repo_root,
             offset: job.offset,
             revision: job.revision,
-            result: repository
-                .catalog_page(job.catalog, &job.current_branch, job.offset, job.limit)
-                .map_err(|error| GitOperationError { message: error.0 }),
+            generation: job.generation,
+            result: snapshots.page(owner, &repository, &job),
         }) else {
             continue;
         };
-        commands
-            .entity(entity)
-            .remove::<CatalogJob>()
-            .insert((GitJobRunning, task));
+        commands.entity(entity).insert((GitJobRunning, task));
     }
 }
 
@@ -923,10 +1289,7 @@ fn start_branch_files_jobs(jobs: PendingGitJobs<BranchFilesJob>, mut commands: C
         }) else {
             continue;
         };
-        commands
-            .entity(entity)
-            .remove::<BranchFilesJob>()
-            .insert((GitJobRunning, task));
+        commands.entity(entity).insert((GitJobRunning, task));
     }
 }
 
@@ -937,6 +1300,7 @@ fn start_diff_jobs(jobs: PendingGitJobs<DiffJob>, mut commands: Commands) {
                 return DiffOutput {
                     viewport: GitDiffViewport {
                         generation: job.generation,
+                        revision: 0,
                         first_line: job.top_line,
                         total_lines: 0,
                         has_more: false,
@@ -945,52 +1309,53 @@ fn start_diff_jobs(jobs: PendingGitJobs<DiffJob>, mut commands: Commands) {
                         error: String::new(),
                     },
                     branch_paths: job.branch_paths,
-                    branch_lines: None,
+                    source: None,
                     branch_top_line: job.branch_top_line,
                     branch_page_complete: true,
                 };
             }
-            let result = match &job.scope {
-                DiffScope::File => match job.content.as_deref() {
-                    Some(content) => repository
-                        .diff_lines_with_content(&job.path, content)
-                        .map(Arc::new),
-                    None => repository.diff_lines(&job.path).map(Arc::new),
-                },
-                DiffScope::Branch(reference) => match job.branch_lines.clone() {
-                    Some(lines) => Ok(lines),
-                    None if !job.branch_source.as_os_str().is_empty()
-                        && !job.branch_merge_base.is_empty() =>
-                    {
-                        GitRepository::at(job.branch_source.clone())
-                            .branch_diff_lines_for_paths_against(
-                                reference,
-                                &job.branch_merge_base,
-                                &job.branch_paths,
-                            )
-                            .map(Arc::new)
+            let result = match job.cached_source.clone() {
+                Some(source) => Ok(source),
+                None => match &job.scope {
+                    DiffScope::File => match job.content.as_deref() {
+                        Some(content) => repository.diff_source_with_content(&job.path, content),
+                        None => repository.diff_source(&job.path),
+                    },
+                    DiffScope::Branch(reference) => {
+                        if !job.branch_source.as_os_str().is_empty()
+                            && !job.branch_merge_base.is_empty()
+                        {
+                            GitRepository::at(job.branch_source.clone())
+                                .branch_diff_source_for_paths_against(
+                                    reference,
+                                    &job.branch_merge_base,
+                                    &job.branch_paths,
+                                )
+                        } else {
+                            repository.branch_diff_source_for_paths(reference, &job.branch_paths)
+                        }
                     }
-                    None => repository
-                        .branch_diff_lines_for_paths(reference, &job.branch_paths)
-                        .map(Arc::new),
+                    DiffScope::Commit(reference) => repository.commit_diff_source(reference),
+                    DiffScope::Stash(reference) => repository.stash_diff_source(reference),
                 },
-                DiffScope::Commit(reference) => {
-                    repository.commit_diff_lines(reference).map(Arc::new)
-                }
-                DiffScope::Stash(reference) => repository.stash_diff_lines(reference).map(Arc::new),
             };
             match result {
-                Ok(all_lines) => {
+                Ok(source) => {
+                    let window_top = if matches!(job.scope, DiffScope::Branch(_)) {
+                        job.branch_top_line
+                    } else {
+                        job.top_line
+                    };
+                    let (source_total, lines) =
+                        match source.window(&repository, window_top, job.rows) {
+                            Ok(window) => window,
+                            Err(error) => return DiffOutput::failure(&job, error),
+                        };
                     let (first_line, total_lines, has_more, lines, branch_page_complete) =
                         if matches!(job.scope, DiffScope::Branch(_)) {
-                            let (branch_total, lines) = super::parse::DiffParser::window(
-                                &all_lines,
-                                job.branch_top_line,
-                                job.rows,
-                            );
                             let page_lines = u32::try_from(lines.len()).unwrap_or(u32::MAX);
                             let branch_loaded = job.branch_top_line.saturating_add(page_lines);
-                            let branch_page_complete = branch_loaded >= branch_total;
+                            let branch_page_complete = branch_loaded >= source_total;
                             (
                                 job.top_line,
                                 job.top_line.saturating_add(page_lines),
@@ -999,26 +1364,26 @@ fn start_diff_jobs(jobs: PendingGitJobs<DiffJob>, mut commands: Commands) {
                                 branch_page_complete,
                             )
                         } else {
-                            let (total_lines, lines) = super::parse::DiffParser::window(
-                                &all_lines,
-                                job.top_line,
-                                job.rows,
-                            );
                             let loaded = job
                                 .top_line
                                 .saturating_add(u32::try_from(lines.len()).unwrap_or(u32::MAX));
                             (
-                                job.top_line.min(total_lines),
-                                total_lines,
-                                loaded < total_lines,
+                                job.top_line.min(source_total),
+                                source_total,
+                                loaded < source_total,
                                 lines,
                                 true,
                             )
                         };
-                    let markers = super::diff::GitDiffMarkers::from_lines(&lines).into_inner();
+                    let markers = if matches!(job.scope, DiffScope::File) {
+                        super::diff::GitDiffMarkers::from_lines(&lines).into_inner()
+                    } else {
+                        Vec::new()
+                    };
                     DiffOutput {
                         viewport: GitDiffViewport {
                             generation: job.generation,
+                            revision: 0,
                             first_line,
                             total_lines,
                             has_more,
@@ -1027,35 +1392,17 @@ fn start_diff_jobs(jobs: PendingGitJobs<DiffJob>, mut commands: Commands) {
                             error: String::new(),
                         },
                         branch_paths: job.branch_paths,
-                        branch_lines: matches!(job.scope, DiffScope::Branch(_))
-                            .then_some(all_lines),
+                        source: Some(source),
                         branch_top_line: job.branch_top_line,
                         branch_page_complete,
                     }
                 }
-                Err(error) => DiffOutput {
-                    viewport: GitDiffViewport {
-                        generation: job.generation,
-                        first_line: job.top_line,
-                        total_lines: 0,
-                        has_more: false,
-                        lines: Vec::new(),
-                        markers: Vec::new(),
-                        error: error.0,
-                    },
-                    branch_paths: job.branch_paths,
-                    branch_lines: None,
-                    branch_top_line: job.branch_top_line,
-                    branch_page_complete: false,
-                },
+                Err(error) => DiffOutput::failure(&job, error),
             }
         }) else {
             continue;
         };
-        commands
-            .entity(entity)
-            .remove::<DiffJob>()
-            .insert((GitJobRunning, task));
+        commands.entity(entity).insert((GitJobRunning, task));
     }
 }
 
@@ -1063,14 +1410,11 @@ fn start_stage_jobs(jobs: PendingGitJobs<StageJob>, mut commands: Commands) {
     for (entity, job, repository, wake) in jobs.ready_with_repository() {
         let Some(task) = jobs.spawn(wake, move || match repository.stage(&job.path) {
             Ok(()) => OperationOutput::success_with_status(&repository, &job.path, "stage", "ok"),
-            Err(error) => OperationOutput::failure("stage", error),
+            Err(error) => OperationOutput::failure(repository.path(), "stage", error),
         }) else {
             continue;
         };
-        commands
-            .entity(entity)
-            .remove::<StageJob>()
-            .insert((GitJobRunning, task));
+        commands.entity(entity).insert((GitJobRunning, task));
     }
 }
 
@@ -1078,14 +1422,11 @@ fn start_unstage_jobs(jobs: PendingGitJobs<UnstageJob>, mut commands: Commands) 
     for (entity, job, repository, wake) in jobs.ready_with_repository() {
         let Some(task) = jobs.spawn(wake, move || match repository.unstage(&job.path) {
             Ok(()) => OperationOutput::success_with_status(&repository, &job.path, "unstage", "ok"),
-            Err(error) => OperationOutput::failure("unstage", error),
+            Err(error) => OperationOutput::failure(repository.path(), "unstage", error),
         }) else {
             continue;
         };
-        commands
-            .entity(entity)
-            .remove::<UnstageJob>()
-            .insert((GitJobRunning, task));
+        commands.entity(entity).insert((GitJobRunning, task));
     }
 }
 
@@ -1093,14 +1434,11 @@ fn start_discard_jobs(jobs: PendingGitJobs<DiscardJob>, mut commands: Commands) 
     for (entity, job, repository, wake) in jobs.ready_with_repository() {
         let Some(task) = jobs.spawn(wake, move || match repository.discard(&job.path) {
             Ok(()) => OperationOutput::success_with_status(&repository, &job.path, "discard", "ok"),
-            Err(error) => OperationOutput::failure("discard", error),
+            Err(error) => OperationOutput::failure(repository.path(), "discard", error),
         }) else {
             continue;
         };
-        commands
-            .entity(entity)
-            .remove::<DiscardJob>()
-            .insert((GitJobRunning, task));
+        commands.entity(entity).insert((GitJobRunning, task));
     }
 }
 
@@ -1115,17 +1453,14 @@ fn start_commit_jobs(jobs: PendingGitJobs<CommitJob>, mut commands: Commands) {
                         "commit",
                         "committed",
                     ),
-                    Err(error) => OperationOutput::failure("commit", error),
+                    Err(error) => OperationOutput::failure(repository.path(), "commit", error),
                 },
-                Err(error) => OperationOutput::failure("commit", error),
+                Err(error) => OperationOutput::failure(job.path, "commit", error),
             })
         else {
             continue;
         };
-        commands
-            .entity(entity)
-            .remove::<CommitJob>()
-            .insert((GitJobRunning, task));
+        commands.entity(entity).insert((GitJobRunning, task));
     }
 }
 
@@ -1140,17 +1475,14 @@ fn start_fetch_jobs(jobs: PendingGitJobs<FetchJob>, mut commands: Commands) {
                         "fetch",
                         "fetched",
                     ),
-                    Err(error) => OperationOutput::failure("fetch", error),
+                    Err(error) => OperationOutput::failure(repository.path(), "fetch", error),
                 },
-                Err(error) => OperationOutput::failure("fetch", error),
+                Err(error) => OperationOutput::failure(job.path, "fetch", error),
             })
         else {
             continue;
         };
-        commands
-            .entity(entity)
-            .remove::<FetchJob>()
-            .insert((GitJobRunning, task));
+        commands.entity(entity).insert((GitJobRunning, task));
     }
 }
 
@@ -1165,17 +1497,14 @@ fn start_pull_jobs(jobs: PendingGitJobs<PullJob>, mut commands: Commands) {
                         "pull",
                         "pulled",
                     ),
-                    Err(error) => OperationOutput::failure("pull", error),
+                    Err(error) => OperationOutput::failure(repository.path(), "pull", error),
                 },
-                Err(error) => OperationOutput::failure("pull", error),
+                Err(error) => OperationOutput::failure(job.path, "pull", error),
             })
         else {
             continue;
         };
-        commands
-            .entity(entity)
-            .remove::<PullJob>()
-            .insert((GitJobRunning, task));
+        commands.entity(entity).insert((GitJobRunning, task));
     }
 }
 
@@ -1190,17 +1519,14 @@ fn start_push_jobs(jobs: PendingGitJobs<PushJob>, mut commands: Commands) {
                         "push",
                         "pushed",
                     ),
-                    Err(error) => OperationOutput::failure("push", error),
+                    Err(error) => OperationOutput::failure(repository.path(), "push", error),
                 },
-                Err(error) => OperationOutput::failure("push", error),
+                Err(error) => OperationOutput::failure(job.path, "push", error),
             })
         else {
             continue;
         };
-        commands
-            .entity(entity)
-            .remove::<PushJob>()
-            .insert((GitJobRunning, task));
+        commands.entity(entity).insert((GitJobRunning, task));
     }
 }
 
@@ -1214,16 +1540,13 @@ fn start_stage_all_jobs(jobs: PendingGitJobs<StageAllJob>, mut commands: Command
                     "stage all",
                     "staged",
                 ),
-                Err(error) => OperationOutput::failure("stage all", error),
+                Err(error) => OperationOutput::failure(repository.path(), "stage all", error),
             },
-            Err(error) => OperationOutput::failure("stage all", error),
+            Err(error) => OperationOutput::failure(job.path, "stage all", error),
         }) else {
             continue;
         };
-        commands
-            .entity(entity)
-            .remove::<StageAllJob>()
-            .insert((GitJobRunning, task));
+        commands.entity(entity).insert((GitJobRunning, task));
     }
 }
 
@@ -1237,57 +1560,53 @@ fn start_hunk_jobs(jobs: PendingGitJobs<HunkJob>, mut commands: Commands) {
                     if job.accept { "accept" } else { "reject" },
                     "ok",
                 ),
-                Err(error) => OperationOutput::failure("hunk", error),
+                Err(error) => OperationOutput::failure(repository.path(), "hunk", error),
             }
         }) else {
             continue;
         };
-        commands
-            .entity(entity)
-            .remove::<HunkJob>()
-            .insert((GitJobRunning, task));
+        commands.entity(entity).insert((GitJobRunning, task));
     }
 }
 
 fn start_amend_jobs(jobs: PendingGitJobs<AmendJob>, mut commands: Commands) {
     for (entity, _, repository, wake) in jobs.ready_with_repository() {
         let Some(task) = jobs.spawn_operation(wake, move || {
-            OperationOutput::from_result("amend", repository.amend())
+            OperationOutput::from_result(&repository, "amend", repository.amend())
         }) else {
             continue;
         };
-        commands
-            .entity(entity)
-            .remove::<AmendJob>()
-            .insert((GitJobRunning, task));
+        commands.entity(entity).insert((GitJobRunning, task));
     }
 }
 
 fn start_checkout_commit_jobs(jobs: PendingGitJobs<CheckoutCommitJob>, mut commands: Commands) {
     for (entity, job, repository, wake) in jobs.ready_with_repository() {
         let Some(task) = jobs.spawn_operation(wake, move || {
-            OperationOutput::from_result("checkout commit", repository.checkout_commit(&job.commit))
+            OperationOutput::from_result(
+                &repository,
+                "checkout commit",
+                repository.checkout_commit(&job.commit),
+            )
         }) else {
             continue;
         };
-        commands
-            .entity(entity)
-            .remove::<CheckoutCommitJob>()
-            .insert((GitJobRunning, task));
+        commands.entity(entity).insert((GitJobRunning, task));
     }
 }
 
 fn start_cherry_pick_jobs(jobs: PendingGitJobs<CherryPickJob>, mut commands: Commands) {
     for (entity, job, repository, wake) in jobs.ready_with_repository() {
         let Some(task) = jobs.spawn_operation(wake, move || {
-            OperationOutput::from_result("cherry-pick", repository.cherry_pick(&job.commit))
+            OperationOutput::from_result(
+                &repository,
+                "cherry-pick",
+                repository.cherry_pick(&job.commit),
+            )
         }) else {
             continue;
         };
-        commands
-            .entity(entity)
-            .remove::<CherryPickJob>()
-            .insert((GitJobRunning, task));
+        commands.entity(entity).insert((GitJobRunning, task));
     }
 }
 
@@ -1295,133 +1614,126 @@ fn start_create_branch_jobs(jobs: PendingGitJobs<CreateBranchJob>, mut commands:
     for (entity, job, repository, wake) in jobs.ready_with_repository() {
         let Some(task) = jobs.spawn_operation(wake, move || {
             OperationOutput::from_result(
+                &repository,
                 "new branch",
                 repository.create_branch(&job.branch, &job.start_point),
             )
         }) else {
             continue;
         };
-        commands
-            .entity(entity)
-            .remove::<CreateBranchJob>()
-            .insert((GitJobRunning, task));
+        commands.entity(entity).insert((GitJobRunning, task));
     }
 }
 
 fn start_delete_branch_jobs(jobs: PendingGitJobs<DeleteBranchJob>, mut commands: Commands) {
     for (entity, job, repository, wake) in jobs.ready_with_repository() {
         let Some(task) = jobs.spawn_operation(wake, move || {
-            OperationOutput::from_result("delete branch", repository.delete_branch(&job.branch))
+            OperationOutput::from_result(
+                &repository,
+                "delete branch",
+                repository.delete_branch(&job.branch),
+            )
         }) else {
             continue;
         };
-        commands
-            .entity(entity)
-            .remove::<DeleteBranchJob>()
-            .insert((GitJobRunning, task));
+        commands.entity(entity).insert((GitJobRunning, task));
     }
 }
 
 fn start_fast_forward_jobs(jobs: PendingGitJobs<FastForwardJob>, mut commands: Commands) {
     for (entity, job, repository, wake) in jobs.ready_with_repository() {
         let Some(task) = jobs.spawn_operation(wake, move || {
-            OperationOutput::from_result("fast-forward", repository.fast_forward(&job.branch))
+            OperationOutput::from_result(
+                &repository,
+                "fast-forward",
+                repository.fast_forward(&job.branch),
+            )
         }) else {
             continue;
         };
-        commands
-            .entity(entity)
-            .remove::<FastForwardJob>()
-            .insert((GitJobRunning, task));
+        commands.entity(entity).insert((GitJobRunning, task));
     }
 }
 
 fn start_merge_jobs(jobs: PendingGitJobs<MergeJob>, mut commands: Commands) {
     for (entity, job, repository, wake) in jobs.ready_with_repository() {
         let Some(task) = jobs.spawn_operation(wake, move || {
-            OperationOutput::from_result("merge", repository.merge(&job.branch))
+            OperationOutput::from_result(&repository, "merge", repository.merge(&job.branch))
         }) else {
             continue;
         };
-        commands
-            .entity(entity)
-            .remove::<MergeJob>()
-            .insert((GitJobRunning, task));
+        commands.entity(entity).insert((GitJobRunning, task));
     }
 }
 
 fn start_rebase_jobs(jobs: PendingGitJobs<RebaseJob>, mut commands: Commands) {
     for (entity, job, repository, wake) in jobs.ready_with_repository() {
         let Some(task) = jobs.spawn_operation(wake, move || {
-            OperationOutput::from_result("rebase", repository.rebase(&job.branch))
+            OperationOutput::from_result(&repository, "rebase", repository.rebase(&job.branch))
         }) else {
             continue;
         };
-        commands
-            .entity(entity)
-            .remove::<RebaseJob>()
-            .insert((GitJobRunning, task));
+        commands.entity(entity).insert((GitJobRunning, task));
     }
 }
 
 fn start_revert_jobs(jobs: PendingGitJobs<RevertJob>, mut commands: Commands) {
     for (entity, job, repository, wake) in jobs.ready_with_repository() {
         let Some(task) = jobs.spawn_operation(wake, move || {
-            OperationOutput::from_result("revert", repository.revert(&job.commit))
+            OperationOutput::from_result(&repository, "revert", repository.revert(&job.commit))
         }) else {
             continue;
         };
-        commands
-            .entity(entity)
-            .remove::<RevertJob>()
-            .insert((GitJobRunning, task));
+        commands.entity(entity).insert((GitJobRunning, task));
     }
 }
 
 fn start_stash_drop_jobs(jobs: PendingGitJobs<StashDropJob>, mut commands: Commands) {
     for (entity, job, repository, wake) in jobs.ready_with_repository() {
         let Some(task) = jobs.spawn_operation(wake, move || {
-            OperationOutput::from_result("stash drop", repository.stash_drop(&job.reference))
+            OperationOutput::from_result(
+                &repository,
+                "stash drop",
+                repository.stash_drop(&job.reference),
+            )
         }) else {
             continue;
         };
-        commands
-            .entity(entity)
-            .remove::<StashDropJob>()
-            .insert((GitJobRunning, task));
+        commands.entity(entity).insert((GitJobRunning, task));
     }
 }
 
 fn start_stash_pop_jobs(jobs: PendingGitJobs<StashPopJob>, mut commands: Commands) {
     for (entity, job, repository, wake) in jobs.ready_with_repository() {
         let Some(task) = jobs.spawn_operation(wake, move || {
-            OperationOutput::from_result("stash pop", repository.stash_pop(&job.reference))
+            OperationOutput::from_result(
+                &repository,
+                "stash pop",
+                repository.stash_pop(&job.reference),
+            )
         }) else {
             continue;
         };
-        commands
-            .entity(entity)
-            .remove::<StashPopJob>()
-            .insert((GitJobRunning, task));
+        commands.entity(entity).insert((GitJobRunning, task));
     }
 }
 
 fn start_stash_push_jobs(jobs: PendingGitJobs<StashPushJob>, mut commands: Commands) {
     for (entity, _, repository, wake) in jobs.ready_with_repository() {
         let Some(task) = jobs.spawn_operation(wake, move || {
-            OperationOutput::from_result("stash", repository.stash_push())
+            OperationOutput::from_result(&repository, "stash", repository.stash_push())
         }) else {
             continue;
         };
-        commands
-            .entity(entity)
-            .remove::<StashPushJob>()
-            .insert((GitJobRunning, task));
+        commands.entity(entity).insert((GitJobRunning, task));
     }
 }
 
 #[cfg(test)]
 mod tests {
+    #[cfg(unix)]
+    use std::os::unix::fs::symlink;
+
     use super::*;
     use crate::event::{FileStatus, GitDiffViewport};
     use crate::host::repository::test_repo;
@@ -1448,6 +1760,7 @@ mod tests {
     fn app() -> App {
         let mut app = App::new();
         app.init_resource::<CapturedOutputs>()
+            .add_plugins(vmux_ecs::UiStatePlugin::<GitUiState>::default())
             .add_plugins(JobPlugin)
             .add_systems(
                 Update,
@@ -1492,6 +1805,30 @@ mod tests {
     }
 
     #[test]
+    fn catalog_snapshots_are_scoped_by_owner_and_replace_old_revisions() {
+        let first = Entity::from_bits(1);
+        let second = Entity::from_bits(2);
+        let key = |owner, revision| CatalogSnapshotKey {
+            owner,
+            repository: PathBuf::from("/repo"),
+            catalog: 2,
+            branch: String::new(),
+            revision,
+        };
+        let snapshot = || Arc::new(GitCatalogSnapshot::Tags(Vec::new()));
+        let mut cache = CatalogSnapshotCache::default();
+
+        cache.insert(key(first, 1), snapshot());
+        cache.insert(key(second, 1), snapshot());
+        cache.insert(key(first, 2), snapshot());
+
+        assert_eq!(cache.snapshots.len(), 2);
+        assert!(!cache.snapshots.contains_key(&key(first, 1)));
+        assert!(cache.snapshots.contains_key(&key(first, 2)));
+        assert!(cache.snapshots.contains_key(&key(second, 1)));
+    }
+
+    #[test]
     fn hidden_pages_defer_read_jobs_until_presented() {
         let mut app = app();
         let webview = owner(&mut app);
@@ -1506,6 +1843,11 @@ mod tests {
             state.snapshot.workspace = "/tmp/repository".to_string();
             state.snapshot.nonce = 1;
         }
+        let revision = app
+            .world_mut()
+            .get_mut::<super::super::state::GitRepositoryLoadRevision>(webview)
+            .unwrap()
+            .advance();
         let job = app
             .world_mut()
             .spawn((
@@ -1513,7 +1855,7 @@ mod tests {
                 RepositoryJob {
                     path: "/tmp/repository".into(),
                     refresh_catalogs: false,
-                    revision: 1,
+                    revision,
                 },
             ))
             .id();
@@ -1526,6 +1868,91 @@ mod tests {
         app.world_mut()
             .entity_mut(webview)
             .insert(vmux_ecs::PagePresented);
+        app.update();
+
+        assert!(app.world().get::<GitJobRunning>(job).is_some());
+    }
+
+    #[test]
+    fn opening_page_starts_read_jobs_before_presentation() {
+        let mut app = app();
+        let webview = app
+            .world_mut()
+            .spawn((
+                super::super::state::GitState::default(),
+                vmux_ecs::PageTransition,
+            ))
+            .id();
+        {
+            let mut state = app
+                .world_mut()
+                .get_mut::<super::super::state::GitState>(webview)
+                .unwrap();
+            state.snapshot.workspace = "/tmp/repository".to_string();
+            state.snapshot.nonce = 1;
+        }
+        let revision = app
+            .world_mut()
+            .get_mut::<super::super::state::GitRepositoryLoadRevision>(webview)
+            .unwrap()
+            .advance();
+        let job = app
+            .world_mut()
+            .spawn((
+                GitJob::new(webview),
+                RepositoryJob {
+                    path: "/tmp/repository".into(),
+                    refresh_catalogs: false,
+                    revision,
+                },
+            ))
+            .id();
+
+        app.update();
+
+        assert!(app.world().get::<GitJobRunning>(job).is_some());
+    }
+
+    #[test]
+    fn foreground_repository_load_waits_until_the_page_is_transitioning() {
+        let mut app = app();
+        let webview = owner(&mut app);
+        app.world_mut()
+            .entity_mut(webview)
+            .remove::<vmux_ecs::PagePresented>();
+        {
+            let mut state = app
+                .world_mut()
+                .get_mut::<super::super::state::GitState>(webview)
+                .unwrap();
+            state.snapshot.workspace = "/tmp/repository".to_string();
+            state.snapshot.nonce = 1;
+        }
+        let revision = app
+            .world_mut()
+            .get_mut::<super::super::state::GitRepositoryLoadRevision>(webview)
+            .unwrap()
+            .advance();
+        let job = app
+            .world_mut()
+            .spawn((
+                GitJob::new(webview),
+                super::super::job::GitForegroundRead,
+                RepositoryJob {
+                    path: "/tmp/repository".into(),
+                    refresh_catalogs: false,
+                    revision,
+                },
+            ))
+            .id();
+
+        app.update();
+
+        assert!(app.world().get::<GitJobRunning>(job).is_none());
+
+        app.world_mut()
+            .entity_mut(webview)
+            .insert(vmux_ecs::PageTransition);
         app.update();
 
         assert!(app.world().get::<GitJobRunning>(job).is_some());
@@ -1609,6 +2036,7 @@ mod tests {
         app.update();
 
         assert!(app.world().get::<GitJobRunning>(first).is_some());
+        assert!(app.world().get::<RepositoryJob>(first).is_some());
         assert!(app.world().get::<RepositoryJob>(second).is_some());
         assert!(app.world().get::<GitJobRunning>(second).is_none());
     }
@@ -1668,6 +2096,51 @@ mod tests {
 
         assert!(Arc::ptr_eq(&root, &child));
         assert!(!Arc::ptr_eq(&root, &refreshed));
+        let cached = loads.cached(&nested).unwrap();
+        assert_eq!(cached.path, nested.to_string_lossy());
+        assert_eq!(
+            PathIdentity::resolve(&cached.repo_root),
+            PathIdentity::resolve(repo.path())
+        );
+    }
+
+    #[test]
+    fn repository_load_aliases_are_bounded() {
+        let mut cache = RepositoryLoadCache::default();
+        let root = PathBuf::from("/tmp/repository");
+        for index in 0..=REPOSITORY_LOAD_ALIAS_CAPACITY {
+            cache.remember_alias(
+                PathIdentity::lexical(format!("/tmp/repository/{index}")),
+                PathIdentity::resolve(format!("/tmp/repository/{index}")),
+                root.clone(),
+            );
+        }
+
+        assert_eq!(cache.aliases.len(), REPOSITORY_LOAD_ALIAS_CAPACITY);
+        assert!(
+            !cache
+                .aliases
+                .contains_key(&PathIdentity::lexical("/tmp/repository/0"))
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn repository_load_cache_rejects_a_retargeted_symlink_alias() {
+        let first = test_repo::init();
+        let second = test_repo::init();
+        let parent = tempfile::tempdir().unwrap();
+        let alias = parent.path().join("repository");
+        symlink(first.path(), &alias).unwrap();
+        let loads = RepositoryLoads::default();
+
+        loads.read(&alias, 1).unwrap();
+        assert!(loads.cached(&alias).is_some());
+
+        std::fs::remove_file(&alias).unwrap();
+        symlink(second.path(), &alias).unwrap();
+
+        assert!(loads.cached(&alias).is_none());
     }
 
     #[test]
@@ -1709,6 +2182,312 @@ mod tests {
     }
 
     #[test]
+    fn stale_catalog_output_releases_loading_state() {
+        let mut app = app();
+        let webview = owner(&mut app);
+        {
+            let mut state = app
+                .world_mut()
+                .get_mut::<super::super::state::GitState>(webview)
+                .unwrap();
+            state.snapshot.workspace = "/tmp/repository".to_string();
+            state.snapshot.nonce = 2;
+            state.snapshot.local_branches.loading = true;
+        }
+        let generation = app
+            .world_mut()
+            .get_mut::<super::super::state::GitCatalogRevision>(webview)
+            .unwrap()
+            .start(GitCatalog::LocalBranches);
+        let job = app
+            .world_mut()
+            .spawn((
+                GitJob::new(webview),
+                CatalogJob {
+                    catalog: GitCatalog::LocalBranches,
+                    current_branch: String::new(),
+                    offset: 0,
+                    limit: 50,
+                    revision: 1,
+                    generation,
+                },
+                CatalogOutput {
+                    catalog: GitCatalog::LocalBranches,
+                    repo_root: "/tmp/repository".to_string(),
+                    offset: 0,
+                    revision: 1,
+                    generation,
+                    result: Err(GitOperationError {
+                        message: "stale".to_string(),
+                    }),
+                },
+            ))
+            .id();
+
+        app.update();
+
+        assert!(app.world().get_entity(job).is_err());
+        let state = app
+            .world()
+            .get::<super::super::state::GitState>(webview)
+            .unwrap();
+        assert!(!state.snapshot.local_branches.loading);
+    }
+
+    #[test]
+    fn stale_catalog_output_does_not_release_a_newer_load() {
+        let mut app = app();
+        let webview = owner(&mut app);
+        {
+            let mut state = app
+                .world_mut()
+                .get_mut::<super::super::state::GitState>(webview)
+                .unwrap();
+            state.snapshot.workspace = "/tmp/repository".to_string();
+            state.snapshot.nonce = 2;
+            state.snapshot.local_branches.loading = true;
+        }
+        let old_generation = {
+            let mut revision = app
+                .world_mut()
+                .get_mut::<super::super::state::GitCatalogRevision>(webview)
+                .unwrap();
+            let old = revision.start(GitCatalog::LocalBranches);
+            let _ = revision.start(GitCatalog::LocalBranches);
+            old
+        };
+        app.world_mut().spawn((
+            GitJob::new(webview),
+            CatalogOutput {
+                catalog: GitCatalog::LocalBranches,
+                repo_root: "/tmp/repository".to_string(),
+                offset: 0,
+                revision: 1,
+                generation: old_generation,
+                result: Err(GitOperationError {
+                    message: "stale".to_string(),
+                }),
+            },
+        ));
+
+        app.update();
+
+        let state = app
+            .world()
+            .get::<super::super::state::GitState>(webview)
+            .unwrap();
+        assert!(state.snapshot.local_branches.loading);
+    }
+
+    #[test]
+    fn failed_diff_job_clears_loading_with_visible_error() {
+        let mut app = app();
+        let webview = owner(&mut app);
+        let repo = test_repo::init();
+        let request =
+            crate::event::GitRepositoryRequest::at(repo.path().to_string_lossy().into_owned());
+        let mut repository = GitRepositorySnapshot::loading(&request);
+        repository.repo_root = repo.path().to_string_lossy().into_owned();
+        repository.path.clone_from(&repository.repo_root);
+        {
+            let mut state = app
+                .world_mut()
+                .get_mut::<super::super::state::GitState>(webview)
+                .unwrap();
+            state.snapshot.workspace.clone_from(&repository.repo_root);
+            state.snapshot.repository = Some(repository);
+            state.snapshot.diff_loading = true;
+            state.snapshot.loading = false;
+        }
+        app.world_mut()
+            .entity_mut(webview)
+            .insert(super::super::diff::GitDiffQuery::for_test(7));
+        let job = app
+            .world_mut()
+            .spawn((
+                GitJob::new(webview),
+                GitRepository::at(repo.path()),
+                DiffJob {
+                    path: PathBuf::new(),
+                    scope: DiffScope::File,
+                    branch_paths: Vec::new(),
+                    cached_source: None,
+                    branch_source: PathBuf::new(),
+                    branch_merge_base: String::new(),
+                    branch_top_line: 0,
+                    branch_has_more: false,
+                    generation: 7,
+                    top_line: 0,
+                    rows: 50,
+                    content: None,
+                },
+                FailureOutput(GitOperationError {
+                    message: "worker failed".to_string(),
+                }),
+            ))
+            .id();
+
+        app.update();
+
+        assert!(app.world().get_entity(job).is_err());
+        let state = app
+            .world()
+            .get::<super::super::state::GitState>(webview)
+            .unwrap();
+        assert!(!state.snapshot.diff_loading);
+        let viewport = state.snapshot.diff_viewport.as_ref().unwrap();
+        assert_eq!(viewport.generation, 7);
+        assert_eq!(viewport.error, "worker failed");
+    }
+
+    #[test]
+    fn stale_operation_output_does_not_mutate_a_different_repository() {
+        let first = test_repo::init();
+        let second = test_repo::init();
+        let mut app = App::new();
+        app.add_systems(Update, deliver_operation_outputs);
+        let request =
+            crate::event::GitRepositoryRequest::at(second.path().to_string_lossy().into_owned());
+        let mut repository = GitRepositorySnapshot::loading(&request);
+        repository.path = second.path().to_string_lossy().into_owned();
+        repository.repo_root = repository.path.clone();
+        let webview = app
+            .world_mut()
+            .spawn(super::super::state::GitState {
+                snapshot: crate::state::GitPageSnapshot {
+                    workspace: repository.repo_root.clone(),
+                    repository: Some(repository),
+                    ..Default::default()
+                },
+            })
+            .id();
+        let job = app
+            .world_mut()
+            .spawn((
+                GitJob::new(webview),
+                OperationOutput {
+                    repository: first.path().to_path_buf(),
+                    result: GitOperationResult {
+                        operation: "fetch".to_string(),
+                        ok: true,
+                        message: "fetched".to_string(),
+                    },
+                    status: None,
+                },
+            ))
+            .id();
+
+        app.update();
+
+        assert!(app.world().get_entity(job).is_err());
+        let state = app
+            .world()
+            .get::<super::super::state::GitState>(webview)
+            .unwrap();
+        assert!(state.snapshot.result.is_none());
+        assert_eq!(state.snapshot.nonce, 0);
+    }
+
+    #[test]
+    fn stale_operation_failure_does_not_mutate_a_different_repository() {
+        let first = test_repo::init();
+        let second = test_repo::init();
+        let mut app = App::new();
+        app.add_systems(Update, deliver_failure_outputs);
+        let request =
+            crate::event::GitRepositoryRequest::at(second.path().to_string_lossy().into_owned());
+        let mut repository = GitRepositorySnapshot::loading(&request);
+        repository.path = second.path().to_string_lossy().into_owned();
+        repository.repo_root = repository.path.clone();
+        let webview = app
+            .world_mut()
+            .spawn(super::super::state::GitState {
+                snapshot: crate::state::GitPageSnapshot {
+                    workspace: repository.repo_root.clone(),
+                    repository: Some(repository),
+                    loading: false,
+                    ..Default::default()
+                },
+            })
+            .id();
+        app.world_mut().spawn((
+            GitJob::new(webview),
+            GitRepository::at(first.path()),
+            FailureOutput(GitOperationError {
+                message: "worker failed".to_string(),
+            }),
+        ));
+
+        app.update();
+
+        let state = app
+            .world()
+            .get::<super::super::state::GitState>(webview)
+            .unwrap();
+        assert!(state.snapshot.message.is_empty());
+    }
+
+    #[test]
+    fn stale_catalog_failure_does_not_release_a_newer_load() {
+        let repo = test_repo::init();
+        let mut app = App::new();
+        app.add_systems(Update, deliver_failure_outputs);
+        let request =
+            crate::event::GitRepositoryRequest::at(repo.path().to_string_lossy().into_owned());
+        let mut repository = GitRepositorySnapshot::loading(&request);
+        repository.path = repo.path().to_string_lossy().into_owned();
+        repository.repo_root = repository.path.clone();
+        let webview = app
+            .world_mut()
+            .spawn(super::super::state::GitState {
+                snapshot: crate::state::GitPageSnapshot {
+                    workspace: repository.repo_root.clone(),
+                    repository: Some(repository),
+                    local_branches: crate::state::GitCatalogProgress {
+                        loading: true,
+                        ..Default::default()
+                    },
+                    loading: false,
+                    ..Default::default()
+                },
+            })
+            .id();
+        let stale = {
+            let mut revision = app
+                .world_mut()
+                .get_mut::<super::super::state::GitCatalogRevision>(webview)
+                .unwrap();
+            let stale = revision.start(GitCatalog::LocalBranches);
+            revision.start(GitCatalog::LocalBranches);
+            stale
+        };
+        app.world_mut().spawn((
+            GitJob::new(webview),
+            GitRepository::at(repo.path()),
+            CatalogJob {
+                catalog: GitCatalog::LocalBranches,
+                current_branch: "main".to_string(),
+                offset: 0,
+                limit: 40,
+                revision: 1,
+                generation: stale,
+            },
+            FailureOutput(GitOperationError {
+                message: "worker failed".to_string(),
+            }),
+        ));
+
+        app.update();
+
+        let state = app
+            .world()
+            .get::<super::super::state::GitState>(webview)
+            .unwrap();
+        assert!(state.snapshot.local_branches.loading);
+        assert!(state.snapshot.message.is_empty());
+    }
+
+    #[test]
     fn jobs_are_despawned_when_their_owner_loses_git_state() {
         let mut app = app();
         let webview = owner(&mut app);
@@ -1733,6 +2512,39 @@ mod tests {
     }
 
     #[test]
+    fn running_diff_job_keeps_its_cancel_marker() {
+        let (repo, file) = dirty_repo();
+        let mut app = app();
+        let webview = owner(&mut app);
+        let job = app
+            .world_mut()
+            .spawn((
+                GitJob::new(webview),
+                GitRepository::at(repo.path()),
+                DiffJob {
+                    path: file,
+                    scope: DiffScope::File,
+                    branch_paths: Vec::new(),
+                    cached_source: None,
+                    branch_source: PathBuf::new(),
+                    branch_merge_base: String::new(),
+                    branch_top_line: 0,
+                    branch_has_more: false,
+                    generation: 7,
+                    top_line: 0,
+                    rows: 50,
+                    content: None,
+                },
+            ))
+            .id();
+
+        app.update();
+
+        assert!(app.world().get::<GitJobRunning>(job).is_some());
+        assert!(app.world().get::<DiffJob>(job).is_some());
+    }
+
+    #[test]
     fn diff_job_emits_projected_viewport() {
         let (repo, file) = dirty_repo();
         let mut app = app();
@@ -1744,7 +2556,7 @@ mod tests {
                 path: file,
                 scope: DiffScope::File,
                 branch_paths: Vec::new(),
-                branch_lines: None,
+                cached_source: None,
                 branch_source: PathBuf::new(),
                 branch_merge_base: String::new(),
                 branch_top_line: 0,
@@ -1797,7 +2609,7 @@ mod tests {
                 path: file,
                 scope: DiffScope::File,
                 branch_paths: Vec::new(),
-                branch_lines: None,
+                cached_source: None,
                 branch_source: PathBuf::new(),
                 branch_merge_base: String::new(),
                 branch_top_line: 0,

@@ -37,6 +37,7 @@ pub struct ToolsPage;
 #[component]
 pub fn Page() -> Element {
     use_theme();
+    let mut manager_view = use_signal(ManagerView::default);
     let tools = use_ui_state::<ToolsUiState>().state;
     let extensions = use_ui_state::<ExtensionsUiState>().state;
     let state = tools();
@@ -50,6 +51,7 @@ pub fn Page() -> Element {
         document::Title { "{title}" }
         ManagerPage {
             ToolsHeader {
+                view_controls: rsx! { if route != "extensions" && state.snapshot.loaded && state.view.visible_count > 0 { ManagerViewToggle { view: manager_view(), list_label: translate("tools-view-list"), grid_label: translate("tools-view-grid"), onchange: move |view| manager_view.set(view) } } },
                 active: route.clone(),
                 providers: state.snapshot.providers.clone(),
                 actions: rsx! {
@@ -82,7 +84,7 @@ pub fn Page() -> Element {
             if route == "extensions" {
                 ExtensionManager { state: extension_state }
             } else {
-                ToolManager { state }
+                ToolManager { state, manager_view }
             }
         }
     }
@@ -238,6 +240,7 @@ fn ToolsHeader(
     active: String,
     providers: Vec<ToolProviderMetadata>,
     #[props(default = rsx! {})] actions: Element,
+    #[props(default = rsx! {})] view_controls: Element,
 ) -> Element {
     let options = ToolRouteOption::all(providers);
     let selected = options
@@ -258,6 +261,7 @@ fn ToolsHeader(
             current: WorkspacePage::Tools.option(),
             options: WorkspacePage::options(),
             actions,
+            view_controls,
             BreadcrumbSeparator {}
             BreadcrumbSelector {
                 label: selected_label,
@@ -296,8 +300,7 @@ fn ToolThumbnail(item: ToolItem, provider: ToolProviderMetadata, class: String) 
 }
 
 #[component]
-fn ToolManager(state: ToolsUiState) -> Element {
-    let mut manager_view = use_signal(ManagerView::default);
+fn ToolManager(state: ToolsUiState, manager_view: Signal<ManagerView>) -> Element {
     let mut selected = use_signal(|| None::<ToolSelection>);
     let current = state;
     let pending = current.pending.into_iter().collect::<BTreeSet<_>>();
@@ -355,14 +358,6 @@ fn ToolManager(state: ToolsUiState) -> Element {
                         );
                     },
                     {translate("tools-apply")}
-                }
-            }
-            if snapshot.loaded && view.visible_count > 0 {
-                ManagerViewToggle {
-                    view: manager_view(),
-                    list_label: translate("tools-view-list"),
-                    grid_label: translate("tools-view-grid"),
-                    onchange: move |view| manager_view.set(view),
                 }
             }
         }

@@ -17,7 +17,7 @@ use crate::event::StackNode;
 #[component]
 pub(super) fn SideSheetStackRow(stack: StackNode, pane_id: u64) -> Element {
     let drag_state: Signal<Option<BookmarkDragState>> = use_context();
-    let folders = LayoutUi::current().value().bookmarks.folders;
+    let folders = LayoutUi::current().use_selector(|state| state.bookmarks.folders.clone())();
     let is_active = stack.is_active;
     let stack_id = stack.id;
     let mut hovered = use_signal(|| false);
@@ -60,6 +60,7 @@ pub(super) fn SideSheetStackRow(stack: StackNode, pane_id: u64) -> Element {
                         move |event| BookmarkDragState::begin(drag_state, &event, item.clone())
                     },
                     id: "sidesheet-stack-{pane_id}-{stack_id}",
+                    "data-vmux-stack-row": "{stack_id}",
                     class: if is_active {
                         "flex h-9 cursor-default items-center gap-2 rounded-md bg-foreground/[0.09] px-2 @max-[12rem]:gap-1.5 @max-[12rem]:px-1"
                     } else {
@@ -255,10 +256,10 @@ fn SheetNewButton(label: String, icon: Element, onclick: EventHandler<MouseEvent
     rsx! {
         button {
             r#type: "button",
-            class: "group flex h-9 w-full cursor-pointer items-center justify-center gap-2 px-2 text-muted-foreground transition-colors hover:bg-foreground/[0.07] hover:text-foreground @max-[12rem]:gap-1.5 @max-[12rem]:px-1",
+            class: "group flex h-9 w-full cursor-pointer items-center gap-2 px-2 text-left text-muted-foreground transition-colors hover:bg-foreground/[0.07] hover:text-foreground @max-[12rem]:gap-1.5 @max-[12rem]:px-1",
             onclick: move |e| onclick.call(e),
             {icon}
-            span { class: "min-w-0 truncate text-ui font-medium", "{label}" }
+            span { class: "min-w-0 flex-1 truncate text-ui font-medium", "{label}" }
         }
     }
 }

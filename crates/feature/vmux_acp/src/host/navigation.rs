@@ -8,7 +8,7 @@ use vmux_ecs::profile::Projects;
 use vmux_ecs::terminal::TerminalLaunch;
 use vmux_ecs::{
     Cwd, EntityTarget, PageMetadata, PageOpenDeferred, PageOpenError, PageOpenHandled, PageOpenSet,
-    PageOpenTask, PendingPrompt, PendingPromptAttachments,
+    PageOpenTask, PendingPrompt, PendingPromptAttachments, UiState, UiStateWriter,
 };
 use vmux_layout::space::FocusedSpace;
 use vmux_layout::tab::{Tab, TabDirDecided, TabWorkspace, TabWorktree, TabWorktreeUnavailable};
@@ -22,7 +22,9 @@ use vmux_start::{StartInlineTransition, StartInlineTransitionView};
 use vmux_ui::i18n::translate;
 
 use super::attach::AcpAgentAttachment;
-use super::navigation_driver::{AcpCatalog, AgentPageOpenWorkspace, PageOpener};
+use super::navigation_driver::{
+    AcpCatalog, AgentPageOpenWorkspace, PageOpenCompletion, PageOpener,
+};
 use crate::AcpSessionId;
 #[cfg(test)]
 use crate::host::acp::registry::RegistryAgent;
@@ -44,19 +46,37 @@ pub(super) fn add(app: &mut App) {
                 poll_workspace_checks,
                 start_workspace_checks,
                 release_transition,
+                discard_stale_inline_transitions,
                 prepare,
                 open,
             )
                 .chain()
-                .in_set(PageOpenSet::HandleKnownPages),
+                .in_set(PageOpenSet::HandleKnownPages)
+                .after(vmux_layout::warm_page::PrewarmPageOpenSet),
+        )
+        .add_systems(
+            Update,
+            discard_stale_inline_transitions.after(PageOpenSet::Respond),
         );
 }
 
 #[derive(Component)]
-struct PreparingAgentChatView;
+pub(super) struct PreparingAgentChatView;
 
 #[derive(Component)]
 struct AwaitingAgentTransitionPaint;
+
+#[derive(Component, Clone)]
+pub(super) struct InlineTransitionSnapshot {
+    metadata: Option<PageMetadata>,
+    session_view: bool,
+    session_manager_view: bool,
+    transition_view: bool,
+    hosts_launcher: bool,
+    page_ready: bool,
+    chat_state: Option<Option<ChatUiState>>,
+    detail_state: Option<Option<SessionDetailUiState>>,
+}
 
 #[derive(Component, Clone)]
 struct WorkspaceCheckRequest {
@@ -133,6 +153,17 @@ fn prepare(
     transitions: Query<&StartInlineTransition>,
     preparing_views: Query<(Entity, &ChildOf), With<PreparingAgentChatView>>,
     manager_views: Query<(Entity, &ChildOf), With<SessionManagerView>>,
+    view_states: Query<(
+        Option<&PageMetadata>,
+        Has<SessionView>,
+        Has<SessionManagerView>,
+        Has<StartInlineTransitionView>,
+        Has<vmux_ecs::launcher::HostsLauncher>,
+        Has<vmux_ecs::page::PageReady>,
+        Option<&UiState<ChatUiState>>,
+        Option<&UiState<SessionDetailUiState>>,
+        Has<InlineTransitionSnapshot>,
+    )>,
     workspace_checks: Query<(), Or<(With<WorkspaceCheckRequest>, With<WorkspaceCheckTask>)>>,
     child_of: Query<&ChildOf>,
     space_hierarchy: vmux_layout::space::SpaceHierarchy,
@@ -163,19 +194,43 @@ fn prepare(
         let Some(route) = Route::parse(&task.url) else {
             continue;
         };
-        let transition_view = transitions
-            .get(task.stack)
-            .ok()
-            .map(|transition| transition.webview)
-            .or_else(|| {
-                matches!(route, Route::Session(_))
-                    .then(|| manager_by_stack.get(&task.stack).copied())
-                    .flatten()
-            });
-        if !preparing_by_stack.contains_key(&task.stack)
+        let transition = transitions.get(task.stack).ok();
+        let transition_view = transition.map(|transition| transition.webview).or_else(|| {
+            matches!(route, Route::Session(_))
+                .then(|| manager_by_stack.get(&task.stack).copied())
+                .flatten()
+        });
+        let transition_is_stale = transition
+            .and_then(|transition| transition.navigation)
+            .is_some_and(|navigation| navigation != task.id);
+        if (!preparing_by_stack.contains_key(&task.stack) || transition_is_stale)
             && let Some(view) = transition_view
             && let Some(target) = AgentChatTarget::parse(&task.url)
         {
+            if let Ok((
+                metadata,
+                session_view,
+                session_manager_view,
+                transition_view,
+                hosts_launcher,
+                page_ready,
+                chat_state,
+                detail_state,
+                snapshot,
+            )) = view_states.get(view)
+                && !snapshot
+            {
+                commands.entity(view).insert(InlineTransitionSnapshot {
+                    metadata: metadata.cloned(),
+                    session_view,
+                    session_manager_view,
+                    transition_view,
+                    hosts_launcher,
+                    page_ready,
+                    chat_state: chat_state.map(|state| state.current().cloned()),
+                    detail_state: detail_state.map(|state| state.current().cloned()),
+                });
+            }
             commands
                 .entity(view)
                 .insert((
@@ -209,9 +264,10 @@ fn prepare(
                 view,
                 &SessionDetailUiState::default(),
             ));
-            commands
-                .entity(task.stack)
-                .insert(StartInlineTransition { webview: view });
+            commands.entity(task.stack).insert(StartInlineTransition {
+                webview: view,
+                navigation: Some(task.id),
+            });
             preparing_by_stack.insert(task.stack, view);
             if let Some(wake) = wake.as_ref() {
                 let _ = wake.send_event(bevy::winit::WinitUserEvent::WakeUp);
@@ -391,6 +447,7 @@ fn open(
     transitions: Query<&StartInlineTransition>,
     launches: Query<&TerminalLaunch>,
     projects: Projects,
+    navigations: Query<&vmux_ecs::PageNavigation>,
 ) {
     let tasks: Vec<(Entity, PageOpenTask, bool)> = open_q
         .p0()
@@ -398,6 +455,12 @@ fn open(
         .map(|(entity, task, restoring)| (entity, task.clone(), restoring))
         .collect();
     for (entity, task, restoring) in tasks {
+        if !navigations
+            .get(task.stack)
+            .is_ok_and(|navigation| navigation.matches(task.id))
+        {
+            continue;
+        }
         let Some(route) = Route::parse(&task.url) else {
             continue;
         };
@@ -462,25 +525,31 @@ fn open(
                     .is_some_and(|route| route.supports_inline_transition())
             });
         match opener.apply(
+            entity,
             &task,
             initial_prompt,
             initial_attachments,
             transition_webview,
             &default_cwd,
         ) {
-            Ok(()) => {
-                opener.commands.entity(entity).insert(PageOpenHandled);
-                if let Some(webview) = transition_webview {
+            Ok(completion) => match completion {
+                PageOpenCompletion::Complete => {
+                    opener.commands.entity(entity).insert(PageOpenHandled);
+                    if let Some(webview) = transition_webview {
+                        opener
+                            .commands
+                            .entity(webview)
+                            .remove::<(PreparingAgentChatView, InlineTransitionSnapshot)>();
+                    }
                     opener
                         .commands
-                        .entity(webview)
-                        .remove::<PreparingAgentChatView>();
+                        .entity(task.stack)
+                        .remove::<StartInlineTransition>();
                 }
-                opener
-                    .commands
-                    .entity(task.stack)
-                    .remove::<StartInlineTransition>();
-            }
+                PageOpenCompletion::PendingAttachment => {
+                    opener.commands.entity(entity).insert(PageOpenDeferred);
+                }
+            },
             Err(message) => {
                 opener
                     .commands
@@ -489,6 +558,94 @@ fn open(
             }
         }
     }
+}
+
+fn discard_stale_inline_transitions(
+    transitions: Query<(Entity, &StartInlineTransition)>,
+    navigations: Query<&vmux_ecs::PageNavigation>,
+    snapshots: Query<&InlineTransitionSnapshot>,
+    mut chat_states: UiStateWriter<ChatUiState>,
+    mut detail_states: UiStateWriter<SessionDetailUiState>,
+    mut commands: Commands,
+) {
+    for (stack, transition) in &transitions {
+        let Some(navigation) = transition.navigation else {
+            continue;
+        };
+        if navigations
+            .get(stack)
+            .is_ok_and(|current| current.matches(navigation))
+        {
+            continue;
+        }
+        commands.entity(stack).remove::<StartInlineTransition>();
+        let Ok(snapshot) = snapshots.get(transition.webview) else {
+            if let Ok(mut view) = commands.get_entity(transition.webview) {
+                view.remove::<(PreparingAgentChatView, StartInlineTransitionView)>();
+            }
+            continue;
+        };
+        let snapshot = snapshot.clone();
+        match snapshot.chat_state.clone() {
+            Some(state) => {
+                chat_states.restore(transition.webview, snapshot.metadata.as_ref(), state)
+            }
+            None => {
+                commands
+                    .entity(transition.webview)
+                    .remove::<UiState<ChatUiState>>();
+            }
+        }
+        match snapshot.detail_state.clone() {
+            Some(state) => {
+                detail_states.restore(transition.webview, snapshot.metadata.as_ref(), state)
+            }
+            None => {
+                commands
+                    .entity(transition.webview)
+                    .remove::<UiState<SessionDetailUiState>>();
+            }
+        }
+        restore_components(&snapshot, transition.webview, &mut commands);
+    }
+}
+
+fn restore_components(snapshot: &InlineTransitionSnapshot, view: Entity, commands: &mut Commands) {
+    let mut entity = commands.entity(view);
+    match snapshot.metadata.clone() {
+        Some(metadata) => {
+            entity.insert(metadata);
+        }
+        None => {
+            entity.remove::<PageMetadata>();
+        }
+    }
+    if snapshot.session_view {
+        entity.insert(SessionView);
+    } else {
+        entity.remove::<SessionView>();
+    }
+    if snapshot.session_manager_view {
+        entity.insert(SessionManagerView);
+    } else {
+        entity.remove::<SessionManagerView>();
+    }
+    if snapshot.transition_view {
+        entity.insert(StartInlineTransitionView);
+    } else {
+        entity.remove::<StartInlineTransitionView>();
+    }
+    if snapshot.hosts_launcher {
+        entity.insert(vmux_ecs::launcher::HostsLauncher);
+    } else {
+        entity.remove::<vmux_ecs::launcher::HostsLauncher>();
+    }
+    if snapshot.page_ready {
+        entity.insert(vmux_ecs::page::PageReady);
+    } else {
+        entity.remove::<vmux_ecs::page::PageReady>();
+    }
+    entity.remove::<(PreparingAgentChatView, InlineTransitionSnapshot)>();
 }
 
 fn swap(
@@ -531,7 +688,6 @@ fn swap(
         });
 
         runtime.detach(session_entity);
-        runtime.commands.entity(ev.stack).despawn_children();
         let cwd = if ev.cwd.as_os_str().is_empty() {
             cwd.0.clone()
         } else {
@@ -544,16 +700,24 @@ fn swap(
         let cfg = settings.agent.acp.iter().find(|cfg| cfg.id == id);
         let icon = catalog.icon(id);
         let agent_name = catalog.profile_name(id, cfg);
-        runtime.commands.spawn(AcpAgentAttachment::new(
-            session_entity,
-            ev.stack,
-            id,
-            session_name.as_str(),
-            agent_name,
-            session_id.0.clone(),
-            cwd,
-            icon,
-            None,
+        let navigation = vmux_ecs::PageOpenId::new();
+        runtime
+            .commands
+            .entity(ev.stack)
+            .insert(vmux_ecs::PageNavigation::new(navigation));
+        runtime.commands.spawn((
+            AcpAgentAttachment::new(
+                session_entity,
+                ev.stack,
+                id,
+                session_name.as_str(),
+                agent_name,
+                session_id.0.clone(),
+                cwd,
+                icon,
+                None,
+            ),
+            vmux_ecs::PageNavigation::new(navigation),
         ));
         if let Some((imported, pending)) = imported {
             runtime
@@ -692,11 +856,127 @@ mod tests {
     }
 
     #[test]
+    fn agent_swap_retains_the_previous_surface_until_attachment_handoff() {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins)
+            .insert_resource(AppSettings::default())
+            .add_message::<SwapStackSession>()
+            .add_systems(Update, swap);
+        app.world_mut()
+            .spawn(registry_agent("claude-acp", "Claude", None));
+        let session = app
+            .world_mut()
+            .spawn((
+                Session,
+                SessionId("session-1".into()),
+                Name::new("Task"),
+                Cwd(PathBuf::from("/tmp")),
+                AgentId("codex".into()),
+            ))
+            .id();
+        let stack = app
+            .world_mut()
+            .spawn(EntityTarget::<Session>::new(session))
+            .id();
+        let previous = app
+            .world_mut()
+            .spawn((vmux_layout::Browser, ChildOf(stack)))
+            .id();
+        app.world_mut().write_message(SwapStackSession {
+            stack,
+            target_agent: "claude-acp".into(),
+            cwd: PathBuf::new(),
+            handoff: None,
+        });
+
+        app.update();
+
+        assert!(app.world().get_entity(previous).is_ok());
+        assert!(app.world().get::<vmux_ecs::PageNavigation>(stack).is_some());
+        assert_eq!(
+            app.world_mut()
+                .query_filtered::<(), With<super::super::attach_driver::PendingAcpAgentAttachment>>(
+                )
+                .iter(app.world())
+                .count(),
+            1
+        );
+    }
+
+    #[test]
     fn manager_target_preserves_requested_agent() {
         let url = Route::manager_for_agent(&AgentId("codex".into()));
         let target = AgentChatTarget::parse(&url).unwrap();
 
         assert_eq!(target.url, url);
+    }
+
+    #[test]
+    fn stale_inline_transition_restores_the_previous_view() {
+        let mut app = App::new();
+        app.add_plugins((
+            MinimalPlugins,
+            vmux_ecs::UiStatePlugin::<ChatUiState>::default(),
+            vmux_ecs::UiStatePlugin::<SessionDetailUiState>::default(),
+        ))
+        .add_systems(Update, discard_stale_inline_transitions);
+        let stale = vmux_ecs::PageOpenId::new();
+        let current = vmux_ecs::PageOpenId::new();
+        let original = PageMetadata {
+            url: Route::Manager.url(),
+            title: "Sessions".into(),
+            ..Default::default()
+        };
+        let view = app
+            .world_mut()
+            .spawn((
+                PageMetadata {
+                    url: Route::Session(SessionId("stale".into())).url(),
+                    title: "Stale".into(),
+                    ..Default::default()
+                },
+                SessionView,
+                PreparingAgentChatView,
+                UiState::<ChatUiState>::default(),
+                UiState::<SessionDetailUiState>::default(),
+                InlineTransitionSnapshot {
+                    metadata: Some(original.clone()),
+                    session_view: false,
+                    session_manager_view: true,
+                    transition_view: true,
+                    hosts_launcher: false,
+                    page_ready: true,
+                    chat_state: None,
+                    detail_state: None,
+                },
+            ))
+            .id();
+        let stack = app
+            .world_mut()
+            .spawn((
+                vmux_ecs::PageNavigation::new(current),
+                StartInlineTransition {
+                    webview: view,
+                    navigation: Some(stale),
+                },
+            ))
+            .id();
+
+        app.update();
+
+        assert!(app.world().get::<StartInlineTransition>(stack).is_none());
+        assert_eq!(app.world().get::<PageMetadata>(view), Some(&original));
+        assert!(app.world().get::<SessionManagerView>(view).is_some());
+        assert!(app.world().get::<SessionView>(view).is_none());
+        assert!(app.world().get::<StartInlineTransitionView>(view).is_some());
+        assert!(app.world().get::<vmux_ecs::page::PageReady>(view).is_some());
+        assert!(app.world().get::<UiState<ChatUiState>>(view).is_none());
+        assert!(
+            app.world()
+                .get::<UiState<SessionDetailUiState>>(view)
+                .is_none()
+        );
+        assert!(app.world().get::<InlineTransitionSnapshot>(view).is_none());
     }
 
     #[test]
@@ -754,6 +1034,7 @@ mod tests {
     fn opening_session_rebinds_the_ancestor_tab_workspace() {
         let mut world = World::new();
         world.insert_resource(AppSettings::default());
+        world.insert_resource(Time::<()>::default());
         let tab = world
             .spawn((
                 Tab {

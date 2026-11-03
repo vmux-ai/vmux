@@ -116,7 +116,7 @@ pub fn NoteSourceLine(chunks: Vec<NoteLineChunk>, caret_width_class: String) -> 
                         key: "caret-{index}",
                         id: NOTE_CARET_ID,
                         class: "relative inline-block h-[1.15em] w-0 scroll-mb-8 scroll-mt-8 align-text-bottom",
-                        span { class: "pointer-events-none absolute inset-y-0 left-0 {caret_width_class} bg-current" }
+                        span { class: "pointer-events-none absolute inset-y-0 left-0 {caret_width_class} bg-[var(--term-cursor,#34d399)] shadow-[0_0_0_0.5px_var(--term-cursor,#34d399)]" }
                     }
                 }
                 if !chunk.text.is_empty() {
@@ -237,12 +237,14 @@ fn MdList(
                 rsx! {
             li {
                 key: "{index}",
+                id: "note-list-line-{item.source_line}",
                 "data-note-list-line": "{item.source_line}",
                 class: "relative my-1",
                 onpointerdown: {
                     let line = item.source_line;
-                    move |_| {
+                    move |event: Event<PointerData>| {
                         if let Some(ListLineHit(mut hit)) = hit {
+                            event.stop_propagation();
                             hit.set(Some(line));
                         }
                     }

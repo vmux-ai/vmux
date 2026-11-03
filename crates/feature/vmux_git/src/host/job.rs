@@ -1,19 +1,22 @@
 use std::path::PathBuf;
-use std::sync::Arc;
 
 use bevy::prelude::Component;
 
 use crate::event::GitCatalog;
+use crate::host::repository::DiffSource;
 
 #[derive(Component, Default)]
 pub(super) struct GitReadJob;
+
+#[derive(Component, Default)]
+pub(super) struct GitForegroundRead;
 
 #[derive(Clone, Component)]
 #[require(GitReadJob)]
 pub(super) struct RepositoryJob {
     pub(super) path: PathBuf,
     pub(super) refresh_catalogs: bool,
-    pub(super) revision: u32,
+    pub(super) revision: u64,
 }
 
 #[derive(Clone, Component)]
@@ -24,6 +27,7 @@ pub(super) struct CatalogJob {
     pub(super) offset: usize,
     pub(super) limit: usize,
     pub(super) revision: u32,
+    pub(super) generation: u64,
 }
 
 #[derive(Clone, Component)]
@@ -32,7 +36,7 @@ pub(super) struct DiffJob {
     pub(super) path: PathBuf,
     pub(super) scope: DiffScope,
     pub(super) branch_paths: Vec<Vec<u8>>,
-    pub(super) branch_lines: Option<Arc<Vec<crate::event::DiffLine>>>,
+    pub(super) cached_source: Option<DiffSource>,
     pub(super) branch_source: PathBuf,
     pub(super) branch_merge_base: String,
     pub(super) branch_top_line: u32,

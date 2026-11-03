@@ -1094,3 +1094,5 @@ project-clone-invalid = Введіть коректний репозиторій
 project-restore = Відновити проєкт
 project-archived = В архіві
 common-select = Вибрати
+
+common-show-more = Показати більше

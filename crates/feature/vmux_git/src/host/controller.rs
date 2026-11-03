@@ -2,6 +2,7 @@ use std::path::Path;
 
 use bevy::ecs::system::SystemParam;
 use bevy::prelude::*;
+use bevy::winit::EventLoopProxyWrapper;
 use bevy_cef::prelude::{UiEventPlugin, UiInput};
 use vmux_ecs::UiStateWrite;
 use vmux_ecs::event::space::ProjectActivateRequest;
@@ -25,26 +26,29 @@ use crate::state::{
 };
 
 use super::directory::GitDirectoryNavigation;
-use super::state::{GitDiffRevealRanges, GitState};
+use super::runtime::{GitRuntime, GitTask};
+use super::state::{CachedGitPage, GitDiffRevealRanges, GitPageCache, GitState};
 
 pub(super) struct ControllerPlugin;
 
 impl Plugin for ControllerPlugin {
     fn build(&self, app: &mut App) {
-        app.add_plugins(UiEventPlugin::<(
-            GitKeyRequest,
-            GitPanelSelectRequest,
-            GitShortcutHelpRequest,
-            GitFileSelectRequest,
-            GitBranchFileSelectRequest,
-            GitBranchCollectionSelectRequest,
-            GitBranchSelectRequest,
-            GitBranchDiffSelectRequest,
-            GitCommitSelectRequest,
-            GitStashSelectRequest,
-            GitDiscardFileRequest,
-        )>::default())
+        app.init_resource::<GitRuntime>()
+            .add_plugins(UiEventPlugin::<(
+                GitKeyRequest,
+                GitPanelSelectRequest,
+                GitShortcutHelpRequest,
+                GitFileSelectRequest,
+                GitBranchFileSelectRequest,
+                GitBranchCollectionSelectRequest,
+                GitBranchSelectRequest,
+                GitBranchDiffSelectRequest,
+                GitCommitSelectRequest,
+                GitStashSelectRequest,
+                GitDiscardFileRequest,
+            )>::default())
             .add_observer(ui_state_write)
+            .add_observer(reset_location)
             .add_observer(key_request)
             .add_observer(panel_select_request)
             .add_observer(shortcut_help_request)
@@ -71,7 +75,14 @@ impl Plugin for ControllerPlugin {
             .add_systems(
                 Update,
                 (
-                    (reconcile, settle_commit, sync_url)
+                    (
+                        start_repository_probes,
+                        bevy::ecs::schedule::ApplyDeferred,
+                        poll_repository_probes,
+                    )
+                        .chain()
+                        .before(ControllerSet::Reconcile),
+                    (reconcile, apply_location, settle_commit, sync_url)
                         .chain()
                         .in_set(ControllerSet::Reconcile),
                     operations.in_set(ControllerSet::Operations),
@@ -95,15 +106,119 @@ pub(super) struct SelectionRevealRevision(u64);
 #[derive(Component, Default)]
 pub(super) struct GitCommitResultSequence(u64);
 
-impl GitPageControllerState {
-    pub(super) fn reset(&mut self, branch: String) {
-        *self = GitPageControllerState {
-            selected_branch: branch,
-            selected_branch_collection: GitBranchCollection::Local,
-            ..Default::default()
-        };
-    }
+#[derive(Component, Default)]
+pub(super) struct LocationCursor {
+    document: String,
+    branch: String,
+    fragment: String,
+    applied: bool,
+}
 
+impl LocationCursor {
+    fn apply(&mut self, url: &str, state: &GitState, controller: &mut GitPageControllerState) {
+        let fragment = vmux_api::page_location::PageLocationUiState::from_url(url).fragment;
+        let document = url.split('#').next().unwrap_or(url);
+        if self.fragment != fragment
+            || self.document != document
+            || self.branch != controller.selected_branch
+        {
+            self.document = document.to_string();
+            self.branch.clone_from(&controller.selected_branch);
+            self.fragment = fragment;
+            self.applied = false;
+        }
+        if self.applied {
+            return;
+        }
+        if self.fragment.is_empty() || !self.fragment.starts_with("diff-") {
+            self.applied = true;
+            return;
+        }
+        if controller.focused_panel != GitPanel::Branches
+            || state.snapshot.branch_files_reference != controller.selected_branch
+            || controller.selected_branch.is_empty()
+        {
+            return;
+        }
+        let mut path = None;
+        for entry in &state.snapshot.branch_files {
+            if crate::GitUrl::file_hash(&entry.path_bytes) == self.fragment {
+                path = Some(entry.path_bytes.clone());
+                break;
+            }
+        }
+        if path.is_none() {
+            for candidate in &state.snapshot.branch_diff_paths {
+                if crate::GitUrl::file_hash(candidate.as_bytes()) == self.fragment {
+                    path = Some(candidate.as_bytes().to_vec());
+                    break;
+                }
+            }
+        }
+        if let Some(path) = path {
+            if controller.selected_branch_path_bytes != path {
+                controller.select_branch_file(
+                    &path,
+                    &state.snapshot.branch_files,
+                    &state.snapshot.branch_diff_paths,
+                );
+            }
+            self.applied = true;
+        } else if !state.snapshot.branch_files_loading {
+            self.applied = true;
+        }
+    }
+}
+
+fn apply_location(
+    mut pages: Query<(
+        &vmux_ecs::PageMetadata,
+        &GitState,
+        &mut LocationCursor,
+        &mut GitPageControllerState,
+    )>,
+) {
+    for (metadata, state, mut cursor, mut controller) in &mut pages {
+        let fragment = metadata
+            .url
+            .split_once('#')
+            .map(|(_, fragment)| fragment)
+            .unwrap_or_default();
+        if cursor.applied
+            && cursor.fragment == fragment
+            && cursor.document == metadata.url.split('#').next().unwrap_or(&metadata.url)
+            && cursor.branch == controller.selected_branch
+        {
+            continue;
+        }
+        cursor.apply(&metadata.url, state, &mut controller);
+    }
+}
+
+fn reset_location(event: On<Add, GitState>, mut commands: Commands) {
+    commands
+        .entity(event.event_target())
+        .insert(LocationCursor::default());
+}
+
+#[derive(Component)]
+struct PendingRepositoryProbe {
+    path: String,
+}
+
+#[derive(Component)]
+struct RepositoryProbeTask {
+    path: String,
+    task: GitTask<bool>,
+}
+
+impl GitCommitResultSequence {
+    pub(super) fn reset(&mut self) {
+        self.0 = 0;
+    }
+}
+
+impl GitPageControllerState {
     fn select_panel(&mut self, panel: GitPanel) {
         self.focused_panel = panel;
         if panel != GitPanel::Commits {
@@ -111,8 +226,9 @@ impl GitPageControllerState {
         }
     }
 
-    fn apply_url_commit(&mut self, selected_commit: Option<String>) {
-        let Some(selected_commit) = selected_commit else {
+    pub(super) fn apply_url_commit(&mut self, selected_commit: Option<String>) {
+        let Some(selected_commit) = selected_commit.filter(|commit| Self::is_object_id(commit))
+        else {
             self.selected_commit.clear();
             return;
         };
@@ -121,11 +237,11 @@ impl GitPageControllerState {
     }
 
     pub(super) fn selected_commit_is_object_id(&self) -> bool {
-        matches!(self.selected_commit.len(), 40 | 64)
-            && self
-                .selected_commit
-                .bytes()
-                .all(|byte| byte.is_ascii_hexdigit())
+        Self::is_object_id(&self.selected_commit)
+    }
+
+    fn is_object_id(value: &str) -> bool {
+        matches!(value.len(), 40 | 64) && value.bytes().all(|byte| byte.is_ascii_hexdigit())
     }
 
     fn open_branch_prompt(&mut self, prompt: GitBranchPrompt) {
@@ -171,14 +287,23 @@ impl GitPageControllerState {
         &mut self,
         path_bytes: &[u8],
         files: &[crate::event::GitBranchFileEntry],
+        expected_paths: &[String],
     ) -> bool {
-        let Some(entry) = files.iter().find(|entry| entry.path_bytes == path_bytes) else {
-            return false;
+        let path = match files.iter().find(|entry| entry.path_bytes == path_bytes) {
+            Some(entry) => entry.path.clone(),
+            None => {
+                let Some(path) = expected_paths
+                    .iter()
+                    .find(|path| path.as_bytes() == path_bytes)
+                else {
+                    return false;
+                };
+                path.clone()
+            }
         };
         self.select_panel(GitPanel::Branches);
-        self.selected_branch_path.clone_from(&entry.path);
-        self.selected_branch_path_bytes
-            .clone_from(&entry.path_bytes);
+        self.selected_branch_path = path;
+        self.selected_branch_path_bytes = path_bytes.to_vec();
         true
     }
 
@@ -348,8 +473,16 @@ impl GitPageControllerState {
     }
 }
 
-type OperationPage<'a> = (&'a GitState, &'a mut GitPageControllerState);
-type ChangedOperationPage = Or<(Changed<GitState>, Changed<GitPageControllerState>)>;
+type OperationPage<'a> = (
+    &'a GitState,
+    Ref<'a, super::state::GitRepositoryRevision>,
+    &'a mut GitPageControllerState,
+);
+type ChangedOperationPage = Or<(
+    Changed<GitState>,
+    Changed<super::state::GitRepositoryRevision>,
+    Changed<GitPageControllerState>,
+)>;
 
 #[derive(SystemParam)]
 struct OperationPages<'w, 's> {
@@ -554,8 +687,22 @@ fn dispatch_git_key(
     }
 }
 
-fn reconcile(mut pages: Query<(&GitState, &mut GitPageControllerState), Changed<GitState>>) {
-    for (state, mut controller) in &mut pages {
+type Sources<'w, 's> = Query<
+    'w,
+    's,
+    (
+        &'static GitState,
+        Ref<'static, super::state::GitRepositoryRevision>,
+        &'static mut GitPageControllerState,
+    ),
+    Or<(
+        Changed<GitState>,
+        Changed<super::state::GitRepositoryRevision>,
+    )>,
+>;
+
+fn reconcile(mut pages: Sources) {
+    for (state, _, mut controller) in &mut pages {
         let Some(repository) = state.repository() else {
             continue;
         };
@@ -601,22 +748,36 @@ fn reconcile(mut pages: Query<(&GitState, &mut GitPageControllerState), Changed<
                 }
             }
         }
-        let next_branch_file = if state.snapshot.branch_files_reference == next.selected_branch {
+        let retained_branch_path = state.snapshot.branch_files_reference == next.selected_branch
+            && state
+                .snapshot
+                .branch_diff_paths
+                .iter()
+                .any(|path| path.as_bytes() == next.selected_branch_path_bytes);
+        let mut next_branch_file = if state.snapshot.branch_files_reference == next.selected_branch
+        {
             state
                 .snapshot
                 .branch_files
                 .iter()
                 .find(|entry| entry.path_bytes == next.selected_branch_path_bytes)
-                .or_else(|| state.snapshot.branch_files.first())
         } else {
             None
         };
-        next.selected_branch_path = next_branch_file
-            .map(|entry| entry.path.clone())
-            .unwrap_or_default();
-        next.selected_branch_path_bytes = next_branch_file
-            .map(|entry| entry.path_bytes.clone())
-            .unwrap_or_default();
+        if next_branch_file.is_none()
+            && !retained_branch_path
+            && state.snapshot.branch_files_reference == next.selected_branch
+        {
+            next_branch_file = state.snapshot.branch_files.first();
+        }
+        if let Some(entry) = next_branch_file {
+            next.selected_branch_path.clone_from(&entry.path);
+            next.selected_branch_path_bytes
+                .clone_from(&entry.path_bytes);
+        } else if !retained_branch_path {
+            next.selected_branch_path.clear();
+            next.selected_branch_path_bytes.clear();
+        }
         if state.snapshot.stashes.loaded {
             next.selected_stash = repository
                 .stashes
@@ -669,7 +830,13 @@ fn settle_commit(
 }
 
 fn operations(mut pages: OperationPages) {
-    for (state, mut controller) in &mut pages.values {
+    for (state, _, mut controller) in &mut pages.values {
+        if state.snapshot.loading {
+            if controller.operations != GitOperationEligibility::default() {
+                controller.operations = GitOperationEligibility::default();
+            }
+            continue;
+        }
         let Some(repository) = state.repository() else {
             if controller.operations != GitOperationEligibility::default() {
                 controller.operations = GitOperationEligibility::default();
@@ -761,6 +928,7 @@ fn sync_url(
         ) else {
             continue;
         };
+        let url = vmux_api::page_location::PageLocationUiState::from_url(&page.url).url(&url);
         if page.url != url {
             page.url = url;
         }
@@ -818,6 +986,8 @@ fn ui_state_write(
         &mut GitDiffRevealRanges,
     )>,
     mut states: super::state::GitStates,
+    mut cache: Option<ResMut<GitPageCache>>,
+    mut watch: Option<NonSendMut<super::watch::GitWatch>>,
     mut commands: Commands,
 ) {
     let webview = trigger.event().webview();
@@ -843,23 +1013,78 @@ fn ui_state_write(
         page_url,
     }) = &patch.context
     {
-        let path = crate::GitUrl::parse(page_url)
+        let route_path = crate::GitUrl::parse(page_url);
+        let path = route_path
+            .as_ref()
             .map(|path| path.to_string_lossy().into_owned())
             .unwrap_or_else(|| working_directory.clone());
         let selected_commit = crate::GitUrl::commit(page_url);
-        if !states.repository_loaded_at(webview, &path) {
-            states.reset(webview, path.clone());
-            controller.reset(String::new());
-            controller.apply_url_commit(selected_commit);
-            pending.0.clear();
-            revision.0 = 0;
-            commit_result.0 = 0;
-            revealed.0.clear();
-            *directory = GitDirectoryNavigation::default();
-            commands.trigger(UiInput {
-                webview,
-                payload: crate::event::GitDirectoryOpenRequest { path },
-            });
+        if !states.repository_loaded_at(webview, &path)
+            && !states.repository_loading_at(webview, &path)
+        {
+            let mut restored = false;
+            if let Some(cached) = cache.as_deref_mut().and_then(|cache| cache.restore(&path)) {
+                let CachedGitPage {
+                    snapshot,
+                    controller: cached_controller,
+                    watch: cached_watch,
+                    diff,
+                    branch_files,
+                } = cached;
+                if states.restore(webview, snapshot) {
+                    *controller = cached_controller;
+                    if let Some(diff) = diff {
+                        commands.entity(webview).insert(diff);
+                    }
+                    if let Some(branch_files) = branch_files {
+                        commands.entity(webview).insert(branch_files);
+                    }
+                    if let Some((workspace, refresh_revision)) = states.refresh_repository(webview)
+                    {
+                        if let (Some(watch), Some(subscription)) =
+                            (watch.as_deref_mut(), cached_watch)
+                        {
+                            let _ =
+                                watch.subscribe_page(webview, Path::new(&workspace), subscription);
+                        }
+                        commands.spawn((
+                            super::job_runner::GitJob::new(webview),
+                            super::job::GitForegroundRead,
+                            super::job::RepositoryJob {
+                                path: workspace.into(),
+                                refresh_catalogs: true,
+                                revision: refresh_revision,
+                            },
+                        ));
+                    }
+                    restored = true;
+                }
+            }
+            if restored {
+                commands
+                    .entity(webview)
+                    .remove::<(PendingRepositoryProbe, RepositoryProbeTask)>();
+                controller.apply_url_commit(selected_commit.clone());
+                pending.0.clear();
+                revision.0 = 0;
+                commit_result.0 = 0;
+                revealed.0.clear();
+                *directory = GitDirectoryNavigation::default();
+            }
+            if !restored {
+                states.reset(webview, path.clone());
+                controller.reset_for_repository(String::new());
+                controller.apply_url_commit(selected_commit.clone());
+                pending.0.clear();
+                revision.0 = 0;
+                commit_result.0 = 0;
+                revealed.0.clear();
+                *directory = GitDirectoryNavigation::default();
+                commands
+                    .entity(webview)
+                    .remove::<RepositoryProbeTask>()
+                    .insert(PendingRepositoryProbe { path });
+            }
         } else {
             controller.apply_url_commit(selected_commit);
         }
@@ -892,7 +1117,7 @@ fn ui_state_write(
         return;
     }
     states.reset(webview, path.clone());
-    controller.reset(branch.clone());
+    controller.reset_for_repository(branch.clone());
     pending.0.clear();
     revision.0 = 0;
     commit_result.0 = 0;
@@ -900,8 +1125,68 @@ fn ui_state_write(
     *directory = GitDirectoryNavigation::default();
     commands.trigger(UiInput {
         webview,
-        payload: GitRepositoryRequest { path: path.clone() },
+        payload: GitRepositoryRequest::project(path.clone(), String::new(), branch.clone()),
     });
+}
+
+fn start_repository_probes(
+    pending: Query<(Entity, &PendingRepositoryProbe), Without<RepositoryProbeTask>>,
+    runtime: Res<GitRuntime>,
+    wake: Option<Res<EventLoopProxyWrapper>>,
+    mut commands: Commands,
+) {
+    let wake = wake.as_deref().map(|wake| (**wake).clone());
+    for (entity, pending) in &pending {
+        let path = pending.path.clone();
+        let probe_path = path.clone();
+        let Some(task) = runtime.spawn(wake.clone(), move || {
+            super::repository::GitRepository::has_repository(Path::new(&probe_path))
+        }) else {
+            continue;
+        };
+        commands
+            .entity(entity)
+            .remove::<PendingRepositoryProbe>()
+            .insert(RepositoryProbeTask { path, task });
+    }
+}
+
+fn poll_repository_probes(
+    mut probes: Query<(Entity, &mut RepositoryProbeTask, &GitPageControllerState)>,
+    states: Query<&GitState>,
+    mut commands: Commands,
+) {
+    for (entity, mut probe, controller) in &mut probes {
+        let Some(result) = probe.task.poll() else {
+            continue;
+        };
+        commands.entity(entity).remove::<RepositoryProbeTask>();
+        let Ok(has_repository) = result else {
+            continue;
+        };
+        let Ok(state) = states.get(entity) else {
+            continue;
+        };
+        if state.workspace() != probe.path {
+            continue;
+        }
+        if has_repository {
+            let selected_commit = controller
+                .selected_commit_is_object_id()
+                .then(|| controller.selected_commit.clone());
+            commands.trigger(UiInput {
+                webview: entity,
+                payload: GitRepositoryRequest::at(probe.path.clone()).with_commit(selected_commit),
+            });
+        } else {
+            commands.trigger(UiInput {
+                webview: entity,
+                payload: crate::event::GitDirectoryOpenRequest {
+                    path: probe.path.clone(),
+                },
+            });
+        }
+    }
 }
 
 fn key_request(
@@ -974,6 +1259,7 @@ fn branch_file_select_request(
     controller.select_branch_file(
         &trigger.event().payload.path_bytes,
         &state.snapshot.branch_files,
+        &state.snapshot.branch_diff_paths,
     );
 }
 
@@ -1171,12 +1457,71 @@ mod tests {
     use super::*;
 
     #[test]
+    fn a_location_waits_for_the_catalog_and_applies_only_once() {
+        let mut cursor = LocationCursor::default();
+        let mut state = GitState::default();
+        let mut controller = GitPageControllerState {
+            focused_panel: GitPanel::Branches,
+            selected_branch: "feature".to_string(),
+            ..Default::default()
+        };
+        let url = format!("git://repository#{}", crate::GitUrl::file_hash(b"late.rs"));
+        cursor.apply(&url, &state, &mut controller);
+        assert!(controller.selected_branch_path_bytes.is_empty());
+        state.snapshot.branch_files_reference = "feature".to_string();
+        state.snapshot.branch_diff_paths = vec!["late.rs".to_string(), "manual.rs".to_string()];
+        cursor.apply(&url, &state, &mut controller);
+        assert_eq!(controller.selected_branch_path_bytes, b"late.rs");
+        controller.select_branch_file(b"manual.rs", &[], &state.snapshot.branch_diff_paths);
+        cursor.apply(&url, &state, &mut controller);
+        assert_eq!(controller.selected_branch_path_bytes, b"manual.rs");
+        cursor.apply("git://repository", &state, &mut controller);
+        cursor.apply(&url, &state, &mut controller);
+        assert_eq!(controller.selected_branch_path_bytes, b"late.rs");
+    }
+
+    #[derive(Resource, Default)]
+    struct InitialRequests {
+        repositories: Vec<GitRepositoryRequest>,
+        directories: Vec<String>,
+    }
+
+    impl InitialRequests {
+        fn settle(app: &mut App) {
+            let deadline = std::time::Instant::now() + std::time::Duration::from_secs(2);
+            loop {
+                app.update();
+                let requests = app.world().resource::<Self>();
+                if !requests.repositories.is_empty() || !requests.directories.is_empty() {
+                    return;
+                }
+                assert!(std::time::Instant::now() < deadline);
+                std::thread::yield_now();
+            }
+        }
+
+        fn repository(trigger: On<UiInput<GitRepositoryRequest>>, mut requests: ResMut<Self>) {
+            requests.repositories.push(trigger.event().payload.clone());
+        }
+
+        fn directory(
+            trigger: On<UiInput<crate::event::GitDirectoryOpenRequest>>,
+            mut requests: ResMut<Self>,
+        ) {
+            requests
+                .directories
+                .push(trigger.event().payload.path.clone());
+        }
+    }
+
+    #[test]
     fn url_commit_selects_a_commit_without_locking_other_panels() {
         let mut controller = GitPageControllerState::default();
+        let commit = "a".repeat(40);
 
-        controller.apply_url_commit(Some("abc123".to_string()));
+        controller.apply_url_commit(Some(commit.clone()));
         assert_eq!(controller.focused_panel, GitPanel::Commits);
-        assert_eq!(controller.selected_commit, "abc123");
+        assert_eq!(controller.selected_commit, commit);
 
         controller.select_panel(GitPanel::Files);
         controller.apply_url_commit(None);
@@ -1189,13 +1534,50 @@ mod tests {
         let mut controller = GitPageControllerState::default();
 
         controller.apply_url_commit(Some("abc123".to_string()));
-        assert!(!controller.selected_commit_is_object_id());
+        assert!(controller.selected_commit.is_empty());
 
         controller.apply_url_commit(Some("a".repeat(40)));
         assert!(controller.selected_commit_is_object_id());
 
         controller.apply_url_commit(Some("g".repeat(40)));
         assert!(!controller.selected_commit_is_object_id());
+    }
+
+    #[test]
+    fn repository_operations_are_disabled_during_revalidation() {
+        let request = GitRepositoryRequest::at("/tmp/repository");
+        let mut app = App::new();
+        app.add_systems(Update, operations);
+        let page = app
+            .world_mut()
+            .spawn((
+                GitState {
+                    snapshot: crate::state::GitPageSnapshot {
+                        repository: Some(GitRepositorySnapshot::loading(&request)),
+                        loading: true,
+                        ..Default::default()
+                    },
+                },
+                GitPageControllerState {
+                    operations: GitOperationEligibility {
+                        stage_all: true,
+                        push: true,
+                        ..Default::default()
+                    },
+                    ..Default::default()
+                },
+            ))
+            .id();
+
+        app.update();
+
+        assert_eq!(
+            app.world()
+                .get::<GitPageControllerState>(page)
+                .unwrap()
+                .operations,
+            GitOperationEligibility::default()
+        );
     }
 
     #[test]
@@ -1348,6 +1730,273 @@ mod tests {
 
         let state = app.world().get::<GitState>(webview).unwrap();
         assert_eq!(state.workspace(), "/tmp/repository");
+    }
+
+    #[test]
+    fn bare_git_page_opens_repository_from_working_directory() {
+        let repository = tempfile::tempdir().unwrap();
+        std::fs::create_dir(repository.path().join(".git")).unwrap();
+        let path = repository.path().to_string_lossy().into_owned();
+        let commit = "a".repeat(40);
+        let mut app = App::new();
+        app.add_plugins((MinimalPlugins, ControllerPlugin))
+            .init_resource::<InitialRequests>()
+            .add_observer(InitialRequests::repository)
+            .add_observer(InitialRequests::directory);
+        let webview = app.world_mut().spawn_empty().id();
+
+        app.world_mut()
+            .trigger(UiStateWrite::<GitUiState>::from_event(
+                webview,
+                &GitPageContext {
+                    working_directory: path.clone(),
+                    page_url: format!("git://?commit={commit}"),
+                },
+            ));
+        InitialRequests::settle(&mut app);
+
+        let requests = app.world().resource::<InitialRequests>();
+        assert_eq!(requests.repositories.len(), 1);
+        assert_eq!(requests.repositories[0].path, path);
+        assert_eq!(requests.repositories[0].commit, commit);
+        assert!(requests.directories.is_empty());
+    }
+
+    #[test]
+    fn bare_git_page_opens_directory_when_working_directory_is_not_a_repository() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().to_string_lossy().into_owned();
+        let mut app = App::new();
+        app.add_plugins((MinimalPlugins, ControllerPlugin))
+            .init_resource::<InitialRequests>()
+            .add_observer(InitialRequests::repository)
+            .add_observer(InitialRequests::directory);
+        let webview = app.world_mut().spawn_empty().id();
+
+        app.world_mut()
+            .trigger(UiStateWrite::<GitUiState>::from_event(
+                webview,
+                &GitPageContext {
+                    working_directory: path.clone(),
+                    page_url: "git://".to_string(),
+                },
+            ));
+        InitialRequests::settle(&mut app);
+
+        let requests = app.world().resource::<InitialRequests>();
+        assert!(requests.repositories.is_empty());
+        assert_eq!(requests.directories, vec![path]);
+    }
+
+    #[test]
+    fn matching_workspace_update_does_not_supersede_an_explicit_repository_load() {
+        let mut app = App::new();
+        app.add_plugins((MinimalPlugins, ControllerPlugin));
+        let mut request = GitRepositoryRequest::project(
+            "/tmp/repository/project".into(),
+            "project".into(),
+            "main".into(),
+        );
+        request.request_id = 7;
+        let webview = app
+            .world_mut()
+            .spawn(GitState {
+                snapshot: crate::state::GitPageSnapshot::loading(&request, 1),
+            })
+            .id();
+
+        app.world_mut()
+            .trigger(UiStateWrite::<GitUiState>::from_event(
+                webview,
+                &GitWorkspaceChanged {
+                    path: "/tmp/repository/./project".into(),
+                    branch: "main".into(),
+                    error: String::new(),
+                },
+            ));
+        app.update();
+
+        let state = app.world().get::<GitState>(webview).unwrap();
+        assert_eq!(state.workspace(), "/tmp/repository/project");
+        assert_eq!(state.snapshot.repository_request_id, 7);
+        assert!(state.snapshot.loading);
+    }
+
+    #[test]
+    fn different_workspace_update_supersedes_an_explicit_repository_load() {
+        let mut app = App::new();
+        app.add_plugins((MinimalPlugins, ControllerPlugin));
+        let mut request = GitRepositoryRequest::project(
+            "/tmp/repository/project".into(),
+            "project".into(),
+            "main".into(),
+        );
+        request.request_id = 7;
+        let webview = app
+            .world_mut()
+            .spawn(GitState {
+                snapshot: crate::state::GitPageSnapshot::loading(&request, 1),
+            })
+            .id();
+
+        app.world_mut()
+            .trigger(UiStateWrite::<GitUiState>::from_event(
+                webview,
+                &GitWorkspaceChanged {
+                    path: "/tmp/other".into(),
+                    branch: "other".into(),
+                    error: String::new(),
+                },
+            ));
+        app.update();
+
+        let state = app.world().get::<GitState>(webview).unwrap();
+        assert_eq!(state.workspace(), "/tmp/other");
+        assert_eq!(state.snapshot.repository_request_id, 0);
+        assert!(state.snapshot.loading);
+    }
+
+    #[test]
+    fn cache_restore_does_not_skip_a_workspace_update_in_the_same_patch() {
+        let mut app = App::new();
+        app.add_plugins((
+            MinimalPlugins,
+            super::super::state::StatePlugin,
+            ControllerPlugin,
+        ))
+        .init_resource::<super::super::job_runner::RepositoryLoads>();
+        let request = GitRepositoryRequest::at("/tmp/cached");
+        let source = app
+            .world_mut()
+            .spawn((
+                GitState {
+                    snapshot: crate::state::GitPageSnapshot {
+                        workspace: "/tmp/cached".to_string(),
+                        repository: Some(GitRepositorySnapshot {
+                            path: "/tmp/cached".to_string(),
+                            repo_root: "/tmp/cached".to_string(),
+                            repo_name: "cached".to_string(),
+                            branch: "main".to_string(),
+                            ..GitRepositorySnapshot::loading(&request)
+                        }),
+                        loading: false,
+                        ..Default::default()
+                    },
+                },
+                GitPageControllerState::for_repository("main".to_string()),
+            ))
+            .id();
+        app.world_mut().entity_mut(source).remove::<GitState>();
+        let target = app.world_mut().spawn(GitState::default()).id();
+
+        app.world_mut()
+            .trigger(UiStateWrite::<GitUiState>::from_event(
+                target,
+                &crate::state::GitUiStatePatch {
+                    context: Some(GitPageContext {
+                        working_directory: "/tmp/cached".to_string(),
+                        page_url: String::new(),
+                    }),
+                    workspace: Some(GitWorkspaceChanged {
+                        path: "/tmp/other".to_string(),
+                        branch: "other".to_string(),
+                        error: String::new(),
+                    }),
+                    ..Default::default()
+                },
+            ));
+        app.update();
+
+        let state = app.world().get::<GitState>(target).unwrap();
+        assert_eq!(state.workspace(), "/tmp/other");
+        assert!(state.snapshot.loading);
+        assert_eq!(
+            app.world()
+                .get::<GitPageControllerState>(target)
+                .unwrap()
+                .selected_branch,
+            "other"
+        );
+    }
+
+    #[test]
+    fn cache_restore_reuses_the_watch_and_revalidates_in_background() {
+        let repo = super::super::repository::test_repo::init();
+        let path = repo.path().to_string_lossy().into_owned();
+        let mut app = App::new();
+        app.add_plugins((
+            MinimalPlugins,
+            super::super::state::StatePlugin,
+            ControllerPlugin,
+        ))
+        .init_resource::<super::super::job_runner::RepositoryLoads>()
+        .insert_non_send(super::super::watch::GitWatch::test());
+        let request = GitRepositoryRequest::at(path.clone());
+        let source = app
+            .world_mut()
+            .spawn((
+                GitState {
+                    snapshot: crate::state::GitPageSnapshot {
+                        workspace: path.clone(),
+                        repository: Some(GitRepositorySnapshot {
+                            path: path.clone(),
+                            repo_root: path.clone(),
+                            repo_name: "cached".to_string(),
+                            branch: "main".to_string(),
+                            ..GitRepositorySnapshot::loading(&request)
+                        }),
+                        loading: false,
+                        ..Default::default()
+                    },
+                },
+                GitPageControllerState::for_repository("main".to_string()),
+            ))
+            .id();
+        let prepared = super::super::watch::GitWatchSubscription::read(repo.path()).unwrap();
+        app.world_mut()
+            .non_send_mut::<super::super::watch::GitWatch>()
+            .subscribe_page(source, repo.path(), prepared)
+            .unwrap();
+        app.world_mut().entity_mut(source).remove::<GitState>();
+        let target = app
+            .world_mut()
+            .spawn((GitState::default(), vmux_ecs::PageTransition))
+            .id();
+
+        app.world_mut()
+            .trigger(UiStateWrite::<GitUiState>::from_event(
+                target,
+                &crate::state::GitUiStatePatch {
+                    context: Some(GitPageContext {
+                        working_directory: path.clone(),
+                        page_url: String::new(),
+                    }),
+                    ..Default::default()
+                },
+            ));
+        app.update();
+
+        assert!(
+            app.world()
+                .get::<GitState>(target)
+                .unwrap()
+                .snapshot
+                .loading
+        );
+        assert!(
+            app.world()
+                .non_send::<super::super::watch::GitWatch>()
+                .has_subscription(target)
+        );
+        let mut repository_jobs = app.world_mut().query::<&super::super::job::RepositoryJob>();
+        let jobs = repository_jobs
+            .iter(app.world())
+            .map(|job| (job.path.clone(), job.refresh_catalogs, job.revision))
+            .collect::<Vec<_>>();
+        assert_eq!(jobs.len(), 1);
+        assert_eq!(jobs[0].0, repo.path());
+        assert!(jobs[0].1);
+        assert!(jobs[0].2 > 0);
     }
 
     #[test]

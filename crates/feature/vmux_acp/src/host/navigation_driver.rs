@@ -5,9 +5,10 @@ use bevy::prelude::*;
 use vmux_api::PageIcon;
 use vmux_api::protocol::AgentAttachment;
 use vmux_ecs::{
-    Cwd, EntityTarget, PageMetadata, PageOpenTask, PendingPrompt, PendingPromptAttachments,
-    ProcessAnchor,
+    Cwd, EntityTarget, PageMetadata, PageNavigation, PageOpenTask, PendingPrompt,
+    PendingPromptAttachments, ProcessAnchor,
 };
+use vmux_flex::Visibility;
 use vmux_layout::space::FocusedSpace;
 use vmux_layout::tab::{Tab, TabWorkspace};
 use vmux_session::host::{SessionManagerView, SessionView};
@@ -17,6 +18,7 @@ use vmux_ui::i18n::translate;
 
 use super::acp::registry::RegistryAgent;
 use super::attach::AcpAgentAttachment;
+use super::attach_driver::DeferredAttachmentPrompt;
 use crate::AcpSessionId;
 
 #[derive(SystemParam)]
@@ -50,11 +52,18 @@ pub(super) struct PageOpener<'w, 's> {
     child_of: Query<'w, 's, &'static ChildOf>,
     tabs: Query<'w, 's, &'static mut Tab>,
     workspaces: Query<'w, 's, &'static mut TabWorkspace>,
+    handoffs: Query<'w, 's, &'static mut vmux_layout::hosted_page::SurfaceHandoff>,
     queues: Query<'w, 's, &'static mut PromptQueue>,
     transcripts: vmux_session::Transcripts<'w, 's>,
     pub(super) commands: Commands<'w, 's>,
     pub(super) settings: Res<'w, AppSettings>,
+    time: Res<'w, Time>,
     catalog: AcpCatalog<'w, 's>,
+}
+
+pub(super) enum PageOpenCompletion {
+    Complete,
+    PendingAttachment,
 }
 
 impl AcpCatalog<'_, '_> {
@@ -117,12 +126,13 @@ impl PageOpener<'_, '_> {
 
     pub(super) fn apply(
         &mut self,
+        task_entity: Entity,
         task: &PageOpenTask,
         initial_prompt: Option<String>,
         initial_attachments: Vec<AgentAttachment>,
         transition_webview: Option<Entity>,
         default_cwd: &Path,
-    ) -> Result<(), String> {
+    ) -> Result<PageOpenCompletion, String> {
         let target = match Route::parse(&task.url) {
             Some(target) => target,
             None => return Err(format!("malformed agent URL '{}'", task.url)),
@@ -132,8 +142,8 @@ impl PageOpener<'_, '_> {
                 let url = Route::requested_agent(&task.url)
                     .map(|agent| Route::manager_for_agent(&agent))
                     .unwrap_or_else(|| Route::Manager.url());
-                self.open_manager(task.stack, transition_webview, &url);
-                Ok(())
+                self.open_manager(task, transition_webview, &url);
+                Ok(PageOpenCompletion::Complete)
             }
             Route::Session(id) => {
                 let Some((
@@ -181,46 +191,46 @@ impl PageOpener<'_, '_> {
                 }
                 let icon = self.catalog.icon(&agent_id);
                 let agent_name = self.catalog.profile_name(&agent_id, config);
-                let cwd = if stored_cwd.as_os_str().is_empty() {
-                    self.commands
-                        .entity(session_entity)
-                        .insert(Cwd(default_cwd.to_path_buf()));
+                let cwd_missing = stored_cwd.as_os_str().is_empty();
+                let cwd = if cwd_missing {
                     default_cwd.to_path_buf()
                 } else {
                     stored_cwd
                 };
-                self.bind_workspace(task.stack, &cwd);
-                self.commands.entity(task.stack).insert((
-                    EntityTarget::<Session>::new(session_entity),
-                    PageMetadata {
-                        url: Route::Session(id.clone()).url(),
-                        title: session_name.clone(),
-                        bg_color: None,
-                        icon: icon.clone().map(PageIcon::favicon).unwrap_or_default(),
-                    },
-                ));
-                if resume.is_some() && self.transcripts.get(session_entity).messages.is_empty() {
-                    self.commands
-                        .entity(session_entity)
-                        .insert(vmux_session::TranscriptLoading);
-                }
-                self.replace_children(task.stack, transition_webview);
-                self.enqueue_initial_prompt(
-                    session_entity,
-                    task.stack,
-                    initial_prompt,
-                    initial_attachments,
-                );
                 if let Some(anchor) = active {
-                    self.open_session_view(
+                    if cwd_missing {
+                        self.commands
+                            .entity(session_entity)
+                            .insert(Cwd(cwd.clone()));
+                    }
+                    self.bind_workspace(task.stack, &cwd);
+                    self.commands
+                        .entity(task.stack)
+                        .insert(EntityTarget::<Session>::new(session_entity));
+                    if resume.is_some()
+                        && self
+                            .transcripts
+                            .read(session_entity, |transcript| transcript.messages.is_empty())
+                    {
+                        self.commands
+                            .entity(session_entity)
+                            .insert(vmux_session::TranscriptLoading);
+                    }
+                    self.enqueue_initial_prompt(
+                        session_entity,
                         task.stack,
+                        initial_prompt,
+                        initial_attachments,
+                    );
+                    self.open_session_view(
+                        task,
                         session_entity,
                         &session_name,
                         &agent_id,
                         anchor,
                         transition_webview,
                     );
-                    return Ok(());
+                    return Ok(PageOpenCompletion::Complete);
                 }
                 let request = AcpAgentAttachment::new(
                     session_entity,
@@ -233,40 +243,58 @@ impl PageOpener<'_, '_> {
                     icon,
                     resume,
                 );
-                self.commands
-                    .entity(session_entity)
-                    .insert(AgentId(agent_id));
-                let operation = self.commands.spawn(request).id();
+                let prompt =
+                    self.defer_initial_prompt(task.stack, initial_prompt, initial_attachments);
+                let operation = self
+                    .commands
+                    .spawn((
+                        request,
+                        PageNavigation::new(task.id),
+                        prompt,
+                        EntityTarget::<PageOpenTask>::new(task_entity),
+                    ))
+                    .id();
                 if let Some(webview) = transition_webview {
                     self.commands
                         .entity(operation)
                         .insert(EntityTarget::<SessionView>::new(webview));
                 }
-                Ok(())
+                Ok(PageOpenCompletion::PendingAttachment)
             }
         }
     }
 
-    fn open_manager(&mut self, stack: Entity, transition_webview: Option<Entity>, url: &str) {
-        let title = translate("sessions-title");
-        self.replace_children(stack, transition_webview);
+    fn defer_initial_prompt(
+        &mut self,
+        stack: Entity,
+        text: Option<String>,
+        attachments: Vec<AgentAttachment>,
+    ) -> DeferredAttachmentPrompt {
         self.commands
             .entity(stack)
-            .remove::<EntityTarget<Session>>()
-            .remove::<vmux_command::CommandBarWorkDirectory>()
-            .insert(PageMetadata {
-                url: url.to_string(),
-                title: title.clone(),
-                bg_color: None,
-                icon: default(),
-            });
+            .remove::<(PendingPrompt, PendingPromptAttachments)>();
+        DeferredAttachmentPrompt { text, attachments }
+    }
+
+    fn open_manager(&mut self, task: &PageOpenTask, transition_webview: Option<Entity>, url: &str) {
+        let stack = task.stack;
+        let title = translate("sessions-title");
+        self.retarget_handoff(transition_webview, task.id);
         let view = transition_webview.unwrap_or_else(|| {
+            let previous = self.previous_surfaces(stack, None);
+            for surface in &previous {
+                self.commands
+                    .entity(*surface)
+                    .try_insert(vmux_layout::hosted_page::SurfaceBlocked);
+            }
             self.commands
                 .spawn((
                     vmux_layout::Browser::hosted_page(url, &title),
+                    self.new_handoff(previous, task.id),
                     SessionManagerView,
                     ChildOf(stack),
                 ))
+                .insert(Visibility::Hidden)
                 .id()
         });
         self.commands.entity(view).remove::<SessionView>().insert((
@@ -282,26 +310,36 @@ impl PageOpener<'_, '_> {
 
     fn open_session_view(
         &mut self,
-        stack: Entity,
+        task: &PageOpenTask,
         session: Entity,
         name: &str,
         agent_id: &str,
         anchor: vmux_ecs::ProcessId,
         transition_webview: Option<Entity>,
     ) {
+        let stack = task.stack;
+        self.retarget_handoff(transition_webview, task.id);
         let url = self
             .sessions
             .get(session)
             .map(|(_, id, ..)| Route::Session(id.clone()).url())
             .unwrap_or_else(|_| Route::Manager.url());
         let view = transition_webview.unwrap_or_else(|| {
+            let previous = self.previous_surfaces(stack, None);
+            for surface in &previous {
+                self.commands
+                    .entity(*surface)
+                    .try_insert(vmux_layout::hosted_page::SurfaceBlocked);
+            }
             self.commands
                 .spawn((
                     vmux_layout::Browser::hosted_page(&url, name),
+                    self.new_handoff(previous, task.id),
                     SessionView,
                     ChildOf(stack),
                     anchor,
                 ))
+                .insert(Visibility::Hidden)
                 .id()
         });
         self.commands.entity(view).insert((
@@ -324,14 +362,32 @@ impl PageOpener<'_, '_> {
             .insert(EntityTarget::<Session>::new(session));
     }
 
-    fn replace_children(&mut self, stack: Entity, keep: Option<Entity>) {
-        let Ok(children) = self.children.get(stack) else {
+    fn previous_surfaces(&self, stack: Entity, keep: Option<Entity>) -> Vec<Entity> {
+        self.children
+            .get(stack)
+            .map(|children| {
+                children
+                    .iter()
+                    .filter(|child| Some(*child) != keep)
+                    .collect()
+            })
+            .unwrap_or_default()
+    }
+
+    fn new_handoff(
+        &self,
+        previous: Vec<Entity>,
+        navigation: vmux_ecs::PageOpenId,
+    ) -> vmux_layout::hosted_page::SurfaceHandoff {
+        vmux_layout::hosted_page::SurfaceHandoff::new(previous, navigation, 0, self.time.elapsed())
+    }
+
+    fn retarget_handoff(&mut self, webview: Option<Entity>, navigation: vmux_ecs::PageOpenId) {
+        let Some(webview) = webview else {
             return;
         };
-        for child in children.iter() {
-            if Some(child) != keep {
-                self.commands.entity(child).despawn();
-            }
+        if let Ok(mut handoff) = self.handoffs.get_mut(webview) {
+            handoff.retarget(navigation, self.time.elapsed());
         }
     }
 
@@ -378,5 +434,58 @@ impl PageOpener<'_, '_> {
         self.commands
             .entity(stack)
             .remove::<(PendingPrompt, PendingPromptAttachments)>();
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use bevy::ecs::system::RunSystemOnce;
+
+    use super::*;
+
+    #[test]
+    fn deferred_attachment_owns_the_initial_prompt() {
+        let mut world = World::new();
+        world.insert_resource(AppSettings::default());
+        world.insert_resource(Time::<()>::default());
+        let attachment = AgentAttachment {
+            path: "/tmp/image.png".into(),
+            name: "image.png".into(),
+            mime_type: "image/png".into(),
+            size: 3,
+        };
+        let stack = world
+            .spawn((
+                PendingPrompt("prompt".into()),
+                PendingPromptAttachments(vec![attachment.clone()]),
+            ))
+            .id();
+        let expected_attachment = attachment.clone();
+
+        let deferred = world
+            .run_system_once(move |mut opener: PageOpener| {
+                opener.defer_initial_prompt(stack, Some("prompt".into()), vec![attachment.clone()])
+            })
+            .unwrap();
+
+        assert_eq!(deferred.text.as_deref(), Some("prompt"));
+        assert_eq!(deferred.attachments, vec![expected_attachment]);
+        assert!(world.get::<PendingPrompt>(stack).is_none());
+        assert!(world.get::<PendingPromptAttachments>(stack).is_none());
+    }
+
+    #[test]
+    fn cold_session_handoff_times_out_if_the_page_never_paints() {
+        let mut world = World::new();
+        world.insert_resource(AppSettings::default());
+        world.insert_resource(Time::<()>::default());
+        let navigation = vmux_ecs::PageOpenId::new();
+
+        let handoff = world
+            .run_system_once(move |opener: PageOpener| opener.new_handoff(Vec::new(), navigation))
+            .unwrap();
+
+        let now = world.resource::<Time>().elapsed();
+        assert!(handoff.timed_out(now + std::time::Duration::from_secs(10)));
     }
 }

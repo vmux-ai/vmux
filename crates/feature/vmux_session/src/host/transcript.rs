@@ -45,7 +45,8 @@ impl bevy::prelude::Plugin for Plugin {
                     apply_results,
                 )
                     .chain()
-                    .after(ServiceMessageSet),
+                    .after(ServiceMessageSet)
+                    .after(vmux_session::TranscriptReadySet),
             );
     }
 }
@@ -218,7 +219,6 @@ fn push_to_page(
         if !moved && !conversation_changed && !owed.contains(&session) {
             continue;
         }
-        let conversation = world.transcripts.get(session);
         let Some((webview, meta)) = world.stacks.iter().find_map(|(target, children, meta)| {
             if target.entity() != session {
                 return None;
@@ -240,22 +240,25 @@ fn push_to_page(
             continue;
         }
         owed.remove(&session);
-        let mut projection = ChatProjection::new(
-            agent_id,
-            &conversation.messages,
-            &conversation.created_at,
-            &state,
-            turn_meta.as_deref(),
-            profile.as_deref(),
-            user_profile.as_deref(),
-            meta,
-            &queue,
-            imported.as_deref(),
-            title.as_deref(),
-            name.as_str(),
-            transcript_loading,
-            world.choices.get(webview).ok(),
-        );
+        let choice = world.choices.get(webview).ok();
+        let mut projection = world.transcripts.read(session, |conversation| {
+            ChatProjection::new(
+                agent_id,
+                &conversation.messages,
+                &conversation.created_at,
+                &state,
+                turn_meta.as_deref(),
+                profile.as_deref(),
+                user_profile.as_deref(),
+                meta,
+                &queue,
+                imported.as_deref(),
+                title.as_deref(),
+                name.as_str(),
+                transcript_loading,
+                choice,
+            )
+        });
         let Ok((mut transcript, mut snapshot, attachments)) = world.chat_views.get_mut(webview)
         else {
             owed.insert(session);
@@ -265,15 +268,6 @@ fn push_to_page(
         transcript_changed |= attachments.hydrate_transcript(&mut transcript.state);
         attachments.hydrate_snapshot(&mut projection.snapshot);
         snapshot.0 = projection.snapshot;
-        if !matches!(*state, RunState::Streaming) {
-            info!(
-                ?session,
-                ?webview,
-                error = %snapshot.0.error,
-                items = conversation.messages.len(),
-                "chat snapshot pushed"
-            );
-        }
         commands.trigger(
             vmux_ecs::UiStateWrite::<crate::state::ChatUiState>::from_event(webview, &snapshot.0),
         );
@@ -461,23 +455,26 @@ fn sync_ready_views(
         else {
             continue;
         };
-        let conversation = world.transcripts.get(session_entity);
-        let mut projection = ChatProjection::new(
-            agent_id,
-            &conversation.messages,
-            &conversation.created_at,
-            state,
-            turn_meta,
-            profile,
-            user_profile,
-            world.metadata.get(stack).ok(),
-            queue,
-            imported,
-            title,
-            name.as_str(),
-            transcript_loading,
-            world.choices.get(webview).ok(),
-        );
+        let meta = world.metadata.get(stack).ok();
+        let choice = world.choices.get(webview).ok();
+        let mut projection = world.transcripts.read(session_entity, |conversation| {
+            ChatProjection::new(
+                agent_id,
+                &conversation.messages,
+                &conversation.created_at,
+                state,
+                turn_meta,
+                profile,
+                user_profile,
+                meta,
+                queue,
+                imported,
+                title,
+                name.as_str(),
+                transcript_loading,
+                choice,
+            )
+        });
         transcript.merge_tail(projection.transcript);
         attachments.hydrate_transcript(&mut transcript.state);
         attachments.hydrate_snapshot(&mut projection.snapshot);
@@ -558,21 +555,22 @@ fn resolve_queries(
             .get(query.session)
             .ok()
             .map(|(state, turn_meta, imported)| {
-                let transcript = transcripts.get(query.session);
                 let imported_messages = imported
                     .map(|conversation| conversation.messages.as_slice())
                     .unwrap_or_default();
                 let durations = turn_meta
                     .map(|meta| meta.durations.as_slice())
                     .unwrap_or(&[]);
-                let page = ChatMessages::new(
-                    imported_messages,
-                    &transcript.messages,
-                    &transcript.created_at,
-                    durations,
-                    matches!(state, RunState::Streaming),
-                )
-                .before(query.before as usize, query.limit as usize);
+                let page = transcripts.read(query.session, |transcript| {
+                    ChatMessages::new(
+                        imported_messages,
+                        &transcript.messages,
+                        &transcript.created_at,
+                        durations,
+                        matches!(state, RunState::Streaming),
+                    )
+                    .before(query.before as usize, query.limit as usize)
+                });
                 TranscriptPage {
                     items: page.items,
                     start: u32::try_from(page.start).unwrap_or(u32::MAX),

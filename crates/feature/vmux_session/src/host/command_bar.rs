@@ -25,6 +25,7 @@ struct ResumeState {
     total: u32,
     sessions: Vec<ResumableSessionEntry>,
     loading: bool,
+    visible: std::collections::HashMap<String, usize>,
 }
 
 #[derive(Component)]
@@ -33,8 +34,19 @@ struct ResumeContribution(ResumableSessionEntry);
 #[derive(Component)]
 struct ResumePending;
 
-type ResumeEntities<'w, 's> =
-    Query<'w, 's, (Entity, &'static ChildOf), Or<(With<ResumeContribution>, With<ResumePending>)>>;
+#[derive(Component)]
+struct ResumeMore(String, usize);
+
+type ResumeEntities<'w, 's> = Query<
+    'w,
+    's,
+    (Entity, &'static ChildOf),
+    Or<(
+        With<ResumeContribution>,
+        With<ResumePending>,
+        With<ResumeMore>,
+    )>,
+>;
 
 fn query(
     trigger: On<CommandBarQueryChanged>,
@@ -51,8 +63,11 @@ fn query(
         return;
     };
     if let Ok(mut state) = states.get_mut(event.target) {
+        if state.filter != filter {
+            state.visible.clear();
+        }
         state.filter = filter.to_string();
-        results.spawn(event.target, &state.sessions, &state.filter);
+        results.spawn(event.target, &state.sessions, &state.filter, &state.visible);
         if state.loading {
             results.pending(event.target, state.sessions.len() as i32);
         }
@@ -69,6 +84,7 @@ fn query(
         total: 0,
         sessions: Vec::new(),
         loading: true,
+        visible: Default::default(),
     });
     results.pending(event.target, 0);
     results.commands.trigger(UiInput {
@@ -110,7 +126,7 @@ fn receive(
     }
     state.total = response.total;
     results.clear(target);
-    results.spawn(target, &state.sessions, &state.filter);
+    results.spawn(target, &state.sessions, &state.filter, &state.visible);
     let loaded = state.sessions.len() as u32;
     if loaded >= state.total {
         state.loading = false;
@@ -132,9 +148,27 @@ fn receive(
 fn activate(
     trigger: On<CommandBarContributionActivated>,
     contributions: Query<&ResumeContribution>,
+    more: Query<&ResumeMore>,
+    mut states: Query<&mut ResumeState>,
+    mut results: ResumeResults,
     mut commands: Commands,
 ) {
     let event = trigger.event();
+    if let Ok(more) = more.get(event.target) {
+        let Ok(mut state) = states.get_mut(event.webview) else {
+            return;
+        };
+        let count = state.visible.entry(more.0.clone()).or_insert(more.1);
+        *count = count.saturating_add(5);
+        results.clear(event.webview);
+        results.spawn(
+            event.webview,
+            &state.sessions,
+            &state.filter,
+            &state.visible,
+        );
+        return;
+    }
     let Ok(contribution) = contributions.get(event.target) else {
         return;
     };
@@ -187,13 +221,67 @@ impl ResumeResults<'_, '_> {
         }
     }
 
-    fn spawn(&mut self, target: Entity, sessions: &[ResumableSessionEntry], filter: &str) {
-        for (rank, (row, session)) in ResumeRows::rows(sessions, filter).into_iter().enumerate() {
+    fn spawn(
+        &mut self,
+        target: Entity,
+        sessions: &[ResumableSessionEntry],
+        filter: &str,
+        limits: &std::collections::HashMap<String, usize>,
+    ) {
+        let mut rank = 0i32;
+        let mut counts = std::collections::HashMap::<String, usize>::new();
+        let all = ResumeRows::rows(sessions, filter);
+        for (_, session) in &all {
+            *counts.entry(ResumeSection::of(session).key()).or_default() += 1;
+        }
+        let mut emitted = std::collections::HashMap::<String, usize>::new();
+        let mut more_done = std::collections::HashSet::new();
+        for (mut row, session) in all {
+            let section = ResumeSection::of(&session);
+            let key = section.key();
+            let limit = limits
+                .get(&key)
+                .copied()
+                .unwrap_or(if section.collapsed { 0 } else { 5 });
+            let shown = emitted.entry(key.clone()).or_default();
+            if *shown >= limit {
+                if more_done.insert(key.clone()) {
+                    self.commands.spawn((
+                        CommandBarContribution {
+                            row: CommandBarResultItem {
+                                key: format!("resume:more:{key}"),
+                                title: translate("common-show-more"),
+                                trailing: counts[&key].saturating_sub(limit).to_string(),
+                                section: (*shown == 0).then(|| CommandBarSection {
+                                    labels: vec![section.label.clone()],
+                                    count: counts[&key] as u32,
+                                }),
+                                ..Default::default()
+                            },
+                            rank,
+                            close: false,
+                            pre_filtered: true,
+                            ..Default::default()
+                        },
+                        ResumeMore(key, limit),
+                        ChildOf(target),
+                    ));
+                    rank += 1;
+                }
+                continue;
+            }
+            if *shown == 0 {
+                row.section = Some(CommandBarSection {
+                    labels: vec![section.label.clone()],
+                    count: counts[&key] as u32,
+                });
+            }
+            *shown += 1;
             self.commands.spawn((
                 Name::new(format!("Resume command-bar row: {}", session.sid)),
                 CommandBarContribution {
                     row,
-                    rank: rank as i32,
+                    rank,
                     close: true,
                     pre_filtered: true,
                     ..Default::default()
@@ -201,6 +289,7 @@ impl ResumeResults<'_, '_> {
                 ResumeContribution(session),
                 ChildOf(target),
             ));
+            rank += 1;
         }
     }
 }
@@ -220,9 +309,10 @@ impl ResumeQuery {
 
 #[derive(Clone, PartialEq, Eq)]
 struct ResumeSection {
-    agent: String,
-    project: String,
-    branch: String,
+    status: String,
+    label: String,
+    order: (u8, u32),
+    collapsed: bool,
     count: usize,
 }
 
@@ -254,6 +344,7 @@ impl ResumeRows {
             }
         }
         let mut rows = Vec::new();
+        groups.sort_by_key(|(section, _)| section.order);
         for (mut section, entries) in groups {
             section.count = entries.len();
             for (index, session) in entries.into_iter().enumerate() {
@@ -266,19 +357,41 @@ impl ResumeRows {
 }
 
 impl ResumeSection {
+    fn key(&self) -> String {
+        self.status.clone()
+    }
+
     fn of(session: &ResumableSessionEntry) -> Self {
         Self {
-            agent: if session.agent_name.is_empty() {
-                session.kind.clone()
+            status: if session.stale {
+                "stale".to_string()
+            } else if session.stage.is_empty() {
+                "recent".to_string()
             } else {
-                session.agent_name.clone()
+                session.stage.clone()
             },
-            project: if session.project.is_empty() {
-                session.subtitle.clone()
+            label: if session.stale {
+                translate("sessions-stale")
+            } else if session.stage_name.is_empty() {
+                translate("sessions-title")
             } else {
-                session.project.clone()
+                vmux_ui::i18n::translate_humanized(&session.stage_name)
             },
-            branch: session.branch.clone(),
+            order: (
+                if session.stale {
+                    3
+                } else if session.terminal {
+                    2
+                } else {
+                    0
+                },
+                if session.stale {
+                    0
+                } else {
+                    session.stage_order
+                },
+            ),
+            collapsed: session.stale || session.terminal,
             count: 0,
         }
     }
@@ -295,6 +408,8 @@ impl ResumeRow<'_> {
             || session.agent_name.to_ascii_lowercase().contains(needle)
             || session.project.to_ascii_lowercase().contains(needle)
             || session.branch.to_ascii_lowercase().contains(needle)
+            || session.stage_name.to_ascii_lowercase().contains(needle)
+            || session.runtime.to_ascii_lowercase().contains(needle)
     }
 
     fn project(&self, section: Option<&ResumeSection>) -> CommandBarResultItem {
@@ -307,16 +422,22 @@ impl ResumeRow<'_> {
                 .unwrap_or_default()
                 .to_string(),
             trailing: SessionWhen::new(session.age_seconds, &session.updated_at).label(),
+            badge: if session.stage_name.is_empty() {
+                String::new()
+            } else {
+                vmux_ui::i18n::translate_humanized(&session.stage_name)
+            },
+            detail: [
+                session.agent_name.as_str(),
+                session.project.as_str(),
+                session.branch.as_str(),
+            ]
+            .into_iter()
+            .filter(|value| !value.is_empty())
+            .collect::<Vec<_>>()
+            .join(" · "),
             section: section.map(|section| CommandBarSection {
-                labels: [
-                    section.agent.as_str(),
-                    section.project.as_str(),
-                    section.branch.as_str(),
-                ]
-                .into_iter()
-                .filter(|label| !label.is_empty())
-                .map(str::to_string)
-                .collect(),
+                labels: vec![section.label.clone()],
                 count: section.count as u32,
             }),
             ..Default::default()
@@ -403,5 +524,172 @@ impl SessionAge {
             return translate(id);
         }
         translate_with(id, &[("count", TranslationValue::Number(count as i64))])
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    struct ResumePicker {
+        app: App,
+        view: Entity,
+    }
+
+    impl ResumePicker {
+        fn loaded() -> Self {
+            let mut app = App::new();
+            app.add_plugins(Plugin);
+            let view = app.world_mut().spawn_empty().id();
+            let mut picker = Self { app, view };
+            picker.query("/resume");
+            let mut sessions = Vec::new();
+            for (stage, count, terminal, stale) in [
+                ("active", 8, false, false),
+                ("waiting", 7, false, false),
+                ("done", 4, true, false),
+                ("old", 4, false, true),
+            ] {
+                for index in 0..count {
+                    sessions.push(ResumableSessionEntry {
+                        kind: "session".to_string(),
+                        sid: format!("{stage}-{index}"),
+                        title: format!("Task {stage} {index}"),
+                        stage: stage.to_string(),
+                        stage_name: stage.to_string(),
+                        stage_order: if stale { index } else { 0 },
+                        terminal,
+                        stale,
+                        ..Default::default()
+                    });
+                }
+            }
+            picker.app.world_mut().trigger(
+                UiStateWrite::<vmux_api::command_bar::CommandBarUiState>::from_event(
+                    picker.view,
+                    &ResumableSessions {
+                        request_id: 1,
+                        total: sessions.len() as u32,
+                        sessions,
+                        ..Default::default()
+                    },
+                ),
+            );
+            picker.app.update();
+            picker
+        }
+
+        fn query(&mut self, query: &str) {
+            self.app.world_mut().trigger(CommandBarQueryChanged {
+                target: self.view,
+                open_id: vmux_api::command_bar::OpenId(1),
+                query: query.to_string(),
+                start: true,
+                open: None,
+                picker: None,
+                numbered: false,
+            });
+            self.app.update();
+        }
+
+        fn rows(&mut self) -> Vec<CommandBarContribution> {
+            let mut rows = Vec::new();
+            let mut query = self
+                .app
+                .world_mut()
+                .query::<(&ChildOf, &CommandBarContribution)>();
+            for (parent, contribution) in query.iter(self.app.world()) {
+                if parent.parent() == self.view {
+                    rows.push(contribution.clone());
+                }
+            }
+            rows.sort_by_key(|row| row.rank);
+            rows
+        }
+
+        fn more(&mut self, key: &str) {
+            let mut query = self
+                .app
+                .world_mut()
+                .query::<(Entity, &ChildOf, &ResumeMore)>();
+            let target = query
+                .iter(self.app.world())
+                .find(|(_, parent, more)| parent.parent() == self.view && more.0 == key)
+                .unwrap()
+                .0;
+            self.app
+                .world_mut()
+                .trigger(CommandBarContributionActivated {
+                    target,
+                    webview: self.view,
+                    query: "/resume".to_string(),
+                    open: None,
+                });
+            self.app.update();
+        }
+    }
+
+    #[test]
+    fn resume_limits_selectable_rows_and_expands_only_the_requested_status() {
+        let mut picker = ResumePicker::loaded();
+        let rows = picker.rows();
+        assert_eq!(rows.len(), 14);
+        let mut totals = Vec::new();
+        for row in &rows {
+            if let Some(section) = &row.row.section {
+                totals.push(section.count);
+            }
+            assert!(!row.row.pending);
+        }
+        assert_eq!(totals, vec![8, 7, 4, 4]);
+        assert!(
+            !rows
+                .iter()
+                .any(|row| row.row.key == "resume:session:active-5")
+        );
+        assert!(
+            !rows
+                .iter()
+                .any(|row| row.row.key == "resume:session:done-0")
+        );
+        assert!(!rows.iter().any(|row| row.row.key == "resume:session:old-0"));
+        picker.more("active");
+        let rows = picker.rows();
+        assert_eq!(rows.len(), 16);
+        assert!(
+            rows.iter()
+                .any(|row| row.row.key == "resume:session:active-7")
+        );
+        assert!(
+            !rows
+                .iter()
+                .any(|row| row.row.key == "resume:session:waiting-5")
+        );
+        assert!(!rows.iter().any(|row| row.row.key == "resume:more:active"));
+        assert!(
+            rows.iter()
+                .filter(|row| row.row.key.starts_with("resume:more:"))
+                .all(|row| !row.close)
+        );
+        picker.more("done");
+        assert!(
+            picker
+                .rows()
+                .iter()
+                .any(|row| row.row.key == "resume:session:done-3")
+        );
+    }
+
+    #[test]
+    fn changing_the_resume_filter_resets_paging_and_keeps_status_counts_accurate() {
+        let mut picker = ResumePicker::loaded();
+        picker.more("active");
+        picker.query("/resume waiting");
+        let rows = picker.rows();
+        assert_eq!(rows.len(), 6);
+        assert_eq!(rows[0].row.section.as_ref().unwrap().count, 7);
+        assert!(rows.iter().all(|row| row.row.key.contains("waiting")));
+        picker.query("/resume");
+        assert_eq!(picker.rows().len(), 14);
     }
 }

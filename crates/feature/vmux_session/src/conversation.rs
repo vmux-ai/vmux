@@ -12,6 +12,7 @@ use vmux_api::session::{
 };
 use vmux_ecs::CreatedAt;
 use vmux_ecs::persistence::PersistenceAppExt;
+use vmux_ecs::service::ServiceMessageSet;
 
 use crate::{AgentId, Session, SessionId};
 
@@ -25,9 +26,23 @@ impl Plugin for ConversationPlugin {
             .add_message::<OperationCommitted>()
             .register_persisted::<Document>()
             .register_persisted::<DocumentKind>()
-            .add_systems(Update, (ensure, sync_agent, materialize));
+            .add_systems(Update, (ensure, sync_agent))
+            .add_systems(
+                Update,
+                (
+                    materialize,
+                    bevy_ecs::schedule::ApplyDeferred,
+                    cache_transcripts,
+                )
+                    .chain()
+                    .after(ServiceMessageSet)
+                    .in_set(TranscriptReadySet),
+            );
     }
 }
+
+#[derive(SystemSet, Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub struct TranscriptReadySet;
 
 #[derive(Component, Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct Member;
@@ -123,6 +138,13 @@ impl Transcript {
     }
 }
 
+#[derive(Component, Default)]
+struct TranscriptCache {
+    transcript: Transcript,
+    order: Vec<(Entity, u64)>,
+    indices: bevy_ecs::entity::EntityHashMap<usize>,
+}
+
 #[derive(SystemParam)]
 pub struct Transcripts<'w, 's> {
     children: Query<'w, 's, &'static Children>,
@@ -136,10 +158,23 @@ pub struct Transcripts<'w, 's> {
         ),
         With<ConversationEvent>,
     >,
+    cache: Query<'w, 's, &'static TranscriptCache>,
 }
 
 impl Transcripts<'_, '_> {
     pub fn get(&self, session: Entity) -> Transcript {
+        self.read(session, Clone::clone)
+    }
+
+    pub fn read<R>(&self, session: Entity, read: impl FnOnce(&Transcript) -> R) -> R {
+        if let Ok(cache) = self.cache.get(session) {
+            return read(&cache.transcript);
+        }
+        let transcript = self.materialize(session);
+        read(&transcript)
+    }
+
+    fn materialize(&self, session: Entity) -> Transcript {
         let items = self
             .children
             .get(session)
@@ -156,6 +191,121 @@ impl Transcripts<'_, '_> {
             })
             .collect();
         Transcript::from_items(items)
+    }
+}
+
+type ChangedTranscriptEvents<'w, 's> = Query<
+    'w,
+    's,
+    (Entity, &'static ChildOf),
+    (
+        With<ConversationEvent>,
+        Or<(
+            Added<ConversationEvent>,
+            Changed<EventIdentity>,
+            Changed<MessageContent>,
+            Changed<CreatedAt>,
+        )>,
+    ),
+>;
+
+#[derive(SystemParam)]
+struct TranscriptEvents<'w, 's> {
+    events: Query<
+        'w,
+        's,
+        (
+            &'static EventIdentity,
+            &'static MessageContent,
+            &'static CreatedAt,
+        ),
+        With<ConversationEvent>,
+    >,
+}
+
+impl TranscriptEvents<'_, '_> {
+    fn rebuild(&self, cache: &mut TranscriptCache, children: &Children) {
+        let mut items = children
+            .iter()
+            .filter_map(|entity| {
+                let (identity, content, created_at) = self.events.get(entity).ok()?;
+                Some((
+                    entity,
+                    identity.sequence,
+                    content.0.clone(),
+                    created_at.0.max(0) as u64,
+                ))
+            })
+            .collect::<Vec<_>>();
+        items.sort_by_key(|(_, sequence, _, _)| *sequence);
+        cache.order.clear();
+        cache.indices.clear();
+        cache.transcript.messages.clear();
+        cache.transcript.created_at.clear();
+        cache.order.reserve(items.len());
+        cache.indices.reserve(items.len());
+        cache.transcript.messages.reserve(items.len());
+        cache.transcript.created_at.reserve(items.len());
+        for (entity, sequence, message, created_at) in items {
+            cache.indices.insert(entity, cache.order.len());
+            cache.order.push((entity, sequence));
+            cache.transcript.messages.push(message);
+            cache.transcript.created_at.push(created_at);
+        }
+    }
+
+    fn update(&self, cache: &mut TranscriptCache, entity: Entity) -> bool {
+        let Some(index) = cache.indices.get(&entity).copied() else {
+            return false;
+        };
+        let Ok((identity, content, created_at)) = self.events.get(entity) else {
+            return false;
+        };
+        if cache.order[index].1 != identity.sequence {
+            return false;
+        }
+        cache.transcript.messages[index].clone_from(&content.0);
+        cache.transcript.created_at[index] = created_at.0.max(0) as u64;
+        true
+    }
+}
+
+fn cache_transcripts(
+    changed_events: ChangedTranscriptEvents,
+    projection: TranscriptEvents,
+    changed_children: Query<Entity, (With<Session>, Changed<Children>)>,
+    uncached: Query<Entity, (With<Session>, With<Children>, Without<TranscriptCache>)>,
+    mut sessions: Query<(Ref<Children>, Option<&mut TranscriptCache>), With<Session>>,
+    mut commands: Commands,
+) {
+    let mut changed = HashMap::<Entity, Vec<Entity>>::new();
+    for (entity, parent) in &changed_events {
+        changed.entry(parent.parent()).or_default().push(entity);
+    }
+    let mut targets = changed
+        .keys()
+        .copied()
+        .collect::<bevy_ecs::entity::EntityHashSet>();
+    targets.extend(changed_children.iter());
+    targets.extend(uncached.iter());
+    for session in targets {
+        let Ok((children, cache)) = sessions.get_mut(session) else {
+            continue;
+        };
+        let changes = changed.remove(&session).unwrap_or_default();
+        let Some(mut cache) = cache else {
+            let mut cache = TranscriptCache::default();
+            projection.rebuild(&mut cache, &children);
+            commands.entity(session).try_insert(cache);
+            continue;
+        };
+        if children.is_changed()
+            || changes
+                .iter()
+                .any(|entity| !projection.update(&mut cache, *entity))
+        {
+            projection.rebuild(&mut cache, &children);
+        }
     }
 }
 

@@ -87,9 +87,13 @@ mod tests {
                 LspDiagnosticsSender::default(),
                 ServerInputSender::default(),
             ));
-            let stack = app.world_mut().spawn_empty().id();
+            let navigation = PageOpenId::new();
+            let stack = app
+                .world_mut()
+                .spawn(vmux_ecs::PageNavigation::new(navigation))
+                .id();
             app.world_mut().spawn(PageOpenTask {
-                id: PageOpenId::new(),
+                id: navigation,
                 stack,
                 url: format!("file://{}", dir.path().join(name).display()),
                 request_id: None,

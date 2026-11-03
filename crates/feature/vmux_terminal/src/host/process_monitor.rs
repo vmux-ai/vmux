@@ -242,7 +242,7 @@ fn open_services(
     for _ in requests.read() {
         stack_requests.write(OpenRequest {
             url: Some(ProcessMonitorPageManifest::URL.to_string()),
-            focus_existing: false,
+            policy: vmux_layout::stack::OpenPolicy::ReplaceStartup,
         });
     }
 }

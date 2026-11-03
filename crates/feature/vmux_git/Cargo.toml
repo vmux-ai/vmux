@@ -15,6 +15,7 @@ path = "src/lib.rs"
 [dependencies]
 rkyv = { workspace = true }
 serde = { workspace = true }
+sha2 = "0.10"
 url = { workspace = true }
 bevy_ecs = { workspace = true }
 vmux_ecs = { path = "../../util/vmux_ecs" }

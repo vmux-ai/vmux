@@ -1091,3 +1091,5 @@ project-clone-invalid = 请输入有效的GitHub仓库
 project-restore = 恢复项目
 project-archived = 已归档
 common-select = 选择
+
+common-show-more = 显示更多

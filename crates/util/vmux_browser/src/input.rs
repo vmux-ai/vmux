@@ -287,13 +287,16 @@ fn track_interaction(
     browsers: Query<&ChildOf, With<Browser>>,
     mut commands: Commands,
 ) {
-    let interacted = mouse_buttons
-        .read()
-        .any(|event| event.state == ButtonState::Pressed)
-        || mouse_wheels.read().next().is_some()
-        || keyboard
-            .read()
-            .any(|event| event.state == ButtonState::Pressed);
+    let mut mouse_pressed = false;
+    for event in mouse_buttons.read() {
+        mouse_pressed |= event.state == ButtonState::Pressed;
+    }
+    let mouse_wheel = mouse_wheels.read().count() > 0;
+    let mut key_pressed = false;
+    for event in keyboard.read() {
+        key_pressed |= event.state == ButtonState::Pressed;
+    }
+    let interacted = mouse_pressed || mouse_wheel || key_pressed;
     if !interacted {
         return;
     }

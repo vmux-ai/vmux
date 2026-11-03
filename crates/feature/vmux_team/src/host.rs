@@ -440,7 +440,7 @@ fn open_request(
 
     stack_requests.write(OpenRequest {
         url: Some(TeamPlugin::URL.to_string()),
-        focus_existing: false,
+        policy: vmux_layout::stack::OpenPolicy::ReplaceStartup,
     });
 }
 
@@ -654,6 +654,7 @@ mod tests {
     use bevy::ecs::system::RunSystemOnce;
     use vmux_ecs::LastActivatedAt;
 
+    use vmux_ecs::PageNavigation;
     use vmux_ecs::page_open::{PageOpenId, PageOpenTask};
 
     fn spawn_team_stack(world: &mut World, space: Entity) -> Entity {
@@ -813,9 +814,13 @@ mod tests {
             .add_plugins(vmux_layout::hosted_page::HostedPagePlugin)
             .add_plugins(HostedUiPlugin::<Team>::new(TeamPlugin::MANIFEST));
 
-        let stack = app.world_mut().spawn(Stack::default()).id();
+        let navigation = PageOpenId::new();
+        let stack = app
+            .world_mut()
+            .spawn((Stack::default(), PageNavigation::new(navigation)))
+            .id();
         app.world_mut().spawn(PageOpenTask {
-            id: PageOpenId::new(),
+            id: navigation,
             stack,
             url: TeamPlugin::URL.to_string(),
             request_id: None,

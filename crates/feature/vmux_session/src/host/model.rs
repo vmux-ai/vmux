@@ -135,7 +135,7 @@ fn emit_picker(
     mut refreshes: MessageReader<RepublishChatUiState>,
     mut runtimes: Query<(Ref<Picker>, &mut ChatUiStateProjection), With<ChatRuntime>>,
 ) {
-    let refresh = refreshes.read().next().is_some();
+    let refresh = refreshes.read().count() > 0;
     let Ok((picker, mut projection)) = runtimes.single_mut() else {
         return;
     };

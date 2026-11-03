@@ -454,19 +454,19 @@ struct OpenRequests<'w, 's> {
 impl OpenRequests<'_, '_> {
     fn read(&mut self) -> CommandBarOpenState {
         let mut request = CommandBarOpenState::default();
-        if self.toggle.read().next().is_some() {
+        if self.toggle.read().count() > 0 {
             request.should_toggle = true;
             request.url_override = Some(String::new());
         }
-        if self.edit_page.read().next().is_some() {
+        if self.edit_page.read().count() > 0 {
             request.should_toggle = true;
             request.replace_active_stack = true;
         }
-        if self.path.read().next().is_some() {
+        if self.path.read().count() > 0 {
             request.should_toggle = true;
             request.url_override = Some("/".to_string());
         }
-        if self.commands.read().next().is_some() {
+        if self.commands.read().count() > 0 {
             request.should_toggle = true;
             request.url_override = Some(">".to_string());
         }
@@ -688,7 +688,7 @@ fn dismiss_requested(
     panel_q: Query<Entity, (With<RendersLauncherPanel>, With<CommandBarPanelActive>)>,
     mut commands: Commands,
 ) {
-    if requests.read().next().is_none() {
+    if requests.read().count() == 0 {
         return;
     }
     for layout_e in &panel_q {

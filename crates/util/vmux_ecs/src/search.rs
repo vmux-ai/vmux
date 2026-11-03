@@ -148,7 +148,7 @@ fn request<M: Send + Sync + 'static>(
         return;
     };
     if debounce.0.is_zero() {
-        commands.entity(event.target).remove::<Pending<M>>();
+        commands.entity(event.target).try_remove::<Pending<M>>();
         commands.trigger(Ready::<M> {
             target: event.target,
             query: event.query.clone(),
@@ -174,13 +174,13 @@ fn cancel<M: Send + Sync + 'static>(
     if let Ok(mut state) = states.get_mut(target) {
         state.cancel();
     }
-    commands.entity(target).remove::<Pending<M>>();
+    commands.entity(target).try_remove::<Pending<M>>();
 }
 
 fn cleanup<M: Send + Sync + 'static>(trigger: On<Remove, State<M>>, mut commands: Commands) {
     commands
         .entity(trigger.event_target())
-        .remove::<Pending<M>>();
+        .try_remove::<Pending<M>>();
 }
 
 fn publish<M: Send + Sync + 'static>(
@@ -196,7 +196,7 @@ fn publish<M: Send + Sync + 'static>(
             state.matches(pending.revision) && state.query() == Some(pending.query.as_str());
         let query = pending.query.clone();
         let revision = pending.revision;
-        commands.entity(target).remove::<Pending<M>>();
+        commands.entity(target).try_remove::<Pending<M>>();
         if ready {
             commands.trigger(Ready::<M> {
                 target,

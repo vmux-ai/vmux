@@ -263,13 +263,14 @@ impl ResumeTarget {
 }
 
 #[derive(Clone, Copy)]
-pub(super) struct SessionPager(Signal<usize>);
+pub(super) struct SessionPager(Signal<usize>, usize);
 
 impl SessionPager {
     const PAGE: usize = 40;
 
-    pub fn use_state() -> Self {
-        Self(use_signal(|| Self::PAGE))
+    pub fn use_state(preview: Option<usize>) -> Self {
+        let step = preview.unwrap_or(Self::PAGE).max(1);
+        Self(use_signal(move || step), step)
     }
 
     pub fn visible(self, total: usize) -> usize {
@@ -280,11 +281,15 @@ impl SessionPager {
         if !event.is_intersecting().unwrap_or(false) {
             return;
         }
+        self.more(total);
+    }
+
+    pub fn more(self, total: usize) {
         let current = self.0();
         if current >= total {
             return;
         }
         let mut visible = self.0;
-        visible.set(current.saturating_add(Self::PAGE).min(total));
+        visible.set(current.saturating_add(self.1).min(total));
     }
 }

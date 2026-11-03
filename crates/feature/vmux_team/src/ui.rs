@@ -100,7 +100,7 @@ fn ProfileSection(
                                 class: "w-full min-w-0".to_string(),
                                 trigger_class: "h-10 w-full justify-start bg-transparent px-2 hover:bg-foreground/[0.055]".to_string(),
                                 popup_class: "max-h-80 min-w-64 overflow-y-auto p-1".to_string(),
-                                ontoggle: move |_| profile_open.set(!profile_open()),
+                                on_open_change: move |next| profile_open.set(next),
                                 on_dismiss: move |_| profile_open.set(false),
                                 leading: rsx! {
                                     Avatar {

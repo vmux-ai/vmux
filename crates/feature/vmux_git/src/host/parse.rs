@@ -222,7 +222,11 @@ impl DiffParser {
         }]
     }
 
-    fn hunk_start(line: &str) -> Option<(u32, u32)> {
+    pub(crate) fn source_spans(text: &str) -> Vec<StyledSpan> {
+        Self::spans(text, [200, 200, 200])
+    }
+
+    pub(crate) fn hunk_start(line: &str) -> Option<(u32, u32)> {
         let body = line.strip_prefix("@@ ")?;
         let end = body.find(" @@")?;
         let ranges = &body[..end];
@@ -234,6 +238,7 @@ impl DiffParser {
         Some((old_start, new_start))
     }
 
+    #[cfg(test)]
     pub fn parse(diff: &str) -> Vec<DiffLine> {
         Self::parse_with_file_headers(diff, false)
     }
@@ -259,7 +264,10 @@ impl DiffParser {
                 .count()
                 > 1;
 
-        for raw in diff.lines() {
+        for (index, raw) in diff.lines().enumerate() {
+            if index % 256 == 0 && super::runtime::GitRuntime::canceled() {
+                break;
+            }
             if raw.starts_with("\\ No newline") {
                 continue;
             }
@@ -355,6 +363,31 @@ pub struct HunkRange {
 }
 
 impl HunkRange {
+    pub(crate) fn index_for(
+        ranges: &[Self],
+        kind: DiffKind,
+        old_no: Option<u32>,
+        new_no: Option<u32>,
+    ) -> Option<u32> {
+        let line = match kind {
+            DiffKind::Add => new_no?,
+            DiffKind::Remove => old_no?,
+            _ => return None,
+        };
+        ranges
+            .iter()
+            .position(|range| match kind {
+                DiffKind::Add => {
+                    line >= range.new_start && line < range.new_start + range.new_count
+                }
+                DiffKind::Remove => {
+                    line >= range.old_start && line < range.old_start + range.old_count
+                }
+                _ => false,
+            })
+            .map(|index| index as u32)
+    }
+
     fn range(value: &str) -> Option<(u32, u32)> {
         let mut parts = value.split(',');
         let start = parts.next()?.parse().ok()?;
@@ -365,7 +398,7 @@ impl HunkRange {
         Some((start, count))
     }
 
-    fn parse(line: &str) -> Option<Self> {
+    pub(crate) fn parse(line: &str) -> Option<Self> {
         let body = line.strip_prefix("@@ ")?;
         let end = body.find(" @@")?;
         let mut parts = body[..end].split_whitespace();
@@ -377,10 +410,6 @@ impl HunkRange {
             new_start,
             new_count,
         })
-    }
-
-    pub fn parse_all(diff: &str) -> Vec<Self> {
-        diff.lines().filter_map(Self::parse).collect()
     }
 }
 

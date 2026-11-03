@@ -63,6 +63,7 @@ struct ResumeCatalog<'w, 's> {
     providers: Res<'w, ProviderCatalog>,
     tombstones: Res<'w, ProviderSessionTombstones>,
     cache: Option<Single<'w, 's, &'static mut RepoInfoCache>>,
+    catalog: Option<Res<'w, vmux_session::CatalogSnapshot>>,
 }
 
 impl ResumeCatalog<'_, '_> {
@@ -72,7 +73,7 @@ impl ResumeCatalog<'_, '_> {
         let mut sessions = Vec::new();
         for (id, name, description, cwd, activated, agent, profile) in &self.sessions {
             let path = cwd.0.as_path();
-            let info = self.cache.as_mut().and_then(|cache| cache.snapshot(path));
+            let info = self.cache.as_mut().and_then(|cache| cache.cached(path));
             let subtitle = path
                 .file_name()
                 .map(|name| name.to_string_lossy().into_owned())
@@ -132,6 +133,7 @@ impl ResumeCatalog<'_, '_> {
                     project,
                     branch,
                     cross_runtime: false,
+                    ..Default::default()
                 },
             ));
         }
@@ -186,8 +188,34 @@ impl ResumeCatalog<'_, '_> {
                     project,
                     branch,
                     cross_runtime: true,
+                    ..Default::default()
                 },
             ));
+        }
+        if let Some(catalog) = self.catalog.as_ref() {
+            for (_, entry) in &mut sessions {
+                let summary = catalog.sessions.iter().find(|summary| {
+                    summary.kind == entry.kind && summary.sid == entry.sid
+                        || summary.provider_kind == entry.kind && summary.provider_sid == entry.sid
+                });
+                let Some(summary) = summary else {
+                    continue;
+                };
+                let presentation =
+                    vmux_session::SessionSummaryProjection::new(summary, &catalog.stages, now);
+                entry.stage.clone_from(&summary.stage);
+                entry.runtime.clone_from(&summary.runtime);
+                entry.terminal = presentation.terminal;
+                entry.stale = presentation.stale;
+                if let Some(stage) = catalog
+                    .stages
+                    .iter()
+                    .find(|stage| stage.id == summary.stage)
+                {
+                    entry.stage_name.clone_from(&stage.name);
+                    entry.stage_order = stage.order;
+                }
+            }
         }
         sessions.sort_by_key(|(activated, _)| std::cmp::Reverse(*activated));
         let total = sessions.len() as u32;

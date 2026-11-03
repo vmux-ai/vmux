@@ -1,20 +1,18 @@
 #![allow(non_snake_case)]
 
 use dioxus::prelude::*;
-use vmux_ecs::event::{ProjectPickerRequest, ProjectRow, ProjectTreeToggle};
+use vmux_ecs::event::{ProjectPickerRequest, ProjectRow};
 use vmux_ui::components::avatar::IdentityOrb;
 use vmux_ui::components::dropdown::DropdownPopup;
-use vmux_ui::components::motion::Collapsible;
 use vmux_ui::components::project_picker::ProjectSelectPopup;
-use vmux_ui::components::sheet::{SheetSelectorRow, SheetToggleRow};
-use vmux_ui::components::tree_row::{FileTreeRow, FileTreeRowGroup};
+use vmux_ui::components::sheet::SheetSelectorRow;
 use vmux_ui::hooks::{send, use_optimistic_map};
 use vmux_ui::i18n::translate;
 use vmux_ui::icon::{GitSymbol, GitSymbolView, LineIcon, LineIconView, PageIconView};
 
 use crate::event::{
-    ActiveSession, ActiveWorkspaceProject, SideSheetProjectOpenRequest,
-    SideSheetProjectPageOpenRequest, SideSheetSectionRequest, TabBoundary, WorkspaceBranch,
+    ActiveSession, ActiveWorkspaceProject, SideSheetProjectPageOpenRequest, TabBoundary,
+    WorkspaceBranch,
 };
 
 use super::LayoutDropdown;
@@ -56,10 +54,10 @@ pub(crate) fn ActiveSessionPanel(session: ActiveSession) -> Element {
                         if !task.description.trim().is_empty() {
                             div { class: "truncate text-[10px] text-muted-foreground", title: "{task.description}", "{task.description}" }
                         } else {
-                            div { class: "truncate text-[10px] text-muted-foreground", title: "{page.url}", "{page.url}" }
+                            CurrentPagePath { url: page.url.clone() }
                         }
                     } else {
-                        div { class: "truncate text-[10px] text-muted-foreground", title: "{page.url}", "{page.url}" }
+                        CurrentPagePath { url: page.url.clone() }
                     }
                 }
             }
@@ -75,6 +73,19 @@ pub(crate) fn ActiveSessionPanel(session: ActiveSession) -> Element {
                     }
                 }
             }
+        }
+    }
+}
+
+#[component]
+fn CurrentPagePath(url: String) -> Element {
+    let label = vmux_path::FileUrl::parse(&url)
+        .and_then(|file| file.path())
+        .map(vmux_path::DisplayPath::project)
+        .unwrap_or_else(|| url.clone());
+    rsx! {
+        div { class: "mt-0.5 inline-flex max-w-full min-w-0 rounded-md bg-foreground/[0.035] px-1.5 py-0.5 text-[10px] text-muted-foreground", title: url,
+            span { class: "truncate-start min-w-0 font-mono", "{label}" }
         }
     }
 }
@@ -104,35 +115,30 @@ fn ActiveSessionGit(boundary: TabBoundary) -> Element {
 fn ActiveWorkspaceProjectTree(project: ActiveWorkspaceProject, pane_id: u64) -> Element {
     let ActiveWorkspaceProject {
         root,
-        children,
+        children: _,
         choices,
         project_dir,
         branch: current_branch,
         branches,
-        expanded,
+        expanded: _,
     } = project;
     let picker_root = root.path.clone();
     let mut choosing = use_signal(|| false);
     let mut choosing_branch = use_signal(|| false);
-    let mut optimistic_project = use_signal(|| None::<ProjectRow>);
+    let project_key = pane_id;
+    let optimistic_project = use_optimistic_map(std::collections::HashMap::from([(
+        project_key,
+        root.clone(),
+    )]));
     let branch_key = format!("{pane_id}:{project_dir}");
     let optimistic_branch = use_optimistic_map(std::collections::HashMap::from([(
         branch_key.clone(),
         current_branch.clone(),
     )]));
-    let selected_project = optimistic_project().unwrap_or_else(|| root.clone());
+    let selected_project = optimistic_project.value(&project_key, &root);
     let selected_path = selected_project.path.clone();
     let selected_label = selected_project.label.clone();
     let selected_display_path = selected_project.display_path.clone();
-    use_effect(move || {
-        if optimistic_project
-            .peek()
-            .as_ref()
-            .is_some_and(|project| project.path == root.path)
-        {
-            optimistic_project.set(None);
-        }
-    });
     let selected_branch = optimistic_branch.value(&branch_key, &current_branch);
     let current_branch_label = if selected_branch.is_empty() {
         "HEAD".to_string()
@@ -171,13 +177,19 @@ fn ActiveWorkspaceProjectTree(project: ActiveWorkspaceProject, pane_id: u64) -> 
                             class: "max-h-64 min-w-0 overflow-y-auto".to_string(),
                             on_pick: move |project: ProjectRow| {
                                 choosing.set(false);
-                                optimistic_project.set(Some(project.clone()));
-                                let _ = send(&vmux_ecs::event::space::ProjectActivateRequest {
+                                optimistic_project.set(
+                                    project_key,
+                                    root.clone(),
+                                    project.clone(),
+                                );
+                                if send(&vmux_ecs::event::space::ProjectActivateRequest {
                                     path: project.path,
                                     branch: String::new(),
                                     checkout: String::new(),
                                     pane_id: Some(pane_id),
-                                });
+                                }).is_err() {
+                                    optimistic_project.clear(&project_key);
+                                }
                             },
                             on_add: move |_| {
                                 choosing.set(false);
@@ -196,11 +208,11 @@ fn ActiveWorkspaceProjectTree(project: ActiveWorkspaceProject, pane_id: u64) -> 
                         }
                     }
                 }
-                if !current_branch.is_empty() || !branch_choices.is_empty() {
+                if !selected_branch.is_empty() || !branch_choices.is_empty() {
                     if branch_choices.is_empty() {
                         div { class: "flex h-8 w-full min-w-0 items-center gap-2 rounded px-2 transition-colors hover:bg-foreground/[0.04] @max-[12rem]:px-1",
                             LineIconView { icon: LineIcon::GitBranch, class: "size-3.5 shrink-0 text-muted-foreground".to_string() }
-                            span { class: "min-w-0 flex-1 truncate font-mono text-[10px] text-foreground/85", "{current_branch}" }
+                            span { class: "min-w-0 flex-1 truncate font-mono text-[10px] text-foreground/85", "{selected_branch}" }
                         }
                     } else {
                         LayoutDropdown {
@@ -243,9 +255,7 @@ fn ActiveWorkspaceProjectTree(project: ActiveWorkspaceProject, pane_id: u64) -> 
                                                             branch: branch_name.clone(),
                                                             checkout: checkout.clone(),
                                                             pane_id: Some(pane_id),
-                                                        })
-                                                        .is_err()
-                                                        {
+                                                        }).is_err() {
                                                             optimistic_branch.clear(&optimistic_key);
                                                         }
                                                     },
@@ -259,30 +269,7 @@ fn ActiveWorkspaceProjectTree(project: ActiveWorkspaceProject, pane_id: u64) -> 
                     }
                 }
             }
-            SheetToggleRow {
-                label: translate("git-files"),
-                expanded,
-                leading: rsx! { LineIconView {
-                    icon: LineIcon::File,
-                    class: "size-3.5 shrink-0 text-muted-foreground".to_string(),
-                } },
-                onclick: move |_| {
-                    let _ = send(&SideSheetSectionRequest::new(
-                        pane_id,
-                        "projects",
-                        !expanded,
-                    ));
-                },
-            }
-            Collapsible { expanded, content_class: "pb-1".to_string(),
-                for child in children {
-                    ActiveWorkspaceProjectRow {
-                        key: "{child.path}",
-                        project: child,
-                        pane_id,
-                    }
-                }
-            }
+
         }
     }
 }
@@ -298,40 +285,6 @@ fn ActiveWorkspaceBranchChoice(branch: WorkspaceBranch, on_pick: EventHandler<()
             span { class: "min-w-0 flex-1 truncate font-mono text-[10px]", "{branch.branch}" }
             if !branch.label.is_empty() {
                 span { class: "max-w-24 truncate text-[9px] text-muted-foreground", "{branch.label}" }
-            }
-        }
-    }
-}
-
-#[component]
-fn ActiveWorkspaceProjectRow(project: ProjectRow, pane_id: u64) -> Element {
-    let path = project.path.clone();
-    let opens_tree = matches!(
-        project.kind,
-        vmux_api::space::ProjectRowKind::Project | vmux_api::space::ProjectRowKind::Directory
-    );
-    rsx! {
-        FileTreeRowGroup {
-            FileTreeRow {
-                path: project.path.clone(),
-                label: project.label.clone(),
-                is_dir: opens_tree,
-                expanded: project.expanded,
-                depth: project.depth,
-                title: project.display_path.clone(),
-                on_activate: move |_| {
-                    if opens_tree {
-                        let _ = send(&ProjectTreeToggle {
-                            path: path.clone(),
-                            pane_id: pane_id.to_string(),
-                        });
-                    } else {
-                        let _ = send(&SideSheetProjectOpenRequest {
-                            pane_id,
-                            path: path.clone(),
-                        });
-                    }
-                },
             }
         }
     }

@@ -11,6 +11,7 @@ use vmux_api::git::FileGitState;
 
 #[vmux_api::ui_state_patch(Default)]
 pub struct FileUiStatePatch {
+    pub checkout: Option<super::FileCheckoutState>,
     pub meta: Option<FileMetaEvent>,
     pub viewport: Option<FileViewportPatch>,
     pub note: Option<FileNoteEvent>,
@@ -48,7 +49,7 @@ pub struct FileUiStatePatch {
     pub find: Option<FileFindEvent>,
 }
 
-#[vmux_api::ui_state(Default, patch = FileUiStatePatch, version = 4)]
+#[vmux_api::ui_state(Default, patch = FileUiStatePatch, version = 6)]
 pub struct FileUiState {
     pub document: FileDocumentUiState,
     pub viewport: FileViewportUiState,
@@ -60,6 +61,7 @@ pub struct FileUiState {
 
 #[vmux_api::contract(Default)]
 pub struct FileDocumentUiState {
+    pub checkout: Option<super::FileCheckoutState>,
     pub meta: Option<FileMetaEvent>,
     pub note: Option<FileNoteEvent>,
     pub error: Option<FileErrorEvent>,
@@ -118,7 +120,43 @@ pub struct FileGitUiState {
 }
 
 impl vmux_api::UiStateProjection<FileUiStatePatch> for FileUiState {
+    fn navigation_seed(&self) -> Option<Self> {
+        let mut next = Self::default();
+        next.document.theme = self.document.theme.clone();
+        next.document.view_mode = self.document.view_mode;
+        next.viewport.keymap = self.viewport.keymap;
+        next.explorer.explorer_panel = self.explorer.explorer_panel;
+        next.explorer.open_editors = self.explorer.open_editors.clone();
+        Some(next)
+    }
+
+    fn navigation_ready(&self) -> bool {
+        if self.document.directory.is_some()
+            || self.document.media.is_some()
+            || self.document.error.is_some()
+        {
+            return true;
+        }
+        let Some(meta) = self.document.meta.as_ref() else {
+            return false;
+        };
+        let note = meta.kind == super::FileDocumentKind::Markdown
+            && self
+                .document
+                .view_mode
+                .as_ref()
+                .is_none_or(|view| view.mode == super::FileViewMode::Note);
+        if note {
+            self.document.note.is_some()
+        } else {
+            self.viewport.content.is_some()
+        }
+    }
+
     fn apply(&mut self, patch: FileUiStatePatch) {
+        if let Some(checkout) = patch.checkout {
+            self.document.checkout = Some(checkout);
+        }
         let reset_document = patch.meta.as_ref().is_some_and(|meta| {
             self.document
                 .meta
@@ -126,6 +164,14 @@ impl vmux_api::UiStateProjection<FileUiStatePatch> for FileUiState {
                 .is_none_or(|current| current.revision != meta.revision)
         });
         if reset_document {
+            if self.document.checkout.as_ref().is_some_and(|checkout| {
+                patch
+                    .meta
+                    .as_ref()
+                    .is_some_and(|meta| checkout.path != meta.abs_path)
+            }) {
+                self.document.checkout = None;
+            }
             self.viewport.content = None;
             self.document.note = None;
             self.document.error = None;

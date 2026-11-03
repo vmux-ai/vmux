@@ -12,6 +12,7 @@ pub(crate) struct LayoutOverlayPlugin;
 impl Plugin for LayoutOverlayPlugin {
     fn build(&self, app: &mut App) {
         app.add_plugins(UiEventPlugin::<(LayoutOverlayEvent,)>::default())
+            .add_message::<LayoutOverlayOpened>()
             .add_observer(emit)
             .add_systems(PreUpdate, adopt_window_overlays)
             .add_systems(PostUpdate, cleanup);
@@ -24,6 +25,11 @@ pub struct LayoutOverlayActive(BTreeSet<String>);
 #[derive(Component, Default)]
 pub struct LayoutOverlayDismissRevision(u64);
 
+#[derive(Message, Clone, Copy)]
+pub struct LayoutOverlayOpened {
+    pub layout: Entity,
+}
+
 impl LayoutOverlayDismissRevision {
     pub fn next_effect(&mut self) -> crate::event::LayoutOverlayDismissEffect {
         self.0 = self.0.wrapping_add(1).max(1);
@@ -34,10 +40,14 @@ impl LayoutOverlayDismissRevision {
 fn emit(
     trigger: On<UiInput<LayoutOverlayEvent>>,
     mut active: Query<&mut LayoutOverlayActive>,
+    mut opened: MessageWriter<LayoutOverlayOpened>,
     mut commands: Commands,
 ) {
     let event = &trigger.event().payload;
     if event.active {
+        opened.write(LayoutOverlayOpened {
+            layout: trigger.event().webview,
+        });
         if let Ok(mut overlays) = active.get_mut(trigger.event().webview) {
             overlays.0.insert(event.id.clone());
         } else if let Ok(mut webview) = commands.get_entity(trigger.event().webview) {

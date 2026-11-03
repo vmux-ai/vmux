@@ -2,7 +2,7 @@ use std::fmt;
 
 use crate::transport::Host;
 use crate::transport::HostPayload;
-use vmux_api::{PageReady, UiEvent, UiState};
+use vmux_api::{PageReady, UiEvent, UiState, UiStateFrame};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum EventListenerError {
@@ -57,13 +57,21 @@ impl Host {
             + for<'a> rkyv::bytecheck::CheckBytes<
                 rkyv::api::high::HighValidator<'a, rkyv::rancor::Error>,
             >,
-        F: FnMut(T) -> bool + 'static,
+        UiStateFrame<T, T::Update>: rkyv::Archive,
+        <UiStateFrame<T, T::Update> as rkyv::Archive>::Archived:
+            rkyv::Deserialize<
+                    UiStateFrame<T, T::Update>,
+                    rkyv::api::high::HighDeserializer<rkyv::rancor::Error>,
+                > + for<'a> rkyv::bytecheck::CheckBytes<
+                    rkyv::api::high::HighValidator<'a, rkyv::rancor::Error>,
+                >,
+        F: FnMut(UiStateFrame<T, T::Update>) -> bool + 'static,
     {
         let mut on_event = on_event;
         Self::listen(
             T::id(),
             Box::new(move |bytes| {
-                if let Some(msg) = HostPayload::new(bytes).decode::<T>() {
+                if let Some(msg) = HostPayload::new(bytes).decode::<UiStateFrame<T, T::Update>>() {
                     return on_event(msg);
                 }
                 true

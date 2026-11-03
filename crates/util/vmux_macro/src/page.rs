@@ -394,6 +394,7 @@ struct Args {
     transparent: bool,
     owns_subtree: bool,
     takes: Option<Type>,
+    reactive_takes: bool,
     claims: Option<Type>,
     manifest: bool,
     title_message_id: Option<LitStr>,
@@ -431,6 +432,7 @@ impl Parse for Args {
         let mut transparent = false;
         let mut owns_subtree = false;
         let mut takes = None;
+        let mut reactive_takes = false;
         let mut claims = None;
         let mut manifest = false;
         let mut title_message_id = None;
@@ -450,6 +452,7 @@ impl Parse for Args {
                 "transparent" => transparent = true,
                 "manifest" => manifest = true,
                 "command_bar" => command_bar = true,
+                "reactive_takes" => reactive_takes = true,
                 "file" => {
                     input.parse::<Token![=]>()?;
                     file = Some(input.parse()?);
@@ -589,6 +592,7 @@ impl Parse for Args {
                 icon = page_manifest.icon(manifest_file)?;
             }
             command_bar |= page_manifest.command_bar;
+            owns_subtree |= page_manifest.owns_subtree;
             manifest |= page_manifest.manifest;
             permissions = page_manifest
                 .permissions
@@ -639,6 +643,7 @@ impl Parse for Args {
             transparent,
             owns_subtree,
             takes,
+            reactive_takes,
             claims,
             manifest,
             title_message_id,
@@ -739,9 +744,16 @@ fn expand_native(args: TokenStream, input: DeriveInput) -> syn::Result<TokenStre
         Placement::Pane => quote! { ::vmux_page::PagePlugin::in_pane(&Self::PAGE) },
         Placement::Modal => quote! { ::vmux_page::PagePlugin::as_modal(&Self::PAGE) },
     };
-    let plugin = match args.takes {
-        Some(takes) => quote! { (#plugin).takes::<#takes>() },
-        None => plugin,
+    let plugin = match (args.takes, args.reactive_takes) {
+        (Some(takes), true) => quote! { (#plugin).takes_reactive::<#takes>() },
+        (Some(takes), false) => quote! { (#plugin).takes::<#takes>() },
+        (None, true) => {
+            return Err(syn::Error::new_spanned(
+                &input.ident,
+                "reactive_takes requires takes = Type",
+            ));
+        }
+        (None, false) => plugin,
     };
     let plugin = match args.claims {
         Some(claims) => quote! { (#plugin).claims::<#claims>() },

@@ -90,7 +90,7 @@ impl FileViewport {
         DriftedWindow::between(previous_top, self).left_the_band()
     }
 
-    fn patch(&self, edit: &mut Editor) -> FileViewportPatch {
+    pub(crate) fn patch(&self, edit: &mut Editor) -> FileViewportPatch {
         let total = edit.core.buffer.len_lines() as u32;
         let wrap = edit.wrapped_view(self);
         let (visible, wrap_columns) = (wrap.total_rows(), wrap.columns());
@@ -276,6 +276,9 @@ fn render_cursor(
             word_highlights,
         },
     ));
+    if edit.is_note() {
+        commands.trigger(super::note::RenderRequest::new(entity));
+    }
 }
 
 struct HighlightedLines;

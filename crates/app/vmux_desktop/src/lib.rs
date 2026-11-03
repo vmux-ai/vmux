@@ -120,6 +120,37 @@ const DEFAULT_WINDOW_HEIGHT: u32 = 800;
 #[cfg(test)]
 mod tests {
     use super::*;
+    use bevy::ecs::schedule::Schedules;
+
+    fn ui_event_flush_probe() {}
+
+    fn cef_create_probe() {}
+
+    #[test]
+    fn desktop_feature_update_schedule_is_acyclic() {
+        let mut app = App::new();
+        app.add_plugins(DefaultPlugins.build().disable::<bevy::winit::WinitPlugin>())
+            .add_plugins(
+                vmux_app::VmuxPlugin::builder()
+                    .input(true)
+                    .simulator(true)
+                    .shortcut(true)
+                    .build(),
+            )
+            .add_message::<crate::runtime::HideAllWindowsRequest>()
+            .add_plugins(crate::window::WindowPlugin);
+        vmux_browser::BrowserPlugin::configure_schedule(&mut app).add_systems(
+            Update,
+            (
+                ui_event_flush_probe.in_set(bevy_cef::prelude::UiEventSystems::Flush),
+                cef_create_probe.in_set(bevy_cef::prelude::CefSystems::CreateAndResize),
+            ),
+        );
+        let mut schedules = app.world_mut().remove_resource::<Schedules>().unwrap();
+        let mut schedule = schedules.remove(Update).unwrap();
+
+        schedule.initialize(app.world_mut()).unwrap();
+    }
 
     #[test]
     fn primary_window_enables_ime_input() {

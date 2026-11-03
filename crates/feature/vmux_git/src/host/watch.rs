@@ -1,7 +1,7 @@
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, mpsc};
+use std::sync::{Arc, Condvar, Mutex, mpsc};
 use std::time::{Duration, Instant};
 
 use super::GitUpdateSet;
@@ -18,12 +18,13 @@ pub(super) struct WatchPlugin;
 impl Plugin for WatchPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<GitRuntime>()
+            .init_resource::<GitWatchDeadline>()
             .add_systems(Startup, initialize)
             .add_systems(Startup, spawn_repo_info_cache)
             .add_systems(
                 Update,
                 (
-                    sync_page_subscriptions,
+                    sync_page_subscriptions.run_if(page_subscriptions_changed),
                     drain,
                     start_relevance_tasks,
                     poll_relevance_tasks,
@@ -33,14 +34,151 @@ impl Plugin for WatchPlugin {
                     .chain()
                     .in_set(GitUpdateSet::Watch),
             )
-            .add_systems(PostUpdate, info);
+            .add_systems(PostUpdate, info.run_if(repo_info_maintenance_needed));
     }
+}
+
+#[derive(Clone, Copy, PartialEq, Eq, Hash)]
+enum GitWatchDeadlineOwner {
+    Subscriptions,
+    RepoInfo,
+}
+
+#[derive(Resource, Clone, Default)]
+struct GitWatchDeadline {
+    state: Arc<(Mutex<GitWatchDeadlineState>, Condvar)>,
+}
+
+#[derive(Default)]
+struct GitWatchDeadlineState {
+    deadlines: HashMap<GitWatchDeadlineOwner, Instant>,
+    proxy: Option<bevy::winit::EventLoopProxy<WinitUserEvent>>,
+    worker_started: bool,
+}
+
+impl GitWatchDeadline {
+    fn schedule(
+        &self,
+        owner: GitWatchDeadlineOwner,
+        deadline: Instant,
+        proxy: Option<&EventLoopProxyWrapper>,
+    ) {
+        self.schedule_proxy(owner, deadline, proxy.map(|proxy| &**proxy));
+    }
+
+    fn schedule_proxy(
+        &self,
+        owner: GitWatchDeadlineOwner,
+        deadline: Instant,
+        proxy: Option<&bevy::winit::EventLoopProxy<WinitUserEvent>>,
+    ) {
+        let Some(proxy) = proxy else {
+            return;
+        };
+        let start_worker = {
+            let (state, wake) = &*self.state;
+            let Ok(mut state) = state.lock() else {
+                return;
+            };
+            if state
+                .deadlines
+                .get(&owner)
+                .is_some_and(|current| *current <= deadline)
+            {
+                return;
+            }
+            state.deadlines.insert(owner, deadline);
+            state.proxy = Some(proxy.clone());
+            let start_worker = !state.worker_started;
+            state.worker_started = true;
+            wake.notify_one();
+            start_worker
+        };
+        if start_worker {
+            let state = Arc::clone(&self.state);
+            let _ = std::thread::Builder::new()
+                .name("vmux-git-watch-deadline".to_string())
+                .spawn(move || Self::run(state));
+        }
+    }
+
+    fn cancel(&self, owner: GitWatchDeadlineOwner) {
+        let (state, wake) = &*self.state;
+        let Ok(mut state) = state.lock() else {
+            return;
+        };
+        if state.deadlines.remove(&owner).is_some() {
+            wake.notify_one();
+        }
+    }
+
+    fn run(state: Arc<(Mutex<GitWatchDeadlineState>, Condvar)>) {
+        let (lock, wake) = &*state;
+        let Ok(mut current) = lock.lock() else {
+            return;
+        };
+        loop {
+            let Some(deadline) = current.deadlines.values().copied().min() else {
+                let Ok(next) = wake.wait(current) else {
+                    return;
+                };
+                current = next;
+                continue;
+            };
+            let delay = deadline.saturating_duration_since(Instant::now());
+            if !delay.is_zero() {
+                let Ok((next, timeout)) = wake.wait_timeout(current, delay) else {
+                    return;
+                };
+                current = next;
+                if !timeout.timed_out()
+                    || current.deadlines.values().copied().min() != Some(deadline)
+                {
+                    continue;
+                }
+            }
+            let now = Instant::now();
+            current.deadlines.retain(|_, deadline| *deadline > now);
+            let proxy = current.proxy.clone();
+            drop(current);
+            if let Some(proxy) = proxy {
+                let _ = proxy.send_event(WinitUserEvent::WakeUp);
+            }
+            let Ok(next) = lock.lock() else {
+                return;
+            };
+            current = next;
+        }
+    }
+}
+
+fn page_subscriptions_changed(
+    presented: Query<(), Added<PagePresented>>,
+    transitions: Query<(), Added<vmux_ecs::PageTransition>>,
+    mut removed_presented: RemovedComponents<PagePresented>,
+    mut removed_transitions: RemovedComponents<vmux_ecs::PageTransition>,
+    mut removed_files: RemovedComponents<super::status::FileGit>,
+    watch: Option<NonSend<GitWatch>>,
+) -> bool {
+    !presented.is_empty()
+        || !transitions.is_empty()
+        || removed_presented.read().next().is_some()
+        || removed_transitions.read().next().is_some()
+        || removed_files.read().next().is_some()
+        || watch.is_some_and(|watch| watch.retry_due(Instant::now()))
+}
+
+fn repo_info_maintenance_needed(repo_info: Single<&RepoInfoCache>) -> bool {
+    repo_info.maintenance_needed(Instant::now())
 }
 
 fn initialize(world: &mut World) {
     let proxy = world
         .get_resource::<EventLoopProxyWrapper>()
         .map(|wrapper| (**wrapper).clone());
+    let retry_wake = proxy
+        .clone()
+        .map(|proxy| (world.resource::<GitWatchDeadline>().clone(), proxy));
     let events = GitWatchEvents::start(proxy);
     let tx = events.sender;
     match notify::recommended_watcher(move |result: notify::Result<notify::Event>| {
@@ -54,11 +192,14 @@ fn initialize(world: &mut World) {
     }) {
         Ok(watcher) => {
             world.insert_non_send(GitWatch {
-                watcher,
+                watcher: GitFileWatcher::Recommended(watcher),
                 rx: events.receiver,
                 watch_references: HashMap::new(),
                 subscriptions: HashMap::new(),
+                subscription_owners: HashMap::new(),
                 repo_info_subscriptions: HashMap::new(),
+                repo_info_owners: HashMap::new(),
+                retry_wake,
             });
         }
         Err(error) => bevy::log::warn!("git watcher init failed: {error}"),
@@ -67,16 +208,7 @@ fn initialize(world: &mut World) {
 
 fn spawn_repo_info_cache(proxy: Option<Res<EventLoopProxyWrapper>>, mut commands: Commands) {
     let wake = proxy.map(|wrapper| (**wrapper).clone());
-    commands.spawn((
-        Name::new("Repository info cache"),
-        RepoInfoCache {
-            entries: HashMap::new(),
-            canonical: HashMap::new(),
-            repositories: HashMap::new(),
-            leases: HashMap::new(),
-            wake,
-        },
-    ));
+    commands.spawn((Name::new("Repository info cache"), RepoInfoCache::new(wake)));
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
@@ -104,20 +236,51 @@ struct GitSubscription {
     repo_root: PathBuf,
     targets: Vec<GitWatchTarget>,
     complete: bool,
+    retry_at: Instant,
 }
 
-#[derive(Clone)]
+#[derive(Clone, PartialEq, Eq)]
 pub(super) struct GitWatchSubscription {
     repo_root: PathBuf,
     targets: Vec<GitWatchTarget>,
 }
 
 pub(super) struct GitWatch {
-    watcher: RecommendedWatcher,
+    watcher: GitFileWatcher,
     rx: mpsc::Receiver<GitWatchBatch>,
     watch_references: HashMap<GitWatchTarget, usize>,
     subscriptions: HashMap<Entity, GitSubscription>,
+    subscription_owners: HashMap<GitWatchTarget, HashSet<Entity>>,
     repo_info_subscriptions: HashMap<PathBuf, Vec<GitWatchTarget>>,
+    repo_info_owners: HashMap<GitWatchTarget, HashSet<PathBuf>>,
+    retry_wake: Option<(
+        GitWatchDeadline,
+        bevy::winit::EventLoopProxy<WinitUserEvent>,
+    )>,
+}
+
+enum GitFileWatcher {
+    Recommended(RecommendedWatcher),
+    #[cfg(test)]
+    Test,
+}
+
+impl GitFileWatcher {
+    fn watch(&mut self, path: &Path, mode: RecursiveMode) -> notify::Result<()> {
+        match self {
+            Self::Recommended(watcher) => watcher.watch(path, mode),
+            #[cfg(test)]
+            Self::Test => Ok(()),
+        }
+    }
+
+    fn unwatch(&mut self, path: &Path) -> notify::Result<()> {
+        match self {
+            Self::Recommended(watcher) => watcher.unwatch(path),
+            #[cfg(test)]
+            Self::Test => Ok(()),
+        }
+    }
 }
 
 #[derive(Clone, Default)]
@@ -136,6 +299,12 @@ struct GitWatchRelevanceOutput {
     repo_info: HashSet<PathBuf>,
 }
 
+#[derive(Default)]
+struct GitWatchOwners {
+    entities: HashSet<Entity>,
+    repo_info: HashSet<PathBuf>,
+}
+
 #[derive(Component, Clone)]
 struct PendingGitWatchRelevance(GitWatchRelevanceBatch);
 
@@ -150,11 +319,16 @@ struct GitWatchRefreshes<'w, 's> {
     states: super::state::GitStates<'w, 's>,
     files: super::status::FileGitStates<'w, 's>,
     presented: Query<'w, 's, (), With<PagePresented>>,
+    transitioning: Query<'w, 's, (), With<vmux_ecs::PageTransition>>,
     wake: Option<Res<'w, EventLoopProxyWrapper>>,
     commands: Commands<'w, 's>,
 }
 
 impl GitWatchRefreshes<'_, '_> {
+    fn active(&self, entity: Entity) -> bool {
+        self.presented.contains(entity) || self.transitioning.contains(entity)
+    }
+
     fn request(&mut self, entity: Entity, refresh_catalogs: bool) {
         if self.states.contains(entity) {
             if let Some((path, revision)) = self.states.mark_changed(entity) {
@@ -276,23 +450,46 @@ struct RepoInfoCacheEntry {
     pending: Option<GitTask<Option<super::worktree::RepoInfo>>>,
 }
 
+#[derive(PartialEq, Eq)]
 struct RepoInfoLease {
     paths: HashSet<PathBuf>,
     active_only: bool,
 }
 
 const REPO_INFO_IDLE_TTL: Duration = Duration::from_secs(300);
+const WATCH_RETRY_DELAY: Duration = Duration::from_secs(1);
+const REPO_INFO_OWNER_PATH_LIMIT: usize = 256;
+const REPO_INFO_CACHE_CAPACITY: usize = 1024;
+const REPO_INFO_LOAD_BUDGET: usize = 16;
 
 #[derive(Component)]
 pub struct RepoInfoCache {
     entries: HashMap<PathBuf, RepoInfoCacheEntry>,
+    dirty: HashSet<PathBuf>,
+    pending: HashSet<PathBuf>,
     canonical: HashMap<PathBuf, PathBuf>,
     repositories: HashMap<PathBuf, PathBuf>,
     leases: HashMap<Entity, RepoInfoLease>,
+    maintenance_dirty: bool,
+    next_gc: Instant,
     wake: Option<bevy::winit::EventLoopProxy<WinitUserEvent>>,
 }
 
 impl RepoInfoCache {
+    fn new(wake: Option<bevy::winit::EventLoopProxy<WinitUserEvent>>) -> Self {
+        Self {
+            entries: HashMap::new(),
+            dirty: HashSet::new(),
+            pending: HashSet::new(),
+            canonical: HashMap::new(),
+            repositories: HashMap::new(),
+            leases: HashMap::new(),
+            maintenance_dirty: true,
+            next_gc: Instant::now() + REPO_INFO_IDLE_TTL,
+            wake,
+        }
+    }
+
     pub fn observe(&mut self, owner: Entity, path: &Path) -> Option<super::worktree::RepoInfo> {
         self.observe_with(owner, path, false)
     }
@@ -310,6 +507,28 @@ impl RepoInfoCache {
         self.request(path)
     }
 
+    pub fn cached(&mut self, path: &Path) -> Option<super::worktree::RepoInfo> {
+        let path = self.entry_path(path);
+        let entry = self.entries.get_mut(&path)?;
+        entry.last_accessed = Instant::now();
+        entry.info.clone()
+    }
+
+    pub fn cached_project_root(&self, path: &Path) -> Option<PathBuf> {
+        let mut selected = None;
+        let mut length = 0;
+        for entry in self.entries.values() {
+            let Some(info) = entry.info.as_ref() else {
+                continue;
+            };
+            if path.starts_with(&info.repo_root) && info.repo_root.as_os_str().len() > length {
+                length = info.repo_root.as_os_str().len();
+                selected = Some(info.project_root().to_path_buf());
+            }
+        }
+        selected
+    }
+
     pub fn observe_active_paths(
         &mut self,
         owner: Entity,
@@ -317,21 +536,28 @@ impl RepoInfoCache {
     ) {
         let mut observed = HashSet::new();
         for path in paths {
-            let path = self.entry_path(&path);
-            let _ = self.request(path.clone());
-            observed.insert(path);
+            observed.insert(self.entry_path(&path));
+            if observed.len() >= REPO_INFO_OWNER_PATH_LIMIT {
+                break;
+            }
         }
-        self.leases.insert(
-            owner,
-            RepoInfoLease {
-                paths: observed,
-                active_only: true,
-            },
-        );
+        let lease = RepoInfoLease {
+            paths: observed.clone(),
+            active_only: true,
+        };
+        if self.leases.get(&owner) != Some(&lease) {
+            self.maintenance_dirty = true;
+        }
+        self.leases.insert(owner, lease);
+        for path in observed {
+            let _ = self.request(path);
+        }
     }
 
     pub fn release(&mut self, owner: Entity) {
-        self.leases.remove(&owner);
+        if self.leases.remove(&owner).is_some() {
+            self.maintenance_dirty = true;
+        }
     }
 
     fn observe_with(
@@ -342,50 +568,85 @@ impl RepoInfoCache {
     ) -> Option<super::worktree::RepoInfo> {
         let path = self.entry_path(path);
         let paths = HashSet::from([path.clone()]);
-        self.leases
-            .insert(owner, RepoInfoLease { paths, active_only });
+        let lease = RepoInfoLease { paths, active_only };
+        if self.leases.get(&owner) != Some(&lease) {
+            self.maintenance_dirty = true;
+        }
+        self.leases.insert(owner, lease);
         self.request(path)
     }
 
     fn request(&mut self, path: PathBuf) -> Option<super::worktree::RepoInfo> {
-        let entry = self
-            .entries
-            .entry(path.clone())
-            .or_insert_with(|| RepoInfoCacheEntry {
-                info: None,
-                loaded: false,
-                dirty: true,
-                branches_dirty: true,
-                watch_attempted: false,
-                last_accessed: Instant::now(),
-                pending: None,
-            });
+        if !self.entries.contains_key(&path) {
+            if self.entries.len() >= REPO_INFO_CACHE_CAPACITY {
+                let leased = self
+                    .leases
+                    .values()
+                    .flat_map(|lease| lease.paths.iter())
+                    .collect::<HashSet<_>>();
+                let expired = self
+                    .entries
+                    .iter()
+                    .filter(|(candidate, entry)| {
+                        entry.pending.is_none() && !leased.contains(candidate)
+                    })
+                    .min_by_key(|(_, entry)| entry.last_accessed)
+                    .map(|(candidate, _)| candidate.clone());
+                if let Some(expired) = expired {
+                    self.remove(&expired);
+                }
+            }
+            if self.entries.len() >= REPO_INFO_CACHE_CAPACITY {
+                return None;
+            }
+            self.maintenance_dirty = true;
+            self.dirty.insert(path.clone());
+            self.entries.insert(
+                path.clone(),
+                RepoInfoCacheEntry {
+                    info: None,
+                    loaded: false,
+                    dirty: true,
+                    branches_dirty: true,
+                    watch_attempted: false,
+                    last_accessed: Instant::now(),
+                    pending: None,
+                },
+            );
+        }
+        let entry = self.entries.get_mut(&path)?;
+        if entry.dirty && entry.pending.is_none() {
+            self.dirty.insert(path);
+        }
         entry.last_accessed = Instant::now();
         entry.info.clone()
     }
 
     fn entry_path(&mut self, path: &Path) -> PathBuf {
-        let path = self.canonical_path(path);
-        self.repositories
-            .iter()
-            .filter(|(root, _)| path.starts_with(root))
-            .max_by_key(|(root, _)| root.components().count())
-            .map(|(_, entry)| entry.clone())
-            .unwrap_or(path)
+        let requested = path.to_path_buf();
+        let path = PathIdentity::resolve(path).into_path_buf();
+        if self.canonical.len() >= CANONICAL_CAP && !self.canonical.contains_key(&requested) {
+            self.canonical.clear();
+        }
+        self.canonical.insert(requested, path.clone());
+        self.repositories.get(&path).cloned().unwrap_or(path)
     }
 
     fn remember_repository(&mut self, path: PathBuf, info: &super::worktree::RepoInfo) {
         let root = info.repo_root.clone();
-        self.canonical.insert(path.clone(), info.identity.clone());
-        if let Ok(relative) = info.identity.strip_prefix(&root) {
-            let depth = relative.components().count();
-            if let Some(alias) = path.ancestors().nth(depth) {
-                self.repositories
-                    .entry(alias.to_path_buf())
-                    .or_insert_with(|| path.clone());
-            }
+        let entry = self
+            .repositories
+            .get(&root)
+            .cloned()
+            .unwrap_or_else(|| path.clone());
+        if entry != path {
+            self.remove(&path);
         }
-        self.repositories.entry(root).or_insert(path);
+        self.canonical.insert(path.clone(), info.identity.clone());
+        self.repositories.insert(path, entry.clone());
+        self.repositories
+            .insert(info.identity.clone(), entry.clone());
+        self.repositories.entry(root).or_insert(entry);
     }
 
     fn canonical_path(&mut self, path: &Path) -> PathBuf {
@@ -404,6 +665,9 @@ impl RepoInfoCache {
         if let Some(entry) = self.entries.get_mut(path) {
             entry.dirty = true;
             entry.branches_dirty |= branches_dirty;
+            if entry.pending.is_none() {
+                self.dirty.insert(path.to_path_buf());
+            }
         }
     }
 
@@ -422,8 +686,24 @@ impl RepoInfoCache {
 
     fn remove(&mut self, path: &Path) {
         self.entries.remove(path);
+        self.dirty.remove(path);
+        self.pending.remove(path);
         self.canonical.retain(|_, canonical| canonical != path);
         self.repositories.retain(|_, entry| entry != path);
+    }
+
+    fn maintenance_needed(&self, now: Instant) -> bool {
+        self.maintenance_dirty || now >= self.next_gc
+    }
+
+    fn schedule_next_gc(&mut self, active: &HashSet<PathBuf>, now: Instant) {
+        self.next_gc = self
+            .entries
+            .iter()
+            .filter(|(path, entry)| !active.contains(*path) && entry.pending.is_none())
+            .map(|(_, entry)| entry.last_accessed + REPO_INFO_IDLE_TTL)
+            .min()
+            .unwrap_or(now + REPO_INFO_IDLE_TTL);
     }
 }
 
@@ -607,7 +887,7 @@ impl GitWatchTarget {
     }
 
     fn resolve_path(root: &Path, value: &str) -> PathBuf {
-        let path = PathBuf::from(value.trim());
+        let path = PathBuf::from(value);
         let path = if path.is_absolute() {
             path
         } else {
@@ -665,22 +945,8 @@ impl GitWatchTarget {
 
 impl GitWatchSubscription {
     pub(super) fn read(root: &Path) -> Result<Self, super::repository::GitError> {
-        let (stdout, stderr, ok) = super::repository::GitCommand::run(
-            root,
-            &["rev-parse", "--absolute-git-dir", "--git-common-dir"],
-        )?;
-        if !ok {
-            return Err(super::repository::GitCommand::error(&stdout, &stderr));
-        }
-        let mut lines = stdout.lines();
-        let git_dir = lines
-            .next()
-            .map(|line| GitWatchTarget::resolve_path(root, line))
-            .ok_or_else(|| super::repository::GitError("missing git directory".into()))?;
-        let common_dir = lines
-            .next()
-            .map(|line| GitWatchTarget::resolve_path(root, line))
-            .ok_or_else(|| super::repository::GitError("missing common git directory".into()))?;
+        let git_dir = Self::read_path(root, "--absolute-git-dir")?;
+        let common_dir = Self::read_path(root, "--git-common-dir")?;
         let mut targets = vec![
             GitWatchTarget {
                 path: PathIdentity::resolve(root).into_path_buf(),
@@ -718,9 +984,31 @@ impl GitWatchSubscription {
             targets,
         })
     }
+
+    fn read_path(root: &Path, argument: &str) -> Result<PathBuf, super::repository::GitError> {
+        let (stdout, stderr, ok) =
+            super::repository::GitCommand::run(root, &["rev-parse", argument])?;
+        if !ok {
+            return Err(super::repository::GitCommand::error(&stdout, &stderr));
+        }
+        let value = stdout.strip_suffix('\n').unwrap_or(&stdout);
+        if value.is_empty() {
+            return Err(super::repository::GitError("missing git directory".into()));
+        }
+        Ok(GitWatchTarget::resolve_path(root, value))
+    }
 }
 
 impl GitWatch {
+    fn has_page_subscription(&self, entity: Entity, path: &Path) -> bool {
+        let path = PathIdentity::lexical(path);
+        self.subscriptions.get(&entity).is_some_and(|subscription| {
+            subscription.kind == GitSubscriptionKind::Page
+                && subscription.complete
+                && PathIdentity::lexical(&subscription.path) == path
+        })
+    }
+
     fn should_forward(result: &notify::Result<notify::Event>) -> bool {
         match result {
             Ok(event) => {
@@ -742,29 +1030,39 @@ impl GitWatch {
         prepared: GitWatchSubscription,
     ) -> Result<PathBuf, super::repository::GitError> {
         let path = PathIdentity::lexical(path).into_path_buf();
-        if let Some(subscription) = self
-            .subscriptions
-            .get_mut(&entity)
-            .filter(|subscription| subscription.path == path && subscription.complete)
-        {
+        if let Some(subscription) = self.subscriptions.get_mut(&entity).filter(|subscription| {
+            subscription.path == path
+                && subscription.repo_root == prepared.repo_root
+                && subscription.targets == prepared.targets
+                && subscription.complete
+        }) {
             subscription.kind = kind;
             return Ok(subscription.repo_root.clone());
         }
         let repo_root = prepared.repo_root;
         let targets = prepared.targets;
         let complete = self.acquire_targets(&targets);
+        let retry_at = Instant::now() + WATCH_RETRY_DELAY;
         let previous = self.subscriptions.insert(
             entity,
             GitSubscription {
                 kind,
                 path,
                 repo_root: repo_root.clone(),
-                targets,
+                targets: targets.clone(),
                 complete,
+                retry_at,
             },
         );
-        if let Some(previous) = previous {
+        if let Some(previous) = previous.filter(|previous| previous.complete) {
+            self.remove_subscription_owner(entity, &previous.targets);
             self.release_targets(&previous.targets);
+        }
+        if complete {
+            self.add_subscription_owner(entity, &targets);
+        }
+        if !complete {
+            self.schedule_retry(retry_at);
         }
         Ok(repo_root)
     }
@@ -787,6 +1085,28 @@ impl GitWatch {
         self.subscribe(entity, path, GitSubscriptionKind::Page, prepared)
     }
 
+    pub(super) fn take_page_subscription(
+        &mut self,
+        entity: Entity,
+    ) -> Option<GitWatchSubscription> {
+        if self
+            .subscriptions
+            .get(&entity)
+            .is_none_or(|subscription| subscription.kind != GitSubscriptionKind::Page)
+        {
+            return None;
+        }
+        let subscription = self.subscriptions.remove(&entity)?;
+        if subscription.complete {
+            self.remove_subscription_owner(entity, &subscription.targets);
+            self.release_targets(&subscription.targets);
+        }
+        Some(GitWatchSubscription {
+            repo_root: subscription.repo_root,
+            targets: subscription.targets,
+        })
+    }
+
     #[cfg(test)]
     fn subscribe_file_now(
         &mut self,
@@ -802,7 +1122,49 @@ impl GitWatch {
         let Some(subscription) = self.subscriptions.remove(&entity) else {
             return;
         };
-        self.release_targets(&subscription.targets);
+        if subscription.complete {
+            self.remove_subscription_owner(entity, &subscription.targets);
+            self.release_targets(&subscription.targets);
+        }
+    }
+
+    fn retry_due(&self, now: Instant) -> bool {
+        self.subscriptions
+            .values()
+            .any(|subscription| !subscription.complete && now >= subscription.retry_at)
+    }
+
+    fn schedule_retry(&self, retry_at: Instant) {
+        let Some((deadline, proxy)) = self.retry_wake.as_ref() else {
+            return;
+        };
+        deadline.schedule_proxy(GitWatchDeadlineOwner::Subscriptions, retry_at, Some(proxy));
+    }
+
+    fn retry_subscription(&mut self, entity: Entity, now: Instant) {
+        let Some(subscription) = self.subscriptions.get(&entity) else {
+            return;
+        };
+        if subscription.complete || now < subscription.retry_at {
+            return;
+        }
+        let targets = subscription.targets.clone();
+        let complete = self.acquire_targets(&targets);
+        let Some(subscription) = self.subscriptions.get_mut(&entity) else {
+            if complete {
+                self.release_targets(&targets);
+            }
+            return;
+        };
+        subscription.complete = complete;
+        subscription.retry_at = now + WATCH_RETRY_DELAY;
+        let retry_at = subscription.retry_at;
+        if complete {
+            self.add_subscription_owner(entity, &targets);
+        }
+        if !complete {
+            self.schedule_retry(retry_at);
+        }
     }
 
     fn acquire_targets(&mut self, targets: &[GitWatchTarget]) -> bool {
@@ -865,6 +1227,66 @@ impl GitWatch {
         }
     }
 
+    fn add_subscription_owner(&mut self, entity: Entity, targets: &[GitWatchTarget]) {
+        for target in targets {
+            self.subscription_owners
+                .entry(target.clone())
+                .or_default()
+                .insert(entity);
+        }
+    }
+
+    fn remove_subscription_owner(&mut self, entity: Entity, targets: &[GitWatchTarget]) {
+        for target in targets {
+            let remove = self
+                .subscription_owners
+                .get_mut(target)
+                .is_some_and(|owners| {
+                    owners.remove(&entity);
+                    owners.is_empty()
+                });
+            if remove {
+                self.subscription_owners.remove(target);
+            }
+        }
+    }
+
+    fn add_repo_info_owner(&mut self, path: &Path, targets: &[GitWatchTarget]) {
+        for target in targets {
+            self.repo_info_owners
+                .entry(target.clone())
+                .or_default()
+                .insert(path.to_path_buf());
+        }
+    }
+
+    fn remove_repo_info_owner(&mut self, path: &Path, targets: &[GitWatchTarget]) {
+        for target in targets {
+            let remove = self.repo_info_owners.get_mut(target).is_some_and(|owners| {
+                owners.remove(path);
+                owners.is_empty()
+            });
+            if remove {
+                self.repo_info_owners.remove(target);
+            }
+        }
+    }
+
+    fn matching_owners(&self, changed: &HashSet<PathBuf>) -> GitWatchOwners {
+        let mut owners = GitWatchOwners::default();
+        for (target, entities) in &self.subscription_owners {
+            if changed.iter().any(|path| target.matches(path)) {
+                owners.entities.extend(entities);
+            }
+        }
+        for (target, paths) in &self.repo_info_owners {
+            if changed.iter().any(|path| target.matches(path)) {
+                owners.repo_info.extend(paths.iter().cloned());
+            }
+        }
+        owners
+    }
+
     fn release_inactive_repo_info(
         &mut self,
         repo_info: &mut RepoInfoCache,
@@ -878,6 +1300,7 @@ impl GitWatch {
             .collect::<Vec<_>>();
         for path in paths {
             if let Some(targets) = self.repo_info_subscriptions.remove(&path) {
+                self.remove_repo_info_owner(&path, &targets);
                 self.release_targets(&targets);
             }
             if let Some(entry) = repo_info.entries.get_mut(&path) {
@@ -893,6 +1316,7 @@ impl GitWatch {
     ) {
         for path in repo_info.inactive_paths(active) {
             if let Some(targets) = self.repo_info_subscriptions.remove(&path) {
+                self.remove_repo_info_owner(&path, &targets);
                 self.release_targets(&targets);
             }
             repo_info.remove(&path);
@@ -912,23 +1336,29 @@ impl GitWatch {
         if !self.acquire_targets(&targets) {
             return false;
         }
-        let previous = self.repo_info_subscriptions.insert(path, targets);
+        let previous = self
+            .repo_info_subscriptions
+            .insert(path.clone(), targets.clone());
         if let Some(previous) = previous {
+            self.remove_repo_info_owner(&path, &previous);
             self.release_targets(&previous);
         }
+        self.add_repo_info_owner(&path, &targets);
         true
     }
 
     #[cfg(test)]
     pub(super) fn test() -> Self {
         let (_, rx) = mpsc::channel();
-        let watcher = notify::recommended_watcher(|_| {}).unwrap();
         Self {
-            watcher,
+            watcher: GitFileWatcher::Test,
             rx,
             watch_references: HashMap::new(),
             subscriptions: HashMap::new(),
+            subscription_owners: HashMap::new(),
             repo_info_subscriptions: HashMap::new(),
+            repo_info_owners: HashMap::new(),
+            retry_wake: None,
         }
     }
 
@@ -938,53 +1368,128 @@ impl GitWatch {
     }
 }
 
+#[derive(bevy::ecs::system::SystemParam)]
+struct WatchRuntime<'w> {
+    watch: Option<NonSendMut<'w, GitWatch>>,
+    deadline: Option<Res<'w, GitWatchDeadline>>,
+    proxy: Option<Res<'w, EventLoopProxyWrapper>>,
+}
+
+type SubscriptionPages<'w, 's> = Query<
+    'w,
+    's,
+    (
+        Entity,
+        &'static mut super::state::GitState,
+        Option<Ref<'static, PagePresented>>,
+        Has<vmux_ecs::PageTransition>,
+        &'static mut super::state::GitRepositoryLoadRevision,
+    ),
+>;
+
 fn sync_page_subscriptions(
-    watch: Option<NonSendMut<GitWatch>>,
-    pages: Query<(Entity, &super::state::GitState, Has<PagePresented>)>,
-    activated: Query<(Entity, &super::state::GitState), Added<PagePresented>>,
+    mut repo_info: Option<Single<&mut RepoInfoCache>>,
+    runtime: WatchRuntime,
+    mut pages: SubscriptionPages,
     files: Query<(), With<super::status::FileGit>>,
+    repository_jobs: Query<&super::job_runner::GitJob, With<super::job::RepositoryJob>>,
     mut removed_files: RemovedComponents<super::status::FileGit>,
     mut commands: Commands,
 ) {
-    let Some(mut watch) = watch else {
+    if let Some(repo_info) = repo_info.as_mut() {
+        repo_info.bypass_change_detection().maintenance_dirty = true;
+    }
+    let Some(mut watch_handle) = runtime.watch else {
         return;
     };
+    let mut active_pages = HashSet::new();
+    for (entity, mut state, presented, transitioning, mut revision) in &mut pages {
+        if transitioning {
+            active_pages.insert(entity);
+        }
+        let Some(presented) = presented else {
+            continue;
+        };
+        active_pages.insert(entity);
+        if !presented.is_added() {
+            continue;
+        }
+        let path = PathBuf::from(state.workspace());
+        if path.as_os_str().is_empty() || watch_handle.has_page_subscription(entity, &path) {
+            continue;
+        }
+        if repository_jobs.iter().any(|job| job.owner() == entity) {
+            continue;
+        }
+        watch_handle.release_subscription(entity);
+        state.snapshot.nonce = state.snapshot.nonce.wrapping_add(1).max(1);
+        commands.spawn((
+            super::job_runner::GitJob::new(entity),
+            super::job::RepositoryJob {
+                path,
+                refresh_catalogs: true,
+                revision: revision.advance(),
+            },
+        ));
+    }
     for entity in removed_files.read() {
         if !files.contains(entity)
-            && watch
+            && watch_handle
                 .subscriptions
                 .get(&entity)
                 .is_some_and(|subscription| subscription.kind == GitSubscriptionKind::File)
         {
-            watch.release_subscription(entity);
+            watch_handle.release_subscription(entity);
         }
     }
-    let inactive = watch
+    let inactive = watch_handle
         .subscriptions
         .iter()
         .filter_map(|(entity, subscription)| {
-            (subscription.kind == GitSubscriptionKind::Page
-                && pages.get(*entity).map_or(true, |(_, _, active)| !active))
-            .then_some(*entity)
+            (subscription.kind == GitSubscriptionKind::Page && !active_pages.contains(entity))
+                .then_some(*entity)
         })
         .collect::<Vec<_>>();
     for entity in inactive {
-        watch.release_subscription(entity);
+        watch_handle.release_subscription(entity);
     }
-    for (entity, state) in &activated {
-        let path = Path::new(state.workspace());
-        if path.as_os_str().is_empty() {
-            continue;
+    let retry = watch_handle
+        .subscriptions
+        .iter()
+        .filter_map(|(entity, subscription)| {
+            (!subscription.complete
+                && match subscription.kind {
+                    GitSubscriptionKind::Page => active_pages.contains(entity),
+                    GitSubscriptionKind::File => files.contains(*entity),
+                })
+            .then_some(*entity)
+        })
+        .collect::<Vec<_>>();
+    let now = Instant::now();
+    for entity in retry {
+        watch_handle.retry_subscription(entity, now);
+    }
+    if let Some(deadline) = runtime.deadline.as_deref() {
+        let next_retry = watch_handle
+            .subscriptions
+            .iter()
+            .filter_map(|(entity, subscription)| {
+                (!subscription.complete
+                    && match subscription.kind {
+                        GitSubscriptionKind::Page => active_pages.contains(entity),
+                        GitSubscriptionKind::File => files.contains(*entity),
+                    })
+                .then_some(subscription.retry_at)
+            })
+            .min();
+        match next_retry {
+            Some(next_retry) => deadline.schedule(
+                GitWatchDeadlineOwner::Subscriptions,
+                next_retry,
+                runtime.proxy.as_deref(),
+            ),
+            None => deadline.cancel(GitWatchDeadlineOwner::Subscriptions),
         }
-        watch.release_subscription(entity);
-        commands.spawn((
-            super::job_runner::GitJob::new(entity),
-            super::job::RepositoryJob {
-                path: path.to_path_buf(),
-                refresh_catalogs: true,
-                revision: state.diff_revision(),
-            },
-        ));
     }
 }
 
@@ -1012,11 +1517,22 @@ fn drain(
     if changed.is_empty() && !overflow {
         return;
     }
+    let owners = if overflow {
+        GitWatchOwners {
+            entities: watch.subscriptions.keys().copied().collect(),
+            repo_info: watch.repo_info_subscriptions.keys().cloned().collect(),
+        }
+    } else {
+        watch.matching_owners(&changed)
+    };
     let mut relevance = GitWatchRelevanceBatch::default();
-    for (entity, subscription) in &watch.subscriptions {
-        if !refreshes.presented.contains(*entity) {
+    for entity in owners.entities {
+        if !refreshes.active(entity) {
             continue;
         }
+        let Some(subscription) = watch.subscriptions.get(&entity) else {
+            continue;
+        };
         let metadata = subscription.targets.iter().any(|target| {
             target.kind == GitWatchKind::Metadata && changed.iter().any(|path| target.matches(path))
         });
@@ -1026,12 +1542,15 @@ fn drain(
                     .targets
                     .iter()
                     .any(|target| changed.iter().any(|path| target.branches_changed(path)));
-            refreshes.request(*entity, refresh_catalogs);
+            refreshes.request(entity, refresh_catalogs);
         } else {
-            relevance.add_entity(*entity, &subscription.targets, &changed);
+            relevance.add_entity(entity, &subscription.targets, &changed);
         }
     }
-    for (path, targets) in &watch.repo_info_subscriptions {
+    for path in owners.repo_info {
+        let Some(targets) = watch.repo_info_subscriptions.get(&path) else {
+            continue;
+        };
         let metadata = targets.iter().any(|target| {
             target.kind == GitWatchKind::Metadata
                 && changed.iter().any(|changed| target.matches(changed))
@@ -1041,9 +1560,9 @@ fn drain(
                 || targets
                     .iter()
                     .any(|target| changed.iter().any(|path| target.branches_changed(path)));
-            repo_info.invalidate(path, branches_dirty);
+            repo_info.invalidate(&path, branches_dirty);
         } else {
-            relevance.add_repo_info(path, targets, &changed);
+            relevance.add_repo_info(&path, targets, &changed);
         }
     }
     if !relevance.is_empty() {
@@ -1089,7 +1608,7 @@ fn poll_relevance_tasks(
         refreshes.commands.entity(task_entity).despawn();
         let output = output.unwrap_or_else(|_| task.fallback.clone());
         for (entity, roots) in output.entities {
-            let current = refreshes.presented.contains(entity)
+            let current = refreshes.active(entity)
                 && watch
                     .subscriptions
                     .get(&entity)
@@ -1114,11 +1633,20 @@ fn poll_relevance_tasks(
 fn start_repo_info_loads(mut repo_info: Single<&mut RepoInfoCache>, runtime: Res<GitRuntime>) {
     let repo_info = repo_info.bypass_change_detection();
     let wake = repo_info.wake.clone();
-    for (path, entry) in &mut repo_info.entries {
+    let paths = repo_info
+        .dirty
+        .iter()
+        .take(REPO_INFO_LOAD_BUDGET)
+        .cloned()
+        .collect::<Vec<_>>();
+    for path in paths {
+        repo_info.dirty.remove(&path);
+        let Some(entry) = repo_info.entries.get_mut(&path) else {
+            continue;
+        };
         if entry.pending.is_some() || (!entry.dirty && entry.loaded) {
             continue;
         }
-        let path = path.clone();
         let wake = wake.clone();
         let refresh_branches = entry.branches_dirty;
         let cached_branches = if refresh_branches {
@@ -1126,46 +1654,64 @@ fn start_repo_info_loads(mut repo_info: Single<&mut RepoInfoCache>, runtime: Res
         } else {
             entry.info.as_ref().map(|info| info.branches.clone())
         };
-        let Some(task) = runtime.spawn(wake, move || {
-            super::worktree::RepoInfo::read_with_branches(&path, cached_branches)
+        let task_path = path.clone();
+        let Some(task) = runtime.spawn_background(wake, move || {
+            super::worktree::RepoInfo::read_with_branches(&task_path, cached_branches)
         }) else {
+            repo_info.dirty.insert(path);
             continue;
         };
         entry.dirty = false;
         entry.branches_dirty &= !refresh_branches;
         entry.pending = Some(task);
+        repo_info.pending.insert(path);
     }
 }
 
 fn poll_info(mut repo_info: Single<&mut RepoInfoCache>) {
-    let (changed, repositories) = {
+    let (changed, repositories, completed) = {
         let repo_info = repo_info.bypass_change_detection();
         let mut changed = false;
+        let mut completed = false;
         let mut repositories = Vec::new();
-        for (path, entry) in &mut repo_info.entries {
+        let paths = repo_info.pending.iter().cloned().collect::<Vec<_>>();
+        for path in paths {
+            let Some(entry) = repo_info.entries.get_mut(&path) else {
+                repo_info.pending.remove(&path);
+                continue;
+            };
             let Some(task) = entry.pending.as_mut() else {
+                repo_info.pending.remove(&path);
                 continue;
             };
             let Some(output) = task.poll() else {
                 continue;
             };
+            completed = true;
             let info = output.unwrap_or(None);
             changed |= entry.info != info;
             entry.info = info;
             entry.loaded = true;
             entry.watch_attempted = false;
             entry.pending = None;
+            repo_info.pending.remove(&path);
+            if entry.dirty {
+                repo_info.dirty.insert(path.clone());
+            }
             if let Some(info) = entry.info.as_ref() {
-                repositories.push((path.clone(), info.clone()));
+                repositories.push((path, info.clone()));
             }
         }
-        (changed, repositories)
+        (changed, repositories, completed)
     };
     for (path, info) in repositories {
         repo_info.remember_repository(path, &info);
     }
     if changed {
         repo_info.set_changed();
+    }
+    if completed {
+        repo_info.bypass_change_detection().maintenance_dirty = true;
     }
 }
 
@@ -1174,8 +1720,11 @@ fn info(
     mut repo_info: Single<&mut RepoInfoCache>,
     entities: Query<(), ()>,
     presented_owners: Query<(), With<PagePresented>>,
+    deadline: Option<Res<GitWatchDeadline>>,
+    proxy: Option<Res<EventLoopProxyWrapper>>,
 ) {
     let repo_info = repo_info.bypass_change_detection();
+    let now = Instant::now();
     repo_info.leases.retain(|owner, lease| {
         entities.contains(*owner) && (!lease.active_only || presented_owners.contains(*owner))
     });
@@ -1188,6 +1737,9 @@ fn info(
         for path in repo_info.inactive_paths(&active) {
             repo_info.remove(&path);
         }
+        repo_info.schedule_next_gc(&active, now);
+        repo_info.maintenance_dirty = false;
+        schedule_repo_info_deadline(deadline.as_deref(), proxy.as_deref(), repo_info);
         return;
     };
     watch.release_inactive_repo_info(repo_info, &active);
@@ -1200,20 +1752,46 @@ fn info(
                 .then_some(path.clone())
         })
         .collect();
+    let mut retry_watch = false;
     for path in paths {
         let info = repo_info
             .entries
             .get(&path)
             .and_then(|entry| entry.info.clone());
-        let _ = watch.subscribe_repo_info(&path, info.as_ref());
+        let subscribed = watch.subscribe_repo_info(&path, info.as_ref());
         if let Some(entry) = repo_info.entries.get_mut(&path) {
-            entry.watch_attempted = true;
+            entry.watch_attempted = subscribed;
         }
+        retry_watch |= !subscribed;
     }
+    repo_info.schedule_next_gc(&active, now);
+    if retry_watch {
+        repo_info.next_gc = repo_info.next_gc.min(now + WATCH_RETRY_DELAY);
+    }
+    repo_info.maintenance_dirty = false;
+    schedule_repo_info_deadline(deadline.as_deref(), proxy.as_deref(), repo_info);
+}
+
+fn schedule_repo_info_deadline(
+    deadline: Option<&GitWatchDeadline>,
+    proxy: Option<&EventLoopProxyWrapper>,
+    repo_info: &RepoInfoCache,
+) {
+    let Some(deadline) = deadline else {
+        return;
+    };
+    if repo_info.entries.is_empty() {
+        deadline.cancel(GitWatchDeadlineOwner::RepoInfo);
+        return;
+    }
+    deadline.schedule(GitWatchDeadlineOwner::RepoInfo, repo_info.next_gc, proxy);
 }
 
 #[cfg(test)]
 mod tests {
+    #[cfg(unix)]
+    use std::os::unix::fs::symlink;
+
     use super::*;
     use crate::host::repository::test_repo;
 
@@ -1294,6 +1872,47 @@ mod tests {
     }
 
     #[test]
+    fn watch_subscription_preserves_newlines_in_repository_paths() {
+        let parent = tempfile::tempdir().unwrap();
+        let repo = parent.path().join("repository\nname");
+        std::fs::create_dir(&repo).unwrap();
+        test_repo::run(&repo, &["init", "-q", "-b", "main"]);
+
+        let subscription = GitWatchSubscription::read(&repo).unwrap();
+        let git_dir = PathIdentity::resolve(repo.join(".git")).into_path_buf();
+
+        assert!(subscription.targets.contains(&GitWatchTarget {
+            path: git_dir,
+            recursive: false,
+            kind: GitWatchKind::Metadata,
+        }));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn repo_info_cache_re_resolves_a_retargeted_symlink() {
+        let first = tempfile::tempdir().unwrap();
+        let second = tempfile::tempdir().unwrap();
+        let parent = tempfile::tempdir().unwrap();
+        let alias = parent.path().join("repository");
+        let mut cache = RepoInfoCache::new(None);
+        symlink(first.path(), &alias).unwrap();
+
+        assert_eq!(
+            cache.entry_path(&alias),
+            first.path().canonicalize().unwrap()
+        );
+
+        std::fs::remove_file(&alias).unwrap();
+        symlink(second.path(), &alias).unwrap();
+
+        assert_eq!(
+            cache.entry_path(&alias),
+            second.path().canonicalize().unwrap()
+        );
+    }
+
+    #[test]
     fn replacing_subscription_releases_only_unshared_watch_targets() {
         let first = test_repo::init();
         let second = test_repo::init();
@@ -1331,6 +1950,37 @@ mod tests {
     }
 
     #[test]
+    fn changed_paths_select_only_matching_subscription_owners() {
+        let first = test_repo::init();
+        let second = test_repo::init();
+        let first_entity = Entity::from_bits(1);
+        let second_entity = Entity::from_bits(2);
+        let mut watch = GitWatch::test();
+        watch
+            .subscribe_page(
+                first_entity,
+                first.path(),
+                GitWatchSubscription::read(first.path()).unwrap(),
+            )
+            .unwrap();
+        watch
+            .subscribe_page(
+                second_entity,
+                second.path(),
+                GitWatchSubscription::read(second.path()).unwrap(),
+            )
+            .unwrap();
+
+        let changed =
+            HashSet::from([PathIdentity::resolve(first.path().join("a.txt")).into_path_buf()]);
+        let owners = watch.matching_owners(&changed);
+
+        assert_eq!(owners.entities, HashSet::from([first_entity]));
+        watch.release_subscription(first_entity);
+        assert!(watch.matching_owners(&changed).entities.is_empty());
+    }
+
+    #[test]
     fn watch_target_limit_rejects_new_targets() {
         let mut watch = GitWatch::test();
         for index in 0..WATCH_TARGET_LIMIT {
@@ -1352,6 +2002,46 @@ mod tests {
         assert!(!watch.acquire_targets(std::slice::from_ref(&target)));
         assert_eq!(watch.watch_references.len(), WATCH_TARGET_LIMIT);
         assert!(!watch.watch_references.contains_key(&target));
+    }
+
+    #[test]
+    fn incomplete_subscription_retries_after_capacity_is_released() {
+        let repository = tempfile::tempdir().unwrap();
+        let mut watch = GitWatch::test();
+        for index in 0..WATCH_TARGET_LIMIT {
+            watch.watch_references.insert(
+                GitWatchTarget {
+                    path: PathBuf::from(format!("/tmp/vmux-git-watch-retry-{index}")),
+                    recursive: false,
+                    kind: GitWatchKind::Metadata,
+                },
+                1,
+            );
+        }
+        let target = GitWatchTarget {
+            path: repository.path().to_path_buf(),
+            recursive: false,
+            kind: GitWatchKind::Metadata,
+        };
+        let entity = Entity::from_bits(1);
+        watch
+            .subscribe_page(
+                entity,
+                repository.path(),
+                GitWatchSubscription {
+                    repo_root: repository.path().to_path_buf(),
+                    targets: vec![target.clone()],
+                },
+            )
+            .unwrap();
+        assert!(!watch.subscriptions[&entity].complete);
+
+        let released = watch.watch_references.keys().next().cloned().unwrap();
+        watch.watch_references.remove(&released);
+        watch.retry_subscription(entity, Instant::now() + WATCH_RETRY_DELAY);
+
+        assert!(watch.subscriptions[&entity].complete);
+        assert_eq!(watch.watch_references.get(&target), Some(&1));
     }
 
     #[test]
@@ -1460,10 +2150,7 @@ mod tests {
                     },
                 ),
             ]),
-            canonical: HashMap::new(),
-            repositories: HashMap::new(),
-            leases: HashMap::new(),
-            wake: None,
+            ..RepoInfoCache::new(None)
         };
         let mut watch = GitWatch::test();
         assert!(watch.subscribe_repo_info(&active_path, Some(&active_info)));
@@ -1522,10 +2209,7 @@ mod tests {
                     },
                 ),
             ]),
-            canonical: HashMap::new(),
-            repositories: HashMap::new(),
-            leases: HashMap::new(),
-            wake: None,
+            ..RepoInfoCache::new(None)
         };
         cache.observe_active_paths(owner, [first_path.clone(), second_path.clone()]);
         app.world_mut().spawn(cache);
@@ -1543,6 +2227,32 @@ mod tests {
                 .repo_info_subscriptions
                 .is_empty()
         );
+    }
+
+    #[test]
+    fn active_owner_repository_paths_are_bounded() {
+        let mut cache = RepoInfoCache::new(None);
+        let owner = Entity::from_bits(1);
+        let paths = std::iter::repeat_n(PathBuf::from("/tmp/vmux-repository-repeated"), 64).chain(
+            (0..REPO_INFO_OWNER_PATH_LIMIT + 32)
+                .map(|index| PathBuf::from(format!("/tmp/vmux-repository-{index}"))),
+        );
+
+        cache.observe_active_paths(owner, paths);
+
+        assert_eq!(cache.leases[&owner].paths.len(), REPO_INFO_OWNER_PATH_LIMIT);
+        assert_eq!(cache.entries.len(), REPO_INFO_OWNER_PATH_LIMIT);
+    }
+
+    #[test]
+    fn repository_info_cache_capacity_is_bounded() {
+        let mut cache = RepoInfoCache::new(None);
+        for index in 0..REPO_INFO_CACHE_CAPACITY + 32 {
+            let path = PathBuf::from(format!("/tmp/vmux-cache-{index}"));
+            let _ = cache.snapshot(&path);
+        }
+
+        assert_eq!(cache.entries.len(), REPO_INFO_CACHE_CAPACITY);
     }
 
     #[test]
@@ -1591,6 +2301,70 @@ mod tests {
     }
 
     #[test]
+    fn activating_an_already_subscribed_page_does_not_reload_repository() {
+        let repo = test_repo::init();
+        let file = test_repo::write(repo.path(), "a.txt", "one\n");
+        let mut app = App::new();
+        app.add_systems(Update, sync_page_subscriptions);
+        app.insert_non_send(GitWatch::test());
+        let page = app
+            .world_mut()
+            .spawn((
+                super::super::state::GitState {
+                    snapshot: crate::state::GitPageSnapshot {
+                        workspace: file.to_string_lossy().into_owned(),
+                        ..Default::default()
+                    },
+                },
+                PagePresented,
+            ))
+            .id();
+        let prepared = GitWatchSubscription::read(repo.path()).unwrap();
+        app.world_mut()
+            .non_send_mut::<GitWatch>()
+            .subscribe_page(page, &file, prepared)
+            .unwrap();
+
+        app.update();
+
+        let mut jobs = app.world_mut().query::<&super::super::job::RepositoryJob>();
+        assert_eq!(jobs.iter(app.world()).count(), 0);
+    }
+
+    #[test]
+    fn presenting_a_page_with_a_pending_repository_load_does_not_queue_another() {
+        let repo = test_repo::init();
+        let mut app = App::new();
+        app.add_systems(Update, sync_page_subscriptions);
+        app.insert_non_send(GitWatch::test());
+        let page = app
+            .world_mut()
+            .spawn((
+                super::super::state::GitState {
+                    snapshot: crate::state::GitPageSnapshot {
+                        workspace: repo.path().to_string_lossy().into_owned(),
+                        ..Default::default()
+                    },
+                },
+                PagePresented,
+            ))
+            .id();
+        app.world_mut().spawn((
+            super::super::job_runner::GitJob::new(page),
+            super::super::job::RepositoryJob {
+                path: repo.path().to_path_buf(),
+                refresh_catalogs: true,
+                revision: 1,
+            },
+        ));
+
+        app.update();
+
+        let mut jobs = app.world_mut().query::<&super::super::job::RepositoryJob>();
+        assert_eq!(jobs.iter(app.world()).count(), 1);
+    }
+
+    #[test]
     fn page_cleanup_preserves_editor_file_subscriptions() {
         let repo = test_repo::init();
         let file = test_repo::write(repo.path(), "a.txt", "one\n");
@@ -1606,6 +2380,13 @@ mod tests {
             .non_send_mut::<GitWatch>()
             .subscribe_file_now(editor, &file)
             .unwrap();
+
+        assert!(
+            app.world_mut()
+                .non_send_mut::<GitWatch>()
+                .take_page_subscription(editor)
+                .is_none()
+        );
 
         app.update();
 
@@ -1713,26 +2494,58 @@ mod tests {
     }
 
     #[test]
-    fn known_repository_reuses_one_cache_entry_for_nested_paths() {
+    fn known_repository_coalesces_nested_paths_after_discovery() {
         let repo = test_repo::init();
         let first = repo.path().join("first");
         let second = repo.path().join("second");
         std::fs::create_dir_all(&first).unwrap();
         std::fs::create_dir_all(&second).unwrap();
-        let mut cache = RepoInfoCache {
-            entries: HashMap::new(),
-            canonical: HashMap::new(),
-            repositories: HashMap::new(),
-            leases: HashMap::new(),
-            wake: None,
-        };
+        let mut cache = RepoInfoCache::new(None);
 
         assert!(cache.snapshot(&first).is_none());
         let info = super::super::worktree::RepoInfo::read(&first).unwrap();
-        cache.remember_repository(PathIdentity::lexical(&first).into_path_buf(), &info);
+        let first_key = PathIdentity::resolve(&first).into_path_buf();
+        let first_entry = cache.entries.get_mut(&first_key).unwrap();
+        first_entry.info = Some(info.clone());
+        first_entry.loaded = true;
+        cache.remember_repository(first_key, &info);
         assert!(cache.snapshot(&second).is_none());
+        assert_eq!(cache.entries.len(), 2);
+
+        let info = super::super::worktree::RepoInfo::read(&second).unwrap();
+        let second_key = PathIdentity::resolve(&second).into_path_buf();
+        let second_entry = cache.entries.get_mut(&second_key).unwrap();
+        second_entry.info = Some(info.clone());
+        second_entry.loaded = true;
+        cache.remember_repository(second_key, &info);
 
         assert_eq!(cache.entries.len(), 1);
+        assert!(cache.snapshot(&second).is_some());
+    }
+
+    #[test]
+    fn nested_repository_gets_its_own_cache_entry() {
+        let parent = test_repo::init();
+        let nested = parent.path().join("nested");
+        std::fs::create_dir_all(&nested).unwrap();
+        test_repo::run(&nested, &["init", "-q", "-b", "main"]);
+        let mut cache = RepoInfoCache::new(None);
+
+        assert!(cache.snapshot(parent.path()).is_none());
+        let parent_info = super::super::worktree::RepoInfo::read(parent.path()).unwrap();
+        cache.remember_repository(
+            PathIdentity::resolve(parent.path()).into_path_buf(),
+            &parent_info,
+        );
+
+        assert!(cache.snapshot(&nested).is_none());
+        assert_eq!(cache.entries.len(), 2);
+        assert_eq!(
+            super::super::worktree::RepoInfo::read(&nested)
+                .unwrap()
+                .repo_root,
+            nested.canonicalize().unwrap()
+        );
     }
 
     #[test]
@@ -1742,13 +2555,7 @@ mod tests {
         test_repo::run(repo.path(), &["add", "a.txt"]);
         test_repo::run(repo.path(), &["commit", "-qm", "init"]);
         let path = PathIdentity::resolve(repo.path()).into_path_buf();
-        let cache = RepoInfoCache {
-            entries: HashMap::new(),
-            canonical: HashMap::new(),
-            repositories: HashMap::new(),
-            leases: HashMap::new(),
-            wake: None,
-        };
+        let cache = RepoInfoCache::new(None);
         let mut app = App::new();
         app.add_plugins(MinimalPlugins)
             .init_resource::<GitRuntime>()
@@ -1797,13 +2604,7 @@ mod tests {
         test_repo::run(repo.path(), &["add", "a.txt"]);
         test_repo::run(repo.path(), &["commit", "-qm", "init"]);
         let path = PathIdentity::resolve(repo.path()).into_path_buf();
-        let cache = RepoInfoCache {
-            entries: HashMap::new(),
-            canonical: HashMap::new(),
-            repositories: HashMap::new(),
-            leases: HashMap::new(),
-            wake: None,
-        };
+        let cache = RepoInfoCache::new(None);
         let mut app = App::new();
         app.add_plugins(MinimalPlugins)
             .init_resource::<GitRuntime>()
@@ -1853,9 +2654,7 @@ mod tests {
         let runtime = GitRuntime::default();
         let pending = runtime.spawn(None, move || stale).unwrap();
         let cache = RepoInfoCache {
-            canonical: HashMap::new(),
-            repositories: HashMap::new(),
-            leases: HashMap::new(),
+            pending: HashSet::from([path.clone()]),
             entries: HashMap::from([(
                 path.clone(),
                 RepoInfoCacheEntry {
@@ -1868,7 +2667,7 @@ mod tests {
                     pending: Some(pending),
                 },
             )]),
-            wake: None,
+            ..RepoInfoCache::new(None)
         };
         let mut app = App::new();
         app.add_plugins(MinimalPlugins)

@@ -18,7 +18,7 @@ pub struct Page {
 
 impl Page {
     pub fn answers_for(&self, url: &str) -> bool {
-        url == self.url || (self.owns_subtree && url.starts_with(self.url))
+        vmux_api::RoutePattern::new(self.url, self.owns_subtree).matches(url)
     }
 
     pub fn preserves_dom_for(&self, next: &Self) -> bool {
@@ -95,7 +95,14 @@ impl Page {
 
 #[cfg(ui)]
 impl Page {
-    pub(crate) fn shell(&self) -> wry::http::Response<Vec<u8>> {
+    pub(crate) fn shell(
+        &self,
+        appearance: crate::webview::Appearance,
+    ) -> wry::http::Response<Vec<u8>> {
+        let scheme = match appearance {
+            crate::webview::Appearance::Light => "light",
+            crate::webview::Appearance::Dark | crate::webview::Appearance::System => "dark",
+        };
         let favicon = if self.favicon {
             vmux_ui::favicon::FaviconSource::vmux(self.url)
                 .or_else(|| vmux_ui::favicon::FaviconSource::vmux(self.document_url()))
@@ -105,19 +112,24 @@ impl Page {
             String::new()
         };
         let surface = if self.transparent {
-            ""
+            String::new()
         } else {
-            r#"<style>
-html, body { background: var(--background); }
-</style>"#
+            let (red, green, blue, _) = appearance.surface_rgba(false);
+            format!(
+                "<style>html, body {{ color-scheme: {scheme}; background-color: var(--background, rgb({red}, {green}, {blue})); }}</style>"
+            )
         };
         let head = format!(
             "<title>{}</title>\n<base href=\"/\"/>\n{surface}\n<link rel=\"stylesheet\" href=\"{}\"/>\n{favicon}",
             self.title, self.stylesheet,
         );
+        let html_attributes = format!(
+            r#"{} data-theme="{scheme}" style="color-scheme: {scheme}""#,
+            self.html_attributes
+        );
         let html = crate::InterpreterShell::new(self.root_id, self.document_url())
             .with_head(head)
-            .with_html_attributes(self.html_attributes)
+            .with_html_attributes(html_attributes)
             .with_body_class(self.body_class)
             .with_root_class(self.root_class)
             .html();
@@ -141,7 +153,7 @@ mod shell_tests {
 
     #[test]
     fn the_interpreter_talks_to_the_origin_the_document_came_from() {
-        let html = String::from_utf8(page().shell().into_body()).unwrap();
+        let html = String::from_utf8(page().shell(crate::Appearance::Dark).into_body()).unwrap();
 
         assert!(html.contains(r#"new NativeInterpreter("vmux://files", false)"#));
         assert!(
@@ -155,7 +167,7 @@ mod shell_tests {
         let html = String::from_utf8(
             Page::pane("vmux://history/", || unreachable!())
                 .titled("History")
-                .shell()
+                .shell(crate::Appearance::Dark)
                 .into_body(),
         )
         .unwrap();
@@ -169,7 +181,7 @@ mod shell_tests {
         let html = String::from_utf8(
             Page::pane("vmux://start/", || unreachable!())
                 .titled("Start")
-                .shell()
+                .shell(crate::Appearance::Dark)
                 .into_body(),
         )
         .unwrap();
@@ -177,6 +189,22 @@ mod shell_tests {
         assert!(html.contains(
             "<body class=\"m-0 flex h-full min-h-0 flex-col overflow-hidden bg-background"
         ));
+        assert!(html.contains(r#"data-theme="dark" style="color-scheme: dark""#));
+        assert!(html.contains("background-color: var(--background, rgb(20, 20, 20))"));
+    }
+
+    #[test]
+    fn the_page_shell_uses_the_resolved_light_surface_before_styles_load() {
+        let html = String::from_utf8(
+            Page::pane("vmux://start/", || unreachable!())
+                .titled("Start")
+                .shell(crate::Appearance::Light)
+                .into_body(),
+        )
+        .unwrap();
+
+        assert!(html.contains(r#"data-theme="light" style="color-scheme: light""#));
+        assert!(html.contains("background-color: var(--background, rgb(240, 240, 240))"));
     }
 }
 

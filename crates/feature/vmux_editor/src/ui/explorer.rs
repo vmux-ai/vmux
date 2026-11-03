@@ -9,6 +9,7 @@ use dioxus::prelude::*;
 use vmux_ecs::event::*;
 use vmux_ui::components::button::{Button, ButtonSize, ButtonVariant};
 use vmux_ui::components::dialog::{DialogContent, DialogDescription, DialogRoot, DialogTitle};
+use vmux_ui::components::skeleton::Skeleton;
 use vmux_ui::components::tree_row::{
     FILE_TREE_LIST_GROUP, FILE_TREE_ROW_BASE, FILE_TREE_STICKY_SURFACE, TreeRowAccent,
 };
@@ -61,6 +62,11 @@ fn collapse_all_dirs() {
 }
 
 fn goto_line(line: u32) {
+    if let Some(navigation) = try_consume_context::<super::outline_navigation::OutlineNavigation>()
+    {
+        navigation.select(line);
+        return;
+    }
     let _ = send(&ExplorerGoto {
         path: String::new(),
         line,
@@ -1108,8 +1114,7 @@ pub fn ExplorerPanel(
             })
             .unwrap_or_default()
     });
-    let root_loading =
-        use_memo(move || tree_state.read().as_ref().is_some_and(|tree| tree.loading));
+    let root_loading = use_memo(move || tree_state.read().as_ref().is_none_or(|tree| tree.loading));
     let outline = use_memo(move || {
         outline_state
             .read()
@@ -1238,7 +1243,14 @@ pub fn ExplorerPanel(
     let focused_path = tree_focus.key.cloned();
     let focused_symbol = outline_focus.key.cloned();
     let caret_symbol = CaretSymbol::from_rows(&outline.read(), caret_line);
+    let followed_symbol = caret_symbol.clone();
+    use_effect(use_reactive!(|(followed_symbol, show_outline)| {
+        if visible() && show_outline && !view().is_search() && !followed_symbol.is_empty() {
+            ScrollIntoView::nearest_vertical(&tree_row_id(&followed_symbol));
+        }
+    }));
     let tree_empty = rows.read().is_empty();
+    let tree_unpainted = !rows.read().iter().any(|row| row.visible);
     let notice = notice().and_then(|notice| {
         let message = notice.message?;
         let message = if notice.ok {
@@ -1250,7 +1262,7 @@ pub fn ExplorerPanel(
     });
 
     rsx! {
-        div { class: "group/panel relative flex h-full w-full flex-col overflow-hidden bg-foreground/[0.04] font-sans text-xs text-foreground select-none",
+        div { class: "group/panel relative flex h-full w-full flex-col overflow-hidden bg-background font-sans text-xs text-foreground select-none",
             SearchView { view }
             div {
                 class: if view().is_search() {
@@ -1308,7 +1320,7 @@ pub fn ExplorerPanel(
                 div {
                     id: "{tree_row_id(&root_path())}",
                     tabindex: "-1",
-                    class: if current_path() == root_path() { "bg-primary/10 outline-none" } else { "outline-none" },
+                    class: if current_path() == root_path() { "vmux-directory-selection outline-none" } else { "outline-none" },
                     oncontextmenu: move |e: Event<MouseData>| {
                         e.prevent_default();
                         let coordinates = e.client_coordinates();
@@ -1340,12 +1352,9 @@ pub fn ExplorerPanel(
                     div {
                         class: "{FILE_TREE_LIST_GROUP} min-h-0 overflow-hidden",
                         onmounted: move |event: Event<MountedData>| files_sticky.mounted(event.data()),
-                        if tree_empty {
-                            if root_loading() {
-                                div { class: "flex h-6 items-center gap-2 px-3 text-foreground/45",
-                                    span { class: "h-3 w-3 animate-spin rounded-full border border-foreground/20 border-t-foreground/60" }
-                                    {translate("common-loading")}
-                                }
+                        if tree_empty || tree_unpainted {
+                            if root_loading() || !tree_empty {
+                                ExplorerTreeSkeleton {}
                             } else {
                                 div { class: "flex h-6 items-center px-3 text-foreground/45",
                                     {translate("editor-explorer-empty")}
@@ -1681,6 +1690,20 @@ pub fn ExplorerPanel(
                         let _ = send(&ExplorerNoticeDismissRequest);
                     },
                     "{message}"
+                }
+            }
+        }
+    }
+}
+
+#[component]
+fn ExplorerTreeSkeleton() -> Element {
+    rsx! {
+        div { aria_busy: true, class: "flex flex-col gap-1 px-3 py-1",
+            for width in ["w-7/12", "w-10/12", "w-8/12", "w-9/12", "w-6/12"] {
+                div { class: "flex h-5 items-center gap-2",
+                    Skeleton { class: "size-3 shrink-0 rounded-sm bg-foreground/[0.05]" }
+                    Skeleton { class: "h-3 {width} bg-foreground/[0.055]" }
                 }
             }
         }

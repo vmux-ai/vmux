@@ -320,6 +320,8 @@ pub(crate) struct PendingNavigationSnapshot {
     pub started: std::time::Duration,
     pub saw_loading: bool,
     pub pane: Option<String>,
+    pub(crate) stack: Option<Entity>,
+    pub(crate) navigation: Option<vmux_ecs::PageOpenId>,
 }
 
 #[derive(Message)]
@@ -329,6 +331,7 @@ pub(crate) struct PendingNavigationUpdate {
 }
 
 impl PendingNavigationUpdate {
+    #[cfg(test)]
     pub(crate) fn set(
         webview: Entity,
         request_id: [u8; 16],
@@ -343,14 +346,31 @@ impl PendingNavigationUpdate {
                 started,
                 saw_loading: false,
                 pane,
+                stack: None,
+                navigation: None,
             }),
         }
     }
 
-    pub(crate) fn clear(webview: Entity) -> Self {
+    pub(crate) fn for_page_open(
+        webview: Entity,
+        request_id: [u8; 16],
+        started: std::time::Duration,
+        pane: Option<String>,
+        stack: Entity,
+        navigation: vmux_ecs::PageOpenId,
+    ) -> Self {
         Self {
             webview,
-            pending: None,
+            pending: Some(PendingNavigationSnapshot {
+                webview,
+                request_id,
+                started,
+                saw_loading: false,
+                pane,
+                stack: Some(stack),
+                navigation: Some(navigation),
+            }),
         }
     }
 }

@@ -274,7 +274,7 @@ fn toggle_fullscreen(
     focused_window: vmux_layout::window::FocusedWindow,
     mut reader: MessageReader<ToggleFullscreenRequest>,
 ) {
-    let toggle = reader.read().next().is_some();
+    let toggle = reader.read().count() > 0;
     if toggle
         && let Some(parent_window) = focused_window
             .entity()
@@ -299,8 +299,9 @@ fn sync_window_visibility(
     mut shortcut: MessageReader<vmux_input::ExitFullscreenShortcut>,
 ) {
     let mut focused_fullscreen = false;
-    let exit_fullscreen =
-        exit_fullscreen.read().next().is_some() || shortcut.read().next().is_some();
+    let exit_requested = exit_fullscreen.read().count() > 0;
+    let shortcut_requested = shortcut.read().count() > 0;
+    let exit_fullscreen = exit_requested || shortcut_requested;
     state.0.retain(|entity, _| window_q.contains(*entity));
     for (entity, mut window, mut window_fullscreen) in &mut window_q {
         let Some(glass) = state.0.get_mut(&entity) else {

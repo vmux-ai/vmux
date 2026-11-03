@@ -4,6 +4,11 @@ pub use vmux_api::space::{
     ProjectBranch, ProjectPickerRequest, ProjectRow, ProjectRowKind, ProjectTreeToggle,
 };
 
+#[vmux_api::ui_state(Default, Eq, version = 1)]
+pub struct ProjectNavigation {
+    pub rows: Vec<ProjectRow>,
+}
+
 #[vmux_api::contract]
 pub struct StyledSpan {
     pub text: String,
@@ -43,6 +48,21 @@ pub struct FileMetaEvent {
     pub line_ending: FileLineEnding,
     #[serde(default)]
     pub encoding: FileEncoding,
+}
+
+#[vmux_api::contract(Default, Eq)]
+pub struct FileCheckoutState {
+    pub path: String,
+    pub repository: String,
+    pub checkout: String,
+    pub read_only: bool,
+}
+
+#[vmux_api::ui_event(Eq)]
+pub struct FileCheckoutPreviewRequest {
+    pub path: String,
+    pub repository: String,
+    pub checkout: String,
 }
 
 #[vmux_api::contract(Copy, Eq, Default)]

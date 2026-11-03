@@ -26,6 +26,7 @@ const MEASURE_ROWS: usize = 8;
 
 #[vmux_page::page(
     component = Page,
+    subtree,
     states = ["ThemeUiState", "TerminalUiState", "KeyClaimsUiState"],
     claims = crate::Terminal
 )]
@@ -749,5 +750,18 @@ fn row_selection_cols(
         None
     } else {
         Some((start, end_exclusive))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn process_specific_terminal_pages_can_exchange_their_state_and_input() {
+        let permissions = TerminalPage::PAGE.page_permissions();
+        for permission in ["TerminalUiState", "TermResizeEvent", "KeyClaimsUiState"] {
+            assert!(permissions.allows("vmux://terminal/29876", permission));
+        }
     }
 }

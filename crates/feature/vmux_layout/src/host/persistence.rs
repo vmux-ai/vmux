@@ -3,10 +3,9 @@ use bevy::prelude::*;
 use bevy::window::PrimaryWindow;
 use bevy_cef::prelude::HostWindow;
 use vmux_ecs::persistence::{PageRestore, WorkspaceStoreValidator};
-use vmux_ecs::{CreatedAt, Order, PageMetadata, PageOpenId, PageOpenTask};
+use vmux_ecs::{CreatedAt, Order, PageMetadata, PageNavigation, PageOpenId, PageOpenTask};
 use vmux_flex::prelude::*;
 
-use crate::LayoutStartupSet;
 use crate::pane::{Pane, PaneSize, PaneSplit, PaneSplitDirection};
 use crate::space::Space;
 use crate::stack::Stack;
@@ -18,13 +17,31 @@ pub enum LayoutPersistenceSet {
     Restore,
 }
 
+#[derive(Message, Clone, Copy)]
+pub struct LayoutRestoreRequest;
+
+#[derive(Message, Clone, Copy)]
+pub struct LayoutRestoreCommitted;
+
+#[derive(Resource, Default)]
+struct RestoreState {
+    requested: bool,
+}
+
 pub(crate) struct LayoutPersistencePlugin;
 
 impl Plugin for LayoutPersistencePlugin {
     fn build(&self, app: &mut App) {
         app.add_systems(PreStartup, spawn_store_validator)
-            .add_systems(Startup, restore_views.in_set(LayoutStartupSet::Post))
-            .add_systems(Update, restore_views.in_set(LayoutPersistenceSet::Restore));
+            .add_message::<LayoutRestoreRequest>()
+            .add_message::<LayoutRestoreCommitted>()
+            .init_resource::<RestoreState>()
+            .add_systems(
+                Update,
+                (request_restore, restore_views)
+                    .chain()
+                    .in_set(LayoutPersistenceSet::Restore),
+            );
     }
 }
 
@@ -93,8 +110,27 @@ impl PersistedLayout<'_, '_> {
     }
 }
 
-fn restore_views(layout: PersistedLayout, mut commands: Commands) {
+fn request_restore(
+    mut requests: MessageReader<LayoutRestoreRequest>,
+    mut state: ResMut<RestoreState>,
+) {
+    if requests.read().count() > 0 {
+        state.requested = true;
+    }
+}
+
+fn restore_views(
+    layout: PersistedLayout,
+    mut state: ResMut<RestoreState>,
+    mut committed: MessageWriter<LayoutRestoreCommitted>,
+    mut commands: Commands,
+) {
+    if !state.requested {
+        return;
+    }
     if !layout.has_pending_views() {
+        state.requested = false;
+        committed.write(LayoutRestoreCommitted);
         return;
     }
     let Ok(main) = layout.main.single() else {
@@ -191,11 +227,22 @@ fn restore_views(layout: PersistedLayout, mut commands: Commands) {
                 ..default()
             },
         ));
+        let id = PageOpenId::new();
+        let url = restored_page_url(&metadata.url).to_string();
+        if url != metadata.url {
+            commands.entity(stack).insert(PageMetadata {
+                title: "Start".to_string(),
+                url: url.clone(),
+                icon: vmux_api::PageIcon::Builtin(vmux_api::BuiltinIcon::Sparkles),
+                bg_color: None,
+            });
+        }
+        commands.entity(stack).insert(PageNavigation::new(id));
         commands.spawn((
             PageOpenTask {
-                id: PageOpenId::new(),
+                id,
                 stack,
-                url: metadata.url.clone(),
+                url,
                 request_id: None,
             },
             PageRestore,
@@ -231,6 +278,13 @@ fn restore_views(layout: PersistedLayout, mut commands: Commands) {
     }
 }
 
+fn restored_page_url(url: &str) -> &str {
+    if url == crate::ErrorPage::URL {
+        return "vmux://start/";
+    }
+    url
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -253,5 +307,11 @@ mod tests {
         assert!(!persisted_store_has_only_empty_page_urls(
             "\"vmux_header::system::PageMetadata\": (\nurl: \"vmux://start/\",\n),"
         ));
+    }
+
+    #[test]
+    fn transient_error_page_restores_as_start() {
+        assert_eq!(restored_page_url(crate::ErrorPage::URL), "vmux://start/");
+        assert_eq!(restored_page_url("vmux://sessions/"), "vmux://sessions/");
     }
 }

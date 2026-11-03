@@ -4,7 +4,7 @@ use bevy::{
         world::DeferredWorld,
     },
     prelude::*,
-    winit::{EventLoopProxyWrapper, WinitUserEvent},
+    winit::EventLoopProxyWrapper,
 };
 use vmux_flex::prelude::*;
 use vmux_history::LastActivatedAt;
@@ -15,6 +15,7 @@ use crate::{
     tab::Tab,
 };
 
+use super::deadline::{DeadlineOwner, DeadlineScheduler};
 use super::{command::LayoutRequestSet, pane::ArrangementSet};
 
 pub(crate) struct PaneZoomPlugin;
@@ -22,6 +23,7 @@ pub(crate) struct PaneZoomPlugin;
 impl Plugin for PaneZoomPlugin {
     fn build(&self, app: &mut App) {
         app.add_message::<FocusRequest>()
+            .init_resource::<DeadlineScheduler>()
             .add_message::<OpenRequest>()
             .add_message::<ToggleZoomRequest>()
             .add_systems(
@@ -88,20 +90,24 @@ struct PaneZoomGap {
 }
 
 #[derive(Component, Debug)]
-struct PaneZoomTransition {
+pub(super) struct PaneZoomTransition {
     leaf: Entity,
     hidden: Vec<Entity>,
     weights: Vec<PaneZoomWeight>,
     gaps: Vec<PaneZoomGap>,
     target_zoomed: bool,
     elapsed: f32,
+    started: std::time::Duration,
 }
 
 impl PaneZoomTransition {
     const DURATION: f32 = 0.24;
 
-    fn progress(&mut self, delta: f32) -> f32 {
-        self.elapsed = (self.elapsed + delta).min(Self::DURATION);
+    fn progress(&mut self, now: std::time::Duration) -> f32 {
+        self.elapsed = now
+            .saturating_sub(self.started)
+            .as_secs_f32()
+            .min(Self::DURATION);
         let linear = self.elapsed / Self::DURATION;
         linear * linear * (3.0 - 2.0 * linear)
     }
@@ -183,6 +189,7 @@ impl ZoomLayout<'_, '_> {
         leaf: Entity,
         hidden: Vec<Entity>,
         target_zoomed: bool,
+        started: std::time::Duration,
     ) -> PaneZoomTransition {
         let mut weights = Vec::with_capacity(hidden.len());
         let mut split_entities = Vec::new();
@@ -243,11 +250,13 @@ impl ZoomLayout<'_, '_> {
             gaps,
             target_zoomed,
             elapsed: 0.0,
+            started,
         }
     }
 }
 
 fn handle_command(
+    time: Res<Time>,
     mut focus_requests: MessageReader<FocusRequest>,
     mut open_requests: MessageReader<OpenRequest>,
     mut toggle_requests: MessageReader<ToggleZoomRequest>,
@@ -259,7 +268,9 @@ fn handle_command(
     mut layout: ZoomLayout,
     mut commands: Commands,
 ) {
-    let unzoom_only = focus_requests.read().count() > 0 || open_requests.read().count() > 0;
+    let focus_requested = focus_requests.read().count() > 0;
+    let open_requested = open_requests.read().count() > 0;
+    let unzoom_only = focus_requested || open_requested;
     let toggle_count = toggle_requests.read().count();
     if !unzoom_only && toggle_count == 0 {
         return;
@@ -299,7 +310,7 @@ fn handle_command(
     if hidden.is_empty() {
         return;
     }
-    let transition = layout.transition(leaf, hidden.clone(), target_zoomed);
+    let transition = layout.transition(leaf, hidden.clone(), target_zoomed, time.elapsed());
     let mut tab = commands.entity(tab);
     tab.insert(transition);
     if target_zoomed {
@@ -329,13 +340,14 @@ fn sync_visibility(
 
 fn animate(
     time: Res<Time>,
+    scheduler: Res<DeadlineScheduler>,
     proxy: Option<Res<EventLoopProxyWrapper>>,
     mut transitions: Query<(Entity, &mut PaneZoomTransition)>,
     mut nodes: Query<&mut Node>,
     mut commands: Commands,
 ) {
     for (tab, mut transition) in &mut transitions {
-        let progress = transition.progress(time.delta_secs());
+        let progress = transition.progress(time.elapsed());
         for weight in &transition.weights {
             if let Ok(mut node) = nodes.get_mut(weight.entity) {
                 node.display = Display::Flex;
@@ -362,8 +374,13 @@ fn animate(
                 }
             }
             commands.entity(tab).remove::<PaneZoomTransition>();
-        } else if let Some(proxy) = proxy.as_deref() {
-            let _ = proxy.send_event(WinitUserEvent::WakeUp);
+            scheduler.cancel(DeadlineOwner::PaneZoomAnimation(tab));
+        } else {
+            scheduler.schedule(
+                DeadlineOwner::PaneZoomAnimation(tab),
+                std::time::Instant::now() + std::time::Duration::from_millis(16),
+                proxy.as_deref(),
+            );
         }
     }
 }

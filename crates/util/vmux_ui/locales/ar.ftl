@@ -1094,3 +1094,5 @@ project-clone-invalid = أدخل مستودع GitHub صالحًا
 project-restore = استعادة المشروع
 project-archived = مؤرشف
 common-select = تحديد
+
+common-show-more = عرض المزيد

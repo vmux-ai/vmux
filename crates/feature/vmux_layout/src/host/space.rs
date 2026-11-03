@@ -11,11 +11,8 @@ impl Plugin for SpaceLayoutPlugin {
             .register_persisted::<SpaceId>()
             .add_systems(
                 Update,
-                (
-                    bevy::ecs::schedule::ApplyDeferred,
-                    sync_current.in_set(CurrentSpaceSet),
-                )
-                    .chain()
+                sync_current
+                    .in_set(CurrentSpaceSet)
                     .after(crate::active::ActiveSystemSet::Space),
             )
             .add_systems(
@@ -84,6 +81,8 @@ pub struct EffectiveStartupSet;
 
 #[derive(bevy::ecs::system::SystemParam)]
 pub struct FocusedSpace<'w, 's> {
+    focused_window: crate::window::FocusedWindow<'w, 's>,
+    hierarchy: crate::window::WindowHierarchy<'w, 's>,
     spaces: Query<
         'w,
         's,
@@ -110,15 +109,41 @@ impl FocusedSpace<'_, '_> {
         &EffectiveStartupUrl,
         &crate::profile::Profile,
     )> {
-        self.spaces
-            .iter()
-            .find(|(_, _, _, _, _, current, _)| *current)
+        let focused = self.focused_window.entity().and_then(|focused_window| {
+            self.spaces
+                .iter()
+                .filter(|(entity, _, _, _, _, _, _)| {
+                    self.hierarchy.get(*entity) == Some(focused_window)
+                })
+                .find(|(_, _, _, _, _, current, _)| *current)
+                .or_else(|| {
+                    self.spaces
+                        .iter()
+                        .filter(|(entity, _, _, _, _, _, _)| {
+                            self.hierarchy.get(*entity) == Some(focused_window)
+                        })
+                        .find(|(_, _, _, _, _, _, active)| *active)
+                })
+        });
+        focused
             .or_else(|| {
+                if self
+                    .spaces
+                    .iter()
+                    .any(|(space, _, _, _, _, _, _)| self.hierarchy.get(space).is_some())
+                {
+                    return None;
+                }
                 self.spaces
                     .iter()
-                    .find(|(_, _, _, _, _, _, active)| *active)
+                    .find(|(_, _, _, _, _, current, _)| *current)
+                    .or_else(|| {
+                        self.spaces
+                            .iter()
+                            .find(|(_, _, _, _, _, _, active)| *active)
+                    })
+                    .or_else(|| self.spaces.iter().next())
             })
-            .or_else(|| self.spaces.iter().next())
             .map(|(entity, id, startup_dir, startup_url, profile, _, _)| {
                 (entity, id, startup_dir, startup_url, profile)
             })
@@ -164,21 +189,25 @@ fn sync_current(
     hierarchy: crate::window::WindowHierarchy,
     mut commands: Commands,
 ) {
-    let current = focused_window
-        .entity()
-        .and_then(|focused| {
-            spaces
-                .iter()
-                .filter(|(_, active, _)| *active)
-                .map(|(entity, _, _)| entity)
-                .find(|space| hierarchy.get(*space) == Some(focused))
-        })
-        .or_else(|| {
-            spaces
-                .iter()
-                .find(|(_, active, _)| *active)
-                .map(|(entity, _, _)| entity)
-        });
+    let focused = focused_window.entity().and_then(|focused| {
+        spaces
+            .iter()
+            .filter(|(_, active, _)| *active)
+            .map(|(entity, _, _)| entity)
+            .find(|space| hierarchy.get(*space) == Some(focused))
+    });
+    let current = focused.or_else(|| {
+        if spaces
+            .iter()
+            .any(|(space, _, _)| hierarchy.get(space).is_some())
+        {
+            return None;
+        }
+        spaces
+            .iter()
+            .find(|(_, active, _)| *active)
+            .map(|(entity, _, _)| entity)
+    });
     for (entity, _, selected) in &spaces {
         if current == Some(entity) && !selected {
             commands.entity(entity).insert(CurrentSpace);
@@ -254,14 +283,34 @@ mod tests {
 
     use bevy::ecs::system::RunSystemOnce;
 
+    fn active_space(app: &mut App, id: &str) -> Entity {
+        let window = app
+            .world_mut()
+            .spawn((Window::default(), vmux_ecs::Active))
+            .id();
+        let root = app
+            .world_mut()
+            .spawn(bevy_cef::prelude::HostWindow(window))
+            .id();
+        let main = app
+            .world_mut()
+            .spawn((crate::window::Main, ChildOf(root)))
+            .id();
+        app.world_mut()
+            .spawn((
+                Space,
+                SpaceId(id.to_string()),
+                vmux_ecs::Active,
+                ChildOf(main),
+            ))
+            .id()
+    }
+
     #[test]
     fn current_space_tracks_active_space() {
         let mut app = App::new();
         app.add_systems(Update, sync_current);
-        let space = app
-            .world_mut()
-            .spawn((Space, SpaceId("default".to_string()), vmux_ecs::Active))
-            .id();
+        let space = active_space(&mut app, "default");
         app.update();
         assert!(app.world().get::<CurrentSpace>(space).is_some());
     }
@@ -279,10 +328,7 @@ mod tests {
     fn current_space_retains_its_typed_id() {
         let mut app = App::new();
         app.add_systems(Update, sync_current);
-        let space = app
-            .world_mut()
-            .spawn((Space, SpaceId("work".to_string()), vmux_ecs::Active))
-            .id();
+        let space = active_space(&mut app, "work");
         app.update();
         assert_eq!(
             app.world()

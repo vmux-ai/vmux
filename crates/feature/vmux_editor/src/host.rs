@@ -35,6 +35,7 @@ impl Plugin for EditorPlugin {
             workspace_edit::WorkspaceEditPlugin,
             feedback::Plugin,
             status::StatusPlugin,
+            address::AddressPlugin,
             viewport::ViewportPlugin,
             media::MediaPlugin,
             note::NotePlugin,
@@ -78,6 +79,7 @@ pub mod markdown;
 pub mod shape;
 pub mod tool;
 
+mod address;
 pub(crate) mod app_key;
 mod command_bar;
 pub(crate) mod directory;

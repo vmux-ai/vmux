@@ -1,9 +1,9 @@
 use bevy::{ecs::relationship::Relationship, prelude::*};
 use bevy_cef::prelude::*;
-use vmux_ecs::PageMetadata;
 use vmux_ecs::page::PageManifest;
+use vmux_ecs::{PageMetadata, PageOpenRequest, PageOpenTarget};
 use vmux_history::LastActivatedAt;
-use vmux_layout::{Browser, Loading};
+use vmux_layout::Loading;
 use vmux_layout::{
     NavigationState,
     pane::{Pane, PaneSplit},
@@ -22,18 +22,51 @@ impl Plugin for PageLifePlugin {
                 drain_loading_state
                     .in_set(crate::BrowserSystemSet::DrainLoadingState)
                     .in_set(crate::BrowserLoadSet),
+                finish_windowed_handoffs.after(crate::BrowserSystemSet::DrainLoadingState),
                 spawn_popup_stacks.in_set(crate::BrowserSystemSet::SpawnPopupStacks),
             ),
         );
     }
 }
 
+fn finish_windowed_handoffs(
+    mut completed: MessageReader<WebviewLoadCompleted>,
+    handoffs: Query<(), With<vmux_layout::hosted_page::SurfaceHandoff>>,
+    hosted: Query<(), With<vmux_ecs::page::HostsPage>>,
+    mut commands: Commands,
+) {
+    for event in completed.read() {
+        if !handoffs.contains(event.webview) || hosted.contains(event.webview) {
+            continue;
+        }
+        commands
+            .entity(event.webview)
+            .insert(vmux_ecs::page::PageReady);
+    }
+}
+
 fn drain_loading_state(
     receiver: Res<WebviewLoadingStateReceiver>,
+    browsers: Option<NonSend<Browsers>>,
+    time: Res<Time>,
+    mut handoffs: Query<&mut vmux_layout::hosted_page::SurfaceHandoff>,
     mut commands: Commands,
     mut completed: MessageWriter<WebviewLoadCompleted>,
 ) {
     while let Ok(ev) = receiver.0.try_recv() {
+        if !browsers.as_ref().is_some_and(|browsers| {
+            browsers.loading_identity(&ev.webview)
+                == Some((ev.surface_generation, ev.navigation_epoch))
+        }) {
+            continue;
+        }
+        if ev.is_loading
+            && let Ok(mut handoff) = handoffs.get_mut(ev.webview)
+            && !handoff.navigation_started()
+        {
+            let baseline = handoff.baseline_navigation_revision();
+            handoff.begin_navigation(baseline, time.elapsed());
+        }
         let Ok(mut ecmds) = commands.get_entity(ev.webview) else {
             continue;
         };
@@ -58,6 +91,7 @@ fn spawn_popup_stacks(
     child_of_q: Query<&ChildOf>,
     stack_q: Query<(), With<Stack>>,
     leaf_panes: Query<Entity, (With<Pane>, Without<PaneSplit>)>,
+    mut page_open_requests: MessageWriter<PageOpenRequest>,
     mut commands: Commands,
 ) {
     while let Ok(ev) = popup_rx.0.try_recv() {
@@ -88,7 +122,11 @@ fn spawn_popup_stacks(
         let new_stack = commands
             .spawn((Stack::bundle(), LastActivatedAt::now(), ChildOf(pane)))
             .id();
-        commands.spawn((Browser::new(&ev.target_url), ChildOf(new_stack)));
+        page_open_requests.write(PageOpenRequest {
+            target: PageOpenTarget::Stack(new_stack),
+            url: ev.target_url,
+            request_id: None,
+        });
     }
 }
 

@@ -82,7 +82,16 @@ fn host_focus_intent(active_webview: Option<Entity>, is_hosted: bool) -> HostFoc
 fn compute_intent(
     focus: FocusedStack,
     child_of_q: Query<&ChildOf>,
-    content_q: Query<Entity, (With<Browser>, Without<Header>, Without<SideSheet>)>,
+    content_q: Query<
+        Entity,
+        (
+            With<Browser>,
+            Without<Header>,
+            Without<SideSheet>,
+            Without<vmux_layout::hosted_page::SurfaceHandoff>,
+            Without<vmux_layout::hosted_page::SurfaceBlocked>,
+        ),
+    >,
     modal_q: Query<
         (
             Entity,
@@ -185,6 +194,7 @@ fn apply_windowed(
         ),
         _ => (false, None),
     };
+    let previous = *focused;
     if let Some(webview) = windowed_focus_target(
         intent,
         has_browser,
@@ -192,7 +202,16 @@ fn apply_windowed(
         &mut focused,
         reclaiming,
     ) {
+        if previous != Some(webview)
+            && let Some(previous) = previous
+        {
+            browsers.set_windowed_focus(&previous, false);
+        }
         browsers.set_windowed_focus(&webview, true);
+    } else if *focused != previous
+        && let Some(previous) = previous
+    {
+        browsers.set_windowed_focus(&previous, false);
     }
 }
 
@@ -242,6 +261,43 @@ mod tests {
         set_focus(&mut app, stack);
         app.update();
         assert_eq!(intent(&app), HostFocusIntent::Windowed(page));
+    }
+
+    #[test]
+    fn blocked_surface_cannot_own_native_focus() {
+        let mut app = app();
+        let stack = app.world_mut().spawn_empty().id();
+        app.world_mut().spawn((
+            Browser,
+            vmux_layout::hosted_page::SurfaceBlocked,
+            ChildOf(stack),
+        ));
+        set_focus(&mut app, stack);
+
+        app.update();
+
+        assert_eq!(intent(&app), HostFocusIntent::WinitHost);
+    }
+
+    #[test]
+    fn incoming_surface_cannot_own_native_focus_before_handoff() {
+        let mut app = app();
+        let stack = app.world_mut().spawn_empty().id();
+        app.world_mut().spawn((
+            Browser,
+            vmux_layout::hosted_page::SurfaceHandoff::new(
+                Vec::new(),
+                vmux_ecs::PageOpenId::new(),
+                0,
+                std::time::Duration::ZERO,
+            ),
+            ChildOf(stack),
+        ));
+        set_focus(&mut app, stack);
+
+        app.update();
+
+        assert_eq!(intent(&app), HostFocusIntent::WinitHost);
     }
 
     #[test]

@@ -75,7 +75,7 @@ fn emit(
     mut runtimes: Query<&mut Launcher, With<Runtime>>,
     mut emits: MessageWriter<UiStateEmit>,
 ) {
-    let refresh = refreshes.read().next().is_some();
+    let refresh = refreshes.read().count() > 0;
     let Ok(mut launcher) = runtimes.single_mut() else {
         return;
     };

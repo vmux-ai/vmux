@@ -27,6 +27,8 @@ pub(super) struct ProjectPagePlugin;
 impl Plugin for ProjectPagePlugin {
     fn build(&self, app: &mut App) {
         app.add_plugins(vmux_ecs::UiStatePlugin::<ProjectUiState>::default())
+            .add_message::<vmux_layout::stack::OpenRequest>()
+            .add_plugins(vmux_ecs::UiStatePlugin::<crate::project::ProjectFilesUiState>::default())
             .add_plugins(UiEventPlugin::<(
                 ProjectCreateRequest,
                 ProjectImportRequest,
@@ -41,6 +43,7 @@ impl Plugin for ProjectPagePlugin {
             .add_observer(archive)
             .add_observer(delete)
             .add_observer(collection_view)
+            .add_observer(open_context)
             .add_systems(PreStartup, prewarm)
             .add_systems(
                 Update,
@@ -48,6 +51,7 @@ impl Plugin for ProjectPagePlugin {
                     queue,
                     sync_icons,
                     finish_catalogs,
+                    finish_files,
                     finish_imports,
                     finish_deletes,
                 )
@@ -60,19 +64,157 @@ impl Plugin for ProjectPagePlugin {
     }
 }
 
-fn prewarm(mut commands: Commands) {
-    commands.spawn(PrewarmPage {
-        host: "projects",
-        url: ProjectRoute::ROOT,
-        title: "Projects",
-        pool_size: 1,
+#[derive(bevy::ecs::system::SystemParam)]
+struct ProjectSources<'w, 's> {
+    info: Query<'w, 's, &'static mut vmux_git::RepoInfoCache>,
+    projects: vmux_ecs::profile::Projects<'w, 's>,
+    states: Query<'w, 's, &'static vmux_ecs::UiState<ProjectUiState>>,
+}
+
+fn open_context(
+    request: On<vmux_ecs::workspace::ProjectContextOpenRequest>,
+    mut source: ProjectSources,
+    active: vmux_layout::stack::ActiveTabParam,
+    tabs: Query<(
+        &vmux_layout::tab::Tab,
+        Option<&vmux_layout::tab::TabWorktree>,
+        Option<&vmux_layout::tab::TabWorkspace>,
+    )>,
+    space: vmux_layout::space::FocusedSpace,
+    mut opens: MessageWriter<vmux_layout::stack::OpenRequest>,
+) {
+    let mut directory = space.startup_dir().map(PathBuf::from);
+    let mut project = None;
+    if let Some(tab) = active.get()
+        && let Ok((tab, worktree, workspace)) = tabs.get(tab)
+    {
+        directory = tab.startup_dir.as_ref().map(PathBuf::from).or(directory);
+        project = worktree
+            .map(|worktree| PathBuf::from(&worktree.repo_root))
+            .or_else(|| workspace.map(|workspace| PathBuf::from(&workspace.project_dir)));
+    }
+    if project.is_none()
+        && let Some(directory) = directory.as_ref()
+        && let Ok(mut repository_info) = source.info.single_mut()
+        && let Some(repository) = repository_info.cached(directory)
+    {
+        project = Some(repository.project_root().to_path_buf());
+    }
+    let selected = project.as_ref().or(directory.as_ref());
+    let mut url = ProjectRoute::ROOT.to_string();
+    if let (Ok(root), Some(directory)) = (source.projects.path(), selected) {
+        for state in &source.states {
+            let Some(state) = state.current() else {
+                continue;
+            };
+            let ProjectView::Catalog(catalog) = &state.view else {
+                continue;
+            };
+            if let Some(entry) = catalog
+                .entries
+                .iter()
+                .filter(|entry| directory.starts_with(&entry.path))
+                .max_by_key(|entry| entry.path.len())
+            {
+                url.clone_from(&entry.url);
+                break;
+            }
+        }
+        if ProjectRoute::is_root(&url)
+            && let Some(current) = ProjectCatalog::url_for_directory(root, directory)
+        {
+            url = current;
+        }
+    }
+    opens.write(vmux_layout::stack::OpenRequest {
+        url: Some(url),
+        policy: if request.force_new {
+            vmux_layout::stack::OpenPolicy::NewStack
+        } else {
+            vmux_layout::stack::OpenPolicy::FocusReusable
+        },
     });
+}
+
+fn prewarm(mut commands: Commands) {
+    commands.spawn(PrewarmPage::host(
+        "projects",
+        ProjectRoute::ROOT,
+        "Projects",
+        1,
+    ));
 }
 
 #[derive(Component)]
 struct ProjectCatalogTask {
     revision: u64,
     task: Task<ProjectUiState>,
+}
+
+#[derive(Component)]
+struct ProjectFilesTask {
+    url: String,
+    root: String,
+    revision: u64,
+    task: Task<Result<Vec<vmux_ecs::event::FileDirEntry>, String>>,
+}
+
+impl ProjectFilesTask {
+    fn spawn(
+        url: String,
+        path: PathBuf,
+        revision: u64,
+        wake: Option<bevy::winit::EventLoopProxy<WinitUserEvent>>,
+    ) -> Self {
+        let root = path.to_string_lossy().into_owned();
+        let task = IoTaskPool::get().spawn(async move {
+            let result = super::file_lifecycle::FileDir::try_read(&path);
+            if let Some(wake) = wake {
+                let _ = wake.send_event(WinitUserEvent::WakeUp);
+            }
+            result
+        });
+        Self {
+            url,
+            root,
+            revision,
+            task,
+        }
+    }
+}
+
+fn finish_files(
+    mut tasks: Query<(
+        Entity,
+        &mut ProjectFilesTask,
+        &vmux_ecs::PageMetadata,
+        &ProjectPageRevision,
+    )>,
+    mut commands: Commands,
+) {
+    for (entity, mut task, page, revision) in &mut tasks {
+        let Some(result) = future::block_on(future::poll_once(&mut task.task)) else {
+            continue;
+        };
+        commands.entity(entity).remove::<ProjectFilesTask>();
+        if page.url != task.url || revision.value != task.revision {
+            continue;
+        }
+        let mut state = crate::project::ProjectFilesUiState {
+            root: task.root.clone(),
+            ready: true,
+            ..Default::default()
+        };
+        match result {
+            Ok(entries) => state.entries = entries,
+            Err(error) => state.error = error,
+        }
+        commands.trigger(
+            vmux_ecs::UiStateWrite::<crate::project::ProjectFilesUiState>::from_event(
+                entity, &state,
+            ),
+        );
+    }
 }
 
 impl ProjectCatalogTask {
@@ -132,14 +274,19 @@ impl ProjectCollectionViews<'_, '_> {
     }
 }
 
+type ProjectPageRows<'w, 's> = Query<
+    'w,
+    's,
+    (Entity, &'static mut vmux_ecs::PageMetadata),
+    (
+        Changed<vmux_ecs::PageMetadata>,
+        Without<vmux_ecs::page::PrewarmedPage>,
+    ),
+>;
+
 #[derive(SystemParam)]
 struct ProjectPageQueries<'w, 's> {
-    pages: Query<
-        'w,
-        's,
-        (Entity, &'static mut vmux_ecs::PageMetadata),
-        Changed<vmux_ecs::PageMetadata>,
-    >,
+    pages: ProjectPageRows<'w, 's>,
     states: Query<'w, 's, &'static vmux_ecs::UiState<ProjectUiState>>,
     revisions: Query<'w, 's, &'static mut ProjectPageRevision>,
     collection_views: ProjectCollectionViews<'w, 's>,
@@ -363,11 +510,12 @@ struct GitHubRepository {
 impl GitHubRepository {
     fn parse(value: &str) -> Result<Self, String> {
         let input = value.trim().trim_end_matches('/');
+        if input.starts_with("http://") {
+            return Err(vmux_ui::i18n::translate("project-clone-invalid"));
+        }
         let path = if let Some(path) = input.strip_prefix("git@github.com:") {
             path
         } else if let Some(path) = input.strip_prefix("https://github.com/") {
-            path
-        } else if let Some(path) = input.strip_prefix("http://github.com/") {
             path
         } else {
             input
@@ -383,11 +531,7 @@ impl GitHubRepository {
         if segments.next().is_some() || !Self::valid_segment(owner) || !Self::valid_segment(name) {
             return Err(vmux_ui::i18n::translate("project-clone-invalid"));
         }
-        let remote = if input.contains("://") || input.starts_with("git@") {
-            input.to_string()
-        } else {
-            format!("https://github.com/{owner}/{name}.git")
-        };
+        let remote = format!("https://github.com/{owner}/{name}.git");
         Ok(Self {
             owner: owner.to_string(),
             name: name.to_string(),
@@ -674,7 +818,9 @@ fn queue(
             if revision.advance_to(&url).is_none() {
                 continue;
             }
-            commands.entity(entity).remove::<ProjectCatalogTask>();
+            commands
+                .entity(entity)
+                .remove::<(ProjectCatalogTask, ProjectFilesTask)>();
             commands.trigger(ScopeProjectionRequest {
                 webview: entity,
                 cwd: None,
@@ -746,6 +892,25 @@ fn queue(
                 seed,
                 settings.appearance.project_icon,
             ));
+            if let Some(path) = cwd.as_ref() {
+                commands.trigger(
+                    vmux_ecs::UiStateWrite::<crate::project::ProjectFilesUiState>::from_event(
+                        entity,
+                        &crate::project::ProjectFilesUiState {
+                            root: path.to_string_lossy().into_owned(),
+                            ..Default::default()
+                        },
+                    ),
+                );
+                commands.entity(entity).insert(ProjectFilesTask::spawn(
+                    url.clone(),
+                    path.clone(),
+                    revision,
+                    proxy.as_deref().map(|proxy| (**proxy).clone()),
+                ));
+            } else {
+                commands.entity(entity).remove::<ProjectFilesTask>();
+            }
             commands.entity(entity).remove::<ProjectCatalogTask>();
             commands.trigger(ScopeProjectionRequest {
                 webview: entity,
@@ -757,6 +922,7 @@ fn queue(
             continue;
         }
         page.title = vmux_ui::i18n::translate("layout-projects");
+        commands.entity(entity).remove::<ProjectFilesTask>();
         page.icon = vmux_api::PageIcon::Builtin(vmux_api::BuiltinIcon::Project);
         commands.trigger(ScopeProjectionRequest {
             webview: entity,
@@ -990,6 +1156,36 @@ struct ProjectCatalog;
 impl ProjectCatalog {
     const MAX_DEPTH: usize = 6;
 
+    fn url_for_directory(root: &Path, directory: &Path) -> Option<String> {
+        let root = vmux_path::PathIdentity::resolve(root).into_path_buf();
+        let directory = vmux_path::PathIdentity::resolve(directory).into_path_buf();
+        for path in directory.ancestors() {
+            if path == root.as_path() {
+                break;
+            }
+            if !path.join(".git").is_dir() {
+                continue;
+            }
+            if let Some(url) = ProjectRoute::from_path(&root, path)
+                && ProjectRoute::resolve(&url, &root).is_some_and(|result| result.is_ok())
+            {
+                return Some(url);
+            }
+            let entries = std::fs::read_dir(root.join("imported")).ok()?;
+            for entry in entries.flatten() {
+                if entry.path().canonicalize().ok().as_deref() != Some(path) {
+                    continue;
+                }
+                let url = ProjectRoute::from_path(&root, &entry.path())?;
+                if ProjectRoute::resolve(&url, &root).is_some_and(|result| result.is_ok()) {
+                    return Some(url);
+                }
+            }
+            return None;
+        }
+        None
+    }
+
     fn read(root: &Path, archive: &ProjectArchive) -> ProjectUiState {
         let mut entries = Vec::new();
         Self::walk(root, root, 0, archive, &mut entries);
@@ -1022,6 +1218,9 @@ impl ProjectCatalog {
                     continue;
                 }
                 let projection = SessionSummaryProjection::new(session, &catalog.stages, now);
+                if projection.archived {
+                    continue;
+                }
                 if projection.stale {
                     entry.stale_sessions += 1;
                 } else if !projection.terminal {
@@ -1099,6 +1298,203 @@ impl ProjectCatalog {
 mod tests {
     use super::*;
     use vmux_session::{SessionSummary, StageSummary};
+
+    #[test]
+    fn contextual_project_open_uses_the_owning_repository_and_preserves_new_stack_policy() {
+        let root = tempfile::tempdir().unwrap();
+        let project = root.path().join("repo");
+        let cwd = project.join(".worktrees/task/src");
+        std::fs::create_dir_all(&cwd).unwrap();
+        std::fs::create_dir(project.join(".git")).unwrap();
+        std::fs::write(
+            project.join(".worktrees/task/.git"),
+            "gitdir: ../../../.git/worktrees/task\n",
+        )
+        .unwrap();
+        let mut page = ProjectPage::at(root.path(), "vmux://projects/");
+        page.app.world_mut().spawn((
+            vmux_layout::tab::Tab {
+                name: "Repo".to_string(),
+                startup_dir: Some(cwd.to_string_lossy().into_owned()),
+            },
+            vmux_ecs::Active,
+        ));
+
+        page.app
+            .world_mut()
+            .trigger(vmux_ecs::workspace::ProjectContextOpenRequest { force_new: true });
+
+        let requests = page
+            .app
+            .world_mut()
+            .resource_mut::<Messages<vmux_layout::stack::OpenRequest>>()
+            .drain()
+            .collect::<Vec<_>>();
+        assert_eq!(requests.len(), 1);
+        assert_eq!(requests[0].url.as_deref(), Some("vmux://projects/repo"));
+        assert_eq!(requests[0].policy, vmux_layout::stack::OpenPolicy::NewStack);
+    }
+
+    #[test]
+    fn contextual_project_urls_keep_imported_aliases_and_ignore_unrelated_directories() {
+        let root = tempfile::tempdir().unwrap();
+        let external = tempfile::tempdir().unwrap();
+        std::fs::create_dir(external.path().join(".git")).unwrap();
+        std::fs::create_dir(external.path().join("src")).unwrap();
+        std::fs::create_dir(root.path().join("imported")).unwrap();
+        std::os::unix::fs::symlink(external.path(), root.path().join("imported/external")).unwrap();
+        assert_eq!(
+            ProjectCatalog::url_for_directory(root.path(), &external.path().join("src")),
+            Some("vmux://projects/imported/external".to_string())
+        );
+        assert_eq!(
+            ProjectCatalog::url_for_directory(root.path(), root.path()),
+            None
+        );
+        let unrelated = tempfile::tempdir().unwrap();
+        assert_eq!(
+            ProjectCatalog::url_for_directory(root.path(), unrelated.path()),
+            None
+        );
+    }
+
+    fn deliver_frame(event: On<bevy_cef::prelude::BinHostEmitEvent>) {
+        event.mark_delivered();
+    }
+
+    struct ProjectPage {
+        app: App,
+        view: Entity,
+    }
+
+    impl ProjectPage {
+        fn at(root: &Path, url: &str) -> Self {
+            let mut app = App::new();
+            app.add_plugins((MinimalPlugins, ProjectPagePlugin))
+                .init_resource::<vmux_setting::AppSettings>()
+                .init_resource::<CatalogSnapshot>()
+                .add_message::<RepositoryProvisionCompleted>()
+                .insert_non_send(bevy_cef::prelude::Browsers::default())
+                .add_observer(deliver_frame);
+            app.world_mut().spawn(vmux_ecs::profile::ProjectsRoot(
+                vmux_ecs::profile::ProjectsDirectory::ensure_at(root.to_path_buf()).unwrap(),
+            ));
+            let view = app
+                .world_mut()
+                .spawn((
+                    vmux_ecs::PageMetadata {
+                        url: url.to_string(),
+                        ..Default::default()
+                    },
+                    bevy_cef::prelude::BinIpcSurfaceGeneration(1),
+                    bevy_cef::prelude::BinIpcNavigationRevision(1),
+                    bevy_cef::prelude::BinIpcEpoch(1),
+                ))
+                .id();
+            app.world_mut()
+                .non_send_mut::<bevy_cef::prelude::Browsers>()
+                .set_externally_hosted(view);
+            app.world_mut().spawn(vmux_api::UiEventPermissions {
+                url: ProjectRoute::ROOT,
+                owns_subtree: true,
+                permissions: &["ProjectUiState", "ProjectFilesUiState"],
+            });
+            Self { app, view }
+        }
+
+        fn files(&self) -> Option<crate::project::ProjectFilesUiState> {
+            self.app
+                .world()
+                .get::<vmux_ecs::UiState<crate::project::ProjectFilesUiState>>(self.view)?
+                .current()
+                .cloned()
+        }
+
+        fn finish(&mut self) -> crate::project::ProjectFilesUiState {
+            let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+            loop {
+                self.app.update();
+                if let Some(state) = self.files()
+                    && state.ready
+                {
+                    return state;
+                }
+                assert!(
+                    std::time::Instant::now() < deadline,
+                    "project files never finished"
+                );
+                std::thread::sleep(std::time::Duration::from_millis(5));
+            }
+        }
+    }
+
+    #[test]
+    fn project_detail_finishes_loading_an_empty_directory_without_an_editor_view() {
+        let root = tempfile::tempdir().unwrap();
+        let project = root.path().join("empty");
+        std::fs::create_dir(&project).unwrap();
+        let mut page = ProjectPage::at(root.path(), "vmux://projects/empty");
+
+        let files = page.finish();
+
+        assert_eq!(
+            files.root,
+            project.canonicalize().unwrap().display().to_string()
+        );
+        assert!(files.entries.is_empty());
+        assert!(files.error.is_empty());
+        assert!(
+            page.app
+                .world()
+                .get::<super::super::editor::FileView>(page.view)
+                .is_none()
+        );
+    }
+
+    #[test]
+    fn project_files_complete_errors_and_discard_results_from_older_navigation() {
+        let root = tempfile::tempdir().unwrap();
+        let current = "vmux://projects/current";
+        for outdated in [false, true] {
+            let mut page = ProjectPage::at(root.path(), current);
+            let missing = root.path().join("missing");
+            page.app.world_mut().entity_mut(page.view).insert((
+                ProjectPageRevision::new(current),
+                ProjectFilesTask::spawn(
+                    if outdated {
+                        "vmux://projects/previous"
+                    } else {
+                        current
+                    }
+                    .to_string(),
+                    missing,
+                    if outdated { 0 } else { 1 },
+                    None,
+                ),
+            ));
+            let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+            while page
+                .app
+                .world()
+                .get::<ProjectFilesTask>(page.view)
+                .is_some()
+            {
+                page.app.update();
+                assert!(std::time::Instant::now() < deadline);
+                std::thread::sleep(std::time::Duration::from_millis(5));
+            }
+            if outdated {
+                assert!(page.files().is_none());
+            } else {
+                let files = page
+                    .files()
+                    .expect("a failed read must finish the skeleton");
+                assert!(files.ready);
+                assert!(!files.error.is_empty());
+                assert!(files.entries.is_empty());
+            }
+        }
+    }
 
     #[test]
     fn catalog_finds_repository_roots_without_descending_into_them() {
@@ -1329,5 +1725,21 @@ mod tests {
                 .join(&repository.name),
             Path::new("/projects/github.com/vmux-ai/vmux")
         );
+    }
+
+    #[test]
+    fn github_repository_normalizes_supported_urls_to_https() {
+        for input in [
+            "https://github.com/vmux-ai/vmux.git",
+            "git@github.com:vmux-ai/vmux.git",
+        ] {
+            let repository = GitHubRepository::parse(input).unwrap();
+            assert_eq!(repository.remote, "https://github.com/vmux-ai/vmux.git");
+        }
+    }
+
+    #[test]
+    fn github_repository_rejects_insecure_http() {
+        assert!(GitHubRepository::parse("http://github.com/vmux-ai/vmux.git").is_err());
     }
 }

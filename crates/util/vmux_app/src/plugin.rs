@@ -26,8 +26,6 @@ pub enum VmuxPlugin {
     Editor(vmux_editor::EditorPlugin),
     #[plugin(feature = "extension", desktop, requires(browser))]
     Extension(vmux_extension::ExtensionPlugin),
-    #[plugin(feature = "browser", desktop, requires(layout))]
-    Browser(vmux_browser::BrowserPlugin),
     #[plugin(feature = "git", desktop, requires(layout))]
     Git(vmux_git::GitPlugin),
     #[plugin(
@@ -56,6 +54,8 @@ pub enum VmuxPlugin {
     Start(vmux_start::StartPlugin),
     #[plugin(feature = "tool", desktop, requires(layout))]
     Tool(vmux_tool::ToolPlugin),
+    #[plugin(feature = "browser", desktop, requires(layout))]
+    Browser(vmux_browser::BrowserPlugin),
     #[plugin(feature = "mobile", mobile)]
     MobilePages(crate::VmuxMobilePlugin),
 }

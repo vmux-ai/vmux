@@ -16,11 +16,13 @@ use vmux_ecs::terminal::TerminalLaunch;
 use vmux_ecs::{
     ArchivedPage, ArchivedPagePosition, ArchivedTabPage, CreatedAt, PageArchiveRequest,
     PageMetadata, PageOpenRequest, PageOpenTarget, PaneStep, SplitAxis, TabCommandSet, UnixMillis,
+    WorkspaceKind,
 };
 use vmux_history::LastActivatedAt;
 
 use super::command::LayoutRequestSet;
 use crate::pane::{Pane, PaneId, PaneSize, PaneSplit, PaneSplitDirection};
+use crate::presentation::{Projection, Retiring, Transition};
 use crate::settings::LayoutSettings;
 use crate::space::{CurrentSpace, Space, SpaceHierarchy, SpaceId};
 #[cfg(test)]
@@ -70,7 +72,13 @@ impl Plugin for ArchivePlugin {
             .add_message::<TabLayoutSpawnRequest>()
             .init_resource::<LayoutSettings>()
             .add_observer(issue_reopen_closed_page)
-            .add_systems(Update, (capture_archived_pages, maintain))
+            .add_systems(Update, maintain)
+            .add_systems(
+                Update,
+                capture_archived_pages
+                    .after(stack_close)
+                    .before(CloseStackSet),
+            )
             .add_systems(
                 Update,
                 (
@@ -94,12 +102,13 @@ fn stack_close(
     layout: TabArchiveLayout,
     mut writer: MessageWriter<PageArchiveRequest>,
 ) {
+    let mut seen = HashSet::new();
     for request in reader.read() {
-        if request.reason != CloseStackReason::ByUser {
+        if request.reason != CloseStackReason::ByUser || !seen.insert(request.stack) {
             continue;
         }
         let stack = request.stack;
-        let Ok((_, meta, launch, _)) = layout.stack_pages.get(stack) else {
+        let Ok((_, meta, launch, _, workspace)) = layout.stack_pages.get(stack) else {
             continue;
         };
         if meta.url.is_empty() {
@@ -109,7 +118,8 @@ fn stack_close(
         let space_id = layout.space_hierarchy.id(stack).unwrap_or_default();
         let tab_index = space.and_then(|space| layout.tab_index(stack, space));
         let (leaf_pane_id, stack_index, pane_path) = layout.pane_path(stack).unwrap_or_default();
-        writer.write(PageArchiveRequest {
+        let request = PageArchiveRequest {
+            source: layout.surfaces.current(stack),
             url: meta.url.clone(),
             title: meta.title.clone(),
             space_id,
@@ -118,22 +128,26 @@ fn stack_close(
             leaf_pane_id,
             stack_index,
             pane_path,
-        });
+            workspace: workspace.copied(),
+        };
+        writer.write(request);
     }
 }
 
 fn capture_archived_pages(mut reader: MessageReader<PageArchiveRequest>, mut commands: Commands) {
     for request in reader.read() {
         if let Some(bundle) = ArchivedPageBundle::new(request, UnixMillis::now().0, None) {
-            commands.queue(bundle);
+            commands.queue(bundle.with_source(request.source));
         }
     }
 }
 
 struct ArchivedPageBundle {
+    source: Option<Entity>,
     page: ArchivedPage,
     position: ArchivedPagePosition,
     tab: Option<ArchivedTabPage>,
+    workspace: Option<WorkspaceKind>,
 }
 
 impl Command for ArchivedPageBundle {
@@ -144,10 +158,22 @@ impl Command for ArchivedPageBundle {
         if let Some(tab) = self.tab {
             entity.insert(tab);
         }
+        if let Some(workspace) = self.workspace {
+            entity.insert(workspace);
+        }
+        let archive = entity.id();
+        if let Some(source) = self.source {
+            world.trigger(vmux_ecs::page::ArchiveCaptureRequest { archive, source });
+        }
     }
 }
 
 impl ArchivedPageBundle {
+    fn with_source(mut self, source: Option<Entity>) -> Self {
+        self.source = source;
+        self
+    }
+
     fn new(
         request: &PageArchiveRequest,
         closed_at: i64,
@@ -157,6 +183,7 @@ impl ArchivedPageBundle {
             return None;
         }
         Some(Self {
+            source: None,
             page: ArchivedPage {
                 url: request.url.clone(),
                 title: request.title.clone(),
@@ -171,6 +198,7 @@ impl ArchivedPageBundle {
                 pane_path: request.pane_path.clone(),
             },
             tab,
+            workspace: request.workspace,
         })
     }
 }
@@ -219,6 +247,7 @@ fn maintain(
 
 #[derive(SystemParam)]
 struct TabArchiveLayout<'w, 's> {
+    surfaces: crate::hosted_page::StackSurface<'w, 's>,
     stack_pages: Query<
         'w,
         's,
@@ -227,14 +256,15 @@ struct TabArchiveLayout<'w, 's> {
             &'static PageMetadata,
             Option<&'static TerminalLaunch>,
             Option<&'static LastActivatedAt>,
+            Option<&'static WorkspaceKind>,
         ),
-        With<Stack>,
+        (With<Stack>, Without<Retiring>),
     >,
     child_of: Query<'w, 's, &'static ChildOf>,
     children_q: Query<'w, 's, &'static Children>,
     space_hierarchy: SpaceHierarchy<'w, 's>,
     tabs: Query<'w, 's, (), With<Tab>>,
-    stacks: Query<'w, 's, (), With<Stack>>,
+    stacks: Query<'w, 's, (), (With<Stack>, Without<Retiring>)>,
     pane_ids: Query<'w, 's, &'static PaneId>,
     splits: Query<'w, 's, &'static PaneSplit>,
     pane_sizes: Query<'w, 's, &'static PaneSize>,
@@ -322,10 +352,26 @@ struct TabCloseLayout<'w, 's> {
     active_tab: ActiveTabParam<'w, 's>,
     hierarchy: TabHierarchy<'w, 's>,
     tabs: Query<'w, 's, &'static Tab>,
+    retiring: Query<'w, 's, (), With<Retiring>>,
+    transitions: Query<'w, 's, &'static Transition>,
+    presentation: Projection<'w, 's>,
+    surfaces: Query<'w, 's, (), With<crate::Browser>>,
     archive: TabArchiveLayout<'w, 's>,
     primary_window: Query<'w, 's, Entity, With<PrimaryWindow>>,
     layout_requests: MessageWriter<'w, TabLayoutSpawnRequest>,
     commands: Commands<'w, 's>,
+}
+
+impl TabCloseLayout<'_, '_> {
+    fn has_surface(&self, entity: Entity) -> bool {
+        if self.surfaces.contains(entity) {
+            return true;
+        }
+        self.archive
+            .children_q
+            .get(entity)
+            .is_ok_and(|children| children.iter().any(|child| self.has_surface(child)))
+    }
 }
 
 fn handle_close_tab_requests(
@@ -336,7 +382,7 @@ fn handle_close_tab_requests(
     let requests: Vec<Entity> = reader
         .read()
         .filter_map(|request| seen.insert(request.tab).then_some(request.tab))
-        .filter(|tab| layout.tabs.contains(*tab))
+        .filter(|tab| layout.tabs.contains(*tab) && !layout.retiring.contains(*tab))
         .collect();
     let closing: HashSet<Entity> = requests.iter().copied().collect();
     let mut replacement_spaces = HashSet::new();
@@ -345,12 +391,22 @@ fn handle_close_tab_requests(
         let Ok(tab) = layout.tabs.get(request.tab) else {
             continue;
         };
+        if let Some((incoming, mut transition)) = layout.presentation.retaining(request.tab) {
+            transition.retire(request.tab);
+            archive_tab(request.tab, tab, &layout.archive, &mut layout.commands);
+            layout.commands.trigger(TabClosed);
+            layout.commands.entity(request.tab).insert(Retiring);
+            layout.commands.entity(incoming).insert(transition);
+            continue;
+        }
         let siblings = layout.hierarchy.siblings(request.tab);
         let surviving_siblings: Vec<Entity> = siblings
             .iter()
             .copied()
-            .filter(|sibling| !closing.contains(sibling))
+            .filter(|sibling| !closing.contains(sibling) && !layout.retiring.contains(*sibling))
             .collect();
+        let active = layout.active_tab.get() == Some(request.tab);
+        let mut deferred = false;
         if surviving_siblings.is_empty() {
             let Ok(tab_space) = layout
                 .archive
@@ -384,23 +440,44 @@ fn handle_close_tab_requests(
                     focus: true,
                 });
                 replacement_spaces.insert(tab_space);
+                deferred = layout.has_surface(request.tab);
             }
-        } else if layout.active_tab.get() == Some(request.tab)
+        } else if active
             && let Some(next) = Tab::next_after_close(
                 request.tab,
                 &siblings
                     .iter()
                     .copied()
-                    .filter(|sibling| *sibling == request.tab || !closing.contains(sibling))
+                    .filter(|sibling| {
+                        *sibling == request.tab
+                            || !closing.contains(sibling) && !layout.retiring.contains(*sibling)
+                    })
                     .collect::<Vec<_>>(),
             )
         {
-            layout.commands.entity(next).insert(LastActivatedAt::now());
+            deferred = layout.has_surface(request.tab);
+            if deferred {
+                let pending = layout.transitions.get(request.tab).ok();
+                let visible = layout
+                    .presentation
+                    .retained(request.tab)
+                    .unwrap_or(request.tab);
+                layout.commands.entity(next).insert((
+                    LastActivatedAt::now(),
+                    Transition::retiring(visible, request.tab, pending),
+                ));
+            } else {
+                layout.commands.entity(next).insert(LastActivatedAt::now());
+            }
         }
 
         archive_tab(request.tab, tab, &layout.archive, &mut layout.commands);
         layout.commands.trigger(TabClosed);
-        layout.commands.entity(request.tab).despawn();
+        if deferred {
+            layout.commands.entity(request.tab).insert(Retiring);
+        } else {
+            layout.commands.entity(request.tab).despawn();
+        }
     }
 }
 
@@ -422,7 +499,7 @@ fn archive_tab(tab_entity: Entity, tab: &Tab, layout: &TabArchiveLayout, command
             .stack_pages
             .get(*stack)
             .ok()
-            .and_then(|(_, _, _, activated)| activated)
+            .and_then(|(_, _, _, activated, _)| activated)
             .map(|activated| activated.0)
             .unwrap_or_default()
     });
@@ -430,11 +507,12 @@ fn archive_tab(tab_entity: Entity, tab: &Tab, layout: &TabArchiveLayout, command
     let closed_at = UnixMillis::now().0;
 
     for stack in stacks {
-        let Ok((_, metadata, launch, _)) = layout.stack_pages.get(stack) else {
+        let Ok((_, metadata, launch, _, workspace)) = layout.stack_pages.get(stack) else {
             continue;
         };
         let (leaf_pane_id, stack_index, pane_path) = layout.pane_path(stack).unwrap_or_default();
         let request = PageArchiveRequest {
+            source: layout.surfaces.current(stack),
             url: metadata.url.clone(),
             title: metadata.title.clone(),
             space_id: space_id.clone(),
@@ -443,6 +521,7 @@ fn archive_tab(tab_entity: Entity, tab: &Tab, layout: &TabArchiveLayout, command
             leaf_pane_id,
             stack_index,
             pane_path,
+            workspace: workspace.copied(),
         };
         if let Some(bundle) = ArchivedPageBundle::new(
             &request,
@@ -454,7 +533,7 @@ fn archive_tab(tab_entity: Entity, tab: &Tab, layout: &TabArchiveLayout, command
                 active: active_stack == Some(stack),
             }),
         ) {
-            commands.queue(bundle);
+            commands.queue(bundle.with_source(layout.surfaces.current(stack)));
         }
     }
 }
@@ -462,7 +541,7 @@ fn archive_tab(tab_entity: Entity, tab: &Tab, layout: &TabArchiveLayout, command
 fn collect_descendant_stacks(
     entity: Entity,
     children_q: &Query<&Children>,
-    stacks: &Query<(), With<Stack>>,
+    stacks: &Query<(), (With<Stack>, Without<Retiring>)>,
     result: &mut Vec<Entity>,
 ) {
     if stacks.contains(entity) {
@@ -479,6 +558,10 @@ fn collect_descendant_stacks(
 
 #[derive(SystemParam)]
 struct ReopenLayout<'w, 's> {
+    active_tab: ActiveTabParam<'w, 's>,
+    focus: crate::stack::LayoutFocus<'w, 's>,
+    surfaces: crate::hosted_page::StackSurface<'w, 's>,
+    item_history: Query<'w, 's, &'static vmux_ecs::page::PageItemHistory>,
     pane_ids: Query<'w, 's, (Entity, &'static PaneId)>,
     leaf_panes: Query<'w, 's, (), (With<Pane>, Without<PaneSplit>)>,
     child_of: Query<'w, 's, &'static ChildOf>,
@@ -550,11 +633,17 @@ struct ReopenEntry {
     page: ArchivedPage,
     position: Option<ArchivedPagePosition>,
     tab: Option<ArchivedTabPage>,
+    workspace: Option<WorkspaceKind>,
 }
 
 fn handle_reopen_closed_page(
     mut reader: MessageReader<ReopenClosedPage>,
-    archived: Query<(Entity, &ArchivedPage, Option<&ArchivedTabPage>)>,
+    archived: Query<(
+        Entity,
+        &ArchivedPage,
+        Option<&ArchivedTabPage>,
+        Option<&WorkspaceKind>,
+    )>,
     positions: Query<&ArchivedPagePosition>,
     layout: ReopenLayout,
     mut tabs: TabSpawner,
@@ -567,11 +656,28 @@ fn handle_reopen_closed_page(
     if !reopen {
         return;
     }
-
-    let Some((entry_entity, page, archived_tab)) = archived
+    let latest = archived
         .iter()
-        .max_by_key(|(_, page, _)| page.closed_at)
-        .map(|(entity, page, tab)| (entity, page.clone(), tab.cloned()))
+        .map(|(_, page, _, _)| page.closed_at)
+        .max()
+        .unwrap_or(0);
+    let (_, _, stack) = layout.focus.resolve(layout.active_tab.get());
+    if let Some(page) = stack.and_then(|stack| layout.surfaces.current(stack))
+        && layout
+            .item_history
+            .get(page)
+            .is_ok_and(|history| history.closed_at >= latest)
+    {
+        commands.trigger(vmux_ecs::page::ReopenItemRequest::new(page, latest));
+        return;
+    }
+
+    let Some((entry_entity, page, archived_tab, archived_workspace)) = archived
+        .iter()
+        .max_by_key(|(_, page, _, _)| page.closed_at)
+        .map(|(entity, page, tab, workspace)| {
+            (entity, page.clone(), tab.cloned(), workspace.copied())
+        })
     else {
         return;
     };
@@ -583,14 +689,15 @@ fn handle_reopen_closed_page(
     if let Some(tab) = archived_tab.filter(|tab| !tab.group_id.is_empty()) {
         let entries: Vec<ReopenEntry> = archived
             .iter()
-            .filter(|(_, _, candidate)| {
+            .filter(|(_, _, candidate, _)| {
                 candidate.is_some_and(|candidate| candidate.group_id == tab.group_id)
             })
-            .map(|(entity, page, tab)| ReopenEntry {
+            .map(|(entity, page, tab, workspace)| ReopenEntry {
                 entity,
                 page: page.clone(),
                 position: positions.get(entity).ok().cloned(),
                 tab: tab.cloned(),
+                workspace: workspace.copied(),
             })
             .collect();
         let restored = restore_archived_tab(
@@ -602,7 +709,11 @@ fn handle_reopen_closed_page(
             target.window,
         );
         for (entry, stack) in restored {
-            reopen_page_content(&entry.page, stack, &mut commands);
+            commands.trigger(vmux_ecs::page::ArchiveRestoreRequest {
+                stack,
+                archive: entry.entity,
+            });
+            reopen_page_content(&entry.page, entry.workspace, stack, &mut commands);
             commands.entity(entry.entity).despawn();
         }
         return;
@@ -629,16 +740,28 @@ fn handle_reopen_closed_page(
     commands.entity(stack).insert(LastActivatedAt::now());
     focus_reopened_ancestors(focus_anchor, &layout, &mut commands);
 
-    reopen_page_content(&page, stack, &mut commands);
+    commands.trigger(vmux_ecs::page::ArchiveRestoreRequest {
+        stack,
+        archive: entry_entity,
+    });
+    reopen_page_content(&page, archived_workspace, stack, &mut commands);
 
     commands.entity(entry_entity).despawn();
 }
 
-fn reopen_page_content(page: &ArchivedPage, stack: Entity, commands: &mut Commands) {
+fn reopen_page_content(
+    page: &ArchivedPage,
+    workspace: Option<WorkspaceKind>,
+    stack: Entity,
+    commands: &mut Commands,
+) {
     if page.url.is_empty() {
         return;
     }
     commands.entity(stack).insert(PageRestore);
+    if let Some(workspace) = workspace {
+        commands.entity(stack).insert(workspace);
+    }
     if let Some(launch) = page.launch.as_ref() {
         commands.entity(stack).insert(launch.clone());
     }
@@ -1156,6 +1279,7 @@ mod tests {
         app.world_mut()
             .resource_mut::<Messages<PageArchiveRequest>>()
             .write(PageArchiveRequest {
+                source: None,
                 url: "https://a.example".to_string(),
                 title: "A".to_string(),
                 space_id: "s".to_string(),
@@ -1164,12 +1288,14 @@ mod tests {
                 leaf_pane_id: String::new(),
                 stack_index: 0,
                 pane_path: Vec::new(),
+                workspace: Some(WorkspaceKind::Knowledge),
             });
         app.update();
-        let mut q = app.world_mut().query::<&ArchivedPage>();
+        let mut q = app.world_mut().query::<(&ArchivedPage, &WorkspaceKind)>();
         let all: Vec<_> = q.iter(app.world()).collect();
         assert_eq!(all.len(), 1);
-        assert_eq!(all[0].url, "https://a.example");
+        assert_eq!(all[0].0.url, "https://a.example");
+        assert_eq!(*all[0].1, WorkspaceKind::Knowledge);
     }
 
     #[test]
@@ -1180,6 +1306,7 @@ mod tests {
         app.world_mut()
             .resource_mut::<Messages<PageArchiveRequest>>()
             .write(PageArchiveRequest {
+                source: None,
                 url: String::new(),
                 title: String::new(),
                 space_id: "s".to_string(),
@@ -1188,6 +1315,7 @@ mod tests {
                 leaf_pane_id: String::new(),
                 stack_index: 0,
                 pane_path: Vec::new(),
+                workspace: None,
             });
         app.update();
         let mut q = app.world_mut().query::<&ArchivedPage>();
@@ -1202,6 +1330,7 @@ mod tests {
         app.world_mut()
             .resource_mut::<Messages<PageArchiveRequest>>()
             .write(PageArchiveRequest {
+                source: None,
                 url: "https://a.example".to_string(),
                 title: "A".to_string(),
                 space_id: "s".to_string(),
@@ -1215,6 +1344,7 @@ mod tests {
                     child_index: 1,
                     flex_weights: vec![1.0, 2.0],
                 }],
+                workspace: None,
             });
         app.update();
         let mut q = app
@@ -1306,6 +1436,30 @@ mod tests {
         assert_eq!(reqs.len(), 1);
         assert_eq!(reqs[0].url, "https://gone.example");
         assert_eq!(reqs[0].space_id, "s1");
+    }
+
+    #[test]
+    fn duplicate_close_requests_archive_the_stack_once() {
+        let mut app = archive_app();
+        let stack = app
+            .world_mut()
+            .spawn((
+                Stack::default(),
+                PageMetadata {
+                    url: "https://gone.example".to_string(),
+                    ..default()
+                },
+            ))
+            .id();
+        for _ in 0..3 {
+            app.world_mut()
+                .resource_mut::<Messages<CloseStackRequest>>()
+                .write(CloseStackRequest::by_user(stack));
+        }
+
+        app.update();
+
+        assert_eq!(drain_archive_reqs(&mut app).len(), 1);
     }
 
     #[test]
@@ -1436,10 +1590,15 @@ mod tests {
 
     fn close_pipeline_app() -> App {
         let mut app = App::new();
-        app.add_plugins((MinimalPlugins, crate::stack::StackPlugin, ArchivePlugin))
-            .add_message::<CloseTabRequest>()
-            .add_message::<PageOpenRequest>()
-            .init_resource::<LayoutSettings>();
+        app.add_plugins((
+            MinimalPlugins,
+            crate::stack::StackPlugin,
+            crate::presentation::PresentationPlugin,
+            ArchivePlugin,
+        ))
+        .add_message::<CloseTabRequest>()
+        .add_message::<PageOpenRequest>()
+        .init_resource::<LayoutSettings>();
         app.world_mut()
             .spawn((bevy::window::Window::default(), PrimaryWindow));
         app
@@ -1518,9 +1677,9 @@ mod tests {
     }
 
     #[test]
-    fn close_command_archives_the_active_stack_before_it_is_despawned() {
+    fn close_command_archives_the_active_stack_before_the_successor_retires_it() {
         let mut app = close_pipeline_app();
-        let (_inactive, active) = spawn_inactive_and_active_stacks(&mut app);
+        let (inactive, active) = spawn_inactive_and_active_stacks(&mut app);
 
         app.world_mut()
             .resource_mut::<Messages<CloseRequest>>()
@@ -1528,11 +1687,24 @@ mod tests {
         app.update();
         app.update();
 
-        assert!(app.world().get_entity(active).is_err());
+        assert!(app.world().get_entity(active).is_ok());
         assert_eq!(
             archived_urls(&mut app),
             vec!["https://active.example".to_string()]
         );
+
+        app.world_mut().spawn((
+            crate::cef::Browser,
+            vmux_ecs::page::PageReady {},
+            vmux_ecs::PagePresented,
+            crate::hosted_page::SurfacePresentationReady,
+            ChildOf(inactive),
+        ));
+        for _ in 0..3 {
+            app.update();
+        }
+
+        assert!(app.world().get_entity(active).is_err());
     }
 
     #[test]
@@ -1613,6 +1785,16 @@ mod tests {
             LastActivatedAt(2),
             ChildOf(left),
         ));
+        app.world_mut().spawn((
+            Stack::default(),
+            PageMetadata {
+                url: "https://retiring.example".to_string(),
+                ..default()
+            },
+            LastActivatedAt(5),
+            Retiring,
+            ChildOf(right),
+        ));
         app.world_mut()
             .resource_mut::<Messages<CloseTabRequest>>()
             .write(CloseTabRequest { tab });
@@ -1637,6 +1819,11 @@ mod tests {
             })
             .collect();
         assert_eq!(archived.len(), 3);
+        assert!(
+            archived
+                .iter()
+                .all(|entry| entry.0 != "https://retiring.example")
+        );
         assert_eq!(
             archived
                 .iter()
@@ -1749,12 +1936,15 @@ mod tests {
     fn reopen_targets_materialized_stack() {
         let mut app = reopen_app();
         app.world_mut().spawn((Space, SpaceId("s1".to_string())));
-        app.world_mut().spawn(ArchivedPage {
-            url: "vmux://terminal/".to_string(),
-            space_id: "s1".to_string(),
-            closed_at: 5,
-            ..default()
-        });
+        app.world_mut().spawn((
+            ArchivedPage {
+                url: "vmux://terminal/".to_string(),
+                space_id: "s1".to_string(),
+                closed_at: 5,
+                ..default()
+            },
+            WorkspaceKind::Knowledge,
+        ));
 
         dispatch_reopen(&mut app);
         let opens = drain_opens(&mut app);
@@ -1764,6 +1954,10 @@ mod tests {
         };
         assert!(app.world().get::<Stack>(stack).is_some());
         assert!(app.world().get::<PageRestore>(stack).is_some());
+        assert_eq!(
+            app.world().get::<WorkspaceKind>(stack),
+            Some(&WorkspaceKind::Knowledge)
+        );
     }
 
     #[test]

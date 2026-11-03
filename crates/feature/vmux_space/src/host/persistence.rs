@@ -26,7 +26,9 @@ use vmux_layout::space::Space;
 #[cfg(test)]
 use vmux_layout::space::SpaceId;
 use vmux_layout::window::WindowHierarchy;
-use vmux_layout::{LayoutPersistenceSet, LayoutStartupSet};
+use vmux_layout::{
+    LayoutPersistenceSet, LayoutRestoreCommitted, LayoutRestoreRequest, LayoutStartupSet,
+};
 #[cfg(test)]
 use vmux_layout::{
     pane::{Pane, PaneId},
@@ -38,6 +40,8 @@ pub(crate) struct WorkspacePersistencePlugin;
 impl Plugin for WorkspacePersistencePlugin {
     fn build(&self, app: &mut App) {
         app.add_message::<WorkspaceSaveRequest>()
+            .add_message::<LayoutRestoreRequest>()
+            .add_message::<LayoutRestoreCommitted>()
             .add_observer(save_on_default_event)
             .add_observer(load_on_default_event)
             .add_systems(
@@ -111,16 +115,22 @@ struct RestorePending;
 fn mark_restore_pending(
     _trigger: On<Loaded>,
     persistence: Single<Entity, With<AutoSave>>,
+    mut restore_requests: MessageWriter<LayoutRestoreRequest>,
     mut commands: Commands,
 ) {
     commands.entity(*persistence).insert(RestorePending);
+    restore_requests.write(LayoutRestoreRequest);
 }
 
 fn complete_restore(
+    mut committed: MessageReader<LayoutRestoreCommitted>,
     mut restore: Single<&mut WorkspaceRestore>,
     persistence: Single<Entity, With<RestorePending>>,
     mut commands: Commands,
 ) {
+    if committed.read().count() == 0 {
+        return;
+    }
     restore.complete = true;
     commands.entity(*persistence).remove::<RestorePending>();
 }

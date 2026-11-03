@@ -187,7 +187,7 @@ pub(super) fn EditorTabStrip(tabs: Vec<OpenEditorItem>) -> Element {
 
     rsx! {
         div {
-            class: "flex min-w-0 flex-1 items-center gap-1 overflow-x-auto overflow-y-hidden py-1",
+            class: "flex min-w-0 flex-1 items-center gap-1 overflow-x-auto overflow-y-hidden py-0.5",
             for tab in tabs {
                 EditorTab { key: "{tab.path}", tab }
             }

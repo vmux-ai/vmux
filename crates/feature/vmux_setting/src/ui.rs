@@ -54,11 +54,13 @@ if (viewport && sections.length) {
   observer.observe(viewport);
   for (const section of sections) observer.observe(section);
   viewport.addEventListener('scroll', schedule, { passive: true });
+  document.addEventListener('scroll', schedule, true);
   window.addEventListener('resize', schedule, true);
   globalThis.__vmuxSettingsScrollSpyCleanup = () => {
     if (frame) cancelAnimationFrame(frame);
     observer.disconnect();
     viewport.removeEventListener('scroll', schedule);
+    document.removeEventListener('scroll', schedule, true);
     window.removeEventListener('resize', schedule, true);
     delete globalThis.__vmuxSettingsScrollSpyCleanup;
   };

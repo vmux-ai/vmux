@@ -1,8 +1,8 @@
 #![allow(non_snake_case)]
 
 use crate::{
-    ShortcutCloseRequest, ShortcutCollectionViewRequest, ShortcutProbeClearRequest,
-    ShortcutProbePressRequest, ShortcutProbeStatus, ShortcutStroke, ShortcutUiState,
+    ShortcutCollectionViewRequest, ShortcutProbeClearRequest, ShortcutProbePressRequest,
+    ShortcutProbeStatus, ShortcutStroke, ShortcutUiState,
 };
 use dioxus::prelude::*;
 use vmux_ui::components::manager::{
@@ -24,7 +24,6 @@ pub(crate) struct ShortcutPage;
 pub fn Page() -> Element {
     use_theme();
     let state = use_ui_state::<ShortcutUiState>().state;
-    let mut close_armed = use_signal(|| false);
     let state = state();
     let view = match state.collection_view {
         vmux_ecs::CollectionView::List => ManagerView::List,
@@ -46,22 +45,6 @@ pub fn Page() -> Element {
             autofocus: true,
             onkeydown: move |event: KeyboardEvent| {
                 let modifiers = event.modifiers();
-                let closes_page = event.code().to_string() == "KeyW"
-                    && modifiers.meta()
-                    && !modifiers.ctrl()
-                    && !modifiers.alt();
-                if closes_page && close_armed() {
-                    event.prevent_default();
-                    event.stop_propagation();
-                    close_armed.set(false);
-                    let _ = send(&ShortcutCloseRequest);
-                    return;
-                }
-                if event.code().to_string() != "MetaLeft"
-                    && event.code().to_string() != "MetaRight"
-                {
-                    close_armed.set(closes_page);
-                }
                 if event.code().to_string() == "Tab"
                     && !modifiers.ctrl()
                     && !modifiers.alt()

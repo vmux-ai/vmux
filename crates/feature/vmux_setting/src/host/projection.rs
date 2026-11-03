@@ -726,6 +726,7 @@ mod projection_tests {
         if trigger.event().id() != SettingsUiState::id() {
             return;
         }
+        trigger.event().mark_delivered();
         let state =
             rkyv::from_bytes::<SettingsUiState, rkyv::rancor::Error>(trigger.event().payload())
                 .unwrap();

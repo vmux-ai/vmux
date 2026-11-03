@@ -544,7 +544,7 @@ fn open(
         for url in urls {
             stack_requests.write(vmux_layout::stack::OpenRequest {
                 url,
-                focus_existing: false,
+                policy: vmux_layout::stack::OpenPolicy::ReplaceStartup,
             });
         }
     }

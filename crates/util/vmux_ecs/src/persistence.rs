@@ -123,7 +123,8 @@ fn detect_change<T: Component>(
     mut removed: RemovedComponents<T>,
     mut commands: Commands,
 ) {
-    if !changed.is_empty() || removed.read().next().is_some() {
+    let removed = removed.read().count() > 0;
+    if !changed.is_empty() || removed {
         commands.trigger(PersistenceDirty);
     }
 }

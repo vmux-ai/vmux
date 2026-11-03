@@ -45,6 +45,34 @@ impl Route {
         format!("{}?{query}", Self::Manager.url())
     }
 
+    pub fn manager_for_project(project: &str, status: &str) -> String {
+        let mut query = url::form_urlencoded::Serializer::new(String::new());
+        if !project.is_empty() {
+            query.append_pair("project", project);
+        }
+        if !status.is_empty() {
+            query.append_pair("status", status);
+        }
+        let query = query.finish();
+        if query.is_empty() {
+            return Self::Manager.url();
+        }
+        format!("{}?{query}", Self::Manager.url())
+    }
+
+    pub fn manager_filter(url: &str, key: &str) -> Option<String> {
+        if Self::parse(url) != Some(Self::Manager) {
+            return None;
+        }
+        let route = vmux_api::VmuxRoute::parse(url)?;
+        for (name, value) in url::form_urlencoded::parse(route.query()?.as_bytes()) {
+            if name == key && !value.is_empty() {
+                return Some(value.into_owned());
+            }
+        }
+        None
+    }
+
     pub fn requested_agent(url: &str) -> Option<AgentId> {
         if Self::parse(url) != Some(Self::Manager) {
             return None;
@@ -84,6 +112,25 @@ impl Route {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn project_session_links_round_trip_paths_and_activity_filters() {
+        let path = "/work/a project/#draft+one";
+        let url = Route::manager_for_project(path, "current");
+        assert_eq!(Route::parse(&url), Some(Route::Manager));
+        assert_eq!(
+            Route::manager_filter(&url, "project").as_deref(),
+            Some(path)
+        );
+        assert_eq!(
+            Route::manager_filter(&url, "status").as_deref(),
+            Some("current")
+        );
+        assert_eq!(
+            Route::manager_filter("vmux://sessions/session-1?project=a", "project"),
+            None
+        );
+    }
 
     #[test]
     fn parses_manager_and_session_routes() {

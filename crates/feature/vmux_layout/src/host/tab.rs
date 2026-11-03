@@ -2,6 +2,7 @@
 use crate::event::TabDropPlacement;
 use crate::event::{TabActivateRequest, TabCloseRequest, TabCreateRequest, TabReorderRequest};
 use crate::{TabLayoutSpawnContent, TabLayoutSpawnRequest, host::swap::SiblingOrder};
+use bevy::ecs::system::SystemParam;
 #[cfg(test)]
 use bevy::window::PrimaryWindow;
 use bevy::{ecs::relationship::Relationship, prelude::*};
@@ -12,12 +13,12 @@ use vmux_command::CommandDefinition;
 #[cfg(test)]
 use vmux_command::CommandManifest;
 use vmux_command::{CommandInvocation, CommandRuntimePlugin};
+use vmux_ecs::Order;
 use vmux_ecs::launcher::LauncherDismissRequest;
 #[cfg(test)]
 use vmux_ecs::manifest::FeaturePlugin;
 use vmux_ecs::persistence::PersistenceAppExt;
 pub use vmux_ecs::workspace::TabCommandSet;
-use vmux_ecs::{Active, Order};
 use vmux_flex::prelude::*;
 use vmux_history::LastActivatedAt;
 
@@ -34,6 +35,7 @@ impl Plugin for TabPlugin {
             .register_persisted::<TabWorktree>()
             .register_persisted::<TabDirDecided>()
             .add_message::<CloseTabRequest>()
+            .add_message::<CreateFromPageRequest>()
             .add_message::<crate::NewTabRequest>()
             .add_message::<LauncherDismissRequest>()
             .add_plugins(UiEventPlugin::<(
@@ -48,13 +50,12 @@ impl Plugin for TabPlugin {
             .add_observer(request_reorder)
             .add_systems(
                 Update,
-                (open, create, close, focus, shift, new)
+                (open, create, create_from_page, close, focus, shift, new)
                     .chain()
                     .in_set(LayoutRequestSet::Handle)
                     .in_set(TabCommandSet)
                     .after(crate::space::EffectiveStartupSet),
             )
-            .add_systems(PostUpdate, visibility.before(LayoutSystems::Layout))
             .add_systems(PostUpdate, order)
             .add_systems(Update, dismiss_launcher);
     }
@@ -189,10 +190,15 @@ pub struct CloseTabRequest {
     pub tab: Entity,
 }
 
+#[derive(Message, Clone, Copy)]
+struct CreateFromPageRequest {
+    origin: Entity,
+}
+
 #[derive(Component, Reflect, Default)]
 #[reflect(Component)]
 #[type_path = "vmux_desktop::layout::tab"]
-#[require(Save)]
+#[require(Save, crate::presentation::Layer)]
 pub struct Tab {
     pub name: String,
     pub startup_dir: Option<String>,
@@ -493,23 +499,6 @@ impl Tab {
     }
 }
 
-fn visibility(mut tabs: Query<(&mut Node, &mut Visibility, Has<Active>), With<Tab>>) {
-    for (mut node, mut vis, active) in &mut tabs {
-        let target_display = if active { Display::Flex } else { Display::None };
-        if node.display != target_display {
-            node.display = target_display;
-        }
-        let target_vis = if active {
-            Visibility::Visible
-        } else {
-            Visibility::Hidden
-        };
-        if *vis != target_vis {
-            *vis = target_vis;
-        }
-    }
-}
-
 fn order(
     spaces: Query<&Children, (With<crate::space::Space>, Changed<Children>)>,
     tab_q: Query<(), With<Tab>>,
@@ -538,37 +527,85 @@ fn order(
 }
 
 fn request_create(
-    _trigger: On<UiInput<TabCreateRequest>>,
-    mut requests: MessageWriter<OpenRequest>,
+    trigger: On<UiInput<TabCreateRequest>>,
+    mut requests: MessageWriter<CreateFromPageRequest>,
 ) {
-    requests.write(OpenRequest { url: None });
+    requests.write(CreateFromPageRequest {
+        origin: trigger.event().webview,
+    });
+}
+
+fn create_from_page(
+    mut requests: MessageReader<CreateFromPageRequest>,
+    scope: crate::window::WindowScope,
+    hierarchy: crate::window::WindowHierarchy,
+    spaces: Query<
+        (
+            &crate::space::EffectiveStartupDir,
+            &vmux_ecs::EffectiveStartupUrl,
+        ),
+        With<crate::space::Space>,
+    >,
+    tabs: Query<(), With<Tab>>,
+    mut layout_requests: MessageWriter<TabLayoutSpawnRequest>,
+) {
+    for request in requests.read() {
+        let Some(space) = scope.current_space(request.origin) else {
+            continue;
+        };
+        let Some(window) = hierarchy.get(space) else {
+            continue;
+        };
+        let Ok((startup_dir, startup_url)) = spaces.get(space) else {
+            continue;
+        };
+        let content = if startup_url.0.is_empty() {
+            TabLayoutSpawnContent::StartupUrlOrPrompt
+        } else {
+            TabLayoutSpawnContent::Url {
+                url: startup_url.0.clone(),
+                pending_prompt: None,
+            }
+        };
+        layout_requests.write(TabLayoutSpawnRequest {
+            space,
+            primary_window: window,
+            name: Some(format!("Tab {}", tabs.iter().count() + 1)),
+            startup_dir: startup_dir.0.clone(),
+            content,
+            clear_pending_stack: true,
+            focus: true,
+        });
+    }
 }
 
 fn request_close(
     trigger: On<UiInput<TabCloseRequest>>,
-    tabs: Query<(Entity, &LastActivatedAt), With<Tab>>,
+    targets: TabTargets,
     active_tab_param: crate::stack::ActiveTabParam,
     mut close_requests: MessageWriter<CloseTabRequest>,
 ) {
     let active_tab = active_tab_param.get();
-    let target = tab_target(
-        trigger.event().payload.tab_id.as_deref(),
-        tabs.iter().map(|(entity, _)| entity),
-    )
-    .or(active_tab);
+    let requested = trigger.event().payload.tab_id.as_deref();
+    let target = match requested {
+        Some(requested) => targets.resolve(requested, trigger.event().webview),
+        None => active_tab.filter(|tab| {
+            targets
+                .scope
+                .contains_current_space(trigger.event().webview, *tab)
+        }),
+    };
     let Some(target) = target else { return };
     close_requests.write(CloseTabRequest { tab: target });
 }
 
 fn request_activate(
     trigger: On<UiInput<TabActivateRequest>>,
-    tabs: Query<(Entity, &LastActivatedAt), With<Tab>>,
+    targets: TabTargets,
     mut commands: Commands,
 ) {
-    let Ok(bits) = trigger.event().payload.tab_id.parse::<u64>() else {
-        return;
-    };
-    let Some((target, _)) = tabs.iter().find(|(entity, _)| entity.to_bits() == bits) else {
+    let Some(target) = targets.resolve(&trigger.event().payload.tab_id, trigger.event().webview)
+    else {
         return;
     };
     commands.entity(target).insert(LastActivatedAt::now());
@@ -576,22 +613,16 @@ fn request_activate(
 
 fn request_reorder(
     trigger: On<UiInput<TabReorderRequest>>,
-    tabs: Query<(Entity, &LastActivatedAt), With<Tab>>,
+    targets: TabTargets,
     child_of: Query<&ChildOf>,
     children: Query<&Children>,
     mut commands: Commands,
 ) {
     let request = &trigger.event().payload;
-    let Some(source) = tab_target(
-        Some(request.tab_id.as_str()),
-        tabs.iter().map(|(entity, _)| entity),
-    ) else {
+    let Some(source) = targets.resolve(&request.tab_id, trigger.event().webview) else {
         return;
     };
-    let Some(target) = tab_target(
-        Some(request.target_tab_id.as_str()),
-        tabs.iter().map(|(entity, _)| entity),
-    ) else {
+    let Some(target) = targets.resolve(&request.target_tab_id, trigger.event().webview) else {
         return;
     };
     if source == target {
@@ -613,7 +644,7 @@ fn request_reorder(
     let kind_positions = siblings
         .iter()
         .enumerate()
-        .filter(|(_, entity)| tabs.contains(*entity))
+        .filter(|(_, entity)| targets.tabs.contains(*entity))
         .map(|(index, _)| index)
         .collect::<Vec<_>>();
     let Some(from) = SiblingOrder::index(source, siblings, &kind_positions) else {
@@ -630,9 +661,23 @@ fn request_reorder(
     }
 }
 
-fn tab_target(id: Option<&str>, tabs: impl IntoIterator<Item = Entity>) -> Option<Entity> {
-    let bits = id?.parse::<u64>().ok()?;
-    tabs.into_iter().find(|e| e.to_bits() == bits)
+#[derive(SystemParam)]
+struct TabTargets<'w, 's> {
+    tabs: Query<
+        'w,
+        's,
+        (Entity, &'static LastActivatedAt),
+        (With<Tab>, Without<crate::presentation::Retiring>),
+    >,
+    scope: crate::window::WindowScope<'w, 's>,
+}
+
+impl TabTargets<'_, '_> {
+    fn resolve(&self, id: &str, origin: Entity) -> Option<Entity> {
+        let entity = Entity::try_from_bits(id.parse().ok()?)?;
+        (self.tabs.contains(entity) && self.scope.contains_current_space(origin, entity))
+            .then_some(entity)
+    }
 }
 
 #[cfg(test)]
@@ -699,15 +744,6 @@ mod tests {
                 base_ref: "main".into(),
             }
         );
-    }
-
-    #[test]
-    fn tab_target_uses_event_tab_id() {
-        let target = Entity::from_bits(42);
-        let other = Entity::from_bits(7);
-        let id = target.to_bits().to_string();
-
-        assert_eq!(tab_target(Some(&id), [other, target]), Some(target));
     }
 
     #[test]
@@ -1262,6 +1298,105 @@ mod tests {
     }
 
     #[test]
+    fn stale_explicit_tab_close_does_not_close_the_active_tab() {
+        let mut app = App::new();
+        app.add_plugins((
+            MinimalPlugins,
+            CommandPlugin,
+            TabPlugin,
+            crate::archive::ArchivePlugin,
+        ))
+        .init_resource::<bevy_cef::prelude::BinIpcEventRawBuffer>()
+        .add_message::<crate::TabLayoutSpawnRequest>()
+        .init_resource::<ClosedTabs>()
+        .add_observer(record_closed);
+        let webview = app.world_mut().spawn_empty().id();
+        let main = app.world_mut().spawn(MainNode).id();
+        let active = app
+            .world_mut()
+            .spawn((
+                Tab::bundle(),
+                LastActivatedAt(2),
+                vmux_ecs::Active,
+                ChildOf(main),
+            ))
+            .id();
+        let other = app
+            .world_mut()
+            .spawn((Tab::bundle(), LastActivatedAt(1), ChildOf(main)))
+            .id();
+        app.world_mut().spawn(PrimaryWindow);
+
+        app.world_mut().trigger(UiInput::<TabCloseRequest> {
+            webview,
+            payload: TabCloseRequest {
+                tab_id: Some(Entity::PLACEHOLDER.to_bits().to_string()),
+            },
+        });
+        app.update();
+
+        assert!(app.world().get_entity(active).is_ok());
+        assert!(app.world().get_entity(other).is_ok());
+        assert_eq!(app.world().resource::<ClosedTabs>().0, 0);
+    }
+
+    #[test]
+    fn tab_create_event_targets_its_origin_window_space() {
+        let mut app = App::new();
+        app.add_plugins((MinimalPlugins, CommandPlugin, TabPlugin))
+            .init_resource::<bevy_cef::prelude::BinIpcEventRawBuffer>()
+            .add_message::<crate::TabLayoutSpawnRequest>();
+        let first_window = app.world_mut().spawn_empty().id();
+        let second_window = app.world_mut().spawn_empty().id();
+        let first_root = app.world_mut().spawn(HostWindow(first_window)).id();
+        let second_root = app.world_mut().spawn(HostWindow(second_window)).id();
+        let first_space = app
+            .world_mut()
+            .spawn((
+                crate::space::Space,
+                crate::space::CurrentSpace,
+                crate::space::EffectiveStartupDir(None),
+                vmux_ecs::EffectiveStartupUrl("vmux://start/".to_string()),
+                ChildOf(first_root),
+            ))
+            .id();
+        let second_space = app
+            .world_mut()
+            .spawn((
+                crate::space::Space,
+                crate::space::CurrentSpace,
+                crate::space::EffectiveStartupDir(None),
+                vmux_ecs::EffectiveStartupUrl("vmux://projects/".to_string()),
+                ChildOf(second_root),
+            ))
+            .id();
+        app.world_mut()
+            .spawn((Tab::bundle(), vmux_ecs::Active, ChildOf(first_space)));
+        app.world_mut()
+            .spawn((Tab::bundle(), vmux_ecs::Active, ChildOf(second_space)));
+        let origin = app.world_mut().spawn(ChildOf(second_root)).id();
+
+        app.world_mut().trigger(UiInput::<TabCreateRequest> {
+            webview: origin,
+            payload: TabCreateRequest,
+        });
+        app.update();
+
+        let requests = app
+            .world_mut()
+            .resource_mut::<Messages<TabLayoutSpawnRequest>>()
+            .drain()
+            .collect::<Vec<_>>();
+        assert_eq!(requests.len(), 1);
+        assert_eq!(requests[0].space, second_space);
+        assert_eq!(requests[0].primary_window, second_window);
+        assert!(matches!(
+            requests[0].content,
+            TabLayoutSpawnContent::Url { ref url, .. } if url == "vmux://projects/"
+        ));
+    }
+
+    #[test]
     fn tabs_reorder_event_moves_the_source_to_the_requested_index() {
         let mut app = App::new();
         app.add_plugins((MinimalPlugins, CommandPlugin, TabPlugin))
@@ -1428,6 +1563,7 @@ mod tests {
             crate::host::command::LayoutRequestPlugin,
             crate::space::SpaceLayoutPlugin,
             TabPlugin,
+            crate::presentation::PresentationPlugin,
         ))
         .init_resource::<bevy_cef::prelude::BinIpcEventRawBuffer>()
         .add_message::<crate::TabLayoutSpawnRequest>()

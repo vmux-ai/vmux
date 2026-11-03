@@ -2,7 +2,8 @@ use bevy_ecs::prelude::Component;
 use vmux_api::space::ProjectRow;
 
 use crate::event::{
-    DiffKind, GitCatalog, GitDiffRow, GitDiffViewport, GitOperationResult, GitRepositorySnapshot,
+    DiffKind, DiffLine, GitBranchEntry, GitBranchFileEntry, GitCatalog, GitCommitEntry, GitDiffRow,
+    GitDiffViewport, GitOperationResult, GitRepositorySnapshot, GitStashEntry, GitTagEntry,
 };
 
 #[vmux_api::contract(Copy, Eq, Default)]
@@ -205,6 +206,17 @@ pub enum GitBranchPrompt {
     Delete { branch: String },
 }
 
+#[derive(Component)]
+#[vmux_api::contract(Copy, Default, Eq)]
+pub enum HeaderDropdown {
+    #[default]
+    Closed,
+    Repository,
+    Branch,
+    View,
+    Commit,
+}
+
 #[vmux_api::contract(Default, Eq)]
 pub struct GitOperationEligibility {
     pub stage_all: bool,
@@ -248,6 +260,20 @@ pub struct GitPageControllerState {
     pub commit_message: String,
     pub commit_pending: String,
     pub operations: GitOperationEligibility,
+}
+
+impl GitPageControllerState {
+    pub fn for_repository(branch: String) -> Self {
+        Self {
+            selected_branch: branch,
+            selected_branch_collection: GitBranchCollection::Local,
+            ..Default::default()
+        }
+    }
+
+    pub fn reset_for_repository(&mut self, branch: String) {
+        *self = Self::for_repository(branch);
+    }
 }
 
 #[vmux_api::contract(Eq)]
@@ -312,11 +338,12 @@ impl Default for GitDirectoryState {
 #[vmux_api::contract]
 pub struct GitPageSnapshot {
     pub workspace: String,
+    pub repository_request_id: u64,
     pub repository: Option<GitRepositorySnapshot>,
     pub diff_viewport: Option<GitDiffViewport>,
     pub diff_rows: Vec<GitDiffRow>,
     pub diff_loading: bool,
-    pub branch_files: Vec<crate::event::GitBranchFileEntry>,
+    pub branch_files: Vec<GitBranchFileEntry>,
     pub branch_diff_paths: Vec<String>,
     pub branch_files_reference: String,
     pub branch_files_base_ref: String,
@@ -360,6 +387,7 @@ impl Default for GitPageSnapshot {
     fn default() -> Self {
         Self {
             workspace: String::new(),
+            repository_request_id: 0,
             repository: None,
             diff_viewport: None,
             diff_rows: Vec::new(),
@@ -411,6 +439,90 @@ impl GitPageSnapshot {
         }
     }
 
+    pub(crate) fn apply_catalog_patch(&mut self, patch: &GitCatalogPatch) {
+        *self.catalog_mut(patch.catalog) = patch.progress;
+        if let Some(message) = patch.message.as_ref() {
+            self.message.clone_from(message);
+        }
+        let Some(entries) = patch.entries.as_ref() else {
+            return;
+        };
+        let Some(repository) = self.repository.as_mut() else {
+            return;
+        };
+        let offset = patch.offset as usize;
+        match entries {
+            GitCatalogEntries::LocalBranches(entries) => {
+                Self::replace_page(&mut repository.branches, offset, entries);
+            }
+            GitCatalogEntries::RemoteBranches(entries) => {
+                Self::replace_page(&mut repository.remote_branches, offset, entries);
+            }
+            GitCatalogEntries::Tags(entries) => {
+                Self::replace_page(&mut repository.tags, offset, entries);
+            }
+            GitCatalogEntries::Commits(entries) => {
+                Self::replace_page(&mut repository.commits, offset, entries);
+            }
+            GitCatalogEntries::Stashes(entries) => {
+                Self::replace_page(&mut repository.stashes, offset, entries);
+            }
+        }
+    }
+
+    pub(crate) fn apply_branch_files_patch(&mut self, patch: &GitBranchFilesPatch) {
+        if self.branch_files_reference != patch.reference {
+            self.branch_files.clear();
+            self.branch_diff_paths.clear();
+            self.branch_files_base_ref.clear();
+            self.branch_files_total = 0;
+            self.branch_files_has_more = false;
+            self.branch_files_reference.clone_from(&patch.reference);
+        }
+        if let Some(base_ref) = patch.base_ref.as_ref() {
+            self.branch_files_base_ref.clone_from(base_ref);
+        }
+        if let Some(paths) = patch.diff_paths.as_ref() {
+            self.branch_diff_paths.clone_from(paths);
+        }
+        if let Some(page) = patch.page.as_ref() {
+            Self::replace_page(&mut self.branch_files, page.offset as usize, &page.files);
+            self.branch_files_total = page.total;
+            self.branch_files_has_more = page.has_more;
+        }
+        if let Some(diff_loading) = patch.diff_loading {
+            self.diff_loading = diff_loading;
+        }
+        self.branch_files_loading = patch.loading;
+        self.branch_files_error.clone_from(&patch.error);
+    }
+
+    fn replace_page<T: Clone>(target: &mut Vec<T>, offset: usize, page: &[T]) {
+        if target.len() < offset {
+            return;
+        }
+        target.truncate(offset);
+        target.extend_from_slice(page);
+    }
+
+    pub(crate) fn loading(request: &crate::event::GitRepositoryRequest, nonce: u32) -> Self {
+        Self {
+            workspace: request.path.clone(),
+            repository_request_id: request.request_id,
+            repository: Some(GitRepositorySnapshot::loading(request)),
+            diff_loading: true,
+            branch_files_loading: true,
+            nonce,
+            loading: true,
+            ..Default::default()
+        }
+    }
+
+    pub(crate) fn begin_repository(&mut self, request: &crate::event::GitRepositoryRequest) {
+        let nonce = self.nonce.wrapping_add(1).max(1);
+        *self = Self::loading(request, nonce);
+    }
+
     pub(crate) fn invalidate_catalogs(&mut self) {
         self.local_branches = GitCatalogProgress::default();
         self.remote_branches = GitCatalogProgress::default();
@@ -440,27 +552,15 @@ impl GitPageSnapshot {
     }
 
     pub(crate) fn append_diff(&mut self, next: &GitDiffViewport) -> bool {
-        if !self.can_append_diff(next) {
-            return false;
-        }
-        let current = self.diff_viewport.as_mut().unwrap();
-        current.total_lines = next.total_lines;
-        current.has_more = next.has_more;
-        current.lines.extend(next.lines.clone());
-        current.markers.extend(next.markers.clone());
-        current.markers.sort_by_key(|marker| marker.line);
-        current.markers.dedup();
-        current.error.clone_from(&next.error);
-        true
+        self.diff_viewport
+            .as_mut()
+            .is_some_and(|current| current.append(next))
     }
 
     pub(crate) fn can_append_diff(&self, next: &GitDiffViewport) -> bool {
-        self.diff_viewport.as_ref().is_some_and(|current| {
-            let loaded = current
-                .first_line
-                .saturating_add(u32::try_from(current.lines.len()).unwrap_or(u32::MAX));
-            current.generation == next.generation && next.first_line == loaded
-        })
+        self.diff_viewport
+            .as_ref()
+            .is_some_and(|current| current.can_append(next))
     }
 
     pub(crate) fn append_diff_patch(
@@ -473,22 +573,35 @@ impl GitPageSnapshot {
             .as_ref()
             .map(|viewport| u32::try_from(viewport.lines.len()).unwrap_or(u32::MAX))
             .unwrap_or_default();
-        if !self.append_diff(&next) {
-            return None;
-        }
-        self.diff_loading = false;
-        self.project_diff_rows(revealed, Self::DIFF_CONTEXT_LINES);
         let requested_from = previous_lines
             .saturating_sub(u32::try_from(Self::DIFF_CONTEXT_LINES + 1).unwrap_or(u32::MAX));
         let first = self
             .diff_rows
             .partition_point(|row| row.end() <= requested_from);
-        let rows = self.diff_rows[first..].to_vec();
-        let rows_from = rows
-            .first()
+        let rows_from = self
+            .diff_rows
+            .get(first)
             .copied()
             .map(GitDiffRow::start)
             .unwrap_or(requested_from);
+        if !self.append_diff(&next) {
+            return None;
+        }
+        self.diff_loading = false;
+        let rows = self
+            .diff_viewport
+            .as_ref()
+            .map(|viewport| {
+                Self::projected_diff_rows(
+                    &viewport.lines,
+                    revealed,
+                    Self::DIFF_CONTEXT_LINES,
+                    rows_from as usize,
+                )
+            })
+            .unwrap_or_default();
+        self.diff_rows.retain(|row| row.end() <= rows_from);
+        self.diff_rows.extend(rows.iter().copied());
         Some(GitDiffAppend {
             viewport: next,
             rows_from,
@@ -501,52 +614,62 @@ impl GitPageSnapshot {
             self.diff_rows.clear();
             return;
         };
-        let lines = &viewport.lines;
-        let mut visible = vec![false; lines.len()];
-        for (index, line) in lines.iter().enumerate() {
+        self.diff_rows = Self::projected_diff_rows(&viewport.lines, revealed, context_lines, 0);
+    }
+
+    fn projected_diff_rows(
+        lines: &[DiffLine],
+        revealed: &[(usize, usize)],
+        context_lines: usize,
+        start: usize,
+    ) -> Vec<GitDiffRow> {
+        let start = start.min(lines.len());
+        let mut visible = vec![false; lines.len().saturating_sub(start)];
+        let scan_start = start.saturating_sub(context_lines);
+        for (index, line) in lines.iter().enumerate().skip(scan_start) {
             if matches!(line.kind, DiffKind::Context) {
                 continue;
             }
-            let start = index.saturating_sub(context_lines);
-            let end = (index + context_lines + 1).min(lines.len());
-            visible[start..end].fill(true);
+            let visible_start = index.saturating_sub(context_lines).max(start) - start;
+            let visible_end = (index + context_lines + 1).min(lines.len()) - start;
+            visible[visible_start..visible_end].fill(true);
         }
-        for (start, end) in revealed {
-            let start = (*start).min(lines.len());
-            let end = (*end).min(lines.len());
-            if start < end {
-                visible[start..end].fill(true);
+        for (revealed_start, revealed_end) in revealed {
+            let revealed_start = (*revealed_start).clamp(start, lines.len()) - start;
+            let revealed_end = (*revealed_end).clamp(start, lines.len()) - start;
+            if revealed_start < revealed_end {
+                visible[revealed_start..revealed_end].fill(true);
             }
         }
         let mut rows = Vec::new();
-        let mut index = 0;
+        let mut index = start;
         while index < lines.len() {
-            if visible[index] {
+            if visible[index - start] {
                 rows.push(GitDiffRow::Line(index as u32));
                 index += 1;
                 continue;
             }
-            let start = index;
-            while index < lines.len() && !visible[index] {
+            let hidden_start = index;
+            while index < lines.len() && !visible[index - start] {
                 index += 1;
             }
-            let hidden = index - start;
+            let hidden = index - hidden_start;
             let chunk = crate::event::GitDiffRevealRequest::CHUNK as usize;
             let (reveal_start, reveal_end) = if hidden <= chunk {
-                (start, index)
-            } else if start == 0 {
+                (hidden_start, index)
+            } else if hidden_start == 0 {
                 (index - chunk, index)
             } else {
-                (start, start + chunk)
+                (hidden_start, hidden_start + chunk)
             };
             rows.push(GitDiffRow::Gap {
-                start: start as u32,
+                start: hidden_start as u32,
                 end: index as u32,
                 reveal_start: reveal_start as u32,
                 reveal_end: reveal_end as u32,
             });
         }
-        self.diff_rows = rows;
+        rows
     }
 }
 
@@ -557,6 +680,81 @@ pub struct GitDiffAppend {
     pub rows: Vec<GitDiffRow>,
 }
 
+#[vmux_api::contract]
+pub struct GitDiffRowsPatch {
+    pub generation: u64,
+    pub revision: u64,
+    pub rows: Vec<GitDiffRow>,
+}
+
+#[vmux_api::contract]
+pub struct GitRepositoryPatch {
+    pub workspace: String,
+    pub repository_request_id: u64,
+    pub repository: Option<GitRepositorySnapshot>,
+    pub local_branches: GitCatalogProgress,
+    pub remote_branches: GitCatalogProgress,
+    pub tags: GitCatalogProgress,
+    pub commits: GitCatalogProgress,
+    pub stashes: GitCatalogProgress,
+    pub loading: bool,
+    pub message: String,
+}
+
+impl GitRepositoryPatch {
+    pub(crate) fn from_snapshot(snapshot: &GitPageSnapshot) -> Self {
+        Self {
+            workspace: snapshot.workspace.clone(),
+            repository_request_id: snapshot.repository_request_id,
+            repository: snapshot.repository.clone(),
+            local_branches: snapshot.local_branches,
+            remote_branches: snapshot.remote_branches,
+            tags: snapshot.tags,
+            commits: snapshot.commits,
+            stashes: snapshot.stashes,
+            loading: snapshot.loading,
+            message: snapshot.message.clone(),
+        }
+    }
+}
+
+#[vmux_api::contract]
+pub enum GitCatalogEntries {
+    LocalBranches(Vec<GitBranchEntry>),
+    RemoteBranches(Vec<GitBranchEntry>),
+    Tags(Vec<GitTagEntry>),
+    Commits(Vec<GitCommitEntry>),
+    Stashes(Vec<GitStashEntry>),
+}
+
+#[vmux_api::contract]
+pub struct GitCatalogPatch {
+    pub catalog: GitCatalog,
+    pub offset: u32,
+    pub entries: Option<GitCatalogEntries>,
+    pub progress: GitCatalogProgress,
+    pub message: Option<String>,
+}
+
+#[vmux_api::contract]
+pub struct GitBranchFilesPagePatch {
+    pub offset: u32,
+    pub files: Vec<GitBranchFileEntry>,
+    pub total: u32,
+    pub has_more: bool,
+}
+
+#[vmux_api::contract]
+pub struct GitBranchFilesPatch {
+    pub reference: String,
+    pub base_ref: Option<String>,
+    pub diff_paths: Option<Vec<String>>,
+    pub page: Option<GitBranchFilesPagePatch>,
+    pub diff_loading: Option<bool>,
+    pub loading: bool,
+    pub error: String,
+}
+
 #[vmux_api::ui_state_patch(Default)]
 pub struct GitUiStatePatch {
     pub context: Option<GitPageContext>,
@@ -565,12 +763,16 @@ pub struct GitUiStatePatch {
     pub projects: Option<Box<GitProjects>>,
     pub snapshot: Option<Box<GitPageSnapshot>>,
     pub diff_append: Option<Box<GitDiffAppend>>,
+    pub diff_rows: Option<Box<GitDiffRowsPatch>>,
+    pub repository: Option<Box<GitRepositoryPatch>>,
+    pub catalog: Option<Box<GitCatalogPatch>>,
+    pub branch_files: Option<Box<GitBranchFilesPatch>>,
     pub directory: Option<Box<GitDirectoryState>>,
     pub controller: Option<Box<GitPageControllerState>>,
     pub selection_reveal: Option<GitSelectionReveal>,
 }
 
-#[vmux_api::ui_state(Default, patch = GitUiStatePatch, version = 10)]
+#[vmux_api::ui_state(Default, patch = GitUiStatePatch, version = 15)]
 pub struct GitUiState {
     pub context: Option<GitPageContext>,
     pub repository_picked: Option<GitRepositoryPicked>,
@@ -580,8 +782,7 @@ pub struct GitUiState {
     pub directory: GitDirectoryState,
     pub controller: GitPageControllerState,
     pub selection_reveal: Option<GitSelectionReveal>,
-    pub diff_update: Option<GitDiffAppend>,
-    pub diff_update_revision: u64,
+    pub diff_updates: Vec<GitDiffAppend>,
 }
 
 impl vmux_api::UiStateProjection<GitUiStatePatch> for GitUiState {
@@ -599,11 +800,47 @@ impl vmux_api::UiStateProjection<GitUiStatePatch> for GitUiState {
             self.projects = *projects;
         }
         if let Some(snapshot) = patch.snapshot {
+            let repository_changed = self.snapshot.repository_request_id
+                != snapshot.repository_request_id
+                || self.snapshot.workspace != snapshot.workspace;
             self.snapshot = *snapshot;
+            self.diff_updates.clear();
+            if repository_changed {
+                self.selection_reveal = None;
+            }
         }
         if let Some(diff_append) = patch.diff_append {
-            self.diff_update = Some(*diff_append);
-            self.diff_update_revision = self.diff_update_revision.wrapping_add(1).max(1);
+            self.diff_updates.push(*diff_append);
+        }
+        if let Some(diff_rows) = patch.diff_rows
+            && self
+                .snapshot
+                .diff_viewport
+                .as_ref()
+                .is_some_and(|viewport| {
+                    viewport.generation == diff_rows.generation
+                        && viewport.revision == diff_rows.revision
+                })
+        {
+            self.snapshot.diff_rows = diff_rows.rows;
+        }
+        if let Some(repository) = patch.repository {
+            self.snapshot.workspace = repository.workspace;
+            self.snapshot.repository_request_id = repository.repository_request_id;
+            self.snapshot.repository = repository.repository;
+            self.snapshot.local_branches = repository.local_branches;
+            self.snapshot.remote_branches = repository.remote_branches;
+            self.snapshot.tags = repository.tags;
+            self.snapshot.commits = repository.commits;
+            self.snapshot.stashes = repository.stashes;
+            self.snapshot.loading = repository.loading;
+            self.snapshot.message = repository.message;
+        }
+        if let Some(catalog) = patch.catalog {
+            self.snapshot.apply_catalog_patch(&catalog);
+        }
+        if let Some(branch_files) = patch.branch_files {
+            self.snapshot.apply_branch_files_patch(&branch_files);
         }
         if let Some(directory) = patch.directory {
             self.directory = *directory;
@@ -615,11 +852,205 @@ impl vmux_api::UiStateProjection<GitUiStatePatch> for GitUiState {
             self.selection_reveal = Some(selection_reveal);
         }
     }
+
+    fn retain(&mut self) {
+        self.diff_updates.clear();
+        self.selection_reveal = None;
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn repository_selection_replaces_stale_content_immediately() {
+        let mut state = GitUiState::default();
+        state.snapshot.repository = Some(repository_with_branches());
+        state.snapshot.branch_files = vec![GitBranchFileEntry {
+            path: "old.rs".into(),
+            path_bytes: b"old.rs".to_vec(),
+            previous_path: None,
+            previous_path_bytes: None,
+            change: crate::event::GitPathChange::Modified,
+        }];
+        state.snapshot.diff_viewport = Some(GitDiffViewport {
+            generation: 1,
+            revision: 1,
+            first_line: 0,
+            total_lines: 1,
+            has_more: false,
+            lines: vec![diff_line(1)],
+            markers: Vec::new(),
+            error: String::new(),
+        });
+        let mut request = crate::event::GitRepositoryRequest::project(
+            "/tmp/next".into(),
+            "next".into(),
+            "feature".into(),
+        );
+        request.request_id = 7;
+
+        state.snapshot.begin_repository(&request);
+        state
+            .controller
+            .reset_for_repository(request.branch.clone());
+        state.diff_updates.clear();
+
+        let repository = state.snapshot.repository.as_ref().unwrap();
+        assert_eq!(repository.repo_root, "/tmp/next");
+        assert_eq!(repository.repo_name, "next");
+        assert_eq!(repository.branch, "feature");
+        assert_eq!(state.snapshot.repository_request_id, 7);
+        assert!(state.snapshot.branch_files.is_empty());
+        assert!(state.snapshot.diff_viewport.is_none());
+        assert!(state.snapshot.diff_loading);
+        assert_eq!(state.controller.selected_branch, "feature");
+    }
+
+    #[test]
+    fn repository_projection_discards_stale_diff_updates() {
+        let mut state = GitUiState::default();
+        state.snapshot.workspace = "/tmp/old".into();
+        state.snapshot.repository_request_id = 4;
+        state.diff_updates.push(GitDiffAppend {
+            viewport: GitDiffViewport {
+                generation: 1,
+                revision: 1,
+                first_line: 0,
+                total_lines: 1,
+                has_more: false,
+                lines: vec![diff_line(1)],
+                markers: Vec::new(),
+                error: String::new(),
+            },
+            rows_from: 0,
+            rows: vec![GitDiffRow::Line(0)],
+        });
+        state.selection_reveal = Some(GitSelectionReveal {
+            id: "old.rs".into(),
+            revision: 2,
+        });
+        let snapshot = GitPageSnapshot {
+            workspace: "/tmp/next".into(),
+            repository_request_id: 5,
+            ..Default::default()
+        };
+
+        vmux_api::UiStateProjection::apply(
+            &mut state,
+            GitUiStatePatch {
+                snapshot: Some(Box::new(snapshot)),
+                ..Default::default()
+            },
+        );
+
+        assert!(state.diff_updates.is_empty());
+        assert!(state.selection_reveal.is_none());
+    }
+
+    #[test]
+    fn catalog_patch_appends_without_replacing_the_snapshot() {
+        let mut state = GitUiState::default();
+        state.snapshot.repository = Some(repository_with_branches());
+        state.snapshot.diff_loading = true;
+        let mut branch = state.snapshot.repository.as_ref().unwrap().branches[1].clone();
+        branch.name = "release".to_string();
+        vmux_api::UiStateProjection::apply(
+            &mut state,
+            GitUiStatePatch {
+                catalog: Some(Box::new(GitCatalogPatch {
+                    catalog: GitCatalog::LocalBranches,
+                    offset: 2,
+                    entries: Some(GitCatalogEntries::LocalBranches(vec![branch])),
+                    progress: GitCatalogProgress {
+                        initialized: true,
+                        loaded: true,
+                        ..Default::default()
+                    },
+                    message: None,
+                })),
+                ..Default::default()
+            },
+        );
+
+        assert_eq!(
+            state
+                .snapshot
+                .repository
+                .as_ref()
+                .unwrap()
+                .branches
+                .iter()
+                .map(|branch| branch.name.as_str())
+                .collect::<Vec<_>>(),
+            ["main", "feature", "release"]
+        );
+        assert!(state.snapshot.diff_loading);
+    }
+
+    #[test]
+    fn branch_file_patch_replaces_then_appends_pages() {
+        let mut state = GitUiState::default();
+        let file = |path: &str| GitBranchFileEntry {
+            path: path.to_string(),
+            path_bytes: path.as_bytes().to_vec(),
+            previous_path: None,
+            previous_path_bytes: None,
+            change: crate::event::GitPathChange::Modified,
+        };
+        for patch in [
+            GitBranchFilesPatch {
+                reference: "feature".to_string(),
+                base_ref: Some("main".to_string()),
+                diff_paths: Some(vec!["a.rs".to_string(), "b.rs".to_string()]),
+                page: Some(GitBranchFilesPagePatch {
+                    offset: 0,
+                    files: vec![file("a.rs")],
+                    total: 2,
+                    has_more: true,
+                }),
+                diff_loading: Some(true),
+                loading: false,
+                error: String::new(),
+            },
+            GitBranchFilesPatch {
+                reference: "feature".to_string(),
+                base_ref: None,
+                diff_paths: None,
+                page: Some(GitBranchFilesPagePatch {
+                    offset: 1,
+                    files: vec![file("b.rs")],
+                    total: 2,
+                    has_more: false,
+                }),
+                diff_loading: None,
+                loading: false,
+                error: String::new(),
+            },
+        ] {
+            vmux_api::UiStateProjection::apply(
+                &mut state,
+                GitUiStatePatch {
+                    branch_files: Some(Box::new(patch)),
+                    ..Default::default()
+                },
+            );
+        }
+
+        assert_eq!(
+            state
+                .snapshot
+                .branch_files
+                .iter()
+                .map(|file| file.path.as_str())
+                .collect::<Vec<_>>(),
+            ["a.rs", "b.rs"]
+        );
+        assert_eq!(state.snapshot.branch_files_base_ref, "main");
+        assert!(!state.snapshot.branch_files_has_more);
+        assert!(state.snapshot.diff_loading);
+    }
 
     fn repository_with_branches() -> GitRepositorySnapshot {
         GitRepositorySnapshot {
@@ -747,6 +1178,7 @@ mod tests {
         let mut snapshot = GitPageSnapshot {
             diff_viewport: Some(GitDiffViewport {
                 generation: 3,
+                revision: 1,
                 first_line: 0,
                 total_lines: 4,
                 has_more: true,
@@ -758,6 +1190,7 @@ mod tests {
         };
         let next = GitDiffViewport {
             generation: 3,
+            revision: 2,
             first_line: 2,
             total_lines: 4,
             has_more: false,
@@ -767,7 +1200,55 @@ mod tests {
         };
 
         assert!(snapshot.append_diff(&next));
-        assert_eq!(snapshot.diff_viewport.unwrap().lines.len(), 4);
+        let viewport = snapshot.diff_viewport.unwrap();
+        assert_eq!(viewport.lines.len(), 4);
+        assert_eq!(viewport.revision, 2);
+    }
+
+    #[test]
+    fn incremental_diff_projection_matches_full_projection() {
+        let mut lines = (1..=120).map(diff_line).collect::<Vec<_>>();
+        lines[20].kind = DiffKind::Add;
+        lines[68].kind = DiffKind::Remove;
+        lines[94].kind = DiffKind::Add;
+        let mut snapshot = GitPageSnapshot {
+            diff_viewport: Some(GitDiffViewport {
+                generation: 5,
+                revision: 1,
+                first_line: 0,
+                total_lines: 120,
+                has_more: true,
+                lines: lines[..70].to_vec(),
+                markers: Vec::new(),
+                error: String::new(),
+            }),
+            ..Default::default()
+        };
+        snapshot.project_diff_rows(&[], GitPageSnapshot::DIFF_CONTEXT_LINES);
+
+        let update = snapshot
+            .append_diff_patch(
+                GitDiffViewport {
+                    generation: 5,
+                    revision: 2,
+                    first_line: 70,
+                    total_lines: 120,
+                    has_more: false,
+                    lines: lines[70..].to_vec(),
+                    markers: Vec::new(),
+                    error: String::new(),
+                },
+                &[],
+            )
+            .unwrap();
+        let mut expected = GitPageSnapshot {
+            diff_viewport: snapshot.diff_viewport.clone(),
+            ..Default::default()
+        };
+        expected.project_diff_rows(&[], GitPageSnapshot::DIFF_CONTEXT_LINES);
+
+        assert_eq!(snapshot.diff_rows, expected.diff_rows);
+        assert!(update.rows.len() < expected.diff_rows.len());
     }
 
     #[test]
@@ -776,6 +1257,7 @@ mod tests {
             diff_loading: true,
             diff_viewport: Some(GitDiffViewport {
                 generation: 3,
+                revision: 1,
                 first_line: 0,
                 total_lines: 4,
                 has_more: true,
@@ -792,6 +1274,7 @@ mod tests {
                 GitDiffAppend {
                     viewport: GitDiffViewport {
                         generation: 3,
+                        revision: 2,
                         first_line: 2,
                         total_lines: 4,
                         has_more: false,
@@ -810,16 +1293,19 @@ mod tests {
 
         assert!(decoded.snapshot.diff_loading);
         assert_eq!(decoded.snapshot.diff_viewport.unwrap().lines.len(), 2);
-        assert_eq!(decoded.diff_update_revision, 1);
-        assert_eq!(decoded.diff_update.unwrap().viewport.lines.len(), 2);
+        assert_eq!(decoded.diff_updates.len(), 1);
+        assert_eq!(decoded.diff_updates[0].viewport.lines.len(), 2);
+        let retained = vmux_api::UiState::retained(&event).unwrap();
+        assert!(retained.diff_updates.is_empty());
     }
 
     #[test]
-    fn newer_diff_append_replaces_the_previous_update() {
+    fn diff_append_batch_preserves_every_update() {
         let first = GitPageSnapshot {
             diff_loading: true,
             diff_viewport: Some(GitDiffViewport {
                 generation: 4,
+                revision: 1,
                 first_line: 0,
                 total_lines: 4,
                 has_more: true,
@@ -837,6 +1323,7 @@ mod tests {
                 GitDiffAppend {
                     viewport: GitDiffViewport {
                         generation: 3,
+                        revision: 2,
                         first_line: 2,
                         total_lines: 4,
                         has_more: false,
@@ -851,6 +1338,7 @@ mod tests {
                 GitDiffAppend {
                     viewport: GitDiffViewport {
                         generation: 4,
+                        revision: 2,
                         first_line: 2,
                         total_lines: 5,
                         has_more: true,
@@ -870,8 +1358,8 @@ mod tests {
         assert!(decoded.snapshot.diff_loading);
         assert_eq!(decoded.snapshot.diff_viewport.unwrap().lines.len(), 2);
         assert_eq!(decoded.snapshot.diff_rows, [GitDiffRow::Line(0)]);
-        assert_eq!(decoded.diff_update_revision, 2);
-        let update = decoded.diff_update.unwrap();
+        assert_eq!(decoded.diff_updates.len(), 2);
+        let update = &decoded.diff_updates[1];
         assert_eq!(update.viewport.generation, 4);
         assert_eq!(update.rows_from, 1);
     }

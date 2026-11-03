@@ -335,6 +335,7 @@ mod wasm {
     #[component]
     pub fn BuiltinIconView(icon: BuiltinIcon, class: String) -> Element {
         match icon {
+            BuiltinIcon::Archive => rsx! { LineIconView { icon: LineIcon::Archive, class } },
             BuiltinIcon::Terminal => rsx! { Icon { class: "{class}",
                 path { d: "m4 17 6-6-6-6" }
                 path { d: "M12 19h8" }
@@ -344,9 +345,9 @@ mod wasm {
                 path { d: "M14 2v4a2 2 0 0 0 2 2h4" }
             } },
             BuiltinIcon::Code => rsx! { Icon { class: "{class}",
-                path { d: "m8 9-3 3 3 3" }
-                path { d: "m16 9 3 3-3 3" }
-                path { d: "m14 5-4 14" }
+                path { d: "m5 8-3 4 3 4" }
+                path { d: "m19 8 3 4-3 4" }
+                path { d: "m14 4-4 16" }
             } },
             BuiltinIcon::Project => rsx! { Icon { class: "{class}",
                 path { d: "M4.5 16.5c-1.5 1.26-2 5-2 5s3.74-.5 5-2c.71-.84.7-2.13-.09-2.91a2.18 2.18 0 0 0-2.91-.09Z" }
@@ -481,7 +482,11 @@ mod wasm {
         img_class: String,
         icon_class: String,
     ) -> Element {
-        if url.starts_with("file:") {
+        let file_entry = url.split(['?', '#']).next() == Some("file://");
+        if file_entry && let PageIcon::Builtin(builtin) = &icon {
+            return rsx! { BuiltinIconView { icon: *builtin, class: icon_class } };
+        }
+        if url.starts_with("file:") && icon.favicon_url().is_empty() {
             let is_dir = url.ends_with('/');
             return rsx! { TypeIcon { path: url, is_dir, class: icon_class } };
         }

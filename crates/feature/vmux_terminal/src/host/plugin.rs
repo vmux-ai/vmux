@@ -512,16 +512,25 @@ type PendingPageOpen = (Without<PageOpenHandled>, Without<PageOpenError>);
 
 fn handle_page_open(
     tasks: Query<(Entity, &PageOpenTask, Has<PageRestore>), PendingPageOpen>,
+    navigations: Query<&vmux_ecs::PageNavigation>,
     pid_indexes: Query<&pid::PidToEntity>,
     tabs: TabHierarchy,
     restored_stacks: Query<(), (With<Stack>, With<PageRestore>)>,
     saved_launches: Query<&TerminalLaunch, With<Stack>>,
+    children: Query<&Children>,
     settings: Res<AppSettings>,
     active_space: FocusedSpace,
+    time: Res<Time>,
     mut commands: Commands,
 ) {
     let space_id = active_space.id().unwrap_or(BOOTSTRAP_SPACE_ID);
     for (entity, task, restoring_task) in &tasks {
+        if !navigations
+            .get(task.stack)
+            .is_ok_and(|navigation| navigation.matches(task.id))
+        {
+            continue;
+        }
         let restoring = restoring_task || restored_stacks.contains(task.stack);
         if task.url != TerminalPlugin::URL.trim_end_matches('/')
             && !task.url.starts_with(TerminalPlugin::URL)
@@ -587,27 +596,39 @@ fn handle_page_open(
                 }
             }
         };
-        commands.entity(task.stack).despawn_children();
         let title = cwd
             .as_ref()
             .map(|cwd| format!("Terminal ({})", cwd.display()))
             .unwrap_or_else(|| "Terminal".to_string());
-        commands.entity(task.stack).insert(PageMetadata {
-            url: TerminalPlugin::URL.to_string(),
-            title,
-            bg_color: None,
-            ..default()
-        });
+        let previous = children
+            .get(task.stack)
+            .map(|children| children.iter().collect::<Vec<_>>())
+            .unwrap_or_default();
+        for surface in &previous {
+            commands
+                .entity(*surface)
+                .try_insert(vmux_layout::hosted_page::SurfaceBlocked);
+        }
         let terminal = commands
             .spawn((
                 TerminalBundle::with_cwd(&settings, cwd.as_deref()),
+                vmux_layout::hosted_page::SurfaceHandoff::new(previous, task.id, 0, time.elapsed()),
                 ChildOf(task.stack),
             ))
             .id();
         if let Some(launch) = saved_launch {
             commands.entity(terminal).insert(launch);
         }
-        commands.entity(terminal).insert(KeyboardOwner);
+        commands.entity(terminal).insert((
+            KeyboardOwner,
+            Visibility::Hidden,
+            PageMetadata {
+                url: TerminalPlugin::URL.to_string(),
+                title,
+                bg_color: None,
+                ..default()
+            },
+        ));
         commands.entity(entity).insert(PageOpenHandled);
     }
 }
@@ -2050,6 +2071,25 @@ mod tests {
             .spawn((record.bundle(), vmux_layout::space::CurrentSpace));
     }
 
+    struct PageOpenFixture;
+
+    impl PageOpenFixture {
+        fn spawn(app: &mut App, stack: Entity, url: &str) -> Entity {
+            let id = PageOpenId::new();
+            app.world_mut()
+                .entity_mut(stack)
+                .insert(vmux_ecs::PageNavigation::new(id));
+            app.world_mut()
+                .spawn(PageOpenTask {
+                    id,
+                    stack,
+                    url: url.to_string(),
+                    request_id: None,
+                })
+                .id()
+        }
+    }
+
     #[test]
     fn bracketed_paste_wraps_payload() {
         assert_eq!(
@@ -2313,15 +2353,7 @@ mod tests {
         spawn_active_space(&mut app, &SpaceRecord::bootstrap());
 
         let stack = app.world_mut().spawn(Stack::bundle()).id();
-        let task = app
-            .world_mut()
-            .spawn(PageOpenTask {
-                id: PageOpenId::new(),
-                stack,
-                url: "vmux://terminal".to_string(),
-                request_id: None,
-            })
-            .id();
+        let task = PageOpenFixture::spawn(&mut app, stack, "vmux://terminal");
 
         app.update();
 
@@ -2333,6 +2365,53 @@ mod tests {
                 .filter(|child_of| child_of.get() == stack)
                 .count(),
             1
+        );
+    }
+
+    #[test]
+    fn terminal_page_open_retains_the_previous_surface_until_commit() {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins)
+            .insert_resource(test_settings())
+            .add_systems(Update, handle_page_open);
+        spawn_active_space(&mut app, &SpaceRecord::bootstrap());
+
+        let previous_metadata = PageMetadata {
+            url: "vmux://projects/".into(),
+            title: "Projects".into(),
+            ..Default::default()
+        };
+        let stack = app.world_mut().spawn(Stack::bundle()).id();
+        app.world_mut()
+            .entity_mut(stack)
+            .insert(previous_metadata.clone());
+        let previous = app
+            .world_mut()
+            .spawn((Browser, previous_metadata.clone(), ChildOf(stack)))
+            .id();
+        PageOpenFixture::spawn(&mut app, stack, "vmux://terminal");
+
+        app.update();
+
+        assert!(app.world().get_entity(previous).is_ok());
+        assert_eq!(
+            app.world().get::<PageMetadata>(stack),
+            Some(&previous_metadata)
+        );
+        let terminal = app
+            .world_mut()
+            .query_filtered::<Entity, With<Terminal>>()
+            .iter(app.world())
+            .next()
+            .unwrap();
+        assert!(
+            app.world()
+                .get::<vmux_layout::hosted_page::SurfaceHandoff>(terminal)
+                .is_some()
+        );
+        assert_eq!(
+            app.world().get::<Visibility>(terminal),
+            Some(&Visibility::Hidden)
         );
     }
 
@@ -2357,12 +2436,7 @@ mod tests {
         spawn_active_space(&mut app, &record);
 
         let stack = app.world_mut().spawn(Stack::bundle()).id();
-        app.world_mut().spawn(PageOpenTask {
-            id: PageOpenId::new(),
-            stack,
-            url: "vmux://terminal".to_string(),
-            request_id: None,
-        });
+        PageOpenFixture::spawn(&mut app, stack, "vmux://terminal");
 
         app.update();
 
@@ -2383,12 +2457,7 @@ mod tests {
         spawn_active_space(&mut app, &record);
 
         let stack = app.world_mut().spawn(Stack::bundle()).id();
-        app.world_mut().spawn(PageOpenTask {
-            id: PageOpenId::new(),
-            stack,
-            url: "vmux://terminal".to_string(),
-            request_id: None,
-        });
+        PageOpenFixture::spawn(&mut app, stack, "vmux://terminal");
 
         app.update();
 
@@ -2428,12 +2497,7 @@ mod tests {
             })
             .id();
         let stack = app.world_mut().spawn((Stack::bundle(), ChildOf(tab))).id();
-        app.world_mut().spawn(PageOpenTask {
-            id: PageOpenId::new(),
-            stack,
-            url: "vmux://terminal".to_string(),
-            request_id: None,
-        });
+        PageOpenFixture::spawn(&mut app, stack, "vmux://terminal");
 
         app.update();
 
@@ -2475,15 +2539,7 @@ mod tests {
             })
             .id();
         let stack = app.world_mut().spawn((Stack::bundle(), ChildOf(tab))).id();
-        let task = app
-            .world_mut()
-            .spawn(PageOpenTask {
-                id: PageOpenId::new(),
-                stack,
-                url: "vmux://terminal".to_string(),
-                request_id: None,
-            })
-            .id();
+        let task = PageOpenFixture::spawn(&mut app, stack, "vmux://terminal");
 
         app.update();
 

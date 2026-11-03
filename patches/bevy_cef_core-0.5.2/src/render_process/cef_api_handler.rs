@@ -1,4 +1,5 @@
 use crate::prelude::{LISTEN_EVENTS, PROCESS_MESSAGE_BIN_JS_EMIT, PROCESS_MESSAGE_JS_EMIT};
+use crate::render_process::render_process_handler::{BinDocumentIdentity, current_bin_ipc_epoch};
 use crate::util::{IntoString, v8_value_to_json};
 use cef::rc::{Rc, RcImpl};
 use cef::{
@@ -120,12 +121,20 @@ impl CefApiHandler {
         if !crate::util::has_embedded_scheme(&frame.url().into_string()) {
             return 1;
         }
+        let Some(identity) = BinDocumentIdentity::current_token(&context) else {
+            return 1;
+        };
+        let Some(ipc_epoch) = current_bin_ipc_epoch(&context) else {
+            return 1;
+        };
 
         if let Some(mut process) = process_message_create(Some(&PROCESS_MESSAGE_BIN_JS_EMIT.into()))
             && let Some(arguments_list) = process.argument_list()
             && let Some(arguments) = arguments
             && let Some(Some(first)) = arguments.first()
         {
+            arguments_list.set_string(2, Some(&identity.as_str().into()));
+            arguments_list.set_string(3, Some(&ipc_epoch.to_string().as_str().into()));
             let (id, payload_index) = if first.is_string().is_positive() {
                 (first.string_value().into_string(), 1)
             } else {
@@ -184,11 +193,14 @@ impl CefApiHandler {
             && let Some(Some(callback)) = arguments.get(1)
             && callback.is_function().is_positive()
             && let Some(browser) = context.browser()
+            && let Some(token) = BinDocumentIdentity::current_token(&context)
         {
-            LISTEN_EVENTS.lock().unwrap().insert(
-                (browser.identifier(), id.string_value().into_string()),
-                callback.clone(),
-            );
+            LISTEN_EVENTS
+                .lock()
+                .unwrap()
+                .entry((browser.identifier(), token, id.string_value().into_string()))
+                .or_default()
+                .push(callback.clone());
         }
         1
     }

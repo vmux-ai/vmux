@@ -204,10 +204,14 @@ const MIN_FOREGROUND_CEF_WAKE_INTERVAL: Duration = Duration::from_nanos(33_333_3
 
 fn keep_awake_while_revealing(
     proxy: Option<Res<EventLoopProxyWrapper>>,
+    wake_policy: Option<Res<MessageLoopWakePolicy>>,
     pending: Query<(), With<vmux_layout::PendingWebviewReveal>>,
 ) {
     if pending.is_empty() {
         return;
+    }
+    if let Some(wake_policy) = wake_policy {
+        wake_policy.begin_interaction();
     }
     if let Some(proxy) = proxy {
         let _ = (**proxy).send_event(WinitUserEvent::WakeUp);

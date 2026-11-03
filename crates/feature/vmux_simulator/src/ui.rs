@@ -92,9 +92,6 @@ fn Mirror(
     let screen_style = frame.screen_style();
     let stream = CanvasStream::new(port, capability, frame_width, frame_height);
     let stream_start = stream.clone();
-    use_effect(move || {
-        PageScript::run(stream_start.start_script());
-    });
     let stream_stop = stream.clone();
     use_drop(move || {
         PageScript::run(stream_stop.stop_script());
@@ -195,6 +192,7 @@ fn Mirror(
                         class: "block h-auto w-full cursor-grab touch-none select-none opacity-0 transition-opacity active:cursor-grabbing",
                         style: image_style,
                         onmounted: move |event: Event<MountedData>| {
+                            PageScript::run(stream_start.start_script());
                             let target = event.data();
                             spawn(async move {
                                 let Ok(rect) = target.get_client_rect().await else {
@@ -292,30 +290,47 @@ try {{
   if (!canvas || !context) throw new Error("simulator canvas is unavailable");
   let generation = 0;
   let first = true;
+  let failures = 0;
+  let reportedFailure = false;
   while (!controller.signal.aborted) {{
-    const frameUrl = `/__simulator-frame?port={port}&capability={capability}&after=${{generation}}`;
-    const response = await fetch(frameUrl, {{ signal: controller.signal, cache: "no-store" }});
-    if (!response.ok) throw new Error(`simulator stream failed: ${{response.status}}`);
-    const payload = new Uint8Array(await response.arrayBuffer());
-    if (payload.length < 9) throw new Error("simulator frame was empty");
-    const generationView = new DataView(payload.buffer, payload.byteOffset, 8);
-    generation = generationView.getUint32(0, true) + generationView.getUint32(4, true) * 4294967296;
-    const decoded = await decodeFrame(payload.subarray(8));
-    if (!canvas.isConnected) {{
-      URL.revokeObjectURL(decoded.url);
-      controller.abort();
-      break;
-    }}
-    context.drawImage(decoded.image, 0, 0, {width}, {height});
-    URL.revokeObjectURL(decoded.url);
-    if (first) {{
-      first = false;
-      reveal();
+    try {{
+      const frameUrl = `/__simulator-frame?port={port}&capability={capability}&after=${{generation}}`;
+      const response = await fetch(frameUrl, {{ signal: controller.signal, cache: "no-store" }});
+      if (!response.ok) throw new Error(`simulator stream failed: ${{response.status}}`);
+      const payload = new Uint8Array(await response.arrayBuffer());
+      if (payload.length < 9) throw new Error("simulator frame was empty");
+      const generationView = new DataView(payload.buffer, payload.byteOffset, 8);
+      generation = generationView.getUint32(0, true) + generationView.getUint32(4, true) * 4294967296;
+      const decoded = await decodeFrame(payload.subarray(8));
+      try {{
+        if (!canvas.isConnected) {{
+          controller.abort();
+          break;
+        }}
+        context.drawImage(decoded.image, 0, 0, {width}, {height});
+      }} finally {{
+        URL.revokeObjectURL(decoded.url);
+      }}
+      failures = 0;
+      reportedFailure = false;
+      if (first) {{
+        first = false;
+        reveal();
+      }}
+    }} catch (error) {{
+      if (controller.signal.aborted) break;
+      if (!reportedFailure) {{
+        console.error(error?.stack || error?.message || String(error));
+        reportedFailure = true;
+      }}
+      failures += 1;
+      const delay = Math.min(1000, 100 * 2 ** Math.min(failures, 3));
+      await new Promise(resolve => setTimeout(resolve, delay));
     }}
   }}
 }} catch (error) {{
   if (!controller.signal.aborted) {{
-    console.error(error);
+    console.error(error?.stack || error?.message || String(error));
   }}
 }} finally {{
   if (streams.get(key) === controller) streams.delete(key);

@@ -7,7 +7,7 @@ use vmux_api::bookmark::{
 };
 use vmux_api::space::ProjectRowKind;
 use vmux_ecs::event::team::{TeamMemberRow, TeamUiState};
-use vmux_ecs::{Description, EntityTarget};
+use vmux_ecs::{Description, EntityTarget, PageMetadata};
 use vmux_session::{RunState, Session, Stage, StageDefinition, StageId};
 
 use crate::cef::{Browser, LayoutCef};
@@ -17,33 +17,67 @@ use crate::event::{
     PaneTreeState, SideSheetPane, SideSheetState, StackNavigationState, StackNode,
     StackRevealTarget, TabBoundary, TabBoundaryState, TabListState, TabStripRow, TabStripState,
 };
+use crate::hosted_page::StackSurface;
 use crate::side_sheet::{SideSheetSections, SideSheetSectionsExpanded};
 use crate::state::LayoutUiState;
 
 pub struct LayoutUiProjectionPlugin;
 
+#[derive(SystemSet, Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum LayoutUiProjectionSet {
+    Source,
+    SourceFlush,
+    Derive,
+    DeriveFlush,
+    Publish,
+}
+
 impl Plugin for LayoutUiProjectionPlugin {
     fn build(&self, app: &mut App) {
-        app.add_observer(capture_tab_list).add_systems(
-            Update,
-            (
-                publish_active_session,
+        app.add_observer(address_request)
+            .add_observer(capture_tab_list)
+            .configure_sets(
+                PostUpdate,
                 (
+                    LayoutUiProjectionSet::Source,
+                    LayoutUiProjectionSet::SourceFlush,
+                    LayoutUiProjectionSet::Derive,
+                    LayoutUiProjectionSet::DeriveFlush,
+                    LayoutUiProjectionSet::Publish,
+                )
+                    .chain()
+                    .after(crate::presentation::PresentationFlushSet)
+                    .before(vmux_flex::prelude::LayoutSystems::Layout),
+            )
+            .add_systems(
+                PostUpdate,
+                bevy::ecs::schedule::ApplyDeferred.in_set(LayoutUiProjectionSet::SourceFlush),
+            )
+            .add_systems(
+                PostUpdate,
+                (
+                    publish_active_session,
                     project_header,
                     project_tab_strip,
-                    publish_header,
-                    publish_tab_strip,
-                )
-                    .chain(),
-                (
                     project_side_sheet,
                     project_bookmark_ui,
+                )
+                    .in_set(LayoutUiProjectionSet::Derive),
+            )
+            .add_systems(
+                PostUpdate,
+                bevy::ecs::schedule::ApplyDeferred.in_set(LayoutUiProjectionSet::DeriveFlush),
+            )
+            .add_systems(
+                PostUpdate,
+                (
+                    publish_header,
+                    publish_tab_strip,
                     publish_side_sheet,
                     publish_bookmark_ui,
                 )
-                    .chain(),
-            ),
-        );
+                    .in_set(LayoutUiProjectionSet::Publish),
+            );
     }
 }
 
@@ -100,7 +134,7 @@ impl TabStripProjection {
             } else {
                 tab.name.clone()
             };
-            let metadata = vmux_ecs::PageMetadata {
+            let metadata = PageMetadata {
                 title: display_title.clone(),
                 url: tab.url.clone(),
                 icon: tab.icon.clone(),
@@ -169,7 +203,7 @@ impl BookmarkUiBuilder {
             pins,
             rows: builder.rows,
             folders: bookmarks.folders.clone(),
-            active_page: active_page.map(|page| vmux_ecs::PageMetadata {
+            active_page: active_page.map(|page| PageMetadata {
                 title: page.title.clone(),
                 url: page.url.clone(),
                 icon: page.icon.clone(),
@@ -403,6 +437,51 @@ impl ActiveSession {
         };
         page.in_subtree(&member) || member.in_subtree(&page)
     }
+
+    fn project_workspace(
+        &mut self,
+        projects: &TabBoundaryState,
+        selection: Option<&GitPageSelection>,
+        pending: Option<&crate::page_context::PendingWorkspaceSelection>,
+        focused: bool,
+    ) {
+        let pending_matches = pending.is_some_and(|pending| {
+            self.project
+                .as_ref()
+                .is_some_and(|project| pending.matches_project_dir(&project.project_dir))
+                || self
+                    .boundary
+                    .as_ref()
+                    .is_some_and(|boundary| pending.matches_project_dir(&boundary.project_dir))
+                || selection.is_some_and(|selection| pending.matches_project_dir(&selection.path))
+        });
+        if let Some(selection) = selection {
+            self.project = ActiveWorkspaceProject::viewed(
+                projects,
+                &selection.path,
+                &selection.name,
+                &selection.branch,
+            );
+            let boundary = self.boundary.get_or_insert_with(TabBoundary::default);
+            boundary.effective_dir.clone_from(&selection.path);
+            boundary.project_dir.clone_from(&selection.path);
+            boundary.repository.clone_from(&selection.name);
+            boundary.is_git_repo = true;
+            boundary.branch.clone_from(&selection.branch);
+        }
+        if !focused || !pending_matches {
+            return;
+        }
+        let Some(pending) = pending else {
+            return;
+        };
+        if let Some(project) = self.project.as_mut() {
+            project.branch = pending.branch().to_string();
+        }
+        if let Some(boundary) = self.boundary.as_mut() {
+            boundary.branch = pending.branch().to_string();
+        }
+    }
 }
 
 #[derive(SystemParam)]
@@ -458,6 +537,7 @@ struct GitPageSelection {
 
 #[derive(SystemParam)]
 struct GitSelectionProjection<'w, 's> {
+    surfaces: StackSurface<'w, 's>,
     pages: Query<
         'w,
         's,
@@ -504,12 +584,12 @@ impl GitSelectionProjection<'_, '_> {
 
     fn page(&self, page: &StackNode) -> Option<GitPageSelection> {
         let stack = Entity::from_bits(page.id);
-        self.pages.iter().find_map(|(parent, path, name, branch)| {
-            (parent.parent() == stack).then(|| GitPageSelection {
-                path: path.0.clone(),
-                name: name.0.clone(),
-                branch: branch.0.clone(),
-            })
+        let surface = self.surfaces.current(stack)?;
+        let (parent, path, name, branch) = self.pages.get(surface).ok()?;
+        (parent.parent() == stack).then(|| GitPageSelection {
+            path: path.0.clone(),
+            name: name.0.clone(),
+            branch: branch.0.clone(),
         })
     }
 }
@@ -589,7 +669,7 @@ impl HeaderState {
             .filter(|url| !url.is_empty())
         else {
             return Self {
-                metadata: active.as_ref().map(|row| vmux_ecs::PageMetadata {
+                metadata: active.as_ref().map(|row| PageMetadata {
                     title: row.title.clone(),
                     url: row.url.clone(),
                     icon: row.icon.clone(),
@@ -598,6 +678,7 @@ impl HeaderState {
                 active,
                 user,
                 agents,
+                profiles: team.profiles.clone(),
                 ..Default::default()
             };
         };
@@ -617,7 +698,8 @@ impl HeaderState {
             .find(|pin| pin.metadata.url == url)
             .map(|pin| pin.uuid.clone());
         Self {
-            metadata: active.as_ref().map(|row| vmux_ecs::PageMetadata {
+            address: None,
+            metadata: active.as_ref().map(|row| PageMetadata {
                 title: row.title.clone(),
                 url: row.url.clone(),
                 icon: row.icon.clone(),
@@ -628,6 +710,7 @@ impl HeaderState {
             pinned_uuid,
             user,
             agents,
+            profiles: team.profiles.clone(),
         }
     }
 }
@@ -658,7 +741,9 @@ impl SideSheetProjection {
                 is_active: pane.is_active,
                 collapsed: pane.collapsed,
                 bookmarks_expanded: pane.bookmarks_expanded,
-                any_loading: stacks.iter().any(|stack| stack.is_loading),
+                any_loading: stacks
+                    .iter()
+                    .any(|stack| stack.is_active && stack.is_loading),
                 collapsed_stack,
                 stacks,
             });
@@ -668,12 +753,22 @@ impl SideSheetProjection {
             .find(|pane| pane.is_active)
             .or_else(|| side_sheet_panes.first())
             .cloned();
-        let active_page = active_pane.as_ref().and_then(|pane| {
-            pane.stacks
-                .iter()
-                .find(|stack| stack.is_active && !stack.url.is_empty())
-                .cloned()
-        });
+        let active_page = active_pane
+            .as_ref()
+            .and_then(|pane| {
+                pane.stacks
+                    .iter()
+                    .find(|stack| stack.is_active && !stack.url.is_empty())
+                    .cloned()
+            })
+            .or_else(|| {
+                let previous = current?.state.active_page.as_ref()?;
+                side_sheet_panes
+                    .iter()
+                    .flat_map(|pane| pane.stacks.iter())
+                    .find(|stack| stack.id == previous.id)
+                    .cloned()
+            });
         let reveal_location = active_pane
             .as_ref()
             .and_then(|pane| {
@@ -733,6 +828,11 @@ fn publish_active_session(
     sections: SideSheetSections,
     changed_sections: Query<(), Changed<SideSheetSectionsExpanded>>,
     mut removed_sections: RemovedComponents<SideSheetSectionsExpanded>,
+    focus: crate::stack::FocusedStack,
+    pending_selections: Query<Ref<crate::page_context::PendingWorkspaceSelection>>,
+    mut removed_pending_selections: RemovedComponents<
+        crate::page_context::PendingWorkspaceSelection,
+    >,
     mut sessions: SessionProjection,
     mut git: GitSelectionProjection,
     mut last: Local<std::collections::HashMap<Entity, ActiveSessionState>>,
@@ -743,7 +843,13 @@ fn publish_active_session(
     let empty_team = TeamUiState::default();
     let sessions_changed = sessions.is_changed();
     let git_changed = git.is_changed();
-    let sections_changed = !changed_sections.is_empty() || removed_sections.read().next().is_some();
+    let section_removed = removed_sections.read().count() > 0;
+    let sections_changed = !changed_sections.is_empty() || section_removed;
+    let pending_selection_changed = pending_selections
+        .iter()
+        .any(|pending| pending.is_changed())
+        || !removed_pending_selections.is_empty();
+    removed_pending_selections.clear();
     for (entity, panes, projects, team) in &layouts {
         let projection_changed = panes.as_ref().is_some_and(|value| value.is_changed())
             || projects.as_ref().is_some_and(|value| value.is_changed())
@@ -753,6 +859,8 @@ fn publish_active_session(
             && !git_changed
             && !projection_changed
             && !sections_changed
+            && !pending_selection_changed
+            && !focus.is_changed()
         {
             continue;
         }
@@ -768,22 +876,42 @@ fn publish_active_session(
             .as_deref()
             .map(|projection| &projection.0)
             .unwrap_or(&empty_team);
-        let session = ActiveSession::from_projections(panes, projects, team).map(|mut active| {
-            active.task = sessions.task(&active.page);
-            if let Some(selection) = git.page(&active.page) {
-                active.project = ActiveWorkspaceProject::viewed(
-                    projects,
-                    &selection.path,
-                    &selection.name,
-                    &selection.branch,
-                );
-                let boundary = active.boundary.get_or_insert_with(TabBoundary::default);
-                boundary.effective_dir.clone_from(&selection.path);
-                boundary.project_dir.clone_from(&selection.path);
-                boundary.repository.clone_from(&selection.name);
-                boundary.is_git_repo = true;
-                boundary.branch.clone_from(&selection.branch);
+        let pending_selection = focus.tab.and_then(|tab| {
+            pending_selections
+                .get(tab)
+                .ok()
+                .map(|pending| (*pending).clone())
+        });
+        let focused_pane = focus.pane.map(Entity::to_bits);
+        let projected = ActiveSession::from_projections(panes, projects, team);
+        let retained = projected.or_else(|| {
+            let active_is_pending = panes.panes.iter().any(|pane| {
+                pane.is_active
+                    && pane
+                        .stacks
+                        .iter()
+                        .any(|stack| stack.is_active && (stack.url.is_empty() || stack.is_loading))
+            });
+            if !active_is_pending {
+                return None;
             }
+            let previous = last.get(&entity)?.session.as_ref()?;
+            panes
+                .panes
+                .iter()
+                .flat_map(|pane| pane.stacks.iter())
+                .any(|stack| stack.id == previous.page.id)
+                .then(|| previous.clone())
+        });
+        let session = retained.map(|mut active| {
+            active.task = sessions.task(&active.page);
+            let selection = git.page(&active.page);
+            active.project_workspace(
+                projects,
+                selection.as_ref(),
+                pending_selection.as_ref(),
+                focused_pane == Some(active.pane_id),
+            );
             if let Some(project) = active.project.as_mut() {
                 project.expanded = sections.under(Entity::from_bits(active.pane_id)).projects;
             }
@@ -817,15 +945,26 @@ fn project_header(
             Option<&BookmarkProjection>,
             Option<&TeamProjection>,
             Option<&HeaderProjection>,
+            Option<&vmux_ecs::UiState<LayoutUiState>>,
         ),
         With<LayoutCef>,
     >,
+    addresses: Query<(
+        Entity,
+        &vmux_ecs::page::AddressContribution,
+        &PageMetadata,
+        Option<&vmux_ecs::UiState<vmux_api::address::PageAddressUiState>>,
+    )>,
+    focus: crate::stack::FocusedStack,
+    surfaces: StackSurface,
+    scope: crate::window::WindowScope,
     mut commands: Commands,
 ) {
     let empty_stacks = StackNavigationState::default();
     let empty_bookmarks = BookmarkStateEvent::default();
     let empty_team = TeamUiState::default();
-    for (entity, stacks, bookmarks, team, current) in &layouts {
+    let active = focus.stack.and_then(|stack| surfaces.current(stack));
+    for (entity, stacks, bookmarks, team, current, state) in &layouts {
         let stacks = stacks
             .map(|projection| &projection.0)
             .unwrap_or(&empty_stacks);
@@ -833,12 +972,76 @@ fn project_header(
             .map(|projection| &projection.0)
             .unwrap_or(&empty_bookmarks);
         let team = team.map(|projection| &projection.0).unwrap_or(&empty_team);
-        let next = HeaderProjection(HeaderState::from_projections(stacks, bookmarks, team));
-        if current == Some(&next) {
-            continue;
+        let visible = state
+            .and_then(|state| state.current())
+            .and_then(|state| state.layout.as_ref())
+            .is_some_and(|geometry| geometry.header_visible());
+        let mut next = HeaderProjection(HeaderState::from_projections(stacks, bookmarks, team));
+        for (owner, address, metadata, ui) in &addresses {
+            if !scope.contains(entity, owner) {
+                continue;
+            }
+            if visible && Some(owner) == active && address.0.url == metadata.url {
+                next.0.address = Some(address.0.clone());
+            }
+            if ui
+                .and_then(|state| state.current())
+                .is_none_or(|state| state.in_header != visible)
+            {
+                commands.trigger(vmux_ecs::UiStateWrite::<
+                    vmux_api::address::PageAddressUiState,
+                >::from_event(
+                    owner,
+                    &vmux_api::address::PageAddressUiStatePatch {
+                        address: None,
+                        in_header: Some(visible),
+                    },
+                ));
+            }
         }
-        commands.entity(entity).insert(next);
+        if current != Some(&next) {
+            commands.entity(entity).insert(next);
+        }
     }
+}
+
+fn address_request(
+    event: On<bevy_cef::prelude::UiInput<vmux_api::address::PageAddressRequest>>,
+    layouts: Query<&HeaderProjection, With<LayoutCef>>,
+    addresses: Query<(&vmux_ecs::page::AddressContribution, &PageMetadata)>,
+    focus: crate::stack::FocusedStack,
+    surfaces: StackSurface,
+    scope: crate::window::WindowScope,
+    mut commands: Commands,
+) {
+    let request = &event.payload;
+    let Ok(header) = layouts.get(event.webview) else {
+        return;
+    };
+    let Some(address) = &header.0.address else {
+        return;
+    };
+    if !address.accepts(request) {
+        return;
+    }
+    let Some(owner) = focus.stack.and_then(|stack| surfaces.current(stack)) else {
+        return;
+    };
+    if owner.to_bits() != request.owner || !scope.contains(event.webview, owner) {
+        return;
+    }
+    let Ok((current, metadata)) = addresses.get(owner) else {
+        return;
+    };
+    if !current.0.accepts(request) || metadata.url != request.url {
+        return;
+    }
+    commands.trigger(vmux_ecs::page::AddressIntentRequest {
+        entity: owner,
+        revision: request.revision,
+        url: request.url.clone(),
+        intent: request.intent.clone(),
+    });
 }
 
 fn project_tab_strip(
@@ -849,7 +1052,14 @@ fn project_tab_strip(
             Option<&HeaderProjection>,
             Option<&TabStripProjection>,
         ),
-        With<LayoutCef>,
+        (
+            With<LayoutCef>,
+            Or<(
+                Added<LayoutCef>,
+                Changed<TabListProjection>,
+                Changed<HeaderProjection>,
+            )>,
+        ),
     >,
     mut commands: Commands,
 ) {
@@ -894,7 +1104,14 @@ fn project_side_sheet(
             &SpacesProjection,
             Option<&SideSheetProjection>,
         ),
-        With<LayoutCef>,
+        (
+            With<LayoutCef>,
+            Or<(
+                Added<LayoutCef>,
+                Changed<PaneTreeProjection>,
+                Changed<SpacesProjection>,
+            )>,
+        ),
     >,
     mut commands: Commands,
 ) {
@@ -915,7 +1132,14 @@ fn project_bookmark_ui(
             Option<&SideSheetProjection>,
             Option<&BookmarkUiProjection>,
         ),
-        With<LayoutCef>,
+        (
+            With<LayoutCef>,
+            Or<(
+                Added<LayoutCef>,
+                Changed<BookmarkProjection>,
+                Changed<SideSheetProjection>,
+            )>,
+        ),
     >,
     mut commands: Commands,
 ) {
@@ -970,6 +1194,34 @@ mod tests {
         if sessions.is_changed() {
             changes.0 += 1;
         }
+    }
+
+    #[test]
+    fn stable_sources_project_when_layout_cef_attaches() {
+        let mut app = App::new();
+        app.add_plugins(LayoutUiProjectionPlugin);
+        let entity = app
+            .world_mut()
+            .spawn((
+                TabListProjection(TabListState::default()),
+                PaneTreeProjection(PaneTreeState::default()),
+                SpacesProjection(vmux_ecs::event::space::SpacesListEvent::default()),
+                BookmarkProjection(BookmarkStateEvent::default()),
+            ))
+            .id();
+
+        app.update();
+        assert!(app.world().get::<TabStripProjection>(entity).is_none());
+        assert!(app.world().get::<SideSheetProjection>(entity).is_none());
+        assert!(app.world().get::<BookmarkUiProjection>(entity).is_none());
+
+        app.world_mut().entity_mut(entity).insert(LayoutCef);
+        app.update();
+
+        assert!(app.world().get::<HeaderProjection>(entity).is_some());
+        assert!(app.world().get::<TabStripProjection>(entity).is_some());
+        assert!(app.world().get::<SideSheetProjection>(entity).is_some());
+        assert!(app.world().get::<BookmarkUiProjection>(entity).is_some());
     }
 
     #[test]
@@ -1206,6 +1458,96 @@ mod tests {
     }
 
     #[test]
+    fn git_selection_keeps_a_nested_projects_pending_branch() {
+        let repository = tempfile::tempdir().unwrap();
+        let nested = repository.path().join("crates/app");
+        std::fs::create_dir_all(&nested).unwrap();
+        let pending = crate::page_context::PendingWorkspaceSelection::new(
+            nested.to_string_lossy().into_owned(),
+            "feature".into(),
+            1,
+        );
+        let selection = GitPageSelection {
+            path: repository.path().to_string_lossy().into_owned(),
+            name: "vmux".into(),
+            branch: "main".into(),
+        };
+        let mut active = ActiveSession {
+            page: StackNode {
+                id: 1,
+                agent_id: None,
+                title: String::new(),
+                url: vmux_git::GIT_PAGE_URL.to_string(),
+                icon: Default::default(),
+                is_active: true,
+                is_loading: false,
+                is_dirty: false,
+                bg_color: None,
+            },
+            task: None,
+            agent: None,
+            project: None,
+            boundary: Some(TabBoundary {
+                project_dir: nested.to_string_lossy().into_owned(),
+                branch: "main".into(),
+                ..Default::default()
+            }),
+            pane_id: 1,
+        };
+
+        active.project_workspace(
+            &TabBoundaryState::default(),
+            Some(&selection),
+            Some(&pending),
+            true,
+        );
+
+        assert_eq!(
+            active
+                .project
+                .as_ref()
+                .map(|project| project.branch.as_str()),
+            Some("feature")
+        );
+        assert_eq!(
+            active
+                .boundary
+                .as_ref()
+                .map(|boundary| boundary.branch.as_str()),
+            Some("feature")
+        );
+
+        let pending = crate::page_context::PendingWorkspaceSelection::new(
+            repository.path().to_string_lossy().into_owned(),
+            "feature".into(),
+            2,
+        );
+        let mut active = ActiveSession {
+            page: active.page,
+            task: None,
+            agent: None,
+            project: None,
+            boundary: None,
+            pane_id: 1,
+        };
+
+        active.project_workspace(
+            &TabBoundaryState::default(),
+            Some(&selection),
+            Some(&pending),
+            true,
+        );
+
+        assert_eq!(
+            active
+                .project
+                .as_ref()
+                .map(|project| project.branch.as_str()),
+            Some("feature")
+        );
+    }
+
+    #[test]
     fn header_projection_contains_render_ready_team_rows() {
         let user = TeamMemberRow {
             id: "user".into(),
@@ -1335,5 +1677,96 @@ mod tests {
         changed_panes.panes[1].is_active = false;
         let changed = SideSheetProjection::from_sources(&changed_panes, &spaces, Some(&unchanged));
         assert_eq!(changed.state.reveal.as_ref().unwrap().revision, 2);
+    }
+
+    #[test]
+    fn side_sheet_keeps_the_visible_page_while_a_new_stack_is_pending() {
+        let spaces = vmux_ecs::event::space::SpacesListEvent::default();
+        let visible = StackNode {
+            id: 11,
+            agent_id: None,
+            title: "Visible".into(),
+            url: "vmux://sessions/visible".into(),
+            icon: Default::default(),
+            is_active: true,
+            is_loading: false,
+            is_dirty: false,
+            bg_color: None,
+        };
+        let initial = PaneTreeState {
+            panes: vec![crate::event::PaneNode {
+                id: 1,
+                is_active: true,
+                collapsed: false,
+                bookmarks_expanded: true,
+                stacks: vec![visible.clone()],
+            }],
+        };
+        let current = SideSheetProjection::from_sources(&initial, &spaces, None);
+        let pending = PaneTreeState {
+            panes: vec![crate::event::PaneNode {
+                id: 1,
+                is_active: true,
+                collapsed: false,
+                bookmarks_expanded: true,
+                stacks: vec![
+                    StackNode {
+                        is_active: false,
+                        ..visible
+                    },
+                    StackNode {
+                        id: 12,
+                        agent_id: None,
+                        title: "New Stack".into(),
+                        url: String::new(),
+                        icon: Default::default(),
+                        is_active: true,
+                        is_loading: true,
+                        is_dirty: false,
+                        bg_color: None,
+                    },
+                ],
+            }],
+        };
+
+        let projection = SideSheetProjection::from_sources(&pending, &spaces, Some(&current));
+
+        assert_eq!(projection.state.active_page.map(|page| page.id), Some(11));
+    }
+
+    #[test]
+    fn side_sheet_loading_follows_the_selected_page() {
+        let spaces = vmux_ecs::event::space::SpacesListEvent::default();
+        let inactive = StackNode {
+            id: 11,
+            agent_id: None,
+            title: "Start".to_string(),
+            url: "vmux://start/".to_string(),
+            icon: Default::default(),
+            is_active: false,
+            is_loading: true,
+            is_dirty: false,
+            bg_color: None,
+        };
+        let mut selected = inactive.clone();
+        selected.id = 12;
+        selected.url = "git://repository".to_string();
+        selected.is_active = true;
+        selected.is_loading = false;
+        let mut panes = PaneTreeState {
+            panes: vec![crate::event::PaneNode {
+                id: 1,
+                is_active: true,
+                collapsed: false,
+                bookmarks_expanded: false,
+                stacks: vec![inactive, selected],
+            }],
+        };
+        let ready = SideSheetProjection::from_sources(&panes, &spaces, None);
+        assert!(!ready.state.panes[0].any_loading);
+
+        panes.panes[0].stacks[1].is_loading = true;
+        let loading = SideSheetProjection::from_sources(&panes, &spaces, Some(&ready));
+        assert!(loading.state.panes[0].any_loading);
     }
 }

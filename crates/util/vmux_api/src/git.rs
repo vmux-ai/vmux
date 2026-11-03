@@ -77,12 +77,37 @@ pub struct GitLineMarker {
 #[vmux_api::contract(Eq)]
 pub struct GitDiffViewport {
     pub generation: u64,
+    pub revision: u64,
     pub first_line: u32,
     pub total_lines: u32,
     pub has_more: bool,
     pub lines: Vec<DiffLine>,
     pub markers: Vec<GitLineMarker>,
     pub error: String,
+}
+
+impl GitDiffViewport {
+    pub fn can_append(&self, next: &Self) -> bool {
+        let loaded = self
+            .first_line
+            .saturating_add(u32::try_from(self.lines.len()).unwrap_or(u32::MAX));
+        self.generation == next.generation && next.first_line == loaded
+    }
+
+    pub fn append(&mut self, next: &Self) -> bool {
+        if !self.can_append(next) {
+            return false;
+        }
+        self.revision = next.revision;
+        self.total_lines = next.total_lines;
+        self.has_more = next.has_more;
+        self.lines.extend(next.lines.clone());
+        self.markers.extend(next.markers.clone());
+        self.markers.sort_by_key(|marker| marker.line);
+        self.markers.dedup();
+        self.error.clone_from(&next.error);
+        true
+    }
 }
 
 #[vmux_api::contract(Copy, Eq)]
@@ -120,11 +145,20 @@ pub struct GitOperationResult {
 }
 
 #[vmux_api::contract(Eq, Default)]
+pub struct FileGitBranch {
+    pub name: String,
+    pub checkout: String,
+}
+
+#[vmux_api::contract(Eq, Default)]
 pub struct FileGitState {
     pub path: String,
     pub repo_root: String,
     pub has_diff: bool,
     pub branch: String,
+    pub branches: Vec<FileGitBranch>,
+    pub branches_loading: bool,
+    pub branches_loaded: bool,
     pub ahead: u32,
     pub behind: u32,
     pub staged_count: u32,

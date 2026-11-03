@@ -959,7 +959,7 @@ fn sync_tombstones(
     mut removed_tombstones: RemovedComponents<ProviderSessionTombstone>,
     mut index: ResMut<ProviderSessionTombstones>,
 ) {
-    let removed = removed_tombstones.read().next().is_some();
+    let removed = removed_tombstones.read().count() > 0;
     if !index.is_added() && changed.is_empty() && !removed {
         return;
     }
@@ -1134,16 +1134,16 @@ struct CanonicalizationChanges<'w, 's> {
 #[cfg(host)]
 impl CanonicalizationChanges<'_, '_> {
     fn any(&mut self) -> bool {
-        !self.sessions.is_empty()
-            || !self.targets.is_empty()
-            || self.removed_sessions.read().count() > 0
-            || self.removed_provider_kinds.read().count() > 0
-            || self.removed_provider_ids.read().count() > 0
-            || self.removed_activated_at.read().count() > 0
-            || self.removed_stage_changed_at.read().count() > 0
-            || self.removed_archived_at.read().count() > 0
-            || self.removed_run_state.read().count() > 0
-            || self.removed_targets.read().count() > 0
+        let mut removed = false;
+        removed |= self.removed_sessions.read().count() > 0;
+        removed |= self.removed_provider_kinds.read().count() > 0;
+        removed |= self.removed_provider_ids.read().count() > 0;
+        removed |= self.removed_activated_at.read().count() > 0;
+        removed |= self.removed_stage_changed_at.read().count() > 0;
+        removed |= self.removed_archived_at.read().count() > 0;
+        removed |= self.removed_run_state.read().count() > 0;
+        removed |= self.removed_targets.read().count() > 0;
+        !self.sessions.is_empty() || !self.targets.is_empty() || removed
     }
 }
 

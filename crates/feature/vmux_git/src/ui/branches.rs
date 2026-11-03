@@ -191,10 +191,15 @@ fn BranchFileTreeView(
     onfileselect: EventHandler<String>,
 ) -> Element {
     let mut collapsed = use_signal(HashSet::<String>::new);
+    let mut revealed_path = use_signal(String::new);
     let follow_tree = tree.clone();
     use_effect(move || {
         let path = active_path();
         if path.is_empty() {
+            revealed_path.set(String::new());
+            return;
+        }
+        if *revealed_path.peek() == path {
             return;
         }
         {
@@ -214,8 +219,12 @@ fn BranchFileTreeView(
         let Some(row_id) = follow_tree.row_id(&path) else {
             return;
         };
+        revealed_path.set(path.clone());
         spawn(async move {
             vmux_ui::platform::Platform::sleep(0).await;
+            if *active_path.peek() != path {
+                return;
+            }
             ScrollIntoView::nearest_vertical(&row_id);
         });
     });
@@ -370,6 +379,13 @@ enum BranchFileNode {
 }
 
 impl BranchFileNode {
+    fn first_path_bytes(&self) -> &[u8] {
+        match self {
+            Self::Directory(directory) => &directory.first_path_bytes,
+            Self::File(entry) => &entry.path_bytes,
+        }
+    }
+
     fn row_id(nodes: &[Self], path: &str) -> Option<String> {
         for node in nodes {
             match node {
@@ -391,6 +407,7 @@ struct BranchDirectoryNode {
     path: String,
     label: String,
     children: Vec<BranchFileNode>,
+    first_path_bytes: Vec<u8>,
 }
 
 #[derive(Default)]
@@ -412,9 +429,7 @@ impl BranchDirectoryBuilder {
         directory.files.push(file);
     }
 
-    fn finish(mut self, parent: String) -> Vec<BranchFileNode> {
-        self.files
-            .sort_by(|left, right| left.name().cmp(right.name()));
+    fn finish(self, parent: String) -> Vec<BranchFileNode> {
         let mut nodes = Vec::with_capacity(self.directories.len() + self.files.len());
         for (name, directory) in self.directories {
             let path = if parent.is_empty() {
@@ -425,6 +440,7 @@ impl BranchDirectoryBuilder {
             nodes.push(BranchFileNode::Directory(directory.node(path, name)));
         }
         nodes.extend(self.files.into_iter().map(BranchFileNode::File));
+        nodes.sort_by(|left, right| left.first_path_bytes().cmp(right.first_path_bytes()));
         nodes
     }
 
@@ -437,10 +453,17 @@ impl BranchDirectoryBuilder {
             label.push_str(&name);
             self = next;
         }
+        let children = self.finish(path.clone());
+        let first_path_bytes = children
+            .first()
+            .map(BranchFileNode::first_path_bytes)
+            .unwrap_or_default()
+            .to_vec();
         BranchDirectoryNode {
-            children: self.finish(path.clone()),
+            children,
             path,
             label,
+            first_path_bytes,
         }
     }
 }
@@ -606,10 +629,21 @@ mod tests {
                 change: GitPathChange::Modified,
             }
         }
+
+        fn paths(nodes: &[BranchFileNode], paths: &mut Vec<Vec<u8>>) {
+            for node in nodes {
+                match node {
+                    BranchFileNode::Directory(directory) => {
+                        Self::paths(&directory.children, paths);
+                    }
+                    BranchFileNode::File(file) => paths.push(file.path_bytes.clone()),
+                }
+            }
+        }
     }
 
     #[test]
-    fn file_tree_compacts_single_directory_chains_and_sorts_files() {
+    fn file_tree_compacts_directories_and_follows_diff_path_order() {
         let tree = BranchFileTree::from_files(vec![
             Fixture::file("crates/app/vmux/src/main.rs"),
             Fixture::file("Cargo.toml"),
@@ -621,8 +655,12 @@ mod tests {
             panic!("first node must be the workflow directory");
         };
         assert_eq!(workflows.label, ".github/workflows");
-        let BranchFileNode::Directory(source) = &tree.roots[1] else {
-            panic!("second node must be the source directory");
+        let BranchFileNode::File(root) = &tree.roots[1] else {
+            panic!("second node must be the root file");
+        };
+        assert_eq!(root.name(), "Cargo.toml");
+        let BranchFileNode::Directory(source) = &tree.roots[2] else {
+            panic!("last node must be the source directory");
         };
         assert_eq!(source.label, "crates/app/vmux/src");
         assert_eq!(source.children.len(), 2);
@@ -630,9 +668,16 @@ mod tests {
             panic!("source child must be a file");
         };
         assert_eq!(first.name(), "lib.rs");
-        let BranchFileNode::File(root) = &tree.roots[2] else {
-            panic!("last node must be the root file");
-        };
-        assert_eq!(root.name(), "Cargo.toml");
+        let mut paths = Vec::new();
+        Fixture::paths(&tree.roots, &mut paths);
+        assert_eq!(
+            paths,
+            [
+                b".github/workflows/ci.yml".to_vec(),
+                b"Cargo.toml".to_vec(),
+                b"crates/app/vmux/src/lib.rs".to_vec(),
+                b"crates/app/vmux/src/main.rs".to_vec(),
+            ]
+        );
     }
 }

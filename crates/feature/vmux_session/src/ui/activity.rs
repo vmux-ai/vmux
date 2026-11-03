@@ -9,7 +9,7 @@ use crate::activity::ActivityIcon;
 pub(super) fn ActivityIconView(kind: ActivityIcon) -> Element {
     if kind == ActivityIcon::Thinking {
         return rsx! {
-            span { class: "flex h-6 w-6 shrink-0 items-center justify-center text-[17px] leading-none", aria_hidden: "true", "🧠" }
+            span { class: "flex h-6 w-6 shrink-0 items-center justify-center text-[14px] leading-none", aria_hidden: "true", "🧠" }
         };
     }
     if let ActivityIcon::Language(path) = &kind {

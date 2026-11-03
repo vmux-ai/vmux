@@ -7,13 +7,15 @@ use std::time::{Duration, Instant};
 use bevy::ecs::system::SystemParam;
 use bevy::prelude::*;
 use bevy::winit::{EventLoopProxy, EventLoopProxyWrapper, WinitUserEvent};
-use bevy_cef::prelude::UiInput;
+use bevy_cef::prelude::{UiEventPlugin, UiInput};
 use vmux_ecs::{FileUiStateUpdates, FileUiStateWrite};
 
+use vmux_path::PathIdentity;
+
 use crate::event::{
-    DiffKind, FileGitState, FileStatus, GitCommitDraftRequest, GitCommitRequest,
-    GitCommitSubmitRequest, GitDiffRevealRequest, GitDiffRow, GitDiffViewport, GitFileStatus,
-    GitOperationResult,
+    DiffKind, FileGitBranchesRequest, FileGitState, FileStatus, GitCommitDraftRequest,
+    GitCommitRequest, GitCommitSubmitRequest, GitDiffRevealRequest, GitDiffRow, GitDiffViewport,
+    GitFileStatus, GitOperationResult,
 };
 
 use super::GitDiffSource;
@@ -31,7 +33,9 @@ impl Plugin for StatusPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<GitRuntime>()
             .init_resource::<GitStatusScheduler>()
+            .add_plugins(UiEventPlugin::<(FileGitBranchesRequest,)>::default())
             .add_observer(file_added)
+            .add_observer(load_branches)
             .add_observer(edit_commit)
             .add_observer(submit_commit)
             .add_systems(
@@ -43,6 +47,8 @@ impl Plugin for StatusPlugin {
                     cancel_stale_tasks,
                     bevy::ecs::schedule::ApplyDeferred,
                     poll_tasks,
+                    start_branch_tasks,
+                    poll_branch_tasks,
                     dispatch_requests,
                     publish_file_state,
                 )
@@ -57,7 +63,7 @@ pub struct FileGit {
     document: u64,
     generation: u64,
     status_applied: bool,
-    revealed_diff: Vec<(usize, usize)>,
+    revealed_diff: super::state::GitDiffRevealRanges,
     state: FileGitState,
 }
 
@@ -67,7 +73,7 @@ impl FileGit {
             document,
             generation: 0,
             status_applied: false,
-            revealed_diff: Vec::new(),
+            revealed_diff: Default::default(),
             state: FileGitState {
                 path: path.as_ref().to_string_lossy().into_owned(),
                 ..Default::default()
@@ -104,6 +110,14 @@ pub(super) struct FileGitStates<'w, 's> {
 impl FileGitStates<'_, '_> {
     pub(super) fn contains(&self, entity: Entity) -> bool {
         self.files.contains(entity)
+    }
+
+    pub(super) fn repository_matches(&self, entity: Entity, repository: &Path) -> bool {
+        self.files.get(entity).is_ok_and(|file| {
+            !file.state.repo_root.is_empty()
+                && PathIdentity::lexical(Path::new(&file.state.repo_root))
+                    == PathIdentity::lexical(repository)
+        })
     }
 
     pub(super) fn accepts(&self, entity: Entity, document: u64, revision: u64) -> bool {
@@ -156,6 +170,8 @@ impl FileGitStates<'_, '_> {
         if event.path != file.state.path {
             return;
         }
+        let repository_changed = file.state.repo_root != event.repo_root;
+        let branch_changed = file.state.branch != event.branch;
         file.status_applied = true;
         file.state.repo_root = event.repo_root;
         file.state.has_diff = matches!(
@@ -167,6 +183,19 @@ impl FileGitStates<'_, '_> {
                 | FileStatus::Deleted
         );
         file.state.branch = event.branch;
+        if repository_changed
+            || branch_changed
+            || !file.state.branches.is_empty()
+                && !file
+                    .state
+                    .branches
+                    .iter()
+                    .any(|branch| branch.name == file.state.branch)
+        {
+            file.state.branches.clear();
+            file.state.branches_loaded = false;
+            file.state.branches_loading = false;
+        }
         file.state.ahead = event.ahead;
         file.state.behind = event.behind;
         file.state.staged_count = event.staged_count;
@@ -208,6 +237,24 @@ impl FileGitStates<'_, '_> {
         file.state.message = message;
     }
 
+    pub(super) fn fail_diff(&mut self, entity: Entity, generation: u64, message: String) {
+        let Ok(mut file) = self.files.get_mut(entity) else {
+            return;
+        };
+        file.state.diff_loading = false;
+        file.state.diff_rows.clear();
+        file.state.diff_viewport = Some(GitDiffViewport {
+            generation,
+            revision: 0,
+            first_line: 0,
+            total_lines: 0,
+            has_more: false,
+            lines: Vec::new(),
+            markers: Vec::new(),
+            error: message,
+        });
+    }
+
     pub(super) fn start_diff(&mut self, entity: Entity, target_changed: bool) {
         let Ok(mut file) = self.files.get_mut(entity) else {
             return;
@@ -225,20 +272,23 @@ impl FileGitStates<'_, '_> {
         };
         file.state.diff_loading = false;
         file.state.diff_viewport = Some(event);
-        file.revealed_diff.clear();
+        file.revealed_diff.0.clear();
         Self::project_diff(&mut file);
     }
 
-    pub(super) fn reveal_diff(&mut self, entity: Entity, start: u32, end: u32) -> bool {
+    pub(super) fn reveal_diff(&mut self, entity: Entity, request: &GitDiffRevealRequest) -> bool {
         let Ok(mut file) = self.files.get_mut(entity) else {
             return false;
         };
-        let range = (start as usize, end as usize);
-        if range.0 >= range.1 || file.revealed_diff.contains(&range) {
+        let file = &mut *file;
+        if !file.revealed_diff.reveal(
+            file.state.diff_viewport.as_ref(),
+            &file.state.diff_rows,
+            request,
+        ) {
             return false;
         }
-        file.revealed_diff.push(range);
-        Self::project_diff(&mut file);
+        Self::project_diff(file);
         true
     }
 
@@ -281,7 +331,7 @@ impl FileGitStates<'_, '_> {
         file.state.diff_loading = false;
         file.state.diff_viewport = None;
         file.state.diff_rows.clear();
-        file.revealed_diff.clear();
+        file.revealed_diff.0.clear();
     }
 
     fn project_diff(file: &mut FileGit) {
@@ -299,7 +349,7 @@ impl FileGitStates<'_, '_> {
             let end = (index + DIFF_CONTEXT_LINES + 1).min(lines.len());
             visible[start..end].fill(true);
         }
-        for (start, end) in &file.revealed_diff {
+        for (start, end) in &file.revealed_diff.0 {
             let start = (*start).min(lines.len());
             let end = (*end).min(lines.len());
             if start < end {
@@ -336,6 +386,96 @@ impl FileGitStates<'_, '_> {
             });
         }
         file.state.diff_rows = rows;
+    }
+}
+
+#[derive(Component)]
+struct FileBranchesTask {
+    webview: Entity,
+    document: u64,
+    repo_root: String,
+    branch: String,
+    task: GitTask<Result<Vec<crate::event::FileGitBranch>, String>>,
+}
+
+#[derive(Component)]
+struct PendingFileBranches;
+
+fn load_branches(
+    trigger: On<UiInput<FileGitBranchesRequest>>,
+    files: Query<&FileGit>,
+    mut commands: Commands,
+) {
+    let webview = trigger.event().webview;
+    let Ok(file) = files.get(webview) else {
+        return;
+    };
+    if file.state.branches_loading || file.state.repo_root.is_empty() {
+        return;
+    }
+    commands.entity(webview).try_insert(PendingFileBranches);
+}
+
+fn start_branch_tasks(
+    mut files: Query<(Entity, &mut FileGit), With<PendingFileBranches>>,
+    runtime: Res<GitRuntime>,
+    wake: Option<Res<EventLoopProxyWrapper>>,
+    mut commands: Commands,
+) {
+    let wake = wake.as_deref().map(|wake| (**wake).clone());
+    for (webview, mut file) in &mut files {
+        if file.state.branches_loading || file.state.repo_root.is_empty() {
+            commands.entity(webview).remove::<PendingFileBranches>();
+            continue;
+        }
+        let document = file.document;
+        let repo_root = file.state.repo_root.clone();
+        let branch = file.state.branch.clone();
+        let root = PathBuf::from(&repo_root);
+        let Some(task) = runtime.spawn(wake.clone(), move || {
+            GitRepository::at(root)
+                .file_branches()
+                .map_err(|error| error.0)
+        }) else {
+            continue;
+        };
+        file.state.branches_loading = true;
+        commands.entity(webview).remove::<PendingFileBranches>();
+        commands.spawn(FileBranchesTask {
+            webview,
+            document,
+            repo_root,
+            branch,
+            task,
+        });
+    }
+}
+
+fn poll_branch_tasks(
+    mut tasks: Query<(Entity, &mut FileBranchesTask)>,
+    mut files: Query<&mut FileGit>,
+    mut commands: Commands,
+) {
+    for (entity, mut task) in &mut tasks {
+        let Some(result) = task.task.poll() else {
+            continue;
+        };
+        if let Ok(mut file) = files.get_mut(task.webview)
+            && file.document == task.document
+            && file.state.repo_root == task.repo_root
+            && file.state.branch == task.branch
+        {
+            file.state.branches_loading = false;
+            match result {
+                Ok(Ok(branches)) => {
+                    file.state.branches = branches;
+                    file.state.branches_loaded = true;
+                }
+                Ok(Err(message)) => file.state.message = message,
+                Err(_) => {}
+            }
+        }
+        commands.entity(entity).despawn();
     }
 }
 
@@ -570,7 +710,7 @@ impl GitStatusResults {
             };
             match repository {
                 Ok(repository) => {
-                    let key = vmux_path::PathIdentity::resolve(repository.path()).into_path_buf();
+                    let key = PathIdentity::resolve(repository.path()).into_path_buf();
                     repositories
                         .entry(key)
                         .or_insert_with(|| (repository, Vec::new()))
@@ -818,9 +958,9 @@ fn dispatch_requests(
     let mut batches: HashMap<GitStatusBatchKey, Vec<GitStatusRequestInput>> = HashMap::new();
     for (webview, request) in &pending {
         let key = match request.repo_root.as_ref() {
-            Some(root) => GitStatusBatchKey::Repository(
-                vmux_path::PathIdentity::lexical(root).into_path_buf(),
-            ),
+            Some(root) => {
+                GitStatusBatchKey::Repository(PathIdentity::lexical(root).into_path_buf())
+            }
             None => GitStatusBatchKey::Discover,
         };
         if active.contains(&key) {
@@ -877,8 +1017,11 @@ fn publish_file_state(
 mod tests {
     use super::*;
     use crate::host::repository::test_repo;
-    use bevy_cef::prelude::{BinHostEmitEvent, Browsers};
-    use vmux_api::BinEvent;
+    use bevy_cef::prelude::{
+        BinHostEmitEvent, BinIpcEpoch, BinIpcNavigationRevision, BinIpcSurfaceGeneration, Browsers,
+    };
+    use vmux_api::{BinEvent, UiStateFrame};
+    use vmux_api::{UiEventPermissions, UiState as _};
     use vmux_ecs::event::FileUiState;
 
     #[derive(Resource, Default)]
@@ -899,9 +1042,17 @@ mod tests {
             if trigger.event().id() != FileUiState::id() {
                 return;
             }
-            let state =
-                rkyv::from_bytes::<FileUiState, rkyv::rancor::Error>(trigger.event().payload())
-                    .unwrap();
+            trigger.event().mark_delivered();
+            let frame = rkyv::from_bytes::<
+                UiStateFrame<FileUiState, <FileUiState as vmux_api::UiState>::Update>,
+                rkyv::rancor::Error,
+            >(trigger.event().payload())
+            .unwrap();
+            let previous = emitted.0.pop();
+            let state = match frame {
+                UiStateFrame::Snapshot(state) => state,
+                UiStateFrame::Updates(updates) => FileUiState::from_updates(previous, updates),
+            };
             emitted.0.push(state);
         }
     }
@@ -921,7 +1072,15 @@ mod tests {
 
     fn reveal_test_diff(mut requests: MessageReader<TestReveal>, mut files: FileGitStates) {
         for request in requests.read() {
-            files.reveal_diff(request.entity, request.start, request.end);
+            files.reveal_diff(
+                request.entity,
+                &GitDiffRevealRequest {
+                    generation: 1,
+                    revision: 1,
+                    start: request.start,
+                    end: request.end,
+                },
+            );
         }
     }
 
@@ -992,6 +1151,7 @@ mod tests {
         let mut app = App::new();
         app.insert_resource(TestDiff(Some(GitDiffViewport {
             generation: 1,
+            revision: 1,
             first_line: 0,
             total_lines: 20,
             has_more: false,
@@ -1057,8 +1217,20 @@ mod tests {
                 FileUiStateUpdates::default(),
                 FileGit::new(&file, 1),
                 GitDiffSource::default(),
+                vmux_ecs::PageMetadata {
+                    url: format!("file://{}", file.to_string_lossy()),
+                    ..Default::default()
+                },
+                BinIpcSurfaceGeneration(1),
+                BinIpcNavigationRevision(1),
+                BinIpcEpoch(1),
             ))
             .id();
+        app.world_mut().spawn(UiEventPermissions {
+            url: "file://",
+            owns_subtree: true,
+            permissions: &[FileUiState::PERMISSION],
+        });
         let mut browsers = Browsers::default();
         browsers.set_externally_hosted(entity);
         app.world_mut().insert_non_send(browsers);

@@ -86,14 +86,17 @@ pub fn ManagerPage(children: Element) -> Element {
 pub fn WorkspaceLayout(
     header: Element,
     #[props(default = rsx! {})] sidebar: Element,
+    #[props(default = true)] show_sidebar: bool,
     children: Element,
 ) -> Element {
     rsx! {
         div { class: "flex min-h-0 flex-1 flex-col overflow-hidden",
             {header}
             div { class: "flex min-h-0 flex-1 overflow-hidden",
-                aside { class: "hidden w-44 shrink-0 flex-col px-2 pb-2 sm:flex",
-                    div { class: "min-h-0 flex-1 overflow-y-auto", {sidebar} }
+                if show_sidebar {
+                    aside { class: "hidden w-44 shrink-0 flex-col px-2 pb-2 sm:flex",
+                        div { class: "min-h-0 flex-1 overflow-y-auto", {sidebar} }
+                    }
                 }
                 div { class: "flex min-w-0 flex-1 flex-col overflow-hidden", {children} }
             }
@@ -104,7 +107,7 @@ pub fn WorkspaceLayout(
 #[component]
 pub fn WorkspaceHeader(children: Element, #[props(default = rsx! {})] actions: Element) -> Element {
     rsx! {
-        header { class: "relative z-40 flex h-14 shrink-0 items-center gap-2 px-2.5",
+        header { class: "relative z-40 flex h-9 shrink-0 items-center gap-2 px-2.5",
             div { class: "flex min-w-0 flex-1 items-center gap-2", {children} }
             div { class: "flex shrink-0 items-center gap-1", {actions} }
         }
@@ -252,11 +255,7 @@ impl WorkspacePage {
     }
 
     pub fn options() -> Vec<BreadcrumbOption> {
-        Self::ALL
-            .into_iter()
-            .filter(|page| *page != Self::Editor)
-            .map(Self::option)
-            .collect()
+        Self::ALL.into_iter().map(Self::option).collect()
     }
 
     pub fn options_with(contextual: Vec<BreadcrumbOption>) -> Vec<BreadcrumbOption> {
@@ -308,12 +307,13 @@ pub fn WorkspaceBreadcrumbHeader(
     options: Vec<BreadcrumbOption>,
     children: Element,
     #[props(default = rsx! {})] actions: Element,
+    #[props(default = rsx! {})] view_controls: Element,
 ) -> Element {
     let label = current.label.clone();
     let leading = current.clone();
     rsx! {
         WorkspaceHeader { actions,
-            Breadcrumbs { class: "min-w-0 flex-1 overflow-hidden".to_string(),
+            Breadcrumbs { class: "min-w-0 overflow-hidden".to_string(),
                 BreadcrumbSelector {
                     label,
                     value: current.value.clone(),
@@ -328,6 +328,7 @@ pub fn WorkspaceBreadcrumbHeader(
                 }
                 {children}
             }
+            {view_controls}
         }
     }
 }
@@ -572,9 +573,9 @@ pub fn ManagerIconButton(
     children: Element,
 ) -> Element {
     let class = if active {
-        "flex size-7 shrink-0 items-center justify-center rounded-md bg-foreground/[0.08] text-foreground"
+        "flex size-6 shrink-0 items-center justify-center rounded-md text-primary"
     } else {
-        "flex size-7 shrink-0 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-foreground/[0.06] hover:text-foreground"
+        "flex size-6 shrink-0 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-foreground/[0.06] hover:text-foreground"
     };
     rsx! {
         Tooltip { label: label.clone(),
@@ -594,6 +595,7 @@ pub fn ManagerIconButton(
 #[component]
 pub fn ManagerAddButton(
     label: String,
+    #[props(default = LineIcon::Plus)] icon: LineIcon,
     #[props(default)] active: bool,
     #[props(default)] disabled: bool,
     onclick: EventHandler<MouseEvent>,
@@ -606,7 +608,7 @@ pub fn ManagerAddButton(
             aria_pressed: active,
             disabled,
             onclick: move |event| onclick.call(event),
-            LineIconView { icon: LineIcon::Plus, class: "size-3.5" }
+            LineIconView { icon, class: "size-3.5" }
             span { "{label}" }
         }
     }
@@ -772,32 +774,32 @@ pub fn ManagerViewToggle(
     onchange: EventHandler<ManagerView>,
 ) -> Element {
     rsx! {
-        div { class: "flex h-7 items-center gap-0.5 rounded-md bg-foreground/[0.025] p-0.5 ring-1 ring-inset ring-foreground/[0.07]",
+        div { class: "flex items-center gap-0.5",
             button {
                 r#type: "button",
-                aria_label: list_label,
+                aria_label: list_label.clone(),
+                title: list_label,
                 aria_pressed: view == ManagerView::List,
                 class: if view == ManagerView::List {
-                    "flex h-6 items-center gap-1.5 rounded-md bg-foreground/[0.08] px-2 text-[11px] font-medium text-foreground"
+                    "flex size-6 items-center justify-center rounded text-primary"
                 } else {
-                    "flex h-6 items-center gap-1.5 rounded-md px-2 text-[11px] font-medium text-muted-foreground transition-colors hover:bg-foreground/[0.05] hover:text-foreground"
+                    "flex size-6 items-center justify-center rounded text-muted-foreground/60 transition-colors hover:bg-foreground/[0.05] hover:text-foreground"
                 },
                 onclick: move |_| onchange.call(ManagerView::List),
                 LineIconView { icon: LineIcon::List, class: "size-3.5" }
-                span { class: "hidden sm:inline", "{list_label}" }
             }
             button {
                 r#type: "button",
-                aria_label: grid_label,
+                aria_label: grid_label.clone(),
+                title: grid_label,
                 aria_pressed: view == ManagerView::Grid,
                 class: if view == ManagerView::Grid {
-                    "flex h-6 items-center gap-1.5 rounded-md bg-foreground/[0.08] px-2 text-[11px] font-medium text-foreground"
+                    "flex size-6 items-center justify-center rounded text-primary"
                 } else {
-                    "flex h-6 items-center gap-1.5 rounded-md px-2 text-[11px] font-medium text-muted-foreground transition-colors hover:bg-foreground/[0.05] hover:text-foreground"
+                    "flex size-6 items-center justify-center rounded text-muted-foreground/60 transition-colors hover:bg-foreground/[0.05] hover:text-foreground"
                 },
                 onclick: move |_| onchange.call(ManagerView::Grid),
                 LineIconView { icon: grid_icon, class: "size-3.5" }
-                span { class: "hidden sm:inline", "{grid_label}" }
             }
         }
     }
@@ -1103,7 +1105,7 @@ pub fn ManagerSelect(
             class: "min-w-0".to_string(),
             trigger_class: "w-full min-w-24 justify-between bg-foreground/[0.045] px-2.5 text-foreground hover:bg-foreground/[0.075]".to_string(),
             popup_class: "max-h-80 min-w-40 overflow-y-auto p-1".to_string(),
-            ontoggle: move |_| open.set(!open()),
+            on_open_change: move |next| open.set(next),
             on_dismiss: move |_| open.set(false),
             for item in items {
                 {

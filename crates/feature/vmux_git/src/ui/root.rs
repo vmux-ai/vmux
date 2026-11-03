@@ -16,15 +16,16 @@ pub fn Page() -> Element {
     use_theme();
     let state = GitPageState::use_state();
     use_context_provider(|| state);
-    let repository_loaded = state.use_selector(|state| state.snapshot.repository.is_some());
-    let shortcut_help_visible = state.use_selector(|state| state.controller.shortcut_help_visible);
-    let branch_prompt_visible =
-        state.use_selector(|state| state.controller.branch_prompt.is_some());
+    let snapshot = state.snapshot;
+    let controller = state.controller;
+    let repository_loaded = use_memo(move || snapshot.read().repository.is_some());
+    let shortcut_help_visible = use_memo(move || controller.read().shortcut_help_visible);
+    let branch_prompt_visible = use_memo(move || controller.read().branch_prompt.is_some());
 
     rsx! {
         document::Title { {translate("git-title")} }
         div {
-            class: "git-page relative flex h-screen min-w-0 flex-col bg-background text-foreground outline-none",
+            class: "git-page relative flex h-screen min-w-0 flex-col overflow-hidden bg-background text-foreground outline-none",
             tabindex: "-1",
             autofocus: true,
             onkeydown: move |event: KeyboardEvent| {

@@ -36,14 +36,23 @@ pub(crate) fn derive_state(input: &DeriveInput, patch: Option<&Type>) -> syn::Re
                     updates: ::std::vec::Vec<Self::Update>,
                 ) -> Self {
                     let mut state = previous.unwrap_or_default();
+                    <Self as ::vmux_api::UiStateProjection<#patch>>::retain(&mut state);
                     for update in updates {
                         <Self as ::vmux_api::UiStateProjection<#patch>>::apply(&mut state, update);
                     }
                     state
                 }
 
-                fn retained(&self) -> ::core::option::Option<Self> {
-                    ::core::option::Option::Some(self.clone())
+                fn retain(&mut self) {
+                    <Self as ::vmux_api::UiStateProjection<#patch>>::retain(self);
+                }
+
+                fn navigation_seed(&self) -> ::core::option::Option<Self> {
+                    <Self as ::vmux_api::UiStateProjection<#patch>>::navigation_seed(self)
+                }
+
+                fn navigation_ready(&self) -> bool {
+                    <Self as ::vmux_api::UiStateProjection<#patch>>::navigation_ready(self)
                 }
             }
         });
@@ -59,9 +68,7 @@ pub(crate) fn derive_state(input: &DeriveInput, patch: Option<&Type>) -> syn::Re
                 updates.pop().expect("UI state update is never empty")
             }
 
-            fn retained(&self) -> ::core::option::Option<Self> {
-                ::core::option::Option::Some(self.clone())
-            }
+            fn retain(&mut self) {}
         }
     })
 }

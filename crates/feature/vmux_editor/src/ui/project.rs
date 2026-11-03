@@ -1,7 +1,7 @@
 use std::path::Path;
 
 use dioxus::prelude::*;
-use vmux_ecs::event::{FileDirEntry, FileDirectoryOpenRequest, OpenEditorItem};
+use vmux_ecs::event::FileDirEntry;
 use vmux_git::event::GitRepositoryRequest;
 use vmux_git::state::GitUiState;
 use vmux_session::state::SessionScopeUiState;
@@ -17,10 +17,9 @@ use vmux_ui::components::dialog::{DialogContent, DialogRoot, DialogTitle};
 use vmux_ui::components::dropdown::{Dropdown, DropdownAlign, DropdownPopup};
 use vmux_ui::components::filter::{FilterPill, FilterTrigger};
 use vmux_ui::components::manager::{
-    ManagerAddButton, ManagerBadge, ManagerCard, ManagerCollection, ManagerEmpty,
-    ManagerExpandableSearch, ManagerGridSize, ManagerList, ManagerPage, ManagerRow, ManagerSearch,
-    ManagerSidebarItem, ManagerSkeleton, ManagerTone, ManagerView, ManagerViewToggle,
-    WorkspaceBreadcrumbHeader, WorkspaceLayout, WorkspacePage,
+    ManagerAddButton, ManagerCollection, ManagerEmpty, ManagerExpandableSearch, ManagerGridSize,
+    ManagerList, ManagerPage, ManagerSearch, ManagerSidebarItem, ManagerSkeleton, ManagerView,
+    ManagerViewToggle, WorkspaceBreadcrumbHeader, WorkspaceLayout, WorkspacePage,
 };
 use vmux_ui::components::page::PageContent;
 use vmux_ui::components::sheet::SheetHeaderChevron;
@@ -35,7 +34,6 @@ use vmux_ui::navigation::{NavigationGesture, PageNavigation};
 use super::project_manager::{
     ProjectFilter, ProjectFilterMenu, ProjectPresentation, ViewPreference,
 };
-use super::state::FileUi;
 use crate::project::{
     ProjectArchiveRequest, ProjectCatalogView, ProjectCloneRequest, ProjectCreateRequest,
     ProjectDeleteRequest, ProjectDetailView, ProjectEntry, ProjectImportRequest, ProjectUiState,
@@ -70,7 +68,6 @@ pub(super) fn ProjectList(
         .as_ref()
         .map(|view| view.entries.clone())
         .unwrap_or_default();
-    let count = entries.len();
     let pending = view.as_ref().is_some_and(|view| view.operation_pending);
     let controls =
         use_collection_controller::<ProjectFilter>(ViewPreference::manager(collection_view));
@@ -79,27 +76,18 @@ pub(super) fn ProjectList(
     rsx! {
         ManagerPage {
             WorkspaceLayout {
+                show_sidebar: entries.iter().any(|entry| entry.archived),
                 header: rsx! {
                     WorkspaceBreadcrumbHeader {
                         current: WorkspacePage::Projects.option(),
                         options: WorkspacePage::options(),
+                        view_controls: rsx! { if !entries.is_empty() { ManagerViewToggle { view: controls.view(), list_label: translate("tools-view-list"), grid_label: translate("tools-view-grid"), onchange: move |view| { controls.set_view(view); let _ = send(&ViewPreference::request(view)); } } } },
                         actions: rsx! {
                             ProjectManagerActions {
                                 entries: entries.clone(),
                                 presentation: presentation.clone(),
                                 controls,
                                 pending,
-                            }
-                            if count > 0 {
-                                ManagerViewToggle {
-                                    view: controls.view(),
-                                    list_label: translate("tools-view-list"),
-                                    grid_label: translate("tools-view-grid"),
-                                    onchange: move |view| {
-                                        controls.set_view(view);
-                                        let _ = send(&ViewPreference::request(view));
-                                    },
-                                }
                             }
                         },
                     }
@@ -122,6 +110,7 @@ pub(super) fn ProjectList(
                             detail: controls.query(),
                         }
                     } else {
+                        ProjectOverview { entries: entries.clone(), controls }
                         ManagerCollection { view: controls.view(), grid_size: ManagerGridSize::Comfortable,
                             for entry in presentation.entries {
                                 ProjectItem {
@@ -139,6 +128,34 @@ pub(super) fn ProjectList(
 }
 
 #[component]
+fn ProjectOverview(
+    entries: Vec<ProjectEntry>,
+    controls: CollectionController<ProjectFilter>,
+) -> Element {
+    let mut active = 0u32;
+    let mut stale = 0u32;
+    let mut archived = 0u32;
+    for entry in &entries {
+        active = active.saturating_add(entry.ongoing_sessions);
+        stale = stale.saturating_add(entry.stale_sessions);
+        archived += u32::from(entry.archived);
+    }
+    rsx! {
+        div { class: "flex flex-wrap items-center gap-4 px-2 pb-1 text-xs text-muted-foreground",
+            span { "{entries.len()} ", {translate("layout-projects")} }
+            ProjectSessionLink { project: String::new(), status: "current", count: active, label: translate("session-stage-active") }
+            ProjectSessionLink { project: String::new(), status: "stale", count: stale, label: translate("sessions-stale") }
+            if archived > 0 {
+                button { class: "flex items-center gap-1.5 hover:text-foreground hover:underline",
+                    onclick: move |_| controls.update_filters(|filters| ProjectFilter::select(filters, Some(ProjectFilter::Archived))),
+                    "{archived} ", {translate("common-archived")}
+                }
+            }
+        }
+    }
+}
+
+#[component]
 fn ProjectManagerActions(
     entries: Vec<ProjectEntry>,
     presentation: ProjectPresentation,
@@ -149,7 +166,7 @@ fn ProjectManagerActions(
     let open = search_open();
     let active = !controls.query().is_empty() || !presentation.selected_filters.is_empty();
     rsx! {
-        div { class: "flex shrink-0 items-center gap-1",
+        div { class: "flex shrink-0 items-center gap-3",
             ManagerExpandableSearch {
                 open,
                 active,
@@ -197,7 +214,7 @@ fn ProjectManagerActions(
                 }
                 if presentation.filter_requested {
                     ProjectFilterMenu {
-                        entries,
+                        entries: entries.clone(),
                         needle: presentation.filter_needle,
                         onselect: move |filter| {
                             controls.update_filters(|filters| {
@@ -240,68 +257,57 @@ fn ProjectCategories(
 #[component]
 fn ProjectItem(entry: ProjectEntry, view: ManagerView) -> Element {
     let url = entry.url.clone();
-    let select = move |gesture| ProjectEntry::open(url.clone(), gesture);
-    let icon = rsx! {
-        IdentityOrb {
-            seed: entry.identity_seed().to_string(),
-            alt: entry.name.clone(),
-            class: "size-6".to_string(),
-        }
+    let class = if view == ManagerView::Grid {
+        "group flex min-w-0 flex-col gap-3 rounded-lg bg-foreground/[0.025] p-3"
+    } else {
+        "group flex min-w-0 items-center gap-3 rounded-md px-2 py-3 hover:bg-foreground/[0.025]"
     };
-    let meta = rsx! { ProjectMeta { entry: entry.clone() } };
-    let actions = rsx! { ProjectActions { entry: entry.clone() } };
-    if view == ManagerView::Grid {
-        return rsx! {
-            ManagerCard {
-                selected: false,
-                onselect: select,
-                icon,
-                title: entry.name,
-                subtitle: entry.source,
-                meta,
-                actions,
-            }
-        };
-    }
     rsx! {
-        ManagerRow {
-            selected: false,
-            onselect: select,
-            icon,
-            title: entry.name,
-            subtitle: entry.source,
-            meta,
-            actions,
+        article { class,
+            div { class: "flex min-w-0 flex-1 items-center gap-3",
+                IdentityOrb { seed: entry.identity_seed().to_string(), alt: entry.name.clone(), class: "size-6 shrink-0".to_string() }
+                a { href: url.clone(), class: "min-w-0 flex-1 hover:text-primary",
+                    onclick: move |event: MouseEvent| { event.prevent_default(); PageNavigation::click(url.clone(), &event); },
+                    div { class: "truncate text-sm font-medium text-foreground", "{entry.name}" }
+                    div { class: "mt-0.5 truncate text-[11px] text-muted-foreground", "{entry.source}" }
+                }
+                if view == ManagerView::Grid { ProjectActions { entry: entry.clone() } }
+            }
+            div { class: "flex shrink-0 flex-wrap items-center gap-4 text-xs text-muted-foreground",
+                ProjectMeta { entry: entry.clone() }
+                if view == ManagerView::List { ProjectActions { entry: entry.clone() } }
+            }
         }
     }
 }
 
 #[component]
 fn ProjectMeta(entry: ProjectEntry) -> Element {
-    let ongoing = format!(
-        "{} {}",
-        entry.ongoing_sessions,
-        translate("session-stage-in-progress")
-    );
-    let stale = format!("{} {}", entry.stale_sessions, translate("sessions-stale"));
     rsx! {
         if entry.archived {
-            ManagerBadge { tone: ManagerTone::Neutral,
-                uppercase: false,
-                span { {translate("project-archived")} }
-            }
+            span { class: "text-[11px] text-muted-foreground", {translate("project-archived")} }
         }
         if entry.ongoing_sessions > 0 {
-            ManagerBadge { tone: ManagerTone::Green,
-                uppercase: false,
-                span { "{ongoing}" }
-            }
+            ProjectSessionLink { project: entry.path.clone(), status: "current", count: entry.ongoing_sessions, label: translate("session-stage-active") }
         }
         if entry.stale_sessions > 0 {
-            ManagerBadge { tone: ManagerTone::Amber,
-                uppercase: false,
-                span { "{stale}" }
-            }
+            ProjectSessionLink { project: entry.path.clone(), status: "stale", count: entry.stale_sessions, label: translate("sessions-stale") }
+        }
+        if entry.ongoing_sessions == 0 && entry.stale_sessions == 0 {
+            ProjectSessionLink { project: entry.path, status: "", count: 0, label: translate("sessions-title") }
+        }
+    }
+}
+
+#[component]
+fn ProjectSessionLink(project: String, status: String, count: u32, label: String) -> Element {
+    let url = vmux_session::Route::manager_for_project(&project, &status);
+    rsx! {
+        a { href: url.clone(), class: "flex items-center gap-1.5 rounded-md py-1 text-xs text-muted-foreground transition-colors hover:text-primary hover:underline",
+            onclick: move |event: MouseEvent| { event.prevent_default(); event.stop_propagation(); PageNavigation::click(url.clone(), &event); },
+            span { class: "tabular-nums text-foreground/80", "{count}" }
+            span { "{label}" }
+            LineIconView { icon: LineIcon::ChevronDown, class: "size-3 -rotate-90 shrink-0 opacity-60" }
         }
     }
 }
@@ -614,9 +620,7 @@ pub(super) fn ProjectDashboard(detail: ProjectDetailView) -> Element {
             return;
         }
         requested_git.set(requested_root.clone());
-        let _ = send(&GitRepositoryRequest {
-            path: requested_root.clone(),
-        });
+        let _ = send(&GitRepositoryRequest::at(requested_root.clone()));
     });
     let start_url = "vmux://start/".to_string();
     let header_root = root.clone();
@@ -624,6 +628,7 @@ pub(super) fn ProjectDashboard(detail: ProjectDetailView) -> Element {
     rsx! {
         ManagerPage {
             WorkspaceLayout {
+                show_sidebar: false,
                 header: rsx! {
                     WorkspaceBreadcrumbHeader {
                         current: WorkspacePage::Projects.option(),
@@ -655,9 +660,10 @@ pub(super) fn ProjectDashboard(detail: ProjectDetailView) -> Element {
                 },
                 PageContent { content_class: "mx-auto flex w-full max-w-5xl flex-col gap-5".to_string(),
                     ProjectSessionsPanel {}
-                    ProjectGitPanel { root: root.clone() }
-                    ProjectRecentFilesPanel { root: root.clone() }
-                    ProjectFilesPanel {}
+                    div { class: "grid grid-cols-1 gap-5 md:grid-cols-2",
+                        ProjectGitPanel { root: root.clone() }
+                        ProjectFilesPanel {}
+                    }
                 }
             }
         }
@@ -726,6 +732,7 @@ fn ProjectSessions(projection: ProjectSessionList) -> Element {
                     sessions: projection.sessions,
                     stages: projection.stages,
                     view: view(),
+                    preview: Some(5),
                 }
             }
         }
@@ -823,61 +830,15 @@ fn ProjectGit(
 }
 
 #[component]
-fn ProjectRecentFilesPanel(root: String) -> Element {
-    let files = FileUi::current();
-    let open_editors = files.use_value(|state| state.explorer.open_editors.as_ref());
-    let recent = use_memo(use_reactive!(|(root,)| {
-        open_editors
-            .read()
-            .as_ref()
-            .map(|editors| {
-                editors
-                    .items
-                    .iter()
-                    .filter(|item| !item.is_dir && ProjectPath::contains(&root, &item.path))
-                    .take(6)
-                    .cloned()
-                    .collect::<Vec<_>>()
-            })
-            .unwrap_or_default()
-    }));
-    if recent.read().is_empty() {
-        return rsx! {};
-    }
-    rsx! { ProjectRecentFiles { files: recent() } }
-}
-
-#[component]
-fn ProjectRecentFiles(files: Vec<OpenEditorItem>) -> Element {
-    rsx! {
-        ProjectSection { title: translate("editor-open-editors"), count: files.len(),
-            div { class: "grid grid-cols-1 gap-px sm:grid-cols-2",
-                for file in files {
-                    ProjectFileButton {
-                        key: "recent-{file.path}",
-                        path: file.path,
-                        name: file.name,
-                        context: file.context,
-                        is_dir: false,
-                    }
-                }
-            }
-        }
-    }
-}
-
-#[component]
 fn ProjectFilesPanel() -> Element {
-    let files = FileUi::current();
-    let directory = files.use_value(|state| state.document.directory.as_ref());
+    let files = use_ui_state::<crate::project::ProjectFilesUiState>().state;
     let projection = use_memo(move || {
-        let directory = directory.read();
+        let files = files.read();
         ProjectFilesProjection {
-            loaded: directory.is_some(),
-            entries: directory
-                .as_ref()
-                .map(|directory| directory.entries.clone())
-                .unwrap_or_default(),
+            loaded: files.ready,
+            entries: files.entries.clone(),
+            root: files.root.clone(),
+            error: files.error.clone(),
         }
     });
     rsx! { ProjectFiles { projection: projection() } }
@@ -887,6 +848,8 @@ fn ProjectFilesPanel() -> Element {
 struct ProjectFilesProjection {
     loaded: bool,
     entries: Vec<FileDirEntry>,
+    root: String,
+    error: String,
 }
 
 #[component]
@@ -895,16 +858,20 @@ fn ProjectFiles(projection: ProjectFilesProjection) -> Element {
     let visible = projection
         .entries
         .iter()
-        .take(18)
+        .take(6)
         .cloned()
         .collect::<Vec<_>>();
+    let open_root = projection.root.clone();
     rsx! {
         section { class: "overflow-hidden rounded-lg",
             div { class: "flex h-10 items-center gap-2 px-3",
                 div { class: "flex min-w-0 flex-1 items-center gap-2",
-                    LineIconView { icon: LineIcon::File, class: "size-3.5 shrink-0 text-muted-foreground".to_string() }
-                    h2 { class: "truncate text-xs font-semibold", {translate("git-files")} }
-                    if projection.loaded {
+                    vmux_ui::icon::BuiltinIconView { icon: vmux_api::BuiltinIcon::Code, class: "size-3.5 shrink-0 text-muted-foreground".to_string() }
+                    button { class: "truncate text-xs font-semibold hover:text-primary hover:underline", disabled: open_root.is_empty(),
+                        onclick: move |_| PageNavigation::stack(vmux_path::FileUrl::from_path(Path::new(&open_root), None, None, None)),
+                        {translate("editor-editor")}
+                    }
+                    if projection.loaded && projection.error.is_empty() {
                         span { class: "text-[10px] tabular-nums text-muted-foreground", "{projection.entries.len()}" }
                     }
                 }
@@ -920,7 +887,11 @@ fn ProjectFiles(projection: ProjectFilesProjection) -> Element {
                     "grid grid-rows-[0fr] opacity-0 transition-[grid-template-rows,opacity] duration-200 ease-out"
                 },
                 div { class: "min-h-0 overflow-hidden",
-                    if projection.loaded {
+                    if !projection.error.is_empty() {
+                        div { class: "px-3 pb-3 text-xs text-destructive", "{projection.error}" }
+                    } else if projection.loaded && projection.entries.is_empty() {
+                        div { class: "px-3 pb-3 text-xs text-muted-foreground", {translate("editor-explorer-empty")} }
+                    } else if projection.loaded {
                         div { class: "grid grid-cols-1 gap-px px-1 pb-1 sm:grid-cols-2 lg:grid-cols-3",
                             for entry in visible {
                                 ProjectFileButton {
@@ -955,7 +926,7 @@ fn ProjectFileButton(path: String, name: String, context: String, is_dir: bool) 
             class: "group flex min-w-0 items-center gap-2 rounded-md px-2.5 py-2 text-left hover:bg-foreground/[0.04]",
             title: "{path}",
             onclick: move |_| {
-                let _ = send(&FileDirectoryOpenRequest { path: open_path.clone() });
+                PageNavigation::stack(vmux_path::FileUrl::from_path(std::path::Path::new(&open_path), None, None, None));
             },
             TypeIcon { path: icon_path, is_dir, class: "size-4 shrink-0".to_string() }
             div { class: "min-w-0 flex-1",
@@ -982,7 +953,6 @@ fn ProjectSection(
                 if count > 0 {
                     span { class: "text-[10px] tabular-nums text-muted-foreground", "{count}" }
                 }
-                div { class: "flex-1" }
                 {actions}
             }
             {children}
@@ -999,17 +969,5 @@ impl ProjectPath {
 
     fn same(left: &str, right: &str) -> bool {
         Self::clean(left) == Self::clean(right)
-    }
-
-    fn contains(root: &str, path: &str) -> bool {
-        let root = Self::clean(root);
-        let path = Self::clean(path);
-        if root.is_empty() || path.is_empty() {
-            return false;
-        }
-        path == root
-            || path
-                .strip_prefix(root)
-                .is_some_and(|relative| relative.starts_with('/'))
     }
 }

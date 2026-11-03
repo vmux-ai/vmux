@@ -622,7 +622,9 @@ impl CheckoutInfo {
         let Err(error) = self.record_base(branch, base) else {
             return Ok(());
         };
-        if let Err(rollback) = self.rollback_worktree(path, branch, delete_branch) {
+        if let Err(rollback) = super::runtime::GitRuntime::without_cancellation(|| {
+            self.rollback_worktree(path, branch, delete_branch)
+        }) {
             return Err(GitError(format!(
                 "{}; failed to roll back worktree: {}",
                 error.0, rollback.0
@@ -637,11 +639,10 @@ impl CheckoutInfo {
         branch: &str,
         delete_branch: bool,
     ) -> Result<(), GitError> {
+        let path = self.validate_discard(path, branch)?;
         let path = path.to_string_lossy();
-        let (stdout, stderr, removed) = GitCommand::run(
-            &self.root,
-            &["worktree", "remove", "--force", path.as_ref()],
-        )?;
+        let args = ["worktree", "remove", path.as_ref()];
+        let (stdout, stderr, removed) = GitCommand::run(&self.root, &args)?;
         if !removed {
             return Err(GitCommand::error(&stdout, &stderr));
         }
@@ -650,6 +651,74 @@ impl CheckoutInfo {
             if !deleted {
                 return Err(GitCommand::error(&stdout, &stderr));
             }
+        }
+        Ok(())
+    }
+
+    fn validate_discard(&self, path: &Path, branch: &str) -> Result<PathBuf, GitError> {
+        let path = Self::normalize_worktree_path(path)?;
+        let registration = self
+            .worktree_registrations()?
+            .into_iter()
+            .find(|registration| registration.path == path)
+            .ok_or_else(|| {
+                GitError(format!(
+                    "worktree is no longer registered: {}",
+                    path.display()
+                ))
+            })?;
+        if registration.branch.as_deref() != Some(branch) {
+            return Err(GitError(format!(
+                "worktree branch changed before cleanup: {}",
+                path.display()
+            )));
+        }
+        let current = CheckoutInfo::try_from(path.as_path())?.head_ref()?;
+        if current != branch {
+            return Err(GitError(format!(
+                "worktree no longer owns branch {branch}: {}",
+                path.display()
+            )));
+        }
+        let (stdout, stderr, clean) = GitCommand::run(
+            &path,
+            &[
+                "status",
+                "--porcelain=v1",
+                "--untracked-files=all",
+                "--ignored=matching",
+            ],
+        )?;
+        if !clean {
+            return Err(GitCommand::error(&stdout, &stderr));
+        }
+        if !stdout.trim().is_empty() {
+            return Err(GitError(format!(
+                "worktree contains local files and was not removed: {}",
+                path.display()
+            )));
+        }
+        Ok(path)
+    }
+
+    pub fn discard_worktree(
+        &self,
+        path: &Path,
+        branch: &str,
+        delete_branch: bool,
+    ) -> Result<(), GitError> {
+        let _lock = RepositoryWorktreeLock::acquire(&self.root)?;
+        super::runtime::GitRuntime::without_cancellation(|| {
+            self.rollback_worktree(path, branch, delete_branch)
+        })
+    }
+
+    pub fn prune_worktrees(&self) -> Result<(), GitError> {
+        let _lock = RepositoryWorktreeLock::acquire(&self.root)?;
+        let (stdout, stderr, ok) =
+            GitCommand::run(&self.root, &["worktree", "prune", "--expire", "now"])?;
+        if !ok {
+            return Err(GitCommand::error(&stdout, &stderr));
         }
         Ok(())
     }
@@ -1196,6 +1265,92 @@ mod tests {
         let (_, _, branch_exists) =
             GitCommand::run(repo.path(), &["rev-parse", "--verify", "-q", "vmux/feat"]).unwrap();
         assert!(!branch_exists, "branch deleted");
+    }
+
+    #[test]
+    fn discard_preserves_a_dirty_worktree() {
+        let repo = test_repo::init();
+        commit_initial(repo.path());
+        let wt = repo.path().join(".worktrees/feat");
+        let checkout = CheckoutInfo::try_from(repo.path()).unwrap();
+        checkout.add_worktree(&wt, "vmux/feat", "main").unwrap();
+        test_repo::write(&wt, "dirty.txt", "keep\n");
+
+        let error = checkout
+            .discard_worktree(&wt, "vmux/feat", false)
+            .unwrap_err();
+
+        assert!(!error.0.is_empty());
+        assert!(wt.join("dirty.txt").is_file());
+        assert_eq!(
+            CheckoutInfo::try_from(wt.as_path())
+                .unwrap()
+                .head_ref()
+                .unwrap(),
+            "vmux/feat"
+        );
+    }
+
+    #[test]
+    fn discard_preserves_ignored_files() {
+        let repo = test_repo::init();
+        commit_initial(repo.path());
+        test_repo::write(repo.path(), ".gitignore", ".cache/\n");
+        test_repo::run(repo.path(), &["add", ".gitignore"]);
+        test_repo::run(repo.path(), &["commit", "-qm", "ignore cache"]);
+        let wt = repo.path().join(".worktrees/feat");
+        let checkout = CheckoutInfo::try_from(repo.path()).unwrap();
+        checkout.add_worktree(&wt, "vmux/feat", "main").unwrap();
+        std::fs::create_dir_all(wt.join(".cache")).unwrap();
+        test_repo::write(&wt, ".cache/secret.txt", "keep\n");
+
+        let error = checkout
+            .discard_worktree(&wt, "vmux/feat", false)
+            .unwrap_err();
+
+        assert!(!error.0.is_empty());
+        assert!(wt.join(".cache/secret.txt").is_file());
+    }
+
+    #[test]
+    fn discard_rejects_a_repurposed_worktree() {
+        let repo = test_repo::init();
+        commit_initial(repo.path());
+        let wt = repo.path().join(".worktrees/feat");
+        let checkout = CheckoutInfo::try_from(repo.path()).unwrap();
+        checkout.add_worktree(&wt, "vmux/feat", "main").unwrap();
+        test_repo::run(&wt, &["checkout", "-qb", "replacement"]);
+
+        let error = checkout
+            .discard_worktree(&wt, "vmux/feat", false)
+            .unwrap_err();
+
+        assert!(error.0.contains("branch changed"));
+        assert!(wt.is_dir());
+        assert_eq!(
+            CheckoutInfo::try_from(wt.as_path())
+                .unwrap()
+                .head_ref()
+                .unwrap(),
+            "replacement"
+        );
+    }
+
+    #[test]
+    fn discard_rejects_a_detached_worktree() {
+        let repo = test_repo::init();
+        commit_initial(repo.path());
+        let wt = repo.path().join(".worktrees/feat");
+        let checkout = CheckoutInfo::try_from(repo.path()).unwrap();
+        checkout.add_worktree(&wt, "vmux/feat", "main").unwrap();
+        test_repo::run(&wt, &["checkout", "--detach", "-q"]);
+
+        let error = checkout
+            .discard_worktree(&wt, "vmux/feat", false)
+            .unwrap_err();
+
+        assert!(!error.0.is_empty());
+        assert!(wt.is_dir());
     }
 
     #[test]

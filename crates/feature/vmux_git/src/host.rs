@@ -106,12 +106,7 @@ impl Plugin for GitPlugin {
 }
 
 fn prewarm(mut commands: Commands) {
-    commands.spawn(PrewarmPage {
-        host: "git",
-        url: crate::GIT_PAGE_URL,
-        title: "Git",
-        pool_size: 1,
-    });
+    commands.spawn(PrewarmPage::host("git", crate::GIT_PAGE_URL, "Git", 1));
 }
 
 #[derive(SystemSet, Clone, Copy, Debug, PartialEq, Eq, Hash)]

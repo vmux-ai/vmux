@@ -50,6 +50,7 @@ app = [
     "dep:vmux_command",
     "dep:vmux_ecs",
     "dep:vmux_editor",
+    "dep:vmux_flex",
     "dep:vmux_git",
     "dep:vmux_layout",
     "dep:vmux_mcp",
@@ -102,6 +103,7 @@ uuid = { workspace = true, optional = true }
 url = { workspace = true, optional = true }
 vmux_ecs = { path = "../../util/vmux_ecs", optional = true }
 vmux_editor = { path = "../vmux_editor", optional = true }
+vmux_flex = { path = "../../util/vmux_flex", optional = true }
 vmux_git = { path = "../vmux_git", optional = true }
 vmux_layout = { path = "../vmux_layout", optional = true }
 vmux_start = { path = "../vmux_start", optional = true }

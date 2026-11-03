@@ -40,6 +40,10 @@ impl Plugin for WindowLayoutPlugin {
             .add_message::<NewWindowRequest>()
             .add_message::<CloseFocusedWindowRequest>()
             .add_message::<ToggleFullscreenRequest>()
+            .configure_sets(
+                Update,
+                vmux_command::ReadCommandRequests.after(WindowFocusSet),
+            )
             .register_persisted::<WindowGeometry>()
             .register_type::<Option<IVec2>>()
             .register_type::<Option<Vec2>>()
@@ -92,8 +96,8 @@ impl Plugin for LayoutSpawnPlugin {
                 spawn_requested_tab_layouts
                     .in_set(TabLayoutSpawnSet)
                     .after(LayoutRequestSet::Handle)
-                    .after(crate::stack::OpenStartupPageSet)
                     .after(WindowShellSet)
+                    .before(crate::stack::OpenStartupPageSet)
                     .before(PageOpenSet::ResolveTarget),
             );
     }
@@ -170,13 +174,23 @@ impl TryFrom<&CommandInvocation> for ToggleFullscreenRequest {
 pub struct WindowFocusSet;
 
 #[derive(SystemSet, Clone, Debug, PartialEq, Eq, Hash)]
-pub(crate) struct WindowShellSet;
+pub struct WindowShellSet;
 
 #[derive(SystemSet, Clone, Debug, PartialEq, Eq, Hash)]
 pub(crate) struct TabLayoutSpawnSet;
 
-#[derive(Component)]
-pub struct NewWindowWorkspace;
+#[derive(Component, Clone, Copy, Default)]
+pub struct NewWindowWorkspace(Option<Entity>);
+
+impl NewWindowWorkspace {
+    pub fn from_space(space: Option<Entity>) -> Self {
+        Self(space)
+    }
+
+    fn source(self) -> Option<Entity> {
+        self.0
+    }
+}
 
 pub const SIDE_SHEET_TOP_PADDING_PX: f32 = 22.0;
 
@@ -313,14 +327,84 @@ impl WindowHierarchy<'_, '_> {
             current = self.child_of.get(current).ok()?.parent();
         }
     }
+
+    pub fn is_empty(&self) -> bool {
+        self.host_windows.is_empty()
+    }
+}
+
+#[derive(SystemParam)]
+pub struct WindowScope<'w, 's> {
+    hierarchy: WindowHierarchy<'w, 's>,
+    spaces: Query<
+        'w,
+        's,
+        (Entity, Has<crate::space::CurrentSpace>, Has<Active>),
+        With<crate::space::Space>,
+    >,
+    space_hierarchy: crate::space::SpaceHierarchy<'w, 's>,
+}
+
+impl WindowScope<'_, '_> {
+    fn has_scoped_space(&self) -> bool {
+        self.spaces
+            .iter()
+            .any(|(space, _, _)| self.hierarchy.get(space).is_some())
+    }
+
+    pub fn contains(&self, origin: Entity, candidate: Entity) -> bool {
+        match (self.hierarchy.get(origin), self.hierarchy.get(candidate)) {
+            (Some(origin), Some(candidate)) => origin == candidate,
+            (None, None) => self.hierarchy.is_empty() && !self.has_scoped_space(),
+            _ => false,
+        }
+    }
+
+    pub fn current_space(&self, origin: Entity) -> Option<Entity> {
+        if self.hierarchy.is_empty() && !self.has_scoped_space() {
+            return self
+                .spaces
+                .iter()
+                .find(|(_, current, _)| *current)
+                .or_else(|| self.spaces.iter().find(|(_, _, active)| *active))
+                .or_else(|| self.spaces.iter().next())
+                .map(|(space, _, _)| space);
+        }
+        let window = self.hierarchy.get(origin)?;
+        self.spaces
+            .iter()
+            .filter(|(space, _, _)| self.hierarchy.get(*space) == Some(window))
+            .find(|(_, current, _)| *current)
+            .or_else(|| {
+                self.spaces
+                    .iter()
+                    .filter(|(space, _, _)| self.hierarchy.get(*space) == Some(window))
+                    .find(|(_, _, active)| *active)
+            })
+            .map(|(space, _, _)| space)
+    }
+
+    pub fn contains_current_space(&self, origin: Entity, candidate: Entity) -> bool {
+        if !self.has_scoped_space() && self.spaces.is_empty() {
+            return self.contains(origin, candidate);
+        }
+        self.current_space(origin)
+            .is_some_and(|space| self.space_hierarchy.get(candidate) == Some(space))
+    }
 }
 
 fn setup_shells(
-    windows: Query<(Entity, &Window, Has<NewWindowWorkspace>)>,
+    windows: Query<(Entity, &Window, Option<&NewWindowWorkspace>)>,
     roots: Query<&HostWindow, With<VmuxWindow>>,
     spaces: Query<&crate::space::SpaceId, With<crate::space::Space>>,
-    sections: Query<&crate::side_sheet::SideSheetSectionsExpanded>,
-    focused_space: crate::space::FocusedSpace,
+    source_spaces: Query<
+        (
+            &crate::space::EffectiveStartupDir,
+            &EffectiveStartupUrl,
+            Option<&crate::side_sheet::SideSheetSectionsExpanded>,
+        ),
+        With<crate::space::Space>,
+    >,
     mut requests: MessageWriter<TabLayoutSpawnRequest>,
     mut commands: Commands,
     settings: Res<LayoutSettings>,
@@ -333,7 +417,7 @@ fn setup_shells(
             continue;
         }
         let main = spawn_window_shell(&mut commands, window_entity, window, &settings);
-        if new_workspace {
+        if let Some(new_workspace) = new_workspace {
             while existing_space_ids.contains(&format!("space-{next_space_number}")) {
                 next_space_number += 1;
             }
@@ -341,10 +425,12 @@ fn setup_shells(
             let name = format!("Space {next_space_number}");
             existing_space_ids.insert(id.clone());
             next_space_number += 1;
-            let expanded_sections = focused_space
-                .entity()
-                .and_then(|space| sections.get(space).ok())
-                .copied();
+            let source = new_workspace
+                .source()
+                .and_then(|space| source_spaces.get(space).ok());
+            let startup_dir = source.and_then(|(dir, _, _)| dir.0.clone());
+            let startup_url = source.map(|(_, url, _)| url.0.clone());
+            let expanded_sections = source.and_then(|(_, _, sections)| sections.copied());
             spawn_new_window_workspace(
                 &mut commands,
                 &mut requests,
@@ -352,7 +438,8 @@ fn setup_shells(
                 main,
                 id,
                 name,
-                focused_space.startup_url().map(str::to_string),
+                startup_dir,
+                startup_url,
                 expanded_sections,
             );
         }
@@ -503,6 +590,7 @@ fn spawn_new_window_workspace(
     main: Entity,
     id: String,
     name: String,
+    startup_dir: Option<std::path::PathBuf>,
     startup_url: Option<String>,
     expanded_sections: Option<crate::side_sheet::SideSheetSectionsExpanded>,
 ) {
@@ -511,6 +599,7 @@ fn spawn_new_window_workspace(
         Name::new(name),
         Order(0),
         Active,
+        crate::space::EffectiveStartupDir(startup_dir.clone()),
         EffectiveStartupUrl(startup_url.clone().unwrap_or_default()),
         LastActivatedAt::now(),
         crate::space::Space::bundle(),
@@ -524,7 +613,7 @@ fn spawn_new_window_workspace(
         space,
         primary_window: window,
         name: None,
-        startup_dir: None,
+        startup_dir,
         content: startup_url
             .filter(|url| !url.is_empty())
             .map(|url| TabLayoutSpawnContent::Url {
@@ -649,6 +738,7 @@ fn spawn_requested_tab_layouts(
     settings: Res<LayoutSettings>,
     mut page_open_requests: MessageWriter<PageOpenRequest>,
     spaces: Query<&EffectiveStartupUrl, With<crate::space::Space>>,
+    active_tabs: Query<(Entity, &ChildOf), (With<Tab>, With<Active>)>,
     mut tabs: TabSpawner,
     mut commands: Commands,
 ) {
@@ -656,6 +746,15 @@ fn spawn_requested_tab_layouts(
         let Ok(startup_url) = spaces.get(request.space) else {
             continue;
         };
+        let previous = request
+            .focus
+            .then(|| {
+                active_tabs
+                    .iter()
+                    .find(|(_, parent)| parent.parent() == request.space)
+                    .map(|(tab, _)| tab)
+            })
+            .flatten();
         let startup_dir = request
             .startup_dir
             .as_ref()
@@ -671,6 +770,11 @@ fn spawn_requested_tab_layouts(
             name: request.name.clone().unwrap_or_default(),
             startup_dir,
         });
+        if let Some(previous) = previous {
+            commands
+                .entity(tab_e)
+                .insert(crate::presentation::Transition::retain(previous));
+        }
         if !request.focus {
             commands.entity(tab_e).insert(LastActivatedAt(0));
             commands.entity(leaf).insert(LastActivatedAt(0));
@@ -763,20 +867,35 @@ fn persist(
 }
 
 fn gap(
-    focus: crate::stack::FocusedStack,
     layout_focus: crate::stack::LayoutFocus,
-    mut main_column_q: Query<&mut Node, With<MainColumn>>,
+    active_tabs: Query<
+        Entity,
+        (
+            With<Tab>,
+            With<Active>,
+            Without<crate::presentation::Retiring>,
+        ),
+    >,
+    hierarchy: WindowHierarchy,
+    roots: Query<&HostWindow, With<VmuxWindow>>,
+    mut main_column_q: Query<(&ChildOf, &mut Node), With<MainColumn>>,
 ) {
-    let pane_count = focus
-        .tab
-        .map(|tab| layout_focus.leaves(tab).len())
-        .unwrap_or(0);
-    let target = if pane_count > 1 {
-        crate::event::PANE_GAP_PX
-    } else {
-        0.0
-    };
-    for mut node in &mut main_column_q {
+    for (parent, mut node) in &mut main_column_q {
+        let pane_count = roots
+            .get(parent.parent())
+            .ok()
+            .and_then(|host| {
+                active_tabs
+                    .iter()
+                    .find(|tab| hierarchy.get(*tab) == Some(host.0))
+            })
+            .map(|tab| layout_focus.leaves(tab).len())
+            .unwrap_or(0);
+        let target = if pane_count > 1 {
+            crate::event::PANE_GAP_PX
+        } else {
+            0.0
+        };
         let current = match node.row_gap {
             Val::Px(v) => v,
             _ => f32::NAN,
@@ -980,7 +1099,7 @@ mod tests {
             );
         let window = app
             .world_mut()
-            .spawn((Window::default(), NewWindowWorkspace))
+            .spawn((Window::default(), NewWindowWorkspace::default()))
             .id();
 
         app.update();
@@ -1001,6 +1120,136 @@ mod tests {
     }
 
     #[test]
+    fn a_new_window_inherits_its_source_space_settings() {
+        let startup_dir = tempfile::tempdir().unwrap();
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins)
+            .insert_resource(test_settings(8.0))
+            .init_resource::<Assets<WindowMaterial>>()
+            .add_message::<TabLayoutSpawnRequest>()
+            .add_systems(
+                Update,
+                (setup_shells, bevy::ecs::schedule::ApplyDeferred).chain(),
+            );
+        let source_window = app.world_mut().spawn(Window::default()).id();
+        let source_root = app
+            .world_mut()
+            .spawn((VmuxWindow, HostWindow(source_window)))
+            .id();
+        let source_main = app.world_mut().spawn((Main, ChildOf(source_root))).id();
+        let source_space = app
+            .world_mut()
+            .spawn((
+                crate::space::Space,
+                crate::space::SpaceId("source".to_string()),
+                crate::space::EffectiveStartupDir(Some(startup_dir.path().to_path_buf())),
+                EffectiveStartupUrl("vmux://projects/source".to_string()),
+                crate::side_sheet::SideSheetSectionsExpanded {
+                    projects: true,
+                    bookmarks: false,
+                    knowledge: true,
+                    tools: false,
+                },
+                ChildOf(source_main),
+            ))
+            .id();
+        let target_window = app
+            .world_mut()
+            .spawn((
+                Window::default(),
+                NewWindowWorkspace::from_space(Some(source_space)),
+            ))
+            .id();
+
+        app.update();
+
+        let target_space = app
+            .world_mut()
+            .query_filtered::<(Entity, &crate::space::SpaceId), With<crate::space::Space>>()
+            .iter(app.world())
+            .find(|(_, id)| id.0 != "source")
+            .map(|(entity, _)| entity)
+            .expect("target space");
+        assert_eq!(
+            app.world()
+                .get::<crate::space::EffectiveStartupDir>(target_space)
+                .unwrap()
+                .0
+                .as_deref(),
+            Some(startup_dir.path())
+        );
+        assert_eq!(
+            app.world()
+                .get::<EffectiveStartupUrl>(target_space)
+                .unwrap()
+                .0,
+            "vmux://projects/source"
+        );
+        assert!(
+            app.world()
+                .get::<crate::side_sheet::SideSheetSectionsExpanded>(target_space)
+                .unwrap()
+                .projects
+        );
+        let request = app
+            .world_mut()
+            .resource_mut::<Messages<TabLayoutSpawnRequest>>()
+            .drain()
+            .next()
+            .expect("tab request");
+        assert_eq!(request.primary_window, target_window);
+        assert_eq!(request.startup_dir.as_deref(), Some(startup_dir.path()));
+        assert!(matches!(
+            request.content,
+            TabLayoutSpawnContent::Url { ref url, .. } if url == "vmux://projects/source"
+        ));
+    }
+
+    #[test]
+    fn window_scope_rejects_unowned_and_foreign_entities() {
+        let mut app = App::new();
+        let first_window = app.world_mut().spawn_empty().id();
+        let second_window = app.world_mut().spawn_empty().id();
+        let first_root = app.world_mut().spawn(HostWindow(first_window)).id();
+        let second_root = app.world_mut().spawn(HostWindow(second_window)).id();
+        let first_space = app
+            .world_mut()
+            .spawn((
+                crate::space::Space,
+                crate::space::CurrentSpace,
+                ChildOf(first_root),
+            ))
+            .id();
+        let second_space = app
+            .world_mut()
+            .spawn((
+                crate::space::Space,
+                crate::space::CurrentSpace,
+                ChildOf(second_root),
+            ))
+            .id();
+        let origin = app.world_mut().spawn(ChildOf(first_root)).id();
+        let local = app.world_mut().spawn(ChildOf(first_space)).id();
+        let foreign = app.world_mut().spawn(ChildOf(second_space)).id();
+        let detached_origin = app.world_mut().spawn_empty().id();
+        let detached_candidate = app.world_mut().spawn_empty().id();
+
+        let result = {
+            let world = app.world_mut();
+            let mut state = SystemState::<WindowScope>::new(world);
+            let scope = state.get(world).unwrap();
+            (
+                scope.contains(origin, local),
+                scope.contains(origin, foreign),
+                scope.contains(detached_origin, detached_candidate),
+                scope.current_space(origin),
+            )
+        };
+
+        assert_eq!(result, (true, false, false, Some(first_space)));
+    }
+
+    #[test]
     fn setup_window_gap_matches_header_layout_gap() {
         let mut app = setup_window_app();
         app.update();
@@ -1013,6 +1262,52 @@ mod tests {
         let node = app.world().get::<Node>(root).expect("window node");
 
         assert_eq!(node.column_gap, Val::Px(crate::event::SIDE_SHEET_GAP_PX));
+    }
+
+    #[test]
+    fn pane_gap_is_scoped_to_each_window() {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins).add_systems(Update, gap);
+        let first_window = app.world_mut().spawn_empty().id();
+        let second_window = app.world_mut().spawn_empty().id();
+        let first_root = app
+            .world_mut()
+            .spawn((VmuxWindow, HostWindow(first_window)))
+            .id();
+        let second_root = app
+            .world_mut()
+            .spawn((VmuxWindow, HostWindow(second_window)))
+            .id();
+        let first_column = app
+            .world_mut()
+            .spawn((MainColumn, Node::default(), ChildOf(first_root)))
+            .id();
+        let second_column = app
+            .world_mut()
+            .spawn((MainColumn, Node::default(), ChildOf(second_root)))
+            .id();
+        let first_tab = app
+            .world_mut()
+            .spawn((Tab::default(), Active, ChildOf(first_root)))
+            .id();
+        let second_tab = app
+            .world_mut()
+            .spawn((Tab::default(), Active, ChildOf(second_root)))
+            .id();
+        app.world_mut().spawn((Pane, ChildOf(first_tab)));
+        app.world_mut().spawn((Pane, ChildOf(first_tab)));
+        app.world_mut().spawn((Pane, ChildOf(second_tab)));
+
+        app.update();
+
+        assert_eq!(
+            app.world().get::<Node>(first_column).unwrap().row_gap,
+            Val::Px(crate::event::PANE_GAP_PX)
+        );
+        assert_eq!(
+            app.world().get::<Node>(second_column).unwrap().row_gap,
+            Val::Px(0.0)
+        );
     }
 
     #[test]

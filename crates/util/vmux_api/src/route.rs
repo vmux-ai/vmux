@@ -1,6 +1,54 @@
 use std::fmt;
 use std::str::FromStr;
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct RoutePattern<'a> {
+    url: &'a str,
+    owns_subtree: bool,
+}
+
+impl<'a> RoutePattern<'a> {
+    pub const fn new(url: &'a str, owns_subtree: bool) -> Self {
+        Self { url, owns_subtree }
+    }
+
+    pub fn matches(self, candidate: &str) -> bool {
+        self.specificity(candidate).is_some()
+    }
+
+    pub fn specificity(self, candidate: &str) -> Option<(bool, usize)> {
+        if let Some(scheme) = self.url.strip_suffix("://") {
+            let matches = candidate
+                .split_once(':')
+                .is_some_and(|(candidate, _)| candidate.eq_ignore_ascii_case(scheme));
+            return matches.then_some((true, self.url.len()));
+        }
+        if let (Some(base), Some(candidate)) =
+            (VmuxRoute::parse(self.url), VmuxRoute::parse(candidate))
+        {
+            let exact = candidate.same_page(&base);
+            let matches = exact || (self.owns_subtree && candidate.in_subtree(&base));
+            return matches.then_some((exact, self.url.len()));
+        }
+        let (Ok(base), Ok(candidate)) = (url::Url::parse(self.url), url::Url::parse(candidate))
+        else {
+            return None;
+        };
+        if base.scheme() != candidate.scheme() || base.host_str() != candidate.host_str() {
+            return None;
+        }
+        let base_path = base.path().trim_end_matches('/');
+        let candidate_path = candidate.path().trim_end_matches('/');
+        let exact = candidate_path == base_path;
+        let matches = exact
+            || (self.owns_subtree
+                && candidate_path
+                    .strip_prefix(base_path)
+                    .is_some_and(|suffix| suffix.starts_with('/')));
+        matches.then_some((exact, self.url.len()))
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct VmuxRoute(url::Url);
 
@@ -259,6 +307,17 @@ mod tests {
         assert!(root.same_page(&VmuxRoute::try_from("vmux://tools/acp").expect("canonical root")));
         assert!(child.in_subtree(&root));
         assert!(!sibling.in_subtree(&root));
+    }
+
+    #[test]
+    fn route_patterns_ignore_query_fragment_and_trailing_slash() {
+        let exact = RoutePattern::new("vmux://projects/", false);
+        assert!(exact.matches("vmux://projects?view=grid#active"));
+        assert!(!exact.matches("vmux://projects/one"));
+
+        let subtree = RoutePattern::new("https://example.com/tools/", true);
+        assert!(subtree.matches("https://example.com/tools/git?branch=main"));
+        assert!(!subtree.matches("https://example.com/toolsmith"));
     }
 
     #[test]

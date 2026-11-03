@@ -1094,3 +1094,5 @@ project-clone-invalid = Introduce un repositorio de GitHub válido
 project-restore = Restaurar proyecto
 project-archived = Archivado
 common-select = Seleccionar
+
+common-show-more = Mostrar más
