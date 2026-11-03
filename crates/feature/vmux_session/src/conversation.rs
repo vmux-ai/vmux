@@ -6,13 +6,13 @@ use bevy_ecs::system::SystemParam;
 use bevy_reflect::Reflect;
 use moonshine_save::prelude::Save;
 use serde::{Deserialize, Serialize};
+use vmux_api::service::ServiceMessageSet;
 use vmux_api::session::{
     ClientOpId, ConversationEvent as SerializedEvent, EventId, MemberId, MemberKind, MemberRole,
     Message,
 };
 use vmux_ecs::CreatedAt;
 use vmux_ecs::persistence::PersistenceAppExt;
-use vmux_ecs::service::ServiceMessageSet;
 
 use crate::{AgentId, Session, SessionId};
 
