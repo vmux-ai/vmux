@@ -113,6 +113,7 @@ impl WindowFrameQueries<'_, '_> {
         resolved
     }
 
+    #[cfg(target_os = "macos")]
     pub(crate) fn page_is_active(&self, page: Entity) -> bool {
         matches!(
             self.presentation(page),

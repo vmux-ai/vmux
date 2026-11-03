@@ -7,6 +7,7 @@ use bevy_cef::prelude::*;
 use vmux_api::{BinEvent, UiEventPermissions};
 #[cfg(ui)]
 use vmux_ecs::event::*;
+use vmux_ecs::event::{ExplorerReveal, FileUiState};
 
 use super::*;
 use crate::host::editor::FileView;
@@ -614,7 +615,7 @@ impl SentReveals {
     fn watch(app: &mut App, webview: Entity) {
         let mut browsers = Browsers::default();
         browsers.set_externally_hosted(webview);
-        app.add_plugins(vmux_ecs::UiStatePlugin::<vmux_ecs::event::FileUiState>::default())
+        app.add_plugins(vmux_ecs::UiStatePlugin::<FileUiState>::default())
             .insert_non_send(browsers)
             .init_resource::<Self>()
             .add_observer(Self::record);
