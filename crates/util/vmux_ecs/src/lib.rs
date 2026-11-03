@@ -65,6 +65,7 @@ pub mod overlay;
 pub mod page;
 #[cfg(all(host, feature = "host"))]
 mod page_driver;
+#[cfg(all(host, feature = "host"))]
 pub mod page_location;
 pub mod page_metadata;
 #[cfg(all(host, feature = "host"))]

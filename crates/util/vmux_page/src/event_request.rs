@@ -21,6 +21,7 @@ impl EventRequest {
         self.0
     }
 
+    #[cfg(any(target_os = "macos", target_os = "ios"))]
     pub(crate) fn deferred_while_blocked(&self) -> bool {
         matches!(
             (self.0.name.as_str(), &self.0.data),
@@ -30,6 +31,7 @@ impl EventRequest {
         )
     }
 
+    #[cfg(any(target_os = "macos", target_os = "ios"))]
     pub(crate) fn coalesces_with(&self, other: &Self) -> bool {
         self.0.element == other.0.element && self.0.name == other.0.name
     }
