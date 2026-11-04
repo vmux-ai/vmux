@@ -595,8 +595,10 @@ working area available. The editor's typed trail still validates its owning surf
 revision, and URL. Path overflow collapses whole directories using measured widths and keeps the
 filename intact. Search sits at the end of the trail and Checkout beside the selected branch.
 Git's branch-file filter sits above its file tree, with page-top spacing shared by the tree and
-diff. Side-sheet cards keep a gutter on both sides; long titles and branch labels fade at the edge,
+diff. The Space card keeps a gutter on both sides; long titles and branch labels fade at the edge,
 and paths retain their filename with a leading fade. Hover exposes the full label.
+Session tabs and side-sheet rows share their Session identicon, with the agent logo in a small
+corner badge. Address identicons use the same size as the adjacent navigation icons.
 Code bookmarks resolve their directory from the active worktree, owning project, or cwd and open
 its README or entry file; directory favicons identify the Code page. Layout and address state flush before native
 presentation in the same frame; the final flush retains updates arriving later.
@@ -1233,6 +1235,8 @@ Vmux state. Resuming it creates the canonical Session entity, records its `AcpSe
 the provider replay the conversation through `session/load`. Compatibility watches exist only while
 the Sessions page or one of their imported Sessions is present, debounce into one wake, rescan only
 the changed provider, and bound untrusted history traversal.
+History loading starts and finishes publish a fresh chat snapshot independently of message
+changes, so empty or unchanged replays still release the conversation skeleton.
 The Session manager publishes only to its active page and leases Git metadata for every displayed
 repository while that page remains active.
 Composer workspace context resolves the Session named by the page URL even before runtime attachment

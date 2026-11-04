@@ -176,7 +176,7 @@ fn SideSheetContent() -> Element {
             div { class: "h-full min-h-0 w-full overflow-hidden",
             div { class: "@container flex h-full min-h-0 w-[var(--vmux-side-sheet-content-width)] flex-col pt-[var(--vmux-side-sheet-pad-top)]",
                 div {
-                    class: "scrollbar-hidden flex min-h-0 flex-1 flex-col overflow-x-hidden overflow-y-auto px-2 pb-3 pt-2 text-foreground @max-[12rem]:px-1 @max-[12rem]:pt-1",
+                    class: "scrollbar-hidden flex min-h-0 flex-1 flex-col overflow-x-hidden overflow-y-auto pb-3 pl-2 pt-2 text-foreground @max-[12rem]:pl-1 @max-[12rem]:pt-1",
                     ..BookmarkDragState::listeners(drag_state),
                     if let Some(space) = active_space {
                         SideSheetSpaceCard {
@@ -243,7 +243,7 @@ fn SideSheetSpaceCard(
     let mut expanded = use_signal(|| true);
     let content_class = if expanded() { "overflow-visible" } else { "" };
     rsx! {
-        div { class: SHEET_SECTION,
+        div { class: "{SHEET_SECTION} mr-2 @max-[12rem]:mr-1",
             SideSheetSpaceRow {
                 space,
                 spaces,

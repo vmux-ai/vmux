@@ -8,7 +8,7 @@ use vmux_ui::components::project_picker::ProjectSelectPopup;
 use vmux_ui::components::sheet::SheetSelectorRow;
 use vmux_ui::hooks::{send, use_optimistic_map};
 use vmux_ui::i18n::translate;
-use vmux_ui::icon::{GitSymbol, GitSymbolView, LineIcon, LineIconView, PageIconView};
+use vmux_ui::icon::{GitSymbol, GitSymbolView, LineIcon, LineIconView};
 
 use crate::event::{
     ActiveSession, ActiveWorkspaceProject, SideSheetProjectPageOpenRequest, TabBoundary,
@@ -16,6 +16,7 @@ use crate::event::{
 };
 
 use super::LayoutDropdown;
+use super::stack::StackIcon;
 
 #[component]
 pub(crate) fn ActiveSessionPanel(session: ActiveSession) -> Element {
@@ -41,11 +42,10 @@ pub(crate) fn ActiveSessionPanel(session: ActiveSession) -> Element {
         div { class: "relative w-full max-w-full min-w-0 overflow-visible py-2 @max-[12rem]:py-1.5",
             div { class: "flex w-full min-w-0 items-center gap-2.5 overflow-hidden px-2 @max-[12rem]:gap-1.5 @max-[12rem]:px-1",
                 div { class: "flex size-4 shrink-0 items-center justify-center",
-                    PageIconView {
+                    StackIcon {
                         icon: page.icon.clone(),
                         url: page.url.clone(),
-                        img_class: "size-4 shrink-0 rounded-sm object-contain".to_string(),
-                        icon_class: "size-4 shrink-0 text-muted-foreground".to_string(),
+                        title: title.clone(),
                     }
                 }
                 div { class: "w-0 min-w-0 flex-1 overflow-hidden",

@@ -2,6 +2,7 @@ use dioxus::prelude::*;
 use vmux_api::PageIcon;
 use vmux_api::bookmark::{BookmarkAddRequest, BookmarkPinUrlRequest};
 use vmux_ecs::PageMetadata;
+use vmux_ui::components::avatar::{AgentThumbnail, IdentityOrb};
 use vmux_ui::components::context_menu::{ContextMenuItem, ContextMenuTrigger};
 use vmux_ui::components::icon::Icon;
 use vmux_ui::hooks::send;
@@ -189,6 +190,24 @@ pub(super) fn NewStackRow(pane_id: u64) -> Element {
 
 #[component]
 pub(super) fn StackIcon(icon: PageIcon, url: String, title: String) -> Element {
+    if let Some(vmux_session::Route::Session(id)) = vmux_session::Route::parse(&url) {
+        let agent_icon = icon.favicon_url().to_string();
+        return rsx! {
+            span { class: "relative inline-flex size-4 shrink-0",
+                IdentityOrb { seed: id.0, alt: title, class: "size-full".to_string() }
+                if !agent_icon.is_empty() {
+                    span { class: "absolute -bottom-0.5 -right-0.5 flex size-2.5 items-center justify-center rounded-full bg-card ring-1 ring-card",
+                        AgentThumbnail {
+                            src: Some(agent_icon.clone()),
+                            seed: agent_icon,
+                            background: String::new(),
+                            class: "size-2 object-contain".to_string(),
+                        }
+                    }
+                }
+            }
+        };
+    }
     if title == "New Stack" && url.is_empty() {
         return rsx! {
             Icon { class: "h-4 w-4 shrink-0 text-muted-foreground",

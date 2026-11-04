@@ -177,7 +177,7 @@ pub(super) fn ChatHeader(
                     IdentityOrb {
                         seed: project_seed,
                         alt: project_name.clone(),
-                        class: "size-5".to_string(),
+                        class: "size-4".to_string(),
                     }
                 },
                 onselect: PageNavigation::replace,
@@ -192,7 +192,7 @@ pub(super) fn ChatHeader(
                     IdentityOrb {
                         seed: session_seed,
                         alt: title.clone(),
-                        class: "size-5".to_string(),
+                        class: "size-4".to_string(),
                     }
                 },
                 onselect: PageNavigation::replace,

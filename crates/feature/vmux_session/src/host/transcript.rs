@@ -108,6 +108,8 @@ struct PushWorld<'w, 's> {
     user_profiles: Query<'w, 's, Ref<'static, Profile>, With<User>>,
     transcripts: Transcripts<'w, 's>,
     changed_events: ChangedConversationEvents<'w, 's>,
+    loading_started: Query<'w, 's, Entity, Added<vmux_session::TranscriptLoading>>,
+    loading_finished: RemovedComponents<'w, 's, vmux_session::TranscriptLoading>,
 }
 
 type ReadyView = (
@@ -189,6 +191,13 @@ fn push_to_page(
         .iter()
         .map(ChildOf::parent)
         .collect::<std::collections::HashSet<_>>();
+    let mut loading_changes = std::collections::HashSet::new();
+    for session in &world.loading_started {
+        loading_changes.insert(session);
+    }
+    for session in world.loading_finished.read() {
+        loading_changes.insert(session);
+    }
     last_push.retain(|session, _| world.sessions.contains(*session));
     owed.retain(|session| world.sessions.contains(*session));
     for (
@@ -207,6 +216,7 @@ fn push_to_page(
     {
         let conversation_changed = children.is_changed() || changed_transcripts.contains(&session);
         let moved = user_moved
+            || loading_changes.contains(&session)
             || name.is_changed()
             || state.is_changed()
             || turn_meta.as_ref().is_some_and(|meta| meta.is_changed())
@@ -632,6 +642,65 @@ fn apply_results(
 mod tests {
     use super::*;
     use vmux_ecs::page::PageReady;
+
+    #[derive(Resource, Default)]
+    struct Published(crate::state::ChatUiState);
+
+    impl Published {
+        fn record(
+            trigger: On<vmux_ecs::UiStateWrite<crate::state::ChatUiState>>,
+            mut published: ResMut<Self>,
+        ) {
+            vmux_api::UiStateProjection::apply(&mut published.0, trigger.event().update().clone());
+        }
+    }
+
+    #[test]
+    fn history_loading_transitions_reach_a_synced_page_without_new_messages() {
+        let mut app = App::new();
+        app.add_plugins((MinimalPlugins, Plugin))
+            .init_resource::<Published>()
+            .add_observer(Published::record);
+        let session = app
+            .world_mut()
+            .spawn((
+                Session,
+                AgentId("codex".into()),
+                Name::new("Resume conversation"),
+                RunState::Idle,
+                PromptQueue::default(),
+                vmux_session::TranscriptLoading,
+            ))
+            .id();
+        app.world_mut().spawn(ChildOf(session));
+        let stack = app
+            .world_mut()
+            .spawn(EntityTarget::<Session>::new(session))
+            .id();
+        let view = app
+            .world_mut()
+            .spawn((SessionView, PageReady {}, ChildOf(stack)))
+            .id();
+        app.update();
+        app.update();
+        assert!(app.world().get::<ChatSynced>(view).is_some());
+        for loading in [false, true, false] {
+            if loading {
+                app.world_mut()
+                    .entity_mut(session)
+                    .insert(vmux_session::TranscriptLoading);
+            } else {
+                app.world_mut()
+                    .entity_mut(session)
+                    .remove::<vmux_session::TranscriptLoading>();
+            }
+            app.update();
+            let state = &app.world().resource::<Published>().0;
+            assert_eq!(state.snapshot.transcript_loading, loading);
+            assert!(state.transcript_revision > 0);
+            assert!(state.transcript.items.is_empty());
+        }
+    }
 
     #[test]
     fn streaming_snapshots_wait_for_frame_interval() {
