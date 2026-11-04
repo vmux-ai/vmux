@@ -19,9 +19,10 @@ use vmux_ui::components::filter::{FilterPill, FilterTrigger};
 use vmux_ui::components::manager::{
     ManagerAddButton, ManagerCollection, ManagerEmpty, ManagerExpandableSearch, ManagerGridSize,
     ManagerList, ManagerPage, ManagerSearch, ManagerSidebarItem, ManagerSkeleton, ManagerView,
-    ManagerViewToggle, WorkspaceBreadcrumbHeader, WorkspaceLayout, WorkspacePage,
+    ManagerViewToggle, WorkspaceLayout, WorkspacePage,
 };
 use vmux_ui::components::page::PageContent;
+use vmux_ui::components::page_address::PageAddress;
 use vmux_ui::components::sheet::SheetHeaderChevron;
 use vmux_ui::components::skeleton::Skeleton;
 use vmux_ui::components::tooltip::Tooltip;
@@ -78,7 +79,7 @@ pub(super) fn ProjectList(
             WorkspaceLayout {
                 show_sidebar: entries.iter().any(|entry| entry.archived),
                 header: rsx! {
-                    WorkspaceBreadcrumbHeader {
+                    PageAddress {
                         current: WorkspacePage::Projects.option(),
                         options: WorkspacePage::options(),
                         view_controls: rsx! { if !entries.is_empty() { ManagerViewToggle { view: controls.view(), list_label: translate("tools-view-list"), grid_label: translate("tools-view-grid"), onchange: move |view| { controls.set_view(view); let _ = send(&ViewPreference::request(view)); } } } },
@@ -630,7 +631,7 @@ pub(super) fn ProjectDashboard(detail: ProjectDetailView) -> Element {
             WorkspaceLayout {
                 show_sidebar: false,
                 header: rsx! {
-                    WorkspaceBreadcrumbHeader {
+                    PageAddress {
                         current: WorkspacePage::Projects.option(),
                         options: WorkspacePage::options(),
                         actions: rsx! {

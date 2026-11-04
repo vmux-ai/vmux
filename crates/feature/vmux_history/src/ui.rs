@@ -10,10 +10,9 @@ use vmux_ui::components::alert_dialog::{
     AlertDialogAction, AlertDialogActions, AlertDialogCancel, AlertDialogContent,
     AlertDialogDescription, AlertDialogRoot, AlertDialogTitle,
 };
-use vmux_ui::components::manager::{
-    ManagerIconButton, ManagerSearchAction, WorkspaceBreadcrumbHeader, WorkspacePage,
-};
+use vmux_ui::components::manager::{ManagerIconButton, ManagerSearchAction, WorkspacePage};
 use vmux_ui::components::page::{PageContent, PageShell};
+use vmux_ui::components::page_address::PageAddress;
 use vmux_ui::components::tooltip::Tooltip;
 use vmux_ui::favicon::Favicon;
 use vmux_ui::hooks::{send, use_theme, use_ui_state};
@@ -51,7 +50,7 @@ pub fn Page() -> Element {
 
     rsx! {
         PageShell {
-            WorkspaceBreadcrumbHeader {
+            PageAddress {
                 current: WorkspacePage::History.option(),
                 options: WorkspacePage::options(),
                 actions: rsx! {

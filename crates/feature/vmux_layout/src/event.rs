@@ -796,6 +796,8 @@ pub struct ActiveWorkspaceProject {
 #[vmux_api::contract(Default)]
 pub struct HeaderState {
     #[serde(default)]
+    pub address_slot: Option<u64>,
+    #[serde(default)]
     pub address: Option<vmux_api::address::PageAddress>,
     pub active: Option<StackRow>,
     pub metadata: Option<PageMetadata>,

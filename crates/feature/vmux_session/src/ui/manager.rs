@@ -20,9 +20,10 @@ use vmux_ui::components::inline_edit::EditableText;
 use vmux_ui::components::manager::{
     ManagerAddButton, ManagerEmpty, ManagerExpandableSearch, ManagerIconButton, ManagerPage,
     ManagerSearch, ManagerSidebarItem, ManagerSidebarSection, ManagerView, ManagerViewToggle,
-    WorkspaceBreadcrumbHeader, WorkspaceLayout, WorkspacePage,
+    WorkspaceLayout, WorkspacePage,
 };
 use vmux_ui::components::motion::{Collapse, Collapsible};
+use vmux_ui::components::page_address::{PageAddress, PageAddressContext};
 use vmux_ui::components::sheet::{SheetHeaderAction, SheetHeaderChevron};
 use vmux_ui::components::skeleton::Skeleton;
 use vmux_ui::hooks::{
@@ -363,7 +364,10 @@ fn SessionsManagerContent(
     rsx! {
         WorkspaceLayout {
             header: rsx! {
-                WorkspaceBreadcrumbHeader {
+                PageAddress {
+                    context: PageAddressContext::default()
+                        .with(use_context::<SessionSelection>())
+                        .with(use_context::<SessionMutations>()),
                     current: WorkspacePage::Sessions.option(),
                     options: WorkspacePage::options(),
                     view_controls: rsx! { if !presentation.snapshot.sessions.is_empty() { ManagerViewToggle { view: controls.view(), list_label: translate("sessions-view-list"), grid_label: translate("sessions-view-board"), grid_icon: LineIcon::Columns3, onchange: move |view| controls.set_view(view) } } },

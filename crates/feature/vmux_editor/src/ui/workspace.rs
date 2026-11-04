@@ -1,6 +1,6 @@
 #![allow(non_snake_case)]
 
-use super::breadcrumb::EditorBreadcrumbs;
+use super::address::EditorAddress;
 use super::diagnostic::DiagnosticPresentation;
 use super::directory::{PreviewDom, PreviewPane};
 use super::dom::{EditorDom, ScrolledLineHeight};
@@ -877,7 +877,7 @@ fn EditorWorkspace() -> Element {
 
             PaneWidth {}
 
-            EditorBreadcrumbs {}
+            EditorAddress {}
 
         div {
             class: "flex min-h-0 flex-1 flex-row overflow-hidden",

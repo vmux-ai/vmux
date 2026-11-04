@@ -15,8 +15,9 @@ use vmux_ui::components::breadcrumb::{BreadcrumbOption, BreadcrumbSelector, Brea
 use vmux_ui::components::button::{Button, ButtonSize, ButtonVariant};
 use vmux_ui::components::input::Input;
 use vmux_ui::components::manager::{
-    ManagerSearchAction, ManagerSelect, ManagerSelectItem, WorkspaceBreadcrumbHeader, WorkspacePage,
+    ManagerSearchAction, ManagerSelect, ManagerSelectItem, WorkspacePage,
 };
+use vmux_ui::components::page_address::PageAddress;
 use vmux_ui::components::switch::{Switch, SwitchThumb};
 use vmux_ui::dioxus_ext::attributes;
 use vmux_ui::focus::FocusClaim;
@@ -136,7 +137,7 @@ pub fn Page() -> Element {
         .collect::<Vec<_>>();
     rsx! {
         div { class: "flex h-full min-h-0 flex-col bg-background text-foreground",
-            WorkspaceBreadcrumbHeader {
+            PageAddress {
                 current: WorkspacePage::Settings.option(),
                 options: WorkspacePage::options(),
                 actions: rsx! {

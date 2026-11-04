@@ -7,9 +7,10 @@ use crate::{
 use dioxus::prelude::*;
 use vmux_ui::components::manager::{
     ManagerCollection, ManagerGridSize, ManagerList, ManagerRow, ManagerSection, ManagerView,
-    ManagerViewToggle, WorkspaceBreadcrumbHeader, WorkspacePage,
+    ManagerViewToggle, WorkspacePage,
 };
 use vmux_ui::components::page::PageShell;
+use vmux_ui::components::page_address::PageAddress;
 use vmux_ui::hooks::{send, use_theme, use_ui_state};
 use vmux_ui::i18n::{TranslationValue, translate, translate_with};
 use vmux_ui::icon::{BuiltinIconView, LineIcon, LineIconView};
@@ -62,7 +63,7 @@ pub fn Page() -> Element {
                 };
                 let _ = send(&ShortcutProbePressRequest { stroke });
             },
-            WorkspaceBreadcrumbHeader {
+            PageAddress {
                 current: WorkspacePage::Shortcuts.option(),
                 options: WorkspacePage::options(),
                 actions: rsx! {

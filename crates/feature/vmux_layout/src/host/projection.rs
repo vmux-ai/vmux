@@ -698,6 +698,7 @@ impl HeaderState {
             .find(|pin| pin.metadata.url == url)
             .map(|pin| pin.uuid.clone());
         Self {
+            address_slot: None,
             address: None,
             metadata: active.as_ref().map(|row| PageMetadata {
                 title: row.title.clone(),
@@ -955,6 +956,7 @@ fn project_header(
         &PageMetadata,
         Option<&vmux_ecs::UiState<vmux_api::address::PageAddressUiState>>,
     )>,
+    slots: Query<&vmux_ecs::page::AddressSlot>,
     focus: crate::stack::FocusedStack,
     surfaces: StackSurface,
     scope: crate::window::WindowScope,
@@ -977,6 +979,13 @@ fn project_header(
             .and_then(|state| state.layout.as_ref())
             .is_some_and(|geometry| geometry.header_visible());
         let mut next = HeaderProjection(HeaderState::from_projections(stacks, bookmarks, team));
+        if visible
+            && let Some(owner) = active
+            && scope.contains(entity, owner)
+            && let Ok(slot) = slots.get(owner)
+        {
+            next.0.address_slot = Some(slot.0);
+        }
         for (owner, address, metadata, ui) in &addresses {
             if !scope.contains(entity, owner) {
                 continue;

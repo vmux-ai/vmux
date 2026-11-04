@@ -579,13 +579,24 @@ the same location state for its section navigation.
 Git file selection and the editor Outline share `SectionNavigation`: clicks request smooth
 scrolling, scrolling publishes the current section, and echoed location updates do not restart
 navigation. Notes resolve `#L<line>` to a rendered block and measure the heading at the viewport
-edge in one DOM request. Outline following preserves the editor caret. The editor contributes a typed address trail to its window header. The page and window use the
-same breadcrumb menus; windows without a visible header retain the page row. Every address
-request carries its owning surface, document revision, and URL. The window accepts requests only
-for its current surface, then forwards them to that surface's editor handlers. Path overflow
-collapses whole directories using measured widths and keeps the filename intact. Search sits at
-the end of the trail and Checkout beside the selected branch. Layout and address state flush
-before native presentation in the same frame; the final flush retains updates arriving later.
+edge in one DOM request. Outline following preserves the editor caret. Built-in pages publish their
+address UI into an owned slot in the window URL bar instead of reserving a breadcrumb row inside
+the page. Pages opt in through `vmux_ui::components::page_address::PageAddress`, passing their
+current breadcrumb, choices, child navigation, and optional actions or view controls.
+`PageAddressContent` accepts custom navigation UI; `PageAddressContext` carries only explicitly
+shared page state. Pages manage neither slot IDs nor windows nor transport, and pages that do not
+opt in keep the ordinary URL display. The slot contains the same menus, search, view controls, and callbacks. Native lifecycle
+updates bind the newest slot to its surface and document generation independently of transient
+input epochs; the window selects only its current surface's slot. The mounted UI inherits the
+page's explicit context. Feature requests and state
+listeners keep the original page host, while DOM focus and popover operations use the window host.
+Closing or remounting a page releases the slot. Hiding the window header leaves the page's full
+working area available. The editor's typed trail still validates its owning surface, document
+revision, and URL. Path overflow collapses whole directories using measured widths and keeps the
+filename intact. Search sits at the end of the trail and Checkout beside the selected branch.
+Code bookmarks resolve their directory from the active worktree, owning project, or cwd and open
+its README or entry file; directory favicons identify the Code page. Layout and address state flush before native
+presentation in the same frame; the final flush retains updates arriving later.
 Tab presses select immediately and host projection reconciles that selection.
 Accepted lifecycle batches also carry the current document revision into paint state; an old
 mount notification discarded during an interaction-epoch change cannot leave the first paint

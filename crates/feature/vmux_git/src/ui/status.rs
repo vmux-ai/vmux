@@ -9,7 +9,8 @@ use vmux_ui::components::avatar::IdentityOrb;
 use vmux_ui::components::breadcrumb::{BreadcrumbOption, BreadcrumbSeparator};
 use vmux_ui::components::button::{Button, ButtonSize, ButtonVariant};
 use vmux_ui::components::dropdown::{Dropdown, DropdownOpenMode, DropdownPopup, DropdownTrigger};
-use vmux_ui::components::manager::{ManagerSearchAction, WorkspaceBreadcrumbHeader, WorkspacePage};
+use vmux_ui::components::manager::{ManagerSearchAction, WorkspacePage};
+use vmux_ui::components::page_address::{PageAddress, PageAddressContext};
 use vmux_ui::components::project_picker::{ProjectSelectPopup, ProjectSelectTrigger};
 use vmux_ui::hooks::{send, use_optimistic_map};
 use vmux_ui::i18n::translate;
@@ -146,7 +147,8 @@ pub(super) fn RepositoryHeader(
         );
     }
     rsx! {
-        WorkspaceBreadcrumbHeader {
+        PageAddress {
+                context: PageAddressContext::default().with(page),
                 current: current_page,
                 options: page_options,
                 actions: rsx! {

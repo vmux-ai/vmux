@@ -4,7 +4,8 @@ use vmux_ui::components::avatar::{AgentThumbnail, Avatar, IdentityOrb};
 use vmux_ui::components::breadcrumb::{BreadcrumbOption, BreadcrumbSelector, BreadcrumbSeparator};
 use vmux_ui::components::button::{Button, ButtonSize, ButtonVariant};
 use vmux_ui::components::composer_bar::StatusDot;
-use vmux_ui::components::manager::{WorkspaceBreadcrumbHeader, WorkspacePage};
+use vmux_ui::components::manager::WorkspacePage;
+use vmux_ui::components::page_address::PageAddress;
 use vmux_ui::i18n::translate;
 use vmux_ui::icon::{LineIcon, LineIconView};
 use vmux_ui::navigation::PageNavigation;
@@ -137,7 +138,7 @@ pub(super) fn ChatHeader(
         .map(|session| session.id.clone())
         .unwrap_or_else(|| title.clone());
     rsx! {
-        WorkspaceBreadcrumbHeader {
+        PageAddress {
             current: WorkspacePage::Sessions.option(),
             options: navigation.views,
             actions: rsx! {

@@ -51,6 +51,16 @@ type ExistingViews<'w, 's> = Query<
 struct FileOpenContext<'w, 's> {
     restored: Query<'w, 's, &'static super::explorer::ArchivedEditorState>,
     tabs: vmux_layout::tab::TabHierarchy<'w, 's>,
+    workspaces: Query<
+        'w,
+        's,
+        (
+            Option<&'static vmux_layout::tab::TabWorktree>,
+            Option<&'static vmux_layout::tab::TabWorkspace>,
+        ),
+    >,
+    spaces: vmux_layout::space::SpaceHierarchy<'w, 's>,
+    directories: Query<'w, 's, &'static vmux_layout::space::EffectiveStartupDir>,
     navigations: Query<'w, 's, &'static PageNavigation>,
     children: Query<'w, 's, &'static Children>,
     currents: Query<'w, 's, &'static vmux_layout::page_slot::Current>,
@@ -65,6 +75,35 @@ struct FileOpenContext<'w, 's> {
 }
 
 impl FileOpenContext<'_, '_> {
+    fn code_directory(&self, stack: Entity) -> Option<PathBuf> {
+        if let Some(tab) = self.tabs.entity(stack)
+            && let Ok((worktree, workspace)) = self.workspaces.get(tab)
+        {
+            if let Some(worktree) = worktree
+                && !worktree.checkout_dir.is_empty()
+            {
+                return Some(PathBuf::from(&worktree.checkout_dir));
+            }
+            if let Some(workspace) = workspace
+                && !workspace.project_dir.is_empty()
+            {
+                return Some(PathBuf::from(&workspace.project_dir));
+            }
+        }
+        if let Some(space) = self.spaces.get(stack)
+            && let Ok(directory) = self.directories.get(space)
+            && let Some(directory) = &directory.0
+        {
+            return Some(directory.clone());
+        }
+        if let Some(directory) = self.tabs.startup_dir(stack)
+            && !directory.is_empty()
+        {
+            return Some(PathBuf::from(directory));
+        }
+        std::env::current_dir().ok()
+    }
+
     fn reusable_view(&self, stack: Entity) -> Option<Entity> {
         if self.transitions.contains(stack) {
             return None;
@@ -171,11 +210,7 @@ fn handle_file(
             .map(|state| PathBuf::from(&state.active));
         let file_landing = if task.url.trim_end_matches('/') == "file:" {
             context
-                .tabs
-                .startup_dir(task.stack)
-                .filter(|path| !path.is_empty())
-                .map(PathBuf::from)
-                .or_else(|| std::env::current_dir().ok())
+                .code_directory(task.stack)
                 .map(|directory| CodeLanding::select(&directory))
         } else {
             None
@@ -703,6 +738,78 @@ mod tests {
         let page = stack.page();
         assert_eq!(stack.path(page), readme);
         assert_eq!(stack.url(page), FileView { path: readme }.url());
+    }
+
+    #[test]
+    fn code_bookmark_uses_the_spaces_project_instead_of_the_legacy_root_directory() {
+        let project = tempfile::tempdir().unwrap();
+        let readme = project.path().join("README.md");
+        std::fs::write(&readme, "# Project\n").unwrap();
+        let mut stack = EditorStack::empty();
+        let space = stack
+            .app
+            .world_mut()
+            .spawn((
+                vmux_layout::space::Space,
+                vmux_layout::space::EffectiveStartupDir(Some(project.path().to_path_buf())),
+            ))
+            .id();
+        let tab = stack
+            .app
+            .world_mut()
+            .spawn((
+                vmux_layout::tab::Tab {
+                    name: "Project".into(),
+                    startup_dir: Some("/".into()),
+                },
+                ChildOf(space),
+            ))
+            .id();
+        stack
+            .app
+            .world_mut()
+            .entity_mut(stack.stack)
+            .insert(ChildOf(tab));
+        stack.open("file:///");
+        let page = stack.page();
+        assert_eq!(stack.path(page), readme);
+    }
+
+    #[test]
+    fn code_bookmark_opens_the_selected_worktrees_readme() {
+        let repository = tempfile::tempdir().unwrap();
+        let checkout = tempfile::tempdir().unwrap();
+        std::fs::write(repository.path().join("README.md"), "# Main\n").unwrap();
+        let readme = checkout.path().join("README.md");
+        std::fs::write(&readme, "# Feature\n").unwrap();
+        let mut stack = EditorStack::empty();
+        let tab = stack
+            .app
+            .world_mut()
+            .spawn((
+                vmux_layout::tab::Tab {
+                    name: "Project".into(),
+                    startup_dir: Some("/".into()),
+                },
+                vmux_layout::tab::TabWorkspace {
+                    project_dir: repository.path().to_string_lossy().into_owned(),
+                },
+                vmux_layout::tab::TabWorktree {
+                    repo_root: repository.path().to_string_lossy().into_owned(),
+                    checkout_dir: checkout.path().to_string_lossy().into_owned(),
+                    branch: "feature".into(),
+                    base_ref: "main".into(),
+                },
+            ))
+            .id();
+        stack
+            .app
+            .world_mut()
+            .entity_mut(stack.stack)
+            .insert(ChildOf(tab));
+        stack.open("file:///");
+        let page = stack.page();
+        assert_eq!(stack.path(page), readme);
     }
 
     #[test]

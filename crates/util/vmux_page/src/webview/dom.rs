@@ -204,6 +204,7 @@ impl Dom {
             waker: embed.waker.clone(),
         });
         embed.lifecycle.update(LifecycleUpdate::Mounted);
+        let _host = HostScope::enter(host.clone());
 
         Self {
             page: Rc::new(RefCell::new(PageDom::mount(component, instance))),
@@ -786,6 +787,11 @@ impl SurfaceHost {
 }
 
 impl PageHost for SurfaceHost {
+    fn publish_address(&self, slot: u64) {
+        self.lifecycle.update(LifecycleUpdate::AddressMounted(slot));
+        self.waker.wake();
+    }
+
     fn send(&self, id: &str, bytes: &[u8]) -> Result<(), EventListenerError> {
         if id == vmux_api::PageReady::id() {
             tracing::info!(

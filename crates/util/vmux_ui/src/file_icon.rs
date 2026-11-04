@@ -366,6 +366,13 @@ pub enum FileIcon {
 
 impl FileIcon {
     pub fn favicon(self) -> String {
+        if self == Self::Folder {
+            return format!(
+                "data:image/svg+xml;base64,{}",
+                base64::engine::general_purpose::STANDARD
+                    .encode(include_bytes!("../assets/favicons/editor.svg")),
+            );
+        }
         let body = match self {
             Self::Logo(logo) => format!(r#"<g transform="translate(2 2) scale(0.8333333)"><path fill="{}" stroke="none" d="{}"/></g>"#, logo.colour, logo.path),
             Self::Folder => r#"<path d="M4 20h16a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13c0 1.1.9 2 2 2Z"/>"#.to_string(),

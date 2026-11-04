@@ -1,7 +1,8 @@
 #![allow(non_snake_case)]
 
 use dioxus::prelude::*;
-use vmux_ui::components::manager::{ManagerPage, WorkspaceBreadcrumbHeader, WorkspacePage};
+use vmux_ui::components::manager::{ManagerPage, WorkspacePage};
+use vmux_ui::components::page_address::PageAddress;
 use vmux_ui::hooks::use_theme;
 use vmux_ui::i18n::translate;
 
@@ -22,7 +23,7 @@ pub fn Page() -> Element {
         document::Title { "Any prompt. Anything, done." }
         document::Meta { name: "description", content: "Any prompt. Anything, done." }
         ManagerPage {
-            WorkspaceBreadcrumbHeader {
+            PageAddress {
                 current: WorkspacePage::Start.option(),
                 options: WorkspacePage::options(),
             }

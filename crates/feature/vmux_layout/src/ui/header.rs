@@ -75,6 +75,7 @@ fn HeaderContent() -> Element {
         .cloned();
     let tab_strip = tab_strip.unwrap_or_default();
     let crate::event::HeaderState {
+        address_slot,
         address: page_address,
         active: retained_active,
         metadata: retained_metadata,
@@ -195,6 +196,7 @@ fn HeaderContent() -> Element {
                         }
                     }
                     HeaderAddressBar {
+                        address_slot,
                         page_address,
                         active_row: active_row.clone(),
                         bg_color: active_bg_color.clone(),
@@ -501,6 +503,20 @@ fn NavButton(
 
 #[component]
 fn HeaderAddressBar(
+    address_slot: Option<u64>,
+    active_row: Option<StackRow>,
+    bg_color: Option<String>,
+    page_address: Option<vmux_api::address::PageAddress>,
+) -> Element {
+    let fallback = rsx! { HeaderAddressReadout { active_row, bg_color, page_address } };
+    if let Some(slot) = address_slot {
+        return rsx! { vmux_ui::components::page_address::PageAddressOutlet { slot, fallback } };
+    }
+    fallback
+}
+
+#[component]
+fn HeaderAddressReadout(
     active_row: Option<StackRow>,
     bg_color: Option<String>,
     page_address: Option<vmux_api::address::PageAddress>,

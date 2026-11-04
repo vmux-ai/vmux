@@ -9,7 +9,8 @@ use vmux_api::team::{
 use vmux_ui::components::avatar::{AgentThumbnail, Avatar};
 use vmux_ui::components::badge::Badge;
 use vmux_ui::components::dropdown::{DropdownAlign, DropdownOption, DropdownSelector};
-use vmux_ui::components::manager::{WorkspaceBreadcrumbHeader, WorkspacePage};
+use vmux_ui::components::manager::WorkspacePage;
+use vmux_ui::components::page_address::PageAddress;
 use vmux_ui::favicon::FaviconSource;
 use vmux_ui::hooks::{send, use_theme, use_ui_state};
 use vmux_ui::i18n::translate;
@@ -37,7 +38,7 @@ pub fn Page() -> Element {
     rsx! {
         div {
             class: "flex h-full min-h-0 flex-col bg-background text-foreground",
-            WorkspaceBreadcrumbHeader {
+            PageAddress {
                 current: WorkspacePage::Team.option(),
                 options: WorkspacePage::options(),
             }

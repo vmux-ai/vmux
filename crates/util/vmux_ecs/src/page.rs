@@ -20,6 +20,9 @@ use crate::page_driver::PageAssets;
 #[derive(Component, Clone, Debug, PartialEq)]
 pub struct AddressContribution(pub vmux_api::address::PageAddress);
 
+#[derive(Component, Clone, Copy, Debug, PartialEq, Eq)]
+pub struct AddressSlot(pub u64);
+
 #[derive(EntityEvent, Clone)]
 pub struct AddressIntentRequest {
     #[event_target]

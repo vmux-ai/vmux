@@ -20,6 +20,7 @@ pub struct PageDom {
     unflushed: bool,
     rebuilt: bool,
     snapshots: vmux_ui::hooks::UiStateSnapshots,
+    host: Option<vmux_ui::transport::HostBinding>,
 }
 
 impl PageDom {
@@ -30,6 +31,10 @@ impl PageDom {
         let contexts = instance.provide_to(&dom);
         let snapshots = vmux_ui::hooks::UiStateSnapshots::default();
         dom.provide_root_context(snapshots.clone());
+        let host = vmux_ui::transport::HostScope::binding();
+        if let Some(host) = &host {
+            dom.provide_root_context(host.clone());
+        }
 
         Self {
             dom,
@@ -39,6 +44,7 @@ impl PageDom {
             unflushed: false,
             rebuilt: false,
             snapshots,
+            host,
         }
     }
 
@@ -60,6 +66,9 @@ impl PageDom {
             let dom = VirtualDom::new(self.component);
             self.contexts.provide_to(&dom);
             dom.provide_root_context(self.snapshots.clone());
+            if let Some(host) = &self.host {
+                dom.provide_root_context(host.clone());
+            }
             self.dom = dom;
         }
         self.rebuilt = true;
@@ -158,6 +167,54 @@ mod tests {
 
     use std::cell::Cell;
     use std::rc::Rc;
+
+    #[derive(Default)]
+    struct BindingHost(Cell<usize>);
+
+    impl vmux_ui::transport::PageHost for BindingHost {
+        fn send(&self, _: &str, _: &[u8]) -> Result<(), vmux_ui::hooks::EventListenerError> {
+            self.0.set(self.0.get() + 1);
+            Ok(())
+        }
+
+        fn listen(
+            &self,
+            _: &str,
+            _: vmux_ui::transport::BytesListener,
+        ) -> Result<(), vmux_ui::hooks::EventListenerError> {
+            Ok(())
+        }
+    }
+
+    #[component]
+    fn BoundPage() -> Element {
+        consume_context::<vmux_ui::transport::HostBinding>()
+            .0
+            .send("binding", &[])
+            .unwrap();
+        rsx! {}
+    }
+
+    #[component]
+    fn MountWithinAnotherPage() -> Element {
+        let host = consume_context::<Rc<BindingHost>>();
+        let _host = vmux_ui::transport::HostScope::enter(host);
+        let mut page = PageDom::mount(BoundPage, crate::Instance::default());
+        page.rebuild();
+        rsx! {}
+    }
+
+    #[test]
+    fn mounting_a_page_binds_its_host_instead_of_the_callers_context() {
+        let outer = Rc::new(BindingHost::default());
+        let inner = Rc::new(BindingHost::default());
+        let mut dom = VirtualDom::new(MountWithinAnotherPage);
+        dom.provide_root_context(vmux_ui::transport::HostBinding(outer.clone()));
+        dom.provide_root_context(inner.clone());
+        dom.rebuild_in_place();
+        assert_eq!(outer.0.get(), 0);
+        assert_eq!(inner.0.get(), 1);
+    }
 
     #[component]
     fn Static() -> Element {

@@ -1,8 +1,6 @@
 use crate::cn::cn;
 use crate::components::badge::Badge;
-use crate::components::breadcrumb::{
-    BreadcrumbOption, BreadcrumbOptionIcon, BreadcrumbSelector, Breadcrumbs,
-};
+use crate::components::breadcrumb::BreadcrumbOption;
 use crate::components::dropdown::{Dropdown, DropdownOption, DropdownSelector};
 use crate::components::page::{PageContent, PageHeader, PageShell};
 use crate::components::skeleton::Skeleton;
@@ -10,7 +8,6 @@ use crate::components::tooltip::Tooltip;
 use crate::i18n::translate;
 use crate::icon::{LineIcon, LineIconView};
 use crate::navigation::NavigationGesture;
-use crate::navigation::PageNavigation;
 use crate::platform::Platform;
 use dioxus::core::{Task, current_scope_id};
 use dioxus::prelude::*;
@@ -100,16 +97,6 @@ pub fn WorkspaceLayout(
                 }
                 div { class: "flex min-w-0 flex-1 flex-col overflow-hidden", {children} }
             }
-        }
-    }
-}
-
-#[component]
-pub fn WorkspaceHeader(children: Element, #[props(default = rsx! {})] actions: Element) -> Element {
-    rsx! {
-        header { class: "relative z-40 flex h-9 shrink-0 items-center gap-2 px-2.5",
-            div { class: "flex min-w-0 flex-1 items-center gap-2", {children} }
-            div { class: "flex shrink-0 items-center gap-1", {actions} }
         }
     }
 }
@@ -298,38 +285,6 @@ impl WorkspacePage {
             .iter()
             .position(|page| page.answers_for(url))
             .unwrap_or(usize::MAX)
-    }
-}
-
-#[component]
-pub fn WorkspaceBreadcrumbHeader(
-    current: BreadcrumbOption,
-    options: Vec<BreadcrumbOption>,
-    children: Element,
-    #[props(default = rsx! {})] actions: Element,
-    #[props(default = rsx! {})] view_controls: Element,
-) -> Element {
-    let label = current.label.clone();
-    let leading = current.clone();
-    rsx! {
-        WorkspaceHeader { actions,
-            Breadcrumbs { class: "min-w-0 overflow-hidden".to_string(),
-                BreadcrumbSelector {
-                    label,
-                    value: current.value.clone(),
-                    options,
-                    leading: rsx! {
-                        BreadcrumbOptionIcon {
-                            option: leading,
-                            class: "size-4 shrink-0".to_string(),
-                        }
-                    },
-                    onselect: PageNavigation::replace,
-                }
-                {children}
-            }
-            {view_controls}
-        }
     }
 }
 

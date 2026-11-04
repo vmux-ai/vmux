@@ -12,7 +12,8 @@ use dioxus::html::geometry::ClientPoint;
 use dioxus::html::input_data::MouseButton;
 use dioxus::prelude::*;
 use std::rc::Rc;
-use vmux_ui::components::manager::{WorkspaceBreadcrumbHeader, WorkspacePage};
+use vmux_ui::components::manager::WorkspacePage;
+use vmux_ui::components::page_address::PageAddress;
 use vmux_ui::components::skeleton::Skeleton;
 use vmux_ui::hooks::{send, use_theme, use_ui_state};
 use vmux_ui::i18n::{TranslationValue, translate, translate_with};
@@ -37,7 +38,7 @@ pub fn Page() -> Element {
     let announced = ready();
     rsx! {
         div { class: "flex h-screen w-screen flex-col overflow-hidden bg-background",
-            WorkspaceBreadcrumbHeader {
+            PageAddress {
                 current: WorkspacePage::Simulator.option(),
                 options: WorkspacePage::options(),
             }

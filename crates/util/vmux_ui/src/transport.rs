@@ -4,6 +4,8 @@ use std::rc::Rc;
 use crate::transport::event_listener::EventListenerError;
 
 pub trait PageHost {
+    fn publish_address(&self, _slot: u64) {}
+
     fn send(&self, id: &str, bytes: &[u8]) -> Result<(), EventListenerError>;
 
     fn listen(&self, id: &str, on_bytes: BytesListener) -> Result<(), EventListenerError>;
@@ -86,7 +88,31 @@ pub fn install_host(host: Rc<dyn PageHost>) {
 
 pub struct HostScope(Option<Rc<dyn PageHost>>);
 
+#[derive(Clone)]
+pub struct HostBinding(pub Rc<dyn PageHost>);
+
+impl PartialEq for HostBinding {
+    fn eq(&self, other: &Self) -> bool {
+        Rc::ptr_eq(&self.0, &other.0)
+    }
+}
+
+impl HostBinding {
+    pub fn current() -> Option<Self> {
+        if dioxus::core::Runtime::try_current().is_some()
+            && let Some(binding) = dioxus::prelude::try_consume_context::<Self>()
+        {
+            return Some(binding);
+        }
+        HOST.with(|slot| slot.borrow().clone().map(Self))
+    }
+}
+
 impl HostScope {
+    pub fn binding() -> Option<HostBinding> {
+        HOST.with(|slot| slot.borrow().clone().map(HostBinding))
+    }
+
     pub fn enter(host: Rc<dyn PageHost>) -> Self {
         Self(HOST.with(|slot| slot.borrow_mut().replace(host)))
     }
@@ -209,9 +235,8 @@ impl Host {
     }
 
     fn with_installed<R>(f: impl FnOnce(&dyn PageHost) -> R) -> Result<R, EventListenerError> {
-        let installed = HOST.with(|slot| slot.borrow().clone());
-        if let Some(host) = installed {
-            return Ok(f(host.as_ref()));
+        if let Some(binding) = HostBinding::current() {
+            return Ok(f(binding.0.as_ref()));
         }
         let Some(fallback) = Self::fallback() else {
             return Err(EventListenerError::NoHost);

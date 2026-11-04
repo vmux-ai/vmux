@@ -4,8 +4,9 @@ use dioxus::prelude::*;
 use vmux_api::service::*;
 use vmux_ui::components::manager::{
     ManagerBadge, ManagerButton, ManagerButtonVariant, ManagerEmpty, ManagerList, ManagerPage,
-    ManagerSearchAction, ManagerTone, WorkspaceBreadcrumbHeader, WorkspacePage,
+    ManagerSearchAction, ManagerTone, WorkspacePage,
 };
+use vmux_ui::components::page_address::PageAddress;
 use vmux_ui::components::skeleton::Skeleton;
 use vmux_ui::hooks::{send, use_theme, use_ui_state};
 use vmux_ui::i18n::translate;
@@ -37,7 +38,7 @@ pub fn Page() -> Element {
 
     rsx! {
         ManagerPage {
-            WorkspaceBreadcrumbHeader {
+            PageAddress {
                 current: WorkspacePage::Services.option(),
                 options: WorkspacePage::options(),
                 actions: rsx! {

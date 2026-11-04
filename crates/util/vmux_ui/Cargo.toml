@@ -38,3 +38,6 @@ vmux_ecs = { path = "../vmux_ecs" }
 
 [lints]
 workspace = true
+
+[dev-dependencies]
+dioxus-ssr = "=0.7.9"
