@@ -84,7 +84,7 @@ impl SectionNavigation {
         if !self.cursor.write().publish(&fragment) {
             return;
         }
-        let _ = crate::hooks::send(&vmux_api::page_location::PageLocationRequest { fragment });
+        crate::hooks::send(&vmux_api::page_location::PageLocationRequest { fragment });
     }
 }
 

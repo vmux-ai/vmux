@@ -203,6 +203,9 @@ impl WebView {
     pub fn bounds(&self) -> Option<wry::Rect> {
         #[cfg(target_os = "macos")]
         {
+            if let Some(modal) = self.modal.borrow().as_ref() {
+                return modal.bounds();
+            }
             self.platform_bounds()
         }
         #[cfg(not(target_os = "macos"))]

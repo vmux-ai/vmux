@@ -1,6 +1,5 @@
-use vmux_ui::hooks::UiState;
 use dioxus::prelude::*;
-use vmux_ui::hooks::{send, };
+use vmux_ui::hooks::UiState;
 use vmux_ui::scroll::{ScrollIntoView, ScrollRetention};
 
 use crate::event::GitRepositoryRequest;
@@ -15,7 +14,7 @@ pub(super) struct GitPageState {
     pub(super) projects: Memo<GitProjects>,
     pub(super) header_dropdown: Signal<crate::state::HeaderDropdown>,
     pub(super) diff: GitDiffState,
-    pub(super) location: Signal<vmux_api::page_location::PageLocationUiState>,
+    pub(super) location: Signal<vmux_api::page_location::UiPageLocation>,
     pub(super) active_branch_file: Signal<String>,
     pending_repository: Signal<Option<PendingRepository>>,
     repository_request_sequence: Signal<u64>,
@@ -67,7 +66,7 @@ impl GitPageState {
             projects: use_memo(move || root.read().projects.clone()),
             header_dropdown: use_signal(crate::state::HeaderDropdown::default),
             diff: GitDiffState::new(root),
-            location: ::<vmux_api::page_location::PageLocationUiState>().state,
+            location: UiState::<vmux_api::page_location::UiPageLocation>::use_context().state,
             active_branch_file: use_signal(String::new),
             pending_repository,
             repository_request_sequence: use_signal(|| 0),
@@ -92,7 +91,7 @@ impl GitPageState {
             request: request.clone(),
         }));
         self.diff.begin_repository(&request.path);
-        if send(&request).is_err() {
+        if vmux_ui::hooks::try_send(&request).is_err() {
             self.pending_repository.set(None);
             self.diff.synchronize(&self.root.peek().snapshot);
         }
@@ -345,6 +344,8 @@ mod tests {
 
     #[component]
     fn CachedDiffPreview() -> Element {
+        let _ = vmux_ui::hooks::use_ui_state::<UiGit>();
+        let _ = vmux_ui::hooks::use_ui_state::<vmux_api::page_location::UiPageLocation>();
         let state = GitPageState::use_state();
         let viewport = (state.diff.viewport)();
         let rows = (state.diff.rows)();
@@ -381,8 +382,7 @@ mod tests {
             },
             ..Default::default()
         };
-        let frame =
-            vmux_api::UiStateFrame::<UiGit, crate::state::UiGitPatch>::Snapshot(state);
+        let frame = vmux_api::UiStateFrame::<UiGit, crate::state::UiGitPatch>::Snapshot(state);
         let bytes = rkyv::to_bytes::<rkyv::rancor::Error>(&frame).unwrap();
         for listener in host.0.borrow_mut().iter_mut() {
             listener(&bytes);

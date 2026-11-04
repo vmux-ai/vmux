@@ -42,7 +42,7 @@ pub(crate) struct CheckoutContext<'w, 's> {
         'w,
         's,
         (
-            Ref<'static, vmux_layout::tab::Tab>,
+            Ref<'static, vmux_layout::tab::StartupDir>,
             Option<&'static vmux_layout::tab::TabWorktree>,
             Option<&'static vmux_layout::tab::TabWorkspace>,
         ),
@@ -57,11 +57,11 @@ impl CheckoutContext<'_, '_> {
     ) -> Option<vmux_ecs::event::FileCheckoutState> {
         let tab = self.hierarchy.entity(entity)?;
         let (tab, worktree, workspace) = self.tabs.get(tab).ok()?;
-        let cwd = PathBuf::from(tab.startup_dir.as_ref()?);
+        let cwd = tab.0.as_ref()?;
         let repository = worktree
             .map(|worktree| PathBuf::from(&worktree.repo_root))
             .or_else(|| workspace.map(|workspace| PathBuf::from(&workspace.project_dir)))?;
-        let cwd = vmux_path::PathIdentity::resolve(&cwd);
+        let cwd = vmux_path::PathIdentity::resolve(cwd);
         let repository = vmux_path::PathIdentity::resolve(&repository);
         let file = vmux_path::PathIdentity::resolve(path);
         let known_project = self
@@ -636,10 +636,7 @@ mod tests {
                         }
                         trigger.event().mark_delivered();
                         let frame = rkyv::from_bytes::<
-                            vmux_api::UiStateFrame<
-                                UiFile,
-                                <UiFile as vmux_api::UiState>::Update,
-                            >,
+                            vmux_api::UiStateFrame<UiFile, <UiFile as vmux_api::UiState>::Update>,
                             rkyv::rancor::Error,
                         >(trigger.event().payload())
                         .unwrap();

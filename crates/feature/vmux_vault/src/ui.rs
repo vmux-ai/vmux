@@ -1,5 +1,6 @@
-use vmux_ui::hooks::UiState;
 #![allow(non_snake_case)]
+
+use vmux_ui::hooks::UiState;
 
 use crate::state::{
     UiVault, VaultConnectionProvider, VaultDestination, VaultDestinationSelectRequest,
@@ -16,7 +17,7 @@ use vmux_ui::components::manager::{
     ManagerSelectItem, ManagerSpinner, WorkspacePage,
 };
 use vmux_ui::components::page_address::PageAddress;
-use vmux_ui::hooks::{send, use_theme, };
+use vmux_ui::hooks::{send, use_theme};
 use vmux_ui::i18n::{TranslationValue, translate, translate_with};
 
 #[vmux_page::page(

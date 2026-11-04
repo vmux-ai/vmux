@@ -72,6 +72,7 @@ impl Default for CefEmbeddedHosts {
     }
 }
 
+#[cfg_attr(feature = "browser-process", derive(bevy::prelude::Resource))]
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct CefEmbeddedPageConfig {
     pub scheme: String,

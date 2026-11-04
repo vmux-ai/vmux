@@ -97,9 +97,9 @@ impl FileOpenContext<'_, '_> {
             return Some(directory.clone());
         }
         if let Some(directory) = self.tabs.startup_dir(stack)
-            && !directory.is_empty()
+            && !directory.as_os_str().is_empty()
         {
-            return Some(PathBuf::from(directory));
+            return Some(directory);
         }
         std::env::current_dir().ok()
     }
@@ -722,10 +722,11 @@ mod tests {
         let tab = stack
             .app
             .world_mut()
-            .spawn(vmux_layout::tab::Tab {
-                name: "Workspace".to_string(),
-                startup_dir: Some(working.path().to_string_lossy().into_owned()),
-            })
+            .spawn((
+                vmux_layout::tab::Tab::bundle(),
+                Name::new("Workspace"),
+                vmux_layout::tab::StartupDir(Some(working.path().to_path_buf())),
+            ))
             .id();
         stack
             .app
@@ -758,10 +759,9 @@ mod tests {
             .app
             .world_mut()
             .spawn((
-                vmux_layout::tab::Tab {
-                    name: "Project".into(),
-                    startup_dir: Some("/".into()),
-                },
+                vmux_layout::tab::Tab::bundle(),
+                Name::new("Project"),
+                vmux_layout::tab::StartupDir(Some("/".into())),
                 ChildOf(space),
             ))
             .id();
@@ -787,10 +787,9 @@ mod tests {
             .app
             .world_mut()
             .spawn((
-                vmux_layout::tab::Tab {
-                    name: "Project".into(),
-                    startup_dir: Some("/".into()),
-                },
+                vmux_layout::tab::Tab::bundle(),
+                Name::new("Project"),
+                vmux_layout::tab::StartupDir(Some("/".into())),
                 vmux_layout::tab::TabWorkspace {
                     project_dir: repository.path().to_string_lossy().into_owned(),
                 },

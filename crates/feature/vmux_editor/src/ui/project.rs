@@ -832,7 +832,7 @@ fn ProjectGit(
 
 #[component]
 fn ProjectFilesPanel() -> Element {
-    let files = use_ui_state::<crate::project::ProjectFilesUiState>().state;
+    let files = UiState::<crate::project::UiProjectFiles>::use_context().state;
     let projection = use_memo(move || {
         let files = files.read();
         ProjectFilesProjection {

@@ -1,6 +1,6 @@
 use bevy::prelude::*;
 use bevy_cef::prelude::{UiEventPlugin, UiInput};
-use vmux_api::page_location::{PageLocationRequest, PageLocationUiState};
+use vmux_api::page_location::{PageLocationRequest, UiPageLocation};
 use vmux_api::{BinEvent, PageMetadata, PageReady, UiEventPermissions};
 
 pub struct Plugin;
@@ -9,7 +9,7 @@ impl bevy::app::Plugin for Plugin {
     fn build(&self, app: &mut App) {
         app.add_plugins((
             UiEventPlugin::<(PageLocationRequest,)>::default(),
-            crate::UiStatePlugin::<PageLocationUiState>::default(),
+            crate::UiStatePlugin::<UiPageLocation>::default(),
         ))
         .add_observer(request)
         .add_observer(ready)
@@ -39,16 +39,12 @@ fn ready(
     let Ok(metadata) = pages.get(event.webview) else {
         return;
     };
-    if !UiEventPermissions::allows_page(
-        permissions.iter(),
-        &metadata.url,
-        PageLocationUiState::id(),
-    ) {
+    if !UiEventPermissions::allows_page(permissions.iter(), &metadata.url, UiPageLocation::id()) {
         return;
     }
-    commands.trigger(crate::UiStateWrite::<PageLocationUiState>::from_event(
+    commands.trigger(crate::UiStateWrite::<UiPageLocation>::from_event(
         event.webview,
-        &PageLocationUiState::from_url(&metadata.url),
+        &UiPageLocation::from_url(&metadata.url),
     ));
 }
 
@@ -58,25 +54,22 @@ type Locations<'w, 's> = Query<
     (
         Entity,
         &'static PageMetadata,
-        Option<&'static crate::UiState<PageLocationUiState>>,
+        Option<&'static crate::UiState<UiPageLocation>>,
     ),
     Changed<PageMetadata>,
 >;
 
 fn sync(pages: Locations, permissions: Query<&UiEventPermissions>, mut commands: Commands) {
     for (entity, metadata, state) in &pages {
-        if !UiEventPermissions::allows_page(
-            permissions.iter(),
-            &metadata.url,
-            PageLocationUiState::id(),
-        ) {
+        if !UiEventPermissions::allows_page(permissions.iter(), &metadata.url, UiPageLocation::id())
+        {
             continue;
         }
-        let location = PageLocationUiState::from_url(&metadata.url);
+        let location = UiPageLocation::from_url(&metadata.url);
         if state.and_then(crate::UiState::current) == Some(&location) {
             continue;
         }
-        commands.trigger(crate::UiStateWrite::<PageLocationUiState>::from_event(
+        commands.trigger(crate::UiStateWrite::<UiPageLocation>::from_event(
             entity, &location,
         ));
     }

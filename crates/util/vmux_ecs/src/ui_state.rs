@@ -638,7 +638,7 @@ impl<S: UiStateContract> UiStateWrite<S> {
 #[cfg(test)]
 mod tests {
     use crate::event::{
-        FileDocumentKind, FileMetaEvent, FileThemeEvent, UiFilePatch, FileViewportPatch,
+        FileDocumentKind, FileMetaEvent, FileThemeEvent, FileViewportPatch, UiFilePatch,
     };
 
     use super::*;
@@ -805,10 +805,8 @@ mod tests {
         match &frame {
             UiStateFrame::Snapshot(state) => emitted.state = state.clone(),
             UiStateFrame::Updates(updates) => {
-                emitted.state = UiFile::from_updates(
-                    Some(std::mem::take(&mut emitted.state)),
-                    updates.clone(),
-                );
+                emitted.state =
+                    UiFile::from_updates(Some(std::mem::take(&mut emitted.state)), updates.clone());
             }
         }
         emitted.frames.push(frame);
@@ -954,31 +952,29 @@ mod tests {
             lines: Vec::new(),
             sticky: Vec::new(),
         };
-        app.world_mut()
-            .trigger(UiStateWrite::<UiFile>::from_event(
-                entity,
-                &UiFilePatch {
-                    meta: Some(meta("/first.rs", 1)),
-                    viewport: Some(viewport()),
-                    theme: Some(FileThemeEvent {
-                        font_family: "Mono".to_string(),
-                        font_size: 12.0,
-                        line_height: 1.0,
-                    }),
-                    ..Default::default()
-                },
-            ));
+        app.world_mut().trigger(UiStateWrite::<UiFile>::from_event(
+            entity,
+            &UiFilePatch {
+                meta: Some(meta("/first.rs", 1)),
+                viewport: Some(viewport()),
+                theme: Some(FileThemeEvent {
+                    font_family: "Mono".to_string(),
+                    font_size: 12.0,
+                    line_height: 1.0,
+                }),
+                ..Default::default()
+            },
+        ));
         app.update();
         assert_eq!(app.world().resource::<Emitted>().frames.len(), 1);
         app.world_mut()
             .get_mut::<crate::PageMetadata>(entity)
             .unwrap()
             .url = "file:///second.rs".to_string();
-        app.world_mut()
-            .trigger(UiStateWrite::<UiFile>::from_event(
-                entity,
-                &FileDirtyEvent { dirty: false },
-            ));
+        app.world_mut().trigger(UiStateWrite::<UiFile>::from_event(
+            entity,
+            &FileDirtyEvent { dirty: false },
+        ));
         app.update();
         let emitted = app.world().resource::<Emitted>();
         assert_eq!(emitted.frames.len(), 1);
@@ -986,15 +982,14 @@ mod tests {
             emitted.state.document.meta.as_ref().unwrap().abs_path,
             "/first.rs"
         );
-        app.world_mut()
-            .trigger(UiStateWrite::<UiFile>::from_event(
-                entity,
-                &UiFilePatch {
-                    meta: Some(meta("/second.rs", 2)),
-                    viewport: Some(viewport()),
-                    ..Default::default()
-                },
-            ));
+        app.world_mut().trigger(UiStateWrite::<UiFile>::from_event(
+            entity,
+            &UiFilePatch {
+                meta: Some(meta("/second.rs", 2)),
+                viewport: Some(viewport()),
+                ..Default::default()
+            },
+        ));
         app.update();
         let emitted = app.world().resource::<Emitted>();
         assert_eq!(emitted.frames.len(), 2);

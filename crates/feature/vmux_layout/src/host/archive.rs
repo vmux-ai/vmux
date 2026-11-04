@@ -389,12 +389,18 @@ fn handle_close_tab_requests(
     let mut replacement_spaces = HashSet::new();
     for requested_tab in requests {
         let request = CloseTabRequest { tab: requested_tab };
-        let Ok(tab) = layout.tabs.get(request.tab) else {
+        let Ok((tab, startup_dir)) = layout.tabs.get(request.tab) else {
             continue;
         };
         if let Some((incoming, mut transition)) = layout.presentation.retaining(request.tab) {
             transition.retire(request.tab);
-            archive_tab(request.tab, tab, &layout.archive, &mut layout.commands);
+            archive_tab(
+                request.tab,
+                tab,
+                startup_dir,
+                &layout.archive,
+                &mut layout.commands,
+            );
             layout.commands.trigger(TabClosed);
             layout.commands.entity(request.tab).insert(Retiring);
             layout.commands.entity(incoming).insert(transition);
@@ -474,8 +480,8 @@ fn handle_close_tab_requests(
 
         archive_tab(
             request.tab,
-            tab.0,
-            tab.1,
+            tab,
+            startup_dir,
             &layout.archive,
             &mut layout.commands,
         );
@@ -1791,7 +1797,7 @@ mod tests {
                 url: "https://retiring.example".to_string(),
                 ..default()
             },
-            LastActivatedAt(5),
+            LastActivatedAt::new(5),
             Retiring,
             ChildOf(right),
         ));

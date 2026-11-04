@@ -70,7 +70,9 @@ impl Plugin for SpacePlugin {
         .add_plugins(super::SpaceToolPlugin)
         .add_plugins(LayoutContractPlugin)
         .add_plugins(vmux_ecs::UiStatePlugin::<UiSpaces>::default())
-        .add_plugins(vmux_ecs::UiStatePlugin::<vmux_ecs::event::ProjectNavigation>::default())
+        .add_plugins(vmux_ecs::UiStatePlugin::<
+            vmux_ecs::event::UiProjectNavigation,
+        >::default())
         .add_message::<CommandBarOpenRequest>()
         .add_message::<SpaceAttachRequest>()
         .add_message::<SpaceCreateRequest>()
@@ -706,7 +708,7 @@ fn project_forget(
     trigger: On<UiInput<ProjectForgetRequest>>,
     active: FocusedSpace,
     scope: vmux_layout::window::WindowScope,
-    spaces: Query<&SpaceId, With<Space>>,
+    spaces: Query<&Id<Space>, With<Space>>,
     settings: Option<ResMut<AppSettings>>,
     mut saves: MessageWriter<SettingsSaveRequest>,
 ) {
@@ -722,7 +724,7 @@ fn project_forget(
     };
     let changed = settings
         .bypass_change_detection()
-        .forget_space_project(&space_id.0, trigger.event().payload.path.trim());
+        .forget_space_project(space_id.as_str(), trigger.event().payload.path.trim());
     if changed {
         settings.set_changed();
         saves.write(SettingsSaveRequest);

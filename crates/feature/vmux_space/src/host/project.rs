@@ -5,7 +5,7 @@ use bevy_cef::prelude::UiInput;
 use vmux_api::Id;
 use vmux_command::{CommandBarProjectRoots, WriteCommandBarSnapshots};
 use vmux_ecs::event::space::{ProjectActivateRequest, ProjectPickerRequest};
-use vmux_ecs::event::{ProjectNavigation, ProjectRow, ProjectRowKind, ProjectTreeToggle};
+use vmux_ecs::event::{ProjectRow, ProjectRowKind, ProjectTreeToggle, UiProjectNavigation};
 use vmux_ecs::page::PageReady;
 use vmux_ecs::persistence::PersistenceAppExt;
 use vmux_ecs::{PageMetadata, UiStateWrite};
@@ -464,9 +464,9 @@ fn publish_navigation(
         commands
             .entity(entity)
             .insert(ProjectNavigationProjection(rows.clone()));
-        commands.trigger(UiStateWrite::<ProjectNavigation>::from_event(
+        commands.trigger(UiStateWrite::<UiProjectNavigation>::from_event(
             entity,
-            &ProjectNavigation { rows: rows.clone() },
+            &UiProjectNavigation { rows: rows.clone() },
         ));
     }
 }

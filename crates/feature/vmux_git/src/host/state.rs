@@ -15,7 +15,7 @@ use crate::event::{
 use crate::state::GitCatalogProgress;
 use crate::state::{
     CheckedOutBranch, GitCommandLogEntry, GitDiffRowsPatch, GitPageControllerState,
-    GitPageSnapshot, GitRepositoryPatch, UiGit, RepositoryName, RepositoryPath,
+    GitPageSnapshot, GitRepositoryPatch, RepositoryName, RepositoryPath, UiGit,
 };
 
 use super::controller::{GitCommitResultSequence, PendingBranchCheckout, SelectionRevealRevision};

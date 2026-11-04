@@ -76,7 +76,12 @@ impl PagePresentation {
 
 #[derive(bevy::ecs::system::SystemParam)]
 struct TabProjectionData<'w, 's> {
-    tabs: Query<'w, 's, (Entity, &'static Name, &'static LastActivatedAt), (With<Tab>, Without<Retiring>)>,
+    tabs: Query<
+        'w,
+        's,
+        (Entity, &'static Name, &'static LastActivatedAt),
+        (With<Tab>, Without<Retiring>),
+    >,
     hierarchy: vmux_layout::tab::TabHierarchy<'w, 's>,
     active_tab: ActiveTabParam<'w, 's>,
     focus: LayoutFocus<'w, 's>,
@@ -1422,23 +1427,23 @@ mod tests {
         let space = app.world_mut().spawn_empty().id();
         let tab = app
             .world_mut()
-            .spawn((Tab::default(), LastActivatedAt(2), ChildOf(space)))
+            .spawn((Tab, LastActivatedAt::new(2), ChildOf(space)))
             .id();
         let retiring_tab = app
             .world_mut()
-            .spawn((Tab::default(), LastActivatedAt(3), Retiring, ChildOf(space)))
+            .spawn((Tab, LastActivatedAt::new(3), Retiring, ChildOf(space)))
             .id();
         let pane = app
             .world_mut()
-            .spawn((Pane, LastActivatedAt(2), ChildOf(tab)))
+            .spawn((Pane, LastActivatedAt::new(2), ChildOf(tab)))
             .id();
         let stack = app
             .world_mut()
-            .spawn((Stack::default(), LastActivatedAt(2), ChildOf(pane)))
+            .spawn((Stack::default(), LastActivatedAt::new(2), ChildOf(pane)))
             .id();
         app.world_mut().spawn((
             Stack::default(),
-            LastActivatedAt(3),
+            LastActivatedAt::new(3),
             Retiring,
             ChildOf(pane),
         ));

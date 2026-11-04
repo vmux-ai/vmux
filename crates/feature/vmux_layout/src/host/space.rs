@@ -137,11 +137,7 @@ impl FocusedSpace<'_, '_> {
                 self.spaces
                     .iter()
                     .find(|(_, _, _, _, current, _)| *current)
-                    .or_else(|| {
-                        self.spaces
-                            .iter()
-                            .find(|(_, _, _, _, _, active)| *active)
-                    })
+                    .or_else(|| self.spaces.iter().find(|(_, _, _, _, _, active)| *active))
                     .or_else(|| self.spaces.iter().next())
             })
             .map(|(entity, id, startup_dir, startup_url, _, _)| {
@@ -296,12 +292,7 @@ mod tests {
             .spawn((crate::window::Main, ChildOf(root)))
             .id();
         app.world_mut()
-            .spawn((
-                Space,
-                Id::<Space>::new(id),
-                vmux_ecs::Active,
-                ChildOf(main),
-            ))
+            .spawn((Space, Id::<Space>::new(id), vmux_ecs::Active, ChildOf(main)))
             .id()
     }
 

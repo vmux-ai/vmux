@@ -767,7 +767,7 @@ fn spawn_requested_tab_layouts(
         } = tabs.spawn(request.space, request.primary_window, settings.pane.gap);
         commands.entity(tab_e).insert((
             Name::new(request.name.clone().unwrap_or_else(|| "Tab".to_string())),
-            StartupDir(startup_dir.map(PathBuf::from)),
+            StartupDir(startup_dir),
         ));
         if let Some(previous) = previous {
             commands
@@ -1145,7 +1145,7 @@ mod tests {
             .world_mut()
             .spawn((
                 crate::space::Space,
-                crate::space::SpaceId("source".to_string()),
+                Id::<crate::space::Space>::new("source"),
                 crate::space::EffectiveStartupDir(Some(startup_dir.path().to_path_buf())),
                 EffectiveStartupUrl("vmux://projects/source".to_string()),
                 crate::side_sheet::SideSheetSectionsExpanded {
@@ -1169,9 +1169,9 @@ mod tests {
 
         let target_space = app
             .world_mut()
-            .query_filtered::<(Entity, &crate::space::SpaceId), With<crate::space::Space>>()
+            .query_filtered::<(Entity, &Id<crate::space::Space>), With<crate::space::Space>>()
             .iter(app.world())
-            .find(|(_, id)| id.0 != "source")
+            .find(|(_, id)| id.as_str() != "source")
             .map(|(entity, _)| entity)
             .expect("target space");
         assert_eq!(
@@ -1292,11 +1292,11 @@ mod tests {
             .id();
         let first_tab = app
             .world_mut()
-            .spawn((Tab::default(), Active, ChildOf(first_root)))
+            .spawn((Tab, Active, ChildOf(first_root)))
             .id();
         let second_tab = app
             .world_mut()
-            .spawn((Tab::default(), Active, ChildOf(second_root)))
+            .spawn((Tab, Active, ChildOf(second_root)))
             .id();
         app.world_mut().spawn((Pane, ChildOf(first_tab)));
         app.world_mut().spawn((Pane, ChildOf(first_tab)));

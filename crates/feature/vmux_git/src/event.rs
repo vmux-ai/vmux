@@ -5,7 +5,7 @@ pub use vmux_api::git::{
     GitFileStatus, GitLineMarker, GitLineStatus, GitOperationError, GitOperationResult, StyledSpan,
 };
 use vmux_api::input::KeyModifiers;
-pub use vmux_api::page_location::PageLocationUiState;
+pub use vmux_api::page_location::UiPageLocation;
 
 use crate::state::{GitBranchCollection, GitBranchPrompt, GitPanel};
 

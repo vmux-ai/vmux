@@ -48,6 +48,8 @@ pub use replication::{
     SnapshotRevision, SnapshotSequence, Tombstone, TombstoneRetention,
 };
 #[cfg(all(host, feature = "host"))]
+pub use ui_file::{UiFileUpdates, UiFileWrite};
+#[cfg(all(host, feature = "host"))]
 pub use ui_state::{UiState, UiStateFlushSet, UiStatePlugin, UiStateWrite, UiStateWriter};
 pub use workspace::WorkspaceKind;
 #[cfg(all(host, feature = "host"))]

@@ -1596,7 +1596,7 @@ mod tests {
         let mut app = App::new();
         let tab = app
             .world_mut()
-            .spawn((Tab::default(), PresentationLayer::Incoming))
+            .spawn((Tab, PresentationLayer::Incoming))
             .id();
         let page = app.world_mut().spawn((Browser, ChildOf(tab))).id();
 
@@ -1613,7 +1613,7 @@ mod tests {
         let mut app = App::new();
         let tab = app
             .world_mut()
-            .spawn((Tab::default(), PresentationLayer::Retained))
+            .spawn((Tab, PresentationLayer::Retained))
             .id();
         let stack = app
             .world_mut()
@@ -1787,7 +1787,7 @@ mod tests {
         let previous_tab = app
             .world_mut()
             .spawn((
-                Tab::default(),
+                Tab,
                 LastActivatedAt::new(1),
                 PresentationLayer::Retained,
                 ChildOf(glass),
@@ -1829,7 +1829,7 @@ mod tests {
         let incoming_tab = app
             .world_mut()
             .spawn((
-                Tab::default(),
+                Tab,
                 LastActivatedAt::new(2),
                 PresentationLayer::Incoming,
                 vmux_layout::presentation::Transition::retain(previous_tab),

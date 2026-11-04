@@ -180,7 +180,7 @@ pub struct UiProject {
 }
 
 #[vmux_api::ui_state(Default)]
-pub struct ProjectFilesUiState {
+pub struct UiProjectFiles {
     pub root: String,
     pub entries: Vec<vmux_ecs::event::FileDirEntry>,
     pub ready: bool,

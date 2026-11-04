@@ -1667,8 +1667,8 @@ mod tests {
         let tab_time = app.world().get::<LastActivatedAt>(tab).unwrap();
         let pane_time = app.world().get::<LastActivatedAt>(pane_e).unwrap();
         let stack_time = app.world().get::<LastActivatedAt>(stack).unwrap();
-        assert_eq!(tab_time.0, pane_time.0);
-        assert_eq!(pane_time.0, stack_time.0);
+        assert_eq!(tab_time.milliseconds(), pane_time.milliseconds());
+        assert_eq!(pane_time.milliseconds(), stack_time.milliseconds());
     }
 
     #[test]
@@ -1682,6 +1682,9 @@ mod tests {
             .world_mut()
             .spawn((
                 crate::space::Space,
+                vmux_api::Id::<crate::space::Space>::new(
+                    "apply_response_reports_the_canonical_focus_after_reduction-0",
+                ),
                 crate::space::CurrentSpace,
                 vmux_ecs::Active,
             ))
@@ -1689,36 +1692,40 @@ mod tests {
         let first_tab = app
             .world_mut()
             .spawn((
-                LayoutTab::default(),
-                LastActivatedAt(2),
+                LayoutTab,
+                LastActivatedAt::new(2),
                 vmux_ecs::Active,
                 ChildOf(space),
             ))
             .id();
         let first_pane = app
             .world_mut()
-            .spawn((Pane::bundle(), LastActivatedAt(2), ChildOf(first_tab)))
+            .spawn((Pane::bundle(), LastActivatedAt::new(2), ChildOf(first_tab)))
             .id();
         let first_stack = app
             .world_mut()
             .spawn((
                 Stack::bundle(),
-                LastActivatedAt(2),
+                LastActivatedAt::new(2),
                 vmux_ecs::Active,
                 ChildOf(first_pane),
             ))
             .id();
         let second_tab = app
             .world_mut()
-            .spawn((LayoutTab::default(), LastActivatedAt(1), ChildOf(space)))
+            .spawn((LayoutTab, LastActivatedAt::new(1), ChildOf(space)))
             .id();
         let second_pane = app
             .world_mut()
-            .spawn((Pane::bundle(), LastActivatedAt(1), ChildOf(second_tab)))
+            .spawn((Pane::bundle(), LastActivatedAt::new(1), ChildOf(second_tab)))
             .id();
         let second_stack = app
             .world_mut()
-            .spawn((Stack::bundle(), LastActivatedAt(1), ChildOf(second_pane)))
+            .spawn((
+                Stack::bundle(),
+                LastActivatedAt::new(1),
+                ChildOf(second_pane),
+            ))
             .id();
         let first = proto::Tab {
             id: Some(NodeKind::Tab.id(first_tab.to_bits())),

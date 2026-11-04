@@ -76,8 +76,8 @@ pub(super) struct InlineTransitionSnapshot {
     transition_view: bool,
     hosts_launcher: bool,
     page_ready: bool,
-    chat_state: Option<Option<ChatUiState>>,
-    detail_state: Option<Option<SessionDetailUiState>>,
+    chat_state: Option<Option<UiChat>>,
+    detail_state: Option<Option<UiSessionDetail>>,
 }
 
 #[derive(Component, Clone)]
@@ -164,8 +164,8 @@ fn prepare(
         Has<StartInlineTransitionView>,
         Has<vmux_ecs::launcher::HostsLauncher>,
         Has<vmux_ecs::page::PageReady>,
-        Option<&UiState<ChatUiState>>,
-        Option<&UiState<SessionDetailUiState>>,
+        Option<&UiState<UiChat>>,
+        Option<&UiState<UiSessionDetail>>,
         Has<InlineTransitionSnapshot>,
     )>,
     workspace_checks: Query<(), Or<(With<WorkspaceCheckRequest>, With<WorkspaceCheckTask>)>>,
@@ -578,8 +578,8 @@ fn discard_stale_inline_transitions(
     transitions: Query<(Entity, &StartInlineTransition)>,
     navigations: Query<&vmux_ecs::PageNavigation>,
     snapshots: Query<&InlineTransitionSnapshot>,
-    mut chat_states: UiStateWriter<ChatUiState>,
-    mut detail_states: UiStateWriter<SessionDetailUiState>,
+    mut chat_states: UiStateWriter<UiChat>,
+    mut detail_states: UiStateWriter<UiSessionDetail>,
     mut commands: Commands,
 ) {
     for (stack, transition) in &transitions {
@@ -607,7 +607,7 @@ fn discard_stale_inline_transitions(
             None => {
                 commands
                     .entity(transition.webview)
-                    .remove::<UiState<ChatUiState>>();
+                    .remove::<UiState<UiChat>>();
             }
         }
         match snapshot.detail_state.clone() {
@@ -617,7 +617,7 @@ fn discard_stale_inline_transitions(
             None => {
                 commands
                     .entity(transition.webview)
-                    .remove::<UiState<SessionDetailUiState>>();
+                    .remove::<UiState<UiSessionDetail>>();
             }
         }
         restore_components(&snapshot, transition.webview, &mut commands);
@@ -884,10 +884,10 @@ mod tests {
             .world_mut()
             .spawn((
                 Session,
-                SessionId("session-1".into()),
+                Id::<Session>::new("session-1"),
                 Name::new("Task"),
                 Cwd(PathBuf::from("/tmp")),
-                AgentId("codex".into()),
+                AgentRef::new("codex"),
             ))
             .id();
         let stack = app
@@ -932,8 +932,8 @@ mod tests {
         let mut app = App::new();
         app.add_plugins((
             MinimalPlugins,
-            vmux_ecs::UiStatePlugin::<ChatUiState>::default(),
-            vmux_ecs::UiStatePlugin::<SessionDetailUiState>::default(),
+            vmux_ecs::UiStatePlugin::<UiChat>::default(),
+            vmux_ecs::UiStatePlugin::<UiSessionDetail>::default(),
         ))
         .add_systems(Update, discard_stale_inline_transitions);
         let stale = vmux_ecs::PageOpenId::new();
@@ -947,14 +947,14 @@ mod tests {
             .world_mut()
             .spawn((
                 PageMetadata {
-                    url: Route::Session(SessionId("stale".into())).url(),
+                    url: Route::Session(Id::<Session>::new("stale")).url(),
                     title: "Stale".into(),
                     ..Default::default()
                 },
                 SessionView,
                 PreparingAgentChatView,
-                UiState::<ChatUiState>::default(),
-                UiState::<SessionDetailUiState>::default(),
+                UiState::<UiChat>::default(),
+                UiState::<UiSessionDetail>::default(),
                 InlineTransitionSnapshot {
                     metadata: Some(original.clone()),
                     session_view: false,
@@ -986,12 +986,8 @@ mod tests {
         assert!(app.world().get::<SessionView>(view).is_none());
         assert!(app.world().get::<StartInlineTransitionView>(view).is_some());
         assert!(app.world().get::<vmux_ecs::page::PageReady>(view).is_some());
-        assert!(app.world().get::<UiState<ChatUiState>>(view).is_none());
-        assert!(
-            app.world()
-                .get::<UiState<SessionDetailUiState>>(view)
-                .is_none()
-        );
+        assert!(app.world().get::<UiState<UiChat>>(view).is_none());
+        assert!(app.world().get::<UiState<UiSessionDetail>>(view).is_none());
         assert!(app.world().get::<InlineTransitionSnapshot>(view).is_none());
     }
 
@@ -1048,6 +1044,8 @@ mod tests {
         let mut world = World::new();
         world.insert_resource(AppSettings::default());
         world.insert_resource(Time::<()>::default());
+        world.insert_resource(vmux_ecs::IdentityIndex::<Session>::default());
+        world.insert_resource(Messages::<vmux_session::SessionMutationRequest>::default());
         let tab = world
             .spawn((
                 Tab::named("Tab").with_startup_dir("/old"),

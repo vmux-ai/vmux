@@ -1,5 +1,6 @@
-use vmux_ui::hooks::UiState;
 #![allow(non_snake_case)]
+
+use vmux_ui::hooks::UiState;
 
 use std::collections::BTreeSet;
 
@@ -23,7 +24,7 @@ use vmux_ui::components::manager::{
     WorkspacePage,
 };
 use vmux_ui::components::page_address::PageAddress;
-use vmux_ui::hooks::{send, use_theme, };
+use vmux_ui::hooks::{send, use_theme};
 use vmux_ui::i18n::{TranslationValue, translate, translate_with};
 use vmux_ui::icon::{LineIcon, LineIconView};
 

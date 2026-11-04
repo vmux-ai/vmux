@@ -351,11 +351,6 @@ mod tests {
         );
         assert!(app.is_plugin_added::<PageDependencyPlugin<Claimed>>());
     }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
 
     fn anchor(left: f32, top: f32) -> vmux_api::dropdown::DropdownAnchor {
         vmux_api::dropdown::DropdownAnchor {

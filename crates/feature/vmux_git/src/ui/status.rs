@@ -275,7 +275,7 @@ pub(super) fn RepositoryHeader(
                                         branch_collection,
                                         onselect: move |collection| {
                                             optimistic_branch_collection.set((), observed_branch_collection, collection);
-                                            if send(&GitBranchCollectionSelectRequest { collection }).is_err() { optimistic_branch_collection.clear(&()); }
+                                            if vmux_ui::hooks::try_send(&GitBranchCollectionSelectRequest { collection }).is_err() { optimistic_branch_collection.clear(&()); }
                                         },
                                     }
                                     span { class: "text-[9px] tabular-nums text-muted-foreground", "{selected_reference_count}" }

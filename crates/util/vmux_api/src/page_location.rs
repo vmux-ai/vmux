@@ -4,7 +4,7 @@ pub struct PageLocationRequest {
 }
 
 impl PageLocationRequest {
-    pub fn location(&self) -> Option<PageLocationUiState> {
+    pub fn location(&self) -> Option<UiPageLocation> {
         if self.fragment.len() > 2048
             || self.fragment.contains('#')
             || self.fragment.chars().any(char::is_whitespace)
@@ -12,18 +12,18 @@ impl PageLocationRequest {
         {
             return None;
         }
-        Some(PageLocationUiState {
+        Some(UiPageLocation {
             fragment: self.fragment.clone(),
         })
     }
 }
 
 #[vmux_api::ui_state(Default, Eq)]
-pub struct PageLocationUiState {
+pub struct UiPageLocation {
     pub fragment: String,
 }
 
-impl PageLocationUiState {
+impl UiPageLocation {
     pub fn from_url(url: &str) -> Self {
         Self {
             fragment: url
@@ -56,9 +56,9 @@ mod tests {
         .unwrap();
         let url = location.url("vmux://settings/?section=general#old");
         assert_eq!(url, "vmux://settings/?section=general#appearance");
-        assert_eq!(PageLocationUiState::from_url(&url), location);
+        assert_eq!(UiPageLocation::from_url(&url), location);
         assert_eq!(
-            PageLocationUiState::default().url(&url),
+            UiPageLocation::default().url(&url),
             "vmux://settings/?section=general"
         );
     }

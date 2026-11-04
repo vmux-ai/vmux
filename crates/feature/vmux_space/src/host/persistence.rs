@@ -29,9 +29,7 @@ use vmux_ecs::{ArchivedPage, ArchivedPagePosition, ArchivedTabPage, PageMetadata
 use vmux_layout::LayoutStartupSet;
 use vmux_layout::space::Space;
 use vmux_layout::window::WindowHierarchy;
-use vmux_layout::{
-    LayoutPersistenceSet, LayoutRestoreCommitted, LayoutRestoreRequest,
-};
+use vmux_layout::{LayoutRestoreCommitted, LayoutRestoreRequest};
 #[cfg(test)]
 use vmux_layout::{
     pane::Pane,
@@ -1239,6 +1237,8 @@ mod tests {
         state.begin_materialize();
         let mut app = App::new();
         app.add_plugins(MinimalPlugins)
+            .add_message::<LayoutRestoreRequest>()
+            .add_message::<LayoutRestoreCommitted>()
             .configure_sets(
                 PreUpdate,
                 (
@@ -1268,6 +1268,14 @@ mod tests {
             ))
             .id();
 
+        app.update();
+
+        assert_eq!(
+            app.world().get::<PersistenceState>(store).unwrap().phase(),
+            RestorePhase::Resolve
+        );
+        assert!(app.world().get::<RestorePending>(store).is_some());
+        app.world_mut().write_message(LayoutRestoreCommitted);
         app.update();
 
         assert_eq!(

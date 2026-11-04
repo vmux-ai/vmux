@@ -276,9 +276,10 @@ fn push_to_page(
         transcript_changed |= attachments.hydrate_transcript(&mut transcript.state);
         attachments.hydrate_snapshot(&mut projection.snapshot);
         snapshot.0 = projection.snapshot;
-        commands.trigger(
-            vmux_ecs::UiStateWrite::<crate::state::UiChat>::from_event(webview, &snapshot.0),
-        );
+        commands.trigger(vmux_ecs::UiStateWrite::<crate::state::UiChat>::from_event(
+            webview,
+            &snapshot.0,
+        ));
         if transcript_changed {
             commands.trigger(vmux_ecs::UiStateWrite::<crate::state::UiChat>::from_event(
                 webview,

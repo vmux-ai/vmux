@@ -1184,6 +1184,7 @@ mod tests {
             .world_mut()
             .spawn((
                 Space,
+                vmux_api::Id::<Space>::new("first-space"),
                 CurrentSpace,
                 Active,
                 vmux_ecs::EffectiveStartupUrl::default(),
@@ -1194,6 +1195,7 @@ mod tests {
             .world_mut()
             .spawn((
                 Space,
+                vmux_api::Id::<Space>::new("second-space"),
                 CurrentSpace,
                 Active,
                 vmux_ecs::EffectiveStartupUrl::default(),
@@ -1202,36 +1204,26 @@ mod tests {
             .id();
         let first_tab = app
             .world_mut()
-            .spawn((
-                Tab::default(),
-                Active,
-                LastActivatedAt(1),
-                ChildOf(first_space),
-            ))
+            .spawn((Tab, Active, LastActivatedAt::new(1), ChildOf(first_space)))
             .id();
         let second_tab = app
             .world_mut()
-            .spawn((
-                Tab::default(),
-                Active,
-                LastActivatedAt(1),
-                ChildOf(second_space),
-            ))
+            .spawn((Tab, Active, LastActivatedAt::new(1), ChildOf(second_space)))
             .id();
         let first_pane = app
             .world_mut()
-            .spawn((Pane, LastActivatedAt(1), ChildOf(first_tab)))
+            .spawn((Pane, LastActivatedAt::new(1), ChildOf(first_tab)))
             .id();
         let second_pane = app
             .world_mut()
-            .spawn((Pane, LastActivatedAt(1), ChildOf(second_tab)))
+            .spawn((Pane, LastActivatedAt::new(1), ChildOf(second_tab)))
             .id();
         let first_stack = app
             .world_mut()
             .spawn((
                 Stack::bundle(),
                 Active,
-                LastActivatedAt(1),
+                LastActivatedAt::new(1),
                 ChildOf(first_pane),
             ))
             .id();
@@ -1240,7 +1232,7 @@ mod tests {
             .spawn((
                 Stack::bundle(),
                 Active,
-                LastActivatedAt(1),
+                LastActivatedAt::new(1),
                 ChildOf(second_pane),
             ))
             .id();

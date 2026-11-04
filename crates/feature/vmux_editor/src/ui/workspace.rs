@@ -531,19 +531,19 @@ fn EditorWorkspace() -> Element {
     let explorer = ExplorerPane::new(explorer_visible, explorer_width);
     let directory_keys = DirectoryKeys {
         on_next: EventHandler::new(move |_| {
-            let _ = send(&FileDirectoryNextRequest);
+            send(&FileDirectoryNextRequest);
         }),
         on_previous: EventHandler::new(move |_| {
-            let _ = send(&FileDirectoryPreviousRequest);
+            send(&FileDirectoryPreviousRequest);
         }),
         on_activate: EventHandler::new(move |_| {
-            let _ = send(&FileDirectoryActivateRequest);
+            send(&FileDirectoryActivateRequest);
         }),
         on_parent: EventHandler::new(move |_| {
-            let _ = send(&FileDirectoryParentRequest);
+            send(&FileDirectoryParentRequest);
         }),
         on_toggle_hidden: EventHandler::new(move |_| {
-            let _ = send(&FileDirectoryToggleHiddenRequest);
+            send(&FileDirectoryToggleHiddenRequest);
         }),
     };
     let tidy = ui.use_value(|state| Some(&state.explorer.tidy));

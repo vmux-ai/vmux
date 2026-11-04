@@ -772,7 +772,7 @@ impl DiffNextRequest {
         if !self.claim(key) {
             return;
         }
-        if send(&GitDiffNextRequest {
+        if vmux_ui::hooks::try_send(&GitDiffNextRequest {
             generation: key.generation,
             revision: key.revision,
         })

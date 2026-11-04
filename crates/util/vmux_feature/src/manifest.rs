@@ -233,6 +233,27 @@ pub struct CommandMcp {
     pub allow_agent: bool,
 }
 
+impl Page {
+    pub fn asset_host(&self) -> Option<&str> {
+        if !self.asset_host.is_empty() {
+            return Some(&self.asset_host);
+        }
+        let url = if self.manifest_url.is_empty() {
+            &self.url
+        } else {
+            &self.manifest_url
+        };
+        if let Some(url) = url.strip_prefix("vmux://") {
+            return url.split('/').next().filter(|host| !host.is_empty());
+        }
+        let (scheme, _) = url.split_once("://")?;
+        if scheme.is_empty() {
+            return None;
+        }
+        Some(scheme)
+    }
+}
+
 #[derive(Clone, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Command {
@@ -621,5 +642,26 @@ mod tests {
             .configure_client_id(|name| (name == "EXAMPLE_CLIENT_ID").then(|| "client".into()));
 
         assert!(manifest.auth_providers[0].configured());
+    }
+
+    #[test]
+    fn page_asset_hosts_follow_the_manifest_route_before_the_external_route() {
+        let manifest = FeatureManifest::parse(
+            r#"(pages: [
+            (url: "vmux://sessions/", title: "Sessions"),
+            (url: "file://", manifest_url: "vmux://files/", title: "Files"),
+            (url: "git://", title: "Git"),
+            (url: "file://", asset_host: "editor", title: "Editor"),
+        ])"#,
+        );
+        let hosts = manifest
+            .pages
+            .iter()
+            .map(Page::asset_host)
+            .collect::<Vec<_>>();
+        assert_eq!(
+            hosts,
+            [Some("sessions"), Some("files"), Some("git"), Some("editor")]
+        );
     }
 }

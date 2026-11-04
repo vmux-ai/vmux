@@ -14,9 +14,8 @@ use vmux_connector::{
 };
 use vmux_ecs::page::{Activity, HostsPage, PageReady};
 use vmux_ecs::{
-    EntityTarget, KeyboardOwner, PageMetadata, PageOpenRequest, PageOpenSet, PageOpenTarget,
-    PageTransition,
-    Operation, OperationKind, OperationState,
+    EntityTarget, KeyboardOwner, Operation, OperationKind, OperationState, PageMetadata,
+    PageOpenRequest, PageOpenSet, PageOpenTarget, PageTransition,
 };
 use vmux_ecs::{UiState, UiStatePlugin, UiStateWrite};
 use vmux_git::RepoInfoCache;
@@ -122,11 +121,7 @@ type UiSessionScopeComponent = UiState<UiSessionScope>;
 pub struct SessionCatalogView;
 
 #[derive(Component, Default)]
-#[require(
-    SessionCatalogView,
-    UiSessionCatalogComponent,
-    UiSessionDetailComponent
-)]
+#[require(SessionCatalogView, UiSessionDetailComponent)]
 struct SessionDetailView;
 
 #[derive(Component, Clone, Debug, PartialEq, Eq)]
@@ -139,7 +134,7 @@ struct ManagerLocations<'w, 's> {
     targets: Query<'w, 's, &'static EntityTarget<Session>>,
     work_dirs: Query<'w, 's, &'static vmux_command::CommandBarWorkDirectory>,
     fallbacks: Query<'w, 's, &'static SessionManagerFallback>,
-    sessions: Query<'w, 's, &'static SessionId, With<Session>>,
+    sessions: Query<'w, 's, &'static Id<Session>, With<Session>>,
     page_containers: Query<'w, 's, &'static PageMetadata, Without<HostsPage>>,
 }
 
@@ -255,7 +250,9 @@ fn sync_manager_views(
                 commands.entity(entity).try_insert(SessionManagerView);
             }
             (false, true) => {
-                commands.entity(entity).remove::<SessionManagerView>();
+                commands
+                    .entity(entity)
+                    .remove::<(SessionManagerView, UiSessionCatalogComponent)>();
             }
             _ => {}
         }
@@ -900,6 +897,7 @@ fn publish(
         Entity,
         (
             With<UiSessionCatalogComponent>,
+            With<SessionManagerView>,
             With<PageReady>,
             With<KeyboardOwner>,
         ),
@@ -908,6 +906,7 @@ fn publish(
         (),
         (
             With<UiSessionCatalogComponent>,
+            With<SessionManagerView>,
             With<PageReady>,
             With<KeyboardOwner>,
             Or<(Added<UiSessionCatalogComponent>, Added<KeyboardOwner>)>,
@@ -1103,21 +1102,11 @@ fn ready(
     {
         commands.entity(target).insert(SessionDetailView);
         let state = UiSessionDetail::project(page, &content.catalog, &content.repositories);
-        commands.trigger(UiStateWrite::<UiSessionDetail>::from_event(
-            target, &state,
-        ));
-        commands.trigger(UiStateWrite::<UiSessionCatalog>::from_event(
-            target,
-            &*repositories,
-        ));
-        let state = UiSessionDetail::project(page, &catalog, &repositories);
         commands.trigger(UiStateWrite::<UiSessionDetail>::from_event(target, &state));
     }
     if let Ok(scope) = scopes.get(target) {
         let state = UiSessionScope::project(&scope.0, &content.catalog);
-        commands.trigger(UiStateWrite::<UiSessionScope>::from_event(
-            target, &state,
-        ));
+        commands.trigger(UiStateWrite::<UiSessionScope>::from_event(target, &state));
     }
 }
 
@@ -1166,10 +1155,13 @@ fn cleanup_inactive_views(
                 .entity(entity)
                 .remove::<(SessionDetailView, UiSessionDetailComponent)>();
         }
-        if !manager && !chat && !scope {
+        if !manager {
             commands
                 .entity(entity)
-                .remove::<(SessionCatalogView, UiSessionCatalogComponent)>();
+                .remove::<UiSessionCatalogComponent>();
+            if !chat && !scope {
+                commands.entity(entity).remove::<SessionCatalogView>();
+            }
         }
     }
 }
@@ -1490,7 +1482,7 @@ mod tests {
         app.world_mut().flush();
 
         let published = app.world().resource::<Published>();
-        assert_eq!(published.catalogs, vec![session, manager]);
+        assert_eq!(published.catalogs, vec![manager]);
         assert_eq!(published.details, vec![session]);
     }
 
@@ -1534,7 +1526,7 @@ mod tests {
         );
 
         app.world_mut().entity_mut(webview).insert(PageMetadata {
-            url: Route::Session(SessionId("session-1".into())).url(),
+            url: Route::Session(Id::<Session>::new("session-1")).url(),
             ..Default::default()
         });
         app.update();
@@ -1554,7 +1546,7 @@ mod tests {
             .world_mut()
             .spawn((
                 PageMetadata {
-                    url: Route::Session(SessionId("session-1".into())).url(),
+                    url: Route::Session(Id::<Session>::new("session-1")).url(),
                     ..Default::default()
                 },
                 EntityTarget::<Session>::new(session),

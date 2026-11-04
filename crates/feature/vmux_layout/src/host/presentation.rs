@@ -13,7 +13,9 @@ use crate::cef::Browser;
 use crate::host::deadline::{DeadlineOwner, DeadlineScheduler};
 use crate::hosted_page::{SurfaceHandoff, SurfacePresentationReady};
 use crate::stack::Stack;
-use crate::tab::{Tab, TabDirDecided, TabWorkspace, TabWorktree, TabWorktreeUnavailable};
+use crate::tab::{
+    StartupDir, Tab, TabDirDecided, TabWorkspace, TabWorktree, TabWorktreeUnavailable,
+};
 
 pub struct PresentationPlugin;
 
@@ -325,7 +327,7 @@ impl Transition {
 
 #[derive(bevy::ecs::system::SystemParam)]
 struct TransitionCommit<'w, 's> {
-    tabs: Query<'w, 's, &'static Tab>,
+    tabs: Query<'w, 's, (), With<Tab>>,
     retiring: Query<'w, 's, (), With<Retiring>>,
     transitions: Query<'w, 's, &'static Transition>,
     commands: Commands<'w, 's>,
@@ -336,14 +338,11 @@ impl TransitionCommit<'_, '_> {
         let mut pending = vec![transition.clone()];
         while let Some(transition) = pending.pop() {
             if let Some(tab) = transition.reset_tab
-                && let Ok(tab_state) = self.tabs.get(tab)
+                && self.tabs.contains(tab)
             {
                 self.commands
                     .entity(tab)
-                    .insert(Tab {
-                        name: tab_state.name.clone(),
-                        startup_dir: None,
-                    })
+                    .insert(StartupDir(None))
                     .remove::<(
                         TabWorkspace,
                         TabWorktree,
@@ -1176,11 +1175,11 @@ mod tests {
         app.add_plugins(MinimalPlugins)
             .add_systems(Update, visibility.run_if(projection_changed));
         app.world_mut()
-            .spawn((Tab::default(), Active, Node::default(), Visibility::Visible));
+            .spawn((Tab, Active, Node::default(), Visibility::Visible));
         app.update();
         let inactive = app
             .world_mut()
-            .spawn((Tab::default(), Node::default(), Visibility::Visible))
+            .spawn((Tab, Node::default(), Visibility::Visible))
             .id();
 
         app.update();
@@ -1267,7 +1266,7 @@ mod tests {
         app.add_plugins((MinimalPlugins, PresentationPlugin));
         let outgoing = app
             .world_mut()
-            .spawn((Stack::default(), Retiring, LastActivatedAt(1)))
+            .spawn((Stack::default(), Retiring, LastActivatedAt::new(1)))
             .id();
         let mut transition = Transition::retain(outgoing);
         transition.deadline = std::time::Instant::now() - std::time::Duration::from_millis(1);
@@ -1280,7 +1279,13 @@ mod tests {
 
         assert!(app.world().get::<Transition>(incoming).is_none());
         assert!(app.world().get::<Retiring>(outgoing).is_none());
-        assert!(app.world().get::<LastActivatedAt>(outgoing).unwrap().0 > 1);
+        assert!(
+            app.world()
+                .get::<LastActivatedAt>(outgoing)
+                .unwrap()
+                .milliseconds()
+                > 1
+        );
     }
 
     #[test]
@@ -1290,10 +1295,9 @@ mod tests {
         let tab = app
             .world_mut()
             .spawn((
-                Tab {
-                    name: "Worktree".into(),
-                    startup_dir: Some("/tmp/worktree".into()),
-                },
+                Tab::bundle(),
+                Name::new("Worktree"),
+                StartupDir(Some("/tmp/worktree".into())),
                 TabWorkspace {
                     project_dir: "/tmp/worktree".into(),
                 },
@@ -1310,7 +1314,7 @@ mod tests {
         app.update();
 
         assert!(app.world().get::<Transition>(incoming).is_none());
-        assert_eq!(app.world().get::<Tab>(tab).unwrap().startup_dir, None);
+        assert_eq!(app.world().get::<StartupDir>(tab).unwrap().0, None);
         assert!(app.world().get::<TabWorkspace>(tab).is_none());
         assert!(app.world().get_entity(outgoing).is_err());
     }
@@ -1562,14 +1566,8 @@ mod tests {
         app.add_plugins((MinimalPlugins, PresentationPlugin));
         let first_space = app.world_mut().spawn(crate::space::Space).id();
         let second_space = app.world_mut().spawn(crate::space::Space).id();
-        let first = app
-            .world_mut()
-            .spawn((Tab::default(), ChildOf(first_space)))
-            .id();
-        let second = app
-            .world_mut()
-            .spawn((Tab::default(), ChildOf(second_space)))
-            .id();
+        let first = app.world_mut().spawn((Tab, ChildOf(first_space))).id();
+        let second = app.world_mut().spawn((Tab, ChildOf(second_space))).id();
 
         app.world_mut().write_message(FocusChanged {
             previous: crate::active_pane::ActiveStack {
@@ -1773,10 +1771,9 @@ mod tests {
         let tab = app
             .world_mut()
             .spawn((
-                Tab {
-                    name: "Worktree".into(),
-                    startup_dir: Some("/tmp/worktree".into()),
-                },
+                Tab::bundle(),
+                Name::new("Worktree"),
+                StartupDir(Some("/tmp/worktree".into())),
                 TabWorkspace {
                     project_dir: "/tmp/worktree".into(),
                 },
@@ -1810,7 +1807,7 @@ mod tests {
         }
 
         assert!(app.world().get_entity(retired).is_err());
-        assert_eq!(app.world().get::<Tab>(tab).unwrap().startup_dir, None);
+        assert_eq!(app.world().get::<StartupDir>(tab).unwrap().0, None);
         assert!(app.world().get::<TabWorkspace>(tab).is_none());
     }
 }

@@ -1269,14 +1269,14 @@ mod tests {
             .world_mut()
             .spawn((
                 Tab::bundle(),
-                LastActivatedAt(2),
+                LastActivatedAt::new(2),
                 vmux_ecs::Active,
                 ChildOf(main),
             ))
             .id();
         let other = app
             .world_mut()
-            .spawn((Tab::bundle(), LastActivatedAt(1), ChildOf(main)))
+            .spawn((Tab::bundle(), LastActivatedAt::new(1), ChildOf(main)))
             .id();
         app.world_mut().spawn(PrimaryWindow);
 
@@ -1408,7 +1408,14 @@ mod tests {
         let main = app.world_mut().spawn(MainNode).id();
         let space = app
             .world_mut()
-            .spawn((crate::space::Space, vmux_ecs::Active, ChildOf(main)))
+            .spawn((
+                crate::space::Space,
+                vmux_api::Id::<crate::space::Space>::new(
+                    "closing_active_rightmost_tab_activates_left_neighbor_not_first-0",
+                ),
+                vmux_ecs::Active,
+                ChildOf(main),
+            ))
             .id();
         let a = app
             .world_mut()
@@ -1527,7 +1534,14 @@ mod tests {
         let main = app.world_mut().spawn(MainNode).id();
         let space = app
             .world_mut()
-            .spawn((crate::space::Space, vmux_ecs::Active, ChildOf(main)))
+            .spawn((
+                crate::space::Space,
+                vmux_api::Id::<crate::space::Space>::new(
+                    "tab_next_activates_and_reveals_target_in_a_single_update-0",
+                ),
+                vmux_ecs::Active,
+                ChildOf(main),
+            ))
             .id();
         let tab_a = app
             .world_mut()

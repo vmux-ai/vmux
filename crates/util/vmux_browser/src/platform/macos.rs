@@ -27,8 +27,8 @@ use vmux_layout::overlay::{LayoutOverlayDismissRevision, LayoutOverlayOpened};
 use vmux_layout::window::FocusedWindow;
 use vmux_page::{
     Appearance, AssetReply, Assets as RendererAssets, Embedding, LifecycleSink, LifecycleUpdate,
-    ModalFrame, Outbox as RendererOutbox, Page, PageClaimDirty, PagePlacement, PageRegistration, SiblingOrder,
-    Wake as RendererWake, WebView,
+    ModalFrame, Outbox as RendererOutbox, Page, PageClaimDirty, PagePlacement, PageRegistration,
+    SiblingOrder, Wake as RendererWake, WebView,
 };
 use vmux_setting::{AppSettings, ResolvedColorScheme, ResolvedScheme};
 use vmux_ui::hooks::EventListenerError;

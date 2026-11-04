@@ -66,6 +66,8 @@ pub enum SessionMutation {
     Created(CreatedMutation),
     Rename(String),
     Describe(String),
+    ChangeWorkspace(PathBuf),
+    ChangeAgent(Option<AgentRef>),
     ChangeWorkflowState(Id<WorkflowState>),
     Archive(Option<i64>),
     ChangeProject(Option<Id<Project>>),
@@ -142,6 +144,7 @@ pub struct SessionMutationRejected {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum SessionMutationRejection {
     MissingSession,
+    DuplicateSession,
     SessionAlreadyExists,
     Stale {
         expected: Revision,
@@ -316,6 +319,17 @@ impl SessionMutations<'_, '_> {
                     .entity(session)
                     .insert(Description(description.clone()));
             }
+            SessionMutation::ChangeWorkspace(cwd) => {
+                self.commands.entity(session).insert(Cwd(cwd.clone()));
+            }
+            SessionMutation::ChangeAgent(agent) => match agent {
+                Some(agent) => {
+                    self.commands.entity(session).insert(agent.clone());
+                }
+                None => {
+                    self.commands.entity(session).remove::<AgentRef>();
+                }
+            },
             SessionMutation::ChangeWorkflowState(workflow_state) => {
                 self.commands.entity(session).insert((
                     WorkflowStateRef::new(workflow_state.clone()),
@@ -448,17 +462,27 @@ fn commit(
     let mut revisions = HashMap::<Entity, Revision>::new();
     let mut sequences = HashMap::<Entity, u64>::new();
     let mut operations = HashMap::<(Entity, Id<Operation>), Entity>::new();
-    let mut sessions = mutations
-        .sessions
-        .iter()
-        .map(|(entity, id, _, _)| (id.clone(), entity))
-        .collect::<HashMap<_, _>>();
+    let mut sessions = HashMap::new();
+    let mut duplicates = HashSet::new();
+    for (entity, id, _, _) in &mutations.sessions {
+        if sessions.insert(id.clone(), entity).is_some() {
+            duplicates.insert(id.clone());
+        }
+    }
     for (entity, operation, sequence, owner) in &mutations.operations {
         operations.insert((owner.parent(), operation.clone()), entity);
         let current = sequences.entry(owner.parent()).or_default();
         *current = (*current).max(sequence.0);
     }
     for request in requests.read() {
+        if duplicates.contains(&request.session) {
+            rejected.write(SessionMutationRejected {
+                operation: request.operation.clone(),
+                session: request.session.clone(),
+                reason: SessionMutationRejection::DuplicateSession,
+            });
+            continue;
+        }
         match mutations.commit(
             request,
             &mut revisions,
@@ -585,5 +609,108 @@ mod tests {
         app.update();
 
         assert_eq!(app.world().get::<Name>(session).unwrap().as_str(), "two");
+    }
+
+    #[test]
+    fn workspace_and_agent_changes_replay_once_and_remove_the_agent() {
+        let mut app = App::new();
+        app.add_plugins(SessionDomainPlugin);
+        let create = CreateRequest::new(
+            "one",
+            "",
+            PathBuf::from("/before"),
+            Some(AgentRef::new("vibe")),
+        );
+        let session_id = create.id().clone();
+        app.world_mut().write_message(create);
+        app.update();
+        let session = app
+            .world()
+            .resource::<vmux_ecs::IdentityIndex<Session>>()
+            .entity(&session_id)
+            .unwrap()
+            .unwrap();
+        for (operation, expected, mutation) in [
+            (
+                "workspace",
+                1,
+                SessionMutation::ChangeWorkspace(PathBuf::from("/after")),
+            ),
+            (
+                "agent",
+                2,
+                SessionMutation::ChangeAgent(Some(AgentRef::new("codex"))),
+            ),
+            ("remove-agent", 3, SessionMutation::ChangeAgent(None)),
+        ] {
+            let request = SessionMutationRequest::replicated(
+                Id::new(operation),
+                Id::new("member"),
+                session_id.clone(),
+                Revision::new(expected),
+                mutation,
+            );
+            app.world_mut().write_message(request.clone());
+            app.world_mut().write_message(request);
+            app.update();
+            assert_eq!(
+                app.world().get::<Revision>(session),
+                Some(&Revision::new(expected + 1))
+            );
+        }
+        assert_eq!(
+            app.world().get::<Cwd>(session).unwrap().0,
+            PathBuf::from("/after")
+        );
+        assert!(app.world().get::<AgentRef>(session).is_none());
+        let world = app.world_mut();
+        let mut operations =
+            world.query_filtered::<(&SessionMutation, &ChildOf), With<CommittedOperation>>();
+        let mut count = 0;
+        for (_, parent) in operations.iter(world) {
+            if parent.parent() == session {
+                count += 1;
+            }
+        }
+        assert_eq!(count, 4);
+    }
+
+    #[test]
+    fn duplicate_identity_rejects_mutation_without_changing_either_session() {
+        let mut app = App::new();
+        app.add_plugins(SessionDomainPlugin);
+        let session_id = Id::<Session>::new("duplicate");
+        let first = app
+            .world_mut()
+            .spawn((Session, session_id.clone(), Name::new("first")))
+            .id();
+        let second = app
+            .world_mut()
+            .spawn((Session, session_id.clone(), Name::new("second")))
+            .id();
+        let first_revision = app.world().get::<Revision>(first).copied();
+        let second_revision = app.world().get::<Revision>(second).copied();
+        app.world_mut().write_message(SessionMutationRequest::local(
+            session_id,
+            SessionMutation::Rename("changed".into()),
+        ));
+        app.update();
+        let rejected = app
+            .world_mut()
+            .resource_mut::<Messages<SessionMutationRejected>>()
+            .drain()
+            .collect::<Vec<_>>();
+        assert_eq!(rejected.len(), 1);
+        assert_eq!(
+            rejected[0].reason,
+            SessionMutationRejection::DuplicateSession
+        );
+        assert_eq!(app.world().get::<Name>(first).unwrap().as_str(), "first");
+        assert_eq!(app.world().get::<Name>(second).unwrap().as_str(), "second");
+        assert_eq!(app.world().get::<Revision>(first).copied(), first_revision);
+        assert_eq!(
+            app.world().get::<Revision>(second).copied(),
+            second_revision
+        );
     }
 }

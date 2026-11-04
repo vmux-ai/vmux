@@ -37,7 +37,7 @@ impl Plugin for ProjectPagePlugin {
             .add_plugins(vmux_ecs::IdentityIndexPlugin::<Project>::default())
             .add_plugins(vmux_ecs::UiStatePlugin::<UiProject>::default())
             .add_message::<vmux_layout::stack::OpenRequest>()
-            .add_plugins(vmux_ecs::UiStatePlugin::<crate::project::ProjectFilesUiState>::default())
+            .add_plugins(vmux_ecs::UiStatePlugin::<crate::project::UiProjectFiles>::default())
             .add_plugins(UiEventPlugin::<(
                 ProjectCreateRequest,
                 ProjectImportRequest,
@@ -348,7 +348,7 @@ fn finish_files(
         if page.url != task.url || revision.value != task.revision {
             continue;
         }
-        let mut state = crate::project::ProjectFilesUiState {
+        let mut state = crate::project::UiProjectFiles {
             root: task.root.clone(),
             ready: true,
             ..Default::default()
@@ -358,9 +358,7 @@ fn finish_files(
             Err(error) => state.error = error,
         }
         commands.trigger(
-            vmux_ecs::UiStateWrite::<crate::project::ProjectFilesUiState>::from_event(
-                entity, &state,
-            ),
+            vmux_ecs::UiStateWrite::<crate::project::UiProjectFiles>::from_event(entity, &state),
         );
     }
 }
@@ -1004,9 +1002,9 @@ fn queue(
             ));
             if let Some(path) = cwd.as_ref() {
                 commands.trigger(
-                    vmux_ecs::UiStateWrite::<crate::project::ProjectFilesUiState>::from_event(
+                    vmux_ecs::UiStateWrite::<crate::project::UiProjectFiles>::from_event(
                         entity,
-                        &crate::project::ProjectFilesUiState {
+                        &crate::project::UiProjectFiles {
                             root: path.to_string_lossy().into_owned(),
                             ..Default::default()
                         },
@@ -1583,10 +1581,9 @@ mod tests {
         .unwrap();
         let mut page = ProjectPage::at(root.path(), "vmux://projects/");
         page.app.world_mut().spawn((
-            vmux_layout::tab::Tab {
-                name: "Repo".to_string(),
-                startup_dir: Some(cwd.to_string_lossy().into_owned()),
-            },
+            vmux_layout::tab::Tab::bundle(),
+            Name::new("Repo"),
+            vmux_layout::tab::StartupDir(Some(cwd.clone())),
             vmux_ecs::Active,
         ));
 
@@ -1644,6 +1641,7 @@ mod tests {
                 .init_resource::<vmux_setting::AppSettings>()
                 .init_resource::<CatalogSnapshot>()
                 .add_message::<RepositoryProvisionCompleted>()
+                .add_message::<vmux_session::SessionMutationRequest>()
                 .insert_non_send(bevy_cef::prelude::Browsers::default())
                 .add_observer(deliver_frame);
             app.world_mut().spawn(vmux_ecs::profile::ProjectsRoot(
@@ -1667,20 +1665,20 @@ mod tests {
             app.world_mut().spawn(vmux_api::UiEventPermissions {
                 url: ProjectRoute::ROOT,
                 owns_subtree: true,
-                permissions: &["UiProject", "ProjectFilesUiState"],
+                permissions: &["UiProject", "UiProjectFiles"],
             });
             Self { app, view }
         }
 
-        fn files(&self) -> Option<crate::project::ProjectFilesUiState> {
+        fn files(&self) -> Option<crate::project::UiProjectFiles> {
             self.app
                 .world()
-                .get::<vmux_ecs::UiState<crate::project::ProjectFilesUiState>>(self.view)?
+                .get::<vmux_ecs::UiState<crate::project::UiProjectFiles>>(self.view)?
                 .current()
                 .cloned()
         }
 
-        fn finish(&mut self) -> crate::project::ProjectFilesUiState {
+        fn finish(&mut self) -> crate::project::UiProjectFiles {
             let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
             loop {
                 self.app.update();

@@ -11,7 +11,7 @@ use crate::event::{
     GitDiffRetryRequest, GitDiffRevealRequest, GitLineMarker, GitLineStatus,
 };
 use crate::state::{
-    GitBranchFilesPagePatch, GitBranchFilesPatch, GitPageControllerState, GitPanel, GitUiState,
+    GitBranchFilesPagePatch, GitBranchFilesPatch, GitPageControllerState, GitPanel, UiGit,
 };
 
 use super::GitUpdateSet;
@@ -619,7 +619,7 @@ fn sync_branch_files(
         &GitPageControllerState,
         Option<&GitBranchFilesQuery>,
     )>,
-    mut ui_state: vmux_ecs::UiStateWriter<GitUiState>,
+    mut ui_state: vmux_ecs::UiStateWriter<UiGit>,
     queued_jobs: QueuedGitJobs<BranchFilesJob>,
     mut commands: Commands,
 ) {
@@ -684,7 +684,7 @@ fn load_next_branch_files(
         &GitPageControllerState,
         &mut GitBranchFilesQuery,
     )>,
-    mut ui_state: vmux_ecs::UiStateWriter<GitUiState>,
+    mut ui_state: vmux_ecs::UiStateWriter<UiGit>,
 ) {
     let entity = trigger.event().webview;
     let Ok((mut state, controller, query)) = pages.get_mut(entity) else {
@@ -722,7 +722,7 @@ fn load_next_branch_files(
 fn retry_branch_files(
     trigger: On<UiInput<GitBranchFilesRetryRequest>>,
     mut states: Query<&mut super::state::GitState>,
-    mut ui_state: vmux_ecs::UiStateWriter<GitUiState>,
+    mut ui_state: vmux_ecs::UiStateWriter<UiGit>,
     mut commands: Commands,
 ) {
     let entity = trigger.event().webview;
@@ -1485,7 +1485,7 @@ mod tests {
             change: crate::event::GitPathChange::Modified,
         };
         let mut app = App::new();
-        app.add_plugins(vmux_ecs::UiStatePlugin::<GitUiState>::default())
+        app.add_plugins(vmux_ecs::UiStatePlugin::<UiGit>::default())
             .add_systems(Update, sync_branch_files);
         let page = app
             .world_mut()

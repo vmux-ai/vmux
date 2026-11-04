@@ -287,7 +287,7 @@ impl TranscriptEvents<'_, '_> {
                     entity,
                     identity.0,
                     content.0.clone(),
-                    created_at.0.max(0) as u64,
+                    created_at.milliseconds().max(0) as u64,
                 ))
             })
             .collect::<Vec<_>>();
@@ -319,7 +319,7 @@ impl TranscriptEvents<'_, '_> {
             return false;
         }
         cache.transcript.messages[index].clone_from(&content.0);
-        cache.transcript.created_at[index] = created_at.0.max(0) as u64;
+        cache.transcript.created_at[index] = created_at.milliseconds().max(0) as u64;
         true
     }
 }

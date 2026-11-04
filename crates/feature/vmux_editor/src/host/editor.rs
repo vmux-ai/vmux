@@ -445,11 +445,10 @@ mod tests {
                 .add_observer(
                     |request: On<vmux_ecs::UiFileWrite>,
                      mut rendered: ResMut<RenderedDocuments>| {
-                        let state =
-                            <vmux_ecs::event::UiFile as vmux_api::UiState>::from_updates(
-                                None,
-                                vec![request.update().clone()],
-                            );
+                        let state = <vmux_ecs::event::UiFile as vmux_api::UiState>::from_updates(
+                            None,
+                            vec![request.update().clone()],
+                        );
                         if state.document.meta.is_some() {
                             rendered.0.push(state);
                         }
@@ -651,10 +650,9 @@ mod tests {
             .app
             .world_mut()
             .spawn((
-                vmux_layout::tab::Tab {
-                    name: "Task".to_string(),
-                    startup_dir: Some(checkout.to_string_lossy().into_owned()),
-                },
+                vmux_layout::tab::Tab::bundle(),
+                Name::new("Task"),
+                vmux_layout::tab::StartupDir(Some(checkout.clone())),
                 vmux_layout::tab::TabWorkspace {
                     project_dir: session.dir.path().to_string_lossy().into_owned(),
                 },
@@ -680,9 +678,9 @@ mod tests {
         session
             .app
             .world_mut()
-            .get_mut::<vmux_layout::tab::Tab>(tab)
+            .get_mut::<vmux_layout::tab::StartupDir>(tab)
             .unwrap()
-            .startup_dir = Some(session.dir.path().to_string_lossy().into_owned());
+            .0 = Some(session.dir.path().to_path_buf());
         session.app.update();
         session.type_into_buffer("ALLOWED");
         session

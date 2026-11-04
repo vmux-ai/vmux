@@ -1,7 +1,7 @@
 use crate::{
     ShortcutBinding, ShortcutCatalog, ShortcutCollectionViewRequest, ShortcutEntry, ShortcutGroup,
     ShortcutProbeClearRequest, ShortcutProbePress, ShortcutProbePressRequest, ShortcutProbeStatus,
-    ShortcutProbeView, ShortcutStroke, UiShortcuts, ShortcutUiStateUpdates, ShortcutUrl,
+    ShortcutProbeView, ShortcutStroke, ShortcutUiStateUpdates, ShortcutUrl, UiShortcuts,
 };
 use bevy::ecs::system::SystemParam;
 use bevy::prelude::*;

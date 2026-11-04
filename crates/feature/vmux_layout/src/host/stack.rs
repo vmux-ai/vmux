@@ -575,11 +575,7 @@ fn closes_tab(tab: Entity, stack: Entity, closer: &mut StackCloser) -> bool {
 #[derive(Component, Reflect, Default)]
 #[reflect(Component)]
 #[type_path = "vmux_desktop::layout::stack"]
-#[require(
-    Save,
-    crate::presentation::Layer,
-    crate::page_slot::Current
-)]
+#[require(Save, crate::presentation::Layer, crate::page_slot::Current)]
 pub struct Stack {
     pub scroll_x: f32,
     pub scroll_y: f32,
@@ -1393,7 +1389,7 @@ mod tests {
         let space = app.world_mut().spawn(crate::space::CurrentSpace).id();
         let tab = app
             .world_mut()
-            .spawn((Tab::default(), LastActivatedAt::now(), ChildOf(space)))
+            .spawn((Tab, LastActivatedAt::now(), ChildOf(space)))
             .id();
         let pane = app
             .world_mut()
@@ -1439,7 +1435,7 @@ mod tests {
         let space = app.world_mut().spawn(crate::space::CurrentSpace).id();
         let tab = app
             .world_mut()
-            .spawn((Tab::default(), LastActivatedAt::now(), ChildOf(space)))
+            .spawn((Tab, LastActivatedAt::now(), ChildOf(space)))
             .id();
         let pane = app
             .world_mut()
@@ -1482,10 +1478,7 @@ mod tests {
     #[test]
     fn closing_a_retained_stack_defers_retirement_to_its_owner() {
         let mut app = close_request_app();
-        let tab = app
-            .world_mut()
-            .spawn((Tab::default(), LastActivatedAt::now()))
-            .id();
+        let tab = app.world_mut().spawn((Tab, LastActivatedAt::now())).id();
         let pane = app
             .world_mut()
             .spawn((Pane, LastActivatedAt::now(), ChildOf(tab)))
@@ -1522,10 +1515,7 @@ mod tests {
     fn close_request_ignores_an_already_retiring_stack() {
         let mut app = close_request_app();
 
-        let tab = app
-            .world_mut()
-            .spawn((Tab::default(), LastActivatedAt::now()))
-            .id();
+        let tab = app.world_mut().spawn((Tab, LastActivatedAt::now())).id();
         let pane = app
             .world_mut()
             .spawn((Pane, LastActivatedAt::now(), ChildOf(tab)))
@@ -1568,10 +1558,10 @@ mod tests {
         let space = app.world_mut().spawn_empty().id();
         let retiring_tab = app
             .world_mut()
-            .spawn((Tab::default(), LastActivatedAt::new(2), Retiring, ChildOf(space)))
+            .spawn((Tab, LastActivatedAt::new(2), Retiring, ChildOf(space)))
             .id();
         app.world_mut()
-            .spawn((Tab::default(), LastActivatedAt::new(1), ChildOf(space)));
+            .spawn((Tab, LastActivatedAt::new(1), ChildOf(space)));
         let pane = app
             .world_mut()
             .spawn((Pane, LastActivatedAt::new(2), ChildOf(retiring_tab)))
@@ -1610,17 +1600,20 @@ mod tests {
         let space = app.world_mut().spawn(crate::space::CurrentSpace).id();
         let active_tab = app
             .world_mut()
-            .spawn((Tab::default(), Active, LastActivatedAt::new(2), ChildOf(space)))
+            .spawn((Tab, Active, LastActivatedAt::new(2), ChildOf(space)))
             .id();
         let active_pane = app
             .world_mut()
             .spawn((Pane, LastActivatedAt::new(2), ChildOf(active_tab)))
             .id();
-        app.world_mut()
-            .spawn((Stack::default(), LastActivatedAt::new(2), ChildOf(active_pane)));
+        app.world_mut().spawn((
+            Stack::default(),
+            LastActivatedAt::new(2),
+            ChildOf(active_pane),
+        ));
         let background_tab = app
             .world_mut()
-            .spawn((Tab::default(), LastActivatedAt::new(1), ChildOf(space)))
+            .spawn((Tab, LastActivatedAt::new(1), ChildOf(space)))
             .id();
         let background_pane = app
             .world_mut()
@@ -1771,8 +1764,16 @@ mod tests {
             app.world().get::<Transition>(runner_up),
             Some(&Transition::retiring(active, active, None))
         );
-        let oldest_ts = app.world().get::<LastActivatedAt>(oldest).unwrap().milliseconds();
-        let runner_up_ts = app.world().get::<LastActivatedAt>(runner_up).unwrap().milliseconds();
+        let oldest_ts = app
+            .world()
+            .get::<LastActivatedAt>(oldest)
+            .unwrap()
+            .milliseconds();
+        let runner_up_ts = app
+            .world()
+            .get::<LastActivatedAt>(runner_up)
+            .unwrap()
+            .milliseconds();
         assert_eq!(oldest_ts, 1, "the oldest stack must not be activated");
         assert!(
             runner_up_ts > oldest_ts,
@@ -1784,10 +1785,7 @@ mod tests {
     fn closing_an_unpresented_close_successor_preserves_every_close_obligation() {
         let mut app = close_request_app();
 
-        let tab = app
-            .world_mut()
-            .spawn((Tab::default(), LastActivatedAt::now()))
-            .id();
+        let tab = app.world_mut().spawn((Tab, LastActivatedAt::now())).id();
         let pane = app
             .world_mut()
             .spawn((Pane, LastActivatedAt::now(), ChildOf(tab)))
@@ -1837,10 +1835,7 @@ mod tests {
     #[test]
     fn closing_an_unpresented_focus_successor_restores_its_predecessor() {
         let mut app = close_request_app();
-        let tab = app
-            .world_mut()
-            .spawn((Tab::default(), LastActivatedAt::now()))
-            .id();
+        let tab = app.world_mut().spawn((Tab, LastActivatedAt::now())).id();
         let pane = app
             .world_mut()
             .spawn((Pane, LastActivatedAt::now(), ChildOf(tab)))
@@ -2340,7 +2335,12 @@ mod tests {
                 vmux_ecs::EffectiveStartupUrl("vmux://start/".to_string()),
             ))
             .id();
-        let old_space = app.world_mut().spawn(crate::space::Space::bundle(vmux_api::Id::<crate::space::Space>::new("old"))).id();
+        let old_space = app
+            .world_mut()
+            .spawn(crate::space::Space::bundle(vmux_api::Id::<
+                crate::space::Space,
+            >::new("old")))
+            .id();
 
         let old_tab = app
             .world_mut()
@@ -2399,7 +2399,7 @@ mod tests {
         let other_space = app.world_mut().spawn(crate::space::Space).id();
         let other_tab = app
             .world_mut()
-            .spawn((Tab::default(), LastActivatedAt::new(1), ChildOf(other_space)))
+            .spawn((Tab, LastActivatedAt::new(1), ChildOf(other_space)))
             .id();
         let other_pane = app
             .world_mut()
@@ -2407,7 +2407,11 @@ mod tests {
             .id();
         let existing = app
             .world_mut()
-            .spawn((Stack::default(), LastActivatedAt::new(1), ChildOf(other_pane)))
+            .spawn((
+                Stack::default(),
+                LastActivatedAt::new(1),
+                ChildOf(other_pane),
+            ))
             .id();
 
         app.update();
@@ -2596,11 +2600,7 @@ mod tests {
             .id();
         let background_tab = app
             .world_mut()
-            .spawn((
-                Tab::default(),
-                LastActivatedAt::now(),
-                ChildOf(background_space),
-            ))
+            .spawn((Tab, LastActivatedAt::now(), ChildOf(background_space)))
             .id();
         let background_pane = app
             .world_mut()
@@ -2790,7 +2790,13 @@ mod tests {
             panic!("replacement opens in a stack");
         };
         assert_ne!(opened, retiring);
-        assert_eq!(app.world().get::<LastActivatedAt>(retiring).unwrap().0, 1);
+        assert_eq!(
+            app.world()
+                .get::<LastActivatedAt>(retiring)
+                .unwrap()
+                .milliseconds(),
+            1
+        );
     }
 
     #[test]
@@ -3197,20 +3203,28 @@ mod tests {
         let main = app.world_mut().spawn(crate::window::Main).id();
         let space_a = app
             .world_mut()
-            .spawn((crate::space::Space, ChildOf(main)))
+            .spawn((
+                crate::space::Space,
+                vmux_api::Id::<crate::space::Space>::new(
+                    "active_tab_param_picks_active_space_tab_not_global_max-0",
+                ),
+                ChildOf(main),
+            ))
             .id();
         let _tab_a = app
             .world_mut()
-            .spawn((
-                Tab,
-                Active,
-                LastActivatedAt::new(100),
-                ChildOf(space_a),
-            ))
+            .spawn((Tab, Active, LastActivatedAt::new(100), ChildOf(space_a)))
             .id();
         let space_b = app
             .world_mut()
-            .spawn((crate::space::Space, Active, ChildOf(main)))
+            .spawn((
+                crate::space::Space,
+                vmux_api::Id::<crate::space::Space>::new(
+                    "active_tab_param_picks_active_space_tab_not_global_max-1",
+                ),
+                Active,
+                ChildOf(main),
+            ))
             .id();
         let tab_b = app
             .world_mut()
@@ -3236,6 +3250,9 @@ mod tests {
             .world_mut()
             .spawn((
                 crate::space::Space,
+                vmux_api::Id::<crate::space::Space>::new(
+                    "active_tab_param_repairs_within_current_space-0",
+                ),
                 crate::space::CurrentSpace,
                 Active,
                 ChildOf(main),
@@ -3268,7 +3285,7 @@ mod tests {
             .spawn((crate::space::Space, ChildOf(main)))
             .id();
         app.world_mut()
-            .spawn((Tab::default(), LastActivatedAt::new(100), ChildOf(other)));
+            .spawn((Tab, LastActivatedAt::new(100), ChildOf(other)));
 
         let got = app
             .world_mut()
@@ -3284,7 +3301,12 @@ mod tests {
         let pane = app.world_mut().spawn(Pane).id();
         let active = app
             .world_mut()
-            .spawn((Stack::default(), Active, LastActivatedAt::new(1), ChildOf(pane)))
+            .spawn((
+                Stack::default(),
+                Active,
+                LastActivatedAt::new(1),
+                ChildOf(pane),
+            ))
             .id();
         app.world_mut()
             .spawn((Stack::default(), LastActivatedAt::new(100), ChildOf(pane)));
@@ -3300,7 +3322,7 @@ mod tests {
     #[test]
     fn layout_focus_walks_the_active_pane_branch() {
         let mut app = App::new();
-        let tab = app.world_mut().spawn(Tab::default()).id();
+        let tab = app.world_mut().spawn(Tab).id();
         let root = app
             .world_mut()
             .spawn((

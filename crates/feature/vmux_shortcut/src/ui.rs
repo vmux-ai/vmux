@@ -1,5 +1,6 @@
-use vmux_ui::hooks::UiState;
 #![allow(non_snake_case)]
+
+use vmux_ui::hooks::UiState;
 
 use crate::{
     ShortcutCollectionViewRequest, ShortcutProbeClearRequest, ShortcutProbePressRequest,
@@ -12,7 +13,7 @@ use vmux_ui::components::manager::{
 };
 use vmux_ui::components::page::PageShell;
 use vmux_ui::components::page_address::PageAddress;
-use vmux_ui::hooks::{send, use_theme, };
+use vmux_ui::hooks::{send, use_theme};
 use vmux_ui::i18n::{TranslationValue, translate, translate_with};
 use vmux_ui::icon::{BuiltinIconView, LineIcon, LineIconView};
 

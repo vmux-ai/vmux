@@ -10,8 +10,7 @@ use vmux_ui::icon::{GitSymbol, GitSymbolView, LineIcon, LineIconView, PageIconVi
 
 use crate::event::{
     ActiveSession, ActiveWorkspaceProject, ProjectDropdownCloseRequest, ProjectDropdownOpenRequest,
-    ProjectDropdownState, TabBoundary,
-    WorkspaceBranch,
+    ProjectDropdownState, TabBoundary, WorkspaceBranch,
 };
 
 use super::LayoutDropdown;

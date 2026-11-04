@@ -113,22 +113,10 @@ impl ModalHost {
     }
 
     pub(super) fn set_bounds(&self, webview: &wry::WebView, bounds: wry::Rect) {
-        let scale = self.parent.backingScaleFactor();
-        let position = bounds.position.to_logical::<f64>(scale);
-        let size = bounds.size.to_logical::<f64>(scale);
-        let parent_frame = self.parent.frame();
-        let content_height = self
-            .parent
-            .contentView()
-            .map(|view| view.frame().size.height)
-            .unwrap_or(parent_frame.size.height);
-        let frame = NSRect::new(
-            NSPoint::new(
-                parent_frame.origin.x + position.x,
-                parent_frame.origin.y + content_height - position.y - size.height,
-            ),
-            NSSize::new(size.width, size.height),
-        );
+        let Some(coordinates) = self.coordinates() else {
+            return;
+        };
+        let frame = coordinates.frame(bounds);
         self.panel.setFrame_display(frame, true);
         let wk = webview.webview();
         let view: &NSView = &wk;
@@ -136,6 +124,19 @@ impl ModalHost {
             content.setFrame(NSRect::new(NSPoint::new(0.0, 0.0), frame.size));
             view.setFrame(content.bounds());
         }
+    }
+
+    pub(super) fn bounds(&self) -> Option<wry::Rect> {
+        Some(self.coordinates()?.bounds(self.panel.frame()))
+    }
+
+    fn coordinates(&self) -> Option<ModalCoordinates> {
+        let content = self.parent.contentView()?;
+        let window_frame = content.convertRect_toView(content.bounds(), None);
+        Some(ModalCoordinates {
+            content: self.parent.convertRectToScreen(window_frame),
+            scale: self.parent.backingScaleFactor(),
+        })
     }
 
     pub(super) fn set_visible(&self, visible: bool) {
@@ -186,6 +187,38 @@ impl Drop for ModalHost {
             glass.setContentView(None);
         }
         self.panel.setContentView(None);
+    }
+}
+
+struct ModalCoordinates {
+    content: NSRect,
+    scale: f64,
+}
+
+impl ModalCoordinates {
+    fn frame(&self, bounds: wry::Rect) -> NSRect {
+        let position = bounds.position.to_logical::<f64>(self.scale);
+        let size = bounds.size.to_logical::<f64>(self.scale);
+        NSRect::new(
+            NSPoint::new(
+                self.content.origin.x + position.x,
+                self.content.origin.y + self.content.size.height - position.y - size.height,
+            ),
+            NSSize::new(size.width, size.height),
+        )
+    }
+
+    fn bounds(&self, frame: NSRect) -> wry::Rect {
+        wry::Rect {
+            position: wry::dpi::LogicalPosition::new(
+                frame.origin.x - self.content.origin.x,
+                self.content.origin.y + self.content.size.height
+                    - frame.origin.y
+                    - frame.size.height,
+            )
+            .into(),
+            size: wry::dpi::LogicalSize::new(frame.size.width, frame.size.height).into(),
+        }
     }
 }
 
@@ -435,6 +468,34 @@ impl PresentedLayer {
 #[cfg(test)]
 mod presentation_tests {
     use super::*;
+
+    #[test]
+    fn modal_bounds_track_the_panel_in_parent_content_coordinates() {
+        for scale in [1.0, 2.0] {
+            let coordinates = ModalCoordinates {
+                content: NSRect::new(NSPoint::new(-1200.0, 84.0), NSSize::new(960.0, 640.0)),
+                scale,
+            };
+            let requested = wry::Rect {
+                position: wry::dpi::PhysicalPosition::new(24.0 * scale, 48.0 * scale).into(),
+                size: wry::dpi::PhysicalSize::new(320.0 * scale, 180.0 * scale).into(),
+            };
+            let mut panel = coordinates.frame(requested);
+            assert_eq!(panel.origin, NSPoint::new(-1176.0, 496.0));
+            assert_eq!(panel.size, NSSize::new(320.0, 180.0));
+            panel.origin.x += 12.0;
+            panel.origin.y -= 8.0;
+            let actual = coordinates.bounds(panel);
+            assert_eq!(
+                actual.position.to_logical::<f64>(scale),
+                wry::dpi::LogicalPosition::new(36.0, 56.0)
+            );
+            assert_eq!(
+                actual.size.to_logical::<f64>(scale),
+                wry::dpi::LogicalSize::new(320.0, 180.0)
+            );
+        }
+    }
 
     #[test]
     fn native_presentation_must_match_the_requested_frame_and_fade_phase() {

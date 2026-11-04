@@ -962,7 +962,7 @@ fn project_header(
         Entity,
         &vmux_ecs::page::AddressContribution,
         &PageMetadata,
-        Option<&vmux_ecs::UiState<vmux_api::address::PageAddressUiState>>,
+        Option<&vmux_ecs::UiState<vmux_api::address::UiPageAddress>>,
     )>,
     slots: Query<&vmux_ecs::page::AddressSlot>,
     focus: crate::stack::FocusedStack,
@@ -1005,15 +1005,15 @@ fn project_header(
                 .and_then(|state| state.current())
                 .is_none_or(|state| state.in_header != visible)
             {
-                commands.trigger(vmux_ecs::UiStateWrite::<
-                    vmux_api::address::PageAddressUiState,
-                >::from_event(
-                    owner,
-                    &vmux_api::address::PageAddressUiStatePatch {
-                        address: None,
-                        in_header: Some(visible),
-                    },
-                ));
+                commands.trigger(
+                    vmux_ecs::UiStateWrite::<vmux_api::address::UiPageAddress>::from_event(
+                        owner,
+                        &vmux_api::address::UiPageAddressPatch {
+                            address: None,
+                            in_header: Some(visible),
+                        },
+                    ),
+                );
             }
         }
         if current != Some(&next) {

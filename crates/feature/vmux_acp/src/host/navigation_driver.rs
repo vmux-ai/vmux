@@ -47,6 +47,8 @@ pub(super) struct PageOpener<'w, 's> {
         ),
         With<Session>,
     >,
+    identities: Res<'w, vmux_ecs::IdentityIndex<Session>>,
+    mutations: MessageWriter<'w, vmux_session::SessionMutationRequest>,
     links: AcpSessionLinks<'w, 's>,
     children: Query<'w, 's, &'static Children>,
     child_of: Query<'w, 's, &'static ChildOf>,
@@ -146,34 +148,23 @@ impl PageOpener<'_, '_> {
                 Ok(PageOpenCompletion::Complete)
             }
             Route::Session(id) => {
-                let mut selected = None;
-                for (entity, candidate, name, cwd, agent, active) in &self.sessions {
-                    if candidate != &id {
-                        continue;
-                    }
-                    selected = Some((
-                        entity,
-                        name.as_str().to_string(),
-                        cwd.0.clone(),
-                        agent.map(|agent| agent.as_str().to_string()),
-                        self.links
-                            .get(entity)
-                            .map(|link| link.id().as_str().to_string()),
-                        active.map(|active| active.0),
-                    ));
-                    break;
-                }
-                let Some((
-                    session_entity,
-                    session_name,
-                    stored_cwd,
-                    selected_agent,
-                    resume,
-                    active,
-                )) = selected
-                else {
-                    return Err(format!("Session '{id}' was not found"));
-                };
+                let session_entity = self
+                    .identities
+                    .entity(&id)
+                    .map_err(|error| error.to_string())?
+                    .ok_or_else(|| format!("Session '{id}' was not found"))?;
+                let (_, _, name, cwd, agent, active) = self
+                    .sessions
+                    .get(session_entity)
+                    .map_err(|_| format!("Session '{id}' is unavailable"))?;
+                let session_name = name.as_str().to_string();
+                let stored_cwd = cwd.0.clone();
+                let selected_agent = agent.map(|agent| agent.as_str().to_string());
+                let active = active.map(|active| active.0);
+                let resume = self
+                    .links
+                    .get(session_entity)
+                    .map(|link| link.id().as_str().to_string());
                 let agent_id = selected_agent
                     .or_else(|| {
                         self.settings
@@ -203,9 +194,11 @@ impl PageOpener<'_, '_> {
                 };
                 if let Some(anchor) = active {
                     if cwd_missing {
-                        self.commands
-                            .entity(session_entity)
-                            .insert(Cwd(cwd.clone()));
+                        self.mutations
+                            .write(vmux_session::SessionMutationRequest::local(
+                                id.clone(),
+                                vmux_session::SessionMutation::ChangeWorkspace(cwd.clone()),
+                            ));
                     }
                     self.bind_workspace(task.stack, &cwd);
                     self.commands
@@ -247,9 +240,6 @@ impl PageOpener<'_, '_> {
                     icon,
                     resume,
                 );
-                self.commands
-                    .entity(session_entity)
-                    .insert(AgentRef::new(agent_id));
                 let prompt =
                     self.defer_initial_prompt(task.stack, initial_prompt, initial_attachments);
                 let operation = self
@@ -455,6 +445,8 @@ mod tests {
         let mut world = World::new();
         world.insert_resource(AppSettings::default());
         world.insert_resource(Time::<()>::default());
+        world.insert_resource(vmux_ecs::IdentityIndex::<Session>::default());
+        world.insert_resource(Messages::<vmux_session::SessionMutationRequest>::default());
         let attachment = AgentAttachment {
             path: "/tmp/image.png".into(),
             name: "image.png".into(),
@@ -486,6 +478,8 @@ mod tests {
         let mut world = World::new();
         world.insert_resource(AppSettings::default());
         world.insert_resource(Time::<()>::default());
+        world.insert_resource(vmux_ecs::IdentityIndex::<Session>::default());
+        world.insert_resource(Messages::<vmux_session::SessionMutationRequest>::default());
         let navigation = vmux_ecs::PageOpenId::new();
 
         let handoff = world

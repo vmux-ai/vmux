@@ -432,6 +432,16 @@ belong to `vmux_connector`; credentials and leases belong to `vmux_auth`; provid
 in their provider feature crates. Layout, page, browser, and CEF state each have one owning plugin.
 Other features submit typed requests rather than mutating those internals.
 
+```text
+build  → register features + typed page behavior
+finish → freeze FeatureRegistry → browser embedded hosts → CEF config → CEF initialize
+```
+
+Browser host allowlists derive from the frozen declarations, including features installed after
+Browser. Asset hosts use an explicit override, then the manifest URL, then the route URL; a
+`file://` page with manifest URL `vmux://files/` serves `files/index.html`. CEF configuration is
+committed before framework initialization callbacks can read it.
+
 `vmux_app` exposes reusable feature-plugin composition without owning executable policy. Page
 manifests, hosted-page plugins, command-bar contributions, and typed MCP tools remain in their
 owning feature crates. A custom
@@ -467,7 +477,8 @@ UI action type.
 Projection payloads use the `Ui*` prefix, such as `UiTheme` and `UiGit`. Feature roots compose
 `UiState<T>` into one reusable selector bundle where multiple descendants share derived state.
 Descendants read that context; props carry leaf display values and local callbacks, not the page
-store.
+store. Descendants never install a second listener: recovery captures one retained snapshot per
+type, and duplicate subscriptions must not replace that snapshot reader.
 
 `#[vmux_api::ui_state]` is the state-specific host-to-UI contract. It includes the contract,
 `HostEvent`, and `UiState` implementations, while `#[vmux_api::ui_state_patch]` supplies the
@@ -575,7 +586,8 @@ opaque committed surface. Commit waits for the platform to acknowledge the incom
 opacity, so no frame exposes the window background. Content pages use the same lifecycle with an
 immediate presentation step. Feature page-open handlers create or retarget the incoming surface;
 they never despawn the committed surface themselves. Only the page reducer retires it after
-presentation commits.
+presentation commits. Native modal bounds use the parent content view's logical coordinates in both
+directions; settlement reads the actual panel screen frame, not its child webview's local frame.
 
 Stack and Tab replacement uses one presentation transition. Selection changes immediately, while
 the projection keeps the outgoing branch visible until a ready presented surface exists under the
@@ -595,7 +607,7 @@ instead of feature-specific loading gates.
 
 Native interaction-state updates are repeatable: each update changes the IPC epoch and the
 document's inert state without adding persistent JavaScript bindings.
-Page-local navigation uses `PageLocationRequest` and `PageLocationUiState`, with the fragment
+Page-local navigation uses `PageLocationRequest` and `UiPageLocation`, with the fragment
 stored in `PageMetadata`. Fragment-only changes update the hosted URL and the committed Stack
 without rebuilding the document or changing its data-cache identity. Pages resolve that shared
 location to their own file or section and use the common scroll transport; Settings can consume
@@ -707,20 +719,23 @@ a revision is saving remain dirty and trigger the next save. Specialized domains
 entity scope, path, validation, seeding, and one writer while sharing the durability mechanics.
 Materialization runs through a tracked load event, so deserialize or scene failures update the same
 typed state, hard-reset only that store, and cannot leave restore silently pending.
-The first `PreUpdate` completes `Validate → Resolve → Ready`: owner-registered validators reject
+Restore advances `Materialize → Validate → Resolve → Ready`. Owner-registered validators reject
 duplicate stable IDs, partial canonical entities, missing owners, and ownership cycles before layout
-reconstruction. A failed restore despawns the materialized entities, hard-resets the store, and
-bootstraps fresh state. Feature projections begin in `Update`, after restore is ready.
+reconstruction. Resolve waits for the layout adapter to rebuild runtime views and acknowledge
+`LayoutRestoreCommitted` on a later frame; validation alone cannot mark the store ready. A failed
+restore despawns materialized entities, hard-resets only that store, and bootstraps fresh state.
+Saves remain blocked until Ready.
 
 Collaborative roots own persisted committed-operation, snapshot, tombstone, and replica-ack child
 entities. Replay orders operations by sequence and rejects duplicate identities, duplicate
 sequences, and non-monotonic revisions. Compaction removes only entries covered by a snapshot and
 every replica acknowledgement; tombstones additionally remain until their retention window ends.
 Provider synchronization stays outside this replication log.
-Session roots use that log for creation, metadata, workflow, project, archive, and taxonomy
-mutations. Each accepted operation carries an operation ID, actor, target, captured revision,
+Session roots use that log for creation, metadata, workspace, agent selection, workflow, project,
+archive, and taxonomy mutations. Each accepted operation carries an operation ID, actor, target, captured revision,
 committed revision, sequence, timestamp, and typed payload. Duplicate operation IDs are idempotent;
-stale captured revisions are rejected before canonical state changes. A `Created` operation can
+stale captured revisions and ambiguous Session identities are rejected before canonical state
+changes. A `Created` operation can
 materialize a missing Session root, so a snapshot plus later operations and a full operation replay
 share one mutation path.
 
@@ -1317,8 +1332,21 @@ Vmux state. Resuming it creates the canonical Session entity, attaches the provi
 and lets the provider replay the conversation through `session/load`. Compatibility watches exist only while
 the Sessions page or one of their imported Sessions is present, debounce into one wake, rescan only
 the changed provider, and bound untrusted history traversal.
-The Session manager publishes only to its active page and leases Git metadata for every displayed
-repository while that page remains active.
+The Session manager publishes the global catalog only to its active manager page; converting it to
+a detail page removes the global projection. Detail and embedded scope pages receive only their
+bound Session or workspace projection. Active pages lease Git metadata for their displayed
+repositories.
+
+```text
+project selection → Operation + Id<Operation> + OperationTarget(Tab) + captured revision
+                  → Running ↔ cleanup wait / retry
+                  → Succeeded | Failed + OperationError | Canceled
+```
+
+Accepted project activation lives on the operation entity, not a Tab-keyed pending map. A newer
+selection cancels the older task; only the matching Tab selection revision may apply its result.
+Discarded checkouts retain their cleanup guard, and terminal operation state remains inspectable
+until the common retention cleanup.
 Composer workspace context resolves the Session named by the page URL even before runtime attachment
 has bound the Stack. Unpublished context is retried after the first ready frame, so a late binding
 cannot leave project and branch controls as placeholders. Branch menus enqueue their checkout reads

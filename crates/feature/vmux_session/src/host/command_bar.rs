@@ -563,7 +563,7 @@ mod tests {
                 }
             }
             picker.app.world_mut().trigger(
-                UiStateWrite::<vmux_api::command_bar::CommandBarUiState>::from_event(
+                UiStateWrite::<vmux_api::command_bar::UiCommandBar>::from_event(
                     picker.view,
                     &ResumableSessions {
                         request_id: 1,

@@ -16,7 +16,7 @@
             permissions: [
                 "PageReady",
                 "PageLocationRequest",
-                "PageLocationUiState",
+                "UiPageLocation",
                 "UiTheme",
                 "UiGit",
                 "GitKeyRequest",

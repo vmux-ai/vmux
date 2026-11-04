@@ -700,9 +700,7 @@ fn deliver_repository_outputs(
                 if let Some(patch) =
                     states.set_repository(webview, snapshot, request.refresh_catalogs)
                 {
-                    commands.trigger(vmux_ecs::UiStateWrite::<UiGit>::from_event(
-                        webview, &patch,
-                    ));
+                    commands.trigger(vmux_ecs::UiStateWrite::<UiGit>::from_event(webview, &patch));
                 }
             }
             Err(error) => {

@@ -1,11 +1,11 @@
 use bevy::prelude::*;
 use vmux_api::protocol::ProcessId;
 use vmux_ecs::{
-    Cwd, EntityTarget, PageMetadata, PageNavigation, PendingPrompt, PendingPromptAttachments,
+    EntityTarget, PageMetadata, PageNavigation, PendingPrompt, PendingPromptAttachments,
     ProcessAnchor,
 };
 use vmux_flex::Visibility;
-use vmux_layout::tab::{Tab, TabWorkspace};
+use vmux_layout::tab::{StartupDir, Tab, TabWorkspace};
 use vmux_session::{AgentConversationTitle, Id, PromptQueue, Session, TitlePending};
 
 pub(super) use super::attach_driver::AcpAgentAttachment;
@@ -17,7 +17,13 @@ use super::navigation::{InlineTransitionSnapshot, PreparingAgentChatView};
 use crate::session::{AcpSessionLink, AcpSessionLinks};
 
 pub(super) fn add(app: &mut App) {
-    app.add_systems(Update, attach.after(vmux_ecs::PageOpenSet::ResolveTarget));
+    app.add_message::<vmux_session::SessionMutationRequest>()
+        .add_systems(
+            Update,
+            attach
+                .after(vmux_ecs::PageOpenSet::HandleKnownPages)
+                .before(vmux_session::SessionMutationCommitSet),
+        );
 }
 
 fn attach(
@@ -45,13 +51,17 @@ fn attach(
     navigations: Query<&PageNavigation>,
     child_of: Query<&ChildOf>,
     children: Query<&Children>,
-    mut tabs: Query<&mut Tab>,
+    mut tabs: Query<&mut StartupDir, With<Tab>>,
+    profiles: vmux_ecs::team::Profiles,
     mut workspaces: Query<&mut TabWorkspace>,
     mut queues: Query<&mut PromptQueue>,
     time: Res<Time>,
     links: AcpSessionLinks,
+    mut mutations: MessageWriter<vmux_session::SessionMutationRequest>,
     mut commands: Commands,
+    mut attached_profiles: Local<std::collections::HashMap<Entity, Entity>>,
 ) {
+    attached_profiles.clear();
     for (
         operation,
         SessionTarget(session_entity),
@@ -91,7 +101,7 @@ fn attach(
         loop {
             if let Ok(mut tab) = tabs.get_mut(ancestor) {
                 let cwd = cwd.to_string_lossy().into_owned();
-                tab.startup_dir = Some(cwd.clone());
+                tab.0 = Some(std::path::PathBuf::from(&cwd));
                 if let Ok(mut workspace) = workspaces.get_mut(ancestor) {
                     workspace.project_dir.clone_from(&cwd);
                 } else {
@@ -108,19 +118,9 @@ fn attach(
         }
         commands
             .entity(*stack)
-            .insert(EntityTarget::<vmux_session::Session>::new(*session_entity));
+            .insert(EntityTarget::<Session>::new(*session_entity));
         if navigation.is_none() {
             commands.entity(*stack).insert(page_metadata.clone());
-        }
-        let transition_view = webview.map(|webview| webview.entity());
-        if transition_view.is_some()
-            && let Ok(stack_children) = children.get(*stack)
-        {
-            for child in stack_children.iter() {
-                if Some(child) != transition_view {
-                    commands.entity(child).despawn();
-                }
-            }
         }
         let mut prompt_title_inserted = false;
         if let Some(prompt) = prompt {
@@ -144,11 +144,17 @@ fn attach(
                     .remove::<(PendingPrompt, PendingPromptAttachments)>();
             }
         }
+        mutations.write(vmux_session::SessionMutationRequest::local(
+            session_id.clone(),
+            vmux_session::SessionMutation::ChangeWorkspace(cwd.clone()),
+        ));
+        mutations.write(vmux_session::SessionMutationRequest::local(
+            session_id.clone(),
+            vmux_session::SessionMutation::ChangeAgent(Some(vmux_session::AgentRef::new(agent_id))),
+        ));
         let anchor = ProcessId::new();
         commands.entity(*session_entity).insert((
             vmux_ecs::agent::AgentSessionRoot,
-            vmux_session::AgentRef::new(agent_id),
-            Cwd(cwd.clone()),
             ProcessAnchor(anchor),
             vmux_session::RunState::default(),
             vmux_session::ApprovalPolicy::default(),
@@ -156,11 +162,19 @@ fn attach(
                 sid: sid.to_string(),
             },
         ));
-        commands.spawn(
-            vmux_ecs::team::Profile::registry(agent_name, agent_id)
-                .with_icon(profile_icon)
-                .owned_by(*session_entity),
-        );
+        if let Some(profile) = attached_profiles.remove(session_entity) {
+            commands.entity(profile).despawn();
+        } else {
+            profiles.remove(&mut commands, *session_entity);
+        }
+        let profile = commands
+            .spawn(
+                vmux_ecs::team::Profile::registry(agent_name, agent_id)
+                    .with_icon(profile_icon)
+                    .owned_by(*session_entity),
+            )
+            .id();
+        attached_profiles.insert(*session_entity, profile);
         commands
             .entity(*session_entity)
             .entry::<PromptQueue>()
@@ -394,7 +408,7 @@ mod tests {
                 vmux_ecs::PageOpenTask {
                     id: vmux_ecs::PageOpenId::new(),
                     stack,
-                    url: vmux_session::Route::Session(SessionId("sid-1".into())).url(),
+                    url: vmux_session::Route::Session(Id::<Session>::new("sid-1")).url(),
                     request_id: None,
                 },
                 vmux_ecs::PageOpenDeferred,
@@ -518,5 +532,30 @@ mod tests {
         assert!(app.world().get_entity(operation).is_err());
         assert!(app.world().get::<PageMetadata>(stack).is_none());
         assert!(app.world().get::<ProcessAnchor>(session).is_none());
+    }
+
+    #[test]
+    fn same_frame_attachments_leave_only_the_latest_owned_profile() {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins);
+        add(&mut app);
+        let session = app.world_mut().spawn_empty().id();
+        for (agent, name) in [("vibe", "Vibe"), ("codex", "Codex")] {
+            let stack = app.world_mut().spawn_empty().id();
+            app.world_mut().spawn(AcpAgentAttachment::new(
+                session, stack, agent, "Task", name, "sid-1", "/tmp", None, None,
+            ));
+        }
+        app.update();
+        let world = app.world_mut();
+        let mut profiles =
+            world.query_filtered::<(&Name, &ChildOf), With<vmux_ecs::team::Profile>>();
+        let mut names = Vec::new();
+        for (name, owner) in profiles.iter(world) {
+            if owner.parent() == session {
+                names.push(name.as_str());
+            }
+        }
+        assert_eq!(names, ["Codex"]);
     }
 }

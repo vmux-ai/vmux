@@ -2,7 +2,7 @@
 
 use bevy::{ecs::relationship::Relationship, prelude::*};
 use bevy_cef::prelude::*;
-use bevy_cef_core::prelude::CefEmbeddedHosts;
+use bevy_cef_core::prelude::{CefEmbeddedHost, CefEmbeddedHosts, CefEmbeddedPageConfig};
 pub use command::{
     NavigationOperation, NavigationRequest, OpenRequest, ShowDevToolsRequest, ZoomChange,
     ZoomRequest,
@@ -18,10 +18,7 @@ pub use native_layout::NativeLayout;
 pub use navigation::OpenHistoryRequest;
 pub use tool::BrowserToolPlugin;
 use vmux_command::{PendingCommandBarReveal, ReadCommandRequests};
-use vmux_ecs::{
-    PageOpenSet,
-    page::{PageManifest, PageReady},
-};
+use vmux_ecs::{PageOpenSet, page::PageReady};
 use vmux_layout::PendingWebviewReveal;
 use vmux_layout::event::{
     HeaderAddressFocusRequest, HeaderBackRequest, HeaderForwardRequest, HeaderReloadRequest,
@@ -106,6 +103,22 @@ impl HostedPageLifecycle {
 pub struct BrowserPlugin;
 
 impl BrowserPlugin {
+    fn embedded_hosts(registry: &vmux_feature::FeatureRegistry) -> CefEmbeddedHosts {
+        let mut hosts = Vec::new();
+        for manifest in registry.manifests() {
+            for page in &manifest.pages {
+                let host = page
+                    .asset_host()
+                    .expect("page manifest requires asset_host");
+                hosts.push(CefEmbeddedHost {
+                    host: host.to_string(),
+                    default_document: format!("{}/index.html", host.trim().trim_matches('/')),
+                });
+            }
+        }
+        CefEmbeddedHosts(hosts)
+    }
+
     pub fn configure_schedule(app: &mut App) -> &mut App {
         app.configure_sets(
             Update,
@@ -142,13 +155,6 @@ impl Plugin for BrowserPlugin {
             BrowserToolPlugin,
             platform::BrowserPlatformPlugin,
         ));
-        let mut manifests = app.world_mut().query::<&PageManifest>();
-        let embedded_hosts = CefEmbeddedHosts(
-            manifests
-                .iter(app.world())
-                .map(PageManifest::embedded_host)
-                .collect(),
-        );
         Self::configure_schedule(app)
             .add_message::<bevy_cef_core::prelude::WebviewCommittedNavigationEvent>()
             .add_message::<WebviewLoadCompleted>()
@@ -159,7 +165,6 @@ impl Plugin for BrowserPlugin {
                     root_cache_path: host::CefStartup::root_cache_path(),
                     locale: startup_locale.value().to_string(),
                     accept_language_list: startup_accept_language_list,
-                    embedded_hosts,
                     #[cfg(target_os = "macos")]
                     os_crypt_key_provider: host::CefStartup::os_crypt_key_provider(),
                     ..default()
@@ -202,6 +207,12 @@ impl Plugin for BrowserPlugin {
                 scroll::ScrollPlugin,
                 window_drag::WindowDragPlugin,
             ));
+    }
+
+    fn finish(&self, app: &mut App) {
+        let hosts = Self::embedded_hosts(app.world().resource::<vmux_feature::FeatureRegistry>());
+        let mut config = app.world_mut().resource_mut::<CefEmbeddedPageConfig>();
+        *config = CefEmbeddedPageConfig::new(config.scheme.clone(), hosts);
     }
 }
 
@@ -270,3 +281,57 @@ fn sync_cef_backend(
 
 #[cfg(test)]
 mod tests;
+
+#[cfg(test)]
+mod embedded_registration {
+    use super::*;
+    use vmux_feature::AppFeatureExt;
+
+    struct EmbeddedRegistration;
+
+    impl Plugin for EmbeddedRegistration {
+        fn build(&self, app: &mut App) {
+            app.insert_resource(CefEmbeddedPageConfig::default());
+        }
+
+        fn finish(&self, app: &mut App) {
+            BrowserPlugin.finish(app);
+        }
+    }
+
+    struct Pages;
+
+    impl vmux_feature::FeatureManifestSource for Pages {
+        const SOURCE: &'static str = r#"(pages: [
+            (url: "vmux://sessions/", title: "Sessions"),
+            (url: "file://", manifest_url: "vmux://files/", title: "Files"),
+            (url: "git://", title: "Git"),
+        ])"#;
+    }
+
+    #[test]
+    fn embedded_hosts_use_the_frozen_declarations_including_late_features() {
+        let mut app = App::new();
+        app.add_plugins((vmux_feature::FeatureRegistryPlugin, EmbeddedRegistration))
+            .register_feature::<Pages>();
+        app.finish();
+        let config = app.world().resource::<CefEmbeddedPageConfig>();
+        assert_eq!(
+            config.hosts.0,
+            [
+                CefEmbeddedHost {
+                    host: "sessions".into(),
+                    default_document: "sessions/index.html".into()
+                },
+                CefEmbeddedHost {
+                    host: "files".into(),
+                    default_document: "files/index.html".into()
+                },
+                CefEmbeddedHost {
+                    host: "git".into(),
+                    default_document: "git/index.html".into()
+                },
+            ]
+        );
+    }
+}
