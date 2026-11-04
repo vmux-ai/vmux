@@ -67,7 +67,7 @@ pub(super) struct LayoutTransition {
 }
 
 impl LayoutTransition {
-    const DURATION: f32 = 0.2;
+    const DURATION: f32 = vmux_ui::motion::Motion::LAYOUT_MS as f32 / 1000.0;
 
     fn progress(&mut self, now: std::time::Duration) -> f32 {
         self.elapsed = now
@@ -339,10 +339,10 @@ mod tests {
         };
         let first = transition.progress(started);
         assert_eq!(LayoutTransition::value(80.0, 0.0, first), 80.0);
-        let middle = transition.progress(started + std::time::Duration::from_millis(100));
+        let middle = transition.progress(started + std::time::Duration::from_millis(60));
         assert_eq!(LayoutTransition::value(80.0, 0.0, middle), 10.0);
         assert!(!transition.complete());
-        transition.progress(started + std::time::Duration::from_millis(200));
+        transition.progress(started + std::time::Duration::from_millis(120));
         assert!(transition.complete());
     }
 

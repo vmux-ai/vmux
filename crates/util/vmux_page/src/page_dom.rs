@@ -216,6 +216,57 @@ mod tests {
         assert_eq!(inner.0.get(), 1);
     }
 
+    #[cfg(ui)]
+    #[derive(Clone, Default)]
+    struct AddressClicks {
+        url: Rc<Cell<usize>>,
+        item: Rc<Cell<usize>>,
+    }
+
+    #[cfg(ui)]
+    #[component]
+    fn ClickableAddress() -> Element {
+        let clicks = consume_context::<AddressClicks>();
+        let url = clicks.url;
+        let item = clicks.item;
+        rsx! {
+            vmux_ui::components::page_address::AddressSurface {
+                url: "vmux://settings/".to_string(),
+                onactivate: move |_| url.set(url.get() + 1),
+                button { onclick: move |_| item.set(item.get() + 1), "Settings" }
+            }
+        }
+    }
+
+    #[test]
+    #[cfg(ui)]
+    fn address_background_and_navigation_buttons_have_independent_click_events() {
+        let clicks = AddressClicks::default();
+        let provided = clicks.clone();
+        let mut page = PageDom::mount(
+            ClickableAddress,
+            crate::Instance::from(move |scope: crate::PageScope<'_>| scope.provide(provided)),
+        );
+        let initial = page.dom.rebuild_to_vec();
+        let targets: Vec<_> = initial
+            .edits
+            .iter()
+            .filter_map(|edit| match edit {
+                dioxus_core::Mutation::NewEventListener { name, id } if name == "click" => {
+                    Some(*id)
+                }
+                _ => None,
+            })
+            .collect();
+        assert_eq!(targets.len(), 2);
+        page.handle(click_on(targets[0]), ());
+        assert_eq!(clicks.url.get(), 1);
+        assert_eq!(clicks.item.get(), 0);
+        page.handle(click_on(targets[1]), ());
+        assert_eq!(clicks.item.get(), 1);
+        assert_eq!(clicks.url.get(), 1);
+    }
+
     #[component]
     fn Static() -> Element {
         rsx! { div { "hello" } }

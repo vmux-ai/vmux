@@ -55,6 +55,7 @@ pub fn BreadcrumbItem(
     match onclick {
         Some(handler) => rsx! {
             button {
+                "data-vmux-address-item": "",
                 r#type: "button",
                 class,
                 title,
@@ -64,7 +65,7 @@ pub fn BreadcrumbItem(
             }
         },
         None => rsx! {
-            span { class, title, aria_current: if active { "page" } else { "false" },
+            span { "data-vmux-address-item": "", class, title, aria_current: if active { "page" } else { "false" },
                 {leading}
                 span { class: "truncate", "{label}" }
             }

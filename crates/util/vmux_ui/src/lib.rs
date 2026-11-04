@@ -21,6 +21,7 @@ pub mod file_icon;
 pub mod focus;
 
 pub mod icon;
+pub mod motion;
 
 mod i18n_catalogs {
     include!(concat!(env!("OUT_DIR"), "/i18n_catalogs.rs"));

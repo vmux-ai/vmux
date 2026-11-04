@@ -93,6 +93,26 @@ pub fn PageAddressOutlet(slot: u64, fallback: Element) -> Element {
 }
 
 #[component]
+pub fn AddressSurface(url: String, onactivate: EventHandler<()>, children: Element) -> Element {
+    rsx! {
+        div { class: "relative flex h-8 min-w-0 flex-1 items-center",
+            button {
+                r#type: "button",
+                "data-vmux-url-edit": "",
+                class: "absolute inset-0 appearance-none rounded-md border-0 bg-transparent outline-none cursor-text focus-visible:bg-foreground/[0.04]",
+                title: url.clone(),
+                aria_label: url,
+                onclick: move |_| onactivate.call(()),
+            }
+            div {
+                class: "pointer-events-none relative flex h-full min-w-0 flex-1 items-center px-1 [&_button]:pointer-events-auto [&_a]:pointer-events-auto [&_input]:pointer-events-auto [&_textarea]:pointer-events-auto [&_select]:pointer-events-auto [&_[role=button]]:pointer-events-auto [&_[role=tab]]:pointer-events-auto [&_[popover]]:pointer-events-auto [&_[contenteditable]]:pointer-events-auto [&_[data-vmux-address-item]]:pointer-events-auto [&_[data-vmux-dropdown-root]]:pointer-events-auto",
+                {children}
+            }
+        }
+    }
+}
+
+#[component]
 fn AddressContent(entry: Rc<AddressEntry>, presentation: HostBinding) -> Element {
     let source = entry.host.0.clone();
     let presentation = presentation.0;

@@ -2,7 +2,7 @@ use crate::page::Page;
 use crate::webview::dom::Dom;
 use crate::webview::report::PageMessage;
 use crate::webview::route::PageRoutes;
-use crate::webview::shim::WRY_HOST_SHIM;
+use crate::webview::shim::Shim;
 pub use embed::{AssetReply, Assets, Embedding, LifecycleSink, LifecycleUpdate, Outbox, Wake};
 use std::cell::Cell;
 use std::rc::Rc;
@@ -119,7 +119,7 @@ impl WebView {
             .with_background_color(appearance.surface_rgba(page.transparent))
             .with_visible(false)
             .with_initialization_script(&frame_capability_script)
-            .with_initialization_script(WRY_HOST_SHIM)
+            .with_initialization_script(Shim::source())
             .with_navigation_handler(|url| url.starts_with("vmux://"))
             .with_asynchronous_custom_protocol("vmux".into(), move |_id, request, responder| {
                 routes.serve(request, responder);

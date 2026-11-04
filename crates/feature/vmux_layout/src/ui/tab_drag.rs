@@ -83,8 +83,7 @@ impl TabDragVisual {
 
     pub(super) fn style(self) -> String {
         if !self.active || (!self.source && self.offset_x.abs() < f64::EPSILON) {
-            return "transform:none;z-index:auto;pointer-events:auto;transition:transform 140ms ease;"
-                .to_string();
+            return "transform:none;z-index:auto;pointer-events:auto;transition:none;".to_string();
         }
         if self.source {
             return format!(
@@ -93,8 +92,9 @@ impl TabDragVisual {
             );
         }
         format!(
-            "transform:translate3d({}px,0,0);z-index:auto;pointer-events:auto;transition:transform 140ms ease;",
-            self.offset_x
+            "transform:translate3d({}px,0,0);z-index:auto;pointer-events:auto;transition:transform {}ms ease-out;",
+            self.offset_x,
+            vmux_ui::motion::Motion::FEEDBACK_MS
         )
     }
 

@@ -32,7 +32,7 @@ struct RectMotion {
 }
 
 impl RectMotion {
-    const DURATION: f32 = 0.18;
+    const DURATION: f32 = vmux_ui::motion::Motion::LAYOUT_MS as f32 / 1000.0;
 
     fn matches(&self, target: &ComputedNode) -> bool {
         self.target.center.distance(target.center) < 0.01
@@ -1142,13 +1142,13 @@ mod tests {
         let (first, complete) = motion.value(started);
         assert_eq!(first.min(), Vec2::ZERO);
         assert!(!complete);
-        let (middle, complete) = motion.value(started + std::time::Duration::from_millis(90));
+        let (middle, complete) = motion.value(started + std::time::Duration::from_millis(60));
         assert!(middle.center.distance(Vec2::new(150.0, 65.0)) < 0.001);
         assert!(middle.size.distance(Vec2::new(150.0, 90.0)) < 0.001);
         assert!(!complete);
         assert!(
             motion
-                .value(started + std::time::Duration::from_millis(180))
+                .value(started + std::time::Duration::from_millis(120))
                 .1
         );
     }

@@ -668,8 +668,9 @@ pub fn Dropdown(
     });
     let root_id = format!("vmux-dropdown-root-{}", current_scope_id().0);
     let layer = if open { "z-[100]" } else { "z-auto" };
+    let duration = crate::motion::Motion::FEEDBACK_MS;
     let root_class = cn([
-        "relative [&_button]:transition-[background-color,color,opacity,transform] [&_button]:duration-150 [&_button]:ease-out [&_svg]:transition-transform [&_svg]:duration-150 motion-reduce:[&_button]:transition-none motion-reduce:[&_svg]:transition-none",
+        "relative [&_button]:transition-[background-color,color,opacity,transform] [&_button]:duration-[var(--vmux-motion-ms)] [&_button]:ease-out [&_svg]:transition-transform [&_svg]:duration-[var(--vmux-motion-ms)] motion-reduce:[&_button]:transition-none motion-reduce:[&_svg]:transition-none",
         layer,
         class.as_str(),
     ]);
@@ -677,6 +678,7 @@ pub fn Dropdown(
         div {
             id: root_id.clone(),
             class: root_class,
+            style: "--vmux-motion-ms:{duration}ms;",
             "data-vmux-dropdown-root": "",
             "data-vmux-dropdown-open": if open { "true" } else { "false" },
             "data-vmux-dropdown-keyboard": if keyboard_navigation { "true" } else { "false" },
@@ -712,10 +714,12 @@ pub fn DropdownPopup(
 ) -> Element {
     let owner = DropdownPopupOwner(current_scope_id().0);
     let context = use_context::<DropdownContext>();
+    let duration = crate::motion::Motion::CONTENT_MS;
     let base = attributes!(div {
         id: owner.id(),
         popover: if context.manual { "manual" } else { "auto" },
-        class: "invisible fixed left-0 top-0 z-[1000] isolate m-0 origin-top rounded-lg bg-popover shadow-[0_12px_32px_rgba(0,0,0,0.28)] [backdrop-filter:none] [-webkit-backdrop-filter:none] animate-[dx-fade-zoom-in_120ms_ease-out_forwards] will-change-[transform,opacity] motion-reduce:animate-none",
+        class: "invisible fixed left-0 top-0 z-[1000] isolate m-0 origin-top rounded-lg bg-popover shadow-[0_12px_32px_rgba(0,0,0,0.28)] [backdrop-filter:none] [-webkit-backdrop-filter:none] animate-[dx-fade-in_var(--vmux-motion-ms)_ease-out_forwards] will-change-opacity motion-reduce:animate-none",
+        style: "--vmux-motion-ms:{duration}ms;",
         "data-vmux-dropdown-popup": "",
     });
     let merged = merge_attributes(vec![base, attributes]);

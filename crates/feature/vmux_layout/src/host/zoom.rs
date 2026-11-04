@@ -101,7 +101,7 @@ pub(super) struct PaneZoomTransition {
 }
 
 impl PaneZoomTransition {
-    const DURATION: f32 = 0.24;
+    const DURATION: f32 = vmux_ui::motion::Motion::LAYOUT_MS as f32 / 1000.0;
 
     fn progress(&mut self, now: std::time::Duration) -> f32 {
         self.elapsed = now

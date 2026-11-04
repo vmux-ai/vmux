@@ -508,11 +508,21 @@ fn HeaderAddressBar(
     bg_color: Option<String>,
     page_address: Option<vmux_api::address::PageAddress>,
 ) -> Element {
+    let url = active_row
+        .as_ref()
+        .map(|row| row.url.clone())
+        .or_else(|| page_address.as_ref().map(|address| address.url.clone()))
+        .unwrap_or_default();
     let fallback = rsx! { HeaderAddressReadout { active_row, bg_color, page_address } };
-    if let Some(slot) = address_slot {
-        return rsx! { vmux_ui::components::page_address::PageAddressOutlet { slot, fallback } };
-    }
-    fallback
+    rsx! { vmux_ui::components::page_address::AddressSurface {
+        url,
+        onactivate: move |_| { let _ = send(&HeaderAddressFocusRequest); },
+        if let Some(slot) = address_slot {
+            vmux_ui::components::page_address::PageAddressOutlet { slot, fallback }
+        } else {
+            {fallback}
+        }
+    } }
 }
 
 #[component]
@@ -525,7 +535,7 @@ fn HeaderAddressReadout(
         LayoutUi::current().use_selector(|state| state.overlay_dismiss_revision)();
     if let Some(address) = page_address {
         return rsx! {
-            div { class: "flex h-8 min-w-0 flex-1 items-center", onclick: move |_| { let _ = send(&HeaderAddressFocusRequest); },
+            div { class: "flex h-8 min-w-0 flex-1 items-center",
                 vmux_ui::components::address::AddressTrail { state: address, dismiss_revision, onpopup: move |active| { let _ = send(&crate::event::LayoutOverlayEvent { id: "page-address".to_string(), active }); } }
             }
         };
@@ -541,9 +551,6 @@ fn HeaderAddressReadout(
     rsx! {
         div {
             class: "flex h-8 min-w-0 flex-1 cursor-pointer items-center gap-2",
-            onclick: move |_| {
-                let _ = send(&HeaderAddressFocusRequest);
-            },
             if !has_content {
                 span { class: "truncate text-ui {empty_class}", {translate("layout-new-stack")} }
             } else {

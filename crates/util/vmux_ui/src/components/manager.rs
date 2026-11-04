@@ -579,10 +579,11 @@ pub fn ManagerExpandableSearch(
     children: Element,
 ) -> Element {
     let root_id = format!("vmux-manager-search-{}", current_scope_id().0);
+    let duration = crate::motion::Motion::CONTENT_MS;
     let class = if open {
-        "relative z-[100] h-7 w-[min(28rem,45vw)] shrink-0 transition-[width] duration-200 ease-out motion-reduce:transition-none"
+        "relative z-[100] h-7 w-[min(28rem,45vw)] shrink-0"
     } else {
-        "relative z-auto h-7 w-7 shrink-0 transition-[width] duration-200 ease-out motion-reduce:transition-none"
+        "relative z-auto h-7 w-7 shrink-0"
     };
     rsx! {
         Dropdown {
@@ -599,7 +600,7 @@ pub fn ManagerExpandableSearch(
                         root_id: root_id.clone(),
                         ondismiss: move |_| ondismiss.call(()),
                     }
-                    div { class: "relative h-7 w-full animate-[dx-fade-in_120ms_ease-out_forwards]", {children} }
+                    div { style: "--vmux-motion-ms:{duration}ms;", class: "relative h-7 w-full animate-[dx-fade-in_var(--vmux-motion-ms)_ease-out_forwards] motion-reduce:animate-none", {children} }
                 } else {
                     ManagerIconButton {
                         label,

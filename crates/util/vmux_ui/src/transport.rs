@@ -211,10 +211,12 @@ impl Host {
     }
 
     pub(crate) fn animate_height(element_id: &str, duration_ms: u32) {
+        let duration_ms = crate::motion::Motion::bounded(duration_ms);
         let _ = Self::with_installed(|host| host.animate_height(element_id, duration_ms));
     }
 
     pub(crate) fn animate_layout(element_id: &str, duration_ms: u32) {
+        let duration_ms = crate::motion::Motion::bounded(duration_ms);
         let _ = Self::with_installed(|host| host.animate_layout(element_id, duration_ms));
     }
 

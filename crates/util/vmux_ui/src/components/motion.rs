@@ -14,6 +14,7 @@ pub fn Collapsible(
     #[props(default)] content_class: String,
     children: Element,
 ) -> Element {
+    let duration = crate::motion::Motion::LAYOUT_MS;
     let state = if expanded {
         "grid-rows-[1fr] opacity-100"
     } else {
@@ -21,7 +22,8 @@ pub fn Collapsible(
     };
     rsx! {
         div {
-            class: "grid {state} transition-[grid-template-rows,opacity] duration-200 ease-out motion-reduce:transition-none {class}",
+            style: "--vmux-motion-ms:{duration}ms;",
+            class: "grid {state} transition-[grid-template-rows,opacity] duration-[var(--vmux-motion-ms)] ease-out motion-reduce:transition-none {class}",
             div { class: "min-h-0 overflow-hidden {content_class}", {children} }
         }
     }

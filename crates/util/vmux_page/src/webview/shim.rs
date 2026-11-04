@@ -1,3 +1,19 @@
+use vmux_ui::motion::Motion;
+
+pub(super) struct Shim;
+
+impl Shim {
+    pub(super) fn source() -> String {
+        WRY_HOST_SHIM
+            .replace(
+                "__VMUX_MOTION_CONTENT_MS__",
+                &Motion::CONTENT_MS.to_string(),
+            )
+            .replace("__VMUX_MOTION_LAYOUT_MS__", &Motion::LAYOUT_MS.to_string())
+            .replace("__VMUX_MOTION_MAX_MS__", &Motion::MAX_MS.to_string())
+    }
+}
+
 pub(crate) const WRY_HOST_SHIM: &str = r#"
 (function () {
   globalThis.__vmuxIpcEpoch = 1;
@@ -260,30 +276,43 @@ pub(crate) const WRY_HOST_SHIM: &str = r#"
     window.interpreter = remount.interpreter;
     return commitNavigationRevision(revision);
   };
-  let pageTransition = null;
-  const transitionRemount = async (remount, revision) => {
-    if (pageTransition !== null) return commitRemount(remount, revision);
-    document.documentElement.classList.add('vmux-page-transition');
-    try {
-      const transition = document.startViewTransition(() => commitRemount(remount, revision));
-      pageTransition = transition;
-      transition.finished.finally(() => {
-        if (pageTransition === transition) pageTransition = null;
-        document.documentElement.classList.remove('vmux-page-transition');
-      }).catch(() => {});
+  class PageMotion {
+    static active = new Set();
+    static play(element, frames, duration) {
+      if (typeof element.animate !== 'function') return;
       try {
-        await transition.updateCallbackDone;
-      } catch (error) {
-        if (!remount.root.isConnected) return commitRemount(remount, revision);
-      }
-      return navigationRevision === revision;
-    } catch (error) {
-      pageTransition = null;
-      document.documentElement.classList.remove('vmux-page-transition');
-      if (!remount.root.isConnected) return commitRemount(remount, revision);
-      return navigationRevision === revision;
+        const animation = element.animate(frames, { duration, easing: 'cubic-bezier(0.2, 0, 0, 1)' });
+        this.active.add(animation);
+        animation.finished.finally(() => this.active.delete(animation)).catch(() => {});
+      } catch (_) {}
     }
-  };
+    static replace(remount, revision) {
+      const motion = navigationRevision !== null && navigationRevision !== revision
+        && !window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+      const previousComposer = motion
+        ? remount.previousRoot.querySelector('.vmux-agent-composer-shared')?.getBoundingClientRect()
+        : null;
+      const opacity = motion ? Number(getComputedStyle(remount.previousRoot).opacity) : 1;
+      for (const animation of this.active) animation.cancel();
+      this.active.clear();
+      const changed = commitRemount(remount, revision);
+      if (!motion) return changed;
+      const composer = remount.root.querySelector('.vmux-agent-composer-shared');
+      if (previousComposer && composer) {
+        for (const element of remount.root.querySelectorAll('.animate-agent-prompt-dock, .animate-agent-ready, .animate-agent-surface')) {
+          element.style.animation = 'none';
+        }
+        const next = composer.getBoundingClientRect();
+        const dx = previousComposer.left - next.left;
+        const dy = previousComposer.top - next.top;
+        if (Math.abs(dx) + Math.abs(dy) > 0.5) {
+          this.play(composer, [{ transform: `translate(${dx}px, ${dy}px)` }, { transform: 'translate(0px, 0px)' }], __VMUX_MOTION_LAYOUT_MS__);
+        }
+      }
+      this.play(remount.root, [{ opacity: Math.min(0.94, opacity) }, { opacity: 1 }], __VMUX_MOTION_CONTENT_MS__);
+      return changed;
+    }
+  }
   const visibleScrollAnchor = (container, viewport) => {
     const x = Math.min(viewport.right - 1, viewport.left + 8);
     const y = Math.min(viewport.bottom - 1, viewport.top + 1);
@@ -402,7 +431,7 @@ pub(crate) const WRY_HOST_SHIM: &str = r#"
           element.style.overflow = 'clip';
           const limit = Math.max(36, capture.viewportHeight || Math.max(capture.height, height));
           state.animation = element.animate([{ height: Math.min(capture.height, limit) + 'px' }, { height: Math.min(height, limit) + 'px' }], {
-            duration: Math.min(300, request.duration_ms), easing: 'cubic-bezier(0.2, 0.7, 0.2, 1)', fill: 'both',
+            duration: Math.min(__VMUX_MOTION_MAX_MS__, request.duration_ms), easing: 'cubic-bezier(0.2, 0.7, 0.2, 1)', fill: 'both',
           });
           this.active.set(element, state);
           state.animation.finished.then(() => this.finish(element, state), () => this.finish(element, state));
@@ -447,7 +476,7 @@ pub(crate) const WRY_HOST_SHIM: &str = r#"
           const dx = previous.left - next.left;
           const dy = previous.top - next.top;
           if (Math.abs(dx) + Math.abs(dy) < 0.5) continue;
-          const animation = element.animate([{ transform: `translate(${dx}px, ${dy}px)` }, { transform: 'translate(0px, 0px)' }], { duration: request.duration_ms, easing: 'cubic-bezier(0.2, 0, 0, 1)' });
+          const animation = element.animate([{ transform: `translate(${dx}px, ${dy}px)` }, { transform: 'translate(0px, 0px)' }], { duration: Math.min(__VMUX_MOTION_MAX_MS__, request.duration_ms), easing: 'cubic-bezier(0.2, 0, 0, 1)' });
           this.active.set(element, animation);
           animation.finished.finally(() => { if (this.active.get(element) === animation) this.active.delete(element); }).catch(() => {});
         }
@@ -687,19 +716,7 @@ pub(crate) const WRY_HOST_SHIM: &str = r#"
         let navigated = false;
         if (remount) {
           if (edits.byteLength) remount.interpreter.run_from_bytes(edits);
-          const reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
-          const sharedComposer = remount.previousRoot.querySelector('.vmux-agent-composer-shared')
-            && remount.root.querySelector('.vmux-agent-composer-shared');
-          if (
-            navigationRevision !== null
-            && typeof document.startViewTransition === 'function'
-            && !reducedMotion
-            && sharedComposer
-          ) {
-            navigated = await transitionRemount(remount, revision);
-          } else {
-            navigated = commitRemount(remount, revision);
-          }
+          navigated = PageMotion.replace(remount, revision);
         } else if (edits.byteLength) {
           window.interpreter.run_from_bytes(edits);
         }

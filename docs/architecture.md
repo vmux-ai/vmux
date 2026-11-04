@@ -598,6 +598,20 @@ Code bookmarks resolve their directory from the active worktree, owning project,
 its README or entry file; directory favicons identify the Code page. Layout and address state flush before native
 presentation in the same frame; the final flush retains updates arriving later.
 Tab presses select immediately and host projection reconciles that selection.
+UI motion is feedback rather than a completion condition. Selection, URL, focus, and the target
+layout commit in the input frame; no request waits for an animation, and fresh input supersedes
+an in-flight transition from its current visual state. Native layout and shared UI animations
+use `vmux_ui::motion::Motion`: 80 ms for feedback, 100 ms for content, and 120 ms for layout, with
+a 160 ms ceiling enforced at DOM animation transport boundaries. Reduced motion uses the same
+state changes without visual interpolation. Page replacement commits synchronously before its
+opacity and composer-position feedback; it does not wait for browser view-transition snapshots.
+Discrete tabs and search widths change immediately. Collapsible content may interpolate height
+within the shared layout budget. Cached pages remain usable during refresh;
+new data occupies a reserved skeleton region, and page replacement keeps the outgoing surface
+until the incoming snapshot paints. Tests exercise fresh input during motion, stale paint rejection,
+and retained-page handoffs instead of asserting animation class names. URL-bar background and
+padding stay independently clickable and expose the URL on hover; breadcrumb and toolbar controls
+keep their own hit targets and events.
 Accepted lifecycle batches also carry the current document revision into paint state; an old
 mount notification discarded during an interaction-epoch change cannot leave the first paint
 waiting on revision zero.

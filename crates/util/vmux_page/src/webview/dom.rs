@@ -871,6 +871,7 @@ impl PageHost for SurfaceHost {
     }
 
     fn animate_height(&self, element_id: &str, duration_ms: u32) {
+        let duration_ms = vmux_ui::motion::Motion::bounded(duration_ms);
         self.request(DomRequest::AnimateHeight {
             element: element_id.to_string(),
             duration_ms,
@@ -878,6 +879,7 @@ impl PageHost for SurfaceHost {
     }
 
     fn animate_layout(&self, element_id: &str, duration_ms: u32) {
+        let duration_ms = vmux_ui::motion::Motion::bounded(duration_ms);
         self.request(DomRequest::AnimateLayout {
             element: element_id.to_string(),
             duration_ms,
