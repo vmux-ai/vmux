@@ -145,12 +145,12 @@ impl WorkspaceEdits<'_, '_> {
 
     fn apply_document(&mut self, document: PreparedDocument) -> Result<(), String> {
         if document.targets.is_empty() {
-            vmux_path::AtomicFile::write(document.path.as_path(), document.updated.as_bytes())
-                .map_err(|error| format!("{}: {error}", document.path.as_path().display()))?;
-            self.self_writes.0.insert(
-                vmux_path::PathIdentity::resolve(document.path.as_path()).into_path_buf(),
-                std::time::Instant::now(),
-            );
+            let revision = vmux_path::AtomicFile::write_revision(
+                document.path.as_path(),
+                document.updated.as_bytes(),
+            )
+            .map_err(|error| format!("{}: {error}", document.path.as_path().display()))?;
+            self.self_writes.record(document.path.as_path(), revision);
             return Ok(());
         }
         for entity in document.targets {

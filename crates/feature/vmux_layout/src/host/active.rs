@@ -136,7 +136,7 @@ fn ensure_space(
         let mut entries = Vec::new();
         for child in children.iter() {
             if let Ok((entity, ts, active)) = spaces.get(child) {
-                entries.push((entity, ts.map(|t| t.0).unwrap_or(0), active));
+                entries.push((entity, ts.map(|t| t.milliseconds()).unwrap_or(0), active));
             }
         }
         active.apply(&entries);
@@ -152,7 +152,7 @@ fn ensure_tab(
         let mut entries = Vec::new();
         for child in children.iter() {
             if let Ok((ts, active)) = tabs.get(child) {
-                entries.push((child, ts.0, active));
+                entries.push((child, ts.milliseconds(), active));
             }
         }
         active.apply(&entries);
@@ -168,7 +168,7 @@ fn ensure_stack(
         let mut entries = Vec::new();
         for child in children.iter() {
             if let Ok((ts, active)) = stacks.get(child) {
-                entries.push((child, ts.0, active));
+                entries.push((child, ts.milliseconds(), active));
             }
         }
         active.apply(&entries);
@@ -184,7 +184,7 @@ fn ensure_branch(
         let mut entries = Vec::new();
         for child in children.iter() {
             if let Ok((ts, active)) = branches.get(child) {
-                entries.push((child, ts.map(|t| t.0).unwrap_or(0), active));
+                entries.push((child, ts.map(|t| t.milliseconds()).unwrap_or(0), active));
             }
         }
         active.apply(&entries);
@@ -203,11 +203,11 @@ mod tests {
         let space = app.world_mut().spawn(Space).id();
         let older = app
             .world_mut()
-            .spawn((Tab::default(), LastActivatedAt(1), ChildOf(space)))
+            .spawn((Tab, LastActivatedAt::new(1), ChildOf(space)))
             .id();
         let newer = app
             .world_mut()
-            .spawn((Tab::default(), LastActivatedAt(5), ChildOf(space)))
+            .spawn((Tab, LastActivatedAt::new(5), ChildOf(space)))
             .id();
         app.update();
         assert!(app.world().entity(newer).contains::<Active>());
@@ -228,11 +228,11 @@ mod tests {
         let space = app.world_mut().spawn(Space).id();
         let stale = app
             .world_mut()
-            .spawn((Tab::default(), LastActivatedAt(1), Active, ChildOf(space)))
+            .spawn((Tab, LastActivatedAt::new(1), Active, ChildOf(space)))
             .id();
         let newer = app
             .world_mut()
-            .spawn((Tab::default(), LastActivatedAt(5), ChildOf(space)))
+            .spawn((Tab, LastActivatedAt::new(5), ChildOf(space)))
             .id();
         app.update();
         assert!(app.world().entity(newer).contains::<Active>());
@@ -247,11 +247,11 @@ mod tests {
         let main = app.world_mut().spawn(crate::window::Main).id();
         let older = app
             .world_mut()
-            .spawn((Space, LastActivatedAt(1), ChildOf(main)))
+            .spawn((Space, LastActivatedAt::new(1), ChildOf(main)))
             .id();
         let newer = app
             .world_mut()
-            .spawn((Space, LastActivatedAt(9), ChildOf(main)))
+            .spawn((Space, LastActivatedAt::new(9), ChildOf(main)))
             .id();
         app.update();
         assert!(app.world().entity(newer).contains::<Active>());
@@ -267,11 +267,11 @@ mod tests {
         let second_main = app.world_mut().spawn(crate::window::Main).id();
         let first = app
             .world_mut()
-            .spawn((Space, LastActivatedAt(2), ChildOf(first_main)))
+            .spawn((Space, LastActivatedAt::new(2), ChildOf(first_main)))
             .id();
         let second = app
             .world_mut()
-            .spawn((Space, LastActivatedAt(1), ChildOf(second_main)))
+            .spawn((Space, LastActivatedAt::new(1), ChildOf(second_main)))
             .id();
 
         app.update();

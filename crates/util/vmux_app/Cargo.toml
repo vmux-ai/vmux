@@ -30,10 +30,12 @@ cli = [
 ]
 desktop = [
     "acp",
+    "auth",
     "bookmark",
     "browser",
     "capture",
     "command",
+    "connector",
     "editor",
     "extension",
     "git",
@@ -70,9 +72,12 @@ capture = ["tool", "dep:vmux_input"]
 bookmark = ["layout", "dep:vmux_bookmark"]
 ecs = [
     "dep:vmux_ecs",
+    "dep:vmux_feature",
     "dep:vmux_flex",
 ]
 command = ["ecs", "dep:vmux_command"]
+connector = ["ecs", "dep:vmux_connector"]
+auth = ["connector", "dep:vmux_auth"]
 setting = ["ecs", "dep:vmux_setting"]
 session = ["dep:vmux_session"]
 layout = ["command", "setting", "dep:vmux_layout"]
@@ -82,6 +87,7 @@ terminal = ["layout", "service", "dep:vmux_terminal"]
 editor = ["layout", "dep:vmux_editor"]
 git = ["layout", "dep:vmux_git"]
 acp = [
+    "auth",
     "command",
     "editor",
     "history",
@@ -108,10 +114,13 @@ vault = ["layout", "dep:vmux_vault"]
 bevy_app = { workspace = true }
 bevy_ecs = { workspace = true, optional = true }
 vmux_acp = { path = "../../feature/vmux_acp", default-features = false, optional = true }
+vmux_auth = { path = "../../feature/vmux_auth", optional = true }
 vmux_bookmark = { path = "../../feature/vmux_bookmark", optional = true }
 vmux_browser = { path = "../vmux_browser", optional = true }
 vmux_command = { path = "../../feature/vmux_command", optional = true }
+vmux_connector = { path = "../../feature/vmux_connector", optional = true }
 vmux_ecs = { path = "../vmux_ecs", optional = true }
+vmux_feature = { path = "../vmux_feature", optional = true }
 vmux_editor = { path = "../../feature/vmux_editor", optional = true }
 vmux_extension = { path = "../../feature/vmux_extension", optional = true }
 vmux_flex = { path = "../vmux_flex", optional = true }

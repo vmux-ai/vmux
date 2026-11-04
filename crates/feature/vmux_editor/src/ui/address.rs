@@ -1,14 +1,14 @@
 #![allow(non_snake_case)]
 
 use dioxus::prelude::*;
-use vmux_api::address::PageAddressUiState;
+use vmux_api::address::UiPageAddress;
 use vmux_ui::components::address::AddressTrail;
 use vmux_ui::components::page_address::PageAddressContent;
-use vmux_ui::hooks::use_ui_state;
+use vmux_ui::hooks::UiState;
 
 #[component]
 pub fn EditorAddress() -> Element {
-    let address = use_ui_state::<PageAddressUiState>().state;
+    let address = UiState::<UiPageAddress>::use_context().state;
     let state = address.read();
     let Some(address) = state.address.clone() else {
         return rsx! {};

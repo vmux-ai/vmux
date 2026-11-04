@@ -1,17 +1,20 @@
 use bevy::prelude::*;
+use vmux_api::Id;
 
 use crate::model::SpaceRecord;
 
 impl SpaceRecord {
     pub fn bundle(&self) -> impl Bundle {
         (
-            vmux_layout::space::Space,
-            vmux_layout::space::SpaceId(self.id.clone()),
-            vmux_layout::profile::Profile {
-                name: self.profile.clone(),
-            },
+            vmux_layout::space::Space::bundle(Id::<vmux_layout::space::Space>::new(
+                self.id.clone(),
+            )),
             Name::new(self.name.clone()),
         )
+    }
+
+    pub fn profile_bundle(&self, owner: Entity) -> impl Bundle {
+        vmux_layout::profile::Profile::owned_by(self.profile.clone(), owner)
     }
 }
 
@@ -33,17 +36,31 @@ mod tests {
     #[test]
     fn space_profile_bundle_spawns_space_name_profile_and_id() {
         let mut app = App::new();
-        app.world_mut().spawn(SpaceRecord::bootstrap().bundle());
+        let record = SpaceRecord::bootstrap();
+        let space = app.world_mut().spawn(record.bundle()).id();
+        app.world_mut().spawn(record.profile_bundle(space));
 
-        let mut query = app.world_mut().query_filtered::<(
-            &Name,
-            &vmux_layout::profile::Profile,
-            &vmux_layout::space::SpaceId,
-        ), With<vmux_layout::space::Space>>();
-        let (name, profile, space_id) = query.single(app.world()).unwrap();
+        let mut query = app
+            .world_mut()
+            .query_filtered::<
+                (&Name, &Id<vmux_layout::space::Space>),
+                With<vmux_layout::space::Space>,
+            >();
+        let (name, space_id) = query.single(app.world()).unwrap();
+        let profile = app
+            .world()
+            .get::<Children>(space)
+            .unwrap()
+            .iter()
+            .find_map(|child| {
+                app.world()
+                    .get::<vmux_layout::profile::Profile>(child)
+                    .and_then(|_| app.world().get::<Name>(child))
+            })
+            .unwrap();
 
         assert!(SpaceRecord::is_planet_name(name.as_str()));
-        assert_eq!(profile.name, "Personal");
-        assert_eq!(space_id.0, BOOTSTRAP_SPACE_ID);
+        assert_eq!(profile.as_str(), "Personal");
+        assert_eq!(space_id.as_str(), BOOTSTRAP_SPACE_ID);
     }
 }

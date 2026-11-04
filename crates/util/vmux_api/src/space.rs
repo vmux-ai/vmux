@@ -5,21 +5,21 @@ pub struct SpacesListEvent {
 }
 
 #[vmux_api::ui_state_patch(Default)]
-pub struct SpacesUiStatePatch {
+pub struct UiSpacesPatch {
     pub snapshot: Option<Box<SpacesListEvent>>,
-    pub team: Option<Box<crate::team::TeamUiState>>,
+    pub team: Option<Box<crate::team::UiTeam>>,
     pub form: Option<Box<SpaceFormState>>,
 }
 
-#[vmux_api::ui_state(Default, patch = SpacesUiStatePatch, version = 2)]
-pub struct SpacesUiState {
+#[vmux_api::ui_state(Default, patch = UiSpacesPatch, version = 2)]
+pub struct UiSpaces {
     pub snapshot: SpacesListEvent,
-    pub team: crate::team::TeamUiState,
+    pub team: crate::team::UiTeam,
     pub form: SpaceFormState,
 }
 
-impl crate::UiStateProjection<SpacesUiStatePatch> for SpacesUiState {
-    fn apply(&mut self, patch: SpacesUiStatePatch) {
+impl crate::UiStateProjection<UiSpacesPatch> for UiSpaces {
+    fn apply(&mut self, patch: UiSpacesPatch) {
         if let Some(snapshot) = patch.snapshot {
             self.snapshot = *snapshot;
         }

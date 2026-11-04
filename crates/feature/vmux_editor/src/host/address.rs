@@ -3,12 +3,12 @@ use std::path::Path;
 use bevy::prelude::*;
 use bevy_cef::prelude::UiInput;
 use vmux_api::address::{
-    AddressCrumb, AddressIntent, AddressOption, PageAddress, PageAddressRequest,
-    PageAddressUiState, PageAddressUiStatePatch,
+    AddressCrumb, AddressIntent, AddressOption, PageAddress, PageAddressRequest, UiPageAddress,
+    UiPageAddressPatch,
 };
 use vmux_ecs::event::*;
 use vmux_ecs::page::{AddressContribution, AddressIntentRequest};
-use vmux_ecs::{FileUiStateWrite, PageMetadata, UiStateWrite};
+use vmux_ecs::{PageMetadata, UiFileWrite, UiStateWrite};
 
 use super::editor::{FileDocumentRevision, FileView};
 
@@ -16,7 +16,7 @@ pub(super) struct AddressPlugin;
 
 impl Plugin for AddressPlugin {
     fn build(&self, app: &mut App) {
-        app.add_plugins(vmux_ecs::UiStatePlugin::<PageAddressUiState>::with_post_update_flush())
+        app.add_plugins(vmux_ecs::UiStatePlugin::<UiPageAddress>::with_post_update_flush())
             .add_observer(capture)
             .add_observer(capture_projects)
             .add_observer(request)
@@ -30,16 +30,12 @@ impl Plugin for AddressPlugin {
 
 #[derive(Component, Default)]
 pub(super) struct AddressSource {
-    state: FileUiState,
-    projects: ProjectNavigation,
+    state: UiFile,
+    projects: UiProjectNavigation,
     line: u32,
 }
 
-fn capture(
-    event: On<FileUiStateWrite>,
-    mut sources: Query<&mut AddressSource>,
-    mut commands: Commands,
-) {
+fn capture(event: On<UiFileWrite>, mut sources: Query<&mut AddressSource>, mut commands: Commands) {
     let patch = event.update();
     if patch.meta.is_none()
         && patch.directory.is_none()
@@ -65,7 +61,7 @@ fn capture(
 }
 
 fn capture_projects(
-    event: On<UiStateWrite<ProjectNavigation>>,
+    event: On<UiStateWrite<UiProjectNavigation>>,
     mut sources: Query<&mut AddressSource>,
     mut commands: Commands,
 ) {
@@ -80,8 +76,8 @@ fn capture_projects(
 }
 
 impl AddressSource {
-    fn apply(&mut self, patch: &FileUiStatePatch) {
-        let update = FileUiStatePatch {
+    fn apply(&mut self, patch: &UiFilePatch) {
+        let update = UiFilePatch {
             meta: patch.meta.clone(),
             view_mode: patch.view_mode,
             directory: patch.directory.clone(),
@@ -371,9 +367,9 @@ fn publish(sources: Documents, mut commands: Commands) {
         commands
             .entity(entity)
             .insert(AddressContribution(next.clone()));
-        commands.trigger(UiStateWrite::<PageAddressUiState>::from_event(
+        commands.trigger(UiStateWrite::<UiPageAddress>::from_event(
             entity,
-            &PageAddressUiStatePatch {
+            &UiPageAddressPatch {
                 address: Some(next),
                 in_header: None,
             },
@@ -614,7 +610,7 @@ mod tests {
                 },
             ))
             .id();
-        app.world_mut().trigger(FileUiStateWrite::from_event(
+        app.world_mut().trigger(UiFileWrite::from_event(
             page,
             &vmux_api::git::FileGitState {
                 repo_root: "/repo".to_string(),

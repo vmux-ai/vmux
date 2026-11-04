@@ -1,13 +1,15 @@
-use std::collections::HashMap;
 use std::path::PathBuf;
 
 use bevy::ecs::system::SystemParam;
 use bevy::prelude::*;
 use bevy::winit::{EventLoopProxyWrapper, WinitUserEvent};
 use bevy_cef::prelude::{UiEventPlugin, UiInput};
-use vmux_ecs::PageMetadata;
 use vmux_ecs::event::space::ProjectActivateRequest;
 use vmux_ecs::page::PageReady;
+use vmux_ecs::{
+    Operation, OperationError, OperationKind, OperationState, OperationTarget,
+    OperationTargetRevision, PageMetadata, Revision,
+};
 use vmux_git::state::{GitPageContext, GitWorkspaceChanged};
 
 use crate::presentation::Retiring;
@@ -46,10 +48,10 @@ struct TabWorkspaceSelection {
     cleanup: Option<ManagedCheckoutCleanup>,
 }
 
+#[derive(Component)]
 struct ProjectActivation {
     webview: Entity,
     branch: String,
-    revision: u64,
     request: ProjectActivationRequest,
     work: ProjectActivationWork,
 }
@@ -88,7 +90,6 @@ enum ProjectActivationPoll {
     Ready(std::thread::Result<Result<TabWorkspaceResolution, String>>),
     Retry,
     Rejected(String),
-    MissingTab,
 }
 
 #[derive(Component, Clone, Debug, PartialEq, Eq)]
@@ -138,14 +139,57 @@ impl PendingWorkspaceSelection {
 #[derive(Resource, Default)]
 struct ProjectActivations {
     next_revision: u64,
-    operations: HashMap<Entity, ProjectActivation>,
+}
+
+struct ProjectActivationInstall {
+    tab: Entity,
+    revision: u64,
+    activation: ProjectActivation,
+}
+
+impl Command for ProjectActivationInstall {
+    type Out = ();
+
+    fn apply(self, world: &mut World) {
+        let tab = self.tab;
+        let revision = self.revision;
+        let mut activation = self.activation;
+        let mut operations = world.query::<(Entity, &OperationTarget, &mut ProjectActivation)>();
+        let mut canceled = Vec::new();
+        for (entity, target, mut activation) in operations.iter_mut(world) {
+            if target.entity() == tab {
+                activation.cancel();
+                canceled.push(entity);
+            }
+        }
+        for entity in canceled {
+            world
+                .entity_mut(entity)
+                .remove::<ProjectActivation>()
+                .insert(OperationState::Canceled);
+        }
+        let operation = world.spawn((
+            Operation,
+            vmux_api::Id::<Operation>::new(uuid::Uuid::new_v4().to_string()),
+            OperationKind::new("project.activate").unwrap(),
+            OperationTargetRevision(Revision::new(revision)),
+        ));
+        let entity = operation.id();
+        if world.get::<Tab>(tab).is_none() {
+            activation.cancel();
+            world.entity_mut(entity).insert(OperationState::Canceled);
+            return;
+        }
+        world.entity_mut(entity).insert((
+            OperationState::Running,
+            OperationTarget::new(tab),
+            activation,
+        ));
+    }
 }
 
 impl ProjectActivation {
-    fn poll(&mut self, tab_exists: bool) -> ProjectActivationPoll {
-        if !tab_exists {
-            return ProjectActivationPoll::MissingTab;
-        }
+    fn poll(&mut self) -> ProjectActivationPoll {
         match &mut self.work {
             ProjectActivationWork::Running(task) => task
                 .poll()
@@ -230,12 +274,6 @@ impl ProjectActivations {
         self.next_revision = self.next_revision.wrapping_add(1).max(1);
         self.next_revision
     }
-
-    fn cancel(&mut self, tab: Entity) {
-        if let Some(mut operation) = self.operations.remove(&tab) {
-            operation.cancel();
-        }
-    }
 }
 
 struct ProjectActivationOutcome {
@@ -263,7 +301,12 @@ impl ProjectActivationOutcome {
 
 #[derive(bevy::ecs::system::SystemParam)]
 struct ProjectActivationContext<'w, 's> {
-    tabs: Query<'w, 's, &'static mut Tab, Without<Retiring>>,
+    tabs: Query<
+        'w,
+        's,
+        (&'static mut Name, &'static mut crate::tab::StartupDir),
+        (With<Tab>, Without<Retiring>),
+    >,
     child_of: Query<'w, 's, &'static ChildOf>,
     pages: Query<'w, 's, (Entity, &'static PageMetadata)>,
     commands: Commands<'w, 's>,
@@ -278,7 +321,7 @@ impl ProjectActivationContext<'_, '_> {
         };
         let Some(tab) = tab else {
             self.commands.trigger(
-                vmux_ecs::UiStateWrite::<vmux_git::state::GitUiState>::from_event(webview, &event),
+                vmux_ecs::UiStateWrite::<vmux_git::state::UiGit>::from_event(webview, &event),
             );
             return;
         };
@@ -290,9 +333,7 @@ impl ProjectActivationContext<'_, '_> {
             loop {
                 if current == tab {
                     self.commands.trigger(
-                        vmux_ecs::UiStateWrite::<vmux_git::state::GitUiState>::from_event(
-                            page, &event,
-                        ),
+                        vmux_ecs::UiStateWrite::<vmux_git::state::UiGit>::from_event(page, &event),
                     );
                     break;
                 }
@@ -316,18 +357,18 @@ impl ProjectActivationContext<'_, '_> {
             worktree,
             cleanup,
         } = selection;
-        let mut tab = self
+        let (mut tab_name, mut tab_startup_dir) = self
             .tabs
             .get_mut(tab_entity)
             .map_err(|error| error.to_string())?;
-        tab.startup_dir = Some(startup_dir.clone());
-        if crate::worktree::WorktreeName::is_generated(&tab.name)
+        tab_startup_dir.0 = Some(startup_dir.clone().into());
+        if crate::worktree::WorktreeName::is_generated(tab_name.as_str())
             && let Some(name) = std::path::Path::new(&project_dir)
                 .file_name()
                 .and_then(|name| name.to_str())
             && !name.is_empty()
         {
-            tab.name = name.to_string();
+            *tab_name = Name::new(name.to_string());
         }
         let mut entity = self.commands.entity(tab_entity);
         entity.insert((TabWorkspace { project_dir }, TabDirDecided));
@@ -536,7 +577,6 @@ impl GitPageContextWriter<'_, '_> {
             .tabs
             .startup_dir(webview)
             .or_else(|| owner.and_then(|owner| self.tabs.startup_dir(owner)))
-            .map(PathBuf::from)
             .or_else(|| {
                 self.hierarchy
                     .get(owner.unwrap_or(webview))
@@ -560,17 +600,14 @@ impl GitPageContextWriter<'_, '_> {
             return;
         };
         self.commands.trigger(
-            vmux_ecs::UiStateWrite::<vmux_git::state::GitUiState>::from_event(webview, &context),
+            vmux_ecs::UiStateWrite::<vmux_git::state::UiGit>::from_event(webview, &context),
         );
     }
 }
 
 fn bootstrap_git_pages(
     pages: Query<
-        (
-            Entity,
-            Option<&vmux_ecs::UiState<vmux_git::state::GitUiState>>,
-        ),
+        (Entity, Option<&vmux_ecs::UiState<vmux_git::state::UiGit>>),
         (With<crate::cef::Browser>, With<PageReady>),
     >,
     mut writer: GitPageContextWriter,
@@ -668,7 +705,6 @@ fn project_activate(
         );
         return;
     };
-    activations.cancel(tab_entity);
     let revision = activations.next_revision();
     context
         .commands
@@ -686,79 +722,86 @@ fn project_activate(
     };
     let wake = wake.as_deref().map(|wake| (**wake).clone());
     let work = request.start(&runtime, wake);
-    activations.operations.insert(
-        tab_entity,
-        ProjectActivation {
-            webview,
-            branch: request.branch.clone(),
-            revision,
-            request,
-            work,
-        },
-    );
+    let activation = ProjectActivation {
+        webview,
+        branch: request.branch.clone(),
+        request,
+        work,
+    };
+    context.commands.queue(ProjectActivationInstall {
+        tab: tab_entity,
+        revision,
+        activation,
+    });
 }
 
 fn poll_project_activations(
     runtime: Res<vmux_git::GitRuntime>,
     wake: Option<Res<EventLoopProxyWrapper>>,
     pending: Query<&PendingWorkspaceSelection>,
-    mut activations: ResMut<ProjectActivations>,
+    mut operations: Query<(
+        Entity,
+        Option<&OperationTarget>,
+        &OperationTargetRevision,
+        &mut ProjectActivation,
+    )>,
     mut context: ProjectActivationContext,
-    mut tabs: Local<Vec<Entity>>,
 ) {
     let wake = wake.as_deref().map(|wake| (**wake).clone());
-    tabs.clear();
-    tabs.extend(activations.operations.keys().copied());
-    for tab in tabs.iter().copied() {
+    for (entity, target, revision, mut activation) in &mut operations {
+        let Some(target) = target else {
+            activation.cancel();
+            context
+                .commands
+                .entity(entity)
+                .remove::<ProjectActivation>()
+                .insert(OperationState::Canceled);
+            continue;
+        };
+        let tab = target.entity();
         let current_revision = pending
             .get(tab)
             .ok()
             .map(PendingWorkspaceSelection::revision);
-        let expected_revision = activations
-            .operations
-            .get(&tab)
-            .map(|activation| activation.revision);
-        if current_revision != expected_revision {
-            if let Some(mut activation) = activations.operations.remove(&tab) {
-                activation.cancel();
-            }
+        if current_revision != Some(revision.0.get()) || !context.tabs.contains(tab) {
+            activation.cancel();
+            context
+                .commands
+                .entity(entity)
+                .remove::<ProjectActivation>()
+                .insert(OperationState::Canceled);
             continue;
         }
-        let Some(poll) = activations
-            .operations
-            .get_mut(&tab)
-            .map(|activation| activation.poll(context.tabs.contains(tab)))
-        else {
-            continue;
-        };
-        let result = match poll {
+        let result = match activation.poll() {
             ProjectActivationPoll::Pending => continue,
             ProjectActivationPoll::Retry => {
-                if let Some(activation) = activations.operations.get_mut(&tab) {
-                    activation.retry(&runtime, wake.clone());
-                }
+                activation.retry(&runtime, wake.clone());
                 continue;
             }
             ProjectActivationPoll::Ready(output) => match output {
                 Ok(Ok(TabWorkspaceResolution::Ready(selection))) => context.apply(*selection, tab),
                 Ok(Ok(TabWorkspaceResolution::Waiting(wait))) => {
-                    if let Some(activation) = activations.operations.get_mut(&tab) {
-                        activation.wait(wait, wake.clone());
-                    }
+                    activation.wait(wait, wake.clone());
                     continue;
                 }
                 Ok(Err(error)) => Err(error),
                 Err(_) => Err("Git workspace worker panicked".to_string()),
             },
             ProjectActivationPoll::Rejected(error) => Err(error),
-            ProjectActivationPoll::MissingTab => {
-                activations.operations.remove(&tab);
-                continue;
+        };
+        let mut operation = context.commands.entity(entity);
+        operation.remove::<ProjectActivation>();
+        match &result {
+            Ok(_) => {
+                operation.insert(OperationState::Succeeded);
             }
-        };
-        let Some(activation) = activations.operations.remove(&tab) else {
-            continue;
-        };
+            Err(error) => {
+                operation.insert((
+                    OperationState::Failed,
+                    OperationError::new(error.clone()).unwrap(),
+                ));
+            }
+        }
         context
             .commands
             .entity(tab)
@@ -774,6 +817,7 @@ fn poll_project_activations(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::tab::StartupDir;
 
     #[derive(Resource, Default)]
     struct ContextWrites(Vec<GitPageContext>);
@@ -782,7 +826,7 @@ mod tests {
     struct WorkspaceWrites(Vec<Entity>);
 
     fn capture_context(
-        trigger: On<vmux_ecs::UiStateWrite<vmux_git::state::GitUiState>>,
+        trigger: On<vmux_ecs::UiStateWrite<vmux_git::state::UiGit>>,
         mut writes: ResMut<ContextWrites>,
     ) {
         if let Some(context) = &trigger.event().update().context {
@@ -791,7 +835,7 @@ mod tests {
     }
 
     fn capture_workspace(
-        trigger: On<vmux_ecs::UiStateWrite<vmux_git::state::GitUiState>>,
+        trigger: On<vmux_ecs::UiStateWrite<vmux_git::state::UiGit>>,
         mut writes: ResMut<WorkspaceWrites>,
     ) {
         if trigger.event().update().workspace.is_some() {
@@ -805,10 +849,10 @@ mod tests {
         fn spawn(app: &mut App, browser: bool) -> Entity {
             let tab = app
                 .world_mut()
-                .spawn(Tab {
-                    startup_dir: Some("/tmp/repo".to_string()),
-                    ..Default::default()
-                })
+                .spawn((
+                    Tab::bundle(),
+                    StartupDir(Some("/tmp/repo".to_string().into())),
+                ))
                 .id();
             let mut page = app.world_mut().spawn((
                 PageMetadata {
@@ -833,10 +877,10 @@ mod tests {
             .add_systems(Update, bootstrap_git_pages);
         let tab = app
             .world_mut()
-            .spawn(Tab {
-                startup_dir: Some("/tmp/owning-checkout".to_string()),
-                ..Default::default()
-            })
+            .spawn((
+                Tab::bundle(),
+                StartupDir(Some("/tmp/owning-checkout".to_string().into())),
+            ))
             .id();
         let page = app
             .world_mut()
@@ -925,7 +969,7 @@ mod tests {
             .insert_resource(ManagedWorktreeRoot(managed_root.path().to_path_buf()))
             .add_observer(project_activate)
             .add_systems(Update, poll_project_activations);
-        let tab = app.world_mut().spawn(Tab::default()).id();
+        let tab = app.world_mut().spawn(Tab).id();
         let webview = app.world_mut().spawn(ChildOf(tab)).id();
 
         app.world_mut().trigger(UiInput {
@@ -945,12 +989,9 @@ mod tests {
         }
 
         let expected = project.path().canonicalize().unwrap();
-        let tab_state = app.world().get::<Tab>(tab).unwrap();
+        let tab_state = app.world().get::<StartupDir>(tab).unwrap();
         let workspace = app.world().get::<TabWorkspace>(tab).unwrap();
-        assert_eq!(
-            tab_state.startup_dir.as_deref(),
-            Some(expected.to_string_lossy().as_ref())
-        );
+        assert_eq!(tab_state.0.as_deref(), Some(expected.as_path()));
         assert_eq!(
             workspace.project_dir,
             expected.to_string_lossy().into_owned()
@@ -974,7 +1015,7 @@ mod tests {
             .insert_resource(ManagedWorktreeRoot(managed_root.path().to_path_buf()))
             .add_observer(project_activate)
             .add_systems(Update, poll_project_activations);
-        let tab = app.world_mut().spawn(Tab::default()).id();
+        let tab = app.world_mut().spawn(Tab).id();
         let pane = app
             .world_mut()
             .spawn((crate::pane::Pane, ChildOf(tab)))
@@ -1006,12 +1047,9 @@ mod tests {
         }
 
         let expected = checkout.canonicalize().unwrap();
-        let tab_state = app.world().get::<Tab>(tab).unwrap();
+        let tab_state = app.world().get::<StartupDir>(tab).unwrap();
         let worktree = app.world().get::<TabWorktree>(tab).unwrap();
-        assert_eq!(
-            tab_state.startup_dir.as_deref(),
-            Some(expected.to_string_lossy().as_ref())
-        );
+        assert_eq!(tab_state.0.as_deref(), Some(expected.as_path()));
         assert_eq!(worktree.branch, "feature");
         assert!(app.world().get::<PendingWorkspaceSelection>(tab).is_none());
     }
@@ -1025,7 +1063,7 @@ mod tests {
             .init_resource::<ProjectActivations>()
             .insert_resource(ManagedWorktreeRoot(managed_root.path().to_path_buf()))
             .add_observer(project_activate);
-        let tab = app.world_mut().spawn(Tab::default()).id();
+        let tab = app.world_mut().spawn(Tab).id();
         let pane = app
             .world_mut()
             .spawn((crate::pane::Pane, ChildOf(tab)))
@@ -1045,10 +1083,17 @@ mod tests {
         }
         app.world_mut().flush();
 
-        let activations = app.world().resource::<ProjectActivations>();
-        assert_eq!(activations.next_revision, 2);
-        assert_eq!(activations.operations.len(), 1);
-        assert_eq!(activations.operations.get(&tab).unwrap().branch, "second");
+        let world = app.world_mut();
+        let mut active = world.query::<(&ProjectActivation, &OperationTarget)>();
+        let active = active.iter(world).collect::<Vec<_>>();
+        assert_eq!(active.len(), 1);
+        assert_eq!(active[0].0.branch, "second");
+        assert_eq!(active[0].1.entity(), tab);
+        let mut states = world.query::<&OperationState>();
+        let states = states.iter(world).cloned().collect::<Vec<_>>();
+        assert_eq!(states.len(), 2);
+        assert!(states.contains(&OperationState::Canceled));
+        assert!(states.contains(&OperationState::Running));
         assert_eq!(
             app.world()
                 .get::<PendingWorkspaceSelection>(tab)
@@ -1084,10 +1129,7 @@ mod tests {
             .add_systems(Update, poll_project_activations);
         let tab = app
             .world_mut()
-            .spawn(Tab {
-                startup_dir: Some("/before".into()),
-                ..Default::default()
-            })
+            .spawn((Tab::bundle(), StartupDir(Some("/before".into()))))
             .id();
         let pane = app
             .world_mut()
@@ -1114,11 +1156,9 @@ mod tests {
 
         let deadline = std::time::Instant::now() + std::time::Duration::from_secs(2);
         loop {
-            let running = app
-                .world()
-                .resource::<ProjectActivations>()
-                .operations
-                .contains_key(&tab);
+            let world = app.world_mut();
+            let mut operations = world.query::<&ProjectActivation>();
+            let running = operations.iter(world).next().is_some();
             if !running {
                 break;
             }
@@ -1129,8 +1169,8 @@ mod tests {
 
         assert!(app.world().get::<PendingWorkspaceSelection>(tab).is_none());
         assert_eq!(
-            app.world().get::<Tab>(tab).unwrap().startup_dir.as_deref(),
-            Some("/before")
+            app.world().get::<StartupDir>(tab).unwrap().0.as_deref(),
+            Some(std::path::Path::new("/before"))
         );
     }
 
@@ -1144,19 +1184,20 @@ mod tests {
         let tab = app
             .world_mut()
             .spawn((
-                Tab::default(),
+                Tab,
                 PendingWorkspaceSelection::new("/project".into(), "feature".into(), 1),
             ))
             .id();
-        app.world_mut()
-            .resource_mut::<ProjectActivations>()
-            .operations
-            .insert(
-                tab,
+        let operation = app
+            .world_mut()
+            .spawn((
+                Operation,
+                OperationState::Running,
+                OperationTarget::new(tab),
+                OperationTargetRevision(Revision::new(1)),
                 ProjectActivation {
                     webview: Entity::PLACEHOLDER,
                     branch: "feature".into(),
-                    revision: 1,
                     request: ProjectActivationRequest {
                         path: "/project".into(),
                         branch: "feature".into(),
@@ -1169,67 +1210,76 @@ mod tests {
                         wake: None,
                     },
                 },
-            );
+            ))
+            .id();
 
         app.update();
         assert!(app.world().get::<PendingWorkspaceSelection>(tab).is_some());
-        assert!(
-            app.world()
-                .resource::<ProjectActivations>()
-                .operations
-                .contains_key(&tab)
-        );
+        assert!(app.world().get::<ProjectActivation>(operation).is_some());
 
         app.update();
         assert!(app.world().get::<PendingWorkspaceSelection>(tab).is_none());
-        assert!(
-            !app.world()
-                .resource::<ProjectActivations>()
-                .operations
-                .contains_key(&tab)
+        assert!(app.world().get::<ProjectActivation>(operation).is_none());
+        assert_eq!(
+            app.world().get::<OperationState>(operation),
+            Some(&OperationState::Failed)
+        );
+        assert_eq!(
+            app.world()
+                .get::<OperationError>(operation)
+                .unwrap()
+                .message(),
+            "Git operation queue is busy"
         );
     }
 
     #[test]
-    fn removing_the_pending_selection_cancels_the_stale_activation() {
-        let mut app = App::new();
-        app.add_plugins(MinimalPlugins)
-            .init_resource::<vmux_git::GitRuntime>()
-            .init_resource::<ProjectActivations>()
-            .add_systems(Update, poll_project_activations);
-        let tab = app.world_mut().spawn(Tab::default()).id();
-        app.world_mut()
-            .resource_mut::<ProjectActivations>()
-            .operations
-            .insert(
-                tab,
-                ProjectActivation {
-                    webview: Entity::PLACEHOLDER,
-                    branch: "feature".into(),
-                    revision: 1,
-                    request: ProjectActivationRequest {
-                        path: "/project".into(),
+    fn removing_the_selection_or_its_tab_cancels_the_stale_activation() {
+        for remove_tab in [false, true] {
+            let mut app = App::new();
+            app.add_plugins(MinimalPlugins)
+                .init_resource::<vmux_git::GitRuntime>()
+                .init_resource::<ProjectActivations>()
+                .add_systems(Update, poll_project_activations);
+            let tab = app.world_mut().spawn(Tab).id();
+            let operation = app
+                .world_mut()
+                .spawn((
+                    Operation,
+                    OperationState::Running,
+                    OperationTarget::new(tab),
+                    OperationTargetRevision(Revision::new(1)),
+                    ProjectActivation {
+                        webview: Entity::PLACEHOLDER,
                         branch: "feature".into(),
-                        checkout: String::new(),
-                        managed_root: PathBuf::new(),
+                        request: ProjectActivationRequest {
+                            path: "/project".into(),
+                            branch: "feature".into(),
+                            checkout: String::new(),
+                            managed_root: PathBuf::new(),
+                        },
+                        work: ProjectActivationWork::Rejected {
+                            observed: false,
+                            error: "cancelled".into(),
+                            wake: None,
+                        },
                     },
-                    work: ProjectActivationWork::Rejected {
-                        observed: false,
-                        error: "cancelled".into(),
-                        wake: None,
-                    },
-                },
+                ))
+                .id();
+
+            if remove_tab {
+                app.world_mut().despawn(tab);
+                assert!(app.world().get::<OperationTarget>(operation).is_none());
+            }
+            app.update();
+
+            assert!(app.world().get::<ProjectActivation>(operation).is_none());
+            assert!(app.world().get::<TabWorkspace>(tab).is_none());
+            assert_eq!(
+                app.world().get::<OperationState>(operation),
+                Some(&OperationState::Canceled)
             );
-
-        app.update();
-
-        assert!(
-            !app.world()
-                .resource::<ProjectActivations>()
-                .operations
-                .contains_key(&tab)
-        );
-        assert!(app.world().get::<TabWorkspace>(tab).is_none());
+        }
     }
 
     #[test]
@@ -1291,7 +1341,7 @@ mod tests {
             .add_observer(project_activate)
             .add_observer(capture_workspace)
             .add_systems(Update, poll_project_activations);
-        let tab = app.world_mut().spawn(Tab::default()).id();
+        let tab = app.world_mut().spawn(Tab).id();
         let requester = app
             .world_mut()
             .spawn((

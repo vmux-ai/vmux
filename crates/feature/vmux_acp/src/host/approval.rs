@@ -8,7 +8,7 @@ use vmux_api::protocol::{ClientMessage, SharedMessage};
 use vmux_ecs::service::ServiceRequest;
 use vmux_ecs::{Cwd, EntityTarget};
 use vmux_session::event::ChatApproval;
-use vmux_session::{AgentId, ApprovalPolicy, RunState, Session, SessionId};
+use vmux_session::{AgentRef, ApprovalPolicy, Id, RunState, Session};
 
 use super::approval_driver::ApprovalDriver;
 
@@ -51,12 +51,12 @@ fn spawn(mut commands: Commands) {
 fn policy(
     store: Single<&ApprovalDriver>,
     mut sessions: Query<
-        (&AgentId, &Cwd, &mut ApprovalPolicy),
-        (With<Session>, Or<(Changed<AgentId>, Changed<Cwd>)>),
+        (&AgentRef, &Cwd, &mut ApprovalPolicy),
+        (With<Session>, Or<(Changed<AgentRef>, Changed<Cwd>)>),
     >,
 ) {
     for (agent_id, cwd, mut policy) in &mut sessions {
-        *policy = store.policy_for(&agent_id.0, &cwd.0);
+        *policy = store.policy_for(agent_id.as_str(), &cwd.0);
     }
 }
 
@@ -67,8 +67,8 @@ fn reply(
         (
             &mut RunState,
             &mut ApprovalPolicy,
-            &SessionId,
-            &AgentId,
+            &Id<Session>,
+            &AgentRef,
             &Cwd,
         ),
         With<Session>,
@@ -92,12 +92,12 @@ fn reply(
     {
         policy.allow(name);
         if let Some(store) = store.as_deref_mut() {
-            store.remember(&agent_id.0, &cwd.0, name);
+            store.remember(agent_id.as_str(), &cwd.0, name);
         }
     }
     service_requests.write(ServiceRequest(ClientMessage::Shared(
         SharedMessage::AgentApprove {
-            sid: session_id.0.clone(),
+            sid: session_id.as_str().to_string(),
             call_id: reply.call_id.clone(),
             decision: reply.decision,
         },
@@ -118,8 +118,8 @@ mod tests {
         fn bundle(agent: &str) -> impl Bundle {
             (
                 Session,
-                SessionId("s".into()),
-                AgentId(agent.into()),
+                Id::<Session>::new("s"),
+                AgentRef::new(agent),
                 Cwd(PathBuf::from("/tmp")),
                 ProcessAnchor(ProcessId::new()),
             )

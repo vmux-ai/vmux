@@ -1,7 +1,7 @@
 use bevy::ecs::system::SystemParam;
 use bevy::prelude::*;
 use bevy_cef::prelude::UiInput;
-use vmux_api::mcp::{McpServerEntry, McpServerRequest, McpServerStatus, McpServersUiState};
+use vmux_api::mcp::{McpServerEntry, McpServerRequest, McpServerStatus, UiMcpServers};
 use vmux_ecs::UiStateWrite;
 use vmux_ecs::{CommandBarContribution, CommandBarContributionActivated, CommandBarQueryChanged};
 
@@ -43,7 +43,7 @@ fn query(trigger: On<CommandBarQueryChanged>, mut results: McpResults) {
 }
 
 fn receive(
-    trigger: On<UiStateWrite<McpServersUiState>>,
+    trigger: On<UiStateWrite<UiMcpServers>>,
     active: Query<&McpCommandBar>,
     mut results: McpResults,
 ) {
@@ -133,7 +133,7 @@ impl McpServerRow<'_> {
             || self.0.description.to_ascii_lowercase().contains(&filter)
     }
 
-    fn project(&self, state: &McpServersUiState) -> vmux_api::command_bar::CommandBarResultItem {
+    fn project(&self, state: &UiMcpServers) -> vmux_api::command_bar::CommandBarResultItem {
         let server = self.0;
         vmux_api::command_bar::CommandBarResultItem {
             key: server.id.clone(),

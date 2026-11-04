@@ -8,7 +8,7 @@ use bevy_ecs::name::Name;
 use bevy_ecs::prelude::*;
 use vmux_ecs::ProcessId;
 use vmux_ecs::cli::{CliInvocation, CliResult, CliWake};
-use vmux_ecs::manifest::FeaturePlugin;
+use vmux_feature::AppFeatureExt;
 
 use crate::protocol::{McpConfig, McpInput, McpOutput, McpPlugin, McpRuntime, McpServer, McpSet};
 
@@ -20,7 +20,8 @@ impl Plugin for McpCliPlugin {
             Name::new("MCP async runtime"),
             McpRuntime(tokio::runtime::Handle::current()),
         ));
-        app.add_plugins((FeaturePlugin::<crate::Feature>::default(), McpPlugin))
+        app.register_feature::<crate::Feature>()
+            .add_plugins(McpPlugin)
             .add_systems(
                 Update,
                 (start_stdio, receive_stdio).chain().in_set(McpSet::Input),

@@ -2,7 +2,7 @@ use bevy::prelude::*;
 use bevy_cef::prelude::{UiEventPlugin, UiInput};
 
 use crate::event::{GitCatalog, GitCatalogNextRequest};
-use crate::state::{GitCatalogPatch, GitPageControllerState, GitPanel, GitUiState};
+use crate::state::{GitCatalogPatch, GitPageControllerState, GitPanel, UiGit};
 
 use super::GitUpdateSet;
 use super::job::{CatalogJob, GitForegroundRead};
@@ -58,7 +58,7 @@ type ChangedCatalogPages<'w, 's> = Query<
 
 fn sync_catalogs(
     mut pages: ChangedCatalogPages,
-    mut ui_state: vmux_ecs::UiStateWriter<GitUiState>,
+    mut ui_state: vmux_ecs::UiStateWriter<UiGit>,
     mut commands: Commands,
 ) {
     for (entity, mut state, controller, mut revision, context) in &mut pages {
@@ -246,7 +246,7 @@ fn load_next(
         &mut super::state::GitState,
         &mut super::state::GitCatalogRevision,
     )>,
-    mut ui_state: vmux_ecs::UiStateWriter<GitUiState>,
+    mut ui_state: vmux_ecs::UiStateWriter<UiGit>,
     mut commands: Commands,
 ) {
     let webview = trigger.event().webview;
@@ -337,10 +337,7 @@ mod tests {
     #[test]
     fn commit_message_edits_do_not_retry_failed_catalogs() {
         let mut app = App::new();
-        app.add_plugins((
-            vmux_ecs::UiStatePlugin::<GitUiState>::default(),
-            CatalogPlugin,
-        ));
+        app.add_plugins((vmux_ecs::UiStatePlugin::<UiGit>::default(), CatalogPlugin));
         let page = app
             .world_mut()
             .spawn((
@@ -428,10 +425,7 @@ mod tests {
     #[test]
     fn automatic_commit_lookup_stops_at_the_bounded_limit() {
         let mut app = App::new();
-        app.add_plugins((
-            vmux_ecs::UiStatePlugin::<GitUiState>::default(),
-            CatalogPlugin,
-        ));
+        app.add_plugins((vmux_ecs::UiStatePlugin::<UiGit>::default(), CatalogPlugin));
         let mut repository = repository();
         repository.commits = (0..AUTO_COMMIT_LIMIT).map(commit).collect();
         let controller = GitPageControllerState {
@@ -476,10 +470,7 @@ mod tests {
     #[test]
     fn catalog_revision_continues_automatic_commit_lookup() {
         let mut app = App::new();
-        app.add_plugins((
-            vmux_ecs::UiStatePlugin::<GitUiState>::default(),
-            CatalogPlugin,
-        ));
+        app.add_plugins((vmux_ecs::UiStatePlugin::<UiGit>::default(), CatalogPlugin));
         let mut repository = repository();
         repository.commits.push(commit(0));
         let controller = GitPageControllerState {
@@ -544,10 +535,7 @@ mod tests {
     #[test]
     fn branch_files_load_before_branch_catalogs() {
         let mut app = App::new();
-        app.add_plugins((
-            vmux_ecs::UiStatePlugin::<GitUiState>::default(),
-            CatalogPlugin,
-        ));
+        app.add_plugins((vmux_ecs::UiStatePlugin::<UiGit>::default(), CatalogPlugin));
         let controller = GitPageControllerState {
             selected_branch: "feature".to_string(),
             focused_panel: GitPanel::Branches,

@@ -1,13 +1,13 @@
 use bevy::{ecs::entity::EntityHashMap, ecs::relationship::Relationship, prelude::*};
 use bevy_cef::prelude::*;
 use vmux_api::bookmark::{
-    BookmarkFolderChoice, BookmarkFolderRow, BookmarkNode, BookmarkRow, BookmarkStateEvent,
-    SmartBookmarkFolder,
+    BookmarkEntry, BookmarkFolderChoice, BookmarkFolderRow, BookmarkNode, BookmarkRow,
+    BookmarkStateEvent, SmartBookmarkFolder,
 };
-use vmux_api::{PageIcon, VmuxRoute};
+use vmux_api::{Id, PageIcon, VmuxRoute};
 use vmux_ecs::{
     Active, Bookmark, BookmarkOrder, Collapsed, Folder, PageIdentity, PageMetadata, Pin,
-    UiStateWrite, Uuid,
+    UiStateWrite,
     notify::AgentDoneUnseen,
     page::{HostHistory, PageReady},
 };
@@ -29,9 +29,9 @@ use vmux_layout::{
     pane::{Pane, PaneSplit, SideSheetCardCollapsed, Zoomed},
     presentation::Retiring,
     side_sheet::{SideSheet, SideSheetPosition, SideSheetSections, SideSheetSectionsExpanded},
-    space::{CurrentSpace, Space, SpaceId},
+    space::{CurrentSpace, Space},
     stack::{ActiveTabParam, FocusedStack, LayoutFocus, Stack},
-    state::LayoutUiState,
+    state::UiLayout,
     tab::Tab,
     toggle::LayoutHidden,
     window::{FocusedWindow, VmuxWindow, WindowHierarchy},
@@ -76,7 +76,12 @@ impl PagePresentation {
 
 #[derive(bevy::ecs::system::SystemParam)]
 struct TabProjectionData<'w, 's> {
-    tabs: Query<'w, 's, (Entity, &'static Tab, &'static LastActivatedAt), Without<Retiring>>,
+    tabs: Query<
+        'w,
+        's,
+        (Entity, &'static Name, &'static LastActivatedAt),
+        (With<Tab>, Without<Retiring>),
+    >,
     hierarchy: vmux_layout::tab::TabHierarchy<'w, 's>,
     active_tab: ActiveTabParam<'w, 's>,
     focus: LayoutFocus<'w, 's>,
@@ -96,7 +101,7 @@ impl TabProjectionData<'_, '_> {
             .into_iter()
             .filter_map(|pane| self.focus.stack(pane))
             .filter_map(|stack| self.stack_timestamps.get(stack).ok())
-            .max_by_key(|(_, timestamp)| timestamp.0)
+            .max_by_key(|(_, timestamp)| timestamp.milliseconds())
             .map(|(entity, _)| entity)
     }
 
@@ -129,7 +134,7 @@ impl TabProjectionData<'_, '_> {
         };
         let mut rows = Vec::new();
         for entity in ordered {
-            let Ok((entity, tab, _)) = self.tabs.get(entity) else {
+            let Ok((entity, name, _)) = self.tabs.get(entity) else {
                 continue;
             };
             let page = self.active_stack(entity).and_then(|stack| self.page(stack));
@@ -144,10 +149,10 @@ impl TabProjectionData<'_, '_> {
             };
             rows.push(TabRow {
                 id: entity.to_bits().to_string(),
-                name: if tab.name.is_empty() {
+                name: if name.as_str().is_empty() {
                     "Tab".to_string()
                 } else {
-                    tab.name.clone()
+                    name.as_str().to_string()
                 },
                 is_active: Some(entity) == active_tab,
                 bg_color,
@@ -426,7 +431,7 @@ type LayoutProjectionChanged = Or<(
     Changed<SideSheetCardCollapsed>,
     Changed<Tab>,
     Changed<HostWindow>,
-    Changed<SpaceId>,
+    Changed<Id<Space>>,
     Changed<SideSheetSectionsExpanded>,
 )>;
 
@@ -508,7 +513,7 @@ type LayoutMarkerChanged = Or<(
 )>;
 
 type BookmarkProjectionChanged = Or<(
-    Changed<Uuid>,
+    Changed<Id<BookmarkEntry>>,
     Changed<BookmarkOrder>,
     Changed<Bookmark>,
     Changed<Pin>,
@@ -580,10 +585,10 @@ struct PageStateRemovals<'w, 's> {
     pane_split: RemovedComponents<'w, 's, PaneSplit>,
     zoomed: RemovedComponents<'w, 's, Zoomed>,
     space: RemovedComponents<'w, 's, Space>,
-    space_id: RemovedComponents<'w, 's, SpaceId>,
+    space_id: RemovedComponents<'w, 's, Id<Space>>,
     current_space: RemovedComponents<'w, 's, CurrentSpace>,
     sections_expanded: RemovedComponents<'w, 's, SideSheetSectionsExpanded>,
-    uuid: RemovedComponents<'w, 's, Uuid>,
+    uuid: RemovedComponents<'w, 's, Id<BookmarkEntry>>,
     bookmark_order: RemovedComponents<'w, 's, BookmarkOrder>,
     bookmark: RemovedComponents<'w, 's, Bookmark>,
     pin: RemovedComponents<'w, 's, Pin>,
@@ -793,7 +798,7 @@ fn push_layout_emit(
     }
     projection
         .commands
-        .trigger(UiStateWrite::<LayoutUiState>::from_event(cef_e, &payload));
+        .trigger(UiStateWrite::<UiLayout>::from_event(cef_e, &payload));
 }
 
 struct AddressRoots<'a> {
@@ -944,7 +949,7 @@ fn push_stacks_host_emit(
         .insert(StackProjection(payload.clone()));
     projection
         .commands
-        .trigger(UiStateWrite::<LayoutUiState>::from_event(cef_e, &payload));
+        .trigger(UiStateWrite::<UiLayout>::from_event(cef_e, &payload));
 }
 
 fn push_pane_tree_emit(
@@ -1080,7 +1085,7 @@ fn push_pane_tree_emit(
 
     projection
         .commands
-        .trigger(UiStateWrite::<LayoutUiState>::from_event(cef_e, &payload));
+        .trigger(UiStateWrite::<UiLayout>::from_event(cef_e, &payload));
 }
 
 fn push_projects_host_emit(
@@ -1222,16 +1227,24 @@ fn push_projects_host_emit(
         .insert(ProjectProjection(payload.clone()));
     projection
         .commands
-        .trigger(UiStateWrite::<LayoutUiState>::from_event(cef_e, &payload));
+        .trigger(UiStateWrite::<UiLayout>::from_event(cef_e, &payload));
 }
 
 fn push_bookmarks_host_emit(
     mut projection: LayoutProjection,
-    pins: Query<(&Uuid, &PageMetadata, &BookmarkOrder, Has<Bookmark>), With<Pin>>,
+    pins: Query<
+        (
+            &Id<BookmarkEntry>,
+            &PageMetadata,
+            &BookmarkOrder,
+            Has<Bookmark>,
+        ),
+        With<Pin>,
+    >,
     folders: Query<
         (
             Entity,
-            &Uuid,
+            &Id<BookmarkEntry>,
             &Name,
             Option<&Children>,
             Has<Collapsed>,
@@ -1242,21 +1255,26 @@ fn push_bookmarks_host_emit(
         With<Folder>,
     >,
     top_bookmarks: Query<
-        (&Uuid, &PageMetadata, &BookmarkOrder, Has<Pin>),
+        (&Id<BookmarkEntry>, &PageMetadata, &BookmarkOrder, Has<Pin>),
         (With<Bookmark>, Without<ChildOf>),
     >,
-    child_bookmarks: Query<(&Uuid, &PageMetadata, &BookmarkOrder, Has<Pin>), With<Bookmark>>,
+    child_bookmarks: Query<
+        (&Id<BookmarkEntry>, &PageMetadata, &BookmarkOrder, Has<Pin>),
+        With<Bookmark>,
+    >,
 ) {
     let Some(target) = projection.target() else {
         return;
     };
     let cef_e = target.entity;
 
-    let row = |uuid: &Uuid, meta: &PageMetadata, bookmarked: bool, pinned: bool| BookmarkRow {
-        uuid: uuid.0.clone(),
-        metadata: meta.clone(),
-        bookmarked,
-        pinned,
+    let row = |uuid: &Id<BookmarkEntry>, meta: &PageMetadata, bookmarked: bool, pinned: bool| {
+        BookmarkRow {
+            uuid: uuid.as_str().to_string(),
+            metadata: meta.clone(),
+            bookmarked,
+            pinned,
+        }
     };
 
     let mut pin_entries: Vec<(u32, BookmarkRow)> = pins
@@ -1284,12 +1302,12 @@ fn push_bookmarks_host_emit(
             folders
                 .get(parent.get())
                 .ok()
-                .map(|(_, uuid, _, _, _, _, _, _)| uuid.0.clone())
+                .map(|(_, uuid, _, _, _, _, _, _)| uuid.as_str().to_string())
         });
         roots.push((
             order.0,
             BookmarkNode::Folder(BookmarkFolderRow {
-                uuid: uuid.0.clone(),
+                uuid: uuid.as_str().to_string(),
                 name: name.as_str().to_string(),
                 collapsed,
                 parent,
@@ -1319,7 +1337,7 @@ fn push_bookmarks_host_emit(
         .insert(BookmarkProjection(payload.clone()));
     projection
         .commands
-        .trigger(UiStateWrite::<LayoutUiState>::from_event(cef_e, &payload));
+        .trigger(UiStateWrite::<UiLayout>::from_event(cef_e, &payload));
 }
 
 fn push_tabs_host_emit(mut projection: LayoutProjection, tabs: TabProjectionData) {
@@ -1335,7 +1353,7 @@ fn push_tabs_host_emit(mut projection: LayoutProjection, tabs: TabProjectionData
     }
     projection
         .commands
-        .trigger(UiStateWrite::<LayoutUiState>::from_event(cef_e, &payload));
+        .trigger(UiStateWrite::<UiLayout>::from_event(cef_e, &payload));
 }
 
 fn push_update_notice_emit(
@@ -1357,17 +1375,14 @@ fn push_update_notice_emit(
     }
     match &*state {
         UpdateState::Idle => {
-            commands.trigger(UiStateWrite::<LayoutUiState>::from_event(
-                cef_e,
-                &UpdateCleared,
-            ));
+            commands.trigger(UiStateWrite::<UiLayout>::from_event(cef_e, &UpdateCleared));
         }
         UpdateState::Downloading {
             version,
             downloaded,
             total,
         } => {
-            commands.trigger(UiStateWrite::<LayoutUiState>::from_event(
+            commands.trigger(UiStateWrite::<UiLayout>::from_event(
                 cef_e,
                 &UpdateProgress {
                     version: version.clone(),
@@ -1378,7 +1393,7 @@ fn push_update_notice_emit(
             ));
         }
         UpdateState::Installing { version } => {
-            commands.trigger(UiStateWrite::<LayoutUiState>::from_event(
+            commands.trigger(UiStateWrite::<UiLayout>::from_event(
                 cef_e,
                 &UpdateProgress {
                     version: version.clone(),
@@ -1389,7 +1404,7 @@ fn push_update_notice_emit(
             ));
         }
         UpdateState::Ready { version } => {
-            commands.trigger(UiStateWrite::<LayoutUiState>::from_event(
+            commands.trigger(UiStateWrite::<UiLayout>::from_event(
                 cef_e,
                 &UpdateReady {
                     version: version.clone(),
@@ -1412,23 +1427,23 @@ mod tests {
         let space = app.world_mut().spawn_empty().id();
         let tab = app
             .world_mut()
-            .spawn((Tab::default(), LastActivatedAt(2), ChildOf(space)))
+            .spawn((Tab, LastActivatedAt::new(2), ChildOf(space)))
             .id();
         let retiring_tab = app
             .world_mut()
-            .spawn((Tab::default(), LastActivatedAt(3), Retiring, ChildOf(space)))
+            .spawn((Tab, LastActivatedAt::new(3), Retiring, ChildOf(space)))
             .id();
         let pane = app
             .world_mut()
-            .spawn((Pane, LastActivatedAt(2), ChildOf(tab)))
+            .spawn((Pane, LastActivatedAt::new(2), ChildOf(tab)))
             .id();
         let stack = app
             .world_mut()
-            .spawn((Stack::default(), LastActivatedAt(2), ChildOf(pane)))
+            .spawn((Stack::default(), LastActivatedAt::new(2), ChildOf(pane)))
             .id();
         app.world_mut().spawn((
             Stack::default(),
-            LastActivatedAt(3),
+            LastActivatedAt::new(3),
             Retiring,
             ChildOf(pane),
         ));

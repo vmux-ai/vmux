@@ -42,7 +42,7 @@ pub(crate) struct CheckoutContext<'w, 's> {
         'w,
         's,
         (
-            Ref<'static, vmux_layout::tab::Tab>,
+            Ref<'static, vmux_layout::tab::StartupDir>,
             Option<&'static vmux_layout::tab::TabWorktree>,
             Option<&'static vmux_layout::tab::TabWorkspace>,
         ),
@@ -57,11 +57,11 @@ impl CheckoutContext<'_, '_> {
     ) -> Option<vmux_ecs::event::FileCheckoutState> {
         let tab = self.hierarchy.entity(entity)?;
         let (tab, worktree, workspace) = self.tabs.get(tab).ok()?;
-        let cwd = PathBuf::from(tab.startup_dir.as_ref()?);
+        let cwd = tab.0.as_ref()?;
         let repository = worktree
             .map(|worktree| PathBuf::from(&worktree.repo_root))
             .or_else(|| workspace.map(|workspace| PathBuf::from(&workspace.project_dir)))?;
-        let cwd = vmux_path::PathIdentity::resolve(&cwd);
+        let cwd = vmux_path::PathIdentity::resolve(cwd);
         let repository = vmux_path::PathIdentity::resolve(&repository);
         let file = vmux_path::PathIdentity::resolve(path);
         let known_project = self
@@ -141,11 +141,11 @@ fn refresh_checkout(
                 commands
                     .entity(entity)
                     .insert(CheckoutPreview(state.clone()));
-                commands.trigger(vmux_ecs::FileUiStateWrite::from_event(entity, &state));
+                commands.trigger(vmux_ecs::UiFileWrite::from_event(entity, &state));
             }
             None => {
                 commands.entity(entity).remove::<CheckoutPreview>();
-                commands.trigger(vmux_ecs::FileUiStateWrite::from_event(
+                commands.trigger(vmux_ecs::UiFileWrite::from_event(
                     entity,
                     &vmux_ecs::event::FileCheckoutState {
                         path: view.path.to_string_lossy().into_owned(),
@@ -179,7 +179,7 @@ fn preview_checkout(
         commands
             .entity(entity)
             .insert(CheckoutPreview(state.clone()));
-        commands.trigger(vmux_ecs::FileUiStateWrite::from_event(entity, &state));
+        commands.trigger(vmux_ecs::UiFileWrite::from_event(entity, &state));
     }
     commands.trigger(FileNavigateRequest::new(entity, path.into_path_buf(), 0));
 }
@@ -262,7 +262,7 @@ impl GotoActions<'_, '_> {
             && browsers.can_emit_to(&entity)
         {
             self.commands
-                .trigger(vmux_ecs::FileUiStateWrite::from_event(entity, &scroll));
+                .trigger(vmux_ecs::UiFileWrite::from_event(entity, &scroll));
         }
         edit.core.top_row = viewport.top_row;
     }
@@ -433,7 +433,7 @@ fn knowledge_link_open(
                 Ok(path) => path,
                 Err(error) => {
                     if browsers.can_emit_to(&entity) {
-                        commands.trigger(vmux_ecs::FileUiStateWrite::from_event(
+                        commands.trigger(vmux_ecs::UiFileWrite::from_event(
                             entity,
                             &FileErrorEvent {
                                 message: error,
@@ -595,10 +595,10 @@ mod tests {
     use crate::keymap::EditorKeymap;
     use crate::keymap::KeymapKindExt;
     use vmux_api::BinEvent;
-    use vmux_ecs::event::FileUiState;
+    use vmux_ecs::event::UiFile;
 
     #[derive(Resource, Default)]
-    struct Emitted(Vec<FileUiState>);
+    struct Emitted(Vec<UiFile>);
 
     struct GotoSession {
         app: App,
@@ -626,27 +626,24 @@ mod tests {
                 .add_message::<crate::lsp::manager::LspGoto>()
                 .add_plugins((
                     NavigationPlugin,
-                    vmux_ecs::UiStatePlugin::<FileUiState>::default(),
+                    vmux_ecs::UiStatePlugin::<UiFile>::default(),
                 ))
                 .init_resource::<Emitted>()
                 .add_observer(
                     |trigger: On<BinHostEmitEvent>, mut emitted: ResMut<Emitted>| {
-                        if trigger.event().id() != FileUiState::id() {
+                        if trigger.event().id() != UiFile::id() {
                             return;
                         }
                         trigger.event().mark_delivered();
                         let frame = rkyv::from_bytes::<
-                            vmux_api::UiStateFrame<
-                                FileUiState,
-                                <FileUiState as vmux_api::UiState>::Update,
-                            >,
+                            vmux_api::UiStateFrame<UiFile, <UiFile as vmux_api::UiState>::Update>,
                             rkyv::rancor::Error,
                         >(trigger.event().payload())
                         .unwrap();
                         let event = match frame {
                             vmux_api::UiStateFrame::Snapshot(state) => state,
                             vmux_api::UiStateFrame::Updates(updates) => {
-                                <FileUiState as vmux_api::UiState>::from_updates(
+                                <UiFile as vmux_api::UiState>::from_updates(
                                     emitted.0.last().cloned(),
                                     updates,
                                 )
@@ -692,7 +689,7 @@ mod tests {
             app.world_mut().spawn(vmux_api::UiEventPermissions {
                 url: "file:///tmp/goto.rs",
                 owns_subtree: false,
-                permissions: &["FileUiState"],
+                permissions: &["UiFile"],
             });
             Self { app, view }
         }

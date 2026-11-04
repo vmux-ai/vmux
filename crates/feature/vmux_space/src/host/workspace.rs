@@ -11,13 +11,16 @@ use vmux_ecs::agent::{AgentContinuationRequest, AgentSessionRoot};
 use vmux_ecs::service::{ServiceMessageSet, ServiceRequest};
 use vmux_ecs::{Cwd, EntityTarget};
 use vmux_git::worktree::CheckoutInfo;
-use vmux_layout::tab::{Tab, TabDirDecided, TabWorkspace, TabWorktree, TabWorktreeUnavailable};
+use vmux_layout::tab::{
+    StartupDir as TabStartupDir, Tab, TabDirDecided, TabWorkspace, TabWorktree,
+    TabWorktreeUnavailable,
+};
 use vmux_layout::worktree::{
     ManagedWorktreeRoot, TabWorktreeActivation, TabWorktreeReady, WorktreeName,
 };
 use vmux_session::event::ChatChoiceSelected;
 use vmux_session::host::{ChatSynced, PendingAgentChoice, SessionView};
-use vmux_session::{Session, SessionId};
+use vmux_session::{Id, Session};
 use vmux_ui::i18n::Locale;
 
 use super::agent_workspace::AgentWorkspaceRequestSet;
@@ -187,13 +190,18 @@ fn initialize_git_agent_choice(
         .remove::<ChatSynced>();
 }
 
-fn bind_tab_workspace(tab: &mut Tab, project_dir: &Path, execution_dir: &Path) {
-    tab.startup_dir = Some(execution_dir.to_string_lossy().into_owned());
-    if WorktreeName::is_generated(&tab.name)
-        && let Some(name) = project_dir.file_name().and_then(|name| name.to_str())
-        && !name.is_empty()
+fn bind_tab_workspace(
+    name: &mut Name,
+    startup_dir: &mut TabStartupDir,
+    project_dir: &Path,
+    execution_dir: &Path,
+) {
+    startup_dir.0 = Some(execution_dir.to_path_buf());
+    if WorktreeName::is_generated(name.as_str())
+        && let Some(project_name) = project_dir.file_name().and_then(|name| name.to_str())
+        && !project_name.is_empty()
     {
-        tab.name = name.to_string();
+        *name = Name::new(project_name.to_string());
     }
 }
 
@@ -233,12 +241,12 @@ fn failed_workspace_continuation(message: &str) -> String {
 
 #[derive(bevy::ecs::system::SystemParam)]
 pub(super) struct AgentWorkspaceState<'w, 's> {
-    pub(super) tabs: Query<'w, 's, &'static mut Tab>,
+    pub(super) tabs: Query<'w, 's, (&'static mut Name, &'static mut TabStartupDir), With<Tab>>,
     pub(super) worktrees: Query<'w, 's, &'static TabWorktree>,
     pub(super) workspaces: Query<'w, 's, &'static TabWorkspace>,
     pub(super) pending_projects: Query<'w, 's, &'static PendingProject>,
     pub(super) managed_root: Option<Res<'w, ManagedWorktreeRoot>>,
-    sessions: Query<'w, 's, (&'static SessionId, &'static mut Cwd), With<Session>>,
+    sessions: Query<'w, 's, (&'static Id<Session>, &'static mut Cwd), With<Session>>,
     session_targets: Query<'w, 's, &'static EntityTarget<Session>>,
     child_of: Query<'w, 's, &'static ChildOf>,
 }
@@ -332,10 +340,10 @@ impl AgentWorkspaceState<'_, '_> {
         project_dir: &Path,
         execution_dir: &Path,
     ) -> Result<(), String> {
-        let Ok(mut tab) = self.tabs.get_mut(tab_entity) else {
+        let Ok((mut name, mut startup_dir)) = self.tabs.get_mut(tab_entity) else {
             return Err("tab not found".to_string());
         };
-        bind_tab_workspace(&mut tab, project_dir, execution_dir);
+        bind_tab_workspace(&mut name, &mut startup_dir, project_dir, execution_dir);
         Ok(())
     }
 
@@ -347,7 +355,7 @@ impl AgentWorkspaceState<'_, '_> {
         session_cwd.0 = cwd.to_path_buf();
         let cwd = cwd.to_string_lossy().into_owned();
         Some(ClientMessage::RebindAcpWorkspace {
-            sid: session_id.0.clone(),
+            sid: session_id.as_str().to_string(),
             cwd,
         })
     }
@@ -625,10 +633,7 @@ mod tests {
         let session = app.world_mut().spawn_empty().id();
         let tab = app
             .world_mut()
-            .spawn(Tab {
-                name: "Project".into(),
-                startup_dir: Some(workspace_path.to_string_lossy().into_owned()),
-            })
+            .spawn(Tab::named("Project").with_startup_dir(workspace_path.clone()))
             .id();
         let webview = app
             .world_mut()
@@ -689,20 +694,14 @@ mod tests {
         app.add_plugins(MinimalPlugins);
         let tab = app
             .world_mut()
-            .spawn((
-                Tab {
-                    name: "Tab 1".into(),
-                    startup_dir: None,
-                },
-                PendingProject(project_dir.clone()),
-            ))
+            .spawn((Tab::named("Tab 1"), PendingProject(project_dir.clone())))
             .id();
         let pane = app.world_mut().spawn(ChildOf(tab)).id();
         let session = app
             .world_mut()
             .spawn((
                 Session,
-                SessionId("routing-session".into()),
+                Id::<Session>::new("routing-session"),
                 Cwd(projects.clone()),
                 ProcessAnchor(anchor),
             ))
@@ -735,10 +734,9 @@ mod tests {
             .1
             .unwrap();
 
-        let tab_state = app.world().get::<Tab>(tab).unwrap();
         assert_eq!(
-            tab_state.startup_dir.as_deref(),
-            Some(execution_dir.to_string_lossy().as_ref())
+            app.world().get::<TabStartupDir>(tab).unwrap().0.as_deref(),
+            Some(execution_dir.as_path())
         );
         assert_eq!(
             app.world().get::<TabWorkspace>(tab).unwrap().project_dir,
@@ -751,7 +749,7 @@ mod tests {
         assert!(app.world().get::<TabWorktreeReady>(tab).is_some());
         assert!(app.world().get::<PendingProject>(tab).is_none());
         assert_eq!(
-            app.world().get::<SessionId>(session).unwrap().0,
+            app.world().get::<Id<Session>>(session).unwrap().as_str(),
             "routing-session"
         );
         assert_eq!(app.world().get::<ProcessAnchor>(session).unwrap().0, anchor);
@@ -779,13 +777,7 @@ mod tests {
         let mut app = App::new();
         app.add_plugins(MinimalPlugins);
 
-        let linked_tab = app
-            .world_mut()
-            .spawn(Tab {
-                name: "Existing".into(),
-                startup_dir: None,
-            })
-            .id();
+        let linked_tab = app.world_mut().spawn(Tab::named("Existing")).id();
         let linked_agent = app.world_mut().spawn(ChildOf(linked_tab)).id();
         let external_for_system = external.clone();
         let linked_execution = app
@@ -820,13 +812,7 @@ mod tests {
         );
         assert_eq!(checkout.worktrees().unwrap().len(), 2);
 
-        let managed_tab = app
-            .world_mut()
-            .spawn(Tab {
-                name: "Managed".into(),
-                startup_dir: None,
-            })
-            .id();
+        let managed_tab = app.world_mut().spawn(Tab::named("Managed")).id();
         let managed_agent = app.world_mut().spawn(ChildOf(managed_tab)).id();
         let project_for_system = project_dir.clone();
         let managed_execution = app
@@ -868,13 +854,7 @@ mod tests {
         let selected = directory.path().canonicalize().unwrap();
         let mut app = App::new();
         app.add_plugins(MinimalPlugins);
-        let tab = app
-            .world_mut()
-            .spawn(Tab {
-                name: "Create".into(),
-                startup_dir: None,
-            })
-            .id();
+        let tab = app.world_mut().spawn(Tab::named("Create")).id();
         let agent = app.world_mut().spawn(ChildOf(tab)).id();
         let selected_for_system = selected.clone();
 

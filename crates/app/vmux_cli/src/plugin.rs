@@ -3,7 +3,7 @@ use std::io;
 use bevy_app::{App, Plugin, Update};
 use bevy_ecs::prelude::*;
 use vmux_ecs::cli::{CliInvocation, CliResult};
-use vmux_ecs::manifest::{FeatureManifestSource, FeaturePlugin};
+use vmux_feature::{AppFeatureExt, FeatureManifestSource};
 
 use crate::command::CliRuntimePlugin;
 
@@ -17,12 +17,9 @@ pub struct CliPlugin;
 
 impl Plugin for CliPlugin {
     fn build(&self, app: &mut App) {
-        app.add_plugins((
-            FeaturePlugin::<Feature>::default(),
-            vmux_app::VmuxToolPlugin,
-            CliRuntimePlugin,
-        ))
-        .add_systems(Update, open);
+        app.register_feature::<Feature>()
+            .add_plugins((vmux_app::VmuxToolPlugin, CliRuntimePlugin))
+            .add_systems(Update, open);
     }
 }
 

@@ -3,7 +3,7 @@ use std::collections::HashSet;
 use bevy::{ecs::system::SystemParam, prelude::*};
 use vmux_api::JsonSchema;
 use vmux_ecs::JsonArguments;
-use vmux_ecs::manifest::{self, FeatureManifest};
+use vmux_feature::{Command as ManifestCommand, FeatureManifest};
 
 #[derive(SystemSet, Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct WriteCommandRequests;
@@ -70,7 +70,7 @@ pub struct CommandShortcut {
     pub when: Option<String>,
 }
 
-pub struct CommandManifest(pub(super) Vec<manifest::Command>);
+pub struct CommandManifest(pub(super) Vec<ManifestCommand>);
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(super) enum AgentAccess {

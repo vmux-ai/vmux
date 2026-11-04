@@ -40,7 +40,7 @@ pub(crate) fn UpdateNoticeFooter(phase: UpdateStatus) -> Element {
                         r#type: "button",
                         class: "vmux-primary-action w-full cursor-pointer rounded-md px-2.5 py-1.5 text-ui font-medium",
                         onclick: move |_| {
-                            let _ = send(&vmux_api::service::RelaunchRequest);
+                            send(&vmux_api::service::RelaunchRequest);
                         },
                         {translate("layout-restart-update")}
                     }

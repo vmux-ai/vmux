@@ -6,7 +6,7 @@ use std::any::{Any, TypeId};
 use std::cell::RefCell;
 use std::collections::HashMap;
 use std::rc::Rc;
-use vmux_api::{UiState, UiStateFrame};
+use vmux_api::{UiState as UiStateContract, UiStateFrame};
 
 #[derive(Clone, Default)]
 pub struct UiStateSnapshots(Rc<RefCell<SnapshotValues>>);
@@ -31,7 +31,7 @@ impl UiStateSnapshots {
         self.0.borrow_mut().values = values;
     }
 
-    fn initial<T: UiState + Default>(&self) -> T {
+    fn initial<T: UiStateContract + Default>(&self) -> T {
         let snapshots = self.0.borrow();
         if let Some(read) = snapshots.readers.get(&TypeId::of::<T>())
             && let Some(value) = read()
@@ -53,7 +53,7 @@ impl UiStateSnapshots {
         self.0.borrow_mut().values.clear();
     }
 
-    fn track<T: UiState>(&self, state: Signal<T>) {
+    fn track<T: UiStateContract>(&self, state: Signal<T>) {
         self.0.borrow_mut().readers.insert(
             TypeId::of::<T>(),
             Box::new(move || {
@@ -68,15 +68,19 @@ struct UiStateListener {
     error: Signal<Option<String>>,
 }
 
-pub struct UiStateBinding<T> {
+pub struct UiState<T> {
     pub state: Signal<T>,
     pub error: Signal<Option<String>>,
 }
 
-impl<T> UiStateBinding<T>
+impl<T> UiState<T>
 where
     T: 'static,
 {
+    pub fn use_context() -> Self {
+        use_context::<Self>()
+    }
+
     pub fn use_selector<S>(self, select: impl Fn(&T) -> S + 'static) -> Memo<S>
     where
         S: Clone + PartialEq + 'static,
@@ -87,7 +91,7 @@ where
 
 fn use_ui_state_listener<T, F>(on_state: F) -> UiStateListener
 where
-    T: UiState + rkyv::Archive + 'static,
+    T: UiStateContract + rkyv::Archive + 'static,
     T::Archived: rkyv::Deserialize<T, rkyv::api::high::HighDeserializer<rkyv::rancor::Error>>
         + for<'a> rkyv::bytecheck::CheckBytes<rkyv::api::high::HighValidator<'a, rkyv::rancor::Error>>,
     UiStateFrame<T, T::Update>: rkyv::Archive,
@@ -136,17 +140,17 @@ where
     UiStateListener { error }
 }
 
-impl<T> Clone for UiStateBinding<T> {
+impl<T> Clone for UiState<T> {
     fn clone(&self) -> Self {
         *self
     }
 }
 
-impl<T> Copy for UiStateBinding<T> {}
+impl<T> Copy for UiState<T> {}
 
-pub fn use_ui_state<T>() -> UiStateBinding<T>
+pub fn use_ui_state<T>() -> UiState<T>
 where
-    T: UiState + rkyv::Archive + Default + 'static,
+    T: UiStateContract + rkyv::Archive + Default + 'static,
     T::Archived: rkyv::Deserialize<T, rkyv::api::high::HighDeserializer<rkyv::rancor::Error>>
         + for<'a> rkyv::bytecheck::CheckBytes<rkyv::api::high::HighValidator<'a, rkyv::rancor::Error>>,
     UiStateFrame<T, T::Update>: rkyv::Archive,
@@ -174,7 +178,7 @@ where
             *current = T::from_updates(Some(previous), updates);
         }
     });
-    let binding = UiStateBinding {
+    let binding = UiState {
         state,
         error: listener.error,
     };

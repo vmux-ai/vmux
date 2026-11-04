@@ -403,7 +403,7 @@ mod tests {
     }
 
     fn record(trigger: On<BinHostEmitEvent>, mut delivered: ResMut<DeliveredLayoutStates>) {
-        if trigger.event().id() != crate::state::LayoutUiState::id() {
+        if trigger.event().id() != crate::state::UiLayout::id() {
             return;
         }
         trigger.event().mark_delivered();
@@ -415,7 +415,7 @@ mod tests {
         let mut app = App::new();
         app.add_plugins((
             MinimalPlugins,
-            vmux_ecs::UiStatePlugin::<crate::state::LayoutUiState>::default(),
+            vmux_ecs::UiStatePlugin::<crate::state::UiLayout>::default(),
         ))
         .init_resource::<DeliveredLayoutStates>()
         .add_observer(record);
@@ -431,15 +431,15 @@ mod tests {
         app.world_mut().spawn(UiEventPermissions {
             url: "vmux://layout/",
             owns_subtree: false,
-            permissions: &[crate::state::LayoutUiState::PERMISSION],
+            permissions: &[crate::state::UiLayout::PERMISSION],
         });
         let mut browsers = Browsers::default();
         browsers.set_externally_hosted(entity);
         app.world_mut().insert_non_send(browsers);
         app.world_mut().trigger(
-            vmux_ecs::UiStateWrite::<crate::state::LayoutUiState>::from_event(
+            vmux_ecs::UiStateWrite::<crate::state::UiLayout>::from_event(
                 entity,
-                &crate::state::LayoutUiStatePatch::default(),
+                &crate::state::UiLayoutPatch::default(),
             ),
         );
 
@@ -509,8 +509,8 @@ mod url_mirror_tests {
                 ..default()
             },
             VisitCount(1),
-            LastVisitedAt(0),
-            CreatedAt(0),
+            LastVisitedAt::new(1),
+            CreatedAt::new(1),
         ));
 
         app.world_mut().spawn(PageMetadata {
@@ -550,8 +550,8 @@ mod url_mirror_tests {
                 ..default()
             },
             VisitCount(1),
-            LastVisitedAt(0),
-            CreatedAt(0),
+            LastVisitedAt::new(1),
+            CreatedAt::new(1),
         ));
 
         app.world_mut().spawn(PageMetadata {

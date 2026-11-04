@@ -13,11 +13,11 @@ use crate::event::{
     ChatBranchesState, ChatItem, ChatMediaState, ChatResumeState, ChatSnapshot,
     ChatTranscriptState, ComposerContext, ResumableSessions,
 };
-use crate::state::ChatUiState;
+use crate::state::UiChat;
 use vmux_api::avatar::IdenticonSpec;
 use vmux_api::command_bar::PromptRequest;
 use vmux_api::protocol::AgentCommandResult;
-use vmux_api::{PageIcon, ProcessId};
+use vmux_api::{Id, PageIcon, ProcessId};
 use vmux_command::CommandBarDismiss;
 use vmux_command::{CommandBarWorkspaceSnapshot, ContributedPages};
 use vmux_ecs::UiState;
@@ -27,14 +27,14 @@ use vmux_ecs::agent::{
 };
 use vmux_ecs::launcher::{HostsLauncher, InlineTransitionRequested};
 use vmux_ecs::{
-    Description, EntityTarget, PageIdentity, PageOpenRequest, PageOpenTarget, PendingPrompt,
-    PendingPromptAttachments,
+    Description, EntityTarget, Operation, OperationKind, OperationState, PageIdentity,
+    PageOpenRequest, PageOpenTarget, PendingPrompt, PendingPromptAttachments,
 };
 use vmux_session::{
-    AgentConversationTitle, AgentId, CreateRequest, Created, PromptQueue, Route, Session, SessionId,
+    AgentConversationTitle, AgentRef, CreateRequest, Created, PromptQueue, Route, Session,
 };
 
-type ChatUiStateUpdates = UiState<ChatUiState>;
+type UiChatUpdates = UiState<UiChat>;
 
 #[derive(SystemParam)]
 pub struct SessionViews<'w, 's> {
@@ -69,8 +69,10 @@ pub(super) struct ChatHostPlugin;
 #[cfg(host)]
 impl Plugin for ChatHostPlugin {
     fn build(&self, app: &mut App) {
-        app.init_resource::<PendingSessionStarts>()
-            .add_message::<StartRequest>()
+        if !app.is_plugin_added::<vmux_ecs::OperationPlugin>() {
+            app.add_plugins(vmux_ecs::OperationPlugin);
+        }
+        app.add_message::<StartRequest>()
             .add_plugins((
                 AgentProjectionPlugin,
                 super::key::ChatKeyPlugin,
@@ -101,7 +103,7 @@ impl StartRequest {
     pub fn from_prompt(
         prompt: impl Into<String>,
         cwd: std::path::PathBuf,
-        agent: AgentId,
+        agent: AgentRef,
         target: PageOpenTarget,
         attachments: Vec<vmux_api::protocol::AgentAttachment>,
     ) -> Self {
@@ -117,15 +119,14 @@ impl StartRequest {
         }
     }
 
-    pub fn id(&self) -> &SessionId {
+    pub fn id(&self) -> &Id<Session> {
         self.create.id()
     }
 }
 
-#[derive(Resource, Default)]
-struct PendingSessionStarts(std::collections::HashMap<SessionId, PendingSessionStart>);
-
+#[derive(Component)]
 struct PendingSessionStart {
+    session_id: Id<Session>,
     target: PageOpenTarget,
     prompt: String,
     attachments: Vec<vmux_api::protocol::AgentAttachment>,
@@ -133,33 +134,47 @@ struct PendingSessionStart {
 
 fn start(
     mut requests: MessageReader<StartRequest>,
+    pending: Query<(&PendingSessionStart, &OperationState), With<Operation>>,
     mut creates: MessageWriter<CreateRequest>,
-    mut pending: ResMut<PendingSessionStarts>,
+    mut commands: Commands,
 ) {
     for request in requests.read() {
-        pending.0.insert(
-            request.create.id().clone(),
+        if pending.iter().any(|(pending, state)| {
+            pending.session_id == *request.create.id()
+                && matches!(state, OperationState::Pending | OperationState::Running)
+        }) {
+            continue;
+        }
+        commands.spawn((
+            Operation,
+            Id::<Operation>::new(uuid::Uuid::new_v4().to_string()),
+            OperationKind::new("session_start").unwrap(),
+            OperationState::Running,
             PendingSessionStart {
+                session_id: request.create.id().clone(),
                 target: request.target.clone(),
                 prompt: request.prompt.clone(),
                 attachments: request.attachments.clone(),
             },
-        );
+        ));
         creates.write(request.create.clone());
     }
 }
 
 fn open_started(
     trigger: On<Created>,
-    mut pending: ResMut<PendingSessionStarts>,
+    mut pending: Query<(Entity, &PendingSessionStart, &mut OperationState), With<Operation>>,
     mut requests: MessageWriter<PageOpenRequest>,
     mut commands: Commands,
 ) {
-    let Some(created) = pending.0.remove(&trigger.event().id) else {
+    let Some((operation, created, mut state)) = pending.iter_mut().find(|(_, pending, state)| {
+        pending.session_id == trigger.event().id
+            && matches!(**state, OperationState::Pending | OperationState::Running)
+    }) else {
         return;
     };
     let mut queue = PromptQueue::default();
-    queue.enqueue_with_attachments(created.prompt.clone(), created.attachments);
+    queue.enqueue_with_attachments(created.prompt.clone(), created.attachments.clone());
     commands.entity(trigger.event().entity).insert(queue);
     if let Some(title) = AgentConversationTitle::from_prompt(&created.prompt) {
         commands
@@ -167,10 +182,12 @@ fn open_started(
             .insert((title, vmux_session::TitlePending));
     }
     requests.write(PageOpenRequest {
-        target: created.target,
+        target: created.target.clone(),
         url: Route::Session(trigger.event().id.clone()).url(),
         request_id: None,
     });
+    *state = OperationState::Succeeded;
+    commands.entity(operation).remove::<PendingSessionStart>();
 }
 
 fn submit_from_command_bar(
@@ -444,7 +461,7 @@ type ChatSessions<'w, 's> = Query<
     (
         Entity,
         Option<&'static AgentConversationTitle>,
-        &'static SessionId,
+        &'static Id<Session>,
     ),
     With<Session>,
 >;
@@ -457,7 +474,7 @@ type ChangedChatSessions<'w, 's> = Query<
         With<Session>,
         Or<(
             Changed<AgentConversationTitle>,
-            Changed<SessionId>,
+            Changed<Id<Session>>,
             Changed<Children>,
         )>,
     ),
@@ -486,7 +503,7 @@ fn report_tab_identity(
                 if let Some(title) = title {
                     reported.title = Some(title.0.clone());
                 }
-                reported.icon = Some(PageIcon::favicon(IdenticonSpec::favicon(&id.0)));
+                reported.icon = Some(PageIcon::favicon(IdenticonSpec::favicon(id.as_str())));
                 if current != Some(&reported) {
                     commands.entity(child).insert(reported);
                 }
@@ -497,7 +514,7 @@ fn report_tab_identity(
 
 #[derive(Component)]
 #[require(
-    ChatUiStateUpdates,
+    UiChatUpdates,
     ChatAttachmentProjection,
     ChatSnapshotProjection,
     ChatTranscriptProjection,
@@ -739,7 +756,7 @@ mod tests {
     #[test]
     fn created_session_owns_the_initial_prompt_before_opening() {
         let mut app = App::new();
-        app.init_resource::<PendingSessionStarts>()
+        app.add_plugins(vmux_ecs::OperationPlugin)
             .add_message::<StartRequest>()
             .add_message::<CreateRequest>()
             .add_message::<PageOpenRequest>()
@@ -751,7 +768,7 @@ mod tests {
             .write(StartRequest::from_prompt(
                 "Fix session startup",
                 std::path::PathBuf::new(),
-                AgentId("mock".into()),
+                AgentRef::new("mock"),
                 PageOpenTarget::Stack(stack),
                 vec![vmux_api::protocol::AgentAttachment {
                     path: "/tmp/screenshot.png".into(),
@@ -811,8 +828,8 @@ mod tests {
                 .world_mut()
                 .spawn((
                     Session,
-                    vmux_session::SessionId("session".into()),
-                    AgentId("mock".into()),
+                    vmux_session::Id::<Session>::new("session"),
+                    AgentRef::new("mock"),
                     vmux_session::RunState::default(),
                 ))
                 .id();
@@ -904,7 +921,12 @@ mod tests {
         let anchor = ProcessId::new();
         let session = app
             .world_mut()
-            .spawn((Session, AgentSessionRoot, vmux_session::TitlePending))
+            .spawn((
+                Session,
+                AgentSessionRoot,
+                Description::default(),
+                vmux_session::TitlePending,
+            ))
             .id();
         let stack = app
             .world_mut()

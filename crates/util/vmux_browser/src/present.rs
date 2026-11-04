@@ -1596,7 +1596,7 @@ mod tests {
         let mut app = App::new();
         let tab = app
             .world_mut()
-            .spawn((Tab::default(), PresentationLayer::Incoming))
+            .spawn((Tab, PresentationLayer::Incoming))
             .id();
         let page = app.world_mut().spawn((Browser, ChildOf(tab))).id();
 
@@ -1613,7 +1613,7 @@ mod tests {
         let mut app = App::new();
         let tab = app
             .world_mut()
-            .spawn((Tab::default(), PresentationLayer::Retained))
+            .spawn((Tab, PresentationLayer::Retained))
             .id();
         let stack = app
             .world_mut()
@@ -1717,8 +1717,8 @@ mod tests {
         let tab = app
             .world_mut()
             .spawn((
-                Tab::default(),
-                LastActivatedAt(1),
+                Tab,
+                LastActivatedAt::new(1),
                 PresentationLayer::Current,
                 ChildOf(glass),
             ))
@@ -1738,7 +1738,7 @@ mod tests {
             .world_mut()
             .spawn((
                 Stack::default(),
-                LastActivatedAt(1),
+                LastActivatedAt::new(1),
                 PresentationLayer::Current,
                 ChildOf(pane),
             ))
@@ -1787,8 +1787,8 @@ mod tests {
         let previous_tab = app
             .world_mut()
             .spawn((
-                Tab::default(),
-                LastActivatedAt(1),
+                Tab,
+                LastActivatedAt::new(1),
                 PresentationLayer::Retained,
                 ChildOf(glass),
             ))
@@ -1808,7 +1808,7 @@ mod tests {
             .world_mut()
             .spawn((
                 Stack::default(),
-                LastActivatedAt(1),
+                LastActivatedAt::new(1),
                 PresentationLayer::Current,
                 ChildOf(previous_pane),
             ))
@@ -1829,8 +1829,8 @@ mod tests {
         let incoming_tab = app
             .world_mut()
             .spawn((
-                Tab::default(),
-                LastActivatedAt(2),
+                Tab,
+                LastActivatedAt::new(2),
                 PresentationLayer::Incoming,
                 vmux_layout::presentation::Transition::retain(previous_tab),
                 ChildOf(glass),
@@ -1851,7 +1851,7 @@ mod tests {
             .world_mut()
             .spawn((
                 Stack::default(),
-                LastActivatedAt(2),
+                LastActivatedAt::new(2),
                 PresentationLayer::Current,
                 ChildOf(incoming_pane),
             ))

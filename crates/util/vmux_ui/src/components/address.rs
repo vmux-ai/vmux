@@ -242,7 +242,7 @@ struct AddressSender(PageAddress);
 
 impl AddressSender {
     fn send(&self, intent: AddressIntent) {
-        let _ = send(&PageAddressRequest {
+        send(&PageAddressRequest {
             owner: self.0.owner,
             revision: self.0.revision,
             url: self.0.url.clone(),

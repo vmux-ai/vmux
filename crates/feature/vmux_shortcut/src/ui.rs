@@ -1,8 +1,10 @@
 #![allow(non_snake_case)]
 
+use vmux_ui::hooks::UiState;
+
 use crate::{
     ShortcutCollectionViewRequest, ShortcutProbeClearRequest, ShortcutProbePressRequest,
-    ShortcutProbeStatus, ShortcutStroke, ShortcutUiState,
+    ShortcutProbeStatus, ShortcutStroke, UiShortcuts,
 };
 use dioxus::prelude::*;
 use vmux_ui::components::manager::{
@@ -11,20 +13,20 @@ use vmux_ui::components::manager::{
 };
 use vmux_ui::components::page::PageShell;
 use vmux_ui::components::page_address::PageAddress;
-use vmux_ui::hooks::{send, use_theme, use_ui_state};
+use vmux_ui::hooks::{send, use_theme};
 use vmux_ui::i18n::{TranslationValue, translate, translate_with};
 use vmux_ui::icon::{BuiltinIconView, LineIcon, LineIconView};
 
 #[vmux_page::page(
     component = Page,
-    states = ["ThemeUiState", "ShortcutUiState"]
+    states = [vmux_ui::theme::UiTheme, crate::UiShortcuts]
 )]
 pub(crate) struct ShortcutPage;
 
 #[component]
 pub fn Page() -> Element {
     use_theme();
-    let state = use_ui_state::<ShortcutUiState>().state;
+    let state = UiState::<UiShortcuts>::use_context().state;
     let state = state();
     let view = match state.collection_view {
         vmux_ecs::CollectionView::List => ManagerView::List,
@@ -61,7 +63,7 @@ pub fn Page() -> Element {
                 let Some(stroke) = ShortcutStroke::from_keyboard_event(&event) else {
                     return;
                 };
-                let _ = send(&ShortcutProbePressRequest { stroke });
+                send(&ShortcutProbePressRequest { stroke });
             },
             PageAddress {
                 current: WorkspacePage::Shortcuts.option(),
@@ -77,7 +79,7 @@ pub fn Page() -> Element {
                                 ManagerView::List => vmux_ecs::CollectionView::List,
                                 ManagerView::Grid => vmux_ecs::CollectionView::Grid,
                             };
-                            let _ = send(&ShortcutCollectionViewRequest { view });
+                            send(&ShortcutCollectionViewRequest { view });
                         },
                     }
                 },
@@ -113,7 +115,7 @@ pub fn Page() -> Element {
                                 onpointerdown: move |event| event.prevent_default(),
                                 onclick: move |event| {
                                     event.stop_propagation();
-                                    let _ = send(&ShortcutProbeClearRequest);
+                                    send(&ShortcutProbeClearRequest);
                                 },
                                 LineIconView { icon: LineIcon::RotateCcw, class: "size-3".to_string() }
                                 {translate("shortcuts-clear")}

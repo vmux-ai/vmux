@@ -8,7 +8,7 @@ use bevy::ecs::system::SystemParam;
 use bevy::prelude::*;
 use bevy::winit::{EventLoopProxy, EventLoopProxyWrapper, WinitUserEvent};
 use bevy_cef::prelude::{UiEventPlugin, UiInput};
-use vmux_ecs::{FileUiStateUpdates, FileUiStateWrite};
+use vmux_ecs::{UiFileUpdates, UiFileWrite};
 
 use vmux_path::PathIdentity;
 
@@ -1003,12 +1003,12 @@ fn dispatch_requests(
 
 fn publish_file_state(
     files: Query<(Entity, &FileGit), Changed<FileGit>>,
-    pages: Query<(), With<FileUiStateUpdates>>,
+    pages: Query<(), With<UiFileUpdates>>,
     mut commands: Commands,
 ) {
     for (entity, file) in &files {
         if pages.contains(entity) {
-            commands.trigger(FileUiStateWrite::from_event(entity, &file.state));
+            commands.trigger(UiFileWrite::from_event(entity, &file.state));
         }
     }
 }
@@ -1022,10 +1022,10 @@ mod tests {
     };
     use vmux_api::{BinEvent, UiStateFrame};
     use vmux_api::{UiEventPermissions, UiState as _};
-    use vmux_ecs::event::FileUiState;
+    use vmux_ecs::event::UiFile;
 
     #[derive(Resource, Default)]
-    struct Emitted(Vec<FileUiState>);
+    struct Emitted(Vec<UiFile>);
 
     #[derive(Resource)]
     struct TestDiff(Option<GitDiffViewport>);
@@ -1039,19 +1039,19 @@ mod tests {
 
     impl Emitted {
         fn record(trigger: On<BinHostEmitEvent>, mut emitted: ResMut<Self>) {
-            if trigger.event().id() != FileUiState::id() {
+            if trigger.event().id() != UiFile::id() {
                 return;
             }
             trigger.event().mark_delivered();
             let frame = rkyv::from_bytes::<
-                UiStateFrame<FileUiState, <FileUiState as vmux_api::UiState>::Update>,
+                UiStateFrame<UiFile, <UiFile as vmux_api::UiState>::Update>,
                 rkyv::rancor::Error,
             >(trigger.event().payload())
             .unwrap();
             let previous = emitted.0.pop();
             let state = match frame {
                 UiStateFrame::Snapshot(state) => state,
-                UiStateFrame::Updates(updates) => FileUiState::from_updates(previous, updates),
+                UiStateFrame::Updates(updates) => UiFile::from_updates(previous, updates),
             };
             emitted.0.push(state);
         }
@@ -1206,7 +1206,7 @@ mod tests {
         let mut app = App::new();
         app.add_plugins((
             MinimalPlugins,
-            vmux_ecs::UiStatePlugin::<FileUiState>::default(),
+            vmux_ecs::UiStatePlugin::<UiFile>::default(),
             StatusPlugin,
         ))
         .init_resource::<Emitted>()
@@ -1214,7 +1214,7 @@ mod tests {
         let entity = app
             .world_mut()
             .spawn((
-                FileUiStateUpdates::default(),
+                UiFileUpdates::default(),
                 FileGit::new(&file, 1),
                 GitDiffSource::default(),
                 vmux_ecs::PageMetadata {
@@ -1229,7 +1229,7 @@ mod tests {
         app.world_mut().spawn(UiEventPermissions {
             url: "file://",
             owns_subtree: true,
-            permissions: &[FileUiState::PERMISSION],
+            permissions: &[UiFile::PERMISSION],
         });
         let mut browsers = Browsers::default();
         browsers.set_externally_hosted(entity);

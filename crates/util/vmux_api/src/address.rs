@@ -76,19 +76,19 @@ impl PageAddress {
 }
 
 #[crate::ui_state_patch(Default)]
-pub struct PageAddressUiStatePatch {
+pub struct UiPageAddressPatch {
     pub address: Option<PageAddress>,
     pub in_header: Option<bool>,
 }
 
-#[crate::ui_state(Default, patch = PageAddressUiStatePatch, version = 1)]
-pub struct PageAddressUiState {
+#[crate::ui_state(Default, patch = UiPageAddressPatch, version = 1)]
+pub struct UiPageAddress {
     pub address: Option<PageAddress>,
     pub in_header: bool,
 }
 
-impl crate::UiStateProjection<PageAddressUiStatePatch> for PageAddressUiState {
-    fn apply(&mut self, patch: PageAddressUiStatePatch) {
+impl crate::UiStateProjection<UiPageAddressPatch> for UiPageAddress {
+    fn apply(&mut self, patch: UiPageAddressPatch) {
         if let Some(address) = patch.address {
             self.address = Some(address);
         }

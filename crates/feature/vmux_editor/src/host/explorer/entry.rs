@@ -3,7 +3,7 @@ use std::path::{Path, PathBuf};
 use bevy::prelude::*;
 use bevy::tasks::{IoTaskPool, Task, futures_lite::future};
 use bevy_cef::prelude::*;
-use vmux_ecs::FileUiStateWrite;
+use vmux_ecs::UiFileWrite;
 use vmux_ecs::event::{
     ExplorerCreateDirectoryPromptRequest, ExplorerCreateFilePromptRequest,
     ExplorerDeletePromptRequest, ExplorerPromptDismissRequest, ExplorerPromptDraftRequest,
@@ -329,7 +329,7 @@ fn project(
         } else {
             ""
         };
-        commands.trigger(FileUiStateWrite::from_event(
+        commands.trigger(UiFileWrite::from_event(
             entity,
             &ExplorerPromptState {
                 open: !title_message_id.is_empty(),

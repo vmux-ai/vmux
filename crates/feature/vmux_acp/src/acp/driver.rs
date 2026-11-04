@@ -16,7 +16,7 @@ use agent_client_protocol::schema::v1::{
     PermissionOptionId, PromptCapabilities, PromptRequest, ReadTextFileRequest,
     ReadTextFileResponse, ReleaseTerminalRequest, ReleaseTerminalResponse,
     RequestPermissionOutcome, RequestPermissionRequest, RequestPermissionResponse, ResourceLink,
-    SelectedPermissionOutcome, SessionConfigOption, SessionId, SessionModeState,
+    SelectedPermissionOutcome, SessionConfigOption, SessionId as AcpSessionId, SessionModeState,
     SessionNotification, SessionUpdate, SetSessionConfigOptionRequest, SetSessionModeRequest,
     TerminalExitStatus, TerminalId, TerminalOutputRequest, TerminalOutputResponse, TextContent,
     WaitForTerminalExitRequest, WaitForTerminalExitResponse, WriteTextFileRequest,
@@ -1358,23 +1358,23 @@ async fn load_requested_session<F, Fut, E>(
     resume: Option<String>,
     load_supported: bool,
     load: F,
-) -> Option<SessionId>
+) -> Option<AcpSessionId>
 where
-    F: FnOnce(SessionId) -> Fut,
+    F: FnOnce(AcpSessionId) -> Fut,
     Fut: Future<Output = Result<(), E>>,
 {
-    let sid = resume.filter(|_| load_supported).map(SessionId::new)?;
+    let sid = resume.filter(|_| load_supported).map(AcpSessionId::new)?;
     load(sid.clone()).await.ok()?;
     Some(sid)
 }
 
 async fn ensure_session<F, Fut, E>(
-    session_id: &mut Option<SessionId>,
+    session_id: &mut Option<AcpSessionId>,
     create: F,
-) -> Result<(SessionId, bool), E>
+) -> Result<(AcpSessionId, bool), E>
 where
     F: FnOnce() -> Fut,
-    Fut: Future<Output = Result<SessionId, E>>,
+    Fut: Future<Output = Result<AcpSessionId, E>>,
 {
     if let Some(sid) = session_id.clone() {
         return Ok((sid, false));
@@ -1609,7 +1609,7 @@ mod tests {
             let entity = app
                 .world_mut()
                 .spawn((
-                    vmux_session::SessionId("s1".into()),
+                    vmux_session::Id::<vmux_session::Session>::new("s1"),
                     super::super::AcpSessionShared(Arc::clone(&shared)),
                     projection_inboxes,
                     AcpProjector::default(),
@@ -2304,7 +2304,7 @@ mod tests {
         let mut session_id = None;
         let (created_id, created) = ensure_session(&mut session_id, || {
             calls.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
-            async { Ok::<SessionId, ()>(SessionId::new("created")) }
+            async { Ok::<AcpSessionId, ()>(AcpSessionId::new("created")) }
         })
         .await
         .unwrap();
@@ -2313,7 +2313,7 @@ mod tests {
 
         let (reused_id, created) = ensure_session(&mut session_id, || {
             calls.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
-            async { Ok::<SessionId, ()>(SessionId::new("unexpected")) }
+            async { Ok::<AcpSessionId, ()>(AcpSessionId::new("unexpected")) }
         })
         .await
         .unwrap();
@@ -2326,7 +2326,7 @@ mod tests {
     async fn failed_session_creation_remains_retryable() {
         let mut session_id = None;
         let result = ensure_session(&mut session_id, || async {
-            Err::<SessionId, &'static str>("create failed")
+            Err::<AcpSessionId, &'static str>("create failed")
         })
         .await;
         assert_eq!(result.unwrap_err(), "create failed");

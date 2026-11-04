@@ -214,7 +214,7 @@ pub(super) fn RepositoryHeader(
                                 );
                                 page.set_header_dropdown(HeaderDropdown::Closed);
                                 page.request_repository(request);
-                                let _ = send(&ProjectActivateRequest {
+                                send(&ProjectActivateRequest {
                                     path: project.path,
                                     branch: String::new(),
                                     checkout: String::new(),
@@ -223,7 +223,7 @@ pub(super) fn RepositoryHeader(
                             },
                             on_add: move |_| {
                                 page.set_header_dropdown(HeaderDropdown::Closed);
-                                let _ = send(&GitRepositoryPickerRequest {
+                                send(&GitRepositoryPickerRequest {
                                     path: project_picker_dir.clone(),
                                 });
                             },
@@ -275,7 +275,7 @@ pub(super) fn RepositoryHeader(
                                         branch_collection,
                                         onselect: move |collection| {
                                             optimistic_branch_collection.set((), observed_branch_collection, collection);
-                                            if send(&GitBranchCollectionSelectRequest { collection }).is_err() { optimistic_branch_collection.clear(&()); }
+                                            if vmux_ui::hooks::try_send(&GitBranchCollectionSelectRequest { collection }).is_err() { optimistic_branch_collection.clear(&()); }
                                         },
                                     }
                                     span { class: "text-[9px] tabular-nums text-muted-foreground", "{selected_reference_count}" }
@@ -284,7 +284,7 @@ pub(super) fn RepositoryHeader(
                                     class: "min-h-0 overflow-y-auto",
                                     onscroll: move |event: Event<ScrollData>| {
                                         if !branch_collection_pending && ScrollPreload::LIST.reached(&event) && selected_branches_progress.has_more && !selected_branches_progress.loading {
-                                            let _ = send(&GitCatalogNextRequest { catalog: selected_catalog });
+                                            send(&GitCatalogNextRequest { catalog: selected_catalog });
                                         }
                                     },
                                     match branch_collection {
@@ -357,7 +357,7 @@ pub(super) fn RepositoryHeader(
                                     class: "min-h-0 overflow-y-auto",
                                     onscroll: move |event: Event<ScrollData>| {
                                         if ScrollPreload::LIST.reached(&event) && branches_progress.has_more && !branches_progress.loading {
-                                            let _ = send(&GitCatalogNextRequest { catalog: GitCatalog::LocalBranches });
+                                            send(&GitCatalogNextRequest { catalog: GitCatalog::LocalBranches });
                                         }
                                     },
                                     for branch in repository.branches.iter() {
@@ -374,11 +374,11 @@ pub(super) fn RepositoryHeader(
                                                     },
                                                     onclick: move |_| {
                                                         page.set_header_dropdown(HeaderDropdown::Closed);
-                                                        let _ = send(&GitPanelSelectRequest { panel: GitPanel::Branches });
-                                                        let _ = send(&GitBranchCollectionSelectRequest {
+                                                        send(&GitPanelSelectRequest { panel: GitPanel::Branches });
+                                                        send(&GitBranchCollectionSelectRequest {
                                                             collection: GitBranchCollection::Local,
                                                         });
-                                                        let _ = send(&GitBranchSelectRequest {
+                                                        send(&GitBranchSelectRequest {
                                                             reference: name.clone(),
                                                         });
                                                     },
@@ -448,7 +448,7 @@ pub(super) fn RepositoryHeader(
                                         class: "max-h-80 overflow-y-auto",
                                         onscroll: move |event: Event<ScrollData>| {
                                             if ScrollPreload::LIST.reached(&event) && commits_progress.has_more && !commits_progress.loading {
-                                                let _ = send(&GitCatalogNextRequest {
+                                                send(&GitCatalogNextRequest {
                                                     catalog: GitCatalog::Commits,
                                                 });
                                             }
@@ -468,8 +468,8 @@ pub(super) fn RepositoryHeader(
                                                         title: "{commit.summary}",
                                                         onclick: move |_| {
                                                             page.set_header_dropdown(HeaderDropdown::Closed);
-                                                            let _ = send(&GitPanelSelectRequest { panel: GitPanel::Commits });
-                                                            let _ = send(&GitCommitSelectRequest { commit: sha.clone() });
+                                                            send(&GitPanelSelectRequest { panel: GitPanel::Commits });
+                                                            send(&GitCommitSelectRequest { commit: sha.clone() });
                                                         },
                                                         code { class: "shrink-0 font-mono text-[10px] text-git-reference", "{commit.short_sha}" }
                                                         span { class: "min-w-0 flex-1 truncate font-medium", "{commit.summary}" }
@@ -524,14 +524,14 @@ fn RepositoryActions(
                 class: "h-8 gap-1.5 px-2.5 text-[11px] font-medium".to_string(),
                 onclick: move |_| {
                     if checkout_start.is_empty() {
-                        let _ = send(&ProjectActivateRequest {
+                        send(&ProjectActivateRequest {
                             path: push_path.clone(),
                             branch: checkout_branch.clone(),
                             checkout: checkout_path.clone(),
                             pane_id: None,
                         });
                     } else {
-                        let _ = send(&GitCreateBranchRequest {
+                        send(&GitCreateBranchRequest {
                             repo_root: push_path.clone(),
                             branch: checkout_branch.clone(),
                             start_point: checkout_start.clone(),
@@ -548,7 +548,7 @@ fn RepositoryActions(
                 class: "h-8 gap-1.5 px-2.5 text-[11px] font-medium".to_string(),
                 disabled: !can_push,
                 onclick: move |_| {
-                    let _ = send(&GitPushRequest { path: push_path.clone() });
+                    send(&GitPushRequest { path: push_path.clone() });
                 },
                 LineIconView { icon: LineIcon::Upload, class: "size-4" }
                 span { {translate("git-push-label")} }
@@ -616,7 +616,7 @@ fn ViewPicker(
                         aria_label: translate("git-branch-changes"),
                         onclick: move |_| {
                             page.set_header_dropdown(HeaderDropdown::Closed);
-                            let _ = send(&GitBranchDiffSelectRequest);
+                            send(&GitBranchDiffSelectRequest);
                         },
                         LineIconView { icon: LineIcon::X, class: "size-3" }
                     }
@@ -630,7 +630,7 @@ fn ViewPicker(
                         label: translate("git-changes"),
                         count: changes,
                         onselect: move |_| {
-                            let _ = send(&GitPanelSelectRequest { panel: GitPanel::Files });
+                            send(&GitPanelSelectRequest { panel: GitPanel::Files });
                         },
                     }
                     div { class: "mx-1 my-1 h-px bg-foreground/[0.07]" }
@@ -640,7 +640,7 @@ fn ViewPicker(
                         label: translate("git-branch-changes"),
                         count: 0,
                         onselect: move |_| {
-                            let _ = send(&GitBranchDiffSelectRequest);
+                            send(&GitBranchDiffSelectRequest);
                         },
                     }
                     ViewPickerItem {
@@ -650,9 +650,9 @@ fn ViewPicker(
                         count: commits,
                         onselect: move |_| {
                             if first_commit.is_empty() {
-                                let _ = send(&GitPanelSelectRequest { panel: GitPanel::Commits });
+                                send(&GitPanelSelectRequest { panel: GitPanel::Commits });
                             } else {
-                                let _ = send(&GitCommitSelectRequest {
+                                send(&GitCommitSelectRequest {
                                     commit: first_commit.clone(),
                                 });
                             }
@@ -664,7 +664,7 @@ fn ViewPicker(
                         label: translate("git-stashes"),
                         count: stashes,
                         onselect: move |_| {
-                            let _ = send(&GitPanelSelectRequest { panel: GitPanel::Stash });
+                            send(&GitPanelSelectRequest { panel: GitPanel::Stash });
                         },
                     }
                 }

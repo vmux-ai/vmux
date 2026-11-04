@@ -6,16 +6,16 @@ use crate::state::{
     ToolLinkRequest, ToolOpenRequest, ToolOperationKey, ToolOperationKind, ToolOperationNotice,
     ToolProvider, ToolProviderMetadata, ToolStatus, ToolUninstallRequest, ToolUnlinkRequest,
     ToolUpdateRequest, ToolsFilterRequest, ToolsNavigateRequest, ToolsRefreshRequest,
-    ToolsSnapshot, ToolsUiState, ToolsView,
+    ToolsSnapshot, ToolsView, UiTools,
 };
 use bevy::prelude::*;
 use bevy::tasks::{IoTaskPool, Task, futures_lite::future};
 use bevy_cef::prelude::{UiEventPlugin, UiInput};
-use vmux_ecs::manifest::{FeatureId, FeatureManifest};
 use vmux_ecs::page::PageReady;
 use vmux_ecs::{
     PageMetadata, PageOpenRequest, PageOpenTarget, UiState, UiStatePlugin, UiStateWrite,
 };
+use vmux_feature::{FeatureId, FeatureManifest};
 
 use crate::{
     ExternalToolOperation, ToolApplier, ToolInventoryChanged, ToolOperationFailed,
@@ -30,7 +30,7 @@ impl Plugin for ToolHostPlugin {
     fn build(&self, app: &mut App) {
         app.add_plugins((
             crate::McpConnectionPlugin,
-            UiStatePlugin::<ToolsUiState>::default(),
+            UiStatePlugin::<UiTools>::default(),
         ))
         .add_plugins((
             UiEventPlugin::<(
@@ -149,10 +149,7 @@ fn open_request(
         return;
     };
     if path == store.brewfile_path() && !path.exists() {
-        if let Some(parent) = path.parent() {
-            let _ = std::fs::create_dir_all(parent);
-        }
-        let _ = std::fs::write(path, "");
+        let _ = vmux_path::AtomicFile::write(path, b"");
     }
     let Ok(url) = url::Url::from_file_path(path) else {
         return;
@@ -213,13 +210,13 @@ impl Default for ToolRegistry {
 }
 
 #[derive(Component, Default)]
-#[require(UiState<ToolsUiState>)]
+#[require(UiState<UiTools>)]
 struct ToolSubscriber {
     snapshot_revision: u64,
     revision: u64,
     emitted_revision: u64,
     pending: BTreeMap<u64, ToolOperationKey>,
-    state: ToolsUiState,
+    state: UiTools,
 }
 
 impl ToolSubscriber {
@@ -871,7 +868,7 @@ fn emit_tools_state(
         if subscriber.emitted_revision == subscriber.revision {
             continue;
         }
-        commands.trigger(UiStateWrite::<ToolsUiState>::from_event(
+        commands.trigger(UiStateWrite::<UiTools>::from_event(
             entity,
             &subscriber.state,
         ));

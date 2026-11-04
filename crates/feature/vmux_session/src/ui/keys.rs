@@ -22,7 +22,7 @@ pub fn use_chat_keys(chat: Chat) -> ChatKeys {
         }),
     };
     use_drop(move || {
-        let _ = send(&KeyContextRequest { keys: Vec::new() });
+        send(&KeyContextRequest { keys: Vec::new() });
     });
     keys
 }

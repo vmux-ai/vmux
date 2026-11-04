@@ -5,8 +5,8 @@ use vmux_api::protocol::{
     AgentListCommands, AgentNotify, AgentQueryResult, AgentRequest, ClientMessage, JsonValue,
 };
 use vmux_ecs::JsonArguments;
-use vmux_ecs::manifest::FeaturePlugin;
 use vmux_ecs::service::{ServiceMessageSet, ServiceRequest};
+use vmux_feature::AppFeatureExt;
 use vmux_tool::{
     AddedTool, ToolCommand, ToolDispatchSet, ToolQueryHandled, ToolQueryRequest, ToolQueryRouteSet,
     UnclaimedToolInvocation,
@@ -23,7 +23,7 @@ pub struct CommandToolPlugin;
 
 impl Plugin for CommandToolPlugin {
     fn build(&self, app: &mut App) {
-        app.add_plugins(FeaturePlugin::<crate::Feature>::default())
+        app.register_feature::<crate::Feature>()
             .add_message::<ToolQueryRequest>()
             .add_message::<ToolQueryHandled>()
             .add_message::<ServiceRequest>()
@@ -139,6 +139,7 @@ mod tests {
         fn app() -> App {
             let mut app = App::new();
             app.add_plugins((ToolRegistryPlugin, CommandToolPlugin));
+            app.finish();
             app.update();
             app
         }

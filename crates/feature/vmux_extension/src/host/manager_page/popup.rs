@@ -10,7 +10,7 @@ use vmux_api::extension::{
 use vmux_ecs::overlay::WindowOverlay;
 use vmux_ecs::{KeyboardOwner, UiStateWrite};
 use vmux_flex::prelude::{LayoutSystems, Visibility};
-use vmux_layout::{Browser, LayoutCef, state::LayoutUiState};
+use vmux_layout::{Browser, LayoutCef, state::UiLayout};
 
 use super::super::model::ExtensionPopup;
 
@@ -57,11 +57,10 @@ impl PopupActions<'_, '_> {
             closed = true;
         }
         if closed {
-            self.commands
-                .trigger(UiStateWrite::<LayoutUiState>::from_event(
-                    owner,
-                    &ExtensionPopupEvent::default(),
-                ));
+            self.commands.trigger(UiStateWrite::<UiLayout>::from_event(
+                owner,
+                &ExtensionPopupEvent::default(),
+            ));
         }
     }
 }
@@ -155,7 +154,7 @@ fn open_request(
         ));
     actions
         .commands
-        .trigger(UiStateWrite::<LayoutUiState>::from_event(
+        .trigger(UiStateWrite::<UiLayout>::from_event(
             owner,
             &ExtensionPopupEvent {
                 id,
@@ -339,7 +338,7 @@ fn size(
     let Ok(popup) = popups.get(trigger.event().webview) else {
         return;
     };
-    commands.trigger(UiStateWrite::<LayoutUiState>::from_event(
+    commands.trigger(UiStateWrite::<UiLayout>::from_event(
         popup.owner,
         &ExtensionPopupSizeEvent {
             id: popup.extension_id.clone(),

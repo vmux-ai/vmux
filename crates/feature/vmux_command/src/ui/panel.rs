@@ -9,7 +9,7 @@ use crate::CommandPaletteSurface;
 pub fn CommandBarPanel() -> Element {
     let state = use_command_bar_ui();
     let close = EventHandler::new(move |()| {
-        let _ = send(&DismissRequest);
+        send(&DismissRequest);
     });
 
     if !state().snapshot.open_id.is_open() {

@@ -10,7 +10,7 @@ use vmux_ecs::event::{
     FileLineEnding, FileShapeSet, FileStatusPickerOpen,
 };
 #[cfg(test)]
-use vmux_ecs::manifest::FeaturePlugin;
+use vmux_feature::AppFeatureExt;
 
 use crate::host::editing::FileFindOpenRequest;
 use crate::host::editor::{Editor, FileView};
@@ -30,7 +30,7 @@ pub(crate) struct KeyPlugin;
 impl Plugin for KeyPlugin {
     fn build(&self, app: &mut App) {
         #[cfg(test)]
-        app.add_plugins(FeaturePlugin::<crate::Feature>::default());
+        app.register_feature::<crate::Feature>();
         if !app.is_plugin_added::<CommandRuntimePlugin>() {
             app.add_plugins(CommandRuntimePlugin);
         }
@@ -402,6 +402,7 @@ mod tests {
                 .init_resource::<PanelRequests>()
                 .add_observer(FindRequests::record)
                 .add_observer(PanelRequests::record);
+            app.finish();
             app
         }
 
@@ -457,6 +458,7 @@ mod tests {
                 .add_message::<FileStatusPicked>()
                 .init_resource::<Reopened>()
                 .add_observer(Reopened::record);
+            app.finish();
             app
         }
 

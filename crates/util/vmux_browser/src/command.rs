@@ -18,15 +18,15 @@ use vmux_command::{
 };
 use vmux_command::{CommandInvocation, ReadCommandRequests, ResolvedLocale};
 use vmux_ecs::launcher::{HostsLauncher, InlineTransitionRequested};
-use vmux_ecs::manifest::FeatureManifest;
-#[cfg(test)]
-use vmux_ecs::manifest::FeaturePlugin;
 #[cfg(test)]
 use vmux_ecs::page::HostHistoryObserve;
 use vmux_ecs::{
     Active, PageMetadata, PageOpenRequest, PageOpenTarget, UiStateWrite,
     page::{HostHistoryDelta, HostHistoryStep, PageReady},
 };
+#[cfg(test)]
+use vmux_feature::AppFeatureExt;
+use vmux_feature::FeatureManifest;
 use vmux_history::LastActivatedAt;
 use vmux_layout::Browser;
 use vmux_layout::event::{
@@ -46,7 +46,7 @@ use vmux_layout::{
     side_sheet::{SideSheet, SideSheetPaneExpanded, SideSheetPosition, SideSheetSectionsExpanded},
     space::{Space, SpaceHierarchy},
     stack::{CloseStackRequest, FocusedStack, LayoutFocus, Stack},
-    state::LayoutUiState,
+    state::UiLayout,
     tab::Tab,
     window::{WindowHierarchy, WindowScope},
 };
@@ -63,7 +63,7 @@ pub(crate) struct CommandPlugin;
 impl Plugin for CommandPlugin {
     fn build(&self, app: &mut App) {
         #[cfg(test)]
-        app.add_plugins(FeaturePlugin::<crate::Feature>::default());
+        app.register_feature::<crate::Feature>();
         if !app.is_plugin_added::<vmux_command::CommandRuntimePlugin>() {
             app.add_plugins(vmux_command::CommandRuntimePlugin);
         }
@@ -730,7 +730,7 @@ fn reload_notify_header(
         return;
     };
     let effect = revision.next_effect();
-    commands.trigger(UiStateWrite::<LayoutUiState>::from_event(cef_e, &effect));
+    commands.trigger(UiStateWrite::<UiLayout>::from_event(cef_e, &effect));
 }
 
 fn hard_reload_notify_header(
@@ -750,7 +750,7 @@ fn hard_reload_notify_header(
         return;
     };
     let effect = revision.next_effect();
-    commands.trigger(UiStateWrite::<LayoutUiState>::from_event(cef_e, &effect));
+    commands.trigger(UiStateWrite::<UiLayout>::from_event(cef_e, &effect));
 }
 
 fn side_sheet_resize(
@@ -983,7 +983,7 @@ mod tests {
     use vmux_ecs::page::HostHistory;
     use vmux_flex::prelude::{Node, Val};
     use vmux_layout::pane::Pane;
-    use vmux_layout::space::{Space, SpaceId};
+    use vmux_layout::space::Space;
     use vmux_layout::stack::Stack;
     use vmux_layout::tab::Tab;
     use vmux_setting::AppSettings;
@@ -1059,10 +1059,7 @@ mod tests {
             .init_resource::<CefNavigations>()
             .add_observer(CefNavigations::record_back);
 
-            let tab = app
-                .world_mut()
-                .spawn((Tab::default(), LastActivatedAt::now()))
-                .id();
+            let tab = app.world_mut().spawn((Tab, LastActivatedAt::now())).id();
             let pane = app
                 .world_mut()
                 .spawn((Pane, LastActivatedAt::now(), ChildOf(tab)))
@@ -1086,6 +1083,9 @@ mod tests {
                 }
                 .local_bundle(),
             );
+            app.finish();
+            app.cleanup();
+            app.update();
 
             Self { app, view }
         }
@@ -1127,15 +1127,15 @@ mod tests {
     #[test]
     fn command_invocations_dispatch_to_concrete_requests() {
         let mut app = App::new();
-        app.add_plugins((
-            MinimalPlugins,
-            FeaturePlugin::<crate::Feature>::default(),
-            vmux_command::CommandRuntimePlugin,
-        ))
-        .add_message::<NavigationRequest>()
-        .add_message::<OpenRequest>()
-        .add_message::<ZoomRequest>()
-        .add_message::<ShowDevToolsRequest>();
+        app.add_plugins(MinimalPlugins)
+            .register_feature::<crate::Feature>()
+            .add_plugins(vmux_command::CommandRuntimePlugin)
+            .add_message::<NavigationRequest>()
+            .add_message::<OpenRequest>()
+            .add_message::<ZoomRequest>()
+            .add_message::<ShowDevToolsRequest>();
+        app.finish();
+        app.cleanup();
         app.world_mut()
             .resource_mut::<Messages<CommandInvocation>>()
             .write_batch([
@@ -1184,6 +1184,7 @@ mod tests {
             .world_mut()
             .spawn((
                 Space,
+                vmux_api::Id::<Space>::new("first-space"),
                 CurrentSpace,
                 Active,
                 vmux_ecs::EffectiveStartupUrl::default(),
@@ -1194,6 +1195,7 @@ mod tests {
             .world_mut()
             .spawn((
                 Space,
+                vmux_api::Id::<Space>::new("second-space"),
                 CurrentSpace,
                 Active,
                 vmux_ecs::EffectiveStartupUrl::default(),
@@ -1202,36 +1204,26 @@ mod tests {
             .id();
         let first_tab = app
             .world_mut()
-            .spawn((
-                Tab::default(),
-                Active,
-                LastActivatedAt(1),
-                ChildOf(first_space),
-            ))
+            .spawn((Tab, Active, LastActivatedAt::new(1), ChildOf(first_space)))
             .id();
         let second_tab = app
             .world_mut()
-            .spawn((
-                Tab::default(),
-                Active,
-                LastActivatedAt(1),
-                ChildOf(second_space),
-            ))
+            .spawn((Tab, Active, LastActivatedAt::new(1), ChildOf(second_space)))
             .id();
         let first_pane = app
             .world_mut()
-            .spawn((Pane, LastActivatedAt(1), ChildOf(first_tab)))
+            .spawn((Pane, LastActivatedAt::new(1), ChildOf(first_tab)))
             .id();
         let second_pane = app
             .world_mut()
-            .spawn((Pane, LastActivatedAt(1), ChildOf(second_tab)))
+            .spawn((Pane, LastActivatedAt::new(1), ChildOf(second_tab)))
             .id();
         let first_stack = app
             .world_mut()
             .spawn((
                 Stack::bundle(),
                 Active,
-                LastActivatedAt(1),
+                LastActivatedAt::new(1),
                 ChildOf(first_pane),
             ))
             .id();
@@ -1240,7 +1232,7 @@ mod tests {
             .spawn((
                 Stack::bundle(),
                 Active,
-                LastActivatedAt(1),
+                LastActivatedAt::new(1),
                 ChildOf(second_pane),
             ))
             .id();
@@ -1308,11 +1300,11 @@ mod tests {
         let pane = app.world_mut().spawn(Pane).id();
         let middle = app
             .world_mut()
-            .spawn((Stack::bundle(), LastActivatedAt(1), ChildOf(pane)))
+            .spawn((Stack::bundle(), LastActivatedAt::new(1), ChildOf(pane)))
             .id();
         let active = app
             .world_mut()
-            .spawn((Stack::bundle(), LastActivatedAt(2), ChildOf(pane)))
+            .spawn((Stack::bundle(), LastActivatedAt::new(2), ChildOf(pane)))
             .id();
         let mut cursor = app
             .world()
@@ -1337,7 +1329,10 @@ mod tests {
             "the button closes its own stack, not whichever one is active"
         );
         assert_eq!(
-            app.world().get::<LastActivatedAt>(active).unwrap().0,
+            app.world()
+                .get::<LastActivatedAt>(active)
+                .unwrap()
+                .milliseconds(),
             2,
             "closing an inactive stack must not disturb activation"
         );
@@ -1431,21 +1426,18 @@ mod tests {
 
             let space = app
                 .world_mut()
-                .spawn((Space, SpaceId("work".to_string())))
+                .spawn(Space::bundle(vmux_api::Id::<Space>::new("work")))
                 .id();
-            let first_tab = app.world_mut().spawn((Tab::default(), ChildOf(space))).id();
+            let first_tab = app.world_mut().spawn((Tab, ChildOf(space))).id();
             let pane_in_first_tab = app.world_mut().spawn((Pane, ChildOf(first_tab))).id();
             app.world_mut()
                 .spawn((Stack::bundle(), ChildOf(pane_in_first_tab)));
-            let second_tab = app.world_mut().spawn((Tab::default(), ChildOf(space))).id();
+            let second_tab = app.world_mut().spawn((Tab, ChildOf(space))).id();
             let other_space = app
                 .world_mut()
-                .spawn((Space, SpaceId("play".to_string())))
+                .spawn(Space::bundle(vmux_api::Id::<Space>::new("play")))
                 .id();
-            let tab_in_other_space = app
-                .world_mut()
-                .spawn((Tab::default(), ChildOf(other_space)))
-                .id();
+            let tab_in_other_space = app.world_mut().spawn((Tab, ChildOf(other_space))).id();
 
             Self {
                 app,

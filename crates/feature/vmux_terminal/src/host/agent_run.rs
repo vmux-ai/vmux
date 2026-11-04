@@ -23,7 +23,7 @@ use vmux_layout::pane::Pane;
 use vmux_layout::pane::{PaneSplitDirection, SpawnCounter, SpawnSeq};
 #[cfg(test)]
 use vmux_layout::stack::Stack;
-use vmux_layout::tab::Tab;
+use vmux_layout::tab::{StartupDir, Tab};
 use vmux_setting::AppSettings;
 #[cfg(test)]
 use vmux_setting::{TerminalSettings, TerminalTheme};
@@ -606,7 +606,7 @@ pub(super) struct AgentRunContext<'w, 's> {
     session_targets: Query<'w, 's, &'static vmux_ecs::EntityTarget<vmux_session::Session>>,
     sessions: Query<'w, 's, &'static vmux_ecs::Cwd, With<vmux_session::Session>>,
     panes: AgentPanes<'w, 's>,
-    tabs: Query<'w, 's, &'static Tab>,
+    tabs: Query<'w, 's, &'static StartupDir, With<Tab>>,
     next_pane_sequence: NextPaneSpawnSequence<'w, 's>,
 }
 
@@ -621,11 +621,11 @@ impl AgentRunContext<'_, '_> {
         Some((terminal, pane, region.copied().unwrap_or_default()))
     }
 
-    fn tab_cwd(&self, pane: Entity) -> Option<String> {
+    fn tab_cwd(&self, pane: Entity) -> Option<std::path::PathBuf> {
         let mut current = pane;
         loop {
-            if let Ok(tab) = self.tabs.get(current) {
-                return tab.startup_dir.clone();
+            if let Ok(startup_dir) = self.tabs.get(current) {
+                return startup_dir.0.clone();
             }
             current = self.panes.placement.child_of_q.get(current).ok()?.parent();
         }
@@ -961,7 +961,7 @@ mod tests {
         let canonical_tab_dir = tab_dir.canonicalize().unwrap();
         assert_eq!(
             WorkspaceCwd::resolve(
-                Some(tab_dir.to_string_lossy().as_ref()),
+                Some(tab_dir.as_path()),
                 Some(agent_dir.to_string_lossy().as_ref()),
             )
             .unwrap(),
@@ -1019,13 +1019,17 @@ mod tests {
         let agent_dir = std::env::temp_dir();
 
         assert!(
-            WorkspaceCwd::resolve(Some("/no/such/vmux-tab-workspace"), agent_dir.to_str()).is_err()
+            WorkspaceCwd::resolve(
+                Some(Path::new("/no/such/vmux-tab-workspace")),
+                agent_dir.to_str(),
+            )
+            .is_err()
         );
     }
 
     #[test]
     fn run_terminal_cwd_rejects_relative_stored_tab_directory() {
-        assert!(WorkspaceCwd::resolve(Some("."), None).is_err());
+        assert!(WorkspaceCwd::resolve(Some(Path::new(".")), None).is_err());
     }
 
     #[test]
@@ -1257,7 +1261,7 @@ mod tests {
             .init_resource::<RunTerminalCandidateOutput>()
             .add_systems(Update, collect_run_candidates);
 
-        let tab = app.world_mut().spawn(Tab::default()).id();
+        let tab = app.world_mut().spawn(Tab).id();
         let terminal_pane = app
             .world_mut()
             .spawn((Pane, SpawnSeq(7), ChildOf(tab)))
@@ -1302,7 +1306,7 @@ mod tests {
         app.add_plugins(MinimalPlugins)
             .init_resource::<RunTerminalCandidateOutput>()
             .add_systems(Update, collect_run_candidates);
-        let tab = app.world_mut().spawn(Tab::default()).id();
+        let tab = app.world_mut().spawn(Tab).id();
         let agent_pane = app
             .world_mut()
             .spawn((Pane, SpawnSeq(1), ChildOf(tab)))
@@ -1363,7 +1367,7 @@ mod tests {
         app.add_plugins(MinimalPlugins)
             .init_resource::<RunTerminalCandidateOutput>()
             .add_systems(Update, collect_run_candidates);
-        let tab = app.world_mut().spawn(Tab::default()).id();
+        let tab = app.world_mut().spawn(Tab).id();
         let agent_pane = app
             .world_mut()
             .spawn((Pane, SpawnSeq(1), ChildOf(tab)))
@@ -1451,7 +1455,7 @@ mod tests {
             .add_systems(Update, collect_run_bucket_panes);
         app.world_mut().spawn(crate::TerminalPlugin::MANIFEST);
 
-        let tab = app.world_mut().spawn(Tab::default()).id();
+        let tab = app.world_mut().spawn(Tab).id();
         let agent_pane = app
             .world_mut()
             .spawn((Pane, SpawnSeq(1), ChildOf(tab)))
@@ -1631,10 +1635,7 @@ mod tests {
             .init_resource::<SplitRunPaneOutput>()
             .add_systems(Update, split_run_pane);
 
-        let tab = app
-            .world_mut()
-            .spawn((Tab::default(), LastActivatedAt(1)))
-            .id();
+        let tab = app.world_mut().spawn((Tab, LastActivatedAt::new(1))).id();
         let browser_pane = app
             .world_mut()
             .spawn((Pane, SpawnSeq(10), ChildOf(tab)))
@@ -1763,17 +1764,14 @@ mod tests {
         let mut app = App::new();
         app.add_plugins(MinimalPlugins)
             .add_systems(Update, focus_reused_run);
-        let tab = app
-            .world_mut()
-            .spawn((Tab::default(), LastActivatedAt(1)))
-            .id();
+        let tab = app.world_mut().spawn((Tab, LastActivatedAt::new(1))).id();
         let pane = app
             .world_mut()
-            .spawn((Pane, SpawnSeq(7), LastActivatedAt(2), ChildOf(tab)))
+            .spawn((Pane, SpawnSeq(7), LastActivatedAt::new(2), ChildOf(tab)))
             .id();
         let stack = app
             .world_mut()
-            .spawn((Stack::bundle(), LastActivatedAt(3), ChildOf(pane)))
+            .spawn((Stack::bundle(), LastActivatedAt::new(3), ChildOf(pane)))
             .id();
         app.insert_resource(ReusedRunTerminalFocusInput {
             candidate: RunTerminalCandidate {
@@ -1787,9 +1785,27 @@ mod tests {
 
         app.update();
 
-        assert!(app.world().get::<LastActivatedAt>(tab).unwrap().0 > 1);
-        assert!(app.world().get::<LastActivatedAt>(pane).unwrap().0 > 2);
-        assert!(app.world().get::<LastActivatedAt>(stack).unwrap().0 > 3);
+        assert!(
+            app.world()
+                .get::<LastActivatedAt>(tab)
+                .unwrap()
+                .milliseconds()
+                > 1
+        );
+        assert!(
+            app.world()
+                .get::<LastActivatedAt>(pane)
+                .unwrap()
+                .milliseconds()
+                > 2
+        );
+        assert!(
+            app.world()
+                .get::<LastActivatedAt>(stack)
+                .unwrap()
+                .milliseconds()
+                > 3
+        );
     }
 
     #[test]

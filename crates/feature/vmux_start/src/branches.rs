@@ -4,7 +4,7 @@ use std::path::{Path, PathBuf};
 use bevy::prelude::*;
 use bevy::winit::EventLoopProxyWrapper;
 use bevy_cef::prelude::{Browsers, UiEventPlugin, UiInput};
-use vmux_api::command_bar::{CommandBarUiState, StartBranchesRequest, StartProjectBranches};
+use vmux_api::command_bar::{StartBranchesRequest, StartProjectBranches, UiCommandBar};
 use vmux_api::space::ProjectBranch;
 use vmux_git::{GitRuntime, GitTask};
 
@@ -129,7 +129,7 @@ fn finish(
             if !browsers.can_emit_to(webview) {
                 continue;
             }
-            commands.trigger(vmux_ecs::UiStateWrite::<CommandBarUiState>::from_event(
+            commands.trigger(vmux_ecs::UiStateWrite::<UiCommandBar>::from_event(
                 *webview,
                 &StartProjectBranches {
                     project: read.project.clone(),

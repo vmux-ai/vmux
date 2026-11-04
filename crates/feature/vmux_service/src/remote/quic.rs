@@ -97,10 +97,7 @@ impl IdentityStore {
 
         let identity =
             SelfSignedIdentity::generate(Self::names()).map_err(std::io::Error::other)?;
-        if let Some(parent) = cert_path.parent() {
-            std::fs::create_dir_all(parent)?;
-        }
-        std::fs::write(&cert_path, &identity.certificate_pem)?;
+        vmux_path::AtomicFile::write(&cert_path, identity.certificate_pem.as_bytes())?;
         PrivateFile::new(key_path).write(&identity.private_key_pem)?;
         self.persist_fingerprint(&identity.fingerprint)?;
         Ok(identity)
@@ -111,10 +108,7 @@ impl IdentityStore {
         if std::fs::read_to_string(&path).is_ok_and(|existing| existing.trim() == fingerprint) {
             return Ok(());
         }
-        if let Some(parent) = path.parent() {
-            std::fs::create_dir_all(parent)?;
-        }
-        std::fs::write(&path, fingerprint)
+        vmux_path::AtomicFile::write(&path, fingerprint.as_bytes())
     }
 
     fn names() -> Vec<String> {

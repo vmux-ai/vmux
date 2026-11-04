@@ -3,8 +3,8 @@ use serde::Deserialize;
 use vmux_api::BinEvent;
 use vmux_api::protocol::{AgentQueryResult, AgentRequest, AgentRequestId, ClientMessage};
 use vmux_ecs::ProcessAnchor;
-use vmux_ecs::manifest::FeaturePlugin;
 use vmux_ecs::service::ServiceRequest;
+use vmux_feature::AppFeatureExt;
 use vmux_layout::AgentOpenBeside;
 use vmux_tool::{
     AddedTool, ToolCommand, ToolDispatchSet, ToolQuery, ToolQueryHandled, ToolQueryRequest,
@@ -18,7 +18,7 @@ pub struct VaultToolPlugin;
 
 impl Plugin for VaultToolPlugin {
     fn build(&self, app: &mut App) {
-        app.add_plugins(FeaturePlugin::<crate::Feature>::default())
+        app.register_feature::<crate::Feature>()
             .add_message::<ToolQueryRequest>()
             .add_message::<ToolQueryHandled>()
             .add_message::<ServiceRequest>()

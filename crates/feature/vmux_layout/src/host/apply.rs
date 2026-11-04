@@ -267,7 +267,7 @@ struct LayoutWriter<'w, 's> {
     children: Query<'w, 's, &'static Children>,
     child_of: Query<'w, 's, &'static ChildOf>,
     activated: Query<'w, 's, &'static LastActivatedAt>,
-    tabs: Query<'w, 's, &'static mut LayoutTab>,
+    tab_names: Query<'w, 's, &'static mut Name, With<LayoutTab>>,
     splits: Query<'w, 's, (Entity, &'static mut PaneSplit, Option<&'static mut Node>)>,
     pane_sizes: Query<'w, 's, &'static mut PaneSize>,
     metadata: Query<'w, 's, &'static mut PageMetadata>,
@@ -311,7 +311,10 @@ impl LayoutWriter<'_, '_> {
                 Some(id) => match NodeKind::parse_id(id) {
                     Ok((_, value)) => {
                         let entity = Entity::from_bits(value);
-                        let activated_at = self.activated.get(entity).map_or(0, |value| value.0);
+                        let activated_at = self
+                            .activated
+                            .get(entity)
+                            .map_or(0, |value| value.milliseconds());
                         (entity, activated_at)
                     }
                     Err(_) => continue,
@@ -326,12 +329,11 @@ impl LayoutWriter<'_, '_> {
                         self.commands.entity(entity).insert(ChildOf(parent));
                     }
                     if !tab.name.is_empty() {
-                        self.commands.entity(entity).insert(LayoutTab {
-                            name: tab.name.clone(),
-                            ..default()
-                        });
+                        self.commands
+                            .entity(entity)
+                            .insert(Name::new(tab.name.clone()));
                     }
-                    (entity, activated_at.0)
+                    (entity, activated_at.milliseconds())
                 }
             };
             self.materialize(tab_entity, true, &tab.root, &mut new_entities);
@@ -352,7 +354,7 @@ impl LayoutWriter<'_, '_> {
                 .unwrap_or(0);
             self.commands
                 .entity(*active_entity)
-                .insert(LastActivatedAt(newest + 1));
+                .insert(LastActivatedAt::new(newest + 1));
         }
         let rescued: ApplyHashSet<String> = new_entities
             .iter()
@@ -502,8 +504,8 @@ impl LayoutWriter<'_, '_> {
             && let Ok((_, value)) = NodeKind::parse_id(id)
         {
             let entity = Entity::from_bits(value);
-            if let Ok(mut layout_tab) = self.tabs.get_mut(entity) {
-                layout_tab.name = tab.name.clone();
+            if let Ok(mut name) = self.tab_names.get_mut(entity) {
+                *name = Name::new(tab.name.clone());
             }
         }
         self.node(&tab.root);
@@ -687,12 +689,12 @@ mod tests {
         let space_b = app.world_mut().spawn(crate::space::Space).id();
         let tab_a = app
             .world_mut()
-            .spawn((crate::tab::Tab::default(), ChildOf(space_a)))
+            .spawn((crate::tab::Tab, ChildOf(space_a)))
             .id();
         let pane_a = app.world_mut().spawn((Pane, ChildOf(tab_a))).id();
         let tab_b = app
             .world_mut()
-            .spawn((crate::tab::Tab::default(), ChildOf(space_b)))
+            .spawn((crate::tab::Tab, ChildOf(space_b)))
             .id();
         let pane_b = app.world_mut().spawn((Pane, ChildOf(tab_b))).id();
         let snapshot = LayoutSnapshot {
@@ -997,13 +999,7 @@ mod tests {
     fn updating_split_direction_changes_component() {
         let mut app = App::new();
         app.add_plugins(MinimalPlugins);
-        let tab = app
-            .world_mut()
-            .spawn(LayoutTab {
-                name: "S".into(),
-                startup_dir: None,
-            })
-            .id();
+        let tab = app.world_mut().spawn(LayoutTab::named("S")).id();
         let split_e = app
             .world_mut()
             .spawn((
@@ -1041,13 +1037,7 @@ mod tests {
     fn updating_flex_weights_writes_pane_size_flex_grow() {
         let mut app = App::new();
         app.add_plugins(MinimalPlugins);
-        let tab = app
-            .world_mut()
-            .spawn(LayoutTab {
-                name: "S".into(),
-                startup_dir: None,
-            })
-            .id();
+        let tab = app.world_mut().spawn(LayoutTab::named("S")).id();
         let split_e = app
             .world_mut()
             .spawn((
@@ -1102,13 +1092,7 @@ mod tests {
     fn moves_pane_to_new_parent() {
         let mut app = App::new();
         app.add_plugins(MinimalPlugins);
-        let tab = app
-            .world_mut()
-            .spawn(LayoutTab {
-                name: "S".into(),
-                startup_dir: None,
-            })
-            .id();
+        let tab = app.world_mut().spawn(LayoutTab::named("S")).id();
         let split_a = app
             .world_mut()
             .spawn((
@@ -1167,13 +1151,7 @@ mod tests {
         app.add_plugins(MinimalPlugins)
             .add_message::<crate::TerminalLayoutSpawnRequest>()
             .add_message::<PageOpenRequest>();
-        let tab = app
-            .world_mut()
-            .spawn(LayoutTab {
-                name: "S".into(),
-                startup_dir: None,
-            })
-            .id();
+        let tab = app.world_mut().spawn(LayoutTab::named("S")).id();
         let pane = app.world_mut().spawn((Pane, ChildOf(tab))).id();
         let stack = app
             .world_mut()
@@ -1234,13 +1212,7 @@ mod tests {
             .add_message::<PageOpenRequest>();
         let active_tab = app
             .world_mut()
-            .spawn((
-                LayoutTab {
-                    name: "A".into(),
-                    startup_dir: None,
-                },
-                LastActivatedAt(1),
-            ))
+            .spawn((LayoutTab::named("A"), LastActivatedAt::new(1)))
             .id();
         let active_pane = app.world_mut().spawn((Pane, ChildOf(active_tab))).id();
 
@@ -1279,7 +1251,10 @@ mod tests {
         let mut q = app
             .world_mut()
             .query_filtered::<(Entity, &LastActivatedAt), With<LayoutTab>>();
-        let ts: Vec<(Entity, i64)> = q.iter(app.world()).map(|(e, l)| (e, l.0)).collect();
+        let ts: Vec<(Entity, i64)> = q
+            .iter(app.world())
+            .map(|(entity, activated)| (entity, activated.milliseconds()))
+            .collect();
         let active_ts = ts
             .iter()
             .find(|(e, _)| *e == active_tab)
@@ -1306,13 +1281,7 @@ mod tests {
         let main = app.world_mut().spawn_empty().id();
         let tab = app
             .world_mut()
-            .spawn((
-                LayoutTab {
-                    name: "A".into(),
-                    startup_dir: None,
-                },
-                ChildOf(main),
-            ))
+            .spawn((LayoutTab::named("A"), ChildOf(main)))
             .id();
         let pane = app.world_mut().spawn((Pane, ChildOf(tab))).id();
 
@@ -1366,13 +1335,7 @@ mod tests {
     fn omitting_pane_from_snapshot_closes_it() {
         let mut app = App::new();
         app.add_plugins(MinimalPlugins);
-        let tab = app
-            .world_mut()
-            .spawn(LayoutTab {
-                name: "S".into(),
-                startup_dir: None,
-            })
-            .id();
+        let tab = app.world_mut().spawn(LayoutTab::named("S")).id();
         let split_e = app
             .world_mut()
             .spawn((
@@ -1420,13 +1383,7 @@ mod tests {
             .add_message::<crate::TerminalLayoutSpawnRequest>()
             .add_message::<PageOpenRequest>();
 
-        let tab = app
-            .world_mut()
-            .spawn(LayoutTab {
-                name: "S".into(),
-                startup_dir: None,
-            })
-            .id();
+        let tab = app.world_mut().spawn(LayoutTab::named("S")).id();
         let pane_e = app.world_mut().spawn((Pane, ChildOf(tab))).id();
         let dead_stack = app
             .world_mut()
@@ -1462,13 +1419,7 @@ mod tests {
             .add_message::<crate::TerminalLayoutSpawnRequest>()
             .add_message::<PageOpenRequest>();
 
-        let tab = app
-            .world_mut()
-            .spawn(LayoutTab {
-                name: "S".into(),
-                startup_dir: None,
-            })
-            .id();
+        let tab = app.world_mut().spawn(LayoutTab::named("S")).id();
         let pane_e = app.world_mut().spawn((Pane, ChildOf(tab))).id();
 
         let snap = LayoutSnapshot {
@@ -1507,13 +1458,7 @@ mod tests {
             .add_message::<crate::TerminalLayoutSpawnRequest>()
             .add_message::<PageOpenRequest>();
 
-        let tab = app
-            .world_mut()
-            .spawn(LayoutTab {
-                name: "S".into(),
-                startup_dir: None,
-            })
-            .id();
+        let tab = app.world_mut().spawn(LayoutTab::named("S")).id();
 
         let pane_count_before = app
             .world_mut()
@@ -1569,13 +1514,7 @@ mod tests {
             .add_message::<crate::TerminalLayoutSpawnRequest>()
             .add_message::<PageOpenRequest>();
 
-        let tab = app
-            .world_mut()
-            .spawn(LayoutTab {
-                name: "S".into(),
-                startup_dir: None,
-            })
-            .id();
+        let tab = app.world_mut().spawn(LayoutTab::named("S")).id();
 
         let split_count_before = app
             .world_mut()
@@ -1631,13 +1570,7 @@ mod tests {
     fn reordering_split_children_swaps_panes() {
         let mut app = App::new();
         app.add_plugins(MinimalPlugins);
-        let tab = app
-            .world_mut()
-            .spawn(LayoutTab {
-                name: "S".into(),
-                startup_dir: None,
-            })
-            .id();
+        let tab = app.world_mut().spawn(LayoutTab::named("S")).id();
         let split_e = app
             .world_mut()
             .spawn((
@@ -1702,13 +1635,7 @@ mod tests {
         let mut app = App::new();
         app.add_plugins(MinimalPlugins);
 
-        let tab = app
-            .world_mut()
-            .spawn(LayoutTab {
-                name: "S".into(),
-                startup_dir: None,
-            })
-            .id();
+        let tab = app.world_mut().spawn(LayoutTab::named("S")).id();
         let pane_e = app.world_mut().spawn((Pane, ChildOf(tab))).id();
         let stack = app
             .world_mut()
@@ -1740,8 +1667,8 @@ mod tests {
         let tab_time = app.world().get::<LastActivatedAt>(tab).unwrap();
         let pane_time = app.world().get::<LastActivatedAt>(pane_e).unwrap();
         let stack_time = app.world().get::<LastActivatedAt>(stack).unwrap();
-        assert_eq!(tab_time.0, pane_time.0);
-        assert_eq!(pane_time.0, stack_time.0);
+        assert_eq!(tab_time.milliseconds(), pane_time.milliseconds());
+        assert_eq!(pane_time.milliseconds(), stack_time.milliseconds());
     }
 
     #[test]
@@ -1755,6 +1682,9 @@ mod tests {
             .world_mut()
             .spawn((
                 crate::space::Space,
+                vmux_api::Id::<crate::space::Space>::new(
+                    "apply_response_reports_the_canonical_focus_after_reduction-0",
+                ),
                 crate::space::CurrentSpace,
                 vmux_ecs::Active,
             ))
@@ -1762,36 +1692,40 @@ mod tests {
         let first_tab = app
             .world_mut()
             .spawn((
-                LayoutTab::default(),
-                LastActivatedAt(2),
+                LayoutTab,
+                LastActivatedAt::new(2),
                 vmux_ecs::Active,
                 ChildOf(space),
             ))
             .id();
         let first_pane = app
             .world_mut()
-            .spawn((Pane::bundle(), LastActivatedAt(2), ChildOf(first_tab)))
+            .spawn((Pane::bundle(), LastActivatedAt::new(2), ChildOf(first_tab)))
             .id();
         let first_stack = app
             .world_mut()
             .spawn((
                 Stack::bundle(),
-                LastActivatedAt(2),
+                LastActivatedAt::new(2),
                 vmux_ecs::Active,
                 ChildOf(first_pane),
             ))
             .id();
         let second_tab = app
             .world_mut()
-            .spawn((LayoutTab::default(), LastActivatedAt(1), ChildOf(space)))
+            .spawn((LayoutTab, LastActivatedAt::new(1), ChildOf(space)))
             .id();
         let second_pane = app
             .world_mut()
-            .spawn((Pane::bundle(), LastActivatedAt(1), ChildOf(second_tab)))
+            .spawn((Pane::bundle(), LastActivatedAt::new(1), ChildOf(second_tab)))
             .id();
         let second_stack = app
             .world_mut()
-            .spawn((Stack::bundle(), LastActivatedAt(1), ChildOf(second_pane)))
+            .spawn((
+                Stack::bundle(),
+                LastActivatedAt::new(1),
+                ChildOf(second_pane),
+            ))
             .id();
         let first = proto::Tab {
             id: Some(NodeKind::Tab.id(first_tab.to_bits())),
@@ -1838,7 +1772,7 @@ mod tests {
             .world_mut()
             .query_filtered::<
                 &crate::active_pane::ActiveStack,
-                With<crate::active_pane::ProfileId>,
+                With<crate::active_pane::ActivePaneScope>,
             >()
             .single(app.world())
             .unwrap();
@@ -1851,13 +1785,7 @@ mod tests {
         app.add_plugins(MinimalPlugins);
         ApplyHarness::install(&mut app);
 
-        let tab = app
-            .world_mut()
-            .spawn(LayoutTab {
-                name: "S".into(),
-                startup_dir: None,
-            })
-            .id();
+        let tab = app.world_mut().spawn(LayoutTab::named("S")).id();
         let pane_e = app.world_mut().spawn((Pane, ChildOf(tab))).id();
         let stack = app
             .world_mut()
@@ -1868,7 +1796,7 @@ mod tests {
             let world = app.world_mut();
             let mut query = world.query_filtered::<
                 &mut crate::active_pane::ActiveStack,
-                With<crate::active_pane::ProfileId>,
+                With<crate::active_pane::ActivePaneScope>,
             >();
             let mut active = query.single_mut(world).unwrap();
             active.tab = Some(tab);
@@ -1898,7 +1826,7 @@ mod tests {
             let world = app.world_mut();
             let mut query = world.query_filtered::<
                 &crate::active_pane::ActiveStack,
-                With<crate::active_pane::ProfileId>,
+                With<crate::active_pane::ActivePaneScope>,
             >();
             *query.single(world).unwrap()
         };
@@ -1913,13 +1841,7 @@ mod tests {
         app.add_plugins(MinimalPlugins)
             .add_message::<crate::TerminalLayoutSpawnRequest>()
             .add_message::<PageOpenRequest>();
-        let tab = app
-            .world_mut()
-            .spawn(LayoutTab {
-                name: "S".into(),
-                startup_dir: None,
-            })
-            .id();
+        let tab = app.world_mut().spawn(LayoutTab::named("S")).id();
         let pane_e = app.world_mut().spawn((Pane, ChildOf(tab))).id();
 
         let snap = LayoutSnapshot {
@@ -1974,13 +1896,7 @@ mod tests {
             .add_message::<crate::TerminalLayoutSpawnRequest>()
             .add_message::<PageOpenRequest>();
 
-        let tab = app
-            .world_mut()
-            .spawn(LayoutTab {
-                name: "S".into(),
-                startup_dir: None,
-            })
-            .id();
+        let tab = app.world_mut().spawn(LayoutTab::named("S")).id();
         let existing_pane = app
             .world_mut()
             .spawn((Pane::bundle(), LastActivatedAt::now(), ChildOf(tab)))
@@ -2069,13 +1985,7 @@ mod tests {
             .add_message::<crate::TerminalLayoutSpawnRequest>()
             .add_message::<PageOpenRequest>();
 
-        let tab = app
-            .world_mut()
-            .spawn(LayoutTab {
-                name: "S".into(),
-                startup_dir: None,
-            })
-            .id();
+        let tab = app.world_mut().spawn(LayoutTab::named("S")).id();
         let existing_root = app
             .world_mut()
             .spawn((
@@ -2158,13 +2068,7 @@ mod tests {
         app.add_plugins(MinimalPlugins);
         ApplyHarness::install(&mut app);
 
-        let tab = app
-            .world_mut()
-            .spawn(LayoutTab {
-                name: "S".into(),
-                startup_dir: None,
-            })
-            .id();
+        let tab = app.world_mut().spawn(LayoutTab::named("S")).id();
         let _ = app.world_mut().spawn((Pane::bundle(), ChildOf(tab))).id();
 
         app.world_mut()
@@ -2190,13 +2094,7 @@ mod tests {
         let mut app = App::new();
         app.add_plugins(MinimalPlugins);
 
-        let tab = app
-            .world_mut()
-            .spawn(LayoutTab {
-                name: "S".into(),
-                startup_dir: None,
-            })
-            .id();
+        let tab = app.world_mut().spawn(LayoutTab::named("S")).id();
         let pane = app.world_mut().spawn((Pane::bundle(), ChildOf(tab))).id();
 
         let snap = LayoutSnapshot {
@@ -2224,13 +2122,7 @@ mod tests {
             .add_message::<crate::TerminalLayoutSpawnRequest>()
             .add_message::<PageOpenRequest>();
 
-        let tab = app
-            .world_mut()
-            .spawn(LayoutTab {
-                name: "S".into(),
-                startup_dir: None,
-            })
-            .id();
+        let tab = app.world_mut().spawn(LayoutTab::named("S")).id();
         let existing_pane = app
             .world_mut()
             .spawn((Pane::bundle(), LastActivatedAt::now(), ChildOf(tab)))

@@ -4,7 +4,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 
 use crate::webstore::ChromeWebStore;
-use vmux_api::extension::{ExtRow, ExtStatus, ExtensionsUiState};
+use vmux_api::extension::{ExtRow, ExtStatus, UiExtensions};
 
 use sha2::{Digest, Sha256};
 
@@ -139,12 +139,9 @@ impl ExtensionStore {
     }
 
     pub fn save_loaded_ids(&self, profile: &str, ids: &[String]) -> Result<(), String> {
-        std::fs::create_dir_all(&self.root).map_err(|error| error.to_string())?;
         let path = self.loaded_path(profile);
-        if let Some(parent) = path.parent() {
-            std::fs::create_dir_all(parent).map_err(|error| error.to_string())?;
-        }
-        std::fs::write(path, ids.join("\n")).map_err(|error| error.to_string())
+        vmux_path::AtomicFile::write(path, ids.join("\n").as_bytes())
+            .map_err(|error| error.to_string())
     }
 
     pub fn packages_dir(&self) -> PathBuf {
@@ -408,7 +405,7 @@ impl Index {
         a != b
     }
 
-    pub fn snapshot(&self, profile: &str, loaded: &[String]) -> ExtensionsUiState {
+    pub fn snapshot(&self, profile: &str, loaded: &[String]) -> UiExtensions {
         let mut extensions = Vec::new();
         for entry in &self.entries {
             if !entry.installed_for(profile) {
@@ -436,7 +433,7 @@ impl Index {
             });
         }
         let visible = extensions.clone();
-        ExtensionsUiState {
+        UiExtensions {
             loaded: true,
             extensions,
             visible,
@@ -469,7 +466,7 @@ impl ExtEntry {
 }
 
 impl ExtensionStore {
-    pub(crate) fn snapshot(&self, profile: &str) -> Result<ExtensionsUiState, String> {
+    pub(crate) fn snapshot(&self, profile: &str) -> Result<UiExtensions, String> {
         let index = self.load_index()?;
         let loaded = self.loaded_ids(profile);
         Ok(index.snapshot(profile, &loaded))
@@ -515,9 +512,9 @@ impl ExtensionStore {
     }
 
     pub fn save_index(&self, index: &Index) -> Result<(), String> {
-        std::fs::create_dir_all(&self.root).map_err(|error| error.to_string())?;
         let source = serde_json::to_string_pretty(index).map_err(|error| error.to_string())?;
-        std::fs::write(self.root.join("index.json"), source).map_err(|error| error.to_string())
+        vmux_path::AtomicFile::write(self.root.join("index.json"), source.as_bytes())
+            .map_err(|error| error.to_string())
     }
 
     pub fn update_index(&self, update: impl FnOnce(&mut Index)) -> Result<(), String> {

@@ -50,7 +50,8 @@ fn QueuedAttachments(attachments: Vec<ChatAttachment>) -> Element {
 }
 
 #[component]
-pub(super) fn ChatTranscript(chat: Chat) -> Element {
+pub(super) fn ChatTranscript() -> Element {
+    let chat = use_context::<Chat>();
     let mut scroll_container = chat.transcript.scroll_container;
     let at_bottom = chat.transcript.at_bottom;
     let transcript = chat.transcript.current();
@@ -102,9 +103,9 @@ pub(super) fn ChatTranscript(chat: Chat) -> Element {
                     HistorySentinel { loading: history_loading }
                 }
                 if !transcript_loading && chat.installing_splash() {
-                    InstallIntro { chat, detail: chat.install_detail() }
+                    InstallIntro { detail: chat.install_detail() }
                 } else if !transcript_loading && items.is_empty() && chat.status() == "idle" {
-                    ReadyIntro { chat }
+                    ReadyIntro {}
                 }
                 if !transcript_loading {
                     for (i , item) in items.iter().cloned().enumerate() {
@@ -199,11 +200,12 @@ fn TranscriptSkeleton() -> Element {
 }
 
 #[component]
-fn InstallIntro(chat: Chat, detail: String) -> Element {
+fn InstallIntro(detail: String) -> Element {
+    let chat = use_context::<Chat>();
     let accent = AgentAccent::for_agent(&chat.agent());
     rsx! {
         div { class: "my-auto flex flex-col items-center gap-3 py-12 text-center",
-            AgentBanner { chat }
+            AgentBanner {}
             div { class: "flex max-w-sm items-center gap-2 text-xs text-muted-foreground",
                 span { class: "h-1.5 w-1.5 shrink-0 rounded-full {accent.accent_bg}" }
                 span { class: "truncate", "{detail}" }
@@ -213,10 +215,10 @@ fn InstallIntro(chat: Chat, detail: String) -> Element {
 }
 
 #[component]
-fn ReadyIntro(chat: Chat) -> Element {
+fn ReadyIntro() -> Element {
     rsx! {
         div { class: "flex flex-col items-center gap-3 py-16 text-center",
-            AgentBanner { chat }
+            AgentBanner {}
             p { class: "text-sm text-muted-foreground", {translate("agent-ready")} }
         }
     }
@@ -242,7 +244,8 @@ fn HandoffDivider(source: String, truncated: bool) -> Element {
 }
 
 #[component]
-pub(super) fn QueuedPrompts(chat: Chat) -> Element {
+pub(super) fn QueuedPrompts() -> Element {
+    let chat = use_context::<Chat>();
     let queued = chat.queue.queued();
     if queued.is_empty() {
         return rsx! {};
@@ -270,7 +273,7 @@ pub(super) fn QueuedPrompts(chat: Chat) -> Element {
                         class: "flex shrink-0 items-center rounded-lg p-1 text-foreground/35 opacity-70 transition hover:bg-foreground/10 hover:text-foreground hover:opacity-100 focus:opacity-100",
                         title: translate("agent-cancel-queued"),
                         onclick: move |_| {
-                            let _ = send(&ChatCancelQueuedPrompt { id: queued_prompt.id });
+                            send(&ChatCancelQueuedPrompt { id: queued_prompt.id });
                         },
                         svg {
                             class: "h-3.5 w-3.5",
@@ -290,7 +293,7 @@ pub(super) fn QueuedPrompts(chat: Chat) -> Element {
                         class: "flex items-center gap-1 rounded-lg px-2 py-1 text-xs text-muted-foreground transition hover:bg-foreground/10 hover:text-foreground",
                         title: translate("agent-resume-queued"),
                         onclick: move |_| {
-                            let _ = send(&ChatResume);
+                            send(&ChatResume);
                         },
                         svg {
                             class: "h-3.5 w-3.5",
@@ -304,7 +307,7 @@ pub(super) fn QueuedPrompts(chat: Chat) -> Element {
                         class: "flex items-center rounded-lg p-1 text-muted-foreground transition hover:bg-foreground/10 hover:text-foreground",
                         title: translate("agent-clear-queue"),
                         onclick: move |_| {
-                            let _ = send(&ChatClearQueue);
+                            send(&ChatClearQueue);
                         },
                         svg {
                             class: "h-3.5 w-3.5",

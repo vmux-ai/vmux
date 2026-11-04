@@ -1,7 +1,7 @@
 use bevy::prelude::*;
 use serde::Deserialize;
 use vmux_api::protocol::AgentRequest;
-use vmux_ecs::manifest::FeaturePlugin;
+use vmux_feature::AppFeatureExt;
 
 use super::{
     AgentSimulatorButtonPress, AgentSimulatorKeyPress, AgentSimulatorScreenshot,
@@ -13,11 +13,10 @@ pub struct SimulatorToolPlugin;
 
 impl Plugin for SimulatorToolPlugin {
     fn build(&self, app: &mut App) {
-        app.add_plugins(FeaturePlugin::<crate::Feature>::default())
-            .add_systems(
-                Update,
-                (screenshot, tap, swipe, type_text, key, button).in_set(ToolDispatchSet),
-            );
+        app.register_feature::<crate::Feature>().add_systems(
+            Update,
+            (screenshot, tap, swipe, type_text, key, button).in_set(ToolDispatchSet),
+        );
     }
 }
 
@@ -179,6 +178,7 @@ mod tests {
         fn app() -> App {
             let mut app = App::new();
             app.add_plugins((ToolRegistryPlugin, SimulatorToolPlugin));
+            app.finish();
             app.update();
             app
         }

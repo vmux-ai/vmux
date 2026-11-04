@@ -2,24 +2,25 @@ use std::collections::HashSet;
 
 use bevy::ecs::system::SystemParam;
 use bevy::prelude::*;
+use vmux_api::Id;
 use vmux_api::bookmark::{
     BookmarkFolderChoice, BookmarkFolderRow, BookmarkNode, BookmarkRow, BookmarkStateEvent,
 };
 use vmux_api::space::ProjectRowKind;
-use vmux_ecs::event::team::{TeamMemberRow, TeamUiState};
+use vmux_ecs::event::team::{TeamMemberRow, UiTeam};
 use vmux_ecs::{Description, EntityTarget, PageMetadata};
-use vmux_session::{RunState, Session, Stage, StageDefinition, StageId};
+use vmux_session::{RunState, Session, WorkflowState, WorkflowStateRef};
 
 use crate::cef::{Browser, LayoutCef};
 use crate::event::{
     ActiveSession, ActiveSessionState, ActiveTask, ActiveWorkspaceProject, BookmarkEntryState,
-    BookmarkFolderState, BookmarkPinState, BookmarkTreeState, BookmarkUiState, HeaderState,
-    PaneTreeState, SideSheetPane, SideSheetState, StackNavigationState, StackNode,
-    StackRevealTarget, TabBoundary, TabBoundaryState, TabListState, TabStripRow, TabStripState,
+    BookmarkFolderState, BookmarkPinState, BookmarkTreeState, HeaderState, PaneTreeState,
+    SideSheetPane, SideSheetState, StackNavigationState, StackNode, StackRevealTarget, TabBoundary,
+    TabBoundaryState, TabListState, TabStripRow, TabStripState, UiBookmark,
 };
 use crate::hosted_page::StackSurface;
 use crate::side_sheet::{SideSheetSections, SideSheetSectionsExpanded};
-use crate::state::LayoutUiState;
+use crate::state::UiLayout;
 
 pub struct LayoutUiProjectionPlugin;
 
@@ -88,7 +89,7 @@ pub struct PaneTreeProjection(pub PaneTreeState);
 pub struct ProjectProjection(pub TabBoundaryState);
 
 #[derive(Component, Clone, Debug, Default, PartialEq)]
-pub struct TeamProjection(pub TeamUiState);
+pub struct TeamProjection(pub UiTeam);
 
 #[derive(Component, Clone, Debug, Default, PartialEq)]
 pub struct StackProjection(pub StackNavigationState);
@@ -115,7 +116,7 @@ struct SideSheetProjection {
 }
 
 #[derive(Component, Clone, Debug, Default, PartialEq)]
-struct BookmarkUiProjection(BookmarkUiState);
+struct BookmarkUiProjection(UiBookmark);
 
 impl TabStripProjection {
     fn from_sources(tabs: &TabListState, header: Option<&HeaderState>) -> Self {
@@ -163,7 +164,7 @@ struct BookmarkUiBuilder {
 }
 
 impl BookmarkUiBuilder {
-    fn build(bookmarks: &BookmarkStateEvent, active_page: Option<&StackNode>) -> BookmarkUiState {
+    fn build(bookmarks: &BookmarkStateEvent, active_page: Option<&StackNode>) -> UiBookmark {
         let active_route = active_page.and_then(|page| vmux_api::VmuxRoute::parse(&page.url));
         let mut pins = Vec::with_capacity(bookmarks.pins.len());
         for row in &bookmarks.pins {
@@ -199,7 +200,7 @@ impl BookmarkUiBuilder {
             }
         }
 
-        BookmarkUiState {
+        UiBookmark {
             pins,
             rows: builder.rows,
             folders: bookmarks.folders.clone(),
@@ -391,7 +392,7 @@ impl ActiveSession {
     fn from_projections(
         panes: &PaneTreeState,
         projects: &TabBoundaryState,
-        team: &TeamUiState,
+        team: &UiTeam,
     ) -> Option<Self> {
         let pane = panes
             .panes
@@ -488,19 +489,19 @@ impl ActiveSession {
 struct SessionProjection<'w, 's> {
     targets: Query<'w, 's, &'static EntityTarget<Session>>,
     session_entities: Query<'w, 's, (), With<Session>>,
-    stage_entities: Query<'w, 's, (), With<StageDefinition>>,
+    stage_entities: Query<'w, 's, (), With<WorkflowState>>,
     sessions: Query<
         'w,
         's,
         (
             &'static Name,
             &'static Description,
-            &'static Stage,
+            &'static WorkflowStateRef,
             Option<&'static RunState>,
         ),
         With<Session>,
     >,
-    stages: Query<'w, 's, (&'static StageId, &'static Name), With<StageDefinition>>,
+    stages: Query<'w, 's, (&'static Id<WorkflowState>, &'static Name), With<WorkflowState>>,
     changed_targets: Query<'w, 's, (), Changed<EntityTarget<Session>>>,
     changed_sessions: Query<
         'w,
@@ -511,21 +512,28 @@ struct SessionProjection<'w, 's> {
             Or<(
                 Changed<Name>,
                 Changed<Description>,
-                Changed<Stage>,
+                Changed<WorkflowStateRef>,
                 Changed<RunState>,
             )>,
         ),
     >,
-    changed_stages:
-        Query<'w, 's, (), (With<StageDefinition>, Or<(Changed<StageId>, Changed<Name>)>)>,
+    changed_stages: Query<
+        'w,
+        's,
+        (),
+        (
+            With<WorkflowState>,
+            Or<(Changed<Id<WorkflowState>>, Changed<Name>)>,
+        ),
+    >,
     removed_targets: RemovedComponents<'w, 's, EntityTarget<Session>>,
     removed_sessions: RemovedComponents<'w, 's, Session>,
     removed_names: RemovedComponents<'w, 's, Name>,
     removed_descriptions: RemovedComponents<'w, 's, Description>,
-    removed_stages: RemovedComponents<'w, 's, Stage>,
+    removed_stages: RemovedComponents<'w, 's, WorkflowStateRef>,
     removed_states: RemovedComponents<'w, 's, RunState>,
-    removed_stage_definitions: RemovedComponents<'w, 's, StageDefinition>,
-    removed_stage_ids: RemovedComponents<'w, 's, StageId>,
+    removed_stage_definitions: RemovedComponents<'w, 's, WorkflowState>,
+    removed_stage_ids: RemovedComponents<'w, 's, Id<WorkflowState>>,
 }
 
 #[derive(Clone)]
@@ -634,12 +642,12 @@ impl SessionProjection<'_, '_> {
         let stage_name = self
             .stages
             .iter()
-            .find_map(|(id, name)| (id == &stage.0).then(|| name.as_str().to_string()))
-            .unwrap_or_else(|| stage.0.0.clone());
+            .find_map(|(id, name)| (id == stage.id()).then(|| name.as_str().to_string()))
+            .unwrap_or_else(|| stage.id().as_str().to_string());
         Some(ActiveTask {
             name: name.as_str().to_string(),
             description: description.0.clone(),
-            stage: stage.0.0.clone(),
+            stage: stage.id().as_str().to_string(),
             stage_name,
             runtime: runtime
                 .map(RunState::status)
@@ -653,7 +661,7 @@ impl HeaderState {
     fn from_projections(
         stacks: &StackNavigationState,
         bookmarks: &BookmarkStateEvent,
-        team: &TeamUiState,
+        team: &UiTeam,
     ) -> Self {
         let active = stacks.stacks.iter().find(|stack| stack.is_active).cloned();
         let user = team.members.iter().find(|member| member.is_user).cloned();
@@ -841,7 +849,7 @@ fn publish_active_session(
 ) {
     let empty_panes = PaneTreeState::default();
     let empty_projects = TabBoundaryState::default();
-    let empty_team = TeamUiState::default();
+    let empty_team = UiTeam::default();
     let sessions_changed = sessions.is_changed();
     let git_changed = git.is_changed();
     let section_removed = removed_sections.read().count() > 0;
@@ -922,14 +930,14 @@ fn publish_active_session(
         if last.get(&entity) == Some(&event) {
             continue;
         }
-        commands.trigger(vmux_ecs::UiStateWrite::<LayoutUiState>::from_event(
+        commands.trigger(vmux_ecs::UiStateWrite::<UiLayout>::from_event(
             entity, &event,
         ));
         last.insert(entity, event);
     }
 }
 
-fn capture_tab_list(trigger: On<vmux_ecs::UiStateWrite<LayoutUiState>>, mut commands: Commands) {
+fn capture_tab_list(trigger: On<vmux_ecs::UiStateWrite<UiLayout>>, mut commands: Commands) {
     let Some(tabs) = &trigger.event().update().tabs else {
         return;
     };
@@ -946,7 +954,7 @@ fn project_header(
             Option<&BookmarkProjection>,
             Option<&TeamProjection>,
             Option<&HeaderProjection>,
-            Option<&vmux_ecs::UiState<LayoutUiState>>,
+            Option<&vmux_ecs::UiState<UiLayout>>,
         ),
         With<LayoutCef>,
     >,
@@ -954,7 +962,7 @@ fn project_header(
         Entity,
         &vmux_ecs::page::AddressContribution,
         &PageMetadata,
-        Option<&vmux_ecs::UiState<vmux_api::address::PageAddressUiState>>,
+        Option<&vmux_ecs::UiState<vmux_api::address::UiPageAddress>>,
     )>,
     slots: Query<&vmux_ecs::page::AddressSlot>,
     focus: crate::stack::FocusedStack,
@@ -964,7 +972,7 @@ fn project_header(
 ) {
     let empty_stacks = StackNavigationState::default();
     let empty_bookmarks = BookmarkStateEvent::default();
-    let empty_team = TeamUiState::default();
+    let empty_team = UiTeam::default();
     let active = focus.stack.and_then(|stack| surfaces.current(stack));
     for (entity, stacks, bookmarks, team, current, state) in &layouts {
         let stacks = stacks
@@ -997,15 +1005,15 @@ fn project_header(
                 .and_then(|state| state.current())
                 .is_none_or(|state| state.in_header != visible)
             {
-                commands.trigger(vmux_ecs::UiStateWrite::<
-                    vmux_api::address::PageAddressUiState,
-                >::from_event(
-                    owner,
-                    &vmux_api::address::PageAddressUiStatePatch {
-                        address: None,
-                        in_header: Some(visible),
-                    },
-                ));
+                commands.trigger(
+                    vmux_ecs::UiStateWrite::<vmux_api::address::UiPageAddress>::from_event(
+                        owner,
+                        &vmux_api::address::UiPageAddressPatch {
+                            address: None,
+                            in_header: Some(visible),
+                        },
+                    ),
+                );
             }
         }
         if current != Some(&next) {
@@ -1086,7 +1094,7 @@ fn publish_header(
     mut commands: Commands,
 ) {
     for (entity, projection) in &projections {
-        commands.trigger(vmux_ecs::UiStateWrite::<LayoutUiState>::from_event(
+        commands.trigger(vmux_ecs::UiStateWrite::<UiLayout>::from_event(
             entity,
             &projection.0,
         ));
@@ -1098,7 +1106,7 @@ fn publish_tab_strip(
     mut commands: Commands,
 ) {
     for (entity, projection) in &projections {
-        commands.trigger(vmux_ecs::UiStateWrite::<LayoutUiState>::from_event(
+        commands.trigger(vmux_ecs::UiStateWrite::<UiLayout>::from_event(
             entity,
             &projection.0,
         ));
@@ -1169,7 +1177,7 @@ fn publish_side_sheet(
     mut commands: Commands,
 ) {
     for (entity, projection) in &projections {
-        commands.trigger(vmux_ecs::UiStateWrite::<LayoutUiState>::from_event(
+        commands.trigger(vmux_ecs::UiStateWrite::<UiLayout>::from_event(
             entity,
             &projection.state,
         ));
@@ -1181,7 +1189,7 @@ fn publish_bookmark_ui(
     mut commands: Commands,
 ) {
     for (entity, projection) in &projections {
-        commands.trigger(vmux_ecs::UiStateWrite::<LayoutUiState>::from_event(
+        commands.trigger(vmux_ecs::UiStateWrite::<UiLayout>::from_event(
             entity,
             &projection.0,
         ));
@@ -1241,14 +1249,14 @@ mod tests {
                 Session,
                 Name::new("Ship session manager"),
                 Description("End-to-end slice".into()),
-                Stage(StageId("in_review".into())),
+                WorkflowStateRef::new(Id::new("in_review")),
                 RunState::Streaming,
             ))
             .id();
         let stack = world.spawn(EntityTarget::<Session>::new(session)).id();
         world.spawn((
-            StageDefinition,
-            StageId("in_review".into()),
+            WorkflowState,
+            Id::<WorkflowState>::new("in_review"),
             Name::new("session-stage-in-review"),
         ));
         let page = StackNode {
@@ -1286,7 +1294,7 @@ mod tests {
                 Session,
                 Name::new("Task"),
                 Description::default(),
-                Stage(StageId("in_progress".into())),
+                WorkflowStateRef::new(Id::new("in_progress")),
                 RunState::Idle,
             ))
             .id();
@@ -1297,8 +1305,8 @@ mod tests {
         let stage = app
             .world_mut()
             .spawn((
-                StageDefinition,
-                StageId("in_progress".into()),
+                WorkflowState,
+                Id::<WorkflowState>::new("in_progress"),
                 Name::new("In progress"),
             ))
             .id();
@@ -1572,7 +1580,7 @@ mod tests {
         let state = HeaderState::from_projections(
             &StackNavigationState::default(),
             &BookmarkStateEvent::default(),
-            &TeamUiState {
+            &UiTeam {
                 members: vec![user.clone(), agent.clone()],
                 ..Default::default()
             },

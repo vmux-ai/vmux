@@ -15,7 +15,7 @@ pub(crate) fn use_file_keys(panel: ReadSignal<FilePanelState>) -> FileKeys {
         }),
     };
     use_drop(move || {
-        let _ = send(&KeyContextRequest { keys: Vec::new() });
+        send(&KeyContextRequest { keys: Vec::new() });
     });
     keys
 }

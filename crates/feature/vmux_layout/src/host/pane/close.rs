@@ -150,7 +150,12 @@ fn close(
             let newest = siblings
                 .iter()
                 .copied()
-                .max_by_key(|&entity| pane_times.get(entity).map(|(_, time)| time.0).unwrap_or(0))
+                .max_by_key(|&entity| {
+                    pane_times
+                        .get(entity)
+                        .map(|(_, time)| time.milliseconds())
+                        .unwrap_or(0)
+                })
                 .unwrap_or(siblings[0]);
             let leaf = panes.first_leaf(newest);
             commands.entity(leaf).insert(LastActivatedAt::now());
@@ -364,7 +369,7 @@ mod tests {
             .add_systems(Update, (process_force_closes, apply_dialog_results).chain());
         let tab = app
             .world_mut()
-            .spawn((crate::tab::Tab::default(), LastActivatedAt::now()))
+            .spawn((crate::tab::Tab, LastActivatedAt::now()))
             .id();
         let pane = app
             .world_mut()
@@ -392,7 +397,7 @@ mod tests {
             .add_systems(Update, apply_dialog_results);
         let tab = app
             .world_mut()
-            .spawn((crate::tab::Tab::default(), LastActivatedAt::now()))
+            .spawn((crate::tab::Tab, LastActivatedAt::now()))
             .id();
         let pane = app
             .world_mut()
@@ -421,7 +426,7 @@ mod tests {
         let window = app.world_mut().spawn(PrimaryWindow).id();
         let tab = app
             .world_mut()
-            .spawn((crate::tab::Tab::default(), LastActivatedAt::now()))
+            .spawn((crate::tab::Tab, LastActivatedAt::now()))
             .id();
         let pane = app
             .world_mut()
@@ -463,7 +468,7 @@ mod tests {
         app.world_mut().spawn(PrimaryWindow);
         let tab = app
             .world_mut()
-            .spawn((crate::tab::Tab::default(), LastActivatedAt::now()))
+            .spawn((crate::tab::Tab, LastActivatedAt::now()))
             .id();
         let root = app
             .world_mut()
@@ -538,7 +543,7 @@ mod tests {
         app.world_mut().spawn(PrimaryWindow);
         let tab = app
             .world_mut()
-            .spawn((crate::tab::Tab::default(), LastActivatedAt::now()))
+            .spawn((crate::tab::Tab, LastActivatedAt::now()))
             .id();
         let root = app
             .world_mut()
@@ -572,9 +577,15 @@ mod tests {
             Vec2::new(1000.0, 400.0),
             Vec2::new(400.0, 800.0),
         );
-        app.world_mut().entity_mut(a).insert(LastActivatedAt(10));
-        app.world_mut().entity_mut(c).insert(LastActivatedAt(20));
-        app.world_mut().entity_mut(b).insert(LastActivatedAt(30));
+        app.world_mut()
+            .entity_mut(a)
+            .insert(LastActivatedAt::new(10));
+        app.world_mut()
+            .entity_mut(c)
+            .insert(LastActivatedAt::new(20));
+        app.world_mut()
+            .entity_mut(b)
+            .insert(LastActivatedAt::new(30));
         app.world_mut()
             .resource_mut::<Messages<CloseRequest>>()
             .write(CloseRequest);

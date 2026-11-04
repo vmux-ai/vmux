@@ -12,7 +12,7 @@ pub(super) fn GitShortcutHelp() -> Element {
         div {
             class: "absolute inset-0 z-50 flex items-center justify-center bg-background/70 p-4 backdrop-blur-sm",
             onclick: move |_| {
-                let _ = send(&GitShortcutHelpRequest { visible: false });
+                send(&GitShortcutHelpRequest { visible: false });
             },
             div {
                 class: "max-h-[min(42rem,calc(100vh-2rem))] w-full max-w-2xl overflow-y-auto rounded-2xl border border-foreground/10 bg-card p-4 shadow-2xl sm:p-5",
@@ -26,7 +26,7 @@ pub(super) fn GitShortcutHelp() -> Element {
                         r#type: "button",
                         class: "rounded-lg border border-foreground/10 bg-foreground/[0.04] px-2 py-1 font-mono text-[10px] text-muted-foreground hover:text-foreground",
                         onclick: move |_| {
-                            let _ = send(&GitShortcutHelpRequest { visible: false });
+                            send(&GitShortcutHelpRequest { visible: false });
                         },
                         "esc"
                     }

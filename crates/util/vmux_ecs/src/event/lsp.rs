@@ -2,7 +2,7 @@ use super::FileLine;
 pub use host::{
     FileCodeActions, FileDiagnostics, FileEditNotice, FileHover, FileHoverState, FileLspStatus,
     FilePanelContent, FilePanelFocus, FilePanelFocusTarget, FilePanelState, FileRenameState,
-    LspCatalog, LspInstallNotice, LspInstallProgress, LspManagerUiState, LspPackageStatus,
+    LspCatalog, LspInstallNotice, LspInstallProgress, LspPackageStatus, UiLspManager,
 };
 pub use ui::{
     FileCodeActionDismissRequest, FileCodeActionMoveRequest, FileCodeActionPick,

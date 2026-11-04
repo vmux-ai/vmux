@@ -2,15 +2,15 @@ use std::collections::HashSet;
 
 use dioxus::prelude::*;
 use vmux_session::SessionSummary;
-use vmux_ui::hooks::{CollectionController, OptimisticMap, send};
+use vmux_ui::hooks::{CollectionController, OptimisticMap, send, try_send};
 use vmux_ui::navigation::{NavigationGesture, PageNavigation};
 
-use crate::SessionId;
 use crate::event::{
     ProviderSessionTarget, ResumeSession, SessionsArchive, SessionsCleanup, SessionsRestoreDeleted,
     SessionsStageChange,
 };
 use crate::route::Route;
+use crate::{Id, Session};
 
 use super::manager_model::{
     ArchiveTarget, DeleteTarget, SessionFilter, SessionFilterStep, StageTarget,
@@ -102,7 +102,7 @@ impl SessionMutations {
         self.stages
             .set(target.id.clone(), target.stage.clone(), stage.clone());
         let id = target.id.clone();
-        if send(&SessionsStageChange {
+        if try_send(&SessionsStageChange {
             id: target.id,
             kind: target.kind,
             sid: target.sid,
@@ -132,7 +132,7 @@ impl SessionMutations {
                 .iter()
                 .map(|target| (target.id.clone(), target.archived, archived)),
         );
-        if send(&SessionsArchive {
+        if try_send(&SessionsArchive {
             ids: targets.iter().map(|target| target.id.clone()).collect(),
             archived,
         })
@@ -192,7 +192,7 @@ impl SessionMutations {
         providers.sort_by(|left, right| (&left.kind, &left.sid).cmp(&(&right.kind, &right.sid)));
         providers.dedup();
         self.leaving.write().extend(ids.iter().cloned());
-        if send(&SessionsCleanup { ids: ids.clone() }).is_err() {
+        if try_send(&SessionsCleanup { ids: ids.clone() }).is_err() {
             let ids = ids.iter().map(String::as_str).collect::<HashSet<_>>();
             self.leaving.write().retain(|id| !ids.contains(id.as_str()));
             return;
@@ -219,7 +219,7 @@ impl SessionMutations {
         if sessions.is_empty() {
             return;
         }
-        if send(&SessionsRestoreDeleted { sessions }).is_ok() {
+        if try_send(&SessionsRestoreDeleted { sessions }).is_ok() {
             self.deleted_providers.set(Vec::new());
         }
     }
@@ -250,10 +250,13 @@ impl ResumeTarget {
     pub fn click(&self, event: &MouseEvent) {
         let gesture = NavigationGesture::from_mouse(event);
         if self.managed {
-            PageNavigation::gesture(Route::Session(SessionId(self.id.clone())).url(), gesture);
+            PageNavigation::gesture(
+                Route::Session(Id::<Session>::new(self.id.clone())).url(),
+                gesture,
+            );
             return;
         }
-        let _ = send(&ResumeSession {
+        send(&ResumeSession {
             kind: self.kind.clone(),
             sid: self.sid.clone(),
             cwd: self.cwd.clone(),

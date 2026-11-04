@@ -1,0 +1,19 @@
+[package]
+name = "vmux_feature"
+version.workspace = true
+edition.workspace = true
+description = "Static feature declarations and registry composition for vmux"
+license.workspace = true
+homepage.workspace = true
+repository.workspace = true
+
+[dependencies]
+bevy_app = { workspace = true }
+bevy_ecs = { workspace = true }
+ron = { workspace = true }
+serde = { workspace = true }
+url = { workspace = true }
+vmux_api = { path = "../vmux_api" }
+
+[lints]
+workspace = true

@@ -120,7 +120,7 @@ impl PackageNotices<'_, '_> {
                 commands.entity(entity).despawn();
             }
         }
-        commands.trigger(vmux_ecs::FileUiStateWrite::from_event(
+        commands.trigger(vmux_ecs::UiFileWrite::from_event(
             target,
             &LspInstallNotice {
                 progress: Some(progress),
@@ -349,7 +349,7 @@ fn clear_notices(
             continue;
         }
         if targets.contains(notice.target) {
-            commands.trigger(vmux_ecs::FileUiStateWrite::from_event(
+            commands.trigger(vmux_ecs::UiFileWrite::from_event(
                 notice.target,
                 &LspInstallNotice::default(),
             ));

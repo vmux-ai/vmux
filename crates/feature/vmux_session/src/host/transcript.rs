@@ -17,10 +17,10 @@ use crate::host::{
     TranscriptTail,
 };
 use vmux_ecs::service::ServiceMessageSet;
-use vmux_ecs::team::{Profile, User};
+use vmux_ecs::team::{AvatarSpec, Profiles, User};
 use vmux_ecs::{CreatedAt, EntityTarget, PageMetadata};
 use vmux_session::{
-    AgentConversationTitle, AgentId, ConversationEvent, EventIdentity, MessageContent, PromptQueue,
+    AgentConversationTitle, AgentRef, ConversationEvent, MessageContent, PromptQueue, Sequence,
     Session, Transcripts,
 };
 use vmux_session::{AgentTurnMeta, RunState};
@@ -58,11 +58,10 @@ struct ChatProjection {
 
 type ChangedSession = (
     Entity,
-    &'static AgentId,
+    &'static AgentRef,
     Ref<'static, Name>,
     Ref<'static, RunState>,
     Option<Ref<'static, AgentTurnMeta>>,
-    Option<Ref<'static, Profile>>,
     Ref<'static, PromptQueue>,
     Option<Ref<'static, ImportedConversation>>,
     Option<Ref<'static, AgentConversationTitle>>,
@@ -78,7 +77,7 @@ type ChangedConversationEvents<'w, 's> = Query<
         With<ConversationEvent>,
         Or<(
             Added<ConversationEvent>,
-            Changed<EventIdentity>,
+            Changed<Sequence>,
             Changed<MessageContent>,
             Changed<CreatedAt>,
         )>,
@@ -105,7 +104,8 @@ struct PushWorld<'w, 's> {
     >,
     chat_views: Query<'w, 's, ProjectionView, With<SessionView>>,
     choices: Query<'w, 's, &'static PendingAgentChoice>,
-    user_profiles: Query<'w, 's, Ref<'static, Profile>, With<User>>,
+    users: Query<'w, 's, Entity, With<User>>,
+    profiles: Profiles<'w, 's>,
     transcripts: Transcripts<'w, 's>,
     changed_events: ChangedConversationEvents<'w, 's>,
 }
@@ -131,15 +131,15 @@ struct ReadyWorld<'w, 's> {
     sessions: Query<'w, 's, SessionProjection>,
     transcripts: Transcripts<'w, 's>,
     choices: Query<'w, 's, &'static PendingAgentChoice>,
-    user_profiles: Query<'w, 's, &'static Profile, With<User>>,
+    users: Query<'w, 's, Entity, With<User>>,
+    profiles: Profiles<'w, 's>,
 }
 
 type SessionProjection = (
-    &'static AgentId,
+    &'static AgentRef,
     &'static Name,
     &'static RunState,
     Option<&'static AgentTurnMeta>,
-    Option<&'static Profile>,
     &'static PromptQueue,
     Option<&'static ImportedConversation>,
     Option<&'static AgentConversationTitle>,
@@ -180,10 +180,15 @@ fn push_to_page(
     mut owed: Local<std::collections::HashSet<Entity>>,
     mut commands: Commands,
 ) {
-    let user_profile = world.user_profiles.single().ok();
+    let user_profile = world
+        .users
+        .single()
+        .ok()
+        .and_then(|user| world.profiles.get(user));
     let user_moved = user_profile
         .as_ref()
-        .is_some_and(|profile| profile.is_changed());
+        .is_some_and(vmux_ecs::team::ProfileView::is_changed);
+    let user_profile = user_profile.as_ref().map(ProfilePresentation::from_profile);
     let changed_transcripts = world
         .changed_events
         .iter()
@@ -197,7 +202,6 @@ fn push_to_page(
         name,
         state,
         turn_meta,
-        profile,
         queue,
         imported,
         title,
@@ -205,12 +209,15 @@ fn push_to_page(
         children,
     ) in &world.sessions
     {
+        let profile = world.profiles.get(session);
         let conversation_changed = children.is_changed() || changed_transcripts.contains(&session);
         let moved = user_moved
             || name.is_changed()
             || state.is_changed()
             || turn_meta.as_ref().is_some_and(|meta| meta.is_changed())
-            || profile.as_ref().is_some_and(|profile| profile.is_changed())
+            || profile
+                .as_ref()
+                .is_some_and(vmux_ecs::team::ProfileView::is_changed)
             || queue.is_changed()
             || imported
                 .as_ref()
@@ -240,6 +247,7 @@ fn push_to_page(
             continue;
         }
         owed.remove(&session);
+        let profile = profile.as_ref().map(ProfilePresentation::from_profile);
         let choice = world.choices.get(webview).ok();
         let mut projection = world.transcripts.read(session, |conversation| {
             ChatProjection::new(
@@ -248,8 +256,8 @@ fn push_to_page(
                 &conversation.created_at,
                 &state,
                 turn_meta.as_deref(),
-                profile.as_deref(),
-                user_profile.as_deref(),
+                profile.as_ref(),
+                user_profile.as_ref(),
                 meta,
                 &queue,
                 imported.as_deref(),
@@ -268,16 +276,15 @@ fn push_to_page(
         transcript_changed |= attachments.hydrate_transcript(&mut transcript.state);
         attachments.hydrate_snapshot(&mut projection.snapshot);
         snapshot.0 = projection.snapshot;
-        commands.trigger(
-            vmux_ecs::UiStateWrite::<crate::state::ChatUiState>::from_event(webview, &snapshot.0),
-        );
+        commands.trigger(vmux_ecs::UiStateWrite::<crate::state::UiChat>::from_event(
+            webview,
+            &snapshot.0,
+        ));
         if transcript_changed {
-            commands.trigger(
-                vmux_ecs::UiStateWrite::<crate::state::ChatUiState>::from_event(
-                    webview,
-                    &transcript.state,
-                ),
-            );
+            commands.trigger(vmux_ecs::UiStateWrite::<crate::state::UiChat>::from_event(
+                webview,
+                &transcript.state,
+            ));
         }
         let paths = attachments.hydration_paths(&transcript.state, &snapshot.0);
         if !paths.is_empty() {
@@ -289,6 +296,27 @@ fn push_to_page(
 
 const CHAT_STREAM_PUSH_INTERVAL: std::time::Duration = std::time::Duration::from_millis(50);
 
+struct ProfilePresentation {
+    name: String,
+    avatar: AvatarSpec,
+}
+
+impl ProfilePresentation {
+    fn from_profile(profile: &vmux_ecs::team::ProfileView<'_>) -> Self {
+        Self {
+            name: profile.name().to_string(),
+            avatar: profile.avatar().clone(),
+        }
+    }
+
+    fn user_named(name: &str) -> Self {
+        Self {
+            name: name.to_string(),
+            avatar: AvatarSpec::for_user_named(name),
+        }
+    }
+}
+
 fn chat_snapshot_due(streaming: bool, urgent: bool, elapsed: Option<std::time::Duration>) -> bool {
     urgent || !streaming || elapsed.is_none_or(|elapsed| elapsed >= CHAT_STREAM_PUSH_INTERVAL)
 }
@@ -296,13 +324,13 @@ fn chat_snapshot_due(streaming: bool, urgent: bool, elapsed: Option<std::time::D
 impl ChatProjection {
     #[allow(clippy::too_many_arguments)]
     fn new(
-        agent_id: &AgentId,
+        agent_id: &AgentRef,
         messages: &[vmux_api::session::Message],
         message_times: &[u64],
         state: &RunState,
         turn_meta: Option<&AgentTurnMeta>,
-        profile: Option<&Profile>,
-        user_profile: Option<&Profile>,
+        profile: Option<&ProfilePresentation>,
+        user_profile: Option<&ProfilePresentation>,
         meta: Option<&PageMetadata>,
         queue: &PromptQueue,
         imported: Option<&ImportedConversation>,
@@ -351,7 +379,7 @@ impl ChatProjection {
                 )
             })
             .unwrap_or_else(|| {
-                let profile = Profile::user();
+                let profile = ProfilePresentation::user_named("You");
                 (profile.name, profile.avatar.initials, profile.avatar.color)
             });
         let agent_icon = meta
@@ -362,7 +390,7 @@ impl ChatProjection {
             status: state.status().to_string(),
             error,
             approval,
-            agent_id: agent_id.0.clone(),
+            agent_id: agent_id.as_str().to_string(),
             agent_name,
             conversation_title: conversation_title
                 .map(|title| title.0.clone())
@@ -431,7 +459,13 @@ fn sync_ready_views(
     world: ReadyWorld,
     mut commands: Commands,
 ) {
-    let user_profile = world.user_profiles.single().ok();
+    let user_profile = world
+        .users
+        .single()
+        .ok()
+        .and_then(|user| world.profiles.get(user))
+        .as_ref()
+        .map(ProfilePresentation::from_profile);
     for (webview, mut transcript, mut snapshot, attachments) in &mut pending {
         let Some(session_entity) = world.targets.session(webview) else {
             continue;
@@ -441,20 +475,16 @@ fn sync_ready_views(
             .get(webview)
             .map(ChildOf::parent)
             .unwrap_or(Entity::PLACEHOLDER);
-        let Ok((
-            agent_id,
-            name,
-            state,
-            turn_meta,
-            profile,
-            queue,
-            imported,
-            title,
-            transcript_loading,
-        )) = world.sessions.get(session_entity)
+        let Ok((agent_id, name, state, turn_meta, queue, imported, title, transcript_loading)) =
+            world.sessions.get(session_entity)
         else {
             continue;
         };
+        let profile = world
+            .profiles
+            .get(session_entity)
+            .as_ref()
+            .map(ProfilePresentation::from_profile);
         let meta = world.metadata.get(stack).ok();
         let choice = world.choices.get(webview).ok();
         let mut projection = world.transcripts.read(session_entity, |conversation| {
@@ -464,8 +494,8 @@ fn sync_ready_views(
                 &conversation.created_at,
                 state,
                 turn_meta,
-                profile,
-                user_profile,
+                profile.as_ref(),
+                user_profile.as_ref(),
                 meta,
                 queue,
                 imported,
@@ -479,21 +509,18 @@ fn sync_ready_views(
         attachments.hydrate_transcript(&mut transcript.state);
         attachments.hydrate_snapshot(&mut projection.snapshot);
         snapshot.0 = projection.snapshot;
-        commands.trigger(
-            vmux_ecs::UiStateWrite::<crate::state::ChatUiState>::from_event(webview, &snapshot.0),
-        );
-        commands.trigger(
-            vmux_ecs::UiStateWrite::<crate::state::ChatUiState>::from_event(
-                webview,
-                &transcript.state,
-            ),
-        );
-        commands.trigger(
-            vmux_ecs::UiStateWrite::<crate::state::ChatUiState>::from_event(
-                webview,
-                &attachments.state(),
-            ),
-        );
+        commands.trigger(vmux_ecs::UiStateWrite::<crate::state::UiChat>::from_event(
+            webview,
+            &snapshot.0,
+        ));
+        commands.trigger(vmux_ecs::UiStateWrite::<crate::state::UiChat>::from_event(
+            webview,
+            &transcript.state,
+        ));
+        commands.trigger(vmux_ecs::UiStateWrite::<crate::state::UiChat>::from_event(
+            webview,
+            &attachments.state(),
+        ));
         let paths = attachments.hydration_paths(&transcript.state, &snapshot.0);
         if !paths.is_empty() {
             commands.trigger(ChatAttachmentHydrationRequest { webview, paths });
@@ -539,9 +566,10 @@ fn request_more(
         return;
     };
     commands.spawn(query);
-    commands.trigger(
-        vmux_ecs::UiStateWrite::<crate::state::ChatUiState>::from_event(webview, &transcript.state),
-    );
+    commands.trigger(vmux_ecs::UiStateWrite::<crate::state::UiChat>::from_event(
+        webview,
+        &transcript.state,
+    ));
 }
 
 fn resolve_queries(
@@ -611,12 +639,10 @@ fn apply_results(
         changed |= attachments.hydrate_transcript(&mut transcript.state);
         commands.entity(entity).despawn();
         if changed {
-            commands.trigger(
-                vmux_ecs::UiStateWrite::<crate::state::ChatUiState>::from_event(
-                    result.webview,
-                    &transcript.state,
-                ),
-            );
+            commands.trigger(vmux_ecs::UiStateWrite::<crate::state::UiChat>::from_event(
+                result.webview,
+                &transcript.state,
+            ));
         }
         let paths = attachments.hydration_paths(&transcript.state, &snapshot.0);
         if !paths.is_empty() {
@@ -663,7 +689,7 @@ mod tests {
 
     #[test]
     fn snapshot_reports_grouped_imported_item_boundary() {
-        let agent = AgentId("codex".into());
+        let agent = AgentRef::new("codex");
         let imported = ImportedConversation {
             source_agent: "Codex".into(),
             source_sid: "codex-1".into(),
@@ -709,7 +735,7 @@ mod tests {
 
     #[test]
     fn snapshot_includes_approval_tool_and_input() {
-        let agent = AgentId("codex".into());
+        let agent = AgentRef::new("codex");
         let snapshot = ChatProjection::new(
             &agent,
             &[],
@@ -742,7 +768,7 @@ mod tests {
 
     #[test]
     fn snapshot_includes_model_written_conversation_title() {
-        let agent = AgentId("codex".into());
+        let agent = AgentRef::new("codex");
         let title = AgentConversationTitle("Refine generated chat summaries".into());
         let snapshot = ChatProjection::new(
             &agent,
@@ -770,7 +796,7 @@ mod tests {
 
     #[test]
     fn snapshot_uses_session_name_until_model_writes_title() {
-        let agent = AgentId("codex".into());
+        let agent = AgentRef::new("codex");
         let snapshot = ChatProjection::new(
             &agent,
             &[],
@@ -794,8 +820,8 @@ mod tests {
 
     #[test]
     fn snapshot_uses_the_active_user_profile_avatar() {
-        let agent = AgentId("codex".into());
-        let profile = Profile::user_named("Personal".into());
+        let agent = AgentRef::new("codex");
+        let profile = ProfilePresentation::user_named("Personal");
         let snapshot = ChatProjection::new(
             &agent,
             &[],

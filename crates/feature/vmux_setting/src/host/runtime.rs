@@ -7,7 +7,7 @@ use notify::{RecommendedWatcher, RecursiveMode, Watcher};
 use serde::{Deserialize, Serialize};
 use std::sync::{Mutex, mpsc};
 use std::time::{Duration, Instant};
-use vmux_ecs::manifest::FeatureManifest;
+use vmux_feature::FeatureManifest;
 pub use vmux_layout::settings::LayoutSettings;
 use vmux_layout::settings::{ConfirmCloseSettings, ResolvedLocale};
 #[cfg(test)]
@@ -15,7 +15,6 @@ pub use vmux_layout::settings::{
     FocusRingSettings, PaneSettings, SideSheetSettings, WindowSettings,
 };
 
-use std::hash::{Hash, Hasher};
 use std::str::FromStr;
 use vmux_ecs::event::{ProjectRow, ProjectRowKind};
 
@@ -53,7 +52,7 @@ fn spawn_settings_runtime(mut commands: Commands) {
     commands.spawn((
         Name::new("Settings runtime"),
         SearchEngineSetting("google".to_string()),
-        LastSelfWriteHash::default(),
+        PendingSettingsWrite::default(),
         SettingsSaveDebounce::default(),
     ));
 }
@@ -176,10 +175,10 @@ impl AppSettings {
     pub fn workspace_dir(
         &self,
         space_id: &str,
-        tab_dir: Option<&str>,
+        tab_dir: Option<&std::path::Path>,
     ) -> Result<Option<std::path::PathBuf>, String> {
         match tab_dir {
-            Some(tab_dir) => StartupDir::from_tab(tab_dir).map(|dir| Some(dir.path)),
+            Some(tab_dir) => StartupDir::from_tab_path(tab_dir).map(|dir| Some(dir.path)),
             None => Ok(self.startup_dir(space_id)),
         }
     }
@@ -760,7 +759,10 @@ impl StartupDir {
         if trimmed.is_empty() {
             return Err("tab workspace directory is empty".to_string());
         }
-        let path = std::path::PathBuf::from(trimmed);
+        Self::from_tab_path(std::path::Path::new(trimmed))
+    }
+
+    pub fn from_tab_path(path: &std::path::Path) -> Result<Self, String> {
         if !path.is_absolute() {
             return Err(format!(
                 "tab workspace directory is not absolute: {}",
@@ -1271,7 +1273,7 @@ fn load_settings(
     defaults: Res<SettingsDefaults>,
     profile: vmux_ecs::profile::CurrentProfile,
     mut commands: Commands,
-    runtime: Single<Entity, With<LastSelfWriteHash>>,
+    runtime: Single<Entity, With<PendingSettingsWrite>>,
 ) {
     let config_path = profile.paths().map(|paths| paths.settings());
     let (settings, config_path) = match config_path {
@@ -1330,7 +1332,7 @@ fn reload_settings_on_change(
     mut layout_settings: ResMut<LayoutSettings>,
     mut confirm_close: ResMut<ConfirmCloseSettings>,
     mut resolved_locale: ResMut<ResolvedLocale>,
-    last_hash: Single<&LastSelfWriteHash>,
+    mut pending_write: Single<&mut PendingSettingsWrite>,
 ) {
     let Some(watcher) = watcher else { return };
 
@@ -1346,8 +1348,7 @@ fn reload_settings_on_change(
 
     match std::fs::read_to_string(&watcher.path) {
         Ok(text) => {
-            let current_hash = settings_content_hash(text.as_bytes());
-            if last_hash.0 == Some(current_hash) {
+            if pending_write.suppress(text.as_bytes()) {
                 bevy::log::debug!("settings: skipping reload (matches last self-write)");
                 return;
             }
@@ -1733,17 +1734,24 @@ fn set_leaf(
 }
 
 #[derive(Component, Default, Debug)]
-pub struct LastSelfWriteHash(pub Option<u64>);
+struct PendingSettingsWrite(Option<vmux_path::FileRevision>);
+
+impl PendingSettingsWrite {
+    fn persist(&mut self, path: impl AsRef<std::path::Path>, bytes: &[u8]) -> std::io::Result<()> {
+        let revision = vmux_path::AtomicFile::write_revision(path, bytes)?;
+        self.0 = Some(revision);
+        Ok(())
+    }
+
+    fn suppress(&mut self, bytes: &[u8]) -> bool {
+        let current = vmux_path::FileRevision::of(bytes);
+        self.0.take().is_some_and(|expected| expected == current)
+    }
+}
 
 #[derive(Message, Debug, Clone)]
 struct SettingsWriteRequest {
     pub ron_bytes: String,
-}
-
-fn settings_content_hash(bytes: &[u8]) -> u64 {
-    let mut hasher = std::collections::hash_map::DefaultHasher::new();
-    bytes.hash(&mut hasher);
-    hasher.finish()
 }
 
 const SETTINGS_SAVE_DEBOUNCE: Duration = Duration::from_millis(400);
@@ -1789,7 +1797,7 @@ fn flush_settings_save(
 fn persist_settings_to_disk(
     mut reader: MessageReader<SettingsWriteRequest>,
     watcher: Option<Single<&SettingsWatcher>>,
-    mut last_hash: Single<&mut LastSelfWriteHash>,
+    mut pending_write: Single<&mut PendingSettingsWrite>,
 ) {
     for request in reader.read() {
         let Some(watcher) = watcher.as_deref() else {
@@ -1797,9 +1805,7 @@ fn persist_settings_to_disk(
             continue;
         };
         let bytes = request.ron_bytes.as_bytes();
-        let hash = settings_content_hash(bytes);
-        last_hash.0 = Some(hash);
-        if let Err(e) = vmux_path::AtomicFile::write(&watcher.path, bytes) {
+        if let Err(e) = pending_write.persist(&watcher.path, bytes) {
             bevy::log::warn!(
                 "settings: failed to persist {}: {e}",
                 watcher.path.display()
@@ -2295,6 +2301,26 @@ mod tests {
     }
 
     #[test]
+    fn settings_self_write_is_consumed_only_for_matching_content() {
+        let temp = tempfile::tempdir().unwrap();
+        let path = temp.path().join("settings.ron");
+        let mut pending = PendingSettingsWrite::default();
+        pending.persist(&path, b"self").unwrap();
+
+        assert!(!pending.suppress(b"external"));
+        assert!(!pending.suppress(b"self"));
+    }
+
+    #[test]
+    fn failed_settings_write_is_not_recorded() {
+        let temp = tempfile::tempdir().unwrap();
+        let mut pending = PendingSettingsWrite::default();
+
+        assert!(pending.persist(temp.path(), b"settings").is_err());
+        assert!(!pending.suppress(b"settings"));
+    }
+
+    #[test]
     fn acp_agent_config_allows_version_only_entry() {
         let cfg: AcpAgentConfig = serde_json::from_value(serde_json::json!({
             "id": "claude",
@@ -2305,15 +2331,6 @@ mod tests {
         assert_eq!(cfg.command, "");
         assert_eq!(cfg.version.as_deref(), Some("0.11.0"));
         assert!(cfg.args.is_empty());
-    }
-
-    #[test]
-    fn content_hash_is_deterministic() {
-        let h1 = settings_content_hash(b"hello");
-        let h2 = settings_content_hash(b"hello");
-        let h3 = settings_content_hash(b"world");
-        assert_eq!(h1, h2);
-        assert_ne!(h1, h3);
     }
 
     #[test]
@@ -2480,7 +2497,7 @@ mod tests {
         );
 
         assert!(
-            s.workspace_dir("work", Some("/no/such/tab/xyz-vmux"))
+            s.workspace_dir("work", Some(std::path::Path::new("/no/such/tab/xyz-vmux")))
                 .is_err()
         );
         assert_eq!(

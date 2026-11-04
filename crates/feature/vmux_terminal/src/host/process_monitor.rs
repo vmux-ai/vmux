@@ -5,12 +5,12 @@ use bevy_cef::prelude::*;
 use vmux_api::protocol::{ClientMessage, ProcessId};
 use vmux_api::service::*;
 use vmux_command::{CommandInvocation, ResolvedLocale};
-#[cfg(test)]
-use vmux_ecs::manifest::FeaturePlugin;
 use vmux_ecs::page::{Activity, PageReady};
 use vmux_ecs::service::ServiceConnected;
 use vmux_ecs::service::ServiceRequest;
 use vmux_ecs::{UiState, UiStatePlugin, UiStateWrite};
+#[cfg(test)]
+use vmux_feature::AppFeatureExt;
 use vmux_history::LastActivatedAt;
 use vmux_ui::i18n::{Locale, TranslationValue};
 
@@ -34,7 +34,7 @@ impl Plugin for ProcessMonitorPlugin {
         #[cfg(ui)]
         app.add_plugins(crate::ui::monitor::ProcessMonitorPage::plugin());
         #[cfg(test)]
-        app.add_plugins(FeaturePlugin::<crate::Feature>::default());
+        app.register_feature::<crate::Feature>();
         if !app.is_plugin_added::<vmux_command::CommandRuntimePlugin>() {
             app.add_plugins(vmux_command::CommandRuntimePlugin);
         }
@@ -47,7 +47,7 @@ impl Plugin for ProcessMonitorPlugin {
                 ProcessKillAllEvent,
                 ProcessSearchRequest,
             )>::default())
-            .add_plugins(UiStatePlugin::<ProcessesUiState>::default())
+            .add_plugins(UiStatePlugin::<UiProcesses>::default())
             .add_systems(
                 Update,
                 (
@@ -210,7 +210,7 @@ impl Sparkline {
 }
 
 #[derive(Component, Default)]
-#[require(UiState<ProcessesUiState>)]
+#[require(UiState<UiProcesses>)]
 pub struct ProcessMonitorView {
     query: String,
     cpu_history: VecDeque<f32>,
@@ -659,12 +659,12 @@ fn broadcast_to_monitors(
             .collect::<Vec<_>>();
         let cpu_graph = Sparkline::plot(&cpu_history, 5.0);
         let memory_graph = Sparkline::plot(&memory_history, 64.0);
-        let state = ProcessesUiState {
+        let state = UiProcesses {
             connected,
             query: monitor.query.clone(),
             total_count,
             managed_count,
-            cpu: ProcessUsageUiState {
+            cpu: UiProcessUsage {
                 label: "CPU".to_string(),
                 value: if runtime.cpu_ready {
                     format!("{total_cpu_percent:.1}%")
@@ -687,7 +687,7 @@ fn broadcast_to_monitors(
                     String::new()
                 },
             },
-            memory: ProcessUsageUiState {
+            memory: UiProcessUsage {
                 label: locale.translate("services-memory"),
                 value: ProcessMemory(total_memory_bytes).label(),
                 peak: format!("↑ {}", ProcessMemory(peak_memory_bytes).label()),
@@ -696,7 +696,7 @@ fn broadcast_to_monitors(
             },
             processes: visible,
         };
-        commands.trigger(UiStateWrite::<ProcessesUiState>::from_event(entity, &state));
+        commands.trigger(UiStateWrite::<UiProcesses>::from_event(entity, &state));
         if view_dirty {
             commands.entity(entity).remove::<ProcessMonitorViewDirty>();
         }

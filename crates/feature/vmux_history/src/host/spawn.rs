@@ -32,7 +32,7 @@ impl VisitWriter<'_, '_> {
         for (entity, metadata, mut count, mut last) in &mut self.urls {
             if metadata.url == url {
                 count.0 = count.0.saturating_add(1);
-                last.0 = now;
+                *last = LastVisitedAt::new(now);
                 url_entity = Some(entity);
                 break;
             }
@@ -50,15 +50,19 @@ impl VisitWriter<'_, '_> {
                         ..default()
                     },
                     VisitCount(1),
-                    LastVisitedAt(now),
-                    CreatedAt(now),
+                    LastVisitedAt::new(now),
+                    CreatedAt::new(now),
                 ))
                 .id(),
         };
 
         if transition != TransitionType::BackForward {
-            self.commands
-                .spawn((Visit, CreatedAt(now), VisitedUrl(url_entity), transition));
+            self.commands.spawn((
+                Visit,
+                CreatedAt::new(now),
+                VisitedUrl(url_entity),
+                transition,
+            ));
         }
     }
 }

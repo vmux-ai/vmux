@@ -1,10 +1,14 @@
 use std::path::PathBuf;
 
 use bevy::prelude::*;
-use moonshine_save::prelude::LoadWorld;
+use vmux_ecs::persistence::DurableStore;
+#[cfg(test)]
+use vmux_ecs::persistence::StoreLoad;
 #[cfg(test)]
 use vmux_ecs::profile::ProfilePaths;
 use vmux_ecs::{Bookmark, Folder, Pin};
+
+use crate::persistence::{STORE_NAME, STORE_SCHEMA_VERSION};
 
 pub(super) type BookmarkFilter = Or<(With<Pin>, With<Bookmark>, With<Folder>)>;
 
@@ -19,24 +23,17 @@ impl Default for BookmarkPersistencePath {
 }
 
 impl BookmarkPersistencePath {
-    pub(super) fn load(&self) -> std::io::Result<LoadWorld<BookmarkFilter>> {
-        let mut source = std::fs::read_to_string(&self.0)?;
-        for (legacy, current) in [
-            (
-                "vmux_desktop::bookmark_persistence::OfferedBookmarkDefaults",
-                "vmux_bookmark::OfferedBookmarkDefaults",
-            ),
-            ("vmux_core::BookmarkOrder", "vmux_ecs::BookmarkOrder"),
-            ("vmux_core::Pin", "vmux_ecs::Pin"),
-            ("vmux_core::Bookmark", "vmux_ecs::Bookmark"),
-            ("vmux_core::Folder", "vmux_ecs::Folder"),
-            ("vmux_core::Collapsed", "vmux_ecs::Collapsed"),
-            ("vmux_core::Uuid", "vmux_ecs::Uuid"),
-        ] {
-            source = source.replace(legacy, current);
-        }
-        Ok(LoadWorld::<BookmarkFilter>::from_stream(
-            std::io::Cursor::new(source.into_bytes()),
+    pub(super) fn store(&self) -> DurableStore {
+        DurableStore::new(&self.0, STORE_NAME, STORE_SCHEMA_VERSION)
+    }
+
+    #[cfg(test)]
+    pub(super) fn load_world(&self) -> moonshine_save::prelude::LoadWorld<BookmarkFilter> {
+        let StoreLoad::Ready(snapshot) = self.store().load().unwrap() else {
+            panic!("bookmark store should be ready");
+        };
+        moonshine_save::prelude::LoadWorld::from_stream(std::io::Cursor::new(
+            snapshot.into_payload().into_bytes(),
         ))
     }
 }

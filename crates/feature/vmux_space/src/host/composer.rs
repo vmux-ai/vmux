@@ -10,12 +10,12 @@ use vmux_ecs::page::PageReady;
 use vmux_ecs::{Cwd, EntityTarget, KeyboardOwner, ProcessAnchor};
 use vmux_git::worktree::RepoInfo;
 use vmux_git::{GitRuntime, GitTask, RepoInfoCache};
-use vmux_layout::tab::{Tab, TabWorkspace, TabWorktree};
+use vmux_layout::tab::{StartupDir, Tab, TabWorkspace, TabWorktree};
 use vmux_session::event::{
     ChatBranch, ChatBranchesRequest, ChatGoToBranch, ChatSelectWorkspace, ComposerContext,
 };
 use vmux_session::host::{ChatBranchesProjection, ChatComposerContext, SessionView};
-use vmux_session::{ApprovalPolicy, Route, Session, SessionId};
+use vmux_session::{ApprovalPolicy, Id, Route, Session};
 
 pub(super) struct SpaceComposerPlugin;
 
@@ -52,12 +52,13 @@ struct ComposerProjection<'w, 's> {
         's,
         (
             Entity,
-            &'static SessionId,
+            &'static Id<Session>,
             Option<&'static Cwd>,
             Option<&'static ApprovalPolicy>,
         ),
         With<Session>,
     >,
+    identities: Res<'w, vmux_ecs::IdentityIndex<Session>>,
     pages: Query<'w, 's, &'static vmux_ecs::PageMetadata>,
     targets: Query<'w, 's, &'static EntityTarget<Session>>,
     child_of: Query<'w, 's, &'static ChildOf>,
@@ -65,10 +66,11 @@ struct ComposerProjection<'w, 's> {
         'w,
         's,
         (
-            &'static Tab,
+            &'static StartupDir,
             Option<&'static TabWorkspace>,
             Option<&'static TabWorktree>,
         ),
+        With<Tab>,
     >,
     repo_info: Option<Single<'w, 's, &'static mut RepoInfoCache>>,
     space_projects: SpaceProjects<'w, 's>,
@@ -83,12 +85,7 @@ impl ComposerProjection<'_, '_> {
             .ok()
             .and_then(|page| Route::parse(&page.url));
         let session = match route {
-            Some(Route::Session(id)) => {
-                self.sessions
-                    .iter()
-                    .find(|(_, candidate, _, _)| **candidate == id)?
-                    .0
-            }
+            Some(Route::Session(id)) => self.identities.entity(&id).ok()??,
             _ => self.targets.get(stack).ok()?.entity(),
         };
         let (_, _, cwd, policy) = self.sessions.get(session).ok()?;
@@ -127,9 +124,9 @@ impl ComposerProjection<'_, '_> {
         let mut workspace_selected = false;
         let mut worktree = None;
         loop {
-            if let Ok((tab, workspace, managed)) = self.tabs.get(current) {
-                tab_dir = tab.startup_dir.as_ref().map(std::path::PathBuf::from);
-                workspace_selected = workspace.is_some() || tab.startup_dir.is_some();
+            if let Ok((startup_dir, workspace, managed)) = self.tabs.get(current) {
+                tab_dir = startup_dir.0.clone();
+                workspace_selected = workspace.is_some() || startup_dir.0.is_some();
                 worktree = managed.cloned();
                 break;
             }
@@ -159,7 +156,7 @@ fn push_context_to_page(
             Ref<PageReady>,
             Has<KeyboardOwner>,
             &mut ChatComposerContext,
-            Option<&vmux_ecs::UiState<vmux_session::state::ChatUiState>>,
+            Option<&vmux_ecs::UiState<vmux_session::state::UiChat>>,
         ),
         With<SessionView>,
     >,
@@ -189,7 +186,7 @@ fn push_context_to_page(
         }
         if changed || ready.is_changed() || pending {
             commands.trigger(
-                vmux_ecs::UiStateWrite::<vmux_session::state::ChatUiState>::from_event(
+                vmux_ecs::UiStateWrite::<vmux_session::state::UiChat>::from_event(
                     webview, &context,
                 ),
             );
@@ -265,10 +262,7 @@ fn chat_branches_request(
     }
     let request_id = projection.start(project.clone());
     commands.trigger(
-        vmux_ecs::UiStateWrite::<vmux_session::state::ChatUiState>::from_event(
-            webview,
-            &projection.0,
-        ),
+        vmux_ecs::UiStateWrite::<vmux_session::state::UiChat>::from_event(webview, &projection.0),
     );
     let root = std::path::PathBuf::from(&project);
     let wake = proxy.as_deref().map(|proxy| (**proxy).clone());
@@ -295,7 +289,7 @@ fn chat_branches_request(
     }) else {
         projection.finish(request_id, &project, Vec::new());
         commands.trigger(
-            vmux_ecs::UiStateWrite::<vmux_session::state::ChatUiState>::from_event(
+            vmux_ecs::UiStateWrite::<vmux_session::state::UiChat>::from_event(
                 webview,
                 &projection.0,
             ),
@@ -331,7 +325,7 @@ fn drain_branch_reads(
             continue;
         }
         commands.trigger(
-            vmux_ecs::UiStateWrite::<vmux_session::state::ChatUiState>::from_event(
+            vmux_ecs::UiStateWrite::<vmux_session::state::UiChat>::from_event(
                 read.webview,
                 &projection.0,
             ),
@@ -420,7 +414,7 @@ mod tests {
 
     impl ContextWrites {
         fn record(
-            event: On<vmux_ecs::UiStateWrite<vmux_session::state::ChatUiState>>,
+            event: On<vmux_ecs::UiStateWrite<vmux_session::state::UiChat>>,
             mut writes: ResMut<Self>,
         ) {
             if event.update().composer.is_some() {
@@ -440,12 +434,14 @@ mod tests {
             app.add_plugins((
                 MinimalPlugins,
                 SpaceComposerPlugin,
-                vmux_ecs::UiStatePlugin::<vmux_session::state::ChatUiState>::default(),
+                vmux_ecs::IdentityIndexPlugin::<Session>::default(),
+                vmux_ecs::UiStatePlugin::<vmux_session::state::UiChat>::default(),
             ))
             .init_resource::<ActiveProjectRows>()
             .init_resource::<ContextWrites>()
             .add_observer(ContextWrites::record)
-            .add_observer(Self::delivered);
+            .add_observer(Self::delivered)
+            .add_systems(PreUpdate, Self::rebuild);
             let stack = app.world_mut().spawn_empty().id();
             let view = app
                 .world_mut()
@@ -465,12 +461,16 @@ mod tests {
             app.world_mut().spawn(vmux_api::UiEventPermissions {
                 url: "vmux://sessions/",
                 owns_subtree: true,
-                permissions: &["ChatUiState"],
+                permissions: &["UiChat"],
             });
             let mut browsers = Browsers::default();
             browsers.set_externally_hosted(view);
             app.insert_non_send(browsers);
             Self { app, view }
+        }
+
+        fn rebuild(mut index: vmux_ecs::IdentityIndexWriter<Session>) {
+            index.rebuild();
         }
 
         fn delivered(event: On<bevy_cef::prelude::BinHostEmitEvent>) {
@@ -480,7 +480,7 @@ mod tests {
         fn bind(&mut self, path: &std::path::Path) {
             self.app.world_mut().spawn((
                 Session,
-                SessionId("late-session".to_string()),
+                Id::<Session>::new("late-session"),
                 Cwd(path.to_path_buf()),
             ));
         }
@@ -489,7 +489,7 @@ mod tests {
             let state = self
                 .app
                 .world()
-                .get::<vmux_ecs::UiState<vmux_session::state::ChatUiState>>(self.view)
+                .get::<vmux_ecs::UiState<vmux_session::state::UiChat>>(self.view)
                 .unwrap()
                 .current()
                 .unwrap();
@@ -530,7 +530,7 @@ mod tests {
         page.app
             .world_mut()
             .entity_mut(page.view)
-            .remove::<vmux_ecs::UiState<vmux_session::state::ChatUiState>>();
+            .remove::<vmux_ecs::UiState<vmux_session::state::UiChat>>();
         page.app.update();
         assert_eq!(page.context().cwd, root.path().to_string_lossy());
         assert_eq!(page.app.world().resource::<ContextWrites>().0, 2);
@@ -545,10 +545,10 @@ mod tests {
         let tab = page
             .app
             .world_mut()
-            .spawn(Tab {
-                startup_dir: Some(tab_root.path().display().to_string()),
-                ..Default::default()
-            })
+            .spawn((
+                Tab::bundle(),
+                StartupDir(Some(tab_root.path().to_path_buf())),
+            ))
             .id();
         page.app.world_mut().entity_mut(stack).insert(ChildOf(tab));
         page.bind(session_root.path());

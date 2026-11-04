@@ -8,19 +8,19 @@ pub use vmux_api::{
 
 pub use editor::*;
 pub use explorer::*;
-pub use file_ui_state::*;
 pub use lsp::*;
 #[cfg(all(host, feature = "host"))]
 pub use page::*;
 pub use terminal::*;
+pub use ui_file::*;
 
 mod editor;
 mod explorer;
-mod file_ui_state;
 mod lsp;
 #[cfg(all(host, feature = "host"))]
 mod page;
 mod terminal;
+mod ui_file;
 
 #[cfg(test)]
 mod file_event_tests {

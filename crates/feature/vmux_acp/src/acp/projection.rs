@@ -3,6 +3,7 @@ use bevy::prelude::{App, Query, Update};
 use vmux_api::protocol::{
     AgentFileTouched, AgentRequest, AgentRequestId, ServiceMessage, SharedEvent,
 };
+use vmux_session::{Id, Session};
 
 use super::driver::AcpTranscriptInput;
 use super::projection_driver::{AcpProjector, Intent};
@@ -14,7 +15,7 @@ pub(super) fn add(app: &mut App) {
 
 fn project(
     mut sessions: Query<(
-        &super::SessionId,
+        &Id<Session>,
         &AcpSessionShared,
         &mut AcpTranscriptInbox,
         &mut AcpProjector,
@@ -50,7 +51,7 @@ fn project(
                             if *configs != next {
                                 *configs = next;
                                 shared.0.emit(ServiceMessage::AcpSessionConfigState {
-                                    sid: sid.0.clone(),
+                                    sid: sid.as_str().to_string(),
                                     configs: configs.0.clone(),
                                 });
                             }
@@ -66,7 +67,7 @@ fn project(
                             {
                                 config.current_value = value;
                                 shared.0.emit(ServiceMessage::AcpSessionConfigState {
-                                    sid: sid.0.clone(),
+                                    sid: sid.as_str().to_string(),
                                     configs: configs.0.clone(),
                                 });
                             }
@@ -92,7 +93,7 @@ fn project(
                                 shared
                                     .0
                                     .emit(ServiceMessage::Shared(SharedEvent::AgentDelta {
-                                        sid: sid.0.clone(),
+                                        sid: sid.as_str().to_string(),
                                         text,
                                     }))
                             }
@@ -105,7 +106,7 @@ fn project(
                                 old_text,
                                 new_text,
                             } => shared.0.emit(ServiceMessage::AcpProposedDiff {
-                                sid: sid.0.clone(),
+                                sid: sid.as_str().to_string(),
                                 call_id,
                                 path,
                                 old_text,

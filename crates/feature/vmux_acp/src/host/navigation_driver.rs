@@ -10,16 +10,16 @@ use vmux_ecs::{
 };
 use vmux_flex::Visibility;
 use vmux_layout::space::FocusedSpace;
-use vmux_layout::tab::{Tab, TabWorkspace};
+use vmux_layout::tab::{StartupDir, Tab, TabWorkspace};
 use vmux_session::host::{SessionManagerView, SessionView};
-use vmux_session::{AgentConversationTitle, AgentId, PromptQueue, Route, Session, SessionId};
+use vmux_session::{AgentConversationTitle, AgentRef, Id, PromptQueue, Route, Session};
 use vmux_setting::AppSettings;
 use vmux_ui::i18n::translate;
 
 use super::acp::registry::RegistryAgent;
 use super::attach::AcpAgentAttachment;
 use super::attach_driver::DeferredAttachmentPrompt;
-use crate::AcpSessionId;
+use crate::session::AcpSessionLinks;
 
 #[derive(SystemParam)]
 pub(super) struct AcpCatalog<'w, 's> {
@@ -39,18 +39,20 @@ pub(super) struct PageOpener<'w, 's> {
         's,
         (
             Entity,
-            &'static SessionId,
+            &'static Id<Session>,
             &'static Name,
             &'static Cwd,
-            Option<&'static AgentId>,
-            Option<&'static AcpSessionId>,
+            Option<&'static AgentRef>,
             Option<&'static ProcessAnchor>,
         ),
         With<Session>,
     >,
+    identities: Res<'w, vmux_ecs::IdentityIndex<Session>>,
+    mutations: MessageWriter<'w, vmux_session::SessionMutationRequest>,
+    links: AcpSessionLinks<'w, 's>,
     children: Query<'w, 's, &'static Children>,
     child_of: Query<'w, 's, &'static ChildOf>,
-    tabs: Query<'w, 's, &'static mut Tab>,
+    tabs: Query<'w, 's, &'static mut StartupDir, With<Tab>>,
     workspaces: Query<'w, 's, &'static mut TabWorkspace>,
     handoffs: Query<'w, 's, &'static mut vmux_layout::hosted_page::SurfaceHandoff>,
     queues: Query<'w, 's, &'static mut PromptQueue>,
@@ -114,11 +116,11 @@ impl AgentPageOpenWorkspace<'_, '_> {
 }
 
 impl PageOpener<'_, '_> {
-    pub(super) fn tab(&self, entity: Entity) -> Option<(Entity, Option<String>)> {
+    pub(super) fn tab(&self, entity: Entity) -> Option<(Entity, Option<std::path::PathBuf>)> {
         let mut current = entity;
         loop {
-            if let Ok(tab) = self.tabs.get(current) {
-                return Some((current, tab.startup_dir.clone()));
+            if let Ok(startup_dir) = self.tabs.get(current) {
+                return Some((current, startup_dir.0.clone()));
             }
             current = self.child_of.get(current).ok()?.parent();
         }
@@ -146,30 +148,23 @@ impl PageOpener<'_, '_> {
                 Ok(PageOpenCompletion::Complete)
             }
             Route::Session(id) => {
-                let Some((
-                    session_entity,
-                    session_name,
-                    stored_cwd,
-                    selected_agent,
-                    resume,
-                    active,
-                )) = self
+                let session_entity = self
+                    .identities
+                    .entity(&id)
+                    .map_err(|error| error.to_string())?
+                    .ok_or_else(|| format!("Session '{id}' was not found"))?;
+                let (_, _, name, cwd, agent, active) = self
                     .sessions
-                    .iter()
-                    .find(|(_, candidate, ..)| *candidate == &id)
-                    .map(|(entity, _, name, cwd, agent, resume, active)| {
-                        (
-                            entity,
-                            name.as_str().to_string(),
-                            cwd.0.clone(),
-                            agent.map(|agent| agent.0.clone()),
-                            resume.map(|resume| resume.0.clone()),
-                            active.map(|active| active.0),
-                        )
-                    })
-                else {
-                    return Err(format!("Session '{}' was not found", id.0));
-                };
+                    .get(session_entity)
+                    .map_err(|_| format!("Session '{id}' is unavailable"))?;
+                let session_name = name.as_str().to_string();
+                let stored_cwd = cwd.0.clone();
+                let selected_agent = agent.map(|agent| agent.as_str().to_string());
+                let active = active.map(|active| active.0);
+                let resume = self
+                    .links
+                    .get(session_entity)
+                    .map(|link| link.id().as_str().to_string());
                 let agent_id = selected_agent
                     .or_else(|| {
                         self.settings
@@ -199,9 +194,11 @@ impl PageOpener<'_, '_> {
                 };
                 if let Some(anchor) = active {
                     if cwd_missing {
-                        self.commands
-                            .entity(session_entity)
-                            .insert(Cwd(cwd.clone()));
+                        self.mutations
+                            .write(vmux_session::SessionMutationRequest::local(
+                                id.clone(),
+                                vmux_session::SessionMutation::ChangeWorkspace(cwd.clone()),
+                            ));
                     }
                     self.bind_workspace(task.stack, &cwd);
                     self.commands
@@ -238,7 +235,7 @@ impl PageOpener<'_, '_> {
                     agent_id.clone(),
                     &session_name,
                     agent_name,
-                    id.0.clone(),
+                    id.as_str().to_string(),
                     cwd,
                     icon,
                     resume,
@@ -395,10 +392,10 @@ impl PageOpener<'_, '_> {
         let Some((tab_entity, _)) = self.tab(stack) else {
             return;
         };
-        let cwd = cwd.to_string_lossy().into_owned();
-        if let Ok(mut tab) = self.tabs.get_mut(tab_entity) {
-            tab.startup_dir = Some(cwd.clone());
+        if let Ok(mut startup_dir) = self.tabs.get_mut(tab_entity) {
+            startup_dir.0 = Some(cwd.to_path_buf());
         }
+        let cwd = cwd.to_string_lossy().into_owned();
         if let Ok(mut workspace) = self.workspaces.get_mut(tab_entity) {
             workspace.project_dir.clone_from(&cwd);
         } else {
@@ -448,6 +445,8 @@ mod tests {
         let mut world = World::new();
         world.insert_resource(AppSettings::default());
         world.insert_resource(Time::<()>::default());
+        world.insert_resource(vmux_ecs::IdentityIndex::<Session>::default());
+        world.insert_resource(Messages::<vmux_session::SessionMutationRequest>::default());
         let attachment = AgentAttachment {
             path: "/tmp/image.png".into(),
             name: "image.png".into(),
@@ -479,6 +478,8 @@ mod tests {
         let mut world = World::new();
         world.insert_resource(AppSettings::default());
         world.insert_resource(Time::<()>::default());
+        world.insert_resource(vmux_ecs::IdentityIndex::<Session>::default());
+        world.insert_resource(Messages::<vmux_session::SessionMutationRequest>::default());
         let navigation = vmux_ecs::PageOpenId::new();
 
         let handoff = world

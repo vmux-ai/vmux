@@ -11,7 +11,7 @@ use vmux_ecs::agent::AgentCommandResponse;
 use vmux_ecs::service::{
     ServiceConnected, ServiceMessageAppExt, ServiceMessageSet, ServiceRequest,
 };
-use vmux_session::{PromptQueue, RunState, Session, SessionId, SnapshotReceived, Transcripts};
+use vmux_session::{Id, PromptQueue, RunState, Session, SnapshotReceived, Transcripts};
 
 #[vmux_api::service_message(AgentRequest)]
 struct InboundAgentRequest {
@@ -68,14 +68,14 @@ pub(super) fn add(app: &mut App) {
 fn route_messages(
     mut inbound: MessageReader<AgentMessagesSnapshot>,
     mut snapshots: MessageWriter<SnapshotReceived>,
-    sessions: Query<(Entity, &SessionId, Has<vmux_session::TranscriptLoading>), With<Session>>,
+    sessions: Query<(Entity, &Id<Session>, Has<vmux_session::TranscriptLoading>), With<Session>>,
     transcripts: Transcripts,
     mut commands: Commands,
 ) {
     for inbound in inbound.read() {
         let Some((session, _, loading)) = sessions
             .iter()
-            .find(|(_, session_id, _)| session_id.0 == inbound.sid)
+            .find(|(_, session_id, _)| session_id.as_str() == inbound.sid)
         else {
             continue;
         };
@@ -87,7 +87,7 @@ fn route_messages(
             continue;
         }
         snapshots.write(SnapshotReceived {
-            session: SessionId(inbound.sid.clone()),
+            session: Id::<Session>::new(inbound.sid.clone()),
             messages: inbound.messages.clone(),
         });
     }
@@ -133,14 +133,14 @@ fn route_requests(
 
 fn route_approval_requests(
     mut inbound: MessageReader<InboundAgentAwaitingApproval>,
-    mut sessions: Query<(Entity, &SessionId, &mut RunState), With<Session>>,
+    mut sessions: Query<(Entity, &Id<Session>, &mut RunState), With<Session>>,
     mut commands: Commands,
 ) {
     for inbound in inbound.read() {
         let args = serde_json::Value::try_from(&inbound.args)
             .unwrap_or_else(|_| serde_json::Value::Object(serde_json::Map::new()));
         for (session, session_id, mut state) in &mut sessions {
-            if session_id.0 != inbound.sid {
+            if session_id.as_str() != inbound.sid {
                 continue;
             }
             *state = RunState::AwaitingApproval {
@@ -159,15 +159,15 @@ fn route_approval_requests(
 
 fn project_deltas(
     mut inbound: MessageReader<AgentDelta>,
-    sessions: Query<(Entity, &SessionId), With<Session>>,
+    sessions: Query<(Entity, &Id<Session>), With<Session>>,
     transcripts: Transcripts,
     mut snapshots: MessageWriter<SnapshotReceived>,
 ) {
-    let mut pending = std::collections::HashMap::<Entity, (SessionId, Vec<Message>)>::new();
+    let mut pending = std::collections::HashMap::<Entity, (Id<Session>, Vec<Message>)>::new();
     for inbound in inbound.read() {
         let Some((session, session_id)) = sessions
             .iter()
-            .find(|(_, session_id)| session_id.0 == inbound.sid)
+            .find(|(_, session_id)| session_id.as_str() == inbound.sid)
         else {
             continue;
         };
@@ -191,11 +191,11 @@ fn project_deltas(
 
 fn project_statuses(
     mut inbound: MessageReader<AgentRunStatusChanged>,
-    mut sessions: Query<(&SessionId, &mut RunState, &mut PromptQueue), With<Session>>,
+    mut sessions: Query<(&Id<Session>, &mut RunState, &mut PromptQueue), With<Session>>,
 ) {
     for inbound in inbound.read() {
         for (session_id, mut state, mut queue) in &mut sessions {
-            if session_id.0 != inbound.sid {
+            if session_id.as_str() != inbound.sid {
                 continue;
             }
             match &inbound.status {
@@ -221,11 +221,11 @@ fn project_statuses(
 
 fn project_approval_resolutions(
     mut inbound: MessageReader<AgentApprovalResolved>,
-    mut sessions: Query<(&SessionId, &mut RunState), With<Session>>,
+    mut sessions: Query<(&Id<Session>, &mut RunState), With<Session>>,
 ) {
     for inbound in inbound.read() {
         for (session_id, mut state) in &mut sessions {
-            if session_id.0 == inbound.sid
+            if session_id.as_str() == inbound.sid
                 && matches!(
                     &*state,
                     RunState::AwaitingApproval { call_id, .. } if call_id == &inbound.call_id
@@ -279,7 +279,7 @@ mod tests {
             .world_mut()
             .spawn((
                 Session,
-                SessionId("session-1".into()),
+                Id::<Session>::new("session-1"),
                 vmux_session::TranscriptLoading,
             ))
             .id();
@@ -303,7 +303,7 @@ mod tests {
             .drain()
             .collect::<Vec<_>>();
         assert_eq!(snapshots.len(), 1);
-        assert_eq!(snapshots[0].session.0, "session-1");
+        assert_eq!(snapshots[0].session.as_str(), "session-1");
     }
 
     #[test]
@@ -311,25 +311,21 @@ mod tests {
         let mut app = App::new();
         app.add_plugins(MinimalPlugins);
         add(&mut app);
-        let session_id = SessionId("session-1".into());
+        let session_id = Id::<Session>::new("session-1");
         let session = app.world_mut().spawn((Session, session_id.clone())).id();
         app.world_mut().spawn((
             vmux_session::ConversationEvent,
-            vmux_session::EventIdentity {
-                event_id: vmux_api::session::EventId::new("event-1"),
-                actor_id: vmux_api::session::MemberId::local(&session_id),
-                client_op_id: None,
-                sequence: 1,
-                reply_to: None,
-            },
+            Id::<vmux_api::session::ConversationEvent>::new("event-1"),
+            vmux_session::ActorRef::new(vmux_api::session::Member::local_id(&session_id)),
+            vmux_session::Sequence(1),
             vmux_session::MessageContent(Message::user("persisted")),
-            vmux_ecs::CreatedAt(1),
+            vmux_ecs::CreatedAt::new(1),
             ChildOf(session),
         ));
         app.world_mut()
             .resource_mut::<Messages<AgentMessagesSnapshot>>()
             .write(AgentMessagesSnapshot {
-                sid: session_id.0,
+                sid: session_id.into_string(),
                 messages: Vec::new(),
             });
 

@@ -97,9 +97,9 @@ impl FileOpenContext<'_, '_> {
             return Some(directory.clone());
         }
         if let Some(directory) = self.tabs.startup_dir(stack)
-            && !directory.is_empty()
+            && !directory.as_os_str().is_empty()
         {
-            return Some(PathBuf::from(directory));
+            return Some(directory);
         }
         std::env::current_dir().ok()
     }
@@ -447,9 +447,9 @@ impl KnowledgeLanding {
             }
             if recent
                 .as_ref()
-                .is_none_or(|(_, timestamp)| visited.0 > *timestamp)
+                .is_none_or(|(_, timestamp)| visited.milliseconds() > *timestamp)
             {
-                recent = Some((path, visited.0));
+                recent = Some((path, visited.milliseconds()));
             }
         }
         if let Some((path, _)) = recent {
@@ -722,10 +722,11 @@ mod tests {
         let tab = stack
             .app
             .world_mut()
-            .spawn(vmux_layout::tab::Tab {
-                name: "Workspace".to_string(),
-                startup_dir: Some(working.path().to_string_lossy().into_owned()),
-            })
+            .spawn((
+                vmux_layout::tab::Tab::bundle(),
+                Name::new("Workspace"),
+                vmux_layout::tab::StartupDir(Some(working.path().to_path_buf())),
+            ))
             .id();
         stack
             .app
@@ -758,10 +759,9 @@ mod tests {
             .app
             .world_mut()
             .spawn((
-                vmux_layout::tab::Tab {
-                    name: "Project".into(),
-                    startup_dir: Some("/".into()),
-                },
+                vmux_layout::tab::Tab::bundle(),
+                Name::new("Project"),
+                vmux_layout::tab::StartupDir(Some("/".into())),
                 ChildOf(space),
             ))
             .id();
@@ -787,10 +787,9 @@ mod tests {
             .app
             .world_mut()
             .spawn((
-                vmux_layout::tab::Tab {
-                    name: "Project".into(),
-                    startup_dir: Some("/".into()),
-                },
+                vmux_layout::tab::Tab::bundle(),
+                Name::new("Project"),
+                vmux_layout::tab::StartupDir(Some("/".into())),
                 vmux_layout::tab::TabWorkspace {
                     project_dir: repository.path().to_string_lossy().into_owned(),
                 },
@@ -994,8 +993,8 @@ mod tests {
             url: vmux_path::FileUrl::from_path(&recent, None, None, None),
             ..Default::default()
         };
-        let older_visit = LastVisitedAt(10);
-        let recent_visit = LastVisitedAt(20);
+        let older_visit = LastVisitedAt::new(10);
+        let recent_visit = LastVisitedAt::new(20);
 
         assert_eq!(
             KnowledgeLanding::select(

@@ -43,6 +43,7 @@ bevy_world_serialization = "0.19.1"
 bevy_cef = "0.5.2"
 bevy_cef_core = "0.5.2"
 moonshine-save = "0.7.0"
+moonshine-util = "0.5.1"
 tokio = { version = "1", features = [
     "rt-multi-thread",
     "sync",

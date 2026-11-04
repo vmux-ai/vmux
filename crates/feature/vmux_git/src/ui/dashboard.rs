@@ -378,7 +378,7 @@ fn GitDiffPane(navigation: SectionNavigation, viewed_count: Signal<usize>) -> El
         if !navigation.receive(&fragment, path) {
             return;
         }
-        let _ = vmux_ui::hooks::send(&crate::event::GitBranchFileSelectRequest { path_bytes });
+        vmux_ui::hooks::send(&crate::event::GitBranchFileSelectRequest { path_bytes });
     });
     let selected_state = selected();
     let Some(repository) = selected_state.repository else {

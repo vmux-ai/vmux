@@ -5,7 +5,7 @@ pub use vmux_api::space::{
 };
 
 #[vmux_api::ui_state(Default, Eq, version = 1)]
-pub struct ProjectNavigation {
+pub struct UiProjectNavigation {
     pub rows: Vec<ProjectRow>,
 }
 

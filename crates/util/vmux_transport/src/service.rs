@@ -4,10 +4,11 @@ use std::pin::Pin;
 use tokio::io::{AsyncRead, AsyncWrite, BufReader};
 use tokio::net::UnixStream;
 use tokio::sync::{Mutex, broadcast, mpsc};
+use vmux_api::Id;
 use vmux_api::protocol::{
     ClientMessage, ServiceMessage, SharedEvent, SharedMessage, SharedResponse,
 };
-use vmux_api::session::ClientOpId;
+use vmux_api::session::ClientOperation;
 use vmux_profile::ServicePaths;
 
 use crate::framing::LengthPrefixed;
@@ -43,8 +44,8 @@ pub trait RemoteDriver: Send + Sync {
 }
 
 pub trait RemoteOperationStore: Send + Sync {
-    fn claim(&self, id: ClientOpId) -> RemoteFuture<'_, bool>;
-    fn release(&self, id: ClientOpId) -> RemoteFuture<'_, ()>;
+    fn claim(&self, id: Id<ClientOperation>) -> RemoteFuture<'_, bool>;
+    fn release(&self, id: Id<ClientOperation>) -> RemoteFuture<'_, ()>;
 }
 
 pub struct ServiceConnection {

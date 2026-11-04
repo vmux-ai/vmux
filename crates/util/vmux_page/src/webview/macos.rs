@@ -1,15 +1,226 @@
-use objc2::MainThreadMarker;
 use objc2::rc::Retained;
+use objc2::{ClassType, MainThreadMarker, MainThreadOnly, runtime::AnyClass};
 use objc2_app_kit::{
     NSAppearance, NSAppearanceCustomization, NSAppearanceNameAqua, NSAppearanceNameDarkAqua,
-    NSAutoresizingMaskOptions, NSColor, NSView, NSWindowOrderingMode,
+    NSAutoresizingMaskOptions, NSBackingStoreType, NSColor, NSGlassEffectView,
+    NSGlassEffectViewStyle, NSPanel, NSView, NSWindow, NSWindowCollectionBehavior,
+    NSWindowOrderingMode, NSWindowStyleMask,
 };
+use objc2_foundation::{NSPoint, NSRect, NSSize};
 use objc2_quartz_core::CACornerMask;
 use objc2_web_kit::WKWebViewConfiguration;
+use std::cell::Cell;
 use tracing::{error, warn};
 use wry::WebViewExtMacOS;
 
 use super::{Appearance, SiblingOrder, WebView};
+
+objc2::define_class!(
+    #[unsafe(super(NSPanel, NSWindow, objc2_app_kit::NSResponder, objc2::runtime::NSObject))]
+    #[thread_kind = objc2::MainThreadOnly]
+    #[name = "VmuxPageModalPanel"]
+    struct ModalPanel;
+
+    impl ModalPanel {
+        #[unsafe(method(canBecomeKeyWindow))]
+        fn can_become_key_window(&self) -> bool {
+            true
+        }
+
+        #[unsafe(method(canBecomeMainWindow))]
+        fn can_become_main_window(&self) -> bool {
+            false
+        }
+    }
+);
+
+pub(super) struct ModalHost {
+    parent: Retained<NSWindow>,
+    panel: Retained<NSPanel>,
+    glass: Option<Retained<NSGlassEffectView>>,
+    visible: Cell<bool>,
+}
+
+impl ModalHost {
+    fn new(webview: &wry::WebView) -> Option<Self> {
+        let marker = MainThreadMarker::new()?;
+        let wk = webview.webview();
+        let view: &NSView = &wk;
+        let parent = view.window()?;
+        let panel: Retained<NSPanel> = {
+            let panel = ModalPanel::alloc(marker);
+            let panel: Retained<ModalPanel> = unsafe {
+                objc2::msg_send![
+                    panel,
+                    initWithContentRect: NSRect::new(
+                        NSPoint::new(0.0, 0.0),
+                        NSSize::new(1.0, 1.0),
+                    ),
+                    styleMask: NSWindowStyleMask::Borderless
+                        | NSWindowStyleMask::NonactivatingPanel,
+                    backing: NSBackingStoreType::Buffered,
+                    defer: false,
+                ]
+            };
+            Retained::into_super(panel)
+        };
+        panel.setFloatingPanel(false);
+        panel.setBecomesKeyOnlyIfNeeded(false);
+        panel.setMovableByWindowBackground(false);
+        panel.setHidesOnDeactivate(true);
+        panel.setOpaque(false);
+        panel.setBackgroundColor(Some(&NSColor::clearColor()));
+        panel.setHasShadow(true);
+        panel.setCollectionBehavior(
+            NSWindowCollectionBehavior::FullScreenAuxiliary | NSWindowCollectionBehavior::Transient,
+        );
+        unsafe { panel.setReleasedWhenClosed(false) };
+
+        view.removeFromSuperview();
+        let glass = if AnyClass::get(c"NSGlassEffectView").is_some() {
+            let glass = NSGlassEffectView::new(marker);
+            glass.setStyle(NSGlassEffectViewStyle::Clear);
+            glass.setTintColor(Some(&NSColor::clearColor()));
+            let glass_view: &NSView = glass.as_super();
+            glass_view.setFrame(NSRect::new(NSPoint::new(0.0, 0.0), NSSize::new(1.0, 1.0)));
+            glass_view.setAutoresizingMask(
+                NSAutoresizingMaskOptions::ViewWidthSizable
+                    | NSAutoresizingMaskOptions::ViewHeightSizable,
+            );
+            glass.setContentView(Some(view));
+            panel.setContentView(Some(glass_view));
+            Some(glass)
+        } else {
+            panel.setContentView(Some(view));
+            None
+        };
+        view.setAutoresizingMask(
+            NSAutoresizingMaskOptions::ViewWidthSizable
+                | NSAutoresizingMaskOptions::ViewHeightSizable,
+        );
+        if let Some(content) = panel.contentView() {
+            view.setFrame(content.bounds());
+        }
+        unsafe { parent.addChildWindow_ordered(&panel, NSWindowOrderingMode::Above) };
+        panel.orderOut(None);
+
+        Some(Self {
+            parent,
+            panel,
+            glass,
+            visible: Cell::new(false),
+        })
+    }
+
+    pub(super) fn set_bounds(&self, webview: &wry::WebView, bounds: wry::Rect) {
+        let Some(coordinates) = self.coordinates() else {
+            return;
+        };
+        let frame = coordinates.frame(bounds);
+        self.panel.setFrame_display(frame, true);
+        let wk = webview.webview();
+        let view: &NSView = &wk;
+        if let Some(content) = self.panel.contentView() {
+            content.setFrame(NSRect::new(NSPoint::new(0.0, 0.0), frame.size));
+            view.setFrame(content.bounds());
+        }
+    }
+
+    pub(super) fn bounds(&self) -> Option<wry::Rect> {
+        Some(self.coordinates()?.bounds(self.panel.frame()))
+    }
+
+    fn coordinates(&self) -> Option<ModalCoordinates> {
+        let content = self.parent.contentView()?;
+        let window_frame = content.convertRect_toView(content.bounds(), None);
+        Some(ModalCoordinates {
+            content: self.parent.convertRectToScreen(window_frame),
+            scale: self.parent.backingScaleFactor(),
+        })
+    }
+
+    pub(super) fn set_visible(&self, visible: bool) {
+        if self.visible.replace(visible) == visible {
+            return;
+        }
+        if visible {
+            self.panel.orderFront(None);
+            self.panel.makeKeyWindow();
+        } else {
+            self.parent.makeKeyWindow();
+            self.panel.orderOut(None);
+        }
+    }
+
+    pub(super) fn set_corner_radius(&self, radius: f64, all_corners: bool) {
+        if let Some(glass) = &self.glass {
+            Self::apply_corner_radius(glass.as_super(), radius, all_corners);
+            return;
+        }
+        let Some(content) = self.panel.contentView() else {
+            return;
+        };
+        Self::apply_corner_radius(&content, radius, all_corners);
+    }
+
+    fn apply_corner_radius(view: &NSView, radius: f64, all_corners: bool) {
+        view.setWantsLayer(true);
+        let Some(layer) = view.layer() else {
+            return;
+        };
+        let all = CACornerMask::LayerMinXMinYCorner
+            | CACornerMask::LayerMaxXMinYCorner
+            | CACornerMask::LayerMinXMaxYCorner
+            | CACornerMask::LayerMaxXMaxYCorner;
+        let bottom = CACornerMask::LayerMinXMinYCorner | CACornerMask::LayerMaxXMinYCorner;
+        layer.setCornerRadius(radius.max(0.0));
+        layer.setMasksToBounds(true);
+        layer.setMaskedCorners(if all_corners { all } else { bottom });
+    }
+}
+
+impl Drop for ModalHost {
+    fn drop(&mut self) {
+        self.parent.removeChildWindow(&self.panel);
+        self.panel.orderOut(None);
+        if let Some(glass) = &self.glass {
+            glass.setContentView(None);
+        }
+        self.panel.setContentView(None);
+    }
+}
+
+struct ModalCoordinates {
+    content: NSRect,
+    scale: f64,
+}
+
+impl ModalCoordinates {
+    fn frame(&self, bounds: wry::Rect) -> NSRect {
+        let position = bounds.position.to_logical::<f64>(self.scale);
+        let size = bounds.size.to_logical::<f64>(self.scale);
+        NSRect::new(
+            NSPoint::new(
+                self.content.origin.x + position.x,
+                self.content.origin.y + self.content.size.height - position.y - size.height,
+            ),
+            NSSize::new(size.width, size.height),
+        )
+    }
+
+    fn bounds(&self, frame: NSRect) -> wry::Rect {
+        wry::Rect {
+            position: wry::dpi::LogicalPosition::new(
+                frame.origin.x - self.content.origin.x,
+                self.content.origin.y + self.content.size.height
+                    - frame.origin.y
+                    - frame.size.height,
+            )
+            .into(),
+            size: wry::dpi::LogicalSize::new(frame.size.width, frame.size.height).into(),
+        }
+    }
+}
 
 struct SurfaceBackground;
 
@@ -110,7 +321,21 @@ impl WebView {
         layer.setOpacity(opacity.clamp(0.0, 1.0));
     }
 
+    pub fn host_as_modal(&self) -> bool {
+        if self.modal.borrow().is_some() {
+            return true;
+        }
+        let Some(host) = ModalHost::new(&self.webview) else {
+            return false;
+        };
+        self.modal.replace(Some(host));
+        true
+    }
+
     pub fn order_among_siblings(&self, order: SiblingOrder) {
+        if self.modal.borrow().is_some() {
+            return;
+        }
         let wk = self.webview.webview();
         let view: &NSView = &wk;
         let Some(parent) = (unsafe { view.superview() }) else {
@@ -133,6 +358,9 @@ impl WebView {
     }
 
     pub fn raise_above_layers(&self) {
+        if self.modal.borrow().is_some() {
+            return;
+        }
         let wk = self.webview.webview();
         let view: &NSView = &wk;
         view.setWantsLayer(true);
@@ -144,6 +372,9 @@ impl WebView {
     }
 
     pub fn set_corner_radius(&self, radius: f64, all_corners: bool) {
+        if let Some(modal) = self.modal.borrow().as_ref() {
+            modal.set_corner_radius(radius, all_corners);
+        }
         let wk = self.webview.webview();
         let view: &NSView = &wk;
         view.setWantsLayer(true);
@@ -237,6 +468,34 @@ impl PresentedLayer {
 #[cfg(test)]
 mod presentation_tests {
     use super::*;
+
+    #[test]
+    fn modal_bounds_track_the_panel_in_parent_content_coordinates() {
+        for scale in [1.0, 2.0] {
+            let coordinates = ModalCoordinates {
+                content: NSRect::new(NSPoint::new(-1200.0, 84.0), NSSize::new(960.0, 640.0)),
+                scale,
+            };
+            let requested = wry::Rect {
+                position: wry::dpi::PhysicalPosition::new(24.0 * scale, 48.0 * scale).into(),
+                size: wry::dpi::PhysicalSize::new(320.0 * scale, 180.0 * scale).into(),
+            };
+            let mut panel = coordinates.frame(requested);
+            assert_eq!(panel.origin, NSPoint::new(-1176.0, 496.0));
+            assert_eq!(panel.size, NSSize::new(320.0, 180.0));
+            panel.origin.x += 12.0;
+            panel.origin.y -= 8.0;
+            let actual = coordinates.bounds(panel);
+            assert_eq!(
+                actual.position.to_logical::<f64>(scale),
+                wry::dpi::LogicalPosition::new(36.0, 56.0)
+            );
+            assert_eq!(
+                actual.size.to_logical::<f64>(scale),
+                wry::dpi::LogicalSize::new(320.0, 180.0)
+            );
+        }
+    }
 
     #[test]
     fn native_presentation_must_match_the_requested_frame_and_fade_phase() {

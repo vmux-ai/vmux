@@ -1,4 +1,4 @@
-use std::collections::BTreeSet;
+use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 
 use bevy::ecs::system::SystemParam;
@@ -6,9 +6,11 @@ use bevy::prelude::*;
 use bevy::tasks::{IoTaskPool, Task, futures_lite::future};
 use bevy::winit::{EventLoopProxyWrapper, WinitUserEvent};
 use bevy_cef::prelude::{UiEventPlugin, UiInput};
-use serde::{Deserialize, Serialize};
+use vmux_api::Id;
 use vmux_api::avatar::IdenticonSpec;
+use vmux_api::project::ProjectRef;
 use vmux_ecs::page::PrewarmPage;
+use vmux_ecs::persistence::PersistenceAppExt;
 use vmux_git::worktree::RepoLabel;
 use vmux_git::{
     RepositoryProvisionCompleted, RepositoryProvisionOperation, RepositoryProvisionRequest,
@@ -17,18 +19,25 @@ use vmux_session::host::ScopeProjectionRequest;
 use vmux_session::{CatalogSnapshot, SessionSummaryProjection};
 
 use crate::project::{
-    ProjectArchiveRequest, ProjectCatalogView, ProjectCloneRequest, ProjectCollectionViewRequest,
-    ProjectCreateRequest, ProjectDeleteRequest, ProjectDetailView, ProjectEntry, ProjectId,
-    ProjectImportRequest, ProjectRoute, ProjectUiState, ProjectView,
+    Project, ProjectArchiveRequest, ProjectBranch, ProjectBundle, ProjectCatalogView,
+    ProjectCloneRequest, ProjectCollectionViewRequest, ProjectCreateRequest, ProjectDeleteRequest,
+    ProjectDetailView, ProjectEntry, ProjectImportRequest, ProjectOwner, ProjectPath, ProjectRoute,
+    ProjectSource, ProjectTarget, ProjectView, UiProject,
 };
 
 pub(super) struct ProjectPagePlugin;
 
 impl Plugin for ProjectPagePlugin {
     fn build(&self, app: &mut App) {
-        app.add_plugins(vmux_ecs::UiStatePlugin::<ProjectUiState>::default())
+        app.register_persisted::<Project>()
+            .register_persisted::<Id<Project>>()
+            .register_persisted::<ProjectPath>()
+            .register_persisted::<ProjectSource>()
+            .register_persisted::<ProjectRef>()
+            .add_plugins(vmux_ecs::IdentityIndexPlugin::<Project>::default())
+            .add_plugins(vmux_ecs::UiStatePlugin::<UiProject>::default())
             .add_message::<vmux_layout::stack::OpenRequest>()
-            .add_plugins(vmux_ecs::UiStatePlugin::<crate::project::ProjectFilesUiState>::default())
+            .add_plugins(vmux_ecs::UiStatePlugin::<crate::project::UiProjectFiles>::default())
             .add_plugins(UiEventPlugin::<(
                 ProjectCreateRequest,
                 ProjectImportRequest,
@@ -45,13 +54,18 @@ impl Plugin for ProjectPagePlugin {
             .add_observer(collection_view)
             .add_observer(open_context)
             .add_systems(PreStartup, prewarm)
+            .add_systems(PreUpdate, rebuild_index)
             .add_systems(
                 Update,
                 (
+                    resolve_owners,
                     queue,
                     sync_icons,
                     finish_catalogs,
                     finish_files,
+                    bevy::ecs::schedule::ApplyDeferred,
+                    rebuild_index,
+                    reconcile_refs.in_set(vmux_session::SessionMutationReceiveSet),
                     finish_imports,
                     finish_deletes,
                 )
@@ -59,8 +73,142 @@ impl Plugin for ProjectPagePlugin {
             )
             .add_systems(
                 PostUpdate,
-                (finish_repository_operations, sync_session_counts).chain(),
+                (
+                    resolve_targets,
+                    finish_repository_operations,
+                    sync_session_counts,
+                )
+                    .chain(),
             );
+    }
+}
+
+fn rebuild_index(mut index: vmux_ecs::IdentityIndexWriter<Project>) {
+    index.rebuild();
+}
+
+type ProjectIdentities<'w, 's> =
+    Query<'w, 's, (Entity, &'static Id<Project>, &'static ProjectPath), With<Project>>;
+type SessionProjectSources<'w, 's> = Query<
+    'w,
+    's,
+    (
+        &'static Id<vmux_session::Session>,
+        Ref<'static, vmux_ecs::Cwd>,
+        Option<&'static ProjectRef>,
+    ),
+    With<vmux_session::Session>,
+>;
+type SpaceProjectSources<'w, 's> = Query<
+    'w,
+    's,
+    (
+        Entity,
+        Ref<'static, vmux_layout::space::EffectiveStartupDir>,
+        Option<&'static ProjectRef>,
+    ),
+    With<vmux_layout::space::Space>,
+>;
+
+struct ProjectMatch;
+
+impl ProjectMatch {
+    fn find(path: &Path, projects: &ProjectIdentities) -> Option<Id<Project>> {
+        projects
+            .iter()
+            .filter(|(_, _, project_path)| path.starts_with(project_path.path()))
+            .max_by_key(|(_, _, project_path)| project_path.path().components().count())
+            .map(|(_, id, _)| id.clone())
+    }
+}
+
+fn reconcile_refs(
+    index: Res<vmux_ecs::IdentityIndex<Project>>,
+    projects: ProjectIdentities,
+    sessions: SessionProjectSources,
+    spaces: SpaceProjectSources,
+    mut session_mutations: MessageWriter<vmux_session::SessionMutationRequest>,
+    mut commands: Commands,
+) {
+    let projects_changed = index.is_changed();
+    for (session, cwd, current) in &sessions {
+        if !projects_changed && !cwd.is_changed() && current.is_some() {
+            continue;
+        }
+        let next = ProjectMatch::find(&cwd.0, &projects);
+        if current.map(ProjectRef::id) == next.as_ref() {
+            continue;
+        }
+        session_mutations.write(vmux_session::SessionMutationRequest::local(
+            session.clone(),
+            vmux_session::SessionMutation::ChangeProject(next),
+        ));
+    }
+    for (entity, startup_dir, current) in &spaces {
+        if !projects_changed && !startup_dir.is_changed() && current.is_some() {
+            continue;
+        }
+        let path = startup_dir.0.as_deref().unwrap_or_else(|| Path::new(""));
+        reconcile_project_ref(entity, path, current, &projects, &mut commands);
+    }
+}
+
+fn reconcile_project_ref(
+    entity: Entity,
+    path: &Path,
+    current: Option<&ProjectRef>,
+    projects: &ProjectIdentities,
+    commands: &mut Commands,
+) {
+    let next = path
+        .is_absolute()
+        .then(|| ProjectMatch::find(path, projects))
+        .flatten();
+    match (next, current) {
+        (Some(next), Some(current)) if current.id() == &next => {}
+        (Some(next), _) => {
+            commands.entity(entity).insert(ProjectRef::new(next));
+        }
+        (None, Some(_)) => {
+            commands.entity(entity).remove::<ProjectRef>();
+        }
+        (None, None) => {}
+    }
+}
+
+fn resolve_targets(
+    index: Res<vmux_ecs::IdentityIndex<Project>>,
+    references: Query<(Entity, Ref<ProjectRef>, Option<&ProjectTarget>)>,
+    mut commands: Commands,
+) {
+    for (entity, reference, current) in &references {
+        if !index.is_changed() && !reference.is_changed() {
+            continue;
+        }
+        let target = index.entity(reference.id()).ok().flatten();
+        match (target, current.map(ProjectTarget::entity)) {
+            (Some(target), Some(current)) if target == current => {}
+            (Some(target), _) => {
+                commands.entity(entity).insert(ProjectTarget::new(target));
+            }
+            (None, Some(_)) => {
+                commands.entity(entity).remove::<ProjectTarget>();
+            }
+            (None, None) => {}
+        }
+    }
+}
+
+fn resolve_owners(
+    projects: Query<Entity, (With<Project>, Without<ProjectOwner>)>,
+    owner: vmux_ecs::profile::Projects,
+    mut commands: Commands,
+) {
+    let Some(owner) = owner.entity() else {
+        return;
+    };
+    for project in &projects {
+        commands.entity(project).insert(ProjectOwner::new(owner));
     }
 }
 
@@ -68,7 +216,7 @@ impl Plugin for ProjectPagePlugin {
 struct ProjectSources<'w, 's> {
     info: Query<'w, 's, &'static mut vmux_git::RepoInfoCache>,
     projects: vmux_ecs::profile::Projects<'w, 's>,
-    states: Query<'w, 's, &'static vmux_ecs::UiState<ProjectUiState>>,
+    states: Query<'w, 's, &'static vmux_ecs::UiState<UiProject>>,
 }
 
 fn open_context(
@@ -76,7 +224,7 @@ fn open_context(
     mut source: ProjectSources,
     active: vmux_layout::stack::ActiveTabParam,
     tabs: Query<(
-        &vmux_layout::tab::Tab,
+        &vmux_layout::tab::StartupDir,
         Option<&vmux_layout::tab::TabWorktree>,
         Option<&vmux_layout::tab::TabWorkspace>,
     )>,
@@ -88,7 +236,7 @@ fn open_context(
     if let Some(tab) = active.get()
         && let Ok((tab, worktree, workspace)) = tabs.get(tab)
     {
-        directory = tab.startup_dir.as_ref().map(PathBuf::from).or(directory);
+        directory = tab.0.clone().or(directory);
         project = worktree
             .map(|worktree| PathBuf::from(&worktree.repo_root))
             .or_else(|| workspace.map(|workspace| PathBuf::from(&workspace.project_dir)));
@@ -148,7 +296,7 @@ fn prewarm(mut commands: Commands) {
 #[derive(Component)]
 struct ProjectCatalogTask {
     revision: u64,
-    task: Task<ProjectUiState>,
+    task: Task<UiProject>,
 }
 
 #[derive(Component)]
@@ -200,7 +348,7 @@ fn finish_files(
         if page.url != task.url || revision.value != task.revision {
             continue;
         }
-        let mut state = crate::project::ProjectFilesUiState {
+        let mut state = crate::project::UiProjectFiles {
             root: task.root.clone(),
             ready: true,
             ..Default::default()
@@ -210,9 +358,7 @@ fn finish_files(
             Err(error) => state.error = error,
         }
         commands.trigger(
-            vmux_ecs::UiStateWrite::<crate::project::ProjectFilesUiState>::from_event(
-                entity, &state,
-            ),
+            vmux_ecs::UiStateWrite::<crate::project::UiProjectFiles>::from_event(entity, &state),
         );
     }
 }
@@ -224,7 +370,7 @@ impl ProjectCatalogTask {
         wake: Option<bevy::winit::EventLoopProxy<WinitUserEvent>>,
     ) -> Self {
         let task = IoTaskPool::get().spawn(async move {
-            let state = ProjectCatalog::read(&root, &ProjectArchive::load(&root));
+            let state = ProjectCatalog::read(&root);
             if let Some(wake) = wake {
                 let _ = wake.send_event(WinitUserEvent::WakeUp);
             }
@@ -287,7 +433,7 @@ type ProjectPageRows<'w, 's> = Query<
 #[derive(SystemParam)]
 struct ProjectPageQueries<'w, 's> {
     pages: ProjectPageRows<'w, 's>,
-    states: Query<'w, 's, &'static vmux_ecs::UiState<ProjectUiState>>,
+    states: Query<'w, 's, &'static vmux_ecs::UiState<UiProject>>,
     revisions: Query<'w, 's, &'static mut ProjectPageRevision>,
     collection_views: ProjectCollectionViews<'w, 's>,
 }
@@ -310,7 +456,7 @@ struct ProjectOperationPages<'w, 's> {
         ),
     >,
     pending: Query<'w, 's, &'static PendingProjectOperation>,
-    states: Query<'w, 's, &'static vmux_ecs::UiState<ProjectUiState>>,
+    states: Query<'w, 's, &'static vmux_ecs::UiState<UiProject>>,
 }
 
 impl ProjectOperationPages<'_, '_> {
@@ -335,7 +481,7 @@ impl ProjectOperationPages<'_, '_> {
         })
     }
 
-    fn pending_state(&self, webview: Entity) -> ProjectUiState {
+    fn pending_state(&self, webview: Entity) -> UiProject {
         self.states
             .get(webview)
             .ok()
@@ -351,42 +497,6 @@ struct ProjectImportTask(Task<Result<(), String>>);
 
 #[derive(Component)]
 struct ProjectDeleteTask(Task<Result<(), String>>);
-
-#[derive(Default, Serialize, Deserialize)]
-struct ProjectArchive {
-    projects: BTreeSet<String>,
-}
-
-impl ProjectArchive {
-    fn path(root: &Path) -> PathBuf {
-        root.join(".archive.ron")
-    }
-
-    fn load(root: &Path) -> Self {
-        let Ok(source) = std::fs::read_to_string(Self::path(root)) else {
-            return Self::default();
-        };
-        ron::from_str(&source).unwrap_or_default()
-    }
-
-    fn contains(&self, url: &str) -> bool {
-        self.projects.contains(url)
-    }
-
-    fn set(&mut self, url: &str, archived: bool) {
-        if archived {
-            self.projects.insert(url.to_string());
-        } else {
-            self.projects.remove(url);
-        }
-    }
-
-    fn save(&self, root: &Path) -> Result<(), String> {
-        let source = ron::ser::to_string(self).map_err(|error| error.to_string())?;
-        vmux_path::AtomicFile::write(Self::path(root), source.as_bytes())
-            .map_err(|error| error.to_string())
-    }
-}
 
 struct ProjectName(String);
 
@@ -577,9 +687,9 @@ fn create(
     {
         Ok(operation) => operation,
         Err(error) => {
-            commands.trigger(vmux_ecs::UiStateWrite::<ProjectUiState>::from_event(
+            commands.trigger(vmux_ecs::UiStateWrite::<UiProject>::from_event(
                 webview,
-                &ProjectUiState {
+                &UiProject {
                     view: ProjectView::Error(error),
                     ..Default::default()
                 },
@@ -588,7 +698,7 @@ fn create(
         }
     };
     let state = pages.pending_state(webview);
-    commands.trigger(vmux_ecs::UiStateWrite::<ProjectUiState>::from_event(
+    commands.trigger(vmux_ecs::UiStateWrite::<UiProject>::from_event(
         webview, &state,
     ));
     let requester = commands.spawn(pending).id();
@@ -613,7 +723,7 @@ fn import(
         return;
     };
     let state = pages.pending_state(webview);
-    commands.trigger(vmux_ecs::UiStateWrite::<ProjectUiState>::from_event(
+    commands.trigger(vmux_ecs::UiStateWrite::<UiProject>::from_event(
         webview, &state,
     ));
     let wake = proxy.as_deref().map(|proxy| (**proxy).clone());
@@ -647,9 +757,9 @@ fn clone(
     {
         Ok(operation) => operation,
         Err(error) => {
-            commands.trigger(vmux_ecs::UiStateWrite::<ProjectUiState>::from_event(
+            commands.trigger(vmux_ecs::UiStateWrite::<UiProject>::from_event(
                 webview,
-                &ProjectUiState {
+                &UiProject {
                     view: ProjectView::Error(error),
                     ..Default::default()
                 },
@@ -658,7 +768,7 @@ fn clone(
         }
     };
     let state = pages.pending_state(webview);
-    commands.trigger(vmux_ecs::UiStateWrite::<ProjectUiState>::from_event(
+    commands.trigger(vmux_ecs::UiStateWrite::<UiProject>::from_event(
         webview, &state,
     ));
     let requester = commands.spawn(pending).id();
@@ -671,10 +781,11 @@ fn clone(
 fn archive(
     trigger: On<UiInput<ProjectArchiveRequest>>,
     projects: vmux_ecs::profile::Projects,
+    index: Res<vmux_ecs::IdentityIndex<Project>>,
     states: Query<(
         Entity,
         &vmux_ecs::PageMetadata,
-        &vmux_ecs::UiState<ProjectUiState>,
+        &vmux_ecs::UiState<UiProject>,
     )>,
     mut commands: Commands,
 ) {
@@ -685,17 +796,14 @@ fn archive(
     let Some(Ok(_)) = ProjectRoute::resolve(&request.url, root) else {
         return;
     };
-    let mut archive = ProjectArchive::load(root);
-    archive.set(&request.url, request.archived);
-    if let Err(error) = archive.save(root) {
-        commands.trigger(vmux_ecs::UiStateWrite::<ProjectUiState>::from_event(
-            trigger.event().webview,
-            &ProjectUiState {
-                view: ProjectView::Error(error),
-                ..Default::default()
-            },
-        ));
+    let id = Id::<Project>::new(request.url.clone());
+    let Ok(Some(project)) = index.entity(&id) else {
         return;
+    };
+    if request.archived {
+        commands.entity(project).insert(vmux_ecs::ArchivedAt::now());
+    } else {
+        commands.entity(project).remove::<vmux_ecs::ArchivedAt>();
     }
     for (entity, page, state) in &states {
         if !ProjectRoute::is_root(&page.url) {
@@ -715,7 +823,7 @@ fn archive(
             continue;
         };
         entry.archived = request.archived;
-        commands.trigger(vmux_ecs::UiStateWrite::<ProjectUiState>::from_event(
+        commands.trigger(vmux_ecs::UiStateWrite::<UiProject>::from_event(
             entity, &current,
         ));
     }
@@ -738,9 +846,9 @@ fn delete(
     let deletion = match ProjectDeletion::resolve(root, &trigger.event().payload.url) {
         Ok(deletion) => deletion,
         Err(error) => {
-            commands.trigger(vmux_ecs::UiStateWrite::<ProjectUiState>::from_event(
+            commands.trigger(vmux_ecs::UiStateWrite::<UiProject>::from_event(
                 webview,
-                &ProjectUiState {
+                &UiProject {
                     view: ProjectView::Error(error),
                     ..Default::default()
                 },
@@ -754,7 +862,7 @@ fn delete(
             .entries
             .retain(|entry| entry.url != trigger.event().payload.url);
     }
-    commands.trigger(vmux_ecs::UiStateWrite::<ProjectUiState>::from_event(
+    commands.trigger(vmux_ecs::UiStateWrite::<UiProject>::from_event(
         webview, &state,
     ));
     let wake = proxy.as_deref().map(|proxy| (**proxy).clone());
@@ -772,7 +880,7 @@ fn collection_view(
     trigger: On<UiInput<ProjectCollectionViewRequest>>,
     hierarchy: vmux_layout::space::SpaceHierarchy,
     mut spaces: Query<&mut vmux_ecs::CollectionView, With<vmux_layout::space::Space>>,
-    states: Query<&vmux_ecs::UiState<ProjectUiState>>,
+    states: Query<&vmux_ecs::UiState<UiProject>>,
     mut commands: Commands,
 ) {
     let webview = trigger.event().webview;
@@ -790,7 +898,7 @@ fn collection_view(
         .cloned()
         .unwrap_or_default();
     state.collection_view = view;
-    commands.trigger(vmux_ecs::UiStateWrite::<ProjectUiState>::from_event(
+    commands.trigger(vmux_ecs::UiStateWrite::<UiProject>::from_event(
         webview, &state,
     ));
 }
@@ -844,9 +952,9 @@ fn queue(
         let root = match projects.path() {
             Ok(root) => root.to_path_buf(),
             Err(error) => {
-                commands.trigger(vmux_ecs::UiStateWrite::<ProjectUiState>::from_event(
+                commands.trigger(vmux_ecs::UiStateWrite::<UiProject>::from_event(
                     entity,
-                    &ProjectUiState {
+                    &UiProject {
                         view: ProjectView::Error(error),
                         collection_view,
                     },
@@ -862,9 +970,9 @@ fn queue(
                         .map(|name| name.to_string_lossy().into_owned())
                         .unwrap_or_else(|| path.to_string_lossy().into_owned());
                     page.title.clone_from(&name);
-                    let id = ProjectId(url.clone());
+                    let id = Id::<Project>::new(url.clone());
                     (
-                        ProjectUiState {
+                        UiProject {
                             view: ProjectView::Detail(ProjectDetailView {
                                 id: id.clone(),
                                 name,
@@ -876,7 +984,7 @@ fn queue(
                     )
                 }
                 Some(Err(error)) => (
-                    ProjectUiState {
+                    UiProject {
                         view: ProjectView::Error(error),
                         collection_view,
                     },
@@ -885,7 +993,7 @@ fn queue(
                 None => continue,
             };
             let seed = match &state.view {
-                ProjectView::Detail(detail) => detail.id.0.as_str(),
+                ProjectView::Detail(detail) => detail.id.as_str(),
                 _ => &url,
             };
             page.icon = vmux_api::PageIcon::favicon(IdenticonSpec::favicon_with_variant(
@@ -894,9 +1002,9 @@ fn queue(
             ));
             if let Some(path) = cwd.as_ref() {
                 commands.trigger(
-                    vmux_ecs::UiStateWrite::<crate::project::ProjectFilesUiState>::from_event(
+                    vmux_ecs::UiStateWrite::<crate::project::UiProjectFiles>::from_event(
                         entity,
-                        &crate::project::ProjectFilesUiState {
+                        &crate::project::UiProjectFiles {
                             root: path.to_string_lossy().into_owned(),
                             ..Default::default()
                         },
@@ -916,7 +1024,7 @@ fn queue(
                 webview: entity,
                 cwd,
             });
-            commands.trigger(vmux_ecs::UiStateWrite::<ProjectUiState>::from_event(
+            commands.trigger(vmux_ecs::UiStateWrite::<UiProject>::from_event(
                 entity, &state,
             ));
             continue;
@@ -934,9 +1042,9 @@ fn queue(
                 .is_some_and(|state| matches!(state.view, ProjectView::Catalog(_)))
         });
         if !has_catalog {
-            commands.trigger(vmux_ecs::UiStateWrite::<ProjectUiState>::from_event(
+            commands.trigger(vmux_ecs::UiStateWrite::<UiProject>::from_event(
                 entity,
-                &ProjectUiState {
+                &UiProject {
                     view: ProjectView::Loading,
                     collection_view,
                 },
@@ -996,9 +1104,9 @@ fn finish_deletes(
                         ));
                 }
                 Err(error) => {
-                    commands.trigger(vmux_ecs::UiStateWrite::<ProjectUiState>::from_event(
+                    commands.trigger(vmux_ecs::UiStateWrite::<UiProject>::from_event(
                         operation.webview,
-                        &ProjectUiState {
+                        &UiProject {
                             view: ProjectView::Error(error),
                             ..Default::default()
                         },
@@ -1010,6 +1118,163 @@ fn finish_deletes(
     }
 }
 
+type CanonicalProjects<'w, 's> = Query<
+    'w,
+    's,
+    (
+        Entity,
+        &'static Id<Project>,
+        &'static Name,
+        &'static ProjectPath,
+        &'static ProjectSource,
+        Option<&'static ProjectBranch>,
+        Has<vmux_ecs::ArchivedAt>,
+        Option<&'static ProjectOwner>,
+    ),
+    With<Project>,
+>;
+
+struct ProjectEntityState {
+    entity: Entity,
+    name: String,
+    path: PathBuf,
+    source: String,
+    branch: String,
+    archived: bool,
+    owner: Option<Entity>,
+}
+
+struct ProjectEntities {
+    by_id: HashMap<Id<Project>, ProjectEntityState>,
+}
+
+#[derive(SystemParam)]
+struct ProjectReconciler<'w, 's> {
+    projects: CanonicalProjects<'w, 's>,
+    commands: Commands<'w, 's>,
+}
+
+impl ProjectReconciler<'_, '_> {
+    fn collect(&mut self) -> ProjectEntities {
+        let mut by_id = HashMap::<Id<Project>, ProjectEntityState>::new();
+        for (entity, id, name, path, source, branch, archived, owner) in &self.projects {
+            let next = ProjectEntityState {
+                entity,
+                name: name.as_str().to_string(),
+                path: path.path().to_path_buf(),
+                source: source.as_str().to_string(),
+                branch: branch
+                    .map(ProjectBranch::as_str)
+                    .unwrap_or_default()
+                    .to_string(),
+                archived,
+                owner: owner.map(ProjectOwner::entity),
+            };
+            if let Some(existing) = by_id.get(id) {
+                if existing.entity.to_bits() <= entity.to_bits() {
+                    self.commands.entity(entity).despawn();
+                    continue;
+                }
+                self.commands.entity(existing.entity).despawn();
+            }
+            by_id.insert(id.clone(), next);
+        }
+        ProjectEntities { by_id }
+    }
+
+    fn reconcile(
+        &mut self,
+        projects: &mut ProjectEntities,
+        state: &mut UiProject,
+        owner: Option<Entity>,
+    ) {
+        let ProjectView::Catalog(catalog) = &mut state.view else {
+            return;
+        };
+        let mut seen = HashSet::new();
+        for entry in &mut catalog.entries {
+            let id = entry.id.clone();
+            seen.insert(id.clone());
+            if let Some(current) = projects.by_id.get_mut(&id) {
+                entry.archived = current.archived;
+                let path = PathBuf::from(&entry.path);
+                if current.name != entry.name {
+                    self.commands
+                        .entity(current.entity)
+                        .insert(Name::new(entry.name.clone()));
+                    current.name.clone_from(&entry.name);
+                }
+                if current.path != path
+                    && let Ok(path) = ProjectPath::new(path)
+                {
+                    self.commands.entity(current.entity).insert(path.clone());
+                    current.path = path.path().to_path_buf();
+                }
+                if current.source != entry.source {
+                    self.commands
+                        .entity(current.entity)
+                        .insert(ProjectSource::new(entry.source.clone()));
+                    current.source.clone_from(&entry.source);
+                }
+                if current.branch != entry.branch {
+                    self.commands
+                        .entity(current.entity)
+                        .insert(ProjectBranch::new(entry.branch.clone()));
+                    current.branch.clone_from(&entry.branch);
+                }
+                if let Some(owner) = owner
+                    && current.owner != Some(owner)
+                {
+                    self.commands
+                        .entity(current.entity)
+                        .insert(ProjectOwner::new(owner));
+                    current.owner = Some(owner);
+                }
+                continue;
+            }
+
+            let Ok(bundle) = ProjectBundle::new(
+                id.clone(),
+                entry.name.clone(),
+                PathBuf::from(&entry.path),
+                entry.source.clone(),
+                entry.branch.clone(),
+            ) else {
+                continue;
+            };
+            let mut project = self.commands.spawn(bundle);
+            if let Some(owner) = owner {
+                project.insert(ProjectOwner::new(owner));
+            }
+            let entity = project.id();
+            projects.by_id.insert(
+                id,
+                ProjectEntityState {
+                    entity,
+                    name: entry.name.clone(),
+                    path: PathBuf::from(&entry.path),
+                    source: entry.source.clone(),
+                    branch: entry.branch.clone(),
+                    archived: false,
+                    owner,
+                },
+            );
+        }
+
+        let stale = projects
+            .by_id
+            .keys()
+            .filter(|id| !seen.contains(*id))
+            .cloned()
+            .collect::<Vec<_>>();
+        for id in stale {
+            if let Some(project) = projects.by_id.remove(&id) {
+                self.commands.entity(project.entity).despawn();
+            }
+        }
+    }
+}
+
 fn finish_catalogs(
     mut tasks: Query<(
         Entity,
@@ -1018,26 +1283,35 @@ fn finish_catalogs(
         &ProjectPageRevision,
     )>,
     catalog: Res<CatalogSnapshot>,
-    states: Query<&vmux_ecs::UiState<ProjectUiState>>,
-    mut commands: Commands,
+    mut reconciler: ProjectReconciler,
+    owner: vmux_ecs::profile::Projects,
+    states: Query<&vmux_ecs::UiState<UiProject>>,
 ) {
+    let mut projects = reconciler.collect();
+    let owner = owner.entity();
     for (entity, mut task, page, revision) in &mut tasks {
         let Some(state) = future::block_on(future::poll_once(&mut task.task)) else {
             continue;
         };
-        commands.entity(entity).remove::<ProjectCatalogTask>();
+        reconciler
+            .commands
+            .entity(entity)
+            .remove::<ProjectCatalogTask>();
         if !ProjectRoute::is_root(&page.url) || revision.value != task.revision {
             continue;
         }
         let mut state = ProjectCatalog::with_session_counts(state, &catalog);
+        reconciler.reconcile(&mut projects, &mut state, owner);
         if let Ok(current) = states.get(entity)
             && let Some(current) = current.current()
         {
             state.collection_view = current.collection_view;
         }
-        commands.trigger(vmux_ecs::UiStateWrite::<ProjectUiState>::from_event(
-            entity, &state,
-        ));
+        reconciler
+            .commands
+            .trigger(vmux_ecs::UiStateWrite::<UiProject>::from_event(
+                entity, &state,
+            ));
     }
 }
 
@@ -1046,7 +1320,7 @@ fn sync_session_counts(
     pages: Query<(
         Entity,
         &vmux_ecs::PageMetadata,
-        &vmux_ecs::UiState<ProjectUiState>,
+        &vmux_ecs::UiState<UiProject>,
     )>,
     mut commands: Commands,
 ) {
@@ -1064,7 +1338,7 @@ fn sync_session_counts(
         if next == *current {
             continue;
         }
-        commands.trigger(vmux_ecs::UiStateWrite::<ProjectUiState>::from_event(
+        commands.trigger(vmux_ecs::UiStateWrite::<UiProject>::from_event(
             entity, &next,
         ));
     }
@@ -1096,9 +1370,9 @@ fn finish_imports(
                         ));
                 }
                 Err(error) => {
-                    commands.trigger(vmux_ecs::UiStateWrite::<ProjectUiState>::from_event(
+                    commands.trigger(vmux_ecs::UiStateWrite::<UiProject>::from_event(
                         operation.webview,
-                        &ProjectUiState {
+                        &UiProject {
                             view: ProjectView::Error(error),
                             ..Default::default()
                         },
@@ -1137,9 +1411,9 @@ fn finish_repository_operations(
                         ));
                 }
                 Err(error) => {
-                    commands.trigger(vmux_ecs::UiStateWrite::<ProjectUiState>::from_event(
+                    commands.trigger(vmux_ecs::UiStateWrite::<UiProject>::from_event(
                         operation.webview,
-                        &ProjectUiState {
+                        &UiProject {
                             view: ProjectView::Error(error.clone()),
                             ..Default::default()
                         },
@@ -1186,16 +1460,16 @@ impl ProjectCatalog {
         None
     }
 
-    fn read(root: &Path, archive: &ProjectArchive) -> ProjectUiState {
+    fn read(root: &Path) -> UiProject {
         let mut entries = Vec::new();
-        Self::walk(root, root, 0, archive, &mut entries);
+        Self::walk(root, root, 0, &mut entries);
         entries.sort_by(|left, right| {
             left.name
                 .to_lowercase()
                 .cmp(&right.name.to_lowercase())
                 .then_with(|| left.path.cmp(&right.path))
         });
-        ProjectUiState {
+        UiProject {
             view: ProjectView::Catalog(ProjectCatalogView {
                 entries,
                 operation_pending: false,
@@ -1204,7 +1478,7 @@ impl ProjectCatalog {
         }
     }
 
-    fn with_session_counts(mut state: ProjectUiState, catalog: &CatalogSnapshot) -> ProjectUiState {
+    fn with_session_counts(mut state: UiProject, catalog: &CatalogSnapshot) -> UiProject {
         let ProjectView::Catalog(view) = &mut state.view else {
             return state;
         };
@@ -1231,13 +1505,7 @@ impl ProjectCatalog {
         state
     }
 
-    fn walk(
-        root: &Path,
-        directory: &Path,
-        depth: usize,
-        archive: &ProjectArchive,
-        entries: &mut Vec<ProjectEntry>,
-    ) {
+    fn walk(root: &Path, directory: &Path, depth: usize, entries: &mut Vec<ProjectEntry>) {
         if depth > 0 && directory.join(".git").exists() {
             let Some(url) = ProjectRoute::from_path(root, directory) else {
                 return;
@@ -1257,8 +1525,7 @@ impl ProjectCatalog {
             let branch = RepoLabel::read(&path)
                 .map(|label| label.branch)
                 .unwrap_or_default();
-            let archived = archive.contains(&url);
-            let id = ProjectId(url.clone());
+            let id = Id::<Project>::new(url.clone());
             entries.push(ProjectEntry {
                 id,
                 name: name.to_string(),
@@ -1272,7 +1539,7 @@ impl ProjectCatalog {
                 ahead: 0,
                 ongoing_sessions: 0,
                 stale_sessions: 0,
-                archived,
+                archived: false,
             });
             return;
         }
@@ -1288,7 +1555,7 @@ impl ProjectCatalog {
                 continue;
             }
             if entry.path().is_dir() {
-                Self::walk(root, &entry.path(), depth + 1, archive, entries);
+                Self::walk(root, &entry.path(), depth + 1, entries);
             }
         }
     }
@@ -1297,6 +1564,7 @@ impl ProjectCatalog {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use bevy::ecs::system::RunSystemOnce;
     use vmux_session::{SessionSummary, StageSummary};
 
     #[test]
@@ -1313,10 +1581,9 @@ mod tests {
         .unwrap();
         let mut page = ProjectPage::at(root.path(), "vmux://projects/");
         page.app.world_mut().spawn((
-            vmux_layout::tab::Tab {
-                name: "Repo".to_string(),
-                startup_dir: Some(cwd.to_string_lossy().into_owned()),
-            },
+            vmux_layout::tab::Tab::bundle(),
+            Name::new("Repo"),
+            vmux_layout::tab::StartupDir(Some(cwd.clone())),
             vmux_ecs::Active,
         ));
 
@@ -1374,6 +1641,7 @@ mod tests {
                 .init_resource::<vmux_setting::AppSettings>()
                 .init_resource::<CatalogSnapshot>()
                 .add_message::<RepositoryProvisionCompleted>()
+                .add_message::<vmux_session::SessionMutationRequest>()
                 .insert_non_send(bevy_cef::prelude::Browsers::default())
                 .add_observer(deliver_frame);
             app.world_mut().spawn(vmux_ecs::profile::ProjectsRoot(
@@ -1397,20 +1665,20 @@ mod tests {
             app.world_mut().spawn(vmux_api::UiEventPermissions {
                 url: ProjectRoute::ROOT,
                 owns_subtree: true,
-                permissions: &["ProjectUiState", "ProjectFilesUiState"],
+                permissions: &["UiProject", "UiProjectFiles"],
             });
             Self { app, view }
         }
 
-        fn files(&self) -> Option<crate::project::ProjectFilesUiState> {
+        fn files(&self) -> Option<crate::project::UiProjectFiles> {
             self.app
                 .world()
-                .get::<vmux_ecs::UiState<crate::project::ProjectFilesUiState>>(self.view)?
+                .get::<vmux_ecs::UiState<crate::project::UiProjectFiles>>(self.view)?
                 .current()
                 .cloned()
         }
 
-        fn finish(&mut self) -> crate::project::ProjectFilesUiState {
+        fn finish(&mut self) -> crate::project::UiProjectFiles {
             let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
             loop {
                 self.app.update();
@@ -1505,7 +1773,7 @@ mod tests {
         std::fs::create_dir_all(vmux.join("client/.git")).unwrap();
         std::fs::create_dir_all(dashboard.join(".git")).unwrap();
 
-        let state = ProjectCatalog::read(root.path(), &ProjectArchive::default());
+        let state = ProjectCatalog::read(root.path());
 
         let ProjectView::Catalog(catalog) = state.view else {
             panic!("expected project catalog");
@@ -1526,21 +1794,18 @@ mod tests {
     }
 
     #[test]
-    fn catalog_marks_archived_projects_without_removing_their_files() {
+    fn catalog_discovers_projects_without_embedding_archive_state() {
         let root = tempfile::tempdir().unwrap();
         let project = root.path().join("github.com/vmux-ai/vmux");
         std::fs::create_dir_all(project.join(".git")).unwrap();
-        let url = "vmux://projects/github.com/vmux-ai/vmux";
-        let mut archive = ProjectArchive::default();
-        archive.set(url, true);
 
-        let state = ProjectCatalog::read(root.path(), &archive);
+        let state = ProjectCatalog::read(root.path());
 
         let ProjectView::Catalog(catalog) = state.view else {
             panic!("expected project catalog");
         };
         assert_eq!(catalog.entries.len(), 1);
-        assert!(catalog.entries[0].archived);
+        assert!(!catalog.entries[0].archived);
         assert!(project.exists());
     }
 
@@ -1550,24 +1815,149 @@ mod tests {
         let local = root.path().join("local/vmux");
         std::fs::create_dir_all(local.join(".git")).unwrap();
 
-        let initial = ProjectCatalog::read(root.path(), &ProjectArchive::default());
+        let initial = ProjectCatalog::read(root.path());
         let ProjectView::Catalog(initial) = initial.view else {
             panic!("expected project catalog");
         };
-        assert_eq!(initial.entries[0].id.0, initial.entries[0].url);
+        assert_eq!(initial.entries[0].id.as_str(), initial.entries[0].url);
 
         let linked = root.path().join("github.com/vmux-ai/vmux");
         std::fs::create_dir_all(linked.parent().unwrap()).unwrap();
         std::fs::rename(local, &linked).unwrap();
 
-        let moved = ProjectCatalog::read(root.path(), &ProjectArchive::default());
+        let moved = ProjectCatalog::read(root.path());
         let ProjectView::Catalog(moved) = moved.view else {
             panic!("expected project catalog");
         };
-        assert_eq!(moved.entries[0].id.0, moved.entries[0].url);
+        assert_eq!(moved.entries[0].id.as_str(), moved.entries[0].url);
         assert_eq!(
             moved.entries[0].url,
             "vmux://projects/github.com/vmux-ai/vmux"
+        );
+    }
+
+    #[test]
+    fn project_catalog_materializes_owned_entities_and_preserves_archive_state() {
+        let root = tempfile::tempdir().unwrap();
+        let path = root.path().join("github.com/vmux-ai/vmux");
+        std::fs::create_dir_all(path.join(".git")).unwrap();
+        let mut app = App::new();
+        let owner = app.world_mut().spawn_empty().id();
+        let state = ProjectCatalog::read(root.path());
+        let state = app
+            .world_mut()
+            .run_system_once_with(
+                move |In(mut state): In<UiProject>, mut reconciler: ProjectReconciler| {
+                    let mut entities = reconciler.collect();
+                    reconciler.reconcile(&mut entities, &mut state, Some(owner));
+                    state
+                },
+                state,
+            )
+            .unwrap();
+
+        let entity = {
+            let world = app.world_mut();
+            let mut projects = world.query_filtered::<
+                (Entity, &Id<Project>, &ProjectPath, &ProjectOwner),
+                With<Project>,
+            >();
+            let (entity, id, project_path, project_owner) = projects.single(world).unwrap();
+            assert_eq!(id.as_str(), "vmux://projects/github.com/vmux-ai/vmux");
+            assert_eq!(project_path.path(), path.canonicalize().unwrap());
+            assert_eq!(project_owner.entity(), owner);
+            entity
+        };
+        let ProjectView::Catalog(catalog) = state.view else {
+            panic!("expected project catalog");
+        };
+        assert!(!catalog.entries[0].archived);
+
+        app.world_mut()
+            .entity_mut(entity)
+            .insert(vmux_ecs::ArchivedAt::new(1));
+        let state = ProjectCatalog::read(root.path());
+        let state = app
+            .world_mut()
+            .run_system_once_with(
+                move |In(mut state): In<UiProject>, mut reconciler: ProjectReconciler| {
+                    let mut entities = reconciler.collect();
+                    reconciler.reconcile(&mut entities, &mut state, Some(owner));
+                    state
+                },
+                state,
+            )
+            .unwrap();
+        let ProjectView::Catalog(catalog) = state.view else {
+            panic!("expected project catalog");
+        };
+        assert!(catalog.entries[0].archived);
+    }
+
+    #[test]
+    fn duplicate_project_ids_are_explicit() {
+        let mut app = App::new();
+        app.add_plugins(vmux_ecs::IdentityIndexPlugin::<Project>::default())
+            .add_systems(Update, rebuild_index);
+        let id = Id::<Project>::new("vmux://projects/duplicate");
+        let path = PathBuf::from("/tmp/duplicate");
+        app.world_mut()
+            .spawn(ProjectBundle::new(id.clone(), "one", path.clone(), "", "").unwrap());
+        app.world_mut()
+            .spawn(ProjectBundle::new(id.clone(), "two", path, "", "").unwrap());
+
+        app.update();
+
+        assert_eq!(
+            app.world()
+                .resource::<vmux_ecs::IdentityIndex<Project>>()
+                .entity(&id),
+            Err(vmux_ecs::IdentityLookupError::Duplicate(id))
+        );
+    }
+
+    #[test]
+    fn project_refs_link_sessions_and_spaces_by_stable_identity() {
+        let mut app = App::new();
+        app.add_plugins((
+            vmux_session::SessionDomainPlugin,
+            vmux_ecs::IdentityIndexPlugin::<Project>::default(),
+        ))
+        .add_systems(Update, (rebuild_index, reconcile_refs).chain())
+        .add_systems(PostUpdate, resolve_targets);
+        let id = Id::<Project>::new("vmux://projects/github.com/vmux-ai/vmux");
+        let root = PathBuf::from("/projects/vmux");
+        let project = app
+            .world_mut()
+            .spawn(ProjectBundle::new(id.clone(), "vmux", root.clone(), "", "").unwrap())
+            .id();
+        let session = app
+            .world_mut()
+            .spawn((
+                vmux_session::Session,
+                Id::<vmux_session::Session>::new("session-1"),
+                vmux_ecs::Cwd(root.join(".worktrees/vmx-233")),
+            ))
+            .id();
+        let space = app
+            .world_mut()
+            .spawn(vmux_layout::space::Space::bundle(Id::new("space-1")))
+            .insert(vmux_layout::space::EffectiveStartupDir(Some(
+                root.join("client"),
+            )))
+            .id();
+
+        app.update();
+
+        assert_eq!(app.world().get::<ProjectRef>(session).unwrap().id(), &id);
+        assert_eq!(app.world().get::<ProjectRef>(space).unwrap().id(), &id);
+        assert_eq!(
+            app.world().get::<ProjectTarget>(session).unwrap().entity(),
+            project
+        );
+        assert_eq!(
+            app.world().get::<ProjectTarget>(space).unwrap().entity(),
+            project
         );
     }
 
@@ -1577,11 +1967,22 @@ mod tests {
         let project = root.path().join("github.com/vmux-ai/vmux");
         std::fs::create_dir_all(&project).unwrap();
         let now = vmux_ecs::UnixMillis::now().0;
-        let state = ProjectUiState {
+        let state = UiProject {
             view: ProjectView::Catalog(ProjectCatalogView {
                 entries: vec![ProjectEntry {
+                    id: Id::new("vmux://projects/test"),
+                    name: "test".into(),
+                    source: String::new(),
                     path: project.display().to_string(),
-                    ..Default::default()
+                    url: "vmux://projects/test".into(),
+                    branch: String::new(),
+                    base_ref: String::new(),
+                    is_worktree: false,
+                    uncommitted: 0,
+                    ahead: 0,
+                    ongoing_sessions: 0,
+                    stale_sessions: 0,
+                    archived: false,
                 }],
                 operation_pending: false,
             }),
@@ -1641,7 +2042,7 @@ mod tests {
         std::fs::create_dir(&imports).unwrap();
         std::os::unix::fs::symlink(external.path(), imports.join("external")).unwrap();
 
-        let state = ProjectCatalog::read(root.path(), &ProjectArchive::default());
+        let state = ProjectCatalog::read(root.path());
         let ProjectView::Catalog(catalog) = state.view else {
             panic!("expected project catalog");
         };
@@ -1670,7 +2071,7 @@ mod tests {
         std::fs::create_dir(external.path().join(".git")).unwrap();
         std::os::unix::fs::symlink(external.path(), root.path().join("external")).unwrap();
 
-        let state = ProjectCatalog::read(root.path(), &ProjectArchive::default());
+        let state = ProjectCatalog::read(root.path());
         let ProjectView::Catalog(catalog) = state.view else {
             panic!("expected project catalog");
         };

@@ -3,17 +3,17 @@ use bevy_cef::prelude::UiInput;
 use vmux_command::{CommandDispatch, CommandRuntimePlugin};
 use vmux_ecs::UiStateWrite;
 #[cfg(test)]
-use vmux_ecs::manifest::FeaturePlugin;
+use vmux_feature::AppFeatureExt;
 
 use super::spaces::{SpaceSelection, Spaces, SpacesPageSnapshot};
-use crate::event::{SpaceAttachRequest, SpaceDeleteRequest, SpacesUiState};
+use crate::event::{SpaceAttachRequest, SpaceDeleteRequest, UiSpaces};
 
 pub(crate) struct SpaceKeyPlugin;
 
 impl Plugin for SpaceKeyPlugin {
     fn build(&self, app: &mut App) {
         #[cfg(test)]
-        app.add_plugins(FeaturePlugin::<crate::Feature>::default());
+        app.register_feature::<crate::Feature>();
         if !app.is_plugin_added::<CommandRuntimePlugin>() {
             app.add_plugins(CommandRuntimePlugin);
         }
@@ -51,10 +51,7 @@ fn select_next(
     };
     selection.0 = (selection.0 + 1).min(snapshot.0.spaces.len().saturating_sub(1));
     snapshot.0.selected = selection.0 as u32;
-    commands.trigger(UiStateWrite::<SpacesUiState>::from_event(
-        caller,
-        &snapshot.0,
-    ));
+    commands.trigger(UiStateWrite::<UiSpaces>::from_event(caller, &snapshot.0));
 }
 
 fn select_previous(
@@ -72,10 +69,7 @@ fn select_previous(
     };
     selection.0 = selection.0.saturating_sub(1);
     snapshot.0.selected = selection.0 as u32;
-    commands.trigger(UiStateWrite::<SpacesUiState>::from_event(
-        caller,
-        &snapshot.0,
-    ));
+    commands.trigger(UiStateWrite::<UiSpaces>::from_event(caller, &snapshot.0));
 }
 
 fn attach_selected(
@@ -141,6 +135,9 @@ mod tests {
         fn app() -> App {
             let mut app = App::new();
             app.add_plugins(MinimalPlugins).add_plugins(SpaceKeyPlugin);
+            app.finish();
+            app.cleanup();
+            app.update();
             app
         }
 

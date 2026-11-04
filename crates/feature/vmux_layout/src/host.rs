@@ -24,6 +24,7 @@ pub mod cef;
 mod command;
 pub mod contract;
 mod deadline;
+mod dropdown;
 pub mod hosted_page;
 pub mod overlay;
 pub mod page_context;
@@ -55,7 +56,7 @@ mod swap;
 mod webview_reveal;
 mod zoom;
 
-pub type LayoutUiStateUpdates = vmux_ecs::UiState<crate::state::LayoutUiState>;
+pub type LayoutUiStateUpdates = vmux_ecs::UiState<crate::state::UiLayout>;
 
 #[derive(SystemSet, Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum LayoutStartupSet {

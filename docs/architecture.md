@@ -314,6 +314,10 @@ behavior does not need a reference back to the creator. Components are the contr
 so either side can be reused, replaced, or omitted independently. Composition changes by changing
 data and plugins, not by editing a growing call graph.
 
+Canonical values are typed and valid by construction. Timestamp components wrap `UnixMillis` and
+do not expose raw storage or use zero as a lifecycle sentinel. Component absence carries one precise
+meaning: for example, a Stack without `LastActivatedAt` has never been activated.
+
 That vocabulary also narrows the implementation search space. A new feature cannot hide
 state in an arbitrary object graph or invent a private integration mechanism: its data,
 behavior, messages, ownership, and composition point have known forms. Code remains
@@ -329,13 +333,12 @@ lifecycle transitions, asynchronous task boundaries, cross-feature dispatch, and
 ordering. A miscellaneous parameter bundle or a large hidden `run`/`dispatch` workflow is not
 a capability and stays as ordinary system logic.
 
-Asynchronous work remains explicit ECS state. A finite filesystem, process, or compute operation
-is a task component on the entity whose lifecycle it advances; one system starts it and another
-consumes its result. Long-lived runtime-specific I/O, streams, retries, and timers belong to a
-transport actor that exchanges typed inputs and outputs with ECS. Coroutine runtimes with ambient
-world access are not the default because they hide scheduling and lifecycle state from queries.
-Use one only for isolated sequential UI choreography where the sequence itself is the behavior,
-never for blocking work, transport ownership, or ordinary domain transitions.
+Asynchronous work remains explicit ECS state. Accepted multi-step work gets an operation entity
+with a stable ID, kind, state, stable target identity, captured revision, runtime task, and terminal
+cleanup. New intent updates or supersedes that entity instead of entering a parallel pending map.
+Long-lived runtime-specific I/O, streams, retries, and timers belong to a transport actor that
+exchanges typed inputs and outputs with ECS. Coroutine runtimes with ambient world access are not
+the default because they hide scheduling and lifecycle state from queries.
 
 System names use their module as context. Prefer `open`, `refresh`, `bind`, `project`, or
 `request_definition` inside the owning module over names that repeat the feature, module,
@@ -403,21 +406,41 @@ subtrees. `state.rs` owns shared UI snapshots and patches; `event.rs` owns trans
 and host-to-UI operations. Generic `page.rs`, `page_state.rs`, `ui_state.rs`, and `view.rs` modules
 are not used because their ownership is ambiguous.
 
-Page manifests are static plugin registration data. Their registration entities exist during
-plugin construction so the browser can build the complete embedded-host allowlist before CEF
-initializes. Runtime page state and behavior still initialize through ECS schedules.
+Page manifests are static plugin registration data. A feature calls
+`app.register_feature::<Feature>()` from its standard Bevy `Plugin::build`. `vmux_feature`
+collects those typed declarations, rejects duplicate feature, page, command, tool, provider, CLI,
+search-engine, and MCP ownership, then freezes one immutable `FeatureRegistry` from
+`FeatureRegistryPlugin::finish`. Only that plugin projects manifest metadata onto ECS entities for
+query-based consumers. Startup messages are not registration authority. Runtime page state and
+behavior still initialize through ECS schedules.
 
 Each feature keeps one `src/feature.ron`. `pages`, `tools`, application `commands`, and settings
 schema contributions are owned beside the feature that implements them; `cli` is the optional
 command tree. The settings feature aggregates those contributions into the `SettingsSchema`
 component on each settings page entity. String-keyed pseudo-sections are not namespaces. A
-crate declares one `FeatureManifestSource` marker. Feature entry paths install the generic
-`FeaturePlugin`, which parses the runtime sections once and registers one ECS entity containing their
-typed metadata. Repeated composition reuses that entity. Tool, command, CLI, and MCP catalog consumers
-read only the metadata they own from it. Page attributes read the same file at compile time. Feature
+crate declares one data-only `FeatureManifestSource` marker. Repeated registration of the same
+marker is idempotent. Tool, command, CLI, and MCP catalog consumers read only the metadata they own
+from the frozen registry projection. Page attributes read the same file at compile time. Feature
 plugins bind typed behavior without reparsing a named subsection or teaching an application crate
 which features exist. The first page is the feature's default page; only additional pages need a
 `name` for an explicit `page = "..."` selection.
+
+`vmux_ecs` owns stable generic ECS primitives, identity, revision, persistence mechanics, runtime
+tasks, and UI-state transport. `vmux_feature` owns only declaration parsing, static ownership
+validation, registry freeze, and projection. Provider-neutral external links and synchronization
+belong to `vmux_connector`; credentials and leases belong to `vmux_auth`; provider adapters remain
+in their provider feature crates. Layout, page, browser, and CEF state each have one owning plugin.
+Other features submit typed requests rather than mutating those internals.
+
+```text
+build  → register features + typed page behavior
+finish → freeze FeatureRegistry → browser embedded hosts → CEF config → CEF initialize
+```
+
+Browser host allowlists derive from the frozen declarations, including features installed after
+Browser. Asset hosts use an explicit override, then the manifest URL, then the route URL; a
+`file://` page with manifest URL `vmux://files/` serves `files/index.html`. CEF configuration is
+committed before framework initialization callbacks can read it.
 
 `vmux_app` exposes reusable feature-plugin composition without owning executable policy. Page
 manifests, hosted-page plugins, command-bar contributions, and typed MCP tools remain in their
@@ -444,6 +467,18 @@ derives and define the complete wire name, version, and allowed page hosts. `Boo
 therefore has the wire id `bookmark_menu_pin@1`, with its module-local `Events` family supplying
 the `layout` target. A namespace would duplicate the target and the type prefix. Both UI-to-host
 decoding and host-to-UI delivery reject a mismatched host before decoding the data.
+
+Dioxus sends the concrete UI event contract directly. Ordinary interaction uses `send`, which
+reports transport failures centrally; optimistic behavior that must roll back immediately uses
+`try_send`. Page components do not repeat transport error handling or wrap requests in a second
+UI action type.
+
+`#[vmux_page::page(states = [...])]` installs each typed state listener and Dioxus context once.
+Projection payloads use the `Ui*` prefix, such as `UiTheme` and `UiGit`. Feature roots compose
+`UiState<T>` into one reusable selector bundle where multiple descendants share derived state.
+Descendants read that context; props carry leaf display values and local callbacks, not the page
+store. Descendants never install a second listener: recovery captures one retained snapshot per
+type, and duplicate subscriptions must not replace that snapshot reader.
 
 `#[vmux_api::ui_state]` is the state-specific host-to-UI contract. It includes the contract,
 `HostEvent`, and `UiState` implementations, while `#[vmux_api::ui_state_patch]` supplies the
@@ -551,7 +586,8 @@ opaque committed surface. Commit waits for the platform to acknowledge the incom
 opacity, so no frame exposes the window background. Content pages use the same lifecycle with an
 immediate presentation step. Feature page-open handlers create or retarget the incoming surface;
 they never despawn the committed surface themselves. Only the page reducer retires it after
-presentation commits.
+presentation commits. Native modal bounds use the parent content view's logical coordinates in both
+directions; settlement reads the actual panel screen frame, not its child webview's local frame.
 
 Stack and Tab replacement uses one presentation transition. Selection changes immediately, while
 the projection keeps the outgoing branch visible until a ready presented surface exists under the
@@ -571,7 +607,7 @@ instead of feature-specific loading gates.
 
 Native interaction-state updates are repeatable: each update changes the IPC epoch and the
 document's inert state without adding persistent JavaScript bindings.
-Page-local navigation uses `PageLocationRequest` and `PageLocationUiState`, with the fragment
+Page-local navigation uses `PageLocationRequest` and `UiPageLocation`, with the fragment
 stored in `PageMetadata`. Fragment-only changes update the hosted URL and the committed Stack
 without rebuilding the document or changing its data-cache identity. Pages resolve that shared
 location to their own file or section and use the common scroll transport; Settings can consume
@@ -670,13 +706,38 @@ inside that Space. Cross-space leaks are impossible by construction — the lega
 tagged tabs with a detached id and computed selection globally, which let creating a space
 corrupt another's panes.
 
-State snapshots to `store.ron` via `moonshine-save`. A schema-version sidecar hard-resets
-on an incompatible version rather than loading a broken store.
+Workspace and bookmark snapshots serialize through `moonshine-save` into one versioned store
+document, then replace the destination through `AtomicFile`. Store name, schema, canonical
+revision, save time, and payload commit in the same file. Incompatible or malformed pre-stability
+stores hard-reset only that store; no sidecar or component migration path can disagree with it.
 
 World persistence uses named type-registry domains. A persisted component or resource registers
 once with its domain; that metadata produces the component and resource allowlists used by saves.
-The workspace domain also installs ordinary change tracking, while specialized domains such as
-bookmarks keep their own entity scope, dirty policy, path, migration, and seeding lifecycle.
+Each store has an entity-owned `PersistenceState` for restore phase, loaded, dirty and saving
+revisions, last success, and recovery failure. Saves serialize per store; mutations received while
+a revision is saving remain dirty and trigger the next save. Specialized domains keep their own
+entity scope, path, validation, seeding, and one writer while sharing the durability mechanics.
+Materialization runs through a tracked load event, so deserialize or scene failures update the same
+typed state, hard-reset only that store, and cannot leave restore silently pending.
+Restore advances `Materialize → Validate → Resolve → Ready`. Owner-registered validators reject
+duplicate stable IDs, partial canonical entities, missing owners, and ownership cycles before layout
+reconstruction. Resolve waits for the layout adapter to rebuild runtime views and acknowledge
+`LayoutRestoreCommitted` on a later frame; validation alone cannot mark the store ready. A failed
+restore despawns materialized entities, hard-resets only that store, and bootstraps fresh state.
+Saves remain blocked until Ready.
+
+Collaborative roots own persisted committed-operation, snapshot, tombstone, and replica-ack child
+entities. Replay orders operations by sequence and rejects duplicate identities, duplicate
+sequences, and non-monotonic revisions. Compaction removes only entries covered by a snapshot and
+every replica acknowledgement; tombstones additionally remain until their retention window ends.
+Provider synchronization stays outside this replication log.
+Session roots use that log for creation, metadata, workspace, agent selection, workflow, project,
+archive, and taxonomy mutations. Each accepted operation carries an operation ID, actor, target, captured revision,
+committed revision, sequence, timestamp, and typed payload. Duplicate operation IDs are idempotent;
+stale captured revisions and ambiguous Session identities are rejected before canonical state
+changes. A `Created` operation can
+materialize a missing Session root, so a snapshot plus later operations and a full operation replay
+share one mutation path.
 
 ---
 
@@ -1158,7 +1219,9 @@ crates/
 │   └── vmux_mobile
 ├── feature/                user-facing capability and page ownership
 │   ├── vmux_acp
+│   ├── vmux_auth          OAuth/OIDC connections and credential leases
 │   ├── vmux_command
+│   ├── vmux_connector     provider-neutral scopes, links, and sync policy
 │   ├── vmux_editor
 │   ├── vmux_extension
 │   ├── vmux_git
@@ -1181,7 +1244,8 @@ crates/
     ├── vmux_app            platform-neutral application plugin facade
     ├── vmux_browser        browser runtime and native-page renderer
     ├── vmux_clipboard
-    ├── vmux_ecs
+    ├── vmux_ecs            stable ECS primitives and persistence mechanics
+    ├── vmux_feature        static feature declarations and ownership registry
     ├── vmux_flex
     ├── vmux_macro
     ├── vmux_mcp
@@ -1205,17 +1269,55 @@ Only the application composition root knows which feature plugins are installed.
 And the `host` cfg alias is **not** the directory: `vmux_ui` holds host-gated code while
 staying flat.
 
-`vmux_session` owns the durable unit of work: one canonical Session entity with its stable ID,
-task metadata, working directory, data-driven stage, conversation-event children, optional agent
-identity, and the derived Session catalog. Session creation generates its ID inside the typed
-request and emits a typed creation event before navigation. Layout Stacks reference the Session
-entity and may close without deleting it. `vmux://sessions/` opens the manager;
+Vmux-owned stable identities use `vmux_api::Id<T>` directly; domain names do not introduce
+parallel aliases such as `SessionId`. The shared `Session` identity tag also serves as the ECS
+marker, while `vmux_session` registers its required durable composition and owns every mutation.
+Spaces and Panes likewise carry `Id<Space>` and `Id<Pane>` directly. Their canonical spawn bundles
+install identity before deferred commands can expose the entity. Tabs derive Space ownership from
+`ChildOf`; they do not copy a Space identity that could drift after rename or restore.
+Stored profiles use `Id<vmux_profile::Profile>`; layout focus uses `ActivePaneScope` because local
+and agent pane ownership is runtime routing state, not profile identity.
+Conversation members and events use `Id<Member>` and `Id<ConversationEvent>` across ECS and wire
+contracts. Client deduplication uses `Id<ClientOperation>`; correlation identity does not introduce
+a parallel string-ID type.
+Sessions reference agents through `AgentRef(Id<Agent>)`, and project contracts use `Id<Project>`;
+neither domain introduces a parallel `*Id` string wrapper.
+The Projects page reconciles repository discovery into profile-owned durable Project entities
+composed from `Project`, `Id<Project>`, `Name`, canonical `ProjectPath`, and `ProjectSource`.
+Branch data remains a rebuildable cache, archive state is the shared `ArchivedAt` component, and a
+duplicate-detecting `IdentityIndex<Project>` serves lookup. Session and Space roots persist
+`ProjectRef(Id<Project>)`; the project owner resolves local `ProjectTarget` relationships from
+canonical paths. UI catalog rows are projections of those entities, not a second archive store.
+Agent presentation profiles are owned entities composed from a `Profile` marker, Bevy `Name`,
+`Avatar`, and `Icon`. Sessions resolve that child through `Profiles`, so agent presentation never
+overloads the Session's canonical task name.
+Each Space likewise owns a separate persisted layout-profile entity composed from its `Profile`
+marker and `Name`; the Space's own `Name` remains the workspace label.
+Layout Tabs use a marker plus Bevy `Name` and a persisted `StartupDir(Option<PathBuf>)`; title and
+working directory change independently instead of replacing one aggregate component.
+
+`vmux_session` owns the durable unit of work: one canonical Session entity with `Id<Session>`, task
+metadata, working directory, workflow-state reference, conversation-event children, optional agent
+identity, and the derived Session catalog. Workflow states are durable entities composed from
+`WorkflowState`, `Id<WorkflowState>`, `Name`, `Order`, and optional terminal state. Sessions persist
+the stable reference and resolve a non-owning ECS relationship through a duplicate-detecting index;
+removing or replacing the target leaves the reference repairable. Session creation generates its ID
+inside the typed request and emits a typed creation event before navigation. Layout Stacks reference
+the Session entity and may close without deleting it. `vmux://sessions/` opens the manager;
 `vmux://sessions/{session_id}` opens a Session independently of its agent or provider conversation
 identity. Session IDs are encoded as one URL path segment.
+Labels and cycles are durable editable entities with `Id<Label>` and `Id<Cycle>`. Session task
+properties remain split into project, assignee, cycle, label-assignment, priority, estimate, and due
+date components. Stable references persist; duplicate-detecting shared identity indexes rebuild
+local assignee, cycle, label, workflow-state, and project relationships after restore. Conversation
+members are durable owned entities, while events keep `ActorRef(Id<Member>)` separate from the
+resolved local actor relationship.
 
-`vmux_acp` attaches transient runtime and ACP capability state to Session entities and owns the
-provider-owned `AcpSessionId`, its persistence, and the single runtime detach path used by cleanup
-and agent replacement. `vmux_session` renders the
+`vmux_acp` attaches transient runtime and ACP capability state to Session entities. Provider
+session identity lives on a persisted `ExternalLink` child as `ProviderKey`, `ExternalScopeRef`,
+`ResourceKind`, and `ExternalId`; canonical Sessions never carry provider IDs. The adapter owns the
+single runtime detach path used by cleanup and agent replacement, including removal of its link.
+`vmux_session` renders the
 Sessions page and Dioxus conversation UI. A dedicated manager-view marker is the authorization and
 publication boundary for Session catalog and mutation UI events; Session detail views receive only
 their bound Session state. The service carries serialized agent protocol messages and runs
@@ -1226,12 +1328,25 @@ ACP `session/list` is the primary provider catalog. The Sessions page starts eac
 long enough to enumerate its paginated catalog, then stops it; transport failure does not switch data
 sources. A bounded provider-store adapter is used only when no installed ACP owns that agent family
 or the ACP explicitly omits `session/list`. Browsing an external entry does not copy it into durable
-Vmux state. Resuming it creates the canonical Session entity, records its `AcpSessionId`, and lets
-the provider replay the conversation through `session/load`. Compatibility watches exist only while
+Vmux state. Resuming it creates the canonical Session entity, attaches the provider-neutral link,
+and lets the provider replay the conversation through `session/load`. Compatibility watches exist only while
 the Sessions page or one of their imported Sessions is present, debounce into one wake, rescan only
 the changed provider, and bound untrusted history traversal.
-The Session manager publishes only to its active page and leases Git metadata for every displayed
-repository while that page remains active.
+The Session manager publishes the global catalog only to its active manager page; converting it to
+a detail page removes the global projection. Detail and embedded scope pages receive only their
+bound Session or workspace projection. Active pages lease Git metadata for their displayed
+repositories.
+
+```text
+project selection → Operation + Id<Operation> + OperationTarget(Tab) + captured revision
+                  → Running ↔ cleanup wait / retry
+                  → Succeeded | Failed + OperationError | Canceled
+```
+
+Accepted project activation lives on the operation entity, not a Tab-keyed pending map. A newer
+selection cancels the older task; only the matching Tab selection revision may apply its result.
+Discarded checkouts retain their cleanup guard, and terminal operation state remains inspectable
+until the common retention cleanup.
 Composer workspace context resolves the Session named by the page URL even before runtime attachment
 has bound the Stack. Unpublished context is retried after the first ready frame, so a late binding
 cannot leave project and branch controls as placeholders. Branch menus enqueue their checkout reads

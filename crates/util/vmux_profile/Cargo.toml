@@ -12,6 +12,7 @@ ring = "0.17"
 serde = { workspace = true }
 serde_json = { workspace = true }
 url = { workspace = true }
+vmux_path = { path = "../vmux_path" }
 zeroize = "1"
 
 [target.'cfg(target_os = "macos")'.dependencies]

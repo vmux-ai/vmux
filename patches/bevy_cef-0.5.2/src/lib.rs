@@ -99,11 +99,11 @@ impl Default for CefPlugin {
 
 impl Plugin for CefPlugin {
     fn build(&self, app: &mut App) {
-        try_set_cef_embedded_page_config(CefEmbeddedPageConfig::new(
+        app.insert_resource(CefEmbeddedPageConfig::new(
             self.embedded_scheme.clone(),
             self.embedded_hosts.clone(),
-        ));
-        app.insert_resource(bevy_cef_core::prelude::CefDiskProfileRoot(
+        ))
+        .insert_resource(bevy_cef_core::prelude::CefDiskProfileRoot(
             self.root_cache_path.clone(),
         ))
         .insert_resource(CefAcceptLanguageList(self.accept_language_list.clone()))
@@ -137,6 +137,11 @@ impl Plugin for CefPlugin {
                     .before(CefSystems::CreateAndResize)
                     .run_if(resource_changed::<bevy_cef_core::prelude::CefColorScheme>),
             );
+    }
+
+    fn finish(&self, app: &mut App) {
+        let config = app.world().resource::<CefEmbeddedPageConfig>().clone();
+        try_set_cef_embedded_page_config(config);
     }
 }
 

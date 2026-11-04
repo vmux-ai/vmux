@@ -1,5 +1,5 @@
 #[vmux_api::ui_state(Default)]
-pub struct SimulatorUiState {
+pub struct UiSimulator {
     pub port: u16,
     pub status: String,
     pub error: String,

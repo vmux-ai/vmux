@@ -5,8 +5,8 @@ use serde::Serialize;
 use serde_json::Value;
 use std::marker::PhantomData;
 use vmux_api::protocol::{AgentCommandTool, AgentRequest};
-use vmux_ecs::manifest::{FeatureManifest, Tool as ToolEntry, ToolAvailability};
 use vmux_ecs::{HostShell, JsonArguments, RegistrationOrder};
+use vmux_feature::{FeatureManifest, Tool as ToolEntry, ToolAvailability};
 
 use vmux_api::JsonSchema;
 

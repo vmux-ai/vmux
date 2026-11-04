@@ -145,7 +145,7 @@ pub struct TermTitleEvent {
 }
 
 #[vmux_api::ui_state_patch(Default)]
-pub struct TerminalUiStatePatch {
+pub struct UiTerminalPatch {
     pub service_unavailable: Option<ServiceUnavailableEvent>,
     pub viewport: Option<TermViewportPatch>,
     pub theme: Option<TermThemeEvent>,
@@ -167,8 +167,8 @@ pub struct TerminalViewportState {
     pub mouse: bool,
 }
 
-#[vmux_api::ui_state(Default, patch = TerminalUiStatePatch)]
-pub struct TerminalUiState {
+#[vmux_api::ui_state(Default, patch = UiTerminalPatch)]
+pub struct UiTerminal {
     pub service_error: String,
     pub viewport: TerminalViewportState,
     pub theme: Option<TermThemeEvent>,
@@ -177,8 +177,8 @@ pub struct TerminalUiState {
     pub prompt_draft: AgentPromptDraftEvent,
 }
 
-impl vmux_api::UiStateProjection<TerminalUiStatePatch> for TerminalUiState {
-    fn apply(&mut self, patch: TerminalUiStatePatch) {
+impl vmux_api::UiStateProjection<UiTerminalPatch> for UiTerminal {
+    fn apply(&mut self, patch: UiTerminalPatch) {
         if let Some(error) = patch.service_unavailable {
             self.service_error = error.message;
         }
@@ -252,7 +252,7 @@ mod tests {
 
     #[test]
     fn terminal_ui_state_builds_a_retained_tree() {
-        let event = <TerminalUiState as vmux_api::UiState>::from_updates(
+        let event = <UiTerminal as vmux_api::UiState>::from_updates(
             None,
             vec![
                 TermTitleEvent {
@@ -268,7 +268,7 @@ mod tests {
             ],
         );
         let bytes = rkyv::to_bytes::<rkyv::rancor::Error>(&event).unwrap();
-        let decoded = rkyv::from_bytes::<TerminalUiState, rkyv::rancor::Error>(&bytes).unwrap();
+        let decoded = rkyv::from_bytes::<UiTerminal, rkyv::rancor::Error>(&bytes).unwrap();
         assert_eq!(decoded.title, "Terminal");
         assert_eq!(decoded.loading.unwrap().label, "Agent");
     }

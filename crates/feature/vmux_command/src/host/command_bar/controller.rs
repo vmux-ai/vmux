@@ -629,9 +629,11 @@ fn open(
     payload.caret_at_end =
         super::driver::PaletteQuery::new(&payload.url).opens_at_end(payload.picker.as_ref());
     payload.picks = picks;
-    commands.trigger(vmux_ecs::UiStateWrite::<
-        vmux_api::command_bar::CommandBarUiState,
-    >::from_event(layout_e, &payload));
+    commands.trigger(
+        vmux_ecs::UiStateWrite::<vmux_api::command_bar::UiCommandBar>::from_event(
+            layout_e, &payload,
+        ),
+    );
 }
 
 #[derive(EntityEvent)]
@@ -641,11 +643,12 @@ struct CommandBarPanelClose {
 }
 
 fn close_panel(trigger: On<CommandBarPanelClose>, mut commands: Commands) {
-    commands.trigger(vmux_ecs::UiStateWrite::<
-        vmux_api::command_bar::CommandBarUiState,
-    >::from_event(
-        trigger.event().layout, &CommandBarOpenEvent::default()
-    ));
+    commands.trigger(
+        vmux_ecs::UiStateWrite::<vmux_api::command_bar::UiCommandBar>::from_event(
+            trigger.event().layout,
+            &CommandBarOpenEvent::default(),
+        ),
+    );
 }
 
 fn dismiss(
@@ -766,9 +769,11 @@ fn retry(
         {
             continue;
         }
-        commands.trigger(vmux_ecs::UiStateWrite::<
-            vmux_api::command_bar::CommandBarUiState,
-        >::from_event(entity, payload));
+        commands.trigger(
+            vmux_ecs::UiStateWrite::<vmux_api::command_bar::UiCommandBar>::from_event(
+                entity, payload,
+            ),
+        );
         pending.started_at.get_or_insert(now);
         pending.last_retry = Some(now);
     }
@@ -781,7 +786,7 @@ mod tests {
     use crate::{CommandPlugin, ReadCommandRequests};
     use bevy::ecs::schedule::{NodeId, Schedules, SystemSet};
     use bevy::ecs::system::RunSystemOnce;
-    use vmux_api::command_bar::{CommandBarOpenEvent, CommandBarUiState, CommandBarUiStatePatch};
+    use vmux_api::command_bar::{CommandBarOpenEvent, UiCommandBar, UiCommandBarPatch};
     use vmux_api::open_target::OpenTarget;
     use vmux_ecs::UiStateWrite;
     use vmux_ecs::launcher::HostsLauncher;
@@ -1215,10 +1220,10 @@ mod tests {
     }
 
     #[derive(Resource, Default)]
-    struct EmittedToPage(Vec<(Entity, CommandBarUiStatePatch)>);
+    struct EmittedToPage(Vec<(Entity, UiCommandBarPatch)>);
 
     fn capture_page_emit(
-        trigger: On<UiStateWrite<CommandBarUiState>>,
+        trigger: On<UiStateWrite<UiCommandBar>>,
         mut emitted: ResMut<EmittedToPage>,
     ) {
         emitted

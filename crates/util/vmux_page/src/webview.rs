@@ -4,7 +4,7 @@ use crate::webview::report::PageMessage;
 use crate::webview::route::PageRoutes;
 use crate::webview::shim::Shim;
 pub use embed::{AssetReply, Assets, Embedding, LifecycleSink, LifecycleUpdate, Outbox, Wake};
-use std::cell::Cell;
+use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 use tracing::error;
 
@@ -62,6 +62,8 @@ pub struct WebView {
     interactive_sync_pending: Rc<Cell<bool>>,
     interactive_sync_attempted: Rc<Cell<bool>>,
     waker: Rc<dyn Wake>,
+    #[cfg(target_os = "macos")]
+    modal: RefCell<Option<macos::ModalHost>>,
 }
 
 impl WebView {
@@ -153,6 +155,8 @@ impl WebView {
             interactive_sync_pending,
             interactive_sync_attempted,
             waker,
+            #[cfg(target_os = "macos")]
+            modal: RefCell::new(None),
         };
         #[cfg(target_os = "macos")]
         surface.anchor_native_frame();
@@ -186,6 +190,11 @@ impl WebView {
     }
 
     pub fn set_bounds(&self, bounds: wry::Rect) {
+        #[cfg(target_os = "macos")]
+        if let Some(modal) = self.modal.borrow().as_ref() {
+            modal.set_bounds(&self.webview, bounds);
+            return;
+        }
         if let Err(error) = self.webview.set_bounds(bounds) {
             error!("vmux_page: set_bounds failed: {error}");
         }
@@ -194,6 +203,9 @@ impl WebView {
     pub fn bounds(&self) -> Option<wry::Rect> {
         #[cfg(target_os = "macos")]
         {
+            if let Some(modal) = self.modal.borrow().as_ref() {
+                return modal.bounds();
+            }
             self.platform_bounds()
         }
         #[cfg(not(target_os = "macos"))]
@@ -209,6 +221,10 @@ impl WebView {
     }
 
     pub fn set_visible(&self, visible: bool) {
+        #[cfg(target_os = "macos")]
+        if let Some(modal) = self.modal.borrow().as_ref() {
+            modal.set_visible(visible);
+        }
         if let Err(error) = self.webview.set_visible(visible) {
             error!("vmux_page: set_visible failed: {error}");
         }

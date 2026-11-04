@@ -3,7 +3,24 @@ use bevy_reflect::{Reflect, std_traits::ReflectDefault};
 use moonshine_save::prelude::*;
 use std::path::PathBuf;
 
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(
+    Clone,
+    Copy,
+    Debug,
+    Default,
+    PartialEq,
+    Eq,
+    PartialOrd,
+    Ord,
+    Hash,
+    Reflect,
+    serde::Deserialize,
+    serde::Serialize,
+    rkyv::Archive,
+    rkyv::Deserialize,
+    rkyv::Serialize,
+)]
+#[type_path = "vmux_ecs"]
 pub struct UnixMillis(pub i64);
 
 impl UnixMillis {
@@ -14,6 +31,127 @@ impl UnixMillis {
                 .unwrap_or_default()
                 .as_millis() as i64,
         )
+    }
+}
+
+#[derive(
+    Component,
+    Clone,
+    Copy,
+    Debug,
+    PartialEq,
+    Eq,
+    PartialOrd,
+    Ord,
+    Hash,
+    Reflect,
+    serde::Deserialize,
+    serde::Serialize,
+)]
+#[component(immutable)]
+#[reflect(Component)]
+#[type_path = "vmux_ecs"]
+pub struct UpdatedAt(pub UnixMillis);
+
+impl UpdatedAt {
+    pub fn now() -> Self {
+        Self(UnixMillis::now())
+    }
+}
+
+#[derive(
+    Component,
+    Clone,
+    Copy,
+    Debug,
+    PartialEq,
+    Eq,
+    PartialOrd,
+    Ord,
+    Hash,
+    Reflect,
+    serde::Deserialize,
+    serde::Serialize,
+)]
+#[component(immutable)]
+#[reflect(Component)]
+#[type_path = "vmux_ecs"]
+pub struct DeletedAt(pub UnixMillis);
+
+#[derive(
+    Component,
+    Clone,
+    Copy,
+    Debug,
+    PartialEq,
+    Eq,
+    PartialOrd,
+    Ord,
+    Hash,
+    Reflect,
+    serde::Deserialize,
+    serde::Serialize,
+)]
+#[component(immutable)]
+#[reflect(Component)]
+#[type_path = "vmux_ecs"]
+pub struct RemoteUpdatedAt(pub UnixMillis);
+
+#[derive(
+    Component,
+    Clone,
+    Copy,
+    Debug,
+    PartialEq,
+    Eq,
+    PartialOrd,
+    Ord,
+    Hash,
+    Reflect,
+    serde::Deserialize,
+    serde::Serialize,
+)]
+#[component(immutable)]
+#[reflect(Component)]
+#[type_path = "vmux_ecs"]
+pub struct LastSyncedAt(pub UnixMillis);
+
+#[derive(
+    Component,
+    Clone,
+    Copy,
+    Debug,
+    Reflect,
+    serde::Deserialize,
+    serde::Serialize,
+    rkyv::Archive,
+    rkyv::Deserialize,
+    rkyv::Serialize,
+    PartialEq,
+    Eq,
+    PartialOrd,
+    Ord,
+    Hash,
+)]
+#[component(immutable)]
+#[reflect(Component)]
+#[type_path = "vmux_ecs"]
+pub struct Revision(u64);
+
+impl Revision {
+    pub const fn new(value: u64) -> Self {
+        Self(value)
+    }
+
+    pub const fn get(self) -> u64 {
+        self.0
+    }
+
+    pub const fn next(self) -> Option<Self> {
+        match self.0.checked_add(1) {
+            Some(value) => Some(Self(value)),
+            None => None,
+        }
     }
 }
 
@@ -51,11 +189,6 @@ pub struct Cwd(pub PathBuf);
 #[require(Save)]
 #[type_path = "vmux_ecs"]
 pub struct Description(pub String);
-
-#[derive(Component, Clone, Copy, Debug, Reflect, Default, PartialEq, Eq)]
-#[reflect(Component, Default)]
-#[type_path = "vmux_ecs"]
-pub struct Terminal;
 
 #[derive(Component, Clone, Debug, Default, PartialEq)]
 pub struct JsonArguments(pub serde_json::Value);
@@ -124,27 +257,43 @@ pub struct HostShell(pub String);
 #[derive(Component, Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct RegistrationOrder(pub u32);
 
-#[derive(Component, Clone, Copy, Debug, Reflect, Default)]
+#[derive(Component, Clone, Copy, Debug, Reflect)]
 #[reflect(Component)]
 #[require(Save)]
 #[type_path = "vmux_history"]
-pub struct CreatedAt(pub i64);
+pub struct CreatedAt(UnixMillis);
 
 impl CreatedAt {
+    pub const fn new(milliseconds: i64) -> Self {
+        Self(UnixMillis(milliseconds))
+    }
+
     pub fn now() -> Self {
-        Self(UnixMillis::now().0)
+        Self(UnixMillis::now())
+    }
+
+    pub const fn milliseconds(self) -> i64 {
+        self.0.0
     }
 }
 
-#[derive(Component, Clone, Copy, Debug, Reflect, Default)]
+#[derive(Component, Clone, Copy, Debug, Reflect)]
 #[reflect(Component)]
 #[require(Save)]
 #[type_path = "vmux_history"]
-pub struct LastActivatedAt(pub i64);
+pub struct LastActivatedAt(UnixMillis);
 
 impl LastActivatedAt {
+    pub const fn new(milliseconds: i64) -> Self {
+        Self(UnixMillis(milliseconds))
+    }
+
     pub fn now() -> Self {
-        Self(UnixMillis::now().0)
+        Self(UnixMillis::now())
+    }
+
+    pub const fn milliseconds(self) -> i64 {
+        self.0.0
     }
 
     pub fn latest(entities: impl Iterator<Item = (Entity, Self)>) -> Option<Entity> {
@@ -154,11 +303,25 @@ impl LastActivatedAt {
     }
 }
 
-#[derive(Component, Clone, Copy, Debug, Reflect, Default, PartialEq, Eq)]
+#[derive(Component, Clone, Copy, Debug, Reflect, PartialEq, Eq)]
 #[reflect(Component)]
 #[require(Save)]
 #[type_path = "vmux_ecs"]
-pub struct ArchivedAt(pub i64);
+pub struct ArchivedAt(UnixMillis);
+
+impl ArchivedAt {
+    pub const fn new(milliseconds: i64) -> Self {
+        Self(UnixMillis(milliseconds))
+    }
+
+    pub fn now() -> Self {
+        Self(UnixMillis::now())
+    }
+
+    pub const fn milliseconds(self) -> i64 {
+        self.0.0
+    }
+}
 
 #[derive(EntityEvent, Clone, Copy, Debug)]
 pub struct ActivateRequest {
@@ -187,11 +350,21 @@ pub struct Url;
 #[type_path = "vmux_history"]
 pub struct VisitCount(pub u32);
 
-#[derive(Component, Clone, Copy, Debug, Reflect, Default)]
-#[reflect(Component, Default)]
+#[derive(Component, Clone, Copy, Debug, Reflect)]
+#[reflect(Component)]
 #[require(Save)]
 #[type_path = "vmux_history"]
-pub struct LastVisitedAt(pub i64);
+pub struct LastVisitedAt(UnixMillis);
+
+impl LastVisitedAt {
+    pub const fn new(milliseconds: i64) -> Self {
+        Self(UnixMillis(milliseconds))
+    }
+
+    pub const fn milliseconds(self) -> i64 {
+        self.0.0
+    }
+}
 
 #[derive(Component, Clone, Copy, Debug, Reflect, Default, PartialEq, Eq)]
 #[reflect(Component, Default)]
@@ -228,11 +401,6 @@ pub struct Folder;
 #[reflect(Component, Default)]
 #[type_path = "vmux_ecs"]
 pub struct Collapsed;
-
-#[derive(Component, Clone, Debug, Reflect, Default, PartialEq, Eq)]
-#[reflect(Component, Default)]
-#[type_path = "vmux_ecs"]
-pub struct Uuid(pub String);
 
 #[derive(Component, Clone, Copy, Debug, Reflect)]
 #[reflect(Component)]

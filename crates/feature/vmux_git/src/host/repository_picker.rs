@@ -6,7 +6,7 @@ use bevy::winit::{EventLoopProxyWrapper, WinitUserEvent};
 use bevy_cef::prelude::{UiEventPlugin, UiInput};
 
 use crate::event::GitRepositoryPickerRequest;
-use crate::state::{GitRepositoryPicked, GitUiState};
+use crate::state::{GitRepositoryPicked, UiGit};
 
 pub(super) struct RepositoryPickerPlugin;
 
@@ -77,7 +77,7 @@ fn poll_repository_pickers(
             continue;
         };
         if let Some(path) = selected {
-            commands.trigger(vmux_ecs::UiStateWrite::<GitUiState>::from_event(
+            commands.trigger(vmux_ecs::UiStateWrite::<UiGit>::from_event(
                 picker.webview,
                 &GitRepositoryPicked {
                     path: path.to_string_lossy().into_owned(),

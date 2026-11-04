@@ -1,5 +1,6 @@
 use bevy::prelude::*;
 use moonshine_save::prelude::*;
+use vmux_api::Id;
 use vmux_ecs::persistence::PersistenceAppExt;
 use vmux_ecs::{Active, EffectiveStartupUrl};
 use vmux_flex::prelude::*;
@@ -8,7 +9,7 @@ impl Plugin for SpaceLayoutPlugin {
     fn build(&self, app: &mut App) {
         app.add_plugins(crate::active::ActivePlugin)
             .register_persisted::<Space>()
-            .register_persisted::<SpaceId>()
+            .register_persisted::<Id<Space>>()
             .add_systems(
                 Update,
                 sync_current
@@ -32,16 +33,22 @@ pub struct CurrentSpaceSet;
 #[type_path = "vmux_desktop::space"]
 #[require(
     Save,
-    SpaceId,
     vmux_ecs::CollectionView,
     EffectiveStartupDir,
-    EffectiveStartupUrl,
-    crate::profile::Profile
+    EffectiveStartupUrl
 )]
 pub struct Space;
 
 impl Space {
-    pub fn bundle() -> impl Bundle {
+    pub fn bundle(id: Id<Self>) -> impl Bundle {
+        (Self::view_bundle(), id)
+    }
+
+    pub(crate) fn restore_bundle() -> impl Bundle {
+        Self::view_bundle()
+    }
+
+    fn view_bundle() -> impl Bundle {
         (
             Self,
             Self::container_node(),
@@ -64,12 +71,6 @@ impl Space {
     }
 }
 
-#[derive(Component, Reflect, Default, Clone, Debug, PartialEq, Eq)]
-#[reflect(Component)]
-#[type_path = "vmux_desktop::space"]
-#[require(Save)]
-pub struct SpaceId(pub String);
-
 #[derive(Component, Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct CurrentSpace;
 
@@ -88,15 +89,15 @@ pub struct FocusedSpace<'w, 's> {
         's,
         (
             Entity,
-            &'static SpaceId,
+            &'static Id<Space>,
             &'static EffectiveStartupDir,
             &'static EffectiveStartupUrl,
-            &'static crate::profile::Profile,
             Has<CurrentSpace>,
             Has<Active>,
         ),
         With<Space>,
     >,
+    profiles: crate::profile::Profiles<'w, 's>,
 }
 
 impl FocusedSpace<'_, '_> {
@@ -104,25 +105,24 @@ impl FocusedSpace<'_, '_> {
         &self,
     ) -> Option<(
         Entity,
-        &SpaceId,
+        &Id<Space>,
         &EffectiveStartupDir,
         &EffectiveStartupUrl,
-        &crate::profile::Profile,
     )> {
         let focused = self.focused_window.entity().and_then(|focused_window| {
             self.spaces
                 .iter()
-                .filter(|(entity, _, _, _, _, _, _)| {
+                .filter(|(entity, _, _, _, _, _)| {
                     self.hierarchy.get(*entity) == Some(focused_window)
                 })
-                .find(|(_, _, _, _, _, current, _)| *current)
+                .find(|(_, _, _, _, current, _)| *current)
                 .or_else(|| {
                     self.spaces
                         .iter()
-                        .filter(|(entity, _, _, _, _, _, _)| {
+                        .filter(|(entity, _, _, _, _, _)| {
                             self.hierarchy.get(*entity) == Some(focused_window)
                         })
-                        .find(|(_, _, _, _, _, _, active)| *active)
+                        .find(|(_, _, _, _, _, active)| *active)
                 })
         });
         focused
@@ -130,51 +130,46 @@ impl FocusedSpace<'_, '_> {
                 if self
                     .spaces
                     .iter()
-                    .any(|(space, _, _, _, _, _, _)| self.hierarchy.get(space).is_some())
+                    .any(|(space, _, _, _, _, _)| self.hierarchy.get(space).is_some())
                 {
                     return None;
                 }
                 self.spaces
                     .iter()
-                    .find(|(_, _, _, _, _, current, _)| *current)
-                    .or_else(|| {
-                        self.spaces
-                            .iter()
-                            .find(|(_, _, _, _, _, _, active)| *active)
-                    })
+                    .find(|(_, _, _, _, current, _)| *current)
+                    .or_else(|| self.spaces.iter().find(|(_, _, _, _, _, active)| *active))
                     .or_else(|| self.spaces.iter().next())
             })
-            .map(|(entity, id, startup_dir, startup_url, profile, _, _)| {
-                (entity, id, startup_dir, startup_url, profile)
+            .map(|(entity, id, startup_dir, startup_url, _, _)| {
+                (entity, id, startup_dir, startup_url)
             })
     }
 
     pub fn get(&self) -> Option<(Entity, Option<std::path::PathBuf>)> {
         self.selected()
-            .map(|(entity, _, startup_dir, _, _)| (entity, startup_dir.0.clone()))
+            .map(|(entity, _, startup_dir, _)| (entity, startup_dir.0.clone()))
     }
 
     pub fn entity(&self) -> Option<Entity> {
-        self.selected().map(|(entity, _, _, _, _)| entity)
+        self.selected().map(|(entity, _, _, _)| entity)
     }
 
     pub fn id(&self) -> Option<&str> {
-        self.selected().map(|(_, id, _, _, _)| id.0.as_str())
+        self.selected().map(|(_, id, _, _)| id.as_str())
     }
 
     pub fn profile(&self) -> Option<&str> {
-        self.selected()
-            .map(|(_, _, _, _, profile)| profile.name.as_str())
+        self.entity().and_then(|space| self.profiles.name(space))
     }
 
     pub fn startup_dir(&self) -> Option<&std::path::Path> {
         self.selected()
-            .and_then(|(_, _, startup_dir, _, _)| startup_dir.0.as_deref())
+            .and_then(|(_, _, startup_dir, _)| startup_dir.0.as_deref())
     }
 
     pub fn startup_url(&self) -> Option<&str> {
         self.selected()
-            .map(|(_, _, _, startup_url, _)| startup_url.0.as_str())
+            .map(|(_, _, _, startup_url)| startup_url.0.as_str())
             .filter(|url| !url.is_empty())
     }
 
@@ -227,7 +222,7 @@ pub struct SpaceOfPane<'w, 's> {
 pub struct SpaceHierarchy<'w, 's> {
     child_of: Query<'w, 's, &'static ChildOf>,
     spaces: Query<'w, 's, (), With<Space>>,
-    ids: Query<'w, 's, &'static SpaceId>,
+    ids: Query<'w, 's, &'static Id<Space>>,
 }
 
 impl SpaceOfPane<'_, '_> {
@@ -254,7 +249,7 @@ impl SpaceHierarchy<'_, '_> {
 
     pub fn id(&self, entity: Entity) -> Option<String> {
         let space = self.get(entity)?;
-        self.ids.get(space).ok().map(|id| id.0.clone())
+        self.ids.get(space).ok().map(|id| id.as_str().to_string())
     }
 }
 
@@ -297,12 +292,7 @@ mod tests {
             .spawn((crate::window::Main, ChildOf(root)))
             .id();
         app.world_mut()
-            .spawn((
-                Space,
-                SpaceId(id.to_string()),
-                vmux_ecs::Active,
-                ChildOf(main),
-            ))
+            .spawn((Space, Id::<Space>::new(id), vmux_ecs::Active, ChildOf(main)))
             .id()
     }
 
@@ -319,7 +309,10 @@ mod tests {
     fn current_space_clears_when_no_space_is_active() {
         let mut app = App::new();
         app.add_systems(Update, sync_current);
-        let space = app.world_mut().spawn((Space, CurrentSpace)).id();
+        let space = app
+            .world_mut()
+            .spawn((Space::bundle(Id::<Space>::new("default")), CurrentSpace))
+            .id();
         app.update();
         assert!(app.world().get::<CurrentSpace>(space).is_none());
     }
@@ -332,9 +325,9 @@ mod tests {
         app.update();
         assert_eq!(
             app.world()
-                .get::<SpaceId>(space)
+                .get::<Id<Space>>(space)
                 .filter(|_| app.world().get::<CurrentSpace>(space).is_some())
-                .map(|id| id.0.as_str()),
+                .map(Id::as_str),
             Some("work")
         );
     }
@@ -344,11 +337,11 @@ mod tests {
         let mut app = App::new();
         let space = app
             .world_mut()
-            .spawn((Space, SpaceId("s".to_string())))
+            .spawn(Space::bundle(Id::<Space>::new("s")))
             .id();
         let tab = app
             .world_mut()
-            .spawn((crate::tab::Tab::default(), ChildOf(space)))
+            .spawn((crate::tab::Tab, ChildOf(space)))
             .id();
         let stack = app.world_mut().spawn(ChildOf(tab)).id();
         let found = app
@@ -369,7 +362,10 @@ mod tests {
     #[test]
     fn space_owns_the_persisted_collection_view() {
         let mut app = App::new();
-        let space = app.world_mut().spawn(Space).id();
+        let space = app
+            .world_mut()
+            .spawn(Space::bundle(Id::<Space>::new("default")))
+            .id();
 
         assert_eq!(
             app.world().get::<vmux_ecs::CollectionView>(space),
@@ -384,14 +380,12 @@ mod tests {
             .add_systems(Update, sync_container_visibility);
         let active = app
             .world_mut()
-            .spawn((
-                Space,
-                vmux_ecs::Active,
-                Space::container_node(),
-                Visibility::default(),
-            ))
+            .spawn((Space::bundle(Id::<Space>::new("active")), vmux_ecs::Active))
             .id();
-        let bg = app.world_mut().spawn(Space::bundle()).id();
+        let bg = app
+            .world_mut()
+            .spawn(Space::bundle(Id::<Space>::new("background")))
+            .id();
         app.update();
         assert_eq!(
             app.world().get::<Node>(active).unwrap().display,

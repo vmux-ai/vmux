@@ -13,7 +13,7 @@ pub struct CommandBarFocusEffect {
 }
 
 #[vmux_api::ui_state_patch(Default)]
-pub struct CommandBarUiStatePatch {
+pub struct UiCommandBarPatch {
     pub snapshot: Option<Box<CommandBarOpenEvent>>,
     pub path_completion: Option<PathCompleteResponse>,
     pub history_suggestions: Option<HistorySuggestionsResponse>,
@@ -23,11 +23,11 @@ pub struct CommandBarUiStatePatch {
     pub attachments: Option<Box<ChatAttachments>>,
     pub media_entries: Option<Box<ChatMediaEntries>>,
     pub focus: Option<CommandBarFocusEffect>,
-    pub palette: Option<Box<CommandPaletteUiState>>,
+    pub palette: Option<Box<UiCommandPalette>>,
 }
 
-#[vmux_api::ui_state(Default, patch = CommandBarUiStatePatch)]
-pub struct CommandBarUiState {
+#[vmux_api::ui_state(Default, patch = UiCommandBarPatch)]
+pub struct UiCommandBar {
     pub snapshot: CommandBarOpenEvent,
     pub path_completion: Option<PathCompleteResponse>,
     pub history_suggestions: Option<HistorySuggestionsResponse>,
@@ -37,11 +37,11 @@ pub struct CommandBarUiState {
     pub attachments: ChatAttachments,
     pub media_entries: ChatMediaEntries,
     pub focus: CommandBarFocusEffect,
-    pub palette: CommandPaletteUiState,
+    pub palette: UiCommandPalette,
 }
 
 #[vmux_api::ui_state(Default)]
-pub struct CommandPaletteUiState {
+pub struct UiCommandPalette {
     pub open_id: super::OpenId,
     pub projection: super::CommandPaletteProjection,
     pub completions: Vec<super::PathEntry>,
@@ -61,8 +61,8 @@ pub struct CommandPaletteUiState {
     pub attachment_sequence: u64,
 }
 
-impl crate::UiStateProjection<CommandBarUiStatePatch> for CommandBarUiState {
-    fn apply(&mut self, patch: CommandBarUiStatePatch) {
+impl crate::UiStateProjection<UiCommandBarPatch> for UiCommandBar {
+    fn apply(&mut self, patch: UiCommandBarPatch) {
         if let Some(snapshot) = patch.snapshot {
             self.snapshot = *snapshot;
         }
@@ -103,7 +103,7 @@ mod tests {
 
     #[test]
     fn patches_build_a_retained_tree() {
-        let state = <CommandBarUiState as crate::UiState>::from_updates(
+        let state = <UiCommandBar as crate::UiState>::from_updates(
             None,
             vec![
                 CommandBarOpenEvent::default().into(),
@@ -111,14 +111,14 @@ mod tests {
             ],
         );
         let bytes = rkyv::to_bytes::<rkyv::rancor::Error>(&state).unwrap();
-        let decoded = rkyv::from_bytes::<CommandBarUiState, rkyv::rancor::Error>(&bytes).unwrap();
+        let decoded = rkyv::from_bytes::<UiCommandBar, rkyv::rancor::Error>(&bytes).unwrap();
 
         assert!(decoded.path_completion.is_some());
     }
 
     #[test]
     fn palette_projection_round_trips() {
-        let state = CommandPaletteUiState {
+        let state = UiCommandPalette {
             open_id: OpenId(8),
             projection: CommandPaletteProjection {
                 rows: vec![CommandBarResultItem {
@@ -134,8 +134,7 @@ mod tests {
             ..Default::default()
         };
         let bytes = rkyv::to_bytes::<rkyv::rancor::Error>(&state).unwrap();
-        let decoded =
-            rkyv::from_bytes::<CommandPaletteUiState, rkyv::rancor::Error>(&bytes).unwrap();
+        let decoded = rkyv::from_bytes::<UiCommandPalette, rkyv::rancor::Error>(&bytes).unwrap();
 
         assert_eq!(decoded.open_id, OpenId(8));
         assert_eq!(decoded.projection.mode, PaletteMode::Url);

@@ -34,7 +34,9 @@ impl CefShutdownState {
 }
 
 impl Plugin for MessageLoopPlugin {
-    fn build(&self, app: &mut App) {
+    fn build(&self, _app: &mut App) {}
+
+    fn finish(&self, app: &mut App) {
         #[cfg(not(target_os = "macos"))]
         let render_process_binary = render_process_path();
 

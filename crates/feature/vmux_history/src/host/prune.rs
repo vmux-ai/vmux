@@ -25,14 +25,14 @@ fn prune(
 
     let mut pruned_visits = Vec::<Entity>::new();
     for (e, created, _) in visits.iter() {
-        if created.0 < cutoff {
+        if created.milliseconds() < cutoff {
             commands.entity(e).despawn();
             pruned_visits.push(e);
         }
     }
 
     for (url_e, last) in urls.iter() {
-        if last.0 < cutoff {
+        if last.milliseconds() < cutoff {
             let has_remaining = visits
                 .iter()
                 .any(|(ve, _, visited)| visited.0 == url_e && !pruned_visits.contains(&ve));
@@ -69,12 +69,12 @@ mod tests {
                     ..default()
                 },
                 VisitCount(1),
-                LastVisitedAt(old),
-                CreatedAt(old),
+                LastVisitedAt::new(old),
+                CreatedAt::new(old),
             ))
             .id();
         a.world_mut()
-            .spawn((Visit, CreatedAt(old), VisitedUrl(url_e)));
+            .spawn((Visit, CreatedAt::new(old), VisitedUrl(url_e)));
         a.update();
         assert_eq!(a.world_mut().query::<&Url>().iter(a.world()).count(), 0);
         assert_eq!(a.world_mut().query::<&Visit>().iter(a.world()).count(), 0);
@@ -93,12 +93,12 @@ mod tests {
                     ..default()
                 },
                 VisitCount(1),
-                LastVisitedAt(now),
-                CreatedAt(now),
+                LastVisitedAt::new(now),
+                CreatedAt::new(now),
             ))
             .id();
         a.world_mut()
-            .spawn((Visit, CreatedAt(now), VisitedUrl(url_e)));
+            .spawn((Visit, CreatedAt::new(now), VisitedUrl(url_e)));
         a.update();
         assert_eq!(a.world_mut().query::<&Url>().iter(a.world()).count(), 1);
         assert_eq!(a.world_mut().query::<&Visit>().iter(a.world()).count(), 1);
@@ -118,12 +118,12 @@ mod tests {
                     ..default()
                 },
                 VisitCount(2),
-                LastVisitedAt(now),
-                CreatedAt(old),
+                LastVisitedAt::new(now),
+                CreatedAt::new(old),
             ))
             .id();
         a.world_mut()
-            .spawn((Visit, CreatedAt(now), VisitedUrl(url_e)));
+            .spawn((Visit, CreatedAt::new(now), VisitedUrl(url_e)));
         a.update();
         assert_eq!(a.world_mut().query::<&Url>().iter(a.world()).count(), 1);
     }

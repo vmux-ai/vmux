@@ -144,7 +144,7 @@ mod tests {
     use super::*;
     use serde::Deserialize;
     use vmux_api::protocol::AgentRequest;
-    use vmux_ecs::manifest::FeaturePlugin;
+    use vmux_feature::AppFeatureExt;
     use vmux_tool::{AddedTool, ToolDispatchSet, ToolQuery, ToolRegistryPlugin};
 
     #[vmux_tool::input]
@@ -153,7 +153,7 @@ mod tests {
 
     struct TestFeature;
 
-    impl vmux_ecs::manifest::FeatureManifestSource for TestFeature {
+    impl vmux_feature::FeatureManifestSource for TestFeature {
         const SOURCE: &'static str =
             r#"(tools: [(name: "test_query", description: "test", input_schema: (type: Object))])"#;
     }
@@ -185,23 +185,23 @@ mod tests {
     #[test]
     fn agent_tools_dispatch_through_the_owning_world() {
         let mut app = App::new();
-        app.add_plugins((
-            MinimalPlugins,
-            FeaturePlugin::<TestFeature>::default(),
-            ToolRegistryPlugin,
-        ))
-        .add_message::<AgentToolCallRequest>()
-        .add_message::<AgentRequestInput>()
-        .add_message::<ToolQueryRequest>()
-        .init_resource::<CapturedAgentQueries>()
-        .add_systems(
-            Update,
-            (
-                create_test_query.in_set(ToolDispatchSet),
-                capture.after(CommandSet::Commands),
-            ),
-        );
+        app.add_plugins(MinimalPlugins)
+            .register_feature::<TestFeature>()
+            .add_plugins(ToolRegistryPlugin)
+            .add_message::<AgentToolCallRequest>()
+            .add_message::<AgentRequestInput>()
+            .add_message::<ToolQueryRequest>()
+            .init_resource::<CapturedAgentQueries>()
+            .add_systems(
+                Update,
+                (
+                    create_test_query.in_set(ToolDispatchSet),
+                    capture.after(CommandSet::Commands),
+                ),
+            );
         app.add_plugins(Plugin);
+        app.finish();
+        app.cleanup();
         app.update();
 
         app.world_mut()

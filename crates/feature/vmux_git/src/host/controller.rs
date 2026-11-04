@@ -21,8 +21,8 @@ use crate::event::{
 };
 use crate::state::{
     GitBranchCollection, GitBranchPrompt, GitOperationEligibility, GitPageContext,
-    GitPageControllerState, GitPanel, GitRepositoryPicked, GitSelectionReveal, GitUiState,
-    GitWorkspaceChanged,
+    GitPageControllerState, GitPanel, GitRepositoryPicked, GitSelectionReveal, GitWorkspaceChanged,
+    UiGit,
 };
 
 use super::directory::GitDirectoryNavigation;
@@ -116,7 +116,7 @@ pub(super) struct LocationCursor {
 
 impl LocationCursor {
     fn apply(&mut self, url: &str, state: &GitState, controller: &mut GitPageControllerState) {
-        let fragment = vmux_api::page_location::PageLocationUiState::from_url(url).fragment;
+        let fragment = vmux_api::page_location::UiPageLocation::from_url(url).fragment;
         let document = url.split('#').next().unwrap_or(url);
         if self.fragment != fragment
             || self.document != document
@@ -499,7 +499,7 @@ fn dispatch_git_key(
 ) {
     if let Some(direction) = SelectionDirection::from_key(request) {
         if let Some(effect) = controller.move_selection(direction, state, revision) {
-            commands.trigger(UiStateWrite::<GitUiState>::from_event(webview, &effect));
+            commands.trigger(UiStateWrite::<UiGit>::from_event(webview, &effect));
         }
         return;
     }
@@ -928,7 +928,7 @@ fn sync_url(
         ) else {
             continue;
         };
-        let url = vmux_api::page_location::PageLocationUiState::from_url(&page.url).url(&url);
+        let url = vmux_api::page_location::UiPageLocation::from_url(&page.url).url(&url);
         if page.url != url {
             page.url = url;
         }
@@ -976,7 +976,7 @@ impl SelectionDirection {
 }
 
 fn ui_state_write(
-    trigger: On<UiStateWrite<GitUiState>>,
+    trigger: On<UiStateWrite<UiGit>>,
     mut pages: Query<(
         &mut GitPageControllerState,
         &mut GitDirectoryNavigation,
@@ -1718,14 +1718,13 @@ mod tests {
         app.add_plugins((MinimalPlugins, ControllerPlugin));
         let webview = app.world_mut().spawn_empty().id();
 
-        app.world_mut()
-            .trigger(UiStateWrite::<GitUiState>::from_event(
-                webview,
-                &GitPageContext {
-                    working_directory: "/tmp/repository".to_string(),
-                    page_url: String::new(),
-                },
-            ));
+        app.world_mut().trigger(UiStateWrite::<UiGit>::from_event(
+            webview,
+            &GitPageContext {
+                working_directory: "/tmp/repository".to_string(),
+                page_url: String::new(),
+            },
+        ));
         app.update();
 
         let state = app.world().get::<GitState>(webview).unwrap();
@@ -1745,14 +1744,13 @@ mod tests {
             .add_observer(InitialRequests::directory);
         let webview = app.world_mut().spawn_empty().id();
 
-        app.world_mut()
-            .trigger(UiStateWrite::<GitUiState>::from_event(
-                webview,
-                &GitPageContext {
-                    working_directory: path.clone(),
-                    page_url: format!("git://?commit={commit}"),
-                },
-            ));
+        app.world_mut().trigger(UiStateWrite::<UiGit>::from_event(
+            webview,
+            &GitPageContext {
+                working_directory: path.clone(),
+                page_url: format!("git://?commit={commit}"),
+            },
+        ));
         InitialRequests::settle(&mut app);
 
         let requests = app.world().resource::<InitialRequests>();
@@ -1773,14 +1771,13 @@ mod tests {
             .add_observer(InitialRequests::directory);
         let webview = app.world_mut().spawn_empty().id();
 
-        app.world_mut()
-            .trigger(UiStateWrite::<GitUiState>::from_event(
-                webview,
-                &GitPageContext {
-                    working_directory: path.clone(),
-                    page_url: "git://".to_string(),
-                },
-            ));
+        app.world_mut().trigger(UiStateWrite::<UiGit>::from_event(
+            webview,
+            &GitPageContext {
+                working_directory: path.clone(),
+                page_url: "git://".to_string(),
+            },
+        ));
         InitialRequests::settle(&mut app);
 
         let requests = app.world().resource::<InitialRequests>();
@@ -1805,15 +1802,14 @@ mod tests {
             })
             .id();
 
-        app.world_mut()
-            .trigger(UiStateWrite::<GitUiState>::from_event(
-                webview,
-                &GitWorkspaceChanged {
-                    path: "/tmp/repository/./project".into(),
-                    branch: "main".into(),
-                    error: String::new(),
-                },
-            ));
+        app.world_mut().trigger(UiStateWrite::<UiGit>::from_event(
+            webview,
+            &GitWorkspaceChanged {
+                path: "/tmp/repository/./project".into(),
+                branch: "main".into(),
+                error: String::new(),
+            },
+        ));
         app.update();
 
         let state = app.world().get::<GitState>(webview).unwrap();
@@ -1839,15 +1835,14 @@ mod tests {
             })
             .id();
 
-        app.world_mut()
-            .trigger(UiStateWrite::<GitUiState>::from_event(
-                webview,
-                &GitWorkspaceChanged {
-                    path: "/tmp/other".into(),
-                    branch: "other".into(),
-                    error: String::new(),
-                },
-            ));
+        app.world_mut().trigger(UiStateWrite::<UiGit>::from_event(
+            webview,
+            &GitWorkspaceChanged {
+                path: "/tmp/other".into(),
+                branch: "other".into(),
+                error: String::new(),
+            },
+        ));
         app.update();
 
         let state = app.world().get::<GitState>(webview).unwrap();
@@ -1889,22 +1884,21 @@ mod tests {
         app.world_mut().entity_mut(source).remove::<GitState>();
         let target = app.world_mut().spawn(GitState::default()).id();
 
-        app.world_mut()
-            .trigger(UiStateWrite::<GitUiState>::from_event(
-                target,
-                &crate::state::GitUiStatePatch {
-                    context: Some(GitPageContext {
-                        working_directory: "/tmp/cached".to_string(),
-                        page_url: String::new(),
-                    }),
-                    workspace: Some(GitWorkspaceChanged {
-                        path: "/tmp/other".to_string(),
-                        branch: "other".to_string(),
-                        error: String::new(),
-                    }),
-                    ..Default::default()
-                },
-            ));
+        app.world_mut().trigger(UiStateWrite::<UiGit>::from_event(
+            target,
+            &crate::state::UiGitPatch {
+                context: Some(GitPageContext {
+                    working_directory: "/tmp/cached".to_string(),
+                    page_url: String::new(),
+                }),
+                workspace: Some(GitWorkspaceChanged {
+                    path: "/tmp/other".to_string(),
+                    branch: "other".to_string(),
+                    error: String::new(),
+                }),
+                ..Default::default()
+            },
+        ));
         app.update();
 
         let state = app.world().get::<GitState>(target).unwrap();
@@ -1963,17 +1957,16 @@ mod tests {
             .spawn((GitState::default(), vmux_ecs::PageTransition))
             .id();
 
-        app.world_mut()
-            .trigger(UiStateWrite::<GitUiState>::from_event(
-                target,
-                &crate::state::GitUiStatePatch {
-                    context: Some(GitPageContext {
-                        working_directory: path.clone(),
-                        page_url: String::new(),
-                    }),
-                    ..Default::default()
-                },
-            ));
+        app.world_mut().trigger(UiStateWrite::<UiGit>::from_event(
+            target,
+            &crate::state::UiGitPatch {
+                context: Some(GitPageContext {
+                    working_directory: path.clone(),
+                    page_url: String::new(),
+                }),
+                ..Default::default()
+            },
+        ));
         app.update();
 
         assert!(

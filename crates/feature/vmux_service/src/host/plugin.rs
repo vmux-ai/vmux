@@ -9,10 +9,10 @@ use crate::DaemonBinary;
 use crate::registry::RegistrationStep;
 use crate::registry::{Backend, RegistrationError};
 use vmux_api::protocol::ClientMessage;
-use vmux_ecs::manifest::FeaturePlugin;
 use vmux_ecs::service::{
     ServiceConnected, ServiceInbound, ServiceMessageIngressSet, ServiceRequest, ServiceUnavailable,
 };
+use vmux_feature::AppFeatureExt;
 
 use super::client::{ServiceClient, ServiceHandle, ServiceWake};
 
@@ -78,7 +78,7 @@ pub struct ServicePlugin;
 
 impl Plugin for ServicePlugin {
     fn build(&self, app: &mut App) {
-        app.add_plugins(FeaturePlugin::<crate::Feature>::default())
+        app.register_feature::<crate::Feature>()
             .add_message::<ServiceRequest>()
             .add_message::<ServiceInbound>()
             .add_systems(

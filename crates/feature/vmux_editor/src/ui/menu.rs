@@ -34,27 +34,27 @@ pub(super) fn CodeActionMenu(titles: Vec<String>, selected: u32, top: f64, left:
                 match event.key() {
                     Key::ArrowDown => {
                         event.prevent_default();
-                        let _ = send(&FileCodeActionMoveRequest { next: true });
+                        send(&FileCodeActionMoveRequest { next: true });
                     }
                     Key::ArrowUp => {
                         event.prevent_default();
-                        let _ = send(&FileCodeActionMoveRequest { next: false });
+                        send(&FileCodeActionMoveRequest { next: false });
                     }
                     Key::Enter => {
                         event.prevent_default();
-                        let _ = send(&FileCodeActionPick { index: chosen as u32 });
+                        send(&FileCodeActionPick { index: chosen as u32 });
                         EditorFocus::file();
                     }
                     Key::Escape => {
                         event.prevent_default();
-                        let _ = send(&FileCodeActionDismissRequest);
+                        send(&FileCodeActionDismissRequest);
                         EditorFocus::file();
                     }
                     _ => {}
                 }
             },
             onblur: move |_| {
-                let _ = send(&FileCodeActionDismissRequest);
+                send(&FileCodeActionDismissRequest);
             },
             for (index, title) in titles.iter().enumerate() {
                 div {
@@ -62,7 +62,7 @@ pub(super) fn CodeActionMenu(titles: Vec<String>, selected: u32, top: f64, left:
                     class: if index == chosen { "cursor-default px-3 py-1 bg-primary/15" } else { "cursor-default px-3 py-1" },
                     onmousedown: move |event: Event<MouseData>| {
                         event.prevent_default();
-                        let _ = send(&FileCodeActionPick { index: index as u32 });
+                        send(&FileCodeActionPick { index: index as u32 });
                         EditorFocus::file();
                     },
                     "{title}"
@@ -85,7 +85,7 @@ pub(super) fn RenameInput(rename: FileRenameState, top: f64, left: f64) -> Eleme
             style: "left:{left}px;top:{top}px;",
             value: "{rename.draft}",
             oninput: move |event| {
-                let _ = send(&FileRenameDraftRequest {
+                send(&FileRenameDraftRequest {
                     draft: event.value(),
                 });
             },
@@ -101,25 +101,25 @@ pub(super) fn RenameInput(rename: FileRenameState, top: f64, left: f64) -> Eleme
                         event.prevent_default();
                         let name = rename.draft.trim().to_string();
                         if !name.is_empty() && name != rename.current {
-                            let _ = send(&FileRenameRequest {
+                            send(&FileRenameRequest {
                                 line: rename.line,
                                 col: rename.col,
                                 new_name: name,
                             });
                         }
-                        let _ = send(&FileRenameDismissRequest);
+                        send(&FileRenameDismissRequest);
                         EditorFocus::file();
                     }
                     Key::Escape => {
                         event.prevent_default();
-                        let _ = send(&FileRenameDismissRequest);
+                        send(&FileRenameDismissRequest);
                         EditorFocus::file();
                     }
                     _ => {}
                 }
             },
             onblur: move |_| {
-                let _ = send(&FileRenameDismissRequest);
+                send(&FileRenameDismissRequest);
             },
         }
     }
@@ -197,7 +197,7 @@ pub(super) fn ReferencesPanel(open: bool, items: Vec<RefItem>, selected: usize) 
                             class: if index == selected { "flex gap-2 rounded bg-primary/15 px-2 py-1" } else { "flex gap-2 rounded px-2 py-1 hover:bg-foreground/[0.05]" },
                             onmousedown: move |event: Event<MouseData>| {
                                 event.prevent_default();
-                                let _ = send(&FilePanelPick { index: index as u32 });
+                                send(&FilePanelPick { index: index as u32 });
                             },
                             span { class: "shrink-0 text-primary/80", "{item.display}" }
                             span { class: "truncate text-foreground/60", "{item.preview}" }
@@ -222,10 +222,10 @@ impl MenuRow {
         match self.operation {
             Some(operation) => operation.send(line, col),
             None if self.label == "editor-go-to-definition" => {
-                let _ = send(&FileDefinitionRequest { line, col });
+                send(&FileDefinitionRequest { line, col });
             }
             None => {
-                let _ = send(&FileReferencesRequest { line, col });
+                send(&FileReferencesRequest { line, col });
             }
         }
     }

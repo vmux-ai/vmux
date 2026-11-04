@@ -6,7 +6,7 @@ use crate::state::{
 use bevy_ecs::prelude::Component;
 
 use crate::{ToolStore, ToolsManifest};
-use vmux_ecs::manifest::{FeatureId, FeatureManifestSource};
+use vmux_feature::{FeatureId, FeatureManifestSource};
 
 #[derive(Component, Clone, Debug, PartialEq, Eq)]
 pub struct ToolProviderId(pub ToolProvider);

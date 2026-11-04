@@ -1,6 +1,7 @@
 use bevy::ecs::system::SystemParam;
 use bevy::prelude::*;
 use moonshine_save::prelude::*;
+use vmux_api::Id;
 use vmux_api::open_target::PaneDirection;
 use vmux_ecs::persistence::PersistenceAppExt;
 use vmux_flex::prelude::*;
@@ -27,8 +28,13 @@ pub struct Pane;
 
 impl Pane {
     pub fn bundle() -> impl Bundle {
+        Self::bundle_with_id(Id::new(uuid::Uuid::new_v4().to_string()))
+    }
+
+    pub fn bundle_with_id(id: Id<Self>) -> impl Bundle {
         (
             Self,
+            id,
             PaneSize::default(),
             Transform::default(),
             Node {
@@ -42,6 +48,14 @@ impl Pane {
     }
 
     pub fn split_bundle(direction: PaneSplitDirection) -> impl Bundle {
+        Self::split_bundle_with_id(Id::new(uuid::Uuid::new_v4().to_string()), direction)
+    }
+
+    pub fn split_bundle_with_id(id: Id<Self>, direction: PaneSplitDirection) -> impl Bundle {
+        (id, Self::split_state_bundle(direction))
+    }
+
+    pub fn split_state_bundle(direction: PaneSplitDirection) -> impl Bundle {
         let gaps = direction.gaps(crate::event::PANE_GAP_PX);
         (
             Self,
@@ -154,15 +168,11 @@ impl PaneTree<'_, '_> {
         already_split: bool,
     ) -> Entity {
         if already_split {
-            let activity = if activate_new {
-                LastActivatedAt::now()
-            } else {
-                LastActivatedAt(0)
-            };
-            return self
-                .commands
-                .spawn((Pane::bundle(), activity, ChildOf(anchor)))
-                .id();
+            let mut pane = self.commands.spawn((Pane::bundle(), ChildOf(anchor)));
+            if activate_new {
+                pane.insert(LastActivatedAt::now());
+            }
+            return pane.id();
         }
         self.split_leaf(anchor, direction, existing_tabs, activate_new)
     }
@@ -174,25 +184,21 @@ impl PaneTree<'_, '_> {
         existing_tabs: &[Entity],
         activate_new: bool,
     ) -> (Entity, Entity) {
-        let new_activity = if activate_new {
-            LastActivatedAt::now()
-        } else {
-            LastActivatedAt(0)
-        };
         let existing = self
             .commands
             .spawn((Pane::bundle(), LastActivatedAt::now(), ChildOf(active)))
             .id();
-        let new = self
-            .commands
-            .spawn((Pane::bundle(), new_activity, ChildOf(active)))
-            .id();
+        let mut new = self.commands.spawn((Pane::bundle(), ChildOf(active)));
+        if activate_new {
+            new.insert(LastActivatedAt::now());
+        }
+        let new = new.id();
         for tab in existing_tabs {
             self.commands.entity(*tab).insert(ChildOf(existing));
         }
         self.commands
             .entity(active)
-            .insert(Pane::split_bundle(direction));
+            .insert(Pane::split_state_bundle(direction));
         (existing, new)
     }
 }
@@ -247,6 +253,25 @@ mod tests {
     use bevy::{ecs::relationship::Relationship, ecs::system::RunSystemOnce};
 
     #[test]
+    fn pane_bundles_include_stable_identity_at_spawn() {
+        let mut world = World::new();
+        let pane = world.spawn(Pane::bundle()).id();
+        let split = world
+            .spawn(Pane::split_bundle(PaneSplitDirection::Row))
+            .id();
+        let restored = world
+            .spawn(Pane::bundle_with_id(Id::<Pane>::new("restored")))
+            .id();
+
+        assert!(world.get::<Id<Pane>>(pane).is_some());
+        assert!(world.get::<Id<Pane>>(split).is_some());
+        assert_eq!(
+            world.get::<Id<Pane>>(restored).unwrap().as_str(),
+            "restored"
+        );
+    }
+
+    #[test]
     fn split_leaf_into_two_reparents_tabs_and_splits() {
         let mut app = App::new();
         app.add_plugins(MinimalPlugins);
@@ -288,10 +313,7 @@ mod tests {
     fn split_or_extend_batched_runs_make_no_empty_panes() {
         let mut app = App::new();
         app.add_plugins(MinimalPlugins);
-        let tab = app
-            .world_mut()
-            .spawn((Tab::default(), LastActivatedAt::now()))
-            .id();
+        let tab = app.world_mut().spawn((Tab, LastActivatedAt::now())).id();
         let anchor = app
             .world_mut()
             .spawn((Pane::bundle(), LastActivatedAt::now(), ChildOf(tab)))

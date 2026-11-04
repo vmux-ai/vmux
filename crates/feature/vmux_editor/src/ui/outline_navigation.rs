@@ -1,7 +1,7 @@
 use dioxus::prelude::*;
-use vmux_api::page_location::PageLocationUiState;
+use vmux_api::page_location::UiPageLocation;
 use vmux_ecs::event::{ExplorerGoto, NoteBlock, OutlineRow};
-use vmux_ui::hooks::{send, use_ui_state};
+use vmux_ui::hooks::{UiState, send};
 use vmux_ui::scroll::{ScrollIntoView, SectionNavigation};
 
 use super::SCROLL_ID;
@@ -36,7 +36,7 @@ impl OutlineNavigation {
             measuring: use_signal(|| false),
             pending: use_signal(|| false),
         };
-        let location = use_ui_state::<PageLocationUiState>().state;
+        let location = UiState::<UiPageLocation>::use_context().state;
         let mut scope = use_signal(String::new);
         use_effect(move || {
             let path = path();
@@ -123,7 +123,7 @@ impl OutlineNavigation {
     }
 
     fn goto(self, line: u32) {
-        let _ = send(&ExplorerGoto {
+        send(&ExplorerGoto {
             path: String::new(),
             line,
         });
@@ -227,7 +227,7 @@ mod tests {
         }
 
         fn listen(&self, id: &str, listener: BytesListener) -> Result<(), EventListenerError> {
-            if id == PageLocationUiState::id() {
+            if id == UiPageLocation::id() {
                 self.listeners.borrow_mut().push(listener);
             }
             Ok(())
@@ -250,6 +250,7 @@ mod tests {
 
     #[component]
     fn OutlineNote() -> Element {
+        let _ = vmux_ui::hooks::use_ui_state::<UiPageLocation>();
         let note = use_memo(|| true);
         let blocks = use_memo(|| {
             let mut blocks = Vec::new();
@@ -304,11 +305,9 @@ mod tests {
         }
 
         fn location(dom: &mut VirtualDom, host: &NoteHost, fragment: &str) {
-            let frame = UiStateFrame::<PageLocationUiState, PageLocationUiState>::Snapshot(
-                PageLocationUiState {
-                    fragment: fragment.to_string(),
-                },
-            );
+            let frame = UiStateFrame::<UiPageLocation, UiPageLocation>::Snapshot(UiPageLocation {
+                fragment: fragment.to_string(),
+            });
             let bytes = rkyv::to_bytes::<rkyv::rancor::Error>(&frame).unwrap();
             for listener in host.listeners.borrow_mut().iter_mut() {
                 listener(&bytes);

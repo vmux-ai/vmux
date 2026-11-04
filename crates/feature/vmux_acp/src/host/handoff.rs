@@ -1,5 +1,5 @@
-use crate::AcpSessionId;
 use bevy::prelude::*;
+use vmux_connector::{ExternalId, ExternalLink, ProviderKey, ResourceKind};
 use vmux_session::host::ImportedConversation;
 
 #[cfg(test)]
@@ -26,14 +26,22 @@ fn spawn(mut commands: Commands) {
 
 fn load(
     directory: Single<&HandoffDriver>,
-    sessions: Query<
-        (Entity, &vmux_session::AgentId, &AcpSessionId),
-        (Added<AcpSessionId>, Without<ImportedConversation>),
+    links: Query<
+        (&ChildOf, &ProviderKey, &ResourceKind, &ExternalId),
+        (With<ExternalLink>, Added<ExternalLink>),
     >,
+    sessions: Query<&vmux_session::AgentRef, Without<ImportedConversation>>,
     mut commands: Commands,
 ) {
-    for (entity, agent_id, session_id) in &sessions {
-        let Some(imported) = directory.load(&agent_id.0, &session_id.0) else {
+    for (owner, provider, kind, session_id) in &links {
+        if provider.as_str() != "acp" || kind.as_str() != "session" {
+            continue;
+        }
+        let entity = owner.parent();
+        let Ok(agent_id) = sessions.get(entity) else {
+            continue;
+        };
+        let Some(imported) = directory.load(agent_id.as_str(), session_id.as_str()) else {
             continue;
         };
         commands.entity(entity).insert(imported);
@@ -44,17 +52,17 @@ fn persist(
     directory: Single<&HandoffDriver>,
     mut created: MessageReader<crate::host::event::AcpSessionCreated>,
     sessions: Query<(
-        &vmux_session::SessionId,
-        &vmux_session::AgentId,
+        &vmux_session::Id<vmux_session::Session>,
+        &vmux_session::AgentRef,
         &ImportedConversation,
     )>,
 ) {
     for event in created.read() {
         for (session_id, agent_id, imported) in &sessions {
-            if session_id.0 != event.sid || imported.first_prompt.is_none() {
+            if session_id.as_str() != event.sid || imported.first_prompt.is_none() {
                 continue;
             }
-            if let Err(error) = directory.save(imported, &agent_id.0, &event.acp_session_id) {
+            if let Err(error) = directory.save(imported, agent_id.as_str(), &event.acp_session_id) {
                 bevy::log::warn!("acp: failed to persist handoff metadata: {error}");
             }
         }
