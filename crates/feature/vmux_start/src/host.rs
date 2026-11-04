@@ -650,10 +650,9 @@ mod tests {
     }
 
     #[test]
-    fn start_plugin_spawns_manifest() {
+    fn start_plugin_registers_manifest_before_startup() {
         let mut app = App::new();
         app.add_plugins(StartPlugin);
-        app.world_mut().run_schedule(PreStartup);
         let mut q = app.world_mut().query::<&PageManifest>();
         assert!(q.iter(app.world()).any(|m| m.url == StartPlugin::URL));
     }
