@@ -47,6 +47,7 @@ pub fn AddressTrail(
     });
     let mut available = use_signal(|| 0.0);
     let mut widths = use_signal(HashMap::<String, f64>::new);
+    let measurement_open = use_signal(|| None::<String>);
     let visible = PathVisibility::start(&state.paths, available(), &widths.read());
     let page = if state.page == "knowledge" {
         WorkspacePage::Knowledge
@@ -74,9 +75,10 @@ pub fn AddressTrail(
     }
     let requests = AddressSender(state.clone());
     let page_requests = requests.clone();
+    let search_requests = requests.clone();
     rsx! {
         nav {
-            class: "flex h-7 min-w-0 flex-1 items-center gap-1 text-xs",
+            class: "relative flex h-7 min-w-0 flex-1 items-center gap-1 text-xs",
             aria_label: translate("editor-breadcrumb"),
             onclick: move |event: MouseEvent| event.stop_propagation(),
             BreadcrumbSelector {
@@ -106,9 +108,9 @@ pub fn AddressTrail(
             }
             BreadcrumbSeparator {}
             div {
-                class: "flex min-w-0 flex-1 items-center overflow-x-auto [scrollbar-width:none]",
+                class: "flex min-w-0 flex-1 items-center overflow-x-auto [contain:inline-size] [scrollbar-width:none]",
                 onresize: move |event: Event<ResizeData>| {
-                    if let Ok(size) = event.get_border_box_size() && *available.peek() != size.width { available.set(size.width); }
+                    if let Ok(size) = event.get_border_box_size() && size.width.is_finite() && size.width > 0.0 && (*available.peek() - size.width).abs() > 0.5 { available.set(size.width); }
                 },
                 if visible > 0 {
                     AddressMenu {
@@ -120,13 +122,9 @@ pub fn AddressTrail(
                 }
                 for (index, crumb) in state.paths.iter().enumerate().skip(visible) {
                     {
-                        let path = crumb.entry.path.clone();
                         rsx! {
                             span {
-                                key: "{path}", class: "flex shrink-0 items-center",
-                                onresize: move |event: Event<ResizeData>| {
-                                    if let Ok(size) = event.get_border_box_size() && size.width > 0.0 && widths.peek().get(&path).copied() != Some(size.width) { widths.write().insert(path.clone(), size.width); }
-                                },
+                                key: "{crumb.entry.path}", class: "flex shrink-0 items-center",
                                 AddressMenu { id: format!("path-{}", crumb.entry.path), crumb: crumb.clone(), requests: requests.clone(), open, preserve_name: true }
                                 if index + 1 < state.paths.len() { BreadcrumbSeparator {} }
                             }
@@ -142,8 +140,29 @@ pub fn AddressTrail(
             }
             ManagerIconButton {
                 label: translate("editor-show-search"), active: state.search_active,
-                onclick: move |_| requests.send(AddressIntent::Search),
+                onclick: move |_| search_requests.send(AddressIntent::Search),
                 LineIconView { icon: LineIcon::Search, class: "size-3.5" }
+            }
+            div {
+                class: "pointer-events-none invisible absolute left-0 top-0 flex w-max items-center",
+                aria_hidden: "true",
+                inert: true,
+                for (index, crumb) in state.paths.iter().enumerate().skip(state.paths.len().saturating_sub(PathVisibility::MAX_PATHS)) {
+                    {
+                        let path = crumb.entry.path.clone();
+                        rsx! {
+                            span {
+                                key: "{path}", class: "flex shrink-0 items-center",
+                                "data-vmux-address-measure": path.clone(),
+                                onresize: move |event: Event<ResizeData>| {
+                                    if let Ok(size) = event.get_border_box_size() && size.width.is_finite() && size.width > 0.0 && widths.peek().get(&path).is_none_or(|width| (width - size.width).abs() > 0.5) { widths.write().insert(path.clone(), size.width); }
+                                },
+                                AddressMenu { id: format!("measure-{}", crumb.entry.path), crumb: crumb.clone(), requests: requests.clone(), open: measurement_open, preserve_name: true }
+                                if index + 1 < state.paths.len() { BreadcrumbSeparator {} }
+                            }
+                        }
+                    }
+                }
             }
         }
     }
@@ -235,8 +254,10 @@ impl AddressSender {
 struct PathVisibility;
 
 impl PathVisibility {
+    const MAX_PATHS: usize = 4;
+
     fn start(paths: &[AddressCrumb], available: f64, widths: &HashMap<String, f64>) -> usize {
-        let mut hidden = paths.len().saturating_sub(4);
+        let mut hidden = paths.len().saturating_sub(Self::MAX_PATHS);
         if available <= 0.0 {
             return hidden;
         }
@@ -261,6 +282,102 @@ impl PathVisibility {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use dioxus::core::{AttributeValue, ElementId, Mutation, VirtualDom};
+    use dioxus_html::{
+        EventData, SerializedHtmlEventConverter, SerializedResizeData, geometry::PixelsSize,
+    };
+
+    #[component]
+    fn SizingAddress() -> Element {
+        rsx! { AddressTrail {
+            state: PageAddress {
+                paths: vec![
+                    AddressCrumb { entry: AddressOption::file("talks".into(), "/repo/talks".into(), true), ..Default::default() },
+                    AddressCrumb { entry: AddressOption::file("long-file-name.md".into(), "/repo/talks/long-file-name.md".into(), false), ..Default::default() },
+                ],
+                ..Default::default()
+            },
+        } }
+    }
+
+    struct AddressSizing {
+        dom: VirtualDom,
+        viewport: ElementId,
+        measurements: HashMap<String, ElementId>,
+    }
+
+    impl AddressSizing {
+        fn mount() -> Self {
+            dioxus::html::set_event_converter(Box::new(SerializedHtmlEventConverter));
+            let mut dom = VirtualDom::new(SizingAddress);
+            let initial = dom.rebuild_to_vec();
+            let mut measurements = HashMap::new();
+            let mut listeners = Vec::new();
+            for edit in initial.edits {
+                match edit {
+                    Mutation::SetAttribute {
+                        name: "data-vmux-address-measure",
+                        value: AttributeValue::Text(path),
+                        id,
+                        ..
+                    } => {
+                        measurements.insert(path, id);
+                    }
+                    Mutation::NewEventListener { name, id } if name == "resize" => {
+                        listeners.push(id)
+                    }
+                    _ => {}
+                }
+            }
+            let viewport = listeners
+                .into_iter()
+                .find(|id| !measurements.values().any(|measured| measured == id))
+                .unwrap();
+            dom.render_immediate_to_vec();
+            Self {
+                dom,
+                viewport,
+                measurements,
+            }
+        }
+
+        fn resize(&mut self, element: ElementId, width: f64) {
+            let size = PixelsSize::new(width, 28.0);
+            let data = EventData::Resize(SerializedResizeData::new(size, size));
+            self.dom
+                .runtime()
+                .handle_event("resize", Event::new(data.into_any(), false), element);
+            self.dom.render_immediate_to_vec();
+        }
+
+        fn html(&self) -> String {
+            dioxus_ssr::render(&self.dom)
+        }
+    }
+
+    #[test]
+    fn address_measurement_keeps_hidden_directories_measurable_and_ignores_detached_sizes() {
+        let mut address = AddressSizing::mount();
+        let directory = address.measurements["/repo/talks"];
+        let file = address.measurements["/repo/talks/long-file-name.md"];
+        address.resize(directory, 60.0);
+        address.resize(file, 400.0);
+        address.resize(address.viewport, 700.0);
+        assert!(!address.html().contains(">…<"));
+        address.resize(address.viewport, 430.0);
+        assert!(address.html().contains(">…<"));
+        let narrow = address.html();
+        address.resize(address.viewport, 0.0);
+        address.resize(file, 0.0);
+        address.resize(address.viewport, 430.25);
+        assert_eq!(address.html(), narrow);
+        address.resize(directory, 10.0);
+        assert!(!address.html().contains(">…<"));
+        address.resize(directory, 60.0);
+        assert!(address.html().contains(">…<"));
+        address.resize(address.viewport, 700.0);
+        assert!(!address.html().contains(">…<"));
+    }
 
     #[test]
     fn narrow_addresses_hide_whole_directories_and_keep_the_filename() {

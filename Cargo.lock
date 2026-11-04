@@ -11250,6 +11250,7 @@ version = "0.0.35"
 dependencies = [
  "base64 0.22.1",
  "dioxus",
+ "dioxus-html",
  "dioxus-primitives",
  "dioxus-ssr",
  "fluent-bundle",

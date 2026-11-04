@@ -40,4 +40,5 @@ vmux_ecs = { path = "../vmux_ecs" }
 workspace = true
 
 [dev-dependencies]
+dioxus-html = { version = "=0.7.9", features = ["serialize"] }
 dioxus-ssr = "=0.7.9"

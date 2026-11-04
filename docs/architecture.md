@@ -612,6 +612,9 @@ until the incoming snapshot paints. Tests exercise fresh input during motion, st
 and retained-page handoffs instead of asserting animation class names. URL-bar background and
 padding stay independently clickable and expose the URL on hover; breadcrumb and toolbar controls
 keep their own hit targets and events.
+Address-path measurements live in an inert, invisible row outside normal layout, so hiding a
+directory never removes its width measurement or changes the available inline space. Zero-size
+notifications from detached surfaces and subpixel noise retain the previous layout.
 Accepted lifecycle batches also carry the current document revision into paint state; an old
 mount notification discarded during an interaction-epoch change cannot leave the first paint
 waiting on revision zero.

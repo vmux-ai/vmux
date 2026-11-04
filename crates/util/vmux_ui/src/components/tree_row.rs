@@ -10,7 +10,7 @@ pub const FILE_TREE_ROW: &str = "flex h-[22px] w-full min-w-0 cursor-pointer ite
 
 pub const FILE_TREE_LIST_GROUP: &str = "group/list";
 
-pub const FILE_TREE_ROW_BASE: &str = "relative flex h-[22px] items-center gap-1 px-1 cursor-default outline-none transition-colors duration-100";
+pub const FILE_TREE_ROW_BASE: &str = "relative flex h-[22px] items-center gap-1 rounded-md px-1 cursor-default outline-none transition-colors duration-100";
 
 pub const FILE_TREE_STICKY_SURFACE: &str =
     "border-b border-foreground/10 bg-background/95 backdrop-blur";
