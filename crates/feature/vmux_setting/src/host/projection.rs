@@ -705,7 +705,7 @@ impl KeyChordText {
 mod projection_tests {
     use super::*;
     use bevy_cef::prelude::{BinHostEmitEvent, Browsers};
-    use vmux_api::BinEvent;
+    use vmux_api::{BinEvent, UiState as UiStateContract, UiStateFrame};
 
     const MANIFESTS: [&str; 9] = [
         include_str!("../feature.ron"),
@@ -726,11 +726,19 @@ mod projection_tests {
         if trigger.event().id() != SettingsUiState::id() {
             return;
         }
-        trigger.event().mark_delivered();
-        let state =
-            rkyv::from_bytes::<SettingsUiState, rkyv::rancor::Error>(trigger.event().payload())
-                .unwrap();
+        let frame = rkyv::from_bytes::<
+            UiStateFrame<SettingsUiState, <SettingsUiState as UiStateContract>::Update>,
+            rkyv::rancor::Error,
+        >(trigger.event().payload())
+        .unwrap();
+        let state = match frame {
+            UiStateFrame::Snapshot(state) => state,
+            UiStateFrame::Updates(updates) => {
+                SettingsUiState::from_updates(emitted.0.last().cloned(), updates)
+            }
+        };
         emitted.0.push(state);
+        trigger.event().mark_delivered();
     }
 
     #[test]
@@ -746,7 +754,25 @@ mod projection_tests {
             .unwrap()
             .expect("settings manifest");
         app.world_mut().spawn((feature, settings));
-        let entity = app.world_mut().spawn((Settings, PageReady)).id();
+        let entity = app
+            .world_mut()
+            .spawn((
+                Settings,
+                PageReady,
+                PageMetadata {
+                    url: "vmux://settings/".to_string(),
+                    ..Default::default()
+                },
+                bevy_cef::prelude::BinIpcSurfaceGeneration(1),
+                bevy_cef::prelude::BinIpcNavigationRevision(1),
+                bevy_cef::prelude::BinIpcEpoch(1),
+            ))
+            .id();
+        app.world_mut().spawn(vmux_api::UiEventPermissions {
+            url: "vmux://settings/",
+            owns_subtree: false,
+            permissions: &[SettingsUiState::PERMISSION],
+        });
         let mut browsers = Browsers::default();
         browsers.set_externally_hosted(entity);
         app.world_mut().insert_non_send(browsers);
