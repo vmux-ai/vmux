@@ -560,7 +560,7 @@ fn HeaderAddressReadout(
                         "{address.origin}"
                     }
                 }
-                span { class: "min-w-0 truncate text-ui", "{address.rest}" }
+                span { class: "truncate-fade min-w-0 flex-1 text-ui", title: "{address.rest}", "{address.rest}" }
             }
         }
     }

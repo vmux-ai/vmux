@@ -28,7 +28,7 @@ pub fn PageAddress(
         PageAddressContent { context,
         div { class: "flex h-8 min-w-0 flex-1 items-center gap-2", onclick: move |event: MouseEvent| event.stop_propagation(),
             div { class: "flex min-w-0 flex-1 items-center gap-2",
-            Breadcrumbs { class: "min-w-0 overflow-hidden".to_string(),
+            Breadcrumbs { class: "min-w-0 flex-1 overflow-hidden pr-4 [mask-image:linear-gradient(to_right,black_calc(100%_-_1rem),transparent)]".to_string(),
                 BreadcrumbSelector {
                     label,
                     value: current.value.clone(),

@@ -5,8 +5,7 @@ use crate::components::dropdown::DropdownToggleIndicator;
 use crate::components::icon::Icon;
 use crate::components::tree_row::{SIDEBAR_CARD_CHEVRON_CLOSED, SIDEBAR_CARD_CHEVRON_OPEN};
 
-pub const SHEET_SECTION: &str =
-    "mb-2 flex shrink-0 flex-col rounded-lg bg-card p-1 @max-[12rem]:rounded-md @max-[12rem]:p-0.5";
+pub const SHEET_SECTION: &str = "mb-2 flex min-w-0 shrink-0 flex-col rounded-lg bg-card p-1 @max-[12rem]:rounded-md @max-[12rem]:p-0.5";
 
 #[component]
 pub fn SheetHeaderAction(
@@ -70,7 +69,7 @@ pub fn SheetToggleRow(
         class.as_str(),
     ]);
     let text_class = cn([
-        "min-w-0 flex-1 truncate text-[10px] font-medium text-foreground/85",
+        "truncate-fade min-w-0 flex-1 text-[10px] font-medium text-foreground/85",
         label_class.as_str(),
     ]);
     rsx! {
@@ -112,7 +111,7 @@ pub fn SheetSelectorRow(
         class.as_str(),
     ]);
     let text_class = cn([
-        "min-w-0 flex-1 truncate text-[10px] font-medium text-foreground/85",
+        "truncate-fade min-w-0 flex-1 text-[10px] font-medium text-foreground/85",
         label_class.as_str(),
     ]);
     rsx! {

@@ -306,6 +306,28 @@
   backdrop-filter: blur(20px) saturate(1.4);
 }
 
+.truncate-fade {
+  overflow: hidden;
+  white-space: nowrap;
+  padding-inline-end: 1.5rem;
+  -webkit-mask-image: linear-gradient(to right, #000 calc(100% - 1.5rem), transparent);
+  mask-image: linear-gradient(to right, #000 calc(100% - 1.5rem), transparent);
+}
+
+.truncate-fade-start {
+  overflow: hidden;
+  white-space: nowrap;
+  direction: rtl;
+  text-align: left;
+  padding-inline-end: 1.5rem;
+  -webkit-mask-image: linear-gradient(to left, #000 calc(100% - 1.5rem), transparent);
+  mask-image: linear-gradient(to left, #000 calc(100% - 1.5rem), transparent);
+}
+
+.truncate-fade-start::before {
+  content: "\200E";
+}
+
 .truncate-start {
   overflow: hidden;
   white-space: nowrap;

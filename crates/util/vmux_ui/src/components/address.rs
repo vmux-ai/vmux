@@ -108,7 +108,7 @@ pub fn AddressTrail(
             }
             BreadcrumbSeparator {}
             div {
-                class: "flex min-w-0 flex-1 items-center overflow-x-auto [contain:inline-size] [scrollbar-width:none]",
+                class: "flex min-w-0 flex-1 items-center overflow-x-auto [contain:inline-size] [scrollbar-width:none] [mask-image:linear-gradient(to_right,black_calc(100%_-_1rem),transparent)]",
                 onresize: move |event: Event<ResizeData>| {
                     if let Ok(size) = event.get_border_box_size() && size.width.is_finite() && size.width > 0.0 && (*available.peek() - size.width).abs() > 0.5 { available.set(size.width); }
                 },

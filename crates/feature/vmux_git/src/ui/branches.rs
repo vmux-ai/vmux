@@ -7,6 +7,7 @@ use vmux_ui::components::avatar::IdentityOrb;
 use vmux_ui::components::button::{Button, ButtonSize, ButtonVariant};
 use vmux_ui::components::dialog::{DialogContent, DialogRoot, DialogTitle};
 use vmux_ui::components::error_state::ErrorState;
+use vmux_ui::components::manager::ManagerSearch;
 use vmux_ui::components::segmented_control::{SegmentedControl, SegmentedControlItem};
 use vmux_ui::components::skeleton::Skeleton;
 use vmux_ui::components::tree_row::{
@@ -104,6 +105,7 @@ pub(super) fn BranchesCard(
     file_query: Signal<String>,
     onfileselect: EventHandler<String>,
 ) -> Element {
+    let mut file_query = file_query;
     let query = file_query().trim().to_lowercase();
     let files_empty = files.is_empty();
     let visible_files = files
@@ -114,6 +116,19 @@ pub(super) fn BranchesCard(
     let tree = BranchFileTree::from_files(visible_files);
     rsx! {
         FileTree {
+            div { class: "flex shrink-0 items-center px-2 pb-2",
+                ManagerSearch {
+                    value: file_query(),
+                    placeholder: translate("common-filter"),
+                    onsearch: move |value| file_query.set(value),
+                    onkeydown: move |event: KeyboardEvent| {
+                        if event.key() == Key::Escape {
+                            event.prevent_default();
+                            file_query.set(String::new());
+                        }
+                    },
+                }
+            }
             FileTreeScroller {
                 class: "flex-1 px-2 pb-2".to_string(),
                 onscroll: move |event: Event<ScrollData>| {

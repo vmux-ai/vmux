@@ -80,7 +80,7 @@ pub(super) fn SideSheetStackRow(stack: StackNode, pane_id: u64) -> Element {
                         });
                     },
                     StackIcon { icon: stack.icon.clone(), url: stack.url.clone(), title: stack.title.clone() }
-                    span { class: "{title_class}", "{display_title}" }
+                    span { class: "{title_class}", title: "{display_title}", "{display_title}" }
                     button {
                         r#type: "button",
                         aria_label: "{close_title}",
@@ -212,9 +212,9 @@ pub(super) struct StackTitle;
 impl StackTitle {
     pub(super) fn truncate_class(title: &str) -> &'static str {
         if title.contains('/') {
-            "truncate-start"
+            "truncate-fade-start"
         } else {
-            "truncate"
+            "truncate-fade"
         }
     }
 

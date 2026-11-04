@@ -35,8 +35,8 @@ pub(super) fn GitDashboard() -> Element {
     }
 
     rsx! {
-        GitHeader { viewed_count, file_query }
-        main { class: "flex min-h-0 flex-1 flex-col bg-transparent",
+        GitHeader { viewed_count }
+        main { class: "flex min-h-0 flex-1 flex-col bg-transparent pt-2",
             div {
                 id: "git-dashboard-split",
                 class: "grid min-h-0 flex-1 grid-cols-1 grid-rows-[minmax(12rem,0.7fr)_minmax(18rem,1.3fr)] sm:grid-cols-[minmax(10rem,var(--git-list-width))_0.75rem_minmax(0,1fr)] sm:grid-rows-1",
@@ -113,7 +113,7 @@ struct HeaderState {
 }
 
 #[component]
-fn GitHeader(viewed_count: ReadSignal<usize>, file_query: Signal<String>) -> Element {
+fn GitHeader(viewed_count: ReadSignal<usize>) -> Element {
     let state = use_context::<GitPageState>();
     let snapshot = state.snapshot;
     let controller = state.controller;
@@ -160,7 +160,6 @@ fn GitHeader(viewed_count: ReadSignal<usize>, file_query: Signal<String>) -> Ele
             commits_progress: header.commits_progress,
             viewed_count: viewed_count(),
             viewed_total: header.viewed_total,
-            file_query,
         }
     }
 }
@@ -385,7 +384,7 @@ fn GitDiffPane(navigation: SectionNavigation, viewed_count: Signal<usize>) -> El
         return rsx! {};
     };
     rsx! {
-        section { class: "min-h-0 min-w-0 overflow-hidden bg-transparent py-2.5 pr-2.5",
+        section { class: "min-h-0 min-w-0 overflow-hidden bg-transparent pb-2.5 pr-2.5",
             if selected_state.panel == GitPanel::Branches {
                 BranchDiffCard {
                     base_ref: selected_state.selected_branch_base,

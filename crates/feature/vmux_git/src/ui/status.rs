@@ -9,7 +9,7 @@ use vmux_ui::components::avatar::IdentityOrb;
 use vmux_ui::components::breadcrumb::{BreadcrumbOption, BreadcrumbSeparator};
 use vmux_ui::components::button::{Button, ButtonSize, ButtonVariant};
 use vmux_ui::components::dropdown::{Dropdown, DropdownOpenMode, DropdownPopup, DropdownTrigger};
-use vmux_ui::components::manager::{ManagerSearchAction, WorkspacePage};
+use vmux_ui::components::manager::WorkspacePage;
 use vmux_ui::components::page_address::{PageAddress, PageAddressContext};
 use vmux_ui::components::project_picker::{ProjectSelectPopup, ProjectSelectTrigger};
 use vmux_ui::hooks::{send, use_optimistic_map};
@@ -40,7 +40,6 @@ pub(super) fn RepositoryHeader(
     commits_progress: GitCatalogProgress,
     viewed_count: usize,
     viewed_total: u32,
-    file_query: Signal<String>,
 ) -> Element {
     let page = use_context::<GitPageState>();
     let observed_branch_collection = branch_collection;
@@ -154,7 +153,6 @@ pub(super) fn RepositoryHeader(
                 actions: rsx! {
                     RepositoryActions {
                         focused_panel,
-                        file_query,
                         viewed_count,
                         viewed_total,
                         checkout_required,
@@ -491,7 +489,6 @@ pub(super) fn RepositoryHeader(
 #[component]
 fn RepositoryActions(
     focused_panel: GitPanel,
-    file_query: Signal<String>,
     viewed_count: usize,
     viewed_total: u32,
     checkout_required: bool,
@@ -501,16 +498,7 @@ fn RepositoryActions(
     push_path: String,
     can_push: bool,
 ) -> Element {
-    let mut query = file_query;
     rsx! {
-        if focused_panel == GitPanel::Branches {
-            ManagerSearchAction {
-                value: query(),
-                placeholder: translate("common-filter"),
-                label: translate("git-files"),
-                onsearch: move |value| query.set(value),
-            }
-        }
         if focused_panel == GitPanel::Branches && viewed_total > 0 {
             span { class: "mr-1 shrink-0 text-[11px] tabular-nums text-muted-foreground",
                 "{viewed_count} / {viewed_total} "

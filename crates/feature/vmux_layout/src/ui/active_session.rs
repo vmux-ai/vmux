@@ -49,10 +49,10 @@ pub(crate) fn ActiveSessionPanel(session: ActiveSession) -> Element {
                     }
                 }
                 div { class: "w-0 min-w-0 flex-1 overflow-hidden",
-                    div { class: "block max-w-full truncate text-ui font-semibold text-foreground", title: "{title}", "{title}" }
+                    div { class: "truncate-fade block max-w-full text-ui font-semibold text-foreground", title: "{title}", "{title}" }
                     if let Some(task) = task.as_ref() {
                         if !task.description.trim().is_empty() {
-                            div { class: "truncate text-[10px] text-muted-foreground", title: "{task.description}", "{task.description}" }
+                            div { class: "truncate-fade text-[10px] text-muted-foreground", title: "{task.description}", "{task.description}" }
                         } else {
                             CurrentPagePath { url: page.url.clone() }
                         }
@@ -85,7 +85,7 @@ fn CurrentPagePath(url: String) -> Element {
         .unwrap_or_else(|| url.clone());
     rsx! {
         div { class: "mt-0.5 inline-flex max-w-full min-w-0 rounded-md bg-foreground/[0.035] px-1.5 py-0.5 text-[10px] text-muted-foreground", title: url,
-            span { class: "truncate-start min-w-0 font-mono", "{label}" }
+            span { class: "truncate-fade-start min-w-0 font-mono", "{label}" }
         }
     }
 }
@@ -103,10 +103,10 @@ fn ActiveSessionGit(boundary: TabBoundary) -> Element {
                 symbol: GitSymbol::Repository,
                 class: "size-3.5 shrink-0 text-muted-foreground".to_string(),
             }
-            span { class: "min-w-0 truncate font-medium text-foreground", title: "{repository}", "{repository}" }
+            span { class: "truncate-fade min-w-0 font-medium text-foreground", title: "{repository}", "{repository}" }
             span { class: "shrink-0 text-xs text-muted-foreground/45", "›" }
             LineIconView { icon: LineIcon::GitBranch, class: "size-3.5 shrink-0 text-muted-foreground".to_string() }
-            span { class: "min-w-0 truncate font-mono text-foreground/85", "{boundary.branch}" }
+            span { class: "truncate-fade min-w-0 font-mono text-foreground/85", title: "{boundary.branch}", "{boundary.branch}" }
         }
     }
 }
@@ -212,7 +212,7 @@ fn ActiveWorkspaceProjectTree(project: ActiveWorkspaceProject, pane_id: u64) -> 
                     if branch_choices.is_empty() {
                         div { class: "flex h-8 w-full min-w-0 items-center gap-2 rounded px-2 transition-colors hover:bg-foreground/[0.04] @max-[12rem]:px-1",
                             LineIconView { icon: LineIcon::GitBranch, class: "size-3.5 shrink-0 text-muted-foreground".to_string() }
-                            span { class: "min-w-0 flex-1 truncate font-mono text-[10px] text-foreground/85", "{selected_branch}" }
+                            span { class: "truncate-fade min-w-0 flex-1 font-mono text-[10px] text-foreground/85", title: "{selected_branch}", "{selected_branch}" }
                         }
                     } else {
                         LayoutDropdown {
@@ -222,6 +222,7 @@ fn ActiveWorkspaceProjectTree(project: ActiveWorkspaceProject, pane_id: u64) -> 
                             on_dismiss: move |_| choosing_branch.set(false),
                             SheetSelectorRow {
                                 label: current_branch_label.clone(),
+                                title: current_branch_label.clone(),
                                 open: choosing_branch(),
                                 label_class: "font-mono font-normal".to_string(),
                                 leading: rsx! { LineIconView {

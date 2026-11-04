@@ -594,6 +594,9 @@ Closing or remounting a page releases the slot. Hiding the window header leaves 
 working area available. The editor's typed trail still validates its owning surface, document
 revision, and URL. Path overflow collapses whole directories using measured widths and keeps the
 filename intact. Search sits at the end of the trail and Checkout beside the selected branch.
+Git's branch-file filter sits above its file tree, with page-top spacing shared by the tree and
+diff. Side-sheet cards keep a gutter on both sides; long titles and branch labels fade at the edge,
+and paths retain their filename with a leading fade. Hover exposes the full label.
 Code bookmarks resolve their directory from the active worktree, owning project, or cwd and open
 its README or entry file; directory favicons identify the Code page. Layout and address state flush before native
 presentation in the same frame; the final flush retains updates arriving later.
