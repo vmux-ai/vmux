@@ -146,7 +146,7 @@ impl ProcessSampler {
             }
         }
 
-        let now = unsafe { libc::mach_absolute_time() };
+        let now = Instant::now();
         let mut samples = HashMap::new();
         let mut local = Vec::new();
         let mut stale = Vec::new();
@@ -224,13 +224,13 @@ impl MacLocalProcess {
 #[cfg(target_os = "macos")]
 struct ProcessCounter {
     started_at: u64,
-    sampled_at: u64,
+    sampled_at: Instant,
     cpu_time: u64,
 }
 
 #[cfg(target_os = "macos")]
 impl ProcessCounter {
-    fn new(started_at: u64, sampled_at: u64, cpu_time: u64) -> Self {
+    fn new(started_at: u64, sampled_at: Instant, cpu_time: u64) -> Self {
         Self {
             started_at,
             sampled_at,
@@ -238,19 +238,19 @@ impl ProcessCounter {
         }
     }
 
-    fn update(&mut self, started_at: u64, sampled_at: u64, cpu_time: u64) -> f32 {
+    fn update(&mut self, started_at: u64, sampled_at: Instant, cpu_time: u64) -> f32 {
         if self.started_at != started_at {
             *self = Self::new(started_at, sampled_at, cpu_time);
             return 0.0;
         }
-        let elapsed = sampled_at.saturating_sub(self.sampled_at);
+        let elapsed = sampled_at.saturating_duration_since(self.sampled_at);
         let used = cpu_time.saturating_sub(self.cpu_time);
         self.sampled_at = sampled_at;
         self.cpu_time = cpu_time;
-        if elapsed == 0 {
+        if elapsed.is_zero() {
             return 0.0;
         }
-        used as f32 * 100.0 / elapsed as f32
+        used as f32 * 100.0 / elapsed.as_nanos() as f32
     }
 }
 
@@ -606,10 +606,21 @@ mod tests {
 
     #[cfg(target_os = "macos")]
     #[test]
-    fn process_counter_uses_cumulative_cpu_delta() {
-        let mut counter = ProcessCounter::new(10, 100, 20);
-        assert_eq!(counter.update(10, 200, 70), 50.0);
-        assert_eq!(counter.update(11, 300, 90), 0.0);
+    fn process_counter_compares_cpu_nanoseconds_to_elapsed_nanoseconds() {
+        let now = Instant::now();
+        let mut counter = ProcessCounter::new(10, now, 500_000_000);
+        assert_eq!(
+            counter.update(10, now + Duration::from_secs(1), 1_000_000_000),
+            50.0
+        );
+        assert_eq!(
+            counter.update(10, now + Duration::from_secs(3), 5_000_000_000),
+            200.0
+        );
+        assert_eq!(
+            counter.update(11, now + Duration::from_secs(4), 100_000_000),
+            0.0
+        );
     }
 
     #[cfg(target_os = "macos")]

@@ -1186,6 +1186,8 @@ APIs; these are facets of one service boundary rather than a separate generic cl
 Persistent processes and their query runtime belong to this service boundary. Terminal pages
 render and control those processes, but the service names and exposes process operations without
 depending on terminal page concepts.
+macOS process CPU percentages compare cumulative CPU nanoseconds with elapsed monotonic time
+converted to nanoseconds; raw Mach clock ticks are not the same unit.
 
 The CLI uses Clap only to parse argv. Feature crates contribute command metadata through local RON
 manifests and own the typed request components and systems that execute those commands;
