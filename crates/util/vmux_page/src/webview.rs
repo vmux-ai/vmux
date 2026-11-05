@@ -181,6 +181,19 @@ impl WebView {
         self.dom.navigation_revision().get()
     }
 
+    pub fn reload(&self) -> bool {
+        match self.webview.reload() {
+            Ok(()) => true,
+            Err(error) => {
+                error!(
+                    "vmux_page: reload failed for {}: {error}",
+                    self.page.get().url
+                );
+                false
+            }
+        }
+    }
+
     pub fn set_url(&self, url: &str) {
         self.outbox.set_page(url);
     }

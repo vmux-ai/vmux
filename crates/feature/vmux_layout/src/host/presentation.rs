@@ -56,6 +56,22 @@ pub struct PresentationSettleSet;
 #[derive(SystemSet, Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct PresentationFlushSet;
 
+#[derive(SystemSet, Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum NativePresentationSet {
+    Place,
+    Settle,
+    Sync,
+    Finalize,
+}
+
+#[derive(Message, Clone, Copy)]
+pub struct NativeSurfaceReused {
+    pub surface: Entity,
+}
+
+#[derive(Message, Clone, Copy)]
+pub struct NativeSelectionCommitted;
+
 impl Plugin for PresentationPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<DeadlineScheduler>()
@@ -70,6 +86,18 @@ impl Plugin for PresentationPlugin {
             .add_message::<StackInPaneChosen>()
             .add_message::<RestoreKeyboardToStack>()
             .add_message::<FocusChanged>()
+            .add_message::<NativeSurfaceReused>()
+            .add_message::<NativeSelectionCommitted>()
+            .configure_sets(
+                PostUpdate,
+                (
+                    NativePresentationSet::Place,
+                    NativePresentationSet::Settle,
+                    NativePresentationSet::Sync,
+                    NativePresentationSet::Finalize,
+                )
+                    .chain(),
+            )
             .add_observer(wake)
             .add_systems(
                 First,
@@ -105,6 +133,18 @@ impl Plugin for PresentationPlugin {
                     .after(PresentationFlushSet)
                     .before(LayoutSystems::Layout)
                     .run_if(projection_changed),
+            )
+            .add_systems(
+                PostUpdate,
+                (
+                    settle_native,
+                    bevy::ecs::schedule::ApplyDeferred,
+                    visibility,
+                    bevy::ecs::schedule::ApplyDeferred,
+                )
+                    .chain()
+                    .in_set(NativePresentationSet::Settle)
+                    .run_if(on_message::<NativeSurfaceReused>),
             );
     }
 }
@@ -143,6 +183,9 @@ fn animate_frames(
         let target = *panes.get(parent.parent()).unwrap_or(computed);
         let owner = DeadlineOwner::StackAnimation(stack);
         if target.is_empty() {
+            if previous.is_some_and(|previous| previous.0.is_empty()) && running.is_none() {
+                continue;
+            }
             commands
                 .entity(stack)
                 .insert(StackRect(target))
@@ -151,7 +194,7 @@ fn animate_frames(
             continue;
         }
         let window = hierarchy.get(stack);
-        let direct = previous.is_none()
+        let direct = previous.is_none_or(|previous| previous.0.is_empty())
             || window.is_some_and(|window| {
                 toggling.contains(window)
                     || finished_windows.contains(&window)
@@ -799,6 +842,38 @@ fn retire(retired: Query<Entity, With<Retired>>, mut commands: Commands) {
     }
 }
 
+fn settle_native(
+    mut reused: MessageReader<NativeSurfaceReused>,
+    pending: Query<(Entity, &Transition, Has<Active>)>,
+    retiring: Query<(), With<Retiring>>,
+    readiness: PresentationReadiness,
+    mut committed: MessageWriter<NativeSelectionCommitted>,
+    mut commands: Commands,
+) {
+    let mut surfaces = HashSet::new();
+    for event in reused.read() {
+        surfaces.insert(event.surface);
+    }
+    let mut changed = false;
+    for (incoming, transition, active) in &pending {
+        if !active
+            || !transition.cancelable()
+            || transition.timed_out()
+            || retiring.contains(transition.outgoing())
+            || pending.contains(transition.outgoing())
+            || !readiness.descendant(incoming)
+            || readiness.reused_branch(incoming, &surfaces) != Some(true)
+        {
+            continue;
+        }
+        commands.entity(incoming).try_remove::<Transition>();
+        changed = true;
+    }
+    if changed {
+        committed.write(NativeSelectionCommitted);
+    }
+}
+
 #[derive(bevy::ecs::system::SystemParam)]
 struct PresentationReadiness<'w, 's> {
     children: Query<'w, 's, &'static Children>,
@@ -850,6 +925,36 @@ struct PresentationReadiness<'w, 's> {
 }
 
 impl PresentationReadiness<'_, '_> {
+    fn reused_branch(&self, entity: Entity, reused: &HashSet<Entity>) -> Option<bool> {
+        if self.stacks.contains(entity) {
+            if !self.active_stacks.contains(entity) {
+                return None;
+            }
+            let Ok((current, _)) = self.slots.get(entity) else {
+                return Some(false);
+            };
+            let Some(surface) = current.surface() else {
+                return Some(false);
+            };
+            return Some(self.hosted_ready.contains(surface) && reused.contains(&surface));
+        }
+        if self.surfaces.contains(entity) {
+            return Some(self.hosted_ready.contains(entity) && reused.contains(&entity));
+        }
+        let children = self.children.get(entity).ok()?;
+        let mut found = false;
+        for child in children.iter() {
+            let Some(ready) = self.reused_branch(child, reused) else {
+                continue;
+            };
+            found = true;
+            if !ready {
+                return Some(false);
+            }
+        }
+        found.then_some(true)
+    }
+
     fn descendant(&self, entity: Entity) -> bool {
         if self.stacks.contains(entity) {
             return self.stack(entity);
@@ -1047,10 +1152,203 @@ fn focus_chosen_stack_in_pane(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use bevy::ecs::message::Messages;
     use bevy::ecs::system::RunSystemOnce;
 
+    #[derive(Component)]
+    struct NativeReuseCandidate;
+
+    fn present_native_fixture(
+        candidates: Query<Entity, With<NativeReuseCandidate>>,
+        mut reused: MessageWriter<NativeSurfaceReused>,
+        mut commands: Commands,
+    ) {
+        for surface in &candidates {
+            commands
+                .entity(surface)
+                .insert((PagePresented, SurfacePresentationReady))
+                .remove::<NativeReuseCandidate>();
+            reused.write(NativeSurfaceReused { surface });
+        }
+    }
+
+    struct NativeSelectionFixture {
+        app: App,
+        incoming: Entity,
+        outgoing: Entity,
+        surfaces: Vec<Entity>,
+    }
+
+    impl NativeSelectionFixture {
+        fn new(tab: bool, proofs: &[bool]) -> Self {
+            let mut app = App::new();
+            app.add_plugins((MinimalPlugins, PresentationPlugin))
+                .add_systems(
+                    PostUpdate,
+                    present_native_fixture
+                        .in_set(NativePresentationSet::Place)
+                        .after(LayoutSystems::Layout),
+                );
+            let (incoming, outgoing) = if tab {
+                let outgoing = app.world_mut().spawn(Tab::default()).id();
+                let incoming = app
+                    .world_mut()
+                    .spawn((Tab::default(), Active, Transition::retain(outgoing)))
+                    .id();
+                (incoming, outgoing)
+            } else {
+                let outgoing = app.world_mut().spawn(Stack::default()).id();
+                let incoming = app
+                    .world_mut()
+                    .spawn((Stack::default(), Active, Transition::retain(outgoing)))
+                    .id();
+                (incoming, outgoing)
+            };
+            let mut surfaces = Vec::new();
+            for proof in proofs {
+                let stack = if tab {
+                    let pane = app
+                        .world_mut()
+                        .spawn((crate::pane::Pane, ChildOf(incoming)))
+                        .id();
+                    app.world_mut()
+                        .spawn((Stack::default(), Active, ChildOf(pane)))
+                        .id()
+                } else {
+                    incoming
+                };
+                let surface = app
+                    .world_mut()
+                    .spawn((Browser, HostsPage, PageReady, ChildOf(stack)))
+                    .id();
+                if *proof {
+                    app.world_mut()
+                        .entity_mut(surface)
+                        .insert(NativeReuseCandidate);
+                } else {
+                    app.world_mut()
+                        .entity_mut(surface)
+                        .insert((PagePresented, SurfacePresentationReady));
+                }
+                app.world_mut()
+                    .entity_mut(stack)
+                    .insert(crate::page_slot::Current::new(
+                        Some(surface),
+                        vmux_ecs::PageMetadata::default(),
+                    ));
+                surfaces.push(surface);
+            }
+            Self {
+                app,
+                incoming,
+                outgoing,
+                surfaces,
+            }
+        }
+    }
+
     #[test]
-    fn hidden_panes_clear_presented_rectangles_and_running_motion() {
+    fn cached_native_selection_commits_after_placement_in_the_same_frame() {
+        for tab in [false, true] {
+            let mut fixture = NativeSelectionFixture::new(tab, &[true]);
+
+            fixture.app.update();
+
+            assert!(
+                fixture
+                    .app
+                    .world()
+                    .get::<Transition>(fixture.incoming)
+                    .is_none()
+            );
+            assert_eq!(
+                fixture.app.world().get::<Layer>(fixture.incoming),
+                Some(&Layer::Current)
+            );
+            assert_eq!(
+                fixture.app.world().get::<Layer>(fixture.outgoing),
+                Some(&Layer::Hidden)
+            );
+            assert_eq!(
+                fixture
+                    .app
+                    .world_mut()
+                    .resource_mut::<Messages<NativeSelectionCommitted>>()
+                    .drain()
+                    .count(),
+                1
+            );
+        }
+    }
+
+    #[test]
+    fn native_tab_selection_waits_for_every_active_stack_to_be_reused() {
+        let mut fixture = NativeSelectionFixture::new(true, &[true, false]);
+
+        fixture.app.update();
+
+        assert!(
+            fixture
+                .app
+                .world()
+                .get::<Transition>(fixture.incoming)
+                .is_some()
+        );
+        assert_eq!(
+            fixture.app.world().get::<Layer>(fixture.outgoing),
+            Some(&Layer::Retained)
+        );
+    }
+
+    #[test]
+    fn native_reuse_cannot_release_a_blocked_surface_or_a_retiring_transition() {
+        for retiring in [false, true] {
+            let mut fixture = NativeSelectionFixture::new(false, &[true]);
+            if retiring {
+                fixture
+                    .app
+                    .world_mut()
+                    .entity_mut(fixture.incoming)
+                    .insert(Transition::retiring(
+                        fixture.outgoing,
+                        fixture.outgoing,
+                        None,
+                    ));
+                fixture
+                    .app
+                    .world_mut()
+                    .entity_mut(fixture.outgoing)
+                    .insert(Retiring);
+            } else {
+                fixture
+                    .app
+                    .world_mut()
+                    .entity_mut(fixture.surfaces[0])
+                    .insert(crate::hosted_page::SurfaceBlocked);
+            }
+
+            fixture.app.update();
+
+            assert!(
+                fixture
+                    .app
+                    .world()
+                    .get::<Transition>(fixture.incoming)
+                    .is_some()
+            );
+            assert_eq!(
+                fixture.app.world().get::<Layer>(fixture.incoming),
+                Some(&Layer::Incoming)
+            );
+            assert_eq!(
+                fixture.app.world().get::<Layer>(fixture.outgoing),
+                Some(&Layer::Retained)
+            );
+        }
+    }
+
+    #[test]
+    fn hidden_panes_clear_motion_and_restore_their_rectangle_immediately() {
         let mut app = App::new();
         app.add_plugins((MinimalPlugins, PresentationPlugin));
         let node = ComputedNode {
@@ -1075,6 +1373,12 @@ mod tests {
         });
         app.update();
         assert!(app.world().get::<StackRect>(stack).unwrap().0.is_empty());
+        assert!(app.world().get::<RectMotion>(stack).is_none());
+        app.world_mut().entity_mut(pane).insert(node);
+        app.update();
+        let presented = app.world().get::<StackRect>(stack).unwrap().0;
+        assert_eq!(presented.center, node.center);
+        assert_eq!(presented.size, node.size);
         assert!(app.world().get::<RectMotion>(stack).is_none());
     }
 

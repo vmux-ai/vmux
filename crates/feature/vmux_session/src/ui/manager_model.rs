@@ -19,7 +19,7 @@ impl CatalogDisplay {
         mut incoming: CatalogSnapshot,
         loading: bool,
     ) -> Option<CatalogSnapshot> {
-        if loading {
+        if loading && incoming.sessions.is_empty() {
             return self.settled.clone();
         }
         if let Some(previous) = &self.settled {
@@ -33,6 +33,8 @@ impl CatalogDisplay {
             for session in &previous.sessions {
                 if let Some(updated) = rows.remove(&session.id) {
                     incoming.sessions.push(updated);
+                } else if loading {
+                    incoming.sessions.push(session.clone());
                 }
             }
             for id in order {
@@ -869,8 +871,9 @@ mod tests {
     use super::*;
 
     #[test]
-    fn discovery_waits_for_completion_and_appends_without_reordering_visible_rows() {
+    fn discovery_shows_ready_rows_and_appends_without_reordering_them() {
         let mut display = CatalogDisplay::default();
+        assert!(display.update(CatalogSnapshot::default(), true).is_none());
         let mut initial = CatalogSnapshot::default();
         for id in ["a", "b"] {
             initial.sessions.push(SessionSummary {
@@ -878,8 +881,15 @@ mod tests {
                 ..Default::default()
             });
         }
-        assert!(display.update(initial.clone(), true).is_none());
-        display.update(initial, false).unwrap();
+        let initial = display.update(initial, true).unwrap();
+        assert_eq!(
+            initial
+                .sessions
+                .iter()
+                .map(|session| session.id.as_str())
+                .collect::<Vec<_>>(),
+            ["a", "b"]
+        );
         let mut refreshed = CatalogSnapshot::default();
         for id in ["c", "b", "a"] {
             refreshed.sessions.push(SessionSummary {
@@ -894,7 +904,7 @@ mod tests {
                 .iter()
                 .map(|session| session.id.as_str())
                 .collect::<Vec<_>>(),
-            ["a", "b"]
+            ["a", "b", "c"]
         );
         let complete = display.update(refreshed, false).unwrap();
         assert_eq!(
@@ -904,6 +914,32 @@ mod tests {
                 .map(|session| session.id.as_str())
                 .collect::<Vec<_>>(),
             ["a", "b", "c"]
+        );
+        let partial = CatalogSnapshot {
+            sessions: complete
+                .sessions
+                .into_iter()
+                .filter(|session| session.id != "a")
+                .collect(),
+            ..Default::default()
+        };
+        let pending = display.update(partial.clone(), true).unwrap();
+        assert_eq!(
+            pending
+                .sessions
+                .iter()
+                .map(|session| session.id.as_str())
+                .collect::<Vec<_>>(),
+            ["a", "b", "c"]
+        );
+        let complete = display.update(partial, false).unwrap();
+        assert_eq!(
+            complete
+                .sessions
+                .iter()
+                .map(|session| session.id.as_str())
+                .collect::<Vec<_>>(),
+            ["b", "c"]
         );
     }
 }

@@ -29,7 +29,7 @@ pub use model::{
     StageChangeRequest, StageChangedAt, StageDefinition, StageId,
 };
 pub use route::Route;
-pub use run_state::{AgentTurnMeta, RunState};
+pub use run_state::{AgentTurnMeta, Failure, RunState};
 pub use session::{
     AgentConversationTitle, ApprovalPolicy, PromptQueue, QueuedPrompt, TitlePending,
     TranscriptLoading,

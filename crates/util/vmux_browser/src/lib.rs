@@ -11,7 +11,7 @@ pub use host::AgentBrowserResolve;
 pub use host::WebviewLoadCompleted;
 pub use host_focus::HostFocusIntent;
 pub use infrastructure::{InfrastructureWebview, PopupWebview, RetiredInfrastructureWebview};
-pub use native_bridge::NativeBridge;
+pub use native_bridge::{NativeBridge, NativeHistoryPhase};
 #[cfg(target_os = "macos")]
 pub use native_bridge::{queue_command_bar_pointer_button, queue_command_bar_pointer_move};
 pub use native_layout::NativeLayout;
@@ -43,6 +43,7 @@ mod appearance;
 mod command;
 mod dom_snapshot;
 mod frame_rate;
+mod history_swipe;
 mod host;
 mod host_focus;
 mod infrastructure;
@@ -192,6 +193,7 @@ impl Plugin for BrowserPlugin {
                 appearance::AppearancePlugin,
                 page_life::PageLifePlugin,
                 command::CommandPlugin,
+                history_swipe::HistorySwipePlugin,
                 frame_rate::FrameRatePlugin,
                 input::InputPlugin,
                 navigation::NavigationPlugin,

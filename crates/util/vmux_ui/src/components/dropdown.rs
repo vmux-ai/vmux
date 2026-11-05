@@ -5,6 +5,7 @@ use dioxus_primitives::dioxus_attributes::attributes;
 use dioxus_primitives::merge_attributes;
 
 use crate::cn::cn;
+use crate::components::popup::Surface;
 use crate::icon::{LineIcon, LineIconView};
 
 const DROPDOWN_CONNECTION_WATCHER: &str = r#"
@@ -133,6 +134,7 @@ dioxus.send(true);
 "#;
 
 const DROPDOWN_POPUP_SCRIPT: &str = r#"
+__VMUX_POPUP_RUNTIME__
 __VMUX_DROPDOWN_CONNECTION_WATCHER__
 const id = '__VMUX_DROPDOWN_POPUP__';
 const entries = globalThis.__vmuxDropdownPopupEntries ??= new Map();
@@ -147,64 +149,12 @@ if (popup && root) {
   }
   let active = true;
   let frame = 0;
-  const align = '__VMUX_DROPDOWN_ALIGN__';
-  const placement = '__VMUX_DROPDOWN_PLACEMENT__';
-  const matchWidth = __VMUX_DROPDOWN_MATCH_WIDTH__;
-  const inset = __VMUX_DROPDOWN_INSET__;
-  const gap = __VMUX_DROPDOWN_GAP__;
-  const margin = 6;
-  const baseWidth = popup.style.width;
-  const baseMinWidth = popup.style.minWidth;
-  const baseMaxHeight = popup.style.maxHeight;
-  const baseOverflowY = popup.style.overflowY;
   const anchor = root.querySelector('[data-vmux-dropdown-trigger]') ?? root;
   let unwatch = () => {};
   const place = () => {
     frame = 0;
-    if (!active || !popup.isConnected || !root.isConnected || !anchor.isConnected) return;
-    if (!popup.matches(':popover-open')) return;
-    const anchorBounds = anchor.getBoundingClientRect();
-    popup.style.width = baseWidth;
-    popup.style.minWidth = baseMinWidth;
-    popup.style.maxHeight = baseMaxHeight;
-    popup.style.overflowY = baseOverflowY;
-    if (matchWidth) popup.style.width = `${Math.max(0, anchorBounds.width - inset * 2)}px`;
-    const availableWidth = Math.max(0, window.innerWidth - margin * 2);
-    const availableHeight = Math.max(0, window.innerHeight - margin * 2);
-    popup.style.maxWidth = `${availableWidth}px`;
-    let bounds = popup.getBoundingClientRect();
-    if (bounds.width > availableWidth) {
-      popup.style.minWidth = '0px';
-      popup.style.width = `${availableWidth}px`;
-      bounds = popup.getBoundingClientRect();
-    }
-    if (bounds.height > availableHeight) {
-      popup.style.maxHeight = `${availableHeight}px`;
-      popup.style.overflowY = 'auto';
-      bounds = popup.getBoundingClientRect();
-    }
-    const width = bounds.width;
-    const height = bounds.height;
-    let x = align === 'end'
-      ? anchorBounds.right - inset - width
-      : anchorBounds.left + inset;
-    let y = placement === 'top'
-      ? anchorBounds.top - gap - height
-      : anchorBounds.bottom + gap;
-    const below = anchorBounds.bottom + gap;
-    const above = anchorBounds.top - gap - height;
-    if (placement === 'bottom' && y + height > window.innerHeight - margin && above >= margin) {
-      y = above;
-    } else if (placement === 'top' && y < margin && below + height <= window.innerHeight - margin) {
-      y = below;
-    }
-    x = Math.min(Math.max(margin, x), Math.max(margin, window.innerWidth - width - margin));
-    y = Math.min(Math.max(margin, y), Math.max(margin, window.innerHeight - height - margin));
-    popup.style.left = `${x}px`;
-    popup.style.top = `${y}px`;
-    popup.style.right = 'auto';
-    popup.style.bottom = 'auto';
-    popup.style.visibility = 'visible';
+    if (!active || !popup.isConnected || !popup.matches(':popover-open')) return;
+    globalThis.__vmuxPopupPresentation.place(popup);
   };
   const schedule = () => {
     if (!active || frame) return;
@@ -502,28 +452,14 @@ impl DropdownPopupOwner {
         format!("vmux-dropdown-popup-{}", self.0)
     }
 
-    fn install_script(
-        self,
-        align: DropdownAlign,
-        placement: DropdownPlacement,
-        match_width: bool,
-        horizontal_inset: f64,
-        gap: f64,
-    ) -> String {
+    fn install_script(self) -> String {
         DROPDOWN_POPUP_SCRIPT
+            .replace("__VMUX_POPUP_RUNTIME__", &Surface::runtime())
             .replace(
                 "__VMUX_DROPDOWN_CONNECTION_WATCHER__",
                 DROPDOWN_CONNECTION_WATCHER,
             )
             .replace("__VMUX_DROPDOWN_POPUP__", &self.id())
-            .replace("__VMUX_DROPDOWN_ALIGN__", align.as_str())
-            .replace("__VMUX_DROPDOWN_PLACEMENT__", placement.as_str())
-            .replace(
-                "__VMUX_DROPDOWN_MATCH_WIDTH__",
-                if match_width { "true" } else { "false" },
-            )
-            .replace("__VMUX_DROPDOWN_INSET__", &horizontal_inset.to_string())
-            .replace("__VMUX_DROPDOWN_GAP__", &gap.to_string())
     }
 
     fn dismiss_script(self) -> String {
@@ -533,6 +469,7 @@ __VMUX_DROPDOWN_CONNECTION_WATCHER__
 const id = '{}';
 const popup = document.getElementById(id);
 if (popup) {{
+  if (!popup.matches(':popover-open')) dioxus.send('dismissed');
   const root = popup.closest('[data-vmux-dropdown-root]');
   const manual = popup.getAttribute('popover') === 'manual';
   const entries = globalThis.__vmuxDropdownToggleEntries ??= new Map();
@@ -586,22 +523,9 @@ if (popup) {{
         )
     }
 
-    fn mount(
-        self,
-        align: DropdownAlign,
-        placement: DropdownPlacement,
-        match_width: bool,
-        horizontal_inset: f64,
-        gap: f64,
-    ) {
+    fn mount(self) {
         crate::transport::Host::show_dropdown_popover(&self.id());
-        crate::transport::Host::run_script(self.install_script(
-            align,
-            placement,
-            match_width,
-            horizontal_inset,
-            gap,
-        ));
+        crate::transport::Host::run_script(self.install_script());
     }
 }
 
@@ -715,25 +639,26 @@ pub fn DropdownPopup(
     let owner = DropdownPopupOwner(current_scope_id().0);
     let context = use_context::<DropdownContext>();
     let duration = crate::motion::Motion::CONTENT_MS;
+    let animation = Surface::ENTER;
     let base = attributes!(div {
         id: owner.id(),
         popover: if context.manual { "manual" } else { "auto" },
-        class: "invisible fixed left-0 top-0 z-[1000] isolate m-0 origin-top rounded-lg bg-popover shadow-[0_12px_32px_rgba(0,0,0,0.28)] [backdrop-filter:none] [-webkit-backdrop-filter:none] animate-[dx-fade-in_var(--vmux-motion-ms)_ease-out_forwards] will-change-opacity motion-reduce:animate-none",
+        class: "invisible fixed left-0 top-0 z-[1000] isolate m-0 origin-top rounded-lg bg-popover shadow-[0_12px_32px_rgba(0,0,0,0.28)] [backdrop-filter:none] [-webkit-backdrop-filter:none] {animation} will-change-opacity",
         style: "--vmux-motion-ms:{duration}ms;",
         "data-vmux-dropdown-popup": "",
+        "data-vmux-popup-kind": Surface::Dropdown.kind(),
+        "data-vmux-popup-align": align.as_str(),
+        "data-vmux-popup-placement": placement.as_str(),
+        "data-vmux-popup-match-width": if match_width { "true" } else { "false" },
+        "data-vmux-popup-inset": "{horizontal_inset}",
+        "data-vmux-popup-gap": "{gap}",
     });
     let merged = merge_attributes(vec![base, attributes]);
     rsx! {
         div {
             onmounted: move |_| {
                 let mut eval = document::eval(&owner.dismiss_script());
-                owner.mount(
-                    align,
-                    placement,
-                    match_width,
-                    horizontal_inset,
-                    gap,
-                );
+                owner.mount();
                 spawn(async move {
                     if eval
                         .recv::<String>()

@@ -20,6 +20,9 @@ pub(super) struct FocusPlugin;
 
 impl Plugin for FocusPlugin {
     fn build(&self, app: &mut App) {
+        if !app.is_plugin_added::<vmux_ecs::PrimitivesPlugin>() {
+            app.add_plugins(vmux_ecs::PrimitivesPlugin);
+        }
         app.add_message::<FocusRequest>()
             .add_systems(Update, select.in_set(LayoutRequestSet::Handle))
             .add_systems(PostUpdate, warp_cursor_to_active);
@@ -118,11 +121,10 @@ fn select(
                 target
             }
         };
-        commands.entity(target).insert((
-            LastActivatedAt::now(),
-            PaneHoverCooldown::start(),
-            PendingCursorWarp,
-        ));
+        commands.trigger(vmux_ecs::ActivateRequest { entity: target });
+        commands
+            .entity(target)
+            .insert((PaneHoverCooldown::start(), PendingCursorWarp));
     }
 }
 
@@ -303,9 +305,8 @@ mod tests {
     impl FocusFixture {
         fn selection() -> Self {
             let mut app = App::new();
-            app.add_plugins(MinimalPlugins)
-                .add_message::<FocusRequest>()
-                .add_systems(Update, select);
+            app.add_plugins((MinimalPlugins, FocusPlugin))
+                .insert_resource(ButtonInput::<KeyCode>::default());
             app.world_mut().spawn(PrimaryWindow);
             Self { app }
         }

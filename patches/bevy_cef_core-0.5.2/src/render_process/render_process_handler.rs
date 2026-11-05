@@ -25,10 +25,12 @@ if (!cef) cef = {};
   native function __cef_emit();
   native function __cef_listen();
   native function __cef_bin_emit();
+  native function __cef_history_swipe();
   cef.emit = __cef_emit;
   cef.listen = __cef_listen;
   cef.binEmit = __cef_bin_emit;
   cef.binListen = __cef_listen;
+  cef.historySwipe = __cef_history_swipe;
 })();
 "#;
 
@@ -54,6 +56,7 @@ pub const BIN_IPC_EPOCH_KEY: &str = "bin_ipc_epoch";
 
 pub const PROCESS_MESSAGE_HOST_EMIT: &str = "host-emit";
 pub const PROCESS_MESSAGE_JS_EMIT: &str = "js-emit";
+pub const PROCESS_MESSAGE_HISTORY_SWIPE: &str = "history-swipe";
 pub const PROCESS_MESSAGE_BIN_HOST_EMIT: &str = "bin-host-emit";
 pub const PROCESS_MESSAGE_BIN_JS_EMIT: &str = "bin-js-emit";
 pub const PROCESS_MESSAGE_BIN_DOCUMENT_CONTEXT: &str = "bin-document-context";

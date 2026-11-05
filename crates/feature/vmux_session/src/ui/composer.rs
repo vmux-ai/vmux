@@ -97,6 +97,10 @@ fn ComposerFooter(chat: Chat) -> Element {
     let context = chat.slash.context();
     let transcript = chat.transcript.current();
     let queued = chat.queue.queued();
+    let mut status = chat.status();
+    if status == "errored" && vmux_session::Failure(&chat.run.error()).in_use() {
+        status = "in_use".to_string();
+    }
     rsx! {
         ComposerBar {
             opened: chat.menu.opened(),
@@ -109,7 +113,7 @@ fn ComposerFooter(chat: Chat) -> Element {
             workspace_known: context.workspace_selected,
             uncommitted: 0,
             ahead: 0,
-            status: chat.status(),
+            status,
             active_subagents: transcript.active_subagents as usize,
             active_tasks: transcript.active_tasks as usize,
             queued_count: queued.len(),

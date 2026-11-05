@@ -174,22 +174,13 @@ pub(super) fn BranchesCard(
                             onfileselect,
                         }
                     }
-                    if files_loading {
-                        div { class: "flex flex-col gap-2 px-2.5 py-2",
-                            for width in ["w-10/12", "w-8/12"] {
-                                Skeleton { class: "h-4 {width} bg-foreground/[0.045]" }
-                            }
-                        }
-                    } else if files_has_more {
+                    if !files_loading && files_has_more {
                         div {
                             key: "branch-files-next-{visible_file_count}",
-                            class: "flex flex-col gap-2 px-2.5 py-2",
+                            class: "h-1",
                             onvisible: move |_| {
                                 let _ = send(&GitBranchFilesNextRequest);
                             },
-                            for width in ["w-10/12", "w-8/12", "w-11/12"] {
-                                Skeleton { class: "h-4 {width} bg-foreground/[0.045]" }
-                            }
                         }
                     }
                 }

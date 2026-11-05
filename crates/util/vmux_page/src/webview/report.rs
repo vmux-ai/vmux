@@ -3,6 +3,7 @@ use std::rc::Rc;
 
 use tracing::{error, info, warn};
 
+use crate::HistoryDirection;
 use crate::page::Page;
 use crate::webview::embed::{LifecycleSink, LifecycleUpdate, Outbox, Wake};
 use crate::webview::measurement::{Measured, PendingReads};
@@ -25,6 +26,7 @@ enum PageReport<'a> {
     Title(&'a str),
     Favicon(&'a str),
     Interaction,
+    History(HistoryDirection),
     Emitted(&'a str),
 }
 
@@ -66,6 +68,11 @@ impl<'a> From<&'a str> for PageReport<'a> {
         }
         if body == "interaction:" {
             return Self::Interaction;
+        }
+        if let Some(value) = body.strip_prefix("history:")
+            && let Some(direction) = HistoryDirection::parse(value)
+        {
+            return Self::History(direction);
         }
 
         Self::Emitted(body)
@@ -154,6 +161,9 @@ impl PageMessage {
             }
             PageReport::Favicon(href) => self.outbox.set_favicon(href),
             PageReport::Interaction => self.lifecycle.update(LifecycleUpdate::PageInteracted),
+            PageReport::History(direction) => self
+                .lifecycle
+                .update(LifecycleUpdate::HistoryRequested(direction)),
             PageReport::Emitted(payload) => self.emit(payload, epoch),
         }
     }
@@ -254,6 +264,17 @@ mod tests {
         fn update(&self, _update: LifecycleUpdate) {}
     }
 
+    #[derive(Default)]
+    struct HistoryProbe {
+        updates: RefCell<Vec<LifecycleUpdate>>,
+    }
+
+    impl LifecycleSink for HistoryProbe {
+        fn update(&self, update: LifecycleUpdate) {
+            self.updates.borrow_mut().push(update);
+        }
+    }
+
     #[component]
     fn TestPage() -> Element {
         rsx! {}
@@ -279,6 +300,7 @@ mod tests {
                 PageReport::Title(title) => format!("title {title}"),
                 PageReport::Favicon(href) => format!("favicon {href}"),
                 PageReport::Interaction => "interaction".to_string(),
+                PageReport::History(direction) => format!("history {direction:?}"),
                 PageReport::Emitted(payload) => format!("emitted {payload}"),
             }
         }
@@ -325,6 +347,38 @@ mod tests {
         assert_eq!(PageReportEnvelope::payload("3:6:AAAA", 7, 3), None);
         assert_eq!(PageReportEnvelope::payload("2:7:AAAA", 7, 3), None);
         assert_eq!(PageReportEnvelope::payload("AAAA", 7, 3), None);
+    }
+
+    #[test]
+    fn a_history_gesture_requires_the_current_document_and_interaction_epoch() {
+        let lifecycle = Rc::new(HistoryProbe::default());
+        let blocked = Rc::new(Cell::new(false));
+        let message = PageMessage::new(
+            Rc::new(Cell::new(&TEST_PAGE)),
+            Rc::new(RecordedOutbox::default()),
+            Rc::new(Cell::new(7)),
+            Rc::new(Cell::new(3)),
+            blocked.clone(),
+            PendingReads::new(lifecycle.clone()),
+            Rc::new(TestWake),
+            lifecycle.clone(),
+        );
+        message.receive("https://example.com/", "3:7:history:back");
+        message.receive("vmux://test/", "3:6:history:back");
+        message.receive("vmux://test/", "2:7:history:back");
+        message.receive("vmux://test/", "3:7:history:reload");
+        message.receive("vmux://test/", "3:7:history:back");
+        blocked.set(true);
+        message.receive("vmux://test/", "3:7:history:forward");
+        blocked.set(false);
+        message.receive("vmux://test/", "3:7:history:forward");
+        assert_eq!(
+            *lifecycle.updates.borrow(),
+            [
+                LifecycleUpdate::HistoryRequested(HistoryDirection::Back),
+                LifecycleUpdate::HistoryRequested(HistoryDirection::Forward),
+            ],
+        );
     }
 
     #[test]

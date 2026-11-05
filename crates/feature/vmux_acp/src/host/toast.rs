@@ -43,6 +43,9 @@ fn surface_errors(
             continue;
         }
         commands.entity(entity).insert(ErrorSurfaced);
+        if vmux_session::Failure(message).in_use() {
+            continue;
+        }
         writer.write(AgentToast {
             session_sid: session.0.clone(),
             level: ToastLevel::Error,
@@ -54,6 +57,26 @@ fn surface_errors(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn an_active_writer_refusal_does_not_emit_an_error_toast() {
+        let mut app = App::new();
+        app.add_message::<AgentToast>()
+            .add_systems(Update, surface_errors);
+        app.world_mut().spawn((
+            Session,
+            SessionId("busy".into()),
+            RunState::Errored("thread_active_writer".into()),
+        ));
+        app.update();
+        assert!(
+            app.world_mut()
+                .resource_mut::<Messages<AgentToast>>()
+                .drain()
+                .next()
+                .is_none()
+        );
+    }
 
     #[test]
     fn rkyv_roundtrip() {

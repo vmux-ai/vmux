@@ -1,6 +1,7 @@
 use std::cell::Cell;
 use std::rc::Rc;
 
+use crate::HistoryDirection;
 use vmux_ui::hooks::EventListenerError;
 
 pub struct Embedding {
@@ -29,6 +30,7 @@ pub enum LifecycleUpdate {
     ListenersCleared,
     DropdownOpened,
     PageInteracted,
+    HistoryRequested(HistoryDirection),
     MeasurementStarted,
     MeasurementFinished,
     MeasurementsCleared,

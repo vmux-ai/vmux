@@ -737,7 +737,7 @@ pub fn ManagerViewToggle(
                 title: list_label,
                 aria_pressed: view == ManagerView::List,
                 class: if view == ManagerView::List {
-                    "flex size-6 items-center justify-center rounded text-primary"
+                    "flex size-6 items-center justify-center rounded text-foreground"
                 } else {
                     "flex size-6 items-center justify-center rounded text-muted-foreground/60 transition-colors hover:bg-foreground/[0.05] hover:text-foreground"
                 },
@@ -750,7 +750,7 @@ pub fn ManagerViewToggle(
                 title: grid_label,
                 aria_pressed: view == ManagerView::Grid,
                 class: if view == ManagerView::Grid {
-                    "flex size-6 items-center justify-center rounded text-primary"
+                    "flex size-6 items-center justify-center rounded text-foreground"
                 } else {
                     "flex size-6 items-center justify-center rounded text-muted-foreground/60 transition-colors hover:bg-foreground/[0.05] hover:text-foreground"
                 },

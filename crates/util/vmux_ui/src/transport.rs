@@ -152,10 +152,6 @@ impl Host {
         let _ = Self::with_installed(|host| host.focus_element(id));
     }
 
-    pub(crate) fn show_element_popover(id: &str) {
-        let _ = Self::with_installed(|host| host.show_element_popover(id));
-    }
-
     pub(crate) fn show_dropdown_popover(id: &str) {
         let _ = Self::with_installed(|host| host.show_dropdown_popover(id));
     }

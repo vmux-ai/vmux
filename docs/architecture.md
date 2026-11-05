@@ -615,7 +615,8 @@ use `vmux_ui::motion::Motion`: 80 ms for feedback, 100 ms for content, and 120 m
 a 160 ms ceiling enforced at DOM animation transport boundaries. Reduced motion uses the same
 state changes without visual interpolation. Page replacement commits synchronously before its
 opacity and composer-position feedback; it does not wait for browser view-transition snapshots.
-Discrete tabs and search widths change immediately. Collapsible content may interpolate height
+Discrete tabs and search widths change immediately. A cached Stack returning from a hidden,
+zero-size frame restores its final rectangle immediately. Collapsible content may interpolate height
 within the shared layout budget. Cached pages remain usable during refresh;
 new data occupies a reserved skeleton region, and page replacement keeps the outgoing surface
 until the incoming snapshot paints. Tests exercise fresh input during motion, stale paint rejection,
@@ -625,6 +626,24 @@ keep their own hit targets and events.
 Address-path measurements live in an inert, invisible row outside normal layout, so hiding a
 directory never removes its width measurement or changes the available inline space. Zero-size
 notifications from detached surfaces and subpixel noise retain the previous layout.
+Dropdown, Select, and context-menu state belongs to their respective controls; their popup
+presentation shares `vmux_ui::components::popup::Surface`. The page interpreter raises, positions,
+and focuses new popovers in the mutation frame, before mounted callbacks. Menus start at 94%
+opacity and fade to full opacity in 100 ms; closing releases interaction immediately and retains
+an inert, identifier-free snapshot for an 80 ms fade. The snapshot retains typography and scroll
+offsets. New input can discard it, and reduced motion skips interpolation.
+Session view controls live in the page content above the list or board rather than its address.
+Activation stamps preserve operation order across shared ancestors even within one clock tick;
+stack navigation consumes a batch against one advancing cursor and excludes retiring targets.
+After layout and native placement, a completed surface with matching generation, navigation,
+bounds, and full native opacity can finalize selection, input ownership, and stacking in the same
+frame. New handoffs retain their existing readiness and animation conditions.
+Session rows use memoized repository lookup and group metadata; rendered Wry frames join the
+native pointer registry so native scrolling does not generate unnecessary layout wakes.
+History swipes use a shared horizontal-wheel recognizer that preserves scrollable ancestors.
+Source-bound requests reuse host history before browser history. The dedicated CEF gesture bridge
+keeps general-page IPC permissions unchanged; both backends require one matching, recent native
+wheel claim for the current surface, window, frame, and direction before moving history.
 Accepted lifecycle batches also carry the current document revision into paint state; an old
 mount notification discarded during an interaction-epoch change cannot leave the first paint
 waiting on revision zero.
@@ -685,8 +704,14 @@ on an incompatible version rather than loading a broken store.
 
 World persistence uses named type-registry domains. A persisted component or resource registers
 once with its domain; that metadata produces the component and resource allowlists used by saves.
-The workspace domain also installs ordinary change tracking, while specialized domains such as
-bookmarks keep their own entity scope, dirty policy, path, migration, and seeding lifecycle.
+The workspace domain tracks component changes only on entities marked `Save`, including removals
+and despawns. Its hierarchy tracker compares names and relationships by value so reinserting an
+unchanged hierarchy cannot restart autosave. Dirty state saves after 500 ms of quiet, with a
+60-second deadline for continuous changes; coincident deadlines write once, and clean workspaces
+do not write periodic snapshots. Specialized domains such as bookmarks keep their own entity
+scope, dirty policy, path, migration, and seeding lifecycle.
+Workspace writes clear dirty state only after successful serialization and storage. Failed writes
+retain the changes and retry on the 60-second deadline; schema sidecars follow successful writes.
 
 ---
 
@@ -803,7 +828,10 @@ sequenceDiagram
 
 Everything the page loads arrives over a `vmux://` custom protocol registered on **that
 webview**: the document, the rendered frames, the verdict on an event it is blocked on, and
-every asset any of those reference. `Route` enumerates that list, so adding one is a variant
+every asset any of those reference. Native pages handle the same reload requests as CEF pages;
+the native adapter reloads its document, and the document-load handshake advances its revision
+and restores the current host state before accepting page input. Hard reload uses WebKit's origin
+reload on macOS to bypass its cache. `Route` enumerates that list, so adding one is a variant
 rather than another branch in a chain of string tests.
 
 A page reaches the app through three channels, gathered once per app rather than per page:
@@ -989,7 +1017,9 @@ filled height, allowing a later expansion to use its natural size. Reduced motio
 alignment without animation; the model and its row virtualization commit immediately.
 Reopening a repository retains the cached file list and diff across repeated restores while
 refreshing them in the background. Repository and branch-file reads keep the diff surface in
-its loading state until their own first result arrives.
+its loading state until their own first result arrives. The file tree reserves skeleton rows
+only while its first files are pending; cached trees and later pages retain their rows without
+loading placeholders beneath them.
 
 The host counts columns in **display cells** — `DisplayCells`, one per narrow character and
 two per wide one — because wrapping and selection are grid problems and the host has no
@@ -1252,13 +1282,19 @@ History loading starts and finishes publish a fresh chat snapshot independently 
 changes, so empty or unchanged replays still release the conversation skeleton.
 The Session manager publishes only to its active page and leases Git metadata for every displayed
 repository while that page remains active.
-Its first discovery reserves a skeleton in one persistent scroll surface; background discovery
-keeps the settled catalog. Completed updates retain visible row order, append new identities, and
-fade in new rows. The view-control band and scrollbar gutter keep their space during loading.
+Its first discovery reserves a skeleton in one persistent scroll surface until rows are available.
+Each provider publishes its completed catalog without waiting for other providers. Partial updates
+keep existing rows, append new identities, and fade them in; a completed discovery can remove
+missing identities without reordering the survivors. The view-control band and scrollbar gutter
+keep their space during loading, with the selected view icon using the foreground color.
 Git change counts live in the Space card with labels rather than as dots in the composer.
 Startup failures retain their specific provider cause when the process exits. A conversation owned
-by another client shows that reason and a retry control; retry preserves its provider identity and
-replaces only the failed local runtime. Failed conversations release their transcript skeleton.
+by another client shows a neutral status card explaining that ownership, with retry and diagnostic
+copy controls. Its composer uses a neutral ownership label and it does not emit an error toast.
+Failed Codex resumes can read bounded local history under the original provider ID while retaining
+the refusal; a successful retry or an already-populated transcript discards a late local read.
+Retry preserves its provider identity and replaces only the failed local runtime.
+Failed conversations release their transcript skeleton.
 Composer workspace context resolves the Session named by the page URL even before runtime attachment
 has bound the Stack. Unpublished context is retried after the first ready frame, so a late binding
 cannot leave project and branch controls as placeholders. Branch menus enqueue their checkout reads

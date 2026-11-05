@@ -33,6 +33,9 @@ pub struct StackPlugin;
 
 impl Plugin for StackPlugin {
     fn build(&self, app: &mut App) {
+        if !app.is_plugin_added::<vmux_ecs::PrimitivesPlugin>() {
+            app.add_plugins(vmux_ecs::PrimitivesPlugin);
+        }
         #[cfg(test)]
         app.add_plugins(FeaturePlugin::<crate::Feature>::default());
         if !app.is_plugin_added::<vmux_command::CommandRuntimePlugin>() {
@@ -772,15 +775,7 @@ impl LayoutFocus<'_, '_> {
     }
 
     fn focus_stack(&self, stack: Entity, commands: &mut Commands) {
-        if let Ok(parent) = self.parents.get(stack) {
-            commands
-                .entity(parent.parent())
-                .insert(LastActivatedAt::now());
-        }
-        commands.entity(stack).insert(LastActivatedAt::now());
-        if let Some(tab) = self.tab_of(stack) {
-            commands.entity(tab).insert(LastActivatedAt::now());
-        }
+        commands.trigger(vmux_ecs::ActivateRequest { entity: stack });
     }
 }
 
@@ -1062,47 +1057,49 @@ fn focus(
     mut reader: MessageReader<FocusRequest>,
     active_tab_param: ActiveTabParam,
     focus: LayoutFocus,
-    stack_q: Query<Entity, With<Stack>>,
+    stack_q: Query<Entity, (With<Stack>, Without<Retiring>)>,
     mut commands: Commands,
 ) {
-    for request in reader.read() {
-        let (active_tab, active_pane, active_stack) = focus.resolve(active_tab_param.get());
-        let Some(active_tab) = active_tab else {
-            continue;
-        };
-        let tab_panes = focus.leaves(active_tab);
-        let mut stacks = Vec::new();
-        for &pane in &tab_panes {
-            if let Ok(children) = focus.pane_children.get(pane) {
-                for child in children.iter() {
-                    if stack_q.contains(child) {
-                        stacks.push((pane, child));
-                    }
+    let requests: Vec<_> = reader.read().copied().collect();
+    if requests.is_empty() {
+        return;
+    }
+    let (active_tab, active_pane, active_stack) = focus.resolve(active_tab_param.get());
+    let Some(active_tab) = active_tab else {
+        return;
+    };
+    let mut stacks = Vec::new();
+    for pane in focus.leaves(active_tab) {
+        if let Ok(children) = focus.pane_children.get(pane) {
+            for child in children.iter() {
+                if stack_q.contains(child) {
+                    stacks.push((pane, child));
                 }
             }
         }
-        if stacks.len() < 2 {
-            continue;
-        }
-        let Some(current) = stacks
-            .iter()
-            .position(|&(_, stack)| Some(stack) == active_stack)
-        else {
-            continue;
-        };
-        let delta = if request.0 == SiblingDirection::Next {
-            1
+    }
+    if stacks.len() < 2 {
+        return;
+    }
+    let Some(mut current) = stacks
+        .iter()
+        .position(|&(_, stack)| Some(stack) == active_stack)
+    else {
+        return;
+    };
+    for request in requests {
+        current = if request.0 == SiblingDirection::Next {
+            (current + 1) % stacks.len()
         } else {
-            -1
+            (current + stacks.len() - 1) % stacks.len()
         };
-        let index = (current as i32 + delta).rem_euclid(stacks.len() as i32) as usize;
-        let (target_pane, target_stack) = stacks[index];
-        commands.entity(target_stack).insert(LastActivatedAt::now());
-        if active_pane != Some(target_pane) {
-            commands
-                .entity(target_pane)
-                .insert((LastActivatedAt::now(), PendingCursorWarp));
-        }
+    }
+    let (target_pane, target_stack) = stacks[current];
+    commands.trigger(vmux_ecs::ActivateRequest {
+        entity: target_stack,
+    });
+    if active_pane != Some(target_pane) {
+        commands.entity(target_pane).insert(PendingCursorWarp);
     }
 }
 
@@ -1322,6 +1319,181 @@ mod tests {
         let world = app.world_mut();
         let mut query = world.query::<&ActiveStack>();
         *query.single(world).unwrap()
+    }
+
+    struct StackNavigationFixture {
+        app: App,
+        tab: Entity,
+        root: Entity,
+    }
+
+    impl StackNavigationFixture {
+        fn new() -> Self {
+            let mut app = App::new();
+            app.add_plugins((
+                MinimalPlugins,
+                crate::contract::LayoutContractPlugin,
+                crate::host::command::LayoutRequestPlugin,
+                crate::space::SpaceLayoutPlugin,
+                StackPlugin,
+                crate::active_pane::ActivePanePlugin,
+            ))
+            .add_message::<CloseTabRequest>()
+            .insert_resource(test_settings());
+            let space = app
+                .world_mut()
+                .spawn((crate::space::Space, Active, LastActivatedAt(1)))
+                .id();
+            let tab = app
+                .world_mut()
+                .spawn((Tab::default(), Active, LastActivatedAt(1), ChildOf(space)))
+                .id();
+            let root = app
+                .world_mut()
+                .spawn((Pane::bundle(), LastActivatedAt(1), ChildOf(tab)))
+                .id();
+            Self { app, tab, root }
+        }
+
+        fn pane(
+            &mut self,
+            parent: Entity,
+            activated_at: i64,
+            split: Option<crate::pane::PaneSplitDirection>,
+        ) -> Entity {
+            let pane = self
+                .app
+                .world_mut()
+                .spawn((
+                    Pane::bundle(),
+                    LastActivatedAt(activated_at),
+                    ChildOf(parent),
+                ))
+                .id();
+            if let Some(direction) = split {
+                self.app
+                    .world_mut()
+                    .entity_mut(pane)
+                    .insert(PaneSplit { direction });
+            }
+            pane
+        }
+
+        fn stack(&mut self, pane: Entity, activated_at: i64) -> Entity {
+            self.app
+                .world_mut()
+                .spawn((
+                    Stack::bundle(),
+                    LastActivatedAt(activated_at),
+                    ChildOf(pane),
+                ))
+                .id()
+        }
+
+        fn navigate(&mut self, directions: &[SiblingDirection]) {
+            for direction in directions {
+                let command = match direction {
+                    SiblingDirection::Next => "stack_next",
+                    SiblingDirection::Previous => "stack_previous",
+                };
+                self.app
+                    .world_mut()
+                    .write_message(CommandInvocation::new(Entity::PLACEHOLDER, command));
+            }
+            self.app.update();
+        }
+
+        fn selected(&mut self) -> ActiveStack {
+            let mut profiles = self.app.world_mut().query::<(&ProfileId, &ActiveStack)>();
+            for (profile, active) in profiles.iter(self.app.world()) {
+                if *profile == ProfileId::Local {
+                    return *active;
+                }
+            }
+            panic!("the production selection schedule creates the local profile");
+        }
+    }
+
+    #[test]
+    fn stack_navigation_applies_every_request_in_a_single_frame() {
+        let mut fixture = StackNavigationFixture::new();
+        let first = fixture.stack(fixture.root, 3);
+        let second = fixture.stack(fixture.root, 2);
+        let third = fixture.stack(fixture.root, 1);
+        fixture.app.update();
+        assert_eq!(fixture.selected().stack, Some(first));
+
+        fixture.navigate(&[SiblingDirection::Next, SiblingDirection::Next]);
+
+        assert_eq!(fixture.selected().stack, Some(third));
+        assert!(fixture.app.world().get::<Active>(third).is_some());
+        assert!(fixture.app.world().get::<Active>(first).is_none());
+        assert!(fixture.app.world().get::<Active>(second).is_none());
+
+        fixture.navigate(&[SiblingDirection::Previous, SiblingDirection::Previous]);
+
+        assert_eq!(fixture.selected().stack, Some(first));
+    }
+
+    #[test]
+    fn stack_navigation_skips_retiring_siblings() {
+        let mut fixture = StackNavigationFixture::new();
+        let first = fixture.stack(fixture.root, 3);
+        let retiring = fixture.stack(fixture.root, 1);
+        let next = fixture.stack(fixture.root, 2);
+        fixture
+            .app
+            .world_mut()
+            .entity_mut(retiring)
+            .insert(Retiring);
+        fixture.app.update();
+        assert_eq!(fixture.selected().stack, Some(first));
+
+        fixture.navigate(&[SiblingDirection::Next]);
+
+        assert_eq!(fixture.selected().stack, Some(next));
+        assert!(fixture.app.world().get::<Active>(next).is_some());
+        assert!(fixture.app.world().get::<Active>(retiring).is_none());
+    }
+
+    #[test]
+    fn stack_navigation_activates_every_branch_of_a_nested_target_pane() {
+        let mut fixture = StackNavigationFixture::new();
+        fixture
+            .app
+            .world_mut()
+            .entity_mut(fixture.root)
+            .insert(PaneSplit {
+                direction: crate::pane::PaneSplitDirection::Row,
+            });
+        let previous_pane = fixture.pane(fixture.root, 2, None);
+        let branch = fixture.pane(
+            fixture.root,
+            1,
+            Some(crate::pane::PaneSplitDirection::Column),
+        );
+        let target_pane = fixture.pane(branch, 2, None);
+        let other_pane = fixture.pane(branch, 1, None);
+        let previous = fixture.stack(previous_pane, 3);
+        let target = fixture.stack(target_pane, 2);
+        fixture.stack(other_pane, 1);
+        fixture.app.update();
+        assert_eq!(fixture.selected().stack, Some(previous));
+        assert!(fixture.app.world().get::<Active>(branch).is_none());
+
+        fixture.navigate(&[SiblingDirection::Next]);
+
+        assert_eq!(
+            fixture.selected(),
+            ActiveStack {
+                tab: Some(fixture.tab),
+                pane: Some(target_pane),
+                stack: Some(target),
+            }
+        );
+        assert!(fixture.app.world().get::<Active>(branch).is_some());
+        assert!(fixture.app.world().get::<Active>(target_pane).is_some());
+        assert!(fixture.app.world().get::<Active>(previous_pane).is_none());
     }
 
     #[test]
@@ -2496,7 +2668,7 @@ mod tests {
 
     fn build_app_with_collector() -> App {
         let mut app = App::new();
-        app.add_plugins(MinimalPlugins)
+        app.add_plugins((MinimalPlugins, vmux_ecs::PrimitivesPlugin))
             .add_message::<OpenRequest>()
             .add_message::<CloseRequest>()
             .add_message::<CloseStackRequest>()

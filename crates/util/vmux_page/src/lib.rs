@@ -1,4 +1,5 @@
 pub use event_request::{EventOutcome, EventRequest, EventRequestError};
+pub use history_swipe::{HistoryDirection, HistorySwipe};
 pub use instance::{Instance, PageScope};
 pub use page::Page;
 pub use page_dom::{PageComponent, PageDom};
@@ -12,6 +13,7 @@ pub use webview::{
 };
 
 mod event_request;
+mod history_swipe;
 mod instance;
 pub mod menu;
 mod page;

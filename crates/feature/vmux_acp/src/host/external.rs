@@ -24,8 +24,8 @@ use vmux_session::{
     AgentConversationTitle, AgentFamily, AgentId, ArchiveRequest, ArchiveState,
     ConversationAppendReceived, CreateRequest, Created, ProviderArchive, ProviderArchiveCompleted,
     ProviderArchiveWriteRequest, ProviderCatalog, ProviderKind, ProviderSession, ProviderSessionId,
-    ProviderSessionKey, ProviderSessionTombstones, Route, Session, SessionDuplicate, SessionId,
-    SnapshotReceived, SourceUpdatedAt, TranscriptLoading, Transcripts,
+    ProviderSessionKey, ProviderSessionTombstones, Route, RunState, Session, SessionDuplicate,
+    SessionId, SnapshotReceived, SourceUpdatedAt, TranscriptLoading, Transcripts,
 };
 use vmux_setting::AppSettings;
 use vmux_tool::ToolInventoryChanged;
@@ -71,6 +71,7 @@ pub(super) fn add(app: &mut App) {
                 associate,
                 request_conversation_refreshes,
                 queue_initial_conversations,
+                queue_failed_conversations,
                 queue_conversation_refreshes,
                 finish_conversations,
             )
@@ -837,6 +838,9 @@ impl ArchiveOverlay {
 struct ConversationLoadPending;
 
 #[derive(Component)]
+struct FailedConversationRead;
+
+#[derive(Component)]
 struct ConversationRefreshRequested(i64);
 
 #[derive(Component)]
@@ -873,6 +877,14 @@ impl ConversationSource {
             sid: sid.to_string(),
             created_at,
         })
+    }
+
+    fn for_failed(kind: &str, sid: &str, created_at: i64) -> Option<Self> {
+        let agent = kind.strip_prefix("acp:")?;
+        if AgentFamily::of(agent) != SourceKind::Codex.family() {
+            return None;
+        }
+        Self::new("acp:codex", sid, created_at)
     }
 
     fn read(
@@ -1812,9 +1824,6 @@ fn project(
             loading_changed = true;
         }
     }
-    if requests.active && catalog.loading {
-        return;
-    }
     let session_removed = removed.read().count() > 0;
     let duplicate_removed = removed_duplicates.read().count() > 0;
     let removed = session_removed || duplicate_removed;
@@ -2086,6 +2095,70 @@ fn queue_initial_conversations(
     }
 }
 
+fn queue_failed_conversations(
+    paths: Option<Single<&SourcePaths>>,
+    sessions: Query<
+        (
+            Entity,
+            &SessionId,
+            &ProviderKind,
+            &ProviderSessionId,
+            &CreatedAt,
+            &RunState,
+        ),
+        (
+            With<Session>,
+            Changed<RunState>,
+            Without<ConversationLoadPending>,
+            Without<SessionDuplicate>,
+        ),
+    >,
+    transcripts: Transcripts,
+    proxy: Option<Res<EventLoopProxyWrapper>>,
+    mut commands: Commands,
+) {
+    if sessions.is_empty() {
+        return;
+    }
+    let paths = match paths {
+        Some(paths) => paths.into_inner().clone(),
+        None => {
+            let Some(paths) = SourcePaths::current() else {
+                return;
+            };
+            paths
+        }
+    };
+    for (session, sid, kind, provider_sid, created_at, state) in &sessions {
+        if !matches!(state, RunState::Errored(_)) || !transcripts.get(session).messages.is_empty() {
+            continue;
+        }
+        let Some(source) = ConversationSource::for_failed(&kind.0, &provider_sid.0, created_at.0)
+        else {
+            continue;
+        };
+        let paths = paths.clone();
+        let wake = proxy.as_deref().map(|proxy| (**proxy).clone());
+        let task = IoTaskPool::get().spawn(async move {
+            let result = source.read(&paths, None, Vec::new());
+            if let Some(wake) = wake {
+                let _ = wake.send_event(WinitUserEvent::WakeUp);
+            }
+            result
+        });
+        commands.entity(session).insert(ConversationLoadPending);
+        commands.spawn((
+            FailedConversationRead,
+            ConversationLoadTask {
+                session,
+                sid: sid.clone(),
+                revision: created_at.0,
+                task,
+            },
+        ));
+    }
+}
+
 fn queue_conversation_refreshes(
     paths: Single<&SourcePaths>,
     sessions: Query<
@@ -2142,15 +2215,33 @@ fn queue_conversation_refreshes(
 }
 
 fn finish_conversations(
-    mut tasks: Query<(Entity, &mut ConversationLoadTask)>,
+    mut tasks: Query<(
+        Entity,
+        &mut ConversationLoadTask,
+        Has<FailedConversationRead>,
+    )>,
+    states: Query<&RunState, With<Session>>,
+    transcripts: Transcripts,
     mut snapshots: MessageWriter<SnapshotReceived>,
     mut appended: MessageWriter<ConversationAppendReceived>,
     mut commands: Commands,
 ) {
-    for (task_entity, mut task) in &mut tasks {
+    for (task_entity, mut task, failed_read) in &mut tasks {
         let Some(result) = future::block_on(future::poll_once(&mut task.task)) else {
             continue;
         };
+        if failed_read
+            && (!states
+                .get(task.session)
+                .is_ok_and(|state| matches!(state, RunState::Errored(_)))
+                || !transcripts.get(task.session).messages.is_empty())
+        {
+            commands
+                .entity(task.session)
+                .try_remove::<ConversationLoadPending>();
+            commands.entity(task_entity).despawn();
+            continue;
+        }
         match result {
             Ok(read) => {
                 if !read.messages.is_empty() {
@@ -2394,6 +2485,154 @@ impl PromptText {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    struct FailedReadFixture {
+        app: App,
+        session: Entity,
+        _directory: tempfile::TempDir,
+    }
+
+    impl FailedReadFixture {
+        fn new() -> Self {
+            let directory = tempfile::tempdir().unwrap();
+            let rollout = directory.path().join("sessions/2026/10/18/rollout-2026-10-18T18-16-34-01a14fcc-f46a-7c12-b000-779be98d72ae.jsonl");
+            std::fs::create_dir_all(rollout.parent().unwrap()).unwrap();
+            std::fs::write(&rollout, concat!(
+                "{\"type\":\"session_meta\",\"payload\":{\"session_id\":\"01a14fcc-f46a-7c12-b000-779be98d72ae\",\"timestamp\":\"2026-10-18T16:16:34.454Z\",\"cwd\":\"/work/vmux\"}}\n",
+                "{\"type\":\"response_item\",\"payload\":{\"type\":\"message\",\"role\":\"user\",\"content\":[{\"type\":\"input_text\",\"text\":\"original conversation\"}]}}\n"
+            )).unwrap();
+            let mut app = App::new();
+            app.add_plugins(MinimalPlugins)
+                .add_message::<SnapshotReceived>()
+                .add_message::<ConversationAppendReceived>()
+                .add_systems(Update, queue_failed_conversations);
+            app.world_mut().spawn(SourcePaths {
+                codex: directory.path().to_path_buf(),
+                claude: directory.path().join("claude"),
+                vibe: directory.path().join("vibe"),
+            });
+            let session = app
+                .world_mut()
+                .spawn((
+                    Session,
+                    SessionId("canonical".into()),
+                    ProviderKind("acp:codex-acp".into()),
+                    ProviderSessionId("01a14fcc-f46a-7c12-b000-779be98d72ae".into()),
+                    AcpSessionId("01a14fcc-f46a-7c12-b000-779be98d72ae".into()),
+                    CreatedAt(Timestamp::parse("2026-10-18T16:16:34.454Z")),
+                    RunState::Errored("thread_active_writer".into()),
+                ))
+                .id();
+            app.update();
+            assert!(
+                app.world()
+                    .get::<ConversationLoadPending>(session)
+                    .is_some()
+            );
+            Self {
+                app,
+                session,
+                _directory: directory,
+            }
+        }
+
+        fn finish(&mut self) -> Vec<SnapshotReceived> {
+            self.app.add_systems(
+                Update,
+                finish_conversations.after(queue_failed_conversations),
+            );
+            let deadline = Instant::now() + Duration::from_secs(3);
+            while self
+                .app
+                .world()
+                .get::<ConversationLoadPending>(self.session)
+                .is_some()
+            {
+                assert!(
+                    Instant::now() < deadline,
+                    "provider history read did not finish"
+                );
+                self.app.update();
+                std::thread::sleep(Duration::from_millis(2));
+            }
+            self.app
+                .world_mut()
+                .resource_mut::<Messages<SnapshotReceived>>()
+                .drain()
+                .collect()
+        }
+    }
+
+    #[test]
+    fn failed_codex_resume_reads_the_original_history_without_replacing_its_identity() {
+        let mut fixture = FailedReadFixture::new();
+        let snapshots = fixture.finish();
+        assert_eq!(snapshots.len(), 1);
+        assert_eq!(snapshots[0].session.0, "canonical");
+        assert_eq!(
+            snapshots[0].messages,
+            [vmux_api::session::Message::user("original conversation")]
+        );
+        assert!(
+            matches!(fixture.app.world().get::<RunState>(fixture.session), Some(RunState::Errored(message)) if message == "thread_active_writer")
+        );
+        assert_eq!(
+            fixture.app.world().get::<AcpSessionId>(fixture.session),
+            Some(&AcpSessionId("01a14fcc-f46a-7c12-b000-779be98d72ae".into()))
+        );
+    }
+
+    #[test]
+    fn local_failure_history_cannot_overwrite_a_successful_retry() {
+        let mut fixture = FailedReadFixture::new();
+        fixture
+            .app
+            .world_mut()
+            .entity_mut(fixture.session)
+            .insert(RunState::Idle);
+        assert!(fixture.finish().is_empty());
+    }
+
+    #[test]
+    fn a_pending_provider_does_not_hide_completed_catalogs() {
+        let mut app = App::new();
+        app.init_resource::<SourceSnapshot>()
+            .init_resource::<AcpSnapshot>()
+            .init_resource::<ProviderCatalog>()
+            .insert_resource(CatalogRequests {
+                active: true,
+                generation: 1,
+                refresh: true,
+                ..Default::default()
+            })
+            .add_systems(Update, project);
+        let mut snapshot = app.world_mut().resource_mut::<AcpSnapshot>();
+        snapshot.0.insert(
+            "codex".into(),
+            AcpSource {
+                state: AcpSourceState::Supported,
+                sessions: vec![ProviderSession {
+                    kind: "acp:codex".into(),
+                    sid: "ready".into(),
+                    agent: "codex".into(),
+                    ..Default::default()
+                }],
+            },
+        );
+        snapshot.0.insert(
+            "mistral-vibe".into(),
+            AcpSource {
+                state: AcpSourceState::Pending,
+                sessions: Vec::new(),
+            },
+        );
+        drop(snapshot);
+        app.update();
+        let catalog = app.world().resource::<ProviderCatalog>();
+        assert!(catalog.loading);
+        assert_eq!(catalog.sessions.len(), 1);
+        assert_eq!(catalog.sessions[0].sid, "ready");
+    }
 
     #[test]
     fn provider_store_fallback_requires_an_explicitly_unsupported_catalog() {

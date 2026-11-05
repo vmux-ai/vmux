@@ -1,3 +1,5 @@
+use crate::HistorySwipe;
+use vmux_ui::components::popup::Surface;
 use vmux_ui::motion::Motion;
 
 pub(super) struct Shim;
@@ -5,6 +7,11 @@ pub(super) struct Shim;
 impl Shim {
     pub(super) fn source() -> String {
         WRY_HOST_SHIM
+            .replace(
+                "__VMUX_HISTORY_SWIPE__",
+                &HistorySwipe::script("postMessage('history:' + direction);"),
+            )
+            .replace("__VMUX_POPUP_RUNTIME__", &Surface::runtime())
             .replace(
                 "__VMUX_MOTION_CONTENT_MS__",
                 &Motion::CONTENT_MS.to_string(),
@@ -16,6 +23,7 @@ impl Shim {
 
 pub(crate) const WRY_HOST_SHIM: &str = r#"
 (function () {
+  __VMUX_POPUP_RUNTIME__
   globalThis.__vmuxIpcEpoch = 1;
   let navigationRevision = null;
   let applyingRevision = null;
@@ -71,6 +79,7 @@ pub(crate) const WRY_HOST_SHIM: &str = r#"
     flushMessages(applyingMessages, applyingMetadata);
     return changed;
   };
+  __VMUX_HISTORY_SWIPE__
   const abandonApplyingRevision = () => {
     applyingRevision = null;
     applyingMessages.length = 0;
@@ -78,35 +87,6 @@ pub(crate) const WRY_HOST_SHIM: &str = r#"
   };
   const report = (kind, text) => {
     try { postMessage('log:' + kind + ':' + text); } catch (e) {}
-  };
-  let lastLayoutGeometry = '';
-  let layoutGeometryReports = 0;
-  const reportLayoutGeometry = () => {
-    if (location.hostname !== 'layout' || layoutGeometryReports >= 12) return;
-    const selectors = ['html', 'body', '#main', '#main > div', '#vmux-side-sheet', '[style*="--vmux-header-top"]'];
-    const nodes = selectors.map(selector => {
-      const element = document.querySelector(selector);
-      if (!element) return { selector, missing: true };
-      const rect = element.getBoundingClientRect();
-      const computed = getComputedStyle(element);
-      const properties = ['position', 'top', 'left', 'right', 'bottom', 'height', 'display', 'align-items', 'justify-content', 'transform', 'translate', 'filter', 'contain', 'container-type', '--vmux-header-top', '--vmux-side-sheet-top'];
-      return {
-        selector,
-        rect: [rect.x, rect.y, rect.width, rect.height],
-        inline: element.getAttribute('style'),
-        class: element.className,
-        computed: Object.fromEntries(properties.map(property => [property, computed.getPropertyValue(property)])),
-      };
-    });
-    const geometry = JSON.stringify({
-      viewport: [innerWidth, innerHeight, devicePixelRatio, scrollX, scrollY],
-      nodes,
-      sheets: Array.from(document.styleSheets).map(sheet => ({ href: sheet.href, disabled: sheet.disabled })),
-    });
-    if (geometry === lastLayoutGeometry) return;
-    lastLayoutGeometry = geometry;
-    layoutGeometryReports += 1;
-    report('warn', 'layout DOM geometry ' + geometry);
   };
   const encoder = new TextEncoder();
   const nativeOpen = XMLHttpRequest.prototype.open;
@@ -708,6 +688,7 @@ pub(crate) const WRY_HOST_SHIM: &str = r#"
         }
         const preserveScroll = requests.some((request) => request.kind === 'preserveScroll');
         const heightAnimations = remount ? [] : HeightAnimation.capture(requests);
+        const popupCaptures = edits.byteLength || remount ? globalThis.__vmuxPopupPresentation.capture() : [];
         const layoutMovements = remount ? [] : LayoutMovement.capture(requests);
         const scrollAnchors = remount || !edits.byteLength || !preserveScroll
           ? []
@@ -720,6 +701,7 @@ pub(crate) const WRY_HOST_SHIM: &str = r#"
         } else if (edits.byteLength) {
           window.interpreter.run_from_bytes(edits);
         }
+        globalThis.__vmuxPopupPresentation.apply(popupCaptures);
         HeightAnimation.apply(heightAnimations);
         LayoutMovement.apply(layoutMovements);
         await restoreScrollAnchors(scrollAnchors);
@@ -739,7 +721,6 @@ pub(crate) const WRY_HOST_SHIM: &str = r#"
         }
         if (!remount) navigated = commitNavigationRevision(revision);
         if (navigated) reportMetadata();
-        requestAnimationFrame(reportLayoutGeometry);
         appliedFrame = frameSequence;
         failedFrame = null;
         failedRevision = null;

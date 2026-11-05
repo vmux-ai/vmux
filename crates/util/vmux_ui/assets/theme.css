@@ -253,6 +253,11 @@
   to { opacity: 1; }
 }
 
+@keyframes vmux-popup-in {
+  from { opacity: 0.94; }
+  to { opacity: 1; }
+}
+
 @keyframes vmux-prompt-popup-upward-in {
   from { opacity: 0; transform: translateY(8px) scale(0.985); }
   to { opacity: 1; transform: translateY(0) scale(1); }

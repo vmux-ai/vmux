@@ -119,6 +119,7 @@ image = { version = "0.25", default-features = false, features = ["png"], option
 objc2 = "0.6"
 objc2-app-kit = { version = "0.3", default-features = false, features = [
     "std",
+    "objc2-core-graphics",
     "NSAlert",
     "NSAnimation",
     "NSAnimationContext",

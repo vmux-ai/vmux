@@ -1,8 +1,9 @@
 use crate::browser_process::ClientHandlerBuilder;
 use crate::browser_process::client_handler::FocusCanceler;
 use crate::browser_process::client_handler::{
-    BinDocumentContextHandler, BinEmitEventHandler, BinIpcContext, BinIpcEventRaw, IpcEventRaw,
-    JsEmitEventHandler, SnapshotResultHandler, SnapshotResultRaw,
+    BinDocumentContextHandler, BinEmitEventHandler, BinIpcContext, BinIpcEventRaw,
+    HistorySwipeHandler, HistorySwipeRaw, IpcEventRaw, JsEmitEventHandler, SnapshotResultHandler,
+    SnapshotResultRaw,
 };
 use crate::prelude::*;
 use async_channel::Sender;
@@ -311,6 +312,7 @@ impl Browsers {
         requester: Requester,
         ipc_event_sender: Sender<IpcEventRaw>,
         bin_ipc_event_sender: Sender<BinIpcEventRaw>,
+        history_swipe_sender: Sender<HistorySwipeRaw>,
         snapshot_result_sender: Sender<SnapshotResultRaw>,
         system_cursor_icon_sender: SystemCursorIconSenderInner,
         webview_loading_state_sender: WebviewLoadingStateSenderInner,
@@ -348,6 +350,7 @@ impl Browsers {
             device_scale.clone(),
             ipc_event_sender,
             bin_ipc_event_sender,
+            history_swipe_sender,
             snapshot_result_sender,
             system_cursor_icon_sender,
             webview_loading_state_sender,
@@ -2608,6 +2611,7 @@ impl Browsers {
         device_scale: SharedDeviceScaleFactor,
         ipc_event_sender: Sender<IpcEventRaw>,
         bin_ipc_event_sender: Sender<BinIpcEventRaw>,
+        history_swipe_sender: Sender<HistorySwipeRaw>,
         snapshot_result_sender: Sender<SnapshotResultRaw>,
         system_cursor_icon_sender: SystemCursorIconSenderInner,
         webview_loading_state_sender: WebviewLoadingStateSenderInner,
@@ -2660,6 +2664,7 @@ impl Browsers {
                 media_permission_sender,
             ))
             .with_message_handler(JsEmitEventHandler::new(webview, ipc_event_sender))
+            .with_message_handler(HistorySwipeHandler::new(webview, history_swipe_sender))
             .with_message_handler(BinEmitEventHandler::new(
                 webview,
                 bin_ipc_event_sender,

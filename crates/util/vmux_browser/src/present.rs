@@ -40,23 +40,38 @@ pub(crate) struct PresentPlugin;
 
 impl Plugin for PresentPlugin {
     fn build(&self, app: &mut App) {
-        app.add_systems(
-            PostUpdate,
-            (
-                sync_keyboard_target,
-                sync_children_to_ui,
-                sync_windowed_layout,
-                sync_windowed_frames.in_set(crate::BrowserSystemSet::SyncWindowedFrames),
-                sync_windowed_command_bar.in_set(crate::BrowserSystemSet::SyncWindowedCommandBar),
-                flush_command_bar_pointer,
-                apply_repaint_nudge,
-                sync_webview_resize,
-                sync_osr_webview_focus,
+        app.add_message::<vmux_layout::presentation::NativeSelectionCommitted>()
+            .init_resource::<FrameSyncMemory>()
+            .add_systems(
+                PostUpdate,
+                (
+                    sync_keyboard_target,
+                    sync_children_to_ui,
+                    sync_windowed_layout,
+                    sync_windowed_frames.in_set(crate::BrowserSystemSet::SyncWindowedFrames),
+                    sync_windowed_command_bar
+                        .in_set(crate::BrowserSystemSet::SyncWindowedCommandBar),
+                    flush_command_bar_pointer,
+                    apply_repaint_nudge,
+                    sync_webview_resize,
+                    sync_osr_webview_focus,
+                )
+                    .chain()
+                    .after(vmux_layout::presentation::StackMotionSet)
+                    .after(LayoutSystems::Layout),
             )
-                .chain()
-                .after(vmux_layout::presentation::StackMotionSet)
-                .after(LayoutSystems::Layout),
-        );
+            .add_systems(
+                PostUpdate,
+                (
+                    sync_keyboard_target,
+                    sync_children_to_ui,
+                    sync_windowed_frames,
+                    bevy::ecs::schedule::ApplyDeferred,
+                )
+                    .chain()
+                    .in_set(vmux_layout::presentation::NativePresentationSet::Sync)
+                    .run_if(on_message::<vmux_layout::presentation::NativeSelectionCommitted>),
+            );
     }
 }
 
@@ -474,6 +489,7 @@ fn sync_windowed_frames(
             Has<PageReady>,
             Has<vmux_layout::hosted_page::SurfacePaintReady>,
             Has<vmux_layout::hosted_page::SurfacePresentationReady>,
+            Has<crate::HostedPageLifecycle>,
             Option<&BinIpcSurfaceGeneration>,
         ),
         (
@@ -484,8 +500,7 @@ fn sync_windowed_frames(
         ),
     >,
     queries: WindowFrameQueries,
-    mut memory: Local<FrameSyncMemory>,
-    mut last_windowed_pages: Local<Vec<Entity>>,
+    mut memory: ResMut<FrameSyncMemory>,
     focused_window: vmux_layout::window::FocusedWindow,
     capturing: Query<(), (With<LayoutCef>, LayoutPointerCapture)>,
     mut commands: Commands,
@@ -506,6 +521,7 @@ fn sync_windowed_frames(
         ready,
         paint_ready,
         presentation_ready,
+        hosted,
         generation,
     ) in &browser_q
     {
@@ -651,9 +667,6 @@ fn sync_windowed_frames(
                     .entity(entity)
                     .insert(vmux_layout::hosted_page::SurfacePresentationReady);
             }
-            if shown && host_window == focused_window.entity() && !blocked {
-                memory.visible_frames.push(frame);
-            }
             memory.raised_frame.insert(entity, key);
             if shown && (force_raise || became_visible || first_native_frame) {
                 browsers.raise_windowed_to_front(&entity);
@@ -661,6 +674,13 @@ fn sync_windowed_frames(
             if reveal && shown {
                 browsers.nudge_windowed_repaint(&entity);
             }
+        }
+        if (browser_ready || (hosted && ready && presentation_ready))
+            && shown
+            && host_window == focused_window.entity()
+            && !blocked
+        {
+            memory.visible_frames.push(frame);
         }
     }
     let current_windowed: Vec<Entity> = visible.iter().chain(&hidden).copied().collect();
@@ -670,7 +690,8 @@ fn sync_windowed_frames(
     memory
         .interactivity
         .retain(|entity, _| current_windowed.contains(entity));
-    for entity in last_windowed_pages
+    for entity in memory
+        .last_windowed_pages
         .iter()
         .filter(|entity| !current_windowed.contains(entity))
     {
@@ -681,7 +702,7 @@ fn sync_windowed_frames(
     let newly_windowed: Vec<Entity> = current_windowed
         .iter()
         .copied()
-        .filter(|entity| !last_windowed_pages.contains(entity))
+        .filter(|entity| !memory.last_windowed_pages.contains(entity))
         .collect();
     let ever_shown: Vec<Entity> = memory.raised_frame.keys().copied().collect();
     for entity in
@@ -690,7 +711,7 @@ fn sync_windowed_frames(
         browsers.set_windowed_hidden(&entity, true);
     }
     memory.visible_pages = visible;
-    *last_windowed_pages = current_windowed;
+    memory.last_windowed_pages = current_windowed;
     memory.visible_frames =
         NativeBridge::set_windowed_page_frames(std::mem::take(&mut memory.visible_frames));
 }
@@ -728,12 +749,13 @@ pub(crate) struct WindowedFrameRect {
     pub(crate) height: f32,
 }
 
-#[derive(Default)]
+#[derive(Resource, Default)]
 struct FrameSyncMemory {
     raised_frame: std::collections::HashMap<Entity, (i32, i32, i32, i32, u32)>,
     interactivity: std::collections::HashMap<Entity, (u64, bool)>,
     visible_pages: Vec<Entity>,
     visible_frames: Vec<WindowedFrameRect>,
+    last_windowed_pages: Vec<Entity>,
 }
 
 impl FrameSyncMemory {

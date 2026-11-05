@@ -12,7 +12,10 @@ use bevy::ecs::world::EntityRef;
 use bevy::prelude::*;
 use bevy::window::PrimaryWindow;
 use bevy::winit::{EventLoopProxy, EventLoopProxyWrapper, WINIT_WINDOWS, WinitUserEvent};
-use bevy_cef::prelude::{BinHostEmitEvent, BinIpcEventRawSender, HostWindow, UiInput, ZoomLevel};
+use bevy_cef::prelude::{
+    BinHostEmitEvent, BinIpcEventRawSender, HostWindow, RequestReload, RequestReloadIgnoreCache,
+    UiInput, ZoomLevel,
+};
 use bevy_cef_core::prelude::{
     BinIpcEpoch, BinIpcEventRaw, BinIpcNavigationRevision, BinIpcSurfaceGeneration, Browsers,
     CefRequest, CefResponse, Requester, Responser, asset_load_path_from_request_url,
@@ -52,7 +55,16 @@ impl Plugin for MacosBrowserPlugin {
                 .after(crate::BrowserSystemSet::SyncWindowedFrames)
                 .after(vmux_layout::projection::LayoutUiProjectionSet::Publish),
         )
+        .configure_sets(
+            PostUpdate,
+            crate::BrowserSystemSet::HostFocusApplied
+                .after(vmux_layout::presentation::NativePresentationSet::Finalize),
+        )
+        .add_message::<vmux_layout::presentation::NativeSurfaceReused>()
+        .add_message::<vmux_layout::presentation::NativeSelectionCommitted>()
         .init_non_send::<PageRenderer>()
+        .init_resource::<SurfacePresentations>()
+        .init_resource::<SurfaceSettleRetries>()
         .init_resource::<OpenPageDropdown>()
         .add_systems(Startup, move |mut commands: Commands| {
             let (metadata, lifecycle) = startup
@@ -86,16 +98,30 @@ impl Plugin for MacosBrowserPlugin {
         )
         .add_systems(
             PostUpdate,
-            (place, render)
+            (place, bevy::ecs::schedule::ApplyDeferred)
                 .chain()
+                .in_set(vmux_layout::presentation::NativePresentationSet::Place)
                 .after(vmux_ecs::UiStateFlushSet)
                 .after(crate::BrowserSystemSet::SyncWindowedFrames),
+        )
+        .add_systems(
+            PostUpdate,
+            (place, bevy::ecs::schedule::ApplyDeferred)
+                .chain()
+                .in_set(vmux_layout::presentation::NativePresentationSet::Finalize)
+                .run_if(on_message::<vmux_layout::presentation::NativeSelectionCommitted>),
+        )
+        .add_systems(
+            PostUpdate,
+            render.after(vmux_layout::presentation::NativePresentationSet::Finalize),
         )
         .add_systems(
             PostUpdate,
             focus.after(crate::BrowserSystemSet::HostFocusApplied),
         )
         .add_observer(forward_host_emit)
+        .add_observer(reload)
+        .add_observer(hard_reload)
         .add_observer(mark_candidate_added::<HostsPage>)
         .add_observer(mark_candidate_removed::<HostsPage>)
         .add_observer(mark_candidate_added::<LayoutCef>)
@@ -109,6 +135,26 @@ struct HostedSurface {
     page: &'static Page,
     window: Entity,
     url: String,
+}
+
+fn reload(event: On<RequestReload>, renderer: NonSend<PageRenderer>, mut commands: Commands) {
+    if let Some(surface) = renderer.active.get(&event.webview)
+        && surface.reload()
+    {
+        commands.entity(event.webview).remove::<PageReady>();
+    }
+}
+
+fn hard_reload(
+    event: On<RequestReloadIgnoreCache>,
+    renderer: NonSend<PageRenderer>,
+    mut commands: Commands,
+) {
+    if let Some(surface) = renderer.active.get(&event.webview)
+        && surface.reload_ignore_cache()
+    {
+        commands.entity(event.webview).remove::<PageReady>();
+    }
 }
 
 #[derive(Component, Clone, Copy, Debug, PartialEq, Eq)]
@@ -533,13 +579,81 @@ struct AppliedSurfacePresentation {
     settled: bool,
 }
 
-#[derive(Default)]
-struct SurfacePresentations(HashMap<Entity, AppliedSurfacePresentation>);
+#[derive(Clone, Copy)]
+struct CachedNativeFrame {
+    generation: u64,
+    navigation_revision: u64,
+    frame: PaneFrame,
+}
+
+impl CachedNativeFrame {
+    fn matches_frame(self, generation: u64, navigation_revision: u64, frame: PaneFrame) -> bool {
+        self.generation == generation
+            && self.navigation_revision == navigation_revision
+            && self.frame == frame
+    }
+
+    fn matches(
+        self,
+        generation: u64,
+        navigation_revision: u64,
+        presentation: SurfacePresentation,
+        bounds: Option<wry::Rect>,
+    ) -> bool {
+        let SurfacePresentation::Visible { frame, opacity, .. } = presentation else {
+            return false;
+        };
+        self.matches_frame(generation, navigation_revision, frame)
+            && opacity == 1.0
+            && frame.matches(bounds)
+    }
+}
+
+#[derive(Resource, Default)]
+struct SurfacePresentations {
+    applied: HashMap<Entity, AppliedSurfacePresentation>,
+    cached: HashMap<Entity, CachedNativeFrame>,
+}
+
+impl SurfacePresentations {
+    fn remember(
+        &mut self,
+        entity: Entity,
+        generation: u64,
+        surface: &WebView,
+        presentation: SurfacePresentation,
+    ) {
+        let SurfacePresentation::Visible { frame, opacity, .. } = presentation else {
+            return;
+        };
+        if opacity == 1.0
+            && self.cached.get(&entity).is_some_and(|cached| {
+                cached.matches_frame(generation, surface.navigation_revision(), frame)
+            })
+        {
+            return;
+        }
+        if opacity != 1.0
+            || !frame.matches(surface.bounds())
+            || !surface.presentation_settled(opacity)
+        {
+            return;
+        }
+        self.cached.insert(
+            entity,
+            CachedNativeFrame {
+                generation,
+                navigation_revision: surface.navigation_revision(),
+                frame,
+            },
+        );
+    }
+}
 
 const SURFACE_SETTLE_TIMEOUT: std::time::Duration = std::time::Duration::from_millis(500);
 const SURFACE_SETTLE_RETRY_INTERVAL: std::time::Duration = std::time::Duration::from_millis(16);
 
-#[derive(Default)]
+#[derive(Resource, Default)]
 struct SurfaceSettleRetries {
     started: HashMap<(Entity, u64), (SurfacePresentation, std::time::Instant)>,
     wake: SurfaceSettleWake,
@@ -833,7 +947,9 @@ impl PageLifecycleBatch {
                 self.measurements_cleared = true;
                 self.measurement_delta = 0;
             }
-            LifecycleUpdate::DropdownOpened | LifecycleUpdate::PageInteracted => {}
+            LifecycleUpdate::DropdownOpened
+            | LifecycleUpdate::PageInteracted
+            | LifecycleUpdate::HistoryRequested(_) => {}
         }
     }
 }
@@ -860,6 +976,7 @@ impl PageLifecycleMailbox {
             LifecycleUpdate::Navigated(_)
                 | LifecycleUpdate::DropdownOpened
                 | LifecycleUpdate::PageInteracted
+                | LifecycleUpdate::HistoryRequested(_)
         ) {
             pending.semantic.push_back(envelope);
             return;
@@ -974,13 +1091,29 @@ fn apply_lifecycle(
                 page.hydration_frame_count = None;
                 continue;
             }
-            LifecycleUpdate::DropdownOpened | LifecycleUpdate::PageInteracted => {}
+            LifecycleUpdate::DropdownOpened
+            | LifecycleUpdate::PageInteracted
+            | LifecycleUpdate::HistoryRequested(_) => {}
             _ => continue,
         }
         if navigation.0 != envelope.navigation_revision || blocked.contains(envelope.webview) {
             continue;
         }
         match envelope.update {
+            LifecycleUpdate::HistoryRequested(direction) => {
+                let operation = match direction {
+                    vmux_page::HistoryDirection::Back => crate::NavigationOperation::Back,
+                    vmux_page::HistoryDirection::Forward => crate::NavigationOperation::Forward,
+                };
+                if !crate::NativeBridge::claim_history_input(envelope.webview, operation) {
+                    continue;
+                }
+                commands.write_message(crate::NavigationRequest::surface(
+                    envelope.webview,
+                    operation,
+                ));
+                continue;
+            }
             LifecycleUpdate::DropdownOpened => {
                 if let Some(previous) = open_dropdown.0.replace(envelope.webview)
                     && previous != envelope.webview
@@ -1723,6 +1856,11 @@ fn place(
             Has<vmux_layout::hosted_page::SurfacePresentationReady>,
             Has<vmux_layout::hosted_page::SurfaceTransitionReady>,
             Has<vmux_layout::hosted_page::SurfacePaintReady>,
+            Has<PageReady>,
+            Has<vmux_ecs::PagePresented>,
+            Has<vmux_layout::hosted_page::SurfaceBlocked>,
+            Has<vmux_ecs::PageTransition>,
+            Has<vmux_layout::PendingWebviewReveal>,
         ),
         With<HostsPage>,
     >,
@@ -1735,8 +1873,9 @@ fn place(
     settings: Res<AppSettings>,
     frame_queries: WindowFrameQueries,
     proxy: Option<Res<EventLoopProxyWrapper>>,
-    mut presentations: Local<SurfacePresentations>,
-    mut retries: Local<SurfaceSettleRetries>,
+    mut presentations: ResMut<SurfacePresentations>,
+    mut retries: ResMut<SurfaceSettleRetries>,
+    mut reused: MessageWriter<vmux_layout::presentation::NativeSurfaceReused>,
     mut commands: Commands,
 ) {
     let Some(mut renderer) = renderer else {
@@ -1755,7 +1894,10 @@ fn place(
     }
     renderer.collect_retired(now, proxy.as_deref());
     presentations
-        .0
+        .applied
+        .retain(|entity, _| renderer.active.contains_key(entity));
+    presentations
+        .cached
         .retain(|entity, _| renderer.active.contains_key(entity));
     retries
         .started
@@ -1775,6 +1917,11 @@ fn place(
         presentation_ready,
         transition_ready,
         paint_ready,
+        ready,
+        presented,
+        blocked,
+        transitioning,
+        revealing,
     ) in &hosted
     {
         let Some(surface) = renderer.active.get(&entity) else {
@@ -1794,14 +1941,14 @@ fn place(
                         vmux_layout::hosted_page::SurfaceTransitionReady,
                     )>();
                 }
-                let hidden_applied = presentations.0.get(&entity).is_some_and(|current| {
+                let hidden_applied = presentations.applied.get(&entity).is_some_and(|current| {
                     current.generation == generation.0
                         && current.presentation == SurfacePresentation::Hidden
                         && current.settled
                 });
                 if page.is_changed() || !hidden_applied {
                     SurfacePresentation::Hidden.apply(surface, false, false);
-                    presentations.0.insert(
+                    presentations.applied.insert(
                         entity,
                         AppliedSurfacePresentation {
                             generation: generation.0,
@@ -1840,7 +1987,24 @@ fn place(
                     .pointer_order(window_is_capturing, pending, presentation),
             }
         };
-        let previous = presentations.0.get(&entity).copied();
+        let reusable = ready
+            && presented
+            && handoff.is_none()
+            && !blocked
+            && !transitioning
+            && !revealing
+            && !renderer.replacements.contains_key(&entity);
+        let cached = reusable
+            && presentation == PresentationLayer::Incoming
+            && presentations.cached.get(&entity).is_some_and(|cached| {
+                cached.matches(
+                    generation.0,
+                    surface.navigation_revision(),
+                    next,
+                    surface.bounds(),
+                )
+            });
+        let previous = presentations.applied.get(&entity).copied();
         let same = !page.is_changed()
             && previous.is_some_and(|current| {
                 current.generation == generation.0 && current.presentation == next
@@ -1861,6 +2025,12 @@ fn place(
                 transition_ready,
                 &mut commands,
             );
+            if cached && surface.presentation_settled(1.0) {
+                reused.write(vmux_layout::presentation::NativeSurfaceReused { surface: entity });
+            }
+            if reusable {
+                presentations.remember(entity, generation.0, surface, next);
+            }
             if renderer.replacements.contains_key(&entity)
                 && (handoff.is_none() || paint_ready)
                 && matches!(next, SurfacePresentation::Visible { .. })
@@ -1882,7 +2052,7 @@ fn place(
         } else {
             next.apply(surface, retain_visible, pending)
         };
-        presentations.0.insert(
+        presentations.applied.insert(
             entity,
             AppliedSurfacePresentation {
                 generation: generation.0,
@@ -1900,6 +2070,12 @@ fn place(
                 &mut commands,
             );
             retries.clear(entity);
+            if cached && surface.presentation_settled(1.0) {
+                reused.write(vmux_layout::presentation::NativeSurfaceReused { surface: entity });
+            }
+            if reusable {
+                presentations.remember(entity, generation.0, surface, next);
+            }
             if renderer.replacements.contains_key(&entity)
                 && (handoff.is_none() || paint_ready)
                 && matches!(next, SurfacePresentation::Visible { .. })
@@ -1921,7 +2097,7 @@ fn place(
                     vmux_layout::hosted_page::SurfaceTransitionReady,
                 )>()
                 .try_insert(vmux_layout::hosted_page::SurfaceHandoffFailed);
-            presentations.0.insert(
+            presentations.applied.insert(
                 entity,
                 AppliedSurfacePresentation {
                     generation: generation.0,
@@ -2259,6 +2435,15 @@ struct PageLifecycleOutbox {
 
 impl LifecycleSink for PageLifecycleOutbox {
     fn update(&self, update: LifecycleUpdate) {
+        if matches!(
+            update,
+            LifecycleUpdate::Mounted
+                | LifecycleUpdate::Remounted
+                | LifecycleUpdate::Navigated(_)
+                | LifecycleUpdate::Ready(_)
+        ) {
+            crate::NativeBridge::invalidate_history_input(self.webview);
+        }
         self.sender.0.send(PageLifecycleEnvelope {
             webview: self.webview,
             generation: self.generation,
@@ -2690,10 +2875,11 @@ fn report_waiting(reason: &str) {
 #[cfg(test)]
 mod tests {
     use super::{
-        HostedSurfaceGeneration, MacosBrowserPlugin, OpenPageDropdown, PageLifecycleEnvelope,
-        PageLifecycleMailbox, PageLifecycleReceiver, PageMetadataMailbox, PageMetadataReceiver,
-        PageMetadataSender, PageOutbox, PagePlacementExt, SURFACE_SETTLE_TIMEOUT, SimulatorFrame,
-        SimulatorFrameRequest, SurfacePresentation, SurfaceSettleRetries,
+        CachedNativeFrame, HostedSurfaceGeneration, MacosBrowserPlugin, OpenPageDropdown,
+        PageLifecycleEnvelope, PageLifecycleMailbox, PageLifecycleReceiver, PageMetadataMailbox,
+        PageMetadataReceiver, PageMetadataSender, PageOutbox, PagePlacementExt,
+        SURFACE_SETTLE_TIMEOUT, SimulatorFrame, SimulatorFrameRequest, SurfacePresentation,
+        SurfaceSettleRetries,
     };
     use bevy::ecs::schedule::Schedules;
     use bevy::prelude::{
@@ -2707,6 +2893,65 @@ mod tests {
 
     use crate::present::PaneFrame;
     use vmux_layout::presentation::Layer as PresentationLayer;
+
+    #[test]
+    fn cached_native_frame_rejects_a_different_surface_navigation_opacity_or_bounds() {
+        let frame = PaneFrame {
+            left: 10.0,
+            top: 20.0,
+            width: 200.0,
+            height: 100.0,
+        };
+        let cached = CachedNativeFrame {
+            generation: 4,
+            navigation_revision: 7,
+            frame,
+        };
+        let visible = SurfacePresentation::Visible {
+            frame,
+            radius: 0.0,
+            opacity: 1.0,
+            all_corners: false,
+            ring: crate::present::FocusRing::default(),
+            order: Some(SiblingOrder::Front),
+        };
+        let bounds = wry::Rect {
+            position: wry::dpi::LogicalPosition::new(10.0, 20.0).into(),
+            size: wry::dpi::LogicalSize::new(200.0, 100.0).into(),
+        };
+
+        assert!(cached.matches(4, 7, visible, Some(bounds)));
+        assert!(!cached.matches(5, 7, visible, Some(bounds)));
+        assert!(!cached.matches(4, 8, visible, Some(bounds)));
+        assert!(!cached.matches(4, 7, SurfacePresentation::Hidden, Some(bounds)));
+        assert!(!cached.matches(4, 7, visible, None));
+        let transparent = SurfacePresentation::Visible {
+            frame,
+            radius: 0.0,
+            opacity: 0.0,
+            all_corners: false,
+            ring: crate::present::FocusRing::default(),
+            order: Some(SiblingOrder::Front),
+        };
+        assert!(!cached.matches(4, 7, transparent, Some(bounds)));
+        let stale_bounds = wry::Rect {
+            position: wry::dpi::LogicalPosition::new(10.0, 20.0).into(),
+            size: wry::dpi::LogicalSize::new(160.0, 100.0).into(),
+        };
+        assert!(!cached.matches(4, 7, visible, Some(stale_bounds)));
+        let resized = SurfacePresentation::Visible {
+            frame: PaneFrame {
+                width: 160.0,
+                ..frame
+            },
+            radius: 0.0,
+            opacity: 1.0,
+            all_corners: false,
+            ring: crate::present::FocusRing::default(),
+            order: Some(SiblingOrder::Front),
+        };
+        assert!(!cached.matches(4, 7, resized, Some(stale_bounds)));
+    }
 
     #[derive(Default, Resource)]
     struct ReadyEvents(usize);

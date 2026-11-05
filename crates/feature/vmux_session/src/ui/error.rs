@@ -9,15 +9,31 @@ use vmux_ui::navigation::PageNavigation;
 #[component]
 pub(super) fn ChatErrorCard(message: String) -> Element {
     let is_startup = message.to_lowercase().contains("startup");
-    let busy = message.contains("thread_active_writer")
-        || message.contains("already has an active writer");
+    let busy = vmux_session::Failure(&message).in_use();
+    if busy {
+        let diagnostics = message.clone();
+        return rsx! {
+            div { class: "flex flex-col gap-3 rounded-lg bg-card px-4 py-3 text-foreground", role: "status",
+                div { class: "text-sm font-medium", {translate("sessions-busy-title")} }
+                p { class: "text-sm leading-relaxed text-muted-foreground", {translate("sessions-busy-detail")} }
+                div { class: "flex items-center gap-2",
+                    Button { size: ButtonSize::Xs, variant: ButtonVariant::Primary,
+                        onclick: move |_| { let _ = send(&ChatRetrySession); },
+                        {translate("common-retry")}
+                    }
+                    Button { size: ButtonSize::Xs, variant: ButtonVariant::Ghost,
+                        onclick: move |_| Clipboard::write(&diagnostics),
+                        {translate("common-copy")}
+                    }
+                }
+            }
+        };
+    }
     #[cfg(not(target_os = "ios"))]
     let version_error_target = Some(format!("{}acp", vmux_tool::ToolPlugin::URL));
     #[cfg(target_os = "ios")]
     let version_error_target: Option<String> = None;
-    let title = if busy {
-        translate("sessions-busy-title")
-    } else if is_startup {
+    let title = if is_startup {
         translate("agent-error-startup-title")
     } else {
         translate("common-error")
@@ -59,9 +75,9 @@ pub(super) fn ChatErrorCard(message: String) -> Element {
                 }
             }
             div { class: "max-h-40 overflow-auto whitespace-pre-wrap break-words border-l border-red-500/20 px-3 py-2 font-mono text-[11px] leading-relaxed text-red-700/90 dark:text-red-200/80",
-                if busy { {translate("sessions-busy-detail")} } else { "{message}" }
+                "{message}"
             }
-            if busy || is_startup || message.contains("session/load failed") {
+            if is_startup || message.contains("session/load failed") {
                 Button { size: ButtonSize::Xs, variant: ButtonVariant::Ghost,
                     class: "self-start".to_string(),
                     onclick: move |_| { let _ = send(&ChatRetrySession); },

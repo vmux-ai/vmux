@@ -5,6 +5,7 @@ use bevy_ecs::reflect::AppTypeRegistry;
 use bevy_ecs::system::SystemParam;
 use bevy_reflect::{FromType, GetTypeRegistration, Reflect, TypePath, TypeRegistry};
 use bevy_world_serialization::WorldFilter;
+use moonshine_save::prelude::Save;
 use std::marker::PhantomData;
 use std::path::PathBuf;
 
@@ -119,12 +120,19 @@ impl PersistenceAppExt for App {
 type PersistedChanged<T> = Or<(Added<T>, Changed<T>)>;
 
 fn detect_change<T: Component>(
-    changed: Query<(), PersistedChanged<T>>,
+    changed: Query<(), (With<Save>, PersistedChanged<T>)>,
+    saved: Query<(), With<Save>>,
     mut removed: RemovedComponents<T>,
     mut commands: Commands,
 ) {
-    let removed = removed.read().count() > 0;
-    if !changed.is_empty() || removed {
+    let marker = std::any::TypeId::of::<T>() == std::any::TypeId::of::<Save>();
+    let mut dirty = !changed.is_empty();
+    for entity in removed.read() {
+        if marker || saved.contains(entity) {
+            dirty = true;
+        }
+    }
+    if dirty {
         commands.trigger(PersistenceDirty);
     }
 }
@@ -140,6 +148,44 @@ mod tests {
     #[derive(Component, Reflect)]
     #[reflect(Component)]
     struct Transient;
+
+    #[derive(Resource, Default)]
+    struct DirtyCount(u32);
+
+    impl DirtyCount {
+        fn record(_: On<PersistenceDirty>, mut count: ResMut<Self>) {
+            count.0 += 1;
+        }
+    }
+
+    #[test]
+    fn runtime_component_updates_do_not_request_workspace_saves() {
+        let mut app = App::new();
+        app.register_persisted::<Saved>()
+            .track_persistence::<Save>()
+            .init_resource::<DirtyCount>()
+            .add_observer(DirtyCount::record);
+        let entity = app.world_mut().spawn(Saved).id();
+        app.update();
+        assert_eq!(app.world().resource::<DirtyCount>().0, 0);
+        app.world_mut().entity_mut(entity).insert(Saved);
+        app.update();
+        assert_eq!(app.world().resource::<DirtyCount>().0, 0);
+        app.world_mut().entity_mut(entity).remove::<Saved>();
+        app.update();
+        assert_eq!(app.world().resource::<DirtyCount>().0, 0);
+        app.world_mut().entity_mut(entity).insert((Save, Saved));
+        app.update();
+        assert!(app.world().resource::<DirtyCount>().0 > 0);
+        app.world_mut().resource_mut::<DirtyCount>().0 = 0;
+        app.world_mut().entity_mut(entity).remove::<Saved>();
+        app.update();
+        assert!(app.world().resource::<DirtyCount>().0 > 0);
+        app.world_mut().resource_mut::<DirtyCount>().0 = 0;
+        app.world_mut().entity_mut(entity).despawn();
+        app.update();
+        assert!(app.world().resource::<DirtyCount>().0 > 0);
+    }
 
     enum FeaturePersistence {}
 

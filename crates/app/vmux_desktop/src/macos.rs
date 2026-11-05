@@ -7,9 +7,9 @@ use bevy::prelude::*;
 use bevy::winit::{EventLoopProxyWrapper, WINIT_WINDOWS, WinitUserEvent};
 use bevy_cef_core::prelude::MessageLoopWakePolicy;
 use objc2_app_kit::{
-    NSAnimatablePropertyContainer, NSAnimationContext, NSApp, NSEvent, NSEventMask, NSEventType,
-    NSView, NSWindowDidEndLiveResizeNotification, NSWindowStyleMask,
-    NSWindowWillStartLiveResizeNotification,
+    NSAnimatablePropertyContainer, NSAnimationContext, NSApp, NSEvent, NSEventMask,
+    NSEventModifierFlags, NSEventPhase, NSEventType, NSView, NSWindowDidEndLiveResizeNotification,
+    NSWindowStyleMask, NSWindowWillStartLiveResizeNotification,
 };
 use objc2_foundation::{
     NSNotification, NSNotificationCenter, NSPoint, NSRect, NSSize, NSString, NSUserDefaults,
@@ -498,6 +498,17 @@ fn install_input_wake_monitor(
                 | NSEventType::OtherMouseUp
         );
         let scroll = event_type == NSEventType::ScrollWheel;
+        if scroll {
+            HistoryScroll::record(ev);
+        } else if matches!(
+            event_type,
+            NSEventType::Magnify
+                | NSEventType::Rotate
+                | NSEventType::KeyDown
+                | NSEventType::FlagsChanged
+        ) {
+            HistoryScroll::cancel();
+        }
         let location = event_location_in_window_physical_px(ev);
         let pointer_position_changed = motion || button_event;
         let was_over_windowed_page = WINDOWED_POINTER_INSIDE.load(Ordering::Relaxed);
@@ -570,6 +581,8 @@ fn install_input_wake_monitor(
         | NSEventMask::OtherMouseDragged;
     let local_mask = mouse_mask
         | NSEventMask::ScrollWheel
+        | NSEventMask::Magnify
+        | NSEventMask::Rotate
         | NSEventMask::KeyDown
         | NSEventMask::KeyUp
         | NSEventMask::FlagsChanged;
@@ -646,6 +659,87 @@ fn event_location_in_window_physical_px(event: &NSEvent) -> Option<(f32, f32)> {
         Some((x as f32, y as f32))
     } else {
         None
+    }
+}
+
+struct HistoryScroll;
+
+impl HistoryScroll {
+    fn record(event: &NSEvent) {
+        let source = event.CGEvent();
+        let modifiers = NSEventModifierFlags::Control
+            | NSEventModifierFlags::Command
+            | NSEventModifierFlags::Option
+            | NSEventModifierFlags::Shift;
+        if source.is_none()
+            || !event.hasPreciseScrollingDeltas()
+            || event.modifierFlags().intersects(modifiers)
+        {
+            Self::cancel();
+            return;
+        }
+        let Some((window, position)) = Self::position(event) else {
+            Self::cancel();
+            return;
+        };
+        let phase = if event.momentumPhase() != NSEventPhase::None {
+            vmux_browser::NativeHistoryPhase::Momentum
+        } else if event.phase().intersects(NSEventPhase::Cancelled) {
+            vmux_browser::NativeHistoryPhase::Cancel
+        } else if event.phase().intersects(NSEventPhase::Ended) {
+            vmux_browser::NativeHistoryPhase::End
+        } else if event
+            .phase()
+            .intersects(NSEventPhase::Began | NSEventPhase::MayBegin)
+        {
+            vmux_browser::NativeHistoryPhase::Begin
+        } else if event
+            .phase()
+            .intersects(NSEventPhase::Changed | NSEventPhase::Stationary)
+        {
+            vmux_browser::NativeHistoryPhase::Changed
+        } else {
+            vmux_browser::NativeHistoryPhase::Unsupported
+        };
+        let delta = Vec2::new(
+            -event.scrollingDeltaX() as f32,
+            -event.scrollingDeltaY() as f32,
+        );
+        vmux_browser::NativeBridge::record_history_wheel(window, position, delta, phase);
+    }
+
+    fn position(event: &NSEvent) -> Option<(isize, Vec2)> {
+        let mtm = objc2::MainThreadMarker::new()?;
+        let mut window = event.window(mtm)?;
+        let screen = window.convertPointToScreen(event.locationInWindow());
+        for _ in 0..8 {
+            let Some(parent) = window.parentWindow() else {
+                break;
+            };
+            window = parent;
+        }
+        let content = window.contentView()?;
+        let point = content.convertPoint_fromView(window.convertPointFromScreen(screen), None);
+        let y = if content.isFlipped() {
+            point.y
+        } else {
+            content.bounds().size.height - point.y
+        };
+        let scale = window.backingScaleFactor();
+        let position = Vec2::new((point.x * scale) as f32, (y * scale) as f32);
+        if !position.is_finite() || !scale.is_finite() || scale <= 0.0 {
+            return None;
+        }
+        Some((window.windowNumber(), position))
+    }
+
+    fn cancel() {
+        vmux_browser::NativeBridge::record_history_wheel(
+            0,
+            Vec2::ZERO,
+            Vec2::ZERO,
+            vmux_browser::NativeHistoryPhase::Cancel,
+        );
     }
 }
 

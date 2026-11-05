@@ -26,6 +26,16 @@ impl RunState {
     }
 }
 
+pub struct Failure<'a>(pub &'a str);
+
+impl Failure<'_> {
+    pub fn in_use(&self) -> bool {
+        self.0.contains("thread_active_writer")
+            || self.0.contains("already has an active writer")
+            || self.0.contains("session is in use by another Codex client")
+    }
+}
+
 #[derive(Component, Default)]
 pub struct AgentTurnMeta {
     pub durations: Vec<u32>,
@@ -35,6 +45,22 @@ pub struct AgentTurnMeta {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn active_writer_refusals_are_distinct_from_other_failures() {
+        for (message, expected) in [
+            (
+                "Invalid request: {\"reason\":\"thread_active_writer\"}",
+                true,
+            ),
+            ("thread abc already has an active writer", true),
+            ("This Codex session is in use by another Codex client", true),
+            ("session/load timed out", false),
+            ("Invalid request: unknown session", false),
+        ] {
+            assert_eq!(Failure(message).in_use(), expected, "{message}");
+        }
+    }
 
     #[test]
     fn default_is_idle() {

@@ -1,4 +1,7 @@
-use crate::prelude::{LISTEN_EVENTS, PROCESS_MESSAGE_BIN_JS_EMIT, PROCESS_MESSAGE_JS_EMIT};
+use crate::prelude::{
+    LISTEN_EVENTS, PROCESS_MESSAGE_BIN_JS_EMIT, PROCESS_MESSAGE_HISTORY_SWIPE,
+    PROCESS_MESSAGE_JS_EMIT,
+};
 use crate::render_process::render_process_handler::{BinDocumentIdentity, current_bin_ipc_epoch};
 use crate::util::{IntoString, v8_value_to_json};
 use cef::rc::{Rc, RcImpl};
@@ -73,6 +76,7 @@ impl ImplV8Handler for CefApiHandler {
             "__cef_emit" => self.execute_emit(arguments),
             "__cef_listen" => self.execute_listen(arguments),
             "__cef_bin_emit" => self.execute_bin_emit(arguments),
+            "__cef_history_swipe" => self.execute_history_swipe(arguments),
             _ => 0,
         }
     }
@@ -84,6 +88,52 @@ impl ImplV8Handler for CefApiHandler {
 }
 
 impl CefApiHandler {
+    fn execute_history_swipe(&self, arguments: Option<&[Option<V8Value>]>) -> c_int {
+        let Some(context) = v8_context_get_current_context() else {
+            return 0;
+        };
+        let Some(frame) = context.frame() else {
+            return 0;
+        };
+        if frame.is_main() == 0 {
+            return 1;
+        }
+        let Some(arguments) = arguments else {
+            return 1;
+        };
+        let Some(Some(direction)) = arguments.first() else {
+            return 1;
+        };
+        let Some(Some(token)) = arguments.get(1) else {
+            return 1;
+        };
+        if direction.is_string() == 0 || token.is_string() == 0 {
+            return 1;
+        }
+        let direction = direction.string_value().into_string();
+        let token = token.string_value().into_string();
+        if !matches!(direction.as_str(), "back" | "forward")
+            || token.len() != 32
+            || !token.bytes().all(|byte| byte.is_ascii_hexdigit())
+        {
+            return 1;
+        }
+        let Some(mut process) = process_message_create(Some(&PROCESS_MESSAGE_HISTORY_SWIPE.into()))
+        else {
+            return 1;
+        };
+        let Some(values) = process.argument_list() else {
+            return 1;
+        };
+        values.set_string(0, Some(&direction.as_str().into()));
+        values.set_string(1, Some(&token.as_str().into()));
+        frame.send_process_message(
+            ProcessId::from(cef_process_id_t::PID_BROWSER),
+            Some(&mut process),
+        );
+        1
+    }
+
     fn execute_emit(&self, arguments: Option<&[Option<V8Value>]>) -> c_int {
         let Some(context) = v8_context_get_current_context() else {
             return 0;

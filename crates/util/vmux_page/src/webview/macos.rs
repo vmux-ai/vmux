@@ -36,6 +36,10 @@ impl SurfaceBackground {
 }
 
 impl WebView {
+    pub fn reload_ignore_cache(&self) -> bool {
+        unsafe { self.webview.webview().reloadFromOrigin().is_some() }
+    }
+
     pub fn presentation_settled(&self, expected_opacity: f32) -> bool {
         let wk = self.webview.webview();
         let view: &NSView = &wk;

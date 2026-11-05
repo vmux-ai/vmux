@@ -1,8 +1,9 @@
 use crate::cef_state::{MediaPermissionSender, WebviewCefStateSender};
 use crate::common::{
-    BinIpcEventRawSender, HostWindow, IpcEventRawSender, ResolvedWebviewUri, SnapshotResultSender,
-    WebviewMaxFrameRate, WebviewNativeLiquidGlass, WebviewOpaqueWindowedBackground, WebviewSize,
-    WebviewSource, WebviewTransparent, WebviewWindowed, WebviewWindowedNativeFocus,
+    BinIpcEventRawSender, HistorySwipeEventSender, HostWindow, IpcEventRawSender,
+    ResolvedWebviewUri, SnapshotResultSender, WebviewMaxFrameRate, WebviewNativeLiquidGlass,
+    WebviewOpaqueWindowedBackground, WebviewSize, WebviewSource, WebviewTransparent,
+    WebviewWindowed, WebviewWindowedNativeFocus,
 };
 use crate::cursor_icon::SystemCursorIconSender;
 use crate::loading_state::{WebviewCommittedNavigationSender, WebviewLoadingStateSender};
@@ -263,6 +264,7 @@ fn create_webview(
         Res<MediaPermissionSender>,
         Res<WebviewRendererTerminatedSender>,
         Option<Res<crate::common::CefShutdownState>>,
+        Res<HistorySwipeEventSender>,
     ),
     popup_sender: Res<WebviewPopupSender>,
     render_callbacks: Res<TextureWakeCallback>,
@@ -354,6 +356,7 @@ fn create_webview(
                 requester.clone(),
                 ipc_event_sender.0.clone(),
                 bin_ipc_event_sender.0.clone(),
+                cef_senders.4.0.clone(),
                 snapshot_result_sender.0.clone(),
                 cursor_icon_sender.clone(),
                 loading_state_sender.0.clone(),

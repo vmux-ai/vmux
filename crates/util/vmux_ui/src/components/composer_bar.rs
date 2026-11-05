@@ -62,6 +62,7 @@ pub fn StatusDot(status: String, size_class: String) -> Element {
         "installing" => "bg-sky-400 shadow-[0_0_8px_rgba(56,189,248,0.65)]",
         "awaiting" => "bg-violet-400 shadow-[0_0_8px_rgba(167,139,250,0.65)]",
         "errored" => "bg-red-500 shadow-[0_0_8px_rgba(239,68,68,0.65)]",
+        "in_use" => "bg-muted-foreground/60",
         _ => "bg-success shadow-[0_0_8px_rgba(16,185,129,0.65)]",
     };
     rsx! {
@@ -81,6 +82,7 @@ pub fn ComposerStatus(
         "awaiting" => translate("composer-status-approval"),
         "installing" => translate("composer-status-starting"),
         "errored" => translate("composer-status-error"),
+        "in_use" => translate("sessions-busy-title"),
         _ => String::new(),
     };
     rsx! {

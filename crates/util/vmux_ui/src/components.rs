@@ -26,6 +26,7 @@ pub mod motion;
 pub mod page;
 pub mod page_address;
 pub mod permission_menu;
+pub mod popup;
 pub mod progress;
 pub mod project_picker;
 pub mod prompt_box;

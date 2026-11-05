@@ -330,8 +330,14 @@ fn invoke_from_bar(
 #[vmux_command::command(message)]
 #[derive(Message, Clone, Copy, Debug, PartialEq, Eq)]
 pub struct NavigationRequest {
-    origin: Entity,
+    target: NavigationTarget,
     operation: NavigationOperation,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum NavigationTarget {
+    Origin(Entity),
+    Surface(Entity),
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -346,7 +352,14 @@ pub enum NavigationOperation {
 impl NavigationRequest {
     pub fn focused(operation: NavigationOperation) -> Self {
         Self {
-            origin: Entity::PLACEHOLDER,
+            target: NavigationTarget::Origin(Entity::PLACEHOLDER),
+            operation,
+        }
+    }
+
+    pub fn surface(webview: Entity, operation: NavigationOperation) -> Self {
+        Self {
+            target: NavigationTarget::Surface(webview),
             operation,
         }
     }
@@ -365,7 +378,7 @@ impl TryFrom<&CommandInvocation> for NavigationRequest {
             _ => return Err(()),
         };
         Ok(Self {
-            origin: invocation.caller,
+            target: NavigationTarget::Origin(invocation.caller),
             operation,
         })
     }
@@ -487,6 +500,7 @@ struct BrowserRequestTarget<'w, 's> {
         Query<'w, 's, (Entity, &'static ChildOf), (With<Tab>, With<Active>, Without<Retiring>)>,
     layout: LayoutFocus<'w, 's>,
     stacks: Query<'w, 's, (), (With<Stack>, Without<Retiring>)>,
+    parents: Query<'w, 's, &'static ChildOf>,
 }
 
 impl BrowserRequestTarget<'_, '_> {
@@ -527,23 +541,91 @@ impl BrowserRequestTarget<'_, '_> {
     }
 }
 
+impl BrowserRequestTarget<'_, '_> {
+    fn navigation_stack(
+        &self,
+        target: NavigationTarget,
+        surfaces: &vmux_layout::hosted_page::StackSurface,
+    ) -> Option<Entity> {
+        match target {
+            NavigationTarget::Origin(origin) => self.stack(origin),
+            NavigationTarget::Surface(webview) => {
+                let stack = self.parents.get(webview).ok()?.parent();
+                if !self.stacks.contains(stack) || !surfaces.is_current(stack, webview) {
+                    return None;
+                }
+                if let Some(space) = self.space_hierarchy.get(webview)
+                    && self.scope.current_space(webview) != Some(space)
+                {
+                    return None;
+                }
+                Some(stack)
+            }
+        }
+    }
+}
+
+#[derive(Default)]
+struct GestureCooldown {
+    stacks: std::collections::HashMap<Entity, std::time::Instant>,
+}
+
+impl GestureCooldown {
+    fn accepts(&mut self, stack: Entity, now: std::time::Instant) -> bool {
+        self.stacks
+            .retain(|_, last| now.duration_since(*last) < std::time::Duration::from_millis(650));
+        if self
+            .stacks
+            .get(&stack)
+            .is_some_and(|last| now.duration_since(*last) < std::time::Duration::from_millis(650))
+        {
+            return false;
+        }
+        self.stacks.insert(stack, now);
+        true
+    }
+}
+
 fn handle_navigation_requests(
     mut navigation_requests: MessageReader<NavigationRequest>,
     target: BrowserRequestTarget,
     surfaces: vmux_layout::hosted_page::StackSurface,
+    blocked: Query<
+        (),
+        Or<(
+            With<BinIpcBlocked>,
+            With<vmux_layout::hosted_page::SurfaceBlocked>,
+            With<Retiring>,
+        )>,
+    >,
     kind_q: Query<(Has<Terminal>, Has<vmux_editor::FileView>)>,
     histories: crate::navigation::NavigationHistory,
     mut host_history_steps: MessageWriter<HostHistoryStep>,
     mut commands: Commands,
+    mut gestures: Local<GestureCooldown>,
 ) {
     for request in navigation_requests.read() {
-        let Some(active) = target.stack(request.origin) else {
+        if let NavigationTarget::Surface(webview) = request.target
+            && blocked.contains(webview)
+        {
+            continue;
+        }
+        let Some(active) = target.navigation_stack(request.target, &surfaces) else {
             continue;
         };
         let Some(webview) = surfaces.current(active) else {
             continue;
         };
         let (is_terminal, _) = kind_q.get(webview).unwrap_or((false, false));
+        if matches!(request.target, NavigationTarget::Surface(_))
+            && matches!(
+                request.operation,
+                NavigationOperation::Back | NavigationOperation::Forward
+            )
+            && (is_terminal || !gestures.accepts(active, std::time::Instant::now()))
+        {
+            continue;
+        }
         match request.operation {
             NavigationOperation::Back => {
                 if is_terminal {
@@ -1122,6 +1204,122 @@ mod tests {
         fn cef_navigations(&self) -> Vec<Entity> {
             self.app.world().resource::<CefNavigations>().0.clone()
         }
+
+        fn another_hosted_page(&mut self) -> Entity {
+            let stack = self.app.world().get::<ChildOf>(self.view).unwrap().parent();
+            let pane = self.app.world().get::<ChildOf>(stack).unwrap().parent();
+            let tab = self.app.world().get::<ChildOf>(pane).unwrap().parent();
+            let other_pane = self
+                .app
+                .world_mut()
+                .spawn((Pane, LastActivatedAt::now(), ChildOf(tab)))
+                .id();
+            let other_stack = self
+                .app
+                .world_mut()
+                .spawn((Stack::bundle(), LastActivatedAt::now(), ChildOf(other_pane)))
+                .id();
+            let view = self
+                .app
+                .world_mut()
+                .spawn((Browser, HostHistory::default(), ChildOf(other_stack)))
+                .id();
+            self.app.world_mut().entity_mut(other_stack).insert(
+                vmux_layout::page_slot::Current::new(Some(view), PageMetadata::default()),
+            );
+            for url in ["file:///other-a.rs", "file:///other-b.rs"] {
+                self.app.world_mut().write_message(HostHistoryObserve {
+                    webview: view,
+                    url: url.to_string(),
+                    top_line: 0,
+                });
+                self.app.update();
+            }
+            view
+        }
+
+        fn swiped_back(&mut self, view: Entity) {
+            self.app
+                .world_mut()
+                .write_message(NavigationRequest::surface(view, NavigationOperation::Back));
+            self.app.update();
+            self.app.update();
+        }
+    }
+
+    #[test]
+    fn a_swipe_moves_the_source_panes_host_history_without_changing_the_focused_pane() {
+        let mut arrow = NavArrow::over_a_hosted_page();
+        let source = arrow.another_hosted_page();
+        arrow.swiped_back(source);
+        assert!(!arrow.walked_back());
+        assert!(
+            arrow
+                .app
+                .world()
+                .get::<HostHistory>(source)
+                .unwrap()
+                .can_go_forward()
+        );
+        assert!(arrow.cef_navigations().is_empty());
+    }
+
+    #[test]
+    fn a_swipe_from_a_replaced_or_blocked_surface_is_ignored() {
+        let mut arrow = NavArrow::over_a_hosted_page();
+        arrow
+            .app
+            .world_mut()
+            .entity_mut(arrow.view)
+            .insert(BinIpcBlocked);
+        arrow.swiped_back(arrow.view);
+        assert!(!arrow.walked_back());
+        arrow
+            .app
+            .world_mut()
+            .entity_mut(arrow.view)
+            .remove::<BinIpcBlocked>();
+        let stack = arrow
+            .app
+            .world()
+            .get::<ChildOf>(arrow.view)
+            .unwrap()
+            .parent();
+        let current = arrow.app.world_mut().spawn((Browser, ChildOf(stack))).id();
+        arrow
+            .app
+            .world_mut()
+            .entity_mut(stack)
+            .insert(vmux_layout::page_slot::Current::new(
+                Some(current),
+                PageMetadata::default(),
+            ));
+        arrow.swiped_back(arrow.view);
+        assert!(!arrow.walked_back());
+        assert!(arrow.cef_navigations().is_empty());
+    }
+
+    #[test]
+    fn momentum_from_a_new_document_cannot_navigate_the_same_stack_twice() {
+        let mut arrow = NavArrow::over(());
+        let stack = arrow
+            .app
+            .world()
+            .get::<ChildOf>(arrow.view)
+            .unwrap()
+            .parent();
+        arrow.swiped_back(arrow.view);
+        let replacement = arrow.app.world_mut().spawn((Browser, ChildOf(stack))).id();
+        arrow
+            .app
+            .world_mut()
+            .entity_mut(stack)
+            .insert(vmux_layout::page_slot::Current::new(
+                Some(replacement),
+                PageMetadata::default(),
+            ));
+        arrow.swiped_back(replacement);
+        assert_eq!(arrow.cef_navigations(), [arrow.view]);
     }
 
     #[test]

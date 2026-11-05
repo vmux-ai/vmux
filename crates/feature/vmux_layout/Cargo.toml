@@ -23,6 +23,7 @@ vmux_page = { path = "../../util/vmux_page" }
 vmux_path = { path = "../../util/vmux_path" }
 vmux_ui = { path = "../../util/vmux_ui", default-features = false }
 vmux_api = { path = "../../util/vmux_api" }
+vmux_session = { path = "../vmux_session", default-features = false }
 
 [dev-dependencies]
 serde_json = { workspace = true }
@@ -46,7 +47,7 @@ vmux_flex = { path = "../../util/vmux_flex" }
 vmux_git = { path = "../vmux_git" }
 vmux_history = { path = "../vmux_history" }
 vmux_input = { path = "../vmux_input" }
-vmux_session = { path = "../vmux_session" }
+vmux_session = { path = "../vmux_session", default-features = false, features = ["app"] }
 vmux_tool = { path = "../vmux_tool" }
 
 [target.'cfg(any(target_os = "ios", target_os = "macos"))'.dependencies]
