@@ -1,16 +1,23 @@
+use crate::event::ChatRetrySession;
 use dioxus::prelude::*;
 use vmux_ui::clipboard::Clipboard;
+use vmux_ui::components::button::{Button, ButtonSize, ButtonVariant};
+use vmux_ui::hooks::send;
 use vmux_ui::i18n::translate;
 use vmux_ui::navigation::PageNavigation;
 
 #[component]
 pub(super) fn ChatErrorCard(message: String) -> Element {
     let is_startup = message.to_lowercase().contains("startup");
+    let busy = message.contains("thread_active_writer")
+        || message.contains("already has an active writer");
     #[cfg(not(target_os = "ios"))]
     let version_error_target = Some(format!("{}acp", vmux_tool::ToolPlugin::URL));
     #[cfg(target_os = "ios")]
     let version_error_target: Option<String> = None;
-    let title = if is_startup {
+    let title = if busy {
+        translate("sessions-busy-title")
+    } else if is_startup {
         translate("agent-error-startup-title")
     } else {
         translate("common-error")
@@ -52,7 +59,14 @@ pub(super) fn ChatErrorCard(message: String) -> Element {
                 }
             }
             div { class: "max-h-40 overflow-auto whitespace-pre-wrap break-words border-l border-red-500/20 px-3 py-2 font-mono text-[11px] leading-relaxed text-red-700/90 dark:text-red-200/80",
-                "{message}"
+                if busy { {translate("sessions-busy-detail")} } else { "{message}" }
+            }
+            if busy || is_startup || message.contains("session/load failed") {
+                Button { size: ButtonSize::Xs, variant: ButtonVariant::Ghost,
+                    class: "self-start".to_string(),
+                    onclick: move |_| { let _ = send(&ChatRetrySession); },
+                    {translate("common-retry")}
+                }
             }
         }
         if is_version_error(&message) {

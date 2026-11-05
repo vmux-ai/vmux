@@ -1096,3 +1096,13 @@ project-archived = مؤرشف
 common-select = تحديد
 
 common-show-more = عرض المزيد
+
+sessions-busy-title = الجلسة قيد الاستخدام
+
+sessions-busy-detail = هذه المحادثة مفتوحة في عميل Codex آخر. أغلقها هناك ثم أعد المحاولة.
+
+layout-git-status = الملفات المعدّلة: { $count }
+
+layout-git-ahead = الالتزامات غير المرسلة: { $count }
+
+common-copy-url = نسخ الرابط

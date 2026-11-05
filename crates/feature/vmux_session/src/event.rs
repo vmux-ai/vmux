@@ -320,6 +320,14 @@ pub struct ChatStop;
 pub struct ChatResume;
 
 #[vmux_api::ui_event]
+pub struct ChatRetrySession;
+
+#[vmux_api::ui_event]
+pub struct SessionsOpen {
+    pub id: String,
+}
+
+#[vmux_api::ui_event]
 pub struct ChatClearQueue;
 
 #[vmux_api::ui_event(Default)]

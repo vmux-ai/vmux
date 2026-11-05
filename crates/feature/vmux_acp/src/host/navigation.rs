@@ -22,12 +22,15 @@ use vmux_start::{StartInlineTransition, StartInlineTransitionView};
 use vmux_ui::i18n::translate;
 
 use super::attach::AcpAgentAttachment;
+use super::navigation_driver::RetryRequested;
 use super::navigation_driver::{
     AcpCatalog, AgentPageOpenWorkspace, PageOpenCompletion, PageOpener,
 };
 use crate::AcpSessionId;
 #[cfg(test)]
 use crate::host::acp::registry::RegistryAgent;
+use bevy_cef::prelude::{UiEventPlugin, UiInput};
+use vmux_session::event::ChatRetrySession;
 
 type PendingPageOpen = (Without<PageOpenHandled>, Without<PageOpenError>);
 type ReadyPageOpen = (
@@ -39,6 +42,8 @@ type ReadyPageOpen = (
 pub(super) fn add(app: &mut App) {
     app.init_resource::<vmux_git::GitRuntime>()
         .add_observer(cleanup)
+        .add_plugins(UiEventPlugin::<(ChatRetrySession,)>::default())
+        .add_observer(retry)
         .add_systems(Update, swap)
         .add_systems(
             Update,
@@ -62,6 +67,37 @@ pub(super) fn add(app: &mut App) {
 
 #[derive(Component)]
 pub(super) struct PreparingAgentChatView;
+
+fn retry(
+    trigger: On<UiInput<ChatRetrySession>>,
+    views: Query<&ChildOf, With<SessionView>>,
+    targets: Query<&EntityTarget<Session>>,
+    sessions: Query<&SessionId, With<Session>>,
+    mut opens: MessageWriter<vmux_ecs::PageOpenRequest>,
+    mut commands: Commands,
+) {
+    let Ok(parent) = views.get(trigger.event().webview) else {
+        return;
+    };
+    let Ok(target) = targets.get(parent.parent()) else {
+        return;
+    };
+    let Ok(id) = sessions.get(target.entity()) else {
+        return;
+    };
+    commands
+        .entity(target.entity())
+        .remove::<(
+            crate::host::acp::AcpLaunchStarted,
+            crate::host::acp::AcpSpawnQueued,
+        )>()
+        .insert(RetryRequested);
+    opens.write(vmux_ecs::PageOpenRequest {
+        target: vmux_ecs::PageOpenTarget::Stack(parent.parent()),
+        url: Route::Session(id.clone()).url(),
+        request_id: None,
+    });
+}
 
 #[derive(Component)]
 struct AwaitingAgentTransitionPaint;
@@ -1193,5 +1229,61 @@ mod tests {
             requests[0].target,
             vmux_ecs::PageOpenTarget::Stack(entity) if entity == stack
         ));
+    }
+
+    #[test]
+    fn retry_reopens_the_same_session_and_preserves_its_resume_identity() {
+        let mut app = App::new();
+        add(&mut app);
+        app.add_message::<vmux_ecs::PageOpenRequest>();
+        let session = app
+            .world_mut()
+            .spawn((
+                Session,
+                SessionId("same-session".into()),
+                AcpSessionId("provider-session".into()),
+                vmux_ecs::ProcessAnchor(vmux_ecs::ProcessId::new()),
+                crate::host::acp::AcpLaunchStarted,
+                crate::host::acp::AcpSpawnQueued,
+            ))
+            .id();
+        let stack = app
+            .world_mut()
+            .spawn(EntityTarget::<Session>::new(session))
+            .id();
+        let view = app.world_mut().spawn((SessionView, ChildOf(stack))).id();
+        app.world_mut().trigger(UiInput {
+            webview: view,
+            payload: ChatRetrySession,
+        });
+        app.world_mut().flush();
+        assert!(app.world().get::<RetryRequested>(session).is_some());
+        assert!(
+            app.world()
+                .get::<crate::host::acp::AcpSpawnQueued>(session)
+                .is_none()
+        );
+        assert_eq!(
+            app.world().get::<AcpSessionId>(session).unwrap().0,
+            "provider-session"
+        );
+        assert!(
+            app.world()
+                .get::<vmux_ecs::ProcessAnchor>(session)
+                .is_some()
+        );
+        let opens = app
+            .world_mut()
+            .resource_mut::<Messages<vmux_ecs::PageOpenRequest>>()
+            .drain()
+            .collect::<Vec<_>>();
+        assert_eq!(opens.len(), 1);
+        assert_eq!(
+            opens[0].url,
+            Route::Session(SessionId("same-session".into())).url()
+        );
+        assert!(
+            matches!(opens[0].target, vmux_ecs::PageOpenTarget::Stack(parent) if parent == stack)
+        );
     }
 }

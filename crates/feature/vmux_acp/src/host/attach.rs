@@ -143,6 +143,9 @@ fn attach(
             }
         }
         let anchor = ProcessId::new();
+        commands
+            .entity(*session_entity)
+            .remove::<super::navigation_driver::RetryRequested>();
         commands.entity(*session_entity).insert((
             vmux_ecs::agent::AgentSessionRoot,
             vmux_session::AgentId(agent_id.to_string()),

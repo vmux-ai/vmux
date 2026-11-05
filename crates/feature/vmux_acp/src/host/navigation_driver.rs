@@ -47,6 +47,7 @@ pub(super) struct PageOpener<'w, 's> {
             Option<&'static ProcessAnchor>,
             Option<&'static vmux_session::ProviderKind>,
             Option<&'static vmux_session::ProviderSessionId>,
+            Has<RetryRequested>,
         ),
         With<Session>,
     >,
@@ -67,6 +68,9 @@ pub(super) enum PageOpenCompletion {
     Complete,
     PendingAttachment,
 }
+
+#[derive(Component)]
+pub(super) struct RetryRequested;
 
 impl AcpCatalog<'_, '_> {
     pub(super) fn agent(&self, id: &str) -> Option<&RegistryAgent> {
@@ -162,14 +166,25 @@ impl PageOpener<'_, '_> {
                     .iter()
                     .find(|(_, candidate, ..)| *candidate == &id)
                     .map(
-                        |(entity, _, name, cwd, agent, resume, active, kind, provider_sid)| {
+                        |(
+                            entity,
+                            _,
+                            name,
+                            cwd,
+                            agent,
+                            resume,
+                            active,
+                            kind,
+                            provider_sid,
+                            retry,
+                        )| {
                             (
                                 entity,
                                 name.as_str().to_string(),
                                 cwd.0.clone(),
                                 agent.map(|agent| agent.0.clone()),
                                 resume.map(|resume| resume.0.clone()),
-                                active.map(|active| active.0),
+                                active.filter(|_| !retry).map(|active| active.0),
                                 kind.cloned(),
                                 provider_sid.cloned(),
                             )

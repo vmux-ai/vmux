@@ -601,6 +601,9 @@ and paths retain their filename with a leading fade. Hover exposes the full labe
 Session tabs and side-sheet rows share their Session identicon, with the agent logo in a small
 corner badge. Address identicons use the same size as the adjacent navigation icons.
 Agent thumbnails contain their logo inside the circular avatar surface, including its border.
+Session breadcrumb controls fit their text, leaving the remaining address surface available for
+URL editing. A hover control copies the active URL. Session selection requests the full page-open
+lifecycle in the current Stack so its Session target and runtime follow the selected URL.
 Code bookmarks resolve their directory from the active worktree, owning project, or cwd and open
 its README or entry file; directory favicons identify the Code page. Layout and address state flush before native
 presentation in the same frame; the final flush retains updates arriving later.
@@ -1249,6 +1252,13 @@ History loading starts and finishes publish a fresh chat snapshot independently 
 changes, so empty or unchanged replays still release the conversation skeleton.
 The Session manager publishes only to its active page and leases Git metadata for every displayed
 repository while that page remains active.
+Its first discovery reserves a skeleton in one persistent scroll surface; background discovery
+keeps the settled catalog. Completed updates retain visible row order, append new identities, and
+fade in new rows. The view-control band and scrollbar gutter keep their space during loading.
+Git change counts live in the Space card with labels rather than as dots in the composer.
+Startup failures retain their specific provider cause when the process exits. A conversation owned
+by another client shows that reason and a retry control; retry preserves its provider identity and
+replaces only the failed local runtime. Failed conversations release their transcript skeleton.
 Composer workspace context resolves the Session named by the page URL even before runtime attachment
 has bound the Stack. Unpublished context is retried after the first ready frame, so a late binding
 cannot leave project and branch controls as placeholders. Branch menus enqueue their checkout reads

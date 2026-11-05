@@ -1,4 +1,7 @@
-use std::{collections::HashSet, rc::Rc};
+use std::{
+    collections::{HashMap, HashSet},
+    rc::Rc,
+};
 
 use dioxus::prelude::*;
 #[cfg(test)]
@@ -68,7 +71,15 @@ pub fn SessionsManager() -> Element {
     let filter_picker = SessionFilterPicker::use_state();
     let catalog = ui.use_selector(|state| state.catalog.clone());
     let repositories = ui.use_selector(|state| state.repositories.clone());
-    let snapshot = catalog();
+    let loading = ui.use_selector(|state| state.loading)();
+    let display = use_hook(|| Rc::new(std::cell::RefCell::new(CatalogDisplay::default())));
+    let incoming = catalog();
+    let settled = display.borrow_mut().update(incoming.clone(), loading);
+    let waiting = settled.is_none();
+    let snapshot = settled.unwrap_or(vmux_session::CatalogSnapshot {
+        stages: incoming.stages,
+        sessions: Vec::new(),
+    });
     let repositories = repositories();
     let optimistic_stages = use_optimistic_map(ManagerPresentation::stage_observations(&snapshot));
     let optimistic_archives =
@@ -80,7 +91,7 @@ pub fn SessionsManager() -> Element {
     use_context_provider(|| selection);
     use_context_provider(|| stage_catalog);
     let filters = controls.filters();
-    let presentation = Rc::new(ManagerPresentation::new(
+    let mut presentation = ManagerPresentation::new(
         snapshot,
         repositories,
         &controls.query(),
@@ -88,7 +99,10 @@ pub fn SessionsManager() -> Element {
         |id, stage| optimistic_stages.value(id, stage),
         |id, archived| optimistic_archives.value(id, &archived),
         |id| mutations.is_leaving(id),
-    ));
+    );
+    presentation.loading = waiting;
+    presentation.refreshing = loading;
+    let presentation = Rc::new(presentation);
     let visible_ids = presentation.visible_ids.clone();
     use_effect(use_reactive!(|(visible_ids,)| {
         selection.retain(&visible_ids);
@@ -370,7 +384,6 @@ fn SessionsManagerContent(
                         .with(use_context::<SessionMutations>()),
                     current: WorkspacePage::Sessions.option(),
                     options: WorkspacePage::options(),
-                    view_controls: rsx! { if !presentation.snapshot.sessions.is_empty() { ManagerViewToggle { view: controls.view(), list_label: translate("sessions-view-list"), grid_label: translate("sessions-view-board"), grid_icon: LineIcon::Columns3, onchange: move |view| controls.set_view(view) } } },
                     actions: rsx! {
                         SessionsManagerActions {
                             controls,
@@ -421,7 +434,19 @@ fn SessionsManagerContent(
                     },
                 }
             },
-            if presentation.snapshot.sessions.is_empty() {
+                div { class: "flex h-7 shrink-0 items-center justify-end px-3",
+                    ManagerViewToggle {
+                        view: controls.view(),
+                        list_label: translate("sessions-view-list"),
+                        grid_label: translate("sessions-view-board"),
+                        grid_icon: LineIcon::Columns3,
+                        onchange: move |view| controls.set_view(view),
+                    }
+                }
+            div { id: "sessions-scroll", class: "flex min-h-0 flex-1 flex-col overflow-auto [scrollbar-gutter:stable]",
+            if presentation.loading {
+                SessionsSkeleton {}
+            } else if presentation.snapshot.sessions.is_empty() {
                 ManagerEmpty {
                     title: translate("sessions-empty"),
                     detail: translate("sessions-empty-detail"),
@@ -438,7 +463,10 @@ fn SessionsManagerContent(
                     groups: presentation.groups.clone(),
                     repositories: presentation.repositories.clone(),
                     view: controls.view(),
+                    scrollable: false,
                 }
+                if presentation.refreshing { SessionsSkeleton {} }
+            }
             }
         }
     }
@@ -564,7 +592,7 @@ fn SessionCategories(
         .map(|group| group.sessions.len())
         .sum();
     rsx! {
-        div { class: "flex flex-col gap-3",
+        div { class: "flex flex-col gap-3 pt-1",
             ManagerSidebarItem {
                 label: translate("sessions-inbox"),
                 count: inbox_count,
@@ -823,14 +851,36 @@ fn SessionUpdatedFilterInput(
 }
 
 #[component]
+fn SessionsSkeleton() -> Element {
+    rsx! {
+        div { class: "min-w-[44rem] shrink-0 p-3",
+            div { class: "flex h-8 items-center gap-2", Skeleton { class: "h-3 w-24" } }
+            for row in 0..10 {
+                div { key: "{row}", class: "flex h-11 items-center gap-2.5 px-2",
+                    Skeleton { class: "size-4 shrink-0 rounded-full" }
+                    Skeleton { class: "h-3 w-10 shrink-0" }
+                    div { class: "min-w-0 flex-1 space-y-1.5",
+                        Skeleton { class: "h-3 w-1/2" }
+                        Skeleton { class: "h-2 w-1/3" }
+                    }
+                    Skeleton { class: "h-4 w-20 shrink-0" }
+                    Skeleton { class: "h-3 w-10 shrink-0" }
+                }
+            }
+        }
+    }
+}
+
+#[component]
 fn SessionsList(
     groups: Vec<StageGroup>,
     repositories: SessionRepositories,
     selection: Option<SessionSelection>,
     preview: Option<usize>,
+    scrollable: bool,
 ) -> Element {
     rsx! {
-        div { class: "min-h-0 flex-1 overflow-auto",
+        div { class: if scrollable { "min-h-0 flex-1 overflow-auto" } else { "contents" },
             div { class: "w-full min-w-[44rem] space-y-2 p-2",
                 for group in groups {
                     if !group.sessions.is_empty() {
@@ -856,13 +906,14 @@ fn SessionsBoard(
     repositories: SessionRepositories,
     selection: Option<SessionSelection>,
     preview: Option<usize>,
+    scrollable: bool,
 ) -> Element {
     groups.sort_by_key(|group| match group.stage.id.as_str() {
         "stale" => (0, 0),
         _ => (1, group.stage.order),
     });
     rsx! {
-        div { class: "min-h-0 flex-1 overflow-auto px-2 pb-2",
+        div { class: if scrollable { "min-h-0 flex-1 overflow-auto px-2 pb-2" } else { "shrink-0 px-2 pb-2" },
             div { class: "flex min-h-full w-max items-start gap-2",
                 for group in groups {
                     if !group.sessions.is_empty() {
@@ -888,12 +939,13 @@ fn SessionGroups(
     repositories: SessionRepositories,
     view: ManagerView,
     #[props(default)] preview: Option<usize>,
+    #[props(default = true)] scrollable: bool,
 ) -> Element {
     let selection = try_consume_context::<SessionSelection>();
     if view == ManagerView::List {
-        return rsx! { SessionsList { groups, repositories, selection, preview } };
+        return rsx! { SessionsList { groups, repositories, selection, preview, scrollable } };
     }
-    rsx! { SessionsBoard { groups, repositories, selection, preview } }
+    rsx! { SessionsBoard { groups, repositories, selection, preview, scrollable } }
 }
 
 #[component]
@@ -910,7 +962,10 @@ fn SessionGroup(
     let pager = SessionPager::use_state(preview);
     let total = sessions.len();
     let visible = pager.visible(total);
-    let group = StageGroupPresentation::new(&stage, &sessions);
+    let group = use_memo(use_reactive((&stage, &sessions), |(stage, sessions)| {
+        StageGroupPresentation::new(&stage, &sessions)
+    }));
+    let group = group.read();
     let section_class = if view == ManagerView::List {
         "p-1"
     } else {
@@ -942,7 +997,7 @@ fn SessionGroup(
                 }
                 if stage.id == "stale" && !group.archivable.is_empty() {
                     div { class: "ml-auto opacity-0 transition-opacity group-hover/session-section:opacity-100 focus-within:opacity-100",
-                        SessionArchiveAllMenu { targets: group.archivable }
+                        SessionArchiveAllMenu { targets: group.archivable.clone() }
                     }
                 }
             }
@@ -977,6 +1032,14 @@ fn SessionGroupContents(
     manual: bool,
     on_manual_more: EventHandler<()>,
 ) -> Element {
+    let repository_ready = repositories.ready;
+    let repository_index = use_memo(use_reactive((&repositories,), |(repositories,)| {
+        let mut index = HashMap::with_capacity(repositories.sessions.len());
+        for repository in repositories.sessions {
+            index.insert(repository.id.clone(), repository);
+        }
+        index
+    }));
     let items_class = if view == ManagerView::List {
         "space-y-px pt-0.5"
     } else {
@@ -989,8 +1052,8 @@ fn SessionGroupContents(
                     SessionItem {
                         key: "{session.id}",
                         view,
-                        repository: repositories.get(&session.id),
-                        repository_ready: repositories.ready,
+                        repository: repository_index.read().get(&session.id).cloned(),
+                        repository_ready,
                         stage: stage.clone(),
                         selection,
                         session,
@@ -1028,11 +1091,13 @@ fn SessionItem(
     let menu_title = presentation.title.clone();
     rsx! {
         Collapse { leaving,
+            div { class: "animate-[dx-fade-in_100ms_ease-out_forwards] motion-reduce:animate-none",
             SessionRowMenu { session: session.clone(), title: menu_title,
             if view == ManagerView::List {
                 SessionListItem { session, presentation, resume, repository_ready, selection }
             } else {
                 SessionBoardItem { session, presentation, resume, repository_ready, selection }
+            }
             }
             }
         }
@@ -1287,6 +1352,7 @@ fn SessionPropertyLink(url: String, children: Element) -> Element {
             class: if empty { "flex min-w-0 items-center gap-2 text-[10px] text-foreground/75" } else { "flex min-w-0 cursor-pointer items-center gap-2 text-[10px] text-foreground/75 transition-colors hover:text-primary hover:underline" },
             onclick: move |event: MouseEvent| {
                 event.prevent_default();
+                event.stop_propagation();
                 if !empty { PageNavigation::click(url.clone(), &event); }
             },
             {children}
@@ -1401,7 +1467,7 @@ fn SessionRowMenu(session: SessionSummary, title: String, children: Element) -> 
                         on_select: move |_: String| mutations.archive(vec![archive.clone()]),
                         attributes: vec![],
                         LineIconView { icon: LineIcon::Archive, class: "mr-2 size-3.5" }
-                        {translate("sessions-archive")}
+                        {translate("common-archive")}
                     }
                 }
                 ContextMenuItem {
@@ -1628,6 +1694,7 @@ fn SessionContextView(context: SessionContext, loading: bool) -> Element {
             } else if !context.project.is_empty() {
                 MetadataPill {
                     label: context.project.clone(),
+                    url: context.project_url.clone(),
                     leading: rsx! {
                         IdentityOrb {
                             seed: project_seed,
@@ -1638,7 +1705,7 @@ fn SessionContextView(context: SessionContext, loading: bool) -> Element {
                 }
             }
             if !loading && !context.branch.is_empty() {
-                MetadataPill { label: context.branch, icon: Some(LineIcon::GitBranch), mono: true }
+                MetadataPill { label: context.branch, url: context.git_url, icon: Some(LineIcon::GitBranch), mono: true }
             }
         }
     }
@@ -1647,6 +1714,7 @@ fn SessionContextView(context: SessionContext, loading: bool) -> Element {
 #[component]
 fn MetadataPill(
     label: String,
+    #[props(default)] url: String,
     #[props(default)] title: String,
     #[props(default)] dot: String,
     #[props(default)] icon: Option<LineIcon>,
@@ -1654,13 +1722,27 @@ fn MetadataPill(
     #[props(default)] mono: bool,
 ) -> Element {
     let label_class = if mono { "font-mono" } else { "" };
+    let linked = !url.is_empty();
+    let link_class = if linked {
+        "cursor-pointer transition-colors hover:bg-foreground/[0.075] hover:text-foreground"
+    } else {
+        ""
+    };
     let title = if title.is_empty() {
         label.clone()
     } else {
         title
     };
     rsx! {
-        span { class: "inline-flex h-[18px] max-w-full min-w-0 items-center gap-1 rounded-md bg-foreground/[0.045] px-1.5 text-[10px] text-muted-foreground", title,
+        a { class: "inline-flex h-[18px] max-w-full min-w-0 items-center gap-1 rounded-md bg-foreground/[0.045] px-1.5 text-[10px] text-muted-foreground {link_class}", title,
+            href: linked.then_some(url.clone()),
+            onclick: move |event: MouseEvent| {
+                if linked {
+                    event.prevent_default();
+                    event.stop_propagation();
+                    PageNavigation::click(url.clone(), &event);
+                }
+            },
             if !dot.is_empty() {
                 span { class: "size-1.5 shrink-0 rounded-full {dot}" }
             }

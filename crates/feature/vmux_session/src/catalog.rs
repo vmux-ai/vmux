@@ -31,9 +31,19 @@ pub struct CatalogSnapshot {
     pub sessions: Vec<SessionSummary>,
 }
 
-#[derive(Resource, Clone, Debug, Default, PartialEq, Eq)]
+#[derive(Resource, Clone, Debug, PartialEq, Eq)]
 pub struct ProviderCatalog {
     pub sessions: Vec<ProviderSession>,
+    pub loading: bool,
+}
+
+impl Default for ProviderCatalog {
+    fn default() -> Self {
+        Self {
+            sessions: Vec::new(),
+            loading: true,
+        }
+    }
 }
 
 impl ProviderCatalog {

@@ -8,8 +8,48 @@ use vmux_ui::i18n::{TranslationValue, translate, translate_humanized, translate_
 
 use crate::event::{ProviderSessionTarget, SessionRepositories, SessionRepository};
 
+#[derive(Default)]
+pub(super) struct CatalogDisplay {
+    settled: Option<CatalogSnapshot>,
+}
+
+impl CatalogDisplay {
+    pub(super) fn update(
+        &mut self,
+        mut incoming: CatalogSnapshot,
+        loading: bool,
+    ) -> Option<CatalogSnapshot> {
+        if loading {
+            return self.settled.clone();
+        }
+        if let Some(previous) = &self.settled {
+            let mut rows = HashMap::new();
+            let mut order = Vec::new();
+            for session in incoming.sessions {
+                order.push(session.id.clone());
+                rows.insert(session.id.clone(), session);
+            }
+            incoming.sessions = Vec::new();
+            for session in &previous.sessions {
+                if let Some(updated) = rows.remove(&session.id) {
+                    incoming.sessions.push(updated);
+                }
+            }
+            for id in order {
+                if let Some(session) = rows.remove(&id) {
+                    incoming.sessions.push(session);
+                }
+            }
+        }
+        self.settled = Some(incoming.clone());
+        Some(incoming)
+    }
+}
+
 #[derive(Clone, PartialEq)]
 pub(super) struct ManagerPresentation {
+    pub loading: bool,
+    pub refreshing: bool,
     pub snapshot: CatalogSnapshot,
     pub repositories: SessionRepositories,
     pub category_groups: Vec<StageGroup>,
@@ -114,6 +154,8 @@ impl ManagerPresentation {
         let selected_filters = SessionFilter::presentations(filters, &snapshot.stages);
         let selected_stage = SessionFilter::stage(filters).map(str::to_string);
         Self {
+            loading: false,
+            refreshing: false,
             snapshot,
             repositories,
             category_groups,
@@ -558,6 +600,7 @@ impl StageGroup {
     }
 }
 
+#[derive(Clone, PartialEq)]
 pub(super) struct StageGroupPresentation {
     pub dot: &'static str,
     pub archivable: Vec<ArchiveTarget>,
@@ -819,4 +862,48 @@ pub(super) fn runtime_label(runtime: &str) -> String {
         _ => "session-runtime-inactive",
     };
     translate(id)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn discovery_waits_for_completion_and_appends_without_reordering_visible_rows() {
+        let mut display = CatalogDisplay::default();
+        let mut initial = CatalogSnapshot::default();
+        for id in ["a", "b"] {
+            initial.sessions.push(SessionSummary {
+                id: id.into(),
+                ..Default::default()
+            });
+        }
+        assert!(display.update(initial.clone(), true).is_none());
+        display.update(initial, false).unwrap();
+        let mut refreshed = CatalogSnapshot::default();
+        for id in ["c", "b", "a"] {
+            refreshed.sessions.push(SessionSummary {
+                id: id.into(),
+                ..Default::default()
+            });
+        }
+        let pending = display.update(refreshed.clone(), true).unwrap();
+        assert_eq!(
+            pending
+                .sessions
+                .iter()
+                .map(|session| session.id.as_str())
+                .collect::<Vec<_>>(),
+            ["a", "b"]
+        );
+        let complete = display.update(refreshed, false).unwrap();
+        assert_eq!(
+            complete
+                .sessions
+                .iter()
+                .map(|session| session.id.as_str())
+                .collect::<Vec<_>>(),
+            ["a", "b", "c"]
+        );
+    }
 }

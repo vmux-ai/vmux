@@ -3,16 +3,16 @@ use dioxus::prelude::*;
 use vmux_ui::components::avatar::{AgentThumbnail, Avatar, IdentityOrb};
 use vmux_ui::components::breadcrumb::{BreadcrumbOption, BreadcrumbSelector, BreadcrumbSeparator};
 use vmux_ui::components::button::{Button, ButtonSize, ButtonVariant};
-use vmux_ui::components::composer_bar::StatusDot;
 use vmux_ui::components::manager::WorkspacePage;
 use vmux_ui::components::page_address::PageAddress;
 use vmux_ui::i18n::translate;
 use vmux_ui::icon::{LineIcon, LineIconView};
 use vmux_ui::navigation::PageNavigation;
 
-use crate::event::SessionRepository;
+use crate::event::{SessionRepository, SessionsOpen};
 use crate::state::Navigation;
 use crate::{Route, SessionId, SessionSummary};
+use vmux_ui::hooks::send;
 
 #[derive(Clone, Default, PartialEq)]
 pub(super) struct ChatHeaderCatalog {
@@ -120,8 +120,6 @@ pub(super) fn ChatHeader(
     on_details_toggle: EventHandler<MouseEvent>,
 ) -> Element {
     let title = chat.title();
-    let user_name = chat.user.name();
-    let user_color = chat.user.color();
     let project_name = repository
         .as_ref()
         .map(|repository| repository.project.clone())
@@ -143,14 +141,6 @@ pub(super) fn ChatHeader(
             options: navigation.views,
             actions: rsx! {
                 div { class: "flex items-center gap-2",
-                    StatusDot { status: chat.status(), size_class: "h-2 w-2" }
-                    Avatar {
-                        src: None,
-                        seed: user_name.clone(),
-                        background: user_color,
-                        alt: user_name.clone(),
-                        class: "size-5 shrink-0 text-[7px]".to_string(),
-                    }
                     if details_available {
                         Button {
                             variant: ButtonVariant::Ghost,
@@ -185,9 +175,10 @@ pub(super) fn ChatHeader(
             BreadcrumbSeparator {}
             BreadcrumbSelector {
                 label: title.clone(),
-                class: "min-w-0 flex-1".to_string(),
+                class: "min-w-0".to_string(),
                 active: true,
                 options: navigation.sessions,
+                value: session.as_ref().map(|session| Route::Session(SessionId(session.id.clone())).url()).unwrap_or_default(),
                 leading: rsx! {
                     IdentityOrb {
                         seed: session_seed,
@@ -195,7 +186,11 @@ pub(super) fn ChatHeader(
                         class: "size-4".to_string(),
                     }
                 },
-                onselect: PageNavigation::replace,
+                onselect: move |url: String| {
+                    if let Some(Route::Session(id)) = Route::parse(&url) {
+                        let _ = send(&SessionsOpen { id: id.0 });
+                    }
+                },
             }
         }
     }

@@ -294,13 +294,22 @@ fn receive(mut inbox: Single<&mut AcpSessionInbox>, mut commands: Commands) {
 fn spawn(
     runtime: Single<&AcpSessionRuntime>,
     wake: Single<&AcpSessionWake>,
-    sessions: Query<&SessionId>,
+    sessions: Query<(Entity, &SessionId, Option<&AcpSessionShared>)>,
     mut requests: Query<(Entity, &mut SpawnAcpSession)>,
     mut commands: Commands,
 ) {
     let mut session_ids = HashSet::new();
-    for sid in &sessions {
-        session_ids.insert(sid.0.clone());
+    for (entity, sid, shared) in &sessions {
+        if requests.iter().any(|(_, request)| request.sid == sid.0)
+            && shared.is_some_and(|shared| shared.0.startup_failed())
+        {
+            commands
+                .entity(entity)
+                .remove::<SessionId>()
+                .insert(AcpSessionClosing);
+        } else {
+            session_ids.insert(sid.0.clone());
+        }
     }
     for (request_entity, mut request) in &mut requests {
         if !session_ids.contains(&request.sid) {

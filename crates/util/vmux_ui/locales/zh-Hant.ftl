@@ -1093,3 +1093,13 @@ project-archived = 已封存
 common-select = 選取
 
 common-show-more = 顯示更多
+
+sessions-busy-title = 工作階段使用中
+
+sessions-busy-detail = 此對話已在另一個 Codex 用戶端中開啟。請在該處關閉後重試。
+
+layout-git-status = 已變更檔案：{ $count }
+
+layout-git-ahead = 未推送提交：{ $count }
+
+common-copy-url = 複製 URL

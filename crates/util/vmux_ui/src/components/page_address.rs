@@ -5,10 +5,13 @@ use std::sync::atomic::{AtomicU64, Ordering};
 
 use dioxus::prelude::*;
 
+use crate::clipboard::Clipboard;
 use crate::components::breadcrumb::{
     BreadcrumbOption, BreadcrumbOptionIcon, BreadcrumbSelector, Breadcrumbs,
 };
+use crate::components::icon::Icon;
 use crate::hooks::UiStateSnapshots;
+use crate::i18n::translate;
 use crate::navigation::PageNavigation;
 use crate::transport::event_listener::EventListenerError;
 use crate::transport::{BytesListener, HostBinding, PageHost, TextOffsetAnswer};
@@ -94,8 +97,9 @@ pub fn PageAddressOutlet(slot: u64, fallback: Element) -> Element {
 
 #[component]
 pub fn AddressSurface(url: String, onactivate: EventHandler<()>, children: Element) -> Element {
+    let copy_url = url.clone();
     rsx! {
-        div { class: "relative flex h-8 min-w-0 flex-1 items-center",
+        div { class: "group/address relative flex h-8 min-w-0 flex-1 items-center",
             button {
                 r#type: "button",
                 "data-vmux-url-edit": "",
@@ -107,6 +111,22 @@ pub fn AddressSurface(url: String, onactivate: EventHandler<()>, children: Eleme
             div {
                 class: "pointer-events-none relative flex h-full min-w-0 flex-1 items-center px-1 [&_button]:pointer-events-auto [&_a]:pointer-events-auto [&_input]:pointer-events-auto [&_textarea]:pointer-events-auto [&_select]:pointer-events-auto [&_[role=button]]:pointer-events-auto [&_[role=tab]]:pointer-events-auto [&_[popover]]:pointer-events-auto [&_[contenteditable]]:pointer-events-auto [&_[data-vmux-address-item]]:pointer-events-auto [&_[data-vmux-dropdown-root]]:pointer-events-auto",
                 {children}
+            }
+            if !copy_url.is_empty() {
+                button {
+                    r#type: "button",
+                    class: "relative z-10 ml-1 flex size-6 shrink-0 items-center justify-center rounded-md text-muted-foreground opacity-0 transition-opacity group-hover/address:opacity-100 focus-visible:opacity-100 hover:bg-foreground/[0.05] hover:text-foreground",
+                    title: translate("common-copy-url"),
+                    aria_label: translate("common-copy-url"),
+                    onclick: move |event: MouseEvent| {
+                        event.stop_propagation();
+                        Clipboard::write(&copy_url);
+                    },
+                    Icon { class: "size-3.5",
+                        rect { x: "9", y: "9", width: "13", height: "13", rx: "2" }
+                        path { d: "M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" }
+                    }
+                }
             }
         }
     }

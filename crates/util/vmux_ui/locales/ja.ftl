@@ -1076,3 +1076,13 @@ project-archived = アーカイブ済み
 common-select = 選択
 
 common-show-more = もっと見る
+
+sessions-busy-title = 他のクライアントで使用中
+
+sessions-busy-detail = この会話は別の Codex クライアントで開かれています。そちらで閉じてから再試行してください。
+
+layout-git-status = 変更ファイル: { $count } 件
+
+layout-git-ahead = 未 push のコミット: { $count } 件
+
+common-copy-url = URL をコピー

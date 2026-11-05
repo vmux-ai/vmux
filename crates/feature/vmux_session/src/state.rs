@@ -13,12 +13,24 @@ use crate::event::SessionRepository;
 pub struct SessionCatalogUiStatePatch {
     pub catalog: Option<Box<CatalogSnapshot>>,
     pub repositories: Option<Box<SessionRepositories>>,
+    pub loading: Option<bool>,
 }
 
-#[vmux_api::ui_state(Default, patch = SessionCatalogUiStatePatch, version = 1)]
+#[vmux_api::ui_state(patch = SessionCatalogUiStatePatch, version = 2)]
 pub struct SessionCatalogUiState {
     pub catalog: CatalogSnapshot,
     pub repositories: SessionRepositories,
+    pub loading: bool,
+}
+
+impl Default for SessionCatalogUiState {
+    fn default() -> Self {
+        Self {
+            catalog: CatalogSnapshot::default(),
+            repositories: SessionRepositories::default(),
+            loading: true,
+        }
+    }
 }
 
 impl vmux_api::UiStateProjection<SessionCatalogUiStatePatch> for SessionCatalogUiState {
@@ -28,6 +40,9 @@ impl vmux_api::UiStateProjection<SessionCatalogUiStatePatch> for SessionCatalogU
         }
         if let Some(repositories) = patch.repositories {
             self.repositories = *repositories;
+        }
+        if let Some(loading) = patch.loading {
+            self.loading = loading;
         }
     }
 }

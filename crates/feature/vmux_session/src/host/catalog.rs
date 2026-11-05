@@ -26,11 +26,11 @@ use super::session::SessionView;
 use crate::event::{
     SessionDirectorySelection, SessionRepositories, SessionRepository, SessionsArchive,
     SessionsChooseDirectory, SessionsCleanup, SessionsCreate, SessionsDescriptionUpdate,
-    SessionsRename, SessionsRestoreDeleted, SessionsStageChange,
+    SessionsOpen, SessionsRename, SessionsRestoreDeleted, SessionsStageChange,
 };
 use crate::state::{
     ChatUiState, Navigation, NavigationProject, NavigationSession, SessionCatalogUiState,
-    SessionDetailUiState, SessionScopeUiState,
+    SessionCatalogUiStatePatch, SessionDetailUiState, SessionScopeUiState,
 };
 
 pub(super) struct CatalogPlugin;
@@ -41,11 +41,13 @@ impl Plugin for CatalogPlugin {
             .init_resource::<DirectoryRevision>()
             .init_resource::<CatalogSnapshot>()
             .init_resource::<SessionRepositories>()
+            .init_resource::<ProviderCatalog>()
             .add_plugins(UiStatePlugin::<SessionCatalogUiState>::default())
             .add_plugins(UiStatePlugin::<SessionDetailUiState>::default())
             .add_plugins(UiStatePlugin::<SessionScopeUiState>::default())
             .add_plugins(UiEventPlugin::<(
                 SessionsCreate,
+                SessionsOpen,
                 SessionsChooseDirectory,
                 SessionsRename,
                 SessionsDescriptionUpdate,
@@ -55,6 +57,7 @@ impl Plugin for CatalogPlugin {
                 SessionsRestoreDeleted,
             )>::default())
             .add_observer(create)
+            .add_observer(open)
             .add_observer(choose_directory)
             .add_observer(open_created)
             .add_observer(rename)
@@ -113,6 +116,43 @@ type SessionScopeUiStateComponent = UiState<SessionScopeUiState>;
 
 #[derive(Component, Default)]
 pub struct SessionCatalogView;
+
+fn open(
+    trigger: On<UiInput<SessionsOpen>>,
+    views: Query<&ChildOf, With<SessionView>>,
+    catalog: Res<CatalogSnapshot>,
+    mut opens: MessageWriter<PageOpenRequest>,
+    mut commands: Commands,
+) {
+    let webview = trigger.event().webview;
+    let Ok(parent) = views.get(webview) else {
+        return;
+    };
+    let Some(session) = catalog
+        .sessions
+        .iter()
+        .find(|session| session.id == trigger.event().payload.id)
+    else {
+        return;
+    };
+    if session.managed {
+        opens.write(PageOpenRequest {
+            target: PageOpenTarget::Stack(parent.parent()),
+            url: Route::Session(SessionId(session.id.clone())).url(),
+            request_id: None,
+        });
+        return;
+    }
+    commands.trigger(UiInput {
+        webview,
+        payload: crate::event::ResumeSession {
+            kind: session.kind.clone(),
+            sid: session.sid.clone(),
+            cwd: session.cwd.clone(),
+            open: Some(vmux_api::open_target::OpenTarget::InPlace),
+        },
+    });
+}
 
 #[derive(Component, Default)]
 #[require(SessionCatalogView, SessionDetailUiStateComponent)]
@@ -829,6 +869,7 @@ impl Navigation {
 
 fn publish(
     catalog: Res<CatalogSnapshot>,
+    providers: Res<ProviderCatalog>,
     repositories: Res<SessionRepositories>,
     targets: Query<
         Entity,
@@ -849,16 +890,21 @@ fn publish(
     >,
     mut commands: Commands,
 ) {
-    if !catalog.is_changed() && !repositories.is_changed() && claimed.is_empty() {
+    if !catalog.is_changed()
+        && !providers.is_changed()
+        && !repositories.is_changed()
+        && claimed.is_empty()
+    {
         return;
     }
     for target in &targets {
         commands.trigger(UiStateWrite::<SessionCatalogUiState>::from_event(
-            target, &*catalog,
-        ));
-        commands.trigger(UiStateWrite::<SessionCatalogUiState>::from_event(
             target,
-            &*repositories,
+            &SessionCatalogUiStatePatch {
+                catalog: Some(Box::new(catalog.clone())),
+                repositories: Some(Box::new(repositories.clone())),
+                loading: Some(providers.loading),
+            },
         ));
     }
 }
@@ -1010,6 +1056,7 @@ fn sync_repositories(
 struct CatalogContent<'w> {
     catalog: Res<'w, CatalogSnapshot>,
     repositories: Res<'w, SessionRepositories>,
+    providers: Res<'w, ProviderCatalog>,
 }
 
 fn ready(
@@ -1029,11 +1076,11 @@ fn ready(
         commands.entity(target).insert(SessionCatalogView);
         commands.trigger(UiStateWrite::<SessionCatalogUiState>::from_event(
             target,
-            &*content.catalog,
-        ));
-        commands.trigger(UiStateWrite::<SessionCatalogUiState>::from_event(
-            target,
-            &*content.repositories,
+            &SessionCatalogUiStatePatch {
+                catalog: Some(Box::new(content.catalog.clone())),
+                repositories: Some(Box::new(content.repositories.clone())),
+                loading: Some(content.providers.loading),
+            },
         ));
     }
     if views.chats.contains(target)
@@ -1111,6 +1158,43 @@ fn cleanup_inactive_views(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn selecting_another_session_requests_the_full_open_lifecycle_in_the_current_stack() {
+        let mut app = App::new();
+        app.add_plugins(CatalogPlugin)
+            .add_message::<PageOpenRequest>();
+        let old_session = app
+            .world_mut()
+            .spawn((Session, SessionId("old".into())))
+            .id();
+        let stack = app
+            .world_mut()
+            .spawn(EntityTarget::<Session>::new(old_session))
+            .id();
+        let view = app.world_mut().spawn((SessionView, ChildOf(stack))).id();
+        app.world_mut()
+            .resource_mut::<CatalogSnapshot>()
+            .sessions
+            .push(SessionSummary {
+                id: "new".into(),
+                managed: true,
+                ..Default::default()
+            });
+        app.world_mut().trigger(UiInput {
+            webview: view,
+            payload: SessionsOpen { id: "new".into() },
+        });
+        app.world_mut().flush();
+        let opens = app
+            .world_mut()
+            .resource_mut::<Messages<PageOpenRequest>>()
+            .drain()
+            .collect::<Vec<_>>();
+        assert_eq!(opens.len(), 1);
+        assert_eq!(opens[0].url, Route::Session(SessionId("new".into())).url());
+        assert!(matches!(opens[0].target, PageOpenTarget::Stack(parent) if parent == stack));
+    }
 
     #[derive(Resource, Default)]
     struct Published {
@@ -1381,6 +1465,7 @@ mod tests {
     fn page_ready_limits_full_catalog_to_manager_views() {
         let mut app = App::new();
         app.init_resource::<CatalogSnapshot>()
+            .init_resource::<ProviderCatalog>()
             .init_resource::<SessionRepositories>()
             .init_resource::<Published>()
             .add_observer(Published::record)
@@ -1560,6 +1645,7 @@ mod tests {
     fn explicit_scope_projection_excludes_unrelated_sessions() {
         let mut app = App::new();
         app.init_resource::<CatalogSnapshot>()
+            .init_resource::<ProviderCatalog>()
             .init_resource::<SessionRepositories>()
             .init_resource::<Published>()
             .add_observer(Published::record_scope)

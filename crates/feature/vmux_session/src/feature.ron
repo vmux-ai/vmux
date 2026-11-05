@@ -33,6 +33,8 @@
                 "ChatCancel",
                 "ChatStop",
                 "ChatResume",
+                "ChatRetrySession",
+                "SessionsOpen",
                 "ChatClearQueue",
                 "ChatCancelQueuedPrompt",
                 "ChatEscape",

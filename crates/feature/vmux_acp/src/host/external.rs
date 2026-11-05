@@ -1770,6 +1770,9 @@ fn finish(
 fn project(
     snapshot: Res<SourceSnapshot>,
     acp: Res<AcpSnapshot>,
+    requests: Res<CatalogRequests>,
+    scans: Query<(), Or<(With<ScanRequested>, With<ScanTask>)>>,
+    unavailable: Query<(), With<vmux_ecs::service::ServiceUnavailable>>,
     imported: Query<
         (
             &AgentId,
@@ -1796,10 +1799,27 @@ fn project(
     mut removed_duplicates: RemovedComponents<SessionDuplicate>,
     mut catalog: ResMut<ProviderCatalog>,
 ) {
+    let mut loading_changed = false;
+    if requests.active {
+        let loading = unavailable.is_empty()
+            && (requests.generation == 0
+                || requests.refresh
+                || !requests.pending.is_empty()
+                || !requests.queued.is_empty()
+                || !scans.is_empty());
+        if catalog.loading != loading {
+            catalog.loading = loading;
+            loading_changed = true;
+        }
+    }
+    if requests.active && catalog.loading {
+        return;
+    }
     let session_removed = removed.read().count() > 0;
     let duplicate_removed = removed_duplicates.read().count() > 0;
     let removed = session_removed || duplicate_removed;
-    if !snapshot.is_changed()
+    if !loading_changed
+        && !snapshot.is_changed()
         && !acp.is_changed()
         && changed.is_empty()
         && !removed

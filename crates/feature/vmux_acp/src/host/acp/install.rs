@@ -8,7 +8,14 @@ pub(super) fn add(app: &mut App) {
 
 fn start(
     mut commands: Commands,
-    sessions: Query<(Entity, &SessionId, &AgentId), (With<Session>, Without<AcpLaunchStarted>)>,
+    sessions: Query<
+        (Entity, &SessionId, &AgentId),
+        (
+            With<Session>,
+            Without<AcpLaunchStarted>,
+            Without<crate::host::navigation_driver::RetryRequested>,
+        ),
+    >,
     targets: Query<&EntityTarget<Session>>,
     jobs: Query<(Entity, &AcpInstallKey)>,
     profile: CurrentProfile,
@@ -105,7 +112,10 @@ fn poll(
             &AcpInstallWaiter,
             &mut RunState,
         ),
-        With<Session>,
+        (
+            With<Session>,
+            Without<crate::host::navigation_driver::RetryRequested>,
+        ),
     >,
     mut package_changes: MessageWriter<AcpPackageChanged>,
     mut commands: Commands,

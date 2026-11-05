@@ -1096,3 +1096,13 @@ project-archived = Archiviato
 common-select = Seleziona
 
 common-show-more = Mostra altro
+
+sessions-busy-title = Sessione in uso
+
+sessions-busy-detail = Questa conversazione è aperta in un altro client Codex. Chiudila lì, poi riprova.
+
+layout-git-status = File modificati: { $count }
+
+layout-git-ahead = Commit da inviare: { $count }
+
+common-copy-url = Copia URL

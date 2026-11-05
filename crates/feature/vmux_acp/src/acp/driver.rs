@@ -605,6 +605,7 @@ pub(super) struct AcpShared {
     pub cancel_requested: AtomicBool,
     stderr_tail: AcpStderrTail,
     startup_ready: AtomicBool,
+    startup_error: Mutex<Option<String>>,
 }
 
 impl AcpShared {
@@ -642,6 +643,7 @@ impl AcpShared {
             cancel_requested: AtomicBool::new(false),
             stderr_tail: AcpStderrTail::default(),
             startup_ready: AtomicBool::new(false),
+            startup_error: Mutex::new(None),
         }
     }
 
@@ -652,6 +654,29 @@ impl AcpShared {
 
     fn startup_ready(&self) -> bool {
         self.startup_ready.load(Ordering::SeqCst)
+    }
+
+    pub(super) fn startup_failed(&self) -> bool {
+        self.startup_error.lock().unwrap().is_some()
+    }
+
+    fn fail_startup(&self, error: String) {
+        let mut failure = self.startup_error.lock().unwrap();
+        *failure = Some(error.clone());
+        self.projection.status(AgentRunStatus::Errored(error));
+    }
+
+    fn report_startup_exit(&self) {
+        if self.startup_ready() {
+            return;
+        }
+        let mut failure = self.startup_error.lock().unwrap();
+        if failure.is_some() {
+            return;
+        }
+        let error = format!("agent exited during startup{}", self.stderr_detail());
+        *failure = Some(error.clone());
+        self.projection.status(AgentRunStatus::Errored(error));
     }
 
     pub(super) fn snapshot_message(&self, messages: &[Message]) -> ServiceMessage {
@@ -1014,18 +1039,18 @@ impl AcpDriver {
                 {
                     Ok(Ok(resp)) => resp,
                     Ok(Err(err)) => {
-                        main_shared.projection.status(AgentRunStatus::Errored(format!(
+                        main_shared.fail_startup(format!(
                             "agent failed to start: {err}{}",
                             main_shared.stderr_detail()
-                        )));
+                        ));
                         return Ok(());
                     }
                     Err(_) => {
-                        main_shared.projection.status(AgentRunStatus::Errored(format!(
+                        main_shared.fail_startup(format!(
                             "agent did not start within {}s{}",
                             ACP_STARTUP_TIMEOUT.as_secs(),
                             main_shared.stderr_detail()
-                        )));
+                        ));
                         return Ok(());
                     }
                 };
@@ -1079,7 +1104,7 @@ impl AcpDriver {
                     if resume_requested {
                         main_shared.projection.transcript(AcpTranscriptInput::FinishHistoryReplay(false));
                     }
-                    main_shared.projection.status(AgentRunStatus::Errored(error));
+                    main_shared.fail_startup(error);
                     return Ok(());
                 }
             };
@@ -1410,12 +1435,7 @@ async fn drain_stderr(stderr: tokio::process::ChildStderr, shared: Arc<AcpShared
         tracing::warn!(target: "acp", "{line}");
         shared.stderr_tail.push(line);
     }
-    if !shared.startup_ready() {
-        shared.projection.status(AgentRunStatus::Errored(format!(
-            "agent exited during startup{}",
-            shared.stderr_detail()
-        )));
-    }
+    shared.report_startup_exit();
 }
 
 const ACP_TERMINAL_COLS: u16 = 80;
@@ -1596,6 +1616,18 @@ mod tests {
         entity: Entity,
         shared: Arc<AcpShared>,
         stream: broadcast::Receiver<ServiceMessage>,
+    }
+
+    #[test]
+    fn startup_exit_preserves_the_specific_resume_failure() {
+        let mut harness = ProjectionHarness::new(4);
+        harness.shared.fail_startup("thread_active_writer".into());
+        harness.shared.report_startup_exit();
+        harness.app.update();
+        assert!(
+            matches!(harness.stream.try_recv(), Ok(ServiceMessage::Shared(SharedEvent::AgentRunStatusChanged { status: AgentRunStatus::Errored(error), .. })) if error == "thread_active_writer")
+        );
+        assert!(harness.stream.try_recv().is_err());
     }
 
     impl ProjectionHarness {
