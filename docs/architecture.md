@@ -1306,7 +1306,9 @@ keep their space during loading, with the selected view icon using the foregroun
 Git change counts live in the Space card with labels rather than as dots in the composer.
 Startup failures retain their specific provider cause when the process exits. A conversation owned
 by another client shows a neutral status card explaining that ownership, with retry and diagnostic
-copy controls. Its composer uses a neutral ownership label and it does not emit an error toast.
+copy controls. Its composer disables input, attachments, sending and setting changes while keeping
+the agent and known settings visible with a neutral ownership label. Ownership refusals cannot
+enqueue prompts or clear drafts and attachments, and they do not emit an error toast.
 Failed Codex resumes can read bounded local history under the original provider ID while retaining
 the refusal; a successful retry or an already-populated transcript discards a late local read.
 Retry preserves its provider identity and replaces only the failed local runtime.

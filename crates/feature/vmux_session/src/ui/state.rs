@@ -258,6 +258,10 @@ impl Chat {
         self.run.status()
     }
 
+    pub fn in_use(&self) -> bool {
+        self.status() == "errored" && vmux_session::Failure(&self.run.error()).in_use()
+    }
+
     pub fn installing(&self) -> bool {
         self.identity.snapshot.value.read().installing
     }
@@ -367,7 +371,8 @@ impl Chat {
     }
 
     pub fn prompt_action_enabled(&self) -> bool {
-        !self.choice_pending()
+        !self.in_use()
+            && !self.choice_pending()
             && (self.streaming()
                 || !self.draft().trim().is_empty()
                 || !self
@@ -385,6 +390,13 @@ impl Chat {
 }
 
 impl Chat {
+    pub fn agent_chip(&self) -> ComposerChip {
+        ComposerChip::ready(self.header_name(), self.header_name()).with_agent(
+            vmux_api::PageIcon::favicon(self.identity.icon()),
+            self.agent(),
+        )
+    }
+
     pub fn model_chip(&self) -> Option<ComposerChip> {
         if !(self.models.state.ready)() {
             return Some(ComposerChip::loading());
@@ -543,6 +555,9 @@ impl Chat {
 
 impl Chat {
     pub fn submit(&self) {
+        if self.in_use() {
+            return;
+        }
         let mut at_bottom = self.transcript.at_bottom;
         let text = self.draft().trim().to_string();
         let selected = self.composer.attachments.value.peek().attachments.clone();
@@ -618,6 +633,9 @@ impl Chat {
     }
 
     pub fn edit_draft(&self, value: String) {
+        if self.in_use() {
+            return;
+        }
         let _ = send(&ChatComposerMenuRequest {
             menu: None,
             index: 0,

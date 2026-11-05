@@ -18,7 +18,11 @@ pub fn use_chat_keys(chat: Chat) -> ChatKeys {
     let keys = ChatKeys {
         handler,
         claim: use_key_claim(Unclaimed::Types, move || {
-            chat.selector.value.read().key_context.clone()
+            if chat.in_use() {
+                Vec::new()
+            } else {
+                chat.selector.value.read().key_context.clone()
+            }
         }),
     };
     use_drop(move || {
@@ -109,6 +113,9 @@ impl ChatKeyHandler {
 
 impl ChatKeyHandler {
     fn type_into_draft(&self, event: &KeyboardEvent) {
+        if self.0.in_use() {
+            return;
+        }
         let modifiers = event.modifiers();
         if modifiers.meta() || modifiers.ctrl() || modifiers.alt() {
             return;

@@ -18,29 +18,31 @@ pub(super) fn ChatDock(chat: Chat) -> Element {
     rsx! {
         div { class: "relative z-20 px-4 pb-[calc(0.75rem+env(safe-area-inset-bottom))] pt-2",
             div { class: "session-chat-prompt-shell relative mx-auto flex max-w-3xl flex-col gap-2",
-                if chat.media_menu_open() {
-                    MediaMenu { chat }
-                }
-                if chat.command_menu_open() {
-                    CommandMenu { chat }
-                }
-                if chat.mcp_menu_open() {
-                    McpMenu {
-                        state: chat.mcp.value.read().clone(),
-                        entries: chat.filtered_mcp_servers(),
-                        selected: chat.list_selection(),
-                        on_select: move |index| chat.choose_list(index),
-                        on_hover: move |index| chat.point_at_list(index),
-                        on_dismiss: move |()| chat.dismiss_selector(),
+                if !chat.in_use() {
+                    if chat.media_menu_open() {
+                        MediaMenu { chat }
                     }
+                    if chat.command_menu_open() {
+                        CommandMenu { chat }
+                    }
+                    if chat.mcp_menu_open() {
+                        McpMenu {
+                            state: chat.mcp.value.read().clone(),
+                            entries: chat.filtered_mcp_servers(),
+                            selected: chat.list_selection(),
+                            on_select: move |index| chat.choose_list(index),
+                            on_hover: move |index| chat.point_at_list(index),
+                            on_dismiss: move |()| chat.dismiss_selector(),
+                        }
+                    }
+                    if chat.resume_menu_open() {
+                        ResumeMenu { chat }
+                    }
+                    if chat.model_menu_open() {
+                        ChatModelMenu { chat }
+                    }
+                    ChatComposerMenus { chat }
                 }
-                if chat.resume_menu_open() {
-                    ResumeMenu { chat }
-                }
-                if chat.model_menu_open() {
-                    ChatModelMenu { chat }
-                }
-                ChatComposerMenus { chat }
                 ChoiceList { chat }
                 QueuedPrompts { chat }
                 ChatComposer { chat }
@@ -57,11 +59,12 @@ fn ChatComposer(chat: Chat) -> Element {
     rsx! {
         PromptComposer {
             shared_transition: true,
+            disabled: chat.in_use(),
             show_send_button: false,
             value: drafted,
             preview: String::new(),
             attachments: chat.composer_attachments(),
-            placeholder: if chat.choice_pending() { translate("agent-choose-option") } else { translate("command-composer-placeholder") },
+            placeholder: if chat.in_use() { translate("sessions-busy-title") } else if chat.choice_pending() { translate("agent-choose-option") } else { translate("command-composer-placeholder") },
             accent_color: chat.accent().css,
             accent_gradient: accent.grad.to_string(),
             footer: Some(rsx! {
@@ -98,12 +101,13 @@ fn ComposerFooter(chat: Chat) -> Element {
     let transcript = chat.transcript.current();
     let queued = chat.queue.queued();
     let mut status = chat.status();
-    if status == "errored" && vmux_session::Failure(&chat.run.error()).in_use() {
+    if chat.in_use() {
         status = "in_use".to_string();
     }
     rsx! {
         ComposerBar {
             opened: chat.menu.opened(),
+            agent: Some(chat.agent_chip()),
             model: chat.model_chip(),
             effort: chat.effort_chip(),
             permission: chat.permission_chip(),

@@ -133,6 +133,11 @@ fn submit(
     let Ok((mut queue, mut state, title)) = sessions.get_mut(session) else {
         return;
     };
+    if let RunState::Errored(error) = &*state
+        && vmux_session::Failure(error).in_use()
+    {
+        return;
+    }
     if title.is_none()
         && let Some(title) = AgentConversationTitle::from_prompt(&text)
     {
@@ -655,6 +660,73 @@ mod tests {
                 .and_then(|queue| queue.items.front())
                 .map(|prompt| prompt.text.as_str()),
             Some("  make me a new\nJapanese restaurant website  ")
+        );
+    }
+
+    #[cfg(host)]
+    #[test]
+    fn owned_conversation_rejects_submit_without_spending_the_draft_or_attachments() {
+        let mut app = App::new();
+        app.add_plugins(ChatPromptInputPlugin);
+        let session = app
+            .world_mut()
+            .spawn((
+                TestSession::bundle(),
+                PromptQueue::default(),
+                RunState::Errored("thread already has an active writer".into()),
+            ))
+            .id();
+        let stack = app
+            .world_mut()
+            .spawn(vmux_ecs::EntityTarget::<vmux_session::Session>::new(
+                session,
+            ))
+            .id();
+        let webview = app.world_mut().spawn((ChildOf(stack), SessionView)).id();
+        app.world_mut()
+            .get_mut::<ComposerState>(webview)
+            .unwrap()
+            .update("keep this draft");
+        app.world_mut()
+            .get_mut::<ChatAttachmentProjection>(webview)
+            .unwrap()
+            .selected
+            .push(ChatAttachment {
+                path: "/tmp/image.png".into(),
+                ..Default::default()
+            });
+
+        app.world_mut().trigger(UiInput {
+            webview,
+            payload: ChatSubmit {
+                text: "keep this draft".into(),
+            },
+        });
+        app.world_mut().flush();
+
+        assert!(
+            app.world()
+                .get::<PromptQueue>(session)
+                .unwrap()
+                .items
+                .is_empty()
+        );
+        assert!(matches!(
+            app.world().get::<RunState>(session),
+            Some(RunState::Errored(error)) if vmux_session::Failure(error).in_use()
+        ));
+        assert!(app.world().get::<AgentConversationTitle>(session).is_none());
+        assert_eq!(
+            app.world().get::<ComposerState>(webview).unwrap().draft(),
+            "keep this draft"
+        );
+        assert_eq!(
+            app.world()
+                .get::<ChatAttachmentProjection>(webview)
+                .unwrap()
+                .selected[0]
+                .path,
+            "/tmp/image.png"
         );
     }
 

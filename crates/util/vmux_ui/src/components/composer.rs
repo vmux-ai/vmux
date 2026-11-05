@@ -29,6 +29,7 @@ pub fn PromptComposer(
     accent_gradient: String,
     #[props(default)] footer: Option<Element>,
     #[props(default)] shared_transition: bool,
+    #[props(default)] disabled: bool,
     #[props(default = true)] show_send_button: bool,
     #[props(default = true)] caret_visible: bool,
     #[props(default = PROMPT_INPUT_ID.to_string())] input_id: String,
@@ -54,7 +55,7 @@ pub fn PromptComposer(
     let has_ghost = ghost.is_some();
     let overlaid = !overlay.is_empty();
     let typed_text_class = if overlaid { "text-transparent" } else { "" };
-    let mode_class = if action_enabled {
+    let mode_class = if action_enabled && !disabled {
         match mode {
             PromptComposerMode::Send => cn([
                 "relative z-10 mr-0.5 flex h-11 w-11 shrink-0 self-center items-center justify-center rounded-xl bg-gradient-to-br text-white shadow-lg transition active:scale-95 hover:brightness-110 sm:h-8 sm:w-8 sm:rounded-lg",
@@ -77,195 +78,221 @@ pub fn PromptComposer(
         "caret-transparent"
     };
     let textarea_class = cn([
-        "relative z-10 max-h-40 min-h-11 w-full [field-sizing:content] resize-none overflow-y-auto bg-transparent px-1.5 py-2.5 text-base leading-6 outline-none placeholder:overflow-hidden placeholder:text-ellipsis placeholder:whitespace-nowrap placeholder:text-muted-foreground/50 sm:min-h-10 sm:py-2 sm:text-[15px]",
+        "relative z-10 max-h-40 min-h-11 w-full [field-sizing:content] resize-none overflow-y-auto bg-transparent px-1.5 py-2.5 text-base leading-6 outline-none placeholder:overflow-hidden placeholder:text-ellipsis placeholder:whitespace-nowrap placeholder:text-muted-foreground/50 disabled:cursor-not-allowed disabled:text-muted-foreground/60 sm:min-h-10 sm:py-2 sm:text-[15px]",
         typed_text_class,
         caret_class,
     ]);
 
     rsx! {
-        PromptBox {
-            class: prompt_box_class,
-            style: "--vmux-prompt-accent:{accent_color};",
-            button {
-                class: if add_menu_open() {
-                    "relative z-10 ml-0.5 flex h-11 w-11 shrink-0 self-center items-center justify-center rounded-xl bg-foreground/10 text-foreground transition sm:h-8 sm:w-8 sm:rounded-lg"
-                } else {
-                    "relative z-10 ml-0.5 flex h-11 w-11 shrink-0 self-center items-center justify-center rounded-xl text-foreground/45 transition active:bg-foreground/10 active:text-foreground hover:bg-foreground/10 hover:text-foreground sm:h-8 sm:w-8 sm:rounded-lg"
-                },
-                r#type: "button",
-                title: translate("common-add"),
-                aria_label: translate("common-add"),
-                aria_expanded: add_menu_open(),
-                onmousedown: move |event| event.prevent_default(),
-                onclick: move |_| add_menu_open.set(!add_menu_open()),
-                LineIconView { icon: LineIcon::Plus, class: "size-4".to_string() }
-            }
-            if add_menu_open() {
-                PromptPopup {
-                    placement: PromptPopupPlacement::Upward,
-                    on_dismiss: move |_| add_menu_open.set(false),
-                    class: "max-w-56",
-                    button {
-                        r#type: "button",
-                        class: PromptMenuRow::class(false),
-                        onmousedown: move |event| event.prevent_default(),
-                        onclick: move |_| {
-                            add_menu_open.set(false);
-                            on_attach.call(());
-                        },
-                        LineIconView { icon: LineIcon::Upload, class: "size-4 text-muted-foreground".to_string() }
-                        span { "{attach_title}" }
-                    }
-                    button {
-                        r#type: "button",
-                        class: PromptMenuRow::class(false),
-                        onmousedown: move |event| event.prevent_default(),
-                        onclick: move |_| {
-                            add_menu_open.set(false);
-                            on_paste.call(());
-                        },
-                        LineIconView { icon: LineIcon::Copy, class: "size-4 text-muted-foreground".to_string() }
-                        span { {translate("editor-paste")} }
-                    }
-                }
-            }
-
-            if !attachments.is_empty() {
-                div { class: "relative z-10 order-first flex w-full flex-wrap items-start gap-1.5 px-1.5 pt-1.5",
-                    for attachment in attachments.iter().cloned() {
-                        div {
-                            key: "{attachment.key}",
-                            class: "group relative shrink-0",
-                            title: "{attachment.name}",
-                            if attachment.preview_data_url.is_empty() {
-                                div { class: "flex h-7 max-w-56 items-center gap-1.5 rounded-full bg-foreground/[0.08] pl-1 pr-2 text-xs text-foreground/80 ring-1 ring-inset ring-foreground/10",
-                                    span { class: "flex h-5 min-w-5 items-center justify-center rounded-full bg-foreground/[0.08] px-1 font-mono text-[8px] font-semibold text-muted-foreground",
-                                        "{attachment.label}"
-                                    }
-                                    span { class: "min-w-0 max-w-40 truncate", "{attachment.name}" }
-                                }
-                            } else {
-                                img {
-                                    src: "{attachment.preview_data_url}",
-                                    alt: "{attachment.name}",
-                                    class: "h-24 w-auto max-w-72 rounded-xl object-cover",
-                                }
-                            }
-                            if let Some(remove_index) = attachment.remove_index {
-                                button {
-                                    class: "absolute -right-1 -top-1 flex h-5 w-5 items-center justify-center rounded-full bg-background/90 text-foreground/60 opacity-0 shadow-sm ring-1 ring-inset ring-foreground/15 transition group-hover:opacity-100 active:bg-foreground/10 active:text-foreground hover:text-foreground",
-                                    r#type: "button",
-                                    title: "{remove_attachment_title}",
-                                    onmousedown: move |event| event.prevent_default(),
-                                    onclick: move |_| {
-                                        on_remove_attachment.call(remove_index as usize);
-                                        PromptFocus::end(PROMPT_INPUT_ID);
-                                    },
-                                    svg {
-                                        class: "h-3 w-3",
-                                        view_box: "0 0 24 24",
-                                        fill: "none",
-                                        stroke: "currentColor",
-                                        stroke_width: "2.5",
-                                        stroke_linecap: "round",
-                                        path { d: "M6 6l12 12M18 6L6 18" }
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-            div { class: "relative z-10 flex min-w-0 flex-1 flex-wrap items-center gap-1 px-1 sm:px-2",
-                div { class: "relative min-w-32 flex-1 overflow-hidden",
-                    if value.is_empty() {
-                        if !preview.is_empty() {
-                            div { class: "pointer-events-none absolute inset-0 flex items-center overflow-hidden px-1.5",
-                                div { class: "max-w-full truncate whitespace-nowrap text-base leading-6 text-foreground sm:text-[15px]", "{preview}" }
-                            }
-                        } else if let Some(ghost) = ghost {
-                            div { class: "pointer-events-none absolute inset-0 flex items-center overflow-hidden px-1.5", {ghost} }
-                        }
-                    }
-                    if overlaid {
-                        div { class: "pointer-events-none absolute inset-0 flex items-center overflow-hidden px-1.5",
-                            div { class: "max-w-full truncate whitespace-nowrap text-base leading-6 text-foreground sm:text-[15px]", "{overlay}" }
-                        }
-                    } else if !completion.is_empty() {
-                        div {
-                            class: "pointer-events-none absolute inset-0 overflow-hidden whitespace-pre-wrap break-words px-1.5 py-2.5 text-base leading-6 sm:py-2 sm:text-[15px]",
-                            span { class: "text-transparent", "{value}" }
-                            span { class: "text-muted-foreground/40", "{completion}" }
-                        }
-                    }
-                    textarea {
-                        id: "{input_id}",
-                        class: textarea_class,
-                        autofocus: true,
-                        rows: "1",
-                        spellcheck: "false",
-                        autocapitalize: "off",
-                        autocomplete: "off",
-                        "autocorrect": "off",
-                        placeholder: if preview.is_empty() && !has_ghost && !overlaid { placeholder } else { String::new() },
-                        value: "{value}",
-                        oninput: move |event| {
-                            if let Some(value) = ime.input(event.value()) {
-                                on_input.call(value);
-                            }
-                        },
-                        onpaste: move |_| on_paste.call(()),
-                        oncompositionstart: move |_| ime.start(),
-                        oncompositionend: move |_| {
-                            if let Some(value) = ime.commit_input() {
-                                on_input.call(value);
-                            }
-                        },
-                        onkeydown: move |event| {
-                            if ime.swallows(&event) {
-                                return;
-                            }
-                            on_keydown.call(event);
-                        },
-                    }
-                }
-            }
-            if mode == PromptComposerMode::Stop || show_send_button {
+        fieldset {
+            class: "min-w-0 disabled:[&_button]:cursor-not-allowed",
+            disabled,
+            PromptBox {
+                class: prompt_box_class,
+                style: "--vmux-prompt-accent:{accent_color};",
                 button {
-                    class: "{mode_class}",
+                    class: if add_menu_open() {
+                        "relative z-10 ml-0.5 flex h-11 w-11 shrink-0 self-center items-center justify-center rounded-xl bg-foreground/10 text-foreground transition sm:h-8 sm:w-8 sm:rounded-lg"
+                    } else {
+                        "relative z-10 ml-0.5 flex h-11 w-11 shrink-0 self-center items-center justify-center rounded-xl text-foreground/45 transition active:bg-foreground/10 active:text-foreground hover:bg-foreground/10 hover:text-foreground sm:h-8 sm:w-8 sm:rounded-lg"
+                    },
                     r#type: "button",
-                    disabled: !action_enabled,
-                    title: "{action_title}",
+                    disabled,
+                    title: translate("common-add"),
+                    aria_label: translate("common-add"),
+                    aria_expanded: add_menu_open() && !disabled,
                     onmousedown: move |event| event.prevent_default(),
                     onclick: move |_| {
-                        if action_enabled {
-                            on_action.call(());
+                        if !disabled {
+                            add_menu_open.set(!add_menu_open());
                         }
                     },
-                    if mode == PromptComposerMode::Stop {
-                        svg {
-                            class: "h-4 w-4",
-                            view_box: "0 0 24 24",
-                            fill: "currentColor",
-                            rect { x: "6", y: "6", width: "12", height: "12", rx: "2.5" }
+                    LineIconView { icon: LineIcon::Plus, class: "size-4".to_string() }
+                }
+                if add_menu_open() && !disabled {
+                    PromptPopup {
+                        placement: PromptPopupPlacement::Upward,
+                        on_dismiss: move |_| add_menu_open.set(false),
+                        class: "max-w-56",
+                        button {
+                            r#type: "button",
+                            class: PromptMenuRow::class(false),
+                            onmousedown: move |event| event.prevent_default(),
+                            onclick: move |_| {
+                                add_menu_open.set(false);
+                                on_attach.call(());
+                            },
+                            LineIconView { icon: LineIcon::Upload, class: "size-4 text-muted-foreground".to_string() }
+                            span { "{attach_title}" }
                         }
-                    } else {
-                        svg {
-                            class: "h-4 w-4",
-                            view_box: "0 0 24 24",
-                            fill: "none",
-                            stroke: "currentColor",
-                            stroke_width: "2",
-                            stroke_linecap: "round",
-                            stroke_linejoin: "round",
-                            path { d: "M12 19V5" }
-                            path { d: "M5 12l7-7 7 7" }
+                        button {
+                            r#type: "button",
+                            class: PromptMenuRow::class(false),
+                            onmousedown: move |event| event.prevent_default(),
+                            onclick: move |_| {
+                                add_menu_open.set(false);
+                                on_paste.call(());
+                            },
+                            LineIconView { icon: LineIcon::Copy, class: "size-4 text-muted-foreground".to_string() }
+                            span { {translate("editor-paste")} }
                         }
                     }
                 }
-            }
-            if let Some(footer) = footer {
-                div { class: "relative z-10 order-last w-full px-2 pb-1", {footer} }
+
+                if !attachments.is_empty() {
+                    div { class: "relative z-10 order-first flex w-full flex-wrap items-start gap-1.5 px-1.5 pt-1.5",
+                        for attachment in attachments.iter().cloned() {
+                            div {
+                                key: "{attachment.key}",
+                                class: "group relative shrink-0",
+                                title: "{attachment.name}",
+                                if attachment.preview_data_url.is_empty() {
+                                    div { class: "flex h-7 max-w-56 items-center gap-1.5 rounded-full bg-foreground/[0.08] pl-1 pr-2 text-xs text-foreground/80 ring-1 ring-inset ring-foreground/10",
+                                        span { class: "flex h-5 min-w-5 items-center justify-center rounded-full bg-foreground/[0.08] px-1 font-mono text-[8px] font-semibold text-muted-foreground",
+                                            "{attachment.label}"
+                                        }
+                                        span { class: "min-w-0 max-w-40 truncate", "{attachment.name}" }
+                                    }
+                                } else {
+                                    img {
+                                        src: "{attachment.preview_data_url}",
+                                        alt: "{attachment.name}",
+                                        class: "h-24 w-auto max-w-72 rounded-xl object-cover",
+                                    }
+                                }
+                                if let Some(remove_index) = attachment.remove_index {
+                                    button {
+                                        class: "absolute -right-1 -top-1 flex h-5 w-5 items-center justify-center rounded-full bg-background/90 text-foreground/60 opacity-0 shadow-sm ring-1 ring-inset ring-foreground/15 transition group-hover:opacity-100 active:bg-foreground/10 active:text-foreground hover:text-foreground",
+                                        r#type: "button",
+                                        title: "{remove_attachment_title}",
+                                        onmousedown: move |event| event.prevent_default(),
+                                        onclick: move |_| {
+                                            if disabled {
+                                                return;
+                                            }
+                                            on_remove_attachment.call(remove_index as usize);
+                                            PromptFocus::end(PROMPT_INPUT_ID);
+                                        },
+                                        svg {
+                                            class: "h-3 w-3",
+                                            view_box: "0 0 24 24",
+                                            fill: "none",
+                                            stroke: "currentColor",
+                                            stroke_width: "2.5",
+                                            stroke_linecap: "round",
+                                            path { d: "M6 6l12 12M18 6L6 18" }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+                div { class: "relative z-10 flex min-w-0 flex-1 flex-wrap items-center gap-1 px-1 sm:px-2",
+                    div { class: "relative min-w-32 flex-1 overflow-hidden",
+                        if value.is_empty() {
+                            if !preview.is_empty() {
+                                div { class: "pointer-events-none absolute inset-0 flex items-center overflow-hidden px-1.5",
+                                    div { class: "max-w-full truncate whitespace-nowrap text-base leading-6 text-foreground sm:text-[15px]", "{preview}" }
+                                }
+                            } else if let Some(ghost) = ghost {
+                                div { class: "pointer-events-none absolute inset-0 flex items-center overflow-hidden px-1.5", {ghost} }
+                            }
+                        }
+                        if overlaid {
+                            div { class: "pointer-events-none absolute inset-0 flex items-center overflow-hidden px-1.5",
+                                div { class: "max-w-full truncate whitespace-nowrap text-base leading-6 text-foreground sm:text-[15px]", "{overlay}" }
+                            }
+                        } else if !completion.is_empty() {
+                            div {
+                                class: "pointer-events-none absolute inset-0 overflow-hidden whitespace-pre-wrap break-words px-1.5 py-2.5 text-base leading-6 sm:py-2 sm:text-[15px]",
+                                span { class: "text-transparent", "{value}" }
+                                span { class: "text-muted-foreground/40", "{completion}" }
+                            }
+                        }
+                        textarea {
+                            id: "{input_id}",
+                            class: textarea_class,
+                            autofocus: !disabled,
+                            disabled,
+                            aria_disabled: disabled,
+                            rows: "1",
+                            spellcheck: "false",
+                            autocapitalize: "off",
+                            autocomplete: "off",
+                            "autocorrect": "off",
+                            placeholder: if preview.is_empty() && !has_ghost && !overlaid { placeholder } else { String::new() },
+                            value: "{value}",
+                            oninput: move |event| {
+                                if disabled {
+                                    return;
+                                }
+                                if let Some(value) = ime.input(event.value()) {
+                                    on_input.call(value);
+                                }
+                            },
+                            onpaste: move |event| {
+                                if disabled {
+                                    event.prevent_default();
+                                    return;
+                                }
+                                on_paste.call(());
+                            },
+                            oncompositionstart: move |_| ime.start(),
+                            oncompositionend: move |_| {
+                                if disabled {
+                                    return;
+                                }
+                                if let Some(value) = ime.commit_input() {
+                                    on_input.call(value);
+                                }
+                            },
+                            onkeydown: move |event| {
+                                if disabled || ime.swallows(&event) {
+                                    return;
+                                }
+                                on_keydown.call(event);
+                            },
+                        }
+                    }
+                }
+                if mode == PromptComposerMode::Stop || show_send_button {
+                    button {
+                        class: "{mode_class}",
+                        r#type: "button",
+                        disabled: disabled || !action_enabled,
+                        title: "{action_title}",
+                        onmousedown: move |event| event.prevent_default(),
+                        onclick: move |_| {
+                            if !disabled && action_enabled {
+                                on_action.call(());
+                            }
+                        },
+                        if mode == PromptComposerMode::Stop {
+                            svg {
+                                class: "h-4 w-4",
+                                view_box: "0 0 24 24",
+                                fill: "currentColor",
+                                rect { x: "6", y: "6", width: "12", height: "12", rx: "2.5" }
+                            }
+                        } else {
+                            svg {
+                                class: "h-4 w-4",
+                                view_box: "0 0 24 24",
+                                fill: "none",
+                                stroke: "currentColor",
+                                stroke_width: "2",
+                                stroke_linecap: "round",
+                                stroke_linejoin: "round",
+                                path { d: "M12 19V5" }
+                                path { d: "M5 12l7-7 7 7" }
+                            }
+                        }
+                    }
+                }
+                if let Some(footer) = footer {
+                    div { class: "relative z-10 order-last w-full px-2 pb-1", {footer} }
+                }
             }
         }
     }
@@ -278,5 +305,73 @@ impl PromptFocus {
         crate::focus::FocusClaim::new(input_id)
             .caret_at_end()
             .request();
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::components::composer_bar::{ComposerBar, ComposerChip};
+
+    #[component]
+    fn ComposerFixture(disabled: bool) -> Element {
+        rsx! {
+            PromptComposer {
+                disabled,
+                value: "Unsent draft".to_string(),
+                placeholder: "Message".to_string(),
+                accent_color: String::new(),
+                accent_gradient: String::new(),
+                action_title: "Send".to_string(),
+                action_enabled: true,
+                footer: Some(rsx! {
+                    ComposerBar {
+                        opened: None,
+                        agent: Some(ComposerChip::ready("Codex", "Codex")),
+                        model: Some(ComposerChip::ready("GPT-5", "GPT-5")),
+                        project: Some(ComposerChip::ready("vmux-cloud", "vmux-cloud")),
+                        branch: Some(ComposerChip::ready("main", "main")),
+                    }
+                }),
+                on_input: move |_| {},
+                on_keydown: move |_| {},
+                on_paste: move |_| {},
+                on_attach: move |_| {},
+                on_remove_attachment: move |_| {},
+                on_action: move |_| {},
+            }
+        }
+    }
+
+    #[test]
+    fn disabling_composer_retains_draft_and_metadata_and_disables_controls() {
+        for disabled in [false, true] {
+            let mut dom =
+                VirtualDom::new_with_props(ComposerFixture, ComposerFixtureProps { disabled });
+            dom.rebuild_in_place();
+            let html = dioxus_ssr::render(&dom);
+            let fieldset = html.split('>').next().unwrap();
+            assert_eq!(fieldset.contains(" disabled="), disabled);
+            let textarea = html
+                .split("<textarea")
+                .nth(1)
+                .unwrap()
+                .split('>')
+                .next()
+                .unwrap();
+            assert_eq!(textarea.contains(" disabled="), disabled);
+            assert_eq!(textarea.contains(" autofocus"), !disabled);
+            let send = html
+                .split("title=\"Send\"")
+                .next()
+                .unwrap()
+                .rsplit("<button")
+                .next()
+                .unwrap();
+            assert_eq!(send.contains(" disabled="), disabled);
+            for text in ["Unsent draft", "Codex", "GPT-5", "vmux-cloud", "main"] {
+                assert!(html.contains(text), "missing {text}");
+            }
+        }
     }
 }
