@@ -34,6 +34,10 @@ pub enum LayoutUiProjectionSet {
 
 impl Plugin for LayoutUiProjectionPlugin {
     fn build(&self, app: &mut App) {
+        app.configure_sets(
+            PostUpdate,
+            LayoutUiProjectionSet::SourceFlush.after(vmux_ecs::address::AddressProjectionSet),
+        );
         app.add_observer(address_request)
             .add_observer(capture_tab_list)
             .configure_sets(
@@ -698,7 +702,6 @@ impl HeaderState {
             .find(|pin| pin.metadata.url == url)
             .map(|pin| pin.uuid.clone());
         Self {
-            address_slot: None,
             address: None,
             metadata: active.as_ref().map(|row| PageMetadata {
                 title: row.title.clone(),
@@ -950,13 +953,9 @@ fn project_header(
         ),
         With<LayoutCef>,
     >,
-    addresses: Query<(
-        Entity,
-        &vmux_ecs::page::AddressContribution,
-        &PageMetadata,
-        Option<&vmux_ecs::UiState<vmux_api::address::PageAddressUiState>>,
-    )>,
-    slots: Query<&vmux_ecs::page::AddressSlot>,
+    addresses: Query<(Entity, &vmux_ecs::page::AddressContribution, &PageMetadata)>,
+    routes: Query<&vmux_ecs::page::PageManifest>,
+    manifests: Query<&vmux_ecs::manifest::FeatureManifest>,
     focus: crate::stack::FocusedStack,
     surfaces: StackSurface,
     scope: crate::window::WindowScope,
@@ -979,33 +978,34 @@ fn project_header(
             .and_then(|state| state.layout.as_ref())
             .is_some_and(|geometry| geometry.header_visible());
         let mut next = HeaderProjection(HeaderState::from_projections(stacks, bookmarks, team));
-        if visible
-            && let Some(owner) = active
-            && scope.contains(entity, owner)
-            && let Ok(slot) = slots.get(owner)
-        {
-            next.0.address_slot = Some(slot.0);
-        }
-        for (owner, address, metadata, ui) in &addresses {
+        for (owner, address, metadata) in &addresses {
             if !scope.contains(entity, owner) {
                 continue;
             }
             if visible && Some(owner) == active && address.0.url == metadata.url {
-                next.0.address = Some(address.0.clone());
-            }
-            if ui
-                .and_then(|state| state.current())
-                .is_none_or(|state| state.in_header != visible)
-            {
-                commands.trigger(vmux_ecs::UiStateWrite::<
-                    vmux_api::address::PageAddressUiState,
-                >::from_event(
-                    owner,
-                    &vmux_api::address::PageAddressUiStatePatch {
-                        address: None,
-                        in_header: Some(visible),
-                    },
-                ));
+                let mut contribution = address.0.clone();
+                if contribution.current.label.is_empty()
+                    && contribution.current.label_key.is_empty()
+                    && let Some(route) = routes
+                        .iter()
+                        .filter(|route| {
+                            vmux_api::RoutePattern::new(route.route, route.owns_subtree)
+                                .matches(&metadata.url)
+                        })
+                        .max_by_key(|route| {
+                            vmux_api::RoutePattern::new(route.route, route.owns_subtree)
+                                .specificity(&metadata.url)
+                        })
+                {
+                    contribution.current = vmux_ecs::address::RouteLabel(route).option();
+                }
+                if contribution.views.is_empty() {
+                    contribution.views = vmux_ecs::address::RouteCatalog::options(
+                        manifests.iter(),
+                        &contribution.contextual,
+                    );
+                }
+                next.0.address = Some(contribution);
             }
         }
         if current != Some(&next) {

@@ -1,3 +1,12 @@
+#[vmux_api::contract(Copy, Eq)]
+pub enum GitCatalog {
+    LocalBranches,
+    RemoteBranches,
+    Tags,
+    Commits,
+    Stashes,
+}
+
 #[vmux_api::contract(Eq)]
 pub struct StyledSpan {
     pub text: String,

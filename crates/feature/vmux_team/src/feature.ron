@@ -8,6 +8,9 @@
             icon: "Users",
             command_bar: true,
             permissions: [
+                "PageAddressPublish",
+                "PageAddressRequest",
+                "PageAddressUiState",
                 "PageReady",
                 "ThemeUiState",
                 "OpenRequest",

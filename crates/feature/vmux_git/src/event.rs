@@ -1,8 +1,9 @@
 use std::fmt::Write;
 
 pub use vmux_api::git::{
-    DiffKind, DiffLine, FileGitBranch, FileGitState, FileStatus, GitDiffRow, GitDiffViewport,
-    GitFileStatus, GitLineMarker, GitLineStatus, GitOperationError, GitOperationResult, StyledSpan,
+    DiffKind, DiffLine, FileGitBranch, FileGitState, FileStatus, GitCatalog, GitDiffRow,
+    GitDiffViewport, GitFileStatus, GitLineMarker, GitLineStatus, GitOperationError,
+    GitOperationResult, StyledSpan,
 };
 use vmux_api::input::KeyModifiers;
 pub use vmux_api::page_location::PageLocationUiState;
@@ -94,15 +95,6 @@ pub struct GitBranchFilesNextRequest;
 
 #[vmux_api::ui_event]
 pub struct GitBranchFilesRetryRequest;
-
-#[vmux_api::contract(Copy, Eq)]
-pub enum GitCatalog {
-    LocalBranches,
-    RemoteBranches,
-    Tags,
-    Commits,
-    Stashes,
-}
 
 #[vmux_api::ui_event(Copy, Eq)]
 pub struct GitCatalogNextRequest {

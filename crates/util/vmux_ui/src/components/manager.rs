@@ -1,6 +1,5 @@
 use crate::cn::cn;
 use crate::components::badge::Badge;
-use crate::components::breadcrumb::BreadcrumbOption;
 use crate::components::dropdown::{Dropdown, DropdownOption, DropdownSelector};
 use crate::components::page::{PageContent, PageHeader, PageShell};
 use crate::components::skeleton::Skeleton;
@@ -11,7 +10,6 @@ use crate::navigation::NavigationGesture;
 use crate::platform::Platform;
 use dioxus::core::{Task, current_scope_id};
 use dioxus::prelude::*;
-use vmux_api::BuiltinIcon;
 
 #[derive(Clone, Copy, Default, PartialEq)]
 pub enum ManagerTone {
@@ -81,210 +79,22 @@ pub fn ManagerPage(children: Element) -> Element {
 
 #[component]
 pub fn WorkspaceLayout(
-    header: Element,
+    #[props(default = rsx! {})] toolbar: Element,
     #[props(default = rsx! {})] sidebar: Element,
     #[props(default = true)] show_sidebar: bool,
     children: Element,
 ) -> Element {
     rsx! {
         div { class: "flex min-h-0 flex-1 flex-col overflow-hidden",
-            {header}
             div { class: "flex min-h-0 flex-1 overflow-hidden",
                 if show_sidebar {
                     aside { class: "hidden w-44 shrink-0 flex-col px-2 pb-2 sm:flex",
                         div { class: "min-h-0 flex-1 overflow-y-auto", {sidebar} }
                     }
                 }
-                div { class: "flex min-w-0 flex-1 flex-col overflow-hidden", {children} }
+                div { class: "flex min-w-0 flex-1 flex-col overflow-hidden", {toolbar}, {children} }
             }
         }
-    }
-}
-
-#[derive(Clone, Copy, PartialEq, Eq)]
-pub enum WorkspacePage {
-    Editor,
-    Git,
-    History,
-    Knowledge,
-    Projects,
-    Services,
-    Sessions,
-    Settings,
-    Shortcuts,
-    Simulator,
-    Start,
-    Team,
-    Terminal,
-    Tools,
-    Vault,
-}
-
-impl WorkspacePage {
-    const ALL: [Self; 15] = [
-        Self::Start,
-        Self::Sessions,
-        Self::Projects,
-        Self::Git,
-        Self::Editor,
-        Self::Terminal,
-        Self::Knowledge,
-        Self::Team,
-        Self::Tools,
-        Self::Vault,
-        Self::History,
-        Self::Shortcuts,
-        Self::Simulator,
-        Self::Services,
-        Self::Settings,
-    ];
-
-    pub fn option(self) -> BreadcrumbOption {
-        let (label, value, icon_url, icon) = match self {
-            Self::Editor => (
-                translate("editor-editor"),
-                "file://",
-                "assets/favicons/editor.svg",
-                BuiltinIcon::Code,
-            ),
-            Self::Git => (
-                translate("git-title"),
-                "git://",
-                "assets/favicons/git.svg",
-                BuiltinIcon::GitBranch,
-            ),
-            Self::History => (
-                translate("history-title"),
-                "vmux://history/",
-                "assets/favicons/history.svg",
-                BuiltinIcon::Clock,
-            ),
-            Self::Knowledge => (
-                translate("layout-knowledge"),
-                "vmux://knowledge/",
-                "assets/favicons/knowledge.svg",
-                BuiltinIcon::Brain,
-            ),
-            Self::Projects => (
-                translate("layout-projects"),
-                "vmux://projects/",
-                "assets/favicons/projects.svg",
-                BuiltinIcon::Project,
-            ),
-            Self::Services => (
-                translate("services-title"),
-                "vmux://services/",
-                "assets/favicons/services.svg",
-                BuiltinIcon::Activity,
-            ),
-            Self::Sessions => (
-                translate("sessions-title"),
-                "vmux://sessions/",
-                "assets/favicons/sessions.svg",
-                BuiltinIcon::MessagesRound,
-            ),
-            Self::Settings => (
-                translate("settings-title"),
-                "vmux://settings/",
-                "assets/favicons/settings.svg",
-                BuiltinIcon::Settings,
-            ),
-            Self::Shortcuts => (
-                translate("shortcuts-title"),
-                "vmux://shortcuts/",
-                "assets/favicons/shortcuts.svg",
-                BuiltinIcon::Keyboard,
-            ),
-            Self::Simulator => (
-                translate("simulator-title"),
-                "vmux://simulator/",
-                "assets/favicons/simulator.svg",
-                BuiltinIcon::Smartphone,
-            ),
-            Self::Start => (
-                translate("start-title"),
-                "vmux://start/",
-                "assets/favicons/start.svg",
-                BuiltinIcon::Sparkles,
-            ),
-            Self::Team => (
-                translate("team-title"),
-                "vmux://team/",
-                "assets/favicons/team.svg",
-                BuiltinIcon::Users,
-            ),
-            Self::Terminal => (
-                translate("command-terminal"),
-                "vmux://terminal/",
-                "assets/favicons/terminal.svg",
-                BuiltinIcon::Terminal,
-            ),
-            Self::Tools => (
-                translate("tools-title"),
-                "vmux://tools/acp",
-                "assets/favicons/tools.svg",
-                BuiltinIcon::Toolbox,
-            ),
-            Self::Vault => (
-                translate("vault-title"),
-                "vmux://vault/",
-                "assets/favicons/vault.svg",
-                BuiltinIcon::Vault,
-            ),
-        };
-        BreadcrumbOption {
-            label,
-            value: value.to_string(),
-            identity_seed: String::new(),
-            icon_url: icon_url.to_string(),
-            icon: Some(icon),
-        }
-    }
-
-    pub fn options() -> Vec<BreadcrumbOption> {
-        Self::ALL.into_iter().map(Self::option).collect()
-    }
-
-    pub fn options_with(contextual: Vec<BreadcrumbOption>) -> Vec<BreadcrumbOption> {
-        let mut options = Self::options();
-        for option in contextual {
-            if let Some(page) = Self::ALL
-                .into_iter()
-                .find(|page| page.answers_for(&option.value))
-            {
-                options.retain(|existing| !page.answers_for(&existing.value));
-            }
-            options.push(option);
-        }
-        options.sort_by_cached_key(|option| Self::rank(&option.value));
-        options
-    }
-
-    fn answers_for(self, url: &str) -> bool {
-        match self {
-            Self::Editor => url.starts_with("file:"),
-            Self::Git => url.starts_with("git:"),
-            Self::Terminal => url.starts_with("vmux://terminal"),
-            Self::History => url.starts_with("vmux://history"),
-            Self::Knowledge => url.starts_with("vmux://knowledge"),
-            Self::Projects => url.starts_with("vmux://projects"),
-            Self::Services => url.starts_with("vmux://services"),
-            Self::Sessions => url.starts_with("vmux://sessions"),
-            Self::Settings => url.starts_with("vmux://settings"),
-            Self::Shortcuts => url.starts_with("vmux://shortcuts"),
-            Self::Simulator => url.starts_with("vmux://simulator"),
-            Self::Start => url.starts_with("vmux://start"),
-            Self::Team => url.starts_with("vmux://team"),
-            Self::Tools => url.starts_with("vmux://tools"),
-            Self::Vault => url.starts_with("vmux://vault"),
-        }
-    }
-
-    fn rank(url: &str) -> usize {
-        Self::ALL
-            .iter()
-            .position(|page| page.answers_for(url))
-            .unwrap_or(usize::MAX)
     }
 }
 

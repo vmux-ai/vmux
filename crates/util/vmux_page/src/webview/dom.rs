@@ -787,11 +787,6 @@ impl SurfaceHost {
 }
 
 impl PageHost for SurfaceHost {
-    fn publish_address(&self, slot: u64) {
-        self.lifecycle.update(LifecycleUpdate::AddressMounted(slot));
-        self.waker.wake();
-    }
-
     fn send(&self, id: &str, bytes: &[u8]) -> Result<(), EventListenerError> {
         if id == vmux_api::PageReady::id() {
             tracing::info!(

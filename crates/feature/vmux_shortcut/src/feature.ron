@@ -46,6 +46,9 @@
             command_bar: true,
             bookmark: Some(120),
             permissions: [
+                "PageAddressPublish",
+                "PageAddressRequest",
+                "PageAddressUiState",
                 "PageReady",
                 "ThemeUiState",
                 "OpenRequest",

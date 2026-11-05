@@ -20,9 +20,6 @@ use crate::page_driver::PageAssets;
 #[derive(Component, Clone, Debug, PartialEq)]
 pub struct AddressContribution(pub vmux_api::address::PageAddress);
 
-#[derive(Component, Clone, Copy, Debug, PartialEq, Eq)]
-pub struct AddressSlot(pub u64);
-
 #[derive(EntityEvent, Clone)]
 pub struct AddressIntentRequest {
     #[event_target]
@@ -139,6 +136,9 @@ pub struct PagePlugin;
 
 impl Plugin for PagePlugin {
     fn build(&self, app: &mut App) {
+        if !app.is_plugin_added::<crate::address::AddressPlugin>() {
+            app.add_plugins(crate::address::AddressPlugin);
+        }
         app.add_plugins(UiEventPlugin::<(
             PageReady,
             vmux_api::address::PageAddressRequest,

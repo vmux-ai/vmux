@@ -1,6 +1,6 @@
 #![allow(non_snake_case)]
 
-use self::agent::{ChatHeader, ChatHeaderCatalog};
+use self::agent::ChatHeader;
 use self::approval::ChatApprovalDock;
 use self::composer::ChatDock;
 use self::item::MD_CSS;
@@ -16,7 +16,7 @@ mod format;
 
 #[vmux_page::page(
     component = Page,
-    states = ["ThemeUiState", "ChatUiState", "SessionCatalogUiState", "SessionDetailUiState", "KeyClaimsUiState"],
+    states = ["PageAddressUiState", "ThemeUiState", "ChatUiState", "SessionCatalogUiState", "SessionDetailUiState", "KeyClaimsUiState"],
     subtree,
     preserve_title,
     no_favicon,
@@ -45,8 +45,6 @@ pub fn Page() -> Element {
 fn SessionDetail(session_id: String) -> Element {
     let chat = use_chat();
     let detail = vmux_ui::hooks::use_ui_state::<crate::state::SessionDetailUiState>();
-    let header_catalog =
-        detail.use_selector(|state| ChatHeaderCatalog::from_navigation(&state.navigation));
     let keys = use_chat_keys(chat);
     use_context_provider(|| keys);
     let accent = chat.accent();
@@ -65,13 +63,6 @@ fn SessionDetail(session_id: String) -> Element {
             })
     };
     let details_available = details.is_some();
-    let header_session = details.as_ref().map(|(session, _, _)| session.clone());
-    let header_repository = details
-        .as_ref()
-        .and_then(|(_, repository, _)| repository.clone());
-    let header_navigation = header_catalog
-        .read()
-        .navigation(header_repository.as_ref(), header_session.as_ref());
     let mut details_open = use_signal(|| false);
 
     rsx! {
@@ -89,10 +80,6 @@ fn SessionDetail(session_id: String) -> Element {
             div { class: "flex min-h-0 flex-1 overflow-hidden",
                 section { class: "flex min-w-0 flex-1 flex-col",
                     ChatHeader {
-                        chat,
-                        session: header_session,
-                        repository: header_repository,
-                        navigation: header_navigation,
                         details_available,
                         details_open: details_open(),
                         on_details_toggle: move |_| details_open.set(!details_open()),

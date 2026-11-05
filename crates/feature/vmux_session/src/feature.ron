@@ -3,6 +3,7 @@
         (
             url: "vmux://sessions/",
             title: "Sessions",
+            title_message_id: "sessions-title",
             bookmark: Some(20),
             owns_subtree: true,
             reports_title: true,
@@ -14,6 +15,9 @@
             keywords: ["ai", "chat", "assistant", "agent"],
             icon: "MessagesRound",
             permissions: [
+                "PageAddressPublish",
+                "PageAddressRequest",
+                "PageAddressUiState",
                 "PageReady",
                 "ThemeUiState",
                 "ChatUiState",

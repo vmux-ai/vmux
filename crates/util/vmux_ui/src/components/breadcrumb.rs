@@ -17,6 +17,19 @@ pub struct BreadcrumbOption {
     pub icon: Option<BuiltinIcon>,
 }
 
+impl BreadcrumbOption {
+    pub fn address(self) -> vmux_api::address::AddressOption {
+        vmux_api::address::AddressOption {
+            label: self.label,
+            identity: self.identity_seed,
+            icon: self.icon,
+            icon_url: self.icon_url,
+            intent: Some(vmux_api::address::AddressIntent::Navigate { url: self.value }),
+            ..Default::default()
+        }
+    }
+}
+
 #[component]
 pub fn Breadcrumbs(
     children: Element,

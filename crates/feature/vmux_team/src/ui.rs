@@ -9,8 +9,7 @@ use vmux_api::team::{
 use vmux_ui::components::avatar::{AgentThumbnail, Avatar};
 use vmux_ui::components::badge::Badge;
 use vmux_ui::components::dropdown::{DropdownAlign, DropdownOption, DropdownSelector};
-use vmux_ui::components::manager::WorkspacePage;
-use vmux_ui::components::page_address::PageAddress;
+
 use vmux_ui::favicon::FaviconSource;
 use vmux_ui::hooks::{send, use_theme, use_ui_state};
 use vmux_ui::i18n::translate;
@@ -18,7 +17,7 @@ use vmux_ui::icon::{LineIcon, LineIconView};
 
 #[vmux_page::page(
     component = Page,
-    states = ["ThemeUiState", "TeamUiState"]
+    states = ["PageAddressUiState", "ThemeUiState", "TeamUiState"]
 )]
 pub(crate) struct TeamPage;
 
@@ -38,10 +37,6 @@ pub fn Page() -> Element {
     rsx! {
         div {
             class: "flex h-full min-h-0 flex-col bg-background text-foreground",
-            PageAddress {
-                current: WorkspacePage::Team.option(),
-                options: WorkspacePage::options(),
-            }
             div { class: "min-h-0 flex-1 overflow-y-auto px-5 py-5",
                 div { class: "mx-auto w-full max-w-4xl",
                     ProfileSection { profiles, active: active_profile, form: profile_form }

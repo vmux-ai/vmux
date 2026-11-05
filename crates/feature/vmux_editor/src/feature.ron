@@ -108,6 +108,7 @@
             icon: "Code",
             command_bar: true,
             permissions: [
+                "PageAddressPublish",
                 "PageReady",
                 "ThemeUiState",
                 "FileUiState",
@@ -226,6 +227,7 @@
             icon: "Project",
             command_bar: true,
             permissions: [
+                "PageAddressPublish",
                 "PageReady",
                 "ThemeUiState",
                 "FileUiState",

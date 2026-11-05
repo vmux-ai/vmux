@@ -58,6 +58,7 @@ impl Plugin for CatalogPlugin {
             )>::default())
             .add_observer(create)
             .add_observer(open)
+            .add_observer(address_request)
             .add_observer(choose_directory)
             .add_observer(open_created)
             .add_observer(rename)
@@ -152,6 +153,22 @@ fn open(
             open: Some(vmux_api::open_target::OpenTarget::InPlace),
         },
     });
+}
+
+fn address_request(
+    event: On<vmux_ecs::page::AddressIntentRequest>,
+    views: Query<(), With<SessionView>>,
+    mut commands: Commands,
+) {
+    if !views.contains(event.entity) {
+        return;
+    }
+    if let vmux_api::address::AddressIntent::Session { id } = &event.intent {
+        commands.trigger(UiInput {
+            webview: event.entity,
+            payload: SessionsOpen { id: id.clone() },
+        });
+    }
 }
 
 #[derive(Component, Default)]
@@ -965,6 +982,12 @@ fn publish_detail(
     }
     for (target, page) in &targets {
         let state = SessionDetailUiState::project(page, &catalog, &repositories);
+        commands.trigger(UiInput {
+            webview: target,
+            payload: vmux_api::address::PageAddressPublish {
+                address: state.address(page.url.clone()),
+            },
+        });
         commands.trigger(UiStateWrite::<SessionDetailUiState>::from_event(
             target, &state,
         ));
@@ -1088,6 +1111,12 @@ fn ready(
     {
         commands.entity(target).insert(SessionDetailView);
         let state = SessionDetailUiState::project(page, &content.catalog, &content.repositories);
+        commands.trigger(UiInput {
+            webview: target,
+            payload: vmux_api::address::PageAddressPublish {
+                address: state.address(page.url.clone()),
+            },
+        });
         commands.trigger(UiStateWrite::<SessionDetailUiState>::from_event(
             target, &state,
         ));

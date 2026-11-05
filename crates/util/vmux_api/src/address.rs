@@ -3,7 +3,8 @@ pub struct PageAddress {
     pub owner: u64,
     pub revision: u64,
     pub url: String,
-    pub page: String,
+    pub current: AddressOption,
+    pub views: Vec<AddressOption>,
     pub contextual: Vec<AddressOption>,
     pub fixed: Vec<AddressCrumb>,
     pub paths: Vec<AddressCrumb>,
@@ -17,6 +18,7 @@ pub struct AddressCrumb {
     pub entry: AddressOption,
     pub options: Vec<AddressOption>,
     pub on_open: Option<AddressIntent>,
+    pub on_more: Option<AddressIntent>,
     pub pending: bool,
     pub active: bool,
 }
@@ -28,6 +30,7 @@ pub struct AddressOption {
     pub title: String,
     pub identity: String,
     pub icon: Option<crate::BuiltinIcon>,
+    pub icon_url: String,
     pub path: String,
     pub is_dir: bool,
     pub intent: Option<AddressIntent>,
@@ -37,6 +40,24 @@ pub struct AddressOption {
 pub enum AddressIntent {
     Navigate {
         url: String,
+    },
+    Session {
+        id: String,
+    },
+    SessionLocation {
+        value: String,
+    },
+    Section {
+        id: String,
+    },
+    GitBranch {
+        reference: String,
+    },
+    GitCommit {
+        commit: String,
+    },
+    GitCatalogNext {
+        catalog: crate::git::GitCatalog,
     },
     File {
         path: String,
@@ -69,6 +90,28 @@ pub struct PageAddressRequest {
     pub intent: AddressIntent,
 }
 
+#[crate::ui_event]
+pub struct PageAddressPublish {
+    pub address: PageAddress,
+}
+
+#[crate::contract]
+pub struct AddressEffect {
+    pub revision: u64,
+    pub owner: u64,
+    pub url: String,
+    pub address_revision: u64,
+    pub intent: AddressIntent,
+}
+
+impl AddressEffect {
+    pub fn matches(&self, address: &PageAddress) -> bool {
+        self.owner == address.owner
+            && self.url == address.url
+            && self.address_revision == address.revision
+    }
+}
+
 impl PageAddress {
     pub fn accepts(&self, request: &PageAddressRequest) -> bool {
         self.owner == request.owner && self.revision == request.revision && self.url == request.url
@@ -78,23 +121,34 @@ impl PageAddress {
 #[crate::ui_state_patch(Default)]
 pub struct PageAddressUiStatePatch {
     pub address: Option<PageAddress>,
-    pub in_header: Option<bool>,
+    pub effect: Option<AddressEffect>,
 }
 
-#[crate::ui_state(Default, patch = PageAddressUiStatePatch, version = 1)]
+#[crate::ui_state(Default, patch = PageAddressUiStatePatch, version = 2)]
 pub struct PageAddressUiState {
     pub address: Option<PageAddress>,
-    pub in_header: bool,
+    pub effect: Option<AddressEffect>,
 }
 
 impl crate::UiStateProjection<PageAddressUiStatePatch> for PageAddressUiState {
     fn apply(&mut self, patch: PageAddressUiStatePatch) {
         if let Some(address) = patch.address {
+            if self
+                .effect
+                .as_ref()
+                .is_some_and(|effect| !effect.matches(&address))
+            {
+                self.effect = None;
+            }
             self.address = Some(address);
         }
-        if let Some(in_header) = patch.in_header {
-            self.in_header = in_header;
+        if let Some(effect) = patch.effect {
+            self.effect = Some(effect);
         }
+    }
+
+    fn retain(&mut self) {
+        self.effect = None;
     }
 }
 
@@ -113,5 +167,47 @@ impl AddressOption {
     pub fn identity(mut self, identity: String) -> Self {
         self.identity = identity;
         self
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::{UiState, UiStateProjection};
+
+    #[test]
+    fn navigation_effects_are_not_replayed_after_reload_or_address_replacement() {
+        let address = PageAddress {
+            owner: 7,
+            revision: 3,
+            url: "vmux://settings/".into(),
+            ..Default::default()
+        };
+        let effect = AddressEffect {
+            revision: 1,
+            owner: address.owner,
+            url: address.url.clone(),
+            address_revision: address.revision,
+            intent: AddressIntent::Section {
+                id: "appearance".into(),
+            },
+        };
+        let mut state = PageAddressUiState::from_updates(
+            None,
+            vec![PageAddressUiStatePatch {
+                address: Some(address.clone()),
+                effect: Some(effect.clone()),
+            }],
+        );
+        assert!(state.effect.as_ref().unwrap().matches(&address));
+        assert!(state.retained().unwrap().effect.is_none());
+        let mut replacement = address;
+        replacement.url = "vmux://settings/#general".into();
+        assert!(!effect.matches(&replacement));
+        state.apply(PageAddressUiStatePatch {
+            address: Some(replacement),
+            ..Default::default()
+        });
+        assert!(state.effect.is_none());
     }
 }

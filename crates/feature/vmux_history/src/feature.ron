@@ -10,6 +10,9 @@
             icon: "Clock",
             command_bar: true,
             permissions: [
+                "PageAddressPublish",
+                "PageAddressRequest",
+                "PageAddressUiState",
                 "PageReady",
                 "ThemeUiState",
                 "OpenRequest",

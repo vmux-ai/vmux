@@ -40,6 +40,8 @@ pub use workspace::WorkspaceKind;
 pub use workspace::{ComputeFocusSet, StackCommandSet, TabCommandSet};
 
 #[cfg(all(host, feature = "host"))]
+pub mod address;
+#[cfg(all(host, feature = "host"))]
 pub mod agent;
 #[cfg(all(host, feature = "host"))]
 mod archive;

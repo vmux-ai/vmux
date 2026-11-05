@@ -4,6 +4,7 @@ use std::{
 };
 
 use dioxus::prelude::*;
+use vmux_api::address::{AddressCrumb, AddressIntent, AddressOption, PageAddress};
 #[cfg(test)]
 use vmux_session::SessionSummaryProjection;
 use vmux_session::{SessionSummary, StageSummary};
@@ -12,7 +13,6 @@ use vmux_ui::components::alert_dialog::{
     AlertDialogDescription, AlertDialogRoot, AlertDialogTitle,
 };
 use vmux_ui::components::avatar::{AgentThumbnail, IdentityOrb};
-use vmux_ui::components::breadcrumb::{BreadcrumbOption, BreadcrumbSelector, BreadcrumbSeparator};
 use vmux_ui::components::checkbox::{Checkbox, CheckboxTone};
 use vmux_ui::components::context_menu::{
     ContextMenu, ContextMenuContent, ContextMenuItem, ContextMenuTrigger,
@@ -23,10 +23,10 @@ use vmux_ui::components::inline_edit::EditableText;
 use vmux_ui::components::manager::{
     ManagerAddButton, ManagerEmpty, ManagerExpandableSearch, ManagerIconButton, ManagerPage,
     ManagerSearch, ManagerSidebarItem, ManagerSidebarSection, ManagerView, ManagerViewToggle,
-    WorkspaceLayout, WorkspacePage,
+    WorkspaceLayout,
 };
 use vmux_ui::components::motion::{Collapse, Collapsible};
-use vmux_ui::components::page_address::{PageAddress, PageAddressContext};
+use vmux_ui::components::page_address::{PageBreadcrumbs, PageToolbar};
 use vmux_ui::components::sheet::{SheetHeaderAction, SheetHeaderChevron};
 use vmux_ui::components::skeleton::Skeleton;
 use vmux_ui::hooks::{
@@ -376,14 +376,26 @@ fn SessionsManagerContent(
 ) -> Element {
     let location = SessionLocationBreadcrumb::new(&presentation);
     rsx! {
+        PageBreadcrumbs {
+            state: location.address(),
+            onintent: move |intent| {
+                if let AddressIntent::SessionLocation { value } = intent {
+                    controls.update_filters(|filters| {
+                        if value == SessionLocationBreadcrumb::ARCHIVED {
+                            SessionFilter::upsert(filters, SessionFilter::Archived);
+                        } else if value == SessionLocationBreadcrumb::INBOX {
+                            SessionFilter::set_stage(filters, None);
+                        } else {
+                            SessionFilter::set_stage(filters, Some(value));
+                        }
+                    });
+                    controls.set_query(String::new());
+                }
+            },
+        }
         WorkspaceLayout {
-            header: rsx! {
-                PageAddress {
-                    context: PageAddressContext::default()
-                        .with(use_context::<SessionSelection>())
-                        .with(use_context::<SessionMutations>()),
-                    current: WorkspacePage::Sessions.option(),
-                    options: WorkspacePage::options(),
+            toolbar: rsx! {
+                PageToolbar {
                     actions: rsx! {
                         SessionsManagerActions {
                             controls,
@@ -391,29 +403,6 @@ fn SessionsManagerContent(
                             presentation: Rc::clone(&presentation),
                         }
                     },
-                    BreadcrumbSeparator {}
-                    BreadcrumbSelector {
-                        label: location.label,
-                        value: location.value,
-                        options: location.options,
-                        active: true,
-                        leading: rsx! { BuiltinIconView {
-                            icon: location.icon,
-                            class: "size-4 shrink-0 text-muted-foreground".to_string(),
-                        } },
-                        onselect: move |value: String| {
-                            controls.update_filters(|filters| {
-                                if value == SessionLocationBreadcrumb::ARCHIVED {
-                                    SessionFilter::upsert(filters, SessionFilter::Archived);
-                                } else if value == SessionLocationBreadcrumb::INBOX {
-                                    SessionFilter::set_stage(filters, None);
-                                } else {
-                                    SessionFilter::set_stage(filters, Some(value));
-                                }
-                            });
-                            controls.set_query(String::new());
-                        },
-                    }
                 }
             },
             sidebar: rsx! {
@@ -475,13 +464,25 @@ fn SessionsManagerContent(
 struct SessionLocationBreadcrumb {
     label: String,
     value: String,
-    options: Vec<BreadcrumbOption>,
+    options: Vec<AddressOption>,
     icon: vmux_api::BuiltinIcon,
 }
 
 impl SessionLocationBreadcrumb {
     const INBOX: &str = "inbox";
     const ARCHIVED: &str = "archived";
+
+    fn address(&self) -> PageAddress {
+        PageAddress {
+            fixed: vec![AddressCrumb {
+                entry: Self::option(self.label.clone(), &self.value, self.icon),
+                options: self.options.clone(),
+                active: true,
+                ..Default::default()
+            }],
+            ..Default::default()
+        }
+    }
 
     fn new(presentation: &ManagerPresentation) -> Self {
         let mut options = vec![Self::option(
@@ -535,13 +536,14 @@ impl SessionLocationBreadcrumb {
         }
     }
 
-    fn option(label: String, value: &str, icon: vmux_api::BuiltinIcon) -> BreadcrumbOption {
-        BreadcrumbOption {
+    fn option(label: String, value: &str, icon: vmux_api::BuiltinIcon) -> AddressOption {
+        AddressOption {
             label,
-            value: value.to_string(),
-            identity_seed: String::new(),
-            icon_url: String::new(),
+            intent: Some(AddressIntent::SessionLocation {
+                value: value.to_string(),
+            }),
             icon: Some(icon),
+            ..Default::default()
         }
     }
 

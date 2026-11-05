@@ -10,6 +10,9 @@
             command_bar: true,
             manifest: true,
             permissions: [
+                "PageAddressPublish",
+                "PageAddressRequest",
+                "PageAddressUiState",
                 "PageReady",
                 "ThemeUiState",
                 "OpenRequest",

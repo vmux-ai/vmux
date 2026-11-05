@@ -16,7 +16,6 @@ pub struct Embedding {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum LifecycleUpdate {
     Mounted,
-    AddressMounted(u64),
     Ready(u64),
     Remounted,
     Navigated(u64),

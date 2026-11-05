@@ -7,21 +7,19 @@ use crate::state::{
     ToolAdoptRequest, ToolApplyRequest, ToolForgetRequest, ToolImportRequest, ToolInstallRequest,
     ToolItem, ToolLinkRequest, ToolOpenRequest, ToolOperationKey, ToolOperationKind,
     ToolOperationNotice, ToolProvider, ToolProviderMetadata, ToolStatus, ToolUninstallRequest,
-    ToolUnlinkRequest, ToolUpdateRequest, ToolsFilterRequest, ToolsNavigateRequest, ToolsUiState,
+    ToolUnlinkRequest, ToolUpdateRequest, ToolsFilterRequest, ToolsUiState,
 };
 use dioxus::prelude::*;
+use vmux_api::address::{AddressCrumb, PageAddress};
 use vmux_api::extension::ExtensionsUiState;
 use vmux_ui::components::avatar::AgentThumbnail;
-use vmux_ui::components::breadcrumb::{
-    BreadcrumbOption, BreadcrumbOptionIcon, BreadcrumbSelector, BreadcrumbSeparator,
-};
+use vmux_ui::components::breadcrumb::BreadcrumbOption;
 use vmux_ui::components::manager::{
     ManagerButton, ManagerButtonVariant, ManagerCard, ManagerCollection, ManagerDetails,
     ManagerEmpty, ManagerList, ManagerPage, ManagerRow, ManagerSearchAction, ManagerSection,
     ManagerSpinner, ManagerThumbnail, ManagerToolbar, ManagerView, ManagerViewToggle,
-    WorkspacePage,
 };
-use vmux_ui::components::page_address::PageAddress;
+use vmux_ui::components::page_address::{PageBreadcrumbs, PageToolbar};
 use vmux_ui::hooks::{send, use_theme, use_ui_state};
 use vmux_ui::i18n::{TranslationValue, translate, translate_with};
 use vmux_ui::icon::{LineIcon, LineIconView};
@@ -30,7 +28,7 @@ use crate::route::ToolRoute;
 
 #[vmux_page::page(
     component = Page,
-    states = ["ThemeUiState", "ToolsUiState", "ExtensionsUiState"],
+    states = ["PageAddressUiState", "ThemeUiState", "ToolsUiState", "ExtensionsUiState"],
     subtree
 )]
 pub struct ToolsPage;
@@ -255,29 +253,24 @@ fn ToolsHeader(
             icon_url: ToolRouteOption::icon_url("tools"),
             icon: vmux_api::BuiltinIcon::Toolbox,
         });
-    let selected_label = selected.label.clone();
     let selected_breadcrumb: BreadcrumbOption = selected.clone().into();
+    let address = PageAddress {
+        fixed: vec![AddressCrumb {
+            entry: selected_breadcrumb.address(),
+            options: options
+                .into_iter()
+                .map(|option| BreadcrumbOption::from(option).address())
+                .collect(),
+            active: true,
+            ..Default::default()
+        }],
+        ..Default::default()
+    };
     rsx! {
-        PageAddress {
-            current: WorkspacePage::Tools.option(),
-            options: WorkspacePage::options(),
+        PageBreadcrumbs { state: address }
+        PageToolbar {
             actions,
             view_controls,
-            BreadcrumbSeparator {}
-            BreadcrumbSelector {
-                label: selected_label,
-                active: true,
-                leading: rsx! {
-                    BreadcrumbOptionIcon {
-                        option: selected_breadcrumb.clone(),
-                        class: "size-4 shrink-0".to_string(),
-                    }
-                },
-                options: options.into_iter().map(Into::into).collect(),
-                onselect: move |url| {
-                    let _ = send(&ToolsNavigateRequest { url });
-                },
-            }
         }
     }
 }

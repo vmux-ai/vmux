@@ -12,15 +12,15 @@ use dioxus::prelude::*;
 use vmux_ui::components::checkbox::Checkbox;
 use vmux_ui::components::manager::{
     ManagerButton, ManagerButtonVariant, ManagerList, ManagerPage, ManagerSelect,
-    ManagerSelectItem, ManagerSpinner, WorkspacePage,
+    ManagerSelectItem, ManagerSpinner,
 };
-use vmux_ui::components::page_address::PageAddress;
+use vmux_ui::components::page_address::PageToolbar;
 use vmux_ui::hooks::{send, use_theme, use_ui_state};
 use vmux_ui::i18n::{TranslationValue, translate, translate_with};
 
 #[vmux_page::page(
     component = Page,
-    states = ["ThemeUiState", "VaultUiState"],
+    states = ["PageAddressUiState", "ThemeUiState", "VaultUiState"],
     subtree,
     takes = vmux_ecs::PageMetadata
 )]
@@ -46,9 +46,7 @@ pub fn Page() -> Element {
     let current = state();
     rsx! {
         ManagerPage {
-            PageAddress {
-                current: WorkspacePage::Vault.option(),
-                options: WorkspacePage::options(),
+            PageToolbar {
                 actions: rsx! {
                     ManagerButton {
                         variant: ManagerButtonVariant::Secondary,

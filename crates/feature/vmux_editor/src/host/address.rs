@@ -16,8 +16,10 @@ pub(super) struct AddressPlugin;
 
 impl Plugin for AddressPlugin {
     fn build(&self, app: &mut App) {
-        app.add_plugins(vmux_ecs::UiStatePlugin::<PageAddressUiState>::with_post_update_flush())
-            .add_observer(capture)
+        if !app.is_plugin_added::<vmux_ecs::address::AddressPlugin>() {
+            app.add_plugins(vmux_ecs::address::AddressPlugin);
+        }
+        app.add_observer(capture)
             .add_observer(capture_projects)
             .add_observer(request)
             .add_observer(forward)
@@ -109,6 +111,7 @@ impl AddressSource {
         view: &FileView,
         revision: &FileDocumentRevision,
         metadata: &PageMetadata,
+        workspace: Option<&vmux_ecs::WorkspaceKind>,
     ) -> PageAddress {
         let absolute = view.path.to_string_lossy().into_owned();
         let git = self.state.git.git_state.clone().unwrap_or_default();
@@ -121,16 +124,33 @@ impl AddressSource {
         let root = project
             .map(|row| row.path.clone())
             .unwrap_or_else(|| git.repo_root.clone());
+        let knowledge = workspace == Some(&vmux_ecs::WorkspaceKind::Knowledge)
+            || metadata.url.starts_with("vmux://knowledge");
         let mut result = PageAddress {
             owner: owner.to_bits(),
             revision: revision.get(),
             url: metadata.url.clone(),
-            page: if metadata.url.starts_with("vmux://knowledge") {
-                "knowledge"
-            } else {
-                "editor"
-            }
-            .to_string(),
+            current: AddressOption {
+                label_key: if knowledge {
+                    "layout-knowledge"
+                } else {
+                    "editor-editor"
+                }
+                .to_string(),
+                icon: Some(if knowledge {
+                    vmux_api::BuiltinIcon::Brain
+                } else {
+                    vmux_api::BuiltinIcon::Code
+                }),
+                intent: Some(AddressIntent::Navigate {
+                    url: if knowledge {
+                        "vmux://knowledge/".to_string()
+                    } else {
+                        vmux_path::FileUrl::from_path(&view.path, None, None, None)
+                    },
+                }),
+                ..Default::default()
+            },
             ..Default::default()
         };
         result.contextual.push(AddressOption {
@@ -268,6 +288,7 @@ impl AddressSource {
                 on_open: Some(AddressIntent::Siblings { path: parent }),
                 pending,
                 active: index + 1 == components.len(),
+                ..Default::default()
             });
         }
         let reading_note = self
@@ -361,10 +382,7 @@ type Documents<'w, 's> = Query<
 
 fn publish(sources: Documents, mut commands: Commands) {
     for (entity, source, view, revision, metadata, current, workspace) in &sources {
-        let mut next = source.address(entity, view, revision, metadata);
-        if workspace == Some(&vmux_ecs::WorkspaceKind::Knowledge) {
-            next.page = "knowledge".to_string();
-        }
+        let next = source.address(entity, view, revision, metadata, workspace);
         if current.is_some_and(|current| current.0 == next) {
             continue;
         }
@@ -375,7 +393,7 @@ fn publish(sources: Documents, mut commands: Commands) {
             entity,
             &PageAddressUiStatePatch {
                 address: Some(next),
-                in_header: None,
+                ..Default::default()
             },
         ));
     }
@@ -427,15 +445,7 @@ fn forward(
         return;
     }
     match &event.intent {
-        AddressIntent::Navigate { url } => {
-            commands.trigger(UiInput {
-                webview,
-                payload: vmux_api::command_bar::OpenRequest {
-                    value: url.clone(),
-                    open: Some(vmux_api::open_target::OpenTarget::InPlace),
-                },
-            });
-        }
+        AddressIntent::Navigate { .. } => {}
         AddressIntent::File { path } => {
             commands.trigger(UiInput {
                 webview,
@@ -511,6 +521,12 @@ fn forward(
                 },
             });
         }
+        AddressIntent::Session { .. }
+        | AddressIntent::SessionLocation { .. }
+        | AddressIntent::Section { .. }
+        | AddressIntent::GitBranch { .. }
+        | AddressIntent::GitCommit { .. }
+        | AddressIntent::GitCatalogNext { .. } => {}
     }
 }
 

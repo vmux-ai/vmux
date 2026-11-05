@@ -246,10 +246,6 @@ impl Chat {
         self.identity.snapshot.value.read().header_name.clone()
     }
 
-    pub fn title(&self) -> String {
-        self.identity.snapshot.value.read().page_title.clone()
-    }
-
     pub fn accent(&self) -> Accent {
         let snapshot = self.identity.snapshot.value.read();
         Accent {

@@ -4,8 +4,6 @@ use std::rc::Rc;
 use crate::transport::event_listener::EventListenerError;
 
 pub trait PageHost {
-    fn publish_address(&self, _slot: u64) {}
-
     fn send(&self, id: &str, bytes: &[u8]) -> Result<(), EventListenerError>;
 
     fn listen(&self, id: &str, on_bytes: BytesListener) -> Result<(), EventListenerError>;

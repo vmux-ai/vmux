@@ -123,6 +123,9 @@
             command_bar: true,
             bookmark: Some(60),
             permissions: [
+                "PageAddressPublish",
+                "PageAddressRequest",
+                "PageAddressUiState",
                 "PageReady",
                 "ThemeUiState",
                 "TerminalUiState",
@@ -148,6 +151,9 @@
             bookmark: Some(140),
             manifest: true,
             permissions: [
+                "PageAddressPublish",
+                "PageAddressRequest",
+                "PageAddressUiState",
                 "PageReady",
                 "ThemeUiState",
                 "OpenRequest",

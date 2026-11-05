@@ -1,6 +1,7 @@
 use std::path::Path;
 
 use dioxus::prelude::*;
+use vmux_api::address::{AddressCrumb, AddressOption, PageAddress};
 use vmux_ecs::event::FileDirEntry;
 use vmux_git::event::GitRepositoryRequest;
 use vmux_git::state::GitUiState;
@@ -19,10 +20,10 @@ use vmux_ui::components::filter::{FilterPill, FilterTrigger};
 use vmux_ui::components::manager::{
     ManagerAddButton, ManagerCollection, ManagerEmpty, ManagerExpandableSearch, ManagerGridSize,
     ManagerList, ManagerPage, ManagerSearch, ManagerSidebarItem, ManagerSkeleton, ManagerView,
-    ManagerViewToggle, WorkspaceLayout, WorkspacePage,
+    ManagerViewToggle, WorkspaceLayout,
 };
 use vmux_ui::components::page::PageContent;
-use vmux_ui::components::page_address::PageAddress;
+use vmux_ui::components::page_address::{PageBreadcrumbs, PageToolbar};
 use vmux_ui::components::sheet::SheetHeaderChevron;
 use vmux_ui::components::skeleton::Skeleton;
 use vmux_ui::components::tooltip::Tooltip;
@@ -78,10 +79,8 @@ pub(super) fn ProjectList(
         ManagerPage {
             WorkspaceLayout {
                 show_sidebar: entries.iter().any(|entry| entry.archived),
-                header: rsx! {
-                    PageAddress {
-                        current: WorkspacePage::Projects.option(),
-                        options: WorkspacePage::options(),
+                toolbar: rsx! {
+                    PageToolbar {
                         view_controls: rsx! { if !entries.is_empty() { ManagerViewToggle { view: controls.view(), list_label: translate("tools-view-list"), grid_label: translate("tools-view-grid"), onchange: move |view| { controls.set_view(view); let _ = send(&ViewPreference::request(view)); } } } },
                         actions: rsx! {
                             ProjectManagerActions {
@@ -625,15 +624,27 @@ pub(super) fn ProjectDashboard(detail: ProjectDetailView) -> Element {
     });
     let start_url = "vmux://start/".to_string();
     let header_root = root.clone();
+    let address = PageAddress {
+        fixed: vec![AddressCrumb {
+            entry: AddressOption {
+                label: project_name.clone(),
+                title: root.clone(),
+                identity: project_identity.clone(),
+                ..Default::default()
+            },
+            active: true,
+            ..Default::default()
+        }],
+        ..Default::default()
+    };
 
     rsx! {
         ManagerPage {
+            PageBreadcrumbs { state: address }
             WorkspaceLayout {
                 show_sidebar: false,
-                header: rsx! {
-                    PageAddress {
-                        current: WorkspacePage::Projects.option(),
-                        options: WorkspacePage::options(),
+                toolbar: rsx! {
+                    PageToolbar {
                         actions: rsx! {
                             Button {
                                 variant: ButtonVariant::Primary,

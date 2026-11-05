@@ -12,8 +12,7 @@ use dioxus::html::geometry::ClientPoint;
 use dioxus::html::input_data::MouseButton;
 use dioxus::prelude::*;
 use std::rc::Rc;
-use vmux_ui::components::manager::WorkspacePage;
-use vmux_ui::components::page_address::PageAddress;
+
 use vmux_ui::components::skeleton::Skeleton;
 use vmux_ui::hooks::{send, use_theme, use_ui_state};
 use vmux_ui::i18n::{TranslationValue, translate, translate_with};
@@ -22,7 +21,7 @@ use vmux_ui::script::PageScript;
 
 #[vmux_page::page(
     component = Page,
-    states = ["ThemeUiState", "SimulatorUiState"],
+    states = ["PageAddressUiState", "ThemeUiState", "SimulatorUiState"],
     subtree,
     takes = vmux_ecs::PageMetadata
 )]
@@ -38,10 +37,6 @@ pub fn Page() -> Element {
     let announced = ready();
     rsx! {
         div { class: "flex h-screen w-screen flex-col overflow-hidden bg-background",
-            PageAddress {
-                current: WorkspacePage::Simulator.option(),
-                options: WorkspacePage::options(),
-            }
             div { class: "flex min-h-0 flex-1 items-center justify-center overflow-hidden",
                 if announced.port == 0 {
                     Waiting {

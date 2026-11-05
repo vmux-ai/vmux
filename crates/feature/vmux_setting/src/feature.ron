@@ -458,6 +458,9 @@
             command_bar: true,
             bookmark: Some(150),
             permissions: [
+                "PageAddressPublish",
+                "PageAddressRequest",
+                "PageAddressUiState",
                 "PageReady",
                 "ThemeUiState",
                 "OpenRequest",

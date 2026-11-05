@@ -10,9 +10,9 @@ use vmux_ui::components::alert_dialog::{
     AlertDialogAction, AlertDialogActions, AlertDialogCancel, AlertDialogContent,
     AlertDialogDescription, AlertDialogRoot, AlertDialogTitle,
 };
-use vmux_ui::components::manager::{ManagerIconButton, ManagerSearchAction, WorkspacePage};
+use vmux_ui::components::manager::{ManagerIconButton, ManagerSearchAction};
 use vmux_ui::components::page::{PageContent, PageShell};
-use vmux_ui::components::page_address::PageAddress;
+use vmux_ui::components::page_address::PageToolbar;
 use vmux_ui::components::tooltip::Tooltip;
 use vmux_ui::favicon::Favicon;
 use vmux_ui::hooks::{send, use_theme, use_ui_state};
@@ -22,7 +22,7 @@ use vmux_ui::platform::Platform;
 
 #[vmux_page::page(
     component = Page,
-    states = ["ThemeUiState", "HistoryUiState"]
+    states = ["PageAddressUiState", "ThemeUiState", "HistoryUiState"]
 )]
 pub(crate) struct HistoryPage;
 
@@ -50,9 +50,7 @@ pub fn Page() -> Element {
 
     rsx! {
         PageShell {
-            PageAddress {
-                current: WorkspacePage::History.option(),
-                options: WorkspacePage::options(),
+            PageToolbar {
                 actions: rsx! {
                     ManagerSearchAction {
                         value: query,

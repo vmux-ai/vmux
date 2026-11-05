@@ -4,6 +4,7 @@ use crate::event::{
     ChatResumeState, ChatSelectorState, ChatSnapshot, ChatTranscriptState, ComposerContext,
     ModeState, ModelState, SessionDirectorySelection, SessionRepositories,
 };
+use vmux_api::address::{AddressCrumb, AddressIntent, AddressOption, PageAddress};
 use vmux_api::mcp::McpServersUiState;
 use vmux_session::{CatalogSnapshot, SessionSummary, StageSummary};
 
@@ -62,6 +63,120 @@ pub struct SessionDetailUiState {
     pub repository: Option<SessionRepository>,
     pub stages: Vec<StageSummary>,
     pub navigation: Navigation,
+}
+
+impl SessionDetailUiState {
+    pub fn address(&self, url: String) -> PageAddress {
+        let mut address = PageAddress {
+            url,
+            current: AddressOption {
+                label_key: "sessions-title".into(),
+                icon: Some(vmux_api::BuiltinIcon::MessagesRound),
+                intent: Some(AddressIntent::Navigate {
+                    url: "vmux://sessions/".into(),
+                }),
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+        let Some(session) = &self.session else {
+            return address;
+        };
+        let entry = match &self.repository {
+            Some(repository) => AddressOption {
+                label: repository.project.clone(),
+                identity: repository.project_url.clone(),
+                intent: Some(AddressIntent::Navigate {
+                    url: repository.project_url.clone(),
+                }),
+                ..Default::default()
+            },
+            None => AddressOption {
+                label_key: "layout-projects".into(),
+                icon: Some(vmux_api::BuiltinIcon::Project),
+                intent: Some(AddressIntent::Navigate {
+                    url: "vmux://projects/".into(),
+                }),
+                ..Default::default()
+            },
+        };
+        let mut options = Vec::new();
+        for project in &self.navigation.projects {
+            options.push(AddressOption {
+                label: project.name.clone(),
+                identity: project.url.clone(),
+                intent: Some(AddressIntent::Navigate {
+                    url: project.url.clone(),
+                }),
+                ..Default::default()
+            });
+        }
+        address.fixed.push(AddressCrumb {
+            entry,
+            options,
+            ..Default::default()
+        });
+        if let Some(repository) = &self.repository
+            && !repository.url.is_empty()
+        {
+            address.contextual.push(AddressOption {
+                label_key: "git-title".into(),
+                icon: Some(vmux_api::BuiltinIcon::GitBranch),
+                intent: Some(AddressIntent::Navigate {
+                    url: repository.url.clone(),
+                }),
+                ..Default::default()
+            });
+        }
+        if !session.cwd.is_empty()
+            && let Ok(url) = url::Url::from_directory_path(&session.cwd)
+        {
+            address.contextual.push(AddressOption {
+                label_key: "editor-editor".into(),
+                icon: Some(vmux_api::BuiltinIcon::Code),
+                intent: Some(AddressIntent::Navigate { url: url.into() }),
+                ..Default::default()
+            });
+        }
+        let title = vmux_session::SessionSummaryProjection::new(
+            session,
+            &self.stages,
+            vmux_ecs::UnixMillis::now().0,
+        )
+        .title;
+        let project = self
+            .repository
+            .as_ref()
+            .map(|repository| repository.project_url.as_str());
+        let options = self
+            .navigation
+            .sessions
+            .iter()
+            .filter(|session| project.is_none_or(|project| session.project_url == project))
+            .map(|session| AddressOption {
+                label: session.title.clone(),
+                identity: session.id.clone(),
+                intent: Some(AddressIntent::Session {
+                    id: session.id.clone(),
+                }),
+                ..Default::default()
+            })
+            .collect();
+        address.fixed.push(AddressCrumb {
+            entry: AddressOption {
+                label: title,
+                identity: session.id.clone(),
+                intent: Some(AddressIntent::Session {
+                    id: session.id.clone(),
+                }),
+                ..Default::default()
+            },
+            options,
+            active: true,
+            ..Default::default()
+        });
+        address
+    }
 }
 
 #[vmux_api::contract(Default, Eq)]

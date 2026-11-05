@@ -1,8 +1,8 @@
 #![allow(non_snake_case)]
 
 use dioxus::prelude::*;
-use vmux_ui::components::manager::{ManagerPage, WorkspacePage};
-use vmux_ui::components::page_address::PageAddress;
+use vmux_ui::components::manager::ManagerPage;
+
 use vmux_ui::hooks::use_theme;
 use vmux_ui::i18n::translate;
 
@@ -10,7 +10,7 @@ use vmux_command::{CommandPalette, CommandPaletteSurface, use_command_bar_ui};
 
 #[vmux_page::page(
     component = Page,
-    states = ["ThemeUiState", "CommandBarUiState", "KeyClaimsUiState"]
+    states = ["PageAddressUiState", "ThemeUiState", "CommandBarUiState", "KeyClaimsUiState"]
 )]
 pub(crate) struct StartPage;
 
@@ -23,10 +23,6 @@ pub fn Page() -> Element {
         document::Title { "Any prompt. Anything, done." }
         document::Meta { name: "description", content: "Any prompt. Anything, done." }
         ManagerPage {
-            PageAddress {
-                current: WorkspacePage::Start.option(),
-                options: WorkspacePage::options(),
-            }
             div {
                 class: "flex min-h-0 flex-1 flex-col overflow-y-auto overscroll-contain bg-background px-5 py-8 text-foreground sm:px-8",
                 div { class: "m-auto flex w-full max-w-2xl flex-col gap-3",

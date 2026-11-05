@@ -579,21 +579,22 @@ the same location state for its section navigation.
 Git file selection and the editor Outline share `SectionNavigation`: clicks request smooth
 scrolling, scrolling publishes the current section, and echoed location updates do not restart
 navigation. Notes resolve `#L<line>` to a rendered block and measure the heading at the viewport
-edge in one DOM request. Outline following preserves the editor caret. Built-in pages publish their
-address UI into an owned slot in the window URL bar instead of reserving a breadcrumb row inside
-the page. Pages opt in through `vmux_ui::components::page_address::PageAddress`, passing their
-current breadcrumb, choices, child navigation, and optional actions or view controls.
-`PageAddressContent` accepts custom navigation UI; `PageAddressContext` carries only explicitly
-shared page state. Pages manage neither slot IDs nor windows nor transport, and pages that do not
-opt in keep the ordinary URL display. The slot contains the same menus, search, view controls, and callbacks. Native lifecycle
-updates bind the newest slot to its surface and document generation independently of transient
-input epochs; the window selects only its current surface's slot. The mounted UI inherits the
-page's explicit context. Feature requests and state
-listeners keep the original page host, while DOM focus and popover operations use the window host.
-Closing or remounting a page releases the slot. Hiding the window header leaves the page's full
-working area available. The editor's typed trail still validates its owning surface, document
-revision, and URL. Path overflow collapses whole directories using measured widths and keeps the
-filename intact. Search sits at the end of the trail and Checkout beside the selected branch.
+edge in one DOM request. Outline following preserves the editor caret. Page routes are declared once in `feature.ron`.
+`PageManifest` supplies the default breadcrumb title, translation key, icon, and destination;
+the registered manifests supply the page-switch menu. Pages publish only typed `PageAddress`
+data through `AddressContribution` or `PageAddressPublish`: the current route, project and session
+choices, directories, symbols, and their intents. `vmux_layout` renders the active surface with
+one `AddressTrail`. No page component, callback, context, or mounted slot crosses into Layout.
+`PageAddressRequest` validates the source window, active surface, revision, and URL before sending
+`AddressIntentRequest` to the page. Navigation opens in the owning Stack; page-local selection
+uses a versioned `AddressEffect` consumed by `PageBreadcrumbs`. Effects bind to the source URL,
+owner, and address revision and are removed from retained snapshots to prevent replay on reload.
+Search, filters, view controls,
+Details, Add, Create, Resume, Start, and Checkout stay in the page body through `PageToolbar`.
+`WorkspaceLayout` places that toolbar inside its content column beside the sidebar.
+Popup state belongs to the Layout that renders the breadcrumb and uses its existing overlay
+capture until dismissal or disposal. Hiding the window header leaves the full page working area.
+Path overflow collapses whole directories using measured widths and keeps the filename intact.
 Git's branch-file filter sits above its file tree, with page-top spacing shared by the tree and
 diff. Side-sheet cards share their outer width; the Space card keeps an inner right inset.
 Long titles and branch labels fade at the edge,
@@ -621,8 +622,7 @@ within the shared layout budget. Cached pages remain usable during refresh;
 new data occupies a reserved skeleton region, and page replacement keeps the outgoing surface
 until the incoming snapshot paints. Tests exercise fresh input during motion, stale paint rejection,
 and retained-page handoffs instead of asserting animation class names. URL-bar background and
-padding stay independently clickable and expose the URL on hover; breadcrumb and toolbar controls
-keep their own hit targets and events.
+padding stay independently clickable and expose the URL on hover; breadcrumb controls keep their own hit targets and events.
 Address-path measurements live in an inert, invisible row outside normal layout, so hiding a
 directory never removes its width measurement or changes the available inline space. Zero-size
 notifications from detached surfaces and subpixel noise retain the previous layout.

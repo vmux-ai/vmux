@@ -3,14 +3,14 @@
 use std::collections::HashMap;
 
 use dioxus::prelude::*;
+use vmux_api::address::{AddressCrumb, AddressIntent, AddressOption, PageAddress};
 use vmux_api::space::ProjectRow;
 use vmux_ecs::event::space::ProjectActivateRequest;
 use vmux_ui::components::avatar::IdentityOrb;
-use vmux_ui::components::breadcrumb::{BreadcrumbOption, BreadcrumbSeparator};
+use vmux_ui::components::breadcrumb::BreadcrumbSeparator;
 use vmux_ui::components::button::{Button, ButtonSize, ButtonVariant};
 use vmux_ui::components::dropdown::{Dropdown, DropdownOpenMode, DropdownPopup, DropdownTrigger};
-use vmux_ui::components::manager::WorkspacePage;
-use vmux_ui::components::page_address::{PageAddress, PageAddressContext};
+use vmux_ui::components::page_address::{PageBreadcrumbs, PageToolbar};
 use vmux_ui::components::project_picker::{ProjectSelectPopup, ProjectSelectTrigger};
 use vmux_ui::hooks::{send, use_optimistic_map};
 use vmux_ui::i18n::translate;
@@ -106,23 +106,23 @@ pub(super) fn RepositoryHeader(
         None,
         None,
     );
-    let current_page = BreadcrumbOption {
-        label: translate("git-title"),
-        value: git_url.clone(),
-        identity_seed: String::new(),
-        icon_url: "assets/favicons/git.svg".to_string(),
+    let current_page = AddressOption {
+        label_key: "git-title".to_string(),
+        intent: Some(AddressIntent::Navigate {
+            url: git_url.clone(),
+        }),
         icon: Some(vmux_api::BuiltinIcon::GitBranch),
+        ..Default::default()
     };
-    let page_options = WorkspacePage::options_with(vec![
+    let contextual = vec![
         current_page.clone(),
-        BreadcrumbOption {
-            label: translate("editor-editor"),
-            value: editor_url,
-            identity_seed: String::new(),
-            icon_url: "assets/favicons/editor.svg".to_string(),
+        AddressOption {
+            label_key: "editor-editor".to_string(),
+            intent: Some(AddressIntent::Navigate { url: editor_url }),
             icon: Some(vmux_api::BuiltinIcon::Code),
+            ..Default::default()
         },
-    ]);
+    ];
     let project_picker_dir = repository.repo_root.clone();
     let mut root_projects = projects
         .into_iter()
@@ -145,11 +145,118 @@ pub(super) fn RepositoryHeader(
             },
         );
     }
+    let mut address = PageAddress {
+        current: current_page,
+        contextual,
+        fixed: vec![
+            AddressCrumb {
+                entry: AddressOption {
+                    label: repository.repo_name.clone(),
+                    title: repository.repo_root.clone(),
+                    identity: repository.repo_root.clone(),
+                    intent: Some(AddressIntent::Navigate {
+                        url: git_url.clone(),
+                    }),
+                    ..Default::default()
+                },
+                options: root_projects
+                    .iter()
+                    .filter_map(|project| {
+                        let url = crate::GitUrl::from_path(std::path::Path::new(&project.path))?;
+                        Some(AddressOption {
+                            label: project.label.clone(),
+                            title: project.path.clone(),
+                            identity: project.path.clone(),
+                            intent: Some(AddressIntent::Navigate { url }),
+                            ..Default::default()
+                        })
+                    })
+                    .collect(),
+                ..Default::default()
+            },
+            AddressCrumb {
+                entry: AddressOption {
+                    label: branch_label.clone(),
+                    icon: Some(vmux_api::BuiltinIcon::GitBranch),
+                    intent: Some(AddressIntent::GitBranch {
+                        reference: branch_label.clone(),
+                    }),
+                    ..Default::default()
+                },
+                options: branch_collection
+                    .references(&repository)
+                    .into_iter()
+                    .map(|reference| AddressOption {
+                        label: reference.clone(),
+                        icon: Some(vmux_api::BuiltinIcon::GitBranch),
+                        intent: Some(AddressIntent::GitBranch { reference }),
+                        ..Default::default()
+                    })
+                    .collect(),
+                pending: selected_branches_progress.loading,
+                on_more: selected_branches_progress.has_more.then_some(
+                    AddressIntent::GitCatalogNext {
+                        catalog: selected_catalog,
+                    },
+                ),
+                ..Default::default()
+            },
+        ],
+        ..Default::default()
+    };
+    if focused_panel == GitPanel::Commits && !revision_label.is_empty() {
+        address.fixed.push(AddressCrumb {
+            entry: AddressOption {
+                label: revision_label.clone(),
+                title: revision_title.clone(),
+                icon: Some(vmux_api::BuiltinIcon::GitBranch),
+                intent: Some(AddressIntent::GitCommit {
+                    commit: selected_commit.clone(),
+                }),
+                ..Default::default()
+            },
+            options: repository
+                .commits
+                .iter()
+                .map(|commit| AddressOption {
+                    label: commit.short_sha.clone(),
+                    title: commit.summary.clone(),
+                    icon: Some(vmux_api::BuiltinIcon::GitBranch),
+                    intent: Some(AddressIntent::GitCommit {
+                        commit: commit.sha.clone(),
+                    }),
+                    ..Default::default()
+                })
+                .collect(),
+            pending: commits_progress.loading,
+            on_more: commits_progress
+                .has_more
+                .then_some(AddressIntent::GitCatalogNext {
+                    catalog: GitCatalog::Commits,
+                }),
+            active: true,
+            ..Default::default()
+        });
+    }
     rsx! {
-        PageAddress {
-                context: PageAddressContext::default().with(page),
-                current: current_page,
-                options: page_options,
+        PageBreadcrumbs {
+            state: address,
+            onintent: move |intent| match intent {
+                AddressIntent::GitBranch { reference } => {
+                    let _ = send(&GitPanelSelectRequest { panel: GitPanel::Branches });
+                    let _ = send(&GitBranchSelectRequest { reference });
+                }
+                AddressIntent::GitCommit { commit } => {
+                    let _ = send(&GitPanelSelectRequest { panel: GitPanel::Commits });
+                    let _ = send(&GitCommitSelectRequest { commit });
+                }
+                AddressIntent::GitCatalogNext { catalog } => {
+                    let _ = send(&GitCatalogNextRequest { catalog });
+                }
+                _ => {}
+            },
+        }
+        PageToolbar {
                 actions: rsx! {
                     RepositoryActions {
                         focused_panel,

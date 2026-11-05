@@ -7,17 +7,17 @@ use crate::{
 use dioxus::prelude::*;
 use vmux_ui::components::manager::{
     ManagerCollection, ManagerGridSize, ManagerList, ManagerRow, ManagerSection, ManagerView,
-    ManagerViewToggle, WorkspacePage,
+    ManagerViewToggle,
 };
 use vmux_ui::components::page::PageShell;
-use vmux_ui::components::page_address::PageAddress;
+use vmux_ui::components::page_address::PageToolbar;
 use vmux_ui::hooks::{send, use_theme, use_ui_state};
 use vmux_ui::i18n::{TranslationValue, translate, translate_with};
 use vmux_ui::icon::{BuiltinIconView, LineIcon, LineIconView};
 
 #[vmux_page::page(
     component = Page,
-    states = ["ThemeUiState", "ShortcutUiState"]
+    states = ["PageAddressUiState", "ThemeUiState", "ShortcutUiState"]
 )]
 pub(crate) struct ShortcutPage;
 
@@ -63,9 +63,7 @@ pub fn Page() -> Element {
                 };
                 let _ = send(&ShortcutProbePressRequest { stroke });
             },
-            PageAddress {
-                current: WorkspacePage::Shortcuts.option(),
-                options: WorkspacePage::options(),
+            PageToolbar {
                 actions: rsx! {
                     span { class: "text-[10px] tabular-nums text-muted-foreground", "{subtitle}" }
                     ManagerViewToggle {

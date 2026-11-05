@@ -851,41 +851,9 @@ impl From<&PageLifecycleEnvelope> for PageLifecycleKey {
     }
 }
 
-struct AddressMount {
-    key: PageLifecycleKey,
-    slot: u64,
-}
-
-impl Command for AddressMount {
-    type Out = ();
-
-    fn apply(self, world: &mut World) {
-        if self.slot == 0
-            || world
-                .get::<HostedSurfaceGeneration>(self.key.webview)
-                .is_none_or(|generation| generation.0 != self.key.generation)
-            || world
-                .get::<BinIpcNavigationRevision>(self.key.webview)
-                .is_none_or(|revision| revision.0 != self.key.navigation_revision)
-        {
-            return;
-        }
-        if world
-            .get::<vmux_ecs::page::AddressSlot>(self.key.webview)
-            .is_some_and(|current| current.0 >= self.slot)
-        {
-            return;
-        }
-        world
-            .entity_mut(self.key.webview)
-            .insert(vmux_ecs::page::AddressSlot(self.slot));
-    }
-}
-
 #[derive(Default)]
 struct PageLifecycleBatch {
     mounts: u64,
-    address: Option<u64>,
     ready: Option<u64>,
     remounts: u64,
     frame_pending: Option<bool>,
@@ -905,9 +873,6 @@ impl PageLifecycleBatch {
     fn record(&mut self, update: LifecycleUpdate) {
         match update {
             LifecycleUpdate::Mounted => self.mounts = self.mounts.saturating_add(1),
-            LifecycleUpdate::AddressMounted(slot) => {
-                self.address = Some(self.address.unwrap_or_default().max(slot));
-            }
             LifecycleUpdate::Ready(revision) => self.ready = Some(revision),
             LifecycleUpdate::Remounted => self.remounts = self.remounts.saturating_add(1),
             LifecycleUpdate::Navigated(_) => {}
@@ -1163,14 +1128,6 @@ fn apply_lifecycle(
             continue;
         }
         let current_epoch = epoch.0 == key.ipc_epoch;
-        if current_epoch && batch.listeners_cleared {
-            commands
-                .entity(key.webview)
-                .remove::<vmux_ecs::page::AddressSlot>();
-        }
-        if let Some(slot) = batch.address {
-            commands.queue(AddressMount { key, slot });
-        }
         if !current_epoch {
             continue;
         }
@@ -3084,64 +3041,6 @@ mod tests {
             started + SURFACE_SETTLE_TIMEOUT
         ));
         assert_eq!(retries.started.len(), 1);
-    }
-
-    #[test]
-    fn address_slot_survives_input_epochs_and_rejects_other_documents() {
-        let mut app = App::new();
-        app.add_plugins((MinimalPlugins, MacosBrowserPlugin))
-            .init_resource::<vmux_setting::AppSettings>()
-            .init_non_send::<bevy_cef::prelude::Browsers>()
-            .add_message::<vmux_layout::overlay::LayoutOverlayOpened>();
-        app.update();
-        let lifecycle = app
-            .world_mut()
-            .query::<&PageLifecycleReceiver>()
-            .single(app.world())
-            .unwrap()
-            .0
-            .clone();
-        let page = app
-            .world_mut()
-            .spawn((
-                HostedSurfaceGeneration(7),
-                BinIpcEpoch(2),
-                BinIpcNavigationRevision(3),
-                crate::HostedPageLifecycle::default(),
-            ))
-            .id();
-        lifecycle.send(PageLifecycleEnvelope {
-            webview: page,
-            generation: 7,
-            navigation_revision: 3,
-            ipc_epoch: 1,
-            update: LifecycleUpdate::AddressMounted(10),
-        });
-        app.update();
-        assert_eq!(
-            app.world()
-                .get::<vmux_ecs::page::AddressSlot>(page)
-                .map(|slot| slot.0),
-            Some(10)
-        );
-        for (generation, navigation_revision, ipc_epoch, slot) in
-            [(6, 3, 2, 30), (7, 2, 2, 40), (7, 3, 2, 11), (7, 3, 1, 9)]
-        {
-            lifecycle.send(PageLifecycleEnvelope {
-                webview: page,
-                generation,
-                navigation_revision,
-                ipc_epoch,
-                update: LifecycleUpdate::AddressMounted(slot),
-            });
-        }
-        app.update();
-        assert_eq!(
-            app.world()
-                .get::<vmux_ecs::page::AddressSlot>(page)
-                .map(|slot| slot.0),
-            Some(11)
-        );
     }
 
     #[test]

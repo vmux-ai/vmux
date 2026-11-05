@@ -11,13 +11,11 @@ use crate::state::{
     SettingsUiState,
 };
 use dioxus::prelude::*;
-use vmux_ui::components::breadcrumb::{BreadcrumbOption, BreadcrumbSelector, BreadcrumbSeparator};
+use vmux_api::address::{AddressCrumb, AddressIntent, AddressOption, PageAddress};
 use vmux_ui::components::button::{Button, ButtonSize, ButtonVariant};
 use vmux_ui::components::input::Input;
-use vmux_ui::components::manager::{
-    ManagerSearchAction, ManagerSelect, ManagerSelectItem, WorkspacePage,
-};
-use vmux_ui::components::page_address::PageAddress;
+use vmux_ui::components::manager::{ManagerSearchAction, ManagerSelect, ManagerSelectItem};
+use vmux_ui::components::page_address::{PageBreadcrumbs, PageToolbar};
 use vmux_ui::components::switch::{Switch, SwitchThumb};
 use vmux_ui::dioxus_ext::attributes;
 use vmux_ui::focus::FocusClaim;
@@ -71,7 +69,7 @@ if (viewport && sections.length) {
 
 #[vmux_page::page(
     component = Page,
-    states = ["ThemeUiState", "SettingsUiState"]
+    states = ["PageAddressUiState", "ThemeUiState", "SettingsUiState"]
 )]
 pub(crate) struct SettingsPage;
 
@@ -101,6 +99,7 @@ pub fn Page() -> Element {
         fields,
         items,
     } = state();
+    let mut active_section = use_signal(String::new);
 
     if sections.is_empty() {
         return rsx! {
@@ -114,12 +113,6 @@ pub fn Page() -> Element {
         fields: Rc::new(fields),
         items: Rc::new(items),
     };
-    let mut active_section = use_signal(|| {
-        sections
-            .first()
-            .map(|section| section.id.clone())
-            .unwrap_or_default()
-    });
     let current_section = sections
         .iter()
         .find(|section| section.id == active_section())
@@ -127,41 +120,37 @@ pub fn Page() -> Element {
         .cloned();
     let section_options = sections
         .iter()
-        .map(|section| BreadcrumbOption {
+        .map(|section| AddressOption {
             label: section.title.clone(),
-            value: section.id.clone(),
-            identity_seed: String::new(),
-            icon_url: String::new(),
-            icon: None,
+            intent: Some(AddressIntent::Section {
+                id: section.id.clone(),
+            }),
+            ..Default::default()
         })
         .collect::<Vec<_>>();
+    let mut address = PageAddress::default();
+    if let Some(section) = current_section {
+        address.fixed.push(AddressCrumb {
+            entry: AddressOption {
+                label: section.title,
+                intent: Some(AddressIntent::Section { id: section.id }),
+                ..Default::default()
+            },
+            options: section_options,
+            active: true,
+            ..Default::default()
+        });
+    }
     rsx! {
         div { class: "flex h-full min-h-0 flex-col bg-background text-foreground",
-            PageAddress {
-                current: WorkspacePage::Settings.option(),
-                options: WorkspacePage::options(),
-                actions: rsx! {
-                    ManagerSearchAction {
-                        value: query.clone(),
-                        placeholder: translate("command-search"),
-                        onsearch: move |query| {
-                            let _ = send(&SettingsFilterRequest { query });
-                        },
+            PageBreadcrumbs {
+                state: address,
+                onintent: move |intent| {
+                    if let AddressIntent::Section { id } = intent {
+                        active_section.set(id.clone());
+                        SettingsSectionNavigation::open(&id);
                     }
                 },
-                if let Some(section) = current_section {
-                    BreadcrumbSeparator {}
-                    BreadcrumbSelector {
-                        label: section.title,
-                        value: section.id,
-                        options: section_options,
-                        active: true,
-                        onselect: move |id: String| {
-                            active_section.set(id.clone());
-                            SettingsSectionNavigation::open(&id);
-                        },
-                    }
-                }
             }
             div { class: "flex min-h-0 flex-1 flex-row",
                 aside { class: "hidden w-56 shrink-0 px-4 py-4 lg:block",
@@ -188,6 +177,13 @@ pub fn Page() -> Element {
                     }
                 }
                 main { id: "settings-scroll-viewport", class: "min-h-0 min-w-0 flex-1 overflow-y-auto",
+                    PageToolbar { actions: rsx! {
+                        ManagerSearchAction {
+                            value: query.clone(),
+                            placeholder: translate("command-search"),
+                            onsearch: move |query| { let _ = send(&SettingsFilterRequest { query }); },
+                        }
+                    } }
                     SettingsScrollSpy {
                         active: active_section,
                     }
