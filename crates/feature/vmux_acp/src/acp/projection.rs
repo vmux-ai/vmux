@@ -135,6 +135,7 @@ fn project(
                     }
                 }
                 AcpTranscriptInput::FinishHistoryReplay(loaded) => {
+                    tracing::info!(target: "acp", sid = %sid.0, loaded, messages = projector.messages().len(), "session history replay finished");
                     if !loaded {
                         *projector = AcpProjector::default();
                     }

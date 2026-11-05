@@ -68,22 +68,21 @@ pub(super) fn add(app: &mut App) {
 fn route_messages(
     mut inbound: MessageReader<AgentMessagesSnapshot>,
     mut snapshots: MessageWriter<SnapshotReceived>,
-    sessions: Query<(Entity, &SessionId, Has<vmux_session::TranscriptLoading>), With<Session>>,
+    sessions: Query<(Entity, &SessionId), With<Session>>,
     transcripts: Transcripts,
     mut commands: Commands,
 ) {
     for inbound in inbound.read() {
-        let Some((session, _, loading)) = sessions
+        let Some((session, _)) = sessions
             .iter()
-            .find(|(_, session_id, _)| session_id.0 == inbound.sid)
+            .find(|(_, session_id)| session_id.0 == inbound.sid)
         else {
             continue;
         };
         commands
             .entity(session)
             .remove::<vmux_session::TranscriptLoading>();
-        if inbound.messages.is_empty() && !loading && !transcripts.get(session).messages.is_empty()
-        {
+        if inbound.messages.is_empty() && !transcripts.get(session).messages.is_empty() {
             continue;
         }
         snapshots.write(SnapshotReceived {
@@ -191,10 +190,11 @@ fn project_deltas(
 
 fn project_statuses(
     mut inbound: MessageReader<AgentRunStatusChanged>,
-    mut sessions: Query<(&SessionId, &mut RunState, &mut PromptQueue), With<Session>>,
+    mut sessions: Query<(Entity, &SessionId, &mut RunState, &mut PromptQueue), With<Session>>,
+    mut commands: Commands,
 ) {
     for inbound in inbound.read() {
-        for (session_id, mut state, mut queue) in &mut sessions {
+        for (session, session_id, mut state, mut queue) in &mut sessions {
             if session_id.0 != inbound.sid {
                 continue;
             }
@@ -208,6 +208,9 @@ fn project_statuses(
                     }
                 }
                 AgentRunStatus::Errored(message) => {
+                    commands
+                        .entity(session)
+                        .remove::<vmux_session::TranscriptLoading>();
                     if queue.flush_pending() {
                         *state = RunState::Idle;
                     } else {
@@ -312,7 +315,10 @@ mod tests {
         app.add_plugins(MinimalPlugins);
         add(&mut app);
         let session_id = SessionId("session-1".into());
-        let session = app.world_mut().spawn((Session, session_id.clone())).id();
+        let session = app
+            .world_mut()
+            .spawn((Session, session_id.clone(), vmux_session::TranscriptLoading))
+            .id();
         app.world_mut().spawn((
             vmux_session::ConversationEvent,
             vmux_session::EventIdentity {
@@ -341,5 +347,40 @@ mod tests {
             .drain()
             .collect::<Vec<_>>();
         assert!(snapshots.is_empty());
+        assert!(
+            !app.world()
+                .entity(session)
+                .contains::<vmux_session::TranscriptLoading>()
+        );
+    }
+
+    #[test]
+    fn failed_resume_releases_loading_and_reports_the_error() {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins);
+        add(&mut app);
+        let session = app
+            .world_mut()
+            .spawn((
+                Session,
+                SessionId("session-1".into()),
+                RunState::Idle,
+                PromptQueue::default(),
+                vmux_session::TranscriptLoading,
+            ))
+            .id();
+        app.world_mut().write_message(AgentRunStatusChanged {
+            sid: "session-1".into(),
+            status: AgentRunStatus::Errored("history unavailable".into()),
+        });
+        app.update();
+        assert!(
+            !app.world()
+                .entity(session)
+                .contains::<vmux_session::TranscriptLoading>()
+        );
+        assert!(
+            matches!(app.world().get::<RunState>(session), Some(RunState::Errored(error)) if error == "history unavailable")
+        );
     }
 }

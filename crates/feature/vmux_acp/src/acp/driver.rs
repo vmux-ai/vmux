@@ -1036,13 +1036,13 @@ impl AcpDriver {
                 main_shared.projection.agent_info(name);
             }
 
-            let resume_requested = resume.is_some() && init_resp.agent_capabilities.load_session;
+            let resume_requested = resume.is_some();
             if resume_requested {
                 main_shared
                     .projection
                     .transcript(AcpTranscriptInput::BeginHistoryReplay);
             }
-            let mut session_id =
+            let loaded_session =
                 load_requested_session(resume, init_resp.agent_capabilities.load_session, |sid| {
                     let mut load = LoadSessionRequest::new(sid, main_shared.cwd());
                     load.mcp_servers = mcp_servers.clone();
@@ -1057,7 +1057,7 @@ impl AcpDriver {
                         let Ok(loaded) = answered else {
                             tracing::warn!(
                                 target: "acp",
-                                "session/load did not answer within {}s; starting a fresh session",
+                                "session/load did not answer within {}s",
                                 ACP_STARTUP_TIMEOUT.as_secs()
                             );
                             return Err("session/load timed out".to_string());
@@ -1072,6 +1072,17 @@ impl AcpDriver {
                     }
                 })
                 .await;
+            let mut session_id = match loaded_session {
+                Ok(session_id) => session_id,
+                Err(error) => {
+                    tracing::warn!(target: "acp", sid = %main_shared.sid, %error, "session resume failed");
+                    if resume_requested {
+                        main_shared.projection.transcript(AcpTranscriptInput::FinishHistoryReplay(false));
+                    }
+                    main_shared.projection.status(AgentRunStatus::Errored(error));
+                    return Ok(());
+                }
+            };
             if resume_requested {
                 main_shared
                     .projection
@@ -1358,14 +1369,23 @@ async fn load_requested_session<F, Fut, E>(
     resume: Option<String>,
     load_supported: bool,
     load: F,
-) -> Option<SessionId>
+) -> Result<Option<SessionId>, String>
 where
     F: FnOnce(SessionId) -> Fut,
     Fut: Future<Output = Result<(), E>>,
+    E: std::fmt::Display,
 {
-    let sid = resume.filter(|_| load_supported).map(SessionId::new)?;
-    load(sid.clone()).await.ok()?;
-    Some(sid)
+    let Some(resume) = resume else {
+        return Ok(None);
+    };
+    if !load_supported {
+        return Err("agent does not support resuming saved sessions".to_string());
+    }
+    let sid = SessionId::new(resume);
+    load(sid.clone())
+        .await
+        .map_err(|error| format!("session/load failed for {sid}: {error}"))?;
+    Ok(Some(sid))
 }
 
 async fn ensure_session<F, Fut, E>(
@@ -2273,29 +2293,32 @@ mod tests {
             calls.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
             async move {
                 assert_eq!(sid.to_string(), "resume-1");
-                Ok::<(), ()>(())
+                Ok::<(), &'static str>(())
             }
         })
         .await;
-        assert_eq!(loaded.unwrap().to_string(), "resume-1");
+        assert_eq!(loaded.unwrap().unwrap().to_string(), "resume-1");
         assert_eq!(calls.load(std::sync::atomic::Ordering::SeqCst), 1);
 
         let skipped = load_requested_session(Some("resume-2".into()), false, |_| {
             calls.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
-            async { Ok::<(), ()>(()) }
+            async { Ok::<(), &'static str>(()) }
         })
         .await;
-        assert!(skipped.is_none());
+        assert!(skipped.is_err());
         assert_eq!(calls.load(std::sync::atomic::Ordering::SeqCst), 1);
     }
 
     #[tokio::test]
-    async fn failed_requested_resume_stays_unassigned() {
+    async fn failed_requested_resume_reports_the_provider_error() {
         let loaded = load_requested_session(Some("stale".into()), true, |_| async {
             Err::<(), &'static str>("missing")
         })
         .await;
-        assert!(loaded.is_none());
+        assert_eq!(
+            loaded.unwrap_err(),
+            "session/load failed for stale: missing"
+        );
     }
 
     #[tokio::test]

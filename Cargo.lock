@@ -10981,6 +10981,7 @@ dependencies = [
  "serde",
  "serde_json",
  "similar",
+ "tempfile",
  "unicode-segmentation",
  "url",
  "uuid",

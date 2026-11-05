@@ -595,10 +595,12 @@ working area available. The editor's typed trail still validates its owning surf
 revision, and URL. Path overflow collapses whole directories using measured widths and keeps the
 filename intact. Search sits at the end of the trail and Checkout beside the selected branch.
 Git's branch-file filter sits above its file tree, with page-top spacing shared by the tree and
-diff. The Space card keeps a gutter on both sides; long titles and branch labels fade at the edge,
+diff. Side-sheet cards share their outer width; the Space card keeps an inner right inset.
+Long titles and branch labels fade at the edge,
 and paths retain their filename with a leading fade. Hover exposes the full label.
 Session tabs and side-sheet rows share their Session identicon, with the agent logo in a small
 corner badge. Address identicons use the same size as the adjacent navigation icons.
+Agent thumbnails contain their logo inside the circular avatar surface, including its border.
 Code bookmarks resolve their directory from the active worktree, owning project, or cwd and open
 its README or entry file; directory favicons identify the Code page. Layout and address state flush before native
 presentation in the same frame; the final flush retains updates arriving later.
@@ -1217,6 +1219,9 @@ request and emits a typed creation event before navigation. Layout Stacks refere
 entity and may close without deleting it. `vmux://sessions/` opens the manager;
 `vmux://sessions/{session_id}` opens a Session independently of its agent or provider conversation
 identity. Session IDs are encoded as one URL path segment.
+Conversation events persist their identities, contents, timestamps, and source markers with the
+Session. Restore displays that history before runtime attachment; provider replay reconciles the
+same event identities without duplicating cached messages.
 
 `vmux_acp` attaches transient runtime and ACP capability state to Session entities and owns the
 provider-owned `AcpSessionId`, its persistence, and the single runtime detach path used by cleanup
@@ -1235,6 +1240,11 @@ Vmux state. Resuming it creates the canonical Session entity, records its `AcpSe
 the provider replay the conversation through `session/load`. Compatibility watches exist only while
 the Sessions page or one of their imported Sessions is present, debounce into one wake, rescan only
 the changed provider, and bound untrusted history traversal.
+Missing history resumes from the catalog owner's original provider ID. Cached continuations keep
+their runtime resume ID. Unsupported or failed loads report an error and keep the Session's identity.
+Empty replays preserve cached history, and failed loads release the loading state.
+ACP sessions withhold startup snapshots until history replay finishes. Compatibility readers leave
+their loading state to the ACP protocol; they read and complete only their own provider-store tasks.
 History loading starts and finishes publish a fresh chat snapshot independently of message
 changes, so empty or unchanged replays still release the conversation skeleton.
 The Session manager publishes only to its active page and leases Git metadata for every displayed

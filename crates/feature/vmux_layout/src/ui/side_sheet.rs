@@ -243,7 +243,7 @@ fn SideSheetSpaceCard(
     let mut expanded = use_signal(|| true);
     let content_class = if expanded() { "overflow-visible" } else { "" };
     rsx! {
-        div { class: "{SHEET_SECTION} mr-2 @max-[12rem]:mr-1",
+        div { class: SHEET_SECTION,
             SideSheetSpaceRow {
                 space,
                 spaces,

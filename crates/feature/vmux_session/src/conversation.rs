@@ -3,7 +3,7 @@ use std::collections::{HashMap, HashSet};
 use bevy_app::{App, Plugin, Update};
 use bevy_ecs::prelude::*;
 use bevy_ecs::system::SystemParam;
-use bevy_reflect::Reflect;
+use bevy_reflect::{Reflect, ReflectDeserialize, ReflectSerialize};
 use moonshine_save::prelude::Save;
 use serde::{Deserialize, Serialize};
 use vmux_api::service::ServiceMessageSet;
@@ -26,6 +26,11 @@ impl Plugin for ConversationPlugin {
             .add_message::<OperationCommitted>()
             .register_persisted::<Document>()
             .register_persisted::<DocumentKind>()
+            .register_persisted::<ConversationEvent>()
+            .register_persisted::<EventIdentity>()
+            .register_persisted::<MessageContent>()
+            .register_persisted::<MaterializedEvent>()
+            .register_persisted::<SnapshotEvent>()
             .add_systems(Update, (ensure, sync_agent))
             .add_systems(
                 Update,
@@ -49,10 +54,14 @@ pub struct Member;
 
 #[derive(Component, Clone, Debug, Default, PartialEq, Eq, Reflect)]
 #[reflect(Component)]
+#[require(Save)]
 #[type_path = "vmux_session"]
 pub struct ConversationEvent;
 
-#[derive(Component, Clone, Debug, PartialEq, Eq)]
+#[derive(Component, Clone, Debug, PartialEq, Eq, Reflect, Serialize, Deserialize)]
+#[reflect(opaque)]
+#[reflect(Component, Serialize, Deserialize)]
+#[type_path = "vmux_session"]
 pub struct EventIdentity {
     pub event_id: EventId,
     pub actor_id: MemberId,
@@ -61,7 +70,10 @@ pub struct EventIdentity {
     pub reply_to: Option<EventId>,
 }
 
-#[derive(Component, Clone, Debug, PartialEq)]
+#[derive(Component, Clone, Debug, PartialEq, Reflect, Serialize, Deserialize)]
+#[reflect(opaque)]
+#[reflect(Component, Serialize, Deserialize)]
+#[type_path = "vmux_session"]
 pub struct MessageContent(pub Message);
 
 #[derive(Component, Clone, Debug, Eq, PartialEq)]
@@ -76,7 +88,9 @@ pub enum MessageDelivery {
 #[type_path = "vmux_session"]
 pub struct MaterializedEvent;
 
-#[derive(Component, Clone, Copy, Debug, Default, Eq, PartialEq)]
+#[derive(Component, Clone, Copy, Debug, Default, Eq, PartialEq, Reflect)]
+#[reflect(Component)]
+#[type_path = "vmux_session"]
 struct SnapshotEvent;
 
 #[derive(Component, Clone, Debug, Default, Eq, PartialEq, Reflect)]
@@ -682,8 +696,101 @@ impl EventMaterializer<'_, '_> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[cfg(feature = "app")]
+    use bevy::prelude::{AssetPlugin, MinimalPlugins};
     use bevy_ecs::system::RunSystemOnce;
+    #[cfg(feature = "app")]
+    use moonshine_save::prelude::{LoadWorld, SaveWorld, TriggerLoad, TriggerSave};
     use vmux_api::session::AssistantBlock;
+
+    #[cfg(feature = "app")]
+    #[test]
+    fn saved_history_is_available_before_replay_and_replaced_without_duplicates() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("conversation.ron");
+        let id = SessionId("saved-session".into());
+        let messages = vec![
+            Message::user("history"),
+            Message::Assistant {
+                blocks: vec![AssistantBlock::Text("answer".into())],
+            },
+        ];
+        let mut source = App::new();
+        source
+            .add_plugins((
+                MinimalPlugins,
+                AssetPlugin::default(),
+                vmux_ecs::PrimitivesPlugin,
+                ConversationPlugin,
+            ))
+            .register_persisted::<Session>()
+            .register_persisted::<SessionId>()
+            .add_observer(moonshine_save::save::save_on_default_event);
+        let session = source.world_mut().spawn((Session, id.clone())).id();
+        source.world_mut().write_message(SnapshotReceived {
+            session: id.clone(),
+            messages: messages.clone(),
+        });
+        source.update();
+        let original = source
+            .world_mut()
+            .run_system_once(move |transcripts: Transcripts| transcripts.get(session))
+            .unwrap();
+        let registry = source
+            .world()
+            .resource::<bevy_ecs::reflect::AppTypeRegistry>()
+            .read();
+        let filter = vmux_ecs::persistence::WorkspacePersisted::filter(&registry)
+            .allow::<Save>()
+            .allow::<ChildOf>()
+            .allow::<Children>()
+            .allow::<Name>();
+        drop(registry);
+        let mut save = SaveWorld::default_into_file(path.clone());
+        save.components = filter;
+        source.world_mut().commands().trigger_save(save);
+        source.update();
+        assert!(path.exists());
+        let mut restored = App::new();
+        restored
+            .add_plugins((
+                MinimalPlugins,
+                AssetPlugin::default(),
+                vmux_ecs::PrimitivesPlugin,
+                ConversationPlugin,
+            ))
+            .register_persisted::<Session>()
+            .register_persisted::<SessionId>()
+            .add_observer(moonshine_save::load::load_on_default_event);
+        restored.update();
+        restored
+            .world_mut()
+            .commands()
+            .trigger_load(LoadWorld::default_from_file(path));
+        restored.update();
+        let session = restored
+            .world_mut()
+            .query_filtered::<Entity, With<Session>>()
+            .single(restored.world())
+            .unwrap();
+        let history = restored
+            .world_mut()
+            .run_system_once(move |transcripts: Transcripts| transcripts.get(session))
+            .unwrap();
+        assert_eq!(history.messages, messages);
+        assert_eq!(history.created_at, original.created_at);
+        let replacement = vec![Message::user("replayed")];
+        restored.world_mut().write_message(SnapshotReceived {
+            session: id,
+            messages: replacement.clone(),
+        });
+        restored.update();
+        let history = restored
+            .world_mut()
+            .run_system_once(move |transcripts: Transcripts| transcripts.get(session))
+            .unwrap();
+        assert_eq!(history.messages, replacement);
+    }
 
     #[test]
     fn snapshot_materializes_ordered_events_under_session() {

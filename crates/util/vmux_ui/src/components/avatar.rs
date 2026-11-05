@@ -91,15 +91,6 @@ pub fn AgentThumbnail(
     #[props(default)] class: String,
 ) -> Element {
     let src = AgentThumbnailSource::resolve(src, &seed);
-    if let Some(src) = src.as_ref() {
-        return rsx! {
-            img {
-                class: cn(["shrink-0 object-contain", class.as_str()]),
-                src: src.clone(),
-                alt,
-            }
-        };
-    }
     let background = AgentThumbnailBackground::resolve(&background, &seed, src.as_deref());
     let class = cn([AGENT_THUMBNAIL, class.as_str()]);
     rsx! {

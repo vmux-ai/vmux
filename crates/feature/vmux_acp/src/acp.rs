@@ -315,6 +315,7 @@ fn spawn(
                 request.processes.clone(),
                 projection,
             ));
+            let replay_pending = request.resume.is_some();
             let task = runtime.0.spawn(driver::AcpDriver::run(
                 std::mem::take(&mut request.command),
                 std::mem::take(&mut request.args),
@@ -335,7 +336,9 @@ fn spawn(
                 AcpSessionConfigs::default(),
                 AcpRunState(AgentRunStatus::Idle),
                 AcpApprovalState::default(),
-                AcpHistoryReplay::default(),
+                AcpHistoryReplay {
+                    active: replay_pending,
+                },
                 AcpSessionAgent(request.agent_id.clone()),
                 CreatedAt::now(),
                 AcpSessionTask(task),
@@ -601,6 +604,7 @@ fn read(
         &AcpAgentName,
         &AcpSessionConfigs,
         &AcpRunState,
+        &AcpHistoryReplay,
     )>,
     mut snapshots: Query<(Entity, &mut SnapshotAcpSession)>,
     mut agent_infos: Query<(Entity, &mut AcpSessionAgentInfo)>,
@@ -611,9 +615,11 @@ fn read(
 ) {
     for (request_entity, mut request) in &mut snapshots {
         let mut result = None;
-        for (sid, shared, projector, _, _, _) in &sessions {
+        for (sid, shared, projector, _, _, _, replay) in &sessions {
             if sid.0 == request.sid {
-                result = Some(shared.0.snapshot_message(projector.messages()));
+                if !replay.active {
+                    result = Some(shared.0.snapshot_message(projector.messages()));
+                }
                 break;
             }
         }
@@ -624,7 +630,7 @@ fn read(
     }
     for (request_entity, mut request) in &mut agent_infos {
         let mut result = None;
-        for (sid, _, _, agent_name, _, _) in &sessions {
+        for (sid, _, _, agent_name, _, _, _) in &sessions {
             if sid.0 == request.sid {
                 result = agent_name.0.as_ref().map(|name| {
                     ServiceMessage::Shared(SharedEvent::AcpAgentInfo {
@@ -642,7 +648,7 @@ fn read(
     }
     for (request_entity, mut request) in &mut config_states {
         let mut result = None;
-        for (sid, _, _, _, configs, _) in &sessions {
+        for (sid, _, _, _, configs, _, _) in &sessions {
             if sid.0 == request.sid {
                 result = Some(ServiceMessage::AcpSessionConfigState {
                     sid: sid.0.clone(),
@@ -658,7 +664,7 @@ fn read(
     }
     for (request_entity, mut request) in &mut statuses {
         let mut result = None;
-        for (sid, _, _, _, _, status) in &sessions {
+        for (sid, _, _, _, _, status, _) in &sessions {
             if sid.0 == request.sid {
                 result = Some(ServiceMessage::Shared(SharedEvent::AgentRunStatusChanged {
                     sid: sid.0.clone(),
@@ -674,7 +680,7 @@ fn read(
     }
     for (request_entity, mut request) in &mut messages {
         let mut result = None;
-        for (sid, _, projector, _, _, _) in &sessions {
+        for (sid, _, projector, _, _, _, _) in &sessions {
             if sid.0 == request.sid {
                 result = Some(projector.messages().to_vec());
                 break;
@@ -829,6 +835,59 @@ fn reap(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[tokio::test]
+    async fn subscriptions_receive_no_empty_snapshot_while_history_is_replaying() {
+        let mut app = App::new();
+        app.add_plugins(crate::service::AcpServicePlugin);
+        let (wake, _wake_rx) = mpsc::unbounded_channel();
+        let (_sessions, runtime) = AcpSessions::new(Handle::current(), wake);
+        app.world_mut().spawn(runtime);
+        let (stream, _receiver) = broadcast::channel(4);
+        let shared = Arc::new(AcpShared::new(
+            "session".into(),
+            PathBuf::from("/tmp"),
+            ProcessId::new(),
+            stream,
+            Arc::new(tokio::sync::Mutex::new(
+                vmux_process::ProcessManager::default(),
+            )),
+        ));
+        let mut projector = AcpProjector::default();
+        projector.push_user("restored".into(), Vec::new());
+        let session = app
+            .world_mut()
+            .spawn((
+                SessionId("session".into()),
+                AcpSessionShared(shared),
+                projector,
+                AcpAgentName::default(),
+                AcpSessionConfigs::default(),
+                AcpRunState(AgentRunStatus::Idle),
+                AcpHistoryReplay { active: true },
+            ))
+            .id();
+        let (response, mut receiver) = oneshot::channel();
+        app.world_mut().spawn(SnapshotAcpSession {
+            sid: "session".into(),
+            response: Some(response),
+        });
+        app.update();
+        assert!(receiver.try_recv().unwrap().is_none());
+        app.world_mut()
+            .get_mut::<AcpHistoryReplay>(session)
+            .unwrap()
+            .active = false;
+        let (response, mut receiver) = oneshot::channel();
+        app.world_mut().spawn(SnapshotAcpSession {
+            sid: "session".into(),
+            response: Some(response),
+        });
+        app.update();
+        assert!(
+            matches!(receiver.try_recv().unwrap(), Some(ServiceMessage::Shared(SharedEvent::AgentMessagesSnapshot { messages, .. })) if matches!(messages.as_slice(), [Message::User { text, .. }] if text == "restored"))
+        );
+    }
 
     #[test]
     fn accepted_user_input_is_projected_before_agent_startup() {

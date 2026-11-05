@@ -2020,6 +2020,9 @@ fn queue_initial_conversations(
     mut commands: Commands,
 ) {
     for (session, sid, kind, provider_sid, created_at, requested, cursor) in &sessions {
+        if kind.0.starts_with("acp:") {
+            continue;
+        }
         if !transcripts.get(session).messages.is_empty() {
             commands.entity(session).remove::<TranscriptLoading>();
             continue;
@@ -2738,6 +2741,60 @@ mod tests {
         assert_eq!(
             app.world().get::<ProviderSessionId>(session),
             Some(&ProviderSessionId("source-session".into()))
+        );
+    }
+
+    #[test]
+    fn acp_history_loading_waits_for_protocol_replay() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins)
+            .add_message::<ServiceRequest>()
+            .add_message::<SnapshotReceived>()
+            .add_message::<ConversationAppendReceived>()
+            .add_message::<ProviderArchiveWriteRequest>()
+            .add_message::<ProviderArchiveCompleted>()
+            .add_message::<ArchiveRequest>()
+            .add_message::<AcpPackageChanged>()
+            .add_message::<PageOpenRequest>()
+            .add_message::<TabLayoutSpawnRequest>()
+            .add_message::<CreateRequest>();
+        add(&mut app);
+        let (_send, changes) = mpsc::channel();
+        app.world_mut().spawn((
+            SourcePaths {
+                codex: dir.path().join("codex"),
+                claude: dir.path().join("claude"),
+                vibe: dir.path().join("vibe"),
+            },
+            Runtime {
+                changes: Mutex::new(changes),
+                watcher: None,
+                watched: HashMap::new(),
+                sources: HashSet::new(),
+                watch_codex_activity: false,
+                manager: false,
+            },
+        ));
+        let session = app
+            .world_mut()
+            .spawn((
+                Session,
+                SessionId("canonical".into()),
+                ProviderKind("acp:codex-acp".into()),
+                ProviderSessionId("provider".into()),
+                CreatedAt(0),
+                TranscriptLoading,
+            ))
+            .id();
+        app.update();
+        assert!(app.world().entity(session).contains::<TranscriptLoading>());
+        assert!(
+            app.world_mut()
+                .query::<&ConversationLoadTask>()
+                .iter(app.world())
+                .next()
+                .is_none()
         );
     }
 

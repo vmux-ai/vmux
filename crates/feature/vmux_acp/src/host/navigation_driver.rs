@@ -18,7 +18,7 @@ use vmux_ui::i18n::translate;
 
 use super::acp::registry::RegistryAgent;
 use super::attach::AcpAgentAttachment;
-use super::attach_driver::DeferredAttachmentPrompt;
+use super::attach_driver::{AcpResume, DeferredAttachmentPrompt};
 use crate::AcpSessionId;
 
 #[derive(SystemParam)]
@@ -45,6 +45,8 @@ pub(super) struct PageOpener<'w, 's> {
             Option<&'static AgentId>,
             Option<&'static AcpSessionId>,
             Option<&'static ProcessAnchor>,
+            Option<&'static vmux_session::ProviderKind>,
+            Option<&'static vmux_session::ProviderSessionId>,
         ),
         With<Session>,
     >,
@@ -153,20 +155,26 @@ impl PageOpener<'_, '_> {
                     selected_agent,
                     resume,
                     active,
+                    provider_kind,
+                    provider_sid,
                 )) = self
                     .sessions
                     .iter()
                     .find(|(_, candidate, ..)| *candidate == &id)
-                    .map(|(entity, _, name, cwd, agent, resume, active)| {
-                        (
-                            entity,
-                            name.as_str().to_string(),
-                            cwd.0.clone(),
-                            agent.map(|agent| agent.0.clone()),
-                            resume.map(|resume| resume.0.clone()),
-                            active.map(|active| active.0),
-                        )
-                    })
+                    .map(
+                        |(entity, _, name, cwd, agent, resume, active, kind, provider_sid)| {
+                            (
+                                entity,
+                                name.as_str().to_string(),
+                                cwd.0.clone(),
+                                agent.map(|agent| agent.0.clone()),
+                                resume.map(|resume| resume.0.clone()),
+                                active.map(|active| active.0),
+                                kind.cloned(),
+                                provider_sid.cloned(),
+                            )
+                        },
+                    )
                 else {
                     return Err(format!("Session '{}' was not found", id.0));
                 };
@@ -190,6 +198,16 @@ impl PageOpener<'_, '_> {
                     return Err(format!("ACP agent unavailable for '{agent_id}'"));
                 }
                 let icon = self.catalog.icon(&agent_id);
+                let has_history = self
+                    .transcripts
+                    .read(session_entity, |transcript| !transcript.messages.is_empty());
+                let resume = AcpResume::for_agent(
+                    &agent_id,
+                    resume,
+                    has_history,
+                    provider_kind.as_ref().zip(provider_sid.as_ref()),
+                )
+                .0;
                 let agent_name = self.catalog.profile_name(&agent_id, config);
                 let cwd_missing = stored_cwd.as_os_str().is_empty();
                 let cwd = if cwd_missing {
@@ -207,11 +225,7 @@ impl PageOpener<'_, '_> {
                     self.commands
                         .entity(task.stack)
                         .insert(EntityTarget::<Session>::new(session_entity));
-                    if resume.is_some()
-                        && self
-                            .transcripts
-                            .read(session_entity, |transcript| transcript.messages.is_empty())
-                    {
+                    if resume.is_some() && !has_history {
                         self.commands
                             .entity(session_entity)
                             .insert(vmux_session::TranscriptLoading);

@@ -39,7 +39,7 @@ pub(crate) fn ActiveSessionPanel(session: ActiveSession) -> Element {
         page.title.clone()
     };
     rsx! {
-        div { class: "relative w-full max-w-full min-w-0 overflow-visible py-2 @max-[12rem]:py-1.5",
+        div { class: "relative w-full max-w-full min-w-0 overflow-visible py-2 pr-2 @max-[12rem]:py-1.5 @max-[12rem]:pr-1",
             div { class: "flex w-full min-w-0 items-center gap-2.5 overflow-hidden px-2 @max-[12rem]:gap-1.5 @max-[12rem]:px-1",
                 div { class: "flex size-4 shrink-0 items-center justify-center",
                     StackIcon {
