@@ -2626,7 +2626,6 @@ mod tests {
                 sessions: Vec::new(),
             },
         );
-        drop(snapshot);
         app.update();
         let catalog = app.world().resource::<ProviderCatalog>();
         assert!(catalog.loading);

@@ -716,7 +716,15 @@ impl Transcript {
         let mut last_top = self.last_top;
         let previous = *last_top.peek();
         last_top.set(top);
-        if top < previous {
+        if (scroll::Observation {
+            top,
+            previous,
+            distance,
+            initial: *self.initial_follow.peek(),
+            settling: self.follow_task.peek().is_some(),
+        })
+        .pauses_following()
+        {
             self.stop_following();
             return;
         }
@@ -747,6 +755,9 @@ impl Transcript {
     }
 
     pub(super) fn request_history(self, anchor: PrependScrollAnchor) {
+        if *self.initial_follow.peek() || self.follow_task.peek().is_some() {
+            return;
+        }
         let transcript = self.current();
         if transcript.loading || transcript.loaded_start == 0 {
             return;

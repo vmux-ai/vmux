@@ -6,6 +6,20 @@ pub use imp::settle_bottom;
 
 pub type Container = Signal<Option<Rc<MountedData>>>;
 
+pub(super) struct Observation {
+    pub top: i32,
+    pub previous: i32,
+    pub distance: i32,
+    pub initial: bool,
+    pub settling: bool,
+}
+
+impl Observation {
+    pub fn pauses_following(&self) -> bool {
+        !self.initial && !self.settling && self.distance > 48 && self.top < self.previous
+    }
+}
+
 mod imp {
     use super::Container;
     use super::Platform;
@@ -63,8 +77,48 @@ mod imp {
                 }
                 stable_height = Some(next_size.height);
             }
-            following.set(false);
             pending.set(None);
         })));
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn shrinking_content_at_the_bottom_does_not_cancel_following() {
+        for (initial, settling) in [(true, true), (true, false), (false, true), (false, false)] {
+            let observed = Observation {
+                top: 8020,
+                previous: 8193,
+                distance: 0,
+                initial,
+                settling,
+            };
+            assert!(!observed.pauses_following());
+        }
+    }
+
+    #[test]
+    fn an_initial_or_pending_scroll_does_not_become_a_manual_upward_scroll() {
+        for (initial, settling) in [(true, true), (true, false), (false, true)] {
+            let observed = Observation {
+                top: 8000,
+                previous: 8193,
+                distance: 400,
+                initial,
+                settling,
+            };
+            assert!(!observed.pauses_following());
+        }
+        let manual = Observation {
+            top: 8000,
+            previous: 8193,
+            distance: 400,
+            initial: false,
+            settling: false,
+        };
+        assert!(manual.pauses_following());
     }
 }

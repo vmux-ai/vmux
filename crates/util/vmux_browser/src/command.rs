@@ -67,6 +67,9 @@ impl Plugin for CommandPlugin {
         if !app.is_plugin_added::<vmux_command::CommandRuntimePlugin>() {
             app.add_plugins(vmux_command::CommandRuntimePlugin);
         }
+        if !app.is_plugin_added::<vmux_ecs::PrimitivesPlugin>() {
+            app.add_plugins(vmux_ecs::PrimitivesPlugin);
+        }
         app.add_message::<HostHistoryStep>()
             .add_message::<NavigationRequest>()
             .add_message::<OpenRequest>()
@@ -871,7 +874,6 @@ fn side_sheet_stack_activate(
     pane_children: Query<&Children, With<Pane>>,
     stack_q: Query<Entity, (With<Stack>, Without<Retiring>)>,
     scope: WindowScope,
-    mut last_activated: Query<&mut LastActivatedAt>,
     proxy: Option<Res<EventLoopProxyWrapper>>,
     mut commands: Commands,
 ) {
@@ -891,14 +893,9 @@ fn side_sheet_stack_activate(
     let Some(target_stack) = target_stack else {
         return;
     };
-    let activated_at = LastActivatedAt::now();
-    for entity in [target_pane, target_stack] {
-        if let Ok(mut value) = last_activated.get_mut(entity) {
-            *value = activated_at;
-        } else {
-            commands.entity(entity).insert(activated_at);
-        }
-    }
+    commands.trigger(vmux_ecs::ActivateRequest {
+        entity: target_stack,
+    });
     commands
         .entity(target_pane)
         .insert(PaneHoverCooldown::start());
@@ -1365,6 +1362,60 @@ mod tests {
             navigation_requests,
             [NavigationRequest::focused(NavigationOperation::Reload)]
         );
+    }
+
+    #[test]
+    fn sidebar_selection_advances_the_entire_restored_ancestry() {
+        let mut app = App::new();
+        app.add_plugins((MinimalPlugins, vmux_ecs::PrimitivesPlugin))
+            .add_observer(side_sheet_stack_activate);
+        let restored = LastActivatedAt(LastActivatedAt::now().0 + 5_000);
+        let window = app.world_mut().spawn_empty().id();
+        let root = app.world_mut().spawn((HostWindow(window), restored)).id();
+        let space = app
+            .world_mut()
+            .spawn((Space, CurrentSpace, Active, restored, ChildOf(root)))
+            .id();
+        let tab = app
+            .world_mut()
+            .spawn((Tab::default(), Active, restored, ChildOf(space)))
+            .id();
+        let branch = app
+            .world_mut()
+            .spawn((
+                Pane,
+                PaneSplit {
+                    direction: vmux_layout::pane::PaneSplitDirection::Row,
+                },
+                restored,
+                ChildOf(tab),
+            ))
+            .id();
+        let leaf = app
+            .world_mut()
+            .spawn((Pane, restored, ChildOf(branch)))
+            .id();
+        let stack = app
+            .world_mut()
+            .spawn((Stack::bundle(), restored, ChildOf(leaf)))
+            .id();
+        let view = app.world_mut().spawn(ChildOf(root)).id();
+        app.world_mut().trigger(UiInput {
+            webview: view,
+            payload: SideSheetStackActivateRequest {
+                pane_id: leaf.to_bits(),
+                stack_id: stack.to_bits(),
+            },
+        });
+        app.update();
+        let selected = app.world().get::<LastActivatedAt>(stack).unwrap().0;
+        assert!(selected > restored.0);
+        for entity in [root, space, tab, branch, leaf] {
+            assert_eq!(
+                app.world().get::<LastActivatedAt>(entity).unwrap().0,
+                selected
+            );
+        }
     }
 
     #[test]

@@ -635,6 +635,7 @@ offsets. New input can discard it, and reduced motion skips interpolation.
 Session view controls live in the page content above the list or board rather than its address.
 Activation stamps preserve operation order across shared ancestors even within one clock tick;
 stack navigation consumes a batch against one advancing cursor and excludes retiring targets.
+Sidebar choices and stack shortcuts share that activation path, including nested pane ancestors.
 After layout and native placement, a completed surface with matching generation, navigation,
 bounds, and full native opacity can finalize selection, input ownership, and stacking in the same
 frame. New handoffs retain their existing readiness and animation conditions.
@@ -1280,6 +1281,9 @@ ACP sessions withhold startup snapshots until history replay finishes. Compatibi
 their loading state to the ACP protocol; they read and complete only their own provider-store tasks.
 History loading starts and finishes publish a fresh chat snapshot independently of message
 changes, so empty or unchanged replays still release the conversation skeleton.
+Initial and pending bottom scrolls retain their follow state through layout-driven offset changes.
+Manual wheel, touch, or scroll-key input can pause following; older history is requested only after
+the initial scroll has settled.
 The Session manager publishes only to its active page and leases Git metadata for every displayed
 repository while that page remains active.
 Its first discovery reserves a skeleton in one persistent scroll surface until rows are available.
