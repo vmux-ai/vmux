@@ -464,6 +464,7 @@ fn SpaceRenameInput(form: SpaceFormState) -> Element {
         let _ = send(&LayoutOverlayEvent {
             id: "space-name-input".to_string(),
             active: true,
+            ..Default::default()
         });
     });
     use_drop(move || {
@@ -471,6 +472,7 @@ fn SpaceRenameInput(form: SpaceFormState) -> Element {
         let _ = send(&LayoutOverlayEvent {
             id: "space-name-input".to_string(),
             active: false,
+            ..Default::default()
         });
     });
     rsx! {

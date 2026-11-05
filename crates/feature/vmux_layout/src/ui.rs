@@ -10,7 +10,7 @@ use vmux_command::CommandBarPanel;
 use vmux_ui::components::dropdown::Dropdown;
 use vmux_ui::hooks::{send, use_theme};
 
-use crate::event::LayoutOverlayEvent;
+use crate::event::{LayoutOverlayEvent, LayoutOverlayKind};
 
 mod active_session;
 mod bookmark;
@@ -94,7 +94,7 @@ pub(super) fn LayoutDropdown(
     let dismiss_revision =
         LayoutUi::current().use_selector(|state| state.overlay_dismiss_revision)();
     let mut observed_dismiss_revision = use_signal(|| dismiss_revision);
-    use_effect(move || {
+    use_effect(use_reactive!(|(dismiss_revision, open)| {
         if dismiss_revision <= *observed_dismiss_revision.peek() {
             return;
         }
@@ -102,16 +102,21 @@ pub(super) fn LayoutDropdown(
         if open {
             on_dismiss.call(());
         }
-    });
+    }));
     let overlay_id = id.clone();
-    use_effect(move || {
+    use_effect(use_reactive!(|(overlay_id, open)| {
         let _ = send(&LayoutOverlayEvent {
             id: overlay_id.clone(),
             active: open,
+            kind: LayoutOverlayKind::Popover,
         });
-    });
+    }));
     use_drop(move || {
-        let _ = send(&LayoutOverlayEvent { id, active: false });
+        let _ = send(&LayoutOverlayEvent {
+            id,
+            active: false,
+            kind: LayoutOverlayKind::Popover,
+        });
     });
     rsx! {
         Dropdown {

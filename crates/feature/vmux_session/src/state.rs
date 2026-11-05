@@ -1,8 +1,8 @@
 use crate::event::{
     ChatAttachments, ChatBranchesState, ChatComposerDraft, ChatComposerEffect, ChatComposerMedia,
     ChatComposerMenuState, ChatListSelectionState, ChatMediaState, ChatPromptFocusEffect,
-    ChatResumeState, ChatSelectorState, ChatSnapshot, ChatTranscriptState, ComposerContext,
-    ModeState, ModelState, SessionDirectorySelection, SessionRepositories,
+    ChatResumeState, ChatSelectorState, ChatSnapshot, ChatTranscriptState, ChatViewportState,
+    ComposerContext, ModeState, ModelState, SessionDirectorySelection, SessionRepositories,
 };
 use vmux_api::address::{AddressCrumb, AddressIntent, AddressOption, PageAddress};
 use vmux_api::mcp::McpServersUiState;
@@ -216,6 +216,7 @@ pub struct ChatUiStatePatch {
     pub composer_menu: Option<ChatComposerMenuState>,
     pub selector: Option<ChatSelectorState>,
     pub transcript: Option<Box<ChatTranscriptState>>,
+    pub viewport: Option<ChatViewportState>,
     pub attachments: Option<Box<ChatAttachments>>,
     pub media: Option<Box<ChatMediaState>>,
     pub composer_media: Option<Box<ChatComposerMedia>>,
@@ -226,7 +227,7 @@ pub struct ChatUiStatePatch {
     pub mcp: Option<Box<McpServersUiState>>,
 }
 
-#[vmux_api::ui_state(Default, patch = ChatUiStatePatch, version = 4)]
+#[vmux_api::ui_state(Default, patch = ChatUiStatePatch, version = 5)]
 pub struct ChatUiState {
     pub session_directory: Option<SessionDirectorySelection>,
     pub snapshot: ChatSnapshot,
@@ -241,6 +242,7 @@ pub struct ChatUiState {
     pub composer_menu: ChatComposerMenuState,
     pub selector: ChatSelectorState,
     pub transcript: ChatTranscriptState,
+    pub viewport: ChatViewportState,
     pub transcript_revision: u64,
     pub attachments: ChatAttachments,
     pub media: ChatMediaState,
@@ -287,6 +289,9 @@ impl vmux_api::UiStateProjection<ChatUiStatePatch> for ChatUiState {
         if let Some(transcript) = patch.transcript {
             self.transcript = *transcript;
             self.transcript_revision = self.transcript_revision.wrapping_add(1).max(1);
+        }
+        if let Some(viewport) = patch.viewport {
+            self.viewport = viewport;
         }
         if let Some(attachments) = patch.attachments {
             self.attachments = *attachments;

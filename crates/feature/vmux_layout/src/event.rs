@@ -708,6 +708,14 @@ pub struct RemotePairingDismissRequest;
 pub struct LayoutOverlayEvent {
     pub id: String,
     pub active: bool,
+    pub kind: LayoutOverlayKind,
+}
+
+#[vmux_api::contract(Copy, Eq, Default)]
+pub enum LayoutOverlayKind {
+    #[default]
+    Panel,
+    Popover,
 }
 
 #[vmux_api::contract(Copy, Default, Eq)]

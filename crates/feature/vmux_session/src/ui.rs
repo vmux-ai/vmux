@@ -44,7 +44,7 @@ pub fn Page() -> Element {
 
 #[component]
 fn SessionDetail(session_id: String, mut details_open: Signal<bool>) -> Element {
-    let chat = use_chat();
+    let chat = use_chat(session_id.clone());
     let detail = vmux_ui::hooks::use_ui_state::<crate::state::SessionDetailUiState>();
     let keys = use_chat_keys(chat);
     use_context_provider(|| keys);

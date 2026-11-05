@@ -7,7 +7,6 @@ use std::sync::{Arc, Condvar, LazyLock, Mutex};
 
 use bevy::ecs::archetype::ArchetypeId;
 use bevy::ecs::relationship::Relationship;
-use bevy::ecs::system::Command;
 use bevy::ecs::world::EntityRef;
 use bevy::prelude::*;
 use bevy::window::PrimaryWindow;

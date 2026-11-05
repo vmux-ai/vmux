@@ -21,12 +21,14 @@ pub(crate) fn RemoteControl(remote: RemoteUiState) -> Element {
         let _ = send(&LayoutOverlayEvent {
             id: "remote".to_string(),
             active: open(),
+            ..Default::default()
         });
     });
     use_drop(move || {
         let _ = send(&LayoutOverlayEvent {
             id: "remote".to_string(),
             active: false,
+            ..Default::default()
         });
     });
     rsx! {

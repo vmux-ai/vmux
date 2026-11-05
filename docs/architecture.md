@@ -589,6 +589,9 @@ one `AddressTrail`. No page component, callback, context, or mounted slot crosse
 `AddressIntentRequest` to the page. Navigation opens in the owning Stack; page-local selection
 uses a versioned `AddressEffect` consumed by `PageBreadcrumbs`. Effects bind to the source URL,
 owner, and address revision and are removed from retained snapshots to prevent replay on reload.
+Layout overlays distinguish DOM popovers from panels. Popovers keep native pointer capture,
+while their DOM decides outside-click dismissal; static header and sidebar rectangles cannot
+close a popover before an item below them receives its click.
 Search, filters, view controls,
 Details, Add, Create, Resume, Start, and Checkout stay in the page body through `PageToolbar`.
 `WorkspaceLayout` places that toolbar inside its content column beside the sidebar.
@@ -621,6 +624,10 @@ rejected. Actual document replacement or failed edits still rebuild the document
 does not animate the whole surface or translate a shared composer; shared sidebar rows stay in
 place when page selection changes. Session detail-panel visibility belongs to the page shell,
 and its geometry remains reserved while the selected session loads.
+Session viewports remember their scroll position and loaded-history start on the owning Session.
+A revisit restores that history window and reader position; the first visit follows the tail.
+Viewport updates validate the originating page URL and Session ID; where a canonical Session ID
+is available, transcript readiness is bound to it. These viewport records are transient.
 Discrete tabs and search widths change immediately. A cached Stack returning from a hidden,
 zero-size frame restores its final rectangle immediately. Collapsible content may interpolate height
 within the shared layout budget. Cached pages remain usable during refresh;

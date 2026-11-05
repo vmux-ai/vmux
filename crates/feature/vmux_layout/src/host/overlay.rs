@@ -1,7 +1,7 @@
-use std::collections::BTreeSet;
+use std::collections::BTreeMap;
 
 use crate::cef::Browser;
-use crate::event::LayoutOverlayEvent;
+use crate::event::{LayoutOverlayEvent, LayoutOverlayKind};
 use crate::window::VmuxWindow;
 use bevy::prelude::*;
 use bevy_cef::prelude::{HostWindow, UiEventPlugin, UiInput};
@@ -20,7 +20,20 @@ impl Plugin for LayoutOverlayPlugin {
 }
 
 #[derive(Component, Clone, Debug, Default, PartialEq, Eq)]
-pub struct LayoutOverlayActive(BTreeSet<String>);
+pub struct LayoutOverlayActive(BTreeMap<String, LayoutOverlayKind>);
+
+impl LayoutOverlayActive {
+    pub fn new(id: impl Into<String>, kind: LayoutOverlayKind) -> Self {
+        Self(BTreeMap::from([(id.into(), kind)]))
+    }
+
+    pub fn dismisses_background_click(&self) -> bool {
+        !self
+            .0
+            .values()
+            .any(|kind| *kind == LayoutOverlayKind::Popover)
+    }
+}
 
 #[derive(Component, Default)]
 pub struct LayoutOverlayDismissRevision(u64);
@@ -49,9 +62,9 @@ fn emit(
             layout: trigger.event().webview,
         });
         if let Ok(mut overlays) = active.get_mut(trigger.event().webview) {
-            overlays.0.insert(event.id.clone());
+            overlays.0.insert(event.id.clone(), event.kind);
         } else if let Ok(mut webview) = commands.get_entity(trigger.event().webview) {
-            webview.insert(LayoutOverlayActive(BTreeSet::from([event.id.clone()])));
+            webview.insert(LayoutOverlayActive::new(event.id.clone(), event.kind));
         }
         return;
     }

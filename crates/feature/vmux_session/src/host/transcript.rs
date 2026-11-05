@@ -7,8 +7,8 @@ use super::presentation::ChatPresentation;
 #[cfg(test)]
 use crate::event::ChatItem;
 use crate::event::{
-    CHAT_INITIAL_ITEM_LIMIT, ChatHistoryMoreRequest, ChatSnapshot, PendingApproval,
-    QueuedPromptSnapshot,
+    CHAT_INITIAL_ITEM_LIMIT, ChatHistoryMoreRequest, ChatSnapshot, ChatViewport,
+    ChatViewportChanged, ChatViewportState, PendingApproval, QueuedPromptSnapshot,
 };
 use crate::host::{ChatAttachmentHydrationRequest, ImportedConversation};
 use crate::host::{
@@ -21,7 +21,7 @@ use vmux_ecs::team::{Profile, User};
 use vmux_ecs::{CreatedAt, EntityTarget, PageMetadata};
 use vmux_session::{
     AgentConversationTitle, AgentId, ConversationEvent, EventIdentity, MessageContent, PromptQueue,
-    Session, Transcripts,
+    Route, Session, SessionId, Transcripts,
 };
 use vmux_session::{AgentTurnMeta, RunState};
 
@@ -29,8 +29,9 @@ pub(super) struct Plugin;
 
 impl bevy::prelude::Plugin for Plugin {
     fn build(&self, app: &mut App) {
-        app.add_plugins(UiEventPlugin::<(ChatHistoryMoreRequest,)>::default())
+        app.add_plugins(UiEventPlugin::<(ChatHistoryMoreRequest, ChatViewportChanged)>::default())
             .add_observer(request_more)
+            .add_observer(remember_viewport)
             .add_observer(reset_synced)
             .add_systems(
                 Update,
@@ -134,6 +135,8 @@ struct ReadyWorld<'w, 's> {
     transcripts: Transcripts<'w, 's>,
     choices: Query<'w, 's, &'static PendingAgentChoice>,
     user_profiles: Query<'w, 's, &'static Profile, With<User>>,
+    viewports: Query<'w, 's, &'static ChatViewport, With<Session>>,
+    session_ids: Query<'w, 's, &'static SessionId, With<Session>>,
 }
 
 type SessionProjection = (
@@ -267,6 +270,7 @@ fn push_to_page(
                 name.as_str(),
                 transcript_loading,
                 choice,
+                None,
             )
         });
         let Ok((mut transcript, mut snapshot, attachments)) = world.chat_views.get_mut(webview)
@@ -320,20 +324,24 @@ impl ChatProjection {
         fallback_title: &str,
         transcript_loading: bool,
         choice: Option<&PendingAgentChoice>,
+        viewport: Option<&ChatViewport>,
     ) -> Self {
         let durations: &[u32] = turn_meta.map(|m| m.durations.as_slice()).unwrap_or(&[]);
         let running = matches!(state, RunState::Streaming);
         let imported_messages = imported
             .map(|conversation| conversation.messages.as_slice())
             .unwrap_or_default();
-        let page = ChatMessages::new(
+        let messages = ChatMessages::new(
             imported_messages,
             messages,
             message_times,
             durations,
             running,
-        )
-        .tail(CHAT_INITIAL_ITEM_LIMIT as usize);
+        );
+        let limit = viewport.map_or(CHAT_INITIAL_ITEM_LIMIT as usize, |viewport| {
+            viewport.item_limit(messages.item_count())
+        });
+        let page = messages.tail(limit);
         let error = match state {
             RunState::Errored(message) => message.clone(),
             _ => String::new(),
@@ -467,6 +475,7 @@ fn sync_ready_views(
         };
         let meta = world.metadata.get(stack).ok();
         let choice = world.choices.get(webview).ok();
+        let viewport = world.viewports.get(session_entity).ok();
         let mut projection = world.transcripts.read(session_entity, |conversation| {
             ChatProjection::new(
                 agent_id,
@@ -483,12 +492,29 @@ fn sync_ready_views(
                 name.as_str(),
                 transcript_loading,
                 choice,
+                viewport,
             )
         });
         transcript.merge_tail(projection.transcript);
         attachments.hydrate_transcript(&mut transcript.state);
         attachments.hydrate_snapshot(&mut projection.snapshot);
         snapshot.0 = projection.snapshot;
+        commands.trigger(
+            vmux_ecs::UiStateWrite::<crate::state::ChatUiState>::from_event(
+                webview,
+                &crate::state::ChatUiStatePatch {
+                    viewport: Some(ChatViewportState {
+                        session: world
+                            .session_ids
+                            .get(session_entity)
+                            .map(|id| id.0.clone())
+                            .unwrap_or_default(),
+                        position: viewport.copied(),
+                    }),
+                    ..Default::default()
+                },
+            ),
+        );
         commands.trigger(
             vmux_ecs::UiStateWrite::<crate::state::ChatUiState>::from_event(webview, &snapshot.0),
         );
@@ -510,6 +536,33 @@ fn sync_ready_views(
         }
         commands.entity(webview).insert(ChatSynced);
     }
+}
+
+fn remember_viewport(
+    event: On<UiInput<ChatViewportChanged>>,
+    views: Query<&PageMetadata, With<SessionView>>,
+    sessions: Query<(Entity, &SessionId, Option<&ChatViewport>), With<Session>>,
+    mut commands: Commands,
+) {
+    let Ok(metadata) = views.get(event.webview) else {
+        return;
+    };
+    let Some(Route::Session(id)) = Route::parse(&metadata.url) else {
+        return;
+    };
+    if id.0 != event.payload.session {
+        return;
+    }
+    let Some((entity, _, current)) = sessions.iter().find(|(_, candidate, _)| **candidate == id)
+    else {
+        return;
+    };
+    let mut position = event.payload.viewport;
+    position.top = position.top.max(0);
+    if current == Some(&position) {
+        return;
+    }
+    commands.entity(entity).insert(position);
 }
 
 fn reset_synced(
@@ -703,6 +756,83 @@ mod tests {
     }
 
     #[test]
+    fn viewport_is_session_scoped_and_restores_the_loaded_history_window_on_revisit() {
+        let mut app = App::new();
+        app.add_plugins((MinimalPlugins, Plugin))
+            .init_resource::<Published>()
+            .add_observer(Published::record);
+        let session = app
+            .world_mut()
+            .spawn((
+                Session,
+                SessionId("saved".into()),
+                AgentId("codex".into()),
+                Name::new("Saved conversation"),
+                RunState::Idle,
+                PromptQueue::default(),
+                ImportedConversation {
+                    source_agent: "Codex".into(),
+                    source_sid: "original".into(),
+                    messages: (0..40)
+                        .map(|index| vmux_api::session::Message::user(format!("message {index}")))
+                        .collect(),
+                    truncated: false,
+                    first_prompt: None,
+                },
+            ))
+            .id();
+        app.world_mut().spawn(ChildOf(session));
+        let stack = app
+            .world_mut()
+            .spawn(EntityTarget::<Session>::new(session))
+            .id();
+        let metadata = PageMetadata {
+            url: Route::Session(SessionId("saved".into())).url(),
+            ..Default::default()
+        };
+        let view = app
+            .world_mut()
+            .spawn((SessionView, PageReady, metadata.clone(), ChildOf(stack)))
+            .id();
+        app.update();
+        app.update();
+        let total = app.world().resource::<Published>().0.transcript.total;
+        assert!(total > CHAT_INITIAL_ITEM_LIMIT);
+        let viewport = ChatViewport {
+            top: 240,
+            loaded_start: 12,
+            following: false,
+        };
+        app.world_mut().trigger(UiInput {
+            webview: view,
+            payload: ChatViewportChanged {
+                session: "unrelated".into(),
+                viewport,
+            },
+        });
+        app.world_mut().flush();
+        assert!(app.world().get::<ChatViewport>(session).is_none());
+        app.world_mut().trigger(UiInput {
+            webview: view,
+            payload: ChatViewportChanged {
+                session: "saved".into(),
+                viewport,
+            },
+        });
+        app.world_mut().flush();
+        app.world_mut().entity_mut(view).despawn();
+        app.world_mut()
+            .spawn((SessionView, PageReady, metadata, ChildOf(stack)));
+        app.update();
+        app.update();
+        let restored = &app.world().resource::<Published>().0;
+        assert_eq!(restored.viewport.session, "saved");
+        assert_eq!(restored.viewport.position, Some(viewport));
+        assert_eq!(restored.transcript.loaded_start, 12);
+        assert_eq!(restored.transcript.total, total);
+    }
+
+    #[test]
     fn streaming_snapshots_wait_for_frame_interval() {
         assert!(!chat_snapshot_due(
             true,
@@ -770,6 +900,7 @@ mod tests {
             "",
             false,
             None,
+            None,
         )
         .snapshot;
 
@@ -797,6 +928,7 @@ mod tests {
             None,
             "",
             false,
+            None,
             None,
         )
         .snapshot;
@@ -828,6 +960,7 @@ mod tests {
             "First prompt",
             false,
             None,
+            None,
         )
         .snapshot;
 
@@ -855,6 +988,7 @@ mod tests {
             "First prompt",
             false,
             None,
+            None,
         )
         .snapshot;
 
@@ -879,6 +1013,7 @@ mod tests {
             None,
             "",
             false,
+            None,
             None,
         )
         .snapshot;

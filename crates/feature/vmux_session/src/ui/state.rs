@@ -5,8 +5,8 @@ use crate::event::{
     ChatComposerMenuKind, ChatComposerMenuRequest, ChatComposerMenuState, ChatDraftChanged,
     ChatHistoryMoreRequest, ChatListChooseRequest, ChatListKind, ChatListSelectionChanged,
     ChatListSelectionState, ChatMediaState, ChatRemoveAttachment, ChatSelectorState, ChatSnapshot,
-    ChatStop, ChatSubmit, ChatTranscriptState, ComposerContext, ModelOptionEntry,
-    QueuedPromptSnapshot, SelectMode, SlashCommandEntry,
+    ChatStop, ChatSubmit, ChatTranscriptState, ChatViewportChanged, ComposerContext,
+    ModelOptionEntry, QueuedPromptSnapshot, SelectMode, SlashCommandEntry,
 };
 use crate::event::{ChatDismissSelectorRequest, ChatResumeState};
 use crate::state::ChatUiState;
@@ -57,7 +57,7 @@ pub struct Chat {
     pub menu: ChatMenu,
 }
 
-pub fn use_chat() -> Chat {
+pub fn use_chat(session: String) -> Chat {
     use_theme();
     let root = use_ui_state::<ChatUiState>().state;
     let always_ready = use_memo(|| true);
@@ -103,7 +103,7 @@ pub fn use_chat() -> Chat {
     };
     let chat = Chat {
         root,
-        transcript: use_transcript(root),
+        transcript: use_transcript(root, session),
         run: RunState { snapshot },
         identity: AgentIdentity { snapshot },
         user: UserIdentity { snapshot },
@@ -646,6 +646,7 @@ impl Chat {
 #[derive(Clone, Copy, PartialEq)]
 pub struct Transcript {
     root: Signal<ChatUiState>,
+    session: Signal<String>,
     pub at_bottom: Signal<bool>,
     pub initial_follow: Signal<bool>,
     last_top: Signal<i32>,
@@ -657,9 +658,10 @@ pub struct Transcript {
     handled_prepend: Signal<u64>,
 }
 
-pub fn use_transcript(root: Signal<ChatUiState>) -> Transcript {
+pub fn use_transcript(root: Signal<ChatUiState>, session: String) -> Transcript {
     Transcript {
         root,
+        session: use_signal(move || session),
         at_bottom: use_signal(|| true),
         initial_follow: use_signal(|| true),
         last_top: use_signal(|| 0),
@@ -678,7 +680,9 @@ impl Transcript {
     }
 
     pub fn ready(self) -> bool {
-        self.root.read().transcript_revision > 0
+        let root = self.root.read();
+        root.transcript_revision > 0
+            && (self.session.peek().is_empty() || root.viewport.session == *self.session.peek())
     }
 
     pub fn revision(self) -> u64 {
@@ -722,7 +726,6 @@ impl Transcript {
         .pauses_following()
         {
             self.stop_following();
-            return;
         }
         if *self.initial_follow.peek() {
             return;
@@ -731,13 +734,46 @@ impl Transcript {
             let mut at_bottom = self.at_bottom;
             at_bottom.set(true);
         }
+        if self.ready() && !self.session.peek().is_empty() && self.follow_task.peek().is_none() {
+            let loaded_start = self.root.peek().transcript.loaded_start;
+            let _ = send(&ChatViewportChanged {
+                session: self.session.peek().clone(),
+                viewport: crate::event::ChatViewport {
+                    top: top.max(0),
+                    loaded_start,
+                    following: distance <= 48,
+                },
+            });
+        }
     }
 
     pub(super) fn follow(self) {
+        if !self.ready() || self.scroll_container.peek().is_none() {
+            return;
+        }
         let generation = self.root.read().transcript.generation;
         if generation != *self.generation.peek() {
+            let first = *self.generation.peek() == 0;
             let mut current = self.generation;
             current.set(generation);
+            if first
+                && let Some(position) = self.root.peek().viewport.position
+                && !position.following
+            {
+                let mut initial_follow = self.initial_follow;
+                initial_follow.set(false);
+                let mut at_bottom = self.at_bottom;
+                at_bottom.set(false);
+                position.restore(self.scroll_container, self.follow_task);
+                return;
+            }
+            if !first
+                && !self.session.peek().is_empty()
+                && !*self.at_bottom.peek()
+                && !*self.initial_follow.peek()
+            {
+                return;
+            }
             let mut initial_follow = self.initial_follow;
             initial_follow.set(true);
             let mut at_bottom = self.at_bottom;

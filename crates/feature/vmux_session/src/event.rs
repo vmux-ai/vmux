@@ -18,6 +18,37 @@ pub const CHAT_INITIAL_ITEM_LIMIT: u32 = 48;
 pub const CHAT_HISTORY_PAGE_SIZE: u32 = 40;
 pub const CHAT_HISTORY_MAX_PAGE_SIZE: u32 = 80;
 
+#[vmux_api::contract(Copy, Eq, Default)]
+#[derive(bevy_ecs::prelude::Component)]
+pub struct ChatViewport {
+    pub top: i32,
+    pub loaded_start: u32,
+    pub following: bool,
+}
+
+impl ChatViewport {
+    pub fn item_limit(&self, total: usize) -> usize {
+        if self.following {
+            return CHAT_INITIAL_ITEM_LIMIT as usize;
+        }
+        total
+            .saturating_sub(self.loaded_start as usize)
+            .max(CHAT_INITIAL_ITEM_LIMIT as usize)
+    }
+}
+
+#[vmux_api::ui_event]
+pub struct ChatViewportChanged {
+    pub session: String,
+    pub viewport: ChatViewport,
+}
+
+#[vmux_api::contract(Default, Eq)]
+pub struct ChatViewportState {
+    pub session: String,
+    pub position: Option<ChatViewport>,
+}
+
 #[vmux_api::ui_event(Default)]
 pub struct SessionsCreate {
     pub name: String,

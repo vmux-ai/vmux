@@ -42,12 +42,14 @@ pub(crate) fn ExtensionPopupModal(
         let _ = send(&LayoutOverlayEvent {
             id: "extension-popup".to_string(),
             active: true,
+            ..Default::default()
         });
     });
     use_drop(move || {
         let _ = send(&LayoutOverlayEvent {
             id: "extension-popup".to_string(),
             active: false,
+            ..Default::default()
         });
         let _ = send(&ExtensionPopupCloseRequest);
     });
@@ -117,6 +119,7 @@ impl ExtensionPopupState {
         let _ = send(&LayoutOverlayEvent {
             id: "extension-popup".to_string(),
             active: false,
+            ..Default::default()
         });
         let _ = send(&ExtensionPopupCloseRequest);
     }

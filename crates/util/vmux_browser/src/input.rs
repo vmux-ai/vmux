@@ -42,7 +42,7 @@ impl Plugin for InputPlugin {
 fn dismiss_layout_overlay_from_native_pointer(
     windows: Query<&Window>,
     mut layouts: Query<(Entity, &HostWindow, &mut LayoutOverlayDismissRevision), With<LayoutCef>>,
-    active_overlays: Query<(), With<LayoutOverlayActive>>,
+    active_overlays: Query<&LayoutOverlayActive>,
     cef_regions: CefPointerRegions,
     mut previous_sequence: Local<u64>,
     mut previous_pressed: Local<bool>,
@@ -62,7 +62,10 @@ fn dismiss_layout_overlay_from_native_pointer(
         return;
     }
     for (layout, host, mut revision) in &mut layouts {
-        if !active_overlays.contains(layout) {
+        if !active_overlays
+            .get(layout)
+            .is_ok_and(LayoutOverlayActive::dismisses_background_click)
+        {
             continue;
         }
         let Ok(window) = windows.get(host.0) else {
@@ -195,7 +198,7 @@ fn forward_layout_cef_mouse_button(
     suppress: Res<CefSuppressPointerInput>,
     browsers: NonSend<Browsers>,
     mut layout_q: Query<(Entity, &HostWindow, &mut LayoutOverlayDismissRevision), With<LayoutCef>>,
-    active_overlays: Query<(), With<LayoutOverlayActive>>,
+    active_overlays: Query<&LayoutOverlayActive>,
     pointer_capture_q: Query<(), (With<LayoutCef>, LayoutPointerCapture)>,
     cef_regions: CefPointerRegions,
     mut captured: Local<Option<Entity>>,
@@ -232,7 +235,12 @@ fn forward_layout_cef_mouse_button(
             continue;
         };
         let in_region = cef_regions.contains(position);
-        if event.state == ButtonState::Pressed && active_overlays.contains(layout) && !in_region {
+        if event.state == ButtonState::Pressed
+            && active_overlays
+                .get(layout)
+                .is_ok_and(LayoutOverlayActive::dismisses_background_click)
+            && !in_region
+        {
             commands.trigger(
                 vmux_ecs::UiStateWrite::<vmux_layout::state::LayoutUiState>::from_event(
                     layout,
@@ -305,5 +313,70 @@ fn track_interaction(
         commands
             .entity(stack)
             .insert(RecentBrowserInteraction::now());
+    }
+}
+
+#[cfg(all(test, target_os = "macos"))]
+mod tests {
+    use super::*;
+    use bevy_cef_core::prelude::NativeMouseButtons;
+    use vmux_layout::event::LayoutOverlayKind;
+    use vmux_layout::state::LayoutUiState;
+
+    #[derive(Resource, Default)]
+    struct Dismissals(usize);
+
+    fn record(
+        event: On<vmux_ecs::UiStateWrite<LayoutUiState>>,
+        mut dismissals: ResMut<Dismissals>,
+    ) {
+        if event.update().overlay_dismiss.is_some() {
+            dismissals.0 += 1;
+        }
+    }
+
+    #[test]
+    fn native_background_clicks_leave_popover_items_to_their_dom_handlers() {
+        let mut app = App::new();
+        app.add_plugins((MinimalPlugins, bevy::input::InputPlugin, InputPlugin))
+            .add_message::<CursorMoved>()
+            .init_resource::<Dismissals>()
+            .init_resource::<CefSuppressPointerInput>()
+            .init_non_send::<Browsers>()
+            .add_observer(record);
+        let window = app
+            .world_mut()
+            .spawn((Window::default(), vmux_ecs::Active))
+            .id();
+        let layout = app.world_mut().spawn(LayoutCef::bundle(window)).id();
+        for (kind, expected) in [
+            (LayoutOverlayKind::Popover, 0),
+            (LayoutOverlayKind::Panel, 1),
+        ] {
+            app.world_mut()
+                .entity_mut(layout)
+                .insert(LayoutOverlayActive::new("test", kind));
+            vmux_input::NativePointer::publish(
+                Vec2::new(400.0, 300.0),
+                NativeMouseButtons::default(),
+                true,
+            );
+            app.update();
+            vmux_input::NativePointer::publish(
+                Vec2::new(400.0, 300.0),
+                NativeMouseButtons {
+                    left: true,
+                    ..Default::default()
+                },
+                true,
+            );
+            app.update();
+            assert_eq!(app.world().resource::<Dismissals>().0, expected);
+        }
+        vmux_input::NativePointer::publish(
+            Vec2::new(400.0, 300.0),
+            NativeMouseButtons::default(),
+            true,
+        );
     }
 }

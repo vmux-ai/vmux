@@ -25,6 +25,7 @@
                 "SessionDetailUiState",
                 "SelectMode",
                 "ChatHistoryMoreRequest",
+                "ChatViewportChanged",
                 "ChatSubmit",
                 "ChatDraftChanged",
                 "ChatRemoveAttachment",

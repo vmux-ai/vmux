@@ -529,7 +529,7 @@ fn HeaderAddressReadout(
     if let Some(address) = page_address {
         return rsx! {
             div { class: "flex h-8 min-w-0 flex-1 items-center",
-                vmux_ui::components::address::AddressTrail { state: address, dismiss_revision, onpopup: move |active| { let _ = send(&crate::event::LayoutOverlayEvent { id: "page-address".to_string(), active }); } }
+                vmux_ui::components::address::AddressTrail { state: address, dismiss_revision, onpopup: move |active| { let _ = send(&crate::event::LayoutOverlayEvent { id: "page-address".to_string(), active, kind: crate::event::LayoutOverlayKind::Popover }); } }
             }
         };
     }

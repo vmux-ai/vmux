@@ -1,3 +1,4 @@
+use crate::event::ChatViewport;
 use dioxus::prelude::*;
 use std::rc::Rc;
 use vmux_ui::platform::Platform;
@@ -5,6 +6,45 @@ use vmux_ui::platform::Platform;
 pub use imp::settle_bottom;
 
 pub type Container = Signal<Option<Rc<MountedData>>>;
+
+impl ChatViewport {
+    pub(super) fn restore(
+        self,
+        container: Container,
+        mut pending: Signal<Option<dioxus::core::Task>>,
+    ) {
+        if pending.peek().is_some() {
+            return;
+        }
+        pending.set(Some(spawn(async move {
+            let mut previous_height = None;
+            for _ in 0..6 {
+                Platform::sleep(16).await;
+                let Some(element) = container.peek().clone() else {
+                    break;
+                };
+                let Ok(size) = element.get_scroll_size().await else {
+                    break;
+                };
+                let Ok(rect) = element.get_client_rect().await else {
+                    break;
+                };
+                let top = (self.top as f64).min((size.height - rect.size.height).max(0.0));
+                let _ = element
+                    .scroll(
+                        dioxus::html::geometry::PixelsVector2D::new(0.0, top),
+                        dioxus::html::ScrollBehavior::Instant,
+                    )
+                    .await;
+                if previous_height.is_some_and(|height: f64| (height - size.height).abs() <= 1.0) {
+                    break;
+                }
+                previous_height = Some(size.height);
+            }
+            pending.set(None);
+        })));
+    }
+}
 
 pub(super) struct Observation {
     pub top: i32,
