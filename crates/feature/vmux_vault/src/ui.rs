@@ -14,7 +14,7 @@ use vmux_ui::components::manager::{
     ManagerButton, ManagerButtonVariant, ManagerList, ManagerPage, ManagerSelect,
     ManagerSelectItem, ManagerSpinner,
 };
-use vmux_ui::components::page_address::PageToolbar;
+use vmux_ui::components::page_address::{PageToolbar, ToolbarControl};
 use vmux_ui::hooks::{send, use_theme, use_ui_state};
 use vmux_ui::i18n::{TranslationValue, translate, translate_with};
 
@@ -47,17 +47,9 @@ pub fn Page() -> Element {
     rsx! {
         ManagerPage {
             PageToolbar {
-                actions: rsx! {
-                    ManagerButton {
-                        variant: ManagerButtonVariant::Secondary,
-                        onclick: move |_| {
-                            let _ = send(&VaultRefreshRequest {
-                                load_repositories: false,
-                            });
-                        },
-                        {translate("common-refresh")}
-                    }
-                },
+                controls: vec![ToolbarControl::button(translate("common-refresh"), move |_| {
+                    let _ = send(&VaultRefreshRequest { load_repositories: false });
+                })],
             }
             ManagerList {
                 if current.vault.root.is_empty() {

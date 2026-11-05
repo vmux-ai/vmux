@@ -12,18 +12,15 @@ use vmux_ui::components::alert_dialog::{
     AlertDialogDescription, AlertDialogRoot, AlertDialogTitle,
 };
 use vmux_ui::components::avatar::IdentityOrb;
-use vmux_ui::components::breadcrumb::{BreadcrumbItem, BreadcrumbSeparator};
 use vmux_ui::components::button::{Button, ButtonSize, ButtonVariant};
 use vmux_ui::components::dialog::{DialogContent, DialogRoot, DialogTitle};
 use vmux_ui::components::dropdown::{Dropdown, DropdownAlign, DropdownPopup};
-use vmux_ui::components::filter::{FilterPill, FilterTrigger};
 use vmux_ui::components::manager::{
-    ManagerAddButton, ManagerCollection, ManagerEmpty, ManagerExpandableSearch, ManagerGridSize,
-    ManagerList, ManagerPage, ManagerSearch, ManagerSidebarItem, ManagerSkeleton, ManagerView,
-    ManagerViewToggle, WorkspaceLayout,
+    ManagerAddButton, ManagerCollection, ManagerEmpty, ManagerGridSize, ManagerList, ManagerPage,
+    ManagerSidebarItem, ManagerSkeleton, ManagerView, ManagerViewToggle, WorkspaceLayout,
 };
 use vmux_ui::components::page::PageContent;
-use vmux_ui::components::page_address::{PageBreadcrumbs, PageToolbar};
+use vmux_ui::components::page_address::{PageBreadcrumbs, PageToolbar, ToolbarControl};
 use vmux_ui::components::sheet::SheetHeaderChevron;
 use vmux_ui::components::skeleton::Skeleton;
 use vmux_ui::components::tooltip::Tooltip;
@@ -37,9 +34,9 @@ use super::project_manager::{
     ProjectFilter, ProjectFilterMenu, ProjectPresentation, ViewPreference,
 };
 use crate::project::{
-    ProjectArchiveRequest, ProjectCatalogView, ProjectCloneRequest, ProjectCreateRequest,
-    ProjectDeleteRequest, ProjectDetailView, ProjectEntry, ProjectImportRequest, ProjectUiState,
-    ProjectView,
+    ProjectArchiveRequest, ProjectCatalogView, ProjectCloneRequest, ProjectCollectionViewRequest,
+    ProjectCreateRequest, ProjectDeleteRequest, ProjectDetailView, ProjectEntry,
+    ProjectImportRequest, ProjectUiState, ProjectView,
 };
 
 #[component]
@@ -80,16 +77,8 @@ pub(super) fn ProjectList(
             WorkspaceLayout {
                 show_sidebar: entries.iter().any(|entry| entry.archived),
                 toolbar: rsx! {
-                    PageToolbar {
-                        view_controls: rsx! { if !entries.is_empty() { ManagerViewToggle { view: controls.view(), list_label: translate("tools-view-list"), grid_label: translate("tools-view-grid"), onchange: move |view| { controls.set_view(view); let _ = send(&ViewPreference::request(view)); } } } },
-                        actions: rsx! {
-                            ProjectManagerActions {
-                                entries: entries.clone(),
-                                presentation: presentation.clone(),
-                                controls,
-                                pending,
-                            }
-                        },
+                    ProjectManagerActions {
+                        entries: entries.clone(), presentation: presentation.clone(), controls, pending,
                     }
                 },
                 sidebar: rsx! { ProjectCategories { entries: entries.clone(), controls } },
@@ -162,70 +151,56 @@ fn ProjectManagerActions(
     controls: CollectionController<ProjectFilter>,
     pending: bool,
 ) -> Element {
-    let mut search_open = use_signal(|| false);
-    let open = search_open();
-    let active = !controls.query().is_empty() || !presentation.selected_filters.is_empty();
+    let mut toolbar = vec![
+        ToolbarControl::search(
+            controls.query(),
+            translate("layout-projects"),
+            move |query| controls.set_query(query),
+        )
+        .keys(&["Backspace"], move |_| {
+            if controls.query().is_empty() {
+                controls.pop_filter();
+            }
+        }),
+    ];
+    for (index, filter) in presentation.selected_filters.iter().enumerate() {
+        toolbar.push(
+            ToolbarControl::button(filter.label.clone(), move |_| controls.remove_filter(index))
+                .icon(LineIcon::X)
+                .text(),
+        );
+    }
+    toolbar.push(
+        ToolbarControl::button(translate("common-filter"), move |_| {
+            controls.toggle_filter()
+        })
+        .icon(LineIcon::Hash)
+        .active(presentation.filter_requested),
+    );
+    if !entries.is_empty() {
+        toolbar.extend(ToolbarControl::view(
+            controls.view(),
+            translate("tools-view-list"),
+            translate("tools-view-grid"),
+            move |view| {
+                controls.set_view(view);
+                let request: ProjectCollectionViewRequest = ViewPreference::request(view);
+                let _ = send(&request);
+            },
+        ));
+    }
     rsx! {
-        div { class: "flex shrink-0 items-center gap-3",
-            ManagerExpandableSearch {
-                open,
-                active,
-                label: translate("layout-projects"),
-                ontoggle: move |_| {
-                    search_open.set(!open);
-                    if open && controls.query().starts_with('#') {
+        ProjectAdd { pending, toolbar: Some(toolbar) }
+        if presentation.filter_requested {
+            div { class: "relative z-30 ml-auto w-72 [&>div]:top-0",
+                ProjectFilterMenu {
+                    entries, needle: presentation.filter_needle,
+                    onselect: move |filter| {
+                        controls.update_filters(|filters| ProjectFilter::select(filters, Some(filter)));
                         controls.dismiss_filter();
-                    }
-                },
-                ondismiss: move |_| {
-                    search_open.set(false);
-                    if controls.query().starts_with('#') {
-                        controls.dismiss_filter();
-                    }
-                },
-                ManagerSearch {
-                    value: controls.query(),
-                    placeholder: translate("layout-projects"),
-                    autofocus: true,
-                    onsearch: move |query: String| controls.set_query(query),
-                    onkeydown: Some(EventHandler::new(move |event: KeyboardEvent| {
-                        if event.key() == Key::Backspace && controls.query().is_empty() {
-                            controls.pop_filter();
-                        }
-                    })),
-                    prefix: rsx! {
-                        for (index, filter) in presentation.selected_filters.iter().cloned().enumerate() {
-                            FilterPill {
-                                key: "project-filter-pill-{index}",
-                                label: filter.label,
-                                dot: filter.dot,
-                                clear_label: translate("common-remove-filter"),
-                                onclear: move |_| controls.remove_filter(index),
-                            }
-                        }
                     },
-                    suffix: rsx! {
-                        FilterTrigger {
-                            active: presentation.filter_requested,
-                            label: translate("common-filter"),
-                            onclick: move |_| controls.toggle_filter(),
-                        }
-                    },
-                }
-                if presentation.filter_requested {
-                    ProjectFilterMenu {
-                        entries: entries.clone(),
-                        needle: presentation.filter_needle,
-                        onselect: move |filter| {
-                            controls.update_filters(|filters| {
-                                ProjectFilter::select(filters, Some(filter));
-                            });
-                            controls.dismiss_filter();
-                        },
-                    }
                 }
             }
-            ProjectAdd { pending }
         }
     }
 }
@@ -459,12 +434,50 @@ enum ProjectPrompt {
 }
 
 #[component]
-fn ProjectAdd(pending: bool, #[props(default)] compact: bool) -> Element {
+fn ProjectAdd(
+    pending: bool,
+    #[props(default)] compact: bool,
+    #[props(default)] toolbar: Option<Vec<ToolbarControl>>,
+) -> Element {
     let mut open = use_signal(|| false);
     let mut prompt = use_signal(|| None::<ProjectPrompt>);
     let mut draft = use_signal(String::new);
     let ready = !draft().trim().is_empty();
+    let mut header = None;
+    if let Some(mut controls) = toolbar {
+        let mut options = Vec::new();
+        for (value, label, icon) in [
+            ("new", "project-new", LineIcon::Plus),
+            ("import", "project-import", LineIcon::FileOutput),
+            ("clone", "project-clone", LineIcon::GitFork),
+        ] {
+            options.push(vmux_api::address::AddressControlChoice {
+                value: value.into(),
+                label: translate(label),
+                icon: format!("{icon:?}"),
+            });
+        }
+        controls.push(
+            ToolbarControl::menu(translate("common-add"), options, move |value| {
+                draft.set(String::new());
+                match value.as_str() {
+                    "new" => prompt.set(Some(ProjectPrompt::New)),
+                    "clone" => prompt.set(Some(ProjectPrompt::Clone)),
+                    "import" => {
+                        let _ = send(&ProjectImportRequest);
+                    }
+                    _ => {}
+                }
+            })
+            .icon(LineIcon::Plus)
+            .disabled(pending),
+        );
+        header = Some(controls);
+    }
     rsx! {
+        if let Some(controls) = header {
+            PageToolbar { controls: controls }
+        } else {
         Dropdown {
             open: open(),
             class: "shrink-0".to_string(),
@@ -520,6 +533,7 @@ fn ProjectAdd(pending: bool, #[props(default)] compact: bool) -> Element {
                     }
                 }
             }
+        }
         }
         if let Some(kind) = prompt() {
             DialogRoot {
@@ -623,7 +637,6 @@ pub(super) fn ProjectDashboard(detail: ProjectDetailView) -> Element {
         let _ = send(&GitRepositoryRequest::at(requested_root.clone()));
     });
     let start_url = "vmux://start/".to_string();
-    let header_root = root.clone();
     let address = PageAddress {
         fixed: vec![AddressCrumb {
             entry: AddressOption {
@@ -644,31 +657,9 @@ pub(super) fn ProjectDashboard(detail: ProjectDetailView) -> Element {
             WorkspaceLayout {
                 show_sidebar: false,
                 toolbar: rsx! {
-                    PageToolbar {
-                        actions: rsx! {
-                            Button {
-                                variant: ButtonVariant::Primary,
-                                size: ButtonSize::Sm,
-                                class: "h-8 gap-1.5 text-xs".to_string(),
-                                onclick: move |_| PageNavigation::replace(start_url.clone()),
-                                LineIconView { icon: LineIcon::MessagesRound, class: "size-3.5".to_string() }
-                                span { {translate("sessions-start")} }
-                            }
-                        },
-                        BreadcrumbSeparator {}
-                        BreadcrumbItem {
-                            label: project_name.clone(),
-                            title: header_root,
-                            active: true,
-                            leading: rsx! {
-                                IdentityOrb {
-                                    seed: project_identity,
-                                    alt: project_name.clone(),
-                                    class: "size-5".to_string(),
-                                }
-                            },
-                        }
-                    }
+                    PageToolbar { controls: vec![
+                        ToolbarControl::button(translate("sessions-start"), move |_| PageNavigation::replace(start_url.clone())).icon(LineIcon::MessagesRound).primary(),
+                    ] }
                 },
                 PageContent { content_class: "mx-auto flex w-full max-w-5xl flex-col gap-5".to_string(),
                     ProjectSessionsPanel {}

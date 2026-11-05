@@ -1,27 +1,20 @@
 use super::state::Chat;
 use dioxus::prelude::*;
 use vmux_ui::components::avatar::{AgentThumbnail, Avatar};
-use vmux_ui::components::button::{Button, ButtonSize, ButtonVariant};
-use vmux_ui::components::page_address::PageToolbar;
+use vmux_ui::components::page_address::{PageToolbar, ToolbarControl};
 use vmux_ui::i18n::translate;
-use vmux_ui::icon::{LineIcon, LineIconView};
+use vmux_ui::icon::LineIcon;
 
 #[component]
 pub(super) fn ChatHeader(
     details_available: bool,
     details_open: bool,
-    on_details_toggle: EventHandler<MouseEvent>,
+    on_details_toggle: EventHandler<()>,
 ) -> Element {
-    rsx! { div { class: "hidden lg:block",
-        PageToolbar { actions: rsx! { Button {
-            variant: ButtonVariant::Ghost, size: ButtonSize::Icon,
-            class: if !details_available { "invisible" } else if details_open { "bg-foreground/[0.08] text-foreground" } else { "" },
-            disabled: !details_available,
-            aria_label: translate("agent-details"), title: translate("agent-details"),
-            onclick: move |event| on_details_toggle.call(event),
-            LineIconView { icon: LineIcon::Layout, class: "size-4" }
-        } } }
-    } }
+    rsx! { PageToolbar { controls: vec![
+        ToolbarControl::button(translate("agent-details"), move |_| on_details_toggle.call(()))
+            .icon(LineIcon::Layout).active(details_open).disabled(!details_available),
+    ] } }
 }
 
 #[component]

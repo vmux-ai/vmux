@@ -9,6 +9,7 @@
             command_bar: true,
             permissions: [
                 "PageAddressPublish",
+                "PageToolbarPublish",
                 "PageAddressRequest",
                 "PageAddressUiState",
                 "PageReady",

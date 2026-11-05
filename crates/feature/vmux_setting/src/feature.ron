@@ -459,6 +459,7 @@
             bookmark: Some(150),
             permissions: [
                 "PageAddressPublish",
+                "PageToolbarPublish",
                 "PageAddressRequest",
                 "PageAddressUiState",
                 "PageReady",

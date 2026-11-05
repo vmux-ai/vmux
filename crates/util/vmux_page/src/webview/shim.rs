@@ -281,20 +281,9 @@ pub(crate) const WRY_HOST_SHIM: &str = r#"
     }
     return captures;
   };
-  const restoreScrollAnchors = async (captures) => {
-    if (!captures.length) return;
-    const changed = captures.some(capture => {
-      if (!capture.container.isConnected) return false;
-      if (Math.abs(capture.container.scrollTop - capture.scrollTop) > 0.5) return false;
-      const anchor = document.getElementById(capture.id);
-      return anchor && capture.container.contains(anchor)
-        && Math.abs(anchor.getBoundingClientRect().top - capture.top) > 0.5;
-    });
-    if (!changed) return;
-    await new Promise((resolve) => requestAnimationFrame(resolve));
+  const restoreScrollAnchors = (captures) => {
     for (const capture of captures) {
       if (!capture.container.isConnected) continue;
-      if (Math.abs(capture.container.scrollTop - capture.scrollTop) > 0.5) continue;
       const anchor = document.getElementById(capture.id);
       if (!anchor || !capture.container.contains(anchor)) continue;
       const delta = anchor.getBoundingClientRect().top - capture.top;
@@ -680,7 +669,7 @@ pub(crate) const WRY_HOST_SHIM: &str = r#"
         globalThis.__vmuxPopupPresentation.apply(popupCaptures);
         HeightAnimation.apply(heightAnimations);
         LayoutMovement.apply(layoutMovements);
-        await restoreScrollAnchors(scrollAnchors);
+        restoreScrollAnchors(scrollAnchors);
         if (document !== documentIdentity) return;
         if (responseCapability !== String(globalThis.__vmuxFrameCapability)) {
           throw new Error('edits response became stale while applying');
@@ -813,3 +802,41 @@ pub(crate) const WRY_HOST_SHIM: &str = r#"
   };
 })();
 "#;
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::io::Write;
+    use std::process::{Command, Stdio};
+
+    struct ScrollProbe;
+
+    impl ScrollProbe {
+        fn verify() {
+            let mut child = Command::new("node")
+                .args(["-e", include_str!("scroll_retention_test.js")])
+                .stdin(Stdio::piped())
+                .stdout(Stdio::piped())
+                .stderr(Stdio::piped())
+                .spawn()
+                .expect("Node is required for the page runtime test");
+            child
+                .stdin
+                .take()
+                .unwrap()
+                .write_all(Shim::source().as_bytes())
+                .unwrap();
+            let result = child.wait_with_output().unwrap();
+            assert!(
+                result.status.success(),
+                "{}",
+                String::from_utf8_lossy(&result.stderr)
+            );
+        }
+    }
+
+    #[test]
+    fn content_growth_and_scroll_clamping_preserve_position_before_the_next_input() {
+        ScrollProbe::verify();
+    }
+}

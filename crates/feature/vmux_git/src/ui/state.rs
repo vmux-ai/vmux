@@ -14,7 +14,6 @@ pub(super) struct GitPageState {
     pub(super) snapshot: Memo<GitPageSnapshot>,
     pub(super) controller: Memo<GitPageControllerState>,
     pub(super) projects: Memo<GitProjects>,
-    pub(super) header_dropdown: Signal<crate::state::HeaderDropdown>,
     pub(super) diff: GitDiffState,
     pub(super) location: Signal<vmux_api::page_location::PageLocationUiState>,
     pub(super) active_branch_file: Signal<String>,
@@ -66,7 +65,6 @@ impl GitPageState {
                 GitPageControllerState::for_repository(request.request.branch.clone())
             }),
             projects: use_memo(move || root.read().projects.clone()),
-            header_dropdown: use_signal(crate::state::HeaderDropdown::default),
             diff: GitDiffState::new(root),
             location: use_ui_state::<vmux_api::page_location::PageLocationUiState>().state,
             active_branch_file: use_signal(String::new),
@@ -87,8 +85,6 @@ impl GitPageState {
             .max(1);
         request.request_id = request_id;
         self.repository_request_sequence.set(request_id);
-        self.header_dropdown
-            .set(crate::state::HeaderDropdown::Closed);
         self.pending_repository.set(Some(PendingRepository {
             request: request.clone(),
         }));
@@ -96,17 +92,6 @@ impl GitPageState {
         if send(&request).is_err() {
             self.pending_repository.set(None);
             self.diff.synchronize(&self.root.peek().snapshot);
-        }
-    }
-
-    pub(super) fn set_header_dropdown(mut self, open: crate::state::HeaderDropdown) {
-        self.header_dropdown.set(open);
-    }
-
-    pub(super) fn dismiss_header_dropdown(mut self, open: crate::state::HeaderDropdown) {
-        if *self.header_dropdown.peek() == open {
-            self.header_dropdown
-                .set(crate::state::HeaderDropdown::Closed);
         }
     }
 

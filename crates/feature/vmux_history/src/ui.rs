@@ -10,14 +10,13 @@ use vmux_ui::components::alert_dialog::{
     AlertDialogAction, AlertDialogActions, AlertDialogCancel, AlertDialogContent,
     AlertDialogDescription, AlertDialogRoot, AlertDialogTitle,
 };
-use vmux_ui::components::manager::{ManagerIconButton, ManagerSearchAction};
 use vmux_ui::components::page::{PageContent, PageShell};
-use vmux_ui::components::page_address::PageToolbar;
+use vmux_ui::components::page_address::{PageToolbar, ToolbarControl};
 use vmux_ui::components::tooltip::Tooltip;
 use vmux_ui::favicon::Favicon;
 use vmux_ui::hooks::{send, use_theme, use_ui_state};
 use vmux_ui::i18n::{TranslationValue, translate, translate_with};
-use vmux_ui::icon::{LineIcon, LineIconView};
+use vmux_ui::icon::LineIcon;
 use vmux_ui::platform::Platform;
 
 #[vmux_page::page(
@@ -51,23 +50,14 @@ pub fn Page() -> Element {
     rsx! {
         PageShell {
             PageToolbar {
-                actions: rsx! {
-                    ManagerSearchAction {
-                        value: query,
-                        placeholder: translate("history-search"),
-                        onsearch: move |query| {
-                            let _ = send(&HistoryQueryRequest { query });
-                        },
-                    }
-                    ManagerIconButton {
-                        label: translate("history-clear-all"),
-                        disabled: entry_count == 0,
-                        onclick: move |_| {
-                            let _ = send(&HistoryClearConfirmRequest { open: true });
-                        },
-                        LineIconView { icon: LineIcon::Trash, class: "size-3.5".to_string() }
-                    }
-                },
+                controls: vec![
+                    ToolbarControl::search(query, translate("history-search"), move |query| {
+                        let _ = send(&HistoryQueryRequest { query });
+                    }),
+                    ToolbarControl::button(translate("history-clear-all"), move |_| {
+                        let _ = send(&HistoryClearConfirmRequest { open: true });
+                    }).icon(LineIcon::Trash).disabled(entry_count == 0),
+                ],
             }
             PageContent {
                     for (label, group) in groups {

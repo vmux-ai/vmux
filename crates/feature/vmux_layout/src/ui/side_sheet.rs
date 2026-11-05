@@ -595,7 +595,7 @@ fn PaneSection(pane: SideSheetPane, index: usize) -> Element {
             div { class: "pt-0.5",
                 div { class: "flex flex-col gap-0.5",
                     Collapsible { expanded,
-                        div { class: "flex flex-col",
+                        div { class: "flex flex-col gap-1",
                             for stack in pane.stacks.iter() {
                                 SideSheetStackRow { key: "{stack.id}", stack: stack.clone(), pane_id }
                             }

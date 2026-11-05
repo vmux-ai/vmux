@@ -11,12 +11,49 @@ pub struct PageAddress {
     pub symbols: Vec<AddressCrumb>,
     pub checkout: Option<AddressOption>,
     pub search_active: bool,
+    pub search_available: bool,
+    pub controls: Vec<AddressControl>,
+    pub toolbar_id: u64,
+}
+
+#[crate::contract(Default)]
+pub struct AddressControl {
+    pub id: String,
+    pub label: String,
+    pub icon: String,
+    pub value: String,
+    pub disabled: bool,
+    pub active: bool,
+    pub primary: bool,
+    pub show_label: bool,
+    pub danger: bool,
+    pub kind: AddressControlKind,
+    pub keys: Vec<String>,
+    pub options: Vec<AddressControlChoice>,
+}
+
+#[crate::contract(Default)]
+pub struct AddressControlChoice {
+    pub value: String,
+    pub label: String,
+    pub icon: String,
+}
+
+#[crate::contract(Default, Copy, Eq)]
+pub enum AddressControlKind {
+    #[default]
+    Button,
+    Search,
+    Badge,
+    Menu,
 }
 
 #[crate::contract(Default)]
 pub struct AddressCrumb {
     pub entry: AddressOption,
     pub options: Vec<AddressOption>,
+    pub tabs: Vec<AddressOption>,
+    pub selected_tab: Option<AddressIntent>,
     pub on_open: Option<AddressIntent>,
     pub on_more: Option<AddressIntent>,
     pub pending: bool,
@@ -80,6 +117,14 @@ pub enum AddressIntent {
         branch: String,
         checkout: String,
     },
+    Control {
+        id: String,
+        value: String,
+    },
+    ControlKey {
+        id: String,
+        key: String,
+    },
 }
 
 #[crate::ui_event]
@@ -93,6 +138,12 @@ pub struct PageAddressRequest {
 #[crate::ui_event]
 pub struct PageAddressPublish {
     pub address: PageAddress,
+}
+
+#[crate::ui_event]
+pub struct PageToolbarPublish {
+    pub id: u64,
+    pub controls: Vec<AddressControl>,
 }
 
 #[crate::contract]
@@ -113,6 +164,10 @@ impl AddressEffect {
 }
 
 impl PageAddress {
+    pub fn document_url(&self) -> &str {
+        self.url.split('#').next().unwrap_or_default()
+    }
+
     pub fn accepts(&self, request: &PageAddressRequest) -> bool {
         self.owner == request.owner && self.revision == request.revision && self.url == request.url
     }
@@ -124,7 +179,7 @@ pub struct PageAddressUiStatePatch {
     pub effect: Option<AddressEffect>,
 }
 
-#[crate::ui_state(Default, patch = PageAddressUiStatePatch, version = 2)]
+#[crate::ui_state(Default, patch = PageAddressUiStatePatch, version = 3)]
 pub struct PageAddressUiState {
     pub address: Option<PageAddress>,
     pub effect: Option<AddressEffect>,

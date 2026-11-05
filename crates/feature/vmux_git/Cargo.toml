@@ -42,3 +42,6 @@ vmux_ui = { path = "../../util/vmux_ui", default-features = false }
 
 [lints]
 workspace = true
+
+[dev-dependencies]
+dioxus-ssr = "=0.7.9"

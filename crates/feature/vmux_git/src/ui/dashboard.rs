@@ -13,9 +13,7 @@ use super::shortcuts::GitShortcutHelp;
 use super::state::GitPageState;
 use super::status::RepositoryHeader;
 use crate::event::{GitBranchFileEntry, GitRepositorySnapshot};
-use crate::state::{
-    GitBranchCollection, GitCatalogProgress, GitOperationEligibility, GitPanel, HeaderDropdown,
-};
+use crate::state::{GitBranchCollection, GitCatalogProgress, GitOperationEligibility, GitPanel};
 
 #[component]
 pub(super) fn GitDashboard() -> Element {
@@ -97,7 +95,6 @@ pub(super) fn GitDashboard() -> Element {
 #[derive(Clone, PartialEq)]
 struct HeaderState {
     repository: Option<GitRepositorySnapshot>,
-    open_dropdown: HeaderDropdown,
     projects: Vec<ProjectRow>,
     focused_panel: GitPanel,
     selected_branch: String,
@@ -118,13 +115,11 @@ fn GitHeader(viewed_count: ReadSignal<usize>) -> Element {
     let snapshot = state.snapshot;
     let controller = state.controller;
     let projects = state.projects;
-    let header_dropdown = state.header_dropdown;
     let header = use_memo(move || {
         let snapshot = snapshot.read();
         let controller = controller.read();
         HeaderState {
             repository: snapshot.repository.clone(),
-            open_dropdown: header_dropdown(),
             projects: projects.read().rows.clone(),
             focused_panel: controller.focused_panel,
             selected_branch: controller.selected_branch.clone(),
@@ -146,7 +141,6 @@ fn GitHeader(viewed_count: ReadSignal<usize>) -> Element {
     rsx! {
         RepositoryHeader {
             repository,
-            open_dropdown: header.open_dropdown,
             projects: header.projects,
             focused_panel: header.focused_panel,
             selected_branch: header.selected_branch,

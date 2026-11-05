@@ -2,11 +2,8 @@
 
 use dioxus::prelude::*;
 use vmux_api::service::*;
-use vmux_ui::components::manager::{
-    ManagerBadge, ManagerButton, ManagerButtonVariant, ManagerEmpty, ManagerList, ManagerPage,
-    ManagerSearchAction, ManagerTone,
-};
-use vmux_ui::components::page_address::PageToolbar;
+use vmux_ui::components::manager::{ManagerEmpty, ManagerList, ManagerPage};
+use vmux_ui::components::page_address::{PageToolbar, ToolbarControl};
 use vmux_ui::components::skeleton::Skeleton;
 use vmux_ui::hooks::{send, use_theme, use_ui_state};
 use vmux_ui::i18n::translate;
@@ -15,7 +12,7 @@ use vmux_ui::icon::{LineIcon, LineIconView};
 #[vmux_page::page(
     page = "process_monitor",
     component = Page,
-    states = ["ThemeUiState", "ProcessesUiState"]
+    states = ["PageAddressUiState", "ThemeUiState", "ProcessesUiState"]
 )]
 pub struct ProcessMonitorPage;
 
@@ -29,6 +26,30 @@ pub fn Page() -> Element {
     let has_processes = snapshot.total_count != 0;
     let has_managed_processes = snapshot.managed_count != 0;
     let process_count = snapshot.total_count as usize;
+    let mut toolbar = vec![
+        ToolbarControl::search(
+            snapshot.query.clone(),
+            translate("services-filter"),
+            move |query| {
+                let _ = send(&ProcessSearchRequest { query });
+            },
+        ),
+        ToolbarControl::badge(process_count.to_string()),
+        ToolbarControl::badge(translate(if connected {
+            "services-connected"
+        } else {
+            "services-disconnected"
+        }))
+        .active(connected),
+    ];
+    if has_managed_processes {
+        toolbar.push(
+            ToolbarControl::button(translate("services-kill-all"), move |_| {
+                let _ = send(&ProcessKillAllEvent { kill_all: true });
+            })
+            .danger(),
+        );
+    }
 
     let empty_detail = format!(
         "{} {}",
@@ -39,27 +60,7 @@ pub fn Page() -> Element {
     rsx! {
         ManagerPage {
             PageToolbar {
-                actions: rsx! {
-                    ManagerSearchAction {
-                        value: snapshot.query.clone(),
-                        placeholder: translate("services-filter"),
-                        onsearch: move |query| {
-                            let _ = send(&ProcessSearchRequest { query });
-                        },
-                    }
-                    span { class: "text-[10px] tabular-nums text-muted-foreground", "{process_count}" }
-                    StatusBadge { connected }
-                    if has_managed_processes {
-                        ManagerButton {
-                            variant: ManagerButtonVariant::Danger,
-                            onclick: move |event: Event<MouseData>| {
-                                event.stop_propagation();
-                                let _ = send(&ProcessKillAllEvent { kill_all: true });
-                            },
-                            {translate("services-kill-all")}
-                        }
-                    }
-                },
+                controls: toolbar,
             }
             ManagerList {
                 class: "mx-auto flex w-full max-w-7xl flex-col gap-3".to_string(),
@@ -169,32 +170,6 @@ fn ProcessTable(processes: Vec<ProcessEntry>) -> Element {
                 for process in processes {
                     ProcessRow { key: "{process.id}", process }
                 }
-            }
-        }
-    }
-}
-
-#[component]
-fn StatusBadge(connected: bool) -> Element {
-    let (tone, color, text) = if connected {
-        (
-            ManagerTone::Green,
-            "bg-success",
-            translate("services-connected"),
-        )
-    } else {
-        (
-            ManagerTone::Amber,
-            "bg-amber-400",
-            translate("services-disconnected"),
-        )
-    };
-
-    rsx! {
-        ManagerBadge { tone,
-            span { class: "flex items-center gap-1.5",
-                span { class: "size-1.5 rounded-full {color}" }
-                "{text}"
             }
         }
     }

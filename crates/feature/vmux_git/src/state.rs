@@ -206,17 +206,6 @@ pub enum GitBranchPrompt {
     Delete { branch: String },
 }
 
-#[derive(Component)]
-#[vmux_api::contract(Copy, Default, Eq)]
-pub enum HeaderDropdown {
-    #[default]
-    Closed,
-    Repository,
-    Branch,
-    View,
-    Commit,
-}
-
 #[vmux_api::contract(Default, Eq)]
 pub struct GitOperationEligibility {
     pub stage_all: bool,

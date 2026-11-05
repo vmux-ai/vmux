@@ -585,6 +585,11 @@ the registered manifests supply the page-switch menu. Pages publish only typed `
 data through `AddressContribution` or `PageAddressPublish`: the current route, project and session
 choices, directories, symbols, and their intents. `vmux_layout` renders the active surface with
 one `AddressTrail`. No page component, callback, context, or mounted slot crosses into Layout.
+`PageToolbarPublish` contributes control descriptions to that same address surface. Search,
+filters, view switches, Details, Add, Create, Resume, Start, and Checkout render in the URL row;
+their callbacks remain in the source page and receive validated, versioned control intents.
+Toolbar identities prevent a retiring publisher from clearing its successor. Fragment updates
+retain the page's breadcrumbs and controls instead of replacing them with the generic route.
 `PageAddressRequest` validates the source window, active surface, revision, and URL before sending
 `AddressIntentRequest` to the page. Navigation opens in the owning Stack; page-local selection
 uses a versioned `AddressEffect` consumed by `PageBreadcrumbs`. Effects bind to the source URL,
@@ -592,9 +597,6 @@ owner, and address revision and are removed from retained snapshots to prevent r
 Layout overlays distinguish DOM popovers from panels. Popovers keep native pointer capture,
 while their DOM decides outside-click dismissal; static header and sidebar rectangles cannot
 close a popover before an item below them receives its click.
-Search, filters, view controls,
-Details, Add, Create, Resume, Start, and Checkout stay in the page body through `PageToolbar`.
-`WorkspaceLayout` places that toolbar inside its content column beside the sidebar.
 Popup state belongs to the Layout that renders the breadcrumb and uses its existing overlay
 capture until dismissal or disposal. Hiding the window header leaves the full page working area.
 Path overflow collapses whole directories using measured widths and keeps the filename intact.
@@ -644,7 +646,7 @@ and focuses new popovers in the mutation frame, before mounted callbacks. Menus 
 opacity and fade to full opacity in 100 ms; closing releases interaction immediately and retains
 an inert, identifier-free snapshot for an 80 ms fade. The snapshot retains typography and scroll
 offsets. New input can discard it, and reduced motion skips interpolation.
-Session view controls live in the page content above the list or board rather than its address.
+Session view controls share the URL row with the session location breadcrumb.
 Activation stamps preserve operation order across shared ancestors even within one clock tick;
 stack navigation consumes a batch against one advancing cursor and excludes retiring targets.
 Sidebar choices and stack shortcuts share that activation path, including nested pane ancestors.
@@ -1017,6 +1019,9 @@ window. A large lockfile therefore cannot produce an unbounded first render, and
 cannot silently materialize the rest of the branch in the page DOM.
 The rendered diff subscribes to its scroll window independently of host data. Moving into a
 loaded region replaces virtual spacers with its rows even when no new data arrives.
+When earlier content changes height, the file and offset at the viewport define the next render
+window. The DOM interpreter restores that anchor within the edit transaction, including scroll
+clamping, before another input can arrive. Loaded content therefore stays in the rendered window.
 File selection uses smooth scrolling and a stable `#diff-<SHA-256 of path>` anchor, matching
 GitHub's pull-request file view. Scroll requests carry their own revision so repeated selection
 of one file works and data refreshes cannot restart a completed scroll.

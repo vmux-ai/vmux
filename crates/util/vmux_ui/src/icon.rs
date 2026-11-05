@@ -48,7 +48,7 @@ impl GitSymbol {
     }
 }
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq, serde::Serialize, serde::Deserialize)]
 pub enum LineIcon {
     AlertCircle,
     Archive,
@@ -74,6 +74,7 @@ pub enum LineIcon {
     GitPullRequest,
     Globe,
     Grid2X2,
+    Hash,
     Image,
     Inbox,
     Layout,
@@ -102,6 +103,13 @@ pub enum LineIcon {
 }
 
 impl LineIcon {
+    pub fn parse(name: &str) -> Option<Self> {
+        serde::Deserialize::deserialize(
+            serde::de::value::StrDeserializer::<serde::de::value::Error>::new(name),
+        )
+        .ok()
+    }
+
     pub fn paths(self) -> &'static [&'static str] {
         match self {
             Self::AlertCircle => &[
@@ -193,6 +201,7 @@ impl LineIcon {
                 "M4 14h6v6H4Z",
                 "M14 14h6v6h-6Z",
             ],
+            Self::Hash => &["M4 9h16", "M3 15h16", "M10 3 8 21", "M16 3 14 21"],
             Self::Image => &[
                 "M19 3H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V5a2 2 0 0 0-2-2Z",
                 "M10.5 8.5a1.5 1.5 0 1 1-3 0 1.5 1.5 0 0 1 3 0Z",

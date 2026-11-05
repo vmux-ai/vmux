@@ -349,6 +349,7 @@ impl AddressSource {
             .explorer_panel
             .as_ref()
             .is_some_and(|panel| panel.search);
+        result.search_available = true;
         result
     }
 }
@@ -526,6 +527,8 @@ fn forward(
         | AddressIntent::Section { .. }
         | AddressIntent::GitBranch { .. }
         | AddressIntent::GitCommit { .. }
+        | AddressIntent::Control { .. }
+        | AddressIntent::ControlKey { .. }
         | AddressIntent::GitCatalogNext { .. } => {}
     }
 }

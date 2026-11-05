@@ -11,6 +11,7 @@
             manifest: true,
             permissions: [
                 "PageAddressPublish",
+                "PageToolbarPublish",
                 "PageAddressRequest",
                 "PageAddressUiState",
                 "PageReady",

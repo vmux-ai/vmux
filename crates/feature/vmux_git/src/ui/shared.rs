@@ -214,6 +214,9 @@ pub fn DiffView(
     let derived_cache = use_hook(|| Rc::new(RefCell::new(DiffDerivedCache::default())));
     let layout_cache = use_hook(|| Rc::new(RefCell::new(DiffLayoutCache::default())));
     let geometry_cache = use_hook(|| Rc::new(RefCell::new(DiffGeometryCache::default())));
+    let scroll_position = use_hook(|| Rc::new(Cell::new(0.0)));
+    let geometry_window = use_hook(|| Rc::new(Cell::new(None::<DiffRenderWindow>)));
+    let pending_anchor = use_hook(|| Rc::new(RefCell::new(None::<ScrollAnchor>)));
     let expected_path_count = expected_paths.len();
     let layout_expected_paths = expected_paths.clone();
     let derived_rows_from = rows_from;
@@ -225,30 +228,72 @@ pub fn DiffView(
     });
     let layout_derived_cache = Rc::clone(&derived_cache);
     let layout_state_cache = Rc::clone(&layout_cache);
-    let layout_revision = use_memo(use_reactive!(|(layout_expected_paths,)| {
+    let layout_identity = identity.clone();
+    let layout_geometry_cache = Rc::clone(&geometry_cache);
+    let layout_scroll_position = Rc::clone(&scroll_position);
+    let layout_pending_anchor = Rc::clone(&pending_anchor);
+    let layout_revision = use_memo(use_reactive!(|(layout_expected_paths, layout_identity)| {
         derived.read();
         let viewport = viewport.read();
         let rows = display_rows.read();
         let derived = layout_derived_cache.borrow();
-        layout_state_cache.borrow_mut().update(
+        let anchor = {
+            let layout = layout_state_cache.borrow();
+            let geometry = layout_geometry_cache.borrow();
+            if layout.has_viewport
+                && viewport
+                    .as_ref()
+                    .is_some_and(|viewport| viewport.generation == layout.generation)
+                && geometry.identity == *layout_identity
+            {
+                ScrollAnchor::capture(
+                    &layout.layout,
+                    &geometry.geometry,
+                    layout_scroll_position.get(),
+                )
+            } else {
+                None
+            }
+        };
+        let mut layout = layout_state_cache.borrow_mut();
+        let previous = layout.version;
+        let revision = layout.update(
             viewport.as_ref(),
             &rows,
             &layout_expected_paths,
             &derived.fingerprints,
             *rows_from.read(),
             !path.read().is_empty(),
-        )
+        );
+        if revision.version != previous {
+            *layout_pending_anchor.borrow_mut() = anchor;
+        }
+        revision
     }));
     let geometry_identity = identity.clone();
     let geometry_layout_cache = Rc::clone(&layout_cache);
     let geometry_state_cache = Rc::clone(&geometry_cache);
+    let geometry_scroll_position = Rc::clone(&scroll_position);
+    let geometry_pending_anchor = Rc::clone(&pending_anchor);
+    let geometry_render_window = Rc::clone(&geometry_window);
     let geometry_revision = use_memo(use_reactive!(|(geometry_identity,)| {
         layout_revision.read();
-        geometry_state_cache.borrow_mut().update(
-            &geometry_layout_cache.borrow(),
-            &geometry_identity,
-            &collapsed_files.read(),
-        )
+        let layout = geometry_layout_cache.borrow();
+        let mut geometry = geometry_state_cache.borrow_mut();
+        let same_document = geometry.identity == *geometry_identity;
+        let revision = geometry.update(&layout, &geometry_identity, &collapsed_files.read());
+        if !same_document {
+            geometry_render_window.set(None);
+        }
+        if let Some(anchor) = geometry_pending_anchor.borrow_mut().take()
+            && same_document
+            && let Some(top) = anchor.restore(&layout.layout, &geometry.geometry)
+        {
+            geometry_scroll_position.set(top);
+            geometry_render_window
+                .set(Some(DiffRenderWindow::at(top, render_window.peek().height)));
+        }
+        revision
     }));
     let reveal_identity = identity.clone();
     let reveal_layout_cache = Rc::clone(&layout_cache);
@@ -325,7 +370,7 @@ pub fn DiffView(
             &identity,
             &collapsed_snapshot,
             &geometry.geometry,
-            *render_window.read(),
+            geometry_window.get().unwrap_or(*render_window.read()),
             true,
         )
     };
@@ -380,6 +425,10 @@ pub fn DiffView(
     let scroll_next_request = Rc::clone(&next_request);
     let scroll_layout_cache = Rc::clone(&layout_cache);
     let scroll_geometry_cache = Rc::clone(&geometry_cache);
+    let mounted_scroll_position = Rc::clone(&scroll_position);
+    let mounted_geometry_window = Rc::clone(&geometry_window);
+    let event_scroll_position = Rc::clone(&scroll_position);
+    let event_geometry_window = Rc::clone(&geometry_window);
 
     rsx! {
         div {
@@ -387,24 +436,31 @@ pub fn DiffView(
             id: "git-diff-viewport",
             "data-vmux-preserve-scroll": "",
             onmounted: move |event: Event<MountedData>| {
+                mounted_scroll_position.set(0.0);
+                mounted_geometry_window.set(None);
                 let element = event.data();
                 scroll_container.set(Some(element.clone()));
+                let position = Rc::clone(&mounted_scroll_position);
                 spawn(async move {
                     let Ok(rect) = element.get_client_rect().await else {
                         return;
                     };
-                    render_window.set(DiffRenderWindow::at(0.0, rect.size.height));
+                    let top = element.get_scroll_offset().await.map(|offset| offset.y).unwrap_or_default();
+                    position.set(top);
+                    render_window.set(DiffRenderWindow::at(top, rect.size.height));
                 });
             },
             class: if visible { "min-h-0 flex-1 overflow-auto bg-transparent font-mono text-[11px] leading-5" } else { "hidden" },
             style: "overflow-anchor:none;",
             onscroll: move |event| {
+                event_scroll_position.set(event.scroll_top());
+                let had_geometry_window = event_geometry_window.replace(None).is_some();
                 let viewport_window = DiffRenderWindow::from_scroll(
                     event.scroll_top(),
                     f64::from(event.client_height()),
                 );
                 let current_window = *render_window.peek();
-                if !current_window.covers(
+                if had_geometry_window || !current_window.covers(
                     event.scroll_top(),
                     f64::from(event.client_height()),
                 ) && current_window != viewport_window
@@ -1163,6 +1219,23 @@ impl DiffGeometry {
             .iter()
             .rev()
             .find_map(|section| section.file_path.clone())
+    }
+}
+
+struct ScrollAnchor {
+    path: String,
+    offset: f64,
+}
+
+impl ScrollAnchor {
+    fn capture(layout: &DiffLayout, geometry: &DiffGeometry, top: f64) -> Option<Self> {
+        let path = geometry.file_at(layout, top)?;
+        let offset = top - geometry.file_offset(layout, &path)?;
+        Some(Self { path, offset })
+    }
+
+    fn restore(&self, layout: &DiffLayout, geometry: &DiffGeometry) -> Option<f64> {
+        Some((geometry.file_offset(layout, &self.path)? + self.offset).max(0.0))
     }
 }
 
@@ -2184,6 +2257,57 @@ mod tests {
             &scrolled,
             "source-row-1000"
         ));
+    }
+
+    #[test]
+    fn growing_an_earlier_file_keeps_the_current_file_in_the_rendered_window() {
+        dioxus::html::set_event_converter(Box::new(dioxus::html::SerializedHtmlEventConverter));
+        let requests = Rc::new(ScrollRequests::default());
+        let _host = HostScope::enter(requests);
+        let probe = Rc::new(RefCell::new(None));
+        let mut dom = VirtualDom::new_with_props(
+            InitialDiffFiles,
+            InitialDiffFilesProps {
+                probe: Rc::clone(&probe),
+            },
+        );
+        let initial = dom.rebuild_to_vec();
+        let scroll_node = initial
+            .edits
+            .iter()
+            .find_map(|edit| match edit {
+                Mutation::NewEventListener { name, id } if name == "scroll" => Some(*id),
+                _ => None,
+            })
+            .unwrap();
+        let mut viewport = probe.borrow().unwrap();
+        dom.runtime().in_scope(ScopeId::ROOT, || {
+            viewport.set(DiffScrollFixture::folding_viewport())
+        });
+        dom.render_immediate_to_vec();
+        let data = EventData::Scroll(SerializedScrollData {
+            scroll_top: 20_500.0,
+            scroll_left: 0.0,
+            scroll_width: 1_000,
+            scroll_height: 40_084,
+            client_width: 1_000,
+            client_height: 800,
+        });
+        dom.runtime()
+            .handle_event("scroll", Event::new(data.into_any(), false), scroll_node);
+        dom.render_immediate_to_vec();
+        assert!(dioxus_ssr::render(&dom).contains("source-row-1000"));
+
+        let mut grown = DiffScrollFixture::folding_viewport().unwrap();
+        let extra = grown.lines[1..501].to_vec();
+        grown.lines.splice(1..1, extra);
+        grown.revision = 2;
+        grown.total_lines += 500;
+        dom.runtime()
+            .in_scope(ScopeId::ROOT, || viewport.set(Some(grown)));
+        dom.render_immediate_to_vec();
+
+        assert!(dioxus_ssr::render(&dom).contains("source-row-1000"));
     }
 
     #[test]

@@ -2,7 +2,7 @@ use bevy::prelude::*;
 use bevy_cef::prelude::{UiEventPlugin, UiInput};
 use vmux_api::address::{
     AddressEffect, AddressIntent, AddressOption, PageAddress, PageAddressPublish,
-    PageAddressUiState, PageAddressUiStatePatch,
+    PageAddressUiState, PageAddressUiStatePatch, PageToolbarPublish,
 };
 
 use crate::manifest::FeatureManifest;
@@ -15,8 +15,9 @@ impl Plugin for AddressPlugin {
     fn build(&self, app: &mut App) {
         app.add_plugins(UiStatePlugin::<PageAddressUiState>::with_post_update_flush())
             .add_message::<PageOpenRequest>()
-            .add_plugins(UiEventPlugin::<(PageAddressPublish,)>::default())
+            .add_plugins(UiEventPlugin::<(PageAddressPublish, PageToolbarPublish)>::default())
             .add_observer(publish)
+            .add_observer(toolbar)
             .add_observer(activate)
             .add_systems(PostUpdate, project.in_set(AddressProjectionSet));
     }
@@ -42,6 +43,26 @@ type Sources<'w, 's> = Query<
 
 fn project(routes: Query<&PageManifest>, pages: Sources, mut commands: Commands) {
     for (owner, metadata, current, automatic) in &pages {
+        if let Some(current) = current
+            && automatic.is_none()
+            && current.0.url != metadata.url
+            && current.0.document_url() == metadata.url.split('#').next().unwrap_or_default()
+        {
+            let mut address = current.0.clone();
+            address.url.clone_from(&metadata.url);
+            address.revision = address.revision.saturating_add(1);
+            commands
+                .entity(owner)
+                .insert(AddressContribution(address.clone()));
+            commands.trigger(UiStateWrite::<PageAddressUiState>::from_event(
+                owner,
+                &PageAddressUiStatePatch {
+                    address: Some(address),
+                    ..Default::default()
+                },
+            ));
+            continue;
+        }
         if let Some(current) = current
             && current.0.url == metadata.url
             && automatic.is_none_or(|automatic| automatic.0 != current.0)
@@ -172,6 +193,10 @@ fn publish(
         return;
     }
     let mut address = event.payload.address.clone();
+    if let Some(current) = current {
+        address.controls.clone_from(&current.0.controls);
+        address.toolbar_id = current.0.toolbar_id;
+    }
     address.url = metadata.url.clone();
     address.owner = owner.to_bits();
     address.revision = current.map_or(1, |current| current.0.revision);
@@ -181,6 +206,45 @@ fn publish(
     if current.is_some() {
         address.revision = address.revision.saturating_add(1);
     }
+    commands
+        .entity(owner)
+        .remove::<RouteAddress>()
+        .insert(AddressContribution(address.clone()));
+    commands.trigger(UiStateWrite::<PageAddressUiState>::from_event(
+        owner,
+        &PageAddressUiStatePatch {
+            address: Some(address),
+            ..Default::default()
+        },
+    ));
+}
+
+fn toolbar(
+    event: On<UiInput<PageToolbarPublish>>,
+    pages: Query<(&PageMetadata, Option<&AddressContribution>)>,
+    mut commands: Commands,
+) {
+    let owner = event.webview;
+    let Ok((metadata, current)) = pages.get(owner) else {
+        return;
+    };
+    if current.is_some_and(|current| {
+        current.0.controls == event.payload.controls && current.0.toolbar_id == event.payload.id
+            || event.payload.controls.is_empty() && current.0.toolbar_id != event.payload.id
+    }) {
+        return;
+    }
+    let mut address = match current {
+        Some(current) => current.0.clone(),
+        None => PageAddress {
+            owner: owner.to_bits(),
+            url: metadata.url.clone(),
+            ..Default::default()
+        },
+    };
+    address.controls.clone_from(&event.payload.controls);
+    address.toolbar_id = event.payload.id;
+    address.revision = address.revision.saturating_add(1);
     commands
         .entity(owner)
         .remove::<RouteAddress>()
@@ -367,6 +431,77 @@ mod tests {
         trail.app.update();
         assert_eq!(trail.address().current.label, "Projects");
         assert!(trail.address().revision > revision);
+    }
+
+    #[test]
+    fn fragment_updates_retain_the_page_header_and_update_its_source_identity() {
+        let mut trail = Trail::new();
+        trail.declare("vmux://projects/", "Projects", true);
+        trail.publish("vmux://projects/one", "Repository and branch");
+        let revision = trail.address().revision;
+
+        trail
+            .app
+            .world_mut()
+            .get_mut::<PageMetadata>(trail.page)
+            .unwrap()
+            .url = "vmux://projects/one#file".into();
+        trail.app.update();
+
+        assert_eq!(trail.address().current.label, "Repository and branch");
+        assert_eq!(trail.address().url, "vmux://projects/one#file");
+        assert!(trail.address().revision > revision);
+        trail
+            .app
+            .world_mut()
+            .get_mut::<PageMetadata>(trail.page)
+            .unwrap()
+            .url = "vmux://projects/two".into();
+        trail.app.update();
+        assert_eq!(trail.address().current.label, "Projects");
+    }
+
+    #[test]
+    fn replacing_breadcrumbs_keeps_controls_and_an_old_toolbar_cannot_clear_its_successor() {
+        let mut trail = Trail::new();
+        trail.publish("vmux://projects/one", "One");
+        let control = vmux_api::address::AddressControl {
+            id: "first".into(),
+            label: "Create".into(),
+            ..Default::default()
+        };
+        trail.app.world_mut().trigger(UiInput {
+            webview: trail.page,
+            payload: PageToolbarPublish {
+                id: 1,
+                controls: vec![control.clone()],
+            },
+        });
+        trail.app.world_mut().flush();
+        trail.publish("vmux://projects/one", "Updated breadcrumbs");
+        assert_eq!(trail.address().controls, [control]);
+        let successor = vmux_api::address::AddressControl {
+            id: "second".into(),
+            label: "Resume".into(),
+            ..Default::default()
+        };
+        trail.app.world_mut().trigger(UiInput {
+            webview: trail.page,
+            payload: PageToolbarPublish {
+                id: 2,
+                controls: vec![successor.clone()],
+            },
+        });
+        trail.app.world_mut().flush();
+        trail.app.world_mut().trigger(UiInput {
+            webview: trail.page,
+            payload: PageToolbarPublish {
+                id: 1,
+                controls: Vec::new(),
+            },
+        });
+        trail.app.world_mut().flush();
+        assert_eq!(trail.address().controls, [successor]);
     }
 
     #[test]

@@ -1,32 +1,20 @@
 #![allow(non_snake_case)]
 
-use std::collections::HashMap;
-
 use dioxus::prelude::*;
 use vmux_api::address::{AddressCrumb, AddressIntent, AddressOption, PageAddress};
 use vmux_api::space::ProjectRow;
 use vmux_ecs::event::space::ProjectActivateRequest;
-use vmux_ui::components::avatar::IdentityOrb;
-use vmux_ui::components::breadcrumb::BreadcrumbSeparator;
-use vmux_ui::components::button::{Button, ButtonSize, ButtonVariant};
-use vmux_ui::components::dropdown::{Dropdown, DropdownOpenMode, DropdownPopup, DropdownTrigger};
-use vmux_ui::components::page_address::{PageBreadcrumbs, PageToolbar};
-use vmux_ui::components::project_picker::{ProjectSelectPopup, ProjectSelectTrigger};
-use vmux_ui::hooks::{send, use_optimistic_map};
+use vmux_ui::components::page_address::{PageBreadcrumbs, PageToolbar, ToolbarControl};
+use vmux_ui::hooks::send;
 use vmux_ui::i18n::translate;
-use vmux_ui::icon::{LineIcon, LineIconView};
-use vmux_ui::scroll::ScrollPreload;
+use vmux_ui::icon::LineIcon;
 
 use crate::event::*;
-use crate::state::{GitBranchCollection, GitCatalogProgress, GitPanel, HeaderDropdown};
-
-use super::branches::{BranchCollectionTabs, BranchRow, TagRow};
-use super::state::GitPageState;
+use crate::state::{GitBranchCollection, GitCatalogProgress, GitPanel};
 
 #[component]
 pub(super) fn RepositoryHeader(
     repository: GitRepositorySnapshot,
-    open_dropdown: HeaderDropdown,
     projects: Vec<ProjectRow>,
     focused_panel: GitPanel,
     selected_branch: String,
@@ -41,203 +29,276 @@ pub(super) fn RepositoryHeader(
     viewed_count: usize,
     viewed_total: u32,
 ) -> Element {
-    let page = use_context::<GitPageState>();
-    let observed_branch_collection = branch_collection;
-    let optimistic_branch_collection =
-        use_optimistic_map(HashMap::from([((), observed_branch_collection)]));
-    let branch_collection = optimistic_branch_collection.value(&(), &observed_branch_collection);
-    let branch_collection_pending = branch_collection != observed_branch_collection;
-    let push_path = repository.repo_root.clone();
-    let repository_open = open_dropdown == HeaderDropdown::Repository;
-    let branch_open = open_dropdown == HeaderDropdown::Branch;
-    let commit_open = open_dropdown == HeaderDropdown::Commit;
-    let selected_commit_entry = repository
-        .commits
-        .iter()
-        .find(|commit| commit.sha == selected_commit)
-        .cloned();
-    let revision_label = selected_commit_entry
-        .as_ref()
-        .map(|commit| commit.short_sha.clone())
-        .unwrap_or_default();
-    let revision_title = selected_commit_entry
-        .as_ref()
-        .map(|commit| commit.summary.clone())
-        .unwrap_or_default();
-    let branch_label = if focused_panel == GitPanel::Branches {
-        selected_branch.clone()
-    } else {
-        repository.branch.clone()
-    };
-    let branch_base = if focused_panel == GitPanel::Branches {
-        selected_branch_base
-    } else {
-        String::new()
-    };
-    let checkout = (focused_panel == GitPanel::Branches)
-        .then(|| selected_branch_collection.checkout(&repository, &selected_branch))
-        .flatten();
-    let checkout_required = focused_panel == GitPanel::Branches
-        && checkout.as_ref().is_some_and(|checkout| !checkout.current);
-    let checkout_branch = checkout
-        .as_ref()
-        .map(|checkout| checkout.branch.clone())
-        .unwrap_or_default();
-    let checkout_path = checkout
-        .as_ref()
-        .map(|checkout| checkout.checkout.clone())
-        .unwrap_or_default();
-    let checkout_start = checkout
-        .as_ref()
-        .map(|checkout| checkout.start_point.clone())
-        .unwrap_or_default();
-    let selected_reference_count = branch_collection.len(&repository);
-    let selected_catalog = GitCatalog::from(branch_collection);
-    let first_commit = repository
-        .commits
-        .first()
-        .map(|commit| commit.sha.clone())
-        .unwrap_or_default();
     let git_url = crate::GitUrl::from_path(std::path::Path::new(&repository.repo_root))
         .unwrap_or_else(|| crate::GIT_PAGE_URL.to_string());
+    let current_page = AddressOption {
+        label_key: "git-title".into(),
+        icon: Some(vmux_api::BuiltinIcon::GitBranch),
+        intent: Some(AddressIntent::Navigate {
+            url: git_url.clone(),
+        }),
+        ..Default::default()
+    };
     let editor_url = vmux_path::FileUrl::from_path(
         std::path::Path::new(&repository.repo_root),
         None,
         None,
         None,
     );
-    let current_page = AddressOption {
-        label_key: "git-title".to_string(),
-        intent: Some(AddressIntent::Navigate {
-            url: git_url.clone(),
-        }),
-        icon: Some(vmux_api::BuiltinIcon::GitBranch),
-        ..Default::default()
+    let (panel, panel_label, panel_icon) = match focused_panel {
+        GitPanel::Files => ("changes", "git-changes", vmux_api::BuiltinIcon::Files),
+        GitPanel::Branches => (
+            "branches",
+            "git-branch-changes",
+            vmux_api::BuiltinIcon::GitBranch,
+        ),
+        GitPanel::Commits => ("commits", "git-commits", vmux_api::BuiltinIcon::Clock),
+        GitPanel::Stash => ("stash", "git-stashes", vmux_api::BuiltinIcon::Archive),
     };
-    let contextual = vec![
-        current_page.clone(),
-        AddressOption {
-            label_key: "editor-editor".to_string(),
-            intent: Some(AddressIntent::Navigate { url: editor_url }),
-            icon: Some(vmux_api::BuiltinIcon::Code),
+    let mut panels = Vec::new();
+    for (id, label, icon) in [
+        ("changes", "git-changes", vmux_api::BuiltinIcon::Files),
+        (
+            "branches",
+            "git-branch-changes",
+            vmux_api::BuiltinIcon::GitBranch,
+        ),
+        ("commits", "git-commits", vmux_api::BuiltinIcon::Clock),
+        ("stash", "git-stashes", vmux_api::BuiltinIcon::Archive),
+    ] {
+        panels.push(AddressOption {
+            label_key: label.into(),
+            icon: Some(icon),
+            intent: Some(AddressIntent::Section { id: id.into() }),
             ..Default::default()
-        },
-    ];
-    let project_picker_dir = repository.repo_root.clone();
-    let mut root_projects = projects
-        .into_iter()
-        .filter(|project| project.depth == 0 && !project.missing)
-        .collect::<Vec<_>>();
-    if !root_projects
+        });
+    }
+    let mut project_options = Vec::new();
+    for project in &projects {
+        if project.depth != 0 || project.missing {
+            continue;
+        }
+        let Some(url) = crate::GitUrl::from_path(std::path::Path::new(&project.path)) else {
+            continue;
+        };
+        project_options.push(AddressOption {
+            label: project.label.clone(),
+            title: project.path.clone(),
+            identity: project.path.clone(),
+            intent: Some(AddressIntent::Navigate { url }),
+            ..Default::default()
+        });
+    }
+    if !project_options
         .iter()
-        .any(|project| project.path == repository.repo_root)
+        .any(|option| option.identity == repository.repo_root)
     {
-        root_projects.insert(
+        project_options.insert(
             0,
-            ProjectRow {
-                path: repository.repo_root.clone(),
+            AddressOption {
                 label: repository.repo_name.clone(),
-                display_path: repository.repo_root.clone(),
-                is_active: true,
-                is_worktree: repository.is_worktree,
-                branch: repository.branch.clone(),
+                title: repository.repo_root.clone(),
+                identity: repository.repo_root.clone(),
+                intent: Some(AddressIntent::Navigate {
+                    url: git_url.clone(),
+                }),
                 ..Default::default()
             },
         );
     }
+    project_options.push(AddressOption {
+        label_key: "agent-project-choose".into(),
+        intent: Some(AddressIntent::Section {
+            id: "browse-project".into(),
+        }),
+        ..Default::default()
+    });
+    let branch_label = if focused_panel == GitPanel::Branches {
+        selected_branch.clone()
+    } else {
+        repository.branch.clone()
+    };
+    let comparison = if focused_panel == GitPanel::Branches
+        && !selected_branch_base.is_empty()
+        && selected_branch_base != branch_label
+    {
+        format!("{selected_branch_base} ← {branch_label}")
+    } else {
+        branch_label.clone()
+    };
+    let mut branch_options = Vec::new();
+    for reference in branch_collection.references(&repository) {
+        branch_options.push(AddressOption {
+            label: reference.clone(),
+            identity: reference.clone(),
+            intent: Some(AddressIntent::GitBranch { reference }),
+            ..Default::default()
+        });
+    }
+    let mut branch_tabs = Vec::new();
+    for (id, label) in [
+        ("local", "git-local"),
+        ("remote", "git-remote"),
+        ("tags", "git-tags"),
+    ] {
+        branch_tabs.push(AddressOption {
+            label_key: label.into(),
+            intent: Some(AddressIntent::Section { id: id.into() }),
+            ..Default::default()
+        });
+    }
+    let progress = if branch_collection == GitBranchCollection::Local {
+        branches_progress
+    } else {
+        selected_branches_progress
+    };
+    let catalog = GitCatalog::from(branch_collection);
     let mut address = PageAddress {
-        current: current_page,
-        contextual,
+        current: current_page.clone(),
+        contextual: vec![
+            current_page,
+            AddressOption {
+                label_key: "editor-editor".into(),
+                icon: Some(vmux_api::BuiltinIcon::Code),
+                intent: Some(AddressIntent::Navigate { url: editor_url }),
+                ..Default::default()
+            },
+        ],
         fixed: vec![
+            AddressCrumb {
+                entry: AddressOption {
+                    label_key: panel_label.into(),
+                    icon: Some(panel_icon),
+                    intent: Some(AddressIntent::Section { id: panel.into() }),
+                    ..Default::default()
+                },
+                options: panels,
+                ..Default::default()
+            },
             AddressCrumb {
                 entry: AddressOption {
                     label: repository.repo_name.clone(),
                     title: repository.repo_root.clone(),
                     identity: repository.repo_root.clone(),
-                    intent: Some(AddressIntent::Navigate {
-                        url: git_url.clone(),
-                    }),
+                    intent: Some(AddressIntent::Navigate { url: git_url }),
                     ..Default::default()
                 },
-                options: root_projects
-                    .iter()
-                    .filter_map(|project| {
-                        let url = crate::GitUrl::from_path(std::path::Path::new(&project.path))?;
-                        Some(AddressOption {
-                            label: project.label.clone(),
-                            title: project.path.clone(),
-                            identity: project.path.clone(),
-                            intent: Some(AddressIntent::Navigate { url }),
-                            ..Default::default()
-                        })
-                    })
-                    .collect(),
+                options: project_options,
                 ..Default::default()
             },
             AddressCrumb {
                 entry: AddressOption {
-                    label: branch_label.clone(),
-                    icon: Some(vmux_api::BuiltinIcon::GitBranch),
+                    label: comparison.clone(),
+                    title: comparison,
+                    identity: branch_label.clone(),
                     intent: Some(AddressIntent::GitBranch {
-                        reference: branch_label.clone(),
+                        reference: branch_label,
                     }),
                     ..Default::default()
                 },
-                options: branch_collection
-                    .references(&repository)
-                    .into_iter()
-                    .map(|reference| AddressOption {
-                        label: reference.clone(),
-                        icon: Some(vmux_api::BuiltinIcon::GitBranch),
-                        intent: Some(AddressIntent::GitBranch { reference }),
-                        ..Default::default()
-                    })
-                    .collect(),
-                pending: selected_branches_progress.loading,
-                on_more: selected_branches_progress.has_more.then_some(
-                    AddressIntent::GitCatalogNext {
-                        catalog: selected_catalog,
-                    },
-                ),
+                options: branch_options,
+                tabs: branch_tabs,
+                selected_tab: Some(AddressIntent::Section {
+                    id: match branch_collection {
+                        GitBranchCollection::Local => "local",
+                        GitBranchCollection::Remote => "remote",
+                        GitBranchCollection::Tags => "tags",
+                    }
+                    .to_string(),
+                }),
+                pending: progress.loading,
+                on_open: (!progress.initialized)
+                    .then_some(AddressIntent::GitCatalogNext { catalog }),
+                on_more: progress
+                    .has_more
+                    .then_some(AddressIntent::GitCatalogNext { catalog }),
                 ..Default::default()
             },
         ],
         ..Default::default()
     };
-    if focused_panel == GitPanel::Commits && !revision_label.is_empty() {
-        address.fixed.push(AddressCrumb {
-            entry: AddressOption {
-                label: revision_label.clone(),
-                title: revision_title.clone(),
-                icon: Some(vmux_api::BuiltinIcon::GitBranch),
+    if focused_panel == GitPanel::Commits {
+        let mut commits = Vec::new();
+        let mut selected = None;
+        for commit in &repository.commits {
+            let entry = AddressOption {
+                label: commit.short_sha.clone(),
+                title: commit.summary.clone(),
                 intent: Some(AddressIntent::GitCommit {
-                    commit: selected_commit.clone(),
+                    commit: commit.sha.clone(),
                 }),
                 ..Default::default()
-            },
-            options: repository
-                .commits
-                .iter()
-                .map(|commit| AddressOption {
-                    label: commit.short_sha.clone(),
-                    title: commit.summary.clone(),
-                    icon: Some(vmux_api::BuiltinIcon::GitBranch),
-                    intent: Some(AddressIntent::GitCommit {
-                        commit: commit.sha.clone(),
+            };
+            if commit.sha == selected_commit {
+                selected = Some(entry.clone());
+            }
+            commits.push(entry);
+        }
+        if let Some(entry) = selected {
+            address.fixed.push(AddressCrumb {
+                entry,
+                options: commits,
+                active: true,
+                pending: commits_progress.loading,
+                on_more: commits_progress
+                    .has_more
+                    .then_some(AddressIntent::GitCatalogNext {
+                        catalog: GitCatalog::Commits,
                     }),
-                    ..Default::default()
-                })
-                .collect(),
-            pending: commits_progress.loading,
-            on_more: commits_progress
-                .has_more
-                .then_some(AddressIntent::GitCatalogNext {
-                    catalog: GitCatalog::Commits,
-                }),
-            active: true,
-            ..Default::default()
-        });
+                ..Default::default()
+            });
+        }
     }
+    let mut toolbar = Vec::new();
+    if focused_panel == GitPanel::Branches && viewed_total > 0 {
+        toolbar.push(ToolbarControl::badge(format!(
+            "{viewed_count} / {viewed_total} {}",
+            translate("git-viewed")
+        )));
+    }
+    let checkout = if focused_panel == GitPanel::Branches {
+        selected_branch_collection.checkout(&repository, &selected_branch)
+    } else {
+        None
+    };
+    let root = repository.repo_root.clone();
+    if let Some(checkout) = checkout.filter(|checkout| !checkout.current) {
+        toolbar.push(
+            ToolbarControl::button(translate("git-checkout"), move |_| {
+                if checkout.start_point.is_empty() {
+                    let _ = send(&ProjectActivateRequest {
+                        path: root.clone(),
+                        branch: checkout.branch.clone(),
+                        checkout: checkout.checkout.clone(),
+                        pane_id: None,
+                    });
+                } else {
+                    let _ = send(&GitCreateBranchRequest {
+                        repo_root: root.clone(),
+                        branch: checkout.branch.clone(),
+                        start_point: checkout.start_point.clone(),
+                    });
+                }
+            })
+            .icon(LineIcon::GitBranch)
+            .primary(),
+        );
+    } else {
+        toolbar.push(
+            ToolbarControl::button(translate("git-push-label"), move |_| {
+                let _ = send(&GitPushRequest { path: root.clone() });
+            })
+            .icon(LineIcon::Upload)
+            .primary()
+            .disabled(!can_push),
+        );
+    }
+    let picker_root = repository.repo_root.clone();
+    let first_commit = repository
+        .commits
+        .first()
+        .map(|commit| commit.sha.clone())
+        .unwrap_or_default();
     rsx! {
         PageBreadcrumbs {
             state: address,
@@ -246,554 +307,30 @@ pub(super) fn RepositoryHeader(
                     let _ = send(&GitPanelSelectRequest { panel: GitPanel::Branches });
                     let _ = send(&GitBranchSelectRequest { reference });
                 }
-                AddressIntent::GitCommit { commit } => {
-                    let _ = send(&GitPanelSelectRequest { panel: GitPanel::Commits });
-                    let _ = send(&GitCommitSelectRequest { commit });
-                }
-                AddressIntent::GitCatalogNext { catalog } => {
-                    let _ = send(&GitCatalogNextRequest { catalog });
+                AddressIntent::GitCommit { commit } => { let _ = send(&GitCommitSelectRequest { commit }); }
+                AddressIntent::GitCatalogNext { catalog } => { let _ = send(&GitCatalogNextRequest { catalog }); }
+                AddressIntent::Section { id } => {
+                    match id.as_str() {
+                        "changes" => { let _ = send(&GitPanelSelectRequest { panel: GitPanel::Files }); }
+                        "branches" => { let _ = send(&GitBranchDiffSelectRequest); }
+                        "commits" if !first_commit.is_empty() => { let _ = send(&GitCommitSelectRequest { commit: first_commit.clone() }); }
+                        "commits" => { let _ = send(&GitPanelSelectRequest { panel: GitPanel::Commits }); }
+                        "stash" => { let _ = send(&GitPanelSelectRequest { panel: GitPanel::Stash }); }
+                        "browse-project" => { let _ = send(&GitRepositoryPickerRequest { path: picker_root.clone() }); }
+                        "local" | "remote" | "tags" => {
+                            let collection = match id.as_str() {
+                                "remote" => GitBranchCollection::Remote,
+                                "tags" => GitBranchCollection::Tags,
+                                _ => GitBranchCollection::Local,
+                            };
+                            let _ = send(&GitBranchCollectionSelectRequest { collection });
+                        }
+                        _ => {}
+                    }
                 }
                 _ => {}
             },
         }
-        PageToolbar {
-                actions: rsx! {
-                    RepositoryActions {
-                        focused_panel,
-                        viewed_count,
-                        viewed_total,
-                        checkout_required,
-                        checkout_branch,
-                        checkout_path,
-                        checkout_start,
-                        push_path,
-                        can_push,
-                    }
-                },
-                BreadcrumbSeparator {}
-                ViewPicker {
-                    open_dropdown,
-                    focused_panel,
-                    changes: repository.files.len(),
-                    commits: repository.commits.len(),
-                    stashes: repository.stashes.len(),
-                    first_commit,
-                    commit_selected: selected_commit_entry.is_some(),
-                }
-                BreadcrumbSeparator {}
-                Dropdown {
-                    open: repository_open,
-                    dismiss_on_mouseleave: true,
-                    class: "min-w-0".to_string(),
-                    on_dismiss: move |_| {
-                        page.dismiss_header_dropdown(HeaderDropdown::Repository);
-                    },
-                    ProjectSelectTrigger {
-                        label: repository.repo_name.clone(),
-                        title: repository.repo_root.clone(),
-                        open: repository_open,
-                        open_mode: DropdownOpenMode::Hover,
-                        seed: repository.repo_root.clone(),
-                        on_hover_open: move |_| {
-                            page.set_header_dropdown(HeaderDropdown::Repository);
-                        },
-                        onclick: move |_| {
-                            let open = if repository_open {
-                                HeaderDropdown::Closed
-                            } else {
-                                HeaderDropdown::Repository
-                            };
-                            page.set_header_dropdown(open);
-                        },
-                    }
-                    if repository_open {
-                        ProjectSelectPopup {
-                            projects: root_projects.clone(),
-                            selected_path: repository.repo_root.clone(),
-                            class: "max-h-72 min-w-64 overflow-y-auto".to_string(),
-                            on_pick: move |project: ProjectRow| {
-                                let request = GitRepositoryRequest::project(
-                                    project.path.clone(),
-                                    project.label,
-                                    project.branch,
-                                );
-                                page.set_header_dropdown(HeaderDropdown::Closed);
-                                page.request_repository(request);
-                                let _ = send(&ProjectActivateRequest {
-                                    path: project.path,
-                                    branch: String::new(),
-                                    checkout: String::new(),
-                                    pane_id: None,
-                                });
-                            },
-                            on_add: move |_| {
-                                page.set_header_dropdown(HeaderDropdown::Closed);
-                                let _ = send(&GitRepositoryPickerRequest {
-                                    path: project_picker_dir.clone(),
-                                });
-                            },
-                        }
-                    }
-                }
-                BreadcrumbSeparator {}
-                Dropdown {
-                    open: branch_open,
-                    dismiss_on_mouseleave: true,
-                    class: "min-w-0".to_string(),
-                    on_dismiss: move |_| {
-                        page.dismiss_header_dropdown(HeaderDropdown::Branch);
-                    },
-                    DropdownTrigger {
-                        label: branch_label.clone(),
-                        title: branch_label.clone(),
-                        open: branch_open,
-                        open_mode: DropdownOpenMode::Hover,
-                        on_hover_open: move |_| {
-                            page.set_header_dropdown(HeaderDropdown::Branch);
-                        },
-                        onclick: move |_| {
-                            let open = if branch_open {
-                                HeaderDropdown::Closed
-                            } else {
-                                HeaderDropdown::Branch
-                            };
-                            page.set_header_dropdown(open);
-                        },
-                        leading: rsx! {
-                            IdentityOrb {
-                                seed: branch_label.clone(),
-                                alt: branch_label.clone(),
-                                class: "size-4".to_string(),
-                            }
-                            if !branch_base.is_empty() && branch_base != branch_label {
-                                span { class: "truncate text-muted-foreground", "{branch_base}" }
-                                span { class: "shrink-0 text-muted-foreground/65", "←" }
-                            }
-                        },
-                    }
-                    if branch_open {
-                        DropdownPopup {
-                            class: "flex max-h-96 min-w-80 flex-col overflow-hidden p-1.5",
-                            if focused_panel == GitPanel::Branches {
-                                div { class: "flex shrink-0 items-center gap-2 px-1 pb-1.5",
-                                    BranchCollectionTabs {
-                                        branch_collection,
-                                        onselect: move |collection| {
-                                            optimistic_branch_collection.set((), observed_branch_collection, collection);
-                                            if send(&GitBranchCollectionSelectRequest { collection }).is_err() { optimistic_branch_collection.clear(&()); }
-                                        },
-                                    }
-                                    span { class: "text-[9px] tabular-nums text-muted-foreground", "{selected_reference_count}" }
-                                }
-                                div {
-                                    class: "min-h-0 overflow-y-auto",
-                                    onscroll: move |event: Event<ScrollData>| {
-                                        if !branch_collection_pending && ScrollPreload::LIST.reached(&event) && selected_branches_progress.has_more && !selected_branches_progress.loading {
-                                            let _ = send(&GitCatalogNextRequest { catalog: selected_catalog });
-                                        }
-                                    },
-                                    match branch_collection {
-                                        GitBranchCollection::Local => rsx! {
-                                            for (index, branch) in repository.branches.iter().cloned().enumerate() {
-                                                {
-                                                    let checked_out = GitBranchCollection::Local
-                                                        .is_checked_out(&repository, &branch.name);
-                                                    rsx! {
-                                                        BranchRow {
-                                                            key: "header-local-{branch.name}",
-                                                            branch,
-                                                            index,
-                                                            remote: false,
-                                                            selected_branch: selected_branch.clone(),
-                                                            checked_out,
-                                                            onselected: move |_| {
-                                                                page.set_header_dropdown(HeaderDropdown::Closed);
-                                                            },
-                                                        }
-                                                    }
-                                                }
-                                            }
-                                        },
-                                        GitBranchCollection::Remote => rsx! {
-                                            for (index, branch) in repository.remote_branches.iter().cloned().enumerate() {
-                                                {
-                                                    let checked_out = GitBranchCollection::Remote
-                                                        .is_checked_out(&repository, &branch.name);
-                                                    rsx! {
-                                                        BranchRow {
-                                                            key: "header-remote-{branch.name}",
-                                                            branch,
-                                                            index,
-                                                            remote: true,
-                                                            selected_branch: selected_branch.clone(),
-                                                            checked_out,
-                                                            onselected: move |_| {
-                                                                page.set_header_dropdown(HeaderDropdown::Closed);
-                                                            },
-                                                        }
-                                                    }
-                                                }
-                                            }
-                                        },
-                                        GitBranchCollection::Tags => rsx! {
-                                            for (index, tag) in repository.tags.iter().cloned().enumerate() {
-                                                TagRow {
-                                                    key: "header-tag-{tag.name}",
-                                                    tag,
-                                                    index,
-                                                    selected_branch: selected_branch.clone(),
-                                                    onselected: move |_| {
-                                                        page.set_header_dropdown(HeaderDropdown::Closed);
-                                                    },
-                                                }
-                                            }
-                                        },
-                                    }
-                                    if !branch_collection_pending && selected_reference_count > 0 && selected_branches_progress.loaded && selected_branches_progress.loading {
-                                        div { class: "flex flex-col gap-2 px-2.5 py-2",
-                                            for width in ["w-9/12", "w-11/12", "w-8/12"] {
-                                                vmux_ui::components::skeleton::Skeleton { class: "h-4 {width} bg-foreground/[0.045]" }
-                                            }
-                                        }
-                                    }
-                                }
-                            } else {
-                                div {
-                                    class: "min-h-0 overflow-y-auto",
-                                    onscroll: move |event: Event<ScrollData>| {
-                                        if ScrollPreload::LIST.reached(&event) && branches_progress.has_more && !branches_progress.loading {
-                                            let _ = send(&GitCatalogNextRequest { catalog: GitCatalog::LocalBranches });
-                                        }
-                                    },
-                                    for branch in repository.branches.iter() {
-                                        {
-                                            let name = branch.name.clone();
-                                            rsx! {
-                                                button {
-                                                    key: "header-branch-{name}",
-                                                    r#type: "button",
-                                                    class: if branch.current {
-                                                        "flex w-full items-center gap-2 rounded-md bg-foreground/[0.075] px-2 py-2 text-left text-xs text-foreground"
-                                                    } else {
-                                                        "flex w-full items-center gap-2 rounded-md px-2 py-2 text-left text-xs text-muted-foreground hover:bg-foreground/[0.055] hover:text-foreground"
-                                                    },
-                                                    onclick: move |_| {
-                                                        page.set_header_dropdown(HeaderDropdown::Closed);
-                                                        let _ = send(&GitPanelSelectRequest { panel: GitPanel::Branches });
-                                                        let _ = send(&GitBranchCollectionSelectRequest {
-                                                            collection: GitBranchCollection::Local,
-                                                        });
-                                                        let _ = send(&GitBranchSelectRequest {
-                                                            reference: name.clone(),
-                                                        });
-                                                    },
-                                                    IdentityOrb {
-                                                        seed: branch.name.clone(),
-                                                        alt: branch.name.clone(),
-                                                        class: "size-5".to_string(),
-                                                    }
-                                                    span { class: "min-w-0 flex-1 truncate font-medium", "{branch.name}" }
-                                                    if branch.current {
-                                                        LineIconView { icon: LineIcon::Check, class: "size-3.5 shrink-0" }
-                                                    }
-                                                }
-                                            }
-                                        }
-                                    }
-                                }
-                            }
-                            if selected_reference_count == 0 {
-                                if branch_collection_pending || (!selected_branches_progress.loaded && !selected_branches_progress.failed) {
-                                    div { class: "flex min-h-28 flex-col justify-center gap-2 px-2.5 py-2",
-                                        for width in ["w-9/12", "w-11/12", "w-8/12"] {
-                                            vmux_ui::components::skeleton::Skeleton { class: "h-4 {width} bg-foreground/[0.045]" }
-                                        }
-                                    }
-                                } else if selected_branches_progress.loaded {
-                                    div { class: "flex min-h-28 items-center justify-center px-3 text-xs text-muted-foreground", {translate("common-no-results")} }
-                                }
-                            }
-                        }
-                    }
-                }
-                if focused_panel == GitPanel::Commits && selected_commit_entry.is_some() {
-                    div { class: "flex min-w-0 items-center",
-                        BreadcrumbSeparator {}
-                        Dropdown {
-                            open: commit_open,
-                            dismiss_on_mouseleave: true,
-                            class: "min-w-0".to_string(),
-                            on_dismiss: move |_| {
-                                page.dismiss_header_dropdown(HeaderDropdown::Commit);
-                            },
-                            DropdownTrigger {
-                                label: revision_label.clone(),
-                                title: "{revision_title}",
-                                open: commit_open,
-                                open_mode: DropdownOpenMode::Hover,
-                                on_hover_open: move |_| {
-                                    page.set_header_dropdown(HeaderDropdown::Commit);
-                                },
-                                onclick: move |_| {
-                                    let open = if commit_open {
-                                        HeaderDropdown::Closed
-                                    } else {
-                                        HeaderDropdown::Commit
-                                    };
-                                    page.set_header_dropdown(open);
-                                },
-                                leading: rsx! {
-                                    LineIconView { icon: LineIcon::GitCommit, class: "size-3.5 shrink-0" }
-                                },
-                            }
-                            if commit_open {
-                                DropdownPopup {
-                                    class: "min-w-80 overflow-hidden p-1.5",
-                                    div {
-                                        class: "max-h-80 overflow-y-auto",
-                                        onscroll: move |event: Event<ScrollData>| {
-                                            if ScrollPreload::LIST.reached(&event) && commits_progress.has_more && !commits_progress.loading {
-                                                let _ = send(&GitCatalogNextRequest {
-                                                    catalog: GitCatalog::Commits,
-                                                });
-                                            }
-                                        },
-                                        for commit in repository.commits.iter() {
-                                            {
-                                                let sha = commit.sha.clone();
-                                                rsx! {
-                                                    button {
-                                                        key: "header-commit-{sha}",
-                                                        r#type: "button",
-                                                        class: if selected_commit == commit.sha {
-                                                            "flex w-full items-center gap-2 rounded-md bg-foreground/[0.075] px-2 py-2 text-left text-xs text-foreground"
-                                                        } else {
-                                                            "flex w-full items-center gap-2 rounded-md px-2 py-2 text-left text-xs text-muted-foreground hover:bg-foreground/[0.055] hover:text-foreground"
-                                                        },
-                                                        title: "{commit.summary}",
-                                                        onclick: move |_| {
-                                                            page.set_header_dropdown(HeaderDropdown::Closed);
-                                                            let _ = send(&GitPanelSelectRequest { panel: GitPanel::Commits });
-                                                            let _ = send(&GitCommitSelectRequest { commit: sha.clone() });
-                                                        },
-                                                        code { class: "shrink-0 font-mono text-[10px] text-git-reference", "{commit.short_sha}" }
-                                                        span { class: "min-w-0 flex-1 truncate font-medium", "{commit.summary}" }
-                                                        span { class: "shrink-0 text-[10px] text-muted-foreground", "{commit.date}" }
-                                                    }
-                                                }
-                                            }
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-        }
-    }
-}
-
-#[component]
-fn RepositoryActions(
-    focused_panel: GitPanel,
-    viewed_count: usize,
-    viewed_total: u32,
-    checkout_required: bool,
-    checkout_branch: String,
-    checkout_path: String,
-    checkout_start: String,
-    push_path: String,
-    can_push: bool,
-) -> Element {
-    rsx! {
-        if focused_panel == GitPanel::Branches && viewed_total > 0 {
-            span { class: "mr-1 shrink-0 text-[11px] tabular-nums text-muted-foreground",
-                "{viewed_count} / {viewed_total} "
-                {translate("git-viewed")}
-            }
-        }
-        if checkout_required {
-            Button {
-                variant: ButtonVariant::Primary,
-                size: ButtonSize::Xs,
-                class: "h-8 gap-1.5 px-2.5 text-[11px] font-medium".to_string(),
-                onclick: move |_| {
-                    if checkout_start.is_empty() {
-                        let _ = send(&ProjectActivateRequest {
-                            path: push_path.clone(),
-                            branch: checkout_branch.clone(),
-                            checkout: checkout_path.clone(),
-                            pane_id: None,
-                        });
-                    } else {
-                        let _ = send(&GitCreateBranchRequest {
-                            repo_root: push_path.clone(),
-                            branch: checkout_branch.clone(),
-                            start_point: checkout_start.clone(),
-                        });
-                    }
-                },
-                LineIconView { icon: LineIcon::GitBranch, class: "size-4" }
-                span { {translate("git-checkout")} }
-            }
-        } else {
-            Button {
-                variant: ButtonVariant::Primary,
-                size: ButtonSize::Xs,
-                class: "h-8 gap-1.5 px-2.5 text-[11px] font-medium".to_string(),
-                disabled: !can_push,
-                onclick: move |_| {
-                    let _ = send(&GitPushRequest { path: push_path.clone() });
-                },
-                LineIconView { icon: LineIcon::Upload, class: "size-4" }
-                span { {translate("git-push-label")} }
-            }
-        }
-    }
-}
-
-#[component]
-fn ViewPicker(
-    open_dropdown: HeaderDropdown,
-    focused_panel: GitPanel,
-    changes: usize,
-    commits: usize,
-    stashes: usize,
-    first_commit: String,
-    commit_selected: bool,
-) -> Element {
-    let page = use_context::<GitPageState>();
-    let open = open_dropdown == HeaderDropdown::View;
-    let (icon, label, count) = match focused_panel {
-        GitPanel::Files => (LineIcon::File, translate("git-changes"), changes),
-        GitPanel::Branches => (LineIcon::GitBranch, translate("git-branch-changes"), 0),
-        GitPanel::Commits => (LineIcon::GitCommit, translate("git-commits"), commits),
-        GitPanel::Stash => (LineIcon::Package, translate("git-stashes"), stashes),
-    };
-    rsx! {
-        Dropdown {
-            open,
-            dismiss_on_mouseleave: true,
-            class: "shrink-0".to_string(),
-            on_dismiss: move |_| {
-                page.dismiss_header_dropdown(HeaderDropdown::View);
-            },
-            div { class: "flex items-center rounded-md hover:bg-foreground/[0.055]",
-                DropdownTrigger {
-                    label,
-                    open,
-                    open_mode: DropdownOpenMode::Hover,
-                    on_hover_open: move |_| {
-                        page.set_header_dropdown(HeaderDropdown::View);
-                    },
-                    onclick: move |_| {
-                        let open = if open {
-                            HeaderDropdown::Closed
-                        } else {
-                            HeaderDropdown::View
-                        };
-                        page.set_header_dropdown(open);
-                    },
-                    leading: rsx! {
-                        LineIconView { icon, class: "size-3.5 shrink-0" }
-                    },
-                    trailing: rsx! {
-                        if count > 0 {
-                            span { class: "text-[10px] tabular-nums", "{count}" }
-                        }
-                    },
-                }
-                if focused_panel == GitPanel::Commits && commit_selected {
-                    button {
-                        r#type: "button",
-                        class: "mr-1 flex size-6 shrink-0 items-center justify-center rounded text-muted-foreground hover:bg-foreground/[0.07] hover:text-foreground",
-                        title: translate("git-branch-changes"),
-                        aria_label: translate("git-branch-changes"),
-                        onclick: move |_| {
-                            page.set_header_dropdown(HeaderDropdown::Closed);
-                            let _ = send(&GitBranchDiffSelectRequest);
-                        },
-                        LineIconView { icon: LineIcon::X, class: "size-3" }
-                    }
-                }
-            }
-            if open {
-                DropdownPopup { class: "min-w-48 p-1.5",
-                    ViewPickerItem {
-                        active: focused_panel == GitPanel::Files,
-                        icon: LineIcon::File,
-                        label: translate("git-changes"),
-                        count: changes,
-                        onselect: move |_| {
-                            let _ = send(&GitPanelSelectRequest { panel: GitPanel::Files });
-                        },
-                    }
-                    div { class: "mx-1 my-1 h-px bg-foreground/[0.07]" }
-                    ViewPickerItem {
-                        active: focused_panel == GitPanel::Branches,
-                        icon: LineIcon::GitBranch,
-                        label: translate("git-branch-changes"),
-                        count: 0,
-                        onselect: move |_| {
-                            let _ = send(&GitBranchDiffSelectRequest);
-                        },
-                    }
-                    ViewPickerItem {
-                        active: focused_panel == GitPanel::Commits,
-                        icon: LineIcon::GitCommit,
-                        label: translate("git-commits"),
-                        count: commits,
-                        onselect: move |_| {
-                            if first_commit.is_empty() {
-                                let _ = send(&GitPanelSelectRequest { panel: GitPanel::Commits });
-                            } else {
-                                let _ = send(&GitCommitSelectRequest {
-                                    commit: first_commit.clone(),
-                                });
-                            }
-                        },
-                    }
-                    ViewPickerItem {
-                        active: focused_panel == GitPanel::Stash,
-                        icon: LineIcon::Package,
-                        label: translate("git-stashes"),
-                        count: stashes,
-                        onselect: move |_| {
-                            let _ = send(&GitPanelSelectRequest { panel: GitPanel::Stash });
-                        },
-                    }
-                }
-            }
-        }
-    }
-}
-
-#[component]
-fn ViewPickerItem(
-    active: bool,
-    icon: LineIcon,
-    label: String,
-    count: usize,
-    onselect: EventHandler<()>,
-) -> Element {
-    let page = use_context::<GitPageState>();
-    rsx! {
-        button {
-            r#type: "button",
-            class: if active {
-                "flex w-full items-center gap-2 rounded-md bg-foreground/[0.075] px-2 py-2 text-left text-xs text-foreground"
-            } else {
-                "flex w-full items-center gap-2 rounded-md px-2 py-2 text-left text-xs text-muted-foreground hover:bg-foreground/[0.055] hover:text-foreground"
-            },
-            onclick: move |_| {
-                page.set_header_dropdown(HeaderDropdown::Closed);
-                onselect.call(());
-            },
-            LineIconView { icon, class: "size-3.5 shrink-0" }
-            span { class: "min-w-0 flex-1 truncate font-medium", "{label}" }
-            if count > 0 {
-                span { class: "shrink-0 text-[9px] tabular-nums text-muted-foreground", "{count}" }
-            }
-        }
+        PageToolbar { controls: toolbar }
     }
 }

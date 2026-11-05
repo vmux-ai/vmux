@@ -14,8 +14,8 @@ use dioxus::prelude::*;
 use vmux_api::address::{AddressCrumb, AddressIntent, AddressOption, PageAddress};
 use vmux_ui::components::button::{Button, ButtonSize, ButtonVariant};
 use vmux_ui::components::input::Input;
-use vmux_ui::components::manager::{ManagerSearchAction, ManagerSelect, ManagerSelectItem};
-use vmux_ui::components::page_address::{PageBreadcrumbs, PageToolbar};
+use vmux_ui::components::manager::{ManagerSelect, ManagerSelectItem};
+use vmux_ui::components::page_address::{PageBreadcrumbs, PageToolbar, ToolbarControl};
 use vmux_ui::components::switch::{Switch, SwitchThumb};
 use vmux_ui::dioxus_ext::attributes;
 use vmux_ui::focus::FocusClaim;
@@ -177,13 +177,9 @@ pub fn Page() -> Element {
                     }
                 }
                 main { id: "settings-scroll-viewport", class: "min-h-0 min-w-0 flex-1 overflow-y-auto",
-                    PageToolbar { actions: rsx! {
-                        ManagerSearchAction {
-                            value: query.clone(),
-                            placeholder: translate("command-search"),
-                            onsearch: move |query| { let _ = send(&SettingsFilterRequest { query }); },
-                        }
-                    } }
+                    PageToolbar { controls: vec![ToolbarControl::search(query.clone(), translate("command-search"), move |query| {
+                        let _ = send(&SettingsFilterRequest { query });
+                    })] }
                     SettingsScrollSpy {
                         active: active_section,
                     }

@@ -7,10 +7,9 @@ use crate::{
 use dioxus::prelude::*;
 use vmux_ui::components::manager::{
     ManagerCollection, ManagerGridSize, ManagerList, ManagerRow, ManagerSection, ManagerView,
-    ManagerViewToggle,
 };
 use vmux_ui::components::page::PageShell;
-use vmux_ui::components::page_address::PageToolbar;
+use vmux_ui::components::page_address::{PageToolbar, ToolbarControl};
 use vmux_ui::hooks::{send, use_theme, use_ui_state};
 use vmux_ui::i18n::{TranslationValue, translate, translate_with};
 use vmux_ui::icon::{BuiltinIconView, LineIcon, LineIconView};
@@ -40,6 +39,19 @@ pub fn Page() -> Element {
             TranslationValue::Number(state.shortcut_count as i64),
         )],
     );
+    let mut toolbar = vec![ToolbarControl::badge(subtitle)];
+    toolbar.extend(ToolbarControl::view(
+        view,
+        translate("tools-view-list"),
+        translate("tools-view-grid"),
+        move |next| {
+            let view = match next {
+                ManagerView::List => vmux_ecs::CollectionView::List,
+                ManagerView::Grid => vmux_ecs::CollectionView::Grid,
+            };
+            let _ = send(&ShortcutCollectionViewRequest { view });
+        },
+    ));
     rsx! {
         PageShell {
             tabindex: "-1",
@@ -64,21 +76,7 @@ pub fn Page() -> Element {
                 let _ = send(&ShortcutProbePressRequest { stroke });
             },
             PageToolbar {
-                actions: rsx! {
-                    span { class: "text-[10px] tabular-nums text-muted-foreground", "{subtitle}" }
-                    ManagerViewToggle {
-                        view,
-                        list_label: translate("tools-view-list"),
-                        grid_label: translate("tools-view-grid"),
-                        onchange: move |next| {
-                            let view = match next {
-                                ManagerView::List => vmux_ecs::CollectionView::List,
-                                ManagerView::Grid => vmux_ecs::CollectionView::Grid,
-                            };
-                            let _ = send(&ShortcutCollectionViewRequest { view });
-                        },
-                    }
-                },
+                controls: toolbar,
             }
             ManagerList {
                     div {

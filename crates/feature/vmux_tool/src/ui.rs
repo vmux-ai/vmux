@@ -16,10 +16,10 @@ use vmux_ui::components::avatar::AgentThumbnail;
 use vmux_ui::components::breadcrumb::BreadcrumbOption;
 use vmux_ui::components::manager::{
     ManagerButton, ManagerButtonVariant, ManagerCard, ManagerCollection, ManagerDetails,
-    ManagerEmpty, ManagerList, ManagerPage, ManagerRow, ManagerSearchAction, ManagerSection,
-    ManagerSpinner, ManagerThumbnail, ManagerToolbar, ManagerView, ManagerViewToggle,
+    ManagerEmpty, ManagerList, ManagerPage, ManagerRow, ManagerSection, ManagerSpinner,
+    ManagerThumbnail, ManagerView,
 };
-use vmux_ui::components::page_address::{PageBreadcrumbs, PageToolbar};
+use vmux_ui::components::page_address::{PageBreadcrumbs, PageToolbar, ToolbarControl};
 use vmux_ui::hooks::{send, use_theme, use_ui_state};
 use vmux_ui::i18n::{TranslationValue, translate, translate_with};
 use vmux_ui::icon::{LineIcon, LineIconView};
@@ -46,39 +46,66 @@ pub fn Page() -> Element {
     let tools_query = state.view.query.clone();
     let extension_query = extension_state.query.clone();
     let browse_query = extension_query.clone();
+    let mut toolbar = Vec::new();
+    if route == "extensions" {
+        toolbar.push(
+            ToolbarControl::search(
+                extension_query,
+                translate("extensions-search"),
+                move |query| {
+                    let _ = send(&vmux_api::extension::ExtFilterRequest { query });
+                },
+            )
+            .keys(&["Enter"], move |_| {
+                if !browse_query.trim().is_empty() {
+                    let _ = send(&vmux_api::extension::ExtBrowseStoreRequest {
+                        query: browse_query.clone(),
+                    });
+                }
+            }),
+        );
+    } else {
+        toolbar.push(ToolbarControl::search(
+            tools_query,
+            translate("tools-search"),
+            move |query| {
+                let _ = send(&ToolsFilterRequest { query });
+            },
+        ));
+        if state.snapshot.loaded && state.view.visible_count > 0 {
+            toolbar.extend(ToolbarControl::view(
+                manager_view(),
+                translate("tools-view-list"),
+                translate("tools-view-grid"),
+                move |view| manager_view.set(view),
+            ));
+        }
+        if let Some(provider) = state.view.apply_provider.clone() {
+            let pending = state.pending.contains(&ToolOperationKey::new(
+                provider.clone(),
+                ToolOperationKind::Apply,
+                "",
+            ));
+            toolbar.push(
+                ToolbarControl::button(translate("tools-apply"), move |_| {
+                    send_operation(
+                        provider.clone(),
+                        ToolOperationKind::Apply,
+                        String::new(),
+                        String::new(),
+                    );
+                })
+                .disabled(pending),
+            );
+        }
+    }
     rsx! {
         document::Title { "{title}" }
         ManagerPage {
             ToolsHeader {
-                view_controls: rsx! { if route != "extensions" && state.snapshot.loaded && state.view.visible_count > 0 { ManagerViewToggle { view: manager_view(), list_label: translate("tools-view-list"), grid_label: translate("tools-view-grid"), onchange: move |view| manager_view.set(view) } } },
+                controls: toolbar,
                 active: route.clone(),
                 providers: state.snapshot.providers.clone(),
-                actions: rsx! {
-                    if route == "extensions" {
-                        ManagerSearchAction {
-                            value: extension_query,
-                            placeholder: translate("extensions-search"),
-                            onsearch: move |query| {
-                                let _ = send(&vmux_api::extension::ExtFilterRequest { query });
-                            },
-                            onkeydown: Some(EventHandler::new(move |event: KeyboardEvent| {
-                                if event.key() == Key::Enter && !browse_query.trim().is_empty() {
-                                    let _ = send(&vmux_api::extension::ExtBrowseStoreRequest {
-                                        query: browse_query.clone(),
-                                    });
-                                }
-                            })),
-                        }
-                    } else {
-                        ManagerSearchAction {
-                            value: tools_query,
-                            placeholder: translate("tools-search"),
-                            onsearch: move |query| {
-                                let _ = send(&ToolsFilterRequest { query });
-                            },
-                        }
-                    }
-                },
             }
             if route == "extensions" {
                 ExtensionManager { state: extension_state }
@@ -238,8 +265,7 @@ impl ToolRouteOption {
 fn ToolsHeader(
     active: String,
     providers: Vec<ToolProviderMetadata>,
-    #[props(default = rsx! {})] actions: Element,
-    #[props(default = rsx! {})] view_controls: Element,
+    controls: Vec<ToolbarControl>,
 ) -> Element {
     let options = ToolRouteOption::all(providers);
     let selected = options
@@ -269,8 +295,7 @@ fn ToolsHeader(
     rsx! {
         PageBreadcrumbs { state: address }
         PageToolbar {
-            actions,
-            view_controls,
+            controls: controls,
         }
     }
 }
@@ -306,7 +331,6 @@ fn ToolManager(state: ToolsUiState, manager_view: Signal<ManagerView>) -> Elemen
         let _ = active_route;
         selected.set(None);
     }));
-    let apply_provider = view.apply_provider.clone();
     let selection = selected();
     let mut installed = Vec::new();
     let mut available = Vec::new();
@@ -334,27 +358,6 @@ fn ToolManager(state: ToolsUiState, manager_view: Signal<ManagerView>) -> Elemen
         })
     });
     rsx! {
-        ManagerToolbar {
-            if let Some(provider) = apply_provider {
-                ManagerButton {
-                    variant: ManagerButtonVariant::Secondary,
-                    disabled: pending.contains(&ToolOperationKey::new(
-                        provider.clone(),
-                        ToolOperationKind::Apply,
-                        "",
-                    )),
-                    onclick: move |_| {
-                        send_operation(
-                            provider.clone(),
-                            ToolOperationKind::Apply,
-                            String::new(),
-                            String::new(),
-                        );
-                    },
-                    {translate("tools-apply")}
-                }
-            }
-        }
         div { class: "flex min-h-0 flex-1 overflow-hidden bg-background/45",
             ManagerList {
                     if view.show_brewfile {

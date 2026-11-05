@@ -18,15 +18,14 @@ use vmux_ui::components::context_menu::{
     ContextMenu, ContextMenuContent, ContextMenuItem, ContextMenuTrigger,
 };
 use vmux_ui::components::dropdown::{Dropdown, DropdownAlign, DropdownPopup};
-use vmux_ui::components::filter::{FilterMenu, FilterOption, FilterPill, FilterTrigger};
+use vmux_ui::components::filter::{FilterMenu, FilterOption};
 use vmux_ui::components::inline_edit::EditableText;
 use vmux_ui::components::manager::{
-    ManagerAddButton, ManagerEmpty, ManagerExpandableSearch, ManagerIconButton, ManagerPage,
-    ManagerSearch, ManagerSidebarItem, ManagerSidebarSection, ManagerView, ManagerViewToggle,
+    ManagerEmpty, ManagerPage, ManagerSidebarItem, ManagerSidebarSection, ManagerView,
     WorkspaceLayout,
 };
 use vmux_ui::components::motion::{Collapse, Collapsible};
-use vmux_ui::components::page_address::{PageBreadcrumbs, PageToolbar};
+use vmux_ui::components::page_address::{PageBreadcrumbs, PageToolbar, ToolbarControl};
 use vmux_ui::components::sheet::{SheetHeaderAction, SheetHeaderChevron};
 use vmux_ui::components::skeleton::Skeleton;
 use vmux_ui::hooks::{
@@ -197,7 +196,6 @@ fn SessionsManagerActions(
     filter_picker: SessionFilterPicker,
     presentation: Rc<ManagerPresentation>,
 ) -> Element {
-    let mut search_open = use_signal(|| false);
     let mut delete_confirm_open = use_signal(|| false);
     let selection = use_context::<SessionSelection>();
     let selected_ids = selection.ids();
@@ -225,112 +223,105 @@ fn SessionsManagerActions(
         .collect::<Vec<_>>();
     let mutations = use_context::<SessionMutations>();
     let deleted_provider_count = mutations.deleted_provider_count();
-    let open = search_open();
-    let active = !controls.query().is_empty() || !presentation.selected_filters.is_empty();
     let delete_confirm = use_memo(move || Some(delete_confirm_open()));
+    let mut toolbar = Vec::new();
+    if deleted_provider_count > 0 {
+        toolbar.push(
+            ToolbarControl::button(translate("sessions-restore-deleted"), move |_| {
+                mutations.restore_deleted()
+            })
+            .icon(LineIcon::RotateCcw),
+        );
+    }
+    if selected_count > 0 {
+        toolbar.push(ToolbarControl::badge(selected_count.to_string()));
+        toolbar.push(
+            ToolbarControl::button(
+                translate(if selected_archived {
+                    "common-restore"
+                } else {
+                    "common-archive"
+                }),
+                move |_| {
+                    if selected_archived {
+                        mutations.restore(selected_targets.clone());
+                    } else {
+                        mutations.archive(selected_targets.clone());
+                    }
+                    selection.clear();
+                },
+            )
+            .icon(if selected_archived {
+                LineIcon::RotateCcw
+            } else {
+                LineIcon::Archive
+            }),
+        );
+        if !selected_deletable.is_empty() {
+            toolbar.push(
+                ToolbarControl::button(translate("sessions-delete"), move |_| {
+                    delete_confirm_open.set(true)
+                })
+                .icon(LineIcon::Trash),
+            );
+        }
+        toolbar.push(
+            ToolbarControl::button(translate("common-cancel"), move |_| selection.clear())
+                .icon(LineIcon::X),
+        );
+    }
+    toolbar.push(
+        ToolbarControl::search(
+            controls.query(),
+            translate("sessions-search"),
+            move |query| controls.set_query(query),
+        )
+        .keys(&["Backspace"], move |_| {
+            if controls.query().is_empty() {
+                controls.pop_filter();
+            }
+        }),
+    );
+    for (index, filter) in presentation.selected_filters.iter().enumerate() {
+        toolbar.push(
+            ToolbarControl::button(filter.label.clone(), move |_| controls.remove_filter(index))
+                .icon(LineIcon::X)
+                .text(),
+        );
+    }
+    toolbar.push(
+        ToolbarControl::button(translate("common-filter"), move |_| {
+            filter_picker.toggle(controls)
+        })
+        .icon(LineIcon::Hash)
+        .active(presentation.filter_requested),
+    );
+    toolbar.extend(ToolbarControl::view(
+        controls.view(),
+        translate("sessions-view-list"),
+        translate("sessions-view-board"),
+        move |view| controls.set_view(view),
+    ));
+    toolbar.push(
+        ToolbarControl::button(translate("common-add"), move |_| StartPage::open())
+            .icon(LineIcon::Plus)
+            .primary(),
+    );
     rsx! {
-        div { class: "flex shrink-0 items-center gap-3",
-            if deleted_provider_count > 0 {
-                ManagerIconButton {
-                    label: translate("sessions-restore-deleted"),
-                    onclick: move |_| mutations.restore_deleted(),
-                    LineIconView { icon: LineIcon::RotateCcw, class: "size-3.5".to_string() }
+        PageToolbar { controls: toolbar }
+        if presentation.filter_requested {
+            div { class: "relative z-30 ml-auto w-72 [&>div]:top-0",
+                SessionFilterMenu {
+                    groups: presentation.category_groups.clone(),
+                    sessions: presentation.snapshot.sessions.clone(),
+                    repositories: presentation.repositories.clone(),
+                    needle: presentation.filter_needle.clone(),
+                    step: filter_picker.filter_step(),
+                    value: filter_picker.filter_value(),
+                    onstep: move |step| filter_picker.select_step(controls, step),
+                    onvalue: move |value| filter_picker.set_value(value),
+                    onselect: move |filter| filter_picker.apply(controls, filter),
                 }
-            }
-            if selected_count > 0 {
-                span { class: "px-1 text-[10px] tabular-nums text-muted-foreground", "{selected_count}" }
-                ManagerIconButton {
-                    label: if selected_archived { translate("common-restore") } else { translate("common-archive") },
-                    onclick: move |_| {
-                        if selected_archived {
-                            mutations.restore(selected_targets.clone());
-                        } else {
-                            mutations.archive(selected_targets.clone());
-                        }
-                        selection.clear();
-                    },
-                    LineIconView {
-                        icon: if selected_archived { LineIcon::RotateCcw } else { LineIcon::Archive },
-                        class: "size-3.5".to_string(),
-                    }
-                }
-                if !selected_deletable.is_empty() {
-                    ManagerIconButton {
-                        label: translate("sessions-delete"),
-                        onclick: move |_| {
-                            delete_confirm_open.set(true);
-                        },
-                        LineIconView { icon: LineIcon::Trash, class: "size-3.5".to_string() }
-                    }
-                }
-                ManagerIconButton {
-                    label: translate("common-cancel"),
-                    onclick: move |_| selection.clear(),
-                    LineIconView { icon: LineIcon::X, class: "size-3.5".to_string() }
-                }
-            }
-            ManagerExpandableSearch {
-                open,
-                active,
-                label: translate("sessions-search"),
-                ontoggle: move |_| {
-                    search_open.set(!open);
-                    if open && controls.query().starts_with('#') {
-                        filter_picker.dismiss(controls);
-                    }
-                },
-                ondismiss: move |_| {
-                    search_open.set(false);
-                    if controls.query().starts_with('#') {
-                        filter_picker.dismiss(controls);
-                    }
-                },
-                ManagerSearch {
-                    value: controls.query(),
-                    placeholder: translate("sessions-search"),
-                    autofocus: true,
-                    onsearch: move |query: String| controls.set_query(query),
-                    onkeydown: Some(EventHandler::new(move |event: KeyboardEvent| {
-                        if event.key() == Key::Backspace && controls.query().is_empty() {
-                            controls.pop_filter();
-                        }
-                    })),
-                    prefix: rsx! {
-                        for (index, filter) in presentation.selected_filters.iter().cloned().enumerate() {
-                            FilterPill {
-                                key: "filter-pill-{index}",
-                                label: filter.label,
-                                dot: filter.dot,
-                                clear_label: translate("common-remove-filter"),
-                                onclear: move |_| controls.remove_filter(index),
-                            }
-                        }
-                    },
-                    suffix: rsx! {
-                        FilterTrigger {
-                            active: presentation.filter_requested,
-                            label: translate("common-filter"),
-                            onclick: move |_| filter_picker.toggle(controls),
-                        }
-                    },
-                }
-                if presentation.filter_requested {
-                    SessionFilterMenu {
-                        groups: presentation.category_groups.clone(),
-                        sessions: presentation.snapshot.sessions.clone(),
-                        repositories: presentation.repositories.clone(),
-                        needle: presentation.filter_needle.clone(),
-                        step: filter_picker.filter_step(),
-                        value: filter_picker.filter_value(),
-                        onstep: move |step| filter_picker.select_step(controls, step),
-                        onvalue: move |value| filter_picker.set_value(value),
-                        onselect: move |filter| filter_picker.apply(controls, filter),
-                    }
-                }
-            }
-            ManagerAddButton {
-                label: translate("common-add"),
-                onclick: move |_| StartPage::open(),
             }
         }
         AlertDialogRoot {
@@ -395,15 +386,7 @@ fn SessionsManagerContent(
         }
         WorkspaceLayout {
             toolbar: rsx! {
-                PageToolbar {
-                    actions: rsx! {
-                        SessionsManagerActions {
-                            controls,
-                            filter_picker,
-                            presentation: Rc::clone(&presentation),
-                        }
-                    },
-                }
+                SessionsManagerActions { controls, filter_picker, presentation: Rc::clone(&presentation) }
             },
             sidebar: rsx! {
                 SessionCategories {
@@ -423,15 +406,6 @@ fn SessionsManagerContent(
                     },
                 }
             },
-                div { class: "flex h-7 shrink-0 items-center justify-end px-3",
-                    ManagerViewToggle {
-                        view: controls.view(),
-                        list_label: translate("sessions-view-list"),
-                        grid_label: translate("sessions-view-board"),
-                        grid_icon: LineIcon::Columns3,
-                        onchange: move |view| controls.set_view(view),
-                    }
-                }
             div { id: "sessions-scroll", class: "flex min-h-0 flex-1 flex-col overflow-auto [scrollbar-gutter:stable]",
             if presentation.loading {
                 SessionsSkeleton {}
