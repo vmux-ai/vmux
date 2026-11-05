@@ -63,7 +63,6 @@ enum EventAdmission {
 struct DeliveredFrame {
     sequence: u64,
     revision: u64,
-    epoch: u64,
     failures: u8,
     requests: Vec<QueuedDomRequest>,
 }
@@ -174,6 +173,29 @@ impl FramePoll {
             && self.failed.is_none()
             && dom.delivered_frame.borrow().is_none()
     }
+
+    fn acknowledge(&self, dom: &Dom) -> bool {
+        if !self.accepted_by(dom) {
+            return false;
+        }
+        let Some(sequence) = self.acknowledged else {
+            return false;
+        };
+        let revision = {
+            let mut delivered = dom.delivered_frame.borrow_mut();
+            if delivered
+                .as_ref()
+                .is_none_or(|frame| frame.sequence != sequence)
+            {
+                return false;
+            }
+            delivered.take().unwrap().revision
+        };
+        dom.page_flushed();
+        dom.lifecycle
+            .update(LifecycleUpdate::FrameApplied(revision));
+        true
+    }
 }
 
 impl Dom {
@@ -264,9 +286,8 @@ impl Dom {
     }
 
     pub(crate) fn interaction_epoch_changed(&self, previous_epoch: u64) {
-        if !self.invalidate_delivered_frame() {
-            self.clear_transient_requests();
-        }
+        self.cancel_parked_poll();
+        self.clear_transient_requests();
         if self.blocked.get() {
             self.deferred_events.borrow_mut().clear();
             self.waker.wake();
@@ -301,9 +322,8 @@ impl Dom {
 
     pub(crate) fn update_instance(&self, instance: crate::Instance) {
         let revision = self.next_navigation_revision();
-        if !self.invalidate_delivered_frame() {
-            self.clear_transient_requests();
-        }
+        self.cancel_parked_poll();
+        self.clear_transient_requests();
         self.deferred_events.borrow_mut().clear();
         let _reactor = self.reactor.enter();
         let _host = HostScope::enter(self.host.clone());
@@ -416,34 +436,17 @@ impl Dom {
             self.refuse_poll(responder);
             return;
         }
-        if let Some(sequence) = poll.acknowledged {
-            let acknowledged = self.delivered_frame.borrow().as_ref().is_some_and(|frame| {
-                frame.sequence == sequence
-                    && frame.revision == poll.revision
-                    && frame.epoch == poll.epoch
-            });
-            if !acknowledged {
-                self.refuse_poll(responder);
-                return;
-            }
-            let revision = self
-                .delivered_frame
-                .borrow_mut()
-                .take()
-                .map(|frame| frame.revision)
-                .unwrap_or_default();
-            self.page_flushed();
-            self.lifecycle
-                .update(LifecycleUpdate::FrameApplied(revision));
+        if poll.acknowledged.is_some() && !poll.acknowledge(self) {
+            self.refuse_poll(responder);
+            return;
         }
         if let Some(sequence) = poll.failed {
             let failure = {
                 let mut delivered = self.delivered_frame.borrow_mut();
-                let Some(frame) = delivered.as_mut().filter(|frame| {
-                    frame.sequence == sequence
-                        && frame.revision == poll.revision
-                        && frame.epoch == poll.epoch
-                }) else {
+                let Some(frame) = delivered
+                    .as_mut()
+                    .filter(|frame| frame.sequence == sequence)
+                else {
                     drop(delivered);
                     self.refuse_poll(responder);
                     return;
@@ -600,6 +603,11 @@ impl Dom {
     }
 
     fn refuse_poll(&self, responder: wry::RequestAsyncResponder) {
+        let sequence = self
+            .delivered_frame
+            .borrow()
+            .as_ref()
+            .map_or(0, |frame| frame.sequence);
         let response = wry::http::Response::builder()
             .status(wry::http::StatusCode::PRECONDITION_FAILED)
             .header(
@@ -608,6 +616,7 @@ impl Dom {
             )
             .header(FRAME_EPOCH, self.ipc_epoch.get().to_string())
             .header(FRAME_CAPABILITY, self.frame_capability.to_string())
+            .header(FRAME_SEQUENCE, sequence.to_string())
             .body(Vec::new())
             .unwrap_or_else(|_| wry::http::Response::new(Vec::new()));
         responder.respond(response);
@@ -622,9 +631,7 @@ impl Dom {
     }
 
     fn invalidate_delivered_frame(&self) -> bool {
-        if let Some(stale) = self.parked.borrow_mut().take() {
-            self.cancel(stale);
-        }
+        self.cancel_parked_poll();
         let abandoned = self.delivered_frame.borrow_mut().take().is_some();
         self.delivered_revision.set(0);
         if !abandoned {
@@ -633,6 +640,12 @@ impl Dom {
         self.page_flushed();
         self.rebuild_from_scratch();
         true
+    }
+
+    fn cancel_parked_poll(&self) {
+        if let Some(stale) = self.parked.borrow_mut().take() {
+            self.cancel(stale);
+        }
     }
 
     fn restart_rendering(&self) {
@@ -677,7 +690,6 @@ impl Dom {
         self.delivered_frame.borrow_mut().replace(DeliveredFrame {
             sequence,
             revision,
-            epoch,
             failures,
             requests,
         });
@@ -1247,7 +1259,6 @@ mod tests {
         dom.delivered_frame.borrow_mut().replace(DeliveredFrame {
             sequence: 1,
             revision: 1,
-            epoch: 1,
             failures: 0,
             requests: Vec::new(),
         });
@@ -1305,7 +1316,6 @@ mod tests {
         dom.delivered_frame.borrow_mut().replace(DeliveredFrame {
             sequence: 2,
             revision: 1,
-            epoch: 1,
             failures: 0,
             requests: Vec::new(),
         });
@@ -1313,22 +1323,12 @@ mod tests {
         dom.ipc_epoch.set(2);
         dom.interaction_epoch_changed(1);
 
-        let recovered = dom.next_batch().unwrap();
-        let recovered = String::from_utf8_lossy(&recovered);
-        assert!(recovered.contains("already rendered data"));
-        assert!(!recovered.contains("placeholder"));
-
-        dom.delivered_frame.borrow_mut().replace(DeliveredFrame {
-            sequence: 3,
-            revision: 1,
-            epoch: 2,
-            failures: 0,
-            requests: Vec::new(),
-        });
-        dom.ipc_epoch.set(3);
-        dom.interaction_epoch_changed(2);
-        let recovered_again = dom.next_batch().unwrap();
-        assert!(String::from_utf8_lossy(&recovered_again).contains("already rendered data"));
+        assert!(dom.next_batch().is_none());
+        let acknowledged = frame_poll(&dom, 1, FRAME_APPLIED, 2);
+        assert!(acknowledged.acknowledge(&dom));
+        assert!(dom.next_batch().is_none());
+        let _ = dom.next_frame();
+        dom.page_flushed();
 
         dom.remount(PopulatedPage, Instance::default());
         let replacement = dom.next_batch().unwrap();
@@ -1417,7 +1417,6 @@ mod tests {
         dom.delivered_frame.borrow_mut().replace(DeliveredFrame {
             sequence: 9,
             revision: 7,
-            epoch: 1,
             failures: 0,
             requests: Vec::new(),
         });
@@ -1447,7 +1446,6 @@ mod tests {
         dom.delivered_frame.borrow_mut().replace(DeliveredFrame {
             sequence: 9,
             revision: 7,
-            epoch: 1,
             failures: 0,
             requests: Vec::new(),
         });
@@ -1489,33 +1487,86 @@ mod tests {
         );
     }
 
+    #[derive(Clone, Default)]
+    struct SharedLayout {
+        mounts: Rc<Cell<usize>>,
+        expanded: Rc<RefCell<Option<Signal<bool>>>>,
+        observed: Rc<Cell<bool>>,
+    }
+
+    #[component]
+    fn StatefulPage() -> Element {
+        let layout = use_context::<SharedLayout>();
+        let mounted = layout.mounts.clone();
+        use_hook(move || mounted.set(mounted.get() + 1));
+        let expanded = use_signal(|| false);
+        layout.expanded.borrow_mut().replace(expanded);
+        layout.observed.set(expanded());
+        let route = consume_context::<String>();
+        rsx! { aside { "shared layout" } main { "{route}" } span { "{expanded}" } }
+    }
+
     #[test]
-    fn updating_an_instance_rebuilds_after_an_unacknowledged_frame() {
+    fn navigation_and_focus_preserve_shared_layout_until_the_inflight_frame_is_acknowledged() {
+        let layout = SharedLayout::default();
+        let initial = layout.clone();
         let dom = Dom::mount(
-            First,
-            Instance::default(),
+            StatefulPage,
+            Instance::from(move |scope: crate::PageScope<'_>| {
+                scope.provide(initial.clone());
+                scope.provide("first".to_string());
+            }),
             &embedding(),
             Rc::new(Cell::new(false)),
         );
         let _ = dom.next_batch().unwrap();
+        layout.expanded.borrow_mut().as_mut().unwrap().set(true);
+        dom.page_flushed();
+        let _ = dom.next_batch().unwrap();
         dom.delivered_frame.borrow_mut().replace(DeliveredFrame {
             sequence: 9,
             revision: 1,
-            epoch: 1,
             failures: 0,
             requests: Vec::new(),
         });
-        dom.delivered_revision.set(1);
-
-        dom.update_instance(Instance::default());
-
-        assert!(dom.delivered_frame.borrow().is_none());
-        assert_eq!(dom.delivered_revision.get(), 0);
-        assert!(!dom.mounted.get());
+        let next = layout.clone();
+        dom.update_instance(Instance::from(move |scope: crate::PageScope<'_>| {
+            scope.provide(next.clone());
+            scope.provide("second".to_string());
+        }));
+        dom.ipc_epoch.set(2);
+        dom.interaction_epoch_changed(1);
+        assert!(dom.next_batch().is_none());
+        assert!(matches!(
+            dom.admit_event(&event_headers(
+                HtmlEvent {
+                    element: ElementId(1),
+                    name: "click".to_string(),
+                    bubbles: true,
+                    data: EventData::Mouse(SerializedMouseData::default()),
+                },
+                1
+            )),
+            EventAdmission::Refused
+        ));
+        let mut acknowledgement = frame_poll(&dom, 2, FRAME_APPLIED, 9);
+        acknowledgement.capability += 1;
+        assert!(!acknowledgement.acknowledge(&dom));
+        acknowledgement.capability = dom.frame_capability;
+        acknowledgement.acknowledged = Some(8);
+        assert!(!acknowledgement.acknowledge(&dom));
+        acknowledgement.acknowledged = Some(9);
+        assert!(acknowledgement.acknowledge(&dom));
         let frame = dom.next_frame().unwrap();
-        assert!(matches!(frame.requests()[0].request(), DomRequest::Remount));
-        let rebuilt = frame.into_body();
-        assert!(String::from_utf8_lossy(&rebuilt).contains("first page"));
+        assert!(
+            frame
+                .requests()
+                .iter()
+                .all(|queued| !matches!(queued.request(), DomRequest::Remount))
+        );
+        assert!(String::from_utf8_lossy(&frame.into_body()).contains("second"));
+        assert_eq!(layout.mounts.get(), 1);
+        assert!(layout.observed.get());
     }
 
     #[test]
@@ -1534,7 +1585,7 @@ mod tests {
     }
 
     #[test]
-    fn an_undelivered_rebuild_keeps_its_remount_after_navigation_and_input_identity_change() {
+    fn a_pending_document_rebuild_keeps_its_remount_after_navigation_and_input_identity_change() {
         let dom = Dom::mount(
             First,
             Instance::default(),
@@ -1545,10 +1596,10 @@ mod tests {
         dom.delivered_frame.borrow_mut().replace(DeliveredFrame {
             sequence: 1,
             revision: 1,
-            epoch: 1,
             failures: 0,
             requests: Vec::new(),
         });
+        dom.restart_rendering();
         dom.ipc_epoch.set(2);
         dom.interaction_epoch_changed(1);
         dom.update_instance(Instance::default());

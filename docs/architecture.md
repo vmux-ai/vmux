@@ -614,8 +614,13 @@ layout commit in the input frame; no request waits for an animation, and fresh i
 an in-flight transition from its current visual state. Native layout and shared UI animations
 use `vmux_ui::motion::Motion`: 80 ms for feedback, 100 ms for content, and 120 ms for layout, with
 a 160 ms ceiling enforced at DOM animation transport boundaries. Reduced motion uses the same
-state changes without visual interpolation. Page replacement commits synchronously before its
-opacity and composer-position feedback; it does not wait for browser view-transition snapshots.
+state changes without visual interpolation. Same-document navigation and input-epoch changes
+retain in-flight edits and existing component scopes. The current document acknowledges a frame
+by its unique sequence after identity resynchronization, while old input and DOM requests remain
+rejected. Actual document replacement or failed edits still rebuild the document. Page replacement
+does not animate the whole surface or translate a shared composer; shared sidebar rows stay in
+place when page selection changes. Session detail-panel visibility belongs to the page shell,
+and its geometry remains reserved while the selected session loads.
 Discrete tabs and search widths change immediately. A cached Stack returning from a hidden,
 zero-size frame restores its final rectangle immediately. Collapsible content may interpolate height
 within the shared layout budget. Cached pages remain usable during refresh;

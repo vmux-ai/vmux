@@ -24,9 +24,11 @@ impl Shim {
 pub(crate) const WRY_HOST_SHIM: &str = r#"
 (function () {
   __VMUX_POPUP_RUNTIME__
+  const documentIdentity = document;
   globalThis.__vmuxIpcEpoch = 1;
   let navigationRevision = null;
   let applyingRevision = null;
+  let applyingEpoch = null;
   let appliedFrame = null;
   let failedFrame = null;
   let failedRevision = null;
@@ -62,7 +64,7 @@ pub(crate) const WRY_HOST_SHIM: &str = r#"
     const revision = applyingRevision ?? navigationRevision;
     if (revision === null) return;
     const message = {
-      epoch: globalThis.__vmuxIpcEpoch,
+      epoch: applyingEpoch ?? globalThis.__vmuxIpcEpoch,
       revision,
       body,
     };
@@ -76,12 +78,14 @@ pub(crate) const WRY_HOST_SHIM: &str = r#"
     const changed = navigationRevision !== revision;
     navigationRevision = revision;
     applyingRevision = null;
+    applyingEpoch = null;
     flushMessages(applyingMessages, applyingMetadata);
     return changed;
   };
   __VMUX_HISTORY_SWIPE__
   const abandonApplyingRevision = () => {
     applyingRevision = null;
+    applyingEpoch = null;
     applyingMessages.length = 0;
     applyingMetadata.clear();
   };
@@ -101,7 +105,7 @@ pub(crate) const WRY_HOST_SHIM: &str = r#"
     }
     const selected = !(document.getSelection() || { isCollapsed: true }).isCollapsed;
     this.setRequestHeader('x-vmux-selected', selected ? '1' : '0');
-    this.setRequestHeader('x-vmux-ipc-epoch', globalThis.__vmuxIpcEpoch);
+    this.setRequestHeader('x-vmux-ipc-epoch', applyingEpoch ?? globalThis.__vmuxIpcEpoch);
     const el = document.activeElement;
     if (el && typeof el.selectionStart === 'number' && /^[\w:.-]+$/.test(el.id)) {
       const bytes = (upto) => encoder.encode(el.value.slice(0, upto)).length;
@@ -256,43 +260,6 @@ pub(crate) const WRY_HOST_SHIM: &str = r#"
     window.interpreter = remount.interpreter;
     return commitNavigationRevision(revision);
   };
-  class PageMotion {
-    static active = new Set();
-    static play(element, frames, duration) {
-      if (typeof element.animate !== 'function') return;
-      try {
-        const animation = element.animate(frames, { duration, easing: 'cubic-bezier(0.2, 0, 0, 1)' });
-        this.active.add(animation);
-        animation.finished.finally(() => this.active.delete(animation)).catch(() => {});
-      } catch (_) {}
-    }
-    static replace(remount, revision) {
-      const motion = navigationRevision !== null && navigationRevision !== revision
-        && !window.matchMedia('(prefers-reduced-motion: reduce)').matches;
-      const previousComposer = motion
-        ? remount.previousRoot.querySelector('.vmux-agent-composer-shared')?.getBoundingClientRect()
-        : null;
-      const opacity = motion ? Number(getComputedStyle(remount.previousRoot).opacity) : 1;
-      for (const animation of this.active) animation.cancel();
-      this.active.clear();
-      const changed = commitRemount(remount, revision);
-      if (!motion) return changed;
-      const composer = remount.root.querySelector('.vmux-agent-composer-shared');
-      if (previousComposer && composer) {
-        for (const element of remount.root.querySelectorAll('.animate-agent-prompt-dock, .animate-agent-ready, .animate-agent-surface')) {
-          element.style.animation = 'none';
-        }
-        const next = composer.getBoundingClientRect();
-        const dx = previousComposer.left - next.left;
-        const dy = previousComposer.top - next.top;
-        if (Math.abs(dx) + Math.abs(dy) > 0.5) {
-          this.play(composer, [{ transform: `translate(${dx}px, ${dy}px)` }, { transform: 'translate(0px, 0px)' }], __VMUX_MOTION_LAYOUT_MS__);
-        }
-      }
-      this.play(remount.root, [{ opacity: Math.min(0.94, opacity) }, { opacity: 1 }], __VMUX_MOTION_CONTENT_MS__);
-      return changed;
-    }
-  }
   const visibleScrollAnchor = (container, viewport) => {
     const x = Math.min(viewport.right - 1, viewport.left + 8);
     const y = Math.min(viewport.bottom - 1, viewport.top + 1);
@@ -623,7 +590,7 @@ pub(crate) const WRY_HOST_SHIM: &str = r#"
         const response = await fetch('/__edits', {
           headers,
         });
-        appliedFrame = null;
+        if (document !== documentIdentity) return;
         const revision = response.headers.get('x-vmux-navigation');
         const responseEpoch = response.headers.get('x-vmux-frame-epoch');
         const responseCapability = response.headers.get('x-vmux-frame-capability');
@@ -636,9 +603,18 @@ pub(crate) const WRY_HOST_SHIM: &str = r#"
             navigationRevision = revision;
             globalThis.__vmuxIpcEpoch = Number(responseEpoch);
             abandonApplyingRevision();
-            appliedFrame = null;
-            failedFrame = null;
-            failedRevision = null;
+            const pendingFrame = response.headers.get('x-vmux-frame');
+            if (appliedFrame !== pendingFrame) appliedFrame = null;
+            if (failedFrame !== pendingFrame) {
+              failedFrame = null;
+              failedRevision = null;
+            } else if (failedFrame !== null) {
+              failedRevision = revision;
+            }
+            if (appliedFrame === null && failedFrame === null && pendingFrame !== null && pendingFrame !== '0') {
+              failedFrame = pendingFrame;
+              failedRevision = revision;
+            }
             retryDelay = 50;
             continue;
           }
@@ -654,17 +630,16 @@ pub(crate) const WRY_HOST_SHIM: &str = r#"
           continue;
         }
         if (!response.ok) throw new Error('edits request failed with ' + response.status);
-        const frame = await response.arrayBuffer();
+        appliedFrame = null;
         if (!revision) continue;
-        if (
-          responseEpoch !== String(globalThis.__vmuxIpcEpoch)
-          || responseCapability !== String(globalThis.__vmuxFrameCapability)
-        ) {
+        if (responseCapability !== String(globalThis.__vmuxFrameCapability)) {
           throw new Error('edits response belongs to a stale document');
         }
         frameRevision = revision;
         frameSequence = response.headers.get('x-vmux-frame');
         if (!frameSequence) throw new Error('edits response omitted its frame sequence');
+        const frame = await response.arrayBuffer();
+        if (document !== documentIdentity) return;
         failedFrame = null;
         failedRevision = null;
         if (frame.byteLength < 4) throw new Error('edits frame is shorter than its header');
@@ -679,8 +654,8 @@ pub(crate) const WRY_HOST_SHIM: &str = r#"
           if (!Array.isArray(requests)) throw new Error('edits requests are not an array');
           requests = requests.filter(
             (request) =>
-              String(request.epoch) === String(globalThis.__vmuxIpcEpoch)
-                && String(request.revision) === String(revision),
+              String(request.revision) === String(revision)
+                && (request.kind === 'remount' || String(request.epoch) === String(globalThis.__vmuxIpcEpoch)),
           );
           for (const queued of requests) {
             if (queued.kind === 'remount') remount = prepareRemount();
@@ -694,10 +669,11 @@ pub(crate) const WRY_HOST_SHIM: &str = r#"
           ? []
           : captureScrollAnchors();
         applyingRevision = revision;
+        applyingEpoch = responseEpoch;
         let navigated = false;
         if (remount) {
           if (edits.byteLength) remount.interpreter.run_from_bytes(edits);
-          navigated = PageMotion.replace(remount, revision);
+          navigated = commitRemount(remount, revision);
         } else if (edits.byteLength) {
           window.interpreter.run_from_bytes(edits);
         }
@@ -705,11 +681,18 @@ pub(crate) const WRY_HOST_SHIM: &str = r#"
         HeightAnimation.apply(heightAnimations);
         LayoutMovement.apply(layoutMovements);
         await restoreScrollAnchors(scrollAnchors);
-        if (
-          responseEpoch !== String(globalThis.__vmuxIpcEpoch)
-          || responseCapability !== String(globalThis.__vmuxFrameCapability)
-        ) {
+        if (document !== documentIdentity) return;
+        if (responseCapability !== String(globalThis.__vmuxFrameCapability)) {
           throw new Error('edits response became stale while applying');
+        }
+        if (responseEpoch !== String(globalThis.__vmuxIpcEpoch)) {
+          abandonApplyingRevision();
+          appliedFrame = frameSequence;
+          failedFrame = null;
+          failedRevision = null;
+          retryDelay = 50;
+          lastError = '';
+          continue;
         }
         for (const queued of requests) {
           if (queued.kind === 'remount') continue;

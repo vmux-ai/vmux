@@ -26,23 +26,24 @@ pub(crate) struct ChatPage;
 
 #[component]
 pub fn Page() -> Element {
+    let details_open = use_signal(|| false);
     let route = try_consume_context::<vmux_ecs::PageMetadata>()
         .and_then(|metadata| vmux_session::Route::parse(&metadata.url));
     match route {
         Some(vmux_session::Route::Manager) => rsx! { manager::SessionsManager {} },
         Some(vmux_session::Route::Session(id)) => {
             let session_id = id.0;
-            rsx! { SessionDetail { key: "{session_id}", session_id } }
+            rsx! { SessionDetail { key: "{session_id}", session_id, details_open } }
         }
         None => {
             let session_id = String::new();
-            rsx! { SessionDetail { key: "{session_id}", session_id } }
+            rsx! { SessionDetail { key: "{session_id}", session_id, details_open } }
         }
     }
 }
 
 #[component]
-fn SessionDetail(session_id: String) -> Element {
+fn SessionDetail(session_id: String, mut details_open: Signal<bool>) -> Element {
     let chat = use_chat();
     let detail = vmux_ui::hooks::use_ui_state::<crate::state::SessionDetailUiState>();
     let keys = use_chat_keys(chat);
@@ -63,7 +64,6 @@ fn SessionDetail(session_id: String) -> Element {
             })
     };
     let details_available = details.is_some();
-    let mut details_open = use_signal(|| false);
 
     rsx! {
         main {
@@ -88,15 +88,21 @@ fn SessionDetail(session_id: String) -> Element {
                     ChatApprovalDock { chat }
                     ChatDock { chat }
                 }
-                if let Some((session, repository, stages)) = details {
-                    div {
-                        class: if details_open() {
-                            "hidden h-full min-h-0 shrink-0 overflow-hidden opacity-100 transition-[width,opacity,transform] duration-200 ease-out motion-reduce:transition-none lg:flex lg:w-[19rem] lg:translate-x-0"
-                        } else {
-                            "pointer-events-none hidden h-full min-h-0 shrink-0 translate-x-3 overflow-hidden opacity-0 transition-[width,opacity,transform] duration-200 ease-out motion-reduce:transition-none lg:flex lg:w-0"
-                        },
-                        aria_hidden: (!details_open()).to_string(),
+                div {
+                    class: if details_open() {
+                        "hidden h-full min-h-0 shrink-0 overflow-hidden opacity-100 transition-[width,opacity,transform] duration-200 ease-out motion-reduce:transition-none lg:flex lg:w-[19rem] lg:translate-x-0"
+                    } else {
+                        "pointer-events-none hidden h-full min-h-0 shrink-0 translate-x-3 overflow-hidden opacity-0 transition-[width,opacity,transform] duration-200 ease-out motion-reduce:transition-none lg:flex lg:w-0"
+                    },
+                    aria_hidden: (!details_open()).to_string(),
+                    if let Some((session, repository, stages)) = details {
                         manager::SessionMetaPanel { session, repository, stages }
+                    } else if details_open() {
+                        div { class: "flex w-[19rem] flex-col gap-4 px-4 py-4",
+                            vmux_ui::components::skeleton::Skeleton { class: "h-6 w-2/3" }
+                            vmux_ui::components::skeleton::Skeleton { class: "h-20 w-full" }
+                            vmux_ui::components::skeleton::Skeleton { class: "h-20 w-full" }
+                        }
                     }
                 }
             }

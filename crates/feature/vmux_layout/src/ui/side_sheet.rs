@@ -114,14 +114,6 @@ fn SideSheetContent() -> Element {
     let side_sheet = side_sheet.unwrap_or_default();
     let active_space = side_sheet.active_space;
     let panes = side_sheet.panes;
-    let stack_order = panes
-        .iter()
-        .flat_map(|pane| pane.stacks.iter().map(|stack| (pane.id, stack.id)))
-        .collect::<Vec<_>>();
-    use_effect(use_reactive!(|stack_order| {
-        let _ = stack_order;
-        vmux_ui::animation::Movement::transition("vmux-side-sheet");
-    }));
     let side_sheet_error = layout.error();
     let reveal = StackReveal {
         settled: use_signal(|| None::<StackRevealTarget>),

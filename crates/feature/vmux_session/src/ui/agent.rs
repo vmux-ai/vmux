@@ -12,10 +12,11 @@ pub(super) fn ChatHeader(
     details_open: bool,
     on_details_toggle: EventHandler<MouseEvent>,
 ) -> Element {
-    rsx! { if details_available {
+    rsx! { div { class: "hidden lg:block",
         PageToolbar { actions: rsx! { Button {
             variant: ButtonVariant::Ghost, size: ButtonSize::Icon,
-            class: if details_open { "hidden bg-foreground/[0.08] text-foreground lg:inline-flex" } else { "hidden lg:inline-flex" },
+            class: if !details_available { "invisible" } else if details_open { "bg-foreground/[0.08] text-foreground" } else { "" },
+            disabled: !details_available,
             aria_label: translate("agent-details"), title: translate("agent-details"),
             onclick: move |event| on_details_toggle.call(event),
             LineIconView { icon: LineIcon::Layout, class: "size-4" }

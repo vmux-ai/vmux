@@ -233,7 +233,7 @@ mod tests {
             vmux_ui::components::page_address::AddressSurface {
                 url: "vmux://settings/".to_string(),
                 onactivate: move |_| url.set(url.get() + 1),
-                button { onclick: move |_| item.set(item.get() + 1), "Settings" }
+                button { id: "address-navigation-item".to_string(), onclick: move |_| item.set(item.get() + 1), "Settings" }
             }
         }
     }
@@ -248,21 +248,36 @@ mod tests {
             crate::Instance::from(move |scope: crate::PageScope<'_>| scope.provide(provided)),
         );
         let initial = page.dom.rebuild_to_vec();
-        let targets: Vec<_> = initial
+        let background = initial
             .edits
             .iter()
-            .filter_map(|edit| match edit {
-                dioxus_core::Mutation::NewEventListener { name, id } if name == "click" => {
-                    Some(*id)
-                }
+            .find_map(|edit| match edit {
+                dioxus_core::Mutation::SetAttribute {
+                    name: "title",
+                    value: dioxus_core::AttributeValue::Text(value),
+                    id,
+                    ..
+                } if value == "vmux://settings/" => Some(*id),
                 _ => None,
             })
-            .collect();
-        assert_eq!(targets.len(), 2);
-        page.handle(click_on(targets[0]), ());
+            .unwrap();
+        let navigation = initial
+            .edits
+            .iter()
+            .find_map(|edit| match edit {
+                dioxus_core::Mutation::SetAttribute {
+                    name: "id",
+                    value: dioxus_core::AttributeValue::Text(value),
+                    id,
+                    ..
+                } if value == "address-navigation-item" => Some(*id),
+                _ => None,
+            })
+            .unwrap();
+        page.handle(click_on(background), ());
         assert_eq!(clicks.url.get(), 1);
         assert_eq!(clicks.item.get(), 0);
-        page.handle(click_on(targets[1]), ());
+        page.handle(click_on(navigation), ());
         assert_eq!(clicks.item.get(), 1);
         assert_eq!(clicks.url.get(), 1);
     }
