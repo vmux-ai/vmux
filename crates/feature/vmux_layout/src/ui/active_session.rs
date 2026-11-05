@@ -76,7 +76,7 @@ pub(crate) fn ActiveSessionPanel(session: ActiveSession) -> Element {
             if let Some(boundary) = boundary {
                 if boundary.is_git_repo {
                     div { class: "flex h-7 min-w-0 items-center gap-2 px-2 text-[10px] text-muted-foreground",
-                        LineIconView { icon: LineIcon::GitBranch, class: "size-3.5 shrink-0".to_string() }
+                        LineIconView { icon: LineIcon::File, class: "size-3.5 shrink-0".to_string() }
                         span { class: "min-w-0 flex-1 truncate", {translate_with("layout-git-status", &[("count", TranslationValue::Number(boundary.uncommitted as i64))])} }
                         if boundary.ahead > 0 {
                             span { class: "shrink-0 text-sky-500", title: translate_with("layout-git-ahead", &[("count", TranslationValue::Number(boundary.ahead as i64))]), "↑{boundary.ahead}" }
