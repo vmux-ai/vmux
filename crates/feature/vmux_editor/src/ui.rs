@@ -40,7 +40,7 @@ pub(crate) struct FilePage;
 #[vmux_page::page(
     page = "projects",
     component = Page,
-    states = ["PageAddressUiState", "ThemeUiState", "FileUiState", "ProjectUiState", "ProjectFilesUiState", "SessionScopeUiState", "GitUiState", "KeyClaimsUiState", "PageLocationUiState"],
+    states = ["PageAddressUiState", "ThemeUiState", "FileUiState", "ProjectUiState", "SessionScopeUiState", "RepositorySummaryUiState", "GitUiState", "KeyClaimsUiState", "PageLocationUiState"],
     dom_group = "editor",
     subtree,
     takes = vmux_ecs::PageMetadata

@@ -61,14 +61,6 @@ pub struct ProjectUiState {
     pub collection_view: vmux_ecs::CollectionView,
 }
 
-#[vmux_api::ui_state(Default)]
-pub struct ProjectFilesUiState {
-    pub root: String,
-    pub entries: Vec<vmux_ecs::event::FileDirEntry>,
-    pub ready: bool,
-    pub error: String,
-}
-
 #[cfg(host)]
 impl ProjectUiState {
     pub(crate) fn pending(mut self) -> Self {

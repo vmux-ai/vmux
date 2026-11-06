@@ -399,6 +399,34 @@ pub struct GitRepositorySnapshot {
     pub stashes: Vec<GitStashEntry>,
 }
 
+#[vmux_api::contract(Default, Eq)]
+pub struct RepositorySummary {
+    pub root: String,
+    pub name: String,
+    pub branch: String,
+    pub changed_files: u32,
+    pub ahead: u32,
+    pub behind: u32,
+}
+
+#[vmux_api::contract(Default, Eq)]
+pub struct RepositorySummaryResult {
+    pub root: String,
+    pub summary: Option<RepositorySummary>,
+    pub loading: bool,
+    pub error: String,
+}
+
+#[vmux_api::ui_state(Default, Eq)]
+pub struct RepositorySummaryUiState {
+    pub repositories: Vec<RepositorySummaryResult>,
+}
+
+#[vmux_api::ui_event(Eq)]
+pub struct RepositorySummaryRequest {
+    pub roots: Vec<String>,
+}
+
 impl GitRepositorySnapshot {
     pub(crate) fn loading(request: &GitRepositoryRequest) -> Self {
         let repo_name = if request.label.trim().is_empty() {

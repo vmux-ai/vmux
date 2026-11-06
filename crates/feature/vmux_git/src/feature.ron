@@ -22,6 +22,8 @@
                 "PageLocationUiState",
                 "ThemeUiState",
                 "GitUiState",
+                "RepositorySummaryUiState",
+                "RepositorySummaryRequest",
                 "GitKeyRequest",
                 "GitPanelSelectRequest",
                 "GitShortcutHelpRequest",

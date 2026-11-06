@@ -2,9 +2,7 @@ use std::path::Path;
 
 use dioxus::prelude::*;
 use vmux_api::address::{AddressCrumb, AddressOption, PageAddress};
-use vmux_ecs::event::FileDirEntry;
-use vmux_git::event::GitRepositoryRequest;
-use vmux_git::state::GitUiState;
+use vmux_git::event::{RepositorySummary, RepositorySummaryRequest, RepositorySummaryUiState};
 use vmux_session::state::SessionScopeUiState;
 use vmux_session::{SessionSummary, SessionSummaryProjection, StageSummary};
 use vmux_ui::components::alert_dialog::{
@@ -21,10 +19,8 @@ use vmux_ui::components::manager::{
 };
 use vmux_ui::components::page::PageContent;
 use vmux_ui::components::page_address::{PageBreadcrumbs, PageToolbar, ToolbarControl};
-use vmux_ui::components::sheet::SheetHeaderChevron;
 use vmux_ui::components::skeleton::Skeleton;
 use vmux_ui::components::tooltip::Tooltip;
-use vmux_ui::file_icon::TypeIcon;
 use vmux_ui::hooks::{CollectionController, send, use_collection_controller, use_ui_state};
 use vmux_ui::i18n::{TranslationValue, translate, translate_with};
 use vmux_ui::icon::{GitSymbol, GitSymbolView, LineIcon, LineIconView};
@@ -627,15 +623,6 @@ pub(super) fn ProjectDashboard(detail: ProjectDetailView) -> Element {
     let root = detail.path;
     let project_name = detail.name;
     let project_identity = detail.id.0;
-    let mut requested_git = use_signal(String::new);
-    let requested_root = root.clone();
-    use_effect(move || {
-        if requested_root.is_empty() || requested_git() == requested_root {
-            return;
-        }
-        requested_git.set(requested_root.clone());
-        let _ = send(&GitRepositoryRequest::at(requested_root.clone()));
-    });
     let start_url = "vmux://start/".to_string();
     let address = PageAddress {
         fixed: vec![AddressCrumb {
@@ -665,7 +652,7 @@ pub(super) fn ProjectDashboard(detail: ProjectDetailView) -> Element {
                     ProjectSessionsPanel {}
                     div { class: "grid grid-cols-1 gap-5 md:grid-cols-2",
                         ProjectGitPanel { root: root.clone() }
-                        ProjectFilesPanel {}
+                        ProjectCode { root: root.clone(), name: project_name.clone() }
                     }
                 }
             }
@@ -744,43 +731,33 @@ fn ProjectSessions(projection: ProjectSessionList) -> Element {
 
 #[component]
 fn ProjectGitPanel(root: String) -> Element {
-    let git = use_ui_state::<GitUiState>();
-    let reactive_root = root.clone();
-    let selected_root = use_memo(use_reactive!(|(reactive_root,)| reactive_root.clone()));
-    let projection = git.use_selector(move |state| ProjectGitProjection {
-        repository: state
-            .snapshot
-            .repository
-            .as_ref()
-            .filter(|repository| ProjectPath::same(&repository.repo_root, &selected_root()))
-            .cloned(),
-        loading: !selected_root().is_empty()
-            && (state.snapshot.workspace != selected_root() || state.snapshot.loading),
+    let state = use_ui_state::<RepositorySummaryUiState>().state;
+    let query_root = root.clone();
+    use_effect(use_reactive!(|(query_root,)| {
+        let _ = send(&RepositorySummaryRequest {
+            roots: vec![query_root.clone()],
+        });
+    }));
+    use_drop(move || {
+        let _ = send(&RepositorySummaryRequest { roots: Vec::new() });
     });
-    rsx! {
-        ProjectGit {
-            root,
-            repository: projection.read().repository.clone(),
-            loading: projection.read().loading,
-        }
-    }
-}
-
-#[derive(Clone, Default, PartialEq)]
-struct ProjectGitProjection {
-    repository: Option<vmux_git::event::GitRepositorySnapshot>,
-    loading: bool,
+    let state = state.read();
+    let result = state
+        .repositories
+        .iter()
+        .find(|result| ProjectPath::same(&result.root, &root));
+    rsx! { ProjectGit {
+        root,
+        repository: result.and_then(|result| result.summary.clone()),
+        loading: result.is_none_or(|result| result.loading),
+    } }
 }
 
 #[component]
-fn ProjectGit(
-    root: String,
-    repository: Option<vmux_git::event::GitRepositorySnapshot>,
-    loading: bool,
-) -> Element {
+fn ProjectGit(root: String, repository: Option<RepositorySummary>, loading: bool) -> Element {
     let git_url = vmux_git::GitUrl::from_path(Path::new(&root));
     rsx! {
-        ProjectSection { title: translate("git-title"), count: repository.as_ref().map(|repository| repository.files.len()).unwrap_or_default(),
+        ProjectSection { title: translate("git-title"), count: repository.as_ref().map(|repository| repository.changed_files as usize).unwrap_or_default(),
             if let Some(repository) = repository {
                 button {
                     r#type: "button",
@@ -793,11 +770,11 @@ fn ProjectGit(
                     GitSymbolView { symbol: GitSymbol::Repository, class: "size-4 shrink-0 text-muted-foreground".to_string() }
                     div { class: "min-w-0 flex-1",
                         div { class: "flex min-w-0 items-center gap-2",
-                            span { class: "truncate text-xs font-medium", "{repository.repo_name}" }
+                            span { class: "truncate text-xs font-medium", "{repository.name}" }
                             span { class: "truncate font-mono text-[10px] text-muted-foreground", "{repository.branch}" }
                         }
                         div { class: "mt-1 flex items-center gap-3 text-[10px] text-muted-foreground",
-                            span { {format!("{} {}", repository.files.len(), translate("git-changes"))} }
+                            span { {format!("{} {}", repository.changed_files, translate("git-changes"))} }
                             if repository.ahead > 0 {
                                 span { class: "inline-flex items-center gap-1",
                                     LineIconView { icon: LineIcon::ArrowUp, class: "size-3".to_string() }
@@ -833,109 +810,28 @@ fn ProjectGit(
 }
 
 #[component]
-fn ProjectFilesPanel() -> Element {
-    let files = use_ui_state::<crate::project::ProjectFilesUiState>().state;
-    let projection = use_memo(move || {
-        let files = files.read();
-        ProjectFilesProjection {
-            loaded: files.ready,
-            entries: files.entries.clone(),
-            root: files.root.clone(),
-            error: files.error.clone(),
-        }
-    });
-    rsx! { ProjectFiles { projection: projection() } }
-}
-
-#[derive(Clone, Default, PartialEq)]
-struct ProjectFilesProjection {
-    loaded: bool,
-    entries: Vec<FileDirEntry>,
-    root: String,
-    error: String,
-}
-
-#[component]
-fn ProjectFiles(projection: ProjectFilesProjection) -> Element {
-    let mut expanded = use_signal(|| true);
-    let visible = projection
-        .entries
-        .iter()
-        .take(6)
-        .cloned()
-        .collect::<Vec<_>>();
-    let open_root = projection.root.clone();
+fn ProjectCode(root: String, name: String) -> Element {
+    let url = vmux_path::FileUrl::from_path(Path::new(&root), None, None, None);
     rsx! {
-        section { class: "overflow-hidden rounded-lg",
-            div { class: "flex h-10 items-center gap-2 px-3",
-                div { class: "flex min-w-0 flex-1 items-center gap-2",
-                    vmux_ui::icon::BuiltinIconView { icon: vmux_api::BuiltinIcon::Code, class: "size-3.5 shrink-0 text-muted-foreground".to_string() }
-                    button { class: "truncate text-xs font-semibold hover:text-primary hover:underline", disabled: open_root.is_empty(),
-                        onclick: move |_| PageNavigation::stack(vmux_path::FileUrl::from_path(Path::new(&open_root), None, None, None)),
-                        {translate("editor-editor")}
-                    }
-                    if projection.loaded && projection.error.is_empty() {
-                        span { class: "text-[10px] tabular-nums text-muted-foreground", "{projection.entries.len()}" }
-                    }
-                }
-                SheetHeaderChevron {
-                    expanded: expanded(),
-                    label: if expanded() { translate("common-collapse") } else { translate("common-expand") },
-                    onclick: move |_| expanded.set(!expanded()),
-                }
-            }
-            div { class: if expanded() {
-                    "grid grid-rows-[1fr] opacity-100 transition-[grid-template-rows,opacity] duration-200 ease-out"
-                } else {
-                    "grid grid-rows-[0fr] opacity-0 transition-[grid-template-rows,opacity] duration-200 ease-out"
+        ProjectSection { title: translate("editor-editor"), count: 0,
+            a {
+                href: url.clone(),
+                class: "group flex min-h-20 w-full min-w-0 items-center gap-3 rounded-md px-3 py-3 hover:bg-foreground/[0.035]",
+                onclick: move |event: MouseEvent| {
+                    event.prevent_default();
+                    PageNavigation::click(url.clone(), &event);
                 },
-                div { class: "min-h-0 overflow-hidden",
-                    if !projection.error.is_empty() {
-                        div { class: "px-3 pb-3 text-xs text-destructive", "{projection.error}" }
-                    } else if projection.loaded && projection.entries.is_empty() {
-                        div { class: "px-3 pb-3 text-xs text-muted-foreground", {translate("editor-explorer-empty")} }
-                    } else if projection.loaded {
-                        div { class: "grid grid-cols-1 gap-px px-1 pb-1 sm:grid-cols-2 lg:grid-cols-3",
-                            for entry in visible {
-                                ProjectFileButton {
-                                    key: "file-{entry.path}",
-                                    path: entry.path,
-                                    name: entry.name,
-                                    context: String::new(),
-                                    is_dir: entry.is_dir,
-                                }
-                            }
-                        }
-                    } else {
-                        div { class: "grid grid-cols-1 gap-2 px-3 pb-3 sm:grid-cols-2 lg:grid-cols-3",
-                            for index in 0..6 {
-                                Skeleton { key: "project-file-skeleton-{index}", class: "h-8 rounded-md bg-foreground/[0.045]" }
-                            }
-                        }
-                    }
+                vmux_ui::icon::BuiltinIconView {
+                    icon: vmux_api::BuiltinIcon::Code,
+                    class: "size-4 shrink-0 text-muted-foreground".to_string(),
                 }
-            }
-        }
-    }
-}
-
-#[component]
-fn ProjectFileButton(path: String, name: String, context: String, is_dir: bool) -> Element {
-    let open_path = path.clone();
-    let icon_path = path.clone();
-    rsx! {
-        button {
-            r#type: "button",
-            class: "group flex min-w-0 items-center gap-2 rounded-md px-2.5 py-2 text-left hover:bg-foreground/[0.04]",
-            title: "{path}",
-            onclick: move |_| {
-                PageNavigation::stack(vmux_path::FileUrl::from_path(std::path::Path::new(&open_path), None, None, None));
-            },
-            TypeIcon { path: icon_path, is_dir, class: "size-4 shrink-0".to_string() }
-            div { class: "min-w-0 flex-1",
-                div { class: "truncate text-[11px] text-foreground/85", "{name}" }
-                if !context.is_empty() {
-                    div { class: "truncate text-[9px] text-muted-foreground", "{context}" }
+                div { class: "min-w-0 flex-1",
+                    div { class: "truncate text-xs font-medium", "{name}" }
+                    div { class: "mt-1 truncate text-[10px] text-muted-foreground", "{root}" }
+                }
+                LineIconView {
+                    icon: LineIcon::ChevronDown,
+                    class: "size-3.5 -rotate-90 shrink-0 text-muted-foreground opacity-0 transition-opacity group-hover:opacity-100".to_string(),
                 }
             }
         }
@@ -956,7 +852,7 @@ fn ProjectSection(
                 if count > 0 {
                     span { class: "text-[10px] tabular-nums text-muted-foreground", "{count}" }
                 }
-                {actions}
+                div { class: "ml-auto flex shrink-0 items-center gap-1", {actions} }
             }
             {children}
         }

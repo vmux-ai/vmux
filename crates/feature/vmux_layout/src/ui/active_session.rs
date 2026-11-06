@@ -74,7 +74,7 @@ pub(crate) fn ActiveSessionPanel(session: ActiveSession) -> Element {
                 }
             }
             if let Some(boundary) = boundary {
-                if boundary.is_git_repo {
+                if boundary.is_git_repo && (boundary.insertions > 0 || boundary.deletions > 0) {
                     div { class: "flex h-7 min-w-0 items-center gap-2 px-2 font-mono text-[10px] tabular-nums",
                         span { class: "text-ansi-2", "+{boundary.insertions}" }
                         span { class: "text-ansi-1", "−{boundary.deletions}" }

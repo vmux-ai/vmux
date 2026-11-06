@@ -2645,6 +2645,10 @@ impl GitStashEntry {
 }
 
 impl GitRepositorySnapshot {
+    pub fn summary(path: &Path) -> Result<Self, GitError> {
+        Ok(Self::load_summary(path)?.snapshot)
+    }
+
     pub fn load(path: &Path) -> Result<Self, GitError> {
         let mut snapshot = Self::load_summary(path)?.snapshot;
         let root = Path::new(&snapshot.repo_root);

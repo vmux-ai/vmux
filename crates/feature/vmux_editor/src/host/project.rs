@@ -28,7 +28,6 @@ impl Plugin for ProjectPagePlugin {
     fn build(&self, app: &mut App) {
         app.add_plugins(vmux_ecs::UiStatePlugin::<ProjectUiState>::default())
             .add_message::<vmux_layout::stack::OpenRequest>()
-            .add_plugins(vmux_ecs::UiStatePlugin::<crate::project::ProjectFilesUiState>::default())
             .add_plugins(UiEventPlugin::<(
                 ProjectCreateRequest,
                 ProjectImportRequest,
@@ -51,7 +50,6 @@ impl Plugin for ProjectPagePlugin {
                     queue,
                     sync_icons,
                     finish_catalogs,
-                    finish_files,
                     finish_imports,
                     finish_deletes,
                 )
@@ -149,72 +147,6 @@ fn prewarm(mut commands: Commands) {
 struct ProjectCatalogTask {
     revision: u64,
     task: Task<ProjectUiState>,
-}
-
-#[derive(Component)]
-struct ProjectFilesTask {
-    url: String,
-    root: String,
-    revision: u64,
-    task: Task<Result<Vec<vmux_ecs::event::FileDirEntry>, String>>,
-}
-
-impl ProjectFilesTask {
-    fn spawn(
-        url: String,
-        path: PathBuf,
-        revision: u64,
-        wake: Option<bevy::winit::EventLoopProxy<WinitUserEvent>>,
-    ) -> Self {
-        let root = path.to_string_lossy().into_owned();
-        let task = IoTaskPool::get().spawn(async move {
-            let result = super::file_lifecycle::FileDir::try_read(&path);
-            if let Some(wake) = wake {
-                let _ = wake.send_event(WinitUserEvent::WakeUp);
-            }
-            result
-        });
-        Self {
-            url,
-            root,
-            revision,
-            task,
-        }
-    }
-}
-
-fn finish_files(
-    mut tasks: Query<(
-        Entity,
-        &mut ProjectFilesTask,
-        &vmux_ecs::PageMetadata,
-        &ProjectPageRevision,
-    )>,
-    mut commands: Commands,
-) {
-    for (entity, mut task, page, revision) in &mut tasks {
-        let Some(result) = future::block_on(future::poll_once(&mut task.task)) else {
-            continue;
-        };
-        commands.entity(entity).remove::<ProjectFilesTask>();
-        if page.url != task.url || revision.value != task.revision {
-            continue;
-        }
-        let mut state = crate::project::ProjectFilesUiState {
-            root: task.root.clone(),
-            ready: true,
-            ..Default::default()
-        };
-        match result {
-            Ok(entries) => state.entries = entries,
-            Err(error) => state.error = error,
-        }
-        commands.trigger(
-            vmux_ecs::UiStateWrite::<crate::project::ProjectFilesUiState>::from_event(
-                entity, &state,
-            ),
-        );
-    }
 }
 
 impl ProjectCatalogTask {
@@ -818,9 +750,7 @@ fn queue(
             if revision.advance_to(&url).is_none() {
                 continue;
             }
-            commands
-                .entity(entity)
-                .remove::<(ProjectCatalogTask, ProjectFilesTask)>();
+            commands.entity(entity).remove::<ProjectCatalogTask>();
             commands.trigger(ScopeProjectionRequest {
                 webview: entity,
                 cwd: None,
@@ -892,25 +822,6 @@ fn queue(
                 seed,
                 settings.appearance.project_icon,
             ));
-            if let Some(path) = cwd.as_ref() {
-                commands.trigger(
-                    vmux_ecs::UiStateWrite::<crate::project::ProjectFilesUiState>::from_event(
-                        entity,
-                        &crate::project::ProjectFilesUiState {
-                            root: path.to_string_lossy().into_owned(),
-                            ..Default::default()
-                        },
-                    ),
-                );
-                commands.entity(entity).insert(ProjectFilesTask::spawn(
-                    url.clone(),
-                    path.clone(),
-                    revision,
-                    proxy.as_deref().map(|proxy| (**proxy).clone()),
-                ));
-            } else {
-                commands.entity(entity).remove::<ProjectFilesTask>();
-            }
             commands.entity(entity).remove::<ProjectCatalogTask>();
             commands.trigger(ScopeProjectionRequest {
                 webview: entity,
@@ -922,7 +833,6 @@ fn queue(
             continue;
         }
         page.title = vmux_ui::i18n::translate("layout-projects");
-        commands.entity(entity).remove::<ProjectFilesTask>();
         page.icon = vmux_api::PageIcon::Builtin(vmux_api::BuiltinIcon::Project);
         commands.trigger(ScopeProjectionRequest {
             webview: entity,
@@ -1397,103 +1307,40 @@ mod tests {
             app.world_mut().spawn(vmux_api::UiEventPermissions {
                 url: ProjectRoute::ROOT,
                 owns_subtree: true,
-                permissions: &["ProjectUiState", "ProjectFilesUiState"],
+                permissions: &["ProjectUiState"],
             });
             Self { app, view }
-        }
-
-        fn files(&self) -> Option<crate::project::ProjectFilesUiState> {
-            self.app
-                .world()
-                .get::<vmux_ecs::UiState<crate::project::ProjectFilesUiState>>(self.view)?
-                .current()
-                .cloned()
-        }
-
-        fn finish(&mut self) -> crate::project::ProjectFilesUiState {
-            let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
-            loop {
-                self.app.update();
-                if let Some(state) = self.files()
-                    && state.ready
-                {
-                    return state;
-                }
-                assert!(
-                    std::time::Instant::now() < deadline,
-                    "project files never finished"
-                );
-                std::thread::sleep(std::time::Duration::from_millis(5));
-            }
         }
     }
 
     #[test]
-    fn project_detail_finishes_loading_an_empty_directory_without_an_editor_view() {
+    fn project_detail_resolves_identity_without_opening_an_editor() {
         let root = tempfile::tempdir().unwrap();
         let project = root.path().join("empty");
         std::fs::create_dir(&project).unwrap();
         let mut page = ProjectPage::at(root.path(), "vmux://projects/empty");
-
-        let files = page.finish();
-
+        page.app.update();
+        let state = page
+            .app
+            .world()
+            .get::<vmux_ecs::UiState<ProjectUiState>>(page.view)
+            .and_then(vmux_ecs::UiState::current)
+            .expect("project detail must be published");
+        let ProjectView::Detail(detail) = &state.view else {
+            panic!("expected project detail");
+        };
+        assert_eq!(detail.id.0, "vmux://projects/empty");
+        assert_eq!(detail.name, "empty");
         assert_eq!(
-            files.root,
+            detail.path,
             project.canonicalize().unwrap().display().to_string()
         );
-        assert!(files.entries.is_empty());
-        assert!(files.error.is_empty());
         assert!(
             page.app
                 .world()
                 .get::<super::super::editor::FileView>(page.view)
                 .is_none()
         );
-    }
-
-    #[test]
-    fn project_files_complete_errors_and_discard_results_from_older_navigation() {
-        let root = tempfile::tempdir().unwrap();
-        let current = "vmux://projects/current";
-        for outdated in [false, true] {
-            let mut page = ProjectPage::at(root.path(), current);
-            let missing = root.path().join("missing");
-            page.app.world_mut().entity_mut(page.view).insert((
-                ProjectPageRevision::new(current),
-                ProjectFilesTask::spawn(
-                    if outdated {
-                        "vmux://projects/previous"
-                    } else {
-                        current
-                    }
-                    .to_string(),
-                    missing,
-                    if outdated { 0 } else { 1 },
-                    None,
-                ),
-            ));
-            let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
-            while page
-                .app
-                .world()
-                .get::<ProjectFilesTask>(page.view)
-                .is_some()
-            {
-                page.app.update();
-                assert!(std::time::Instant::now() < deadline);
-                std::thread::sleep(std::time::Duration::from_millis(5));
-            }
-            if outdated {
-                assert!(page.files().is_none());
-            } else {
-                let files = page
-                    .files()
-                    .expect("a failed read must finish the skeleton");
-                assert!(files.ready);
-                assert!(!files.error.is_empty());
-                assert!(files.entries.is_empty());
-            }
-        }
     }
 
     #[test]

@@ -707,6 +707,18 @@ impl Transcript {
         self.root.read().transcript_revision
     }
 
+    pub(super) fn initial_scroll(self) -> String {
+        if !self.ready() || self.root.read().snapshot.transcript_loading {
+            return String::new();
+        }
+        if let Some(position) = self.root.read().viewport.position
+            && !position.following
+        {
+            return position.top.max(0).to_string();
+        }
+        "bottom".to_string()
+    }
+
     pub(super) fn note_scroll_input(self) {
         self.stop_following();
     }

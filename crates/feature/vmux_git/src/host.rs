@@ -47,6 +47,7 @@ mod watch;
 mod highlight;
 mod parse;
 mod repository;
+mod repository_summary;
 pub mod worktree;
 
 #[vmux_page::page]
@@ -96,6 +97,7 @@ impl Plugin for GitPlugin {
                 DirectoryPlugin,
                 RepositoryPickerPlugin,
                 RepositoryProvisionPlugin,
+                repository_summary::SummaryPlugin,
             ))
             .add_plugins(
                 Self::MANIFEST

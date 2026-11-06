@@ -281,6 +281,18 @@ pub(crate) const WRY_HOST_SHIM: &str = r#"
     }
     return captures;
   };
+  const initialScrollPositions = new WeakSet();
+  const placeInitialScroll = () => {
+    for (const container of document.querySelectorAll('[data-vmux-initial-scroll]')) {
+      const target = container.dataset.vmuxInitialScroll;
+      if (!target || initialScrollPositions.has(container)) continue;
+      const maximum = Math.max(0, container.scrollHeight - container.clientHeight);
+      const top = target === 'bottom' ? maximum : Number(target);
+      if (!Number.isFinite(top)) continue;
+      container.scrollTop = Math.min(Math.max(0, top), maximum);
+      initialScrollPositions.add(container);
+    }
+  };
   const restoreScrollAnchors = (captures) => {
     for (const capture of captures) {
       if (!capture.container.isConnected) continue;
@@ -669,6 +681,7 @@ pub(crate) const WRY_HOST_SHIM: &str = r#"
         globalThis.__vmuxPopupPresentation.apply(popupCaptures);
         HeightAnimation.apply(heightAnimations);
         LayoutMovement.apply(layoutMovements);
+        placeInitialScroll();
         restoreScrollAnchors(scrollAnchors);
         if (document !== documentIdentity) return;
         if (responseCapability !== String(globalThis.__vmuxFrameCapability)) {

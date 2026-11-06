@@ -73,6 +73,7 @@ pub(super) fn ChatTranscript(chat: Chat) -> Element {
     rsx! {
         div {
             id: "chat-scroll",
+            "data-vmux-initial-scroll": chat.transcript.initial_scroll(),
             onmounted: move |e| {
                 scroll_container.set(Some(e.data()));
                 if *at_bottom.peek() {

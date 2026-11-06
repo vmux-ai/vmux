@@ -450,6 +450,11 @@ decoding and host-to-UI delivery reject a mismatched host before decoding the da
 serializable typed patch mapping. `#[vmux_api::host_event]` remains for one-shot notifications and
 responses that are not page state.
 
+Read contracts belong to a capability rather than a page. A client subscribes to typed resource
+selectors; the host derives and publishes only that selection, and multiple pages share the
+underlying read. The transport carries the resulting projection, not the entire ECS world.
+Immediate presentation choices remain local to the client.
+
 Command palette queries are UI input, while filtered rows, completion text, prompt targets, and
 mode are a host-owned ECS projection on the page entity. Dioxus renders that projection; immediate
 text entry, selection, submission, focus, caret, and IME behavior remain local until the input and
@@ -1330,9 +1335,16 @@ Project dashboards and resume suggestions use the same catalog stage and stalene
 Embedded Session groups show five entries at a time, with stale groups initially collapsed.
 Resume suggestions restrict host contributions to the visible entries, so keyboard selection
 cannot reach hidden sessions; each status has its own explicit expansion limit.
-The Project page reads its Code preview through a route- and revision-bound directory task,
-independent of an open editor. Empty and failed reads complete that task, and results from a
-previous route cannot replace the current preview.
+Project dashboards show related sessions, repository status and an entry point into Code,
+without reading or listing arbitrary directories in the overview. Repository status uses the Git
+feature's shared `RepositorySummaryRequest` subscription rather than loading a Git page. Reads
+share a bounded worker task per requested root, publish only requested results, and settle failed
+reads. Hidden pages release their tasks; returning pages retain their last result during refresh.
+The repository root is a resource location, not a separate logical project identity.
+
+The DOM interpreter places a ready transcript at its saved reading position or the bottom inside
+the first edit transaction, before acknowledging its frame. Later frames never repeat that initial
+placement; ordinary following and history anchoring govern subsequent movement.
 
 Code opens the owning Space's working directory and prefers its README, then a bounded set of
 entry files, before falling back to directory columns. Directory pages use paths as page titles
