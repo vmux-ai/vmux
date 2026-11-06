@@ -18,7 +18,7 @@ pub fn use_chat_keys(chat: Chat) -> ChatKeys {
     let keys = ChatKeys {
         handler,
         claim: use_key_claim(Unclaimed::Types, move || {
-            if chat.in_use() {
+            if chat.in_use() && !chat.menu.navigation_open() {
                 Vec::new()
             } else {
                 chat.selector.value.read().key_context.clone()

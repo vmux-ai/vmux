@@ -42,8 +42,8 @@ pub(super) fn ChatDock(chat: Chat) -> Element {
                     if chat.model_menu_open() {
                         ChatModelMenu { chat }
                     }
-                    ChatComposerMenus { chat }
                 }
+                ChatComposerMenus { chat }
                 ChoiceList { chat }
                 QueuedPrompts { chat }
                 ChatFeedback { chat,
@@ -104,16 +104,22 @@ fn ComposerFooter(chat: Chat) -> Element {
     let transcript = chat.transcript.current();
     let queued = chat.queue.queued();
     let mut status = chat.status();
+    let mut model = chat.model_chip();
+    let mut effort = chat.effort_chip();
+    let mut permission = chat.permission_chip();
     if chat.in_use() {
         status = "in_use".to_string();
+        model = model.map(|chip| chip.readonly());
+        effort = effort.map(|chip| chip.readonly());
+        permission = permission.map(|chip| chip.readonly());
     }
     rsx! {
         ComposerBar {
             opened: chat.menu.opened(),
             agent: Some(chat.agent_chip()),
-            model: chat.model_chip(),
-            effort: chat.effort_chip(),
-            permission: chat.permission_chip(),
+            model,
+            effort,
+            permission,
             project: chat.project_chip(),
             branch: chat.branch_chip(),
             is_git_repo: context.is_git_repo,
@@ -130,3 +136,153 @@ fn ComposerFooter(chat: Chat) -> Element {
 
 mod menu;
 pub(crate) mod options;
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::event::{
+        ChatComposerMenuKind, ChatComposerMenuRequest, ChatComposerMenuState, ChatSnapshot,
+        ComposerContext,
+    };
+    use crate::state::{ChatUiState, ChatUiStatePatch};
+    use crate::ui::keys::use_chat_keys;
+    use crate::ui::state::use_chat;
+    use dioxus::core::{AttributeValue, Mutation, VirtualDom};
+    use dioxus_html::{EventData, SerializedHtmlEventConverter, SerializedMouseData};
+    use std::{cell::RefCell, rc::Rc};
+    use vmux_api::{BinEvent, UiStateFrame};
+    use vmux_ecs::event::ProjectRow;
+    use vmux_ui::transport::{
+        BytesListener, HostBinding, PageHost, event_listener::EventListenerError,
+    };
+
+    #[component]
+    fn LockedComposer() -> Element {
+        let chat = use_chat("locked-session".into());
+        let keys = use_chat_keys(chat);
+        use_context_provider(|| keys);
+        rsx! { ChatDock { chat } }
+    }
+
+    #[derive(Default)]
+    struct ComposerHost {
+        listeners: RefCell<Vec<BytesListener>>,
+        menus: RefCell<Vec<Option<ChatComposerMenuKind>>>,
+    }
+
+    impl PageHost for ComposerHost {
+        fn send(&self, id: &str, bytes: &[u8]) -> Result<(), EventListenerError> {
+            if id == ChatComposerMenuRequest::id() {
+                let request =
+                    rkyv::from_bytes::<ChatComposerMenuRequest, rkyv::rancor::Error>(bytes)
+                        .unwrap();
+                self.menus.borrow_mut().push(request.menu);
+            }
+            Ok(())
+        }
+        fn listen(&self, id: &str, listener: BytesListener) -> Result<(), EventListenerError> {
+            if id == ChatUiState::id() {
+                self.listeners.borrow_mut().push(listener);
+            }
+            Ok(())
+        }
+    }
+
+    impl ComposerHost {
+        fn show(&self, menu: Option<ChatComposerMenuKind>) {
+            let frame = UiStateFrame::<ChatUiState, ChatUiStatePatch>::Snapshot(ChatUiState {
+                snapshot: ChatSnapshot {
+                    status: "errored".into(),
+                    error: "thread_active_writer".into(),
+                    header_name: "Codex".into(),
+                    agent_id: "codex".into(),
+                    ..Default::default()
+                },
+                snapshot_ready: true,
+                composer_ready: true,
+                composer_draft: "Unsent draft".into(),
+                composer: ComposerContext {
+                    cwd: "/tmp/current".into(),
+                    workspace_selected: true,
+                    can_manage_workspace: true,
+                    projects: vec![
+                        ProjectRow {
+                            path: "/tmp/current".into(),
+                            label: "Current project".into(),
+                            is_active: true,
+                            ..Default::default()
+                        },
+                        ProjectRow {
+                            path: "/tmp/other".into(),
+                            label: "Another project".into(),
+                            ..Default::default()
+                        },
+                    ],
+                    ..Default::default()
+                },
+                composer_menu: ChatComposerMenuState { menu, index: 0 },
+                ..Default::default()
+            });
+            let bytes = rkyv::to_bytes::<rkyv::rancor::Error>(&frame).unwrap();
+            for listener in &mut *self.listeners.borrow_mut() {
+                listener(&bytes);
+            }
+        }
+    }
+
+    #[test]
+    fn busy_sessions_can_open_project_navigation_while_the_prompt_stays_disabled() {
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_time()
+            .build()
+            .unwrap();
+        let _runtime = runtime.enter();
+        dioxus_html::set_event_converter(Box::new(SerializedHtmlEventConverter));
+        let host = Rc::new(ComposerHost::default());
+        let mut dom = VirtualDom::new(LockedComposer);
+        dom.provide_root_context(HostBinding(host.clone()));
+        dom.rebuild_in_place();
+        dom.render_immediate_to_vec();
+        host.show(None);
+        let loaded = dom.render_immediate_to_vec();
+        dom.render_immediate_to_vec();
+        let title = format!("{} · /tmp/current", translate("agent-project-choose"));
+        let button = loaded
+            .edits
+            .iter()
+            .find_map(|edit| match edit {
+                Mutation::SetAttribute {
+                    name: "title",
+                    value: AttributeValue::Text(value),
+                    id,
+                    ..
+                } if value == &title => Some(*id),
+                _ => None,
+            })
+            .expect("the project navigation control must render");
+        dom.runtime().handle_event(
+            "click",
+            Event::new(
+                EventData::Mouse(SerializedMouseData::default()).into_any(),
+                true,
+            ),
+            button,
+        );
+        dom.render_immediate_to_vec();
+        assert_eq!(*host.menus.borrow(), [Some(ChatComposerMenuKind::Project)]);
+        host.show(Some(ChatComposerMenuKind::Project));
+        dom.render_immediate_to_vec();
+        dom.render_immediate_to_vec();
+        let html = dioxus_ssr::render(&dom);
+        assert!(html.contains("Another project"), "{html}");
+        assert!(html.contains("Unsent draft"));
+        let textarea = html
+            .split("<textarea")
+            .nth(1)
+            .unwrap()
+            .split('>')
+            .next()
+            .unwrap();
+        assert!(textarea.contains("disabled"));
+    }
+}

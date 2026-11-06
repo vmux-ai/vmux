@@ -85,8 +85,7 @@ pub fn PromptComposer(
 
     rsx! {
         fieldset {
-            class: "min-w-0 disabled:[&_button]:cursor-not-allowed",
-            disabled,
+            class: "min-w-0",
             PromptBox {
                 class: prompt_box_class,
                 style: "--vmux-prompt-accent:{accent_color};",
@@ -162,6 +161,7 @@ pub fn PromptComposer(
                                 }
                                 if let Some(remove_index) = attachment.remove_index {
                                     button {
+                                        disabled,
                                         class: "absolute -right-1 -top-1 flex h-5 w-5 items-center justify-center rounded-full bg-background/90 text-foreground/60 opacity-0 shadow-sm ring-1 ring-inset ring-foreground/15 transition group-hover:opacity-100 active:bg-foreground/10 active:text-foreground hover:text-foreground",
                                         r#type: "button",
                                         title: "{remove_attachment_title}",
@@ -334,10 +334,13 @@ impl PromptFocus {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::components::composer_bar::{ComposerBar, ComposerChip};
+    use crate::components::composer_bar::{ComposerBar, ComposerChip, ComposerMenuKind};
+    use std::io::Write;
+    use std::process::{Command, Stdio};
 
     #[component]
     fn ComposerFixture(disabled: bool, #[props(default)] attached: bool) -> Element {
+        let mut opened = use_signal(|| None::<ComposerMenuKind>);
         let notice = attached.then(|| {
             rsx! {
                 crate::components::notice::Notice {
@@ -359,10 +362,10 @@ mod tests {
                 action_enabled: true,
                 footer: Some(rsx! {
                     ComposerBar {
-                        opened: None,
+                        opened: opened(),
                         agent: Some(ComposerChip::ready("Codex", "Codex")),
                         model: Some(ComposerChip::ready("GPT-5", "GPT-5")),
-                        project: Some(ComposerChip::ready("vmux-cloud", "vmux-cloud")),
+                        project: Some(ComposerChip::ready("vmux-cloud", "vmux-cloud").opens(EventHandler::new(move |_| opened.set(Some(ComposerMenuKind::Project))))),
                         branch: Some(ComposerChip::ready("main", "main")),
                     }
                 }),
@@ -389,14 +392,7 @@ mod tests {
             );
             dom.rebuild_in_place();
             let html = dioxus_ssr::render(&dom);
-            let fieldset = html
-                .split("<fieldset")
-                .nth(1)
-                .unwrap()
-                .split('>')
-                .next()
-                .unwrap();
-            assert_eq!(fieldset.contains(" disabled="), disabled);
+            ComposerMarkup(&html).navigation_enabled();
             let textarea = html
                 .split("<textarea")
                 .nth(1)
@@ -444,6 +440,76 @@ mod tests {
         assert!(!retry.contains("disabled"));
         for text in ["Unsent draft", "Codex", "GPT-5", "vmux-cloud", "main"] {
             assert!(html.contains(text), "missing {text}");
+        }
+    }
+
+    struct ComposerMarkup<'a>(&'a str);
+
+    impl ComposerMarkup<'_> {
+        fn navigation_enabled(&self) {
+            let script = r#"
+import sys
+from html.parser import HTMLParser
+class Node:
+    def __init__(self, tag, attrs, parent=None):
+        self.tag, self.attrs, self.parent = tag, dict(attrs), parent
+        self.children = []
+    def contains(self, target):
+        while target:
+            if target is self: return True
+            target = target.parent
+        return False
+    def disabled(self):
+        if 'disabled' in self.attrs: return True
+        current = self.parent
+        while current:
+            if current.tag == 'fieldset' and 'disabled' in current.attrs:
+                legend = next((child for child in current.children if child.tag == 'legend'), None)
+                if not legend or not legend.contains(self): return True
+            current = current.parent
+        return False
+class Tree(HTMLParser):
+    def __init__(self):
+        super().__init__()
+        self.current = Node('root', [])
+        self.nodes = []
+    def handle_starttag(self, tag, attrs):
+        node = Node(tag, attrs, self.current)
+        self.current.children.append(node)
+        self.nodes.append(node)
+        if tag not in ['area', 'base', 'br', 'col', 'embed', 'hr', 'img', 'input', 'link', 'meta', 'param', 'source', 'track', 'wbr']:
+            self.current = node
+    def handle_endtag(self, tag):
+        current = self.current
+        while current.parent:
+            if current.tag == tag:
+                self.current = current.parent
+                return
+            current = current.parent
+tree = Tree()
+tree.feed(sys.stdin.read())
+buttons = [node for node in tree.nodes if node.tag == 'button' and node.attrs.get('title') == 'vmux-cloud']
+assert len(buttons) == 1, 'project control must be a button'
+assert not buttons[0].disabled(), 'project navigation inherits disabled from an ancestor'
+"#;
+            let mut child = Command::new("python3")
+                .args(["-c", script])
+                .stdin(Stdio::piped())
+                .stderr(Stdio::piped())
+                .spawn()
+                .expect("Python is required for native form semantics verification");
+            child
+                .stdin
+                .take()
+                .unwrap()
+                .write_all(self.0.as_bytes())
+                .unwrap();
+            let result = child.wait_with_output().unwrap();
+            assert!(
+                result.status.success(),
+                "{}",
+                String::from_utf8_lossy(&result.stderr)
+            );
         }
     }
 }

@@ -13,6 +13,9 @@ use vmux_ui::hooks::send;
 pub(super) fn ChatComposerMenus(chat: Chat) -> Element {
     let menus = ChatMenuSet::from(chat);
     let menu = chat.menu;
+    if chat.in_use() && !menu.navigation_open() {
+        return rsx! {};
+    }
     rsx! {
         ComposerMenus {
             opened: menu.opened(),

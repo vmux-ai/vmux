@@ -620,6 +620,11 @@ impl ComposerChip {
         self
     }
 
+    pub fn readonly(mut self) -> Self {
+        self.on_open = None;
+        self
+    }
+
     pub fn with_agent(mut self, icon: PageIcon, seed: impl Into<String>) -> Self {
         self.visual = ComposerChipVisual::Agent {
             icon,

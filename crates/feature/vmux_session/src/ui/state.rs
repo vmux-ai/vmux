@@ -222,6 +222,13 @@ pub struct ChatMenu {
 }
 
 impl ChatMenu {
+    pub fn navigation_open(self) -> bool {
+        matches!(
+            self.opened(),
+            Some(ComposerMenuKind::Project | ComposerMenuKind::Branch)
+        )
+    }
+
     pub fn opened(self) -> Option<ComposerMenuKind> {
         match self.state.read().menu {
             Some(ChatComposerMenuKind::Effort) => Some(ComposerMenuKind::Effort),
