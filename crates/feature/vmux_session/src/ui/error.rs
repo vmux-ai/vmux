@@ -14,6 +14,10 @@ pub(super) fn ChatFeedback(chat: Chat) -> Element {
     let message = chat.run.error();
     let status = chat.status();
     let kind = Failure(&message).kind();
+    #[cfg(not(target_os = "ios"))]
+    let setup_url = Some(format!("{}acp", vmux_tool::ToolPlugin::URL));
+    #[cfg(target_os = "ios")]
+    let setup_url: Option<String> = None;
     let mut visible = use_signal(|| true);
     let mut seen = use_signal(|| None::<(String, String)>);
     let mut dismiss_task = use_signal(|| None::<Task>);
@@ -92,10 +96,12 @@ pub(super) fn ChatFeedback(chat: Chat) -> Element {
                 message: translate("agent-error-version-suggestion"),
                 kind: NoticeKind::Warning,
                 actions: rsx! {
-                    Button { size: ButtonSize::Xs, variant: ButtonVariant::Ghost,
-                        aria_label: translate("agent-error-open-agents"),
-                        onclick: move |_| PageNavigation::replace(format!("{}acp", vmux_tool::ToolPlugin::URL)),
-                        {translate("agent-error-open-agents")}
+                    if let Some(url) = setup_url {
+                        Button { size: ButtonSize::Xs, variant: ButtonVariant::Ghost,
+                            aria_label: translate("agent-error-open-agents"),
+                            onclick: move |_| PageNavigation::replace(url.clone()),
+                            {translate("agent-error-open-agents")}
+                        }
                     }
                 },
                 on_dismiss: move |_| visible.set(false),
