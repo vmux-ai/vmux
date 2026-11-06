@@ -221,12 +221,6 @@ pub enum DropdownOpenMode {
     Hover,
 }
 
-impl DropdownOpenMode {
-    fn activates_on_click(self, open: bool) -> bool {
-        self == Self::Click || !open
-    }
-}
-
 #[component]
 pub fn DropdownToggleIndicator(open: bool) -> Element {
     rsx! {
@@ -306,13 +300,9 @@ pub fn DropdownTrigger(
                     }
             },
             onclick: move |_| {
-                if open_mode == DropdownOpenMode::Hover {
-                    if let Some(task) = hover_task.write().take() {
+                if open_mode == DropdownOpenMode::Hover
+                    && let Some(task) = hover_task.write().take() {
                         task.cancel();
-                    }
-                    if !open_mode.activates_on_click(open) {
-                        return;
-                    }
                 }
                 onclick.call(());
             },
@@ -702,12 +692,67 @@ fn DropdownKeyboardNavigation(root_id: String) -> Element {
 
 #[cfg(test)]
 mod tests {
-    use super::DropdownOpenMode;
+    use super::{DropdownOpenMode, DropdownTrigger};
+    use dioxus::core::{AttributeValue, Mutation};
+    use dioxus::prelude::*;
+    use dioxus_html::{EventData, SerializedHtmlEventConverter, SerializedMouseData};
+
+    #[component]
+    fn HoverTrigger() -> Element {
+        let mut open = use_signal(|| true);
+        rsx! {
+            DropdownTrigger {
+                label: "Branches".to_string(),
+                open: open(),
+                open_mode: DropdownOpenMode::Hover,
+                onclick: move |_| open.set(!open()),
+            }
+        }
+    }
 
     #[test]
-    fn hover_open_trigger_click_keeps_the_popup_open() {
-        assert!(!DropdownOpenMode::Hover.activates_on_click(true));
-        assert!(DropdownOpenMode::Hover.activates_on_click(false));
-        assert!(DropdownOpenMode::Click.activates_on_click(true));
+    fn hover_open_trigger_click_toggles_without_waiting_for_mouseleave() {
+        dioxus_html::set_event_converter(Box::new(SerializedHtmlEventConverter));
+        let mut dom = VirtualDom::new(HoverTrigger);
+        let initial = dom.rebuild_to_vec();
+        let trigger = initial
+            .edits
+            .iter()
+            .find_map(|edit| match edit {
+                Mutation::SetAttribute {
+                    name: "aria-expanded",
+                    id,
+                    ..
+                } => Some(*id),
+                _ => None,
+            })
+            .expect("dropdown trigger must render");
+        for expanded in [false, true] {
+            dom.runtime().handle_event(
+                "click",
+                Event::new(
+                    EventData::Mouse(SerializedMouseData::default()).into_any(),
+                    true,
+                ),
+                trigger,
+            );
+            let changed = dom.render_immediate_to_vec();
+            assert!(
+                changed.edits.iter().any(|edit| match edit {
+                    Mutation::SetAttribute {
+                        name: "aria-expanded",
+                        value,
+                        ..
+                    } => match value {
+                        AttributeValue::Bool(value) => *value == expanded,
+                        AttributeValue::Text(value) => value == &expanded.to_string(),
+                        _ => false,
+                    },
+                    _ => false,
+                }),
+                "{:?}",
+                changed.edits
+            );
+        }
     }
 }

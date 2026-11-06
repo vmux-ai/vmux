@@ -758,6 +758,13 @@ impl Transcript {
             self.stop_following();
         }
         if *self.initial_follow.peek() {
+            if self.ready() && distance <= 48 {
+                let mut initial_follow = self.initial_follow;
+                initial_follow.set(false);
+            }
+            return;
+        }
+        if self.follow_task.peek().is_some() && !*self.at_bottom.peek() {
             return;
         }
         if distance <= 48 && !*self.at_bottom.peek() {
@@ -810,9 +817,6 @@ impl Transcript {
             at_bottom.set(true);
             let mut last_top = self.last_top;
             last_top.set(0);
-        }
-        if *self.initial_follow.peek() || *self.at_bottom.peek() {
-            scroll::settle_bottom(self.scroll_container, self.initial_follow, self.follow_task);
         }
     }
 

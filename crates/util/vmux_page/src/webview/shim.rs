@@ -281,18 +281,80 @@ pub(crate) const WRY_HOST_SHIM: &str = r#"
     }
     return captures;
   };
-  const initialScrollPositions = new WeakSet();
-  const placeInitialScroll = () => {
-    for (const container of document.querySelectorAll('[data-vmux-initial-scroll]')) {
-      const target = container.dataset.vmuxInitialScroll;
-      if (!target || initialScrollPositions.has(container)) continue;
-      const maximum = Math.max(0, container.scrollHeight - container.clientHeight);
-      const top = target === 'bottom' ? maximum : Number(target);
-      if (!Number.isFinite(top)) continue;
-      container.scrollTop = Math.min(Math.max(0, top), maximum);
-      initialScrollPositions.add(container);
+  class ScrollPlacement {
+    static states = new Map();
+    constructor(element) {
+      this.element = element;
+      this.applied = false;
+      this.initialTarget = null;
+      this.following = false;
+      this.sawUnfollowed = false;
+      this.cancelled = false;
+      this.content = null;
+      this.observer = typeof ResizeObserver === 'function'
+        ? new ResizeObserver(() => this.place())
+        : null;
+      this.observer?.observe(element);
+      const cancel = () => { this.cancelled = true; };
+      for (const event of ['wheel', 'touchmove', 'pointerdown']) {
+        element.addEventListener?.(event, cancel, { passive: true });
+      }
+      element.addEventListener?.('keydown', event => {
+        if (event.target?.closest?.('input, textarea, [contenteditable]')) return;
+        if (['ArrowUp', 'ArrowDown', 'PageUp', 'PageDown', 'Home', 'End', ' '].includes(event.key)) cancel();
+      });
+      element.addEventListener?.('scroll', () => {
+        if (element.scrollHeight - element.clientHeight - element.scrollTop <= 48) this.cancelled = false;
+      }, { passive: true });
     }
-  };
+    static apply() {
+      for (const [element, state] of this.states) {
+        if (element.isConnected) continue;
+        state.observer?.disconnect();
+        this.states.delete(element);
+      }
+      for (const element of document.querySelectorAll('[data-vmux-initial-scroll]')) {
+        if (!element.isConnected) continue;
+        let state = this.states.get(element);
+        if (!state) {
+          state = new ScrollPlacement(element);
+          this.states.set(element, state);
+        }
+        state.update();
+      }
+    }
+    update() {
+      const requested = this.element.dataset.vmuxFollowScroll === 'true';
+      if (requested && !this.following) this.cancelled = false;
+      if (!requested) this.sawUnfollowed = true;
+      this.following = requested;
+      const content = this.element.firstElementChild;
+      if (content !== this.content) {
+        if (this.content) this.observer?.unobserve(this.content);
+        this.content = content;
+        if (content) this.observer?.observe(content);
+      }
+      this.place();
+    }
+    place() {
+      const element = this.element;
+      if (!element.isConnected || element.clientHeight <= 0 || this.cancelled) return;
+      const target = element.dataset.vmuxInitialScroll;
+      if (!target) return;
+      const maximum = Math.max(0, element.scrollHeight - element.clientHeight);
+      if (!this.applied) {
+        const top = target === 'bottom' ? maximum : Number(target);
+        if (!Number.isFinite(top)) return;
+        element.scrollTop = Math.min(Math.max(0, top), maximum);
+        this.initialTarget = target;
+        this.applied = true;
+      }
+      if (this.following && (this.initialTarget === 'bottom' || this.sawUnfollowed)
+        && Math.abs(element.scrollTop - maximum) > 0.5) {
+        element.scrollTop = maximum;
+      }
+    }
+  }
   const restoreScrollAnchors = (captures) => {
     for (const capture of captures) {
       if (!capture.container.isConnected) continue;
@@ -681,7 +743,6 @@ pub(crate) const WRY_HOST_SHIM: &str = r#"
         globalThis.__vmuxPopupPresentation.apply(popupCaptures);
         HeightAnimation.apply(heightAnimations);
         LayoutMovement.apply(layoutMovements);
-        placeInitialScroll();
         restoreScrollAnchors(scrollAnchors);
         if (document !== documentIdentity) return;
         if (responseCapability !== String(globalThis.__vmuxFrameCapability)) {
@@ -704,6 +765,7 @@ pub(crate) const WRY_HOST_SHIM: &str = r#"
             report('error', 'dom request ' + queued.kind + ': ' + String(error));
           }
         }
+        ScrollPlacement.apply();
         if (!remount) navigated = commitNavigationRevision(revision);
         if (navigated) reportMetadata();
         appliedFrame = frameSequence;

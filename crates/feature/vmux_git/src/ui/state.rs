@@ -5,7 +5,7 @@ use vmux_ui::scroll::{ScrollIntoView, ScrollRetention};
 use crate::event::GitRepositoryRequest;
 use crate::event::{GitDiffRow, GitDiffViewport};
 use crate::state::{
-    GitDiffAppend, GitPageControllerState, GitPageSnapshot, GitProjects, GitUiState,
+    GitDiffAppend, GitPageControllerState, GitPageSnapshot, GitPanel, GitProjects, GitUiState,
 };
 
 #[derive(Clone, Copy)]
@@ -91,13 +91,15 @@ impl GitPageState {
         self.diff.begin_repository(&request.path);
         if send(&request).is_err() {
             self.pending_repository.set(None);
-            self.diff.synchronize(&self.root.peek().snapshot);
+            let root = self.root.peek();
+            self.diff.synchronize(&root.snapshot, &root.controller);
         }
     }
 
     fn subscribe(self, mut root: Signal<GitUiState>) {
         use_effect(move || {
             let snapshot = root.read().snapshot.clone();
+            let controller = root.read().controller.clone();
             let pending = self.pending_repository.peek().clone();
             if let Some(pending) = pending {
                 if pending.waiting_for(&snapshot) {
@@ -106,7 +108,7 @@ impl GitPageState {
                 let mut pending_repository = self.pending_repository;
                 pending_repository.set(None);
             }
-            self.diff.synchronize(&snapshot);
+            self.diff.synchronize(&snapshot, &controller);
             let updates = if root.read().diff_updates.is_empty() {
                 Vec::new()
             } else {
@@ -132,11 +134,40 @@ impl GitPageState {
 #[derive(Clone, Copy)]
 pub(super) struct GitDiffState {
     workspace: Signal<String>,
+    selection: Signal<DiffSelection>,
     pub(super) viewport: Signal<Option<GitDiffViewport>>,
     pub(super) rows: Signal<Vec<GitDiffRow>>,
     pub(super) rows_from: Signal<Option<u32>>,
     pub(super) loading: Signal<bool>,
     update_cursor: Signal<DiffUpdateCursor>,
+}
+
+#[derive(Clone, PartialEq)]
+enum DiffSelection {
+    None,
+    File { path: String, bytes: Vec<u8> },
+    Branch(String),
+    Commit(String),
+    Stash(String),
+}
+
+impl DiffSelection {
+    fn of(controller: &GitPageControllerState) -> Self {
+        match controller.focused_panel {
+            GitPanel::Files if !controller.selected_abs_path.is_empty() => Self::File {
+                path: controller.selected_abs_path.clone(),
+                bytes: controller.selected_path_bytes.clone(),
+            },
+            GitPanel::Branches if !controller.selected_branch.is_empty() => {
+                Self::Branch(controller.selected_branch.clone())
+            }
+            GitPanel::Commits => Self::Commit(controller.selected_commit.clone()),
+            GitPanel::Stash if !controller.selected_stash.is_empty() => {
+                Self::Stash(controller.selected_stash.clone())
+            }
+            _ => Self::None,
+        }
+    }
 }
 
 #[derive(Clone, Copy, Default)]
@@ -173,6 +204,7 @@ impl GitDiffState {
     fn new(root: Signal<GitUiState>) -> Self {
         Self {
             workspace: use_signal(move || root.peek().snapshot.workspace.clone()),
+            selection: use_signal(move || DiffSelection::of(&root.peek().controller)),
             viewport: use_signal(move || root.peek().snapshot.diff_viewport.clone()),
             rows: use_signal(move || root.peek().snapshot.diff_rows.clone()),
             rows_from: use_signal(|| None),
@@ -181,9 +213,12 @@ impl GitDiffState {
         }
     }
 
-    fn synchronize(self, snapshot: &GitPageSnapshot) {
-        if *self.workspace.peek() != snapshot.workspace {
+    fn synchronize(self, snapshot: &GitPageSnapshot, controller: &GitPageControllerState) {
+        let selection = DiffSelection::of(controller);
+        if *self.workspace.peek() != snapshot.workspace || *self.selection.peek() != selection {
             self.begin_repository(&snapshot.workspace);
+            let mut current = self.selection;
+            current.set(selection);
         }
         let mut loading = self.loading;
         if *loading.peek() != snapshot.diff_loading {
@@ -308,7 +343,12 @@ impl GitDiffState {
 mod tests {
     use super::*;
     use crate::event::{DiffKind, DiffLine};
-    use std::{cell::RefCell, rc::Rc};
+    use std::{
+        cell::RefCell,
+        future::Future,
+        rc::Rc,
+        task::{Context, Waker},
+    };
     use vmux_api::BinEvent;
     use vmux_ui::hooks::EventListenerError;
     use vmux_ui::transport::{BytesListener, HostScope, PageHost};
@@ -326,6 +366,50 @@ mod tests {
                 self.0.borrow_mut().push(listener);
             }
             Ok(())
+        }
+    }
+
+    struct DiffPreview {
+        host: Rc<PreviewHost>,
+        dom: VirtualDom,
+        _scope: HostScope,
+    }
+
+    impl DiffPreview {
+        fn new() -> Self {
+            let host = Rc::new(PreviewHost::default());
+            let scope = HostScope::enter(host.clone());
+            let mut dom = VirtualDom::new(CachedDiffPreview);
+            dom.provide_root_context(vmux_ui::transport::HostBinding(host.clone()));
+            dom.rebuild_to_vec();
+            let mut preview = Self {
+                host,
+                dom,
+                _scope: scope,
+            };
+            preview.render();
+            preview
+        }
+
+        fn publish(&mut self, state: GitUiState) -> String {
+            let frame =
+                vmux_api::UiStateFrame::<GitUiState, crate::state::GitUiStatePatch>::Snapshot(
+                    state,
+                );
+            let bytes = rkyv::to_bytes::<rkyv::rancor::Error>(&frame).unwrap();
+            for listener in self.host.0.borrow_mut().iter_mut() {
+                listener(&bytes);
+            }
+            self.render()
+        }
+
+        fn render(&mut self) -> String {
+            for _ in 0..4 {
+                let mut context = Context::from_waker(Waker::noop());
+                let _ = std::pin::pin!(self.dom.wait_for_work()).poll(&mut context);
+                self.dom.render_immediate_to_vec();
+            }
+            dioxus_ssr::render(&self.dom)
         }
     }
 
@@ -381,6 +465,48 @@ mod tests {
         let recovered = String::from_utf8_lossy(&recovered);
         assert!(recovered.contains("populated diff"));
         assert!(!recovered.contains("empty diff"));
+    }
+
+    #[test]
+    fn branch_changes_clear_old_diff_while_refresh_and_file_seek_keep_it() {
+        let mut preview = DiffPreview::new();
+        let loaded = GitUiState {
+            snapshot: GitPageSnapshot {
+                workspace: "/repo".to_string(),
+                diff_viewport: Some(GitDiffViewport {
+                    generation: 1,
+                    revision: 1,
+                    first_line: 0,
+                    total_lines: 1,
+                    has_more: false,
+                    lines: vec![line(1)],
+                    markers: Vec::new(),
+                    error: String::new(),
+                }),
+                diff_rows: vec![GitDiffRow::Line(0)],
+                ..Default::default()
+            },
+            controller: GitPageControllerState {
+                focused_panel: GitPanel::Branches,
+                selected_branch: "feature".to_string(),
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+        assert!(preview.publish(loaded.clone()).contains("populated diff"));
+        let mut pending = loaded.clone();
+        pending.snapshot.diff_viewport = None;
+        pending.snapshot.diff_rows.clear();
+        pending.snapshot.diff_loading = true;
+        assert!(!preview.publish(pending.clone()).contains("empty diff"));
+        pending.controller.selected_branch_path = "second.rs".to_string();
+        pending.controller.selected_branch_path_bytes = b"second.rs".to_vec();
+        assert!(!preview.publish(pending.clone()).contains("empty diff"));
+        pending.controller.selected_branch = "main".to_string();
+        assert!(preview.publish(pending).contains("empty diff"));
+        let mut incoming = loaded;
+        incoming.controller.selected_branch = "main".to_string();
+        assert!(preview.publish(incoming).contains("populated diff"));
     }
 
     fn line(number: u32) -> DiffLine {

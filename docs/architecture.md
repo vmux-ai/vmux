@@ -1016,7 +1016,8 @@ interactive and mutating-operation lanes. Repository refreshes are single-flight
 inactive views release their watches and tasks, and watcher bursts coalesce into invalidations; the
 watcher never runs a Git command or filters paths synchronously. Each Git child process drains
 stdin, stdout and stderr concurrently, has bounded output and a timeout, and is terminated when its
-operation entity is discarded. Catalogs and diffs page at their source, so opening a page cannot
+operation entity is discarded. Short metadata commands avoid a fixed wait; process polling backs
+off only while a command remains running. Catalogs and diffs page at their source, so opening a page cannot
 schedule work in proportion to the total repository history or block the ECS schedule. Branch
 review advances one file and one bounded line window at a time; viewport demand requests another
 window. A large lockfile therefore cannot produce an unbounded first render, and an idle review
@@ -1029,6 +1030,10 @@ clamping, before another input can arrive. Loaded content therefore stays in the
 File selection uses smooth scrolling and a stable `#diff-<SHA-256 of path>` anchor, matching
 GitHub's pull-request file view. Scroll requests carry their own revision so repeated selection
 of one file works and data refreshes cannot restart a completed scroll.
+Changing the selected branch, commit, stash or file clears the previous source's viewport;
+refreshing the same source retains its loaded rows. Owners keep the last diff generation across
+discarded and restored queries, so old viewport demand cannot target a new source. Breadcrumb
+menus toggle immediately on click while retaining their hover delay.
 Viewed toggles and fold controls recompute the file header's offset after changing the collapsed
 sections and move the render window to that offset. Native height transitions compensate the scroll
 offset for a header already pinned to the viewport, and reveal a header elsewhere only when needed.
@@ -1343,8 +1348,10 @@ reads. Hidden pages release their tasks; returning pages retain their last resul
 The repository root is a resource location, not a separate logical project identity.
 
 The DOM interpreter places a ready transcript at its saved reading position or the bottom inside
-the first edit transaction, before acknowledging its frame. Later frames never repeat that initial
-placement; ordinary following and history anchoring govern subsequent movement.
+the first edit transaction, once its viewport has real geometry. A resize observer keeps a following
+transcript at the bottom before paint as content and viewport sizes change. Reader input cancels
+following immediately; later frames never repeat initial placement. History anchoring governs
+movement while reading older messages.
 
 Code opens the owning Space's working directory and prefers its README, then a bounded set of
 entry files, before falling back to directory columns. Directory pages use paths as page titles

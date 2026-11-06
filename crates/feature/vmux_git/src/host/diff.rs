@@ -35,6 +35,7 @@ impl Plugin for DiffPlugin {
             GitBranchFilesNextRequest,
             GitBranchFilesRetryRequest,
         )>::default())
+            .add_observer(seed)
             .add_observer(file_refresh)
             .add_observer(reveal)
             .add_observer(load_next)
@@ -169,6 +170,34 @@ pub(super) struct GitDiffQuery {
     cached_source: Option<DiffSource>,
     prefetch: PrefetchBudget,
     loading: bool,
+}
+
+#[derive(Component, Clone, Copy, Default)]
+struct Generation(u64);
+
+impl Generation {
+    fn observe(&mut self, value: u64) {
+        self.0 = self.0.max(value);
+    }
+
+    fn advance(&mut self) -> u64 {
+        self.0 = self.0.wrapping_add(1).max(1);
+        self.0
+    }
+}
+
+fn seed(
+    event: On<Add, GitDiffQuery>,
+    queries: Query<(&GitDiffQuery, Option<&Generation>)>,
+    mut commands: Commands,
+) {
+    let entity = event.event_target();
+    let Ok((query, current)) = queries.get(entity) else {
+        return;
+    };
+    let mut generation = current.copied().unwrap_or_default();
+    generation.observe(query.generation);
+    commands.entity(entity).insert(generation);
 }
 
 #[derive(Clone, Copy, Default)]
@@ -910,6 +939,7 @@ type PendingDiffRequests<'w, 's> = Query<
 
 fn start_requests(
     pending: PendingDiffRequests,
+    generations: Query<&Generation>,
     mut pages: Query<(
         &mut super::state::GitState,
         &mut super::state::GitDiffRevealRanges,
@@ -939,7 +969,9 @@ fn start_requests(
             commands.entity(entity).remove::<PendingGitDiff>();
             continue;
         }
-        generation = generation.wrapping_add(1).max(1);
+        let mut sequence = generations.get(entity).copied().unwrap_or_default();
+        sequence.observe(generation);
+        generation = sequence.advance();
         let target = pending.target.clone();
         let content = source
             .filter(|source| source.dirty)
@@ -967,7 +999,7 @@ fn start_requests(
         commands
             .entity(entity)
             .remove::<PendingGitDiff>()
-            .insert(query);
+            .insert((query, sequence));
         commands.spawn((
             GitJob::new(entity),
             GitForegroundRead,
@@ -1608,48 +1640,66 @@ mod tests {
 
     #[test]
     fn a_new_target_supersedes_the_previous_diff_generation() {
-        let mut app = App::new();
-        app.add_systems(Update, start_requests);
-        let entity = app
-            .world_mut()
-            .spawn((
-                super::super::state::GitState::default(),
-                PendingGitDiff {
+        for restored in [false, true] {
+            for discarded in [false, true] {
+                let mut app = App::new();
+                app.add_plugins((
+                    MinimalPlugins,
+                    vmux_ecs::UiStatePlugin::<GitUiState>::default(),
+                    DiffPlugin,
+                ));
+                let mut entity = app
+                    .world_mut()
+                    .spawn((
+                        super::super::state::GitState::default(),
+                        PendingGitDiff {
+                            target: GitDiffTarget {
+                                repo_root: "/repo".into(),
+                                path: "/repo/a.rs".into(),
+                                path_bytes: Vec::new(),
+                                scope: DiffScope::File,
+                            },
+                            file: None,
+                            page_revision: None,
+                        },
+                    ))
+                    .id();
+                app.update();
+                let previous = app.world().get::<GitDiffQuery>(entity).unwrap().generation;
+                if restored {
+                    let cached = app.world().get::<GitDiffQuery>(entity).unwrap().clone();
+                    entity = app
+                        .world_mut()
+                        .spawn((super::super::state::GitState::default(), cached))
+                        .id();
+                    app.update();
+                }
+                if discarded {
+                    app.world_mut().entity_mut(entity).remove::<GitDiffQuery>();
+                }
+                app.world_mut().entity_mut(entity).insert(PendingGitDiff {
                     target: GitDiffTarget {
                         repo_root: "/repo".into(),
-                        path: "/repo/a.rs".into(),
+                        path: "/repo/b.rs".into(),
                         path_bytes: Vec::new(),
                         scope: DiffScope::File,
                     },
                     file: None,
                     page_revision: None,
-                },
-            ))
-            .id();
-
-        app.update();
-        assert!(
-            app.world()
-                .get::<GitDiffQuery>(entity)
-                .is_some_and(|query| query.accepts(1))
-        );
-
-        app.world_mut().entity_mut(entity).insert(PendingGitDiff {
-            target: GitDiffTarget {
-                repo_root: "/repo".into(),
-                path: "/repo/b.rs".into(),
-                path_bytes: Vec::new(),
-                scope: DiffScope::File,
-            },
-            file: None,
-            page_revision: None,
-        });
-        app.update();
-
-        let query = app.world().get::<GitDiffQuery>(entity).unwrap();
-        assert!(query.accepts(2));
-        assert!(!query.accepts(1));
-        assert_eq!(query.target.path, PathBuf::from("/repo/b.rs"));
+                });
+                app.update();
+                let query = app.world().get::<GitDiffQuery>(entity).unwrap();
+                assert!(
+                    query.generation > previous,
+                    "restored={restored} discarded={discarded}"
+                );
+                assert!(
+                    !query.accepts(previous),
+                    "restored={restored} discarded={discarded}"
+                );
+                assert_eq!(query.target.path, PathBuf::from("/repo/b.rs"));
+            }
+        }
     }
 
     #[test]

@@ -1857,6 +1857,7 @@ struct GitOutputCapture {
 struct GitChild {
     child: Child,
     reaped: bool,
+    poll_delay: Duration,
 }
 
 impl GitChild {
@@ -1864,6 +1865,7 @@ impl GitChild {
         Self {
             child,
             reaped: false,
+            poll_delay: Duration::from_millis(2),
         }
     }
 
@@ -1871,6 +1873,12 @@ impl GitChild {
         let status = self.child.try_wait()?;
         self.reaped |= status.is_some();
         Ok(status)
+    }
+
+    fn pause(&mut self, deadline: Instant) {
+        let remaining = deadline.saturating_duration_since(Instant::now());
+        std::thread::sleep(remaining.min(self.poll_delay));
+        self.poll_delay = self.poll_delay.saturating_mul(2).min(GIT_COMMAND_POLL);
     }
 
     fn stop(&mut self) -> std::io::Result<ExitStatus> {
@@ -2109,11 +2117,7 @@ impl GitCommand {
             {
                 break status;
             }
-            std::thread::sleep(
-                deadline
-                    .saturating_duration_since(now)
-                    .min(GIT_COMMAND_POLL),
-            );
+            child.pause(deadline);
         };
         let stderr = Self::receive(
             stderr_rx,
@@ -2230,15 +2234,13 @@ impl GitCommand {
                     .stop()
                     .map_err(|error| GitError(format!("failed to wait for git: {error}")))?;
             }
-            let remaining = deadline.saturating_duration_since(now);
-            let wait = remaining.min(GIT_COMMAND_POLL);
             if let Some(status) = child
                 .try_wait()
                 .map_err(|error| GitError(format!("failed to wait for git: {error}")))?
             {
                 break status;
             }
-            std::thread::sleep(wait);
+            child.pause(deadline);
         };
         let drain_deadline = Instant::now() + GIT_IO_DRAIN_TIMEOUT;
         let write = writer.map(|writer| Self::receive(writer, drain_deadline, "git stdin"));

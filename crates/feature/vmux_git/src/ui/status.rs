@@ -340,7 +340,6 @@ pub(super) fn RepositoryHeader(
             state: address,
             onintent: move |intent| match intent {
                 AddressIntent::GitBranch { reference } => {
-                    let _ = send(&GitPanelSelectRequest { panel: GitPanel::Branches });
                     let _ = send(&GitBranchSelectRequest { reference });
                 }
                 AddressIntent::GitCommit { commit } => { let _ = send(&GitCommitSelectRequest { commit }); }
