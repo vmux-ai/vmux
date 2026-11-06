@@ -1095,3 +1095,7 @@ layout-git-status = Changed files: { $count }
 layout-git-ahead = Commits ahead: { $count }
 
 common-copy-url = Copy URL
+
+sessions-history-unavailable = This conversation cannot be reopened. You can start a new one.
+sessions-connection-interrupted = The connection was interrupted. Try connecting again.
+sessions-operation-failed = The operation could not be completed.

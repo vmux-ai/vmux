@@ -23,6 +23,7 @@ pub mod manager;
 pub mod mcp_menu;
 pub mod model_menu;
 pub mod motion;
+pub mod notice;
 pub mod page;
 pub mod page_address;
 pub mod permission_menu;

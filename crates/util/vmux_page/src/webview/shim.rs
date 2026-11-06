@@ -291,8 +291,13 @@ pub(crate) const WRY_HOST_SHIM: &str = r#"
       this.sawUnfollowed = false;
       this.cancelled = false;
       this.content = null;
+      this.measured = new Map();
+      this.known = new WeakSet();
+      this.measurePending = false;
+      this.resizePending = false;
+      this.disposed = false;
       this.observer = typeof ResizeObserver === 'function'
-        ? new ResizeObserver(() => this.place())
+        ? new ResizeObserver(() => this.schedule())
         : null;
       this.observer?.observe(element);
       const cancel = () => { this.cancelled = true; };
@@ -308,13 +313,13 @@ pub(crate) const WRY_HOST_SHIM: &str = r#"
         if (['ArrowUp', 'ArrowDown', 'PageUp', 'PageDown', 'Home', 'End', ' '].includes(event.key)) cancel();
       });
       element.addEventListener?.('scroll', () => {
-        if (element.scrollHeight - element.clientHeight - element.scrollTop <= 48) this.cancelled = false;
+        if (element.scrollHeight - element.clientHeight - element.scrollTop <= 0.5) this.cancelled = false;
       }, { passive: true });
     }
     static apply() {
       for (const [element, state] of this.states) {
         if (element.isConnected) continue;
-        state.observer?.disconnect();
+        state.dispose();
         this.states.delete(element);
       }
       for (const element of document.querySelectorAll('[data-vmux-initial-scroll]')) {
@@ -328,6 +333,7 @@ pub(crate) const WRY_HOST_SHIM: &str = r#"
       }
     }
     update() {
+      if (this.disposed || !this.element.isConnected) return;
       const requested = this.element.dataset.vmuxFollowScroll === 'true';
       if (requested && !this.following) this.cancelled = false;
       if (!requested) this.sawUnfollowed = true;
@@ -338,7 +344,56 @@ pub(crate) const WRY_HOST_SHIM: &str = r#"
         this.content = content;
         if (content) this.observer?.observe(content);
       }
+      if (!this.cancelled && (!this.applied || this.following)) this.measure();
       this.place();
+    }
+    schedule() {
+      if (this.resizePending) return;
+      this.resizePending = true;
+      requestAnimationFrame(() => {
+        this.resizePending = false;
+        this.update();
+      });
+    }
+    dispose() {
+      this.disposed = true;
+      this.observer?.disconnect();
+      for (const [node, visibility] of this.measured) node.style.contentVisibility = visibility;
+      this.measured.clear();
+      this.measurePending = false;
+    }
+    measure() {
+      for (const node of this.element.querySelectorAll?.('[data-vmux-scroll-layout]') || []) {
+        if (this.known.has(node) || this.measured.has(node)) continue;
+        this.measured.set(node, node.style.contentVisibility);
+        node.style.contentVisibility = 'visible';
+      }
+      if (this.measurePending || this.measured.size === 0) return;
+      this.measurePending = true;
+      const batch = [...this.measured.keys()];
+      const release = () => {
+        if (this.disposed) return;
+        if (!this.element.isConnected) { this.dispose(); return; }
+        if (document.fonts?.status === 'loading') {
+          Promise.resolve(document.fonts.ready).then(paint);
+          return;
+        }
+        for (const node of batch) {
+          node.style.contentVisibility = this.measured.get(node) || '';
+          this.known.add(node);
+          this.measured.delete(node);
+        }
+        this.measurePending = false;
+        if (this.measured.size) this.measure();
+        this.place();
+        if (PagePresentation.current) PagePresentation.present(PagePresentation.current);
+      };
+      const paint = () => {
+        requestAnimationFrame(() => requestAnimationFrame(() => {
+          release();
+        }));
+      };
+      Promise.resolve(document.fonts?.ready).then(paint);
     }
     place() {
       const element = this.element;
@@ -357,6 +412,62 @@ pub(crate) const WRY_HOST_SHIM: &str = r#"
         && Math.abs(element.scrollTop - maximum) > 0.5) {
         element.scrollTop = maximum;
       }
+    }
+  }
+  class PagePresentation {
+    static current = null;
+    static presented = null;
+    static applied(revision, epoch) {
+      if (this.presented?.revision === revision && this.presented?.epoch === epoch) return;
+      let ticket = this.current;
+      if (!ticket || ticket.revision !== revision || ticket.epoch !== epoch) {
+        ticket = { revision, epoch, fonts: false, scheduled: false };
+        this.current = ticket;
+        Promise.resolve(document.fonts?.ready).then(() => {
+          if (this.current !== ticket) return;
+          ticket.fonts = true;
+          this.present(ticket);
+        });
+      }
+      this.present(ticket);
+    }
+    static pending() {
+      for (const [element, state] of ScrollPlacement.states) {
+        if (element.isConnected && element.clientHeight > 0 && state.measurePending) return true;
+      }
+      for (const element of document.querySelectorAll('[data-vmux-presentation-pending]')) {
+        if (element.closest?.('[aria-hidden="true"]')) continue;
+        const style = getComputedStyle(element);
+        if (style.display === 'none' || style.visibility === 'hidden') continue;
+        if (element.getClientRects && element.getClientRects().length === 0 && style.display !== 'contents') continue;
+        return true;
+      }
+      return false;
+    }
+    static present(ticket) {
+      if (!ticket.fonts || ticket.scheduled || this.current !== ticket) return;
+      if (this.pending()) return;
+      if (document.fonts?.status === 'loading') {
+        ticket.fonts = false;
+        Promise.resolve(document.fonts.ready).then(() => {
+          if (this.current !== ticket) return;
+          ticket.fonts = true;
+          this.present(ticket);
+        });
+        return;
+      }
+      ticket.scheduled = true;
+      requestAnimationFrame(() => requestAnimationFrame(() => {
+        ticket.scheduled = false;
+        if (this.current !== ticket || document !== documentIdentity) return;
+        if (!requestMatchesDocument(ticket)) return;
+        if (this.pending()) return;
+        ScrollPlacement.apply();
+        if (document.fonts?.status === 'loading') { this.present(ticket); return; }
+        this.presented = ticket;
+        this.current = null;
+        postMessage('presented:' + ticket.revision);
+      }));
     }
   }
   const restoreScrollAnchors = (captures) => {
@@ -772,6 +883,7 @@ pub(crate) const WRY_HOST_SHIM: &str = r#"
         ScrollPlacement.apply();
         if (!remount) navigated = commitNavigationRevision(revision);
         if (navigated) reportMetadata();
+        PagePresentation.applied(revision, responseEpoch);
         appliedFrame = frameSequence;
         failedFrame = null;
         failedRevision = null;
@@ -888,12 +1000,12 @@ mod tests {
     use std::io::Write;
     use std::process::{Command, Stdio};
 
-    struct ScrollProbe;
+    struct RuntimeProbe;
 
-    impl ScrollProbe {
-        fn verify() {
+    impl RuntimeProbe {
+        fn verify(script: &str) {
             let mut child = Command::new("node")
-                .args(["-e", include_str!("scroll_retention_test.js")])
+                .args(["-e", script])
                 .stdin(Stdio::piped())
                 .stdout(Stdio::piped())
                 .stderr(Stdio::piped())
@@ -916,6 +1028,11 @@ mod tests {
 
     #[test]
     fn content_growth_and_scroll_clamping_preserve_position_before_the_next_input() {
-        ScrollProbe::verify();
+        RuntimeProbe::verify(include_str!("scroll_retention_test.js"));
+    }
+
+    #[test]
+    fn presentation_waits_for_content_fonts_and_scroll_layout_in_the_current_navigation() {
+        RuntimeProbe::verify(include_str!("presentation_test.js"));
     }
 }

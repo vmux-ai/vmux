@@ -22,6 +22,7 @@ enum PageReport<'a> {
         token: u64,
         measured: Option<Measured>,
     },
+    Presented(u64),
     Link(&'a str),
     Title(&'a str),
     Favicon(&'a str),
@@ -47,6 +48,12 @@ impl<'a> From<&'a str> for PageReport<'a> {
         if let Some(rest) = body.strip_prefix("log:") {
             let (level, text) = rest.split_once(':').unwrap_or(("log", rest));
             return Self::Console { level, text };
+        }
+        if let Some(revision) = body
+            .strip_prefix("presented:")
+            .and_then(|value| value.parse().ok())
+        {
+            return Self::Presented(revision);
         }
         if let Some(rest) = body.strip_prefix("measured:")
             && let Some((token, values)) = rest.split_once(':')
@@ -143,6 +150,7 @@ impl PageMessage {
                 &report,
                 PageReport::Console { .. }
                     | PageReport::Measured { .. }
+                    | PageReport::Presented(_)
                     | PageReport::Title(_)
                     | PageReport::Favicon(_)
                     | PageReport::Emitted(_)
@@ -153,6 +161,13 @@ impl PageMessage {
         match report {
             PageReport::Console { level, text } => self.log(level, text),
             PageReport::Measured { token, measured } => self.measured(token, measured),
+            PageReport::Presented(revision) => {
+                if revision == self.navigation_revision.get() {
+                    self.lifecycle
+                        .update(LifecycleUpdate::FramePainted(revision));
+                    self.waker.wake();
+                }
+            }
             PageReport::Link(href) => self.link(href),
             PageReport::Title(title) => {
                 if self.page.get().reports_title {
@@ -302,6 +317,7 @@ mod tests {
                 PageReport::Interaction => "interaction".to_string(),
                 PageReport::History(direction) => format!("history {direction:?}"),
                 PageReport::Emitted(payload) => format!("emitted {payload}"),
+                PageReport::Presented(revision) => format!("presented {revision}"),
             }
         }
     }

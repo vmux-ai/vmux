@@ -126,7 +126,7 @@ pub(super) fn EmptyRepository() -> Element {
 #[component]
 fn GitLoadingSkeleton() -> Element {
     rsx! {
-        header { class: "relative z-40 flex h-11 shrink-0 items-center gap-2 px-2.5",
+        header { class: "relative z-40 flex h-11 shrink-0 items-center gap-2 px-2.5", "data-vmux-presentation-pending": "",
             div { class: "flex min-w-0 flex-1 items-center gap-1 overflow-hidden",
                 div { class: "flex h-7 min-w-0 items-center gap-1.5 px-1.5",
                     GitSymbolView {

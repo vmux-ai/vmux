@@ -758,7 +758,7 @@ impl Transcript {
             self.stop_following();
         }
         if *self.initial_follow.peek() {
-            if self.ready() && distance <= 48 {
+            if self.ready() && distance <= 0 {
                 let mut initial_follow = self.initial_follow;
                 initial_follow.set(false);
             }
@@ -767,7 +767,7 @@ impl Transcript {
         if self.follow_task.peek().is_some() && !*self.at_bottom.peek() {
             return;
         }
-        if distance <= 48 && !*self.at_bottom.peek() {
+        if distance <= 0 && !*self.at_bottom.peek() {
             let mut at_bottom = self.at_bottom;
             at_bottom.set(true);
         }
@@ -778,7 +778,7 @@ impl Transcript {
                 viewport: crate::event::ChatViewport {
                     top: top.max(0),
                     loaded_start,
-                    following: distance <= 48,
+                    following: distance <= 0,
                 },
             });
         }

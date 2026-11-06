@@ -250,6 +250,7 @@ struct StackCloser<'w, 's> {
     child_of: Query<'w, 's, &'static ChildOf>,
     splits: Query<'w, 's, &'static PaneSplit>,
     startup_urls: Query<'w, 's, &'static vmux_ecs::EffectiveStartupUrl, With<crate::space::Space>>,
+    startup_page: vmux_ecs::page::StartupPageUrl<'w, 's>,
     close_tab_requests: MessageWriter<'w, CloseTabRequest>,
     page_open_requests: MessageWriter<'w, PageOpenRequest>,
 }
@@ -281,10 +282,10 @@ impl StackCloser<'_, '_> {
         let mut current = entity;
         loop {
             if let Ok(url) = self.startup_urls.get(current) {
-                return url.0.clone();
+                return self.startup_page.resolve(Some(&url.0));
             }
             let Ok(parent) = self.child_of.get(current) else {
-                return String::new();
+                return self.startup_page.resolve(None);
             };
             current = parent.parent();
         }
@@ -2711,6 +2712,24 @@ mod tests {
     #[test]
     fn closing_last_stack_keeps_it_visible_until_startup_presents() {
         let mut app = build_app_with_collector();
+        app.world_mut().spawn((
+            vmux_ecs::page::StartupPage,
+            vmux_ecs::page::PageManifest {
+                route: "vmux://start/",
+                url: "vmux://start/",
+                asset_host: "start",
+                owns_subtree: true,
+                title: "Start",
+                title_message_id: None,
+                replaces_command: None,
+                keywords: &[],
+                icon: None,
+                command_bar: true,
+                startup: true,
+                reports_title: false,
+                placement: vmux_ecs::page::PagePlacement::DEFAULT,
+            },
+        ));
         let (tab, pane, original_stack) = build_hierarchy(&mut app, "");
 
         app.world_mut()
@@ -2729,6 +2748,7 @@ mod tests {
         let PageOpenTarget::Stack(replacement) = request.target else {
             panic!("replacement opens in a stack");
         };
+        assert_eq!(request.url, "vmux://start/");
         assert_ne!(replacement, original_stack);
         assert_eq!(
             app.world().get::<Transition>(replacement),

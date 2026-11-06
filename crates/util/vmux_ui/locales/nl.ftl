@@ -1106,3 +1106,7 @@ layout-git-status = Gewijzigde bestanden: { $count }
 layout-git-ahead = Commits vooruit: { $count }
 
 common-copy-url = URL kopiëren
+
+sessions-history-unavailable = Dit gesprek kan niet opnieuw worden geopend. Je kunt een nieuw gesprek starten.
+sessions-connection-interrupted = De verbinding is verbroken. Probeer opnieuw verbinding te maken.
+sessions-operation-failed = De bewerking kon niet worden voltooid.

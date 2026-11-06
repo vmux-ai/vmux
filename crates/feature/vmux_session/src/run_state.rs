@@ -28,7 +28,41 @@ impl RunState {
 
 pub struct Failure<'a>(pub &'a str);
 
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub enum FailureKind {
+    Busy,
+    MissingHistory,
+    Connection,
+    Setup,
+    Other,
+}
+
 impl Failure<'_> {
+    pub fn kind(&self) -> FailureKind {
+        if self.in_use() {
+            return FailureKind::Busy;
+        }
+        let message = self.0.to_ascii_lowercase();
+        if message.contains("no rollout found") || message.contains("thread not found") {
+            return FailureKind::MissingHistory;
+        }
+        if message.contains("timed out")
+            || message.contains("timeout")
+            || message.contains("connection refused")
+            || message.contains("connection closed")
+        {
+            return FailureKind::Connection;
+        }
+        if message.contains("command not found")
+            || message.contains("not installed")
+            || message.contains("unsupported version")
+            || message.contains("package version")
+        {
+            return FailureKind::Setup;
+        }
+        FailureKind::Other
+    }
+
     pub fn in_use(&self) -> bool {
         self.0.contains("thread_active_writer")
             || self.0.contains("already has an active writer")
@@ -59,6 +93,21 @@ mod tests {
             ("Invalid request: unknown session", false),
         ] {
             assert_eq!(Failure(message).in_use(), expected, "{message}");
+        }
+    }
+
+    #[test]
+    fn failures_distinguish_recoverable_connections_from_missing_history() {
+        for (message, kind) in [
+            (
+                "session/load failed: no rollout found for thread id abc",
+                FailureKind::MissingHistory,
+            ),
+            ("session/load timed out", FailureKind::Connection),
+            ("agent command not found", FailureKind::Setup),
+            ("operation failed unexpectedly", FailureKind::Other),
+        ] {
+            assert!(Failure(message).kind() == kind, "{message}");
         }
     }
 

@@ -1103,3 +1103,7 @@ layout-git-status = 변경된 파일: { $count }개
 layout-git-ahead = 전송하지 않은 커밋: { $count }개
 
 common-copy-url = URL 복사
+
+sessions-history-unavailable = 이 대화를 다시 열 수 없습니다. 새 대화를 시작할 수 있습니다.
+sessions-connection-interrupted = 연결이 중단되었습니다. 다시 연결해 주세요.
+sessions-operation-failed = 작업을 완료하지 못했습니다.

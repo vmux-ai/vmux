@@ -2,6 +2,7 @@
     pages: [
         (
             url: "git://",
+            owns_subtree: true,
             title: "Git",
             manifest_url: "vmux://git/",
             title_message_id: "git-title",

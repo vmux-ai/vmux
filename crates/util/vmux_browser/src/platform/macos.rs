@@ -859,6 +859,7 @@ struct PageLifecycleBatch {
     frame_delivered: Option<u64>,
     frames_applied: u64,
     frame_applied: Option<u64>,
+    frame_painted: Option<u64>,
     frame_failed: Option<u64>,
     ui_events: u64,
     host_events: u64,
@@ -883,6 +884,9 @@ impl PageLifecycleBatch {
             LifecycleUpdate::FrameApplied(revision) => {
                 self.frames_applied = self.frames_applied.saturating_add(1);
                 self.frame_applied = Some(self.frame_applied.unwrap_or_default().max(revision));
+            }
+            LifecycleUpdate::FramePainted(revision) => {
+                self.frame_painted = Some(self.frame_painted.unwrap_or_default().max(revision));
             }
             LifecycleUpdate::FrameFailed(revision) => {
                 self.frame_pending = Some(false);
@@ -1159,6 +1163,12 @@ fn apply_lifecycle(
         }
         if let Some(revision) = batch.frame_applied {
             page.frame_revision_applied = page.frame_revision_applied.max(revision);
+        }
+        if batch.remounts > 0 {
+            page.frame_revision_painted = 0;
+        }
+        if let Some(revision) = batch.frame_painted {
+            page.frame_revision_painted = page.frame_revision_painted.max(revision);
         }
         if batch.frame_failed == Some(navigation.0) && handoffs.contains(key.webview) {
             commands
@@ -3087,6 +3097,7 @@ mod tests {
         for update in [
             LifecycleUpdate::FrameDelivered(1),
             LifecycleUpdate::FrameApplied(1),
+            LifecycleUpdate::FramePainted(1),
         ] {
             lifecycle.send(PageLifecycleEnvelope {
                 webview: page,

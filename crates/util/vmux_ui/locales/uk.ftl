@@ -1106,3 +1106,7 @@ layout-git-status = Змінені файли: { $count }
 layout-git-ahead = Ненадіслані коміти: { $count }
 
 common-copy-url = Копіювати URL
+
+sessions-history-unavailable = Цю розмову неможливо відкрити знову. Ви можете почати нову.
+sessions-connection-interrupted = З’єднання перервано. Спробуйте підключитися знову.
+sessions-operation-failed = Не вдалося завершити операцію.

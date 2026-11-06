@@ -19,6 +19,7 @@ pub struct Page {
 impl Page {
     pub fn answers_for(&self, url: &str) -> bool {
         vmux_api::RoutePattern::new(self.url, self.owns_subtree).matches(url)
+            || vmux_api::RoutePattern::new(self.document_url(), self.owns_subtree).matches(url)
     }
 
     pub fn preserves_dom_for(&self, next: &Self) -> bool {

@@ -1967,7 +1967,7 @@ pub enum Mode {
 #[component]
 fn EditorLoadingSkeleton() -> Element {
     rsx! {
-        div { aria_busy: true, class: "flex flex-col gap-2 px-4 py-3",
+        div { aria_busy: true, class: "flex flex-col gap-2 px-4 py-3", "data-vmux-presentation-pending": "",
             for width in ["w-8/12", "w-6/12", "w-10/12", "w-7/12", "w-9/12"] {
                 vmux_ui::components::skeleton::Skeleton { class: "h-3 {width} bg-foreground/[0.05]" }
             }

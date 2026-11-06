@@ -70,6 +70,7 @@ async function scenario(growth, clamp, input, expected, initial = null, replay =
         if (options.manual) handlers.get('wheel')?.({});
         if (options.interactivePointer) handlers.get('pointerdown')?.({ target: { closest: () => ({}) } });
         container.scrollTop += input;
+        if (options.scrollEvent) handlers.get('scroll')?.();
         scope.appliedInput = true;
         if (options.lateGrowth) container.scrollHeight += options.lateGrowth;
         if (options.unlaidOut) { container.scrollHeight = 1000; container.clientHeight = 200; }
@@ -115,6 +116,7 @@ async function scenario(growth, clamp, input, expected, initial = null, replay =
   await scenario(0, null, 0, 1600, 'bottom', false, { follow: true, lateGrowth: 800, interactivePointer: true });
   await scenario(0, null, 0, 150, '150', false, { follow: true, lateGrowth: 800 });
   await scenario(0, null, -100, 700, 'bottom', true, { follow: true, manual: true, lateGrowth: 800 });
+  await scenario(0, null, -5, 795, 'bottom', true, { follow: true, manual: true, scrollEvent: true });
   await scenario(0, null, -100, 1600, 'bottom', true, { manual: true, lateGrowth: 800, followingFrames: [true, false, true] });
   await scenario(0, null, 0, 800, 'bottom', false, { unlaidOut: true });
   await scenario(0, null, 0, 800, 'bottom', true, { follow: true, disconnect: true });

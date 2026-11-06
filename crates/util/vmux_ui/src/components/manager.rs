@@ -925,6 +925,7 @@ pub fn ManagerEmpty(
 #[component]
 pub fn ManagerSkeleton() -> Element {
     rsx! {
+        div { class: "contents", "data-vmux-presentation-pending": "",
         for i in 0..3 {
             div { key: "{i}", class: "flex items-center gap-4 rounded-lg bg-foreground/[0.03] px-4 py-3",
                 Skeleton { class: "h-9 w-9 shrink-0 rounded-lg bg-foreground/[0.06]" }
@@ -933,6 +934,7 @@ pub fn ManagerSkeleton() -> Element {
                     Skeleton { class: "h-2.5 w-48 bg-foreground/[0.05]" }
                 }
             }
+        }
         }
     }
 }

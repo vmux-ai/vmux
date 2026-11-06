@@ -574,6 +574,12 @@ remain input-inert but may exchange typed initialization events, and presentatio
 after the first host snapshot. This gives every vmux page one stale-while-revalidate lifecycle
 instead of feature-specific loading gates.
 
+DOM delivery and presentation readiness are separate acknowledgements. Delivery releases the
+next edit batch; presentation waits for the current fonts, initial content and a browser paint
+opportunity. Initial loaders mark only their visible primary region as pending. Incoming pages
+remain hidden while the outgoing page stays available, and become visible as soon as presentation
+is ready. Rehydration invalidates the old paint acknowledgement.
+
 Native interaction-state updates are repeatable: each update changes the IPC epoch and the
 document's inert state without adding persistent JavaScript bindings.
 Page-local navigation uses `PageLocationRequest` and `PageLocationUiState`, with the fragment
@@ -590,7 +596,8 @@ the registered manifests supply the page-switch menu. Pages publish only typed `
 data through `AddressContribution` or `PageAddressPublish`: the current route, project and session
 choices, directories, symbols, and their intents. `vmux_layout` renders the active surface with
 one `AddressTrail`. No page component, callback, context, or mounted slot crosses into Layout.
-The URL row contains routing breadcrumbs. Search, filters, view switches, Details, Add, Create,
+The URL row contains routing breadcrumbs. Git view, repository, branch and commit selections
+use canonical vmux routes; legacy git paths remain input aliases. Search, filters, Details, Add, Create,
 Resume, Start, and Checkout render inside the page through `PageToolbar`, with local callbacks.
 Fragment updates retain the page's breadcrumbs instead of replacing them with the generic route.
 `PageAddressRequest` validates the source window, active surface, revision, and URL before sending
@@ -1347,11 +1354,15 @@ share a bounded worker task per requested root, publish only requested results, 
 reads. Hidden pages release their tasks; returning pages retain their last result during refresh.
 The repository root is a resource location, not a separate logical project identity.
 
-The DOM interpreter places a ready transcript at its saved reading position or the bottom inside
-the first edit transaction, once its viewport has real geometry. A resize observer keeps a following
-transcript at the bottom before paint as content and viewport sizes change. Reader input cancels
-following immediately; later frames never repeat initial placement. History anchoring governs
-movement while reading older messages.
+The DOM interpreter measures the initial transcript rows before positioning them. Their
+content-visibility estimates are replaced by real extents for the first paint, then normal skipping
+resumes. A resize observer schedules following at browser frames instead of writing layout from its
+notification loop. Any upward reading movement stops following; only the actual bottom resumes it.
+Saved reading positions and history anchoring retain their own ownership.
+
+Session failures with a useful remedy appear in a compact banner above the composer. Busy sessions
+explain where to release the writer; missing histories offer a new conversation; connection failures
+offer retry. Other failures use a dismissible toast. Raw provider diagnostics remain in app logs.
 
 Code opens the owning Space's working directory and prefers its README, then a bounded set of
 entry files, before falling back to directory columns. Directory pages use paths as page titles

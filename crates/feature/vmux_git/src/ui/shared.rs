@@ -430,6 +430,12 @@ pub fn DiffView(
     let event_scroll_position = Rc::clone(&scroll_position);
     let event_geometry_window = Rc::clone(&geometry_window);
 
+    let initial_loading = loading && viewport.read().is_none();
+    let (top_spacer, bottom_spacer, sections) = if initial_loading {
+        (0.0, 0.0, Vec::new())
+    } else {
+        (top_spacer, bottom_spacer, sections)
+    };
     rsx! {
         div {
             key: "{identity}",
@@ -451,7 +457,7 @@ pub fn DiffView(
                 });
             },
             class: if visible { "min-h-0 flex-1 overflow-auto bg-transparent font-mono text-[11px] leading-5" } else { "hidden" },
-            style: "overflow-anchor:none;",
+            style: "overflow-anchor:none;scrollbar-gutter:stable;",
             onscroll: move |event| {
                 event_scroll_position.set(event.scroll_top());
                 let had_geometry_window = event_geometry_window.replace(None).is_some();
@@ -490,12 +496,8 @@ pub fn DiffView(
                 }
             },
 
-            if loading && rows.is_empty() && expected_path_count == 0 {
-                div { class: "flex flex-col gap-2 p-3",
-                    for width in ["w-10/12", "w-full", "w-8/12", "w-11/12", "w-7/12"] {
-                        Skeleton { class: "h-4 {width} bg-foreground/[0.045]" }
-                    }
-                }
+            if initial_loading {
+                DiffLoadingSurface { height: render_window.read().height.max(360.0) }
             } else if !error.is_empty() {
                 ErrorState {
                     class: "min-h-64 font-sans".to_string(),
@@ -770,6 +772,33 @@ fn DiffVirtualSpacer(height: f64) -> Element {
                             div { class: "h-3 w-11/12 rounded bg-foreground/[0.04]" }
                         }
                     }
+                }
+            }
+        }
+    }
+}
+
+#[component]
+fn DiffLoadingSurface(height: f64) -> Element {
+    let rows = ((height - DIFF_FILE_HEADER_HEIGHT).max(DIFF_LINE_HEIGHT) / DIFF_LINE_HEIGHT).ceil()
+        as usize;
+    let widths = ["w-10/12", "w-8/12", "w-11/12", "w-7/12"];
+    rsx! {
+        div {
+            class: "min-h-full overflow-hidden",
+            style: "height:{height}px;",
+            "data-vmux-presentation-pending": "",
+            div { class: "flex h-9 items-center gap-2 bg-foreground/[0.025] px-3",
+                Skeleton { class: "size-3.5 shrink-0 rounded-sm bg-foreground/[0.07]" }
+                Skeleton { class: "h-2.5 w-32 bg-foreground/[0.07]" }
+            }
+            for index in 0..rows {
+                div { key: "initial-diff-{index}", class: "flex h-5 items-center gap-3 px-3",
+                    div { class: "flex w-16 shrink-0 gap-2",
+                        Skeleton { class: "h-2.5 w-5 bg-foreground/[0.045]" }
+                        Skeleton { class: "h-2.5 w-7 bg-foreground/[0.04]" }
+                    }
+                    Skeleton { class: "h-2.5 {widths[index % widths.len()]} bg-foreground/[0.045]" }
                 }
             }
         }

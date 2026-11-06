@@ -1106,3 +1106,7 @@ layout-git-status = Изменённые файлы: { $count }
 layout-git-ahead = Неотправленные коммиты: { $count }
 
 common-copy-url = Копировать URL
+
+sessions-history-unavailable = Этот разговор нельзя открыть снова. Вы можете начать новый.
+sessions-connection-interrupted = Соединение прервано. Попробуйте подключиться снова.
+sessions-operation-failed = Не удалось завершить операцию.

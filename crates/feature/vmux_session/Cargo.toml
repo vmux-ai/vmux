@@ -79,6 +79,7 @@ vmux_tool = { path = "../vmux_tool", optional = true }
 workspace = true
 
 [dev-dependencies]
+tokio = { workspace = true }
 tempfile = "3"
 dioxus-ssr = "=0.7.9"
 dioxus-html = { version = "=0.7.9", features = ["serialize"] }

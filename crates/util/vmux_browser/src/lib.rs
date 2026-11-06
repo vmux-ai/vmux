@@ -89,6 +89,7 @@ pub struct HostedPageLifecycle {
     pub frames_applied: u64,
     pub frame_revision_delivered: u64,
     pub frame_revision_applied: u64,
+    pub frame_revision_painted: u64,
     pub frame_pending: bool,
     pub ui_events: u64,
     pub host_events: u64,
@@ -100,7 +101,7 @@ pub struct HostedPageLifecycle {
 impl HostedPageLifecycle {
     pub fn painted_after(&self, navigation_revision: u64) -> bool {
         self.navigation_revision > navigation_revision
-            && self.frame_revision_applied >= self.navigation_revision
+            && self.frame_revision_painted >= self.navigation_revision
     }
 }
 

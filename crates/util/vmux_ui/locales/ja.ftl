@@ -1086,3 +1086,7 @@ layout-git-status = 変更ファイル: { $count } 件
 layout-git-ahead = 未 push のコミット: { $count } 件
 
 common-copy-url = URL をコピー
+
+sessions-history-unavailable = この会話を再開できません。新しい会話を開始できます。
+sessions-connection-interrupted = 接続が中断されました。もう一度接続してください。
+sessions-operation-failed = 操作を完了できませんでした。

@@ -1,152 +1,265 @@
+use super::state::Chat;
 use crate::event::ChatRetrySession;
+use crate::{Failure, FailureKind};
+use dioxus::core::Task;
 use dioxus::prelude::*;
-use vmux_ui::clipboard::Clipboard;
 use vmux_ui::components::button::{Button, ButtonSize, ButtonVariant};
+use vmux_ui::components::notice::{Notice, NoticeKind};
 use vmux_ui::hooks::send;
 use vmux_ui::i18n::translate;
 use vmux_ui::navigation::PageNavigation;
 
 #[component]
-pub(super) fn ChatErrorCard(message: String) -> Element {
-    let is_startup = message.to_lowercase().contains("startup");
-    let busy = vmux_session::Failure(&message).in_use();
-    if busy {
-        let diagnostics = message.clone();
-        return rsx! {
-            div { class: "flex flex-col gap-3 rounded-lg bg-card px-4 py-3 text-foreground", role: "status",
-                div { class: "text-sm font-medium", {translate("sessions-busy-title")} }
-                p { class: "text-sm leading-relaxed text-muted-foreground", {translate("sessions-busy-detail")} }
-                div { class: "flex items-center gap-2",
-                    Button { size: ButtonSize::Xs, variant: ButtonVariant::Primary,
+pub(super) fn ChatFeedback(chat: Chat) -> Element {
+    let message = chat.run.error();
+    let status = chat.status();
+    let kind = Failure(&message).kind();
+    let mut visible = use_signal(|| true);
+    let mut seen = use_signal(|| None::<(String, String)>);
+    let mut dismiss_task = use_signal(|| None::<Task>);
+    use_drop(move || {
+        if let Some(task) = dismiss_task.write().take() {
+            task.cancel();
+        }
+    });
+    let observed_message = message.clone();
+    let observed_status = status.clone();
+    use_effect(use_reactive!(|(observed_message, observed_status)| {
+        let identity = (observed_status.clone(), observed_message.clone());
+        if seen.peek().as_ref() == Some(&identity) {
+            return;
+        }
+        seen.set(Some(identity));
+        visible.set(true);
+        if let Some(task) = dismiss_task.write().take() {
+            task.cancel();
+        }
+        if observed_status == "errored" && kind == FailureKind::Other {
+            dismiss_task.set(Some(spawn(async move {
+                vmux_ui::platform::Platform::sleep(5000).await;
+                visible.set(false);
+                dismiss_task.set(None);
+            })));
+        }
+    }));
+    if status != "errored" || message.is_empty() || !visible() {
+        return rsx! {};
+    }
+    match kind {
+        FailureKind::Busy => rsx! {
+            Notice {
+                message: translate("sessions-busy-detail"),
+                kind: NoticeKind::Info,
+                actions: rsx! {
+                    Button { size: ButtonSize::Xs, variant: ButtonVariant::Ghost,
+                        aria_label: translate("common-retry"),
                         onclick: move |_| { let _ = send(&ChatRetrySession); },
                         {translate("common-retry")}
                     }
+                },
+            }
+        },
+        FailureKind::MissingHistory => rsx! {
+            Notice {
+                message: translate("sessions-history-unavailable"),
+                kind: NoticeKind::Warning,
+                actions: rsx! {
                     Button { size: ButtonSize::Xs, variant: ButtonVariant::Ghost,
-                        onclick: move |_| Clipboard::write(&diagnostics),
-                        {translate("common-copy")}
+                        aria_label: translate("sessions-start"),
+                        onclick: move |_| PageNavigation::replace("vmux://start/"),
+                        {translate("sessions-start")}
                     }
-                }
+                },
+                on_dismiss: move |_| visible.set(false),
             }
-        };
-    }
-    #[cfg(not(target_os = "ios"))]
-    let version_error_target = Some(format!("{}acp", vmux_tool::ToolPlugin::URL));
-    #[cfg(target_os = "ios")]
-    let version_error_target: Option<String> = None;
-    let title = if is_startup {
-        translate("agent-error-startup-title")
-    } else {
-        translate("common-error")
-    };
-    let copy_label = translate("common-copy");
-    let copy_text = message.clone();
-    rsx! {
-        div { class: "flex flex-col gap-2 border-l-2 border-red-500/40 px-4 py-2",
-            div { class: "flex items-center gap-2",
-                svg {
-                    class: "h-4 w-4 shrink-0 text-red-500",
-                    view_box: "0 0 24 24",
-                    fill: "none",
-                    stroke: "currentColor",
-                    stroke_width: "1.8",
-                    stroke_linecap: "round",
-                    stroke_linejoin: "round",
-                    path { d: "M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0Z" }
-                    path { d: "M12 9v4" }
-                    path { d: "M12 17h.01" }
-                }
-                span { class: "text-sm font-semibold text-red-600 dark:text-red-300", "{title}" }
-                button {
-                    class: "ml-auto flex h-6 w-6 items-center justify-center rounded-md text-red-500/70 transition hover:bg-red-500/10 hover:text-red-500",
-                    title: "{copy_label}",
-                    aria_label: "{copy_label}",
-                    onclick: move |_| Clipboard::write(&copy_text),
-                    svg {
-                        class: "h-3.5 w-3.5",
-                        view_box: "0 0 24 24",
-                        fill: "none",
-                        stroke: "currentColor",
-                        stroke_width: "1.8",
-                        stroke_linecap: "round",
-                        stroke_linejoin: "round",
-                        rect { x: "9", y: "9", width: "13", height: "13", rx: "2" }
-                        path { d: "M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" }
+        },
+        FailureKind::Connection => rsx! {
+            Notice {
+                message: translate("sessions-connection-interrupted"),
+                kind: NoticeKind::Error,
+                actions: rsx! {
+                    Button { size: ButtonSize::Xs, variant: ButtonVariant::Ghost,
+                        aria_label: translate("common-retry"),
+                        onclick: move |_| { let _ = send(&ChatRetrySession); },
+                        {translate("common-retry")}
                     }
-                }
+                },
+                on_dismiss: move |_| visible.set(false),
             }
-            div { class: "max-h-40 overflow-auto whitespace-pre-wrap break-words border-l border-red-500/20 px-3 py-2 font-mono text-[11px] leading-relaxed text-red-700/90 dark:text-red-200/80",
-                "{message}"
-            }
-            if is_startup || message.contains("session/load failed") {
-                Button { size: ButtonSize::Xs, variant: ButtonVariant::Ghost,
-                    class: "self-start".to_string(),
-                    onclick: move |_| { let _ = send(&ChatRetrySession); },
-                    {translate("common-retry")}
-                }
-            }
-        }
-        if is_version_error(&message) {
-            div { class: "flex items-start gap-3 border-t border-foreground/10 px-4 py-3",
-                div { class: "flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-amber-500/15 text-amber-500",
-                    svg {
-                        class: "h-4 w-4",
-                        view_box: "0 0 24 24",
-                        fill: "none",
-                        stroke: "currentColor",
-                        stroke_width: "1.8",
-                        stroke_linecap: "round",
-                        stroke_linejoin: "round",
-                        path { d: "M9 18h6" }
-                        path { d: "M10 22h4" }
-                        path { d: "M12 2a7 7 0 0 0-4 12.7c.6.5 1 1.3 1 2.1h6c0-.8.4-1.6 1-2.1A7 7 0 0 0 12 2Z" }
+        },
+        FailureKind::Setup => rsx! {
+            Notice {
+                message: translate("agent-error-version-suggestion"),
+                kind: NoticeKind::Warning,
+                actions: rsx! {
+                    Button { size: ButtonSize::Xs, variant: ButtonVariant::Ghost,
+                        aria_label: translate("agent-error-open-agents"),
+                        onclick: move |_| PageNavigation::replace(format!("{}acp", vmux_tool::ToolPlugin::URL)),
+                        {translate("agent-error-open-agents")}
                     }
-                }
-                div { class: "flex min-w-0 flex-1 flex-col gap-2.5",
-                    p { class: "text-sm leading-relaxed text-foreground", {translate("agent-error-version-suggestion")} }
-                    if let Some(url) = version_error_target {
-                        button {
-                            class: "vmux-primary-action inline-flex items-center gap-2 self-end rounded-xl px-6 py-3 text-sm font-semibold transition hover:-translate-y-0.5 hover:shadow-lg",
-                            onclick: move |_| {
-                                PageNavigation::replace(url.clone());
-                            },
-                            svg {
-                                class: "h-4 w-4 text-indigo-500",
-                                view_box: "0 0 24 24",
-                                fill: "none",
-                                stroke: "currentColor",
-                                stroke_width: "1.8",
-                                stroke_linecap: "round",
-                                stroke_linejoin: "round",
-                                path { d: "M15 3h6v6" }
-                                path { d: "M10 14 21 3" }
-                                path { d: "M21 14v5a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5" }
-                            }
-                            span { class: "bg-gradient-to-r from-indigo-500 via-purple-500 to-pink-500 bg-clip-text text-transparent",
-                                {translate("agent-error-open-agents")}
-                            }
-                        }
-                    }
-                }
+                },
+                on_dismiss: move |_| visible.set(false),
             }
-        }
+        },
+        FailureKind::Other => rsx! {
+            Notice {
+                message: translate("sessions-operation-failed"),
+                kind: NoticeKind::Error, floating: true,
+                on_dismiss: move |_| visible.set(false),
+            }
+        },
     }
 }
 
-fn is_version_error(message: &str) -> bool {
-    let lower = message.to_lowercase();
-    [
-        "403",
-        "404",
-        "forbidden",
-        "security policy",
-        "blocked",
-        "eacces",
-        "invalid tag",
-        "einvalidtagname",
-        "etarget",
-        "no matching version",
-        "notarget",
-    ]
-    .iter()
-    .any(|needle| lower.contains(needle))
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::event::ChatSnapshot;
+    use crate::state::ChatUiState;
+    use dioxus::core::{AttributeValue, Mutation, VirtualDom};
+    use dioxus_html::{EventData, SerializedHtmlEventConverter, SerializedMouseData};
+    use std::{cell::RefCell, rc::Rc};
+    use vmux_api::{BinEvent, UiStateFrame, command_bar::OpenRequest};
+    use vmux_ui::transport::{
+        BytesListener, HostBinding, PageHost, event_listener::EventListenerError,
+    };
+
+    #[component]
+    fn FeedbackPage() -> Element {
+        let chat = super::super::state::use_chat("session".into());
+        rsx! { ChatFeedback { chat } }
+    }
+
+    #[derive(Default)]
+    struct FeedbackHost {
+        listeners: RefCell<Vec<BytesListener>>,
+        requests: RefCell<Vec<String>>,
+    }
+
+    impl PageHost for FeedbackHost {
+        fn send(&self, id: &str, bytes: &[u8]) -> Result<(), EventListenerError> {
+            if id == ChatRetrySession::id() {
+                self.requests.borrow_mut().push("retry".into());
+            } else if id == OpenRequest::id() {
+                let request = rkyv::from_bytes::<OpenRequest, rkyv::rancor::Error>(bytes).unwrap();
+                self.requests.borrow_mut().push(request.value);
+            }
+            Ok(())
+        }
+
+        fn listen(&self, id: &str, listener: BytesListener) -> Result<(), EventListenerError> {
+            if id == ChatUiState::id() {
+                self.listeners.borrow_mut().push(listener);
+            }
+            Ok(())
+        }
+    }
+
+    impl FeedbackHost {
+        fn fail(&self, message: &str) {
+            let frame = UiStateFrame::<ChatUiState, crate::state::ChatUiStatePatch>::Snapshot(
+                ChatUiState {
+                    snapshot: ChatSnapshot {
+                        status: "errored".into(),
+                        error: message.into(),
+                        ..Default::default()
+                    },
+                    snapshot_ready: true,
+                    ..Default::default()
+                },
+            );
+            let bytes = rkyv::to_bytes::<rkyv::rancor::Error>(&frame).unwrap();
+            for listener in &mut *self.listeners.borrow_mut() {
+                listener(&bytes);
+            }
+        }
+    }
+
+    #[test]
+    fn failures_hide_protocol_details_and_offer_only_relevant_recovery() {
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_time()
+            .build()
+            .unwrap();
+        let _runtime = runtime.enter();
+        dioxus_html::set_event_converter(Box::new(SerializedHtmlEventConverter));
+        for (message, role, label, request) in [
+            (
+                "Invalid request: {\"reason\":\"thread_active_writer\"}",
+                "status",
+                "common-retry",
+                Some("retry"),
+            ),
+            (
+                "session/load failed: no rollout found for thread id abc",
+                "status",
+                "sessions-start",
+                Some("vmux://start/"),
+            ),
+            (
+                "session/load timed out",
+                "alert",
+                "common-retry",
+                Some("retry"),
+            ),
+            (
+                "agent command not found",
+                "status",
+                "agent-error-open-agents",
+                Some("vmux://tools/acp"),
+            ),
+            (
+                "operation failed unexpectedly",
+                "alert",
+                "common-close",
+                None,
+            ),
+        ] {
+            let host = Rc::new(FeedbackHost::default());
+            let mut dom = VirtualDom::new(FeedbackPage);
+            dom.provide_root_context(HostBinding(host.clone()));
+            dom.rebuild_in_place();
+            dom.render_immediate_to_vec();
+            host.fail(message);
+            let update = dom.render_immediate_to_vec();
+            dom.render_immediate_to_vec();
+            let html = dioxus_ssr::render(&dom);
+            assert!(!html.contains(message), "raw failure leaked: {message}");
+            assert!(!html.contains("thread_active_writer"));
+            assert!(html.contains(&format!("role=\"{role}\"")), "{html}");
+            assert!(html.contains(&translate(label)), "{html}");
+            if request != Some("retry") {
+                assert!(!html.contains(&translate("common-retry")));
+            }
+            let button = update
+                .edits
+                .iter()
+                .find_map(|edit| match edit {
+                    Mutation::SetAttribute {
+                        name: "aria-label",
+                        value: AttributeValue::Text(value),
+                        id,
+                        ..
+                    } if value == &translate(label) => Some(*id),
+                    _ => None,
+                })
+                .expect("feedback must offer recovery or dismissal");
+            dom.runtime().handle_event(
+                "click",
+                Event::new(
+                    EventData::Mouse(SerializedMouseData::default()).into_any(),
+                    true,
+                ),
+                button,
+            );
+            dom.render_immediate_to_vec();
+            assert_eq!(
+                *host.requests.borrow(),
+                request.into_iter().collect::<Vec<_>>()
+            );
+            if request.is_none() {
+                assert!(!dioxus_ssr::render(&dom).contains("role=\"alert\""));
+            }
+        }
+    }
 }

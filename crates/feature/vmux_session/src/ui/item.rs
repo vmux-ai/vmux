@@ -30,7 +30,7 @@ pub fn UserBubble(
     children: Element,
 ) -> Element {
     rsx! {
-        div { class: "chat-message-enter chat-user-bubble group flex w-full flex-row-reverse items-start justify-start gap-3 px-1 py-1 text-sm [contain-intrinsic-size:auto_160px] [contain:layout_paint_style] [content-visibility:auto]", ..attributes,
+        div { class: "chat-message-enter chat-user-bubble group flex w-full flex-row-reverse items-start justify-start gap-3 px-1 py-1 text-sm [contain-intrinsic-size:auto_160px] [contain:layout_paint_style] [content-visibility:auto]", "data-vmux-scroll-layout": "", ..attributes,
             Avatar {
                 src: None,
                 seed: avatar_name.clone(),
@@ -58,7 +58,7 @@ pub fn AssistantTurn(
     children: Element,
 ) -> Element {
     rsx! {
-        div { class: "chat-message-enter chat-assistant-turn group flex w-full gap-3 px-1 py-1 [contain-intrinsic-size:auto_160px] [contain:layout_paint_style] [content-visibility:auto]", ..attributes,
+        div { class: "chat-message-enter chat-assistant-turn group flex w-full gap-3 px-1 py-1 [contain-intrinsic-size:auto_160px] [contain:layout_paint_style] [content-visibility:auto]", "data-vmux-scroll-layout": "", ..attributes,
             AgentThumbnail {
                 src: avatar_src,
                 seed: agent_id,
@@ -318,6 +318,7 @@ pub fn TurnView(
         div {
             key: "{key}",
             class: "flex w-full flex-col gap-2 [contain-intrinsic-size:auto_180px] [content-visibility:auto]",
+            "data-vmux-scroll-layout": "",
             if !turn.rows.is_empty() || turn.running || duration_label.is_some() {
                 AssistantTurn {
                     agent_id,

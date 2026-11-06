@@ -22,6 +22,7 @@ pub enum LifecycleUpdate {
     FramePending,
     FrameDelivered(u64),
     FrameApplied(u64),
+    FramePainted(u64),
     FrameFailed(u64),
     UiEventHandled,
     HostEventDelivered,

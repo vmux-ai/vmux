@@ -1,6 +1,7 @@
 use self::menu::{CommandMenu, MediaMenu, ResumeMenu};
 use self::options::{ChatComposerMenus, ChatModelMenu};
 use super::approval::ChoiceList;
+use super::error::ChatFeedback;
 use super::keys::ChatKeys;
 use super::state::Chat;
 use super::transcript::QueuedPrompts;
@@ -45,6 +46,7 @@ pub(super) fn ChatDock(chat: Chat) -> Element {
                 }
                 ChoiceList { chat }
                 QueuedPrompts { chat }
+                ChatFeedback { chat }
                 ChatComposer { chat }
             }
         }

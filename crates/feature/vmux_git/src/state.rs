@@ -25,6 +25,25 @@ pub struct RepositoryName(pub String);
 pub struct CheckedOutBranch(pub String);
 
 impl GitPanel {
+    pub fn route(self) -> &'static str {
+        match self {
+            Self::Files => "changes",
+            Self::Branches => "branch-changes",
+            Self::Commits => "commits",
+            Self::Stash => "stashes",
+        }
+    }
+
+    pub fn from_route(route: &str) -> Option<Self> {
+        match route {
+            "changes" => Some(Self::Files),
+            "branch-changes" => Some(Self::Branches),
+            "commits" => Some(Self::Commits),
+            "stashes" => Some(Self::Stash),
+            _ => None,
+        }
+    }
+
     pub fn from_key(key: &str) -> Option<Self> {
         match key {
             "0" | "1" => Some(Self::Files),
@@ -406,6 +425,17 @@ impl Default for GitPageSnapshot {
 }
 
 impl GitPageSnapshot {
+    pub(crate) fn clear_diff(&mut self) {
+        self.diff_viewport = None;
+        self.diff_rows.clear();
+        self.diff_loading = true;
+        self.branch_files.clear();
+        self.branch_diff_paths.clear();
+        self.branch_files_reference.clear();
+        self.branch_files_total = 0;
+        self.branch_files_loading = true;
+    }
+
     pub(crate) const DIFF_CONTEXT_LINES: usize = 3;
 
     pub(crate) fn catalog(&self, catalog: GitCatalog) -> GitCatalogProgress {

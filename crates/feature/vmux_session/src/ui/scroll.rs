@@ -54,13 +54,25 @@ pub(super) struct Observation {
 
 impl Observation {
     pub fn pauses_following(&self) -> bool {
-        !self.initial && !self.settling && self.distance > 48 && self.top < self.previous
+        !self.initial && !self.settling && self.distance > 0 && self.top < self.previous
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn small_upward_scroll_stops_following_until_the_actual_bottom() {
+        let moved = Observation {
+            top: 995,
+            previous: 1000,
+            distance: 5,
+            initial: false,
+            settling: false,
+        };
+        assert!(moved.pauses_following());
+    }
 
     #[test]
     fn shrinking_content_at_the_bottom_does_not_cancel_following() {

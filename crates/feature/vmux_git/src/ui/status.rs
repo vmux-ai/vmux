@@ -55,24 +55,6 @@ pub(super) fn RepositoryHeader(
         GitPanel::Commits => ("commits", "git-commits", vmux_api::BuiltinIcon::Clock),
         GitPanel::Stash => ("stash", "git-stashes", vmux_api::BuiltinIcon::Archive),
     };
-    let mut panels = Vec::new();
-    for (id, label, icon) in [
-        ("changes", "git-changes", vmux_api::BuiltinIcon::Files),
-        (
-            "branches",
-            "git-branch-changes",
-            vmux_api::BuiltinIcon::GitBranch,
-        ),
-        ("commits", "git-commits", vmux_api::BuiltinIcon::Clock),
-        ("stash", "git-stashes", vmux_api::BuiltinIcon::Archive),
-    ] {
-        panels.push(AddressOption {
-            label_key: label.into(),
-            icon: Some(icon),
-            intent: Some(AddressIntent::Section { id: id.into() }),
-            ..Default::default()
-        });
-    }
     let mut project_options = Vec::new();
     for project in &projects {
         if project.depth != 0 || project.missing {
@@ -131,7 +113,12 @@ pub(super) fn RepositoryHeader(
         branch_options.push(AddressOption {
             label: reference.clone(),
             identity: reference.clone(),
-            intent: Some(AddressIntent::GitBranch { reference }),
+            intent: crate::GitUrl::from_view(
+                std::path::Path::new(&repository.repo_root),
+                GitPanel::Branches,
+                Some(&reference),
+            )
+            .map(|url| AddressIntent::Navigate { url }),
             ..Default::default()
         });
     }
@@ -181,9 +168,12 @@ pub(super) fn RepositoryHeader(
                     label: comparison.clone(),
                     title: comparison,
                     identity: branch_label.clone(),
-                    intent: Some(AddressIntent::GitBranch {
-                        reference: branch_label,
-                    }),
+                    intent: crate::GitUrl::from_view(
+                        std::path::Path::new(&repository.repo_root),
+                        GitPanel::Branches,
+                        Some(&branch_label),
+                    )
+                    .map(|url| AddressIntent::Navigate { url }),
                     ..Default::default()
                 },
                 options: branch_options,
@@ -214,9 +204,12 @@ pub(super) fn RepositoryHeader(
             let entry = AddressOption {
                 label: commit.short_sha.clone(),
                 title: commit.summary.clone(),
-                intent: Some(AddressIntent::GitCommit {
-                    commit: commit.sha.clone(),
-                }),
+                intent: crate::GitUrl::from_view(
+                    std::path::Path::new(&repository.repo_root),
+                    GitPanel::Commits,
+                    Some(&commit.sha),
+                )
+                .map(|url| AddressIntent::Navigate { url }),
                 ..Default::default()
             };
             if commit.sha == selected_commit {
@@ -239,53 +232,55 @@ pub(super) fn RepositoryHeader(
             });
         }
     }
-    let first_panel_commit = repository
-        .commits
-        .first()
-        .map(|commit| commit.sha.clone())
-        .unwrap_or_default();
-    let mut panel_options = Vec::new();
-    for option in panels {
-        let Some(AddressIntent::Section { id }) = option.intent else {
-            continue;
+    let selection = match focused_panel {
+        GitPanel::Branches => Some(selected_branch.as_str()),
+        GitPanel::Commits => Some(selected_commit.as_str()),
+        GitPanel::Stash | GitPanel::Files => None,
+    };
+    let mut views = Vec::new();
+    for (panel, label) in [
+        (GitPanel::Files, "git-changes"),
+        (GitPanel::Branches, "git-branch-changes"),
+        (GitPanel::Commits, "git-commits"),
+        (GitPanel::Stash, "git-stashes"),
+    ] {
+        let choice = match panel {
+            GitPanel::Branches => Some(if selected_branch.is_empty() {
+                repository.branch.as_str()
+            } else {
+                selected_branch.as_str()
+            }),
+            GitPanel::Commits if !selected_commit.is_empty() => Some(selected_commit.as_str()),
+            _ => None,
         };
-        panel_options.push(vmux_ui::components::page_address::ToolbarChoice {
-            value: id,
-            label: translate(&option.label_key),
-            icon: String::new(),
-        });
+        if let Some(url) =
+            crate::GitUrl::from_view(std::path::Path::new(&repository.repo_root), panel, choice)
+        {
+            views.push(AddressOption {
+                label_key: label.into(),
+                intent: Some(AddressIntent::Navigate { url }),
+                ..Default::default()
+            });
+        }
     }
-    let mut toolbar = vec![
-        ToolbarControl::menu(translate(panel_label), panel_options, move |id| {
-            match id.as_str() {
-                "changes" => {
-                    let _ = send(&GitPanelSelectRequest {
-                        panel: GitPanel::Files,
-                    });
-                }
-                "branches" => {
-                    let _ = send(&GitBranchDiffSelectRequest);
-                }
-                "commits" if !first_panel_commit.is_empty() => {
-                    let _ = send(&GitCommitSelectRequest {
-                        commit: first_panel_commit.clone(),
-                    });
-                }
-                "commits" => {
-                    let _ = send(&GitPanelSelectRequest {
-                        panel: GitPanel::Commits,
-                    });
-                }
-                "stash" => {
-                    let _ = send(&GitPanelSelectRequest {
-                        panel: GitPanel::Stash,
-                    });
-                }
-                _ => {}
-            }
-        })
-        .text(),
-    ];
+    address.fixed.insert(
+        0,
+        AddressCrumb {
+            entry: AddressOption {
+                label_key: panel_label.into(),
+                intent: crate::GitUrl::from_view(
+                    std::path::Path::new(&repository.repo_root),
+                    focused_panel,
+                    selection,
+                )
+                .map(|url| AddressIntent::Navigate { url }),
+                ..Default::default()
+            },
+            options: views,
+            ..Default::default()
+        },
+    );
+    let mut toolbar = Vec::new();
     if focused_panel == GitPanel::Branches && viewed_total > 0 {
         toolbar.push(ToolbarControl::badge(format!(
             "{viewed_count} / {viewed_total} {}",

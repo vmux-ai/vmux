@@ -81,6 +81,7 @@ pub struct EffectiveStartupSet;
 
 #[derive(bevy::ecs::system::SystemParam)]
 pub struct FocusedSpace<'w, 's> {
+    startup_page: vmux_ecs::page::StartupPageUrl<'w, 's>,
     focused_window: crate::window::FocusedWindow<'w, 's>,
     hierarchy: crate::window::WindowHierarchy<'w, 's>,
     spaces: Query<
@@ -179,7 +180,7 @@ impl FocusedSpace<'_, '_> {
     }
 
     pub fn resolved_startup_url(&self) -> String {
-        self.startup_url().unwrap_or_default().to_string()
+        self.startup_page.resolve(self.startup_url())
     }
 }
 

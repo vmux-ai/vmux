@@ -1,5 +1,4 @@
 use super::agent::AgentBanner;
-use super::error::ChatErrorCard;
 use super::item::ChatItemRow;
 use super::state::Chat;
 use crate::event::{ChatCancelQueuedPrompt, ChatClearQueue, ChatResume};
@@ -143,9 +142,6 @@ pub(super) fn ChatTranscript(chat: Chat) -> Element {
                         }
                     },
                 }
-                if chat.status() == "errored" {
-                    ChatErrorCard { message: chat.run.error() }
-                }
                 if chat.queue.paused() {
                     div { class: "flex items-center gap-3 py-1 text-xs text-muted-foreground",
                         span { class: "h-px flex-1 bg-foreground/10" }
@@ -175,7 +171,7 @@ fn HistorySentinel(loading: bool) -> Element {
 #[component]
 fn TranscriptSkeleton() -> Element {
     rsx! {
-        div { class: "flex flex-col gap-8 py-8",
+        div { class: "flex min-h-full flex-col justify-end gap-8 py-8", "data-vmux-presentation-pending": "",
             div { class: "ml-auto flex w-2/3 items-start justify-end gap-3",
                 div { class: "flex min-w-0 flex-1 flex-col items-end gap-2 pt-1",
                     Skeleton { class: "h-2.5 w-12 bg-foreground/[0.07]" }

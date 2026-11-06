@@ -590,6 +590,12 @@ impl GitStates<'_, '_> {
         true
     }
 
+    pub(super) fn clear_diff(&mut self, entity: Entity) {
+        if let Ok(mut state) = self.states.get_mut(entity) {
+            state.snapshot.clear_diff();
+        }
+    }
+
     pub(super) fn start_repository(
         &mut self,
         entity: Entity,

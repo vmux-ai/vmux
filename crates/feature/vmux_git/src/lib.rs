@@ -19,7 +19,8 @@ pub mod event;
 pub mod state;
 
 pub const FILES_HOST: &str = "files";
-pub const GIT_PAGE_URL: &str = "git://";
+pub const GIT_PAGE_URL: &str = "vmux://git/";
+const LEGACY_GIT_PAGE_URL: &str = "git://";
 
 pub struct GitUrl;
 
@@ -29,7 +30,7 @@ impl GitUrl {
     }
 
     pub fn is_page(value: &str) -> bool {
-        value.starts_with(GIT_PAGE_URL)
+        value.starts_with(GIT_PAGE_URL) || value.starts_with(LEGACY_GIT_PAGE_URL)
     }
 
     pub fn parse(value: &str) -> Option<std::path::PathBuf> {
@@ -38,19 +39,29 @@ impl GitUrl {
     }
 
     fn parse_with_home(value: &str, home: Option<&std::path::Path>) -> Option<std::path::PathBuf> {
-        let rest = value
-            .strip_prefix(GIT_PAGE_URL)
-            .or_else(|| value.strip_prefix("GIT://"))?;
-        let rest = rest.split(['?', '#']).next().unwrap_or_default();
-        if rest.is_empty() {
-            return None;
-        }
-        let encoded = if rest.starts_with('/') {
-            format!("file://{rest}")
+        let path = if value.starts_with(GIT_PAGE_URL) {
+            let parsed = url::Url::parse(value).ok()?;
+            let mut segments = parsed.path_segments()?;
+            crate::state::GitPanel::from_route(segments.next()?)?;
+            let locator = percent_encoding::percent_decode_str(segments.next()?)
+                .decode_utf8()
+                .ok()?;
+            url::Url::parse(&locator).ok()?.to_file_path().ok()?
         } else {
-            format!("file:///{rest}")
+            let rest = value
+                .strip_prefix(LEGACY_GIT_PAGE_URL)
+                .or_else(|| value.strip_prefix("GIT://"))?;
+            let rest = rest.split(['?', '#']).next().unwrap_or_default();
+            if rest.is_empty() {
+                return None;
+            }
+            let encoded = if rest.starts_with('/') {
+                format!("file://{rest}")
+            } else {
+                format!("file:///{rest}")
+            };
+            url::Url::parse(&encoded).ok()?.to_file_path().ok()?
         };
-        let path = url::Url::parse(&encoded).ok()?.to_file_path().ok()?;
         let relative = path.strip_prefix("/~").ok();
         match (home, relative) {
             (Some(home), Some(relative)) => Some(home.join(relative)),
@@ -59,34 +70,80 @@ impl GitUrl {
     }
 
     pub fn from_path(path: &std::path::Path) -> Option<String> {
-        let file_url = url::Url::from_file_path(path).ok()?;
-        let rest = file_url.as_str().strip_prefix("file:///")?;
-        Some(format!("{GIT_PAGE_URL}{rest}"))
+        Self::from_view(path, crate::state::GitPanel::Files, None)
+    }
+
+    pub fn from_view(
+        path: &std::path::Path,
+        panel: crate::state::GitPanel,
+        selection: Option<&str>,
+    ) -> Option<String> {
+        let locator = url::Url::from_file_path(path).ok()?;
+        let mut page = url::Url::parse(GIT_PAGE_URL).ok()?;
+        {
+            let mut segments = page.path_segments_mut().ok()?;
+            segments.pop_if_empty();
+            segments.push(panel.route());
+            segments.push(locator.as_str());
+            if let Some(selection) = selection.filter(|value| !value.is_empty()) {
+                segments.push(selection);
+            }
+        }
+        Some(page.to_string())
     }
 
     pub fn from_path_with_commit(path: &std::path::Path, commit: Option<&str>) -> Option<String> {
-        let base = Self::from_path(path)?;
-        let Some(commit) = commit.filter(|commit| !commit.is_empty()) else {
-            return Some(base);
+        let panel = if commit.is_some_and(|value| !value.is_empty()) {
+            crate::state::GitPanel::Commits
+        } else {
+            crate::state::GitPanel::Files
         };
-        let mut serializer = url::form_urlencoded::Serializer::new(String::new());
-        serializer.append_pair("commit", commit);
-        Some(format!("{base}?{}", serializer.finish()))
+        Self::from_view(path, panel, commit)
+    }
+
+    pub fn panel(value: &str) -> Option<crate::state::GitPanel> {
+        let parsed = url::Url::parse(value).ok()?;
+        if parsed.scheme() != "vmux" || parsed.host_str() != Some("git") {
+            return Self::legacy_commit(value).map(|_| crate::state::GitPanel::Commits);
+        }
+        crate::state::GitPanel::from_route(parsed.path_segments()?.next()?)
+    }
+
+    pub fn selection(value: &str) -> Option<String> {
+        if value.starts_with(GIT_PAGE_URL) {
+            let parsed = url::Url::parse(value).ok()?;
+            let encoded = parsed.path_segments()?.nth(2)?;
+            return percent_encoding::percent_decode_str(encoded)
+                .decode_utf8()
+                .ok()
+                .map(|value| value.into_owned());
+        }
+        Self::legacy_commit(value)
     }
 
     pub fn from_path_preserving_commit(
         path: &std::path::Path,
         current_url: &str,
     ) -> Option<String> {
-        let commit = if Self::parse(current_url).as_deref() == Some(path) {
-            Self::commit(current_url)
-        } else {
-            None
-        };
-        Self::from_path_with_commit(path, commit.as_deref())
+        if Self::parse(current_url).as_deref() != Some(path) {
+            return Self::from_path(path);
+        }
+        Self::from_view(
+            path,
+            Self::panel(current_url).unwrap_or_default(),
+            Self::selection(current_url).as_deref(),
+        )
     }
 
     pub fn commit(value: &str) -> Option<String> {
+        if Self::panel(value) == Some(crate::state::GitPanel::Commits) {
+            Self::selection(value)
+        } else {
+            Self::legacy_commit(value)
+        }
+    }
+
+    fn legacy_commit(value: &str) -> Option<String> {
         let query = value
             .split_once('?')?
             .1
@@ -122,8 +179,35 @@ mod tests {
         let path = std::path::Path::new("/Users/me/a repo");
         let url = GitUrl::from_path(path).unwrap();
 
-        assert_eq!(url, "git://Users/me/a%20repo");
+        assert_eq!(
+            url,
+            "vmux://git/changes/file:%2F%2F%2FUsers%2Fme%2Fa%2520repo"
+        );
         assert_eq!(GitUrl::parse(&url), Some(path.to_path_buf()));
+    }
+
+    #[test]
+    fn canonical_git_views_round_trip_repository_and_selection() {
+        let path = std::path::Path::new("/Users/me/a repo");
+        for (panel, selection) in [
+            (crate::state::GitPanel::Files, None),
+            (crate::state::GitPanel::Branches, Some("feature/日本語")),
+            (crate::state::GitPanel::Commits, Some("abcdef012345")),
+            (crate::state::GitPanel::Stash, Some("stash@{0}")),
+        ] {
+            let page = GitUrl::from_view(path, panel, selection).unwrap();
+            assert_eq!(GitUrl::parse(&page).as_deref(), Some(path));
+            assert_eq!(GitUrl::panel(&page), Some(panel));
+            assert_eq!(GitUrl::selection(&page).as_deref(), selection);
+        }
+        assert_eq!(
+            GitUrl::parse("git://Users/me/a%20repo").as_deref(),
+            Some(path)
+        );
+        assert_eq!(
+            GitUrl::commit("git://Users/me/a%20repo?commit=abcdef").as_deref(),
+            Some("abcdef")
+        );
     }
 
     #[test]
@@ -152,7 +236,10 @@ mod tests {
         let path = std::path::Path::new("/Users/me/a repo");
         let url = GitUrl::from_path_with_commit(path, Some("abc/123")).unwrap();
 
-        assert_eq!(url, "git://Users/me/a%20repo?commit=abc%2F123");
+        assert_eq!(
+            url,
+            "vmux://git/commits/file:%2F%2F%2FUsers%2Fme%2Fa%2520repo/abc%2F123"
+        );
         assert_eq!(GitUrl::parse(&url), Some(path.to_path_buf()));
         assert_eq!(GitUrl::commit(&url).as_deref(), Some("abc/123"));
         assert_eq!(

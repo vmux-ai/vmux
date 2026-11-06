@@ -102,7 +102,8 @@ impl Plugin for GitPlugin {
             .add_plugins(
                 Self::MANIFEST
                     .plugin()
-                    .hosted(HostedPage::subtree(crate::GIT_PAGE_URL, "Git")),
+                    .hosted(HostedPage::subtree(crate::GIT_PAGE_URL, "Git"))
+                    .alias(HostedPage::subtree(crate::LEGACY_GIT_PAGE_URL, "Git")),
             );
     }
 }

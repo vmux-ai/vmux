@@ -34,6 +34,8 @@ fn a_handoff_waits_for_the_frame_from_its_new_navigation() {
 
     assert!(!lifecycle.painted_after(1));
     lifecycle.frame_revision_applied = 2;
+    assert!(!lifecycle.painted_after(1));
+    lifecycle.frame_revision_painted = 2;
     assert!(lifecycle.painted_after(1));
     assert!(!lifecycle.painted_after(2));
 }

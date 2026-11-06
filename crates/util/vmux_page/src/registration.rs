@@ -86,6 +86,13 @@ impl Plugin for PagePlugin {
         let registration = self.registration;
         app.add_systems(PreStartup, move |mut commands: Commands| {
             commands.spawn((registration, registration.page.page_permissions()));
+            if registration.page.document_url() != registration.page.url {
+                commands.spawn(vmux_api::UiEventPermissions {
+                    url: registration.page.document_url(),
+                    owns_subtree: registration.page.owns_subtree,
+                    permissions: registration.page.permissions,
+                });
+            }
         });
     }
 

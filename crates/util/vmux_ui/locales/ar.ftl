@@ -1106,3 +1106,7 @@ layout-git-status = الملفات المعدّلة: { $count }
 layout-git-ahead = الالتزامات غير المرسلة: { $count }
 
 common-copy-url = نسخ الرابط
+
+sessions-history-unavailable = لا يمكن فتح هذه المحادثة مجددًا. يمكنك بدء محادثة جديدة.
+sessions-connection-interrupted = انقطع الاتصال. حاول الاتصال مرة أخرى.
+sessions-operation-failed = تعذر إكمال العملية.

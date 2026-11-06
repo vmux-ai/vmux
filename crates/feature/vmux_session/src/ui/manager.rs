@@ -844,7 +844,7 @@ fn SessionUpdatedFilterInput(
 #[component]
 fn SessionsSkeleton() -> Element {
     rsx! {
-        div { class: "min-w-[44rem] shrink-0 p-3", aria_busy: true,
+        div { class: "min-w-[44rem] shrink-0 p-3", aria_busy: true, "data-vmux-presentation-pending": "",
             div { class: "flex h-8 items-center gap-2", Skeleton { class: "h-3 w-24" } }
             for row in 0..10 {
                 div { key: "{row}", class: "flex h-11 items-center gap-2.5 px-2",

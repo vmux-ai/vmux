@@ -527,9 +527,7 @@ impl GitPageContextWriter<'_, '_> {
         let Ok(page) = self.pages.get(webview) else {
             return None;
         };
-        if !page.url.starts_with(vmux_git::GIT_PAGE_URL)
-            && page.url != vmux_git::GitPlugin::MANIFEST.url
-        {
+        if !vmux_git::GitUrl::is_page(&page.url) {
             return None;
         }
         let path = self

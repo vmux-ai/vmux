@@ -1103,3 +1103,7 @@ layout-git-status = 已變更檔案：{ $count }
 layout-git-ahead = 未推送提交：{ $count }
 
 common-copy-url = 複製 URL
+
+sessions-history-unavailable = 無法重新開啟此對話。你可以開始新對話。
+sessions-connection-interrupted = 連線已中斷。請重新連線。
+sessions-operation-failed = 無法完成操作。

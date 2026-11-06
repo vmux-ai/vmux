@@ -105,6 +105,7 @@ pub fn BreadcrumbDropdown(
     #[props(default = rsx! {})] leading: Element,
     #[props(default)] popup_class: String,
     #[props(default = true)] truncate: bool,
+    #[props(default = DropdownOpenMode::Hover)] open_mode: DropdownOpenMode,
 ) -> Element {
     let root_class = cn(["w-fit min-w-0 max-w-full", class.as_str()]);
     let popup_class = cn([
@@ -119,7 +120,7 @@ pub fn BreadcrumbDropdown(
             open,
             class: root_class,
             active,
-            open_mode: DropdownOpenMode::Hover,
+            open_mode,
             leading,
             align: DropdownAlign::Start,
             match_width: true,

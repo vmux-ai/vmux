@@ -650,6 +650,7 @@ impl PageManifest {
 
     pub fn routes(&self, url: &str) -> bool {
         vmux_api::RoutePattern::new(self.route, self.owns_subtree).matches(url)
+            || vmux_api::RoutePattern::new(self.url, self.owns_subtree).matches(url)
     }
 
     pub fn metadata_for(&self, url: impl Into<String>) -> crate::PageMetadata {
