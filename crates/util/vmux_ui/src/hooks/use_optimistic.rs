@@ -11,6 +11,7 @@ const OPTIMISTIC_TIMEOUT_MS: u32 = 10_000;
 struct Pending<V> {
     baseline: V,
     expected: V,
+    superseded: Vec<V>,
     generation: u64,
 }
 
@@ -55,8 +56,14 @@ where
         {
             let mut pending = self.pending.write();
             for (key, baseline, expected) in values {
-                if baseline == expected {
-                    pending.remove(&key);
+                let mut superseded = Vec::new();
+                if let Some(previous) = pending.remove(&key) {
+                    superseded = previous.superseded;
+                    if !superseded.contains(&previous.expected) {
+                        superseded.push(previous.expected);
+                    }
+                }
+                if baseline == expected && superseded.is_empty() {
                     continue;
                 }
                 keys.insert(key.clone());
@@ -65,6 +72,7 @@ where
                     Pending {
                         baseline,
                         expected,
+                        superseded,
                         generation,
                     },
                 );
@@ -95,9 +103,10 @@ where
     let generation = use_signal(|| 0u64);
     use_effect(use_reactive!(|observed| {
         pending.write().retain(|key, pending| {
-            observed
-                .get(key)
-                .is_some_and(|value| value != &pending.expected && value == &pending.baseline)
+            observed.get(key).is_some_and(|value| {
+                value != &pending.expected
+                    && (value == &pending.baseline || pending.superseded.contains(value))
+            })
         });
     }));
     OptimisticMap {

@@ -57,6 +57,9 @@ vmux_command = { path = "../vmux_command" }
 
 [target.'cfg(not(target_os = "ios"))'.dev-dependencies]
 tempfile = "3"
+tokio = { workspace = true }
+dioxus-html = { version = "=0.7.9", features = ["serialize"] }
+dioxus-ssr = "=0.7.9"
 
 [lints]
 workspace = true

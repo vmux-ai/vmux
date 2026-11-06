@@ -298,6 +298,29 @@ pub fn PromptComposer(
     }
 }
 
+#[component]
+pub fn ComposerFrame(#[props(default)] notice: Option<Element>, children: Element) -> Element {
+    let attached = notice.is_some();
+    rsx! {
+        div {
+            "data-slot": "composer-frame",
+            class: if attached { "rounded-[14px] bg-foreground p-px text-background" } else { "relative" },
+            if let Some(notice) = notice {
+                {notice}
+            }
+            div {
+                "data-slot": "composer-content",
+                class: if attached {
+                    "rounded-[13px] bg-background text-foreground [&_.vmux-prompt-box]:rounded-[13px] [&_.vmux-prompt-box]:ring-0"
+                } else {
+                    "relative"
+                },
+                {children}
+            }
+        }
+    }
+}
+
 pub struct PromptFocus;
 
 impl PromptFocus {
@@ -314,8 +337,18 @@ mod tests {
     use crate::components::composer_bar::{ComposerBar, ComposerChip};
 
     #[component]
-    fn ComposerFixture(disabled: bool) -> Element {
+    fn ComposerFixture(disabled: bool, #[props(default)] attached: bool) -> Element {
+        let notice = attached.then(|| {
+            rsx! {
+                crate::components::notice::Notice {
+                    attached: true,
+                    message: "This session is open elsewhere.".to_string(),
+                    actions: rsx! { button { id: "retry-session", "Retry" } },
+                }
+            }
+        });
         rsx! {
+            ComposerFrame { notice,
             PromptComposer {
                 disabled,
                 value: "Unsent draft".to_string(),
@@ -340,17 +373,29 @@ mod tests {
                 on_remove_attachment: move |_| {},
                 on_action: move |_| {},
             }
+            }
         }
     }
 
     #[test]
     fn disabling_composer_retains_draft_and_metadata_and_disables_controls() {
         for disabled in [false, true] {
-            let mut dom =
-                VirtualDom::new_with_props(ComposerFixture, ComposerFixtureProps { disabled });
+            let mut dom = VirtualDom::new_with_props(
+                ComposerFixture,
+                ComposerFixtureProps {
+                    disabled,
+                    attached: false,
+                },
+            );
             dom.rebuild_in_place();
             let html = dioxus_ssr::render(&dom);
-            let fieldset = html.split('>').next().unwrap();
+            let fieldset = html
+                .split("<fieldset")
+                .nth(1)
+                .unwrap()
+                .split('>')
+                .next()
+                .unwrap();
             assert_eq!(fieldset.contains(" disabled="), disabled);
             let textarea = html
                 .split("<textarea")
@@ -372,6 +417,33 @@ mod tests {
             for text in ["Unsent draft", "Codex", "GPT-5", "vmux-cloud", "main"] {
                 assert!(html.contains(text), "missing {text}");
             }
+        }
+    }
+
+    #[test]
+    fn attached_notice_remains_outside_the_disabled_composer_and_retains_metadata() {
+        let mut dom = VirtualDom::new_with_props(
+            ComposerFixture,
+            ComposerFixtureProps {
+                disabled: true,
+                attached: true,
+            },
+        );
+        dom.rebuild_in_place();
+        let html = dioxus_ssr::render(&dom);
+        assert!(
+            html.find("data-slot=\"composer-notice\"").unwrap() < html.find("<fieldset").unwrap()
+        );
+        let retry = html
+            .split("id=\"retry-session\"")
+            .next()
+            .unwrap()
+            .rsplit("<button")
+            .next()
+            .unwrap();
+        assert!(!retry.contains("disabled"));
+        for text in ["Unsent draft", "Codex", "GPT-5", "vmux-cloud", "main"] {
+            assert!(html.contains(text), "missing {text}");
         }
     }
 }

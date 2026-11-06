@@ -88,17 +88,17 @@ impl Gesture {
         if input.delta == Vec2::ZERO {
             return true;
         }
-        if input.delta.y.abs() > input.delta.x.abs() * 0.65 {
-            return false;
-        }
         if self.delta.x != 0.0
             && input.delta.x != 0.0
             && self.delta.x.signum() != input.delta.x.signum()
         {
             self.delta = Vec2::ZERO;
         }
-        self.delta += input.delta;
-        self.delta.is_finite() && self.delta.y.abs() <= self.delta.x.abs() * 0.65
+        self.delta.x += input.delta.x;
+        self.delta.y += input.delta.y.abs();
+        self.delta.is_finite()
+            && (self.delta.x.abs() + self.delta.y < 12.0
+                || self.delta.y <= self.delta.x.abs() * 0.65)
     }
 
     fn matches(&self, webview: Entity, operation: NavigationOperation, at: Instant) -> bool {
@@ -378,6 +378,50 @@ mod tests {
                 at,
             });
         }
+    }
+
+    #[test]
+    fn initial_axis_noise_does_not_discard_a_horizontal_trackpad_gesture() {
+        let at = Instant::now();
+        let view = Entity::from_bits(100);
+        let frame = WindowedFrameRect {
+            left: 0.0,
+            top: 0.0,
+            width: 800.0,
+            height: 600.0,
+        };
+        let mut witness = HistoryWitness::over(view, 7, frame);
+        witness.scrolling(
+            7,
+            Vec2::new(50.0, 50.0),
+            Vec2::new(0.0, 3.0),
+            NativeHistoryPhase::Begin,
+            at,
+        );
+        witness.scrolling(
+            7,
+            Vec2::new(50.0, 50.0),
+            Vec2::new(-120.0, 1.0),
+            NativeHistoryPhase::Changed,
+            at + Duration::from_millis(16),
+        );
+        witness.scrolling(
+            7,
+            Vec2::new(50.0, 50.0),
+            Vec2::new(-120.0, 1.0),
+            NativeHistoryPhase::Changed,
+            at + Duration::from_millis(32),
+        );
+        assert!(witness.claim(
+            view,
+            NavigationOperation::Back,
+            at + Duration::from_millis(33)
+        ));
+        assert!(!witness.claim(
+            view,
+            NavigationOperation::Back,
+            at + Duration::from_millis(34)
+        ));
     }
 
     #[test]

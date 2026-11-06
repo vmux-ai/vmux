@@ -121,6 +121,7 @@ pub fn BreadcrumbDropdown(
             class: root_class,
             active,
             open_mode,
+            hover_delay_ms: 0,
             leading,
             align: DropdownAlign::Start,
             match_width: true,

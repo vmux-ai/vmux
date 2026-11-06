@@ -165,7 +165,7 @@ fn AddressMenu(
         } };
     }
     let active = open.read().as_ref() == Some(&id);
-    let open_mode = crate::components::dropdown::DropdownOpenMode::Click;
+    let open_mode = crate::components::dropdown::DropdownOpenMode::Hover;
     let open_id = id.clone();
     let on_open = crumb.on_open.clone();
     let open_requests = requests.clone();

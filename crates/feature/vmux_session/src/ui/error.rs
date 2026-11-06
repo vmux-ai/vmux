@@ -4,13 +4,14 @@ use crate::{Failure, FailureKind};
 use dioxus::core::Task;
 use dioxus::prelude::*;
 use vmux_ui::components::button::{Button, ButtonSize, ButtonVariant};
+use vmux_ui::components::composer::ComposerFrame;
 use vmux_ui::components::notice::{Notice, NoticeKind};
 use vmux_ui::hooks::send;
 use vmux_ui::i18n::translate;
 use vmux_ui::navigation::PageNavigation;
 
 #[component]
-pub(super) fn ChatFeedback(chat: Chat) -> Element {
+pub(super) fn ChatFeedback(chat: Chat, #[props(default = rsx! {})] children: Element) -> Element {
     let message = chat.run.error();
     let status = chat.status();
     let kind = Failure(&message).kind();
@@ -46,12 +47,11 @@ pub(super) fn ChatFeedback(chat: Chat) -> Element {
             })));
         }
     }));
-    if status != "errored" || message.is_empty() || !visible() {
-        return rsx! {};
-    }
-    match kind {
+    let shown = status == "errored" && !message.is_empty() && visible();
+    let feedback = match kind {
         FailureKind::Busy => rsx! {
             Notice {
+                attached: true,
                 message: translate("sessions-busy-detail"),
                 kind: NoticeKind::Info,
                 actions: rsx! {
@@ -65,6 +65,7 @@ pub(super) fn ChatFeedback(chat: Chat) -> Element {
         },
         FailureKind::MissingHistory => rsx! {
             Notice {
+                attached: true,
                 message: translate("sessions-history-unavailable"),
                 kind: NoticeKind::Warning,
                 actions: rsx! {
@@ -79,6 +80,7 @@ pub(super) fn ChatFeedback(chat: Chat) -> Element {
         },
         FailureKind::Connection => rsx! {
             Notice {
+                attached: true,
                 message: translate("sessions-connection-interrupted"),
                 kind: NoticeKind::Error,
                 actions: rsx! {
@@ -93,6 +95,7 @@ pub(super) fn ChatFeedback(chat: Chat) -> Element {
         },
         FailureKind::Setup => rsx! {
             Notice {
+                attached: true,
                 message: translate("agent-error-version-suggestion"),
                 kind: NoticeKind::Warning,
                 actions: rsx! {
@@ -114,6 +117,13 @@ pub(super) fn ChatFeedback(chat: Chat) -> Element {
                 on_dismiss: move |_| visible.set(false),
             }
         },
+    };
+    let notice = (shown && kind != FailureKind::Other).then(|| feedback.clone());
+    rsx! {
+        ComposerFrame { notice, {children} }
+        if shown && kind == FailureKind::Other {
+            {feedback}
+        }
     }
 }
 

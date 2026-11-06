@@ -540,13 +540,25 @@ impl SpaceRenameSubmission {
 }
 
 #[component]
-fn PaneSection(pane: SideSheetPane, index: usize) -> Element {
+fn PaneSection(mut pane: SideSheetPane, index: usize) -> Element {
+    let observed = pane
+        .stacks
+        .iter()
+        .find(|stack| stack.is_active)
+        .map(|stack| stack.id);
+    let selected = LayoutUi::current().selected_stack(pane.id, observed);
+    for stack in &mut pane.stacks {
+        stack.is_active = selected == Some(stack.id);
+    }
     let label = translate_with(
         "layout-stack-number",
         &[("number", TranslationValue::Number((index + 1) as i64))],
     );
     let pane_id = pane.id;
-    let any_loading = pane.any_loading;
+    let any_loading = pane
+        .stacks
+        .iter()
+        .any(|stack| stack.is_active && stack.is_loading);
     let expanded = !pane.collapsed;
     let fold_title = if expanded {
         translate("layout-fold-stack")
@@ -605,5 +617,179 @@ fn PaneSection(pane: SideSheetPane, index: usize) -> Element {
                 }
             }
         }
+    }
+}
+
+#[cfg(all(test, not(target_os = "ios")))]
+mod tests {
+    use super::*;
+    use crate::event::{SideSheetStackActivateRequest, SideSheetState, StackNode};
+    use crate::state::{LayoutUiState, LayoutUiStatePatch};
+    use dioxus::core::{AttributeValue, ElementId, Mutation, VirtualDom};
+    use dioxus_html::{EventData, SerializedHtmlEventConverter, SerializedMouseData};
+    use std::{cell::RefCell, collections::HashMap, rc::Rc};
+    use vmux_api::{BinEvent, UiStateFrame};
+    use vmux_ui::transport::{
+        BytesListener, HostBinding, PageHost, event_listener::EventListenerError,
+    };
+
+    #[component]
+    fn StackCards() -> Element {
+        let layout = LayoutUi::use_state();
+        layout.provide();
+        use_context_provider(|| Signal::new(None::<BookmarkDragState>));
+        let panes =
+            layout.use_selector(|state| state.side_sheet.clone().unwrap_or_default().panes)();
+        rsx! {
+            for pane in panes {
+                PaneSection { pane, index: 0 }
+            }
+        }
+    }
+
+    #[derive(Default)]
+    struct SelectionHost {
+        listeners: RefCell<Vec<BytesListener>>,
+        requests: RefCell<Vec<u64>>,
+    }
+
+    impl PageHost for SelectionHost {
+        fn send(&self, id: &str, bytes: &[u8]) -> Result<(), EventListenerError> {
+            if id == SideSheetStackActivateRequest::id() {
+                let request =
+                    rkyv::from_bytes::<SideSheetStackActivateRequest, rkyv::rancor::Error>(bytes)
+                        .unwrap();
+                self.requests.borrow_mut().push(request.stack_id);
+            }
+            Ok(())
+        }
+        fn listen(&self, id: &str, listener: BytesListener) -> Result<(), EventListenerError> {
+            if id == LayoutUiState::id() {
+                self.listeners.borrow_mut().push(listener);
+            }
+            Ok(())
+        }
+    }
+
+    impl SelectionHost {
+        fn select(&self, active: u64) {
+            let mut stacks = Vec::new();
+            for id in 1..=3 {
+                stacks.push(StackNode {
+                    id,
+                    agent_id: None,
+                    title: format!("Page {id}"),
+                    url: "vmux://start/".into(),
+                    icon: Default::default(),
+                    is_active: id == active,
+                    is_loading: false,
+                    is_dirty: false,
+                    bg_color: None,
+                });
+            }
+            let frame =
+                UiStateFrame::<LayoutUiState, LayoutUiStatePatch>::Snapshot(LayoutUiState {
+                    side_sheet: Some(SideSheetState {
+                        panes: vec![SideSheetPane {
+                            id: 10,
+                            is_active: true,
+                            collapsed: false,
+                            bookmarks_expanded: false,
+                            any_loading: false,
+                            collapsed_stack: None,
+                            stacks,
+                        }],
+                        ..Default::default()
+                    }),
+                    ..Default::default()
+                });
+            let bytes = rkyv::to_bytes::<rkyv::rancor::Error>(&frame).unwrap();
+            for listener in &mut *self.listeners.borrow_mut() {
+                listener(&bytes);
+            }
+        }
+    }
+
+    struct Cards {
+        dom: VirtualDom,
+        host: Rc<SelectionHost>,
+        rows: HashMap<u64, ElementId>,
+    }
+
+    impl Cards {
+        fn loaded() -> Self {
+            dioxus_html::set_event_converter(Box::new(SerializedHtmlEventConverter));
+            let host = Rc::new(SelectionHost::default());
+            let mut dom = VirtualDom::new(StackCards);
+            dom.provide_root_context(HostBinding(host.clone()));
+            dom.rebuild_in_place();
+            dom.render_immediate_to_vec();
+            host.select(1);
+            let loaded = dom.render_immediate_to_vec();
+            dom.render_immediate_to_vec();
+            let mut rows = HashMap::new();
+            for edit in loaded.edits {
+                if let Mutation::SetAttribute {
+                    name: "data-vmux-stack-row",
+                    value: AttributeValue::Text(value),
+                    id,
+                    ..
+                } = edit
+                {
+                    rows.insert(value.parse().unwrap(), id);
+                }
+            }
+            assert_eq!(rows.len(), 3);
+            Self { dom, host, rows }
+        }
+        fn click(&mut self, row: u64) {
+            self.dom.runtime().handle_event(
+                "click",
+                Event::new(
+                    EventData::Mouse(SerializedMouseData::default()).into_any(),
+                    true,
+                ),
+                self.rows[&row],
+            );
+            self.dom.render_immediate_to_vec();
+        }
+        fn selected(&self, expected: u64) {
+            let html = dioxus_ssr::render(&self.dom);
+            for row in 1..=3 {
+                let marker = format!("id=\"sidesheet-stack-10-{row}\"");
+                let position = html.find(&marker).unwrap();
+                let begin = html[..position].rfind('<').unwrap();
+                let end = position + html[position..].find('>').unwrap();
+                let current = if row == expected { "page" } else { "false" };
+                assert!(
+                    html[begin..end].contains(&format!("aria-current=\"{current}\"")),
+                    "row {row}, expected selection {expected}: {}",
+                    &html[begin..end]
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn stack_cards_select_before_host_acknowledgement_and_keep_the_latest_click() {
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_time()
+            .build()
+            .unwrap();
+        let _runtime = runtime.enter();
+        let mut cards = Cards::loaded();
+        cards.click(2);
+        cards.selected(2);
+        cards.click(3);
+        cards.selected(3);
+        assert_eq!(*cards.host.requests.borrow(), [2, 3]);
+        cards.host.select(2);
+        cards.dom.render_immediate_to_vec();
+        cards.dom.render_immediate_to_vec();
+        cards.selected(3);
+        cards.host.select(3);
+        cards.dom.render_immediate_to_vec();
+        cards.dom.render_immediate_to_vec();
+        cards.selected(3);
     }
 }

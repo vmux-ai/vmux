@@ -224,13 +224,14 @@ pub enum DropdownOpenMode {
 #[component]
 pub fn DropdownToggleIndicator(open: bool) -> Element {
     rsx! {
+        span {
+            "data-vmux-dropdown-indicator": "",
+            "data-state": if open { "open" } else { "closed" },
+            class: "inline-flex shrink-0 text-muted-foreground/60 opacity-0 transition-[opacity,transform] data-[state=open]:rotate-180 data-[state=open]:opacity-100 group-hover:opacity-100 group-focus-visible:opacity-100",
         LineIconView {
             icon: LineIcon::ChevronDown,
-            class: if open {
-                "size-3 shrink-0 rotate-180 text-muted-foreground/60 opacity-100 transition-[opacity,transform]".to_string()
-            } else {
-                "size-3 shrink-0 text-muted-foreground/60 opacity-0 transition-[opacity,transform] group-hover:opacity-100 group-focus-visible:opacity-100".to_string()
-            },
+            class: "size-3".to_string(),
+        }
         }
     }
 }
@@ -245,6 +246,7 @@ pub fn DropdownTrigger(
     #[props(default)] active: bool,
     #[props(default)] disabled: bool,
     #[props(default)] open_mode: DropdownOpenMode,
+    #[props(default = 120)] hover_delay_ms: u32,
     #[props(default)] class: String,
     #[props(default = true)] truncate: bool,
     #[props(default = rsx! {})] leading: Element,
@@ -284,11 +286,15 @@ pub fn DropdownTrigger(
                     && !open
                     && let Some(on_hover_open) = on_hover_open
                 {
+                    if hover_delay_ms == 0 {
+                        on_hover_open.call(());
+                        return;
+                    }
                     if let Some(task) = hover_task.write().take() {
                         task.cancel();
                     }
                     hover_task.set(Some(spawn(async move {
-                        crate::platform::Platform::sleep(120).await;
+                        crate::platform::Platform::sleep(hover_delay_ms).await;
                         on_hover_open.call(());
                     })));
                 }
@@ -370,12 +376,19 @@ pub fn DropdownSelector(
     #[props(default)] align: DropdownAlign,
     #[props(default)] placement: DropdownPlacement,
     #[props(default)] open_mode: DropdownOpenMode,
+    #[props(default = 120)] hover_delay_ms: u32,
     #[props(default)] match_width: bool,
     #[props(default)] horizontal_inset: f64,
     #[props(default = 4.0)] gap: f64,
     #[props(default = rsx! {})] leading: Element,
     #[props(default = rsx! {})] trailing: Element,
 ) -> Element {
+    let mut hover_preview = use_signal(|| false);
+    use_effect(use_reactive!(|open| {
+        if !open {
+            hover_preview.set(false);
+        }
+    }));
     rsx! {
         Dropdown {
             open,
@@ -391,6 +404,7 @@ pub fn DropdownSelector(
                 active,
                 disabled,
                 open_mode,
+                hover_delay_ms,
                 class: trigger_class,
                 leading,
                 trailing: rsx! {
@@ -399,8 +413,18 @@ pub fn DropdownSelector(
                         DropdownToggleIndicator { open }
                     }
                 },
-                on_hover_open: move |_| on_open_change.call(true),
-                onclick: move |_| on_open_change.call(!open),
+                on_hover_open: move |_| {
+                    hover_preview.set(true);
+                    on_open_change.call(true);
+                },
+                onclick: move |_| {
+                    if open && *hover_preview.peek() {
+                        hover_preview.set(false);
+                        return;
+                    }
+                    hover_preview.set(false);
+                    on_open_change.call(!open);
+                },
             }
             if open {
                 DropdownPopup {
@@ -692,10 +716,62 @@ fn DropdownKeyboardNavigation(root_id: String) -> Element {
 
 #[cfg(test)]
 mod tests {
-    use super::{DropdownOpenMode, DropdownTrigger};
+    use super::{DropdownOpenMode, DropdownSelector, DropdownTrigger};
     use dioxus::core::{AttributeValue, Mutation};
     use dioxus::prelude::*;
     use dioxus_html::{EventData, SerializedHtmlEventConverter, SerializedMouseData};
+
+    #[component]
+    fn HoverSelector() -> Element {
+        let mut open = use_signal(|| false);
+        rsx! {
+            DropdownSelector {
+                label: "Branches".to_string(),
+                open: open(),
+                open_mode: DropdownOpenMode::Hover,
+                hover_delay_ms: 0,
+                on_open_change: move |next| open.set(next),
+                on_dismiss: move |_| open.set(false),
+                span { "main" }
+            }
+        }
+    }
+
+    #[test]
+    fn hover_opens_immediately_and_the_first_click_keeps_the_menu_open() {
+        dioxus_html::set_event_converter(Box::new(SerializedHtmlEventConverter));
+        let mut dom = VirtualDom::new(HoverSelector);
+        let initial = dom.rebuild_to_vec();
+        let trigger = initial
+            .edits
+            .iter()
+            .find_map(|edit| match edit {
+                Mutation::SetAttribute {
+                    name: "aria-expanded",
+                    id,
+                    ..
+                } => Some(*id),
+                _ => None,
+            })
+            .unwrap();
+        for (event, expanded) in [("mouseenter", true), ("click", true), ("click", false)] {
+            dom.runtime().handle_event(
+                event,
+                Event::new(
+                    EventData::Mouse(SerializedMouseData::default()).into_any(),
+                    true,
+                ),
+                trigger,
+            );
+            dom.render_immediate_to_vec();
+            let html = dioxus_ssr::render(&dom);
+            assert!(
+                html.contains(&format!("aria-expanded={expanded}"))
+                    || html.contains(&format!("aria-expanded=\"{expanded}\"")),
+                "after {event}: {html}"
+            );
+        }
+    }
 
     #[component]
     fn HoverTrigger() -> Element {

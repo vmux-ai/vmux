@@ -18,7 +18,8 @@ use crate::event::StackNode;
 #[component]
 pub(super) fn SideSheetStackRow(stack: StackNode, pane_id: u64) -> Element {
     let drag_state: Signal<Option<BookmarkDragState>> = use_context();
-    let folders = LayoutUi::current().use_selector(|state| state.bookmarks.folders.clone())();
+    let layout = LayoutUi::current();
+    let folders = layout.use_selector(|state| state.bookmarks.folders.clone())();
     let is_active = stack.is_active;
     let stack_id = stack.id;
     let mut hovered = use_signal(|| false);
@@ -62,6 +63,7 @@ pub(super) fn SideSheetStackRow(stack: StackNode, pane_id: u64) -> Element {
                     },
                     id: "sidesheet-stack-{pane_id}-{stack_id}",
                     "data-vmux-stack-row": "{stack_id}",
+                    aria_current: if is_active { "page" } else { "false" },
                     class: if is_active {
                         "flex h-9 cursor-default items-center gap-2 rounded-md bg-foreground/[0.09] px-2 @max-[12rem]:gap-1.5 @max-[12rem]:px-1"
                     } else {
@@ -75,10 +77,7 @@ pub(super) fn SideSheetStackRow(stack: StackNode, pane_id: u64) -> Element {
                             event.stop_propagation();
                             return;
                         }
-                        let _ = send(&crate::event::SideSheetStackActivateRequest {
-                            pane_id,
-                            stack_id,
-                        });
+                        layout.select_stack(pane_id, stack_id);
                     },
                     StackIcon { icon: stack.icon.clone(), url: stack.url.clone(), title: stack.title.clone() }
                     span { class: "{title_class}", title: "{display_title}", "{display_title}" }

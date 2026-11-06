@@ -168,6 +168,11 @@ globalThis.__vmuxPopupPresentation ??= (() => {
   document.addEventListener('beforetoggle', event => {
     const element = event.target;
     if (!(element instanceof Element) || !element.hasAttribute('data-vmux-popup-kind')) return;
+    if (element.dataset.vmuxPopupKind === 'dropdown') {
+      const root = element.closest('[data-vmux-dropdown-root]');
+      root?.querySelector('[data-vmux-dropdown-trigger]')?.setAttribute('aria-expanded', String(event.newState === 'open'));
+      root?.querySelector('[data-vmux-dropdown-indicator]')?.setAttribute('data-state', event.newState);
+    }
     if (event.newState === 'closed') presentation.retire(presentation.snapshot(element));
     else presentation.closing.delete(element);
   }, true);
@@ -188,3 +193,41 @@ globalThis.__vmuxPopupPresentation ??= (() => {
 })();
 globalThis.__vmuxPopupPresentation.apply([]);
 "#;
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::io::Write;
+    use std::process::{Command, Stdio};
+
+    struct PopupProbe;
+
+    impl PopupProbe {
+        fn verify() {
+            let mut child = Command::new("node")
+                .args(["-e", include_str!("popup_state_test.js")])
+                .stdin(Stdio::piped())
+                .stdout(Stdio::piped())
+                .stderr(Stdio::piped())
+                .spawn()
+                .expect("Node is required for the popup runtime test");
+            child
+                .stdin
+                .take()
+                .unwrap()
+                .write_all(Surface::runtime().as_bytes())
+                .unwrap();
+            let output = child.wait_with_output().unwrap();
+            assert!(
+                output.status.success(),
+                "{}",
+                String::from_utf8_lossy(&output.stderr)
+            );
+        }
+    }
+
+    #[test]
+    fn native_popup_close_updates_the_trigger_before_the_host_round_trip() {
+        PopupProbe::verify();
+    }
+}

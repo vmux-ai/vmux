@@ -46,8 +46,9 @@ pub(super) fn ChatDock(chat: Chat) -> Element {
                 }
                 ChoiceList { chat }
                 QueuedPrompts { chat }
-                ChatFeedback { chat }
-                ChatComposer { chat }
+                ChatFeedback { chat,
+                    ChatComposer { chat }
+                }
             }
         }
     }

@@ -624,7 +624,8 @@ lifecycle in the current Stack so its Session target and runtime follow the sele
 Code bookmarks resolve their directory from the active worktree, owning project, or cwd and open
 its README or entry file; directory favicons identify the Code page. Layout and address state flush before native
 presentation in the same frame; the final flush retains updates arriving later.
-Tab presses select immediately and host projection reconciles that selection.
+Tab presses and Stack card clicks select immediately; host projection reconciles their local
+selection. Earlier acknowledgements cannot replace a newer pending selection.
 UI motion is feedback rather than a completion condition. Selection, URL, focus, and the target
 layout commit in the input frame; no request waits for an animation, and fresh input supersedes
 an in-flight transition from its current visual state. Native layout and shared UI animations
@@ -667,7 +668,8 @@ bounds, and full native opacity can finalize selection, input ownership, and sta
 frame. New handoffs retain their existing readiness and animation conditions.
 Session rows use memoized repository lookup and group metadata; rendered Wry frames join the
 native pointer registry so native scrolling does not generate unnecessary layout wakes.
-History swipes use a shared horizontal-wheel recognizer that preserves scrollable ancestors.
+History swipes use a shared horizontal-wheel recognizer. Horizontal scrollable ancestors consume
+movement until their boundary; zero-delta starts and small initial axis noise do not cancel a swipe.
 Source-bound requests reuse host history before browser history. The dedicated CEF gesture bridge
 keeps general-page IPC permissions unchanged; both backends require one matching, recent native
 wheel claim for the current surface, window, frame, and direction before moving history.
@@ -1361,7 +1363,9 @@ resumes. A resize observer schedules following at browser frames instead of writ
 notification loop. Any upward reading movement stops following; only the actual bottom resumes it.
 Saved reading positions and history anchoring retain their own ownership.
 
-Session failures with a useful remedy appear in a compact banner above the composer. Busy sessions
+Session failures with a useful remedy occupy a light notification strip in the composer's outer
+frame. The dark composer keeps its draft and metadata inside that frame; recovery controls remain
+outside its disabled fieldset. Busy sessions
 explain where to release the writer; missing histories offer a new conversation; connection failures
 offer retry. Other failures use a dismissible toast. Raw provider diagnostics remain in app logs.
 

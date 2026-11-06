@@ -35,13 +35,16 @@ const SCRIPT: &str = r#"
   let horizontalDirection = 0;
   let blocked = false;
   let navigated = false;
-  const protectsScroll = event => {
+  const protectsScroll = (event, direction) => {
     for (const node of event.composedPath()) {
       if (!(node instanceof Element)) continue;
       if (node.matches('input, textarea, select, [contenteditable]:not([contenteditable="false"]), [popover], [role="menu"], [role="listbox"], [role="dialog"]')) return true;
       if (node.scrollWidth <= node.clientWidth + 1) continue;
       const overflow = getComputedStyle(node).overflowX;
-      if (node === document.scrollingElement || overflow === 'auto' || overflow === 'scroll' || overflow === 'overlay') return true;
+      if (overflow === 'hidden' || overflow === 'clip') continue;
+      if (node !== document.scrollingElement && overflow !== 'auto' && overflow !== 'scroll' && overflow !== 'overlay') continue;
+      if (direction < 0 && node.scrollLeft > 0.5) return true;
+      if (direction > 0 && node.scrollLeft + node.clientWidth < node.scrollWidth - 0.5) return true;
     }
     return false;
   };
@@ -54,7 +57,7 @@ const SCRIPT: &str = r#"
       horizontal = 0;
       vertical = 0;
       horizontalDirection = 0;
-      blocked = protectsScroll(event);
+      blocked = false;
       navigated = false;
     }
     if (event.deltaMode !== 0 || event.ctrlKey || event.metaKey || event.altKey || event.shiftKey || !event.cancelable) {
@@ -68,22 +71,20 @@ const SCRIPT: &str = r#"
       blocked = true;
       return;
     }
+    if (x === 0 && y === 0) return;
     if (navigated) {
       if (Math.abs(x) > Math.abs(y) && x !== 0) event.preventDefault();
       return;
     }
-    if (Math.abs(y) > Math.abs(x) * 0.65 || x === 0) {
-      blocked = true;
-      return;
-    }
-    if (horizontalDirection && horizontalDirection !== Math.sign(x)) {
+    if (x !== 0 && horizontalDirection && horizontalDirection !== Math.sign(x)) {
       horizontal = 0;
       vertical = 0;
     }
-    horizontalDirection = Math.sign(x);
+    if (x !== 0) horizontalDirection = Math.sign(x);
     horizontal += x;
     vertical += Math.abs(y);
-    if (vertical > Math.abs(horizontal) * 0.65) {
+    if (Math.abs(horizontal) + vertical < 12) return;
+    if (vertical > Math.abs(horizontal) * 0.65 || protectsScroll(event, Math.sign(horizontal))) {
       blocked = true;
       return;
     }
@@ -109,3 +110,43 @@ const SCRIPT: &str = r#"
   };
 })();
 "#;
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::io::Write;
+    use std::process::{Command, Stdio};
+
+    struct GestureProbe;
+
+    impl GestureProbe {
+        fn verify() {
+            let mut child = Command::new("node")
+                .args(["-e", include_str!("history_swipe_test.js")])
+                .stdin(Stdio::piped())
+                .stdout(Stdio::piped())
+                .stderr(Stdio::piped())
+                .spawn()
+                .expect("Node is required for the gesture runtime test");
+            child
+                .stdin
+                .take()
+                .unwrap()
+                .write_all(
+                    HistorySwipe::script("globalThis.navigations.push(direction);").as_bytes(),
+                )
+                .unwrap();
+            let output = child.wait_with_output().unwrap();
+            assert!(
+                output.status.success(),
+                "{}",
+                String::from_utf8_lossy(&output.stderr)
+            );
+        }
+    }
+
+    #[test]
+    fn trackpad_gestures_ignore_startup_noise_and_respect_horizontal_scroll_boundaries() {
+        GestureProbe::verify();
+    }
+}
