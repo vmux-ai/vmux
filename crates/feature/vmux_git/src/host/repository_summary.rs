@@ -76,13 +76,22 @@ fn subscribe(event: On<UiInput<RepositorySummaryRequest>>, mut commands: Command
     commands.entity(event.webview).insert(Subscription(roots));
 }
 
-fn start(
-    subscriptions: Query<(
-        &Subscription,
-        Option<&vmux_ecs::UiState<RepositorySummaryUiState>>,
-        Has<vmux_ecs::PagePresented>,
-        Has<vmux_ecs::PageTransition>,
+type SubscribedPages<'w, 's> = Query<
+    'w,
+    's,
+    (
+        Entity,
+        &'static Subscription,
+        Option<&'static vmux_ecs::UiState<RepositorySummaryUiState>>,
+    ),
+    Or<(
+        With<vmux_ecs::PagePresented>,
+        With<vmux_ecs::PageTransition>,
     )>,
+>;
+
+fn start(
+    subscriptions: SubscribedPages,
     mut cache: ResMut<SummaryCache>,
     runtime: Res<GitRuntime>,
     proxy: Option<Res<EventLoopProxyWrapper>>,
@@ -90,10 +99,7 @@ fn start(
     let now = Instant::now();
     let mut roots = HashSet::new();
     let mut retained = HashMap::new();
-    for (subscription, state, presented, transitioning) in &subscriptions {
-        if !presented && !transitioning {
-            continue;
-        }
+    for (_, subscription, state) in &subscriptions {
         roots.extend(subscription.0.iter().cloned());
         if let Some(state) = state.and_then(vmux_ecs::UiState::current) {
             for result in &state.repositories {
@@ -151,21 +157,8 @@ fn finish(mut cache: ResMut<SummaryCache>) {
     }
 }
 
-fn publish(
-    subscriptions: Query<(
-        Entity,
-        &Subscription,
-        Option<&vmux_ecs::UiState<RepositorySummaryUiState>>,
-        Has<vmux_ecs::PagePresented>,
-        Has<vmux_ecs::PageTransition>,
-    )>,
-    cache: Res<SummaryCache>,
-    mut commands: Commands,
-) {
-    for (owner, subscription, current, presented, transitioning) in &subscriptions {
-        if !presented && !transitioning {
-            continue;
-        }
+fn publish(subscriptions: SubscribedPages, cache: Res<SummaryCache>, mut commands: Commands) {
+    for (owner, subscription, current) in &subscriptions {
         let mut state = RepositorySummaryUiState::default();
         for root in &subscription.0 {
             if let Some(entry) = cache.0.get(root) {
