@@ -425,6 +425,15 @@ impl Default for GitPageSnapshot {
 }
 
 impl GitPageSnapshot {
+    pub(crate) fn references_complete(&self) -> bool {
+        for progress in [self.local_branches, self.remote_branches, self.tags] {
+            if !progress.loaded || progress.has_more {
+                return false;
+            }
+        }
+        true
+    }
+
     pub(crate) fn clear_diff(&mut self) {
         self.diff_viewport = None;
         self.diff_rows.clear();

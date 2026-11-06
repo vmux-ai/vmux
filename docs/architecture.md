@@ -597,7 +597,8 @@ data through `AddressContribution` or `PageAddressPublish`: the current route, p
 choices, directories, symbols, and their intents. `vmux_layout` renders the active surface with
 one `AddressTrail`. No page component, callback, context, or mounted slot crosses into Layout.
 The URL row contains routing breadcrumbs. Git view, repository, branch and commit selections
-use canonical vmux routes; legacy git paths remain input aliases. Search, filters, Details, Add, Create,
+use canonical vmux routes; legacy git paths remain input aliases. Requested references remain selected
+while their catalogs are incomplete. Search, filters, Details, Add, Create,
 Resume, Start, and Checkout render inside the page through `PageToolbar`, with local callbacks.
 Fragment updates retain the page's breadcrumbs instead of replacing them with the generic route.
 `PageAddressRequest` validates the source window, active surface, revision, and URL before sending

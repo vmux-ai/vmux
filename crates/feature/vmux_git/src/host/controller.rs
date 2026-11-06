@@ -778,11 +778,12 @@ fn reconcile(mut pages: Sources) {
         {
             match GitBranchCollection::containing(repository, &next.selected_branch) {
                 Some(collection) => next.selected_branch_collection = collection,
-                None => {
+                None if next.selected_branch.is_empty() || state.snapshot.references_complete() => {
                     next.selected_branch = GitBranchCollection::Local
                         .selected_reference(repository, &next.selected_branch);
                     next.selected_branch_collection = GitBranchCollection::Local;
                 }
+                None => {}
             }
         }
         let retained_branch_path = state.snapshot.branch_files_reference == next.selected_branch
@@ -2063,6 +2064,7 @@ mod tests {
                         page_url: url,
                     },
                 ));
+            app.update();
             let controller = app.world().get::<GitPageControllerState>(webview).unwrap();
             assert_eq!(controller.focused_panel, panel);
             match panel {
@@ -2072,6 +2074,24 @@ mod tests {
                 GitPanel::Files => assert!(controller.selected_commit.is_empty()),
             }
         }
+        let complete = crate::state::GitCatalogProgress {
+            loaded: true,
+            ..Default::default()
+        };
+        {
+            let mut state = app.world_mut().get_mut::<GitState>(webview).unwrap();
+            state.snapshot.local_branches = complete;
+            state.snapshot.remote_branches = complete;
+            state.snapshot.tags = complete;
+        }
+        app.update();
+        assert_eq!(
+            app.world()
+                .get::<GitPageControllerState>(webview)
+                .unwrap()
+                .selected_branch,
+            "main"
+        );
     }
 
     #[test]
