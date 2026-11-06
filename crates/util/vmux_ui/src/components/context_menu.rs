@@ -130,7 +130,7 @@ pub fn ContextMenuContent(props: ContextMenuContentProps) -> Element {
         div {
             id: overlay.id(),
             popover: "manual",
-            class: "fixed inset-0 z-[1000] m-0 h-screen w-screen max-h-none max-w-none border-0 bg-transparent p-0 outline-none {animation}",
+            class: "fixed inset-0 z-[1000] m-0 h-screen w-screen max-h-none max-w-none border-0 bg-transparent p-0 outline-none",
             style: motion_style,
             "data-vmux-popup-kind": Surface::Context.kind(),
             "data-vmux-popup-x": "{x}",
@@ -173,7 +173,7 @@ pub fn ContextMenuContent(props: ContextMenuContentProps) -> Element {
                 id: props.id,
                 role: "menu",
                 aria_orientation: "vertical",
-                class: "fixed z-[1000] min-w-[132px] max-w-[calc(100vw-12px)] max-h-[calc(100vh-12px)] overflow-y-auto rounded-md border border-border bg-background p-0.5 dark:bg-muted",
+                class: "fixed z-[1000] min-w-[132px] max-w-[calc(100vw-12px)] max-h-[calc(100vh-12px)] overflow-y-auto rounded-md border border-border bg-background p-0.5 dark:bg-muted {animation}",
                 style: "left:clamp(6px, {x}px, calc(100vw - 140px));top:clamp(6px, {y}px, calc(100vh - 32px));",
                 onpointerdown: move |event| event.stop_propagation(),
                 oncontextmenu: move |event| {

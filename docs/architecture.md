@@ -585,11 +585,9 @@ the registered manifests supply the page-switch menu. Pages publish only typed `
 data through `AddressContribution` or `PageAddressPublish`: the current route, project and session
 choices, directories, symbols, and their intents. `vmux_layout` renders the active surface with
 one `AddressTrail`. No page component, callback, context, or mounted slot crosses into Layout.
-`PageToolbarPublish` contributes control descriptions to that same address surface. Search,
-filters, view switches, Details, Add, Create, Resume, Start, and Checkout render in the URL row;
-their callbacks remain in the source page and receive validated, versioned control intents.
-Toolbar identities prevent a retiring publisher from clearing its successor. Fragment updates
-retain the page's breadcrumbs and controls instead of replacing them with the generic route.
+The URL row contains routing breadcrumbs. Search, filters, view switches, Details, Add, Create,
+Resume, Start, and Checkout render inside the page through `PageToolbar`, with local callbacks.
+Fragment updates retain the page's breadcrumbs instead of replacing them with the generic route.
 `PageAddressRequest` validates the source window, active surface, revision, and URL before sending
 `AddressIntentRequest` to the page. Navigation opens in the owning Stack; page-local selection
 uses a versioned `AddressEffect` consumed by `PageBreadcrumbs`. Effects bind to the source URL,
@@ -642,11 +640,12 @@ directory never removes its width measurement or changes the available inline sp
 notifications from detached surfaces and subpixel noise retain the previous layout.
 Dropdown, Select, and context-menu state belongs to their respective controls; their popup
 presentation shares `vmux_ui::components::popup::Surface`. The page interpreter raises, positions,
-and focuses new popovers in the mutation frame, before mounted callbacks. Menus start at 94%
-opacity and fade to full opacity in 100 ms; closing releases interaction immediately and retains
+and focuses new popovers in the mutation frame, before mounted callbacks. Menus fade in from
+transparent with a small vertical movement in 100 ms; closing releases interaction immediately and retains
 an inert, identifier-free snapshot for an 80 ms fade. The snapshot retains typography and scroll
 offsets. New input can discard it, and reduced motion skips interpolation.
-Session view controls share the URL row with the session location breadcrumb.
+Session view and category controls live in the page toolbar. Section headings support right-click
+and overflow menus for bulk archive, restore, and folding.
 Activation stamps preserve operation order across shared ancestors even within one clock tick;
 stack navigation consumes a batch against one advancing cursor and excludes retiring targets.
 Sidebar choices and stack shortcuts share that activation path, including nested pane ancestors.
@@ -1193,6 +1192,8 @@ render and control those processes, but the service names and exposes process op
 depending on terminal page concepts.
 macOS process CPU percentages compare cumulative CPU nanoseconds with elapsed monotonic time
 converted to nanoseconds; raw Mach clock ticks are not the same unit.
+Repository project identity uses the primary checkout. Submodules resolve `core.worktree` from
+their common Git directory; `.git/modules` is metadata, never a project root.
 
 The CLI uses Clap only to parse argv. Feature crates contribute command metadata through local RON
 manifests and own the typed request components and systems that execute those commands;
@@ -1307,9 +1308,10 @@ The Session manager publishes only to its active page and leases Git metadata fo
 repository while that page remains active.
 Its first discovery reserves a skeleton in one persistent scroll surface until rows are available.
 Each provider publishes its completed catalog without waiting for other providers. Partial updates
-keep existing rows, append new identities, and fade them in; a completed discovery can remove
+keep existing rows and append new identities; a completed discovery can remove
 missing identities without reordering the survivors. The view-control band and scrollbar gutter
 keep their space during loading, with the selected view icon using the foreground color.
+Once rows exist, background discovery never appends another initial-loading skeleton.
 Git change counts live in the Space card with labels rather than as dots in the composer.
 Startup failures retain their specific provider cause when the process exits. A conversation owned
 by another client shows a neutral status card explaining that ownership, with retry and diagnostic

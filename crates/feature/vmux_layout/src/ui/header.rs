@@ -248,7 +248,7 @@ fn HeaderContent() -> Element {
                     }
                     TeamFacepile { user, profiles }
                     ExtensionBar { extensions }
-                    RemoteControl { remote }
+                    div { class: "hidden", RemoteControl { remote } }
                 }
             }
         }

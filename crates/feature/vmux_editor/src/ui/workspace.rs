@@ -1,5 +1,6 @@
 #![allow(non_snake_case)]
 
+use super::address::EditorAddress;
 use super::diagnostic::DiagnosticPresentation;
 use super::directory::{PreviewDom, PreviewPane};
 use super::dom::{EditorDom, ScrolledLineHeight};
@@ -875,6 +876,7 @@ fn EditorWorkspace() -> Element {
             },
 
             PaneWidth {}
+            EditorAddress {}
 
 
         div {

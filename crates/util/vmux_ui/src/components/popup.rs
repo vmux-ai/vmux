@@ -42,14 +42,15 @@ globalThis.__vmuxPopupPresentation ??= (() => {
       return element.dataset.state !== 'closed' && element.getBoundingClientRect().height > 0;
     }
     snapshot(element) {
-      const style = getComputedStyle(element);
+      const rendered = element.dataset.vmuxPopupKind === 'context' ? element.querySelector('[role="menu"]') ?? element : element;
+      const style = getComputedStyle(rendered);
       const scrolling = [];
-      const nodes = [element, ...element.querySelectorAll('*')];
+      const nodes = [rendered, ...rendered.querySelectorAll('*')];
       for (let index = 0; index < nodes.length; index++) {
         const node = nodes[index];
         if (node.scrollTop || node.scrollLeft) scrolling.push({ index, top: node.scrollTop, left: node.scrollLeft });
       }
-      return { element, rect: element.getBoundingClientRect(), opacity: style.opacity, scrolling, typography: { color: style.color, fontFamily: style.fontFamily, fontSize: style.fontSize, fontWeight: style.fontWeight, lineHeight: style.lineHeight, letterSpacing: style.letterSpacing } };
+      return { element, rendered, rect: rendered.getBoundingClientRect(), opacity: style.opacity, scrolling, typography: { color: style.color, fontFamily: style.fontFamily, fontSize: style.fontSize, fontWeight: style.fontWeight, lineHeight: style.lineHeight, letterSpacing: style.letterSpacing } };
     }
     capture() {
       const captures = [];
@@ -59,12 +60,12 @@ globalThis.__vmuxPopupPresentation ??= (() => {
       return captures;
     }
     retire(capture) {
-      const { element, rect, opacity, scrolling, typography } = capture;
+      const { element, rendered, rect, opacity, scrolling, typography } = capture;
       if (rect.width <= 0 || rect.height <= 0) return;
       if (this.closing.has(element)) return;
       this.closing.add(element);
       if (window.matchMedia('(prefers-reduced-motion: reduce)').matches || typeof element.animate !== 'function') return;
-      const ghost = element.cloneNode(true);
+      const ghost = rendered.cloneNode(true);
       for (const node of [ghost, ...ghost.querySelectorAll('[id], [data-dioxus-id], [data-vmux-popup-kind]')]) {
         node.removeAttribute('id');
         node.removeAttribute('data-dioxus-id');
@@ -85,7 +86,7 @@ globalThis.__vmuxPopupPresentation ??= (() => {
           const node = nodes[scroll.index];
           if (node) { node.scrollTop = scroll.top; node.scrollLeft = scroll.left; }
         }
-        animation = ghost.animate([{ opacity }, { opacity: 0 }], { duration: __VMUX_POPUP_EXIT_MS__, easing: 'ease-out' });
+        animation = ghost.animate([{ opacity, transform: 'translateY(0)' }, { opacity: 0, transform: 'translateY(4px)' }], { duration: __VMUX_POPUP_EXIT_MS__, easing: 'ease-out' });
         animation.finished.then(cleanup, cleanup);
       } catch (_) { cleanup(); }
     }

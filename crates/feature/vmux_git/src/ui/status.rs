@@ -45,7 +45,7 @@ pub(super) fn RepositoryHeader(
         None,
         None,
     );
-    let (panel, panel_label, panel_icon) = match focused_panel {
+    let (_panel, panel_label, _panel_icon) = match focused_panel {
         GitPanel::Files => ("changes", "git-changes", vmux_api::BuiltinIcon::Files),
         GitPanel::Branches => (
             "branches",
@@ -167,16 +167,6 @@ pub(super) fn RepositoryHeader(
         fixed: vec![
             AddressCrumb {
                 entry: AddressOption {
-                    label_key: panel_label.into(),
-                    icon: Some(panel_icon),
-                    intent: Some(AddressIntent::Section { id: panel.into() }),
-                    ..Default::default()
-                },
-                options: panels,
-                ..Default::default()
-            },
-            AddressCrumb {
-                entry: AddressOption {
                     label: repository.repo_name.clone(),
                     title: repository.repo_root.clone(),
                     identity: repository.repo_root.clone(),
@@ -249,7 +239,53 @@ pub(super) fn RepositoryHeader(
             });
         }
     }
-    let mut toolbar = Vec::new();
+    let first_panel_commit = repository
+        .commits
+        .first()
+        .map(|commit| commit.sha.clone())
+        .unwrap_or_default();
+    let mut panel_options = Vec::new();
+    for option in panels {
+        let Some(AddressIntent::Section { id }) = option.intent else {
+            continue;
+        };
+        panel_options.push(vmux_ui::components::page_address::ToolbarChoice {
+            value: id,
+            label: translate(&option.label_key),
+            icon: String::new(),
+        });
+    }
+    let mut toolbar = vec![
+        ToolbarControl::menu(translate(panel_label), panel_options, move |id| {
+            match id.as_str() {
+                "changes" => {
+                    let _ = send(&GitPanelSelectRequest {
+                        panel: GitPanel::Files,
+                    });
+                }
+                "branches" => {
+                    let _ = send(&GitBranchDiffSelectRequest);
+                }
+                "commits" if !first_panel_commit.is_empty() => {
+                    let _ = send(&GitCommitSelectRequest {
+                        commit: first_panel_commit.clone(),
+                    });
+                }
+                "commits" => {
+                    let _ = send(&GitPanelSelectRequest {
+                        panel: GitPanel::Commits,
+                    });
+                }
+                "stash" => {
+                    let _ = send(&GitPanelSelectRequest {
+                        panel: GitPanel::Stash,
+                    });
+                }
+                _ => {}
+            }
+        })
+        .text(),
+    ];
     if focused_panel == GitPanel::Branches && viewed_total > 0 {
         toolbar.push(ToolbarControl::badge(format!(
             "{viewed_count} / {viewed_total} {}",

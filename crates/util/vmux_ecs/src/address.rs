@@ -2,7 +2,7 @@ use bevy::prelude::*;
 use bevy_cef::prelude::{UiEventPlugin, UiInput};
 use vmux_api::address::{
     AddressEffect, AddressIntent, AddressOption, PageAddress, PageAddressPublish,
-    PageAddressUiState, PageAddressUiStatePatch, PageToolbarPublish,
+    PageAddressUiState, PageAddressUiStatePatch,
 };
 
 use crate::manifest::FeatureManifest;
@@ -15,9 +15,8 @@ impl Plugin for AddressPlugin {
     fn build(&self, app: &mut App) {
         app.add_plugins(UiStatePlugin::<PageAddressUiState>::with_post_update_flush())
             .add_message::<PageOpenRequest>()
-            .add_plugins(UiEventPlugin::<(PageAddressPublish, PageToolbarPublish)>::default())
+            .add_plugins(UiEventPlugin::<(PageAddressPublish,)>::default())
             .add_observer(publish)
-            .add_observer(toolbar)
             .add_observer(activate)
             .add_systems(PostUpdate, project.in_set(AddressProjectionSet));
     }
@@ -193,10 +192,6 @@ fn publish(
         return;
     }
     let mut address = event.payload.address.clone();
-    if let Some(current) = current {
-        address.controls.clone_from(&current.0.controls);
-        address.toolbar_id = current.0.toolbar_id;
-    }
     address.url = metadata.url.clone();
     address.owner = owner.to_bits();
     address.revision = current.map_or(1, |current| current.0.revision);
@@ -206,45 +201,6 @@ fn publish(
     if current.is_some() {
         address.revision = address.revision.saturating_add(1);
     }
-    commands
-        .entity(owner)
-        .remove::<RouteAddress>()
-        .insert(AddressContribution(address.clone()));
-    commands.trigger(UiStateWrite::<PageAddressUiState>::from_event(
-        owner,
-        &PageAddressUiStatePatch {
-            address: Some(address),
-            ..Default::default()
-        },
-    ));
-}
-
-fn toolbar(
-    event: On<UiInput<PageToolbarPublish>>,
-    pages: Query<(&PageMetadata, Option<&AddressContribution>)>,
-    mut commands: Commands,
-) {
-    let owner = event.webview;
-    let Ok((metadata, current)) = pages.get(owner) else {
-        return;
-    };
-    if current.is_some_and(|current| {
-        current.0.controls == event.payload.controls && current.0.toolbar_id == event.payload.id
-            || event.payload.controls.is_empty() && current.0.toolbar_id != event.payload.id
-    }) {
-        return;
-    }
-    let mut address = match current {
-        Some(current) => current.0.clone(),
-        None => PageAddress {
-            owner: owner.to_bits(),
-            url: metadata.url.clone(),
-            ..Default::default()
-        },
-    };
-    address.controls.clone_from(&event.payload.controls);
-    address.toolbar_id = event.payload.id;
-    address.revision = address.revision.saturating_add(1);
     commands
         .entity(owner)
         .remove::<RouteAddress>()
@@ -459,49 +415,6 @@ mod tests {
             .url = "vmux://projects/two".into();
         trail.app.update();
         assert_eq!(trail.address().current.label, "Projects");
-    }
-
-    #[test]
-    fn replacing_breadcrumbs_keeps_controls_and_an_old_toolbar_cannot_clear_its_successor() {
-        let mut trail = Trail::new();
-        trail.publish("vmux://projects/one", "One");
-        let control = vmux_api::address::AddressControl {
-            id: "first".into(),
-            label: "Create".into(),
-            ..Default::default()
-        };
-        trail.app.world_mut().trigger(UiInput {
-            webview: trail.page,
-            payload: PageToolbarPublish {
-                id: 1,
-                controls: vec![control.clone()],
-            },
-        });
-        trail.app.world_mut().flush();
-        trail.publish("vmux://projects/one", "Updated breadcrumbs");
-        assert_eq!(trail.address().controls, [control]);
-        let successor = vmux_api::address::AddressControl {
-            id: "second".into(),
-            label: "Resume".into(),
-            ..Default::default()
-        };
-        trail.app.world_mut().trigger(UiInput {
-            webview: trail.page,
-            payload: PageToolbarPublish {
-                id: 2,
-                controls: vec![successor.clone()],
-            },
-        });
-        trail.app.world_mut().flush();
-        trail.app.world_mut().trigger(UiInput {
-            webview: trail.page,
-            payload: PageToolbarPublish {
-                id: 1,
-                controls: Vec::new(),
-            },
-        });
-        trail.app.world_mut().flush();
-        assert_eq!(trail.address().controls, [successor]);
     }
 
     #[test]

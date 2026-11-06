@@ -16,7 +16,6 @@
             icon: "MessagesRound",
             permissions: [
                 "PageAddressPublish",
-                "PageToolbarPublish",
                 "PageAddressRequest",
                 "PageAddressUiState",
                 "PageReady",

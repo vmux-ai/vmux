@@ -47,7 +47,6 @@
             bookmark: Some(120),
             permissions: [
                 "PageAddressPublish",
-                "PageToolbarPublish",
                 "PageAddressRequest",
                 "PageAddressUiState",
                 "PageReady",

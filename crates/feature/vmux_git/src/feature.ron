@@ -15,7 +15,6 @@
             bookmark: Some(40),
             permissions: [
                 "PageAddressPublish",
-                "PageToolbarPublish",
                 "PageAddressRequest",
                 "PageAddressUiState",
                 "PageReady",

@@ -124,7 +124,6 @@
             bookmark: Some(60),
             permissions: [
                 "PageAddressPublish",
-                "PageToolbarPublish",
                 "PageAddressRequest",
                 "PageAddressUiState",
                 "PageReady",
@@ -153,7 +152,6 @@
             manifest: true,
             permissions: [
                 "PageAddressPublish",
-                "PageToolbarPublish",
                 "PageAddressRequest",
                 "PageAddressUiState",
                 "PageReady",

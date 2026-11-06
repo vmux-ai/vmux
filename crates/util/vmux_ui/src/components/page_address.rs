@@ -4,10 +4,7 @@ use crate::components::manager::ManagerView;
 use crate::hooks::{send, use_ui_state};
 use crate::i18n::translate;
 use dioxus::prelude::*;
-use vmux_api::address::{
-    AddressControl, AddressControlChoice, AddressControlKind, AddressIntent, PageAddress,
-    PageAddressPublish, PageAddressUiState, PageToolbarPublish,
-};
+use vmux_api::address::{AddressIntent, PageAddress, PageAddressPublish, PageAddressUiState};
 
 #[component]
 pub fn PageBreadcrumbs(
@@ -52,92 +49,121 @@ pub fn PageBreadcrumbs(
 }
 
 #[component]
-pub fn PageToolbar(mut controls: Vec<ToolbarControl>) -> Element {
-    let slot = use_hook(ToolbarControl::allocate);
-    let source = use_ui_state::<PageAddressUiState>().state;
-    let mut observed = use_signal(move || {
-        source
-            .peek()
-            .effect
-            .as_ref()
-            .map_or(0, |effect| effect.revision)
-    });
-    let callbacks =
-        use_hook(|| std::rc::Rc::new(std::cell::RefCell::new(Vec::<ToolbarControl>::new())));
-    let mut described = Vec::with_capacity(controls.len());
-    for (index, control) in controls.iter_mut().enumerate() {
-        control.description.id = format!("toolbar-{slot}-{index}");
-        described.push(control.description.clone());
-    }
-    *callbacks.borrow_mut() = controls;
-    use_effect(use_reactive!(|(described,)| {
-        let _ = send(&PageToolbarPublish {
-            id: slot,
-            controls: described.clone(),
-        });
-    }));
-    use_drop(move || {
-        let _ = send(&PageToolbarPublish {
-            id: slot,
-            controls: Vec::new(),
-        });
-    });
-    use_effect(move || {
-        let source = source.read();
-        let Some(effect) = &source.effect else {
-            return;
-        };
-        if effect.revision <= *observed.peek() {
-            return;
+pub fn PageToolbar(controls: Vec<ToolbarControl>) -> Element {
+    rsx! { div { class: "flex shrink-0 flex-wrap items-center justify-end gap-2 px-3 py-2",
+        for (index, control) in controls.into_iter().enumerate() {
+            PageToolbarControl { key: "{index}:{control.description.label}", control }
         }
-        observed.set(effect.revision);
-        if source
-            .address
-            .as_ref()
-            .is_none_or(|address| !effect.matches(address))
-        {
-            return;
+    } }
+}
+
+#[component]
+fn PageToolbarControl(control: ToolbarControl) -> Element {
+    let mut open = use_signal(|| false);
+    let description = control.description;
+    match description.kind {
+        ControlKind::Badge => {
+            rsx! { span { class: "px-1 text-[10px] tabular-nums text-muted-foreground", "{description.label}" } }
         }
-        let (id, value, keyboard) = match &effect.intent {
-            AddressIntent::Control { id, value } => (id, value, false),
-            AddressIntent::ControlKey { id, key } => (id, key, true),
-            _ => return,
-        };
-        let callback = callbacks
-            .borrow()
-            .iter()
-            .find(|control| control.description.id == *id)
-            .and_then(|control| {
-                if keyboard {
-                    control.key_callback
-                } else {
-                    control.callback
+        ControlKind::Search => rsx! {
+            crate::components::manager::ManagerSearchAction {
+                value: description.value, placeholder: description.label,
+                onsearch: move |value| { if let Some(callback) = control.callback { callback.call(value); } },
+                onkeydown: Some(EventHandler::new(move |event: KeyboardEvent| {
+                    let key = event.key().to_string();
+                    if description.keys.contains(&key) && let Some(callback) = control.key_callback { callback.call(key); }
+                })),
+            }
+        },
+        ControlKind::Button => {
+            let icon = crate::icon::LineIcon::parse(&description.icon);
+            rsx! {
+                crate::components::button::Button {
+                    variant: if description.danger { crate::components::button::ButtonVariant::Destructive } else if description.primary { crate::components::button::ButtonVariant::Primary } else { crate::components::button::ButtonVariant::Ghost },
+                    size: crate::components::button::ButtonSize::Xs,
+                    r#type: "button", disabled: description.disabled,
+                    class: if description.active { "h-7 whitespace-nowrap bg-foreground/10" } else { "h-7 whitespace-nowrap" },
+                    title: description.label.clone(), aria_label: description.label.clone(),
+                    onclick: move |_| { if let Some(callback) = control.callback { callback.call(String::new()); } },
+                    if let Some(icon) = icon { crate::icon::LineIconView { icon, class: "size-3.5" } }
+                    if icon.is_none() || description.primary || description.danger || description.show_label { span { "{description.label}" } }
                 }
-            });
-        if let Some(callback) = callback {
-            callback.call(value.clone());
+            }
         }
-    });
-    rsx! {}
+        ControlKind::Menu => rsx! {
+            crate::components::dropdown::Dropdown {
+                open: open(), on_dismiss: move |_| open.set(false),
+                crate::components::button::Button {
+                    variant: if description.primary { crate::components::button::ButtonVariant::Primary } else { crate::components::button::ButtonVariant::Ghost },
+                    size: crate::components::button::ButtonSize::Xs,
+                    r#type: "button", disabled: description.disabled,
+                    class: "h-7 whitespace-nowrap", aria_label: description.label.clone(),
+                    onclick: move |_| open.set(!open()),
+                    if let Some(icon) = crate::icon::LineIcon::parse(&description.icon) { crate::icon::LineIconView { icon, class: "size-3.5" } }
+                    if description.primary || description.show_label || description.icon.is_empty() { "{description.label}" }
+                }
+                if open() {
+                    crate::components::dropdown::DropdownPopup { class: "min-w-48 p-1",
+                        for option in description.options {
+                            {
+                                let value = option.value;
+                                rsx! { crate::components::dropdown::DropdownOption {
+                                    label: option.label, selected: false,
+                                    onclick: move |_| { open.set(false); if let Some(callback) = control.callback { callback.call(value.clone()); } },
+                                    leading: rsx! { if let Some(icon) = crate::icon::LineIcon::parse(&option.icon) { crate::icon::LineIconView { icon, class: "size-3.5" } } },
+                                } }
+                            }
+                        }
+                    }
+                }
+            }
+        },
+    }
+}
+
+#[derive(Clone, PartialEq, Default)]
+struct ControlDescription {
+    label: String,
+    icon: String,
+    value: String,
+    disabled: bool,
+    active: bool,
+    primary: bool,
+    show_label: bool,
+    danger: bool,
+    kind: ControlKind,
+    keys: Vec<String>,
+    options: Vec<ToolbarChoice>,
+}
+
+#[derive(Clone, PartialEq)]
+pub struct ToolbarChoice {
+    pub value: String,
+    pub label: String,
+    pub icon: String,
+}
+
+#[derive(Clone, Copy, PartialEq, Default)]
+enum ControlKind {
+    #[default]
+    Button,
+    Search,
+    Badge,
+    Menu,
 }
 
 #[derive(Clone, PartialEq)]
 pub struct ToolbarControl {
-    description: AddressControl,
+    description: ControlDescription,
     callback: Option<EventHandler<String>>,
     key_callback: Option<EventHandler<String>>,
 }
 
 impl ToolbarControl {
-    fn allocate() -> u64 {
-        static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
-        NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
-    }
-
     pub fn button(label: impl Into<String>, callback: impl FnMut(()) + 'static) -> Self {
         let callback = EventHandler::new(callback);
         Self {
-            description: AddressControl {
+            description: ControlDescription {
                 label: label.into(),
                 ..Default::default()
             },
@@ -152,8 +178,8 @@ impl ToolbarControl {
         callback: impl FnMut(String) + 'static,
     ) -> Self {
         Self {
-            description: AddressControl {
-                kind: AddressControlKind::Search,
+            description: ControlDescription {
+                kind: ControlKind::Search,
                 value,
                 label: placeholder,
                 ..Default::default()
@@ -165,8 +191,8 @@ impl ToolbarControl {
 
     pub fn badge(label: impl Into<String>) -> Self {
         Self {
-            description: AddressControl {
-                kind: AddressControlKind::Badge,
+            description: ControlDescription {
+                kind: ControlKind::Badge,
                 label: label.into(),
                 ..Default::default()
             },
@@ -177,14 +203,14 @@ impl ToolbarControl {
 
     pub fn menu(
         label: String,
-        options: Vec<AddressControlChoice>,
+        options: Vec<ToolbarChoice>,
         callback: impl FnMut(String) + 'static,
     ) -> Self {
         Self {
-            description: AddressControl {
+            description: ControlDescription {
                 label,
                 options,
-                kind: AddressControlKind::Menu,
+                kind: ControlKind::Menu,
                 ..Default::default()
             },
             callback: Some(EventHandler::new(callback)),
@@ -288,60 +314,8 @@ pub fn AddressSurface(url: String, onactivate: EventHandler<()>, children: Eleme
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::components::address::AddressTrail;
-    use crate::hooks::EventListenerError;
-    use crate::transport::{BytesListener, HostBinding, PageHost};
     use dioxus::core::{AttributeValue, Mutation};
     use dioxus_html::{EventData, SerializedHtmlEventConverter, SerializedMouseData};
-    use std::cell::RefCell;
-    use std::rc::Rc;
-    use vmux_api::BinEvent;
-    use vmux_api::address::{AddressEffect, PageAddressRequest, PageAddressUiStatePatch};
-
-    #[derive(Default)]
-    struct ToolbarHost {
-        controls: RefCell<Vec<AddressControl>>,
-        requests: RefCell<Vec<PageAddressRequest>>,
-        listeners: RefCell<Vec<BytesListener>>,
-    }
-
-    impl PageHost for ToolbarHost {
-        fn send(&self, id: &str, bytes: &[u8]) -> Result<(), EventListenerError> {
-            if id == PageToolbarPublish::id() {
-                let update =
-                    rkyv::from_bytes::<PageToolbarPublish, rkyv::rancor::Error>(bytes).unwrap();
-                *self.controls.borrow_mut() = update.controls;
-            } else if id == PageAddressRequest::id() {
-                self.requests.borrow_mut().push(
-                    rkyv::from_bytes::<PageAddressRequest, rkyv::rancor::Error>(bytes).unwrap(),
-                );
-            }
-            Ok(())
-        }
-
-        fn listen(&self, id: &str, listener: BytesListener) -> Result<(), EventListenerError> {
-            if id == PageAddressUiState::id() {
-                self.listeners.borrow_mut().push(listener);
-            }
-            Ok(())
-        }
-    }
-
-    impl ToolbarHost {
-        fn deliver(&self, address: &PageAddress, effect: Option<AddressEffect>) {
-            let frame =
-                vmux_api::UiStateFrame::<PageAddressUiState, PageAddressUiStatePatch>::Snapshot(
-                    PageAddressUiState {
-                        address: Some(address.clone()),
-                        effect,
-                    },
-                );
-            let bytes = rkyv::to_bytes::<rkyv::rancor::Error>(&frame).unwrap();
-            for listener in self.listeners.borrow_mut().iter_mut() {
-                listener(&bytes);
-            }
-        }
-    }
 
     #[component]
     fn ToolbarPage() -> Element {
@@ -352,40 +326,12 @@ mod tests {
         }
     }
 
-    #[component]
-    fn WindowToolbar(address: PageAddress) -> Element {
-        rsx! { AddressTrail { state: address } }
-    }
-
     #[test]
-    fn window_controls_render_outside_the_page_and_dispatch_to_their_source_state() {
+    fn page_controls_render_and_update_their_own_page_state() {
         dioxus_html::set_event_converter(Box::new(SerializedHtmlEventConverter));
-        let source_host = Rc::new(ToolbarHost::default());
-        let window_host = Rc::new(ToolbarHost::default());
-        let mut page = VirtualDom::new(ToolbarPage);
-        page.provide_root_context(HostBinding(source_host.clone()));
-        page.rebuild_in_place();
-        page.render_immediate_to_vec();
-        assert!(!dioxus_ssr::render(&page).contains("<button"));
-        let address = PageAddress {
-            owner: 7,
-            revision: 1,
-            url: "git:///repo".into(),
-            controls: source_host.controls.borrow().clone(),
-            ..Default::default()
-        };
-        assert!(!address.controls.is_empty());
-        source_host.deliver(&address, None);
-        page.render_immediate_to_vec();
-        let mut window = VirtualDom::new_with_props(
-            WindowToolbar,
-            WindowToolbarProps {
-                address: address.clone(),
-            },
-        );
-        window.provide_root_context(HostBinding(window_host.clone()));
-        let mounted = window.rebuild_to_vec();
-        let button = mounted
+        let mut dom = VirtualDom::new(ToolbarPage);
+        let rendered = dom.rebuild_to_vec();
+        let button = rendered
             .edits
             .iter()
             .find_map(|edit| match edit {
@@ -397,8 +343,8 @@ mod tests {
                 } if value == "Run" => Some(*id),
                 _ => None,
             })
-            .expect("the window must render the page control");
-        window.runtime().handle_event(
+            .expect("the page must render its own control");
+        dom.runtime().handle_event(
             "click",
             Event::new(
                 EventData::Mouse(SerializedMouseData::default()).into_any(),
@@ -406,21 +352,7 @@ mod tests {
             ),
             button,
         );
-        window.render_immediate_to_vec();
-        let request = window_host.requests.borrow().last().unwrap().clone();
-        source_host.deliver(
-            &address,
-            Some(AddressEffect {
-                revision: 1,
-                owner: request.owner,
-                url: request.url,
-                address_revision: request.revision,
-                intent: request.intent,
-            }),
-        );
-        page.render_immediate_to_vec();
-        page.render_immediate_to_vec();
-        assert!(dioxus_ssr::render(&page).contains("count=1"));
-        assert!(source_host.requests.borrow().is_empty());
+        dom.render_immediate_to_vec();
+        assert!(dioxus_ssr::render(&dom).contains("count=1"));
     }
 }

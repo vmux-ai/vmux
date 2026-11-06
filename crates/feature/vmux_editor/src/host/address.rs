@@ -527,8 +527,6 @@ fn forward(
         | AddressIntent::Section { .. }
         | AddressIntent::GitBranch { .. }
         | AddressIntent::GitCommit { .. }
-        | AddressIntent::Control { .. }
-        | AddressIntent::ControlKey { .. }
         | AddressIntent::GitCatalogNext { .. } => {}
     }
 }

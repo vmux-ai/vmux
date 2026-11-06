@@ -38,11 +38,6 @@ impl SessionFilterPicker {
         (self.filter_value)()
     }
 
-    pub fn dismiss(self, controls: CollectionController<SessionFilter>) {
-        controls.dismiss_filter();
-        self.reset_filter_input();
-    }
-
     pub fn toggle(self, controls: CollectionController<SessionFilter>) {
         controls.toggle_filter();
         self.reset_filter_input();

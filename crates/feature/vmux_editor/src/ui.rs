@@ -4,6 +4,7 @@ pub(crate) use input::EditorFocus;
 pub use workspace::Page;
 pub(super) use workspace::{HOVER_DELAY_MS, Mode, SCROLL_ID};
 
+mod address;
 mod diagnostic;
 mod directory;
 mod dom;

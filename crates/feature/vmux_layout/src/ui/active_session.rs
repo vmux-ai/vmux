@@ -7,7 +7,7 @@ use vmux_ui::components::dropdown::DropdownPopup;
 use vmux_ui::components::project_picker::ProjectSelectPopup;
 use vmux_ui::components::sheet::SheetSelectorRow;
 use vmux_ui::hooks::{send, use_optimistic_map};
-use vmux_ui::i18n::{TranslationValue, translate, translate_with};
+use vmux_ui::i18n::translate;
 use vmux_ui::icon::{GitSymbol, GitSymbolView, LineIcon, LineIconView};
 
 use crate::event::{

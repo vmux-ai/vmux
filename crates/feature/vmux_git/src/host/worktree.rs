@@ -867,6 +867,7 @@ pub struct RepoInfo {
     pub insertions: u32,
     pub deletions: u32,
     pub repo_root: PathBuf,
+    project_root: PathBuf,
     pub(crate) git_dir: PathBuf,
     pub(crate) common_dir: PathBuf,
     pub(crate) worktrees_dir: Option<PathBuf>,
@@ -875,7 +876,17 @@ pub struct RepoInfo {
 
 impl RepoInfo {
     pub fn project_root(&self) -> &Path {
-        self.common_dir.parent().unwrap_or(&self.repo_root)
+        if !self.project_root.as_os_str().is_empty() {
+            return &self.project_root;
+        }
+        if self
+            .common_dir
+            .file_name()
+            .is_some_and(|name| name == ".git")
+        {
+            return self.common_dir.parent().unwrap_or(&self.repo_root);
+        }
+        &self.repo_root
     }
 
     pub fn project_name(&self) -> String {
@@ -994,7 +1005,53 @@ impl LinkedRepoRoot {
         if git_dir == common_dir {
             return None;
         }
-        Some(common_dir.parent()?.to_path_buf())
+        let checkout = CheckoutInfo::try_from(dir).ok()?;
+        Some(
+            ProjectRoot {
+                checkout: &checkout.root,
+                common: &common_dir,
+            }
+            .resolve(),
+        )
+    }
+}
+
+struct ProjectRoot<'a> {
+    checkout: &'a Path,
+    common: &'a Path,
+}
+
+impl ProjectRoot<'_> {
+    fn resolve(&self) -> PathBuf {
+        if self.common.file_name().is_some_and(|name| name == ".git") {
+            return self.common.parent().unwrap_or(self.checkout).to_path_buf();
+        }
+        let common = self.common.to_string_lossy();
+        if let Ok((configured, _, true)) = GitCommand::read(
+            self.checkout,
+            &[
+                "--git-dir",
+                &common,
+                "config",
+                "--path",
+                "--get",
+                "core.worktree",
+            ],
+        ) {
+            let configured = configured.strip_suffix('\n').unwrap_or(&configured);
+            if !configured.is_empty() {
+                let path = PathBuf::from(configured);
+                let root = if path.is_absolute() {
+                    path
+                } else {
+                    self.common.join(path)
+                };
+                if let Ok(root) = root.canonicalize() {
+                    return root;
+                }
+            }
+        }
+        self.checkout.to_path_buf()
     }
 }
 
@@ -1060,6 +1117,11 @@ impl RepoInfo {
                 .into(),
         };
         let base = BaseRef::resolve(&repo_root);
+        let project_root = ProjectRoot {
+            checkout: &repo_root,
+            common: &common_dir,
+        }
+        .resolve();
         Some(Self {
             name,
             branch,
@@ -1074,6 +1136,7 @@ impl RepoInfo {
             insertions: 0,
             deletions: 0,
             repo_root,
+            project_root,
             git_dir,
             common_dir,
             worktrees_dir,
@@ -1748,6 +1811,44 @@ mod tests {
             unsafe { libc::flock(competing.as_raw_fd(), libc::LOCK_EX | libc::LOCK_NB) },
             0
         );
+    }
+
+    #[test]
+    fn submodule_project_roots_use_the_primary_checkout_instead_of_git_modules() {
+        let child = test_repo::init();
+        commit_initial(child.path());
+        let parent = test_repo::init();
+        test_repo::run(
+            parent.path(),
+            &[
+                "-c",
+                "protocol.file.allow=always",
+                "submodule",
+                "add",
+                "-q",
+                child.path().to_str().unwrap(),
+                "client",
+            ],
+        );
+        let checkout = parent.path().join("client").canonicalize().unwrap();
+        let info = RepoInfo::read(&checkout).unwrap();
+        assert_eq!(info.project_root(), checkout);
+        assert_eq!(info.project_name(), "client");
+        let linked = parent.path().join("linked-client");
+        test_repo::run(
+            &checkout,
+            &[
+                "worktree",
+                "add",
+                "-q",
+                "-b",
+                "feature",
+                linked.to_str().unwrap(),
+            ],
+        );
+        let info = RepoInfo::read(&linked).unwrap();
+        assert_eq!(info.project_root(), checkout);
+        assert_eq!(LinkedRepoRoot::find(&linked).unwrap(), checkout);
     }
 
     #[test]

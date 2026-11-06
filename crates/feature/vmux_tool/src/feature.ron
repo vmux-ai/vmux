@@ -30,7 +30,6 @@
             )),
             permissions: [
                 "PageAddressPublish",
-                "PageToolbarPublish",
                 "PageAddressRequest",
                 "PageAddressUiState",
                 "PageReady",

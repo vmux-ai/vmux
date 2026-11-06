@@ -80,3 +80,5 @@ workspace = true
 
 [dev-dependencies]
 tempfile = "3"
+dioxus-ssr = "=0.7.9"
+dioxus-html = { version = "=0.7.9", features = ["serialize"] }

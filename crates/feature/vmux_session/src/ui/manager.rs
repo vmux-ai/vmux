@@ -4,6 +4,7 @@ use std::{
 };
 
 use dioxus::prelude::*;
+use dioxus_primitives::dioxus_attributes::attributes;
 use vmux_api::address::{AddressCrumb, AddressIntent, AddressOption, PageAddress};
 #[cfg(test)]
 use vmux_session::SessionSummaryProjection;
@@ -25,7 +26,7 @@ use vmux_ui::components::manager::{
     WorkspaceLayout,
 };
 use vmux_ui::components::motion::{Collapse, Collapsible};
-use vmux_ui::components::page_address::{PageBreadcrumbs, PageToolbar, ToolbarControl};
+use vmux_ui::components::page_address::{PageToolbar, ToolbarControl};
 use vmux_ui::components::sheet::{SheetHeaderAction, SheetHeaderChevron};
 use vmux_ui::components::skeleton::Skeleton;
 use vmux_ui::hooks::{
@@ -100,7 +101,6 @@ pub fn SessionsManager() -> Element {
         |id| mutations.is_leaving(id),
     );
     presentation.loading = waiting;
-    presentation.refreshing = loading;
     let presentation = Rc::new(presentation);
     let visible_ids = presentation.visible_ids.clone();
     use_effect(use_reactive!(|(visible_ids,)| {
@@ -194,6 +194,7 @@ pub fn SessionCollection(
 fn SessionsManagerActions(
     controls: CollectionController<SessionFilter>,
     filter_picker: SessionFilterPicker,
+    location: PageAddress,
     presentation: Rc<ManagerPresentation>,
 ) -> Element {
     let mut delete_confirm_open = use_signal(|| false);
@@ -224,7 +225,39 @@ fn SessionsManagerActions(
     let mutations = use_context::<SessionMutations>();
     let deleted_provider_count = mutations.deleted_provider_count();
     let delete_confirm = use_memo(move || Some(delete_confirm_open()));
-    let mut toolbar = Vec::new();
+    let mut locations = Vec::new();
+    let location_label = location
+        .fixed
+        .first()
+        .map(|crumb| crumb.entry.label.clone())
+        .unwrap_or_default();
+    if let Some(crumb) = location.fixed.first() {
+        for option in &crumb.options {
+            let Some(AddressIntent::SessionLocation { value }) = &option.intent else {
+                continue;
+            };
+            locations.push(vmux_ui::components::page_address::ToolbarChoice {
+                value: value.clone(),
+                label: option.label.clone(),
+                icon: String::new(),
+            });
+        }
+    }
+    let mut toolbar = vec![
+        ToolbarControl::menu(location_label, locations, move |value| {
+            controls.update_filters(|filters| {
+                if value == SessionLocationBreadcrumb::ARCHIVED {
+                    SessionFilter::upsert(filters, SessionFilter::Archived);
+                } else if value == SessionLocationBreadcrumb::INBOX {
+                    SessionFilter::set_stage(filters, None);
+                } else {
+                    SessionFilter::set_stage(filters, Some(value));
+                }
+            });
+            controls.set_query(String::new());
+        })
+        .text(),
+    ];
     if deleted_provider_count > 0 {
         toolbar.push(
             ToolbarControl::button(translate("sessions-restore-deleted"), move |_| {
@@ -367,26 +400,9 @@ fn SessionsManagerContent(
 ) -> Element {
     let location = SessionLocationBreadcrumb::new(&presentation);
     rsx! {
-        PageBreadcrumbs {
-            state: location.address(),
-            onintent: move |intent| {
-                if let AddressIntent::SessionLocation { value } = intent {
-                    controls.update_filters(|filters| {
-                        if value == SessionLocationBreadcrumb::ARCHIVED {
-                            SessionFilter::upsert(filters, SessionFilter::Archived);
-                        } else if value == SessionLocationBreadcrumb::INBOX {
-                            SessionFilter::set_stage(filters, None);
-                        } else {
-                            SessionFilter::set_stage(filters, Some(value));
-                        }
-                    });
-                    controls.set_query(String::new());
-                }
-            },
-        }
         WorkspaceLayout {
             toolbar: rsx! {
-                SessionsManagerActions { controls, filter_picker, presentation: Rc::clone(&presentation) }
+                SessionsManagerActions { controls, filter_picker, location: location.address(), presentation: Rc::clone(&presentation) }
             },
             sidebar: rsx! {
                 SessionCategories {
@@ -428,7 +444,6 @@ fn SessionsManagerContent(
                     view: controls.view(),
                     scrollable: false,
                 }
-                if presentation.refreshing { SessionsSkeleton {} }
             }
             }
         }
@@ -829,7 +844,7 @@ fn SessionUpdatedFilterInput(
 #[component]
 fn SessionsSkeleton() -> Element {
     rsx! {
-        div { class: "min-w-[44rem] shrink-0 p-3",
+        div { class: "min-w-[44rem] shrink-0 p-3", aria_busy: true,
             div { class: "flex h-8 items-center gap-2", Skeleton { class: "h-3 w-24" } }
             for row in 0..10 {
                 div { key: "{row}", class: "flex h-11 items-center gap-2.5 px-2",
@@ -949,6 +964,10 @@ fn SessionGroup(
     };
     rsx! {
         section { class: "group/session-section {section_class}",
+            ContextMenu {
+                attributes: attributes!(div { class: "contents" }),
+                ContextMenuTrigger {
+                    attributes: attributes!(div { class: "contents", aria_label: translate_humanized(&stage.name) }),
             header { class: "sticky top-0 z-10 flex h-8 w-full items-center gap-2 bg-background px-1 text-left",
                 div { class: "flex h-7 w-fit max-w-full min-w-0 items-center gap-1 px-1",
                     SheetHeaderChevron {
@@ -971,9 +990,24 @@ fn SessionGroup(
                         span { class: "text-[10px] tabular-nums text-muted-foreground/75", "{sessions.len()}" }
                     }
                 }
-                if stage.id == "stale" && !group.archivable.is_empty() {
+                if !group.archivable.is_empty() || !group.restorable.is_empty() {
                     div { class: "ml-auto opacity-0 transition-opacity group-hover/session-section:opacity-100 focus-within:opacity-100",
-                        SessionArchiveAllMenu { targets: group.archivable.clone() }
+                        SessionArchiveAllMenu {
+                            targets: group.archivable.clone(),
+                            restorable: group.restorable.clone(),
+                            collapsed: collapsed(),
+                            on_toggle: move |_| collapsed.set(!collapsed()),
+                        }
+                    }
+                }
+            }
+                }
+                ContextMenuContent { attributes: vec![],
+                    SessionGroupMenuItems {
+                        context: true,
+                        targets: group.archivable.clone(), restorable: group.restorable.clone(),
+                        collapsed: collapsed(),
+                        on_toggle: move |_| collapsed.set(!collapsed()),
                     }
                 }
             }
@@ -1067,13 +1101,11 @@ fn SessionItem(
     let menu_title = presentation.title.clone();
     rsx! {
         Collapse { leaving,
-            div { class: "animate-[dx-fade-in_100ms_ease-out_forwards] motion-reduce:animate-none",
             SessionRowMenu { session: session.clone(), title: menu_title,
             if view == ManagerView::List {
                 SessionListItem { session, presentation, resume, repository_ready, selection }
             } else {
                 SessionBoardItem { session, presentation, resume, repository_ready, selection }
-            }
             }
             }
         }
@@ -1513,10 +1545,14 @@ fn SessionActionButton(
 }
 
 #[component]
-fn SessionArchiveAllMenu(targets: Vec<ArchiveTarget>) -> Element {
+fn SessionArchiveAllMenu(
+    targets: Vec<ArchiveTarget>,
+    restorable: Vec<ArchiveTarget>,
+    collapsed: bool,
+    on_toggle: EventHandler<()>,
+) -> Element {
     let mut open = use_signal(|| false);
     let label = translate("sessions-actions");
-    let mutations = use_context::<SessionMutations>();
     rsx! {
         Dropdown {
             open: open(),
@@ -1535,20 +1571,73 @@ fn SessionArchiveAllMenu(targets: Vec<ArchiveTarget>) -> Element {
                     align: DropdownAlign::End,
                     class: "w-40 p-1",
                     onclick: move |event: MouseEvent| event.stop_propagation(),
-                    button {
-                        r#type: "button",
-                        class: "flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-[11px] text-foreground/75 transition-colors hover:bg-foreground/[0.08] hover:text-foreground",
-                        onclick: move |_| {
-                            open.set(false);
-                            mutations.archive(targets.clone());
-                        },
-                        LineIconView { icon: LineIcon::Archive, class: "size-3.5 shrink-0".to_string() }
-                        span { {translate("sessions-archive-all")} }
+                    SessionGroupMenuItems {
+                        targets, restorable, collapsed, on_toggle,
+                        on_close: move |_| open.set(false),
                     }
                 }
             }
         }
     }
+}
+
+#[component]
+fn SessionGroupMenuItems(
+    targets: Vec<ArchiveTarget>,
+    restorable: Vec<ArchiveTarget>,
+    collapsed: bool,
+    on_toggle: EventHandler<()>,
+    #[props(default)] context: bool,
+    #[props(default)] on_close: Option<EventHandler<()>>,
+) -> Element {
+    let mutations = use_context::<SessionMutations>();
+    let restore_index = usize::from(!targets.is_empty());
+    let toggle_index = restore_index + usize::from(!restorable.is_empty());
+    rsx! {
+        if !targets.is_empty() {
+            SessionGroupMenuItem { context, index: 0usize, icon: LineIcon::Archive,
+                label: translate("sessions-archive-all"),
+                on_select: move |_| { if let Some(close) = on_close { close.call(()); } mutations.archive(targets.clone()); },
+            }
+        }
+        if !restorable.is_empty() {
+            SessionGroupMenuItem { context, index: restore_index, icon: LineIcon::RotateCcw,
+                label: translate("common-restore"),
+                on_select: move |_| { if let Some(close) = on_close { close.call(()); } mutations.restore(restorable.clone()); },
+            }
+        }
+        SessionGroupMenuItem { context, index: toggle_index,
+            icon: LineIcon::ChevronDown,
+            label: translate(if collapsed { "common-expand" } else { "common-collapse" }),
+            on_select: move |_| { if let Some(close) = on_close { close.call(()); } on_toggle.call(()); },
+        }
+    }
+}
+
+#[component]
+fn SessionGroupMenuItem(
+    context: bool,
+    index: usize,
+    icon: LineIcon,
+    label: String,
+    on_select: EventHandler<()>,
+) -> Element {
+    let value = use_signal(String::new);
+    if context {
+        return rsx! { ContextMenuItem {
+            index, value: Into::<ReadSignal<String>>::into(value), attributes: attributes!(div { aria_label: label.clone() }),
+            on_select: move |_: String| on_select.call(()),
+            LineIconView { icon, class: "mr-2 size-3.5" }
+            "{label}"
+        } };
+    }
+    rsx! { button {
+        r#type: "button", role: "menuitem",
+        class: "flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-[11px] text-foreground/75 transition-colors hover:bg-foreground/[0.08] hover:text-foreground",
+        onclick: move |_| on_select.call(()),
+        LineIconView { icon, class: "size-3.5 shrink-0" }
+        span { "{label}" }
+    } }
 }
 
 #[component]
@@ -1745,6 +1834,199 @@ fn SessionIdPill(label: String, title: String) -> Element {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use dioxus::core::{AttributeValue, ElementId, Mutation};
+    use dioxus_html::{
+        Code, EventData, Location, Modifiers, SerializedHtmlEventConverter, SerializedKeyboardData,
+        SerializedMouseData,
+    };
+    use std::cell::RefCell;
+    use vmux_api::BinEvent;
+    use vmux_ui::hooks::EventListenerError;
+    use vmux_ui::transport::{BytesListener, HostBinding, PageHost};
+
+    #[derive(Default)]
+    struct ManagerHost {
+        listeners: RefCell<Vec<BytesListener>>,
+        archived: RefCell<Vec<String>>,
+    }
+
+    impl PageHost for ManagerHost {
+        fn send(&self, id: &str, bytes: &[u8]) -> Result<(), EventListenerError> {
+            if id == crate::event::SessionsArchive::id() {
+                let request =
+                    rkyv::from_bytes::<crate::event::SessionsArchive, rkyv::rancor::Error>(bytes)
+                        .unwrap();
+                *self.archived.borrow_mut() = request.ids;
+            }
+            Ok(())
+        }
+
+        fn listen(&self, id: &str, listener: BytesListener) -> Result<(), EventListenerError> {
+            if id == SessionCatalogUiState::id() {
+                self.listeners.borrow_mut().push(listener);
+            }
+            Ok(())
+        }
+    }
+
+    impl ManagerHost {
+        fn load(&self) {
+            let mut sessions = Vec::new();
+            for index in 0..90 {
+                sessions.push(SessionSummary {
+                    id: format!("session-{index}"),
+                    name: format!("Task {index}"),
+                    stage: "active".into(),
+                    runtime: "idle".into(),
+                    last_activated_at: vmux_ecs::UnixMillis::now().0 - 4 * 24 * 60 * 60 * 1_000,
+                    ..Default::default()
+                });
+            }
+            let state = SessionCatalogUiState {
+                loading: true,
+                repositories: SessionRepositories {
+                    ready: true,
+                    ..Default::default()
+                },
+                catalog: vmux_session::CatalogSnapshot {
+                    stages: vec![StageSummary {
+                        id: "active".into(),
+                        name: "Active".into(),
+                        ..Default::default()
+                    }],
+                    sessions,
+                },
+            };
+            let frame = vmux_api::UiStateFrame::<
+                SessionCatalogUiState,
+                crate::state::SessionCatalogUiStatePatch,
+            >::Snapshot(state);
+            let bytes = rkyv::to_bytes::<rkyv::rancor::Error>(&frame).unwrap();
+            for listener in self.listeners.borrow_mut().iter_mut() {
+                listener(&bytes);
+            }
+        }
+    }
+
+    struct ManagerFixture {
+        dom: VirtualDom,
+        host: Rc<ManagerHost>,
+        collapse: ElementId,
+        context: ElementId,
+    }
+
+    impl ManagerFixture {
+        fn loaded() -> Self {
+            dioxus_html::set_event_converter(Box::new(SerializedHtmlEventConverter));
+            let host = Rc::new(ManagerHost::default());
+            let mut dom = VirtualDom::new(SessionsManager);
+            dom.provide_root_context(HostBinding(host.clone()));
+            dom.rebuild_in_place();
+            dom.render_immediate_to_vec();
+            assert!(dioxus_ssr::render(&dom).contains("aria-busy"));
+            host.load();
+            let mounted = dom.render_immediate_to_vec();
+            dom.render_immediate_to_vec();
+            let collapse_label = translate("common-collapse");
+            let collapse = mounted
+                .edits
+                .iter()
+                .find_map(|edit| match edit {
+                    Mutation::SetAttribute {
+                        name: "aria-label",
+                        value: AttributeValue::Text(value),
+                        id,
+                        ..
+                    } if value == &collapse_label => Some(*id),
+                    _ => None,
+                })
+                .expect("the loaded group header must be collapsible");
+            let section_label = translate_humanized("Stale");
+            let context = mounted
+                .edits
+                .iter()
+                .find_map(|edit| match edit {
+                    Mutation::SetAttribute {
+                        name: "aria-label",
+                        value: AttributeValue::Text(value),
+                        id,
+                        ..
+                    } if value == &section_label => Some(*id),
+                    _ => None,
+                })
+                .expect("the group header must have a context menu");
+            Self {
+                dom,
+                host,
+                collapse,
+                context,
+            }
+        }
+    }
+
+    #[test]
+    fn closing_a_loaded_group_during_refresh_does_not_reintroduce_loading_placeholders() {
+        let mut fixture = ManagerFixture::loaded();
+        assert!(!dioxus_ssr::render(&fixture.dom).contains("aria-busy"));
+        fixture.dom.runtime().handle_event(
+            "click",
+            Event::new(
+                EventData::Mouse(SerializedMouseData::default()).into_any(),
+                true,
+            ),
+            fixture.collapse,
+        );
+        fixture.dom.render_immediate_to_vec();
+        let html = dioxus_ssr::render(&fixture.dom);
+        assert!(!html.contains("aria-busy"));
+        assert!(html.contains(&translate("common-expand")));
+    }
+
+    #[test]
+    fn a_group_header_context_menu_archives_the_entire_group_beyond_the_visible_page() {
+        let mut fixture = ManagerFixture::loaded();
+        fixture.dom.runtime().handle_event(
+            "contextmenu",
+            Event::new(
+                EventData::Mouse(SerializedMouseData::default()).into_any(),
+                true,
+            ),
+            fixture.context,
+        );
+        let opened = fixture.dom.render_immediate_to_vec();
+        let archive_label = translate("sessions-archive-all");
+        let archive = opened
+            .edits
+            .iter()
+            .find_map(|edit| match edit {
+                Mutation::SetAttribute {
+                    name: "aria-label",
+                    value: AttributeValue::Text(value),
+                    id,
+                    ..
+                } if value == &archive_label => Some(*id),
+                _ => None,
+            })
+            .expect("right clicking the section must offer bulk archive");
+        let keyboard = SerializedKeyboardData::new(
+            Key::Enter,
+            Code::Enter,
+            Location::Standard,
+            false,
+            Modifiers::empty(),
+            false,
+        );
+        fixture.dom.runtime().handle_event(
+            "keydown",
+            Event::new(EventData::Keyboard(keyboard).into_any(), true),
+            archive,
+        );
+        let archived = fixture.host.archived.borrow();
+        assert_eq!(archived.len(), 90);
+        for index in 0..90 {
+            assert!(archived.contains(&format!("session-{index}")));
+        }
+    }
 
     #[test]
     fn project_activity_filters_include_nested_work_and_exclude_stale_terminal_and_sibling_projects()

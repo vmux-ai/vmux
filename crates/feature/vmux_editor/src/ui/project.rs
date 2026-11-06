@@ -451,7 +451,7 @@ fn ProjectAdd(
             ("import", "project-import", LineIcon::FileOutput),
             ("clone", "project-clone", LineIcon::GitFork),
         ] {
-            options.push(vmux_api::address::AddressControlChoice {
+            options.push(vmux_ui::components::page_address::ToolbarChoice {
                 value: value.into(),
                 label: translate(label),
                 icon: format!("{icon:?}"),

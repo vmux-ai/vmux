@@ -239,6 +239,10 @@ impl SurfaceHandoff {
         self.retain_visible
     }
 
+    pub fn requires_paint(&self, paint_ready: bool) -> bool {
+        !paint_ready && !self.retain_visible
+    }
+
     pub fn previous(&self) -> &[Entity] {
         &self.previous
     }
@@ -1686,6 +1690,19 @@ mod tests {
                 .get::<vmux_ecs::PageTransition>(surface)
                 .is_none()
         );
+    }
+
+    #[test]
+    fn an_incoming_surface_waits_for_paint_even_when_an_outgoing_surface_exists() {
+        let previous = World::new().spawn_empty().id();
+        let navigation = PageOpenId::new();
+        let incoming =
+            SurfaceHandoff::new(vec![previous], navigation, 0, std::time::Duration::ZERO);
+        assert!(incoming.requires_paint(false));
+        assert!(!incoming.requires_paint(true));
+        let retained =
+            SurfaceHandoff::retaining(vec![previous], navigation, std::time::Duration::ZERO);
+        assert!(!retained.requires_paint(false));
     }
 
     #[test]

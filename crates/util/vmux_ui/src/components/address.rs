@@ -2,8 +2,7 @@ use std::{collections::HashMap, rc::Rc};
 
 use dioxus::prelude::*;
 use vmux_api::address::{
-    AddressControl, AddressControlKind, AddressCrumb, AddressIntent, AddressOption, PageAddress,
-    PageAddressRequest,
+    AddressCrumb, AddressIntent, AddressOption, PageAddress, PageAddressRequest,
 };
 
 use crate::components::avatar::IdentityOrb;
@@ -99,16 +98,6 @@ pub fn AddressTrail(
                     AddressMenu { id: format!("symbol-{index}"), crumb: crumb.clone(), requests: requests.clone(), open }
                 }
             }
-            if state.checkout.is_some() || state.search_available {
-                AddressControls { state: state.clone() }
-            }
-            if !state.controls.is_empty() {
-                div { class: "flex max-w-[55%] min-w-0 shrink items-center gap-1 overflow-x-auto [scrollbar-width:none]",
-                    for control in state.controls.iter().cloned() {
-                        AddressToolbarControl { key: "{control.id}", control, requests: requests.clone(), open }
-                    }
-                }
-            }
             div {
                 class: "pointer-events-none invisible absolute left-0 top-0 flex w-max items-center",
                 aria_hidden: "true",
@@ -125,94 +114,6 @@ pub fn AddressTrail(
                                 },
                                 AddressMenu { id: format!("measure-{}", crumb.entry.path), crumb: crumb.clone(), requests: requests.clone(), open: measurement_open, preserve_name: true }
                                 if index + 1 < state.paths.len() { BreadcrumbSeparator {} }
-                            }
-                        }
-                    }
-                }
-            }
-        }
-    }
-}
-
-#[component]
-fn AddressToolbarControl(
-    control: AddressControl,
-    requests: AddressSender,
-    mut open: Signal<Option<String>>,
-) -> Element {
-    let id = control.id.clone();
-    match control.kind {
-        AddressControlKind::Badge => {
-            rsx! { span { class: "shrink-0 px-1 text-[10px] tabular-nums text-muted-foreground", "{control.label}" } }
-        }
-        AddressControlKind::Search => {
-            let key_requests = requests.clone();
-            let key_id = id.clone();
-            let keys = control.keys;
-            rsx! {
-                crate::components::manager::ManagerSearchAction {
-                    value: control.value, placeholder: control.label,
-                    onsearch: move |value| requests.send(AddressIntent::Control { id: id.clone(), value }),
-                    onkeydown: Some(EventHandler::new(move |event: KeyboardEvent| {
-                        let key = event.key().to_string();
-                        if keys.contains(&key) {
-                            key_requests.send(AddressIntent::ControlKey { id: key_id.clone(), key });
-                        }
-                    })),
-                }
-            }
-        }
-        AddressControlKind::Button => {
-            let icon = LineIcon::parse(&control.icon);
-            let class = if control.danger {
-                "h-7 shrink-0 gap-1 rounded-md px-2 text-xs text-destructive hover:bg-destructive/10"
-            } else if control.primary {
-                "h-7 shrink-0 gap-1 rounded-md bg-primary/10 px-2 text-xs text-primary hover:bg-primary/20"
-            } else if control.active {
-                "h-7 shrink-0 gap-1 rounded-md bg-foreground/10 px-1.5 text-xs text-foreground"
-            } else {
-                "h-7 shrink-0 gap-1 rounded-md px-1.5 text-xs text-muted-foreground hover:bg-foreground/5 hover:text-foreground"
-            };
-            rsx! { button {
-                r#type: "button", class, title: control.label.clone(), aria_label: control.label.clone(),
-                disabled: control.disabled,
-                onclick: move |_| requests.send(AddressIntent::Control { id: id.clone(), value: String::new() }),
-                if let Some(icon) = icon { LineIconView { icon, class: "size-3.5" } }
-                if icon.is_none() || control.primary || control.danger || control.show_label { span { "{control.label}" } }
-            } }
-        }
-        AddressControlKind::Menu => {
-            let active = open.read().as_ref() == Some(&id);
-            let menu_id = id.clone();
-            let icon = LineIcon::parse(&control.icon);
-            rsx! {
-                crate::components::dropdown::Dropdown {
-                    open: active, class: "shrink-0".to_string(),
-                    on_dismiss: move |_| open.set(None),
-                    button {
-                        r#type: "button", disabled: control.disabled,
-                        class: "flex h-7 shrink-0 items-center gap-1 rounded-md px-1.5 text-xs text-muted-foreground hover:bg-foreground/5 hover:text-foreground",
-                        title: control.label.clone(), aria_label: control.label.clone(),
-                        onclick: move |_| open.set(if active { None } else { Some(menu_id.clone()) }),
-                        if let Some(icon) = icon { LineIconView { icon, class: "size-3.5" } }
-                        if icon.is_none() { "{control.label}" }
-                    }
-                    if active {
-                        crate::components::dropdown::DropdownPopup {
-                            class: "min-w-48 p-1".to_string(),
-                            for option in control.options {
-                                {
-                                    let id = id.clone();
-                                    let value = option.value;
-                                    let requests = requests.clone();
-                                    let icon = LineIcon::parse(&option.icon);
-                                    rsx! { DropdownOption {
-                                        label: option.label,
-                                        selected: false,
-                                        onclick: move |_| { open.set(None); requests.send(AddressIntent::Control { id: id.clone(), value: value.clone() }); },
-                                        leading: rsx! { if let Some(icon) = icon { LineIconView { icon, class: "size-3.5" } } },
-                                    } }
-                                }
                             }
                         }
                     }
@@ -467,7 +368,7 @@ mod tests {
     }
 
     #[test]
-    fn declared_routes_render_navigation_operations_and_popup_capture() {
+    fn declared_routes_render_navigation_and_popup_capture_without_page_operations() {
         dioxus::html::set_event_converter(Box::new(SerializedHtmlEventConverter));
         let probe = Rc::new(TrailProbe::default());
         let _host = HostScope::enter(probe.clone());
@@ -500,7 +401,7 @@ mod tests {
             })
             .unwrap();
         assert!(dioxus_ssr::render(&dom).contains("Sessions"));
-        assert!(dioxus_ssr::render(&dom).contains(&translate("git-checkout")));
+        assert!(!dioxus_ssr::render(&dom).contains(&translate("git-checkout")));
         dom.runtime().handle_event(
             "click",
             Event::new(

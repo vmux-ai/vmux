@@ -51,7 +51,6 @@ impl CatalogDisplay {
 #[derive(Clone, PartialEq)]
 pub(super) struct ManagerPresentation {
     pub loading: bool,
-    pub refreshing: bool,
     pub snapshot: CatalogSnapshot,
     pub repositories: SessionRepositories,
     pub category_groups: Vec<StageGroup>,
@@ -157,7 +156,6 @@ impl ManagerPresentation {
         let selected_stage = SessionFilter::stage(filters).map(str::to_string);
         Self {
             loading: false,
-            refreshing: false,
             snapshot,
             repositories,
             category_groups,
@@ -606,17 +604,25 @@ impl StageGroup {
 pub(super) struct StageGroupPresentation {
     pub dot: &'static str,
     pub archivable: Vec<ArchiveTarget>,
+    pub restorable: Vec<ArchiveTarget>,
 }
 
 impl StageGroupPresentation {
     pub fn new(stage: &StageSummary, sessions: &[SessionSummary]) -> Self {
+        let mut archivable = Vec::new();
+        let mut restorable = Vec::new();
+        for session in sessions {
+            let target = ArchiveTarget::from_session(session);
+            if target.archived {
+                restorable.push(target);
+            } else {
+                archivable.push(target);
+            }
+        }
         Self {
             dot: StageVisual::for_id(&stage.id).dot,
-            archivable: sessions
-                .iter()
-                .filter(|session| session.archived_at == 0)
-                .map(ArchiveTarget::from_session)
-                .collect(),
+            archivable,
+            restorable,
         }
     }
 }

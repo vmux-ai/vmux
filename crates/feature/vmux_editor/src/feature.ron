@@ -109,7 +109,6 @@
             command_bar: true,
             permissions: [
                 "PageAddressPublish",
-                "PageToolbarPublish",
                 "PageReady",
                 "ThemeUiState",
                 "FileUiState",
@@ -229,7 +228,6 @@
             command_bar: true,
             permissions: [
                 "PageAddressPublish",
-                "PageToolbarPublish",
                 "PageReady",
                 "ThemeUiState",
                 "FileUiState",

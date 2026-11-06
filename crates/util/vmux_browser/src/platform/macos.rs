@@ -1919,9 +1919,8 @@ fn place(
             let all_corners = corners.get(entity).is_ok_and(|corners| corners.0);
             let ring = rings.get(entity).copied().unwrap_or_default();
             let window_is_capturing = capturing.iter().any(|host| host.0 == page.window);
-            let awaiting_first_paint = handoff.is_some_and(|handoff| {
-                !paint_ready && !handoff.retain_visible() && handoff.previous().is_empty()
-            });
+            let awaiting_first_paint =
+                handoff.is_some_and(|handoff| handoff.requires_paint(paint_ready));
             let opacity = if awaiting_first_paint {
                 0.0
             } else {
