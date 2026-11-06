@@ -670,6 +670,8 @@ Session rows use memoized repository lookup and group metadata; rendered Wry fra
 native pointer registry so native scrolling does not generate unnecessary layout wakes.
 History swipes use a shared horizontal-wheel recognizer. Horizontal scrollable ancestors consume
 movement until their boundary; zero-delta starts and small initial axis noise do not cancel a swipe.
+A transient arrow at the corresponding viewport edge tracks gesture progress and fades on commit
+or cancellation. Its isolated, input-inert layer does not participate in page layout or delay navigation.
 Source-bound requests reuse host history before browser history. The dedicated CEF gesture bridge
 keeps general-page IPC permissions unchanged; both backends require one matching, recent native
 wheel claim for the current surface, window, frame, and direction before moving history.
