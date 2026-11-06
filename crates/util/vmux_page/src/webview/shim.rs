@@ -296,9 +296,13 @@ pub(crate) const WRY_HOST_SHIM: &str = r#"
         : null;
       this.observer?.observe(element);
       const cancel = () => { this.cancelled = true; };
-      for (const event of ['wheel', 'touchmove', 'pointerdown']) {
+      for (const event of ['wheel', 'touchmove']) {
         element.addEventListener?.(event, cancel, { passive: true });
       }
+      element.addEventListener?.('pointerdown', event => {
+        if (event.target?.closest?.('button, a, input, textarea, select, [role="button"]')) return;
+        cancel();
+      }, { passive: true });
       element.addEventListener?.('keydown', event => {
         if (event.target?.closest?.('input, textarea, [contenteditable]')) return;
         if (['ArrowUp', 'ArrowDown', 'PageUp', 'PageDown', 'Home', 'End', ' '].includes(event.key)) cancel();
