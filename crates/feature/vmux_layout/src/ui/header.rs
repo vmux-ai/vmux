@@ -73,20 +73,13 @@ fn HeaderContent() -> Element {
             .as_ref()
             .and_then(|sheet| sheet.active_page.as_ref())
             .filter(|page| page.is_loading)
-            .map(|page| page.id)
+            .map(|page| LoadingKey {
+                stack: page.id,
+                url: page.url.clone(),
+                revision: state.reload_revision,
+            })
     });
-    let loading_feedback = use_resource(move || {
-        let page = active_loading();
-        async move {
-            if page.is_some() {
-                vmux_ui::platform::Platform::sleep(150).await;
-            }
-            page
-        }
-    });
-    let loading = active_loading().is_some()
-        && loading_feedback.state()() == UseResourceState::Ready
-        && *loading_feedback.read() == Some(active_loading());
+    let loading = LoadingFeedback::use_state(active_loading)();
     let stacks_state = stacks_state.unwrap_or_default();
     let projected_active = stacks_state
         .stacks
@@ -524,6 +517,34 @@ fn NavButton(
     }
 }
 
+#[derive(Clone, PartialEq)]
+struct LoadingKey {
+    stack: u64,
+    url: String,
+    revision: u64,
+}
+
+struct LoadingFeedback;
+
+impl LoadingFeedback {
+    fn use_state(active: Memo<Option<LoadingKey>>) -> Memo<bool> {
+        let feedback = use_resource(move || {
+            let key = active();
+            async move {
+                if key.is_some() {
+                    vmux_ui::platform::Platform::sleep(150).await;
+                }
+                key
+            }
+        });
+        use_memo(move || {
+            active().is_some()
+                && feedback.state()() == UseResourceState::Ready
+                && *feedback.read() == Some(active())
+        })
+    }
+}
+
 #[component]
 fn HeaderAddressBar(
     active_row: Option<StackRow>,
@@ -561,18 +582,6 @@ fn HeaderAddressReadout(
         };
     }
     let has_content = active_row.as_ref().is_some_and(|row| !row.url.is_empty());
-    let icon = active_row
-        .as_ref()
-        .map(|row| row.icon.clone())
-        .unwrap_or_default();
-    let url = active_row
-        .as_ref()
-        .map(|row| row.url.clone())
-        .unwrap_or_default();
-    let title = active_row
-        .as_ref()
-        .map(|row| row.title.clone())
-        .unwrap_or_default();
     let address = active_row.map(|row| row.address).unwrap_or_default();
     let empty_class = if bg_color.is_some() {
         "opacity-50"
@@ -586,7 +595,6 @@ fn HeaderAddressReadout(
             if !has_content {
                 span { class: "truncate text-ui {empty_class}", {translate("layout-new-stack")} }
             } else {
-                StackIcon { icon, url, title, loading }
                 if !address.origin.is_empty() {
                     span {
                         class: "shrink-0 rounded-full bg-foreground/10 px-2 py-0.5 text-ui leading-tight",
@@ -654,5 +662,89 @@ fn TeamFacepile(user: Option<TeamMemberRow>, profiles: Vec<ProfileRow>) -> Eleme
                 }
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::{cell::RefCell, future::Future, rc::Rc};
+
+    #[derive(Clone, Default, PartialEq)]
+    struct FeedbackProbe(Rc<RefCell<Option<(Signal<u64>, Memo<bool>)>>>);
+
+    #[component]
+    fn ReloadFeedback(probe: FeedbackProbe) -> Element {
+        let revision = use_signal(|| 1);
+        let active = use_memo(move || {
+            Some(LoadingKey {
+                stack: 7,
+                url: "vmux://start/".to_string(),
+                revision: revision(),
+            })
+        });
+        let feedback = LoadingFeedback::use_state(active);
+        *probe.0.borrow_mut() = Some((revision, feedback));
+        rsx! { span { "data-loading": feedback().to_string() } }
+    }
+
+    struct FeedbackHarness {
+        dom: VirtualDom,
+        probe: FeedbackProbe,
+    }
+
+    impl FeedbackHarness {
+        fn start() -> Self {
+            let probe = FeedbackProbe::default();
+            let mut dom = VirtualDom::new_with_props(
+                ReloadFeedback,
+                ReloadFeedbackProps {
+                    probe: probe.clone(),
+                },
+            );
+            dom.rebuild_to_vec();
+            let mut harness = Self { dom, probe };
+            harness.settle();
+            harness
+        }
+
+        fn settle(&mut self) {
+            for _ in 0..8 {
+                let mut context = std::task::Context::from_waker(std::task::Waker::noop());
+                let _ = std::pin::pin!(self.dom.wait_for_work()).poll(&mut context);
+                self.dom.render_immediate_to_vec();
+            }
+        }
+
+        fn reload(&mut self) {
+            let (mut revision, _) = self.probe.0.borrow().unwrap();
+            self.dom.runtime().in_scope(ScopeId::ROOT, || {
+                let next = *revision.peek() + 1;
+                revision.set(next);
+            });
+            self.settle();
+        }
+
+        fn visible(&self) -> bool {
+            let (_, feedback) = self.probe.0.borrow().unwrap();
+            *feedback.peek()
+        }
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn another_reload_of_the_same_page_does_not_reuse_the_previous_indicator() {
+        let mut harness = FeedbackHarness::start();
+        assert!(!harness.visible());
+        tokio::time::sleep(std::time::Duration::from_millis(170)).await;
+        harness.settle();
+        assert!(harness.visible());
+        harness.reload();
+        assert!(!harness.visible());
+        tokio::time::sleep(std::time::Duration::from_millis(30)).await;
+        harness.settle();
+        assert!(!harness.visible());
+        tokio::time::sleep(std::time::Duration::from_millis(140)).await;
+        harness.settle();
+        assert!(harness.visible());
     }
 }
