@@ -69,6 +69,7 @@ Combinators are fine where they stay small and local — `map_err` to convert an
 ## Rules
 
 - Never show literal loading copy such as "Loading..." or "Loading data..." in product UI. Use a skeleton for structured content or matrix rain for a full-surface transition.
+- Layout, selection, focus, and routing respond in the input frame. Never hold a layout transition for page readiness, background data, font completion, or a stability timer. Present the first usable page layout with reserved loading geometry; preserve scroll and element positions during later updates. Initial transcript placement must happen before its messages become visible.
 - Page roots use themed surface tokens. Never use pure black or pure white as a page background; reserve them for content that requires it, such as media, QR codes, and scrims. Prefer flat surface hierarchy over borders and decorative shadows.
 - Reserve `Chrome` for Google Chrome or Chromium compatibility code. Never use `chrome` to mean application UI, window controls, a panel, a toolbar, a shell, or presentation state.
 - Do not use generic `Action` names for vmux-owned types, fields, functions, sets, or modules. Use `Request` for an intent entering a feature, `Operation` for accepted work being executed, `Effect` for a versioned UI-side effect, or a concrete domain noun such as `Selection`, `Decision`, or `Transition`. Externally fixed protocol vocabulary and standard domain terms such as LSP `CodeAction` are exempt at their boundaries; translate them when they enter vmux-owned state.
