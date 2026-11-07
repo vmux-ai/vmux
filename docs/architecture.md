@@ -777,8 +777,12 @@ unchanged hierarchy cannot restart autosave. Dirty state saves after 500 ms of q
 60-second deadline for continuous changes; coincident deadlines write once, and clean workspaces
 do not write periodic snapshots. Specialized domains such as bookmarks keep their own entity
 scope, dirty policy, path, migration, and seeding lifecycle.
-Workspace writes clear dirty state only after successful serialization and storage. Failed writes
-retain the changes and retry on the 60-second deadline; schema sidecars follow successful writes.
+Automatic saves capture an immutable world on the main thread, then serialize and atomically
+replace the file on the I/O pool. An in-flight save keeps later edits dirty; completion wakes the
+app and never clears newer changes. Explicit saves finish an earlier write to the same path first.
+Failed writes retain the changes and retry on the 60-second deadline; schema sidecars follow
+successful writes. Restored session children containing only a timestamp and parent reference are
+discarded after backing up the store; conversation content and live children remain intact.
 
 ---
 
