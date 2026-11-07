@@ -5,7 +5,7 @@ use dioxus_primitives::dioxus_attributes::attributes;
 use dioxus_primitives::merge_attributes;
 
 const PROMPT_BOX_ROOT: &str = "vmux-prompt-box relative z-20 flex items-center rounded-xl bg-foreground/[0.055] p-1 ring-1 ring-inset ring-foreground/[0.08] transition-colors duration-150 focus-within:bg-foreground/[0.075] focus-within:ring-foreground/[0.14]";
-const PROMPT_POPUP_ROOT: &str = "vmux-prompt-popup absolute left-0 z-20 max-h-80 w-full overflow-x-hidden overflow-y-auto rounded-xl bg-card shadow-lg ring-1 ring-inset ring-foreground/[0.08]";
+const PROMPT_POPUP_ROOT: &str = "vmux-prompt-popup absolute left-0 z-20 max-h-80 w-full overflow-x-hidden overflow-y-auto rounded-xl border border-foreground/[0.08] bg-card shadow-lg";
 
 const PROMPT_POPUP_HEADER: &str =
     "pointer-events-none sticky top-0 z-10 flex items-center justify-end";
