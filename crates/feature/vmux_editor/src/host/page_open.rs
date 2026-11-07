@@ -230,7 +230,11 @@ fn handle_file(
             });
             continue;
         };
-        let path = restored_path.unwrap_or(path);
+        let path = if CodeLanding::requested(&task.url) {
+            path
+        } else {
+            restored_path.unwrap_or(path)
+        };
         let (persisted_workspace, stack_restoring) = context
             .stack_workspaces
             .get(task.stack)
@@ -390,8 +394,14 @@ impl FilePageTarget {
                 Err(error) => Self { path: None, error },
             });
         }
+        let mut path = vmux_path::FileUrl::parse(url).and_then(|file| file.path());
+        if CodeLanding::requested(url)
+            && let Some(directory) = path.as_ref().filter(|path| path.is_dir())
+        {
+            path = Some(CodeLanding::select(directory));
+        }
         Some(Self {
-            path: vmux_path::FileUrl::parse(url).and_then(|file| file.path()),
+            path,
             error: format!("malformed file URL '{url}'"),
         })
     }
@@ -400,6 +410,13 @@ impl FilePageTarget {
 struct CodeLanding;
 
 impl CodeLanding {
+    fn requested(value: &str) -> bool {
+        url::Url::parse(value).is_ok_and(|url| {
+            url.query_pairs()
+                .any(|(key, value)| key == "vmux-entry" && value == "1")
+        })
+    }
+
     fn select(directory: &Path) -> PathBuf {
         for entry in [
             "README.md",
@@ -810,6 +827,27 @@ mod tests {
         stack.open("file:///");
         let page = stack.page();
         assert_eq!(stack.path(page), readme);
+    }
+
+    #[test]
+    fn project_code_entry_prefers_readme_without_changing_directory_navigation() {
+        let directory = tempfile::tempdir().unwrap();
+        let readme = directory.path().join("README.md");
+        std::fs::write(&readme, "# Project").unwrap();
+        let url = vmux_path::FileUrl::from_path(directory.path(), None, None, None);
+        let normal =
+            FilePageTarget::resolve(&url, Ok(directory.path()), directory.path(), None, None)
+                .unwrap();
+        assert_eq!(normal.path.as_deref(), Some(directory.path()));
+        let entry = FilePageTarget::resolve(
+            &format!("{url}?vmux-entry=1"),
+            Ok(directory.path()),
+            directory.path(),
+            None,
+            None,
+        )
+        .unwrap();
+        assert_eq!(entry.path, Some(readme));
     }
 
     #[test]

@@ -85,8 +85,11 @@ fn SessionDetail(session_id: String, mut details_open: Signal<bool>) -> Element 
                         on_details_toggle: move |_| details_open.set(!details_open()),
                     }
                     ChatTranscript { chat }
-                    ChatApprovalDock { chat }
-                    ChatDock { chat }
+                    div {
+                        class: "relative isolate z-20 -mt-8 before:pointer-events-none before:absolute before:inset-x-0 before:-top-12 before:bottom-0 before:-z-10 before:bg-[linear-gradient(to_bottom,transparent,var(--background)_3rem)]",
+                        ChatApprovalDock { chat }
+                        ChatDock { chat }
+                    }
                 }
                 div {
                     class: if details_open() {

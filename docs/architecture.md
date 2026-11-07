@@ -639,6 +639,8 @@ does not animate the whole surface or translate a shared composer; shared sideba
 place when page selection changes. Session detail-panel visibility belongs to the page shell,
 and its geometry remains reserved while the selected session loads.
 Session viewports remember their scroll position and loaded-history start on the owning Session.
+A floating composer overlaps the transcript's lower edge, with an input-inert surface gradient.
+Transcript end padding keeps the latest message clear of the composer and its fade.
 A revisit restores that history window and reader position; the first visit follows the tail.
 Viewport updates validate the originating page URL and Session ID; where a canonical Session ID
 is available, transcript readiness is bound to it. These viewport records are transient.
@@ -1373,7 +1375,8 @@ configuration stays read-only. Busy sessions
 explain where to release the writer; missing histories offer a new conversation; connection failures
 offer retry. Other failures use a dismissible toast. Raw provider diagnostics remain in app logs.
 
-Code opens the owning Space's working directory and prefers its README, then a bounded set of
+Project summaries open Code through the same README-first entry selection. Direct directory routes
+retain directory navigation. Code opens the owning Space's working directory and prefers its README, then a bounded set of
 entry files, before falling back to directory columns. Directory pages use paths as page titles
 and show columns without a duplicate Explorer tree. The outer editor container and the columns
 share directory key handling; text view-mode updates cannot steal directory focus.

@@ -210,8 +210,8 @@ pub fn CommandPalette(props: PaletteProps) -> Element {
             branch: chips.branch,
             is_git_repo: composer.is_git_repo,
             workspace_known: !composer.cwd.is_empty(),
-            uncommitted: composer.uncommitted,
-            ahead: composer.ahead,
+            uncommitted: 0,
+            ahead: 0,
         }
     };
     let start_menus = rsx! {

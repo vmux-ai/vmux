@@ -80,7 +80,7 @@ pub(super) fn ChatTranscript(chat: Chat) -> Element {
                     chat.transcript.follow();
                 }
             },
-            class: "relative z-10 flex-1 overflow-y-auto overscroll-contain px-3 pb-8 pt-3 outline-none sm:px-4 md:px-6",
+            class: "relative z-10 flex-1 overflow-y-auto overscroll-contain px-3 pb-20 pt-3 outline-none sm:px-4 md:px-6",
             tabindex: "0",
             onwheel: move |_| chat.transcript.note_scroll_input(),
             ontouchmove: move |_| chat.transcript.note_scroll_input(),

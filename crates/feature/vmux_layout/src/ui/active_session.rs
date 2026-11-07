@@ -93,7 +93,9 @@ fn CurrentPagePath(url: String) -> Element {
         .unwrap_or_else(|| url.clone());
     rsx! {
         div { class: "mt-0.5 inline-flex max-w-full min-w-0 rounded-md bg-foreground/[0.035] px-1.5 py-0.5 text-[10px] text-muted-foreground", title: url,
-            span { class: "truncate-fade-start min-w-0 font-mono", "{label}" }
+            span { class: "truncate-fade-start min-w-0 flex-1 font-mono",
+                bdi { dir: "ltr", "{label}" }
+            }
         }
     }
 }

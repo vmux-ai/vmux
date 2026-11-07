@@ -811,7 +811,10 @@ fn ProjectGit(root: String, repository: Option<RepositorySummary>, loading: bool
 
 #[component]
 fn ProjectCode(root: String, name: String) -> Element {
-    let url = vmux_path::FileUrl::from_path(Path::new(&root), None, None, None);
+    let url = format!(
+        "{}?vmux-entry=1",
+        vmux_path::FileUrl::from_path(Path::new(&root), None, None, None)
+    );
     rsx! {
         ProjectSection { title: translate("editor-editor"), count: 0,
             a {
