@@ -140,12 +140,6 @@ impl AcpSnapshot {
         self.0.values().flat_map(|source| source.sessions.iter())
     }
 
-    fn supports(&self, family: &AgentFamily) -> bool {
-        self.0.iter().any(|(agent, source)| {
-            AgentFamily::of(agent) == *family && source.state == AcpSourceState::Supported
-        })
-    }
-
     fn refresh_codex_activity(&mut self, activity: &codex::RolloutActivity) -> bool {
         let family = SourceKind::Codex.family();
         let mut refreshed = false;
