@@ -1041,7 +1041,7 @@ fn push_pane_tree_emit(
                             url: metadata.url.clone(),
                             icon: metadata.icon.clone(),
                             is_active: stack_is_active,
-                            is_loading: true,
+                            is_loading: stack_is_active,
                             is_dirty: false,
                             bg_color: metadata.bg_color.clone(),
                         }),
@@ -1404,6 +1404,94 @@ fn push_update_notice_emit(
 mod tests {
     use super::*;
     use bevy::ecs::system::RunSystemOnce;
+
+    #[test]
+    fn dormant_stack_keeps_its_favicon_without_a_loading_indicator() {
+        let mut app = App::new();
+        app.add_plugins((MinimalPlugins, StatePlugin))
+            .insert_resource(AppSettings::default())
+            .init_resource::<vmux_space::ActiveProjectRows>()
+            .init_non_send::<Browsers>();
+        app.world_mut().spawn(UpdateState::Idle);
+        let layout = app.world_mut().spawn((LayoutCef, PageReady {})).id();
+        app.world_mut()
+            .non_send_mut::<Browsers>()
+            .set_externally_hosted(layout);
+        let tab = app
+            .world_mut()
+            .spawn((Tab::default(), LastActivatedAt(1)))
+            .id();
+        let pane = app
+            .world_mut()
+            .spawn((Pane, LastActivatedAt(1), ChildOf(tab)))
+            .id();
+        let metadata = PageMetadata {
+            title: "Start".into(),
+            url: "vmux://start/".into(),
+            icon: PageIcon::Builtin(vmux_api::BuiltinIcon::Sparkles),
+            ..Default::default()
+        };
+        let dormant = app
+            .world_mut()
+            .spawn((
+                Stack::default(),
+                LastActivatedAt(1),
+                metadata.clone(),
+                ChildOf(pane),
+            ))
+            .id();
+        let selected = app
+            .world_mut()
+            .spawn((
+                Stack::default(),
+                LastActivatedAt(2),
+                metadata.clone(),
+                Active,
+                ChildOf(pane),
+            ))
+            .id();
+        app.world_mut().spawn(
+            vmux_layout::active_pane::ActiveStack {
+                tab: Some(tab),
+                pane: Some(pane),
+                stack: Some(selected),
+            }
+            .local_bundle(),
+        );
+        app.update();
+        let projection = &app.world().get::<PaneTreeProjection>(layout).unwrap().0;
+        let rows = &projection.panes[0].stacks;
+        let start = rows.iter().find(|row| row.id == dormant.to_bits()).unwrap();
+        assert!(!start.is_loading);
+        assert_eq!(start.icon, metadata.icon);
+        assert!(
+            rows.iter()
+                .find(|row| row.id == selected.to_bits())
+                .unwrap()
+                .is_loading
+        );
+
+        let browser = app
+            .world_mut()
+            .spawn((Browser, Loading, metadata.clone(), ChildOf(dormant)))
+            .id();
+        app.world_mut()
+            .entity_mut(dormant)
+            .insert(vmux_layout::page_slot::Current::new(
+                Some(browser),
+                metadata,
+            ));
+        app.update();
+        let projection = &app.world().get::<PaneTreeProjection>(layout).unwrap().0;
+        assert!(
+            projection.panes[0]
+                .stacks
+                .iter()
+                .find(|row| row.id == dormant.to_bits())
+                .unwrap()
+                .is_loading
+        );
+    }
 
     #[test]
     fn retiring_tabs_and_stacks_leave_navigation_immediately() {

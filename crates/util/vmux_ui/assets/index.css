@@ -121,6 +121,25 @@
   }
 }
 
+.loading-icon {
+  animation: loading-icon-turn 1.6s linear infinite;
+}
+
+.loading-icon circle {
+  stroke-dasharray: 1 44;
+  animation: loading-icon-arc 1.3s ease-in-out infinite;
+}
+
+@keyframes loading-icon-turn {
+  to { transform: rotate(360deg); }
+}
+
+@keyframes loading-icon-arc {
+  0% { stroke-dasharray: 1 44; stroke-dashoffset: 0; }
+  50% { stroke-dasharray: 32 44; stroke-dashoffset: -12; }
+  100% { stroke-dasharray: 1 44; stroke-dashoffset: -43; }
+}
+
 .url-loading-glow {
   border-radius: 0.5rem;
   animation: url-loading-glow 1.6s ease-in-out infinite;
@@ -138,6 +157,15 @@
 }
 
 @media (prefers-reduced-motion: reduce) {
+  .loading-icon,
+  .loading-icon circle {
+    animation: none;
+  }
+
+  .loading-icon circle {
+    stroke-dasharray: 28 44;
+  }
+
   .url-loading-glow {
     animation: none;
     box-shadow: inset 0 0 0 1px color-mix(in oklch, var(--ring) 35%, transparent);

@@ -143,7 +143,10 @@ fn reload(event: On<RequestReload>, renderer: NonSend<PageRenderer>, mut command
     if let Some(surface) = renderer.active.get(&event.webview)
         && surface.reload()
     {
-        commands.entity(event.webview).remove::<PageReady>();
+        commands
+            .entity(event.webview)
+            .insert(vmux_layout::Loading)
+            .remove::<PageReady>();
     }
 }
 
@@ -155,7 +158,10 @@ fn hard_reload(
     if let Some(surface) = renderer.active.get(&event.webview)
         && surface.reload_ignore_cache()
     {
-        commands.entity(event.webview).remove::<PageReady>();
+        commands
+            .entity(event.webview)
+            .insert(vmux_layout::Loading)
+            .remove::<PageReady>();
     }
 }
 
@@ -344,9 +350,13 @@ fn dismiss_popups(
 fn stop_loading(
     request: On<crate::command::StopLoadingRequested>,
     renderer: NonSend<PageRenderer>,
+    mut commands: Commands,
 ) {
     if let Some(surface) = renderer.active.get(&request.event().webview) {
         surface.evaluate_script("window.stop();");
+        commands
+            .entity(request.event().webview)
+            .remove::<vmux_layout::Loading>();
     }
 }
 
@@ -1168,6 +1178,9 @@ fn apply_lifecycle(
             page.hydration_frame_count = None;
         }
         if batch.ready == Some(navigation.0) {
+            commands
+                .entity(key.webview)
+                .remove::<vmux_layout::Loading>();
             commands.trigger(UiInput {
                 webview: key.webview,
                 payload: PageReady {},
@@ -3199,6 +3212,7 @@ mod tests {
                 BinIpcEpoch(1),
                 BinIpcNavigationRevision(1),
                 crate::HostedPageLifecycle::default(),
+                vmux_layout::Loading,
             ))
             .id();
         lifecycle.send(PageLifecycleEnvelope {
@@ -3208,6 +3222,17 @@ mod tests {
             ipc_epoch: 1,
             update: LifecycleUpdate::Navigated(2),
         });
+        lifecycle.send(PageLifecycleEnvelope {
+            webview: page,
+            generation: 4,
+            navigation_revision: 1,
+            ipc_epoch: 1,
+            update: LifecycleUpdate::Ready(1),
+        });
+        app.update();
+        assert!(app.world().get::<vmux_layout::Loading>(page).is_some());
+        assert_eq!(app.world().resource::<ReadyEvents>().0, 0);
+
         lifecycle.send(PageLifecycleEnvelope {
             webview: page,
             generation: 4,
@@ -3223,6 +3248,7 @@ mod tests {
             2
         );
         assert_eq!(app.world().resource::<ReadyEvents>().0, 1);
+        assert!(app.world().get::<vmux_layout::Loading>(page).is_none());
     }
 
     #[test]

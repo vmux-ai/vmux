@@ -552,6 +552,12 @@ committing a presented surface clears the side sheet's pending-page indication i
 The URL bar's subtle border glow and favicon spinner follow the selected page. Reload becomes a
 stop button while it loads; stopping cancels browser loading and rolls an uncommitted handoff back
 to its retained page. Inactive restored pages do not animate the selected page's controls.
+Dormant stack entries keep their page icon until a visible load is requested. Keyboard commands
+from the user target the focused page; page-origin commands retain their window scope. Hosted-page
+reloads publish loading immediately and clear it on the matching ready handshake or cancellation.
+The favicon loader rotates a growing and shrinking arc. Diff loading surfaces retain their full
+geometry while showing a short, sparse preview with thinner bars and blank rows; known file headers
+remain visible while their bodies load.
 Native-page transitions fade the two retained surfaces by painting the incoming surface above the
 opaque committed surface. Commit waits for the platform to acknowledge the incoming surface at full
 opacity, so no frame exposes the window background. Content pages use the same lifecycle with an

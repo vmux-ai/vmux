@@ -4,9 +4,19 @@ use dioxus_primitives::progress::{self, ProgressIndicatorProps, ProgressProps};
 #[component]
 pub fn LoadingIcon(#[props(default = "size-4".to_string())] class: String) -> Element {
     rsx! {
-        span {
-            class: "inline-block shrink-0 rounded-full border-[1.5px] border-current border-r-transparent animate-spin motion-reduce:animate-none {class}",
-            aria_hidden: true,
+        svg {
+            class: "loading-icon inline-block shrink-0 {class}",
+            view_box: "0 0 20 20",
+            fill: "none",
+            stroke: "currentColor",
+            "aria-hidden": "true",
+            circle {
+                cx: "10",
+                cy: "10",
+                r: "7",
+                stroke_width: "1.75",
+                stroke_linecap: "round",
+            }
         }
     }
 }

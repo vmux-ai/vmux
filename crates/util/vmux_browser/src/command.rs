@@ -496,6 +496,7 @@ impl TryFrom<&CommandInvocation> for ShowDevToolsRequest {
 #[derive(SystemParam)]
 struct BrowserRequestTarget<'w, 's> {
     focus: FocusedStack<'w, 's>,
+    users: Query<'w, 's, (), With<vmux_ecs::team::User>>,
     focused_space: vmux_layout::space::FocusedSpace<'w, 's>,
     hierarchy: WindowHierarchy<'w, 's>,
     scope: WindowScope<'w, 's>,
@@ -510,7 +511,7 @@ struct BrowserRequestTarget<'w, 's> {
 
 impl BrowserRequestTarget<'_, '_> {
     fn stack(&self, origin: Entity) -> Option<Entity> {
-        if origin != Entity::PLACEHOLDER {
+        if origin != Entity::PLACEHOLDER && !self.users.contains(origin) {
             self.hierarchy.get(origin)?;
             let space = self.scope.current_space(origin)?;
             if self
@@ -537,7 +538,7 @@ impl BrowserRequestTarget<'_, '_> {
     }
 
     fn startup_url(&self, origin: Entity) -> Option<&str> {
-        if origin != Entity::PLACEHOLDER {
+        if origin != Entity::PLACEHOLDER && !self.users.contains(origin) {
             self.hierarchy.get(origin)?;
             let space = self.scope.current_space(origin)?;
             return self.spaces.get(space).ok().map(|url| url.0.as_str());
@@ -1107,6 +1108,54 @@ mod tests {
         fn record(request: On<StopLoadingRequested>, mut pages: ResMut<Self>) {
             pages.0.push(request.event().webview);
         }
+    }
+
+    #[derive(Resource, Default)]
+    struct ReloadedPages(Vec<(Entity, NavigationOperation)>);
+
+    impl ReloadedPages {
+        fn record(request: On<RequestReload>, mut pages: ResMut<Self>) {
+            pages.0.push((request.webview, NavigationOperation::Reload));
+        }
+
+        fn record_ignore_cache(request: On<RequestReloadIgnoreCache>, mut pages: ResMut<Self>) {
+            pages
+                .0
+                .push((request.webview, NavigationOperation::HardReload));
+        }
+    }
+
+    #[test]
+    fn keyboard_reload_uses_the_selected_page_for_the_user_caller() {
+        let mut fixture = NavArrow::over(HostHistory::default());
+        fixture
+            .app
+            .init_resource::<ReloadedPages>()
+            .add_observer(ReloadedPages::record)
+            .add_observer(ReloadedPages::record_ignore_cache);
+        let user = fixture.app.world_mut().spawn(vmux_ecs::team::User).id();
+        for id in ["browser_reload", "browser_hard_reload"] {
+            fixture
+                .app
+                .world_mut()
+                .write_message(CommandInvocation::new(user, id));
+            fixture.app.update();
+            fixture.app.update();
+        }
+        let unrelated = fixture.app.world_mut().spawn_empty().id();
+        fixture
+            .app
+            .world_mut()
+            .write_message(CommandInvocation::new(unrelated, "browser_reload"));
+        fixture.app.update();
+        fixture.app.update();
+        assert_eq!(
+            fixture.app.world().resource::<ReloadedPages>().0,
+            [
+                (fixture.view, NavigationOperation::Reload),
+                (fixture.view, NavigationOperation::HardReload),
+            ]
+        );
     }
 
     #[test]
