@@ -3,12 +3,15 @@
 use bevy::{ecs::relationship::Relationship, prelude::*};
 use bevy_cef::prelude::*;
 use bevy_cef_core::prelude::CefEmbeddedHosts;
-pub use command::{NavigationRequest, OpenRequest, ShowDevToolsRequest, ZoomRequest};
+pub use command::{
+    NavigationOperation, NavigationRequest, OpenRequest, ShowDevToolsRequest, ZoomChange,
+    ZoomRequest,
+};
 pub use host::AgentBrowserResolve;
 pub use host::WebviewLoadCompleted;
 pub use host_focus::HostFocusIntent;
 pub use infrastructure::{InfrastructureWebview, PopupWebview, RetiredInfrastructureWebview};
-pub use native_bridge::NativeBridge;
+pub use native_bridge::{NativeBridge, NativeHistoryPhase};
 #[cfg(target_os = "macos")]
 pub use native_bridge::{queue_command_bar_pointer_button, queue_command_bar_pointer_move};
 pub use native_layout::NativeLayout;
@@ -22,10 +25,11 @@ use vmux_ecs::{
 use vmux_layout::PendingWebviewReveal;
 use vmux_layout::event::{
     HeaderAddressFocusRequest, HeaderBackRequest, HeaderForwardRequest, HeaderReloadRequest,
-    RemoteCopyEvent, RemotePairingDismissRequest, RemotePairingShowRequest, RemoteRequest,
-    RemoteRevokeRequest, SideSheetProjectOpenRequest, SideSheetResizeEvent,
-    SideSheetSectionRequest, SideSheetStackActivateRequest, SideSheetStackCloseRequest,
-    SideSheetStackCreateRequest, WindowDragRegionEvent,
+    HeaderStopRequest, RemoteCopyEvent, RemotePairingDismissRequest, RemotePairingShowRequest,
+    RemoteRequest, RemoteRevokeRequest, SideSheetProjectOpenRequest,
+    SideSheetProjectPageOpenRequest, SideSheetResizeEvent, SideSheetSectionRequest,
+    SideSheetStackActivateRequest, SideSheetStackCloseRequest, SideSheetStackCreateRequest,
+    WindowDragRegionEvent,
 };
 pub use vmux_layout::{Browser, Loading};
 pub use window_drag::WindowDragRegion;
@@ -40,6 +44,7 @@ mod appearance;
 mod command;
 mod dom_snapshot;
 mod frame_rate;
+mod history_swipe;
 mod host;
 mod host_focus;
 mod infrastructure;
@@ -81,17 +86,30 @@ pub struct BrowserOverlaySet;
 pub struct HostedPageLifecycle {
     pub mount_revision: u64,
     pub remount_revision: u64,
+    pub navigation_revision: u64,
+    pub frames_applied: u64,
+    pub frame_revision_delivered: u64,
+    pub frame_revision_applied: u64,
+    pub frame_revision_painted: u64,
     pub frame_pending: bool,
     pub ui_events: u64,
     pub host_events: u64,
+    pub hydration_frame_count: Option<u64>,
     pub listeners: usize,
     pub measurements: usize,
+}
+
+impl HostedPageLifecycle {
+    pub fn painted_after(&self, navigation_revision: u64) -> bool {
+        self.navigation_revision > navigation_revision
+            && self.frame_revision_painted >= self.navigation_revision
+    }
 }
 
 pub struct BrowserPlugin;
 
 impl BrowserPlugin {
-    fn configure_backend(app: &mut App) -> &mut App {
+    pub fn configure_schedule(app: &mut App) -> &mut App {
         app.configure_sets(
             Update,
             BrowserSystemSet::SyncCefBackend.before(CefSystems::CreateAndResize),
@@ -102,6 +120,16 @@ impl BrowserPlugin {
                 .in_set(BrowserSystemSet::SyncCefBackend)
                 .after(PageOpenSet::Fallback)
                 .after(BrowserSystemSet::SpawnPopupStacks),
+        )
+        .configure_sets(
+            Update,
+            bevy_cef::prelude::UiEventSystems::Flush
+                .before(ReadCommandRequests)
+                .before(PageOpenSet::ResolveTarget),
+        )
+        .configure_sets(
+            Update,
+            CefSystems::CreateAndResize.after(ReadCommandRequests),
         )
     }
 }
@@ -124,14 +152,10 @@ impl Plugin for BrowserPlugin {
                 .map(PageManifest::embedded_host)
                 .collect(),
         );
-        Self::configure_backend(app)
+        Self::configure_schedule(app)
             .add_message::<bevy_cef_core::prelude::WebviewCommittedNavigationEvent>()
             .add_message::<WebviewLoadCompleted>()
             .add_plugins(vmux_layout::LayoutContractPlugin)
-            .configure_sets(
-                Update,
-                CefSystems::CreateAndResize.after(ReadCommandRequests),
-            )
             .add_plugins((
                 CefPlugin {
                     command_line_config: host::CefStartup::command_line(),
@@ -147,11 +171,13 @@ impl Plugin for BrowserPlugin {
                     HeaderBackRequest,
                     HeaderForwardRequest,
                     HeaderReloadRequest,
+                    HeaderStopRequest,
                     HeaderAddressFocusRequest,
                     SideSheetStackActivateRequest,
                     SideSheetStackCloseRequest,
                     SideSheetStackCreateRequest,
                     SideSheetProjectOpenRequest,
+                    SideSheetProjectPageOpenRequest,
                 )>::default(),
                 UiEventPlugin::<(
                     SideSheetSectionRequest,
@@ -170,6 +196,7 @@ impl Plugin for BrowserPlugin {
                 appearance::AppearancePlugin,
                 page_life::PageLifePlugin,
                 command::CommandPlugin,
+                history_swipe::HistorySwipePlugin,
                 frame_rate::FrameRatePlugin,
                 input::InputPlugin,
                 navigation::NavigationPlugin,

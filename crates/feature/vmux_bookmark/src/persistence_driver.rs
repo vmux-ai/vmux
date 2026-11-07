@@ -1,14 +1,10 @@
 use std::path::PathBuf;
 
 use bevy::prelude::*;
-use bevy_world_serialization::WorldFilter;
 use moonshine_save::prelude::LoadWorld;
-use vmux_api::bookmark::SmartBookmarkFolder;
 #[cfg(test)]
 use vmux_ecs::profile::ProfilePaths;
-use vmux_ecs::{Bookmark, BookmarkOrder, Collapsed, Folder, PageMetadata, Pin, Uuid};
-
-use super::persistence::OfferedBookmarkDefaults;
+use vmux_ecs::{Bookmark, Folder, Pin};
 
 pub(super) type BookmarkFilter = Or<(With<Pin>, With<Bookmark>, With<Folder>)>;
 
@@ -23,25 +19,6 @@ impl Default for BookmarkPersistencePath {
 }
 
 impl BookmarkPersistencePath {
-    pub(super) fn scene_filter() -> WorldFilter {
-        WorldFilter::deny_all()
-            .allow::<ChildOf>()
-            .allow::<Children>()
-            .allow::<Name>()
-            .allow::<Pin>()
-            .allow::<Bookmark>()
-            .allow::<Folder>()
-            .allow::<SmartBookmarkFolder>()
-            .allow::<Collapsed>()
-            .allow::<Uuid>()
-            .allow::<BookmarkOrder>()
-            .allow::<PageMetadata>()
-    }
-
-    pub(super) fn resource_filter() -> WorldFilter {
-        WorldFilter::deny_all().allow::<OfferedBookmarkDefaults>()
-    }
-
     pub(super) fn load(&self) -> std::io::Result<LoadWorld<BookmarkFilter>> {
         let mut source = std::fs::read_to_string(&self.0)?;
         for (legacy, current) in [

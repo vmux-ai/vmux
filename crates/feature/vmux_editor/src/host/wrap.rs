@@ -26,15 +26,15 @@ impl WrapView {
             if folds.is_hidden(line_no) {
                 continue;
             }
-            let text = rope
-                .line(line_no as usize)
-                .chars()
-                .filter(|character| *character != '\n' && *character != '\r')
-                .collect::<String>();
-            let width = DisplayCells::from(text.as_str()).width();
             let rows = if columns == 0 {
                 1
             } else {
+                let text = rope
+                    .line(line_no as usize)
+                    .chars()
+                    .filter(|character| *character != '\n' && *character != '\r')
+                    .collect::<String>();
+                let width = DisplayCells::from(text.as_str()).width();
                 width.max(1).div_ceil(columns as u32)
             }
             .min(u16::MAX as u32) as u16;

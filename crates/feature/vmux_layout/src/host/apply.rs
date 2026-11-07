@@ -24,9 +24,35 @@ impl Plugin for LayoutApplyPlugin {
     fn build(&self, app: &mut App) {
         app.add_message::<LayoutApplyPlan>()
             .add_message::<LayoutApplyResult>()
-            .add_systems(Update, (plan_requests, apply, respond_to).chain())
+            .add_systems(Update, plan_requests.in_set(LayoutApplySet::Plan))
+            .add_systems(
+                Update,
+                apply
+                    .in_set(LayoutApplySet::Mutate)
+                    .after(LayoutApplySet::Plan),
+            )
+            .add_systems(
+                Update,
+                bevy::ecs::schedule::ApplyDeferred
+                    .after(LayoutApplySet::Mutate)
+                    .before(crate::active::ActiveSystemSet::Descendants),
+            )
+            .add_systems(
+                Update,
+                respond_to
+                    .in_set(LayoutApplySet::Respond)
+                    .after(LayoutApplySet::Mutate)
+                    .after(crate::stack::ComputeFocusSet),
+            )
             .add_systems(Update, serve_snapshot_requests);
     }
+}
+
+#[derive(SystemSet, Clone, Copy, Debug, PartialEq, Eq, Hash)]
+enum LayoutApplySet {
+    Plan,
+    Mutate,
+    Respond,
 }
 
 #[derive(Message, Clone)]
@@ -245,14 +271,6 @@ struct LayoutWriter<'w, 's> {
     splits: Query<'w, 's, (Entity, &'static mut PaneSplit, Option<&'static mut Node>)>,
     pane_sizes: Query<'w, 's, &'static mut PaneSize>,
     metadata: Query<'w, 's, &'static mut PageMetadata>,
-    profiles: Query<
-        'w,
-        's,
-        (
-            &'static crate::active_pane::ProfileId,
-            &'static mut crate::active_pane::ActiveStack,
-        ),
-    >,
     terminal_spawn: MessageWriter<'w, TerminalLayoutSpawnRequest>,
     page_open: MessageWriter<'w, PageOpenRequest>,
     commands: Commands<'w, 's>,
@@ -593,27 +611,18 @@ impl LayoutWriter<'_, '_> {
     }
 
     fn focus(&mut self, focus: &proto::Focus) {
-        for (profile, mut active) in &mut self.profiles {
-            if *profile != crate::active_pane::ProfileId::Local {
-                continue;
-            }
-            if let Some(id) = focus.tab.as_deref() {
-                active.tab = NodeKind::parse_id(id)
-                    .ok()
-                    .map(|(_, v)| Entity::from_bits(v));
-            }
-            if let Some(id) = focus.pane.as_deref() {
-                active.pane = NodeKind::parse_id(id)
-                    .ok()
-                    .map(|(_, v)| Entity::from_bits(v));
-            }
-            if let Some(id) = focus.stack.as_deref() {
-                active.stack = NodeKind::parse_id(id)
-                    .ok()
-                    .map(|(_, v)| Entity::from_bits(v));
-            }
+        let target = focus
+            .stack
+            .as_deref()
+            .or(focus.pane.as_deref())
+            .or(focus.tab.as_deref())
+            .and_then(|id| NodeKind::parse_id(id).ok())
+            .map(|(_, value)| Entity::from_bits(value));
+        let Some(target) = target else {
             return;
-        }
+        };
+        self.commands
+            .trigger(vmux_ecs::ActivateRequest { entity: target });
     }
 }
 
@@ -638,6 +647,7 @@ mod tests {
                 .add_message::<LayoutSnapshotResponse>()
                 .add_message::<crate::TerminalLayoutSpawnRequest>()
                 .add_message::<PageOpenRequest>()
+                .add_plugins(vmux_ecs::PrimitivesPlugin)
                 .add_plugins(LayoutApplyPlugin);
             app.world_mut()
                 .spawn(crate::active_pane::ActiveStack::default().local_bundle());
@@ -1688,7 +1698,7 @@ mod tests {
     }
 
     #[test]
-    fn focus_change_writes_focused_stack() {
+    fn focus_change_updates_the_canonical_selection_path() {
         let mut app = App::new();
         app.add_plugins(MinimalPlugins);
 
@@ -1727,17 +1737,112 @@ mod tests {
         };
 
         ApplyHarness::apply(&mut app, snap).unwrap();
-        let focused = {
-            let world = app.world_mut();
-            let mut query = world.query_filtered::<
+        let tab_time = app.world().get::<LastActivatedAt>(tab).unwrap();
+        let pane_time = app.world().get::<LastActivatedAt>(pane_e).unwrap();
+        let stack_time = app.world().get::<LastActivatedAt>(stack).unwrap();
+        assert_eq!(tab_time.0, pane_time.0);
+        assert_eq!(pane_time.0, stack_time.0);
+    }
+
+    #[test]
+    fn apply_response_reports_the_canonical_focus_after_reduction() {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins);
+        ApplyHarness::install(&mut app);
+        app.add_message::<crate::tab::CloseTabRequest>()
+            .add_plugins((crate::space::SpaceLayoutPlugin, crate::stack::StackPlugin));
+        let space = app
+            .world_mut()
+            .spawn((
+                crate::space::Space,
+                crate::space::CurrentSpace,
+                vmux_ecs::Active,
+            ))
+            .id();
+        let first_tab = app
+            .world_mut()
+            .spawn((
+                LayoutTab::default(),
+                LastActivatedAt(2),
+                vmux_ecs::Active,
+                ChildOf(space),
+            ))
+            .id();
+        let first_pane = app
+            .world_mut()
+            .spawn((Pane::bundle(), LastActivatedAt(2), ChildOf(first_tab)))
+            .id();
+        let first_stack = app
+            .world_mut()
+            .spawn((
+                Stack::bundle(),
+                LastActivatedAt(2),
+                vmux_ecs::Active,
+                ChildOf(first_pane),
+            ))
+            .id();
+        let second_tab = app
+            .world_mut()
+            .spawn((LayoutTab::default(), LastActivatedAt(1), ChildOf(space)))
+            .id();
+        let second_pane = app
+            .world_mut()
+            .spawn((Pane::bundle(), LastActivatedAt(1), ChildOf(second_tab)))
+            .id();
+        let second_stack = app
+            .world_mut()
+            .spawn((Stack::bundle(), LastActivatedAt(1), ChildOf(second_pane)))
+            .id();
+        let first = proto::Tab {
+            id: Some(NodeKind::Tab.id(first_tab.to_bits())),
+            name: String::new(),
+            is_active: false,
+            root: proto::LayoutNode::Pane {
+                id: Some(NodeKind::Pane.id(first_pane.to_bits())),
+                is_zoomed: false,
+                stacks: vec![proto::Stack {
+                    id: Some(NodeKind::Stack.id(first_stack.to_bits())),
+                    ..default()
+                }],
+            },
+        };
+        let second = proto::Tab {
+            id: Some(NodeKind::Tab.id(second_tab.to_bits())),
+            name: String::new(),
+            is_active: true,
+            root: proto::LayoutNode::Pane {
+                id: Some(NodeKind::Pane.id(second_pane.to_bits())),
+                is_zoomed: false,
+                stacks: vec![proto::Stack {
+                    id: Some(NodeKind::Stack.id(second_stack.to_bits())),
+                    ..default()
+                }],
+            },
+        };
+        let requested = proto::Focus {
+            tab: Some(NodeKind::Tab.id(second_tab.to_bits())),
+            pane: Some(NodeKind::Pane.id(second_pane.to_bits())),
+            stack: Some(NodeKind::Stack.id(second_stack.to_bits())),
+        };
+        let response = ApplyHarness::apply(
+            &mut app,
+            LayoutSnapshot {
+                tabs: vec![first, second],
+                focused: requested.clone(),
+            },
+        )
+        .unwrap();
+
+        assert_eq!(response.focused, requested);
+        let focused = app
+            .world_mut()
+            .query_filtered::<
                 &crate::active_pane::ActiveStack,
                 With<crate::active_pane::ProfileId>,
-            >();
-            *query.single(world).unwrap()
-        };
-        assert_eq!(focused.tab, Some(tab));
-        assert_eq!(focused.pane, Some(pane_e));
-        assert_eq!(focused.stack, Some(stack));
+            >()
+            .single(app.world())
+            .unwrap();
+        assert_eq!(focused.stack, Some(second_stack));
     }
 
     #[test]

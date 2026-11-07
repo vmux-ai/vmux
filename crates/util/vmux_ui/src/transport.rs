@@ -12,11 +12,39 @@ pub trait PageHost {
 
     fn show_element_popover(&self, _element_id: &str) {}
 
+    fn show_dropdown_popover(&self, element_id: &str) {
+        self.show_element_popover(element_id);
+    }
+
     fn scroll_element_into_view(&self, _element_id: &str) {}
+
+    fn scroll_element_into_view_vertical(&self, _element_id: &str) {}
 
     fn reveal_first_rendered(&self, _element_ids: &[&str], _centered: bool) {}
 
     fn scroll_element_to(&self, _element_id: &str, _top: f64) {}
+
+    fn scroll_element_to_smooth(&self, element_id: &str, top: f64) {
+        self.scroll_element_to(element_id, top);
+    }
+
+    fn section_at_top(&self, _container: &str) -> TextOffsetAnswer {
+        Box::pin(std::future::ready(None))
+    }
+
+    fn scroll_section(
+        &self,
+        _container: &str,
+        _element: &str,
+        _behavior: dioxus::html::ScrollBehavior,
+    ) {
+    }
+
+    fn animate_height(&self, _element_id: &str, _duration_ms: u32) {}
+    fn animate_layout(&self, _element_id: &str, _duration_ms: u32) {}
+
+    fn preserve_scroll(&self) {}
+
     fn text_offset_at(&self, _element_id: &str, _x: f64, _y: f64) -> TextOffsetAnswer {
         Box::pin(std::future::ready(None))
     }
@@ -48,7 +76,7 @@ pub trait PageHost {
     }
 }
 
-pub type BytesListener = Box<dyn FnMut(&[u8])>;
+pub type BytesListener = Box<dyn FnMut(&[u8]) -> bool>;
 
 pub type TextOffsetAnswer = std::pin::Pin<Box<dyn std::future::Future<Output = Option<u32>>>>;
 
@@ -58,7 +86,31 @@ pub fn install_host(host: Rc<dyn PageHost>) {
 
 pub struct HostScope(Option<Rc<dyn PageHost>>);
 
+#[derive(Clone)]
+pub struct HostBinding(pub Rc<dyn PageHost>);
+
+impl PartialEq for HostBinding {
+    fn eq(&self, other: &Self) -> bool {
+        Rc::ptr_eq(&self.0, &other.0)
+    }
+}
+
+impl HostBinding {
+    pub fn current() -> Option<Self> {
+        if dioxus::core::Runtime::try_current().is_some()
+            && let Some(binding) = dioxus::prelude::try_consume_context::<Self>()
+        {
+            return Some(binding);
+        }
+        HOST.with(|slot| slot.borrow().clone().map(Self))
+    }
+}
+
 impl HostScope {
+    pub fn binding() -> Option<HostBinding> {
+        HOST.with(|slot| slot.borrow().clone().map(HostBinding))
+    }
+
     pub fn enter(host: Rc<dyn PageHost>) -> Self {
         Self(HOST.with(|slot| slot.borrow_mut().replace(host)))
     }
@@ -73,6 +125,19 @@ impl Drop for HostScope {
 pub(crate) struct Host;
 
 impl Host {
+    pub(crate) fn section_at_top(container: &str) -> TextOffsetAnswer {
+        Self::with_installed(|host| host.section_at_top(container))
+            .unwrap_or_else(|_| Box::pin(std::future::ready(None)))
+    }
+
+    pub(crate) fn scroll_section(
+        container: &str,
+        element: &str,
+        behavior: dioxus::html::ScrollBehavior,
+    ) {
+        let _ = Self::with_installed(|host| host.scroll_section(container, element, behavior));
+    }
+
     pub(crate) fn emit(id: &str, bytes: &[u8]) -> Result<(), EventListenerError> {
         Self::with_installed(|host| host.send(id, bytes))?
     }
@@ -85,8 +150,8 @@ impl Host {
         let _ = Self::with_installed(|host| host.focus_element(id));
     }
 
-    pub(crate) fn show_element_popover(id: &str) {
-        let _ = Self::with_installed(|host| host.show_element_popover(id));
+    pub(crate) fn show_dropdown_popover(id: &str) {
+        let _ = Self::with_installed(|host| host.show_dropdown_popover(id));
     }
 
     pub(crate) fn select_element_text(id: &str) {
@@ -134,6 +199,25 @@ impl Host {
     pub(crate) fn scroll_element_to(element_id: &str, top: f64) {
         let _ = Self::with_installed(|host| host.scroll_element_to(element_id, top));
     }
+
+    pub(crate) fn scroll_element_to_smooth(element_id: &str, top: f64) {
+        let _ = Self::with_installed(|host| host.scroll_element_to_smooth(element_id, top));
+    }
+
+    pub(crate) fn animate_height(element_id: &str, duration_ms: u32) {
+        let duration_ms = crate::motion::Motion::bounded(duration_ms);
+        let _ = Self::with_installed(|host| host.animate_height(element_id, duration_ms));
+    }
+
+    pub(crate) fn animate_layout(element_id: &str, duration_ms: u32) {
+        let duration_ms = crate::motion::Motion::bounded(duration_ms);
+        let _ = Self::with_installed(|host| host.animate_layout(element_id, duration_ms));
+    }
+
+    pub(crate) fn preserve_scroll() {
+        let _ = Self::with_installed(|host| host.preserve_scroll());
+    }
+
     pub(crate) fn reveal_first_rendered(element_ids: &[&str], centered: bool) {
         let _ = Self::with_installed(|host| host.reveal_first_rendered(element_ids, centered));
     }
@@ -147,9 +231,8 @@ impl Host {
     }
 
     fn with_installed<R>(f: impl FnOnce(&dyn PageHost) -> R) -> Result<R, EventListenerError> {
-        let installed = HOST.with(|slot| slot.borrow().clone());
-        if let Some(host) = installed {
-            return Ok(f(host.as_ref()));
+        if let Some(binding) = HostBinding::current() {
+            return Ok(f(binding.0.as_ref()));
         }
         let Some(fallback) = Self::fallback() else {
             return Err(EventListenerError::NoHost);
@@ -193,6 +276,11 @@ mod tests {
         value: u32,
     }
 
+    #[vmux_api::ui_state(Default, Eq)]
+    struct SnapshotState {
+        value: u32,
+    }
+
     #[derive(Default)]
     struct LoopbackHost {
         listeners: RefCell<Vec<(String, BytesListener)>>,
@@ -200,11 +288,9 @@ mod tests {
 
     impl PageHost for LoopbackHost {
         fn send(&self, id: &str, bytes: &[u8]) -> Result<(), EventListenerError> {
-            for (registered, on_bytes) in self.listeners.borrow_mut().iter_mut() {
-                if registered == id {
-                    on_bytes(bytes);
-                }
-            }
+            self.listeners
+                .borrow_mut()
+                .retain_mut(|(registered, on_bytes)| registered != id || on_bytes(bytes));
             Ok(())
         }
 
@@ -226,6 +312,7 @@ mod tests {
                 if let Some(ping) = HostPayload::new(bytes).decode::<Ping>() {
                     sink.borrow_mut().push(ping);
                 }
+                true
             }),
         )
         .unwrap();
@@ -235,6 +322,39 @@ mod tests {
         Host::emit("other", &bytes).unwrap();
 
         assert_eq!(*seen.borrow(), vec![Ping { value: 7 }]);
+    }
+
+    #[test]
+    fn an_inactive_listener_is_removed_after_delivery() {
+        let host = Rc::new(LoopbackHost::default());
+        install_host(host.clone());
+        Host::listen("once", Box::new(|_| false)).unwrap();
+
+        Host::emit("once", &[]).unwrap();
+        Host::emit("once", &[]).unwrap();
+
+        assert!(host.listeners.borrow().is_empty());
+    }
+
+    #[test]
+    fn mobile_state_emit_reaches_the_shared_state_listener() {
+        let host = Rc::new(LoopbackHost::default());
+        install_host(host.clone());
+        let seen = Rc::new(RefCell::new(Vec::new()));
+        let sink = seen.clone();
+        Host::listen_state::<SnapshotState, _>(move |frame| {
+            sink.borrow_mut().push(frame);
+            true
+        })
+        .unwrap();
+        let emit = vmux_api::page::UiStateEmit::from_state(&SnapshotState { value: 7 }).unwrap();
+
+        host.send(&emit.id, &emit.bytes).unwrap();
+
+        assert_eq!(
+            *seen.borrow(),
+            vec![vmux_api::UiStateFrame::Snapshot(SnapshotState { value: 7 })]
+        );
     }
 
     #[derive(Default)]

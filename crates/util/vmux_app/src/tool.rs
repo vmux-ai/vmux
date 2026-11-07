@@ -14,7 +14,7 @@ impl Plugin for VmuxToolPlugin {
             vmux_team::TeamToolPlugin,
             vmux_browser::BrowserToolPlugin,
             vmux_input::CapturePlugin,
-            vmux_chat::host::ChatToolPlugin,
+            vmux_session::host::ChatToolPlugin,
             vmux_editor::FileToolPlugin,
             vmux_knowledge::KnowledgeToolPlugin,
             vmux_vault::VaultToolPlugin,

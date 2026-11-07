@@ -1,7 +1,7 @@
 use crate::{
-    ShortcutBinding, ShortcutCatalog, ShortcutEntry, ShortcutGroup, ShortcutProbeClearRequest,
-    ShortcutProbePress, ShortcutProbePressRequest, ShortcutProbeStatus, ShortcutProbeView,
-    ShortcutStroke, ShortcutUiState, ShortcutUiStateUpdates, ShortcutUrl,
+    ShortcutBinding, ShortcutCatalog, ShortcutCollectionViewRequest, ShortcutEntry, ShortcutGroup,
+    ShortcutProbeClearRequest, ShortcutProbePress, ShortcutProbePressRequest, ShortcutProbeStatus,
+    ShortcutProbeView, ShortcutStroke, ShortcutUiState, ShortcutUiStateUpdates, ShortcutUrl,
 };
 use bevy::ecs::system::SystemParam;
 use bevy::prelude::*;
@@ -32,13 +32,19 @@ impl Plugin for ShortcutPlugin {
             crate::claim::ClaimPlugin,
             crate::input::InputPlugin,
             HostedUiPlugin::<Shortcuts>::new(Self::MANIFEST),
-            UiEventPlugin::<(ShortcutProbePressRequest, ShortcutProbeClearRequest)>::default(),
+            UiEventPlugin::<(
+                ShortcutProbePressRequest,
+                ShortcutProbeClearRequest,
+                ShortcutCollectionViewRequest,
+            )>::default(),
             vmux_ecs::UiStatePlugin::<ShortcutUiState>::default(),
         ))
         .add_message::<NativeKeyInput>()
+        .add_message::<vmux_layout::stack::CloseStackRequest>()
         .add_observer(send_shortcuts)
         .add_observer(probe_press_request)
         .add_observer(probe_clear_request)
+        .add_observer(collection_view)
         .add_observer(probe_press)
         .add_systems(Update, normalize_alias.in_set(PageOpenSet::ResolveTarget))
         .add_systems(
@@ -57,6 +63,8 @@ impl Plugin for ShortcutPlugin {
 struct Shortcuts {
     catalog: ShortcutCatalog,
     probe: ShortcutProbe,
+    close_armed_at_ms: Option<i64>,
+    collection_view: vmux_ecs::CollectionView,
 }
 
 #[derive(Default)]
@@ -106,6 +114,30 @@ impl ShortcutCaptureFocus<'_, '_> {
 }
 
 impl Shortcuts {
+    const CLOSE_ARM_WINDOW_MS: i64 = 1_000;
+
+    fn closes_on(&mut self, input: &NativeKeyInput) -> bool {
+        let closes = input.key == Some(bevy::input::keyboard::KeyCode::KeyW)
+            && input.modifiers.super_key
+            && !input.modifiers.ctrl
+            && !input.modifiers.shift
+            && !input.modifiers.alt;
+        if !closes {
+            self.close_armed_at_ms = None;
+            return false;
+        }
+        let Some(armed_at) = self.close_armed_at_ms.replace(input.pressed_at_ms) else {
+            return false;
+        };
+        let elapsed = input.pressed_at_ms.saturating_sub(armed_at);
+        if elapsed > Self::CLOSE_ARM_WINDOW_MS {
+            return false;
+        }
+        self.close_armed_at_ms = None;
+        self.probe.clear();
+        true
+    }
+
     fn project(&self) -> ShortcutUiState {
         let active = !self.probe.sequence.is_empty();
         let mut groups = Vec::new();
@@ -146,6 +178,7 @@ impl Shortcuts {
                 status: self.probe.status(&self.catalog),
             },
             shortcut_count,
+            collection_view: self.collection_view,
         }
     }
 }
@@ -321,6 +354,8 @@ impl ShortcutStroke {
 fn send_shortcuts(
     trigger: On<UiInput<PageReady>>,
     mut views: Query<(&mut Shortcuts, Option<&KeyContext>)>,
+    hierarchy: vmux_layout::space::SpaceHierarchy,
+    spaces: Query<&vmux_ecs::CollectionView, With<vmux_layout::space::Space>>,
     keymap: Single<&Keymap>,
     definitions: Query<&CommandDefinition>,
     locale: Option<Res<ResolvedLocale>>,
@@ -336,6 +371,31 @@ fn send_shortcuts(
     let context = context.unwrap_or(KeyContext::NONE);
     let definitions = definitions.iter().cloned().collect::<Vec<_>>();
     view.catalog = ShortcutCatalog::build(&keymap, context, &locale, &definitions);
+    view.collection_view = hierarchy
+        .get(webview)
+        .and_then(|space| spaces.get(space).ok())
+        .copied()
+        .unwrap_or_default();
+}
+
+fn collection_view(
+    trigger: On<UiInput<ShortcutCollectionViewRequest>>,
+    hierarchy: vmux_layout::space::SpaceHierarchy,
+    mut spaces: Query<&mut vmux_ecs::CollectionView, With<vmux_layout::space::Space>>,
+    mut views: Query<&mut Shortcuts>,
+) {
+    let webview = trigger.event().webview;
+    let Ok(mut shortcuts) = views.get_mut(webview) else {
+        return;
+    };
+    let view = trigger.event().payload.view;
+    shortcuts.collection_view = view;
+    let Some(space) = hierarchy.get(webview) else {
+        return;
+    };
+    if let Ok(mut current) = spaces.get_mut(space) {
+        *current = view;
+    }
 }
 
 fn probe_press_request(
@@ -378,11 +438,11 @@ fn probe_press(trigger: On<ShortcutProbePress>, mut views: Query<&mut Shortcuts>
 
 fn sync_capture(
     focus: ShortcutCaptureFocus,
-    captures: Query<(Entity, Has<NativeKeyCapture>), With<ShortcutCapture>>,
+    mut captures: Query<(Entity, Has<NativeKeyCapture>, &mut Shortcuts), With<ShortcutCapture>>,
     mut commands: Commands,
 ) {
     let next = focus.active();
-    for (entity, active) in &captures {
+    for (entity, active, mut shortcuts) in &mut captures {
         let should_capture = next == Some(entity);
         if active == should_capture {
             continue;
@@ -390,17 +450,27 @@ fn sync_capture(
         if should_capture {
             commands.entity(entity).insert(NativeKeyCapture);
         } else {
+            shortcuts.close_armed_at_ms = None;
             commands.entity(entity).remove::<NativeKeyCapture>();
         }
     }
 }
 
+type NativeCaptures<'w, 's> = Query<
+    'w,
+    's,
+    (Entity, &'static mut Shortcuts, &'static ChildOf),
+    (With<ShortcutCapture>, With<NativeKeyCapture>),
+>;
+
 fn capture_native_keys(
     mut inputs: MessageReader<NativeKeyInput>,
-    captures: Query<Entity, (With<ShortcutCapture>, With<NativeKeyCapture>)>,
+    mut captures: NativeCaptures,
+    mut close_requests: MessageWriter<vmux_layout::stack::CloseStackRequest>,
+    proxy: Option<Res<bevy::winit::EventLoopProxyWrapper>>,
     mut commands: Commands,
 ) {
-    let Some(target) = captures.iter().next() else {
+    let Some((target, mut shortcuts, parent)) = captures.iter_mut().next() else {
         inputs.clear();
         return;
     };
@@ -409,7 +479,17 @@ fn capture_native_keys(
             continue;
         }
         if input.releases_capture() {
+            shortcuts.close_armed_at_ms = None;
             commands.entity(target).remove::<NativeKeyCapture>();
+            continue;
+        }
+        if shortcuts.closes_on(input) {
+            {
+                let _wake = vmux_ecs::wake::Wake::beside(proxy.as_deref());
+                close_requests.write(vmux_layout::stack::CloseStackRequest::by_user(
+                    parent.parent(),
+                ));
+            }
             continue;
         }
         commands.trigger(ShortcutProbePress::new(
@@ -593,7 +673,7 @@ mod tests {
     use vmux_api::input::KeyModifiers;
     use vmux_command::CommandManifest;
     use vmux_command::{Binding, Modifiers, Source, When};
-    use vmux_ecs::{PageMetadata, PageOpenId, PageOpenTask};
+    use vmux_ecs::{PageMetadata, PageNavigation, PageOpenId, PageOpenTask};
     use vmux_layout::hosted_page::HostedPagePlugin;
 
     struct LayoutCommandFixture;
@@ -738,6 +818,8 @@ mod tests {
         let mut view = Shortcuts {
             catalog: shortcuts,
             probe: ShortcutProbe::default(),
+            close_armed_at_ms: None,
+            collection_view: vmux_ecs::CollectionView::default(),
         };
 
         view.probe.press(stroke("KeyG", true), &view.catalog, 1_000);
@@ -843,9 +925,10 @@ mod tests {
             .init_resource::<bevy_cef::prelude::BinIpcEventRawBuffer>()
             .add_plugins(HostedPagePlugin)
             .add_plugins(ShortcutPlugin);
-        let stack = app.world_mut().spawn_empty().id();
+        let navigation = PageOpenId::new();
+        let stack = app.world_mut().spawn(PageNavigation::new(navigation)).id();
         app.world_mut().spawn(PageOpenTask {
-            id: PageOpenId::new(),
+            id: navigation,
             stack,
             url: ShortcutPlugin::URL.to_string(),
             request_id: None,
@@ -870,9 +953,10 @@ mod tests {
             .init_resource::<bevy_cef::prelude::BinIpcEventRawBuffer>()
             .add_plugins(HostedPagePlugin)
             .add_plugins(ShortcutPlugin);
-        let stack = app.world_mut().spawn_empty().id();
+        let navigation = PageOpenId::new();
+        let stack = app.world_mut().spawn(PageNavigation::new(navigation)).id();
         app.world_mut().spawn(PageOpenTask {
-            id: PageOpenId::new(),
+            id: navigation,
             stack,
             url: "vmux://cheatsheet/".to_string(),
             request_id: None,
@@ -935,6 +1019,31 @@ mod tests {
                 ..default()
             }]
         );
+        for pressed_at_ms in [2, 3] {
+            app.world_mut()
+                .resource_mut::<Messages<NativeKeyInput>>()
+                .write(NativeKeyInput {
+                    key: Some(KeyCode::KeyW),
+                    native_code: 0x0D,
+                    text: "w".to_string(),
+                    modifiers: KeyModifiers {
+                        super_key: true,
+                        ..Default::default()
+                    },
+                    repeat: false,
+                    captured: true,
+                    claim: None,
+                    pressed_at_ms,
+                });
+        }
+        app.update();
+        let closes = app
+            .world_mut()
+            .resource_mut::<Messages<vmux_layout::stack::CloseStackRequest>>()
+            .drain()
+            .collect::<Vec<_>>();
+        assert_eq!(closes.len(), 1);
+        assert_eq!(closes[0].stack, stack);
         app.world_mut().get_mut::<Window>(window).unwrap().focused = false;
         app.update();
         assert!(!app.world().entity(page).contains::<NativeKeyCapture>());

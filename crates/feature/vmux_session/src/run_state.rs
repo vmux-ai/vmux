@@ -3,13 +3,9 @@ use std::time::Duration;
 
 #[derive(Component, Default)]
 #[require(AgentTurnMeta)]
-pub enum AgentRunState {
+pub enum RunState {
     #[default]
     Idle,
-    Installing {
-        pct: Option<u8>,
-        message: String,
-    },
     Streaming,
     AwaitingApproval {
         call_id: String,
@@ -19,15 +15,58 @@ pub enum AgentRunState {
     Errored(String),
 }
 
-impl AgentRunState {
+impl RunState {
     pub fn status(&self) -> &'static str {
         match self {
             Self::Idle => "idle",
-            Self::Installing { .. } => "installing",
             Self::Streaming => "streaming",
             Self::AwaitingApproval { .. } => "awaiting",
             Self::Errored(_) => "errored",
         }
+    }
+}
+
+pub struct Failure<'a>(pub &'a str);
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub enum FailureKind {
+    Busy,
+    MissingHistory,
+    Connection,
+    Setup,
+    Other,
+}
+
+impl Failure<'_> {
+    pub fn kind(&self) -> FailureKind {
+        if self.in_use() {
+            return FailureKind::Busy;
+        }
+        let message = self.0.to_ascii_lowercase();
+        if message.contains("no rollout found") || message.contains("thread not found") {
+            return FailureKind::MissingHistory;
+        }
+        if message.contains("timed out")
+            || message.contains("timeout")
+            || message.contains("connection refused")
+            || message.contains("connection closed")
+        {
+            return FailureKind::Connection;
+        }
+        if message.contains("command not found")
+            || message.contains("not installed")
+            || message.contains("unsupported version")
+            || message.contains("package version")
+        {
+            return FailureKind::Setup;
+        }
+        FailureKind::Other
+    }
+
+    pub fn in_use(&self) -> bool {
+        self.0.contains("thread_active_writer")
+            || self.0.contains("already has an active writer")
+            || self.0.contains("session is in use by another Codex client")
     }
 }
 
@@ -42,15 +81,46 @@ mod tests {
     use super::*;
 
     #[test]
+    fn active_writer_refusals_are_distinct_from_other_failures() {
+        for (message, expected) in [
+            (
+                "Invalid request: {\"reason\":\"thread_active_writer\"}",
+                true,
+            ),
+            ("thread abc already has an active writer", true),
+            ("This Codex session is in use by another Codex client", true),
+            ("session/load timed out", false),
+            ("Invalid request: unknown session", false),
+        ] {
+            assert_eq!(Failure(message).in_use(), expected, "{message}");
+        }
+    }
+
+    #[test]
+    fn failures_distinguish_recoverable_connections_from_missing_history() {
+        for (message, kind) in [
+            (
+                "session/load failed: no rollout found for thread id abc",
+                FailureKind::MissingHistory,
+            ),
+            ("session/load timed out", FailureKind::Connection),
+            ("agent command not found", FailureKind::Setup),
+            ("operation failed unexpectedly", FailureKind::Other),
+        ] {
+            assert!(Failure(message).kind() == kind, "{message}");
+        }
+    }
+
+    #[test]
     fn default_is_idle() {
-        assert!(matches!(AgentRunState::default(), AgentRunState::Idle));
+        assert!(matches!(RunState::default(), RunState::Idle));
     }
 
     #[test]
     fn errored_holds_message() {
-        let s = AgentRunState::Errored("oops".into());
+        let s = RunState::Errored("oops".into());
         match s {
-            AgentRunState::Errored(m) => assert_eq!(m, "oops"),
+            RunState::Errored(m) => assert_eq!(m, "oops"),
             _ => panic!("wrong variant"),
         }
     }

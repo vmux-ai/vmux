@@ -58,6 +58,7 @@ impl InterpreterShell {
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width">
+<script>document.documentElement.dataset.theme||=matchMedia('(prefers-color-scheme: dark)').matches?'dark':'light';document.documentElement.style.colorScheme=document.documentElement.dataset.theme;</script>
 {head}
 </head>
 <body class="{body_class}">
@@ -65,7 +66,8 @@ impl InterpreterShell {
 <script type="module">
 {SLEDGEHAMMER_JS}
 {NATIVE_JS}
-window.interpreter = new NativeInterpreter("{base_uri}", false);
+window.vmuxCreateInterpreter = () => new NativeInterpreter("{base_uri}", false);
+window.interpreter = window.vmuxCreateInterpreter();
 window.onload = function() {{
   const root = window.document.getElementById("{root_id}");
   if (root != null) {{
@@ -124,6 +126,7 @@ mod tests {
         assert!(shell.contains(r#"<base href="/">"#));
         assert!(shell.contains("./assets/index.css"));
         assert!(shell.contains(r#"<html class="h-full">"#));
+        assert!(shell.contains("document.documentElement.dataset.theme||=matchMedia"));
         assert!(shell.contains(r#"<body class="flex h-full">"#));
         assert!(
             shell.contains(r#"<div id="main" class="flex flex-1"></div>"#),

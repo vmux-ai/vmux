@@ -15,6 +15,11 @@ impl Host {
         true
     }
 
+    pub(crate) fn scroll_item_into_view_vertical(item_id: &str) -> bool {
+        let _ = Host::with_installed(|host| host.scroll_element_into_view_vertical(item_id));
+        true
+    }
+
     pub(crate) fn set_root_radius(_radius: f32) {}
 
     pub(crate) fn set_root_language(_locale: &str, _direction: &str) {}

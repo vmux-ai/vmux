@@ -2,8 +2,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 
 use crate::state::{
-    ToolAdoptRequest, ToolCategory, ToolForgetRequest, ToolImportRequest, ToolItem,
-    ToolOperationKind, ToolProvider, ToolStatus,
+    ToolCategory, ToolForgetRequest, ToolItem, ToolOperationKind, ToolProvider, ToolStatus,
 };
 use bevy_app::{App, Plugin, Startup, Update};
 use bevy_ecs::prelude::*;
@@ -25,23 +24,9 @@ struct McpProvider;
 impl Plugin for McpToolPlugin {
     fn build(&self, app: &mut App) {
         app.add_systems(Startup, spawn)
-            .add_systems(
-                Update,
-                (request_import, request_adopt, request_forget).in_set(ToolOperationRouteSet),
-            )
-            .add_systems(
-                Update,
-                (
-                    locate,
-                    discover,
-                    import_file,
-                    import_all,
-                    import_one,
-                    forget,
-                )
-                    .after(ToolOperationRouteFlush),
-            )
-            .add_systems(Update, (finish_file, finish_import, finish_forget));
+            .add_systems(Update, request_forget.in_set(ToolOperationRouteSet))
+            .add_systems(Update, forget.after(ToolOperationRouteFlush))
+            .add_systems(Update, finish_forget);
     }
 }
 
@@ -65,15 +50,6 @@ impl McpProvider {
             .into_iter()
             .map(|error| format!("MCP Servers: {error}"))
             .collect();
-        for (name, server) in &discovered {
-            if name != "vmux" && name != "linear" && !server.conflict {
-                manifest
-                    .mcp
-                    .servers
-                    .entry(name.clone())
-                    .or_insert_with(|| server.definition.clone());
-            }
-        }
         let mut names = discovered.keys().cloned().collect::<BTreeSet<_>>();
         names.extend(manifest.mcp.servers.keys().cloned());
         let items = names
@@ -81,12 +57,10 @@ impl McpProvider {
             .map(|name| {
                 let managed = manifest.mcp.servers.contains_key(&name);
                 let external = discovered.get(&name);
-                let status = if managed {
-                    ToolStatus::Installed
-                } else if external.is_some_and(|server| server.conflict) {
+                let status = if external.is_some_and(|server| server.conflict) {
                     ToolStatus::Conflict
                 } else {
-                    ToolStatus::Available
+                    ToolStatus::Installed
                 };
                 let definition = manifest
                     .mcp
@@ -106,19 +80,17 @@ impl McpProvider {
                             .join(", ")
                     })
                     .unwrap_or_default();
-                let detail = if external.is_some_and(|server| server.conflict) && !managed {
+                let detail = if external.is_some_and(|server| server.conflict) {
                     format!("Conflicting definitions in {sources}")
                 } else if managed && sources.is_empty() {
-                    format!("{transport} · Tools managed")
+                    format!("{transport} · legacy tools.toml")
                 } else if managed {
-                    format!("{transport} · Tools managed · imported from {sources}")
+                    format!("{transport} · configured in {sources} · duplicated in tools.toml")
                 } else {
                     format!("{transport} · configured in {sources}")
                 };
                 let operations = if managed {
                     vec![ToolOperationKind::Forget]
-                } else if status == ToolStatus::Available {
-                    vec![ToolOperationKind::Adopt]
                 } else {
                     Vec::new()
                 };
@@ -142,72 +114,6 @@ impl McpProvider {
             },
             errors,
         })
-    }
-}
-
-fn request_import(
-    requests: Query<
-        (
-            Entity,
-            &ToolOperationRequest<ToolImportRequest>,
-            &ToolProviderTarget,
-        ),
-        Added<ToolStoreTarget>,
-    >,
-    providers: Query<(), With<McpProvider>>,
-    mut commands: Commands,
-) {
-    for (entity, operation, provider) in &requests {
-        if !providers.contains(provider.entity()) {
-            continue;
-        }
-        let request = &operation.0;
-        let value = request.value.trim();
-        let operation = if value.is_empty() {
-            commands.entity(entity).insert((
-                ToolStoreOperation,
-                DiscoverMcpServers,
-                ImportDefaultMcpConfigs,
-            ));
-            continue;
-        } else {
-            ImportMcpConfig {
-                path: PathBuf::from(value),
-            }
-        };
-        commands
-            .entity(entity)
-            .insert((ToolStoreOperation, operation));
-    }
-}
-
-fn request_adopt(
-    requests: Query<
-        (
-            Entity,
-            &ToolOperationRequest<ToolAdoptRequest>,
-            &ToolProviderTarget,
-        ),
-        Added<ToolStoreTarget>,
-    >,
-    providers: Query<(), With<McpProvider>>,
-    mut commands: Commands,
-) {
-    for (entity, operation, provider) in &requests {
-        if !providers.contains(provider.entity()) {
-            continue;
-        }
-        let request = &operation.0;
-        if request.id.trim().is_empty() {
-            continue;
-        }
-        commands.entity(entity).insert((
-            ToolStoreOperation,
-            DiscoverMcpServers,
-            ImportMcpServer {
-                name: request.id.trim().to_string(),
-            },
-        ));
     }
 }
 
@@ -240,36 +146,6 @@ fn request_forget(
     }
 }
 
-fn finish_file(
-    operations: Query<
-        (Entity, &ImportedMcpConfig),
-        (With<ToolStoreOperation>, Without<ToolOperationFinished>),
-    >,
-    mut commands: Commands,
-) {
-    for (entity, output) in &operations {
-        commands.entity(entity).insert((
-            ToolOperationFinished,
-            ToolOperationSucceeded(format!("imported {} MCP server(s)", output.servers)),
-        ));
-    }
-}
-
-fn finish_import(
-    operations: Query<
-        (Entity, &ImportedMcpServer),
-        (With<ToolStoreOperation>, Without<ToolOperationFinished>),
-    >,
-    mut commands: Commands,
-) {
-    for (entity, output) in &operations {
-        commands.entity(entity).insert((
-            ToolOperationFinished,
-            ToolOperationSucceeded(format!("{} is now managed", output.name)),
-        ));
-    }
-}
-
 fn finish_forget(
     operations: Query<
         (Entity, &ForgottenMcpServer),
@@ -285,16 +161,13 @@ fn finish_forget(
     }
 }
 
-#[derive(Component, Clone, Copy, Debug, Default, PartialEq, Eq)]
-struct DiscoverMcpServers;
-
-#[derive(Component, Clone, Debug, Default, PartialEq, Eq)]
-pub(super) struct DiscoveredMcpServers {
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+struct DiscoveredMcpServers {
     servers: BTreeMap<String, DiscoveredMcpServer>,
     errors: Vec<String>,
 }
 
-#[derive(Component, Clone, Debug, Default, PartialEq, Eq)]
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
 struct McpConfigSources(Vec<PathBuf>);
 
 impl McpConfigSources {
@@ -304,6 +177,7 @@ impl McpConfigSources {
                 home.join(".codex/config.toml"),
                 home.join(".claude.json"),
                 home.join(".vibe/config.toml"),
+                home.join(".gemini/settings.json"),
                 home.join(".mcp.json"),
             ]
             .into_iter()
@@ -341,165 +215,6 @@ impl McpConfigSources {
             }
         }
         DiscoveredMcpServers { servers, errors }
-    }
-}
-
-fn locate(
-    operations: Query<(Entity, &ToolStoreTarget), Added<DiscoverMcpServers>>,
-    stores: Query<&ToolStore>,
-    mut commands: Commands,
-) {
-    for (entity, target) in &operations {
-        let Ok(store) = stores.get(target.entity()) else {
-            commands.entity(entity).insert((
-                ToolOperationFinished,
-                ToolOperationFailed("tool store entity is unavailable".to_string()),
-            ));
-            continue;
-        };
-        commands
-            .entity(entity)
-            .insert(McpConfigSources::at(store.home()));
-    }
-}
-
-fn discover(
-    operations: Query<
-        (Entity, &McpConfigSources),
-        (
-            With<DiscoverMcpServers>,
-            Without<ToolOperationTask<DiscoveredMcpServers>>,
-            Without<DiscoveredMcpServers>,
-            Without<ToolOperationFinished>,
-        ),
-    >,
-    mut commands: Commands,
-) {
-    for (entity, sources) in &operations {
-        let sources = sources.clone();
-        commands.entity(entity).insert(ToolOperationTask(
-            IoTaskPool::get().spawn(async move { Ok(sources.discover()) }),
-        ));
-    }
-}
-
-#[derive(Component, Clone, Debug, PartialEq, Eq)]
-struct ImportMcpConfig {
-    path: PathBuf,
-}
-
-#[derive(Component, Clone, Copy, Debug, Default, PartialEq, Eq)]
-struct ImportDefaultMcpConfigs;
-
-#[derive(Component, Clone, Copy, Debug, PartialEq, Eq)]
-pub(super) struct ImportedMcpConfig {
-    servers: usize,
-}
-
-fn import_file(
-    operations: Query<
-        (Entity, &ImportMcpConfig, &ToolStoreTarget),
-        (
-            Without<ToolOperationTask<ImportedMcpConfig>>,
-            Without<ImportedMcpConfig>,
-            Without<ToolOperationFinished>,
-        ),
-    >,
-    stores: Query<&ToolStore>,
-    mut commands: Commands,
-) {
-    for (entity, operation, target) in &operations {
-        let Ok(store) = stores.get(target.entity()).cloned() else {
-            commands.entity(entity).insert((
-                ToolOperationFinished,
-                ToolOperationFailed("tool store entity is unavailable".to_string()),
-            ));
-            continue;
-        };
-        let path = operation.path.clone();
-        commands
-            .entity(entity)
-            .insert(ToolOperationTask(IoTaskPool::get().spawn(async move {
-                let servers = store.import_mcp_config(&path)?;
-                Ok(ImportedMcpConfig { servers })
-            })));
-    }
-}
-
-fn import_all(
-    operations: Query<
-        (Entity, &DiscoveredMcpServers, &ToolStoreTarget),
-        (
-            With<ImportDefaultMcpConfigs>,
-            Without<ToolOperationTask<ImportedMcpConfig>>,
-            Without<ImportedMcpConfig>,
-            Without<ToolOperationFinished>,
-        ),
-    >,
-    stores: Query<&ToolStore>,
-    mut commands: Commands,
-) {
-    for (entity, discovered, target) in &operations {
-        let Ok(store) = stores.get(target.entity()).cloned() else {
-            commands.entity(entity).insert((
-                ToolOperationFinished,
-                ToolOperationFailed("tool store entity is unavailable".to_string()),
-            ));
-            continue;
-        };
-        let discovered = discovered.clone();
-        commands
-            .entity(entity)
-            .insert(ToolOperationTask(IoTaskPool::get().spawn(async move {
-                let servers = discovered.import_all(&store)?;
-                Ok(ImportedMcpConfig { servers })
-            })));
-    }
-}
-
-#[derive(Component, Clone, Debug, PartialEq, Eq)]
-struct ImportMcpServer {
-    name: String,
-}
-
-#[derive(Component, Clone, Debug, PartialEq, Eq)]
-pub(super) struct ImportedMcpServer {
-    name: String,
-}
-
-fn import_one(
-    operations: Query<
-        (
-            Entity,
-            &ImportMcpServer,
-            &DiscoveredMcpServers,
-            &ToolStoreTarget,
-        ),
-        (
-            Without<ToolOperationTask<ImportedMcpServer>>,
-            Without<ImportedMcpServer>,
-            Without<ToolOperationFinished>,
-        ),
-    >,
-    stores: Query<&ToolStore>,
-    mut commands: Commands,
-) {
-    for (entity, operation, discovered, target) in &operations {
-        let Ok(store) = stores.get(target.entity()).cloned() else {
-            commands.entity(entity).insert((
-                ToolOperationFinished,
-                ToolOperationFailed("tool store entity is unavailable".to_string()),
-            ));
-            continue;
-        };
-        let name = operation.name.clone();
-        let discovered = discovered.clone();
-        commands
-            .entity(entity)
-            .insert(ToolOperationTask(IoTaskPool::get().spawn(async move {
-                discovered.import(&store, &name)?;
-                Ok(ImportedMcpServer { name })
-            })));
     }
 }
 
@@ -602,93 +317,6 @@ impl ToolStore {
     fn discover_mcp_servers(&self) -> (BTreeMap<String, DiscoveredMcpServer>, Vec<String>) {
         let discovered = self.default_mcp_config_paths().discover();
         (discovered.servers, discovered.errors)
-    }
-
-    pub(crate) fn import_mcp_config(&self, path: &Path) -> Result<usize, String> {
-        self.migrate_legacy_storage()?;
-        self.import_mcp_config_to(path, &self.manifest_path())
-    }
-
-    pub(crate) fn import_default_mcp_configs(&self) -> Result<usize, String> {
-        self.default_mcp_config_paths().discover().import_all(self)
-    }
-
-    pub(crate) fn import_mcp_config_to(
-        &self,
-        path: &Path,
-        manifest_path: &Path,
-    ) -> Result<usize, String> {
-        let path = self.expand_user_path(path)?;
-        let servers = McpConfigDocument::from_file(&path)?.into_servers();
-        if servers.is_empty() {
-            return Err(format!("no MCP servers found in {}", path.display()));
-        }
-        let mut manifest = ToolsManifest::read(manifest_path)?;
-        let mut imported = 0;
-        for (name, definition) in servers {
-            if name == "vmux" {
-                continue;
-            }
-            imported += usize::from(manifest.mcp.servers.get(&name) != Some(&definition));
-            manifest.mcp.servers.insert(name, definition);
-        }
-        manifest.write_to(manifest_path)?;
-        Ok(imported)
-    }
-}
-
-impl DiscoveredMcpServers {
-    fn import_all(&self, store: &ToolStore) -> Result<usize, String> {
-        if !self.errors.is_empty() {
-            return Err(self.errors.join("\n"));
-        }
-        let mut conflicts = Vec::new();
-        for (name, server) in &self.servers {
-            if server.conflict {
-                conflicts.push(name.as_str());
-            }
-        }
-        if !conflicts.is_empty() {
-            return Err(format!(
-                "conflicting MCP definitions: {}",
-                conflicts.join(", ")
-            ));
-        }
-        let mut manifest = store.load()?;
-        let mut imported = 0;
-        for (name, server) in &self.servers {
-            if name == "vmux" {
-                continue;
-            }
-            imported += usize::from(manifest.mcp.servers.get(name) != Some(&server.definition));
-            manifest
-                .mcp
-                .servers
-                .insert(name.clone(), server.definition.clone());
-        }
-        store.save(&manifest)?;
-        Ok(imported)
-    }
-
-    fn import(&self, store: &ToolStore, name: &str) -> Result<(), String> {
-        if !self.errors.is_empty() {
-            return Err(self.errors.join("\n"));
-        }
-        let server = self
-            .servers
-            .get(name)
-            .ok_or_else(|| format!("MCP server not found: {name}"))?;
-        if server.conflict {
-            return Err(format!(
-                "MCP server {name} has conflicting definitions; import an explicit config path"
-            ));
-        }
-        let mut manifest = store.load()?;
-        manifest
-            .mcp
-            .servers
-            .insert(name.to_string(), server.definition.clone());
-        store.save(&manifest)
     }
 }
 
@@ -858,5 +486,36 @@ impl McpConfigDocument {
                     })
                     .collect()
             })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn discovery_reads_agent_config_without_mutating_tools_manifest() {
+        let temp = tempfile::tempdir().unwrap();
+        let home = temp.path().join("home");
+        let gemini = home.join(".gemini/settings.json");
+        std::fs::create_dir_all(gemini.parent().unwrap()).unwrap();
+        std::fs::write(
+            gemini,
+            r#"{"mcpServers":{"docs":{"url":"https://example.com/mcp"}}}"#,
+        )
+        .unwrap();
+        let store = ToolStore::new(temp.path().join("tools"), home);
+        let mut manifest = ToolsManifest::default();
+
+        let snapshot =
+            McpProvider::scan(&ToolProvider::new("mcp"), &store, &mut manifest, false).unwrap();
+
+        assert!(manifest.mcp.servers.is_empty());
+        assert_eq!(snapshot.category.items.len(), 1);
+        let item = &snapshot.category.items[0];
+        assert_eq!(item.id, "docs");
+        assert_eq!(item.status, ToolStatus::Installed);
+        assert!(!item.managed);
+        assert!(item.operations.is_empty());
     }
 }

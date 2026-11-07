@@ -7,7 +7,10 @@ use self::state::LayoutUi;
 use dioxus::prelude::*;
 pub(crate) use error::ErrorPage;
 use vmux_command::CommandBarPanel;
-use vmux_ui::hooks::use_theme;
+use vmux_ui::components::dropdown::Dropdown;
+use vmux_ui::hooks::{send, use_theme};
+
+use crate::event::{LayoutOverlayEvent, LayoutOverlayKind};
 
 mod active_session;
 mod bookmark;
@@ -24,6 +27,13 @@ mod window_drag;
 
 #[vmux_page::page(
     component = Page,
+    states = [
+        "ThemeUiState",
+        "LayoutUiState",
+        "ExtensionsUiState",
+        "CommandBarUiState",
+        "KeyClaimsUiState",
+    ],
     placement = layout,
     transparent,
     stylesheet = "./assets/index.css",
@@ -36,9 +46,13 @@ pub fn Page() -> Element {
     use_theme();
     let layout_ui = LayoutUi::use_state();
     layout_ui.provide();
+    let layout = layout_ui.use_selector(|state| state.layout.unwrap_or_default());
+    let center_offset = layout().main_cef_center_offset();
 
     rsx! {
-        div { class: "fixed inset-0 pointer-events-none text-foreground",
+        div {
+            class: "fixed inset-0 pointer-events-none text-foreground",
+            style: "--vmux-command-bar-center-offset:{center_offset}px;",
             SideSheetView {}
             HeaderView {}
             CommandBarPanel {}
@@ -49,15 +63,68 @@ pub fn Page() -> Element {
 
 #[component]
 fn ExtensionPopup() -> Element {
-    let ui = LayoutUi::current().value();
-    if ui.extension_popup.id.is_empty() {
+    let popup = LayoutUi::current().use_selector(|state| {
+        (
+            state.extension_popup.clone(),
+            state.extension_popup_size.clone(),
+        )
+    });
+    let (popup, preferred_size) = popup();
+    if popup.id.is_empty() {
         return rsx! {};
     }
 
     rsx! {
         ExtensionPopupModal {
-            popup: ui.extension_popup,
-            preferred_size: ui.extension_popup_size,
+            popup,
+            preferred_size,
+        }
+    }
+}
+
+#[component]
+pub(super) fn LayoutDropdown(
+    id: String,
+    open: bool,
+    #[props(default)] class: String,
+    #[props(default)] keyboard_navigation: bool,
+    on_dismiss: EventHandler<()>,
+    children: Element,
+) -> Element {
+    let dismiss_revision =
+        LayoutUi::current().use_selector(|state| state.overlay_dismiss_revision)();
+    let mut observed_dismiss_revision = use_signal(|| dismiss_revision);
+    use_effect(use_reactive!(|(dismiss_revision, open)| {
+        if dismiss_revision <= *observed_dismiss_revision.peek() {
+            return;
+        }
+        observed_dismiss_revision.set(dismiss_revision);
+        if open {
+            on_dismiss.call(());
+        }
+    }));
+    let overlay_id = id.clone();
+    use_effect(use_reactive!(|(overlay_id, open)| {
+        let _ = send(&LayoutOverlayEvent {
+            id: overlay_id.clone(),
+            active: open,
+            kind: LayoutOverlayKind::Popover,
+        });
+    }));
+    use_drop(move || {
+        let _ = send(&LayoutOverlayEvent {
+            id,
+            active: false,
+            kind: LayoutOverlayKind::Popover,
+        });
+    });
+    rsx! {
+        Dropdown {
+            open,
+            class,
+            keyboard_navigation,
+            on_dismiss,
+            {children}
         }
     }
 }

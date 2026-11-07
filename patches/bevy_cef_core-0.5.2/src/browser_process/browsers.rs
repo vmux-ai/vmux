@@ -1,7 +1,8 @@
 use crate::browser_process::ClientHandlerBuilder;
 use crate::browser_process::client_handler::FocusCanceler;
 use crate::browser_process::client_handler::{
-    BinEmitEventHandler, BinIpcEventRaw, IpcEventRaw, JsEmitEventHandler, SnapshotResultHandler,
+    BinDocumentContextHandler, BinEmitEventHandler, BinIpcContext, BinIpcEventRaw,
+    HistorySwipeHandler, HistorySwipeRaw, IpcEventRaw, JsEmitEventHandler, SnapshotResultHandler,
     SnapshotResultRaw,
 };
 use crate::prelude::*;
@@ -45,6 +46,7 @@ use crate::browser_process::permission_handler::{
 };
 use crate::browser_process::renderer_handler::SharedDeviceScaleFactor;
 use crate::browser_process::request_handler::RequestHandlerBuilder;
+use crate::browser_process::request_handler::WebviewRendererTerminatedSenderInner;
 pub use keyboard::*;
 
 /// Default CEF [`BrowserSettings::background_color`] ARGB.
@@ -194,6 +196,8 @@ pub struct WebviewBrowser {
     last_corner_radius_all_corners: Cell<Option<bool>>,
     #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
     last_focus_ring: Cell<Option<(f64, f64, f64, f64)>>,
+    #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+    last_z_position: Cell<Option<f64>>,
     /// Last value passed to [`Browsers::set_windowed_focus`]. Re-asserting focus every frame
     /// resets the renderer's input state, so only transitions are forwarded.
     last_renderer_focus: Cell<Option<bool>>,
@@ -206,6 +210,7 @@ pub struct WebviewBrowser {
     /// windowless API and produces no DOM key events. It is gone; AppKit is the only way in now.
     /// See docs/specs/2026-08-08-osr-free-desktop-design.md.
     windowed: bool,
+    bin_ipc_context: BinIpcContext,
     allow_native_focus: bool,
     webview_popup_sender: WebviewPopupSenderInner,
     texture_wake: Option<TextureWake>,
@@ -213,6 +218,8 @@ pub struct WebviewBrowser {
     native_liquid_glass: Option<objc2::rc::Retained<objc2_app_kit::NSGlassEffectView>>,
     #[cfg(target_os = "macos")]
     child_window: std::cell::RefCell<Option<objc2::rc::Retained<objc2_app_kit::NSPanel>>>,
+    #[cfg(target_os = "macos")]
+    interaction_shield: RefCell<Option<objc2::rc::Retained<objc2_app_kit::NSView>>>,
     #[cfg(all(target_os = "macos", feature = "native-video-overlay"))]
     media_overlay: RefCell<Option<MediaOverlay>>,
     #[cfg(target_os = "macos")]
@@ -253,6 +260,7 @@ pub struct Browsers {
     /// Webviews whose page is served by some other engine, and which therefore have no entry in
     /// [`Self::browsers`] yet are perfectly able to receive a host event.
     externally_hosted: HashSet<Entity>,
+    next_bin_ipc_surface_generation: u64,
 }
 
 impl Default for Browsers {
@@ -262,6 +270,7 @@ impl Default for Browsers {
             shared_disk_context: None,
             color_scheme: CefColorMode::default(),
             externally_hosted: HashSet::default(),
+            next_bin_ipc_surface_generation: 0,
         }
     }
 }
@@ -303,6 +312,7 @@ impl Browsers {
         requester: Requester,
         ipc_event_sender: Sender<IpcEventRaw>,
         bin_ipc_event_sender: Sender<BinIpcEventRaw>,
+        history_swipe_sender: Sender<HistorySwipeRaw>,
         snapshot_result_sender: Sender<SnapshotResultRaw>,
         system_cursor_icon_sender: SystemCursorIconSenderInner,
         webview_loading_state_sender: WebviewLoadingStateSenderInner,
@@ -310,6 +320,7 @@ impl Browsers {
         webview_cef_state_sender: WebviewCefStateSenderInner,
         media_permission_sender: MediaPermissionSenderInner,
         webview_popup_sender: WebviewPopupSenderInner,
+        renderer_terminated_sender: WebviewRendererTerminatedSenderInner,
         texture_wake: Option<TextureWake>,
         initialize_scripts: &[String],
         _window_handle: Option<RawWindowHandle>,
@@ -321,23 +332,25 @@ impl Browsers {
         shared_texture: bool,
         native_liquid_glass: bool,
         allow_native_focus: bool,
+        bin_ipc_blocked: bool,
     ) {
         let _ = native_liquid_glass;
         // Only consumed by the macOS windowless window-info below; non-macOS OSR is CPU-only.
         let _ = shared_texture;
         let windowless_frame_rate = normalize_windowless_frame_rate(windowless_frame_rate);
-        info!(
-            "cef_create_browser webview={webview:?} uri={_uri} size={}x{} scale={device_scale_factor} windowed={windowed} bg={background_color:?} fps={windowless_frame_rate} native_liquid_glass={native_liquid_glass} allow_native_focus={allow_native_focus}",
-            webview_size.x, webview_size.y
-        );
         let size = Rc::new(Cell::new(webview_size));
         let device_scale = Rc::new(Cell::new(device_scale_factor));
+        self.next_bin_ipc_surface_generation =
+            self.next_bin_ipc_surface_generation.wrapping_add(1).max(1);
+        let bin_ipc_context =
+            BinIpcContext::new(self.next_bin_ipc_surface_generation, _uri, bin_ipc_blocked);
         let mut client = self.client_handler(
             webview,
             size.clone(),
             device_scale.clone(),
             ipc_event_sender,
             bin_ipc_event_sender,
+            history_swipe_sender,
             snapshot_result_sender,
             system_cursor_icon_sender,
             webview_loading_state_sender,
@@ -345,8 +358,10 @@ impl Browsers {
             webview_cef_state_sender,
             media_permission_sender,
             webview_popup_sender.clone(),
+            renderer_terminated_sender,
             texture_wake.clone(),
             !allow_native_focus,
+            bin_ipc_context.clone(),
         );
 
         // `RequestContext::register_scheme_handler_factory` is not always enough: some navigations
@@ -458,7 +473,13 @@ impl Browsers {
                 background_color: background_color.unwrap_or(CEF_OSR_BACKGROUND_COLOR_ARGB),
                 ..Default::default()
             }),
-            Self::create_extra_info(initialize_scripts, _uri).as_mut(),
+            Self::create_extra_info(
+                initialize_scripts,
+                _uri,
+                bin_ipc_context.surface_generation(),
+                bin_ipc_context.ipc_epoch(),
+            )
+            .as_mut(),
             context_for_browser,
         )
         .expect("Failed to create browser");
@@ -468,6 +489,15 @@ impl Browsers {
             host.was_hidden(0);
         }
         #[cfg(target_os = "macos")]
+        if windowed {
+            use objc2_app_kit::NSView;
+            let handle = host.window_handle();
+            if !handle.is_null() {
+                let view: &NSView = unsafe { &*handle.cast::<NSView>() };
+                view.setHidden(true);
+            }
+        }
+        #[cfg(target_os = "macos")]
         let native_liquid_glass =
             (windowed && native_liquid_glass).then(|| Self::create_native_liquid_glass(&host));
         #[cfg(target_os = "macos")]
@@ -475,6 +505,8 @@ impl Browsers {
         let webview_browser = WebviewBrowser {
             #[cfg(target_os = "macos")]
             child_window: std::cell::RefCell::new(None),
+            #[cfg(target_os = "macos")]
+            interaction_shield: RefCell::new(None),
             host,
             client: browser,
             size,
@@ -486,8 +518,10 @@ impl Browsers {
             last_corner_radius: Cell::new(None),
             last_corner_radius_all_corners: Cell::new(None),
             last_focus_ring: Cell::new(None),
+            last_z_position: Cell::new(None),
             last_renderer_focus: Cell::new(None),
             windowed,
+            bin_ipc_context,
             allow_native_focus,
             webview_popup_sender,
             texture_wake,
@@ -512,6 +546,47 @@ impl Browsers {
     #[inline]
     pub fn has_browser(&self, webview: Entity) -> bool {
         self.browsers.contains_key(&webview)
+    }
+
+    pub fn bin_ipc_context(&self, webview: &Entity) -> Option<(u64, u64, u64)> {
+        let context = &self.browsers.get(webview)?.bin_ipc_context;
+        Some((
+            context.surface_generation(),
+            context.navigation_revision(),
+            context.ipc_epoch(),
+        ))
+    }
+
+    pub fn loading_identity(&self, webview: &Entity) -> Option<(u64, u64)> {
+        let context = &self.browsers.get(webview)?.bin_ipc_context;
+        Some((context.surface_generation(), context.navigation_epoch()))
+    }
+
+    pub fn set_bin_ipc_blocked(&self, webview: &Entity, blocked: bool) {
+        if let Some(browser) = self.browsers.get(webview) {
+            browser.bin_ipc_context.set_blocked(blocked);
+            if let Some(mut message) =
+                process_message_create(Some(&PROCESS_MESSAGE_BIN_IPC_EPOCH.into()))
+                && let Some(arguments) = message.argument_list()
+                && let Some(frame) = browser.client.main_frame()
+            {
+                arguments.set_string(
+                    0,
+                    Some(
+                        &browser
+                            .bin_ipc_context
+                            .ipc_epoch()
+                            .to_string()
+                            .as_str()
+                            .into(),
+                    ),
+                );
+                frame.send_process_message(
+                    ProcessId::from(cef_dll_sys::cef_process_id_t::PID_RENDERER),
+                    Some(&mut message),
+                );
+            }
+        }
     }
 
     #[inline]
@@ -603,6 +678,19 @@ impl Browsers {
         ))
     }
 
+    pub fn commit_navigation(
+        &self,
+        webview: &Entity,
+        url: &str,
+        navigation_epoch: Option<u64>,
+    ) -> Option<(u64, u64)> {
+        let context = &self.browsers.get(webview)?.bin_ipc_context;
+        if navigation_epoch.is_some_and(|epoch| epoch != context.navigation_epoch()) {
+            return None;
+        }
+        Some((context.surface_generation(), context.commit(url)))
+    }
+
     #[cfg(not(target_os = "macos"))]
     pub fn windowed_view_state(&self, _: &Entity) -> Option<String> {
         None
@@ -640,6 +728,10 @@ impl Browsers {
     /// so input forwarding, sizing and teardown correctly do nothing.
     pub fn set_externally_hosted(&mut self, webview: Entity) {
         self.externally_hosted.insert(webview);
+    }
+
+    pub fn unset_externally_hosted(&mut self, webview: Entity) {
+        self.externally_hosted.remove(&webview);
     }
 
     /// `WasHidden` for a windowed browser is driven by its native view, not by OSR bookkeeping.
@@ -882,7 +974,7 @@ impl Browsers {
             && browser.allow_native_focus
         {
             #[cfg(target_os = "macos")]
-            if focused {
+            {
                 use objc2_app_kit::{NSResponder, NSView};
 
                 let handle = browser.host.window_handle();
@@ -897,9 +989,11 @@ impl Browsers {
                                         || responder_view.isDescendantOf(view)
                                 })
                         });
-                        if !owns_focus {
+                        if focused && !owns_focus {
                             let responder: &NSResponder = view;
                             let _ = window.makeFirstResponder(Some(responder));
+                        } else if !focused && owns_focus {
+                            let _ = window.makeFirstResponder(None::<&NSResponder>);
                         }
                     }
                 }
@@ -918,10 +1012,13 @@ impl Browsers {
             && let Some(argument_list) = process_message.argument_list()
             && let Some(browser) = self.browsers.get(webview)
             && let Some(frame) = browser.client.main_frame()
+            && let Some((token, ipc_epoch)) = browser.bin_ipc_context.current_authority()
             && crate::util::is_trusted_embedded_page(&frame.url().into_string())
         {
             argument_list.set_string(0, Some(&id.into().as_str().into()));
             argument_list.set_string(1, Some(&event.to_string().as_str().into()));
+            argument_list.set_string(2, Some(&token.as_str().into()));
+            argument_list.set_string(3, Some(&ipc_epoch.to_string().as_str().into()));
             frame.send_process_message(
                 ProcessId::from(cef_dll_sys::cef_process_id_t::PID_RENDERER),
                 Some(&mut process_message),
@@ -936,10 +1033,13 @@ impl Browsers {
             && let Some(argument_list) = process_message.argument_list()
             && let Some(browser) = self.browsers.get(webview)
             && let Some(frame) = browser.client.main_frame()
+            && let Some((token, ipc_epoch)) = browser.bin_ipc_context.current_authority()
             && crate::util::is_trusted_embedded_page(&frame.url().into_string())
         {
             argument_list.set_string(0, Some(&id.into().as_str().into()));
             argument_list.set_string(1, Some(&json_body.into()));
+            argument_list.set_string(2, Some(&token.as_str().into()));
+            argument_list.set_string(3, Some(&ipc_epoch.to_string().as_str().into()));
             frame.send_process_message(
                 ProcessId::from(cef_dll_sys::cef_process_id_t::PID_RENDERER),
                 Some(&mut process_message),
@@ -966,12 +1066,22 @@ impl Browsers {
     }
 
     #[allow(dead_code)]
-    pub fn emit_event_bytes(&self, webview: &Entity, id: impl Into<String>, payload: &[u8]) {
+    pub fn emit_event_bytes(
+        &self,
+        webview: &Entity,
+        id: impl Into<String>,
+        payload: &[u8],
+        authority: (u64, u64, u64),
+    ) -> bool {
         if let Some(mut process_message) =
             process_message_create(Some(&PROCESS_MESSAGE_BIN_HOST_EMIT.into()))
             && let Some(argument_list) = process_message.argument_list()
             && let Some(browser) = self.browsers.get(webview)
             && let Some(frame) = browser.client.main_frame()
+            && let Some(token) =
+                browser
+                    .bin_ipc_context
+                    .authority_token(authority.0, authority.1, authority.2)
             && crate::util::is_trusted_embedded_page(&frame.url().into_string())
         {
             argument_list.set_string(0, Some(&id.into().as_str().into()));
@@ -983,15 +1093,22 @@ impl Browsers {
             {
                 argument_list.set_binary(1, Some(&mut binary));
             }
+            argument_list.set_string(2, Some(&token.as_str().into()));
+            argument_list.set_string(3, Some(&authority.2.to_string().as_str().into()));
             frame.send_process_message(
                 ProcessId::from(cef_dll_sys::cef_process_id_t::PID_RENDERER),
                 Some(&mut process_message),
             );
-        };
+            return true;
+        }
+        false
     }
 
     pub fn resize(&self, webview: &Entity, size: Vec2, device_scale_factor: f32) {
         if let Some(browser) = self.browsers.get(webview) {
+            if browser.size.get() == size && browser.device_scale.get() == device_scale_factor {
+                return;
+            }
             browser.size.set(size);
             browser.device_scale.set(device_scale_factor);
             browser.host.notify_screen_info_changed();
@@ -1655,6 +1772,9 @@ impl Browsers {
         let Some(browser) = self.browsers.get(webview) else {
             return;
         };
+        if browser.hidden.get() == hidden {
+            return;
+        }
         let handle = browser.host.window_handle();
         if handle.is_null() {
             return;
@@ -1664,16 +1784,63 @@ impl Browsers {
             glass.as_super().setHidden(hidden);
         }
         view.setHidden(hidden);
-        if browser.hidden.replace(hidden) != hidden {
-            browser.host.was_hidden(hidden as _);
-            if !hidden {
-                browser.host.was_resized();
+        browser.hidden.set(hidden);
+        if let Some(child) = browser.child_window.borrow().clone() {
+            if hidden {
+                child.orderOut(None);
+            } else if !child.isVisible() {
+                child.orderFront(None);
             }
+        }
+        browser.host.was_hidden(hidden as _);
+        if !hidden {
+            browser.host.was_resized();
         }
     }
 
     #[cfg(not(target_os = "macos"))]
     pub fn set_windowed_hidden(&self, _: &Entity, _: bool) {}
+
+    #[cfg(target_os = "macos")]
+    pub fn set_windowed_interactive(&self, webview: &Entity, interactive: bool) {
+        use objc2::{MainThreadMarker, MainThreadOnly};
+        use objc2_app_kit::{NSAutoresizingMaskOptions, NSView};
+
+        let Some(browser) = self.browsers.get(webview) else {
+            return;
+        };
+        if !browser.windowed {
+            return;
+        }
+        if interactive {
+            if let Some(shield) = browser.interaction_shield.borrow_mut().take() {
+                shield.removeFromSuperview();
+            }
+            return;
+        }
+        self.set_windowed_focus(webview, false);
+        if browser.interaction_shield.borrow().is_some() {
+            return;
+        }
+        let Some(mtm) = MainThreadMarker::new() else {
+            return;
+        };
+        let handle = browser.host.window_handle();
+        if handle.is_null() {
+            return;
+        }
+        let view: &NSView = unsafe { &*handle.cast::<NSView>() };
+        let shield = NSView::initWithFrame(NSView::alloc(mtm), view.bounds());
+        shield.setAutoresizingMask(
+            NSAutoresizingMaskOptions::ViewWidthSizable
+                | NSAutoresizingMaskOptions::ViewHeightSizable,
+        );
+        view.addSubview(&shield);
+        *browser.interaction_shield.borrow_mut() = Some(shield);
+    }
+
+    #[cfg(not(target_os = "macos"))]
+    pub fn set_windowed_interactive(&self, _: &Entity, _: bool) {}
 
     /// Move a windowed browser's native view to the front of its siblings.
     ///
@@ -1827,11 +1994,6 @@ impl Browsers {
                 cef_view.setFrame(bounds);
             }
         }
-        if !child.isVisible() {
-            child.orderFront(None);
-        }
-        // The standard buttons are not created until the window is first displayed, so hiding them
-        // at construction time is a no-op and they show through the chromeless surface.
         true
     }
 
@@ -1944,6 +2106,9 @@ impl Browsers {
         if !browser.windowed {
             return;
         }
+        if browser.last_z_position.get() == Some(z) {
+            return;
+        }
         let handle = browser.host.window_handle();
         if handle.is_null() {
             return;
@@ -1957,6 +2122,7 @@ impl Browsers {
         target.setWantsLayer(true);
         if let Some(layer) = target.layer() {
             layer.setZPosition(z);
+            browser.last_z_position.set(Some(z));
         }
     }
 
@@ -2037,14 +2203,13 @@ impl Browsers {
     /// The browser will be removed from the hash map after closing.
     pub fn close(&mut self, webview: &Entity) {
         if let Some(browser) = self.browsers.remove(webview) {
-            info!(
-                "cef_close_browser webview={webview:?} windowed={}",
-                browser.windowed
-            );
             #[cfg(target_os = "macos")]
             {
                 use objc2::ClassType;
                 use objc2_app_kit::NSView;
+                if let Some(shield) = browser.interaction_shield.borrow_mut().take() {
+                    shield.removeFromSuperview();
+                }
                 if let Some(glass) = &browser.native_liquid_glass {
                     glass.setContentView(None);
                     glass.as_super().removeFromSuperview();
@@ -2094,16 +2259,15 @@ impl Browsers {
     /// ## Reference
     ///
     /// - [`GoBack`](https://cef-builds.spotifycdn.com/docs/122.0/classCefBrowser.html#a85b02760885c070e4ad2a2705cea56cb)
-    pub fn go_back(&self, webview: &Entity) {
-        if let Some(browser) = self.browsers.get(webview) {
-            let can = browser.client.can_go_back();
-            bevy::log::info!("[nav] go_back {:?} can_go_back={}", webview, can);
-            if can == 1 {
-                browser.client.go_back();
-            }
-        } else {
-            bevy::log::warn!("[nav] go_back {:?} — browser not found", webview);
+    pub fn go_back(&self, webview: &Entity) -> Option<(u64, u64)> {
+        let browser = self.browsers.get(webview)?;
+        let can = browser.client.can_go_back();
+        if can != 1 {
+            return None;
         }
+        let revision = browser.bin_ipc_context.history();
+        browser.client.go_back();
+        Some((browser.bin_ipc_context.surface_generation(), revision))
     }
 
     /// Navigate forwards.
@@ -2111,16 +2275,15 @@ impl Browsers {
     /// ## Reference
     ///
     /// - [`GoForward`](https://cef-builds.spotifycdn.com/docs/122.0/classCefBrowser.html#aa8e97fc210ee0e73f16b2d98482419d0)
-    pub fn go_forward(&self, webview: &Entity) {
-        if let Some(browser) = self.browsers.get(webview) {
-            let can = browser.client.can_go_forward();
-            bevy::log::info!("[nav] go_forward {:?} can_go_forward={}", webview, can);
-            if can == 1 {
-                browser.client.go_forward();
-            }
-        } else {
-            bevy::log::warn!("[nav] go_forward {:?} — browser not found", webview);
+    pub fn go_forward(&self, webview: &Entity) -> Option<(u64, u64)> {
+        let browser = self.browsers.get(webview)?;
+        let can = browser.client.can_go_forward();
+        if can != 1 {
+            return None;
         }
+        let revision = browser.bin_ipc_context.history();
+        browser.client.go_forward();
+        Some((browser.bin_ipc_context.surface_generation(), revision))
     }
 
     /// Navigate a specific webview to a new URL.
@@ -2132,26 +2295,34 @@ impl Browsers {
         }
     }
 
-    pub fn navigate(&self, webview: &Entity, url: &str) {
-        if let Some(browser) = self.browsers.get(webview)
-            && let Some(frame) = browser.client.main_frame()
-        {
-            frame.load_url(Some(&url.into()));
-        }
+    pub fn navigate(&self, webview: &Entity, url: &str) -> Option<(u64, u64)> {
+        let browser = self.browsers.get(webview)?;
+        let frame = browser.client.main_frame()?;
+        let revision = browser.bin_ipc_context.navigate(url);
+        frame.load_url(Some(&url.into()));
+        Some((browser.bin_ipc_context.surface_generation(), revision))
     }
 
     /// Reload a specific webview (normal reload, may use cache — browser ⌘R / Ctrl+R).
-    pub fn reload_webview(&self, webview: &Entity) {
+    pub fn reload_webview(&self, webview: &Entity) -> Option<(u64, u64)> {
+        let browser = self.browsers.get(webview)?;
+        let revision = browser.bin_ipc_context.reload();
+        browser.client.reload();
+        Some((browser.bin_ipc_context.surface_generation(), revision))
+    }
+
+    pub fn stop_loading_webview(&self, webview: &Entity) {
         if let Some(browser) = self.browsers.get(webview) {
-            browser.client.reload();
+            browser.client.stop_load();
         }
     }
 
     /// Hard-reload a specific webview (bypass HTTP cache — browser ⌘⇧R / Ctrl+Shift+R).
-    pub fn reload_webview_ignore_cache(&self, webview: &Entity) {
-        if let Some(browser) = self.browsers.get(webview) {
-            browser.client.reload_ignore_cache();
-        }
+    pub fn reload_webview_ignore_cache(&self, webview: &Entity) -> Option<(u64, u64)> {
+        let browser = self.browsers.get(webview)?;
+        let revision = browser.bin_ipc_context.reload();
+        browser.client.reload_ignore_cache();
+        Some((browser.bin_ipc_context.surface_generation(), revision))
     }
 
     /// Returns the current zoom level for the specified webview.
@@ -2446,6 +2617,7 @@ impl Browsers {
         device_scale: SharedDeviceScaleFactor,
         ipc_event_sender: Sender<IpcEventRaw>,
         bin_ipc_event_sender: Sender<BinIpcEventRaw>,
+        history_swipe_sender: Sender<HistorySwipeRaw>,
         snapshot_result_sender: Sender<SnapshotResultRaw>,
         system_cursor_icon_sender: SystemCursorIconSenderInner,
         webview_loading_state_sender: WebviewLoadingStateSenderInner,
@@ -2453,8 +2625,10 @@ impl Browsers {
         webview_cef_state_sender: WebviewCefStateSenderInner,
         media_permission_sender: MediaPermissionSenderInner,
         webview_popup_sender: WebviewPopupSenderInner,
+        renderer_terminated_sender: WebviewRendererTerminatedSenderInner,
         texture_wake: Option<TextureWake>,
         cancel_native_focus: bool,
+        bin_ipc_context: BinIpcContext,
     ) -> Client {
         let client = ClientHandlerBuilder::new(RenderHandlerBuilder::build(
             webview,
@@ -2478,19 +2652,31 @@ impl Browsers {
                 webview,
                 webview_loading_state_sender,
                 webview_committed_nav_sender,
+                bin_ipc_context.clone(),
             ))
             .with_life_span_handler(LifeSpanHandlerBuilder::build(
                 webview,
                 webview_popup_sender.clone(),
                 texture_wake.clone(),
             ))
-            .with_request_handler(RequestHandlerBuilder::build(webview, webview_popup_sender))
+            .with_request_handler(RequestHandlerBuilder::build(
+                webview,
+                webview_popup_sender,
+                renderer_terminated_sender,
+                texture_wake,
+            ))
             .with_permission_handler(PermissionHandlerBuilder::build(
                 webview,
                 media_permission_sender,
             ))
             .with_message_handler(JsEmitEventHandler::new(webview, ipc_event_sender))
-            .with_message_handler(BinEmitEventHandler::new(webview, bin_ipc_event_sender))
+            .with_message_handler(HistorySwipeHandler::new(webview, history_swipe_sender))
+            .with_message_handler(BinEmitEventHandler::new(
+                webview,
+                bin_ipc_event_sender,
+                bin_ipc_context.clone(),
+            ))
+            .with_message_handler(BinDocumentContextHandler::new(bin_ipc_context))
             .with_message_handler(SnapshotResultHandler::new(webview, snapshot_result_sender))
             .build()
     }
@@ -2504,18 +2690,30 @@ impl Browsers {
         }
     }
 
-    fn create_extra_info(scripts: &[String], uri: &str) -> Option<DictionaryValue> {
-        if scripts.is_empty() {
-            return None;
-        }
+    fn create_extra_info(
+        scripts: &[String],
+        uri: &str,
+        surface_generation: u64,
+        ipc_epoch: u64,
+    ) -> Option<DictionaryValue> {
         let extra = dictionary_value_create()?;
+        if !scripts.is_empty() {
+            extra.set_string(
+                Some(&CefString::from(INIT_SCRIPT_KEY)),
+                Some(&CefString::from(scripts.join(";").as_str())),
+            );
+            extra.set_string(
+                Some(&CefString::from(INIT_SCRIPT_URL_KEY)),
+                Some(&CefString::from(uri)),
+            );
+        }
         extra.set_string(
-            Some(&CefString::from(INIT_SCRIPT_KEY)),
-            Some(&CefString::from(scripts.join(";").as_str())),
+            Some(&CefString::from(BIN_IPC_SURFACE_GENERATION_KEY)),
+            Some(&CefString::from(surface_generation.to_string().as_str())),
         );
         extra.set_string(
-            Some(&CefString::from(INIT_SCRIPT_URL_KEY)),
-            Some(&CefString::from(uri)),
+            Some(&CefString::from(BIN_IPC_EPOCH_KEY)),
+            Some(&CefString::from(ipc_epoch.to_string().as_str())),
         );
         Some(extra)
     }

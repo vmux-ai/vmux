@@ -17,6 +17,11 @@ struct NavigationSnapshotResponseRoute {
     request_id: [u8; 16],
 }
 
+#[derive(Component)]
+struct SnapshotResponseRoute {
+    request_id: [u8; 16],
+}
+
 struct SnapshotToken([u8; 16]);
 
 impl std::fmt::Display for SnapshotToken {
@@ -87,6 +92,20 @@ fn start_snapshots(
                     .request_snapshot(&webview, &SnapshotToken(request.request_id).to_string())
             })
             .unwrap_or(false);
+        if sent {
+            let navigation = navigation_routes
+                .iter()
+                .any(|(_, route)| route.request_id == request.request_id);
+            let scroll = scroll_routes
+                .iter()
+                .any(|(_, route)| route.request_id == request.request_id);
+            if !navigation && !scroll {
+                commands.spawn(SnapshotResponseRoute {
+                    request_id: request.request_id,
+                });
+            }
+            continue;
+        }
         if !sent {
             let message = if explicit_target {
                 "browser target not found"
@@ -127,19 +146,22 @@ fn start_snapshots(
 #[derive(SystemParam)]
 pub(crate) struct BrowserTarget<'w, 's> {
     active: ActivePaneQuery<'w, 's>,
-    targets: vmux_layout::target::BrowserTargets<'w, 's, Browser>,
+    targets: vmux_layout::target::BrowserTargets<'w, 's>,
 }
 
 impl BrowserTarget<'_, '_> {
     pub(crate) fn resolve(&self, webview: Option<Entity>, pane: Option<&str>) -> Option<Entity> {
         if let Some(webview) = webview {
-            return self.targets.contains_webview(webview).then_some(webview);
+            return self.targets.is_settled_webview(webview).then_some(webview);
         }
         if pane.is_some() {
             return self.resolve_pane(pane);
         }
-        self.resolve_pane(None)
-            .or_else(|| self.targets.most_recent_webview())
+        self.resolve_pane(None).or_else(|| {
+            self.targets
+                .most_recent_webview()
+                .filter(|webview| self.targets.is_settled_webview(*webview))
+        })
     }
 
     pub(crate) fn resolve_pane(&self, pane: Option<&str>) -> Option<Entity> {
@@ -152,17 +174,28 @@ impl BrowserTarget<'_, '_> {
                 .filter(|pane| self.targets.contains_pane(*pane))
                 .map(vmux_layout::target::BrowserTarget::Pane),
         }?;
-        self.targets.webview(target)
+        self.targets
+            .webview(target)
+            .filter(|webview| self.targets.is_settled_webview(*webview))
     }
 }
 
 fn drive_pending_nav_snapshots(
     time: Res<Time>,
     mut pending: Query<(Entity, &mut PendingNavigationSnapshot)>,
+    navigations: Query<&vmux_ecs::PageNavigation>,
     loading_q: Query<(), With<Loading>>,
     alive_q: Query<(), With<Browser>>,
     ready_q: Query<(), With<vmux_ecs::page::PageReady>>,
+    transitioning: Query<
+        (),
+        Or<(
+            With<vmux_ecs::PageTransition>,
+            With<vmux_layout::hosted_page::SurfaceHandoff>,
+        )>,
+    >,
     mut snapshot_writer: MessageWriter<BrowserSnapshotRequest>,
+    mut service_requests: MessageWriter<vmux_ecs::service::ServiceRequest>,
     mut commands: Commands,
 ) {
     if pending.is_empty() {
@@ -170,7 +203,24 @@ fn drive_pending_nav_snapshots(
     }
     let now = time.elapsed();
     for (entity, mut nav) in &mut pending {
+        if let (Some(stack), Some(navigation)) = (nav.stack, nav.navigation)
+            && !navigations
+                .get(stack)
+                .is_ok_and(|current| current.matches(navigation))
+        {
+            if let Some(response) = crate::host::PageOpenResponse::from_result(
+                Some(nav.request_id),
+                Err("navigation snapshot superseded by a newer page".to_string()),
+            ) {
+                service_requests.write(response);
+            }
+            commands.entity(entity).despawn();
+            continue;
+        }
         let alive = alive_q.contains(nav.webview);
+        if alive && transitioning.contains(nav.webview) {
+            continue;
+        }
         let ready = ready_q.contains(nav.webview);
         let loading = loading_q.contains(nav.webview);
         if loading {
@@ -198,6 +248,7 @@ fn drive_pending_nav_snapshots(
 
 fn shape_results(
     mut reader: MessageReader<SnapshotResult>,
+    routes: Query<(Entity, &SnapshotResponseRoute)>,
     navigation_routes: Query<(Entity, &NavigationSnapshotResponseRoute)>,
     scroll_routes: Query<(Entity, &crate::scroll::ScrollSnapshotResponseRoute)>,
     mut writer: MessageWriter<BrowserSnapshotResponse>,
@@ -234,10 +285,17 @@ fn shape_results(
             commands.entity(entity).despawn();
             continue;
         }
+        let Some((entity, _)) = routes
+            .iter()
+            .find(|(_, route)| route.request_id == request_id)
+        else {
+            continue;
+        };
         writer.write(BrowserSnapshotResponse {
             request_id,
             result: mapped,
         });
+        commands.entity(entity).despawn();
     }
 }
 
@@ -245,6 +303,52 @@ fn shape_results(
 mod tests {
     use super::*;
     use bevy::ecs::message::Messages;
+
+    #[test]
+    fn superseded_page_open_never_snapshots_the_replacement_page() {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins)
+            .add_message::<BrowserSnapshotRequest>()
+            .add_message::<vmux_ecs::service::ServiceRequest>()
+            .add_systems(Update, drive_pending_nav_snapshots);
+        let stale = vmux_ecs::PageOpenId::new();
+        let current = vmux_ecs::PageOpenId::new();
+        let stack = app
+            .world_mut()
+            .spawn(vmux_ecs::PageNavigation::new(current))
+            .id();
+        let webview = app.world_mut().spawn(Browser).id();
+        let pending = app
+            .world_mut()
+            .spawn(PendingNavigationSnapshot {
+                webview,
+                request_id: [7; 16],
+                started: std::time::Duration::ZERO,
+                saw_loading: false,
+                pane: None,
+                stack: Some(stack),
+                navigation: Some(stale),
+            })
+            .id();
+
+        app.update();
+
+        assert!(app.world().get_entity(pending).is_err());
+        assert!(
+            app.world_mut()
+                .resource_mut::<Messages<BrowserSnapshotRequest>>()
+                .drain()
+                .next()
+                .is_none()
+        );
+        assert_eq!(
+            app.world_mut()
+                .resource_mut::<Messages<vmux_ecs::service::ServiceRequest>>()
+                .drain()
+                .count(),
+            1
+        );
+    }
 
     #[test]
     fn snapshot_results_follow_the_request_entity_route() {
@@ -263,6 +367,12 @@ mod tests {
             .world_mut()
             .spawn(NavigationSnapshotResponseRoute {
                 request_id: navigation_id,
+            })
+            .id();
+        let query_route = app
+            .world_mut()
+            .spawn(SnapshotResponseRoute {
+                request_id: query_id,
             })
             .id();
         let scroll_route = app
@@ -305,6 +415,36 @@ mod tests {
         assert_eq!(scroll.len(), 1);
         assert_eq!(scroll[0].request_id, scroll_id);
         assert!(app.world().get_entity(navigation_route).is_err());
+        assert!(app.world().get_entity(query_route).is_err());
         assert!(app.world().get_entity(scroll_route).is_err());
+    }
+
+    #[test]
+    fn orphaned_snapshot_results_are_discarded() {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins)
+            .add_message::<SnapshotResult>()
+            .add_message::<BrowserSnapshotResponse>()
+            .add_message::<BrowserScrollResponse>()
+            .add_message::<BrowserNavigationSnapshotResponse>()
+            .add_systems(Update, shape_results);
+        let request_id = [9; 16];
+        app.world_mut()
+            .resource_mut::<Messages<SnapshotResult>>()
+            .write(SnapshotResult {
+                webview: Entity::PLACEHOLDER,
+                request_id: SnapshotToken(request_id).to_string(),
+                json: "invalid".to_string(),
+            });
+
+        app.update();
+
+        assert!(
+            app.world_mut()
+                .resource_mut::<Messages<BrowserSnapshotResponse>>()
+                .drain()
+                .next()
+                .is_none()
+        );
     }
 }

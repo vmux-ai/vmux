@@ -1,6 +1,6 @@
 use dioxus::html::geometry::ClientPoint;
 use dioxus::prelude::*;
-use vmux_api::editor::SelSpan;
+use vmux_api::editor::{KeymapKind, SelSpan};
 use vmux_ecs::event::{MdBlock, MdInline, MdListItem, MdTableAlign};
 use vmux_ui::cn::cn;
 use vmux_ui::components::checkbox::Checkbox;
@@ -10,6 +10,19 @@ use vmux_ui::i18n::translate;
 use super::text_style::StyledSpanStyle;
 
 pub const NOTE_CARET_ID: &str = "note-caret";
+
+pub(super) struct CaretStyle;
+
+impl CaretStyle {
+    pub(super) const BAR: &str = "pointer-events-none absolute left-0 top-1/2 h-[1em] -translate-y-1/2 rounded-full bg-[var(--term-cursor,var(--primary))] opacity-80";
+
+    pub(super) fn width(keymap: KeymapKind) -> &'static str {
+        match keymap {
+            KeymapKind::Vscode => "w-px",
+            KeymapKind::Vim => "w-[1.5px]",
+        }
+    }
+}
 
 pub(super) struct HeadingStyle;
 
@@ -106,6 +119,7 @@ impl NoteLineChunk {
 
 #[component]
 pub fn NoteSourceLine(chunks: Vec<NoteLineChunk>, caret_width_class: String) -> Element {
+    let caret_class = CaretStyle::BAR;
     rsx! {
         span {
             "data-note-line-text": "true",
@@ -116,7 +130,7 @@ pub fn NoteSourceLine(chunks: Vec<NoteLineChunk>, caret_width_class: String) -> 
                         key: "caret-{index}",
                         id: NOTE_CARET_ID,
                         class: "relative inline-block h-[1.15em] w-0 scroll-mb-8 scroll-mt-8 align-text-bottom",
-                        span { class: "pointer-events-none absolute inset-y-0 left-0 {caret_width_class} bg-current" }
+                        span { class: "{caret_class} {caret_width_class}" }
                     }
                 }
                 if !chunk.text.is_empty() {
@@ -237,12 +251,14 @@ fn MdList(
                 rsx! {
             li {
                 key: "{index}",
+                id: "note-list-line-{item.source_line}",
                 "data-note-list-line": "{item.source_line}",
                 class: "relative my-1",
                 onpointerdown: {
                     let line = item.source_line;
-                    move |_| {
+                    move |event: Event<PointerData>| {
                         if let Some(ListLineHit(mut hit)) = hit {
+                            event.stop_propagation();
                             hit.set(Some(line));
                         }
                     }

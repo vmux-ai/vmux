@@ -5,7 +5,7 @@ pub use agent::{
 };
 pub use cwd::WorkspaceCwd;
 pub use plugin::SpacePlugin;
-pub use project::{ExpandedProjectDirs, SpaceProjects};
+pub use project::{ActiveProjectRows, ExpandedProjectDirs, SpaceProjects};
 pub use spaces::Spaces;
 pub use tool::SpaceToolPlugin;
 pub use vmux_api::space::{

@@ -284,7 +284,7 @@ fn present(
     mut resized: MessageReader<WindowResized>,
     mut commands: Commands,
 ) {
-    if resized.read().next().is_some() {
+    if resized.read().count() > 0 {
         for (entity, ..) in &popups {
             browsers.hide_child_window(&entity);
             commands.entity(entity).try_despawn();

@@ -11,15 +11,28 @@ use vmux_flex::prelude::*;
 pub struct Browser;
 
 #[derive(Component)]
-#[require(crate::LayoutUiStateUpdates, ReloadRevision)]
+#[require(
+    crate::LayoutUiStateUpdates,
+    ReloadRevision,
+    crate::overlay::LayoutOverlayDismissRevision
+)]
 pub struct LayoutCef;
 
 impl LayoutCef {
+    fn metadata() -> PageMetadata {
+        PageMetadata {
+            title: "vmux".to_string(),
+            url: "vmux://layout/".to_string(),
+            ..Default::default()
+        }
+    }
+
     pub fn bundle(host_window: Entity) -> impl Bundle {
         (
             Self,
             HostsPage,
             RendersLauncherPanel,
+            Self::metadata(),
             HostWindow(host_window),
             Node {
                 width: Val::Percent(100.0),
@@ -212,7 +225,9 @@ impl Browser {
     pub fn hosted_page_with_icon(url: &str, title: &str, icon: PageIcon) -> impl Bundle {
         (
             Self,
+            crate::hosted_page::Surface::new(url),
             WebviewWindowed,
+            WebviewOpaqueWindowedBackground,
             HostsPage,
             PageMetadata {
                 title: title.to_string(),
@@ -276,7 +291,7 @@ mod apply_cef_state_tests {
     }
 
     #[test]
-    fn vmux_agent_url_accepts_dynamic_title_only() {
+    fn vmux_acp_url_accepts_dynamic_title_only() {
         for url in ["vmux://sessions/codex", "vmux://agent/codex"] {
             let mut meta = PageMetadata {
                 url: url.into(),
@@ -375,9 +390,62 @@ mod apply_cef_state_tests {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use bevy_cef::prelude::{
+        BinHostEmitEvent, BinIpcEpoch, BinIpcNavigationRevision, BinIpcSurfaceGeneration, Browsers,
+    };
+    use vmux_api::{BinEvent, UiEventPermissions};
+
+    #[derive(Resource, Default)]
+    struct DeliveredLayoutStates(usize);
 
     fn build_test_page(mut commands: Commands) {
         commands.spawn(Browser::new("https://example.com"));
+    }
+
+    fn record(trigger: On<BinHostEmitEvent>, mut delivered: ResMut<DeliveredLayoutStates>) {
+        if trigger.event().id() != crate::state::LayoutUiState::id() {
+            return;
+        }
+        trigger.event().mark_delivered();
+        delivered.0 += 1;
+    }
+
+    #[test]
+    fn layout_surface_delivers_state_through_its_authoritative_channel() {
+        let mut app = App::new();
+        app.add_plugins((
+            MinimalPlugins,
+            vmux_ecs::UiStatePlugin::<crate::state::LayoutUiState>::default(),
+        ))
+        .init_resource::<DeliveredLayoutStates>()
+        .add_observer(record);
+        let entity = app
+            .world_mut()
+            .spawn(LayoutCef::bundle(Entity::PLACEHOLDER))
+            .id();
+        app.world_mut().entity_mut(entity).insert((
+            BinIpcSurfaceGeneration(1),
+            BinIpcNavigationRevision(1),
+            BinIpcEpoch(1),
+        ));
+        app.world_mut().spawn(UiEventPermissions {
+            url: "vmux://layout/",
+            owns_subtree: false,
+            permissions: &[crate::state::LayoutUiState::PERMISSION],
+        });
+        let mut browsers = Browsers::default();
+        browsers.set_externally_hosted(entity);
+        app.world_mut().insert_non_send(browsers);
+        app.world_mut().trigger(
+            vmux_ecs::UiStateWrite::<crate::state::LayoutUiState>::from_event(
+                entity,
+                &crate::state::LayoutUiStatePatch::default(),
+            ),
+        );
+
+        app.update();
+
+        assert_eq!(app.world().resource::<DeliveredLayoutStates>().0, 1);
     }
 
     #[test]

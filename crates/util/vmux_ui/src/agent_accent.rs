@@ -11,7 +11,8 @@ pub struct AgentAccent {
 
 impl AgentAccent {
     pub fn for_agent(segment: &str) -> Self {
-        match segment {
+        let segment = segment.to_ascii_lowercase();
+        match segment.as_str() {
             "claude" | "claude-acp" => AgentAccent {
                 glow_top: "pointer-events-none absolute -top-1/3 left-1/2 h-[60vh] w-[60vh] -translate-x-1/2 rounded-full bg-rose-500/20 blur-[120px]",
                 glow_bottom: "pointer-events-none absolute -bottom-1/4 right-1/4 h-[44vh] w-[44vh] rounded-full bg-orange-400/10 blur-[120px]",
@@ -38,6 +39,15 @@ impl AgentAccent {
                 accent_bg: "bg-[#00ff41]",
                 cta_shadow: "shadow-lg shadow-[#00ff41]/25 hover:shadow-[#00ff41]/40",
                 rain_rgb: "0 255 65",
+            },
+            segment if segment.contains("mistral") || segment.contains("vibe") => Self {
+                glow_top: "pointer-events-none absolute -top-1/3 left-1/2 h-[60vh] w-[60vh] -translate-x-1/2 rounded-full bg-[#ff7000]/20 blur-[120px]",
+                glow_bottom: "pointer-events-none absolute -bottom-1/4 right-1/4 h-[44vh] w-[44vh] rounded-full bg-[#ff7000]/10 blur-[120px]",
+                grad: "from-[#ff7000] to-[#ff7000]",
+                accent_text: "text-[#d95f00] dark:text-[#ff8b33]",
+                accent_bg: "bg-[#ff7000]",
+                cta_shadow: "shadow-lg shadow-[#ff7000]/25 hover:shadow-[#ff7000]/40",
+                rain_rgb: "255 112 0",
             },
             _ => Self {
                 glow_top: "pointer-events-none absolute -top-1/3 left-1/2 h-[60vh] w-[60vh] -translate-x-1/2 rounded-full bg-orange-500/20 blur-[120px]",
@@ -85,10 +95,19 @@ mod tests {
     }
 
     #[test]
-    fn unknown_falls_back_to_vibe_amber() {
+    fn mistral_vibe_uses_brand_orange() {
+        for id in ["vibe", "mistral-vibe", "Mistral Vibe"] {
+            let a = AgentAccent::for_agent(id);
+            assert_eq!(a.grad, "from-[#ff7000] to-[#ff7000]");
+            assert_eq!(a.accent_bg, "bg-[#ff7000]");
+            assert_eq!(a.rain_rgb, "255 112 0");
+        }
+    }
+
+    #[test]
+    fn unknown_falls_back_to_orange_amber() {
         let a = AgentAccent::for_agent("nope");
         assert_eq!(a.grad, "from-orange-500 to-amber-600");
-        assert_eq!(a.grad, AgentAccent::for_agent("vibe").grad);
         assert_eq!(a.rain_rgb, "251 146 60");
     }
 }

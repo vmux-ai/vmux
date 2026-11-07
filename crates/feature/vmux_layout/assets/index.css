@@ -45,3 +45,7 @@
   background-size: 200% 100%;
   animation: loading-sweep 2s cubic-bezier(0.4, 0, 0.2, 1) infinite;
 }
+
+[data-command-bar-card] {
+  margin-left: var(--vmux-command-bar-center-offset, 0px);
+}

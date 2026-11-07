@@ -3,7 +3,7 @@ use crate::{CommandBarOpenProjection, CommandBarProjector};
 use std::time::{Duration, Instant};
 use vmux_api::command_bar::{
     CommandBarOpenEvent, CommandBarPickRow, CommandBarPicker, CommandBarReadyEvent,
-    CommandBarRenderedEvent, CommandBarSizeEvent, DismissRequest, OpenId,
+    CommandBarRenderedEvent, CommandBarSizeEvent, DeactivateRequest, DismissRequest, OpenId,
 };
 use vmux_api::open_target::OpenTarget;
 use vmux_ecs::launcher::{LauncherDismissRequest, RendersLauncherPanel, RestoreKeyboardToStack};
@@ -50,11 +50,13 @@ impl bevy::app::Plugin for Plugin {
             .add_message::<RestoreKeyboardToStack>()
             .add_plugins(UiEventPlugin::<(
                 DismissRequest,
+                DeactivateRequest,
                 CommandBarReadyEvent,
                 CommandBarRenderedEvent,
                 CommandBarSizeEvent,
             )>::default())
             .add_observer(dismiss)
+            .add_observer(deactivate)
             .add_observer(close)
             .add_observer(close_panel)
             .add_observer(ready)
@@ -454,19 +456,19 @@ struct OpenRequests<'w, 's> {
 impl OpenRequests<'_, '_> {
     fn read(&mut self) -> CommandBarOpenState {
         let mut request = CommandBarOpenState::default();
-        if self.toggle.read().next().is_some() {
+        if self.toggle.read().count() > 0 {
             request.should_toggle = true;
             request.url_override = Some(String::new());
         }
-        if self.edit_page.read().next().is_some() {
+        if self.edit_page.read().count() > 0 {
             request.should_toggle = true;
             request.replace_active_stack = true;
         }
-        if self.path.read().next().is_some() {
+        if self.path.read().count() > 0 {
             request.should_toggle = true;
             request.url_override = Some("/".to_string());
         }
-        if self.commands.read().next().is_some() {
+        if self.commands.read().count() > 0 {
             request.should_toggle = true;
             request.url_override = Some(">".to_string());
         }
@@ -648,8 +650,28 @@ fn close_panel(trigger: On<CommandBarPanelClose>, mut commands: Commands) {
     ));
 }
 
-fn dismiss(trigger: On<UiInput<DismissRequest>>, mut commands: Commands) {
-    commands.trigger(CommandBarDismiss::new(trigger.event().webview, true));
+fn dismiss(
+    trigger: On<UiInput<DismissRequest>>,
+    panels: Query<(), With<RendersLauncherPanel>>,
+    mut commands: Commands,
+) {
+    let webview = trigger.event().webview;
+    if panels.contains(webview) {
+        commands.trigger(CommandBarPanelClose { layout: webview });
+    }
+    commands.trigger(CommandBarDismiss::new(webview, true));
+}
+
+fn deactivate(
+    trigger: On<UiInput<DeactivateRequest>>,
+    panels: Query<(), With<RendersLauncherPanel>>,
+    mut commands: Commands,
+) {
+    let webview = trigger.event().webview;
+    if panels.contains(webview) {
+        commands.trigger(CommandBarPanelClose { layout: webview });
+    }
+    commands.trigger(CommandBarDismiss::new(webview, false));
 }
 
 fn close(
@@ -680,7 +702,7 @@ fn dismiss_requested(
     panel_q: Query<Entity, (With<RendersLauncherPanel>, With<CommandBarPanelActive>)>,
     mut commands: Commands,
 ) {
-    if requests.read().next().is_none() {
+    if requests.read().count() == 0 {
         return;
     }
     for layout_e in &panel_q {
@@ -1357,6 +1379,31 @@ mod tests {
     }
 
     #[test]
+    fn page_dismiss_request_closes_the_panel() {
+        let mut app = panel_app();
+        app.add_plugins(UiEventPlugin::<(DismissRequest,)>::default())
+            .add_observer(dismiss);
+        app.world_mut().spawn((
+            CommandBar,
+            Node {
+                display: Display::None,
+                ..default()
+            },
+            Visibility::Hidden,
+        ));
+        let layout = app.world_mut().spawn(RendersLauncherPanel).id();
+
+        app.world_mut().trigger(UiInput::<DismissRequest> {
+            webview: layout,
+            payload: DismissRequest,
+        });
+        app.world_mut().flush();
+
+        assert_eq!(emitted_to_page(&app), vec![layout]);
+        assert!(!open_payload(&app).open_id.is_open());
+    }
+
+    #[test]
     fn open_page_in_command_bar_marks_payload_as_in_place_target() {
         let mut app = panel_app();
         app.world_mut().spawn(RendersLauncherPanel);
@@ -1364,6 +1411,57 @@ mod tests {
         send(&mut app, "command_bar_edit_page");
 
         assert_eq!(open_payload(&app).target, Some(OpenTarget::InPlace));
+    }
+
+    #[test]
+    fn deactivation_closes_the_panel_and_modal_without_restoring_keyboard_focus() {
+        let mut app = App::new();
+        app.add_plugins((MinimalPlugins, CommandPlugin, Plugin))
+            .init_resource::<bevy_cef::prelude::BinIpcEventRawBuffer>()
+            .init_resource::<EmittedToPage>()
+            .add_observer(capture_page_emit);
+        let stack = app.world_mut().spawn_empty().id();
+        app.world_mut().spawn(CommandBarWorkspaceSnapshot {
+            stack: Some(stack),
+            ..Default::default()
+        });
+        let modal = app
+            .world_mut()
+            .spawn((
+                CommandBar,
+                Node {
+                    display: Display::Flex,
+                    ..default()
+                },
+                Visibility::Visible,
+                KeyboardOwner,
+                CommandBarRenderedOpen(OpenId(1)),
+            ))
+            .id();
+        let layout = app
+            .world_mut()
+            .spawn((RendersLauncherPanel, CommandBarPanelActive))
+            .id();
+        app.world_mut().trigger(UiInput::<DeactivateRequest> {
+            webview: layout,
+            payload: DeactivateRequest,
+        });
+        app.world_mut().flush();
+        assert_eq!(
+            *app.world().get::<Visibility>(modal).unwrap(),
+            Visibility::Hidden
+        );
+        assert_eq!(
+            app.world().get::<Node>(modal).unwrap().display,
+            Display::None
+        );
+        assert!(app.world().get::<KeyboardOwner>(modal).is_none());
+        assert!(!open_payload(&app).open_id.is_open());
+        assert!(
+            app.world()
+                .resource::<Messages<RestoreKeyboardToStack>>()
+                .is_empty()
+        );
     }
 
     #[test]

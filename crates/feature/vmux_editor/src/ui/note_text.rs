@@ -1,3 +1,5 @@
+use pulldown_cmark::{Event, Options, Parser, Tag, TagEnd};
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) enum NoteInlineKind {
     BlockMarker,
@@ -42,6 +44,73 @@ pub(super) struct NoteText<'a> {
 impl<'a> NoteText<'a> {
     pub(super) fn new(source: &'a str) -> Self {
         Self { source }
+    }
+
+    pub(super) fn rendered_position(self, start_line: u32, target: u32) -> (u32, u32) {
+        let options =
+            Options::ENABLE_TABLES | Options::ENABLE_STRIKETHROUGH | Options::ENABLE_TASKLISTS;
+        let mut offset = 0u32;
+        let mut source_end = 0usize;
+        let mut code_block = false;
+        let mut image = false;
+        for (event, range) in Parser::new_ext(self.source, options).into_offset_iter() {
+            let text = match event {
+                Event::Start(Tag::CodeBlock(_)) => {
+                    code_block = true;
+                    continue;
+                }
+                Event::End(TagEnd::CodeBlock) => {
+                    code_block = false;
+                    continue;
+                }
+                Event::Start(Tag::Image { .. }) => {
+                    image = true;
+                    continue;
+                }
+                Event::End(TagEnd::Image) => {
+                    image = false;
+                    continue;
+                }
+                Event::Text(text) | Event::Code(text) | Event::Html(text) => text,
+                Event::SoftBreak => " ".into(),
+                _ => continue,
+            };
+            if image {
+                continue;
+            }
+            let mut cursor = range.start;
+            for character in text.chars() {
+                if code_block && matches!(character, '\n' | '\r') {
+                    continue;
+                }
+                let position = self.source[cursor..range.end]
+                    .find(character)
+                    .map(|index| cursor + index)
+                    .unwrap_or(cursor);
+                if offset == target {
+                    return self
+                        .cell_position(start_line, self.source[..position].chars().count() as u32);
+                }
+                offset = offset.saturating_add(1);
+                cursor = position.saturating_add(character.len_utf8()).min(range.end);
+                source_end = cursor;
+            }
+        }
+        self.cell_position(start_line, self.source[..source_end].chars().count() as u32)
+    }
+
+    pub(super) fn cell_position(self, start_line: u32, offset: u32) -> (u32, u32) {
+        let (line, column) = self.position(start_line, offset);
+        let text = self
+            .source
+            .lines()
+            .nth(line.saturating_sub(start_line) as usize)
+            .unwrap_or_default();
+        let mut cells = 0;
+        for character in text.chars().take(column as usize) {
+            cells += crate::text::DisplayCells::width_of(character);
+        }
+        (line, cells)
     }
 
     pub(super) fn list_marker_prefix_len(line: &str) -> Option<(usize, usize)> {
@@ -307,6 +376,25 @@ impl<'a> NoteText<'a> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn rendered_pointer_skips_hidden_markdown_and_uses_display_cells() {
+        assert_eq!(
+            NoteText::new("日本 `code` end").rendered_position(3, 8),
+            (3, 12)
+        );
+        assert_eq!(NoteText::new("## Heading").rendered_position(7, 4), (7, 7));
+        assert_eq!(
+            NoteText::new("a **bold** end").rendered_position(0, 7),
+            (0, 11)
+        );
+    }
+
+    #[test]
+    fn rendered_pointer_tracks_fenced_code_lines_without_counting_fences() {
+        let source = "```rust\nlet n = 1;\nlet m = 2;\n```";
+        assert_eq!(NoteText::new(source).rendered_position(4, 14), (6, 4));
+    }
 
     struct LiveText;
 

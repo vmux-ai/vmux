@@ -31,6 +31,7 @@ use vmux_api::protocol::{CommandLifecycleKind, ServiceMessage};
 const MAX_PTY_CHUNKS_PER_POLL: usize = 64;
 const _: () = assert!(MAX_PTY_CHUNKS_PER_POLL <= 256);
 const HEAVY_OUTPUT_FRAME_INTERVAL: Duration = Duration::from_millis(100);
+const PTY_EXIT_QUIET_INTERVAL: Duration = Duration::from_millis(50);
 
 #[derive(Clone, Debug)]
 pub enum ProcessUpdate {
@@ -353,6 +354,7 @@ pub struct Process {
     exited: bool,
     exit_reported: bool,
     exit_code: Option<i32>,
+    exit_drain_quiet_since: Option<Instant>,
 }
 
 struct CopyModeState {
@@ -700,6 +702,7 @@ impl Process {
             exited: bool::default(),
             exit_reported: false,
             exit_code: None,
+            exit_drain_quiet_since: None,
         })
     }
 
@@ -746,7 +749,7 @@ impl Process {
         }
     }
 
-    #[cfg(debug_assertions)]
+    #[cfg(any(test, debug_assertions))]
     #[doc(hidden)]
     pub fn process_output_for_test(&mut self, data: &[u8]) {
         self.processor.advance(&mut self.term, data);
@@ -1615,6 +1618,7 @@ impl Process {
         }
         if got_data {
             self.output_viewport_dirty = true;
+            self.exit_drain_quiet_since = None;
         }
         if self.exit_code.is_none()
             && let Ok(Some(status)) = self.child.try_wait()
@@ -1627,13 +1631,22 @@ impl Process {
         self.maybe_broadcast_mode();
         if !self.exit_reported
             && let Some(code) = self.exit_code
-            && self.pty_reader_drained()
-            && self.pty_rx.is_empty()
         {
-            self.exit_reported = true;
-            let _ = self.update_tx.send(ProcessUpdate::Exited {
-                exit_code: Some(code),
-            });
+            let reader_drained = pty_closed || self.pty_reader_drained();
+            if reader_drained && self.pty_rx.is_empty() {
+                let now = Instant::now();
+                let quiet_since = *self.exit_drain_quiet_since.get_or_insert(now);
+                if pty_closed
+                    || now.saturating_duration_since(quiet_since) >= PTY_EXIT_QUIET_INTERVAL
+                {
+                    self.exit_reported = true;
+                    let _ = self.update_tx.send(ProcessUpdate::Exited {
+                        exit_code: Some(code),
+                    });
+                }
+            } else {
+                self.exit_drain_quiet_since = None;
+            }
         }
         if pty_closed && self.exit_code.is_some() {
             self.exited = true;
@@ -2770,6 +2783,17 @@ mod tests {
         let process = mgr.processes.get_mut(&id).expect("process");
         process.pty_rx = pty_rx;
         let mut rx = process.subscribe();
+
+        let exit_deadline = Instant::now() + Duration::from_millis(500);
+        while process.exit_code.is_none() && Instant::now() < exit_deadline {
+            process.poll();
+            assert!(
+                !matches!(rx.try_recv(), Ok(ProcessUpdate::Exited { .. })),
+                "child exit must wait for a quiet PTY interval"
+            );
+            std::thread::sleep(Duration::from_millis(1));
+        }
+        assert!(process.exit_code.is_some(), "child should exit");
 
         let deadline = Instant::now() + Duration::from_millis(500);
         let mut reported = false;

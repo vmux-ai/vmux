@@ -4,15 +4,16 @@ use dioxus::prelude::*;
 use vmux_api::bookmark::{
     BookmarkAddRequest, BookmarkPinUrlRequest, BookmarkToggleRequest, BookmarkUnpinRequest,
 };
-use vmux_ecs::event::team::{TeamMemberFocusRequest, TeamMemberRow, TeamOpenRequest};
+use vmux_ecs::event::team::{ProfileRow, TeamMemberRow, TeamOpenRequest, TeamProfileSwitchRequest};
 use vmux_ui::cn::cn;
 use vmux_ui::components::avatar::Avatar;
 use vmux_ui::components::context_menu::{ContextMenuContent, ContextMenuItem, ContextMenuTrigger};
+use vmux_ui::components::dropdown::{DropdownAlign, DropdownOption, DropdownPopup};
 use vmux_ui::components::icon::Icon;
-use vmux_ui::favicon::FaviconSource;
 use vmux_ui::hooks::send;
 use vmux_ui::i18n::translate;
 
+use super::LayoutDropdown;
 use super::bookmark::LayoutContextMenu;
 use super::extension::ExtensionBar;
 use super::remote::RemoteControl;
@@ -22,15 +23,18 @@ use super::tab_drag::TabDrag;
 use super::window_drag::WindowDragRegion;
 use crate::event::{
     HeaderAddressFocusRequest, HeaderBackRequest, HeaderForwardRequest, HeaderReloadRequest,
-    StackNavigationState, StackRow, TabCloseRequest, TabCreateRequest, TabStripRow, TabStripState,
+    HeaderStopRequest, StackNavigationState, StackRow, TabCloseRequest, TabCreateRequest,
+    TabStripRow, TabStripState,
 };
 
 #[component]
 pub(crate) fn HeaderView() -> Element {
     let layout = LayoutUi::current();
-    let ui = layout.value();
-    let state = ui.layout.unwrap_or_default();
-    if !ui.overlay_ready(&layout.error()) || !state.header_visible() {
+    let geometry = layout.use_selector(|ui| ui.layout);
+    let Some(state) = geometry() else {
+        return rsx! {};
+    };
+    if !state.header_visible() {
         return rsx! {};
     }
     let header_vars = format!(
@@ -41,12 +45,11 @@ pub(crate) fn HeaderView() -> Element {
         state.header_height,
         state.tab_row_pad_left(),
     );
-
     rsx! {
         div {
-            class: "pointer-events-auto fixed top-[var(--vmux-header-top)] left-[var(--vmux-header-left)] right-[var(--vmux-header-right)] h-[var(--vmux-header-height)]",
+            class: "pointer-events-auto fixed top-[var(--vmux-header-top)] left-[var(--vmux-header-left)] right-[var(--vmux-header-right)] h-[var(--vmux-header-height)] overflow-hidden",
             style: "{header_vars}",
-            HeaderContent {}
+            div { class: "h-[76px]", HeaderContent {} }
         }
     }
 }
@@ -54,24 +57,64 @@ pub(crate) fn HeaderView() -> Element {
 #[component]
 fn HeaderContent() -> Element {
     let layout = LayoutUi::current();
-    let ui = layout.value();
-    let stacks_state = ui.stacks.unwrap_or_default();
-    let tab_strip = ui.tab_strip.unwrap_or_default();
+    let header = layout.use_selector(|ui| {
+        (
+            ui.stacks.clone(),
+            ui.tab_strip.clone(),
+            ui.header.clone(),
+            ui.extensions.clone(),
+            ui.remote.clone(),
+        )
+    });
+    let (stacks_state, tab_strip, header, extensions, remote) = header();
+    let loading = layout.use_selector(|state| {
+        state
+            .side_sheet
+            .as_ref()
+            .and_then(|sheet| sheet.active_page.as_ref())
+            .is_some_and(|page| page.is_loading)
+    })();
+    let stacks_state = stacks_state.unwrap_or_default();
+    let projected_active = stacks_state
+        .stacks
+        .iter()
+        .find(|row| row.is_active)
+        .cloned();
+    let tab_strip = tab_strip.unwrap_or_default();
     let crate::event::HeaderState {
-        active: active_row,
-        metadata: active_metadata,
+        address: page_address,
+        active: retained_active,
+        metadata: retained_metadata,
         bookmarked: is_bookmarked,
         pinned_uuid,
         user,
-        agents,
-    } = ui.header;
-    let extensions = ui.extensions.extensions;
-    let remote = ui.remote;
-    let reload_key = ui.reload_revision;
+        agents: _,
+        profiles,
+    } = header;
+    let active_row = projected_active.or(retained_active);
+    let active_metadata = active_row
+        .as_ref()
+        .map(|row| vmux_ecs::PageMetadata {
+            title: row.title.clone(),
+            url: row.url.clone(),
+            icon: row.icon.clone(),
+            bg_color: row.bg_color.clone(),
+        })
+        .or(retained_metadata);
+    let extensions = extensions.extensions;
     let stacks_error = layout.error();
     let tabs_error = stacks_error.clone();
-    let tab_order = use_memo(move || layout.value().tab_strip.unwrap_or_default().order);
-    let tab_drag = TabDrag::use_state(tab_order);
+    let tab_order = layout.use_selector(|ui| ui.tab_strip.clone().unwrap_or_default().order);
+    let tab_active = layout.use_selector(|ui| {
+        ui.tab_strip.as_ref().and_then(|strip| {
+            strip
+                .tabs
+                .iter()
+                .find(|row| row.tab.is_active)
+                .map(|row| row.tab.id.clone())
+        })
+    });
+    let tab_drag = TabDrag::use_state(tab_order, tab_active);
     let StackNavigationState {
         stacks: _,
         can_go_back,
@@ -103,7 +146,7 @@ fn HeaderContent() -> Element {
                 WindowDragRegion {
                     id: "leading",
                     revision: tab_drag_region_revision.clone(),
-                    class: "h-10 shrink-0 self-stretch",
+                    class: "h-9 shrink-0 self-stretch",
                     style: "margin-left:min(56px,var(--vmux-tab-row-pad-left));width:max(0px,calc(var(--vmux-tab-row-pad-left) - 56px));",
                 }
                 if let Some(err) = tabs_error {
@@ -118,13 +161,14 @@ fn HeaderContent() -> Element {
                                 row: tab.clone(),
                                 index: tab_index,
                                 drag: tab_drag,
+                                loading: tab.tab.is_active && loading,
                                 }
                         }
                         NewTabButton {}
                         WindowDragRegion {
                             id: "trailing",
                             revision: tab_drag_region_revision.clone(),
-                            class: "h-10 min-w-0 flex-1 self-stretch",
+                            class: "h-9 min-w-0 flex-1 self-stretch",
                             style: "",
                         }
                     }
@@ -148,10 +192,12 @@ fn HeaderContent() -> Element {
                             path { d: "M12 5l7 7-7 7" }
                         }
                     }
-                    NavButton { label: translate("layout-reload"), disabled: active_row.as_ref().is_none_or(|t| t.url.is_empty()), onclick: move |_| { let _ = send(&HeaderReloadRequest); },
-                        span {
-                            key: "{reload_key}",
-                            class: if reload_key > 0 { "inline-flex animate-spin-once" } else { "inline-flex" },
+                    NavButton { label: if loading { translate("common-cancel") } else { translate("layout-reload") }, disabled: active_row.as_ref().is_none_or(|t| t.url.is_empty()), onclick: move |_| {
+                        if loading { let _ = send(&HeaderStopRequest); } else { let _ = send(&HeaderReloadRequest); }
+                    },
+                        if loading {
+                            vmux_ui::icon::LineIconView { icon: vmux_ui::icon::LineIcon::X, class: "size-4" }
+                        } else {
                             Icon { class: "h-4 w-4",
                                 path { d: "M21 12a9 9 0 11-3-6.7L21 8" }
                                 path { d: "M21 3v5h-5" }
@@ -159,6 +205,8 @@ fn HeaderContent() -> Element {
                         }
                     }
                     HeaderAddressBar {
+                        loading,
+                        page_address,
                         active_row: active_row.clone(),
                         bg_color: active_bg_color.clone(),
                     }
@@ -209,12 +257,9 @@ fn HeaderContent() -> Element {
                             }
                         }
                     }
-                    TeamFacepile {
-                        user,
-                        agents,
-                    }
+                    TeamFacepile { user, profiles }
                     ExtensionBar { extensions }
-                    RemoteControl { remote }
+                    div { class: "hidden", RemoteControl { remote } }
                 }
             }
         }
@@ -224,12 +269,12 @@ fn HeaderContent() -> Element {
 fn url_row_cef(_bg_color: Option<&str>) -> (String, String) {
     (
         String::new(),
-        "flex min-w-0 flex-1 shrink-0 items-center gap-1 rounded-t-[var(--radius)] px-2 bg-glass backdrop-blur-xl backdrop-saturate-150 text-foreground".to_string(),
+        "flex min-w-0 flex-1 shrink-0 items-center gap-1 rounded-t-[var(--radius)] bg-card px-2 text-foreground".to_string(),
     )
 }
 
 #[component]
-fn Tab(row: TabStripRow, index: usize, drag: TabDrag) -> Element {
+fn Tab(row: TabStripRow, index: usize, drag: TabDrag, #[props(default)] loading: bool) -> Element {
     let TabStripRow {
         tab,
         display_title,
@@ -244,7 +289,7 @@ fn Tab(row: TabStripRow, index: usize, drag: TabDrag) -> Element {
         display_title
     };
     let tooltip = display_title.clone();
-    let is_active = tab.is_active;
+    let is_active = drag.is_selected(&tab.id, tab.is_active);
     let skirt_classes = "relative \
         before:content-[''] before:absolute before:bottom-0 before:-left-2 before:h-2 before:w-2 before:pointer-events-none \
         before:[background:radial-gradient(circle_at_top_left,transparent_0,transparent_8px,var(--tab-bg)_8px)] \
@@ -256,42 +301,42 @@ fn Tab(row: TabStripRow, index: usize, drag: TabDrag) -> Element {
         "cursor-pointer"
     };
     let tab_box_classes = cn([
-        "group relative flex h-10 w-[var(--tab-width)] min-w-[var(--tab-width)] max-w-[var(--tab-width)] basis-[var(--tab-width)] shrink-0 grow-0 select-none items-start",
+        "group relative flex h-9 w-[var(--tab-width)] min-w-[var(--tab-width)] max-w-[var(--tab-width)] basis-[var(--tab-width)] shrink-0 grow-0 select-none items-start",
         cursor_classes,
     ]);
     let inactive_hover_classes = if visual.active() {
         ""
     } else {
-        "hover:bg-glass-hover hover:text-foreground"
+        "bg-card/75 hover:bg-card hover:text-foreground"
     };
 
     let trunc = StackTitle::truncate_class(&display_title);
     let (surface_style, surface_class, title_class, close_class) = if is_active {
         (
-            "--tab-bg:var(--glass);background-color:var(--glass);border-bottom-width:0;"
+            "--tab-bg:var(--card);background-color:var(--card);border-bottom-width:0;"
                 .to_string(),
             cn([
                 skirt_classes,
-                "glass mt-1 flex h-10 w-full items-center gap-2 rounded-t-md border-b-0 px-3.5 transition-[height,margin,background-color,border-color,border-radius,color,box-shadow] duration-150 ease-out",
+                "mt-1 flex h-8 w-full items-center gap-2 rounded-t-md border-b-0 px-3",
             ]),
             cn([
                 "min-w-0 flex-1",
                 trunc,
-                "text-ui font-medium text-foreground transition-colors duration-150 ease-out",
+                "text-ui font-medium text-foreground",
             ]),
             "flex h-4 w-4 cursor-pointer shrink-0 items-center justify-center rounded-sm opacity-0 transition-opacity group-hover:opacity-100 focus-visible:opacity-100 hover:bg-foreground/10".to_string(),
         )
     } else {
         (
-            "background-color:color-mix(in oklab,var(--glass) 58%,transparent);".to_string(),
+            String::new(),
             cn([
-                "my-1 flex h-8 w-full items-center gap-2 rounded-lg border border-glass-border/65 px-3.5 text-muted-foreground shadow-sm transition-[height,margin,background-color,border-color,border-radius,color,box-shadow] duration-150 ease-out",
+                "my-1 flex h-7 w-full items-center gap-2 rounded-lg px-3 text-muted-foreground",
                 inactive_hover_classes,
             ]),
             cn([
                 "min-w-0 flex-1",
                 trunc,
-                "text-ui transition-colors duration-150 ease-out",
+                "text-ui",
             ]),
             "flex h-4 w-4 cursor-pointer shrink-0 items-center justify-center rounded-sm opacity-0 transition-opacity group-hover:opacity-100 focus-visible:opacity-100 hover:bg-foreground/10".to_string(),
         )
@@ -314,7 +359,7 @@ fn Tab(row: TabStripRow, index: usize, drag: TabDrag) -> Element {
             onpointerdown: {
                 let source_id = tab.id.clone();
                 move |event| {
-                    drag.begin(
+                    drag.press(
                         &event,
                         source_id.clone(),
                         index,
@@ -342,6 +387,7 @@ fn Tab(row: TabStripRow, index: usize, drag: TabDrag) -> Element {
                     title: "{tooltip}",
                     class: "flex min-w-0 flex-1 items-center gap-2.5 overflow-hidden",
                     StackIcon {
+                        loading,
                         icon: tab.icon.clone(),
                         url: tab.url.clone(),
                         title: display_title.clone(),
@@ -401,6 +447,7 @@ fn Tab(row: TabStripRow, index: usize, drag: TabDrag) -> Element {
 
 #[component]
 fn NewTabButton() -> Element {
+    let mut pressed = use_signal(|| false);
     rsx! {
         div { class: "relative h-7 w-7 shrink-0",
             WindowDragRegion {
@@ -414,11 +461,19 @@ fn NewTabButton() -> Element {
                 r#type: "button",
                 aria_label: translate("layout-new-tab"),
                 title: translate("layout-new-tab"),
-                class: "absolute inset-0 flex cursor-pointer items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-glass-hover hover:text-foreground active:bg-glass-active active:text-foreground",
+                class: "absolute inset-0 flex appearance-none cursor-pointer items-center justify-center rounded-md border-0 bg-foreground/[0.04] text-muted-foreground shadow-none outline-none transition-colors hover:bg-foreground/[0.09] hover:text-foreground active:bg-foreground/[0.12] focus-visible:bg-foreground/[0.09] focus-visible:text-foreground",
+                onpointerdown: move |event: Event<PointerData>| {
+                    if event.trigger_button() == Some(dioxus::html::input_data::MouseButton::Primary) {
+                        pressed.set(true);
+                        let _ = send(&TabCreateRequest);
+                    }
+                },
+                onpointercancel: move |_| pressed.set(false),
                 onclick: move |_| {
+                    if pressed() { pressed.set(false); return; }
                     let _ = send(&TabCreateRequest);
                 },
-                Icon { class: "h-3.5 w-3.5",
+                Icon { class: "h-4 w-4",
                     path { d: "M12 5v14" }
                     path { d: "M5 12h14" }
                 }
@@ -457,8 +512,55 @@ fn NavButton(
 }
 
 #[component]
-fn HeaderAddressBar(active_row: Option<StackRow>, bg_color: Option<String>) -> Element {
+fn HeaderAddressBar(
+    active_row: Option<StackRow>,
+    bg_color: Option<String>,
+    page_address: Option<vmux_api::address::PageAddress>,
+    loading: bool,
+) -> Element {
+    let url = active_row
+        .as_ref()
+        .map(|row| row.url.clone())
+        .or_else(|| page_address.as_ref().map(|address| address.url.clone()))
+        .unwrap_or_default();
+    let fallback = rsx! { HeaderAddressReadout { active_row, bg_color, page_address, loading } };
+    rsx! { vmux_ui::components::page_address::AddressSurface {
+        url,
+        loading,
+        onactivate: move |_| { let _ = send(&HeaderAddressFocusRequest); },
+        {fallback}
+    } }
+}
+
+#[component]
+fn HeaderAddressReadout(
+    active_row: Option<StackRow>,
+    bg_color: Option<String>,
+    page_address: Option<vmux_api::address::PageAddress>,
+    loading: bool,
+) -> Element {
+    let dismiss_revision =
+        LayoutUi::current().use_selector(|state| state.overlay_dismiss_revision)();
+    if let Some(address) = page_address {
+        return rsx! {
+            div { class: "flex h-8 min-w-0 flex-1 items-center",
+                vmux_ui::components::address::AddressTrail { state: address, dismiss_revision, loading, onpopup: move |active| { let _ = send(&crate::event::LayoutOverlayEvent { id: "page-address".to_string(), active, kind: crate::event::LayoutOverlayKind::Popover }); } }
+            }
+        };
+    }
     let has_content = active_row.as_ref().is_some_and(|row| !row.url.is_empty());
+    let icon = active_row
+        .as_ref()
+        .map(|row| row.icon.clone())
+        .unwrap_or_default();
+    let url = active_row
+        .as_ref()
+        .map(|row| row.url.clone())
+        .unwrap_or_default();
+    let title = active_row
+        .as_ref()
+        .map(|row| row.title.clone())
+        .unwrap_or_default();
     let address = active_row.map(|row| row.address).unwrap_or_default();
     let empty_class = if bg_color.is_some() {
         "opacity-50"
@@ -469,40 +571,45 @@ fn HeaderAddressBar(active_row: Option<StackRow>, bg_color: Option<String>) -> E
     rsx! {
         div {
             class: "flex h-8 min-w-0 flex-1 cursor-pointer items-center gap-2",
-            onclick: move |_| {
-                let _ = send(&HeaderAddressFocusRequest);
-            },
             if !has_content {
                 span { class: "truncate text-ui {empty_class}", {translate("layout-new-stack")} }
             } else {
+                StackIcon { icon, url, title, loading }
                 if !address.origin.is_empty() {
                     span {
                         class: "shrink-0 rounded-full bg-foreground/10 px-2 py-0.5 text-ui leading-tight",
                         "{address.origin}"
                     }
                 }
-                span { class: "min-w-0 truncate text-ui", "{address.rest}" }
+                span { class: "truncate-fade min-w-0 flex-1 text-ui", title: "{address.rest}", "{address.rest}" }
             }
         }
     }
 }
 
 #[component]
-fn TeamFacepile(user: Option<TeamMemberRow>, agents: Vec<TeamMemberRow>) -> Element {
-    if user.is_none() && agents.is_empty() {
+fn TeamFacepile(user: Option<TeamMemberRow>, profiles: Vec<ProfileRow>) -> Element {
+    let mut open = use_signal(|| false);
+    if user.is_none() {
         return rsx! {};
     }
-    let max = 5usize;
-    let overflow = agents.len().saturating_sub(max);
     rsx! {
         div {
-            class: "flex shrink-0 items-center gap-2 pl-3 pr-3",
+            class: "flex shrink-0 items-center pl-3 pr-3",
             if let Some(user) = user {
-                div {
+                LayoutDropdown {
+                    id: "profiles",
+                    keyboard_navigation: true,
+                    open: open(),
+                    on_dismiss: move |_| open.set(false),
+                    class: "shrink-0",
+                button {
+                    r#type: "button",
+                    "data-vmux-dropdown-trigger": "true",
                     class: "flex items-center gap-1.5 rounded-full bg-foreground/10 py-0.5 pl-0.5 pr-2.5 cursor-pointer transition-opacity hover:opacity-80",
                     title: translate("team-profiles"),
                     onclick: move |_| {
-                        let _ = send(&TeamOpenRequest);
+                        open.set(!open());
                     },
                     Avatar {
                         src: None,
@@ -513,49 +620,25 @@ fn TeamFacepile(user: Option<TeamMemberRow>, agents: Vec<TeamMemberRow>) -> Elem
                     }
                     span { class: "whitespace-nowrap text-xs font-medium text-foreground", "{user.name}" }
                 }
-            }
-            if !agents.is_empty() {
-                div { class: "flex items-center -space-x-1.5",
-                    for m in agents.iter().take(max) {
-                        {
-                            let src = FaviconSource::resolve(&m.icon, &m.url);
-                            let id = m.id.clone();
-                            rsx! {
-                                div {
-                                    key: "{m.id}",
-                                    title: "{m.name}",
-                                    class: "relative inline-flex size-5 shrink-0 cursor-pointer transition-opacity hover:opacity-80",
-                                    onclick: move |_| {
-                                        let _ = send(&TeamMemberFocusRequest {
-                                            member_id: id.clone(),
-                                        });
-                                    },
-                                    Avatar {
-                                        src,
-                                        seed: m.name.clone(),
-                                        background: m.color.clone(),
-                                        alt: m.name.clone(),
-                                        class: "size-5 text-[9px] ring-2 ring-background",
-                                    }
-                                    if m.is_running {
-                                        span { class: "absolute -bottom-0.5 -right-0.5 size-1.5 rounded-full bg-success ring-2 ring-background" }
-                                    } else if m.is_done_unseen {
-                                        span { class: "absolute -bottom-0.5 -right-0.5 size-2 rounded-full bg-amber-400 ring-2 ring-background" }
-                                    }
-                                }
+                if open() {
+                    DropdownPopup { align: DropdownAlign::End, class: "w-64 p-1.5",
+                        for profile in profiles {
+                            DropdownOption {
+                                key: "{profile.id}",
+                                label: profile.name.clone(),
+                                selected: profile.is_active,
+                                onclick: move |_| {
+                                    open.set(false);
+                                    if !profile.is_active { let _ = send(&TeamProfileSwitchRequest { profile_id: profile.id.clone() }); }
+                                },
+                                leading: rsx! { Avatar { src: None, seed: profile.name.clone(), background: profile.color, alt: profile.name, class: "size-5 text-[8px]" } },
                             }
                         }
-                    }
-                    if overflow > 0 {
-                        div {
-                            class: "relative inline-flex size-5 items-center justify-center rounded-full ring-2 ring-background bg-muted text-[9px] font-medium text-muted-foreground cursor-pointer transition-opacity hover:opacity-80",
-                            title: translate("team-profiles"),
-                            onclick: move |_| {
-                                let _ = send(&TeamOpenRequest);
-                            },
-                            "+{overflow}"
+                        DropdownOption { label: translate("team-profiles"), selected: false,
+                            onclick: move |_| { open.set(false); let _ = send(&TeamOpenRequest); },
                         }
                     }
+                }
                 }
             }
         }

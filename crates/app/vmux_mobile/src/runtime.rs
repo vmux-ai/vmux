@@ -148,7 +148,9 @@ fn deliver_ui_state(
             tracing::debug!(id = emit.id, "UI state emit had no listener");
             continue;
         };
-        listener(&emit.bytes);
+        if !listener(&emit.bytes) {
+            listeners.0.remove(&emit.id);
+        }
     }
 }
 

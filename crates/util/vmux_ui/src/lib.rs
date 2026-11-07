@@ -1,6 +1,7 @@
 pub use language_icon::LanguageIconPath;
 
 pub mod agent_accent;
+pub mod animation;
 
 pub mod dom;
 
@@ -20,6 +21,7 @@ pub mod file_icon;
 pub mod focus;
 
 pub mod icon;
+pub mod motion;
 
 mod i18n_catalogs {
     include!(concat!(env!("OUT_DIR"), "/i18n_catalogs.rs"));
@@ -28,6 +30,8 @@ mod i18n_catalogs {
 pub mod i18n;
 pub mod ime;
 pub mod matrix_rain;
+
+pub mod navigation;
 
 pub mod prompt_ghost;
 pub mod prompt_recall;

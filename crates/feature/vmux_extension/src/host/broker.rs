@@ -829,7 +829,10 @@ fn create_page_request(
         })
         .filter(|url| !url.is_empty());
     let Some(url) = url else {
-        return Ok(vmux_layout::stack::OpenRequest { url: None });
+        return Ok(vmux_layout::stack::OpenRequest {
+            url: None,
+            policy: vmux_layout::stack::OpenPolicy::ReplaceStartup,
+        });
     };
     let parsed = url::Url::parse(url)
         .map_err(|_| ExtensionApiError::new("invalid_url", "extension page URL is invalid"))?;
@@ -845,6 +848,7 @@ fn create_page_request(
     }
     Ok(vmux_layout::stack::OpenRequest {
         url: Some(url.to_string()),
+        policy: vmux_layout::stack::OpenPolicy::ReplaceStartup,
     })
 }
 

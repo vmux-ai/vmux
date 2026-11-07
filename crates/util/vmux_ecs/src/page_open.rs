@@ -15,6 +15,26 @@ impl PageOpenId {
     }
 }
 
+#[derive(Component, Clone, Copy, Debug, PartialEq, Eq)]
+pub struct PageNavigation(PageOpenId);
+
+#[derive(Component, Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct PageTransition;
+
+impl PageNavigation {
+    pub fn new(id: PageOpenId) -> Self {
+        Self(id)
+    }
+
+    pub fn matches(&self, id: PageOpenId) -> bool {
+        self.0 == id
+    }
+
+    pub fn id(&self) -> PageOpenId {
+        self.0
+    }
+}
+
 #[derive(Clone, Debug)]
 pub enum PageOpenTarget {
     ActiveStack,

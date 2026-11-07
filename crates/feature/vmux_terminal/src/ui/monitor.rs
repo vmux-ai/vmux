@@ -2,15 +2,18 @@
 
 use dioxus::prelude::*;
 use vmux_api::service::*;
-use vmux_ui::components::manager::{
-    ManagerBadge, ManagerButton, ManagerButtonVariant, ManagerEmpty, ManagerHeader, ManagerList,
-    ManagerPage, ManagerTone,
-};
+use vmux_ui::components::manager::{ManagerEmpty, ManagerList, ManagerPage};
+use vmux_ui::components::page_address::{PageToolbar, ToolbarControl};
+use vmux_ui::components::skeleton::Skeleton;
 use vmux_ui::hooks::{send, use_theme, use_ui_state};
 use vmux_ui::i18n::translate;
 use vmux_ui::icon::{LineIcon, LineIconView};
 
-#[vmux_page::page(page = "process_monitor", component = Page)]
+#[vmux_page::page(
+    page = "process_monitor",
+    component = Page,
+    states = ["PageAddressUiState", "ThemeUiState", "ProcessesUiState"]
+)]
 pub struct ProcessMonitorPage;
 
 #[component]
@@ -23,6 +26,30 @@ pub fn Page() -> Element {
     let has_processes = snapshot.total_count != 0;
     let has_managed_processes = snapshot.managed_count != 0;
     let process_count = snapshot.total_count as usize;
+    let mut toolbar = vec![
+        ToolbarControl::search(
+            snapshot.query.clone(),
+            translate("services-filter"),
+            move |query| {
+                let _ = send(&ProcessSearchRequest { query });
+            },
+        ),
+        ToolbarControl::badge(process_count.to_string()),
+        ToolbarControl::badge(translate(if connected {
+            "services-connected"
+        } else {
+            "services-disconnected"
+        }))
+        .active(connected),
+    ];
+    if has_managed_processes {
+        toolbar.push(
+            ToolbarControl::button(translate("services-kill-all"), move |_| {
+                let _ = send(&ProcessKillAllEvent { kill_all: true });
+            })
+            .danger(),
+        );
+    }
 
     let empty_detail = format!(
         "{} {}",
@@ -32,28 +59,8 @@ pub fn Page() -> Element {
 
     rsx! {
         ManagerPage {
-            ManagerHeader {
-                title: translate("services-title"),
-                count: process_count,
-                search_value: snapshot.query.clone(),
-                search_placeholder: translate("services-filter"),
-                onsearch: move |event: FormEvent| {
-                    let _ = send(&ProcessSearchRequest { query: event.value() });
-                },
-                onkeydown: None,
-                actions: rsx! {
-                    StatusBadge { connected }
-                    if has_managed_processes {
-                        ManagerButton {
-                            variant: ManagerButtonVariant::Danger,
-                            onclick: move |event: Event<MouseData>| {
-                                event.stop_propagation();
-                                let _ = send(&ProcessKillAllEvent { kill_all: true });
-                            },
-                            {translate("services-kill-all")}
-                        }
-                    }
-                },
+            PageToolbar {
+                controls: toolbar,
             }
             ManagerList {
                 class: "mx-auto flex w-full max-w-7xl flex-col gap-3".to_string(),
@@ -82,7 +89,7 @@ fn ServiceDashboard(
     memory: ProcessUsageUiState,
 ) -> Element {
     rsx! {
-        div { class: "grid min-h-0 gap-3 xl:grid-cols-2",
+        div { class: "grid min-h-0 items-start gap-3 xl:grid-cols-2",
             UsageChart {
                 class: "xl:col-span-2".to_string(),
                 usage: cpu,
@@ -112,12 +119,22 @@ fn UsageChart(
             div { class: "flex h-9 items-center justify-between border-b border-foreground/[0.07] px-3",
                 div { class: "flex items-baseline gap-2",
                     h2 { class: "font-mono text-[10px] font-semibold uppercase tracking-[0.12em] text-foreground", "{usage.label}" }
-                    span { class: "font-mono text-xs font-semibold {line_class}", "{usage.value}" }
+                    if usage.value.is_empty() {
+                        Skeleton { class: "h-3 w-12 bg-foreground/[0.05]" }
+                    } else {
+                        span { class: "font-mono text-xs font-semibold {line_class}", "{usage.value}" }
+                    }
                 }
-                span { class: "font-mono text-[9px] text-muted-foreground", "{usage.peak}" }
+                if usage.peak.is_empty() {
+                    Skeleton { class: "h-2.5 w-14 bg-foreground/[0.04]" }
+                } else {
+                    span { class: "font-mono text-[9px] text-muted-foreground", "{usage.peak}" }
+                }
             }
             div { class: "relative h-36 bg-background/30 px-2 py-2",
-                svg {
+                if usage.line.is_empty() {
+                    Skeleton { class: "h-full w-full bg-foreground/[0.025]" }
+                } else { svg {
                     class: "h-full w-full overflow-visible {line_class}",
                     view_box: "0 0 100 40",
                     preserve_aspect_ratio: "none",
@@ -125,9 +142,9 @@ fn UsageChart(
                     for y in [10, 20, 30] {
                         line { x1: "0", x2: "100", y1: "{y}", y2: "{y}", stroke: "currentColor", stroke_opacity: "0.08", stroke_width: "0.5" }
                     }
-                    polygon { points: "{usage.area}", fill }
-                    polyline { points: "{usage.line}", fill: "none", stroke: "currentColor", stroke_width: "1.35", vector_effect: "non-scaling-stroke" }
-                }
+                    path { d: "{usage.area}", fill }
+                    path { d: "{usage.line}", fill: "none", stroke: "currentColor", stroke_width: "1.35", stroke_linecap: "round", stroke_linejoin: "round", vector_effect: "non-scaling-stroke" }
+                } }
             }
         }
     }
@@ -153,32 +170,6 @@ fn ProcessTable(processes: Vec<ProcessEntry>) -> Element {
                 for process in processes {
                     ProcessRow { key: "{process.id}", process }
                 }
-            }
-        }
-    }
-}
-
-#[component]
-fn StatusBadge(connected: bool) -> Element {
-    let (tone, color, text) = if connected {
-        (
-            ManagerTone::Green,
-            "bg-success",
-            translate("services-connected"),
-        )
-    } else {
-        (
-            ManagerTone::Amber,
-            "bg-amber-400",
-            translate("services-disconnected"),
-        )
-    };
-
-    rsx! {
-        ManagerBadge { tone,
-            span { class: "flex items-center gap-1.5",
-                span { class: "size-1.5 rounded-full {color}" }
-                "{text}"
             }
         }
     }
@@ -228,7 +219,13 @@ fn ProcessRow(process: ProcessEntry) -> Element {
                     div { class: "truncate font-mono text-[8px] text-muted-foreground/65", title: "{cwd}", "{cwd}" }
                 }
             }
-            span { class: if process.cpu_percent >= 25.0 { "text-right font-mono text-[10px] font-semibold tabular-nums text-amber-400" } else { "text-right font-mono text-[10px] tabular-nums text-foreground" }, "{process.cpu_label}" }
+            if process.cpu_label.is_empty() {
+                span { class: "flex justify-end",
+                    Skeleton { class: "h-2.5 w-8 bg-foreground/[0.04]" }
+                }
+            } else {
+                span { class: if process.cpu_percent >= 25.0 { "text-right font-mono text-[10px] font-semibold tabular-nums text-amber-400" } else { "text-right font-mono text-[10px] tabular-nums text-foreground" }, "{process.cpu_label}" }
+            }
             span { class: "text-right font-mono text-[9px] tabular-nums text-foreground", "{process.memory_label}" }
             span { class: "hidden text-right font-mono text-[9px] tabular-nums text-muted-foreground sm:block", "{process.uptime_label}" }
             if managed {

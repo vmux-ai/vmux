@@ -1,9 +1,9 @@
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use bevy::prelude::*;
 use bevy_cef::prelude::*;
 use vmux_ecs::PageMetadata;
-use vmux_ecs::event::{FileErrorEvent, FileOpenEvent, KnowledgeLinkOpen};
+use vmux_ecs::event::{FileErrorEvent, FileOpenEvent, KnowledgeLinkOpen, RecordVisitRequest};
 
 use super::media::FileMedia;
 use crate::edit::Selection;
@@ -22,11 +22,166 @@ pub(crate) struct NavigationPlugin;
 impl Plugin for NavigationPlugin {
     fn build(&self, app: &mut App) {
         app.add_message::<crate::lsp::manager::LspGoto>()
+            .add_message::<RecordVisitRequest>()
             .add_observer(file_open)
+            .add_observer(preview_checkout)
             .add_observer(knowledge_link_open)
             .add_observer(apply_file)
-            .add_systems(Update, (apply_goto, apply_pending_goto));
+            .add_systems(Update, (refresh_checkout, apply_goto, apply_pending_goto));
     }
+}
+
+#[derive(Component, Clone, PartialEq)]
+pub(crate) struct CheckoutPreview(pub(crate) vmux_ecs::event::FileCheckoutState);
+
+#[derive(bevy::ecs::system::SystemParam)]
+pub(crate) struct CheckoutContext<'w, 's> {
+    info: Query<'w, 's, &'static vmux_git::RepoInfoCache>,
+    hierarchy: vmux_layout::tab::TabHierarchy<'w, 's>,
+    tabs: Query<
+        'w,
+        's,
+        (
+            Ref<'static, vmux_layout::tab::Tab>,
+            Option<&'static vmux_layout::tab::TabWorktree>,
+            Option<&'static vmux_layout::tab::TabWorkspace>,
+        ),
+    >,
+}
+
+impl CheckoutContext<'_, '_> {
+    pub(crate) fn preview(
+        &self,
+        entity: Entity,
+        path: &Path,
+    ) -> Option<vmux_ecs::event::FileCheckoutState> {
+        let tab = self.hierarchy.entity(entity)?;
+        let (tab, worktree, workspace) = self.tabs.get(tab).ok()?;
+        let cwd = PathBuf::from(tab.startup_dir.as_ref()?);
+        let repository = worktree
+            .map(|worktree| PathBuf::from(&worktree.repo_root))
+            .or_else(|| workspace.map(|workspace| PathBuf::from(&workspace.project_dir)))?;
+        let cwd = vmux_path::PathIdentity::resolve(&cwd);
+        let repository = vmux_path::PathIdentity::resolve(&repository);
+        let file = vmux_path::PathIdentity::resolve(path);
+        let known_project = self
+            .info
+            .single()
+            .ok()
+            .and_then(|info| info.cached_project_root(file.as_path()));
+        if !file.as_path().starts_with(repository.as_path())
+            && known_project.as_deref() != Some(repository.as_path())
+        {
+            return None;
+        }
+        let checkout = file
+            .as_path()
+            .ancestors()
+            .find(|path| path.join(".git").exists())?;
+        let current = cwd
+            .as_path()
+            .ancestors()
+            .find(|path| path.join(".git").exists())?;
+        if checkout == current {
+            return None;
+        }
+        Some(vmux_ecs::event::FileCheckoutState {
+            path: path.to_string_lossy().into_owned(),
+            repository: repository.as_path().to_string_lossy().into_owned(),
+            checkout: checkout.to_string_lossy().into_owned(),
+            read_only: true,
+        })
+    }
+
+    fn is_current(&self, entity: Entity, checkout: &Path) -> bool {
+        let Some(cwd) = self.hierarchy.startup_dir(entity) else {
+            return false;
+        };
+        let cwd = vmux_path::PathIdentity::resolve(Path::new(&cwd));
+        let checkout = vmux_path::PathIdentity::resolve(checkout);
+        cwd.as_path()
+            .ancestors()
+            .find(|path| path.join(".git").exists())
+            == Some(checkout.as_path())
+    }
+
+    fn changed(&self, entity: Entity) -> bool {
+        self.hierarchy
+            .entity(entity)
+            .and_then(|tab| self.tabs.get(tab).ok())
+            .is_some_and(|(tab, _, _)| tab.is_changed())
+    }
+}
+
+fn refresh_checkout(
+    views: Query<(Entity, Ref<FileView>, Option<&CheckoutPreview>)>,
+    context: CheckoutContext,
+    mut commands: Commands,
+) {
+    for (entity, view, previous) in &views {
+        if !view.is_changed() && !context.changed(entity) {
+            continue;
+        }
+        let retained = previous.filter(|preview| {
+            view.path.starts_with(&preview.0.checkout)
+                && !context.is_current(entity, Path::new(&preview.0.checkout))
+        });
+        let next = if let Some(preview) = retained {
+            let mut state = preview.0.clone();
+            state.path = view.path.to_string_lossy().into_owned();
+            Some(state)
+        } else {
+            context.preview(entity, &view.path)
+        };
+        if previous.map(|preview| &preview.0) == next.as_ref() {
+            continue;
+        }
+        match next {
+            Some(state) => {
+                commands
+                    .entity(entity)
+                    .insert(CheckoutPreview(state.clone()));
+                commands.trigger(vmux_ecs::FileUiStateWrite::from_event(entity, &state));
+            }
+            None => {
+                commands.entity(entity).remove::<CheckoutPreview>();
+                commands.trigger(vmux_ecs::FileUiStateWrite::from_event(
+                    entity,
+                    &vmux_ecs::event::FileCheckoutState {
+                        path: view.path.to_string_lossy().into_owned(),
+                        ..Default::default()
+                    },
+                ));
+            }
+        }
+    }
+}
+
+fn preview_checkout(
+    input: On<UiInput<vmux_ecs::event::FileCheckoutPreviewRequest>>,
+    context: CheckoutContext,
+    mut commands: Commands,
+) {
+    let entity = input.event().webview;
+    let request = &input.event().payload;
+    let path = vmux_path::PathIdentity::resolve(Path::new(&request.path));
+    let checkout = vmux_path::PathIdentity::resolve(Path::new(&request.checkout));
+    if !path.as_path().starts_with(checkout.as_path()) {
+        return;
+    }
+    if !context.is_current(entity, checkout.as_path()) {
+        let state = vmux_ecs::event::FileCheckoutState {
+            path: path.as_path().to_string_lossy().into_owned(),
+            repository: request.repository.clone(),
+            checkout: checkout.as_path().to_string_lossy().into_owned(),
+            read_only: true,
+        };
+        commands
+            .entity(entity)
+            .insert(CheckoutPreview(state.clone()));
+        commands.trigger(vmux_ecs::FileUiStateWrite::from_event(entity, &state));
+    }
+    commands.trigger(FileNavigateRequest::new(entity, path.into_path_buf(), 0));
 }
 
 #[derive(Component)]
@@ -113,10 +268,36 @@ impl GotoActions<'_, '_> {
     }
 }
 
-fn file_open(trigger: On<UiInput<FileOpenEvent>>, mut commands: Commands) {
+fn file_open(
+    trigger: On<UiInput<FileOpenEvent>>,
+    mut visits: FileVisitRecorder,
+    mut commands: Commands,
+) {
     let entity = trigger.event().webview;
     let path = PathBuf::from(&trigger.event().payload.path);
+    visits.record(&path);
     commands.trigger(FileNavigateRequest::new(entity, path, 0));
+}
+
+#[derive(bevy::ecs::system::SystemParam)]
+struct FileVisitRecorder<'w> {
+    visits: MessageWriter<'w, RecordVisitRequest>,
+}
+
+impl FileVisitRecorder<'_> {
+    fn record(&mut self, path: &Path) {
+        if !path.is_file() {
+            return;
+        }
+        let title = path
+            .file_name()
+            .map(|name| name.to_string_lossy().to_string())
+            .unwrap_or_else(|| path.to_string_lossy().to_string());
+        self.visits.write(RecordVisitRequest {
+            url: vmux_path::FileUrl::from_path(path, None, None, None),
+            title,
+        });
+    }
 }
 
 fn apply_file(
@@ -128,6 +309,7 @@ fn apply_file(
         &mut PageMetadata,
     )>,
     mut lsp_closes: Option<MessageWriter<crate::lsp::manager::LspDocumentCloseRequest>>,
+    settings: Option<Res<vmux_setting::AppSettings>>,
     mut commands: Commands,
 ) {
     let request = trigger.event();
@@ -141,11 +323,8 @@ fn apply_file(
             path: previous.clone(),
         });
     }
-    metadata.title = view
-        .path
-        .file_name()
-        .map(|name| name.to_string_lossy().to_string())
-        .unwrap_or_else(|| view.path.to_string_lossy().to_string());
+    metadata.title = view.page_title();
+    metadata.icon = view.page_icon();
     metadata.url = view.url();
     if let Some(page_url) = &request.page_url {
         metadata.title.clone_from(page_url);
@@ -154,28 +333,8 @@ fn apply_file(
     }
     viewport.top_row = request.top_line;
     let entity = request.entity;
-    commands.queue(move |world: &mut World| {
-        let Ok(mut entity) = world.get_entity_mut(entity) else {
-            return;
-        };
-        if !entity.contains::<Editor>() || !entity.contains::<vmux_git::GitDiffSource>() {
-            return;
-        }
-        let Some(edit) = entity.take::<Editor>() else {
-            return;
-        };
-        let Some(diff) = entity.take::<vmux_git::GitDiffSource>() else {
-            return;
-        };
-        let parked = ParkedEdit {
-            edit,
-            diff,
-            modified: ParkedEdits::modified_at(&previous),
-        };
-        let mut edits = entity.take::<ParkedEdits>().unwrap_or_default();
-        edits.insert(previous, parked);
-        entity.insert(edits);
-    });
+    let requested = request.path.clone();
+    let resumed_keymap = super::keymap::KeymapConfig::resolve(settings.as_deref()).keymap();
     commands
         .entity(entity)
         .remove::<FileDir>()
@@ -188,11 +347,54 @@ fn apply_file(
         .remove::<FileInitialMetaSent>()
         .remove::<crate::lsp::manager::LspOpened>()
         .remove::<crate::lsp::manager::LintRan>();
+    commands.queue(move |world: &mut World| {
+        let Ok(mut document) = world.get_entity_mut(entity) else {
+            return;
+        };
+        if document
+            .get::<FileView>()
+            .is_none_or(|view| view.path != requested)
+        {
+            return;
+        }
+        let mut edits = document.take::<ParkedEdits>().unwrap_or_default();
+        if document.contains::<Editor>() && document.contains::<vmux_git::GitDiffSource>() {
+            let edit = document.take::<Editor>().unwrap();
+            let diff = document.take::<vmux_git::GitDiffSource>().unwrap();
+            let actual_previous = edit.core.buffer.path.clone();
+            let modified = ParkedEdits::modified_at(&actual_previous);
+            edits.insert(
+                actual_previous,
+                ParkedEdit {
+                    edit,
+                    diff,
+                    modified,
+                },
+            );
+        }
+        let forced = document
+            .get::<super::file_lifecycle::ForcedEncoding>()
+            .is_some_and(|encoding| encoding.path == requested);
+        let resumed = if forced {
+            None
+        } else {
+            edits.resume(&requested)
+        };
+        document.insert(edits);
+        if let Some(resumed) = resumed {
+            document.insert((resumed.edit, resumed.diff, resumed_keymap));
+            if super::markdown::ParsedNote::supports(&requested) {
+                document.insert(super::explorer::OutlineDirty);
+            }
+            world.trigger(super::status::DocumentRenderRequest::new(entity));
+        }
+    });
 }
 
 fn knowledge_link_open(
     trigger: On<UiInput<KnowledgeLinkOpen>>,
     mut goto: MessageWriter<crate::lsp::manager::LspGoto>,
+    mut visits: FileVisitRecorder,
     browsers: NonSend<Browsers>,
     mut commands: Commands,
 ) {
@@ -263,6 +465,7 @@ fn knowledge_link_open(
     if let Some(line) = request.line {
         commands.entity(entity).insert(NoteRevealLine(line));
     }
+    visits.record(&path);
     goto.write(crate::lsp::manager::LspGoto {
         entity,
         path,
@@ -431,10 +634,24 @@ mod tests {
                         if trigger.event().id() != FileUiState::id() {
                             return;
                         }
-                        let event = rkyv::from_bytes::<FileUiState, rkyv::rancor::Error>(
-                            trigger.event().payload(),
-                        )
+                        trigger.event().mark_delivered();
+                        let frame = rkyv::from_bytes::<
+                            vmux_api::UiStateFrame<
+                                FileUiState,
+                                <FileUiState as vmux_api::UiState>::Update,
+                            >,
+                            rkyv::rancor::Error,
+                        >(trigger.event().payload())
                         .unwrap();
+                        let event = match frame {
+                            vmux_api::UiStateFrame::Snapshot(state) => state,
+                            vmux_api::UiStateFrame::Updates(updates) => {
+                                <FileUiState as vmux_api::UiState>::from_updates(
+                                    emitted.0.last().cloned(),
+                                    updates,
+                                )
+                            }
+                        };
                         emitted.0.push(event);
                     },
                 );
@@ -458,9 +675,12 @@ mod tests {
                         scroll_revision: 0,
                     },
                     EditorKeymap(vmux_api::editor::KeymapKind::Vscode.make(&[], "\\")),
+                    bevy_cef::prelude::BinIpcSurfaceGeneration(1),
+                    bevy_cef::prelude::BinIpcNavigationRevision(1),
+                    bevy_cef::prelude::BinIpcEpoch(1),
                     PageMetadata {
                         title: String::new(),
-                        url: String::new(),
+                        url: "file:///tmp/goto.rs".to_string(),
                         icon: vmux_api::PageIcon::None,
                         bg_color: None,
                     },
@@ -469,6 +689,11 @@ mod tests {
             let mut browsers = Browsers::default();
             browsers.set_externally_hosted(view);
             app.world_mut().insert_non_send(browsers);
+            app.world_mut().spawn(vmux_api::UiEventPermissions {
+                url: "file:///tmp/goto.rs",
+                owns_subtree: false,
+                permissions: &["FileUiState"],
+            });
             Self { app, view }
         }
 

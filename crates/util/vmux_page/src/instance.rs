@@ -1,6 +1,8 @@
 use dioxus_core::VirtualDom;
+use std::cell::RefCell;
 
 type Provide = Box<dyn FnOnce(PageScope<'_>)>;
+type Replay = Box<dyn Fn(&VirtualDom)>;
 
 #[derive(Default)]
 pub struct Instance(Option<Provide>);
@@ -15,18 +17,37 @@ where
 }
 
 impl Instance {
-    pub(crate) fn provide_to(self, dom: &VirtualDom) {
-        let Some(provide) = self.0 else {
-            return;
-        };
-        provide(PageScope(dom));
+    pub(crate) fn provide_to(self, dom: &VirtualDom) -> Contexts {
+        let contexts = Contexts::default();
+        if let Some(provide) = self.0 {
+            provide(PageScope(dom, &contexts));
+        }
+        contexts
     }
 }
 
-pub struct PageScope<'a>(&'a VirtualDom);
+#[derive(Default)]
+pub(crate) struct Contexts(RefCell<Vec<Replay>>);
+
+impl Contexts {
+    pub(crate) fn provide_to(&self, dom: &VirtualDom) {
+        for provide in self.0.borrow().iter() {
+            provide(dom);
+        }
+    }
+
+    fn retain<T: Clone + 'static>(&self, value: T) {
+        self.0.borrow_mut().push(Box::new(move |dom| {
+            dom.provide_root_context(value.clone());
+        }));
+    }
+}
+
+pub struct PageScope<'a>(&'a VirtualDom, &'a Contexts);
 
 impl PageScope<'_> {
     pub fn provide<T: Clone + 'static>(&self, value: T) {
+        self.1.retain(value.clone());
         self.0.provide_root_context(value);
     }
 }

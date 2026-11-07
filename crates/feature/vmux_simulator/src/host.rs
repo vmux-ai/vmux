@@ -3,9 +3,11 @@ use crate::event::{HardwareButton, SimulatorClipboardOperation, SimulatorUiState
 use crate::url::SimulatorRoute;
 use bevy::prelude::*;
 use bevy::tasks::{IoTaskPool, Task, futures_lite::future};
-use bevy::winit::{EventLoopProxyWrapper, WinitUserEvent};
+use bevy::winit::{EventLoopProxy, EventLoopProxyWrapper, WinitUserEvent};
 pub use device::{Axe, SimulatorDevice};
 use hid::HidBroker;
+use std::sync::Arc;
+use std::sync::atomic::{AtomicU8, Ordering};
 use stream::StreamServer;
 pub use tool::SimulatorToolPlugin;
 use vmux_api::protocol::{AgentImage, AgentQueryResult, AgentRequestId, ClientMessage};
@@ -372,6 +374,8 @@ type SimulatorViews<'w, 's> = Query<
         &'static PageMetadata,
         Option<&'static ChildOf>,
         Option<&'static UiState<SimulatorUiState>>,
+        Option<&'static DeviceAttachment>,
+        Option<&'static AttachmentFailed>,
     ),
     With<PageReady>,
 >;
@@ -397,10 +401,53 @@ struct ActiveSimulatorView;
 struct AttachedRoute(SimulatorRoute);
 
 #[derive(Component)]
-struct DeviceAttachment(Task<Result<AttachedDevice, String>>);
+struct DeviceAttachment {
+    task: Task<Result<AttachedDevice, String>>,
+    progress: Arc<AtomicU8>,
+}
+
+struct AttachmentProgress {
+    phase: Arc<AtomicU8>,
+    wake: Option<EventLoopProxy<WinitUserEvent>>,
+}
+
+impl AttachmentProgress {
+    fn set(&self, phase: AttachmentPhase) {
+        self.phase.store(phase as u8, Ordering::Relaxed);
+        if let Some(wake) = &self.wake {
+            let _ = wake.send_event(WinitUserEvent::WakeUp);
+        }
+    }
+}
+
+#[derive(Clone, Copy)]
+#[repr(u8)]
+enum AttachmentPhase {
+    Locating = 1,
+    Booting = 2,
+    Connecting = 3,
+    Streaming = 4,
+}
+
+impl AttachmentPhase {
+    fn status(value: u8) -> &'static str {
+        match value {
+            2 => "booting",
+            3 => "connecting",
+            4 => "streaming",
+            _ => "locating",
+        }
+    }
+}
+
+impl DeviceAttachment {
+    fn status(&self) -> &'static str {
+        AttachmentPhase::status(self.progress.load(Ordering::Relaxed))
+    }
+}
 
 #[derive(Component)]
-struct AttachmentFailed;
+struct AttachmentFailed(String);
 
 struct AttachedDevice {
     axe: Axe,
@@ -481,20 +528,30 @@ fn start_device_attachments(
         )>();
         let wake = wake.as_ref().map(|wrapper| (**wrapper).clone());
         let attached_route = route.clone();
+        let progress = Arc::new(AtomicU8::new(AttachmentPhase::Locating as u8));
+        let attachment_progress = AttachmentProgress {
+            phase: progress.clone(),
+            wake: wake.clone(),
+        };
         let task = IoTaskPool::get().spawn(async move {
-            let result = attach_device(&route);
+            let result = attach_device(&route, &attachment_progress);
             if let Some(proxy) = wake {
                 let _ = proxy.send_event(WinitUserEvent::WakeUp);
             }
             result
         });
-        commands
-            .entity(entity)
-            .insert((AttachedRoute(attached_route), DeviceAttachment(task)));
+        commands.entity(entity).insert((
+            AttachedRoute(attached_route),
+            DeviceAttachment { task, progress },
+        ));
     }
 }
 
-fn attach_device(route: &SimulatorRoute) -> Result<AttachedDevice, String> {
+fn attach_device(
+    route: &SimulatorRoute,
+    progress: &AttachmentProgress,
+) -> Result<AttachedDevice, String> {
+    progress.set(AttachmentPhase::Locating);
     let axe = Axe::locate().ok_or_else(|| {
         format!(
             "`{}` not found; install it with `brew install cameroncooke/axe/axe`",
@@ -506,7 +563,9 @@ fn attach_device(route: &SimulatorRoute) -> Result<AttachedDevice, String> {
         axe.version().unwrap_or_default(),
         axe.path().display()
     );
+    progress.set(AttachmentPhase::Booting);
     let device = SimulatorDevice::booted_or_boot(route.version(), route.device_name())?;
+    progress.set(AttachmentPhase::Connecting);
     let points = device.point_size(&axe);
     let pixels = device.pixel_size(&axe);
     let hid = HidBroker::start(&axe, &device)
@@ -515,6 +574,7 @@ fn attach_device(route: &SimulatorRoute) -> Result<AttachedDevice, String> {
         .map_err(|error| format!("could not start simulator clipboard: {error}"))?;
     let keyboard = input::SimulatorKeyboard::start(&axe, &device)
         .map_err(|error| format!("could not start simulator keyboard: {error}"))?;
+    progress.set(AttachmentPhase::Streaming);
     let server = StreamServer::start(&axe, device.clone(), pixels)
         .map_err(|error| format!("could not serve the simulator stream: {error}"))?;
     Ok(AttachedDevice {
@@ -535,7 +595,7 @@ fn finish_device_attachments(
     mut commands: Commands,
 ) {
     for (entity, mut attachment) in &mut attachments {
-        let Some(result) = future::block_on(future::poll_once(&mut attachment.0)) else {
+        let Some(result) = future::block_on(future::poll_once(&mut attachment.task)) else {
             continue;
         };
         commands.entity(entity).remove::<DeviceAttachment>();
@@ -543,7 +603,7 @@ fn finish_device_attachments(
             Ok(attached) => attached,
             Err(error) => {
                 error!("could not attach an iOS Simulator: {error}");
-                commands.entity(entity).insert(AttachmentFailed);
+                commands.entity(entity).insert(AttachmentFailed(error));
                 continue;
             }
         };
@@ -579,13 +639,15 @@ fn announce(
     attachments: Query<(&StreamServer, &SimulatorDevice)>,
     mut commands: Commands,
 ) {
-    for (entity, meta, child_of, announced) in views.iter() {
+    for (entity, meta, child_of, announced, starting, failed) in views.iter() {
         if !meta.url.starts_with(SimulatorPlugin::URL) {
             continue;
         }
         let payload = match attachments.get(entity) {
             Ok((server, device)) => SimulatorUiState {
                 port: server.port(),
+                status: "ready".to_string(),
+                error: String::new(),
                 capability: server.capability().to_string(),
                 version: device
                     .version
@@ -597,7 +659,17 @@ fn announce(
                 frame_height: server.frame_height(),
                 frame_stride: server.frame_stride(),
             },
-            Err(_) => SimulatorUiState::default(),
+            Err(_) => SimulatorUiState {
+                status: if failed.is_some() {
+                    "errored".to_string()
+                } else if let Some(starting) = starting {
+                    starting.status().to_string()
+                } else {
+                    "waiting".to_string()
+                },
+                error: failed.map(|failed| failed.0.clone()).unwrap_or_default(),
+                ..Default::default()
+            },
         };
         if let Ok((_, device)) = attachments.get(entity)
             && let Some(canonical_url) = device.canonical_url()

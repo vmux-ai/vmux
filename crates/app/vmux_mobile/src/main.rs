@@ -8,7 +8,7 @@ use crate::runtime::RuntimeHandle;
 use crate::session::{LeaveSession, RestartSession, use_session};
 use bevy_app::{App as BevyApp, AppExit, Plugin};
 use dioxus::prelude::*;
-use vmux_chat::host::Agents;
+use vmux_session::host::Agents;
 use vmux_start::roster::Roster;
 use vmux_ui::back::PageBack;
 use vmux_ui::components::start_hero::{START_BACKDROP_CLASS, StartBackdrop, StartHero};
@@ -205,7 +205,7 @@ fn AppBody() -> Element {
 
     if session.is_open() {
         return rsx! {
-            vmux_chat::ui::Page {}
+            vmux_session::ui::Page {}
         };
     }
 

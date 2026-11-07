@@ -22,14 +22,11 @@ mod tabs;
 mod template;
 mod windows;
 
-#[vmux_page::page]
 pub struct ExtensionPlugin;
 
 impl Plugin for ExtensionPlugin {
     fn build(&self, app: &mut App) {
         app.add_plugins(FeaturePlugin::<crate::Feature>::default());
-        #[cfg(ui)]
-        app.add_plugins(crate::ui::ExtensionPage::plugin());
 
         let prepared = load::PreparedExtensions::load().unwrap_or_else(|error| {
             bevy::log::error!(%error, "failed to prepare extensions; starting without them");

@@ -27,7 +27,10 @@ use vmux_ecs::manifest::FeaturePlugin;
 use vmux_ecs::page::PageManifest;
 use vmux_ecs::{Bookmark, BookmarkOrder, Collapsed, Folder, PageMetadata, Pin, UiStateWrite, Uuid};
 
-use super::{command::LayoutRequestSet, stack::OpenRequest};
+use super::{
+    command::LayoutRequestSet,
+    stack::{OpenPolicy, OpenRequest},
+};
 
 pub struct BookmarkPlugin;
 
@@ -1044,7 +1047,8 @@ fn sync_metadata(
             }
             continue;
         };
-        if metadata.title == metadata.url {
+        if metadata.title == metadata.url || metadata.url == "file://" && metadata.title == "Files"
+        {
             metadata.title = manifest.title.to_string();
         }
         if let Some(icon) = manifest.icon
@@ -1068,9 +1072,21 @@ fn request_toggle(
 fn request_open(
     trigger: On<UiInput<BookmarkOpenRequest>>,
     mut requests: MessageWriter<OpenRequest>,
+    mut commands: Commands,
 ) {
+    let url = trigger.event().payload.url.clone();
+    let force_new = trigger.event().payload.force_new;
+    if url.trim_end_matches('/') == "vmux://projects" {
+        commands.trigger(vmux_ecs::workspace::ProjectContextOpenRequest { force_new });
+        return;
+    }
     requests.write(OpenRequest {
-        url: Some(trigger.event().payload.url.clone()),
+        url: Some(url),
+        policy: if force_new {
+            OpenPolicy::NewStack
+        } else {
+            OpenPolicy::FocusReusable
+        },
     });
 }
 
@@ -1435,7 +1451,7 @@ mod tests {
     }
 
     #[test]
-    fn open_event_requests_new_stack() {
+    fn open_event_focuses_an_existing_page_or_opens_a_stack() {
         let mut app = App::new();
         app.add_plugins(MinimalPlugins)
             .add_message::<ShowBookmarkMenuRequest>()
@@ -1446,6 +1462,7 @@ mod tests {
             webview,
             payload: BookmarkOpenRequest {
                 url: "https://a.test".into(),
+                force_new: false,
             },
         });
         let requests: Vec<_> = app
@@ -1457,6 +1474,36 @@ mod tests {
             requests,
             vec![OpenRequest {
                 url: Some("https://a.test".into()),
+                policy: OpenPolicy::FocusReusable,
+            }]
+        );
+    }
+
+    #[test]
+    fn modified_open_event_always_requests_a_new_stack() {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins)
+            .add_message::<ShowBookmarkMenuRequest>()
+            .add_message::<OpenRequest>()
+            .add_observer(request_open);
+        let webview = app.world_mut().spawn_empty().id();
+        app.world_mut().trigger(UiInput::<BookmarkOpenRequest> {
+            webview,
+            payload: BookmarkOpenRequest {
+                url: "https://a.test".into(),
+                force_new: true,
+            },
+        });
+        let requests: Vec<_> = app
+            .world_mut()
+            .resource_mut::<Messages<OpenRequest>>()
+            .drain()
+            .collect();
+        assert_eq!(
+            requests,
+            vec![OpenRequest {
+                url: Some("https://a.test".into()),
+                policy: OpenPolicy::NewStack,
             }]
         );
     }

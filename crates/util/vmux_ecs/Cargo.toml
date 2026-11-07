@@ -6,7 +6,26 @@ version.workspace = true
 edition.workspace = true
 publish = false
 
+[features]
+default = ["host"]
+host = [
+    "dep:bevy",
+    "dep:bevy_cef",
+    "dep:bevy_cef_core",
+    "dep:ron",
+    "dep:sha2",
+    "dep:toml",
+    "dep:url",
+    "dep:vmux_flex",
+    "dep:zip",
+]
+
 [dependencies]
+bevy_app = { workspace = true }
+bevy_ecs = { workspace = true }
+bevy_reflect = { workspace = true }
+bevy_world_serialization = { workspace = true }
+moonshine-save = { workspace = true }
 rkyv = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
@@ -17,23 +36,24 @@ vmux_api = { path = "../vmux_api", features = ["bevy"] }
 
 [dev-dependencies]
 serde_json = { workspace = true }
+tempfile = "3"
 
 [target.'cfg(not(target_os = "ios"))'.dependencies]
-bevy = { workspace = true }
-bevy_cef = { workspace = true }
-bevy_cef_core = { workspace = true }
+bevy = { workspace = true, optional = true }
+bevy_cef = { workspace = true, optional = true }
+bevy_cef_core = { workspace = true, optional = true }
 bevy_ecs = { workspace = true }
 bevy_reflect = { workspace = true }
 bevy_world_serialization = { workspace = true }
 moonshine-save = { workspace = true }
-ron = { workspace = true }
-sha2 = "0.10"
+ron = { workspace = true, optional = true }
+sha2 = { version = "0.10", optional = true }
 tokio = { workspace = true }
-toml = { workspace = true }
-url = { workspace = true }
-vmux_flex = { path = "../vmux_flex" }
+toml = { workspace = true, optional = true }
+url = { workspace = true, optional = true }
+vmux_flex = { path = "../vmux_flex", optional = true }
 vmux_transport = { path = "../vmux_transport" }
-zip = { version = "2", default-features = false, features = ["deflate"] }
+zip = { version = "2", default-features = false, features = ["deflate"], optional = true }
 
 [lints]
 workspace = true

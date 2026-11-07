@@ -542,7 +542,10 @@ fn open(
             });
         }
         for url in urls {
-            stack_requests.write(vmux_layout::stack::OpenRequest { url });
+            stack_requests.write(vmux_layout::stack::OpenRequest {
+                url,
+                policy: vmux_layout::stack::OpenPolicy::ReplaceStartup,
+            });
         }
     }
 }

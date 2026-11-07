@@ -116,9 +116,19 @@ fn route_snapshot_queries(
     mut snapshots: MessageWriter<BrowserSnapshotRequest>,
     mut activate: MessageWriter<ActivatePane>,
     browse: AgentBrowserResolve,
+    mut service_requests: MessageWriter<ServiceRequest>,
 ) {
     for request in queries.read() {
-        let resolved = browse.resolve_pane(&request.payload.pane, &request.payload.anchor);
+        let Some(resolved) = browse.resolve_pane(&request.payload.pane, &request.payload.anchor)
+        else {
+            service_requests.write(ServiceRequest(ClientMessage::AgentQueryResult(
+                AgentQueryResult::text(
+                    request.request_id,
+                    Err("browser snapshot target is unavailable".to_string()),
+                ),
+            )));
+            continue;
+        };
         if let Some(request) = resolved.activation {
             activate.write(request);
         }
@@ -135,9 +145,19 @@ fn route_scroll_queries(
     mut scrolls: MessageWriter<BrowserScrollRequest>,
     mut activate: MessageWriter<ActivatePane>,
     browse: AgentBrowserResolve,
+    mut service_requests: MessageWriter<ServiceRequest>,
 ) {
     for request in queries.read() {
-        let resolved = browse.resolve_pane(&request.payload.pane, &request.payload.anchor);
+        let Some(resolved) = browse.resolve_pane(&request.payload.pane, &request.payload.anchor)
+        else {
+            service_requests.write(ServiceRequest(ClientMessage::AgentQueryResult(
+                AgentQueryResult::text(
+                    request.request_id,
+                    Err("browser scroll target is unavailable".to_string()),
+                ),
+            )));
+            continue;
+        };
         if let Some(request) = resolved.activation {
             activate.write(request);
         }
@@ -313,7 +333,12 @@ fn go_back(
     mut responses: MessageWriter<AgentCommandResponse>,
 ) {
     for request in requests.read() {
-        let resolved = browse.command_pane(&request.payload.pane, &request.origin);
+        let Some(resolved) = browse.command_pane(&request.payload.pane, &request.origin) else {
+            responses.write(request.reply.response(AgentCommandResult::Error(
+                "browser_go_back: target pane is unavailable".to_string(),
+            )));
+            continue;
+        };
         if let Some(activation) = resolved.activation {
             activate.write(activation);
         }
@@ -332,7 +357,12 @@ fn go_forward(
     mut responses: MessageWriter<AgentCommandResponse>,
 ) {
     for request in requests.read() {
-        let resolved = browse.command_pane(&request.payload.pane, &request.origin);
+        let Some(resolved) = browse.command_pane(&request.payload.pane, &request.origin) else {
+            responses.write(request.reply.response(AgentCommandResult::Error(
+                "browser_go_forward: target pane is unavailable".to_string(),
+            )));
+            continue;
+        };
         if let Some(activation) = resolved.activation {
             activate.write(activation);
         }

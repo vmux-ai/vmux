@@ -1,6 +1,10 @@
 pub const RUN_OSC: &str = "6973";
 
 #[cfg(feature = "bevy")]
+#[derive(bevy_ecs::schedule::SystemSet, Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub struct ServiceMessageSet;
+
+#[cfg(feature = "bevy")]
 pub trait ServiceMessageVariant: bevy_ecs::message::Message + Sized {
     fn from_service_message(message: &crate::protocol::ServiceMessage) -> Option<Self>;
 }

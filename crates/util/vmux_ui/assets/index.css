@@ -78,7 +78,11 @@
 
   html {
     height: 100%;
-    color-scheme: light dark;
+    color-scheme: light;
+  }
+
+  html[data-theme="dark"] {
+    color-scheme: dark;
   }
 
   html,
@@ -117,21 +121,27 @@
   }
 }
 
-.pane-loading-ring {
-  --ring-color: var(--ring);
-  box-shadow:
-    0 0 0 2px var(--ring-color),
-    0 0 8px 0 color-mix(in oklch, var(--ring-color) 40%, transparent);
-  background-image: linear-gradient(
-    90deg,
-    transparent 0%,
-    transparent 30%,
-    color-mix(in oklch, var(--ring-color) 60%, transparent) 50%,
-    transparent 70%,
-    transparent 100%
-  );
-  background-size: 200% 100%;
-  animation: loading-sweep 2s cubic-bezier(0.4, 0, 0.2, 1) infinite;
+.url-loading-glow {
+  border-radius: 0.5rem;
+  animation: url-loading-glow 1.6s ease-in-out infinite;
+}
+
+@keyframes url-loading-glow {
+  0%, 100% {
+    box-shadow: inset 0 0 0 1px color-mix(in oklch, var(--ring) 25%, transparent);
+  }
+  50% {
+    box-shadow:
+      inset 0 0 0 1px color-mix(in oklch, var(--ring) 60%, transparent),
+      0 0 6px color-mix(in oklch, var(--ring) 12%, transparent);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .url-loading-glow {
+    animation: none;
+    box-shadow: inset 0 0 0 1px color-mix(in oklch, var(--ring) 35%, transparent);
+  }
 }
 
 @keyframes update-indeterminate {

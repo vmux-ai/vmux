@@ -3,7 +3,11 @@ use moonshine_save::prelude::Save;
 
 use super::persistence::PersistenceAppExt;
 use crate::PageMetadata;
-use crate::component::{ActivateRequest, Active, CreatedAt, LastActivatedAt, Order};
+use crate::WorkspaceKind;
+use crate::component::{
+    ActivateRequest, Active, ArchivedAt, CollectionView, CreatedAt, Cwd, Description,
+    LastActivatedAt, Order,
+};
 use vmux_api::{BuiltinIcon, PageIcon};
 
 use bevy::ecs::relationship::Relationship;
@@ -12,30 +16,61 @@ pub struct PrimitivesPlugin;
 
 impl Plugin for PrimitivesPlugin {
     fn build(&self, app: &mut App) {
-        app.register_persisted::<PageMetadata>()
+        app.init_resource::<ActivationClock>()
+            .register_persisted::<PageMetadata>()
+            .register_persisted::<WorkspaceKind>()
             .register_type::<PageIcon>()
             .register_type::<BuiltinIcon>()
+            .register_persisted::<Cwd>()
+            .register_persisted::<Description>()
+            .register_persisted::<CollectionView>()
             .register_persisted::<CreatedAt>()
             .register_persisted::<LastActivatedAt>()
+            .register_persisted::<ArchivedAt>()
             .register_persisted::<Order>()
             .register_type::<Active>()
             .register_type::<Children>()
             .register_type::<ChildOf>()
             .track_persistence::<Save>()
-            .track_persistence::<Name>()
-            .track_persistence::<Children>()
-            .track_persistence::<ChildOf>()
             .add_observer(activate);
     }
 }
 
-fn activate(trigger: On<ActivateRequest>, child_of: Query<&ChildOf>, mut commands: Commands) {
-    let activated_at = LastActivatedAt::now();
+#[derive(Resource, Default)]
+struct ActivationClock(i64);
+
+impl ActivationClock {
+    fn next(&mut self, after: i64) -> LastActivatedAt {
+        self.0 = LastActivatedAt::now()
+            .0
+            .max(self.0.saturating_add(1))
+            .max(after.saturating_add(1));
+        LastActivatedAt(self.0)
+    }
+}
+
+fn activate(
+    trigger: On<ActivateRequest>,
+    child_of: Query<&ChildOf>,
+    timestamps: Query<&LastActivatedAt>,
+    mut clock: ResMut<ActivationClock>,
+    mut commands: Commands,
+) {
     let mut current = trigger.event_target();
-    commands.entity(current).insert(activated_at);
+    let mut path = vec![current];
     while let Ok(parent_rel) = child_of.get(current) {
         current = parent_rel.get();
-        commands.entity(current).insert(activated_at);
+        path.push(current);
+    }
+    let mut after = 0;
+    for entity in &path {
+        if let Ok(timestamp) = timestamps.get(*entity) {
+            after = after.max(timestamp.0);
+        }
+    }
+    let activated_at = clock.next(after);
+    for entity in path {
+        commands.entity(entity).insert(activated_at);
     }
 }
 
@@ -49,13 +84,19 @@ mod tests {
         app.add_plugins(PrimitivesPlugin);
 
         let registry = app.world().resource::<AppTypeRegistry>().read();
+        let filter = super::super::persistence::WorkspacePersisted::filter(&registry);
         assert!(
             registry
                 .get(std::any::TypeId::of::<PageMetadata>())
                 .is_some()
         );
         assert!(registry.get(std::any::TypeId::of::<CreatedAt>()).is_some());
+        assert!(registry.get(std::any::TypeId::of::<ArchivedAt>()).is_some());
         assert!(registry.get(std::any::TypeId::of::<Order>()).is_some());
+        assert!(filter.is_allowed::<Cwd>());
+        assert!(filter.is_allowed::<Description>());
+        assert!(filter.is_allowed::<CollectionView>());
+        assert!(filter.is_allowed::<WorkspaceKind>());
     }
 
     #[test]
@@ -88,5 +129,26 @@ mod tests {
         assert!(app.world().get::<LastActivatedAt>(root).unwrap().0 > 1);
         assert!(app.world().get::<LastActivatedAt>(child).unwrap().0 > 1);
         assert!(app.world().get::<LastActivatedAt>(leaf).unwrap().0 > 1);
+    }
+
+    #[test]
+    fn repeated_activation_orders_siblings_even_when_the_clock_has_not_advanced() {
+        let mut app = App::new();
+        app.add_plugins(PrimitivesPlugin);
+        let restored = LastActivatedAt(LastActivatedAt::now().0 + 5_000);
+        let root = app.world_mut().spawn(restored).id();
+        let first = app.world_mut().spawn((restored, ChildOf(root))).id();
+        let second = app.world_mut().spawn((restored, ChildOf(root))).id();
+        app.world_mut().trigger(ActivateRequest { entity: first });
+        app.world_mut().trigger(ActivateRequest { entity: second });
+        app.update();
+        let first_at = app.world().get::<LastActivatedAt>(first).unwrap().0;
+        let second_at = app.world().get::<LastActivatedAt>(second).unwrap().0;
+        assert!(first_at > restored.0);
+        assert!(second_at > first_at);
+        assert_eq!(
+            app.world().get::<LastActivatedAt>(root).unwrap().0,
+            second_at
+        );
     }
 }

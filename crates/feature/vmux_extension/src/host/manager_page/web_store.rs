@@ -123,7 +123,10 @@ fn browse_request(
             EncodedQuery::from(query)
         )
     };
-    requests.write(vmux_layout::stack::OpenRequest { url: Some(url) });
+    requests.write(vmux_layout::stack::OpenRequest {
+        url: Some(url),
+        policy: vmux_layout::stack::OpenPolicy::ReplaceStartup,
+    });
 }
 
 struct EncodedQuery(String);

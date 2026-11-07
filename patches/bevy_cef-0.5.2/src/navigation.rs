@@ -1,5 +1,5 @@
 use bevy::prelude::*;
-use bevy_cef_core::prelude::Browsers;
+use bevy_cef_core::prelude::{BinIpcNavigationRevision, BinIpcSurfaceGeneration, Browsers};
 use serde::{Deserialize, Serialize};
 
 pub(super) struct NavigationPlugin;
@@ -55,25 +55,67 @@ pub struct RequestReloadIgnoreCache {
     pub webview: Entity,
 }
 
-fn apply_request_go_back(trigger: On<RequestGoBack>, browsers: NonSend<Browsers>) {
-    browsers.go_back(&trigger.webview);
+fn apply_request_go_back(
+    trigger: On<RequestGoBack>,
+    browsers: NonSend<Browsers>,
+    mut commands: Commands,
+) {
+    if let Some((generation, revision)) = browsers.go_back(&trigger.webview) {
+        commands.entity(trigger.webview).insert((
+            BinIpcSurfaceGeneration(generation),
+            BinIpcNavigationRevision(revision),
+        ));
+    }
 }
 
-fn apply_request_go_forward(trigger: On<RequestGoForward>, browsers: NonSend<Browsers>) {
-    browsers.go_forward(&trigger.webview);
+fn apply_request_go_forward(
+    trigger: On<RequestGoForward>,
+    browsers: NonSend<Browsers>,
+    mut commands: Commands,
+) {
+    if let Some((generation, revision)) = browsers.go_forward(&trigger.webview) {
+        commands.entity(trigger.webview).insert((
+            BinIpcSurfaceGeneration(generation),
+            BinIpcNavigationRevision(revision),
+        ));
+    }
 }
 
-fn apply_request_navigate(trigger: On<RequestNavigate>, browsers: NonSend<Browsers>) {
-    browsers.navigate(&trigger.webview, &trigger.url);
+fn apply_request_navigate(
+    trigger: On<RequestNavigate>,
+    browsers: NonSend<Browsers>,
+    mut commands: Commands,
+) {
+    if let Some((generation, revision)) = browsers.navigate(&trigger.webview, &trigger.url) {
+        commands.entity(trigger.webview).insert((
+            BinIpcSurfaceGeneration(generation),
+            BinIpcNavigationRevision(revision),
+        ));
+    }
 }
 
-fn apply_request_reload(trigger: On<RequestReload>, browsers: NonSend<Browsers>) {
-    browsers.reload_webview(&trigger.webview);
+fn apply_request_reload(
+    trigger: On<RequestReload>,
+    browsers: NonSend<Browsers>,
+    mut commands: Commands,
+) {
+    if let Some((generation, revision)) = browsers.reload_webview(&trigger.webview) {
+        commands.entity(trigger.webview).insert((
+            BinIpcSurfaceGeneration(generation),
+            BinIpcNavigationRevision(revision),
+        ));
+    }
 }
 
 fn apply_request_reload_ignore_cache(
     trigger: On<RequestReloadIgnoreCache>,
     browsers: NonSend<Browsers>,
+    mut commands: Commands,
 ) {
-    browsers.reload_webview_ignore_cache(&trigger.webview);
+    if let Some((generation, revision)) = browsers.reload_webview_ignore_cache(&trigger.webview) {
+        commands.entity(trigger.webview).insert((
+            BinIpcSurfaceGeneration(generation),
+            BinIpcNavigationRevision(revision),
+        ));
+    }
 }

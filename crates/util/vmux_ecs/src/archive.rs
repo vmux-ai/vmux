@@ -1,6 +1,7 @@
 use bevy::prelude::*;
 use moonshine_save::prelude::*;
 
+use crate::WorkspaceKind;
 use crate::terminal::TerminalLaunch;
 
 #[derive(Component, Clone, Debug, Reflect, Default)]
@@ -56,6 +57,7 @@ pub enum SplitAxis {
 
 #[derive(Message, Clone, Debug)]
 pub struct PageArchiveRequest {
+    pub source: Option<Entity>,
     pub url: String,
     pub title: String,
     pub space_id: String,
@@ -64,6 +66,7 @@ pub struct PageArchiveRequest {
     pub leaf_pane_id: String,
     pub stack_index: usize,
     pub pane_path: Vec<PaneStep>,
+    pub workspace: Option<WorkspaceKind>,
 }
 
 #[cfg(test)]

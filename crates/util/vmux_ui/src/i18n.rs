@@ -23,6 +23,10 @@ pub fn translate_with(id: &str, args: &[(&str, TranslationValue<'_>)]) -> String
     Locale::current().translate_with(id, args)
 }
 
+pub fn translate_humanized(id: &str) -> String {
+    Locale::current().translate_humanized(id)
+}
+
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct Locale(String);
 
@@ -86,6 +90,14 @@ impl Locale {
 
     pub fn translate(&self, id: &str) -> String {
         self.translate_with(id, &[])
+    }
+
+    pub fn translate_humanized(&self, id: &str) -> String {
+        let translated = self.translate(id);
+        if translated != id {
+            return translated;
+        }
+        HumanizedMessage::from(id).0
     }
 
     pub fn translate_with(&self, id: &str, args: &[(&str, TranslationValue<'_>)]) -> String {
@@ -228,6 +240,23 @@ pub enum TranslationValue<'a> {
     Number(i64),
 }
 
+struct HumanizedMessage(String);
+
+impl From<&str> for HumanizedMessage {
+    fn from(id: &str) -> Self {
+        let mut value = id
+            .split(['_', '-'])
+            .filter(|part| !part.is_empty())
+            .collect::<Vec<_>>()
+            .join(" ");
+        if let Some(first) = value.chars().next() {
+            let upper = first.to_uppercase().collect::<String>();
+            value.replace_range(..first.len_utf8(), &upper);
+        }
+        Self(value)
+    }
+}
+
 fn platform_locale() -> Option<String> {
     sys_locale::get_locale()
 }
@@ -283,6 +312,18 @@ mod tests {
     fn resolves_region_variants_to_language_catalog() {
         assert_eq!(Locale::from("ja-JP").translate("common-open"), "開く");
         assert_eq!(Locale::from("en-GB").translate("common-open"), "Open");
+    }
+
+    #[test]
+    fn missing_dynamic_labels_are_humanized() {
+        let english = Locale::from("en-US");
+
+        assert_eq!(
+            english.translate_humanized("session-stage-in-progress"),
+            "In progress"
+        );
+        assert_eq!(english.translate_humanized("in_progress"), "In progress");
+        assert_eq!(english.translate_humanized("needs-review"), "Needs review");
     }
 
     #[test]

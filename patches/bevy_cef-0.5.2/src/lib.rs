@@ -7,6 +7,7 @@ mod loading_state;
 mod mute;
 mod navigation;
 mod popup_state;
+mod renderer_state;
 mod webview;
 mod zoom;
 
@@ -17,6 +18,7 @@ use crate::loading_state::WebviewLoadingStatePlugin;
 use crate::mute::AudioMutePlugin;
 use crate::popup_state::WebviewPopupPlugin;
 use crate::prelude::{CefSystems, IpcPlugin, NavigationPlugin, WebviewPlugin};
+use crate::renderer_state::WebviewRendererStatePlugin;
 use crate::zoom::ZoomPlugin;
 use bevy::prelude::*;
 use bevy_cef_core::prelude::{
@@ -28,11 +30,12 @@ pub mod prelude {
     pub use crate::{
         CefPlugin, RunOnMainThread, cef_state::*,
         common::custom_scheme::asset_loader::CefResponseHandle, common::*, loading_state::*,
-        navigation::*, popup_state::*, webview::prelude::*,
+        navigation::*, popup_state::*, renderer_state::*, webview::prelude::*,
     };
     pub use bevy_cef_core::prelude::{
-        Browsers, CefAcceptLanguageList, CefColorMode, CefColorScheme, CefDiskProfileRoot,
-        CefEmbeddedHost, CefEmbeddedHosts, CefEmbeddedPageConfig, CefExtensions, CefTransitionCore,
+        BinIpcBlocked, BinIpcEpoch, BinIpcNavigationRevision, BinIpcSurfaceGeneration, Browsers,
+        CefAcceptLanguageList, CefColorMode, CefColorScheme, CefDiskProfileRoot, CefEmbeddedHost,
+        CefEmbeddedHosts, CefEmbeddedPageConfig, CefExtensions, CefTransitionCore,
         CefTransitionQualifiers, CommandLineConfig, MediaPermissionRequest, PointerButton,
         WebviewCefStateEvent, WebviewCommittedNavigationEvent, WebviewLoadingStateEvent,
         WebviewPopupEvent, compile_time_cef_embedded_scheme, resolve_media_permission,
@@ -122,6 +125,7 @@ impl Plugin for CefPlugin {
             WebviewLoadingStatePlugin,
             WebviewCefStatePlugin,
             WebviewPopupPlugin,
+            WebviewRendererStatePlugin,
             NavigationPlugin,
             ZoomPlugin,
             AudioMutePlugin,

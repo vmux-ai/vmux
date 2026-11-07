@@ -33,11 +33,21 @@ impl PendingReads {
     }
 
     pub(crate) fn clear(&self) {
-        if self.slots.borrow().is_empty() {
+        let mut slots = self.slots.borrow_mut();
+        if slots.is_empty() {
             return;
         }
-        self.slots.borrow_mut().clear();
+        let mut wakers = Vec::new();
+        for (_, slot) in slots.drain() {
+            if let Slot::Asked(Some(waker)) = slot {
+                wakers.push(waker);
+            }
+        }
+        drop(slots);
         self.lifecycle.update(LifecycleUpdate::MeasurementsCleared);
+        for waker in wakers {
+            waker.wake();
+        }
     }
 
     pub(crate) fn ask(&self) -> Measurement {
@@ -172,5 +182,30 @@ mod tests {
         drop(answered);
 
         assert!(reads.slots.borrow().is_empty());
+    }
+
+    #[test]
+    fn clearing_pending_reads_wakes_the_waiter() {
+        struct WakeCount(std::sync::atomic::AtomicUsize);
+
+        impl std::task::Wake for WakeCount {
+            fn wake(self: std::sync::Arc<Self>) {
+                self.0.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            }
+        }
+
+        let reads = PendingReads::default();
+        let mut measurement = reads.ask();
+        let wakes = std::sync::Arc::new(WakeCount(std::sync::atomic::AtomicUsize::new(0)));
+        let waker = Waker::from(wakes.clone());
+        assert!(matches!(
+            Pin::new(&mut measurement).poll(&mut Context::from_waker(&waker)),
+            Poll::Pending
+        ));
+
+        reads.clear();
+
+        assert_eq!(wakes.0.load(std::sync::atomic::Ordering::SeqCst), 1);
+        assert!(matches!(measurement.poll_once(), Poll::Ready(Err(_))));
     }
 }

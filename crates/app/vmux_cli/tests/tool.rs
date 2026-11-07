@@ -42,18 +42,12 @@ fn tools_adopt_and_apply_manage_home_links() {
 }
 
 #[test]
-fn tools_import_adopts_existing_manifests() {
+fn tools_import_adopts_existing_brewfile() {
     let temp = tempfile::tempdir().unwrap();
     let home = temp.path().join("home");
     let brewfile = temp.path().join("Brewfile");
-    let mcp = temp.path().join("mcp.json");
     std::fs::create_dir_all(&home).unwrap();
     std::fs::write(&brewfile, "brew \"ripgrep\"\ncask \"ghostty\"\n").unwrap();
-    std::fs::write(
-        &mcp,
-        r#"{"mcpServers":{"docs":{"url":"https://example.com/mcp"}}}"#,
-    )
-    .unwrap();
 
     Command::cargo_bin("vmux")
         .unwrap()
@@ -65,20 +59,11 @@ fn tools_import_adopts_existing_manifests() {
     Command::cargo_bin("vmux")
         .unwrap()
         .env("HOME", &home)
-        .args(["tools", "import", "mcp", mcp.to_str().unwrap()])
-        .assert()
-        .success()
-        .stdout(predicate::str::contains("1 MCP server"));
-    Command::cargo_bin("vmux")
-        .unwrap()
-        .env("HOME", &home)
         .args(["tools", "status"])
         .assert()
         .success()
         .stdout(
             predicate::str::contains("homebrew-formula (1)")
-                .and(predicate::str::contains("homebrew-cask (1)"))
-                .and(predicate::str::contains("mcp (1)"))
-                .and(predicate::str::contains("docs · Http")),
+                .and(predicate::str::contains("homebrew-cask (1)")),
         );
 }

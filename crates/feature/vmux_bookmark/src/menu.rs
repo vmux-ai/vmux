@@ -298,6 +298,7 @@ mod macos {
             ChildOf(menu),
             BookmarkMenuMessage(OpenRequest {
                 url: Some(metadata.url.clone()),
+                policy: vmux_layout::stack::OpenPolicy::FocusExact,
             }),
         ));
         commands.spawn((
@@ -338,6 +339,7 @@ mod macos {
             ChildOf(menu),
             BookmarkMenuMessage(OpenRequest {
                 url: Some(metadata.url.clone()),
+                policy: vmux_layout::stack::OpenPolicy::FocusExact,
             }),
         ));
         commands.spawn((

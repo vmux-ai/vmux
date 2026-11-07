@@ -2,7 +2,6 @@
 
 use dioxus::prelude::*;
 use vmux_ui::components::button::{Button, ButtonVariant};
-use vmux_ui::components::card::{Card, CardVariant};
 use vmux_ui::components::textarea::{Textarea, TextareaVariant};
 use vmux_ui::file_icon::TypeIcon;
 use vmux_ui::hooks::send;
@@ -13,7 +12,8 @@ use crate::event::*;
 use crate::state::{GitOperationEligibility, GitPanel};
 
 use super::model::FileStatusView;
-use super::panel::{HeaderOperationButton, PanelHeader, PanelIcon};
+use super::operation::HeaderOperationButton;
+use super::shared::ListPager;
 
 #[component]
 pub(super) fn ChangesCard(
@@ -22,7 +22,6 @@ pub(super) fn ChangesCard(
     confirm_discard: Vec<u8>,
     commit_message: String,
     commit_pending: String,
-    focused_panel: GitPanel,
     operations: GitOperationEligibility,
 ) -> Element {
     let mut staged = Vec::new();
@@ -36,8 +35,44 @@ pub(super) fn ChangesCard(
         }
     }
     let staged_count = staged.len() as u32;
+    let staged_total = staged.len();
+    let unstaged_total = unstaged.len();
+    let total_rows = staged_total + unstaged_total;
+    let pager = ListPager::use_state();
+    let selected_row = staged
+        .iter()
+        .position(|(_, entry)| entry.path_bytes == selected_path_bytes)
+        .or_else(|| {
+            unstaged
+                .iter()
+                .position(|(_, entry)| entry.path_bytes == selected_path_bytes)
+                .map(|index| staged_total + index)
+        });
+    let visible_rows = pager
+        .visible(total_rows)
+        .max(selected_row.map(|index| index + 1).unwrap_or_default());
+    let visible_staged = visible_rows.min(staged_total);
+    let visible_unstaged = visible_rows
+        .saturating_sub(staged_total)
+        .min(unstaged_total);
+    let has_unstaged = !unstaged.is_empty();
     let file_operations = rsx! {
         div { class: "flex shrink-0 items-center gap-0.5",
+            if has_unstaged {
+                HeaderOperationButton {
+                    icon: LineIcon::Plus,
+                    shortcut: "",
+                    label: translate("git-stage-all"),
+                    disabled: !operations.stage_all,
+                    danger: false,
+                    onpress: {
+                        let repo_root = repository.repo_root.clone();
+                        move |_| {
+                            let _ = send(&GitStageAllRequest { path: repo_root.clone() });
+                        }
+                    },
+                }
+            }
             HeaderOperationButton {
                 icon: LineIcon::Package,
                 shortcut: "s",
@@ -64,35 +99,13 @@ pub(super) fn ChangesCard(
     };
 
     rsx! {
-        Card {
-            variant: CardVariant::Panel,
-            class: if focused_panel == GitPanel::Files {
-                if repository.files.is_empty() {
-                    "order-4 min-h-[13rem] border-ansi-2/55 shadow-[0_0_0_1px_color-mix(in_oklab,var(--ansi-2)_18%,transparent)] sm:col-start-1 sm:row-start-2 sm:min-h-0 sm:order-none"
-                } else {
-                    "order-4 min-h-[19rem] border-ansi-2/55 shadow-[0_0_0_1px_color-mix(in_oklab,var(--ansi-2)_18%,transparent)] sm:col-start-1 sm:row-start-2 sm:min-h-0 sm:order-none"
-                }
-            } else {
-                if repository.files.is_empty() {
-                    "order-4 min-h-[13rem] border-t-amber-400/30 sm:col-start-1 sm:row-start-2 sm:min-h-0 sm:order-none"
-                } else {
-                    "order-4 min-h-[19rem] border-t-amber-400/30 sm:col-start-1 sm:row-start-2 sm:min-h-0 sm:order-none"
-                }
-            },
-            onclick: move |_| {
-                let _ = send(&GitPanelSelectRequest { panel: GitPanel::Files });
-            },
-            PanelHeader {
-                index: 2,
-                title: translate("git-files"),
-                count: Some(repository.files.len()),
-                icon: PanelIcon::Line(LineIcon::File),
-                icon_class: "bg-amber-400/10 text-amber-500 ring-1 ring-inset ring-amber-400/15",
-                badge_class: "border-amber-400/20 bg-amber-400/[0.08] text-amber-500",
-                focused: focused_panel == GitPanel::Files,
-                operations: file_operations,
+        section { class: "flex h-full min-h-0 flex-col",
+            div { class: "flex h-10 shrink-0 items-center justify-end px-3",
+                {file_operations}
             }
-            div { class: "min-h-0 flex-1 overflow-y-auto px-1 py-1",
+            div {
+                class: "min-h-0 flex-1 overflow-y-auto px-2 py-1.5",
+                onscroll: move |event| pager.load_more(event, total_rows),
                 if repository.files.is_empty() {
                     div { class: "flex h-full min-h-16 items-center justify-center gap-2 px-3 text-center text-xs text-muted-foreground",
                         LineIconView { icon: LineIcon::ShieldCheck, class: "h-4 w-4 shrink-0 text-ansi-2" }
@@ -102,7 +115,8 @@ pub(super) fn ChangesCard(
                     if !staged.is_empty() {
                         FileSection {
                             title: translate("git-staged-changes"),
-                            files: staged,
+                            files: staged.into_iter().take(visible_staged).collect(),
+                            total: staged_total,
                             repo_root: repository.repo_root.clone(),
                             staged_view: true,
                             selected_path_bytes: selected_path_bytes.clone(),
@@ -112,7 +126,8 @@ pub(super) fn ChangesCard(
                     if !unstaged.is_empty() {
                         FileSection {
                             title: translate("git-unstaged-changes"),
-                            files: unstaged,
+                            files: unstaged.into_iter().take(visible_unstaged).collect(),
+                            total: unstaged_total,
                             repo_root: repository.repo_root.clone(),
                             staged_view: false,
                             selected_path_bytes: selected_path_bytes.clone(),
@@ -135,6 +150,7 @@ pub(super) fn ChangesCard(
 fn FileSection(
     title: String,
     files: Vec<(usize, GitFileEntry)>,
+    total: usize,
     repo_root: String,
     staged_view: bool,
     selected_path_bytes: Vec<u8>,
@@ -142,9 +158,9 @@ fn FileSection(
 ) -> Element {
     rsx! {
         div { class: "pb-1 last:pb-0",
-            div { class: "flex h-7 items-center justify-between px-2.5 text-[9px] font-semibold uppercase tracking-[0.08em] text-muted-foreground",
+            div { class: "flex h-8 items-center justify-between px-2.5 text-[10px] font-semibold text-muted-foreground",
                 span { "{title}" }
-                span { class: "tabular-nums", "{files.len()}" }
+                span { class: "tabular-nums", "{total}" }
             }
             div {
                 for (row_index, entry) in files {
@@ -189,9 +205,9 @@ fn FileRow(
         div {
             id: "{row_id}",
             class: if selected {
-                "group mx-1 flex min-h-8 cursor-default items-center gap-2 rounded-md bg-primary/[0.10] px-2 text-foreground shadow-[inset_0_0_0_1px_color-mix(in_oklab,var(--primary)_16%,transparent)]"
+                "group flex min-h-9 cursor-default items-center gap-2 rounded-md bg-primary/[0.10] px-2.5 text-foreground"
             } else {
-                "group mx-1 flex min-h-8 cursor-default items-center gap-2 rounded-md px-2 hover:bg-foreground/[0.045]"
+                "group flex min-h-9 cursor-default items-center gap-2 rounded-md px-2.5 hover:bg-foreground/[0.045]"
             },
             onclick: {
                 let file_path_bytes = file_path_bytes.clone();
@@ -204,7 +220,7 @@ fn FileRow(
             span { class: "w-4 shrink-0 text-center font-mono text-xs font-semibold {status_class}", title: "{status_label}", "{status_code}" }
             TypeIcon { path: entry.path.clone(), is_dir: false, class: "h-4 w-4 shrink-0 opacity-80" }
             div { class: "min-w-0 flex-1",
-                div { class: "truncate text-xs", "{file_name}" }
+                div { class: "truncate text-[13px]", "{file_name}" }
                 if !parent.is_empty() {
                     div { class: "truncate text-[10px] text-muted-foreground", "{parent}" }
                 }
@@ -268,10 +284,10 @@ fn CommitPanel(
     let can_commit = can_commit && !commit_message.trim().is_empty() && commit_pending.is_empty();
 
     rsx! {
-        div { class: "shrink-0 border-t border-foreground/[0.07] bg-foreground/[0.015] p-1.5",
+        div { class: "shrink-0 bg-card/70 p-3",
             Textarea {
                 variant: TextareaVariant::Outline,
-                class: "min-h-8 w-full resize-none rounded-md border border-foreground/[0.09] bg-background/65 px-2 py-1.5 text-[11px] shadow-inner outline-none placeholder:text-muted-foreground focus:border-primary/40 focus:ring-2 focus:ring-primary/10",
+                class: "min-h-8 w-full resize-none rounded-md border-0 bg-foreground/[0.035] px-2 py-1.5 text-[11px] shadow-none outline-none placeholder:text-muted-foreground focus:bg-foreground/[0.055] focus:ring-0",
                 placeholder: translate("git-commit-message"),
                 value: "{commit_message}",
                 oninput: move |event: Event<FormData>| {

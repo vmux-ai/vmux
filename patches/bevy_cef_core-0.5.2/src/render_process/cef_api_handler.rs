@@ -1,4 +1,8 @@
-use crate::prelude::{LISTEN_EVENTS, PROCESS_MESSAGE_BIN_JS_EMIT, PROCESS_MESSAGE_JS_EMIT};
+use crate::prelude::{
+    LISTEN_EVENTS, PROCESS_MESSAGE_BIN_JS_EMIT, PROCESS_MESSAGE_HISTORY_SWIPE,
+    PROCESS_MESSAGE_JS_EMIT,
+};
+use crate::render_process::render_process_handler::{BinDocumentIdentity, current_bin_ipc_epoch};
 use crate::util::{IntoString, v8_value_to_json};
 use cef::rc::{Rc, RcImpl};
 use cef::{
@@ -72,6 +76,7 @@ impl ImplV8Handler for CefApiHandler {
             "__cef_emit" => self.execute_emit(arguments),
             "__cef_listen" => self.execute_listen(arguments),
             "__cef_bin_emit" => self.execute_bin_emit(arguments),
+            "__cef_history_swipe" => self.execute_history_swipe(arguments),
             _ => 0,
         }
     }
@@ -83,6 +88,52 @@ impl ImplV8Handler for CefApiHandler {
 }
 
 impl CefApiHandler {
+    fn execute_history_swipe(&self, arguments: Option<&[Option<V8Value>]>) -> c_int {
+        let Some(context) = v8_context_get_current_context() else {
+            return 0;
+        };
+        let Some(frame) = context.frame() else {
+            return 0;
+        };
+        if frame.is_main() == 0 {
+            return 1;
+        }
+        let Some(arguments) = arguments else {
+            return 1;
+        };
+        let Some(Some(direction)) = arguments.first() else {
+            return 1;
+        };
+        let Some(Some(token)) = arguments.get(1) else {
+            return 1;
+        };
+        if direction.is_string() == 0 || token.is_string() == 0 {
+            return 1;
+        }
+        let direction = direction.string_value().into_string();
+        let token = token.string_value().into_string();
+        if !matches!(direction.as_str(), "back" | "forward")
+            || token.len() != 32
+            || !token.bytes().all(|byte| byte.is_ascii_hexdigit())
+        {
+            return 1;
+        }
+        let Some(mut process) = process_message_create(Some(&PROCESS_MESSAGE_HISTORY_SWIPE.into()))
+        else {
+            return 1;
+        };
+        let Some(values) = process.argument_list() else {
+            return 1;
+        };
+        values.set_string(0, Some(&direction.as_str().into()));
+        values.set_string(1, Some(&token.as_str().into()));
+        frame.send_process_message(
+            ProcessId::from(cef_process_id_t::PID_BROWSER),
+            Some(&mut process),
+        );
+        1
+    }
+
     fn execute_emit(&self, arguments: Option<&[Option<V8Value>]>) -> c_int {
         let Some(context) = v8_context_get_current_context() else {
             return 0;
@@ -120,12 +171,20 @@ impl CefApiHandler {
         if !crate::util::has_embedded_scheme(&frame.url().into_string()) {
             return 1;
         }
+        let Some(identity) = BinDocumentIdentity::current_token(&context) else {
+            return 1;
+        };
+        let Some(ipc_epoch) = current_bin_ipc_epoch(&context) else {
+            return 1;
+        };
 
         if let Some(mut process) = process_message_create(Some(&PROCESS_MESSAGE_BIN_JS_EMIT.into()))
             && let Some(arguments_list) = process.argument_list()
             && let Some(arguments) = arguments
             && let Some(Some(first)) = arguments.first()
         {
+            arguments_list.set_string(2, Some(&identity.as_str().into()));
+            arguments_list.set_string(3, Some(&ipc_epoch.to_string().as_str().into()));
             let (id, payload_index) = if first.is_string().is_positive() {
                 (first.string_value().into_string(), 1)
             } else {
@@ -184,11 +243,14 @@ impl CefApiHandler {
             && let Some(Some(callback)) = arguments.get(1)
             && callback.is_function().is_positive()
             && let Some(browser) = context.browser()
+            && let Some(token) = BinDocumentIdentity::current_token(&context)
         {
-            LISTEN_EVENTS.lock().unwrap().insert(
-                (browser.identifier(), id.string_value().into_string()),
-                callback.clone(),
-            );
+            LISTEN_EVENTS
+                .lock()
+                .unwrap()
+                .entry((browser.identifier(), token, id.string_value().into_string()))
+                .or_default()
+                .push(callback.clone());
         }
         1
     }

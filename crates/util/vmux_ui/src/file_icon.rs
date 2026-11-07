@@ -1,3 +1,4 @@
+use base64::Engine;
 pub use components::TypeIcon;
 
 const RUST: Logo = Logo {
@@ -284,7 +285,12 @@ pub struct FilePath<'a>(pub &'a str);
 
 impl<'a> FilePath<'a> {
     pub fn name(self) -> &'a str {
-        let path = self.0.trim_end_matches('/');
+        let source = if self.0.contains("://") {
+            self.0.split(['?', '#']).next().unwrap_or(self.0)
+        } else {
+            self.0
+        };
+        let path = source.trim_end_matches('/');
         match path.rsplit_once('/') {
             Some((_, name)) => name,
             None => path,
@@ -358,6 +364,33 @@ pub enum FileIcon {
     File,
 }
 
+impl FileIcon {
+    pub fn favicon(self) -> String {
+        if self == Self::Folder {
+            return format!(
+                "data:image/svg+xml;base64,{}",
+                base64::engine::general_purpose::STANDARD
+                    .encode(include_bytes!("../assets/favicons/editor.svg")),
+            );
+        }
+        let body = match self {
+            Self::Logo(logo) => format!(r#"<g transform="translate(2 2) scale(0.8333333)"><path fill="{}" stroke="none" d="{}"/></g>"#, logo.colour, logo.path),
+            Self::Folder => r#"<path d="M4 20h16a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13c0 1.1.9 2 2 2Z"/>"#.to_string(),
+            Self::Config => r#"<path d="M8 3H7a2 2 0 0 0-2 2v5a2 2 0 0 1-2 2 2 2 0 0 1 2 2v5c0 1.1.9 2 2 2h1M16 21h1a2 2 0 0 0 2-2v-5c0-1.1.9-2 2-2a2 2 0 0 1-2-2V5a2 2 0 0 0-2-2h-1"/>"#.to_string(),
+            Self::Code => r#"<path d="m16 18 6-6-6-6m-8 0-6 6 6 6"/>"#.to_string(),
+            Self::Image => r#"<path d="M19 3H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V5a2 2 0 0 0-2-2Zm2 12-5-5L5 21"/>"#.to_string(),
+            Self::Text | Self::File => r#"<path d="M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7ZM14 2v4a2 2 0 0 0 2 2h4"/>"#.to_string(),
+        };
+        let svg = format!(
+            r##"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="#9ca3af" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">{body}</svg>"##
+        );
+        format!(
+            "data:image/svg+xml;base64,{}",
+            base64::engine::general_purpose::STANDARD.encode(svg)
+        )
+    }
+}
+
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub struct Logo {
     pub path: &'static str,
@@ -425,6 +458,19 @@ mod components {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn file_icons_ignore_url_locations_without_trimming_local_filename_characters() {
+        assert_eq!(
+            FilePath("file:///work/AGENTS.md#L12").icon(false),
+            FilePath("AGENTS.md").icon(false)
+        );
+        assert_eq!(
+            FilePath("file:///work/Cargo.toml?raw=1#section").icon(false),
+            FilePath("Cargo.toml").icon(false)
+        );
+        assert_eq!(FilePath("/work/name#draft.md").name(), "name#draft.md");
+    }
 
     #[test]
     fn ext_of_reads_last_segment_extension() {

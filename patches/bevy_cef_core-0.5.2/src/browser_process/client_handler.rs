@@ -1,4 +1,5 @@
 mod bin_emit_event_handler;
+mod history_swipe_handler;
 mod js_emit_event_handler;
 mod snapshot_result_handler;
 
@@ -14,7 +15,11 @@ use cef::{
 };
 use std::os::raw::c_int;
 
-pub use bin_emit_event_handler::{BinEmitEventHandler, BinIpcEventRaw};
+pub use bin_emit_event_handler::{
+    BinDocumentContextHandler, BinEmitEventHandler, BinIpcBlocked, BinIpcContext, BinIpcEpoch,
+    BinIpcEventRaw, BinIpcNavigationRevision, BinIpcSurfaceGeneration,
+};
+pub use history_swipe_handler::{HistorySwipeDirection, HistorySwipeHandler, HistorySwipeRaw};
 pub use js_emit_event_handler::{IpcEventRaw, JsEmitEventHandler};
 pub use snapshot_result_handler::{SnapshotResultHandler, SnapshotResultRaw};
 
@@ -251,10 +256,15 @@ impl ImplClient for ClientHandlerBuilder {
             let name = message.name().into_string();
             let url = frame.url().into_string();
             let is_snapshot_result = name == crate::prelude::PROCESS_MESSAGE_SNAPSHOT_RESULT;
-            if !is_snapshot_result && !crate::util::ipc_allowed_browser(&url) {
+            let is_history_swipe = name == crate::prelude::PROCESS_MESSAGE_HISTORY_SWIPE;
+            if is_history_swipe && frame.is_main() == 0 {
+                return 1;
+            }
+            if !is_snapshot_result && !is_history_swipe && !crate::util::ipc_allowed_browser(&url) {
                 return 1;
             }
             if !is_snapshot_result
+                && !is_history_swipe
                 && crate::util::is_bridge_allowed_origin(&url)
                 && name != crate::prelude::PROCESS_MESSAGE_JS_EMIT
             {

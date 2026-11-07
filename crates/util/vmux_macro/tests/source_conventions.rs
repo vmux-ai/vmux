@@ -1,6 +1,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::Path;
 
+use serde::Deserialize;
 use syn::visit::{self, Visit};
 use syn::{
     Attribute, Block, Expr, ExprMethodCall, ExprPath, FnArg, ImplItem, ImplItemFn, Item, ItemFn,
@@ -10,6 +11,119 @@ use syn::{
 const GENERIC_MODULES: &[&str] = &[
     "bin", "host", "lib", "main", "plugin", "runtime", "src", "test", "tests", "ui",
 ];
+
+#[derive(Deserialize)]
+struct FeaturePages {
+    #[serde(default)]
+    pages: Vec<FeaturePage>,
+}
+
+#[derive(Deserialize)]
+struct FeaturePage {
+    #[serde(default)]
+    permissions: Vec<String>,
+}
+
+#[test]
+fn ui_events_are_declared_in_the_owning_feature_page_manifest() {
+    let feature_dir = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .ancestors()
+        .nth(2)
+        .expect("crates dir")
+        .join("feature");
+    let mut violations = Vec::new();
+    let entries = std::fs::read_dir(&feature_dir).expect("feature crates");
+
+    for entry in entries.flatten() {
+        let crate_dir = entry.path();
+        let manifest_path = crate_dir.join("src/feature.ron");
+        if !manifest_path.is_file() {
+            continue;
+        }
+        let source = std::fs::read_to_string(&manifest_path).expect("read feature manifest");
+        let manifest: FeaturePages = ron::from_str(&source).expect("parse feature manifest");
+        if manifest.pages.is_empty() {
+            continue;
+        }
+        let permissions = manifest
+            .pages
+            .into_iter()
+            .flat_map(|page| page.permissions)
+            .collect::<BTreeSet<_>>();
+        let mut sends = UiSends::default();
+        for path in [crate_dir.join("src/ui.rs"), crate_dir.join("src/ui")] {
+            walk(&path, &mut |_, source| {
+                let Ok(file) = syn::parse_file(source) else {
+                    return;
+                };
+                sends.visit_file(&file);
+            });
+        }
+        for event in sends.0.difference(&permissions) {
+            violations.push(format!("{}: {event}", manifest_path.display()));
+        }
+    }
+
+    assert!(
+        violations.is_empty(),
+        "UI events sent by a feature must be declared in one of its page manifests:\n{}",
+        violations.join("\n")
+    );
+}
+
+#[derive(Default)]
+struct UiSends(BTreeSet<String>);
+
+impl<'ast> Visit<'ast> for UiSends {
+    fn visit_expr_call(&mut self, call: &'ast syn::ExprCall) {
+        let Expr::Path(function) = call.func.as_ref() else {
+            visit::visit_expr_call(self, call);
+            return;
+        };
+        if function
+            .path
+            .segments
+            .last()
+            .is_none_or(|part| part.ident != "send")
+        {
+            visit::visit_expr_call(self, call);
+            return;
+        }
+        if let Some(event) = call.args.first().and_then(sent_type)
+            && event.starts_with(|character: char| character.is_ascii_uppercase())
+        {
+            self.0.insert(event);
+        }
+        visit::visit_expr_call(self, call);
+    }
+}
+
+fn sent_type(expression: &Expr) -> Option<String> {
+    match expression {
+        Expr::Call(call) => {
+            let Expr::Path(function) = call.func.as_ref() else {
+                return None;
+            };
+            function
+                .path
+                .segments
+                .iter()
+                .rev()
+                .nth(1)
+                .map(|part| part.ident.to_string())
+        }
+        Expr::Group(group) => sent_type(&group.expr),
+        Expr::Paren(paren) => sent_type(&paren.expr),
+        Expr::Path(path) => path.path.segments.last().map(|part| part.ident.to_string()),
+        Expr::Reference(reference) => sent_type(&reference.expr),
+        Expr::Struct(value) => value
+            .path
+            .segments
+            .last()
+            .map(|part| part.ident.to_string()),
+        _ => None,
+    }
+}
 
 #[test]
 fn registered_systems_and_observers_use_short_names_from_their_module_context() {

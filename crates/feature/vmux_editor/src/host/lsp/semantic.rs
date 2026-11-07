@@ -147,7 +147,7 @@ impl SemanticKind {
         static LIGHT: OnceLock<[[u8; 3]; 7]> = OnceLock::new();
         let cell = if dark { &DARK } else { &LIGHT };
         *cell.get_or_init(|| {
-            let theme = crate::palette::Palette::for_scheme(dark).theme();
+            let theme = vmux_syntax::Palette::for_scheme(dark).theme();
             let highlighter = Highlighter::new(&theme);
             let mut out = [[0u8; 3]; 7];
             for (slot, kind) in Self::ALL.iter().enumerate() {

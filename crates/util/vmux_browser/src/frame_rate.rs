@@ -8,6 +8,7 @@ use bevy::{
     winit::{EventLoopProxyWrapper, WinitUserEvent},
 };
 use bevy_cef::prelude::*;
+use bevy_cef_core::prelude::MessageLoopWakePolicy;
 use std::sync::atomic::Ordering;
 use vmux_api::BinEvent;
 use vmux_api::command_bar::CommandBarUiState;
@@ -215,7 +216,7 @@ fn refresh_active_windowed_hover(
     state.position = Some(position);
 }
 
-const LAYOUT_IDLE_FRAME_RATE: i32 = 10;
+const LAYOUT_IDLE_FRAME_RATE: i32 = 4;
 const LAYOUT_ACTIVE_FRAME_RATE: i32 = 60;
 const PAGE_MAX_FRAME_RATE: i32 = 60;
 
@@ -245,6 +246,7 @@ fn request_layout_frame_burst(
     browsers: NonSend<Browsers>,
     mut commands: Commands,
     proxy: Option<Res<EventLoopProxyWrapper>>,
+    wake_policy: Option<Res<MessageLoopWakePolicy>>,
 ) {
     if trigger.id() != LayoutUiState::id() && trigger.id() != CommandBarUiState::id() {
         return;
@@ -268,6 +270,9 @@ fn request_layout_frame_burst(
     }
     if let Some(proxy) = proxy {
         let _ = proxy.send_event(WinitUserEvent::WakeUp);
+    }
+    if let Some(wake_policy) = wake_policy {
+        wake_policy.begin_interaction();
     }
 }
 
@@ -383,6 +388,9 @@ mod tests {
         app.add_plugins(MinimalPlugins)
             .add_observer(request_layout_frame_burst);
         app.world_mut().insert_non_send(Browsers::default());
+        let wake_policy = MessageLoopWakePolicy::default();
+        wake_policy.set_min_wake_interval(std::time::Duration::from_millis(250));
+        app.insert_resource(wake_policy.clone());
         let other = app.world_mut().spawn_empty().id();
         app.world_mut()
             .trigger(BinHostEmitEvent::from_event(other, &OtherEvent));
@@ -406,6 +414,10 @@ mod tests {
         assert_eq!(
             app.world().get::<WebviewMaxFrameRate>(layout).unwrap().0,
             LAYOUT_ACTIVE_FRAME_RATE
+        );
+        assert_eq!(
+            wake_policy.min_wake_interval(),
+            std::time::Duration::from_millis(16)
         );
 
         app.world_mut()

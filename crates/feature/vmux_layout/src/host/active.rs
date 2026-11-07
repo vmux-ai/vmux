@@ -3,6 +3,7 @@ use vmux_ecs::Active;
 use vmux_history::LastActivatedAt;
 
 use crate::pane::{Pane, PaneSplit};
+use crate::presentation::Retiring;
 use crate::space::Space;
 use crate::stack::Stack;
 use crate::tab::Tab;
@@ -23,15 +24,86 @@ impl Plugin for ActivePlugin {
             Update,
             ensure_space
                 .in_set(ActiveSystemSet::Space)
-                .after(crate::window::WindowFocusSet),
+                .after(crate::window::WindowFocusSet)
+                .run_if(space_selection_changed),
         )
         .add_systems(
             Update,
-            (ensure_tab, ensure_stack, ensure_branch)
+            (clear_retiring, ensure_tab, ensure_stack, ensure_branch)
+                .chain()
                 .in_set(ActiveSystemSet::Descendants)
                 .after(LayoutRequestSet::Handle)
-                .after(crate::window::TabLayoutSpawnSet),
+                .after(crate::window::TabLayoutSpawnSet)
+                .run_if(descendant_selection_changed),
         );
+    }
+}
+
+fn space_selection_changed(
+    spaces: Query<
+        (),
+        (
+            With<Space>,
+            Or<(Added<Space>, Changed<LastActivatedAt>, Changed<Active>)>,
+        ),
+    >,
+    mains: Query<(), (With<crate::window::Main>, Changed<Children>)>,
+    all_spaces: Query<(), With<Space>>,
+    mut removed_active: RemovedComponents<Active>,
+    mut removed_activated_at: RemovedComponents<LastActivatedAt>,
+) -> bool {
+    !spaces.is_empty()
+        || !mains.is_empty()
+        || removed_active
+            .read()
+            .any(|entity| all_spaces.contains(entity))
+        || removed_activated_at
+            .read()
+            .any(|entity| all_spaces.contains(entity))
+}
+
+fn descendant_selection_changed(
+    descendants: Query<
+        (),
+        (
+            Or<(With<Tab>, With<Stack>, With<Pane>)>,
+            Or<(
+                Added<Tab>,
+                Added<Stack>,
+                Added<Pane>,
+                Changed<LastActivatedAt>,
+                Changed<Active>,
+                Changed<Retiring>,
+            )>,
+        ),
+    >,
+    containers: Query<
+        (),
+        (
+            Or<(With<Space>, With<Pane>, With<PaneSplit>)>,
+            Changed<Children>,
+        ),
+    >,
+    all_descendants: Query<(), Or<(With<Tab>, With<Stack>, With<Pane>)>>,
+    mut removed_active: RemovedComponents<Active>,
+    mut removed_activated_at: RemovedComponents<LastActivatedAt>,
+) -> bool {
+    !descendants.is_empty()
+        || !containers.is_empty()
+        || removed_active
+            .read()
+            .any(|entity| all_descendants.contains(entity))
+        || removed_activated_at
+            .read()
+            .any(|entity| all_descendants.contains(entity))
+}
+
+fn clear_retiring(
+    selected: Query<Entity, (With<Retiring>, With<Active>, Or<(With<Tab>, With<Stack>)>)>,
+    mut commands: Commands,
+) {
+    for entity in &selected {
+        commands.entity(entity).remove::<Active>();
     }
 }
 
@@ -73,7 +145,7 @@ fn ensure_space(
 
 fn ensure_tab(
     spaces: Query<&Children, With<Space>>,
-    tabs: Query<(&LastActivatedAt, Has<Active>), With<Tab>>,
+    tabs: Query<(&LastActivatedAt, Has<Active>), (With<Tab>, Without<Retiring>)>,
     mut active: ActiveWriter,
 ) {
     for children in &spaces {
@@ -89,7 +161,7 @@ fn ensure_tab(
 
 fn ensure_stack(
     leaves: Query<&Children, (With<Pane>, Without<PaneSplit>)>,
-    stacks: Query<(&LastActivatedAt, Has<Active>), With<Stack>>,
+    stacks: Query<(&LastActivatedAt, Has<Active>), (With<Stack>, Without<Retiring>)>,
     mut active: ActiveWriter,
 ) {
     for children in &leaves {

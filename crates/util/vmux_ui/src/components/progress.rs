@@ -2,6 +2,16 @@ use dioxus::prelude::*;
 use dioxus_primitives::progress::{self, ProgressIndicatorProps, ProgressProps};
 
 #[component]
+pub fn LoadingIcon(#[props(default = "size-4".to_string())] class: String) -> Element {
+    rsx! {
+        span {
+            class: "inline-block shrink-0 rounded-full border-[1.5px] border-current border-r-transparent animate-spin motion-reduce:animate-none {class}",
+            aria_hidden: true,
+        }
+    }
+}
+
+#[component]
 pub fn Progress(props: ProgressProps) -> Element {
     rsx! {
         progress::Progress {

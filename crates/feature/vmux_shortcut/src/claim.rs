@@ -70,7 +70,7 @@ mod tests {
     use super::*;
     use bevy::input::keyboard::KeyCode;
     use bevy_cef::prelude::{BinHostEmitEvent, Browsers};
-    use vmux_api::BinEvent;
+    use vmux_api::{BinEvent, UiState as UiStateContract, UiStateFrame};
     use vmux_command::{Binding, KeyCombo, Modifiers, Shortcut, Source, When};
 
     #[derive(Resource, Default)]
@@ -100,13 +100,25 @@ mod tests {
                 rejected.0.push(trigger.id().to_string());
                 return;
             }
-            let Ok(claims) =
-                rkyv::from_bytes::<KeyClaimsUiState, rkyv::rancor::Error>(trigger.payload())
-            else {
+            let Ok(frame) = rkyv::from_bytes::<
+                UiStateFrame<KeyClaimsUiState, KeyClaimsUiState>,
+                rkyv::rancor::Error,
+            >(trigger.payload()) else {
                 rejected.0.push("undecodable payload".to_string());
                 return;
             };
+            let previous = pushed
+                .0
+                .iter()
+                .rev()
+                .find(|(page, _)| *page == trigger.webview())
+                .map(|(_, state)| state.clone());
+            let claims = match frame {
+                UiStateFrame::Snapshot(state) => state,
+                UiStateFrame::Updates(updates) => KeyClaimsUiState::from_updates(previous, updates),
+            };
             pushed.0.push((trigger.webview(), claims));
+            trigger.mark_delivered();
         }
     }
 
@@ -154,15 +166,34 @@ mod tests {
                 .init_resource::<Pushed>()
                 .init_resource::<Rejected>()
                 .add_observer(Pushed::record);
-            app.world_mut().spawn(keymap);
+            app.world_mut().spawn((
+                keymap,
+                vmux_api::UiEventPermissions {
+                    url: "about:blank",
+                    owns_subtree: false,
+                    permissions: &[KeyClaimsUiState::PERMISSION],
+                },
+            ));
             app.insert_non_send(Browsers::default());
             app
+        }
+
+        fn identity() -> impl Bundle {
+            (
+                vmux_ecs::PageMetadata {
+                    url: "about:blank".to_string(),
+                    ..Default::default()
+                },
+                bevy_cef::prelude::BinIpcSurfaceGeneration(1),
+                bevy_cef::prelude::BinIpcNavigationRevision(1),
+                bevy_cef::prelude::BinIpcEpoch(1),
+            )
         }
 
         fn page(app: &mut App) -> Entity {
             let entity = app
                 .world_mut()
-                .spawn(WebviewSource::new("about:blank"))
+                .spawn((WebviewSource::new("about:blank"), Self::identity()))
                 .id();
             app.world_mut()
                 .non_send_mut::<Browsers>()
@@ -172,7 +203,7 @@ mod tests {
         }
 
         fn hosted_page(app: &mut App) -> Entity {
-            let entity = app.world_mut().spawn(HostsPage).id();
+            let entity = app.world_mut().spawn((HostsPage, Self::identity())).id();
             app.world_mut()
                 .non_send_mut::<Browsers>()
                 .set_externally_hosted(entity);

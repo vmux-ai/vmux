@@ -27,6 +27,7 @@ impl Plugin for NotePlugin {
             .add_observer(edit_property)
             .add_observer(toggle_properties)
             .add_observer(commit_property)
+            .add_observer(render)
             .add_systems(
                 Update,
                 (
@@ -71,7 +72,7 @@ type ReadyNotes<'w, 's> = Query<
         Option<&'static NoteEditing>,
         Option<&'static NotePresentation>,
     ),
-    ReadyNote,
+    With<vmux_ecs::page::PageReady>,
 >;
 
 fn active_note_block(blocks: &[NoteBlock], line: u32) -> Option<u32> {
@@ -83,7 +84,26 @@ fn active_note_block(blocks: &[NoteBlock], line: u32) -> Option<u32> {
         .map(|index| index as u32)
 }
 
-fn send(
+fn send(pending: Query<Entity, (ReadyNote, With<FileView>, With<Editor>)>, mut commands: Commands) {
+    for entity in &pending {
+        commands.trigger(RenderRequest::new(entity));
+    }
+}
+
+#[derive(EntityEvent)]
+pub(crate) struct RenderRequest {
+    #[event_target]
+    entity: Entity,
+}
+
+impl RenderRequest {
+    pub(crate) fn new(entity: Entity) -> Self {
+        Self { entity }
+    }
+}
+
+fn render(
+    request: On<RenderRequest>,
     mode: Single<&SharedFileViewMode>,
     indexes: Query<&vmux_knowledge::KnowledgeIndex>,
     notes: ReadyNotes,
@@ -94,72 +114,74 @@ fn send(
         return;
     }
     let index = indexes.single().ok();
-    for (entity, file, edit, reveal, editing, presentation) in &notes {
-        if !ParsedNote::supports(&file.path) {
-            commands.entity(entity).insert(NoteSent);
-            continue;
-        }
-        if !browsers.can_emit_to(&entity) {
-            continue;
-        }
-        let Some(mut note) = edit.parsed_note() else {
-            commands.entity(entity).insert(NoteSent);
-            continue;
-        };
-        let missing_presentation = presentation.is_none();
-        let presentation = presentation.cloned().unwrap_or_else(|| NotePresentation {
-            properties_open: !note.properties.is_empty(),
-            drafts: BTreeMap::new(),
-        });
-        if missing_presentation {
-            commands.entity(entity).insert(presentation.clone());
-        }
-        let references = index
-            .filter(|index| index.loaded() && file.path.starts_with(index.root()))
-            .map(|index| {
-                index.resolve_blocks(&file.path, &mut note.blocks);
-                let mut references = index.backlinks(&file.path);
-                references.extend(index.unlinked_mentions(&file.path, 32));
-                references
-                    .into_iter()
-                    .map(|reference| vmux_knowledge::KnowledgeReference {
-                        title: reference.title,
-                        path: reference.path.to_string_lossy().into_owned(),
-                        line: reference.line,
-                        preview: reference.preview,
-                        unlinked: reference.unlinked,
-                    })
-                    .collect()
-            })
-            .unwrap_or_default();
-        let active = active_note_block(&note.blocks, edit.cursor_line());
-        let edit_line = editing
-            .is_some()
-            .then_some(())
-            .and(active)
-            .and_then(|index| note.blocks.get(index as usize))
-            .filter(|block| matches!(block.block, MdBlock::List { .. }))
-            .map(|_| edit.cursor_line());
-        commands.trigger(vmux_ecs::FileUiStateWrite::from_event(
-            entity,
-            &FileNoteEvent {
-                title: note.title,
-                properties: note.properties,
-                properties_open: presentation.properties_open,
-                property_drafts: presentation.drafts.values().cloned().collect(),
-                blocks: note.blocks,
-                active,
-                editing: editing.is_some(),
-                edit_line,
-                references,
-                reveal_line: reveal.map(|line| line.0),
-            },
-        ));
-        commands
-            .entity(entity)
-            .insert(NoteSent)
-            .remove::<NoteRevealLine>();
+    let entity = request.entity;
+    let Ok((_, file, edit, reveal, editing, presentation)) = notes.get(entity) else {
+        return;
+    };
+    if !ParsedNote::supports(&file.path) {
+        commands.entity(entity).insert(NoteSent);
+        return;
     }
+    if !browsers.can_emit_to(&entity) {
+        return;
+    }
+    let Some(mut note) = edit.parsed_note() else {
+        commands.entity(entity).insert(NoteSent);
+        return;
+    };
+    let missing_presentation = presentation.is_none();
+    let presentation = presentation.cloned().unwrap_or_else(|| NotePresentation {
+        properties_open: !note.properties.is_empty(),
+        drafts: BTreeMap::new(),
+    });
+    if missing_presentation {
+        commands.entity(entity).insert(presentation.clone());
+    }
+    let references = index
+        .filter(|index| index.loaded() && file.path.starts_with(index.root()))
+        .map(|index| {
+            index.resolve_blocks(&file.path, &mut note.blocks);
+            let mut references = index.backlinks(&file.path);
+            references.extend(index.unlinked_mentions(&file.path, 32));
+            references
+                .into_iter()
+                .map(|reference| vmux_knowledge::KnowledgeReference {
+                    title: reference.title,
+                    path: reference.path.to_string_lossy().into_owned(),
+                    line: reference.line,
+                    preview: reference.preview,
+                    unlinked: reference.unlinked,
+                })
+                .collect()
+        })
+        .unwrap_or_default();
+    let active = active_note_block(&note.blocks, edit.cursor_line());
+    let edit_line = editing
+        .is_some()
+        .then_some(())
+        .and(active)
+        .and_then(|index| note.blocks.get(index as usize))
+        .filter(|block| matches!(block.block, MdBlock::List { .. }))
+        .map(|_| edit.cursor_line());
+    commands.trigger(vmux_ecs::FileUiStateWrite::from_event(
+        entity,
+        &FileNoteEvent {
+            title: note.title,
+            properties: note.properties,
+            properties_open: presentation.properties_open,
+            property_drafts: presentation.drafts.values().cloned().collect(),
+            blocks: note.blocks,
+            active,
+            editing: editing.is_some(),
+            edit_line,
+            references,
+            reveal_line: reveal.map(|line| line.0),
+        },
+    ));
+    commands
+        .entity(entity)
+        .insert(NoteSent)
+        .remove::<NoteRevealLine>();
 }
 
 fn start_edit(

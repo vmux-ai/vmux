@@ -13,13 +13,15 @@ use bevy::tasks::{IoTaskPool, Task, futures_lite::future};
 use bevy_cef::prelude::{UiEventPlugin, UiInput};
 use vmux_ecs::manifest::{FeatureId, FeatureManifest};
 use vmux_ecs::page::PageReady;
-use vmux_ecs::{PageMetadata, PageOpenRequest, PageOpenTarget};
-use vmux_ecs::{UiState, UiStatePlugin, UiStateWrite};
+use vmux_ecs::{
+    PageMetadata, PageOpenRequest, PageOpenTarget, UiState, UiStatePlugin, UiStateWrite,
+};
 
 use crate::{
-    ExternalToolOperation, ToolApplier, ToolOperationFailed, ToolOperationFinished,
-    ToolOperationRequest, ToolOperationSucceeded, ToolOperator, ToolProviderBinding,
-    ToolProviderId, ToolProviderTarget, ToolScanner, ToolStore, ToolStoreTarget, ToolsManifest,
+    ExternalToolOperation, ToolApplier, ToolInventoryChanged, ToolOperationFailed,
+    ToolOperationFinished, ToolOperationRequest, ToolOperationSucceeded, ToolOperator,
+    ToolProviderBinding, ToolProviderId, ToolProviderTarget, ToolScanner, ToolStore,
+    ToolStoreTarget, ToolsManifest,
 };
 
 pub(crate) struct ToolHostPlugin;
@@ -165,19 +167,18 @@ fn open_request(
 fn navigate_request(
     trigger: On<UiInput<ToolsNavigateRequest>>,
     mut subscribers: Query<&mut ToolSubscriber>,
-    mut requests: MessageWriter<PageOpenRequest>,
+    mut pages: Query<&mut PageMetadata>,
 ) {
     let Some(route) = crate::route::ToolRoute::parse(&trigger.event().payload.url) else {
         return;
     };
-    if let Ok(mut subscriber) = subscribers.get_mut(trigger.event().webview) {
+    let webview = trigger.event().webview;
+    if let Ok(mut subscriber) = subscribers.get_mut(webview) {
         subscriber.navigate(&route.url());
     }
-    requests.write(PageOpenRequest {
-        target: PageOpenTarget::ContainingStack(trigger.event().webview),
-        url: route.url(),
-        request_id: None,
-    });
+    if let Ok(mut page) = pages.get_mut(webview) {
+        page.url = route.url();
+    }
 }
 
 fn spawn_registry(mut commands: Commands) {
@@ -319,6 +320,17 @@ impl ToolSubscriber {
                     items.push(item.clone());
                 }
             }
+            items.sort_by(|left, right| {
+                left.status
+                    .display_order()
+                    .cmp(&right.status.display_order())
+                    .then_with(|| right.managed.cmp(&left.managed))
+                    .then_with(|| {
+                        left.name
+                            .to_ascii_lowercase()
+                            .cmp(&right.name.to_ascii_lowercase())
+                    })
+            });
             if !items.is_empty() {
                 categories.push(crate::state::ToolCategory {
                     provider: category.provider.clone(),
@@ -803,6 +815,7 @@ fn drain_succeeded_operations(
     >,
     mut registry: Query<&mut ToolRegistry>,
     mut subscribers: Query<&mut ToolSubscriber>,
+    mut changed: MessageWriter<ToolInventoryChanged>,
     mut commands: Commands,
 ) {
     let Ok(mut state) = registry.single_mut() else {
@@ -819,6 +832,7 @@ fn drain_succeeded_operations(
         }
         state.dirty = true;
         state.generation = state.generation.wrapping_add(1);
+        changed.write(ToolInventoryChanged(operation.operation.provider.clone()));
         commands.entity(entity).despawn();
     }
 }
@@ -892,11 +906,21 @@ mod tests {
     }
 
     #[test]
-    fn tools_navigation_targets_the_emitting_page_stack() {
+    fn tools_navigation_keeps_the_emitting_page() {
         let mut app = App::new();
-        app.add_message::<PageOpenRequest>()
-            .add_observer(navigate_request);
-        let webview = app.world_mut().spawn_empty().id();
+        app.add_observer(navigate_request);
+        let mut subscriber = ToolSubscriber::default();
+        subscriber.state.view.route = "acp".to_string();
+        let webview = app
+            .world_mut()
+            .spawn((
+                PageMetadata {
+                    url: "vmux://tools/acp".to_string(),
+                    ..Default::default()
+                },
+                subscriber,
+            ))
+            .id();
 
         app.world_mut().trigger(UiInput {
             webview,
@@ -905,15 +929,10 @@ mod tests {
             },
         });
 
-        let messages = app.world().resource::<Messages<PageOpenRequest>>();
-        let mut cursor = messages.get_cursor();
-        let requests = cursor.read(messages).collect::<Vec<_>>();
-        assert_eq!(requests.len(), 1);
-        assert_eq!(requests[0].url, "vmux://tools/lsp");
-        assert!(matches!(
-            requests[0].target,
-            PageOpenTarget::ContainingStack(target) if target == webview
-        ));
+        let page = app.world().get::<PageMetadata>(webview).unwrap();
+        let subscriber = app.world().get::<ToolSubscriber>(webview).unwrap();
+        assert_eq!(page.url, "vmux://tools/lsp");
+        assert_eq!(subscriber.state.view.route, "lsp");
     }
 
     #[test]

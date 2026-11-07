@@ -1,6 +1,8 @@
 use dioxus::prelude::*;
 use vmux_api::command_bar::{CommandBarResultItem, CommandBarSection};
 use vmux_ui::cn::cn;
+use vmux_ui::components::avatar::AgentThumbnail;
+use vmux_ui::components::badge::Badge;
 use vmux_ui::components::icon::Icon;
 use vmux_ui::components::skeleton::Skeleton;
 use vmux_ui::favicon::Favicon;
@@ -18,9 +20,9 @@ pub fn ResultRow(
     let section = item.section.clone();
     let disabled = item.disabled;
     let row_class = if selected {
-        "flex min-h-15 min-w-0 w-full items-center justify-between overflow-hidden bg-primary/12 px-3.5 py-2.5 text-foreground shadow-[inset_2px_0_0_0_var(--primary),0_0_18px_-4px_color-mix(in_oklab,var(--primary)_45%,transparent)]"
+        "flex min-h-15 min-w-0 w-full items-center justify-between overflow-hidden bg-primary/12 px-2.5 py-2.5 text-foreground shadow-[inset_2px_0_0_0_var(--primary),0_0_18px_-4px_color-mix(in_oklab,var(--primary)_45%,transparent)]"
     } else {
-        "flex min-h-15 min-w-0 w-full items-center justify-between overflow-hidden px-3.5 py-2.5 hover:bg-foreground/5"
+        "flex min-h-15 min-w-0 w-full items-center justify-between overflow-hidden px-2.5 py-2.5 hover:bg-foreground/5"
     };
     rsx! {
         if let Some(section) = section {
@@ -90,6 +92,22 @@ fn RowIcon(item: CommandBarResultItem) -> Element {
             }
         };
     }
+    if AgentRow::matches(&item.url) {
+        let icon = if item.favicon_url.is_empty() {
+            item.icon.favicon_url().to_string()
+        } else {
+            item.favicon_url.clone()
+        };
+        return rsx! {
+            AgentThumbnail {
+                src: (!icon.is_empty()).then_some(icon),
+                seed: item.title.clone(),
+                background: String::new(),
+                alt: item.title,
+                class: "mt-0.5 h-4 w-4 text-[5px]",
+            }
+        };
+    }
     if !item.favicon_url.is_empty() {
         return rsx! {
             Favicon {
@@ -100,7 +118,7 @@ fn RowIcon(item: CommandBarResultItem) -> Element {
             }
         };
     }
-    if !item.url.is_empty() {
+    if !item.url.is_empty() || !item.icon.is_none() {
         return rsx! {
             PageIconView {
                 icon: item.icon,
@@ -115,6 +133,24 @@ fn RowIcon(item: CommandBarResultItem) -> Element {
     }
     rsx! {
         span { class: "mt-0.5 shrink-0 font-mono text-sm text-muted-foreground", "{item.leading}" }
+    }
+}
+
+struct AgentRow;
+
+impl AgentRow {
+    fn matches(url: &str) -> bool {
+        let Some(route) = vmux_api::VmuxRoute::parse(url) else {
+            return false;
+        };
+        if !route.is_agent() {
+            return false;
+        }
+        let Some(query) = route.query() else {
+            return false;
+        };
+        url::form_urlencoded::parse(query.as_bytes())
+            .any(|(key, value)| key == "agent" && !value.is_empty())
     }
 }
 
@@ -139,15 +175,15 @@ fn SectionRow(section: CommandBarSection) -> Element {
         return rsx! {};
     }
     rsx! {
-        div { class: "sticky top-0 z-10 flex min-w-0 items-center gap-1.5 border-y border-foreground/[0.06] bg-background/95 px-4 py-1.5 backdrop-blur",
+        div { class: "sticky top-0 z-10 flex min-w-0 items-center gap-1.5 bg-background px-2.5 py-2",
             for label in section.labels {
-                span {
-                    class: "flex h-6 min-w-0 items-center rounded-md bg-foreground/[0.045] px-2 text-[11px] text-muted-foreground/75",
+                Badge {
+                    class: "h-6 min-w-0 max-w-[38%] overflow-hidden rounded-full bg-foreground/[0.065] px-2.5 text-[11px] font-medium text-muted-foreground/80",
                     title: "{label}",
                     span { class: "min-w-0 truncate", "{label}" }
                 }
             }
-            span { class: "ml-auto flex h-5 min-w-5 shrink-0 items-center justify-center rounded-full bg-foreground/[0.055] px-1.5 font-mono text-[10px] tabular-nums text-muted-foreground/55", "{section.count}" }
+            Badge { class: "ml-auto h-5 min-w-5 rounded-full bg-foreground/[0.05] px-1.5 font-mono text-[10px] tabular-nums text-muted-foreground/55", "{section.count}" }
         }
     }
 }

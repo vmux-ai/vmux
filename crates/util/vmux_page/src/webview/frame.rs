@@ -1,15 +1,20 @@
 use tracing::error;
 
-use crate::webview::dom_request::DomRequest;
+use crate::webview::dom_request::QueuedDomRequest;
 
+#[derive(Clone)]
 pub(crate) struct PageFrame {
-    requests: Vec<DomRequest>,
+    requests: Vec<QueuedDomRequest>,
     edits: Vec<u8>,
 }
 
 impl PageFrame {
-    pub(crate) fn new(requests: Vec<DomRequest>, edits: Vec<u8>) -> Self {
+    pub(crate) fn new(requests: Vec<QueuedDomRequest>, edits: Vec<u8>) -> Self {
         Self { requests, edits }
+    }
+
+    pub(crate) fn requests(&self) -> &[QueuedDomRequest] {
+        &self.requests
     }
 
     pub(crate) fn into_body(self) -> Vec<u8> {
@@ -33,14 +38,16 @@ impl PageFrame {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::webview::dom_request::{DomRequest, RequestQueue};
 
     #[test]
     fn the_length_prefix_locates_the_edits_the_page_has_to_run() {
         let edits = vec![9u8, 8, 7, 0, 255];
+        let requests = RequestQueue::default();
         let body = PageFrame::new(
-            vec![DomRequest::Focus {
+            vec![requests.stamp(DomRequest::Focus {
                 element: "prompt".to_string(),
-            }],
+            })],
             edits.clone(),
         )
         .into_body();

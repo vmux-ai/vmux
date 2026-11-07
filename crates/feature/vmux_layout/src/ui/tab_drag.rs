@@ -83,8 +83,7 @@ impl TabDragVisual {
 
     pub(super) fn style(self) -> String {
         if !self.active || (!self.source && self.offset_x.abs() < f64::EPSILON) {
-            return "transform:none;z-index:auto;pointer-events:auto;transition:transform 140ms ease;"
-                .to_string();
+            return "transform:none;z-index:auto;pointer-events:auto;transition:none;".to_string();
         }
         if self.source {
             return format!(
@@ -93,8 +92,9 @@ impl TabDragVisual {
             );
         }
         format!(
-            "transform:translate3d({}px,0,0);z-index:auto;pointer-events:auto;transition:transform 140ms ease;",
-            self.offset_x
+            "transform:translate3d({}px,0,0);z-index:auto;pointer-events:auto;transition:transform {}ms ease-out;",
+            self.offset_x,
+            vmux_ui::motion::Motion::FEEDBACK_MS
         )
     }
 
@@ -103,20 +103,79 @@ impl TabDragVisual {
     }
 }
 
+#[derive(Clone, PartialEq)]
+struct PendingSelection {
+    id: String,
+    previous: Option<String>,
+}
+
+impl PendingSelection {
+    fn resolved(&self, active: Option<&str>, order: &[String]) -> bool {
+        active == Some(self.id.as_str())
+            || active != self.previous.as_deref()
+            || !order.contains(&self.id)
+    }
+}
+
 #[derive(Clone, Copy, PartialEq)]
 pub(crate) struct TabDrag {
     state: Signal<Option<Rc<TabDragState>>>,
     click_block: Signal<Option<TabClickBlock>>,
     order: Memo<Vec<String>>,
+    active: Memo<Option<String>>,
+    selection: Signal<Option<PendingSelection>>,
 }
 
 impl TabDrag {
-    pub(crate) fn use_state(order: Memo<Vec<String>>) -> Self {
+    pub(crate) fn use_state(order: Memo<Vec<String>>, active: Memo<Option<String>>) -> Self {
+        let mut selection = use_signal(|| None::<PendingSelection>);
+        use_effect(move || {
+            let active = active();
+            let order = order();
+            if selection
+                .peek()
+                .as_ref()
+                .is_some_and(|pending| pending.resolved(active.as_deref(), &order))
+            {
+                selection.set(None);
+            }
+        });
         Self {
             state: use_signal(|| None::<Rc<TabDragState>>),
             click_block: use_signal(|| None),
             order,
+            active,
+            selection,
         }
+    }
+
+    pub(crate) fn is_selected(self, id: &str, projected: bool) -> bool {
+        match self.selection.read().as_ref() {
+            Some(pending) => pending.id == id,
+            None => projected,
+        }
+    }
+
+    pub(crate) fn press(
+        &mut self,
+        event: &Event<PointerData>,
+        id: String,
+        index: usize,
+        active: bool,
+    ) {
+        if event.trigger_button() != Some(MouseButton::Primary) {
+            return;
+        }
+        if active {
+            self.begin(event, id, index, true);
+            return;
+        }
+        event.prevent_default();
+        self.activate(id.clone());
+        self.click_block.set(Some(TabClickBlock {
+            source_id: id.clone(),
+            target_id: id,
+        }));
     }
 
     pub(crate) fn metrics_style() -> String {
@@ -246,6 +305,26 @@ impl TabDrag {
     }
 
     pub(crate) fn activate(&mut self, tab_id: String) {
+        if self
+            .selection
+            .peek()
+            .as_ref()
+            .is_some_and(|pending| pending.id == tab_id)
+        {
+            return;
+        }
+        let pending = PendingSelection {
+            id: tab_id.clone(),
+            previous: (self.active)(),
+        };
+        self.selection.set(Some(pending.clone()));
+        let mut selection = self.selection;
+        spawn(async move {
+            Platform::sleep(1000).await;
+            if selection.peek().as_ref() == Some(&pending) {
+                selection.set(None);
+            }
+        });
         let _ = send(&TabActivateRequest { tab_id });
     }
 }

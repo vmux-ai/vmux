@@ -11,7 +11,7 @@ use vmux_ui::i18n::translate;
 use crate::CommandPaletteSurface;
 
 use super::results::{CommandBarResultItem, PageRows, PickerRows};
-use super::{Composer, ExLine, Glyph, PaletteDraft, PaletteQuery, PaletteRows};
+use super::{CompletionQuery, Composer, ExLine, Glyph, PaletteDraft, PaletteQuery, PaletteRows};
 
 #[derive(Clone, Debug, Default, PartialEq)]
 pub(crate) enum PaletteDecision {
@@ -19,6 +19,7 @@ pub(crate) enum PaletteDecision {
     None,
     Close,
     Retype(String),
+    Attach(String),
     Prompt {
         close: bool,
         request: PromptRequest,
@@ -89,7 +90,7 @@ impl PaletteDecision {
             Self::Close | Self::Invoke(_) | Self::SwitchTab(_) | Self::Ex(_) | Self::Pick(_) => {
                 true
             }
-            Self::None | Self::Retype(_) => false,
+            Self::None | Self::Retype(_) | Self::Attach(_) => false,
         }
     }
 }
@@ -156,8 +157,10 @@ impl PaletteState {
         .find(|key| !key.is_empty())
         .map(str::to_string)
         .or_else(|| {
-            VmuxRoute::parse(&composer.agent_url)
-                .and_then(|route| route.agent_id().map(str::to_string))
+            let route = VmuxRoute::parse(&composer.agent_url)?;
+            url::form_urlencoded::parse(route.query()?.as_bytes()).find_map(|(key, value)| {
+                (key == "agent" && !value.is_empty()).then(|| value.into_owned())
+            })
         });
         let row_text = if rows.start_prompt_mode {
             None
@@ -239,7 +242,15 @@ impl PaletteState {
         attachments: &[ChatAttachment],
     ) -> PaletteDecision {
         if self.surface.is_start()
-            && (PaletteQuery::new(&self.query).is_start_prompt() || !attachments.is_empty())
+            && CompletionQuery::only_files(&self.query)
+            && let CommandBarResultItem::File { path, is_dir, .. } = item
+        {
+            if *is_dir {
+                return PaletteDecision::retyping(format!("@{path}"));
+            }
+            return PaletteDecision::Attach(path.clone());
+        }
+        if (PaletteQuery::new(&self.query).is_prompt() || !attachments.is_empty())
             && let Some(target_url) = PageRows::prompt_target_url(item)
         {
             return if PageRows::prompt_target_matches(item, &self.query) && attachments.is_empty() {
@@ -263,11 +274,6 @@ impl PaletteState {
                 &format!("file://{path}"),
                 self.open_target,
             )),
-            CommandBarResultItem::WorkDir { path, .. } => Some(PaletteDecision::open(
-                true,
-                &format!("file://{path}"),
-                self.open_target,
-            )),
             CommandBarResultItem::Stack {
                 pane_id, tab_index, ..
             } => Some(PaletteDecision::switch_tab(*pane_id, *tab_index)),
@@ -279,9 +285,6 @@ impl PaletteState {
             | CommandBarResultItem::Navigate { url, .. }
             | CommandBarResultItem::History { url, .. } => {
                 (!url.is_empty()).then(|| PaletteDecision::open(true, url, self.open_target))
-            }
-            CommandBarResultItem::RecentFile { url, .. } => {
-                Some(PaletteDecision::open(true, url, self.open_target))
             }
             CommandBarResultItem::Search { engine, query } => Some(PaletteDecision::open(
                 true,
@@ -365,6 +368,9 @@ impl PaletteState {
         if let Some(item) = self.row(self.selected) {
             return self.activate(item, attachments);
         }
+        if CompletionQuery::only_files(&self.query) {
+            return PaletteDecision::default();
+        }
         if !self.query.is_empty() {
             return PaletteDecision::open(false, &self.query, self.open_target);
         }
@@ -387,7 +393,6 @@ impl TypedRow {
             CommandBarResultItem::File { path, is_dir, .. } => {
                 !is_dir && Self::is_named(path, query)
             }
-            CommandBarResultItem::RecentFile { title, .. } => Self::is_called(title, query),
             _ => false,
         }
     }
@@ -444,10 +449,7 @@ impl RowText {
     }
 
     fn names_itself_in_the_row(item: &CommandBarResultItem) -> bool {
-        matches!(
-            item,
-            CommandBarResultItem::File { .. } | CommandBarResultItem::WorkDir { .. }
-        )
+        matches!(item, CommandBarResultItem::File { .. })
     }
 
     fn resolve(item: &CommandBarResultItem, query: &str) -> String {
@@ -461,8 +463,6 @@ impl RowText {
             CommandBarResultItem::Page { title, .. } => title.clone(),
             CommandBarResultItem::History { title, url, .. } => Self::titled(title, url),
             CommandBarResultItem::File { path, .. } => path.clone(),
-            CommandBarResultItem::WorkDir { path, .. } => path.clone(),
-            CommandBarResultItem::RecentFile { title, url } => Self::titled(title, url),
             CommandBarResultItem::PartialIndex | CommandBarResultItem::MoreMatches { .. } => {
                 query.to_string()
             }

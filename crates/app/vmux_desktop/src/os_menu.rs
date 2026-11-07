@@ -815,9 +815,9 @@ mod tests {
         let window = app.world_mut().spawn(Window::default()).id();
         app.world_mut()
             .resource_mut::<Messages<vmux_browser::OpenRequest>>()
-            .write(vmux_browser::OpenRequest {
-                url: Some("vmux://terminal".to_string()),
-            });
+            .write(vmux_browser::OpenRequest::focused(Some(
+                "vmux://terminal".to_string(),
+            )));
         app.world_mut()
             .resource_mut::<Messages<WindowCloseRequested>>()
             .write(WindowCloseRequested { window });

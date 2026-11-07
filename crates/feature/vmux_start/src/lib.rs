@@ -19,12 +19,16 @@ pub mod ui;
 #[cfg(host)]
 mod host;
 
+#[cfg(host)]
+mod branches;
+
 pub mod roster;
 
 #[cfg(host)]
 #[derive(bevy::prelude::Component, Clone, Copy, Debug)]
 pub struct StartInlineTransition {
     pub webview: bevy::prelude::Entity,
+    pub navigation: Option<vmux_ecs::PageOpenId>,
 }
 
 #[cfg(host)]

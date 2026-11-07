@@ -22,12 +22,19 @@ impl Plugin for WindowPlugin {
             .add_systems(PreUpdate, ensure_state)
             .add_systems(
                 Update,
-                (open_windows, close_focused_windows)
+                (
+                    open_windows,
+                    close_focused_windows,
+                    bevy::ecs::schedule::ApplyDeferred,
+                )
                     .chain()
                     .in_set(vmux_command::ReadCommandRequests)
-                    .after(vmux_layout::window::WindowFocusSet),
+                    .before(vmux_layout::window::WindowShellSet),
             )
-            .add_systems(Update, close_windows.after(close_focused_windows))
+            .add_systems(
+                Update,
+                close_windows.after(vmux_command::ReadCommandRequests),
+            )
             .add_systems(
                 Update,
                 (
@@ -103,15 +110,17 @@ fn relocate_to_live_display(
 fn open_windows(
     mut reader: MessageReader<NewWindowRequest>,
     focused: FocusedWindow,
+    focused_space: vmux_layout::space::FocusedSpace,
     mut commands: Commands,
 ) {
     for _ in reader.read() {
+        let source_space = focused_space.entity();
         if let Some(window) = focused.entity() {
             commands.entity(window).remove::<vmux_ecs::Active>();
         }
         commands.spawn((
             crate::VmuxPlugin::window_config(true),
-            NewWindowWorkspace,
+            NewWindowWorkspace::from_space(source_space),
             vmux_ecs::Active,
         ));
     }
@@ -148,10 +157,7 @@ fn close_windows(
             hide_windows.write(crate::runtime::HideAllWindowsRequest);
             continue;
         }
-        let (_, primary) = remaining.remove(index);
-        if primary && let Some((next, _)) = remaining.first() {
-            commands.entity(*next).insert(PrimaryWindow);
-        }
+        remaining.remove(index);
         for (root, host) in &roots {
             if host.0 == request.0 {
                 commands.entity(root).despawn();
@@ -160,6 +166,11 @@ fn close_windows(
         if windows.get(request.0).is_ok() {
             commands.entity(request.0).despawn();
         }
+    }
+    if remaining.iter().all(|(_, primary)| !*primary)
+        && let Some((next, _)) = remaining.first()
+    {
+        commands.entity(*next).insert(PrimaryWindow);
     }
 }
 
@@ -275,6 +286,7 @@ fn restore_fullscreen(
 mod tests {
     use super::*;
     use bevy::ecs::message::Messages;
+    use bevy::ecs::system::SystemState;
     use bevy::window::OnMonitor;
 
     fn test_monitor(x: i32, y: i32, width: u32, height: u32) -> Monitor {
@@ -403,6 +415,48 @@ mod tests {
     }
 
     #[test]
+    fn new_window_builds_its_layout_in_the_request_frame() {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins)
+            .init_resource::<vmux_layout::settings::LayoutSettings>()
+            .add_message::<crate::runtime::HideAllWindowsRequest>()
+            .add_plugins((vmux_layout::window::WindowLayoutPlugin, WindowPlugin));
+        app.world_mut()
+            .spawn((Window::default(), PrimaryWindow, vmux_ecs::Active));
+        app.update();
+        app.world_mut()
+            .resource_mut::<Messages<NewWindowRequest>>()
+            .write(NewWindowRequest);
+
+        app.update();
+
+        let new_window = app
+            .world_mut()
+            .query_filtered::<Entity, (With<Window>, Without<PrimaryWindow>)>()
+            .single(app.world())
+            .unwrap();
+        let has_root = app
+            .world_mut()
+            .query_filtered::<(Entity, &HostWindow), With<VmuxWindow>>()
+            .iter(app.world())
+            .any(|(_, host)| host.0 == new_window);
+        let has_space = {
+            let world = app.world_mut();
+            let mut state = SystemState::<(
+                vmux_layout::window::WindowHierarchy,
+                Query<Entity, With<vmux_layout::space::Space>>,
+            )>::new(world);
+            let (hierarchy, spaces) = state.get(world).unwrap();
+            spaces
+                .iter()
+                .any(|space| hierarchy.get(space) == Some(new_window))
+        };
+
+        assert!(has_root);
+        assert!(has_space);
+    }
+
+    #[test]
     fn closing_one_of_two_windows_despawns_only_its_shell() {
         let mut app = App::new();
         app.add_message::<crate::runtime::HideAllWindowsRequest>()
@@ -447,6 +501,33 @@ mod tests {
             .iter(app.world())
             .collect();
         assert_eq!(windows, vec![second]);
+        assert!(app.world().entity(second).contains::<PrimaryWindow>());
+    }
+
+    #[test]
+    fn closing_primary_and_its_first_successor_promotes_the_final_window() {
+        let mut app = App::new();
+        app.add_message::<crate::runtime::HideAllWindowsRequest>()
+            .add_message::<CloseVmuxWindow>()
+            .add_systems(Update, close_windows);
+        let primary = app
+            .world_mut()
+            .spawn((Window::default(), PrimaryWindow))
+            .id();
+        let next = app.world_mut().spawn(Window::default()).id();
+        let final_window = app.world_mut().spawn(Window::default()).id();
+        app.world_mut()
+            .resource_mut::<Messages<CloseVmuxWindow>>()
+            .write(CloseVmuxWindow(primary));
+        app.world_mut()
+            .resource_mut::<Messages<CloseVmuxWindow>>()
+            .write(CloseVmuxWindow(next));
+
+        app.update();
+
+        assert!(app.world().get_entity(primary).is_err());
+        assert!(app.world().get_entity(next).is_err());
+        assert!(app.world().entity(final_window).contains::<PrimaryWindow>());
     }
 
     #[test]
