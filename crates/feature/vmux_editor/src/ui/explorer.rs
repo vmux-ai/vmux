@@ -1650,7 +1650,7 @@ fn SearchInput(search: SearchState, view: ReadSignal<SidebarView>) -> Element {
     let regex_query = query.clone();
     rsx! {
         div {
-            class: "flex h-8 shrink-0 items-center px-2",
+            class: "flex h-8 shrink-0 items-center px-3",
             oncompositionstart: move |_| ime.start(),
             oncompositionend: move |_| ime.commit(),
             ManagerSearch {

@@ -202,10 +202,10 @@ fn EditorTab(tab: OpenEditorItem) -> Element {
     let element_id = format!("editor-tab-{}", tab.path);
     let class = match tab.active {
         true => {
-            "group flex h-7 min-w-0 max-w-[14rem] shrink-0 cursor-default items-center gap-1.5 rounded-md bg-foreground/[0.07] px-2 text-ui text-foreground"
+            "group flex h-6 min-w-0 max-w-[12rem] shrink-0 cursor-default items-center gap-1.5 rounded-md bg-foreground/[0.05] px-2.5 text-[11px] text-foreground"
         }
         false => {
-            "group flex h-7 min-w-0 max-w-[14rem] shrink-0 cursor-default items-center gap-1.5 rounded-md px-2 text-ui text-foreground/55 hover:bg-foreground/[0.035] hover:text-foreground/90"
+            "group flex h-6 min-w-0 max-w-[12rem] shrink-0 cursor-default items-center gap-1.5 rounded-md px-2.5 text-[11px] text-foreground/55 hover:bg-foreground/[0.035] hover:text-foreground/90"
         }
     };
     let close_title = match tab.dirty {
@@ -223,7 +223,7 @@ fn EditorTab(tab: OpenEditorItem) -> Element {
                     path: open_path.clone(),
                 });
             },
-            TypeIcon { path: tab.path.clone(), is_dir: tab.is_dir, class: "h-4 w-4 shrink-0 opacity-80" }
+            TypeIcon { path: tab.path.clone(), is_dir: tab.is_dir, class: "size-3.5 shrink-0 opacity-80" }
             span { class: "truncate", "{tab.name}" }
             if !tab.context.is_empty() {
                 span { class: "shrink-0 truncate text-[10px] text-muted-foreground/70", "{tab.context}" }

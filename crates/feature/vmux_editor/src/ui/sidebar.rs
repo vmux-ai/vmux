@@ -131,10 +131,13 @@ pub(super) fn ExplorerSidebar(
 
 #[component]
 pub(super) fn ExplorerToggleButton(pane: ExplorerPane, mode: Memo<Mode>) -> Element {
+    let open = (pane.visible)();
     rsx! {
         button {
-            class: "shrink-0 cursor-default rounded p-0.5 text-foreground/60 hover:bg-foreground/[0.08] hover:text-foreground",
+            class: "flex size-6 shrink-0 cursor-default items-center justify-center rounded-md text-foreground/60 transition-[color,background-color,transform] duration-100 hover:bg-foreground/[0.045] hover:text-foreground active:scale-95 motion-reduce:transition-none",
             title: translate("editor-toggle-explorer"),
+            aria_label: translate("editor-toggle-explorer"),
+            aria_expanded: open,
             onclick: move |_| {
                 pane.toggle(mode)
             },
@@ -143,11 +146,23 @@ pub(super) fn ExplorerToggleButton(pane: ExplorerPane, mode: Memo<Mode>) -> Elem
                 view_box: "0 0 24 24",
                 fill: "none",
                 stroke: "currentColor",
-                stroke_width: "2",
+                stroke_width: "1.5",
                 stroke_linecap: "round",
                 stroke_linejoin: "round",
                 rect { x: "3", y: "3", width: "18", height: "18", rx: "2" }
-                line { x1: "9", y1: "3", x2: "9", y2: "21" }
+                rect { x: "4", y: "4", width: "4", height: "16", fill: "currentColor", stroke: "none",
+                    class: if open {
+                        "origin-[4px_12px] scale-x-100 opacity-[0.12] transition-[transform,opacity] duration-100 motion-reduce:transition-none"
+                    } else {
+                        "origin-[4px_12px] scale-x-0 opacity-0 transition-[transform,opacity] duration-100 motion-reduce:transition-none"
+                    },
+                }
+                line { x1: "9", y1: "3", x2: "9", y2: "21",
+                    class: if open { "opacity-100 transition-opacity duration-100 motion-reduce:transition-none" } else { "opacity-0 transition-opacity duration-100 motion-reduce:transition-none" },
+                }
+                path { d: "m10 8 4 4-4 4",
+                    class: if open { "-translate-x-0.5 opacity-0 transition-[transform,opacity] duration-100 motion-reduce:transition-none" } else { "translate-x-0 opacity-100 transition-[transform,opacity] duration-100 motion-reduce:transition-none" },
+                }
             }
         }
     }

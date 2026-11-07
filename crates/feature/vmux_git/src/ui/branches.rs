@@ -9,9 +9,8 @@ use vmux_ui::components::dialog::{DialogContent, DialogRoot, DialogTitle};
 use vmux_ui::components::error_state::ErrorState;
 use vmux_ui::components::manager::ManagerSearch;
 use vmux_ui::components::segmented_control::{SegmentedControl, SegmentedControlItem};
-use vmux_ui::components::skeleton::Skeleton;
 use vmux_ui::components::tree_row::{
-    FileTree, FileTreeChildren, FileTreeRow, FileTreeRowGroup, FileTreeScroller,
+    FileTree, FileTreeChildren, FileTreeRow, FileTreeRowGroup, FileTreeScroller, FileTreeSkeleton,
 };
 use vmux_ui::hooks::send;
 use vmux_ui::i18n::translate;
@@ -137,11 +136,7 @@ pub(super) fn BranchesCard(
                     }
                 },
                 if files_loading && files_empty {
-                    div { class: "flex flex-col gap-2 px-2.5 py-2",
-                        for width in ["w-9/12", "w-11/12", "w-8/12", "w-10/12"] {
-                            Skeleton { class: "h-4 {width} bg-foreground/[0.045]" }
-                        }
-                    }
+                    FileTreeSkeleton { rows: 4, class: "py-2" }
                 } else if !files_error.is_empty() {
                     ErrorState {
                         class: "min-h-40".to_string(),

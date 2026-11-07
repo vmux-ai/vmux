@@ -267,6 +267,8 @@ pub fn ManagerSearch(
 ) -> Element {
     let mut draft = use_signal(|| value.clone());
     let mut pending = use_signal(|| None::<Task>);
+    let generated_id = use_hook(|| format!("vmux-manager-search-input-{}", current_scope_id().0));
+    let id = id.unwrap_or(generated_id);
     use_effect(use_reactive!(|value| {
         if *draft.peek() != value {
             draft.set(value);
@@ -278,53 +280,58 @@ pub fn ManagerSearch(
         }
     });
     let class = if minimal {
-        "relative z-30 flex h-7 min-w-0 flex-1 items-center gap-1.5 px-0.5"
+        "group/manager-search relative z-30 flex h-7 min-w-0 flex-1 items-center gap-1.5 px-0.5"
     } else {
-        "relative z-30 flex h-7 min-w-0 flex-1 items-center gap-1.5 rounded-md bg-foreground/[0.025] px-2.5 ring-1 ring-inset ring-foreground/[0.08] focus-within:bg-foreground/[0.05] focus-within:ring-foreground/[0.16]"
+        "group/manager-search relative z-30 flex h-7 min-w-0 flex-1 items-center gap-1.5 px-2.5"
     };
     rsx! {
-        div { class,
-            LineIconView {
-                icon: LineIcon::Search,
-                class: "size-3.5 shrink-0 text-muted-foreground",
+        div { class, "data-vmux-search-active": if draft().is_empty() { "false" } else { "true" },
+            label { r#for: id.clone(), class: "flex h-full shrink-0 cursor-text items-center",
+                LineIconView {
+                    icon: LineIcon::Search,
+                    class: "size-3.5 shrink-0 text-muted-foreground/70 transition-colors duration-100 group-focus-within/manager-search:text-foreground",
+                }
             }
             {prefix}
-            input {
-                id,
-                r#type: "search",
-                class: "h-full min-w-0 flex-1 bg-transparent text-[11px] text-foreground outline-none placeholder:text-muted-foreground/55",
-                placeholder,
-                value: draft(),
-                autofocus,
-                autocomplete: "off",
-                spellcheck: "false",
-                oninput: move |event: FormEvent| {
-                    let query = event.value();
-                    draft.set(query.clone());
-                    if let Some(handler) = onsearch {
-                        handler.call(query.clone());
-                    }
-                    if let Some(task) = pending.write().take() {
-                        task.cancel();
-                    }
-                    let Some(handler) = ondebounced else {
-                        return;
-                    };
-                    if debounce_ms == 0 {
-                        handler.call(query);
-                        return;
-                    }
-                    pending.set(Some(spawn(async move {
-                        Platform::sleep(debounce_ms).await;
-                        handler.call(query);
-                    })));
-                },
-                onkeydown: move |event| {
-                    event.stop_propagation();
-                    if let Some(handler) = &onkeydown {
-                        handler.call(event);
-                    }
-                },
+            label { r#for: id.clone(), class: "flex h-full min-w-0 flex-1 cursor-text items-center",
+                input {
+                    id,
+                    r#type: "search",
+                    class: "h-full w-24 min-w-0 flex-[0_1_auto] bg-transparent text-[11px] text-foreground outline-none transition-[width,flex-grow] duration-100 ease-out placeholder:text-muted-foreground/55 group-focus-within/manager-search:w-full group-focus-within/manager-search:grow group-data-[vmux-search-active=true]/manager-search:w-full group-data-[vmux-search-active=true]/manager-search:grow motion-reduce:transition-none",
+                    aria_label: placeholder.clone(),
+                    placeholder,
+                    value: draft(),
+                    autofocus,
+                    autocomplete: "off",
+                    spellcheck: "false",
+                    oninput: move |event: FormEvent| {
+                        let query = event.value();
+                        draft.set(query.clone());
+                        if let Some(handler) = onsearch {
+                            handler.call(query.clone());
+                        }
+                        if let Some(task) = pending.write().take() {
+                            task.cancel();
+                        }
+                        let Some(handler) = ondebounced else {
+                            return;
+                        };
+                        if debounce_ms == 0 {
+                            handler.call(query);
+                            return;
+                        }
+                        pending.set(Some(spawn(async move {
+                            Platform::sleep(debounce_ms).await;
+                            handler.call(query);
+                        })));
+                    },
+                    onkeydown: move |event| {
+                        event.stop_propagation();
+                        if let Some(handler) = &onkeydown {
+                            handler.call(event);
+                        }
+                    },
+                }
             }
             {suffix}
         }

@@ -1,7 +1,9 @@
 use dioxus::prelude::*;
 
 use crate::components::icon::Icon;
+use crate::components::skeleton::Skeleton;
 use crate::file_icon::TypeIcon;
+use crate::icon::{LineIcon, LineIconView};
 
 pub const FILE_TREE_ROW_GROUP: &str =
     "group/row flex w-full items-center rounded-md hover:bg-glass-hover";
@@ -73,6 +75,25 @@ impl TreeRowAccent {
 pub fn FileTree(children: Element) -> Element {
     rsx! {
         div { class: "flex min-h-0 min-w-0 flex-1 flex-col", {children} }
+    }
+}
+
+#[component]
+pub fn FileTreeSkeleton(
+    #[props(default = 5)] rows: usize,
+    #[props(default)] class: String,
+) -> Element {
+    let widths = ["w-24", "w-16", "w-28", "w-20", "w-32"];
+    rsx! {
+        div { class: "flex min-w-0 flex-col {class}", aria_busy: true, "data-vmux-loading-surface": "",
+            for index in 0..rows {
+                div { class: "flex h-[22px] min-w-0 items-center gap-1 px-2",
+                    span { class: "w-3 shrink-0" }
+                    LineIconView { icon: LineIcon::File, class: "size-3.5 shrink-0 text-muted-foreground/40" }
+                    Skeleton { class: "h-2 max-w-[60%] rounded-sm bg-foreground/[0.035] {widths[index % widths.len()]}" }
+                }
+            }
+        }
     }
 }
 

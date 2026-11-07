@@ -2,6 +2,7 @@ use dioxus::prelude::*;
 use vmux_ecs::event::space::ProjectActivateRequest;
 use vmux_ui::components::dropdown::{Dropdown, DropdownPopup};
 use vmux_ui::components::skeleton::Skeleton;
+use vmux_ui::components::tree_row::FileTreeSkeleton;
 use vmux_ui::hooks::send;
 use vmux_ui::i18n::translate;
 use vmux_ui::icon::{BuiltinIconView, GitSymbol, GitSymbolView, LineIcon, LineIconView};
@@ -158,18 +159,8 @@ fn GitLoadingSkeleton() -> Element {
         main { class: "flex min-h-0 flex-1 flex-col bg-transparent text-foreground",
             div { class: "grid min-h-0 flex-1 grid-cols-1 grid-rows-[minmax(12rem,0.7fr)_minmax(18rem,1.3fr)] overflow-hidden sm:grid-cols-[minmax(18rem,336px)_0.75rem_minmax(0,1fr)] sm:grid-rows-1",
                 aside { class: "flex min-h-0 flex-col overflow-hidden bg-transparent",
-                    div { class: "flex min-h-0 flex-1 flex-col gap-0.5 overflow-hidden px-2 pb-2 pt-1",
-                        for (index, width) in ["w-8/12", "w-11/12", "w-9/12", "w-10/12", "w-7/12", "w-full", "w-9/12", "w-8/12"].into_iter().enumerate() {
-                            div { class: "flex h-[22px] items-center gap-1 px-1",
-                                if index % 3 == 0 {
-                                    Skeleton { class: "size-3 shrink-0 rounded-sm bg-foreground/[0.05]" }
-                                } else {
-                                    div { class: "w-3 shrink-0" }
-                                }
-                                Skeleton { class: "size-3.5 shrink-0 rounded-sm bg-foreground/[0.05]" }
-                                Skeleton { class: "h-3 {width} bg-foreground/[0.055]" }
-                            }
-                        }
+                    div { class: "flex min-h-0 flex-1 flex-col overflow-hidden px-2 pb-2 pt-1",
+                        FileTreeSkeleton { rows: 8 }
                     }
                 }
                 div { class: "hidden sm:block" }

@@ -21,7 +21,7 @@ use vmux_ui::text_run::TextRun;
 
 use super::EditorFocus;
 use super::markdown::{
-    HeadingStyle, ListEditLine, ListLineHit, MdBlockView, NoteLineChunk, NoteSourceLine,
+    CaretStyle, HeadingStyle, ListEditLine, ListLineHit, MdBlockView, NoteLineChunk, NoteSourceLine,
 };
 use super::note_text::{NoteInlineKind, NoteInlineNode, NoteText};
 use super::text_style::GitLineTone;
@@ -276,11 +276,7 @@ impl NoteBlocks for [NoteBlock] {
 pub(super) fn NoteBlankLine(line: u32, col: u32, keymap: vmux_api::editor::KeymapKind) -> Element {
     let text = " ".repeat(col as usize);
     let chunks = NoteLineChunk::split(&text, Some(col), None);
-    let caret_width_class = if keymap == vmux_api::editor::KeymapKind::Vscode {
-        "w-0.5"
-    } else {
-        "w-[2px]"
-    };
+    let caret_width_class = CaretStyle::width(keymap);
     rsx! {
         div {
             id: "note-line-{line}",
@@ -411,11 +407,12 @@ fn note_inline_class(kind: NoteInlineKind) -> &'static str {
 
 #[component]
 fn NoteCaret(width_class: String) -> Element {
+    let caret_class = CaretStyle::BAR;
     rsx! {
         span {
             id: NOTE_CARET_ID,
             class: "relative inline-block h-[1.15em] w-0 scroll-mb-8 scroll-mt-8 align-text-bottom",
-            span { class: "pointer-events-none absolute inset-y-0 left-0 {width_class} bg-[var(--term-cursor,#34d399)] shadow-[0_0_0_0.5px_var(--term-cursor,#34d399)]" }
+            span { class: "{caret_class} {width_class}" }
         }
     }
 }
@@ -778,11 +775,8 @@ pub(super) fn NoteBlockView(
     } else {
         (Vec::new(), Vec::new(), 0, Vec::new())
     };
-    let caret_width_class = if keymap == vmux_api::editor::KeymapKind::Vscode {
-        "w-0.5"
-    } else {
-        "w-[2px]"
-    };
+    let caret_width_class = CaretStyle::width(keymap);
+    let caret_class = CaretStyle::BAR;
     let line_chunks = |line: u32, raw: &str, prefix: u32| {
         let selection = selections
             .iter()
@@ -1004,7 +998,7 @@ pub(super) fn NoteBlockView(
                                                             key: "caret-{chunk_index}",
                                                             id: NOTE_CARET_ID,
                                                             class: "relative inline-block h-[1.15em] w-0 scroll-mb-8 scroll-mt-8 align-text-bottom",
-                                                            span { class: "pointer-events-none absolute inset-y-0 left-0 {caret_width_class} bg-[var(--term-cursor,#34d399)] shadow-[0_0_0_0.5px_var(--term-cursor,#34d399)]" }
+                                                            span { class: "{caret_class} {caret_width_class}" }
                                                         }
                                                     }
                                                     if !chunk.text.is_empty() {

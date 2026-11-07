@@ -670,6 +670,9 @@ focus transfers cannot leave a popup behind. Command-bar deactivation never rest
 focus to a background window.
 Collection and Code search reuse `manager::ManagerSearch` at the top of their sidebars. Code keeps
 its file tabs and view controls in the first page row; search never reserves an empty row above it.
+Search has no surrounding field frame and expands within its fixed row when focused. File-list
+placeholders retain the real 22 px row height with file outlines and short name bars. Rendered-note
+carets share a thin, font-sized style without a surrounding shadow.
 Session view and category controls live in the page toolbar. Section headings support right-click
 and overflow menus for bulk archive, restore, and folding.
 Activation stamps preserve operation order across shared ancestors even within one clock tick;
