@@ -92,29 +92,31 @@ pub(super) fn ExplorerSidebar(
     let keys = use_context::<FileKeys>();
     let open = (pane.visible)();
     let panel_width = pane.rendered_width();
-    let wrapper_style = if open {
-        format!("width:{panel_width}px;min-width:{EXPLORER_MIN_WIDTH}px;")
+    let duration = vmux_ui::motion::Motion::LAYOUT_MS;
+    let wrapper_width = if open { panel_width } else { 0 };
+    let wrapper_style =
+        format!("--vmux-sidebar-motion-ms:{duration}ms;width:{wrapper_width}px;min-width:0px;");
+    let panel_style = format!("width:{panel_width}px;");
+    let wrapper_class = if (pane.resizing)() {
+        "relative z-[2] h-full shrink-0 [contain:layout_style] transition-none"
     } else {
-        "width:0px;min-width:0px;".to_string()
-    };
-    let panel_style = if open {
-        "width:100%;".to_string()
-    } else {
-        format!("width:{panel_width}px;")
+        "relative z-[2] h-full shrink-0 [contain:layout_style] transition-[width] duration-[var(--vmux-sidebar-motion-ms)] ease-out motion-reduce:transition-none"
     };
     let panel_class = if open {
-        "absolute inset-y-0 left-0 h-full translate-x-0 opacity-100 transition-[translate,opacity] duration-200 ease-out will-change-[translate]"
+        "absolute inset-y-0 left-0 h-full translate-x-0 opacity-100 transition-[translate,opacity] duration-[var(--vmux-sidebar-motion-ms)] ease-out motion-reduce:transition-none"
     } else {
-        "pointer-events-none absolute inset-y-0 left-0 h-full -translate-x-full opacity-0 transition-[translate,opacity] duration-200 ease-out will-change-[translate]"
+        "pointer-events-none absolute inset-y-0 left-0 h-full -translate-x-full opacity-0 transition-[translate,opacity] duration-[var(--vmux-sidebar-motion-ms)] ease-out motion-reduce:transition-none"
     };
     rsx! {
         div {
-            class: "relative z-[2] h-full shrink [contain:layout_style]",
+            class: wrapper_class,
             style: "{wrapper_style}",
             onkeydown: move |event| {
                 keys.offer(&event);
             },
-            div { class: "{panel_class}", style: "{panel_style}", ExplorerPanel { visible: pane.visible, caret_line, view } }
+            div { class: "absolute inset-0 overflow-hidden",
+                div { class: "{panel_class}", style: "{panel_style}", ExplorerPanel { visible: pane.visible, caret_line, view } }
+            }
             if open {
                 div {
                     class: "group absolute inset-y-0 -right-1 z-[3] w-2 cursor-col-resize",
@@ -157,12 +159,7 @@ pub(super) fn ExplorerToggleButton(pane: ExplorerPane, mode: Memo<Mode>) -> Elem
                         "origin-[4px_12px] scale-x-0 opacity-0 transition-[transform,opacity] duration-100 motion-reduce:transition-none"
                     },
                 }
-                line { x1: "9", y1: "3", x2: "9", y2: "21",
-                    class: if open { "opacity-100 transition-opacity duration-100 motion-reduce:transition-none" } else { "opacity-0 transition-opacity duration-100 motion-reduce:transition-none" },
-                }
-                path { d: "m10 8 4 4-4 4",
-                    class: if open { "-translate-x-0.5 opacity-0 transition-[transform,opacity] duration-100 motion-reduce:transition-none" } else { "translate-x-0 opacity-100 transition-[transform,opacity] duration-100 motion-reduce:transition-none" },
-                }
+                line { x1: "9", y1: "3", x2: "9", y2: "21" }
             }
         }
     }

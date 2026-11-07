@@ -669,7 +669,10 @@ copy of that specific tab for an 80 ms fade. Remaining tabs move from their prev
 within the 160 ms budget, while selection and the actual layout update immediately. Reduced motion
 skips both effects. A cached Stack returning from a hidden,
 zero-size frame restores its final rectangle immediately. Collapsible content may interpolate height
-within the shared layout budget. Cached pages remain usable during refresh;
+within the shared layout budget. The editor sidebar keeps one panel icon in both states.
+Its width, slide, and opacity use the
+120 ms layout budget with a fixed inner width; pointer resizing and reduced motion skip width
+interpolation, and opening never waits for page data. Cached pages remain usable during refresh;
 new data occupies a reserved skeleton region, and page replacement keeps the outgoing surface
 until the incoming snapshot paints. Tests exercise fresh input during motion, stale paint rejection,
 and retained-page handoffs instead of asserting animation class names. URL-bar background and
