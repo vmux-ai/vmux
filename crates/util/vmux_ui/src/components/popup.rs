@@ -39,6 +39,7 @@ globalThis.__vmuxPopupPresentation ??= (() => {
     styles = new WeakMap();
     activations = new WeakMap();
     ghosts = new Set();
+    scrollInitialized = new WeakSet();
     visible(element) {
       if (!element.isConnected) return false;
       if (element.hasAttribute('popover')) return element.matches(':popover-open');
@@ -93,6 +94,31 @@ globalThis.__vmuxPopupPresentation ??= (() => {
         animation.finished.then(cleanup, cleanup);
       } catch (_) { cleanup(); }
     }
+    reveal(popup, option) {
+      if (!popup?.isConnected || !option?.isConnected || !popup.contains(option)) return;
+      if (popup.clientHeight <= 0 || option.getBoundingClientRect().height <= 0) return;
+      this.scrollInitialized.add(popup);
+      for (let container = option.parentElement; container && popup.contains(container); container = container.parentElement) {
+        if (container.clientHeight > 0 && container.scrollHeight > container.clientHeight) {
+          const bounds = container.getBoundingClientRect();
+          const item = option.getBoundingClientRect();
+          const top = bounds.top + container.clientTop;
+          const bottom = top + container.clientHeight;
+          if (item.top < top) container.scrollTop += item.top - top;
+          else if (item.bottom > bottom) container.scrollTop += item.bottom - bottom;
+        }
+        if (container === popup) break;
+      }
+    }
+    initializeScroll(popup) {
+      if (this.scrollInitialized.has(popup)) return;
+      const option = popup.querySelector('[data-vmux-dropdown-selected="true"]');
+      if (option) this.reveal(popup, option);
+    }
+    noteInput(event) {
+      const popup = event.target instanceof Element ? event.target.closest('[data-vmux-dropdown-popup]') : null;
+      if (popup) this.scrollInitialized.add(popup);
+    }
     place(popup) {
       if (!popup.isConnected) return;
       const margin = 6;
@@ -141,7 +167,9 @@ globalThis.__vmuxPopupPresentation ??= (() => {
       else if (top && y < margin && below + size.height <= window.innerHeight - margin) y = below;
       x = Math.min(Math.max(margin, x), Math.max(margin, window.innerWidth - size.width - margin));
       y = Math.min(Math.max(margin, y), Math.max(margin, window.innerHeight - size.height - margin));
-      Object.assign(popup.style, { left: x + 'px', top: y + 'px', right: 'auto', bottom: 'auto', visibility: 'visible' });
+      Object.assign(popup.style, { left: x + 'px', top: y + 'px', right: 'auto', bottom: 'auto' });
+      this.initializeScroll(popup);
+      popup.style.visibility = 'visible';
     }
     apply(captures) {
       const popups = [...document.querySelectorAll('[data-vmux-popup-kind]')];
@@ -177,9 +205,13 @@ globalThis.__vmuxPopupPresentation ??= (() => {
       root?.querySelector('[data-vmux-dropdown-indicator]')?.setAttribute('data-state', event.newState);
     }
     if (event.newState === 'closed') presentation.retire(presentation.snapshot(element));
-    else presentation.closing.delete(element);
+    else {
+      presentation.closing.delete(element);
+      presentation.scrollInitialized.delete(element);
+    }
   }, true);
   document.addEventListener('pointerdown', event => {
+    presentation.noteInput(event);
     const path = event.composedPath();
     for (const popup of document.querySelectorAll('[data-vmux-popup-kind][popover="manual"]:popover-open')) {
       const context = popup.dataset.vmuxPopupKind === 'context';
@@ -188,6 +220,9 @@ globalThis.__vmuxPopupPresentation ??= (() => {
       if (!path.includes(target) && (!root || !path.includes(root))) popup.hidePopover();
     }
   }, true);
+  for (const name of ['wheel', 'touchmove', 'input']) {
+    document.addEventListener(name, event => presentation.noteInput(event), { capture: true, passive: true });
+  }
   document.addEventListener('keydown', event => {
     if (event.key !== 'Escape') return;
     for (const popup of document.querySelectorAll('[data-vmux-popup-kind][popover="manual"]:popover-open')) popup.hidePopover();

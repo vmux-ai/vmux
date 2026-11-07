@@ -663,6 +663,8 @@ and focuses new popovers in the mutation frame, before mounted callbacks. Menus 
 transparent with a small vertical movement in 100 ms; closing releases interaction immediately and retains
 an inert, identifier-free snapshot for an 80 ms fade. The snapshot retains typography and scroll
 offsets. New input can discard it, and reduced motion skips interpolation.
+Selected dropdown entries are revealed inside their own menu before its first paint. Mounted setup
+and later renders preserve that position; fresh pointer, scroll and text input own it thereafter.
 Command bars, menus, selects, tooltips and dialogs share `popup::Dismissal`. Document deactivation
 closes them through their owning state; moving focus between fields leaves them open. The macOS
 application resignation notification dispatches the same lifecycle to every hosted page, so native

@@ -57,6 +57,7 @@ const watchConnection = globalThis.__vmuxDropdownWatchConnection ??= (() => {
 "#;
 
 const DROPDOWN_KEYBOARD_SCRIPT: &str = r#"
+__VMUX_POPUP_RUNTIME__
 __VMUX_DROPDOWN_CONNECTION_WATCHER__
 globalThis.__vmuxDropdownKeyboardCleanup?.();
 let active = true;
@@ -77,7 +78,8 @@ const activate = (root, options, index) => {
   const option = options[index];
   option.setAttribute('data-vmux-dropdown-active', 'true');
   option.setAttribute('aria-selected', 'true');
-  option.scrollIntoView({ block: 'nearest' });
+  const popup = option.closest('[data-vmux-dropdown-popup]');
+  if (popup) globalThis.__vmuxPopupPresentation.reveal(popup, option);
 };
 const keydown = event => {
   if (event.isComposing) return;
@@ -185,8 +187,6 @@ if (popup && root) {
   };
   unwatch = watchConnection(id, popup, cleanup);
   entries.set(id, { cleanup });
-  place();
-  popup.querySelector('[data-vmux-dropdown-selected="true"]')?.scrollIntoView({ block: 'nearest' });
   place();
 }
 "#;
@@ -701,6 +701,7 @@ fn DropdownKeyboardNavigation(root_id: String) -> Element {
         let root_id = root_id.clone();
         async move {
             let script = DROPDOWN_KEYBOARD_SCRIPT
+                .replace("__VMUX_POPUP_RUNTIME__", &Surface::runtime())
                 .replace(
                     "__VMUX_DROPDOWN_CONNECTION_WATCHER__",
                     DROPDOWN_CONNECTION_WATCHER,
@@ -715,10 +716,60 @@ fn DropdownKeyboardNavigation(root_id: String) -> Element {
 
 #[cfg(test)]
 mod tests {
-    use super::{DropdownOpenMode, DropdownSelector, DropdownTrigger};
+    use super::{
+        DROPDOWN_CONNECTION_WATCHER, DROPDOWN_KEYBOARD_SCRIPT, DropdownOpenMode,
+        DropdownPopupOwner, DropdownSelector, DropdownTrigger,
+    };
+    use crate::components::popup::Surface;
     use dioxus::core::{AttributeValue, Mutation};
     use dioxus::prelude::*;
     use dioxus_html::{EventData, SerializedHtmlEventConverter, SerializedMouseData};
+    use std::io::Write;
+    use std::process::{Command, Stdio};
+
+    struct PlacementProbe;
+
+    impl PlacementProbe {
+        fn verify() {
+            let runtime = Surface::runtime();
+            let keyboard = DROPDOWN_KEYBOARD_SCRIPT
+                .replace("__VMUX_POPUP_RUNTIME__", &runtime)
+                .replace(
+                    "__VMUX_DROPDOWN_CONNECTION_WATCHER__",
+                    DROPDOWN_CONNECTION_WATCHER,
+                )
+                .replace("__VMUX_DROPDOWN_ROOT__", "test-dropdown-root");
+            let source = serde_json::json!({
+                "runtime": runtime,
+                "mount": DropdownPopupOwner(0).install_script(),
+                "keyboard": keyboard,
+            });
+            let mut child = Command::new("node")
+                .args(["-e", include_str!("dropdown_placement_test.js")])
+                .stdin(Stdio::piped())
+                .stdout(Stdio::piped())
+                .stderr(Stdio::piped())
+                .spawn()
+                .expect("Node is required for the dropdown runtime test");
+            child
+                .stdin
+                .take()
+                .unwrap()
+                .write_all(source.to_string().as_bytes())
+                .unwrap();
+            let output = child.wait_with_output().unwrap();
+            assert!(
+                output.status.success(),
+                "{}",
+                String::from_utf8_lossy(&output.stderr)
+            );
+        }
+    }
+
+    #[test]
+    fn dropdown_selection_is_placed_before_paint_and_preserves_fresh_reading_input() {
+        PlacementProbe::verify();
+    }
 
     #[component]
     fn HoverSelector() -> Element {

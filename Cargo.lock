@@ -11265,6 +11265,7 @@ dependencies = [
  "fluent-bundle",
  "rkyv",
  "serde",
+ "serde_json",
  "sha2",
  "sys-locale",
  "tokio",
