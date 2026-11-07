@@ -7,9 +7,10 @@ use bevy::prelude::*;
 use bevy::winit::{EventLoopProxyWrapper, WINIT_WINDOWS, WinitUserEvent};
 use bevy_cef_core::prelude::MessageLoopWakePolicy;
 use objc2_app_kit::{
-    NSAnimatablePropertyContainer, NSAnimationContext, NSApp, NSEvent, NSEventMask,
-    NSEventModifierFlags, NSEventPhase, NSEventType, NSView, NSWindowDidEndLiveResizeNotification,
-    NSWindowStyleMask, NSWindowWillStartLiveResizeNotification,
+    NSAnimatablePropertyContainer, NSAnimationContext, NSApp,
+    NSApplicationDidResignActiveNotification, NSEvent, NSEventMask, NSEventModifierFlags,
+    NSEventPhase, NSEventType, NSView, NSWindowDidEndLiveResizeNotification, NSWindowStyleMask,
+    NSWindowWillStartLiveResizeNotification,
 };
 use objc2_foundation::{
     NSNotification, NSNotificationCenter, NSPoint, NSRect, NSSize, NSString, NSUserDefaults,
@@ -28,6 +29,8 @@ pub(super) struct RuntimePlatformPlugin;
 impl Plugin for RuntimePlatformPlugin {
     fn build(&self, app: &mut App) {
         app.add_systems(Startup, seed)
+            .add_message::<vmux_ecs::overlay::PopupDismissRequest>()
+            .add_systems(First, deactivate)
             .add_systems(Update, activate_app_during_boot)
             .add_systems(Update, grab_key_window_on_pane_hover)
             .add_systems(
@@ -35,6 +38,7 @@ impl Plugin for RuntimePlatformPlugin {
                 (
                     install_input_wake_monitor,
                     install_live_resize_monitor,
+                    install_activation_monitor,
                     activate_primary_window,
                 ),
             );
@@ -64,6 +68,38 @@ static IN_LIVE_RESIZE: AtomicBool = AtomicBool::new(false);
 static LIVE_RESIZE_MONITOR_INSTALLED: AtomicBool = AtomicBool::new(false);
 static HOVER_OVER_PANE: AtomicBool = AtomicBool::new(false);
 static WINDOWED_POINTER_INSIDE: AtomicBool = AtomicBool::new(false);
+static ACTIVATION_MONITOR_INSTALLED: AtomicBool = AtomicBool::new(false);
+static APP_DEACTIVATED: AtomicBool = AtomicBool::new(false);
+
+fn deactivate(mut dismiss: MessageWriter<vmux_ecs::overlay::PopupDismissRequest>) {
+    if APP_DEACTIVATED.swap(false, Ordering::Relaxed) {
+        dismiss.write_default();
+    }
+}
+
+fn install_activation_monitor(proxy: Option<Res<EventLoopProxyWrapper>>) {
+    if ACTIVATION_MONITOR_INSTALLED.load(Ordering::Relaxed) {
+        return;
+    }
+    let Some(proxy) = proxy else {
+        return;
+    };
+    let proxy = (**proxy).clone();
+    let block = block2::RcBlock::new(move |_notification: NonNull<NSNotification>| {
+        APP_DEACTIVATED.store(true, Ordering::Relaxed);
+        let _ = proxy.send_event(WinitUserEvent::WakeUp);
+    });
+    let token = unsafe {
+        NSNotificationCenter::defaultCenter().addObserverForName_object_queue_usingBlock(
+            Some(NSApplicationDidResignActiveNotification),
+            None,
+            None,
+            &block,
+        )
+    };
+    std::mem::forget(token);
+    ACTIVATION_MONITOR_INSTALLED.store(true, Ordering::Relaxed);
+}
 
 fn activate_primary_window(
     primary_window: Query<(Entity, &Window), With<bevy::window::PrimaryWindow>>,

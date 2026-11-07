@@ -2,6 +2,7 @@
 
 use dioxus::prelude::*;
 use vmux_ui::components::icon::Icon;
+use vmux_ui::components::popup::Dismissal;
 use vmux_ui::components::skeleton::Skeleton;
 use vmux_ui::hooks::send;
 use vmux_ui::i18n::translate;
@@ -17,6 +18,7 @@ use qrcode::render::svg;
 #[component]
 pub(crate) fn RemoteControl(remote: RemoteUiState) -> Element {
     let mut open = use_signal(|| false);
+    Dismissal::use_listener(open(), EventHandler::new(move |()| open.set(false)));
     use_effect(move || {
         let _ = send(&LayoutOverlayEvent {
             id: "remote".to_string(),

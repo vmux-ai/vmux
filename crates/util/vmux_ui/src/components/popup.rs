@@ -1,4 +1,7 @@
 use crate::motion::Motion;
+use dioxus::core::Task;
+use dioxus::prelude::*;
+use std::sync::atomic::{AtomicU64, Ordering};
 
 #[derive(Clone, Copy)]
 pub enum Surface {
@@ -194,6 +197,93 @@ globalThis.__vmuxPopupPresentation ??= (() => {
 globalThis.__vmuxPopupPresentation.apply([]);
 "#;
 
+#[derive(Clone, Copy)]
+pub struct Dismissal(u64);
+
+impl Dismissal {
+    pub fn use_open(
+        open: ReadSignal<Option<bool>>,
+        default_open: bool,
+        on_open_change: Callback<bool>,
+    ) -> (Memo<bool>, Callback<bool>) {
+        let (open, set_open) =
+            dioxus_primitives::use_controlled(open, default_open, on_open_change);
+        Self::use_listener(open(), EventHandler::new(move |()| set_open.call(false)));
+        (open, set_open)
+    }
+
+    pub fn use_listener(open: bool, on_dismiss: EventHandler<()>) {
+        let owner = use_hook(Self::next);
+        let mut task = use_signal(|| None::<Task>);
+        let dismiss = use_callback(move |()| on_dismiss.call(()));
+        use_effect(use_reactive!(|open| {
+            if let Some(task) = task.write().take() {
+                task.cancel();
+            }
+            crate::transport::Host::run_script(owner.remove_script());
+            if !open {
+                return;
+            }
+            task.set(Some(spawn(async move {
+                let mut eval = document::eval(&owner.listen_script());
+                while let Ok(dismissed) = eval.recv::<bool>().await {
+                    if dismissed {
+                        dismiss.call(());
+                    }
+                }
+            })));
+        }));
+        use_drop(move || {
+            if let Some(task) = task.write().take() {
+                task.cancel();
+            }
+            crate::transport::Host::run_script(owner.remove_script());
+        });
+    }
+
+    fn next() -> Self {
+        static NEXT: AtomicU64 = AtomicU64::new(0);
+        Self(NEXT.fetch_add(1, Ordering::Relaxed))
+    }
+
+    fn listen_script(self) -> String {
+        format!(
+            "{DISMISSAL_RUNTIME}\nglobalThis.__vmuxPopupDismissal.subscribe({}, () => dioxus.send(true));",
+            self.0
+        )
+    }
+
+    fn remove_script(self) -> String {
+        format!("globalThis.__vmuxPopupDismissal?.remove({});", self.0)
+    }
+}
+
+const DISMISSAL_RUNTIME: &str = r#"
+globalThis.__vmuxPopupDismissal ??= (() => {
+  class Dismissal {
+    listeners = new Map();
+    subscribe(owner, dismiss) { this.listeners.set(owner, dismiss); }
+    remove(owner) { this.listeners.delete(owner); }
+    dismiss() {
+      const listeners = [...this.listeners.entries()];
+      for (const [owner, dismiss] of listeners) {
+        try { dismiss(); } catch (_) { this.listeners.delete(owner); }
+      }
+    }
+  }
+  const dismissal = new Dismissal();
+  window.addEventListener('blur', event => {
+    if (event.target === window) dismissal.dismiss();
+  });
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'hidden') dismissal.dismiss();
+  });
+  window.addEventListener('pagehide', () => dismissal.dismiss());
+  window.addEventListener('vmux-deactivated', () => dismissal.dismiss());
+  return dismissal;
+})();
+"#;
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -203,9 +293,9 @@ mod tests {
     struct PopupProbe;
 
     impl PopupProbe {
-        fn verify() {
+        fn verify(script: &str, source: &str) {
             let mut child = Command::new("node")
-                .args(["-e", include_str!("popup_state_test.js")])
+                .args(["-e", script])
                 .stdin(Stdio::piped())
                 .stdout(Stdio::piped())
                 .stderr(Stdio::piped())
@@ -215,7 +305,7 @@ mod tests {
                 .stdin
                 .take()
                 .unwrap()
-                .write_all(Surface::runtime().as_bytes())
+                .write_all(source.as_bytes())
                 .unwrap();
             let output = child.wait_with_output().unwrap();
             assert!(
@@ -228,6 +318,11 @@ mod tests {
 
     #[test]
     fn native_popup_close_updates_the_trigger_before_the_host_round_trip() {
-        PopupProbe::verify();
+        PopupProbe::verify(include_str!("popup_state_test.js"), &Surface::runtime());
+    }
+
+    #[test]
+    fn popups_share_deactivation_and_preserve_focus_moves_inside_the_page() {
+        PopupProbe::verify(include_str!("popup_dismissal_test.js"), DISMISSAL_RUNTIME);
     }
 }

@@ -60,6 +60,9 @@ impl Plugin for MacosBrowserPlugin {
                 .after(vmux_layout::presentation::NativePresentationSet::Finalize),
         )
         .add_message::<vmux_layout::presentation::NativeSurfaceReused>()
+        .add_message::<vmux_ecs::overlay::PopupDismissRequest>()
+        .add_systems(Update, dismiss_popups)
+        .add_observer(stop_loading)
         .add_message::<vmux_layout::presentation::NativeSelectionCommitted>()
         .init_non_send::<PageRenderer>()
         .init_resource::<SurfacePresentations>()
@@ -324,6 +327,27 @@ struct PageRenderer {
     replacements: HashMap<Entity, WebView>,
     retired: Vec<RetiredPage>,
     retirement_wake_pending: Arc<AtomicBool>,
+}
+
+fn dismiss_popups(
+    mut requests: MessageReader<vmux_ecs::overlay::PopupDismissRequest>,
+    renderer: NonSend<PageRenderer>,
+) {
+    if requests.read().count() == 0 {
+        return;
+    }
+    for surface in renderer.active.values() {
+        surface.evaluate_script("window.dispatchEvent(new Event('vmux-deactivated'));");
+    }
+}
+
+fn stop_loading(
+    request: On<crate::command::StopLoadingRequested>,
+    renderer: NonSend<PageRenderer>,
+) {
+    if let Some(surface) = renderer.active.get(&request.event().webview) {
+        surface.evaluate_script("window.stop();");
+    }
 }
 
 impl Default for PageRenderer {

@@ -77,6 +77,12 @@ fn sync_hosted_view<M: Component + Default>(
 
 pub struct HostedPagePlugin;
 
+#[derive(EntityEvent)]
+pub struct SurfaceCancelRequest {
+    #[event_target]
+    pub webview: Entity,
+}
+
 #[derive(SystemSet, Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct HandoffCommitSet;
 
@@ -317,6 +323,7 @@ impl Plugin for HostedPagePlugin {
             app.add_plugins(crate::page_slot::PageSlotPlugin);
         }
         app.add_message::<PageOpenRequest>()
+            .add_observer(cancel)
             .add_systems(First, retire_surfaces)
             .add_systems(
                 Update,
@@ -345,6 +352,33 @@ impl Plugin for HostedPagePlugin {
 }
 
 type PendingPageOpen = (Without<PageOpenHandled>, Without<PageOpenError>);
+
+fn cancel(
+    request: On<SurfaceCancelRequest>,
+    parents: Query<&ChildOf>,
+    currents: Query<&crate::page_slot::Current>,
+    mut handoffs: Query<&mut SurfaceHandoff>,
+    mut commands: Commands,
+) {
+    let surface = request.event().webview;
+    let Ok(parent) = parents.get(surface) else {
+        return;
+    };
+    let Ok(current) = currents.get(parent.parent()) else {
+        return;
+    };
+    if current
+        .surface()
+        .is_none_or(|committed| committed == surface)
+    {
+        return;
+    }
+    let Ok(mut handoff) = handoffs.get_mut(surface) else {
+        return;
+    };
+    handoff.error_fallback = true;
+    commands.entity(surface).insert(SurfaceHandoffFailed);
+}
 
 fn handoff_state_changed(
     transitions: Query<(), Changed<crate::page_slot::Transition>>,
@@ -1624,6 +1658,70 @@ mod tests {
             app.world().get::<crate::presentation::Transition>(stack),
             Some(&crate::presentation::Transition::retain(visible_stack))
         );
+    }
+
+    #[test]
+    fn cancelling_an_incoming_surface_restores_the_committed_page_without_an_error_page() {
+        let mut app = App::new();
+        app.add_plugins((MinimalPlugins, vmux_ecs::page::PagePlugin, HostedPagePlugin));
+        let navigation = PageOpenId::new();
+        let previous = PageMetadata {
+            url: "vmux://sessions/old".into(),
+            title: "Old".into(),
+            ..Default::default()
+        };
+        let stack = app
+            .world_mut()
+            .spawn((
+                crate::stack::Stack::default(),
+                previous.clone(),
+                PageNavigation::new(navigation),
+            ))
+            .id();
+        let committed = app
+            .world_mut()
+            .spawn((
+                Browser,
+                previous.clone(),
+                PageReady {},
+                Visibility::Visible,
+                ChildOf(stack),
+            ))
+            .id();
+        app.world_mut()
+            .entity_mut(stack)
+            .insert(crate::page_slot::Current::new(
+                Some(committed),
+                previous.clone(),
+            ));
+        let incoming = app
+            .world_mut()
+            .spawn((
+                Browser,
+                PageMetadata {
+                    url: "vmux://projects/new".into(),
+                    ..Default::default()
+                },
+                SurfaceHandoff::new(vec![committed], navigation, 0, std::time::Duration::ZERO),
+                ChildOf(stack),
+            ))
+            .id();
+        app.update();
+        app.world_mut()
+            .trigger(SurfaceCancelRequest { webview: incoming });
+        app.update();
+        app.update();
+        assert_eq!(
+            app.world()
+                .get::<crate::page_slot::Current>(stack)
+                .unwrap()
+                .surface(),
+            Some(committed)
+        );
+        assert_eq!(app.world().get::<PageMetadata>(stack), Some(&previous));
+        assert!(app.world().get_entity(incoming).is_err());
+        assert!(app.world().get_entity(committed).is_ok());
+        assert!(app.world().get::<PageNavigation>(stack).is_none());
     }
 
     #[test]

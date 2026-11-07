@@ -367,6 +367,9 @@ pub struct HeaderForwardRequest;
 pub struct HeaderReloadRequest;
 
 #[vmux_api::ui_event]
+pub struct HeaderStopRequest;
+
+#[vmux_api::ui_event]
 pub struct HeaderAddressFocusRequest;
 
 #[vmux_api::contract(Default, Eq)]

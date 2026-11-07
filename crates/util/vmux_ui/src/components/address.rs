@@ -19,6 +19,7 @@ pub fn AddressTrail(
     state: PageAddress,
     #[props(default)] onpopup: Option<EventHandler<bool>>,
     #[props(default)] dismiss_revision: u64,
+    #[props(default)] loading: bool,
 ) -> Element {
     let mut open = use_signal(|| None::<String>);
     let mut observed_dismiss = use_signal(|| dismiss_revision);
@@ -59,6 +60,7 @@ pub fn AddressTrail(
                     ..Default::default()
                 },
                 requests: requests.clone(), open,
+                loading,
             }
             for (index, crumb) in state.fixed.iter().enumerate() {
                 span { key: "fixed-{index}", class: "flex min-w-0 shrink items-center gap-1",
@@ -152,6 +154,7 @@ fn AddressMenu(
     requests: AddressSender,
     mut open: Signal<Option<String>>,
     #[props(default)] preserve_name: bool,
+    #[props(default)] loading: bool,
 ) -> Element {
     if crumb.options.is_empty()
         && crumb.tabs.is_empty()
@@ -160,7 +163,7 @@ fn AddressMenu(
         && crumb.entry.intent.is_none()
     {
         return rsx! { span { class: "flex h-7 min-w-0 items-center gap-1", title: crumb.entry.title.clone(),
-            AddressIcon { entry: crumb.entry.clone() }
+            AddressIcon { entry: crumb.entry.clone(), loading }
             span { class: "truncate", {AddressLabel(&crumb.entry).text()} }
         } };
     }
@@ -181,7 +184,7 @@ fn AddressMenu(
                     if let Some(intent) = &on_open { open_requests.send(intent.clone()); }
                 } else if open.peek().as_ref() == Some(&open_id) { open.set(None); }
             },
-            leading: rsx! { if !preserve_name || crumb.active { AddressIcon { entry: crumb.entry.clone() } } },
+            leading: rsx! { if !preserve_name || crumb.active { AddressIcon { entry: crumb.entry.clone(), loading } } },
             if !crumb.tabs.is_empty() {
                 div { class: "flex gap-1 p-1",
                     for tab in crumb.tabs {
@@ -229,7 +232,10 @@ fn AddressMenu(
 }
 
 #[component]
-fn AddressIcon(entry: AddressOption) -> Element {
+fn AddressIcon(entry: AddressOption, #[props(default)] loading: bool) -> Element {
+    if loading {
+        return rsx! { crate::components::progress::LoadingIcon {} };
+    }
     if !entry.identity.is_empty() {
         return rsx! { IdentityOrb { seed: entry.identity, alt: entry.label, class: "size-4".to_string() } };
     }

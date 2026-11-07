@@ -1,4 +1,4 @@
-use crate::components::popup::Surface;
+use crate::components::popup::{Dismissal, Surface};
 use dioxus::prelude::*;
 use dioxus_primitives::dioxus_attributes::attributes;
 use dioxus_primitives::icon;
@@ -18,7 +18,19 @@ const SELECT_OPTION: &str = "flex cursor-pointer items-center justify-between ro
 
 #[component]
 pub fn Select<T: Clone + PartialEq + 'static>(props: SelectProps<T>) -> Element {
-    let base = attributes!(div { class: SELECT_ROOT });
+    let owner = use_hook(|| dioxus::core::current_scope_id().0);
+    Dismissal::use_listener(
+        true,
+        EventHandler::new(move |()| {
+            crate::transport::Host::run_script(format!(
+                "document.querySelector('[data-vmux-select-owner=\"{owner}\"] [aria-haspopup=\"listbox\"][aria-expanded=\"true\"]')?.click();"
+            ));
+        }),
+    );
+    let base = attributes!(div {
+        class: SELECT_ROOT,
+        "data-vmux-select-owner": owner.to_string(),
+    });
     let merged = merge_attributes(vec![base, props.attributes.clone()]);
     rsx! {
         select::Select {

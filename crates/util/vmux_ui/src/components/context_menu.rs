@@ -1,4 +1,4 @@
-use crate::components::popup::Surface;
+use crate::components::popup::{Dismissal, Surface};
 use dioxus::prelude::*;
 use dioxus_primitives::context_menu::{
     ContextMenuContentProps, ContextMenuItemProps, ContextMenuProps, ContextMenuTriggerProps,
@@ -121,6 +121,10 @@ pub fn ContextMenuContent(props: ContextMenuContentProps) -> Element {
     let (x, y) = (state.position)();
     let animation = Surface::ENTER;
     let motion_style = Surface::style();
+    Dismissal::use_listener(
+        (state.open)(),
+        EventHandler::new(move |()| state.set_open(false)),
+    );
 
     if !(state.open)() {
         return rsx! {};

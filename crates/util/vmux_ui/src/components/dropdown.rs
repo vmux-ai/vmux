@@ -5,7 +5,7 @@ use dioxus_primitives::dioxus_attributes::attributes;
 use dioxus_primitives::merge_attributes;
 
 use crate::cn::cn;
-use crate::components::popup::Surface;
+use crate::components::popup::{Dismissal, Surface};
 use crate::icon::{LineIcon, LineIconView};
 
 const DROPDOWN_CONNECTION_WATCHER: &str = r#"
@@ -497,7 +497,6 @@ if (popup) {{
     popup.removeEventListener('beforetoggle', beforetoggle);
     document.removeEventListener('pointerdown', pointerdown, true);
     document.removeEventListener('keydown', keydown, true);
-    window.removeEventListener('blur', dismiss, true);
     if (entries.get(id)?.cleanup === cleanup) entries.delete(id);
   }};
   const dismiss = () => {{
@@ -525,7 +524,6 @@ if (popup) {{
   if (manual) {{
     document.addEventListener('pointerdown', pointerdown, true);
     document.addEventListener('keydown', keydown, true);
-    window.addEventListener('blur', dismiss, true);
   }}
 }}
 "#,
@@ -578,6 +576,7 @@ pub fn Dropdown(
         }
         on_dismiss.call(());
     });
+    Dismissal::use_listener(open, dismiss);
     let hover_enter = use_callback(move |()| {
         if !dismiss_on_mouseleave {
             return;

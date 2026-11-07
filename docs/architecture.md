@@ -549,8 +549,9 @@ than polling every surface on every frame. A failed or superseded request discar
 surface and leaves `Current` untouched. Request IDs reject acknowledgements from stale surfaces.
 Layout projections observe `Current` changes even when the requested metadata stays the same, so
 committing a presented surface clears the side sheet's pending-page indication immediately.
-The side sheet's loading ring follows the selected page. Inactive restored pages without a
-materialized surface do not keep that ring active while the visible page is ready.
+The URL bar's subtle border glow and favicon spinner follow the selected page. Reload becomes a
+stop button while it loads; stopping cancels browser loading and rolls an uncommitted handoff back
+to its retained page. Inactive restored pages do not animate the selected page's controls.
 Native-page transitions fade the two retained surfaces by painting the incoming surface above the
 opaque committed surface. Commit waits for the platform to acknowledge the incoming surface at full
 opacity, so no frame exposes the window background. Content pages use the same lifecycle with an
@@ -662,6 +663,11 @@ and focuses new popovers in the mutation frame, before mounted callbacks. Menus 
 transparent with a small vertical movement in 100 ms; closing releases interaction immediately and retains
 an inert, identifier-free snapshot for an 80 ms fade. The snapshot retains typography and scroll
 offsets. New input can discard it, and reduced motion skips interpolation.
+Command bars, menus, selects, tooltips and dialogs share `popup::Dismissal`. Document deactivation
+closes them through their owning state; moving focus between fields leaves them open. The macOS
+application resignation notification dispatches the same lifecycle to every hosted page, so native
+focus transfers cannot leave a popup behind. Command-bar deactivation never restores keyboard
+focus to a background window.
 Session view and category controls live in the page toolbar. Section headings support right-click
 and overflow menus for bulk archive, restore, and folding.
 Activation stamps preserve operation order across shared ancestors even within one clock tick;

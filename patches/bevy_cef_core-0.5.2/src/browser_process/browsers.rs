@@ -2311,6 +2311,12 @@ impl Browsers {
         Some((browser.bin_ipc_context.surface_generation(), revision))
     }
 
+    pub fn stop_loading_webview(&self, webview: &Entity) {
+        if let Some(browser) = self.browsers.get(webview) {
+            browser.client.stop_load();
+        }
+    }
+
     /// Hard-reload a specific webview (bypass HTTP cache — browser ⌘⇧R / Ctrl+Shift+R).
     pub fn reload_webview_ignore_cache(&self, webview: &Entity) -> Option<(u64, u64)> {
         let browser = self.browsers.get(webview)?;

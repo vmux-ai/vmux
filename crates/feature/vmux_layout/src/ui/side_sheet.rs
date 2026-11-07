@@ -312,7 +312,7 @@ fn SideSheetSpaceRow(
                             } else {
                                 button {
                                     r#type: "button",
-                                    class: "pointer-events-auto min-w-0 flex-1 truncate rounded px-1 py-0.5 text-left text-ui font-medium text-foreground outline-none hover:bg-foreground/[0.045] focus-visible:bg-foreground/[0.055] @max-[12rem]:text-ui-xs",
+                                    class: "pointer-events-auto h-6 min-w-0 flex-1 truncate rounded px-1.5 py-0 text-left text-ui font-medium text-foreground outline-none hover:bg-foreground/[0.045] focus-visible:bg-foreground/[0.055] @max-[12rem]:text-ui-xs",
                                     onclick: move |event| {
                                         event.stop_propagation();
                                         let _ = send(&SpaceFormOpenRequest {
@@ -481,7 +481,7 @@ fn SpaceRenameInput(form: SpaceFormState) -> Element {
             placeholder: String::new(),
             aria_label: translate("spaces-new-placeholder"),
             action_label: translate("common-refresh"),
-            class: "pointer-events-auto h-7 flex-1 rounded bg-background/70 ring-1 ring-inset ring-primary/40".to_string(),
+            class: "pointer-events-auto h-6 min-w-0 flex-1 rounded bg-background/70 ring-1 ring-inset ring-primary/40".to_string(),
             input_class: "px-1.5 text-ui font-medium text-foreground".to_string(),
             autofocus: true,
             select_all: true,
@@ -555,10 +555,6 @@ fn PaneSection(mut pane: SideSheetPane, index: usize) -> Element {
         &[("number", TranslationValue::Number((index + 1) as i64))],
     );
     let pane_id = pane.id;
-    let any_loading = pane
-        .stacks
-        .iter()
-        .any(|stack| stack.is_active && stack.is_loading);
     let expanded = !pane.collapsed;
     let fold_title = if expanded {
         translate("layout-fold-stack")
@@ -566,11 +562,7 @@ fn PaneSection(mut pane: SideSheetPane, index: usize) -> Element {
         translate("layout-unfold-stack")
     };
     rsx! {
-        div { class: if pane.is_active && any_loading {
-                format!("group {SHEET_SECTION} pane-loading-ring")
-            } else {
-                format!("group {SHEET_SECTION}")
-            },
+        div { class: "group {SHEET_SECTION}",
             div {
                 class: "flex h-9 items-center rounded-md",
                 div { class: "flex min-w-0 flex-1 items-center gap-2 px-2 @max-[12rem]:gap-1 @max-[12rem]:px-1",

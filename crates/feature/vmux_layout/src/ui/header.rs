@@ -23,7 +23,8 @@ use super::tab_drag::TabDrag;
 use super::window_drag::WindowDragRegion;
 use crate::event::{
     HeaderAddressFocusRequest, HeaderBackRequest, HeaderForwardRequest, HeaderReloadRequest,
-    StackNavigationState, StackRow, TabCloseRequest, TabCreateRequest, TabStripRow, TabStripState,
+    HeaderStopRequest, StackNavigationState, StackRow, TabCloseRequest, TabCreateRequest,
+    TabStripRow, TabStripState,
 };
 
 #[component]
@@ -63,10 +64,16 @@ fn HeaderContent() -> Element {
             ui.header.clone(),
             ui.extensions.clone(),
             ui.remote.clone(),
-            ui.reload_revision,
         )
     });
-    let (stacks_state, tab_strip, header, extensions, remote, reload_key) = header();
+    let (stacks_state, tab_strip, header, extensions, remote) = header();
+    let loading = layout.use_selector(|state| {
+        state
+            .side_sheet
+            .as_ref()
+            .and_then(|sheet| sheet.active_page.as_ref())
+            .is_some_and(|page| page.is_loading)
+    })();
     let stacks_state = stacks_state.unwrap_or_default();
     let projected_active = stacks_state
         .stacks
@@ -154,6 +161,7 @@ fn HeaderContent() -> Element {
                                 row: tab.clone(),
                                 index: tab_index,
                                 drag: tab_drag,
+                                loading: tab.tab.is_active && loading,
                                 }
                         }
                         NewTabButton {}
@@ -184,10 +192,12 @@ fn HeaderContent() -> Element {
                             path { d: "M12 5l7 7-7 7" }
                         }
                     }
-                    NavButton { label: translate("layout-reload"), disabled: active_row.as_ref().is_none_or(|t| t.url.is_empty()), onclick: move |_| { let _ = send(&HeaderReloadRequest); },
-                        span {
-                            key: "{reload_key}",
-                            class: if reload_key > 0 { "inline-flex animate-spin-once" } else { "inline-flex" },
+                    NavButton { label: if loading { translate("common-cancel") } else { translate("layout-reload") }, disabled: active_row.as_ref().is_none_or(|t| t.url.is_empty()), onclick: move |_| {
+                        if loading { let _ = send(&HeaderStopRequest); } else { let _ = send(&HeaderReloadRequest); }
+                    },
+                        if loading {
+                            vmux_ui::icon::LineIconView { icon: vmux_ui::icon::LineIcon::X, class: "size-4" }
+                        } else {
                             Icon { class: "h-4 w-4",
                                 path { d: "M21 12a9 9 0 11-3-6.7L21 8" }
                                 path { d: "M21 3v5h-5" }
@@ -195,6 +205,7 @@ fn HeaderContent() -> Element {
                         }
                     }
                     HeaderAddressBar {
+                        loading,
                         page_address,
                         active_row: active_row.clone(),
                         bg_color: active_bg_color.clone(),
@@ -263,7 +274,7 @@ fn url_row_cef(_bg_color: Option<&str>) -> (String, String) {
 }
 
 #[component]
-fn Tab(row: TabStripRow, index: usize, drag: TabDrag) -> Element {
+fn Tab(row: TabStripRow, index: usize, drag: TabDrag, #[props(default)] loading: bool) -> Element {
     let TabStripRow {
         tab,
         display_title,
@@ -376,6 +387,7 @@ fn Tab(row: TabStripRow, index: usize, drag: TabDrag) -> Element {
                     title: "{tooltip}",
                     class: "flex min-w-0 flex-1 items-center gap-2.5 overflow-hidden",
                     StackIcon {
+                        loading,
                         icon: tab.icon.clone(),
                         url: tab.url.clone(),
                         title: display_title.clone(),
@@ -504,15 +516,17 @@ fn HeaderAddressBar(
     active_row: Option<StackRow>,
     bg_color: Option<String>,
     page_address: Option<vmux_api::address::PageAddress>,
+    loading: bool,
 ) -> Element {
     let url = active_row
         .as_ref()
         .map(|row| row.url.clone())
         .or_else(|| page_address.as_ref().map(|address| address.url.clone()))
         .unwrap_or_default();
-    let fallback = rsx! { HeaderAddressReadout { active_row, bg_color, page_address } };
+    let fallback = rsx! { HeaderAddressReadout { active_row, bg_color, page_address, loading } };
     rsx! { vmux_ui::components::page_address::AddressSurface {
         url,
+        loading,
         onactivate: move |_| { let _ = send(&HeaderAddressFocusRequest); },
         {fallback}
     } }
@@ -523,17 +537,30 @@ fn HeaderAddressReadout(
     active_row: Option<StackRow>,
     bg_color: Option<String>,
     page_address: Option<vmux_api::address::PageAddress>,
+    loading: bool,
 ) -> Element {
     let dismiss_revision =
         LayoutUi::current().use_selector(|state| state.overlay_dismiss_revision)();
     if let Some(address) = page_address {
         return rsx! {
             div { class: "flex h-8 min-w-0 flex-1 items-center",
-                vmux_ui::components::address::AddressTrail { state: address, dismiss_revision, onpopup: move |active| { let _ = send(&crate::event::LayoutOverlayEvent { id: "page-address".to_string(), active, kind: crate::event::LayoutOverlayKind::Popover }); } }
+                vmux_ui::components::address::AddressTrail { state: address, dismiss_revision, loading, onpopup: move |active| { let _ = send(&crate::event::LayoutOverlayEvent { id: "page-address".to_string(), active, kind: crate::event::LayoutOverlayKind::Popover }); } }
             }
         };
     }
     let has_content = active_row.as_ref().is_some_and(|row| !row.url.is_empty());
+    let icon = active_row
+        .as_ref()
+        .map(|row| row.icon.clone())
+        .unwrap_or_default();
+    let url = active_row
+        .as_ref()
+        .map(|row| row.url.clone())
+        .unwrap_or_default();
+    let title = active_row
+        .as_ref()
+        .map(|row| row.title.clone())
+        .unwrap_or_default();
     let address = active_row.map(|row| row.address).unwrap_or_default();
     let empty_class = if bg_color.is_some() {
         "opacity-50"
@@ -547,6 +574,7 @@ fn HeaderAddressReadout(
             if !has_content {
                 span { class: "truncate text-ui {empty_class}", {translate("layout-new-stack")} }
             } else {
+                StackIcon { icon, url, title, loading }
                 if !address.origin.is_empty() {
                     span {
                         class: "shrink-0 rounded-full bg-foreground/10 px-2 py-0.5 text-ui leading-tight",

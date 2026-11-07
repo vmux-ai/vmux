@@ -275,10 +275,15 @@ impl ToolbarControl {
 }
 
 #[component]
-pub fn AddressSurface(url: String, onactivate: EventHandler<()>, children: Element) -> Element {
+pub fn AddressSurface(
+    url: String,
+    onactivate: EventHandler<()>,
+    children: Element,
+    #[props(default)] loading: bool,
+) -> Element {
     let copy_url = url.clone();
     rsx! {
-        div { class: "group/address relative flex h-8 min-w-0 flex-1 items-center",
+        div { class: if loading { "group/address url-loading-glow relative flex h-8 min-w-0 flex-1 items-center" } else { "group/address relative flex h-8 min-w-0 flex-1 items-center" },
             button {
                 r#type: "button",
                 "data-vmux-url-edit": "",

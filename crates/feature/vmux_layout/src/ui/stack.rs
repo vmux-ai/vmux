@@ -79,7 +79,7 @@ pub(super) fn SideSheetStackRow(stack: StackNode, pane_id: u64) -> Element {
                         }
                         layout.select_stack(pane_id, stack_id);
                     },
-                    StackIcon { icon: stack.icon.clone(), url: stack.url.clone(), title: stack.title.clone() }
+                    StackIcon { icon: stack.icon.clone(), url: stack.url.clone(), title: stack.title.clone(), loading: stack.is_loading }
                     span { class: "{title_class}", title: "{display_title}", "{display_title}" }
                     button {
                         r#type: "button",
@@ -188,7 +188,15 @@ pub(super) fn NewStackRow(pane_id: u64) -> Element {
 }
 
 #[component]
-pub(super) fn StackIcon(icon: PageIcon, url: String, title: String) -> Element {
+pub(super) fn StackIcon(
+    icon: PageIcon,
+    url: String,
+    title: String,
+    #[props(default)] loading: bool,
+) -> Element {
+    if loading {
+        return rsx! { vmux_ui::components::progress::LoadingIcon {} };
+    }
     if let Some(vmux_session::Route::Session(id)) = vmux_session::Route::parse(&url) {
         let agent_icon = icon.favicon_url().to_string();
         return rsx! {

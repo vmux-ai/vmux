@@ -1,12 +1,30 @@
+use crate::components::popup::Dismissal;
 use dioxus::prelude::*;
 
 #[component]
 pub fn Tooltip(label: String, children: Element) -> Element {
     let mut dismissed = use_signal(|| false);
+    let mut active = use_signal(|| false);
+    Dismissal::use_listener(
+        active(),
+        EventHandler::new(move |()| {
+            dismissed.set(true);
+            active.set(false);
+        }),
+    );
     rsx! {
         span {
             class: "group/tooltip relative inline-flex",
-            onpointerenter: move |_| dismissed.set(false),
+            onpointerenter: move |_| {
+                dismissed.set(false);
+                active.set(true);
+            },
+            onpointerleave: move |_| active.set(false),
+            onfocusin: move |_| {
+                dismissed.set(false);
+                active.set(true);
+            },
+            onfocusout: move |_| active.set(false),
             onpointerdown: move |_| {
                 dismissed.set(true);
                 let _ = document::eval("document.activeElement?.blur();");

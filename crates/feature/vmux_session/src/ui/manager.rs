@@ -523,6 +523,10 @@ fn SessionSearch(
     filter_picker: SessionFilterPicker,
     presentation: Rc<ManagerPresentation>,
 ) -> Element {
+    vmux_ui::components::popup::Dismissal::use_listener(
+        presentation.filter_requested,
+        EventHandler::new(move |()| controls.dismiss_filter()),
+    );
     rsx! {
         div { class: "relative z-40 flex min-w-0 px-2 pb-2 pt-1",
             vmux_ui::components::manager::ManagerSearch {

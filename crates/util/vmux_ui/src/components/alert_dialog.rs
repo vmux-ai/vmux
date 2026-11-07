@@ -8,16 +8,20 @@ use dioxus_primitives::dioxus_attributes::attributes;
 use dioxus_primitives::merge_attributes;
 
 use crate::cn::cn;
+use crate::components::popup::Dismissal;
 
 #[component]
 pub fn AlertDialogRoot(props: AlertDialogRootProps) -> Element {
+    let (open, on_open_change) =
+        Dismissal::use_open(props.open, props.default_open, props.on_open_change);
+    let controlled = use_memo(move || Some(open()));
     rsx! {
         alert_dialog::AlertDialogRoot {
             class: "group fixed inset-0 z-[1000] bg-scrim data-[state=closed]:animate-[dx-fade-zoom-out_150ms_ease-in_forwards] data-[state=open]:animate-[dx-fade-zoom-in_150ms_ease-out_forwards]",
             id: props.id,
             default_open: props.default_open,
-            open: props.open,
-            on_open_change: props.on_open_change,
+            open: controlled,
+            on_open_change,
             attributes: props.attributes,
             {props.children}
         }

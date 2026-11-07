@@ -40,6 +40,7 @@ use vmux_layout::{
     LayoutCef, ReloadRevision,
     event::{
         HeaderAddressFocusRequest, HeaderBackRequest, HeaderForwardRequest, HeaderReloadRequest,
+        HeaderStopRequest,
     },
     pane::{Pane, PaneHoverCooldown, PaneSplit, SideSheetCardCollapsed},
     presentation::Retiring,
@@ -79,6 +80,7 @@ impl Plugin for CommandPlugin {
             .add_observer(header_back)
             .add_observer(header_forward)
             .add_observer(header_reload)
+            .add_observer(header_stop)
             .add_observer(header_address_focus)
             .add_observer(side_sheet_stack_activate)
             .add_observer(side_sheet_stack_close)
@@ -606,6 +608,7 @@ fn handle_navigation_requests(
     mut host_history_steps: MessageWriter<HostHistoryStep>,
     mut commands: Commands,
     mut gestures: Local<GestureCooldown>,
+    browsers: Option<NonSend<Browsers>>,
 ) {
     for request in navigation_requests.read() {
         if let NavigationTarget::Surface(webview) = request.target
@@ -616,7 +619,10 @@ fn handle_navigation_requests(
         let Some(active) = target.navigation_stack(request.target, &surfaces) else {
             continue;
         };
-        let Some(webview) = surfaces.current(active) else {
+        let Some(webview) = surfaces
+            .current(active)
+            .or_else(|| surfaces.incoming(active))
+        else {
             continue;
         };
         let (is_terminal, _) = kind_q.get(webview).unwrap_or((false, false));
@@ -670,9 +676,23 @@ fn handle_navigation_requests(
                     commands.trigger(RequestReloadIgnoreCache { webview });
                 }
             }
-            NavigationOperation::Stop => {}
+            NavigationOperation::Stop => {
+                let loading = surfaces.incoming(active).unwrap_or(webview);
+                if let Some(browsers) = &browsers {
+                    browsers.stop_loading_webview(&loading);
+                }
+                commands.trigger(StopLoadingRequested { webview: loading });
+                commands
+                    .trigger(vmux_layout::hosted_page::SurfaceCancelRequest { webview: loading });
+            }
         }
     }
+}
+
+#[derive(EntityEvent)]
+pub(crate) struct StopLoadingRequested {
+    #[event_target]
+    pub webview: Entity,
 }
 
 fn handle_open_requests(
@@ -785,6 +805,16 @@ fn header_reload(
     command_invocations.write(CommandInvocation::new(
         trigger.event().webview,
         "browser_reload",
+    ));
+}
+
+fn header_stop(
+    trigger: On<UiInput<HeaderStopRequest>>,
+    mut command_invocations: MessageWriter<CommandInvocation>,
+) {
+    command_invocations.write(CommandInvocation::new(
+        trigger.event().webview,
+        "browser_stop",
     ));
 }
 
@@ -1069,6 +1099,33 @@ mod tests {
 
     #[derive(Resource, Default)]
     struct CefNavigations(Vec<Entity>);
+
+    #[derive(Resource, Default)]
+    struct StoppedPages(Vec<Entity>);
+
+    impl StoppedPages {
+        fn record(request: On<StopLoadingRequested>, mut pages: ResMut<Self>) {
+            pages.0.push(request.event().webview);
+        }
+    }
+
+    #[test]
+    fn the_stop_command_reaches_the_selected_page() {
+        let mut fixture = NavArrow::over(HostHistory::default());
+        fixture
+            .app
+            .init_resource::<StoppedPages>()
+            .add_observer(StoppedPages::record);
+        fixture
+            .app
+            .world_mut()
+            .write_message(NavigationRequest::focused(NavigationOperation::Stop));
+        fixture.app.update();
+        assert_eq!(
+            fixture.app.world().resource::<StoppedPages>().0,
+            [fixture.view]
+        );
+    }
 
     impl CefNavigations {
         fn record_back(trigger: On<RequestGoBack>, mut navigations: ResMut<Self>) {

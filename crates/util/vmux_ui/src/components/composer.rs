@@ -2,6 +2,7 @@ use dioxus::prelude::*;
 pub use vmux_api::prompt_media::PromptComposerAttachment;
 
 use crate::cn::cn;
+use crate::components::popup::Dismissal;
 use crate::components::prompt_box::{PromptBox, PromptMenuRow, PromptPopup, PromptPopupPlacement};
 use crate::i18n::translate;
 use crate::icon::{LineIcon, LineIconView};
@@ -46,6 +47,10 @@ pub fn PromptComposer(
     on_action: EventHandler<()>,
 ) -> Element {
     let mut add_menu_open = use_signal(|| false);
+    Dismissal::use_listener(
+        add_menu_open(),
+        EventHandler::new(move |()| add_menu_open.set(false)),
+    );
     let footer = footer.or_else(|| {
         Some(rsx! {
             div { class: "truncate text-[10px] text-muted-foreground/55", {translate("command-send")} }

@@ -1,5 +1,6 @@
 use crate::cn::cn;
 use crate::components::button::IconButton;
+use crate::components::popup::Dismissal;
 use dioxus::prelude::*;
 use dioxus_primitives::dioxus_attributes::attributes;
 use dioxus_primitives::merge_attributes;
@@ -66,6 +67,14 @@ pub fn PromptPopup(
     children: Element,
 ) -> Element {
     let root = PROMPT_POPUP_ROOT;
+    Dismissal::use_listener(
+        on_dismiss.is_some(),
+        EventHandler::new(move |()| {
+            if let Some(on_dismiss) = on_dismiss {
+                on_dismiss.call(());
+            }
+        }),
+    );
     let class = match placement {
         PromptPopupPlacement::Upward => cn([
             root,
