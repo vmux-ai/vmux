@@ -108,7 +108,7 @@ fn ComposerFooter(chat: Chat) -> Element {
     let mut effort = chat.effort_chip();
     let mut permission = chat.permission_chip();
     if chat.in_use() {
-        status = "in_use".to_string();
+        status.clear();
         model = model.map(|chip| chip.readonly());
         effort = effort.map(|chip| chip.readonly());
         permission = permission.map(|chip| chip.readonly());
@@ -284,5 +284,10 @@ mod tests {
             .next()
             .unwrap();
         assert!(textarea.contains("disabled"));
+        let label = translate("sessions-busy-title");
+        assert!(
+            !html.contains(&format!(">{label}<")),
+            "the composer footer repeats the busy notice"
+        );
     }
 }

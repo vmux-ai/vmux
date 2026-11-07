@@ -1367,7 +1367,8 @@ Saved reading positions and history anchoring retain their own ownership.
 
 Session failures with a useful remedy occupy a light notification strip in the composer's outer
 frame. The dark composer keeps its draft and metadata inside that frame. Busy sessions disable
-editing, attachments and submission while Project and Branch menus remain usable; model and agent
+editing, attachments and submission while Project and Branch menus remain usable. The notification
+strip owns the locked-status message; the footer retains activity counts. Model and agent
 configuration stays read-only. Busy sessions
 explain where to release the writer; missing histories offer a new conversation; connection failures
 offer retry. Other failures use a dismissible toast. Raw provider diagnostics remain in app logs.

@@ -90,7 +90,9 @@ pub fn PromptComposer(
                 class: prompt_box_class,
                 style: "--vmux-prompt-accent:{accent_color};",
                 button {
-                    class: if add_menu_open() {
+                    class: if disabled {
+                        "relative z-10 ml-0.5 flex h-11 w-11 shrink-0 cursor-not-allowed self-center items-center justify-center rounded-xl text-muted-foreground/35 sm:h-8 sm:w-8 sm:rounded-lg"
+                    } else if add_menu_open() {
                         "relative z-10 ml-0.5 flex h-11 w-11 shrink-0 self-center items-center justify-center rounded-xl bg-foreground/10 text-foreground transition sm:h-8 sm:w-8 sm:rounded-lg"
                     } else {
                         "relative z-10 ml-0.5 flex h-11 w-11 shrink-0 self-center items-center justify-center rounded-xl text-foreground/45 transition active:bg-foreground/10 active:text-foreground hover:bg-foreground/10 hover:text-foreground sm:h-8 sm:w-8 sm:rounded-lg"
@@ -410,6 +412,14 @@ mod tests {
                 .next()
                 .unwrap();
             assert_eq!(send.contains(" disabled="), disabled);
+            let add = html
+                .split(&format!("title=\"{}\"", translate("common-add")))
+                .next()
+                .unwrap()
+                .rsplit("<button")
+                .next()
+                .unwrap();
+            assert_eq!(add.contains(" disabled="), disabled);
             for text in ["Unsent draft", "Codex", "GPT-5", "vmux-cloud", "main"] {
                 assert!(html.contains(text), "missing {text}");
             }
