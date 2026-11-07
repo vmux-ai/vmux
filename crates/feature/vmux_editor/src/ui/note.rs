@@ -241,7 +241,7 @@ fn note_edit_line_class(block: &MdBlock) -> &'static str {
 }
 
 fn note_edit_overlay_class() -> &'static str {
-    "visible absolute inset-0 z-10 cursor-text overflow-visible"
+    "visible absolute inset-0 z-10 flex items-center cursor-text overflow-visible"
 }
 
 pub(super) trait NoteBlocks {
@@ -908,7 +908,7 @@ pub(super) fn NoteBlockView(
                         div {
                             id: "note-live-block-{index}",
                             "data-note-edit-block": "{index}",
-                            class: edit_class,
+                            class: "w-full min-w-0 shrink-0 {edit_class}",
                             onclick: move |event: Event<MouseData>| {
                                 event.stop_propagation();
                                 event.prevent_default();
@@ -945,7 +945,7 @@ pub(super) fn NoteBlockView(
                         }
                     } else {
                         div {
-                            class: if is_list { "" } else { edit_class },
+                            class: "w-full min-w-0 shrink-0 {edit_class}",
                             for (line, raw, prefix) in edit_lines.iter() {
                                 {
                                     let line = *line;

@@ -675,6 +675,8 @@ its file tabs and view controls in the first page row; search never reserves an 
 Search has no surrounding field frame and expands within its fixed row when focused. File-list
 placeholders retain the real 22 px row height with file outlines and short name bars. Rendered-note
 carets share a thin, font-sized style without a surrounding shadow.
+Note editing keeps the rendered block in normal flow and centers the source overlay inside that
+reserved area, so extra source lines occupy the space above and below without moving adjacent blocks.
 Session view and category controls live in the page toolbar. Section headings support right-click
 and overflow menus for bulk archive, restore, and folding.
 Activation stamps preserve operation order across shared ancestors even within one clock tick;

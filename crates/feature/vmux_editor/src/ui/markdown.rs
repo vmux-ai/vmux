@@ -307,7 +307,7 @@ fn ListSourceOverlay(
         div {
             id: "note-line-{line}",
             "data-note-edit-line": "{line}",
-            class: "absolute inset-0 min-h-[1lh] w-full cursor-text whitespace-pre-wrap break-words",
+            class: "absolute inset-0 flex min-h-[1lh] w-full items-center cursor-text whitespace-pre-wrap break-words",
             onclick: move |event: Event<MouseData>| {
                 event.stop_propagation();
                 event.prevent_default();
@@ -328,9 +328,11 @@ fn ListSourceOverlay(
                     event.modifiers().shift(),
                 ));
             },
-            NoteSourceLine {
-                chunks: edit.chunks.clone(),
-                caret_width_class: edit.caret_width_class.clone(),
+            div { class: "w-full min-w-0 shrink-0",
+                NoteSourceLine {
+                    chunks: edit.chunks.clone(),
+                    caret_width_class: edit.caret_width_class.clone(),
+                }
             }
         }
     }
