@@ -660,6 +660,8 @@ Session viewports remember their scroll position and loaded-history start on the
 A floating composer overlaps the transcript's lower edge, with an input-inert surface gradient.
 Transcript end padding keeps the latest message clear of the composer and its fade.
 A revisit restores that history window and reader position; the first visit follows the tail.
+Initial tail following remains active until user scroll input. Placeholder and zero-height scroll
+events neither finish placement nor replace the remembered reader position.
 Viewport updates validate the originating page URL and Session ID; where a canonical Session ID
 is available, transcript readiness is bound to it. These viewport records are transient.
 Discrete tabs and search widths change immediately. Removing a tab retains an inert, identifier-free
@@ -1362,6 +1364,8 @@ the changed provider, and bound untrusted history traversal.
 Missing history resumes from the catalog owner's original provider ID. Cached continuations keep
 their runtime resume ID. Unsupported or failed loads report an error and keep the Session's identity.
 Empty replays preserve cached history, and failed loads release the loading state.
+Codex family aliases share rollout-watch identity without changing the provider ID. A failed
+resume still reads the local cursor and appends unseen messages to nonempty cached history.
 ACP sessions withhold startup snapshots until history replay finishes. Compatibility readers leave
 their loading state to the ACP protocol; they read and complete only their own provider-store tasks.
 History loading starts and finishes publish a fresh chat snapshot independently of message

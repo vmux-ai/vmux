@@ -866,8 +866,9 @@ struct ConversationSource {
 
 impl ConversationSource {
     fn new(kind: &str, sid: &str, created_at: i64) -> Option<Self> {
-        (kind == "acp:codex").then(|| Self {
-            kind: kind.to_string(),
+        let agent = kind.strip_prefix("acp:")?;
+        (AgentFamily::of(agent) == SourceKind::Codex.family()).then(|| Self {
+            kind: "acp:codex".to_string(),
             sid: sid.to_string(),
             created_at,
         })
@@ -1254,6 +1255,15 @@ struct ProviderConversationChanged {
 }
 
 impl ProviderConversationChanged {
+    fn matches(&self, kind: &str, sid: &str) -> bool {
+        if self.session.matches(kind, sid) {
+            return true;
+        }
+        self.session.id.0 == sid
+            && ConversationSource::new(&self.session.kind.0, sid, 0).is_some()
+            && ConversationSource::new(kind, sid, 0).is_some()
+    }
+
     fn codex(activity: &codex::RolloutActivity) -> Self {
         Self {
             session: ProviderSessionKey::new(
@@ -1561,7 +1571,7 @@ fn request_changed_conversations(
 ) {
     for changed in changed.read() {
         for (session, kind, sid, mut activated_at, revision, requested) in &mut sessions {
-            if !changed.session.matches(&kind.0, &sid.0) {
+            if !changed.matches(&kind.0, &sid.0) {
                 continue;
             }
             activated_at.0 = activated_at.0.max(changed.updated_at);
@@ -2099,6 +2109,7 @@ fn queue_failed_conversations(
             &ProviderSessionId,
             &CreatedAt,
             &RunState,
+            Option<&ConversationCursor>,
         ),
         (
             With<Session>,
@@ -2123,8 +2134,8 @@ fn queue_failed_conversations(
             paths
         }
     };
-    for (session, sid, kind, provider_sid, created_at, state) in &sessions {
-        if !matches!(state, RunState::Errored(_)) || !transcripts.get(session).messages.is_empty() {
+    for (session, sid, kind, provider_sid, created_at, state, cursor) in &sessions {
+        if !matches!(state, RunState::Errored(_)) {
             continue;
         }
         let Some(source) = ConversationSource::for_failed(&kind.0, &provider_sid.0, created_at.0)
@@ -2132,9 +2143,11 @@ fn queue_failed_conversations(
             continue;
         };
         let paths = paths.clone();
+        let cursor = cursor.map(|cursor| cursor.0);
+        let known = KnownConversation::tail(&transcripts.get(session).messages);
         let wake = proxy.as_deref().map(|proxy| (**proxy).clone());
         let task = IoTaskPool::get().spawn(async move {
-            let result = source.read(&paths, None, Vec::new());
+            let result = source.read(&paths, cursor, known);
             if let Some(wake) = wake {
                 let _ = wake.send_event(WinitUserEvent::WakeUp);
             }
@@ -2228,7 +2241,8 @@ fn finish_conversations(
             && (!states
                 .get(task.session)
                 .is_ok_and(|state| matches!(state, RunState::Errored(_)))
-                || !transcripts.get(task.session).messages.is_empty())
+                || result.as_ref().is_ok_and(|read| read.snapshot)
+                    && !transcripts.get(task.session).messages.is_empty())
         {
             commands
                 .entity(task.session)
@@ -2488,6 +2502,10 @@ mod tests {
 
     impl FailedReadFixture {
         fn new() -> Self {
+            Self::with_cached(Vec::new())
+        }
+
+        fn with_cached(cached: Vec<vmux_api::session::Message>) -> Self {
             let directory = tempfile::tempdir().unwrap();
             let rollout = directory.path().join("sessions/2026/10/18/rollout-2026-10-18T18-16-34-01a14fcc-f46a-7c12-b000-779be98d72ae.jsonl");
             std::fs::create_dir_all(rollout.parent().unwrap()).unwrap();
@@ -2495,6 +2513,11 @@ mod tests {
                 "{\"type\":\"session_meta\",\"payload\":{\"session_id\":\"01a14fcc-f46a-7c12-b000-779be98d72ae\",\"timestamp\":\"2026-10-18T16:16:34.454Z\",\"cwd\":\"/work/vmux\"}}\n",
                 "{\"type\":\"response_item\",\"payload\":{\"type\":\"message\",\"role\":\"user\",\"content\":[{\"type\":\"input_text\",\"text\":\"original conversation\"}]}}\n"
             )).unwrap();
+            if !cached.is_empty() {
+                let mut body = std::fs::read_to_string(&rollout).unwrap();
+                body.push_str("{\"type\":\"response_item\",\"payload\":{\"type\":\"message\",\"role\":\"user\",\"content\":[{\"type\":\"input_text\",\"text\":\"new message after cached history\"}]}}\n");
+                std::fs::write(&rollout, body).unwrap();
+            }
             let mut app = App::new();
             app.add_plugins(MinimalPlugins)
                 .add_message::<SnapshotReceived>()
@@ -2517,6 +2540,21 @@ mod tests {
                     RunState::Errored("thread_active_writer".into()),
                 ))
                 .id();
+            for (sequence, message) in cached.into_iter().enumerate() {
+                app.world_mut().spawn((
+                    vmux_session::ConversationEvent,
+                    vmux_session::EventIdentity {
+                        event_id: vmux_api::session::EventId::new(format!("cached-{sequence}")),
+                        actor_id: vmux_api::session::MemberId::local(&SessionId::new("canonical")),
+                        client_op_id: None,
+                        sequence: sequence as u64,
+                        reply_to: None,
+                    },
+                    vmux_session::MessageContent(message),
+                    CreatedAt(1),
+                    ChildOf(session),
+                ));
+            }
             app.update();
             assert!(
                 app.world()
@@ -2573,6 +2611,41 @@ mod tests {
         assert_eq!(
             fixture.app.world().get::<AcpSessionId>(fixture.session),
             Some(&AcpSessionId("01a14fcc-f46a-7c12-b000-779be98d72ae".into()))
+        );
+    }
+
+    #[test]
+    fn failed_codex_resume_keeps_cached_history_and_appends_new_provider_messages() {
+        let cached = vmux_api::session::Message::user("original conversation");
+        let mut fixture = FailedReadFixture::with_cached(vec![cached.clone()]);
+        assert!(fixture.finish().is_empty());
+        let appended = fixture
+            .app
+            .world_mut()
+            .resource_mut::<Messages<ConversationAppendReceived>>()
+            .drain()
+            .collect::<Vec<_>>();
+        assert_eq!(appended.len(), 1);
+        assert_eq!(appended[0].session, SessionId::new("canonical"));
+        assert_eq!(
+            appended[0].messages,
+            [vmux_api::session::Message::user(
+                "new message after cached history"
+            )]
+        );
+        let mut contents = fixture
+            .app
+            .world_mut()
+            .query::<&vmux_session::MessageContent>();
+        assert_eq!(contents.single(fixture.app.world()).unwrap().0, cached);
+        assert_eq!(
+            fixture
+                .app
+                .world()
+                .get::<ProviderKind>(fixture.session)
+                .unwrap()
+                .0,
+            "acp:codex-acp"
         );
     }
 
@@ -3327,7 +3400,7 @@ mod tests {
             .spawn((
                 Session,
                 SessionId::new("local-session"),
-                ProviderKind("acp:codex".into()),
+                ProviderKind("acp:codex-acp".into()),
                 ProviderSessionId("provider-session".into()),
                 vmux_ecs::LastActivatedAt(200),
                 ConversationRevision(200),

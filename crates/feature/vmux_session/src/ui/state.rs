@@ -732,7 +732,13 @@ impl Transcript {
         }
     }
 
-    pub(super) fn observe_scroll(self, top: i32, distance: i32) {
+    pub(super) fn observe_scroll(self, top: i32, distance: i32, height: i32) {
+        if height <= 0
+            || self.initial_scroll().is_empty()
+            || self.root.peek().transcript.items.is_empty()
+        {
+            return;
+        }
         let mut last_top = self.last_top;
         let previous = *last_top.peek();
         last_top.set(top);
@@ -747,10 +753,6 @@ impl Transcript {
             self.stop_following();
         }
         if *self.initial_follow.peek() {
-            if self.ready() && distance <= 0 {
-                let mut initial_follow = self.initial_follow;
-                initial_follow.set(false);
-            }
             return;
         }
         if distance <= 0 && !*self.at_bottom.peek() {

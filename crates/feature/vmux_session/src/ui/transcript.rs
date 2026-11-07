@@ -87,9 +87,12 @@ pub(super) fn ChatTranscript(chat: Chat) -> Element {
             onwheel: move |_| chat.transcript.note_scroll_input(),
             ontouchmove: move |_| chat.transcript.note_scroll_input(),
             onscroll: move |e: Event<ScrollData>| {
+                if e.client_height() <= 0 {
+                    return;
+                }
                 let top = e.scroll_top() as i32;
                 let dist = e.scroll_height() - top - e.client_height();
-                chat.transcript.observe_scroll(top, dist);
+                chat.transcript.observe_scroll(top, dist, e.client_height());
                 if ScrollPreload::HISTORY.reached_start(&e) {
                     chat.transcript.request_history();
                 }
