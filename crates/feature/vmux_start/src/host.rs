@@ -51,6 +51,7 @@ impl Plugin for StartPlugin {
             .add_observer(go_to_branch)
             .add_observer(apply_chosen_project)
             .add_observer(focus_command_bar)
+            .add_observer(focus_ready)
             .add_plugins(crate::branches::Plugin)
             .add_systems(Update, finish_workspace_pickers);
     }
@@ -550,6 +551,28 @@ fn sync_pages(
     }
 }
 
+fn focus_ready(
+    event: On<UiInput<vmux_ecs::page::PageReady>>,
+    starts: Query<
+        &PageMetadata,
+        (
+            With<HostsLauncher>,
+            With<KeyboardOwner>,
+            Without<crate::StartInlineTransitionView>,
+        ),
+    >,
+    mut commands: Commands,
+) {
+    if starts
+        .get(event.webview)
+        .is_ok_and(|metadata| metadata.url.starts_with(StartPlugin::URL))
+    {
+        commands.trigger(CommandBarFocusRequested {
+            webview: event.webview,
+        });
+    }
+}
+
 fn focus_command_bar(
     trigger: On<CommandBarFocusRequested>,
     mut revisions: Query<&mut CommandBarFocusRevision>,
@@ -639,6 +662,7 @@ mod tests {
         let mut app = App::new();
         app.init_resource::<EmittedIds>()
             .add_observer(focus_command_bar)
+            .add_observer(focus_ready)
             .add_observer(capture_state);
         app
     }
@@ -696,6 +720,39 @@ mod tests {
                 .is_some(),
             "the surviving half of the transition still applies"
         );
+    }
+
+    #[test]
+    fn selected_start_requests_prompt_focus_after_its_document_is_ready() {
+        let mut app = start_focus_app();
+        let metadata = PageMetadata {
+            url: StartPlugin::URL.to_string(),
+            ..Default::default()
+        };
+        let selected = app
+            .world_mut()
+            .spawn((HostsLauncher, KeyboardOwner, metadata.clone()))
+            .id();
+        let dormant = app.world_mut().spawn((HostsLauncher, metadata)).id();
+        let another = app
+            .world_mut()
+            .spawn((
+                HostsLauncher,
+                KeyboardOwner,
+                PageMetadata {
+                    url: "vmux://sessions/".to_string(),
+                    ..Default::default()
+                },
+            ))
+            .id();
+        for webview in [selected, dormant, another] {
+            app.world_mut().trigger(UiInput {
+                webview,
+                payload: vmux_ecs::page::PageReady,
+            });
+        }
+        app.update();
+        assert_eq!(app.world().resource::<EmittedIds>().0, [("focus", 1)]);
     }
 
     #[test]

@@ -549,9 +549,15 @@ than polling every surface on every frame. A failed or superseded request discar
 surface and leaves `Current` untouched. Request IDs reject acknowledgements from stale surfaces.
 Layout projections observe `Current` changes even when the requested metadata stays the same, so
 committing a presented surface clears the side sheet's pending-page indication immediately.
-The URL bar's subtle border glow and favicon spinner follow the selected page. Reload becomes a
-stop button while it loads; stopping cancels browser loading and rolls an uncommitted handoff back
-to its retained page. Inactive restored pages do not animate the selected page's controls.
+Scroll and scroll-end events use asynchronous native delivery, coalesced to the latest position per
+element and event kind within one animation frame. Keyboard and pointer events retain synchronous
+replies for cancellation; queued scroll events are discarded when their document or interpreter
+changes, so native round trips cannot pause scrolling or affect a replaced page.
+The URL bar's favicon spinner follows the selected page after 150 ms of continued loading, avoiding
+brief flashes on fast local reloads without delaying the page. Reload then becomes a stop button;
+stopping cancels browser loading and rolls an uncommitted handoff back to its retained page.
+Inactive restored pages do not animate the selected page's controls. A selected Start page requests
+composer focus again when its document becomes ready, including a reused prewarmed page.
 Dormant stack entries keep their page icon until a visible load is requested. Keyboard commands
 from the user target the focused page; page-origin commands retain their window scope. Hosted-page
 reloads publish loading immediately and clear it on the matching ready handshake or cancellation.

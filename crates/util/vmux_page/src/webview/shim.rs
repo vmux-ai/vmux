@@ -120,6 +120,44 @@ pub(crate) const WRY_HOST_SHIM: &str = r#"
     }
     return nativeSend.call(this, body);
   };
+  class ScrollEvents {
+    static installed = new WeakSet();
+    static install(interpreter) {
+      if (this.installed.has(interpreter)) return;
+      this.installed.add(interpreter);
+      const synchronous = interpreter.sendSerializedEvent.bind(interpreter);
+      const pending = new Map();
+      let scheduled = false;
+      interpreter.sendSerializedEvent = (body) => {
+        if (body.name !== 'scroll' && body.name !== 'scrollend') return synchronous(body);
+        const key = body.name + ':' + body.element;
+        pending.delete(key);
+        pending.set(key, {
+          body,
+          revision: applyingRevision ?? navigationRevision,
+          epoch: applyingEpoch ?? globalThis.__vmuxIpcEpoch,
+        });
+        if (!scheduled) {
+          scheduled = true;
+          requestAnimationFrame(() => {
+            scheduled = false;
+            const events = [...pending.values()];
+            pending.clear();
+            if (window.interpreter !== interpreter) return;
+            for (const event of events) {
+              if (!requestMatchesDocument(event)) continue;
+              const xhr = new XMLHttpRequest();
+              xhr.open('POST', interpreter.eventsPath, true);
+              xhr.setRequestHeader('Content-Type', 'application/json');
+              xhr.setRequestHeader('dioxus-data', toBase64(encoder.encode(JSON.stringify(event.body))));
+              xhr.send();
+            }
+          });
+        }
+        return { preventDefault: false, stopPropagation: false };
+      };
+    }
+  }
   window.addEventListener('error', (e) => {
     report('error', (e.message || 'error') + ' @ ' + (e.filename || '?') + ':' + (e.lineno || 0));
   });
@@ -237,6 +275,7 @@ pub(crate) const WRY_HOST_SHIM: &str = r#"
     const root = previous.root.cloneNode(false);
     const interpreter = window.vmuxCreateInterpreter();
     interpreter.initialize(root);
+    ScrollEvents.install(interpreter);
     return { previousRoot: previous.root, root, interpreter };
   };
   const sectionAtTop = (element) => {
@@ -956,6 +995,7 @@ pub(crate) const WRY_HOST_SHIM: &str = r#"
     start() {
       if (started) return;
       started = true;
+      ScrollEvents.install(window.interpreter);
       holdLinks();
       reportInteractions();
       watchMetadata();
@@ -1005,6 +1045,11 @@ mod tests {
                 String::from_utf8_lossy(&result.stderr)
             );
         }
+    }
+
+    #[test]
+    fn scroll_notifications_do_not_wait_for_native_replies_and_coalesce_per_frame() {
+        RuntimeProbe::verify(include_str!("scroll_events_test.js"));
     }
 
     #[test]

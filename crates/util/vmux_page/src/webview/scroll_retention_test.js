@@ -59,7 +59,7 @@ async function scenario(growth, clamp, input, expected, initial = null, replay =
     btoa: value => Buffer.from(value, 'binary').toString('base64'),
     atob: value => Buffer.from(value, 'base64').toString('binary'),
     ipc: { postMessage() {} }, __vmuxFrameCapability: '777',
-    interpreter: { root: {}, run_from_bytes() {
+    interpreter: { root: {}, sendSerializedEvent() {}, run_from_bytes() {
       documentTop += growth;
       if (initial !== null) container.dataset.vmuxInitialScroll = initial;
       scope.renderedFrames = (scope.renderedFrames || 0) + 1;

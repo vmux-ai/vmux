@@ -52,7 +52,7 @@ class PageProbe {
       btoa: value => Buffer.from(value, 'binary').toString('base64'),
       atob: value => Buffer.from(value, 'base64').toString('binary'),
       ipc: { postMessage: message => this.messages.push(message) }, __vmuxFrameCapability: '777',
-      interpreter: { root: {}, run_from_bytes: () => this.edit?.() },
+      interpreter: { root: {}, sendSerializedEvent() {}, run_from_bytes: () => this.edit?.() },
       fetch: async (_, options) => {
         this.requests.push(options.headers);
         if (this.requests.length === 1) return this.response(412);

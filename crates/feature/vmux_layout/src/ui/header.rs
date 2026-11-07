@@ -67,13 +67,26 @@ fn HeaderContent() -> Element {
         )
     });
     let (stacks_state, tab_strip, header, extensions, remote) = header();
-    let loading = layout.use_selector(|state| {
+    let active_loading = layout.use_selector(|state| {
         state
             .side_sheet
             .as_ref()
             .and_then(|sheet| sheet.active_page.as_ref())
-            .is_some_and(|page| page.is_loading)
-    })();
+            .filter(|page| page.is_loading)
+            .map(|page| page.id)
+    });
+    let loading_feedback = use_resource(move || {
+        let page = active_loading();
+        async move {
+            if page.is_some() {
+                vmux_ui::platform::Platform::sleep(150).await;
+            }
+            page
+        }
+    });
+    let loading = active_loading().is_some()
+        && loading_feedback.state()() == UseResourceState::Ready
+        && *loading_feedback.read() == Some(active_loading());
     let stacks_state = stacks_state.unwrap_or_default();
     let projected_active = stacks_state
         .stacks
@@ -526,7 +539,6 @@ fn HeaderAddressBar(
     let fallback = rsx! { HeaderAddressReadout { active_row, bg_color, page_address, loading } };
     rsx! { vmux_ui::components::page_address::AddressSurface {
         url,
-        loading,
         onactivate: move |_| { let _ = send(&HeaderAddressFocusRequest); },
         {fallback}
     } }
