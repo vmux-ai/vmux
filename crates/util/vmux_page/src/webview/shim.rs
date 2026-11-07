@@ -13,6 +13,10 @@ impl Shim {
             )
             .replace("__VMUX_POPUP_RUNTIME__", &Surface::runtime())
             .replace(
+                "__VMUX_MOTION_FEEDBACK_MS__",
+                &Motion::FEEDBACK_MS.to_string(),
+            )
+            .replace(
                 "__VMUX_MOTION_CONTENT_MS__",
                 &Motion::CONTENT_MS.to_string(),
             )
@@ -591,6 +595,12 @@ pub(crate) const WRY_HOST_SHIM: &str = r#"
   }
   class LayoutMovement {
     static active = new WeakMap();
+    static items(container) {
+      return container.querySelectorAll('[data-vmux-motion-item], [data-vmux-stack-row]');
+    }
+    static key(element) {
+      return element.dataset.vmuxMotionItem ?? element.dataset.vmuxStackRow;
+    }
     static capture(requests) {
       if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) return [];
       const captures = [];
@@ -599,9 +609,12 @@ pub(crate) const WRY_HOST_SHIM: &str = r#"
         const container = document.getElementById(request.element);
         if (!container) continue;
         const rects = new Map();
-        for (const element of container.querySelectorAll('[data-vmux-stack-row]')) {
+        const bounds = container.getBoundingClientRect();
+        for (const element of this.items(container)) {
           const rect = element.getBoundingClientRect();
-          rects.set(element.dataset.vmuxStackRow, { left: rect.left, top: rect.top });
+          const visible = rect.right > bounds.left && rect.left < bounds.right && rect.bottom > bounds.top && rect.top < bounds.bottom;
+          const snapshot = element.dataset.vmuxMotionItem && visible ? element.cloneNode(true) : null;
+          rects.set(this.key(element), { rect, bounds, snapshot });
           this.active.get(element)?.cancel();
           this.active.delete(element);
         }
@@ -609,19 +622,47 @@ pub(crate) const WRY_HOST_SHIM: &str = r#"
       }
       return captures;
     }
+    static retire(container, capture) {
+      const { snapshot: ghost, rect, bounds } = capture;
+      if (!ghost || typeof ghost.animate !== 'function') return;
+      for (const node of [ghost, ...ghost.querySelectorAll('[id], [data-dioxus-id], [data-vmux-motion-item], [data-vmux-stack-row]')]) {
+        for (const attribute of ['id', 'data-dioxus-id', 'data-vmux-motion-item', 'data-vmux-stack-row']) node.removeAttribute(attribute);
+      }
+      ghost.inert = true;
+      ghost.setAttribute('aria-hidden', 'true');
+      Object.assign(ghost.style, {
+        position: 'fixed', left: rect.left + 'px', top: rect.top + 'px', right: 'auto', bottom: 'auto',
+        width: rect.width + 'px', height: rect.height + 'px', margin: '0', pointerEvents: 'none', zIndex: '30',
+        transformOrigin: 'center', transition: 'none',
+        clipPath: `inset(${Math.max(0, bounds.top - rect.top)}px ${Math.max(0, rect.right - bounds.right)}px ${Math.max(0, rect.bottom - bounds.bottom)}px ${Math.max(0, bounds.left - rect.left)}px)`,
+      });
+      container.appendChild(ghost);
+      const animation = ghost.animate([{ opacity: 1, transform: 'scale(1)' }, { opacity: 0, transform: 'scale(0.96)' }], { duration: __VMUX_MOTION_FEEDBACK_MS__, easing: 'ease-out' });
+      animation.finished.finally(() => ghost.remove()).catch(() => {});
+    }
     static apply(captures) {
       for (const { request, rects } of captures) {
         if (!requestMatchesDocument(request)) continue;
         const container = document.getElementById(request.element);
         if (!container) continue;
-        for (const element of container.querySelectorAll('[data-vmux-stack-row]')) {
-          const previous = rects.get(element.dataset.vmuxStackRow);
+        const items = [...this.items(container)];
+        const present = new Set(items.map(element => this.key(element)));
+        let retired = false;
+        for (const [key, capture] of rects) {
+          if (present.has(key) || !capture.snapshot) continue;
+          this.retire(container, capture);
+          retired = true;
+        }
+        const duration = Math.min(__VMUX_MOTION_MAX_MS__, request.duration_ms);
+        const delay = retired ? Math.min(__VMUX_MOTION_FEEDBACK_MS__ / 2, __VMUX_MOTION_MAX_MS__ - duration) : 0;
+        for (const element of items) {
+          const previous = rects.get(this.key(element))?.rect;
           if (!previous || typeof element.animate !== 'function') continue;
           const next = element.getBoundingClientRect();
           const dx = previous.left - next.left;
           const dy = previous.top - next.top;
           if (Math.abs(dx) + Math.abs(dy) < 0.5) continue;
-          const animation = element.animate([{ transform: `translate(${dx}px, ${dy}px)` }, { transform: 'translate(0px, 0px)' }], { duration: Math.min(__VMUX_MOTION_MAX_MS__, request.duration_ms), easing: 'cubic-bezier(0.2, 0, 0, 1)' });
+          const animation = element.animate([{ transform: `translate(${dx}px, ${dy}px)` }, { transform: 'translate(0px, 0px)' }], { duration, delay, fill: 'backwards', easing: 'cubic-bezier(0.2, 0, 0, 1)' });
           this.active.set(element, animation);
           animation.finished.finally(() => { if (this.active.get(element) === animation) this.active.delete(element); }).catch(() => {});
         }
@@ -1045,6 +1086,11 @@ mod tests {
                 String::from_utf8_lossy(&result.stderr)
             );
         }
+    }
+
+    #[test]
+    fn closing_a_middle_tab_fades_that_tab_and_moves_its_successor_without_delaying_layout() {
+        RuntimeProbe::verify(include_str!("layout_movement_test.js"));
     }
 
     #[test]

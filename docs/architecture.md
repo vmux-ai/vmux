@@ -662,7 +662,10 @@ Transcript end padding keeps the latest message clear of the composer and its fa
 A revisit restores that history window and reader position; the first visit follows the tail.
 Viewport updates validate the originating page URL and Session ID; where a canonical Session ID
 is available, transcript readiness is bound to it. These viewport records are transient.
-Discrete tabs and search widths change immediately. A cached Stack returning from a hidden,
+Discrete tabs and search widths change immediately. Removing a tab retains an inert, identifier-free
+copy of that specific tab for an 80 ms fade. Remaining tabs move from their previous rectangles
+within the 160 ms budget, while selection and the actual layout update immediately. Reduced motion
+skips both effects. A cached Stack returning from a hidden,
 zero-size frame restores its final rectangle immediately. Collapsible content may interpolate height
 within the shared layout budget. Cached pages remain usable during refresh;
 new data occupies a reserved skeleton region, and page replacement keeps the outgoing surface

@@ -1,6 +1,7 @@
 #![allow(non_snake_case)]
 
 use dioxus::prelude::*;
+use std::rc::Rc;
 use vmux_api::bookmark::{
     BookmarkAddRequest, BookmarkPinUrlRequest, BookmarkToggleRequest, BookmarkUnpinRequest,
 };
@@ -132,6 +133,10 @@ fn HeaderContent() -> Element {
         order: _,
         drag_region_revision: tab_drag_region_revision,
     } = tab_strip;
+    let previous_tab_count = use_hook(|| Rc::new(std::cell::Cell::new(tabs.len())));
+    if tabs.len() < previous_tab_count.replace(tabs.len()) {
+        vmux_ui::animation::Movement::transition("layout-tab-strip");
+    }
     let tab_metrics_style = TabDrag::metrics_style();
     let active_bg_color = active_row.as_ref().and_then(|r| r.bg_color.clone());
     let active_url = active_row
@@ -159,6 +164,7 @@ fn HeaderContent() -> Element {
                     span { class: "text-ui text-destructive", "{err}" }
                 } else {
                     div {
+                        id: "layout-tab-strip",
                         class: "flex min-w-0 flex-1 items-center gap-[var(--tab-gap)] overflow-x-auto overflow-y-hidden pl-2",
                         style: "{tab_metrics_style}",
                         for (tab_index, tab) in tabs.iter().enumerate() {
@@ -360,6 +366,7 @@ fn Tab(row: TabStripRow, index: usize, drag: TabDrag, #[props(default)] loading:
         LayoutContextMenu {
             ContextMenuTrigger { attributes: vec![],
         div {
+            "data-vmux-motion-item": "tab-{tab.id}",
             class: "{tab_box_classes}",
             style: "{tab_style}",
             onpointerdown: {
@@ -456,6 +463,7 @@ fn NewTabButton() -> Element {
     let mut pressed = use_signal(|| false);
     rsx! {
         div { class: "relative h-7 w-7 shrink-0",
+            "data-vmux-motion-item": "new-tab-button",
             WindowDragRegion {
                 id: "new-tab",
                 revision: String::new(),
