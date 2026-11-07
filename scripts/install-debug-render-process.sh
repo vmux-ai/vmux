@@ -50,7 +50,6 @@ fi
 for directory in \
     "$root/patches/bevy_cef_core-0.5.2" \
     "$root/patches/bevy_cef_debug_render_process-0.5.2" \
-    "$root/patches/bevy_remote-0.19.0" \
     "$root/patches/bevy_window-0.19.0"
 do
     while IFS= read -r path; do

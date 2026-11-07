@@ -82,6 +82,9 @@ jobs:
           cache-key: test
           cef-version: ${{ needs.cef-version.outputs.version }}
 
+      - name: Test build-only and launch-only iteration
+        run: bash scripts/test-dev-build.sh
+
       - name: Run tests
         run: env -u CEF_PATH VMUX_SKIP_DX_BUILD=1 cargo test --workspace
 

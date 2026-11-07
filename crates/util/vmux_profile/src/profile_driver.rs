@@ -30,7 +30,7 @@ impl ProfileMigration {
             home: Self::home(),
             data: paths.shared_data(),
             managed_data: paths.application_data(),
-            test: SessionEnvironment::is_test(),
+            test: SessionEnvironment::is_test() || std::env::var_os("VMUX_DATA_DIR").is_some(),
         }
     }
 

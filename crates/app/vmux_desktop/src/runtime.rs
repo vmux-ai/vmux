@@ -37,7 +37,9 @@ impl Plugin for RuntimePlugin {
         app.add_message::<HideAllWindowsRequest>()
             .add_message::<vmux_input::HideWindowsShortcut>()
             .add_systems(Update, hide_all_windows)
-            .add_systems(Update, keep_awake_while_revealing);
+            .add_systems(Update, keep_awake_while_revealing)
+            .add_systems(Startup, install_shutdown_signal)
+            .add_systems(Update, receive_shutdown_signal);
         #[cfg(feature = "tray")]
         app.add_message::<ShowAllWindowsRequest>()
             .add_message::<QuitRequest>()
@@ -51,6 +53,44 @@ impl Plugin for RuntimePlugin {
             .add_systems(Update, sync_winit_power_mode.after(request_quit));
         #[cfg(not(feature = "tray"))]
         app.add_systems(Update, sync_winit_power_mode.after(hide_all_windows));
+    }
+}
+
+#[derive(Resource)]
+struct ShutdownSignal(std::sync::Mutex<std::sync::mpsc::Receiver<()>>);
+
+fn install_shutdown_signal(mut commands: Commands, wake: Option<Res<EventLoopProxyWrapper>>) {
+    let (sender, receiver) = std::sync::mpsc::channel();
+    let wake = wake.map(|proxy| (**proxy).clone());
+    std::thread::spawn(move || {
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .expect("create shutdown signal runtime");
+        runtime.block_on(async move {
+            let mut terminate =
+                tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())
+                    .expect("install termination signal");
+            tokio::select! {
+                _ = tokio::signal::ctrl_c() => {}
+                _ = terminate.recv() => {}
+            }
+            let _ = sender.send(());
+            if let Some(wake) = wake {
+                let _ = wake.send_event(WinitUserEvent::WakeUp);
+            }
+        });
+    });
+    commands.insert_resource(ShutdownSignal(std::sync::Mutex::new(receiver)));
+}
+
+fn receive_shutdown_signal(signal: Res<ShutdownSignal>, mut exits: MessageWriter<AppExit>) {
+    if signal
+        .0
+        .lock()
+        .is_ok_and(|receiver| receiver.try_recv().is_ok())
+    {
+        exits.write(AppExit::Success);
     }
 }
 

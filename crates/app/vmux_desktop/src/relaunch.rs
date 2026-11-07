@@ -99,7 +99,13 @@ fn relaunch(mut requests: MessageReader<RelaunchApplication>, mut exit: MessageW
         return;
     };
     let dyld = std::env::var("DYLD_LIBRARY_PATH").ok();
-    let args = relaunch_plan(&exe, std::process::id(), dyld.as_deref(), None);
+    let profile = vmux_profile::Profile::current();
+    let args = relaunch_plan(
+        &exe,
+        std::process::id(),
+        dyld.as_deref(),
+        Some(profile.id()),
+    );
     if let Err(error) = std::process::Command::new("sh").args(&args).spawn() {
         bevy::log::error!("failed to spawn relauncher: {error}");
         return;
@@ -108,42 +114,7 @@ fn relaunch(mut requests: MessageReader<RelaunchApplication>, mut exit: MessageW
     exit.write(AppExit::Success);
 }
 
-fn profile_launch_plan(
-    exe: &std::path::Path,
-    dyld_library_path: Option<&str>,
-    profile: &str,
-) -> Vec<std::ffi::OsString> {
-    let app_bundle = exe
-        .ancestors()
-        .nth(3)
-        .filter(|path| path.extension().and_then(|extension| extension.to_str()) == Some("app"));
-    match (app_bundle, dyld_library_path) {
-        (Some(app), _) => vec![
-            "-c".into(),
-            "open -n --env \"$2\" \"$1\"".into(),
-            "vmux-profile-launcher".into(),
-            app.as_os_str().into(),
-            format!("VMUX_PROFILE={profile}").into(),
-        ],
-        (None, Some(dyld)) if !dyld.is_empty() => vec![
-            "-c".into(),
-            "DYLD_LIBRARY_PATH=\"$2\" VMUX_PROFILE=\"$3\" \"$1\"".into(),
-            "vmux-profile-launcher".into(),
-            exe.as_os_str().into(),
-            dyld.into(),
-            profile.into(),
-        ],
-        (None, _) => vec![
-            "-c".into(),
-            "VMUX_PROFILE=\"$2\" \"$1\"".into(),
-            "vmux-profile-launcher".into(),
-            exe.as_os_str().into(),
-            profile.into(),
-        ],
-    }
-}
-
-fn launch_profiles(mut requests: MessageReader<LaunchProfile>) {
+fn launch_profiles(mut requests: MessageReader<LaunchProfile>, mut exits: MessageWriter<AppExit>) {
     let Some(LaunchProfile(profile)) = requests.read().last() else {
         return;
     };
@@ -152,12 +123,13 @@ fn launch_profiles(mut requests: MessageReader<LaunchProfile>) {
         return;
     };
     let dyld = std::env::var("DYLD_LIBRARY_PATH").ok();
-    let args = profile_launch_plan(&exe, dyld.as_deref(), profile);
+    let args = relaunch_plan(&exe, std::process::id(), dyld.as_deref(), Some(profile));
     if let Err(error) = std::process::Command::new("sh").args(&args).spawn() {
         bevy::log::error!("failed to launch profile: {error}");
         return;
     }
-    bevy::log::info!(profile, "launched profile window");
+    bevy::log::info!(profile, "switching profile");
+    exits.write(AppExit::Success);
 }
 
 fn restart_request(
@@ -235,17 +207,6 @@ mod tests {
                 .to_string_lossy()
                 .contains("open --env \"$2\" \"$1\"")
         );
-        assert_eq!(args[3], "/Applications/Vmux.app");
-        assert_eq!(args[4], "VMUX_PROFILE=client-work");
-    }
-
-    #[test]
-    fn profile_launch_plan_opens_a_new_app_instance_without_waiting_for_exit() {
-        let exe = std::path::Path::new("/Applications/Vmux.app/Contents/MacOS/vmux_desktop");
-        let args = profile_launch_plan(exe, None, "client-work");
-
-        assert_eq!(args[1], "open -n --env \"$2\" \"$1\"");
-        assert!(!args[1].to_string_lossy().contains("kill -0"));
         assert_eq!(args[3], "/Applications/Vmux.app");
         assert_eq!(args[4], "VMUX_PROFILE=client-work");
     }

@@ -134,14 +134,63 @@ fn start(requests: Query<Entity, Added<ServiceStartRequest>>, mut commands: Comm
 
 fn stop(requests: Query<Entity, Added<ServiceStopRequest>>, mut commands: Commands) {
     for entity in &requests {
-        #[cfg(target_os = "macos")]
-        let result = LaunchAgent::current().bootout().map(|_| 0);
-        #[cfg(not(target_os = "macos"))]
-        let result = {
-            eprintln!("vmux service: launchd commands are macOS-only");
-            Ok(2)
-        };
+        let result = ServiceStop::current().map(|_| 0);
         commands.entity(entity).insert(CliResult::from(result));
+    }
+}
+
+struct ServiceStop;
+
+impl ServiceStop {
+    fn current() -> std::io::Result<()> {
+        let paths = ServicePaths::current();
+        let data = vmux_profile::ProfilePaths::current().shared_data();
+        std::fs::create_dir_all(&data)?;
+        let desktop = std::fs::OpenOptions::new()
+            .create(true)
+            .read(true)
+            .write(true)
+            .truncate(false)
+            .open(data.join("desktop.lock"))?;
+        desktop.try_lock().map_err(|error| {
+            std::io::Error::new(
+                std::io::ErrorKind::WouldBlock,
+                format!("Quit Vmux before stopping its service: {error}"),
+            )
+        })?;
+        #[cfg(target_os = "macos")]
+        if ServicePaths::build_profile() == "release" {
+            LaunchAgent::current().bootout()?;
+        }
+        if let Ok(mut stream) = std::os::unix::net::UnixStream::connect(paths.socket()) {
+            stream.set_read_timeout(Some(Duration::from_secs(5)))?;
+            stream.set_write_timeout(Some(Duration::from_secs(1)))?;
+            ServiceCodec::write_client_blocking(&mut stream, &ClientMessage::Shutdown)?;
+            let mut reader = std::io::BufReader::new(&mut stream);
+            let _ = ServiceCodec::read_service_blocking(&mut reader)?;
+        }
+        std::fs::create_dir_all(ServicePaths::dir())?;
+        let lock = std::fs::OpenOptions::new()
+            .create(true)
+            .read(true)
+            .write(true)
+            .truncate(false)
+            .open(paths.daemon_lock())?;
+        let deadline = std::time::Instant::now() + Duration::from_secs(5);
+        loop {
+            match lock.try_lock() {
+                Ok(()) => return Ok(()),
+                Err(std::fs::TryLockError::WouldBlock) => {}
+                Err(std::fs::TryLockError::Error(error)) => return Err(error),
+            }
+            if std::time::Instant::now() >= deadline {
+                return Err(std::io::Error::new(
+                    std::io::ErrorKind::TimedOut,
+                    "Vmux service did not stop",
+                ));
+            }
+            std::thread::sleep(Duration::from_millis(25));
+        }
     }
 }
 

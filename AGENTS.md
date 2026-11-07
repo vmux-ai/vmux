@@ -41,7 +41,9 @@ Keep module-specific tests inline. Split tests only when they form an independen
 
 ## Debugging
 
-**Never launch or run vmux yourself.** Do not execute `make dev`, `vmux_desktop`, `Vmux.app`, or automate input against the app. Build it when needed, then ask the user to run the normal build. After the user runs it, inspect the app logs directly.
+**Never launch or run vmux yourself.** Do not execute `make dev`, `make run-dev`, `vmux_desktop`, `Vmux.app`, or automate input against the app. For manual iteration, run `make build-dev`: it builds and signs the debug binaries without launching or stopping anything. The user picks them up with `make run-dev`, which never compiles. Keep `make build-local` for packaging, permissions, and release-like final checks. After the user runs the app, inspect its logs directly.
+
+Local and debug builds share the workspace store and one Chromium profile per named profile across worktrees. Quit all Vmux windows and stop the previous build's service before switching; `make stop-dev` stops a detached debug service. The runtime refuses concurrent GUI writers or a different build while the old daemon holds the data lease. Use `VMUX_DATA_DIR=/absolute/path/to/a/copy` for persistence/schema/migration work, never `VMUX_TEST=1` with real shared data. Legacy builds without leases must be quit before the first shared-data launch.
 
 When adding temporary diagnostics to investigate a bug, make logging unconditional (default-on) — never gate it behind an env var or flag the user must set. The user runs the normal build; logs must appear without extra setup. Strip every temporary diagnostic before committing the fix.
 

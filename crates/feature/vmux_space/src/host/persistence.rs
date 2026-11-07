@@ -71,7 +71,8 @@ impl Plugin for WorkspacePersistencePlugin {
                 Update,
                 (auto_save, handle_save_requests, drain_writes).chain(),
             )
-            .add_systems(Update, track_hierarchy.before(auto_save));
+            .add_systems(Update, track_hierarchy.before(auto_save))
+            .add_systems(Last, flush_on_exit);
     }
 }
 
@@ -105,6 +106,28 @@ fn spawn(registry: Res<AppTypeRegistry>, profile: CurrentProfile, mut commands: 
         WorkspaceRestore::default(),
         WorkspaceStorePath(path),
     ));
+}
+
+fn flush_on_exit(
+    mut exits: MessageReader<AppExit>,
+    persistence: Single<(Entity, &AutoSave, &WorkspaceStorePath, &WorkspaceRestore)>,
+    save_entities: SpaceSaveEntities,
+    spaces: Query<(), With<Space>>,
+    mut saver: SpaceSaver,
+) {
+    if exits.read().count() == 0 || spaces.is_empty() {
+        return;
+    }
+    let (_, autosave, path, restore) = *persistence;
+    if !restore.complete {
+        return;
+    }
+    saver.save(
+        path.0.clone(),
+        save_entities.excluded(),
+        autosave.components.clone(),
+        None,
+    );
 }
 
 fn handle_save_requests(
@@ -339,7 +362,11 @@ struct SpaceSaveEntities<'w, 's> {
 #[derive(bevy::ecs::system::SystemParam)]
 struct SpaceSaver<'w, 's> {
     commands: Commands<'w, 's>,
+    refused: Option<Res<'w, WorkspaceLoadRefused>>,
 }
+
+#[derive(Resource)]
+struct WorkspaceLoadRefused;
 
 impl SpaceSaver<'_, '_> {
     fn save(
@@ -349,7 +376,7 @@ impl SpaceSaver<'_, '_> {
         components: WorldFilter,
         autosave: Option<Entity>,
     ) {
-        if SessionEnvironment::is_test() {
+        if SessionEnvironment::is_test() || self.refused.is_some() {
             return;
         }
         if let Some(parent) = path.parent() {
@@ -609,7 +636,7 @@ impl WorkspaceStorePath {
         std::fs::read_to_string(self.version())
             .ok()
             .and_then(|value| value.trim().parse::<u32>().ok())
-            .is_some_and(|version| version >= STORE_SCHEMA_VERSION)
+            .is_some_and(|version| version == STORE_SCHEMA_VERSION)
     }
 
     fn write_schema_version(&self) {
@@ -691,21 +718,24 @@ fn load_on_startup(
         return;
     }
     let path = &path.0;
-    normalize_workspace_resources_if_needed(path);
-    let removed_stale = remove_rejected_store_if_needed(path, &validators);
-    let removed_incompatible = {
+    if let Ok(body) = std::fs::read_to_string(path) {
         let registry = registry.read();
-        remove_incompatible_store_if_needed(path, &registry)
-    };
-    let schema_outdated = path.exists() && !WorkspaceStorePath(path.clone()).schema_is_current();
-    if schema_outdated {
-        warn!("Store schema outdated; resetting {:?}", path);
-        if let Err(e) = std::fs::remove_file(path) {
-            warn!("Failed to remove outdated store {:?}: {e}", path);
+        if validators.rejected_by(&body).is_some()
+            || space_has_unregistered_types(&body, &registry)
+            || !WorkspaceStorePath(path.clone()).schema_is_current()
+        {
+            error!(
+                "Refusing incompatible workspace {:?}; the original store is unchanged. Use VMUX_DATA_DIR for migration tests.",
+                path
+            );
+            restore.store_present = true;
+            commands.insert_resource(WorkspaceLoadRefused);
+            commands.write_message(AppExit::error());
+            return;
         }
-        let _ = std::fs::remove_file(WorkspaceStorePath(path.clone()).version());
     }
-    let exists = path.exists() && !removed_stale && !removed_incompatible && !schema_outdated;
+    normalize_workspace_resources_if_needed(path);
+    let exists = path.exists();
     restore.store_present = exists;
     if exists {
         info!("Loading space from {:?}", path);
@@ -1009,39 +1039,6 @@ fn normalized_store_icons(body: &str) -> Option<(String, Vec<String>)> {
     }
 }
 
-fn remove_rejected_store_if_needed(path: &Path, validators: &WorkspaceStoreValidators) -> bool {
-    let Ok(body) = std::fs::read_to_string(path) else {
-        return false;
-    };
-    let Some(validator) = validators.rejected_by(&body) else {
-        return false;
-    };
-    warn!(%validator, "Removing rejected store from {:?}", path);
-    let _ = std::fs::remove_file(path);
-    true
-}
-
-fn remove_incompatible_store_if_needed(
-    path: &Path,
-    registry: &bevy::reflect::TypeRegistry,
-) -> bool {
-    let Ok(body) = std::fs::read_to_string(path) else {
-        return false;
-    };
-    if !space_has_unregistered_types(&body, registry) {
-        return false;
-    }
-    warn!(
-        "Removing incompatible store (unregistered component types) from {:?}",
-        path
-    );
-    let _ = std::fs::remove_file(path);
-    if let Some(parent) = path.parent() {
-        let _ = std::fs::remove_file(parent.join("store.version"));
-    }
-    true
-}
-
 fn space_has_unregistered_types(body: &str, registry: &bevy::reflect::TypeRegistry) -> bool {
     component_type_path_keys(body).any(|path| registry.get_with_type_path(path).is_none())
 }
@@ -1330,6 +1327,26 @@ mod tests {
                 _home: home,
             }
         }
+    }
+
+    #[test]
+    fn exit_flushes_pending_workspace_changes_before_debounce() {
+        let mut fixture = WorkspaceSaveFixture::new("exit-flushes-pending-layout");
+        fixture
+            .app
+            .insert_resource(bevy::time::TimeUpdateStrategy::ManualDuration(
+                std::time::Duration::ZERO,
+            ));
+        fixture.app.world_mut().trigger(PersistenceDirty);
+        fixture.app.world_mut().write_message(AppExit::Success);
+        fixture.app.update();
+        assert!(fixture.path.exists());
+        assert_eq!(fixture.app.world().resource::<SaveCount>().0, 1);
+        assert!(
+            std::fs::read_to_string(&fixture.path)
+                .unwrap()
+                .contains("Workspace")
+        );
     }
 
     #[test]
@@ -2426,39 +2443,29 @@ mod tests {
     }
 
     #[test]
-    fn incompatible_store_is_removed_before_load() {
-        let dir = tempfile::tempdir().expect("tempdir");
-        let path = dir.path().join("store.ron");
-        std::fs::write(dir.path().join("store.version"), "2").expect("write version");
-        std::fs::write(
-            &path,
-            store_body_with_key("vmux_desktop::ghost::DoesNotExist"),
-        )
-        .expect("write store");
-
-        let app = registry_app();
-        let registry = app.world().resource::<AppTypeRegistry>().read();
-        assert!(remove_incompatible_store_if_needed(&path, &registry));
-        assert!(!path.exists());
-        assert!(!dir.path().join("store.version").exists());
+    fn newer_store_schema_is_preserved_and_startup_refused() {
+        let _home = HomeEnvGuard::use_temp_home("newer-store-is-preserved-on-startup");
+        let store = WorkspaceStorePath::default();
+        std::fs::write(&store.0, "(resources: {}, entities: {})").unwrap();
+        let newer = (STORE_SCHEMA_VERSION + 1).to_string();
+        std::fs::write(store.version(), &newer).unwrap();
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins)
+            .insert_resource(test_settings())
+            .add_plugins(WorkspacePersistencePlugin);
+        app.update();
+        assert_eq!(std::fs::read_to_string(store.version()).unwrap(), newer);
+        assert_eq!(
+            std::fs::read_to_string(&store.0).unwrap(),
+            "(resources: {}, entities: {})"
+        );
+        assert!(app.world().contains_resource::<WorkspaceLoadRefused>());
+        assert_eq!(app.should_exit(), Some(AppExit::error()));
     }
 
     #[test]
-    fn compatible_store_is_kept_before_load() {
-        let dir = tempfile::tempdir().expect("tempdir");
-        let path = dir.path().join("store.ron");
-        let app = registry_app();
-        let registry = app.world().resource::<AppTypeRegistry>().read();
-        let key = <vmux_ecs::PageMetadata as bevy::reflect::TypePath>::type_path();
-        std::fs::write(&path, store_body_with_key(key)).expect("write store");
-
-        assert!(!remove_incompatible_store_if_needed(&path, &registry));
-        assert!(path.exists());
-    }
-
-    #[test]
-    fn incompatible_store_is_removed_on_startup() {
-        let _home = HomeEnvGuard::use_temp_home("incompatible-store-is-removed-on-startup");
+    fn incompatible_store_is_preserved_and_startup_refused() {
+        let _home = HomeEnvGuard::use_temp_home("incompatible-store-is-preserved-on-startup");
         let store = WorkspaceStorePath::default();
         let path = store.0.clone();
         if let Some(parent) = path.parent() {
@@ -2477,14 +2484,13 @@ mod tests {
             .add_plugins(WorkspacePersistencePlugin);
         app.update();
 
-        assert!(
-            !path.exists(),
-            "incompatible store should be removed on startup"
+        assert_eq!(
+            std::fs::read_to_string(&path).unwrap(),
+            store_body_with_key("vmux_desktop::ghost::DoesNotExist")
         );
-        assert!(
-            !store.version().exists(),
-            "store.version should be removed with the incompatible store"
-        );
+        assert!(store.version().exists());
+        assert!(app.world().contains_resource::<WorkspaceLoadRefused>());
+        assert_eq!(app.should_exit(), Some(AppExit::error()));
     }
 
     #[test]

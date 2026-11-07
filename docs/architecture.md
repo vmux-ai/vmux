@@ -1324,6 +1324,30 @@ React-style, in one atomic transaction.
 
 ## Platforms
 
+### Manual iteration
+
+```text
+agent: make build-dev -> signed debug binaries -> user: make run-dev
+```
+
+Debug uses the full desktop feature set, Bevy dynamic linking, no LTO, and incremental
+compilation. Build and launch are separate: run-dev verifies the completed artifacts and
+never compiles or kills an existing app. build-local remains the bundle/OS-integration gate.
+
+Local and debug share the workspace store and a stable Chromium directory per named profile,
+not per worktree. On first use the most recently modified legacy local profile is reused
+without merging or overwriting other profiles. Normal builds use the same Safe Storage key;
+mock-key test sessions have their own data directory. Logs and service endpoints stay separate.
+A process-lifetime desktop lock allows one GUI writer; desktop and daemon share a data lease
+whose owner is the build and worktree. A different owner cannot start until both have exited,
+and an endpoint lock prevents duplicate daemons from overwriting PID/socket files.
+Quit flushes pending layout changes. Switching named profiles restarts the GUI rather than
+opening another writer. Quit all old builds before switching; a daemon outlives its windows,
+so service stop waits for its shutdown and lock release. Old binaries without leases are not
+protected by these advisory locks. VMUX_DATA_DIR selects a separate data root and runtime
+endpoints for copied-state tests. Incompatible stores are preserved and startup is refused;
+changing persistence schemas against the live shared store is not an iteration shortcut.
+
 | Platform | Role | Status |
 |---|---|---|
 | macOS | host | primary — packaged, launchd-managed, shipped |

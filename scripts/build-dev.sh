@@ -1,0 +1,34 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+source "$root/scripts/cargo-target-paths.sh"
+export CARGO_INCREMENTAL="${CARGO_INCREMENTAL:-1}"
+export VMUX_BUILD_PROFILE=dev
+
+debug_dir="$(vmux_cargo_profile_dir "$root" debug)"
+stamp="$debug_dir/.vmux-dev-ready"
+mkdir -p "$debug_dir"
+rm -f "$stamp"
+
+cd "$root"
+"$root/scripts/cargo-with-cef-cache.sh" build -p vmux_cli
+"$root/scripts/cargo-with-cef-cache.sh" build -p vmux_app --bin vmux_service --features service-daemon
+"$root/scripts/cargo-with-cef-cache.sh" build -p vmux_desktop "$@"
+
+if [[ "$(uname -s)" == Darwin ]]; then
+    identity="$("$root/scripts/ensure-local-codesign-identity.sh")"
+    APPLE_SIGNING_IDENTITY="$identity" APP_BINARY="$debug_dir/vmux_desktop" \
+        HELPER_BINARY="${CEF_DEBUG_RENDER:-$HOME/.local/share/Chromium Embedded Framework.framework/Libraries/bevy_cef_debug_render_process}" \
+        "$root/scripts/sign-dev-mac.sh"
+fi
+
+{
+    printf '%s\n' "$root"
+    for binary in vmux vmux_service vmux_desktop; do
+        [[ -x "$debug_dir/$binary" ]] || { echo "Missing debug binary: $binary" >&2; exit 1; }
+        shasum -a 256 "$debug_dir/$binary"
+    done
+} > "$stamp.tmp"
+mv -f "$stamp.tmp" "$stamp"
+printf 'Debug build ready: %s\nRun: make run-dev\n' "$debug_dir/vmux_desktop"

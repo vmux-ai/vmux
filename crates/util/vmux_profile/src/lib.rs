@@ -1,8 +1,10 @@
 use std::path::{Path, PathBuf};
 
+pub use lease::DataLease;
 pub use profile_driver::{ProfileMigration, ProfileRecord, ProfileStore};
 pub use service::{RemotePaths, ServicePaths};
 
+mod lease;
 pub mod mcp_credentials;
 mod profile_driver;
 pub mod safe_storage;
@@ -95,6 +97,8 @@ impl From<Profile> for String {
 pub struct ProfilePaths {
     build: &'static str,
     profile: Profile,
+    data: PathBuf,
+    test: bool,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -129,32 +133,47 @@ impl ProjectsDirectory {
 
 impl ProfilePaths {
     pub fn current() -> Self {
+        #[cfg(target_os = "macos")]
+        let base = home_dir().join("Library/Application Support");
+        #[cfg(not(target_os = "macos"))]
+        let base = std::env::temp_dir();
+        let test = SessionEnvironment::is_test();
+        let mut data = base.join("Vmux");
+        if let Some(override_dir) = std::env::var_os("VMUX_DATA_DIR")
+            && !override_dir.is_empty()
+        {
+            data = PathBuf::from(override_dir);
+            assert!(data.is_absolute(), "VMUX_DATA_DIR must be an absolute path");
+        }
+        if test {
+            data = data.join("test");
+        }
+        if data.is_relative() {
+            data = std::env::current_dir()
+                .expect("current directory unavailable")
+                .join(data);
+        }
         Self {
             build: build_profile(),
             profile: Profile::current(),
+            data,
+            test,
         }
     }
 
     pub fn shared_data(&self) -> PathBuf {
-        #[cfg(target_os = "macos")]
-        {
-            let home = std::env::var_os("HOME").expect("HOME not set");
-            PathBuf::from(home)
-                .join("Library/Application Support")
-                .join(data_dir_suffix_for(self.build))
-        }
-        #[cfg(not(target_os = "macos"))]
-        {
-            std::env::temp_dir().join(data_dir_suffix_for(self.build))
+        self.data.clone()
+    }
+
+    pub fn runtime_data(&self) -> PathBuf {
+        match self.build {
+            "release" | "local" => self.data.clone(),
+            other => self.data.join(other),
         }
     }
 
     pub fn application_data(&self) -> PathBuf {
-        let data = self.shared_data();
-        match self.build {
-            "release" | "local" => data,
-            _ => data.parent().map(PathBuf::from).unwrap_or(data),
-        }
+        self.data.clone()
     }
 
     pub fn config(&self) -> PathBuf {
@@ -196,14 +215,53 @@ impl ProfilePaths {
     }
 
     pub fn cef_cache(&self) -> Option<String> {
-        cef_cache_path_in(
-            &self.shared_data(),
-            self.profile.id(),
-            self.build,
-            env!("VMUX_WORKTREE_ID"),
-        )
-        .to_str()
-        .map(str::to_owned)
+        let directory = self.cef_directory();
+        directory
+            .canonicalize()
+            .unwrap_or(directory)
+            .to_str()
+            .map(str::to_owned)
+    }
+
+    fn cef_directory(&self) -> PathBuf {
+        let profile = self.profile();
+        if self.test || self.build == "release" {
+            return profile;
+        }
+        profile.join("cef").join("local")
+    }
+
+    pub fn prepare_browser_profile(&self) -> std::io::Result<()> {
+        let destination = self.cef_directory();
+        if destination.exists() || self.test || self.build == "release" {
+            return Ok(());
+        }
+        let Some(parent) = destination.parent() else {
+            return Ok(());
+        };
+        if !parent.exists() {
+            return Ok(());
+        }
+        let mut source = None;
+        let mut newest = std::time::SystemTime::UNIX_EPOCH;
+        for entry in std::fs::read_dir(parent)? {
+            let entry = entry?;
+            if !entry.file_type()?.is_dir()
+                || !entry.file_name().to_string_lossy().starts_with("local-")
+            {
+                continue;
+            }
+            let modified = entry.metadata()?.modified()?;
+            if source.is_none() || modified > newest {
+                newest = modified;
+                source = Some(entry.path());
+            }
+        }
+        if let Some(source) = source {
+            #[cfg(unix)]
+            std::os::unix::fs::symlink(source.file_name().unwrap(), destination)?;
+        }
+        Ok(())
     }
 
     pub fn store(&self) -> PathBuf {
@@ -229,13 +287,6 @@ impl ProfilePaths {
     }
 }
 
-fn data_dir_suffix_for(profile: &str) -> PathBuf {
-    match profile {
-        "release" | "local" => PathBuf::from("Vmux"),
-        other => PathBuf::from("Vmux").join(other),
-    }
-}
-
 fn recording_dir_for(data: &Path, profile: &str) -> PathBuf {
     data.join("profiles").join(profile).join("recording")
 }
@@ -254,21 +305,6 @@ fn settings_candidates_in(base: &Path, suffix: Option<&str>) -> Vec<PathBuf> {
     }
     candidates.push(base.join("settings.ron"));
     candidates
-}
-
-fn cef_cache_path_in(
-    data: &Path,
-    profile: &str,
-    build_profile: &str,
-    worktree_id: &str,
-) -> PathBuf {
-    let profile_dir = data.join("profiles").join(profile);
-    if build_profile == "release" {
-        return profile_dir;
-    }
-    profile_dir
-        .join("cef")
-        .join(format!("{build_profile}-{worktree_id}"))
 }
 
 fn cef_keychain_switches_for(is_test_session: bool) -> &'static [&'static str] {
@@ -380,43 +416,81 @@ mod tests {
     }
 
     #[test]
-    fn data_dir_suffix_maps_each_profile() {
-        assert_eq!(data_dir_suffix_for("release"), PathBuf::from("Vmux"));
-        assert_eq!(data_dir_suffix_for("local"), PathBuf::from("Vmux"));
+    fn local_and_dev_reuse_browser_cookies_without_mixing_named_profiles() {
+        let directory = tempfile::tempdir().unwrap();
+        let local = ProfilePaths {
+            build: "local",
+            profile: Profile::named("personal"),
+            data: directory.path().to_path_buf(),
+            test: false,
+        };
+        let mut dev = local.clone();
+        dev.build = "dev";
+        std::fs::create_dir_all(local.cef_directory()).unwrap();
+        std::fs::write(local.cef_directory().join("Cookies"), b"persisted session").unwrap();
         assert_eq!(
-            data_dir_suffix_for("dev"),
-            PathBuf::from("Vmux").join("dev")
+            std::fs::read(dev.cef_directory().join("Cookies")).unwrap(),
+            b"persisted session"
+        );
+        dev.profile = Profile::named("work");
+        assert!(!dev.cef_directory().join("Cookies").exists());
+    }
+
+    #[test]
+    fn browser_profile_adopts_legacy_local_data_once_without_overwriting_it() {
+        let directory = tempfile::tempdir().unwrap();
+        let paths = ProfilePaths {
+            build: "dev",
+            profile: Profile::named("personal"),
+            data: directory.path().to_path_buf(),
+            test: false,
+        };
+        let legacy = paths.profile().join("cef/local-worktree-a");
+        std::fs::create_dir_all(&legacy).unwrap();
+        std::fs::write(legacy.join("Cookies"), b"existing login").unwrap();
+        paths.prepare_browser_profile().unwrap();
+        assert_eq!(
+            std::fs::read(paths.cef_directory().join("Cookies")).unwrap(),
+            b"existing login"
+        );
+        let other = paths.profile().join("cef/local-worktree-b");
+        std::fs::create_dir_all(&other).unwrap();
+        std::fs::write(other.join("Cookies"), b"other login").unwrap();
+        paths.prepare_browser_profile().unwrap();
+        assert_eq!(
+            std::fs::read(paths.cef_directory().join("Cookies")).unwrap(),
+            b"existing login"
         );
         assert_eq!(
-            data_dir_suffix_for("custom"),
-            PathBuf::from("Vmux").join("custom"),
+            std::fs::read(legacy.join("Cookies")).unwrap(),
+            b"existing login"
+        );
+        assert_eq!(
+            std::fs::read(other.join("Cookies")).unwrap(),
+            b"other login"
         );
     }
 
     #[test]
-    fn local_and_release_share_one_space() {
-        assert_eq!(data_dir_suffix_for("local"), data_dir_suffix_for("release"));
-    }
-
-    #[test]
-    fn release_keeps_the_shared_cef_profile() {
+    fn copied_store_and_runtime_are_separate_from_normal_data() {
+        let directory = tempfile::tempdir().unwrap();
+        let local = ProfilePaths {
+            build: "local",
+            profile: Profile::named("personal"),
+            data: directory.path().join("normal"),
+            test: false,
+        };
+        let mut dev = local.clone();
+        dev.build = "dev";
+        std::fs::write(local.store().join("store.ron"), b"workspace").unwrap();
         assert_eq!(
-            cef_cache_path_in(Path::new("/data/Vmux"), "personal", "release", "worktree-a",),
-            PathBuf::from("/data/Vmux/profiles/personal")
+            std::fs::read(dev.store().join("store.ron")).unwrap(),
+            b"workspace"
         );
-    }
-
-    #[test]
-    fn local_cef_profiles_are_isolated_by_worktree() {
-        let data = Path::new("/data/Vmux");
-        let first = cef_cache_path_in(data, "personal", "local", "worktree-a");
-        let second = cef_cache_path_in(data, "personal", "local", "worktree-b");
-
-        assert_eq!(
-            first,
-            PathBuf::from("/data/Vmux/profiles/personal/cef/local-worktree-a")
-        );
-        assert_ne!(first, second);
+        assert_ne!(local.runtime_data(), dev.runtime_data());
+        dev.data = directory.path().join("copy");
+        assert!(!dev.store().join("store.ron").exists());
+        assert!(dev.runtime_data().starts_with(&dev.data));
     }
 
     #[test]
@@ -430,37 +504,6 @@ mod tests {
     #[test]
     fn interactive_sessions_use_real_keychain() {
         assert!(cef_keychain_switches_for(false).is_empty());
-    }
-
-    #[test]
-    fn dev_lives_under_the_release_space() {
-        let release = data_dir_suffix_for("release");
-        let dev = data_dir_suffix_for("dev");
-        assert!(dev.starts_with(&release));
-        assert_ne!(dev, release);
-        assert_eq!(dev.file_name().unwrap(), "dev");
-    }
-
-    #[test]
-    fn shared_data_dir_ends_with_profile_suffix() {
-        assert!(
-            ProfilePaths::current()
-                .shared_data()
-                .ends_with(data_dir_suffix_for(build_profile()))
-        );
-    }
-
-    #[test]
-    fn managed_data_uses_build_agnostic_application_support_root() {
-        let paths = ProfilePaths::current();
-        let shared = paths.shared_data();
-        let managed = paths.application_data();
-        assert!(shared.starts_with(&managed));
-        if matches!(build_profile(), "release" | "local") {
-            assert_eq!(shared, managed);
-        } else {
-            assert_eq!(shared.parent(), Some(managed.as_path()));
-        }
     }
 
     #[test]
