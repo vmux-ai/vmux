@@ -261,20 +261,23 @@ pub(crate) const WRY_HOST_SHIM: &str = r#"
     return commitNavigationRevision(revision);
   };
   const visibleScrollAnchor = (container, viewport) => {
-    const x = Math.min(viewport.right - 1, viewport.left + 8);
-    const y = Math.min(viewport.bottom - 1, viewport.top + 1);
-    const anchor = document.elementsFromPoint(x, y)
-      .map(element => element.closest('[data-vmux-scroll-anchor]'))
-      .find(element => element && container.contains(element));
-    if (!anchor) return null;
-    const rect = anchor.getBoundingClientRect();
-    return anchor.id ? { id: anchor.id, top: rect.top, scrollTop: container.scrollTop } : null;
+    for (const y of [viewport.top + 1, viewport.top + 24, viewport.top + (viewport.bottom - viewport.top) / 4]) {
+      for (const x of [(viewport.left + viewport.right) / 2, viewport.left + 8]) {
+        const anchor = document.elementsFromPoint(x, y)
+          .map(element => element.closest('[data-vmux-scroll-anchor]'))
+          .find(element => element && container.contains(element));
+        if (!anchor?.id) continue;
+        return { id: anchor.id, top: anchor.getBoundingClientRect().top, scrollTop: container.scrollTop };
+      }
+    }
+    return null;
   };
-  const captureScrollAnchors = () => {
+  const captureScrollAnchors = (explicit) => {
     const captures = [];
     const containers = document.querySelectorAll('[data-vmux-preserve-scroll]');
     for (let containerIndex = 0; containerIndex < containers.length; containerIndex += 1) {
       const container = containers[containerIndex];
+      if (!explicit && container.dataset.vmuxPreserveScroll !== 'auto') continue;
       const viewport = container.getBoundingClientRect();
       const anchor = visibleScrollAnchor(container, viewport);
       if (anchor) captures.push({ container, id: anchor.id, top: anchor.top, scrollTop: anchor.scrollTop });
@@ -374,10 +377,6 @@ pub(crate) const WRY_HOST_SHIM: &str = r#"
       const release = () => {
         if (this.disposed) return;
         if (!this.element.isConnected) { this.dispose(); return; }
-        if (document.fonts?.status === 'loading') {
-          Promise.resolve(document.fonts.ready).then(paint);
-          return;
-        }
         for (const node of batch) {
           node.style.contentVisibility = this.measured.get(node) || '';
           this.known.add(node);
@@ -393,7 +392,7 @@ pub(crate) const WRY_HOST_SHIM: &str = r#"
           release();
         }));
       };
-      Promise.resolve(document.fonts?.ready).then(paint);
+      paint();
     }
     place() {
       const element = this.element;
@@ -421,20 +420,12 @@ pub(crate) const WRY_HOST_SHIM: &str = r#"
       if (this.presented?.revision === revision && this.presented?.epoch === epoch) return;
       let ticket = this.current;
       if (!ticket || ticket.revision !== revision || ticket.epoch !== epoch) {
-        ticket = { revision, epoch, fonts: false, scheduled: false };
+        ticket = { revision, epoch, scheduled: false };
         this.current = ticket;
-        Promise.resolve(document.fonts?.ready).then(() => {
-          if (this.current !== ticket) return;
-          ticket.fonts = true;
-          this.present(ticket);
-        });
       }
       this.present(ticket);
     }
     static pending() {
-      for (const [element, state] of ScrollPlacement.states) {
-        if (element.isConnected && element.clientHeight > 0 && state.measurePending) return true;
-      }
       for (const element of document.querySelectorAll('[data-vmux-presentation-pending]')) {
         if (element.closest?.('[aria-hidden="true"]')) continue;
         const style = getComputedStyle(element);
@@ -445,17 +436,8 @@ pub(crate) const WRY_HOST_SHIM: &str = r#"
       return false;
     }
     static present(ticket) {
-      if (!ticket.fonts || ticket.scheduled || this.current !== ticket) return;
+      if (ticket.scheduled || this.current !== ticket) return;
       if (this.pending()) return;
-      if (document.fonts?.status === 'loading') {
-        ticket.fonts = false;
-        Promise.resolve(document.fonts.ready).then(() => {
-          if (this.current !== ticket) return;
-          ticket.fonts = true;
-          this.present(ticket);
-        });
-        return;
-      }
       ticket.scheduled = true;
       requestAnimationFrame(() => requestAnimationFrame(() => {
         ticket.scheduled = false;
@@ -463,7 +445,6 @@ pub(crate) const WRY_HOST_SHIM: &str = r#"
         if (!requestMatchesDocument(ticket)) return;
         if (this.pending()) return;
         ScrollPlacement.apply();
-        if (document.fonts?.status === 'loading') { this.present(ticket); return; }
         this.presented = ticket;
         this.current = null;
         postMessage('presented:' + ticket.revision);
@@ -843,9 +824,9 @@ pub(crate) const WRY_HOST_SHIM: &str = r#"
         const heightAnimations = remount ? [] : HeightAnimation.capture(requests);
         const popupCaptures = edits.byteLength || remount ? globalThis.__vmuxPopupPresentation.capture() : [];
         const layoutMovements = remount ? [] : LayoutMovement.capture(requests);
-        const scrollAnchors = remount || !edits.byteLength || !preserveScroll
+        const scrollAnchors = remount || !edits.byteLength
           ? []
-          : captureScrollAnchors();
+          : captureScrollAnchors(preserveScroll);
         applyingRevision = revision;
         applyingEpoch = responseEpoch;
         let navigated = false;
@@ -1032,7 +1013,7 @@ mod tests {
     }
 
     #[test]
-    fn presentation_waits_for_content_fonts_and_scroll_layout_in_the_current_navigation() {
+    fn first_layout_presents_without_waiting_for_background_data_or_fonts() {
         RuntimeProbe::verify(include_str!("presentation_test.js"));
     }
 }

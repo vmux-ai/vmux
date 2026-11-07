@@ -8,7 +8,7 @@ use vmux_ui::agent_accent::AgentAccent;
 use vmux_ui::components::skeleton::Skeleton;
 use vmux_ui::hooks::send;
 use vmux_ui::i18n::{TranslationValue, translate, translate_with};
-use vmux_ui::scroll::{PrependScrollAnchor, ScrollPreload};
+use vmux_ui::scroll::ScrollPreload;
 
 #[component]
 fn QueuedAttachments(attachments: Vec<ChatAttachment>) -> Element {
@@ -53,12 +53,13 @@ pub(super) fn ChatTranscript(chat: Chat) -> Element {
     let mut scroll_container = chat.transcript.scroll_container;
     let at_bottom = chat.transcript.at_bottom;
     let transcript = chat.transcript.current();
-    let prepend_revision = transcript.prepend_revision;
     let transcript_loading =
         chat.status() != "errored" && (chat.transcript_loading() || !chat.transcript.ready());
     let loaded_start = transcript.loaded_start;
     let history_loading = transcript.loading;
     let items = transcript.items;
+    let initial_scroll = chat.transcript.initial_scroll();
+    let placement_pending = !transcript_loading && !items.is_empty() && initial_scroll.is_empty();
     let handoff_source = chat.handoff.source();
     let handoff_truncated = chat.handoff.truncated();
     let agent = chat.agent();
@@ -68,12 +69,13 @@ pub(super) fn ChatTranscript(chat: Chat) -> Element {
     let agent_color = chat.accent().css;
     let user_name = chat.user.name();
     let user_color = chat.user.color();
-    use_effect(move || chat.transcript.restore_prepend(prepend_revision));
     rsx! {
         div {
             id: "chat-scroll",
-            "data-vmux-initial-scroll": chat.transcript.initial_scroll(),
+            "data-vmux-initial-scroll": initial_scroll,
+            "data-vmux-presentation-pending": placement_pending.then_some(""),
             "data-vmux-follow-scroll": at_bottom().to_string(),
+            "data-vmux-preserve-scroll": "auto",
             onmounted: move |e| {
                 scroll_container.set(Some(e.data()));
                 if *at_bottom.peek() {
@@ -89,12 +91,12 @@ pub(super) fn ChatTranscript(chat: Chat) -> Element {
                 let dist = e.scroll_height() - top - e.client_height();
                 chat.transcript.observe_scroll(top, dist);
                 if ScrollPreload::HISTORY.reached_start(&e) {
-                    chat.transcript
-                        .request_history(PrependScrollAnchor::capture(&e));
+                    chat.transcript.request_history();
                 }
             },
             div {
                 class: "mx-auto flex min-h-full w-full max-w-3xl flex-col gap-5",
+                style: transcript_loading.then_some("height:100%;"),
                 onresize: move |_| {
                     if *chat.transcript.initial_follow.peek() || *at_bottom.peek() {
                         chat.transcript.follow();
@@ -112,21 +114,25 @@ pub(super) fn ChatTranscript(chat: Chat) -> Element {
                 }
                 if !transcript_loading {
                     for (i , item) in items.iter().cloned().enumerate() {
-                        ChatItemRow {
+                        div {
                             key: "{loaded_start as usize + i}",
-                            absolute_index: loaded_start as usize + i,
-                            item,
-                            agent_id: agent.clone(),
-                            agent_name: agent_name.clone(),
-                            agent_avatar: agent_avatar.clone(),
-                            agent_color: agent_color.clone(),
-                            user_name: user_name.clone(),
-                            user_color: user_color.clone(),
-                            on_media_load: move |_| {
-                                if *at_bottom.peek() {
-                                    chat.transcript.follow();
-                                }
-                            },
+                            id: "chat-item-{loaded_start as usize + i}",
+                            "data-vmux-scroll-anchor": "",
+                            ChatItemRow {
+                                absolute_index: loaded_start as usize + i,
+                                item,
+                                agent_id: agent.clone(),
+                                agent_name: agent_name.clone(),
+                                agent_avatar: agent_avatar.clone(),
+                                agent_color: agent_color.clone(),
+                                user_name: user_name.clone(),
+                                user_color: user_color.clone(),
+                                on_media_load: move |_| {
+                                    if *at_bottom.peek() {
+                                        chat.transcript.follow();
+                                    }
+                                },
+                            }
                         }
                         if !handoff_source.is_empty() && chat.handoff.boundary(loaded_start as usize + i) {
                             HandoffDivider { source: handoff_source.clone(), truncated: handoff_truncated }
@@ -171,16 +177,16 @@ fn HistorySentinel(loading: bool) -> Element {
 #[component]
 fn TranscriptSkeleton() -> Element {
     rsx! {
-        div { class: "flex min-h-full flex-col justify-end gap-8 py-8", "data-vmux-presentation-pending": "",
+        div { class: "flex min-h-full shrink-0 flex-col justify-end gap-5 px-1 py-1", "data-vmux-loading-surface": "",
             div { class: "ml-auto flex w-2/3 items-start justify-end gap-3",
                 div { class: "flex min-w-0 flex-1 flex-col items-end gap-2 pt-1",
                     Skeleton { class: "h-2.5 w-12 bg-foreground/[0.07]" }
                     Skeleton { class: "h-3 w-40 bg-foreground/[0.08]" }
                 }
-                Skeleton { class: "size-7 shrink-0 rounded-full bg-foreground/[0.08]" }
+                Skeleton { class: "size-6 shrink-0 rounded-full bg-foreground/[0.08]" }
             }
             div { class: "flex w-3/4 items-start gap-3",
-                Skeleton { class: "size-7 shrink-0 rounded-full bg-foreground/[0.08]" }
+                Skeleton { class: "size-6 shrink-0 rounded-full bg-foreground/[0.08]" }
                 div { class: "flex min-w-0 flex-1 flex-col gap-2 pt-1",
                     Skeleton { class: "h-2.5 w-14 bg-foreground/[0.07]" }
                     Skeleton { class: "h-3 w-full bg-foreground/[0.08]" }
@@ -193,7 +199,7 @@ fn TranscriptSkeleton() -> Element {
                     Skeleton { class: "h-2.5 w-12 bg-foreground/[0.07]" }
                     Skeleton { class: "h-3 w-32 bg-foreground/[0.08]" }
                 }
-                Skeleton { class: "size-7 shrink-0 rounded-full bg-foreground/[0.08]" }
+                Skeleton { class: "size-6 shrink-0 rounded-full bg-foreground/[0.08]" }
             }
         }
     }

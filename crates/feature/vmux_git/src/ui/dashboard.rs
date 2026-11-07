@@ -33,7 +33,6 @@ pub(super) fn GitDashboard() -> Element {
     }
 
     rsx! {
-        GitHeader { viewed_count }
         main { class: "flex min-h-0 flex-1 flex-col bg-transparent pt-2",
             div {
                 id: "git-dashboard-split",
@@ -52,9 +51,12 @@ pub(super) fn GitDashboard() -> Element {
                     },
                     div { class: "pointer-events-none h-10 w-1 rounded-full bg-foreground/20 opacity-0 transition-opacity duration-150 group-hover:opacity-100" }
                 }
-                GitDiffPane {
-                    navigation,
-                    viewed_count,
+                div { class: "flex min-h-0 min-w-0 flex-col",
+                    GitHeader { viewed_count }
+                    GitDiffPane {
+                        navigation,
+                        viewed_count,
+                    }
                 }
             }
         }

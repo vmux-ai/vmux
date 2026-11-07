@@ -16,6 +16,7 @@ impl Route {
         let segments = route.path_segments().collect::<Vec<_>>();
         match segments.as_slice() {
             [] => Some(Self::Manager),
+            ["inbox"] => Some(Self::Manager),
             [id] if route.query().is_none() && route.fragment().is_none() => {
                 let id = percent_decode_str(id).decode_utf8().ok()?;
                 (!id.is_empty()).then(|| Self::Session(SessionId(id.into_owned())))
@@ -26,7 +27,7 @@ impl Route {
 
     pub fn url(&self) -> String {
         match self {
-            Self::Manager => "vmux://sessions/".to_string(),
+            Self::Manager => "vmux://sessions/inbox".to_string(),
             Self::Session(id) => {
                 let mut url = url::Url::parse("vmux://sessions/")
                     .expect("static Session route must be valid");
@@ -43,6 +44,15 @@ impl Route {
             .append_pair("agent", &agent.0)
             .finish();
         format!("{}?{query}", Self::Manager.url())
+    }
+
+    pub fn manager_url(value: &str) -> Option<String> {
+        if Self::parse(value) != Some(Self::Manager) {
+            return None;
+        }
+        let mut url = url::Url::parse(value).ok()?;
+        url.set_path("/inbox");
+        Some(url.into())
     }
 
     pub fn manager_for_project(project: &str, status: &str) -> String {
@@ -114,6 +124,18 @@ mod tests {
     use super::*;
 
     #[test]
+    fn inbox_is_a_collection_and_canonicalization_preserves_filter_context() {
+        assert_eq!(Route::parse("vmux://sessions/inbox"), Some(Route::Manager));
+        let url = Route::manager_url("vmux://sessions/?project=%2Fwork%2Fa&agent=codex").unwrap();
+        assert_eq!(url, "vmux://sessions/inbox?project=%2Fwork%2Fa&agent=codex");
+        assert_eq!(
+            Route::manager_filter(&url, "project").as_deref(),
+            Some("/work/a")
+        );
+        assert_eq!(Route::requested_agent(&url), Some(AgentId("codex".into())));
+    }
+
+    #[test]
     fn project_session_links_round_trip_paths_and_activity_filters() {
         let path = "/work/a project/#draft+one";
         let url = Route::manager_for_project(path, "current");
@@ -147,7 +169,7 @@ mod tests {
     fn manager_agent_is_transient_creation_context() {
         let url = Route::manager_for_agent(&AgentId("claude acp".into()));
 
-        assert_eq!(url, "vmux://sessions/?agent=claude+acp");
+        assert_eq!(url, "vmux://sessions/inbox?agent=claude+acp");
         assert_eq!(
             Route::requested_agent(&url),
             Some(AgentId("claude acp".into()))

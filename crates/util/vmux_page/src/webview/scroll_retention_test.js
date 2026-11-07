@@ -3,8 +3,8 @@ const vm = require('node:vm');
 const assert = require('node:assert/strict');
 const shim = fs.readFileSync(0, 'utf8');
 
-function packet() {
-  const json = Buffer.from(JSON.stringify([{ kind: 'preserveScroll', revision: 1, epoch: 1 }]));
+function packet(automatic = false) {
+  const json = Buffer.from(JSON.stringify(automatic ? [] : [{ kind: 'preserveScroll', revision: 1, epoch: 1 }]));
   const bytes = Buffer.alloc(5 + json.length);
   bytes.writeUInt32LE(json.length);
   json.copy(bytes, 4);
@@ -22,7 +22,7 @@ async function scenario(growth, clamp, input, expected, initial = null, replay =
   const frames = options.followingFrames?.length || (replay ? 2 : 1);
   const container = {
     isConnected: true, scrollTop: options.unlaidOut ? 0 : 100,
-    scrollHeight: options.unlaidOut ? 0 : 1000, clientHeight: options.unlaidOut ? 0 : 200, dataset: {},
+    scrollHeight: options.unlaidOut ? 0 : 1000, clientHeight: options.unlaidOut ? 0 : 200, dataset: { vmuxPreserveScroll: options.automatic ? 'auto' : '' },
     firstElementChild: content, addEventListener: (name, handler) => handlers.set(name, handler),
     contains: element => element === anchor,
     getBoundingClientRect: () => ({ left: 0, right: 500, top: 0, bottom: 500 }),
@@ -89,7 +89,7 @@ async function scenario(growth, clamp, input, expected, initial = null, replay =
           'x-vmux-navigation': '1', 'x-vmux-frame-epoch': '1',
           'x-vmux-frame-capability': '777', 'x-vmux-frame': String(index),
         })[name] || null },
-        arrayBuffer: async () => packet(),
+        arrayBuffer: async () => packet(options.automatic),
       };
     },
   };
@@ -107,6 +107,7 @@ async function scenario(growth, clamp, input, expected, initial = null, replay =
 
 (async () => {
   await scenario(80, null, 20, 200);
+  await scenario(80, null, 20, 200, null, false, { automatic: true });
   await scenario(-80, 40, 0, 20);
   await scenario(0, null, 20, 120);
   await scenario(0, null, 0, 800, 'bottom');

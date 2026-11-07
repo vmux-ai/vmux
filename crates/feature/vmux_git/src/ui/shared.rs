@@ -787,7 +787,7 @@ fn DiffLoadingSurface(height: f64) -> Element {
         div {
             class: "min-h-full overflow-hidden",
             style: "height:{height}px;",
-            "data-vmux-presentation-pending": "",
+            "data-vmux-loading-surface": "",
             div { class: "flex h-9 items-center gap-2 bg-foreground/[0.025] px-3",
                 Skeleton { class: "size-3.5 shrink-0 rounded-sm bg-foreground/[0.07]" }
                 Skeleton { class: "h-2.5 w-32 bg-foreground/[0.07]" }

@@ -10,6 +10,7 @@ class PageProbe {
     this.requests = [];
     this.observers = [];
     this.pending = [];
+    this.loading = [];
     this.rows = [];
     this.revision = '1';
     this.epoch = '1';
@@ -30,6 +31,7 @@ class PageProbe {
       querySelector: () => null,
       querySelectorAll: selector => {
         if (selector === '[data-vmux-presentation-pending]') return this.pending;
+        if (selector === '[data-vmux-loading-surface]') return this.loading;
         if (selector === '[data-vmux-initial-scroll]') return this.rows.length ? [this.container] : [];
         return [];
       },
@@ -110,31 +112,54 @@ class PageProbe {
 (async () => {
   const loading = new PageProbe();
   loading.loadingFonts();
-  loading.pending = [{}];
+  loading.loading = [{}];
   await loading.send();
   await loading.paint();
   await loading.paint();
-  assert.deepEqual(loading.presented, []);
+  assert.deepEqual(loading.presented, ['1:1:presented:1'], 'the first layout must present while data and fonts are still loading');
+  assert.equal(loading.loading.length, 1);
+  assert.equal(loading.fonts.status, 'loading');
   loading.finishFonts();
   await loading.flush();
   await loading.paint();
-  assert.deepEqual(loading.presented, [], 'a skeleton must not become the presented page');
-  await loading.send(() => { loading.pending = []; });
-  await loading.paint();
-  assert.deepEqual(loading.presented, [], 'delivery is not a paint opportunity');
-  await loading.paint();
-  assert.deepEqual(loading.presented, ['1:1:presented:1']);
-  await loading.send();
+  await loading.send(() => { loading.loading = []; });
   await loading.paint();
   await loading.paint();
-  assert.equal(loading.presented.length, 1, 'streaming updates must not repeat initial presentation');
+  assert.equal(loading.presented.length, 1, 'replacing a loader must not delay or repeat presentation');
+
+  const placement = new PageProbe();
+  placement.pending = [{}];
+  await placement.send();
+  await placement.paint();
+  await placement.paint();
+  assert.deepEqual(placement.presented, [], 'messages awaiting initial scroll placement must stay hidden');
+  await placement.send(() => { placement.pending = []; });
+  await placement.paint();
+  assert.deepEqual(placement.presented, [], 'delivery is not a paint opportunity');
+  await placement.paint();
+  assert.deepEqual(placement.presented, ['1:1:presented:1']);
+  await placement.send();
+  await placement.paint();
+  await placement.paint();
+  assert.equal(placement.presented.length, 1, 'streaming updates must not repeat initial presentation');
+
+  const measuring = new PageProbe();
+  measuring.loadingFonts();
+  measuring.row(1000);
+  await measuring.send();
+  assert.equal(measuring.container.scrollTop, 800, 'initial scroll placement must precede the first visible frame');
+  await measuring.paint();
+  await measuring.paint();
+  assert.deepEqual(measuring.presented, ['1:1:presented:1'], 'measuring transcript rows must not wait for font completion');
+  assert.equal(measuring.fonts.status, 'loading');
+  assert.equal(measuring.rows[0].style.contentVisibility, 'auto');
 
   const fonts = new PageProbe();
   await fonts.send();
   fonts.loadingFonts();
   await fonts.paint();
   await fonts.paint();
-  assert.deepEqual(fonts.presented, [], 'content can introduce another font load');
+  assert.deepEqual(fonts.presented, ['1:1:presented:1'], 'font completion must not delay the first usable page layout');
   fonts.finishFonts();
   await fonts.flush();
   await fonts.paint();
@@ -173,7 +198,7 @@ class PageProbe {
   await layout.paint();
   assert.equal(first.style.contentVisibility, 'auto');
   assert.equal(appended.style.contentVisibility, 'visible', 'new rows need their own layout opportunity');
-  assert.deepEqual(layout.presented, []);
+  assert.equal(layout.presented.length, 1, 'a new row must not postpone presentation until streaming becomes stable');
   await layout.paint();
   await layout.paint();
   await layout.paint();

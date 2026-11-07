@@ -574,11 +574,13 @@ remain input-inert but may exchange typed initialization events, and presentatio
 after the first host snapshot. This gives every vmux page one stale-while-revalidate lifecycle
 instead of feature-specific loading gates.
 
-DOM delivery and presentation readiness are separate acknowledgements. Delivery releases the
-next edit batch; presentation waits for the current fonts, initial content and a browser paint
-opportunity. Initial loaders mark only their visible primary region as pending. Incoming pages
-remain hidden while the outgoing page stays available, and become visible as soon as presentation
-is ready. Rehydration invalidates the old paint acknowledgement.
+DOM delivery and presentation are separate acknowledgements. Delivery releases the next edit
+batch. Layout, selection, focus and routing respond in the input frame; background data, fonts
+and stability timers never hold a layout transition. The incoming page presents its first usable
+layout, including reserved loading geometry, at the first paint opportunity. The outgoing surface
+covers the handoff until that paint. Initial transcript placement runs before messages become
+visible, and later updates preserve the visible row and scroll position. Rehydration invalidates
+the old paint acknowledgement.
 
 Native interaction-state updates are repeatable: each update changes the IPC epoch and the
 document's inert state without adding persistent JavaScript bindings.
@@ -1363,9 +1365,11 @@ The repository root is a resource location, not a separate logical project ident
 
 The DOM interpreter measures the initial transcript rows before positioning them. Their
 content-visibility estimates are replaced by real extents for the first paint, then normal skipping
-resumes. A resize observer schedules following at browser frames instead of writing layout from its
-notification loop. Any upward reading movement stops following; only the actual bottom resumes it.
-Saved reading positions and history anchoring retain their own ownership.
+resumes without waiting for fonts or streaming updates. History insertion captures the currently
+visible row immediately before DOM edits and restores its position before paint, so loading cannot
+replay an earlier scroll position over fresh input. A resize observer schedules following at browser
+frames instead of writing layout from its notification loop. Any upward reading movement stops
+following; only the actual bottom resumes it.
 
 Session failures with a useful remedy occupy a light notification strip in the composer's outer
 frame. The dark composer keeps its draft and metadata inside that frame. Busy sessions disable

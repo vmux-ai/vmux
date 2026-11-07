@@ -145,9 +145,7 @@ impl PageOpener<'_, '_> {
         };
         match target {
             Route::Manager => {
-                let url = Route::requested_agent(&task.url)
-                    .map(|agent| Route::manager_for_agent(&agent))
-                    .unwrap_or_else(|| Route::Manager.url());
+                let url = Route::manager_url(&task.url).unwrap_or_else(|| Route::Manager.url());
                 self.open_manager(task, transition_webview, &url);
                 Ok(PageOpenCompletion::Complete)
             }

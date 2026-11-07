@@ -26,7 +26,7 @@ use vmux_ui::components::manager::{
     WorkspaceLayout,
 };
 use vmux_ui::components::motion::{Collapse, Collapsible};
-use vmux_ui::components::page_address::{PageToolbar, ToolbarControl};
+use vmux_ui::components::page_address::{PageBreadcrumbs, PageToolbar, ToolbarControl};
 use vmux_ui::components::sheet::{SheetHeaderAction, SheetHeaderChevron};
 use vmux_ui::components::skeleton::Skeleton;
 use vmux_ui::hooks::{
@@ -193,7 +193,6 @@ pub fn SessionCollection(
 #[component]
 fn SessionsManagerActions(
     controls: CollectionController<SessionFilter>,
-    filter_picker: SessionFilterPicker,
     location: PageAddress,
     presentation: Rc<ManagerPresentation>,
 ) -> Element {
@@ -225,39 +224,7 @@ fn SessionsManagerActions(
     let mutations = use_context::<SessionMutations>();
     let deleted_provider_count = mutations.deleted_provider_count();
     let delete_confirm = use_memo(move || Some(delete_confirm_open()));
-    let mut locations = Vec::new();
-    let location_label = location
-        .fixed
-        .first()
-        .map(|crumb| crumb.entry.label.clone())
-        .unwrap_or_default();
-    if let Some(crumb) = location.fixed.first() {
-        for option in &crumb.options {
-            let Some(AddressIntent::SessionLocation { value }) = &option.intent else {
-                continue;
-            };
-            locations.push(vmux_ui::components::page_address::ToolbarChoice {
-                value: value.clone(),
-                label: option.label.clone(),
-                icon: String::new(),
-            });
-        }
-    }
-    let mut toolbar = vec![
-        ToolbarControl::menu(location_label, locations, move |value| {
-            controls.update_filters(|filters| {
-                if value == SessionLocationBreadcrumb::ARCHIVED {
-                    SessionFilter::upsert(filters, SessionFilter::Archived);
-                } else if value == SessionLocationBreadcrumb::INBOX {
-                    SessionFilter::set_stage(filters, None);
-                } else {
-                    SessionFilter::set_stage(filters, Some(value));
-                }
-            });
-            controls.set_query(String::new());
-        })
-        .text(),
-    ];
+    let mut toolbar = Vec::new();
     if deleted_provider_count > 0 {
         toolbar.push(
             ToolbarControl::button(translate("sessions-restore-deleted"), move |_| {
@@ -303,18 +270,6 @@ fn SessionsManagerActions(
                 .icon(LineIcon::X),
         );
     }
-    toolbar.push(
-        ToolbarControl::search(
-            controls.query(),
-            translate("sessions-search"),
-            move |query| controls.set_query(query),
-        )
-        .keys(&["Backspace"], move |_| {
-            if controls.query().is_empty() {
-                controls.pop_filter();
-            }
-        }),
-    );
     for (index, filter) in presentation.selected_filters.iter().enumerate() {
         toolbar.push(
             ToolbarControl::button(filter.label.clone(), move |_| controls.remove_filter(index))
@@ -322,13 +277,6 @@ fn SessionsManagerActions(
                 .text(),
         );
     }
-    toolbar.push(
-        ToolbarControl::button(translate("common-filter"), move |_| {
-            filter_picker.toggle(controls)
-        })
-        .icon(LineIcon::Hash)
-        .active(presentation.filter_requested),
-    );
     toolbar.extend(ToolbarControl::view(
         controls.view(),
         translate("sessions-view-list"),
@@ -341,22 +289,22 @@ fn SessionsManagerActions(
             .primary(),
     );
     rsx! {
-        PageToolbar { controls: toolbar }
-        if presentation.filter_requested {
-            div { class: "relative z-30 ml-auto w-72 [&>div]:top-0",
-                SessionFilterMenu {
-                    groups: presentation.category_groups.clone(),
-                    sessions: presentation.snapshot.sessions.clone(),
-                    repositories: presentation.repositories.clone(),
-                    needle: presentation.filter_needle.clone(),
-                    step: filter_picker.filter_step(),
-                    value: filter_picker.filter_value(),
-                    onstep: move |step| filter_picker.select_step(controls, step),
-                    onvalue: move |value| filter_picker.set_value(value),
-                    onselect: move |filter| filter_picker.apply(controls, filter),
-                }
-            }
+        PageBreadcrumbs { state: location,
+            onintent: move |intent| {
+                let AddressIntent::SessionLocation { value } = intent else { return; };
+                controls.update_filters(|filters| {
+                    if value == SessionLocationBreadcrumb::ARCHIVED {
+                        SessionFilter::upsert(filters, SessionFilter::Archived);
+                    } else if value == SessionLocationBreadcrumb::INBOX {
+                        SessionFilter::set_stage(filters, None);
+                    } else {
+                        SessionFilter::set_stage(filters, Some(value));
+                    }
+                });
+                controls.set_query(String::new());
+            },
         }
+        PageToolbar { controls: toolbar }
         AlertDialogRoot {
             open: Into::<ReadSignal<Option<bool>>>::into(delete_confirm),
             on_open_change: Callback::new(move |next| delete_confirm_open.set(next)),
@@ -402,9 +350,10 @@ fn SessionsManagerContent(
     rsx! {
         WorkspaceLayout {
             toolbar: rsx! {
-                SessionsManagerActions { controls, filter_picker, location: location.address(), presentation: Rc::clone(&presentation) }
+                SessionsManagerActions { controls, location: location.address(), presentation: Rc::clone(&presentation) }
             },
             sidebar: rsx! {
+                SessionSearch { controls, filter_picker, presentation: Rc::clone(&presentation) }
                 SessionCategories {
                     groups: presentation.category_groups.clone(),
                     selected: presentation.selected_stage.clone(),
@@ -564,6 +513,58 @@ fn StartSessionButton() -> Element {
             onclick: move |_| StartPage::open(),
             LineIconView { icon: LineIcon::Plus, class: "size-3.5".to_string() }
             span { {translate("sessions-start")} }
+        }
+    }
+}
+
+#[component]
+fn SessionSearch(
+    controls: CollectionController<SessionFilter>,
+    filter_picker: SessionFilterPicker,
+    presentation: Rc<ManagerPresentation>,
+) -> Element {
+    rsx! {
+        div { class: "relative z-40 flex min-w-0 px-2 pb-2 pt-1",
+            vmux_ui::components::manager::ManagerSearch {
+                value: controls.query(),
+                placeholder: translate("sessions-search"),
+                onsearch: move |query| controls.set_query(query),
+                onkeydown: move |event: KeyboardEvent| {
+                    if event.key() == Key::Backspace && controls.query().is_empty() {
+                        controls.pop_filter();
+                    }
+                    if event.key() == Key::Escape {
+                        controls.set_query(String::new());
+                        controls.dismiss_filter();
+                    }
+                },
+                suffix: rsx! {
+                    vmux_ui::components::button::Button {
+                        aria_label: translate("common-filter"),
+                        size: vmux_ui::components::button::ButtonSize::Icon,
+                        variant: vmux_ui::components::button::ButtonVariant::Ghost,
+                        class: if presentation.filter_requested { "size-5 bg-foreground/10" } else { "size-5" },
+                        onmousedown: move |event: MouseEvent| event.prevent_default(),
+                        onclick: move |_| filter_picker.toggle(controls),
+                        LineIconView { icon: LineIcon::Hash, class: "size-3.5".to_string() }
+                    }
+                },
+            }
+            if presentation.filter_requested {
+                div { class: "absolute left-2 top-full z-40 w-72 [&>div]:static",
+                    SessionFilterMenu {
+                        groups: presentation.category_groups.clone(),
+                        sessions: presentation.snapshot.sessions.clone(),
+                        repositories: presentation.repositories.clone(),
+                        needle: presentation.filter_needle.clone(),
+                        step: filter_picker.filter_step(),
+                        value: filter_picker.filter_value(),
+                        onstep: move |step| filter_picker.select_step(controls, step),
+                        onvalue: move |value| filter_picker.set_value(value),
+                        onselect: move |filter| filter_picker.apply(controls, filter),
+                    }
+                }
+            }
         }
     }
 }
@@ -844,7 +845,7 @@ fn SessionUpdatedFilterInput(
 #[component]
 fn SessionsSkeleton() -> Element {
     rsx! {
-        div { class: "min-w-[44rem] shrink-0 p-3", aria_busy: true, "data-vmux-presentation-pending": "",
+        div { class: "min-w-[44rem] shrink-0 p-3", aria_busy: true, "data-vmux-loading-surface": "",
             div { class: "flex h-8 items-center gap-2", Skeleton { class: "h-3 w-24" } }
             for row in 0..10 {
                 div { key: "{row}", class: "flex h-11 items-center gap-2.5 px-2",

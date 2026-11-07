@@ -1349,7 +1349,7 @@ fn activate(
     } else {
         HashSet::new()
     };
-    let watch_codex_activity = manager && acp.supports(&SourceKind::Codex.family());
+    let watch_codex_activity = manager;
     let mut sources = if manager {
         available.clone()
     } else {
@@ -1362,7 +1362,7 @@ fn activate(
                 continue;
             };
             let family = AgentFamily::of(agent);
-            if viewed.contains(&entity) && family == codex_family && acp.supports(&family) {
+            if viewed.contains(&entity) && family == codex_family {
                 watch_codex_activity = true;
             }
             let Some(source) = SourceKind::for_family(&family) else {

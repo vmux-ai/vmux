@@ -1,11 +1,5 @@
-use crate::platform::Platform;
-use dioxus::core::Task;
 use dioxus::html::ScrollBehavior;
-use dioxus::html::geometry::PixelsVector2D;
-use dioxus::prelude::{
-    MountedData, ReadableExt, ScrollData, Signal, WritableExt, spawn, use_signal,
-};
-use std::rc::Rc;
+use dioxus::prelude::{ReadableExt, ScrollData, Signal, WritableExt, use_signal};
 
 #[derive(Clone, PartialEq)]
 pub struct Target {
@@ -160,49 +154,6 @@ impl ScrollPreload {
             .client_height()
             .saturating_mul(self.viewports)
             .max(self.minimum)
-    }
-}
-
-#[derive(Clone, Copy, Debug, PartialEq)]
-pub struct PrependScrollAnchor {
-    top: f64,
-    height: f64,
-}
-
-impl PrependScrollAnchor {
-    pub fn capture(event: &ScrollData) -> Self {
-        Self {
-            top: event.scroll_top(),
-            height: f64::from(event.scroll_height()),
-        }
-    }
-
-    pub fn restore(self, element: Rc<MountedData>) -> Task {
-        spawn(async move {
-            let mut previous_height = self.height;
-            let mut stable_frames = 0;
-            let mut changed = false;
-            for _ in 0..8 {
-                Platform::sleep(16).await;
-                let Ok(size) = element.get_scroll_size().await else {
-                    return;
-                };
-                changed |= (size.height - self.height).abs() > 1.0;
-                let top = (self.top + size.height - self.height).max(0.0);
-                let _ = element
-                    .scroll(PixelsVector2D::new(0.0, top), ScrollBehavior::Instant)
-                    .await;
-                if changed && (size.height - previous_height).abs() <= 1.0 {
-                    stable_frames += 1;
-                    if stable_frames >= 2 {
-                        return;
-                    }
-                } else {
-                    stable_frames = 0;
-                }
-                previous_height = size.height;
-            }
-        })
     }
 }
 

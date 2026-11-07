@@ -149,9 +149,7 @@ impl AgentChatTarget {
     fn parse(url: &str) -> Option<Self> {
         match Route::parse(url)? {
             Route::Manager => Some(Self {
-                url: Route::requested_agent(url)
-                    .map(|agent| Route::manager_for_agent(&agent))
-                    .unwrap_or_else(|| Route::Manager.url()),
+                url: Route::manager_url(url).unwrap_or_else(|| Route::Manager.url()),
                 title: translate("sessions-title"),
             }),
             Route::Session(id) => Some(Self {

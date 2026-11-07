@@ -92,9 +92,9 @@ fn CurrentPagePath(url: String) -> Element {
         .map(vmux_path::DisplayPath::project)
         .unwrap_or_else(|| url.clone());
     rsx! {
-        div { class: "mt-0.5 inline-flex max-w-full min-w-0 rounded-md bg-foreground/[0.035] px-1.5 py-0.5 text-[10px] text-muted-foreground", title: url,
-            span { class: "truncate-fade-start min-w-0 flex-1 font-mono",
-                bdi { dir: "ltr", "{label}" }
+        div { class: "mt-0.5 flex w-fit max-w-full min-w-0 rounded-md bg-foreground/[0.035] px-1.5 py-0.5 text-[10px] text-muted-foreground", title: url,
+            span { class: "min-w-0 truncate font-mono", dir: "ltr",
+                "{label}"
             }
         }
     }
