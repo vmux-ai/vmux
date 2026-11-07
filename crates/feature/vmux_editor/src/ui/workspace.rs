@@ -876,7 +876,6 @@ fn EditorWorkspace() -> Element {
             },
 
             PaneWidth {}
-            EditorAddress {}
 
 
         div {
@@ -1838,6 +1837,7 @@ fn EditorHeader(
                 ExplorerToggleButton { pane, mode }
             }
             EditorTabStrip { tabs: editor_tabs }
+            EditorAddress { show_search: mode() == Mode::Dir }
             if find_open {
                 FindBar {
                     query: find_query,

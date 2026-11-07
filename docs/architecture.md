@@ -668,6 +668,8 @@ closes them through their owning state; moving focus between fields leaves them 
 application resignation notification dispatches the same lifecycle to every hosted page, so native
 focus transfers cannot leave a popup behind. Command-bar deactivation never restores keyboard
 focus to a background window.
+Collection and Code search reuse `manager::ManagerSearch` at the top of their sidebars. Code keeps
+its file tabs and view controls in the first page row; search never reserves an empty row above it.
 Session view and category controls live in the page toolbar. Section headings support right-click
 and overflow menus for bulk archive, restore, and folding.
 Activation stamps preserve operation order across shared ancestors even within one clock tick;

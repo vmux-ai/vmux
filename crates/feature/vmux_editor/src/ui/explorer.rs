@@ -9,6 +9,7 @@ use dioxus::prelude::*;
 use vmux_ecs::event::*;
 use vmux_ui::components::button::{Button, ButtonSize, ButtonVariant};
 use vmux_ui::components::dialog::{DialogContent, DialogDescription, DialogRoot, DialogTitle};
+use vmux_ui::components::manager::ManagerSearch;
 use vmux_ui::components::skeleton::Skeleton;
 use vmux_ui::components::tree_row::{
     FILE_TREE_LIST_GROUP, FILE_TREE_ROW_BASE, FILE_TREE_STICKY_SURFACE, TreeRowAccent,
@@ -244,6 +245,11 @@ impl SearchState {
 
     fn clear(self) {
         let _ = send(&ExplorerSearchClear);
+    }
+
+    fn close(self) {
+        self.clear();
+        let _ = send(&ExplorerPanelViewSet { search: false });
     }
 
     fn is_collapsed(self, path: &str) -> bool {
@@ -789,26 +795,15 @@ fn StickyOutlineRow(row: OutlineRow, on_pick: EventHandler<u32>) -> Element {
 }
 
 #[component]
-fn SearchView(view: ReadSignal<SidebarView>) -> Element {
-    let results = FileUi::current().use_value(|state| Some(&state.explorer.explorer_search));
-    let search = SearchState {
-        results: results.into(),
-    };
+fn SearchView(view: ReadSignal<SidebarView>, search: SearchState) -> Element {
     let hit_focus = TreeFocus {
         key: use_signal(String::new),
     };
-    let ime = use_ime_guard();
 
     let active = view().is_search();
     let focused = hit_focus.key.cloned();
     let current = search.results.read().as_ref().cloned().unwrap_or_default();
     let query = current.query.clone();
-    let regex = current.regex;
-    let case_sensitive = current.case_sensitive;
-    let whole_word = current.whole_word;
-    let case_query = query.clone();
-    let whole_query = query.clone();
-    let regex_query = query.clone();
     let mut summary = None;
     let mut root = String::new();
     let mut files = Vec::new();
@@ -834,78 +829,12 @@ fn SearchView(view: ReadSignal<SidebarView>) -> Element {
                     TitleButton {
                         glyph: TitleGlyph::Clear,
                         label: translate("editor-search-clear"),
-                        on_press: move |_| search.clear(),
+                        on_press: move |_| search.close(),
                     }
                     TitleButton {
                         glyph: TitleGlyph::CollapseAll,
                         label: translate("common-collapse-all"),
                         on_press: move |_| search.collapse_all(),
-                    }
-                }
-            }
-            div { class: "shrink-0 px-2 pb-1",
-                div { class: "flex h-7 items-center gap-1 rounded-md bg-foreground/[0.06] px-2 text-foreground/85 ring-1 ring-inset ring-foreground/10 focus-within:ring-primary/50",
-                    input {
-                        id: SEARCH_INPUT_ID,
-                        r#type: "text",
-                        class: "min-w-0 flex-1 bg-transparent font-sans text-[11px] text-foreground outline-none placeholder:text-muted-foreground",
-                        placeholder: translate("editor-find-in-files-placeholder"),
-                        value: "{query}",
-                        oninput: move |event| {
-                            search.draft(event.value(), regex, case_sensitive, whole_word);
-                        },
-                        oncompositionstart: move |_| ime.start(),
-                        oncompositionend: move |_| ime.commit(),
-                        onkeydown: move |event: Event<KeyboardData>| {
-                            event.stop_propagation();
-                            if ime.swallows(&event) {
-                                return;
-                            }
-                            match event.key() {
-                                Key::Enter => {
-                                    event.prevent_default();
-                                    search.run();
-                                }
-                                Key::Escape => {
-                                    event.prevent_default();
-                                    search.clear();
-                                }
-                                _ => {}
-                            }
-                        },
-                    }
-                    SearchToggle {
-                        label: "Aa".to_string(),
-                        hint: translate("editor-find-case"),
-                        on: case_sensitive,
-                        on_press: move |_| search.draft(
-                            case_query.clone(),
-                            regex,
-                            !case_sensitive,
-                            whole_word,
-                        ),
-                    }
-                    SearchToggle {
-                        label: "ab".to_string(),
-                        hint: translate("editor-find-whole-word"),
-                        on: whole_word,
-                        on_press: move |_| search.draft(
-                            whole_query.clone(),
-                            regex,
-                            case_sensitive,
-                            !whole_word,
-                        ),
-                    }
-                    SearchToggle {
-                        label: ".*".to_string(),
-                        hint: translate("editor-find-regex"),
-                        on: regex,
-                        on_press: move |_| search.draft(
-                            regex_query.clone(),
-                            !regex,
-                            case_sensitive,
-                            whole_word,
-                        ),
                     }
                 }
             }
@@ -1086,6 +1015,10 @@ pub fn ExplorerPanel(
     let notice = FileUi::current().use_value(|state| Some(&state.explorer.explorer_notice));
     let panel = FileUi::current().use_value(|state| state.explorer.explorer_panel.as_ref());
     let prompt = FileUi::current().use_value(|state| Some(&state.explorer.explorer_prompt));
+    let results = FileUi::current().use_value(|state| Some(&state.explorer.explorer_search));
+    let search = SearchState {
+        results: results.into(),
+    };
     let root_name = use_memo(move || {
         tree_state
             .read()
@@ -1263,7 +1196,8 @@ pub fn ExplorerPanel(
 
     rsx! {
         div { class: "group/panel relative flex h-full w-full flex-col overflow-hidden bg-background font-sans text-xs text-foreground select-none",
-            SearchView { view }
+            SearchInput { search, view }
+            SearchView { view, search }
             div {
                 class: if view().is_search() {
                     "hidden"
@@ -1691,6 +1625,81 @@ pub fn ExplorerPanel(
                     },
                     "{message}"
                 }
+            }
+        }
+    }
+}
+
+#[component]
+fn SearchInput(search: SearchState, view: ReadSignal<SidebarView>) -> Element {
+    let ime = use_ime_guard();
+    let (query, regex, case_sensitive, whole_word) = {
+        let results = search.results.read();
+        match results.as_ref() {
+            Some(results) => (
+                results.query.clone(),
+                results.regex,
+                results.case_sensitive,
+                results.whole_word,
+            ),
+            None => (String::new(), false, false, false),
+        }
+    };
+    let case_query = query.clone();
+    let whole_query = query.clone();
+    let regex_query = query.clone();
+    rsx! {
+        div {
+            class: "flex h-8 shrink-0 items-center px-2",
+            oncompositionstart: move |_| ime.start(),
+            oncompositionend: move |_| ime.commit(),
+            ManagerSearch {
+                id: Some(SEARCH_INPUT_ID.to_string()),
+                value: query,
+                placeholder: translate("editor-find-in-files-placeholder"),
+                onsearch: move |query: String| {
+                    let searching = !query.trim().is_empty();
+                    search.draft(query, regex, case_sensitive, whole_word);
+                    if searching != view().is_search() {
+                        let _ = send(&ExplorerPanelViewSet { search: searching });
+                    }
+                },
+                onkeydown: move |event: KeyboardEvent| {
+                    if ime.swallows(&event) {
+                        return;
+                    }
+                    match event.key() {
+                        Key::Enter => {
+                            event.prevent_default();
+                            search.run();
+                        }
+                        Key::Escape => {
+                            event.prevent_default();
+                            search.close();
+                        }
+                        _ => {}
+                    }
+                },
+                suffix: rsx! {
+                    SearchToggle {
+                        label: "Aa".to_string(),
+                        hint: translate("editor-find-case"),
+                        on: case_sensitive,
+                        on_press: move |_| search.draft(case_query.clone(), regex, !case_sensitive, whole_word),
+                    }
+                    SearchToggle {
+                        label: "ab".to_string(),
+                        hint: translate("editor-find-whole-word"),
+                        on: whole_word,
+                        on_press: move |_| search.draft(whole_query.clone(), regex, case_sensitive, !whole_word),
+                    }
+                    SearchToggle {
+                        label: ".*".to_string(),
+                        hint: translate("editor-find-regex"),
+                        on: regex,
+                        on_press: move |_| search.draft(regex_query.clone(), !regex, case_sensitive, whole_word),
+                    }
+                },
             }
         }
     }

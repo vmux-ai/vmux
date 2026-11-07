@@ -255,6 +255,7 @@ pub fn ManagerControls(children: Element, #[props(default)] class: String) -> El
 pub fn ManagerSearch(
     value: String,
     placeholder: String,
+    #[props(default)] id: Option<String>,
     #[props(default)] autofocus: bool,
     #[props(default)] minimal: bool,
     #[props(default)] onsearch: Option<EventHandler<String>>,
@@ -289,6 +290,7 @@ pub fn ManagerSearch(
             }
             {prefix}
             input {
+                id,
                 r#type: "search",
                 class: "h-full min-w-0 flex-1 bg-transparent text-[11px] text-foreground outline-none placeholder:text-muted-foreground/55",
                 placeholder,
