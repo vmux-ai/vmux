@@ -279,10 +279,11 @@ pub fn ManagerSearch(
             task.cancel();
         }
     });
-    let class = if minimal {
-        "group/manager-search relative z-30 flex h-7 min-w-0 flex-1 items-center gap-1.5 px-0.5"
+    let class = "group/manager-search relative z-30 flex h-7 min-w-0 flex-1 items-center gap-1.5";
+    let input_class = if minimal {
+        "h-full w-24 min-w-0 flex-[0_1_auto] bg-transparent text-[11px] text-foreground outline-none transition-[width,flex-grow] duration-100 ease-out placeholder:text-muted-foreground/55 group-focus-within/manager-search:w-full group-focus-within/manager-search:grow group-data-[vmux-search-active=true]/manager-search:w-full group-data-[vmux-search-active=true]/manager-search:grow motion-reduce:transition-none"
     } else {
-        "group/manager-search relative z-30 flex h-7 min-w-0 flex-1 items-center gap-1.5 px-2.5"
+        "h-full w-full min-w-0 flex-1 bg-transparent text-ui text-foreground outline-none placeholder:text-muted-foreground/55"
     };
     rsx! {
         div { class, "data-vmux-search-active": if draft().is_empty() { "false" } else { "true" },
@@ -297,7 +298,7 @@ pub fn ManagerSearch(
                 input {
                     id,
                     r#type: "search",
-                    class: "h-full w-24 min-w-0 flex-[0_1_auto] bg-transparent text-[11px] text-foreground outline-none transition-[width,flex-grow] duration-100 ease-out placeholder:text-muted-foreground/55 group-focus-within/manager-search:w-full group-focus-within/manager-search:grow group-data-[vmux-search-active=true]/manager-search:w-full group-data-[vmux-search-active=true]/manager-search:grow motion-reduce:transition-none",
+                    class: input_class,
                     aria_label: placeholder.clone(),
                     placeholder,
                     value: draft(),

@@ -672,7 +672,9 @@ focus transfers cannot leave a popup behind. Command-bar deactivation never rest
 focus to a background window.
 Collection and Code search reuse `manager::ManagerSearch` at the top of their sidebars. Code keeps
 its file tabs and view controls in the first page row; search never reserves an empty row above it.
-Search has no surrounding field frame and expands within its fixed row when focused. File-list
+Search has no surrounding field frame and fills its reserved sidebar row. Code keeps regex and
+matching options in a menu, and root-folder headings own the Explorer hover controls. Markdown
+outlines publish after document metadata, so a navigation reset cannot discard newly parsed headings. File-list
 placeholders retain the real 22 px row height with file outlines and short name bars. Rendered-note
 carets share a thin, font-sized style without a surrounding shadow.
 Note editing keeps the rendered block in normal flow and centers the source overlay inside that

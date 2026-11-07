@@ -9,6 +9,7 @@ use dioxus::prelude::*;
 use vmux_ecs::event::*;
 use vmux_ui::components::button::{Button, ButtonSize, ButtonVariant};
 use vmux_ui::components::dialog::{DialogContent, DialogDescription, DialogRoot, DialogTitle};
+use vmux_ui::components::dropdown::{Dropdown, DropdownAlign, DropdownOption, DropdownPopup};
 use vmux_ui::components::manager::ManagerSearch;
 use vmux_ui::components::skeleton::Skeleton;
 use vmux_ui::components::tree_row::{
@@ -18,6 +19,7 @@ use vmux_ui::file_icon::TypeIcon;
 use vmux_ui::focus::FocusClaim;
 use vmux_ui::hooks::send;
 use vmux_ui::i18n::{TranslationValue, translate, translate_with};
+use vmux_ui::icon::{LineIcon, LineIconView};
 use vmux_ui::ime::use_ime_guard;
 use vmux_ui::platform::Platform;
 use vmux_ui::scroll::ScrollIntoView;
@@ -644,13 +646,19 @@ fn Chevron(expanded: bool, loading: bool) -> Element {
 }
 
 #[component]
-fn SectionHeader(title: String, open: bool, on_toggle: EventHandler<()>) -> Element {
+fn SectionHeader(
+    title: String,
+    open: bool,
+    on_toggle: EventHandler<()>,
+    #[props(default = rsx! {})] trailing: Element,
+) -> Element {
     rsx! {
         div {
-            class: "flex items-center gap-1 px-2 py-1 cursor-default text-[11px] font-bold uppercase tracking-wide text-foreground/70 transition-colors hover:text-foreground",
+            class: "group/section flex h-7 items-center gap-1 px-3 cursor-default text-[11px] font-bold uppercase tracking-wide text-foreground/70 transition-colors hover:text-foreground",
             onclick: move |_| on_toggle.call(()),
             Chevron { expanded: open, loading: false }
-            span { class: "truncate", "{title}" }
+            span { class: "min-w-0 flex-1 truncate", "{title}" }
+            {trailing}
         }
     }
 }
@@ -969,26 +977,6 @@ fn SearchHitRow(
     }
 }
 
-#[component]
-fn SearchToggle(label: String, hint: String, on: bool, on_press: EventHandler<()>) -> Element {
-    rsx! {
-        button {
-            r#type: "button",
-            class: if on {
-                "shrink-0 rounded bg-foreground/15 px-1 font-mono text-[10px] text-foreground"
-            } else {
-                "shrink-0 rounded px-1 font-mono text-[10px] text-foreground/50 hover:bg-foreground/10 hover:text-foreground"
-            },
-            title: "{hint}",
-            onclick: move |event: Event<MouseData>| {
-                event.stop_propagation();
-                on_press.call(());
-            },
-            "{label}"
-        }
-    }
-}
-
 fn localize_notice(message: &str) -> String {
     for (prefix, id) in [
         ("Created folder ", "editor-created-folder"),
@@ -1202,43 +1190,6 @@ pub fn ExplorerPanel(
                 class: if view().is_search() {
                     "hidden"
                 } else {
-                    "flex h-9 shrink-0 items-center gap-1.5 pl-2 pr-2 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground"
-                },
-                span { class: "truncate", {SidebarView::Explorer.title()} }
-                div {
-                    class: "pointer-events-none ml-auto flex shrink-0 items-center gap-0.5 opacity-0 transition-opacity duration-100 focus-within:pointer-events-auto focus-within:opacity-100 group-hover/panel:pointer-events-auto group-hover/panel:opacity-100",
-                    TitleButton {
-                        glyph: TitleGlyph::NewFile,
-                        label: translate("editor-new-file"),
-                        on_press: move |_| {
-                            let focus = tree_focus.key.peek().clone();
-                            let _ = send(&ExplorerCreateFilePromptRequest { path: focus });
-                        },
-                    }
-                    TitleButton {
-                        glyph: TitleGlyph::NewFolder,
-                        label: translate("editor-new-folder"),
-                        on_press: move |_| {
-                            let focus = tree_focus.key.peek().clone();
-                            let _ = send(&ExplorerCreateDirectoryPromptRequest { path: focus });
-                        },
-                    }
-                    TitleButton {
-                        glyph: TitleGlyph::Refresh,
-                        label: translate("common-refresh"),
-                        on_press: move |_| tree.refresh(root_path()),
-                    }
-                    TitleButton {
-                        glyph: TitleGlyph::CollapseAll,
-                        label: translate("common-collapse-all"),
-                        on_press: move |_| tree.collapse_all(),
-                    }
-                }
-            }
-            div {
-                class: if view().is_search() {
-                    "hidden"
-                } else {
                     "group/tree min-h-0 flex-1 overflow-y-auto pb-4"
                 },
                 onmounted: move |event: Event<MountedData>| {
@@ -1274,6 +1225,37 @@ pub fn ExplorerPanel(
                         on_toggle: EventHandler::new(move |_| {
                             let _ = send(&ExplorerFilesToggle);
                         }),
+                        trailing: rsx! {
+                            div {
+                                class: "pointer-events-none ml-auto flex shrink-0 items-center gap-0.5 opacity-0 transition-opacity duration-100 focus-within:pointer-events-auto focus-within:opacity-100 group-hover/section:pointer-events-auto group-hover/section:opacity-100",
+                                TitleButton {
+                                    glyph: TitleGlyph::NewFile,
+                                    label: translate("editor-new-file"),
+                                    on_press: move |_| {
+                                        let focus = tree_focus.key.peek().clone();
+                                        let _ = send(&ExplorerCreateFilePromptRequest { path: focus });
+                                    },
+                                }
+                                TitleButton {
+                                    glyph: TitleGlyph::NewFolder,
+                                    label: translate("editor-new-folder"),
+                                    on_press: move |_| {
+                            let focus = tree_focus.key.peek().clone();
+                            let _ = send(&ExplorerCreateDirectoryPromptRequest { path: focus });
+                                    },
+                                }
+                                TitleButton {
+                                    glyph: TitleGlyph::Refresh,
+                                    label: translate("common-refresh"),
+                                    on_press: move |_| tree.refresh(root_path()),
+                                }
+                                TitleButton {
+                                    glyph: TitleGlyph::CollapseAll,
+                                    label: translate("common-collapse-all"),
+                                    on_press: move |_| tree.collapse_all(),
+                                }
+                            }
+                        },
                     }
                 }
                 StickyFolders {
@@ -1645,9 +1627,6 @@ fn SearchInput(search: SearchState, view: ReadSignal<SidebarView>) -> Element {
             None => (String::new(), false, false, false),
         }
     };
-    let case_query = query.clone();
-    let whole_query = query.clone();
-    let regex_query = query.clone();
     rsx! {
         div {
             class: "flex h-8 shrink-0 items-center px-3",
@@ -1680,26 +1659,65 @@ fn SearchInput(search: SearchState, view: ReadSignal<SidebarView>) -> Element {
                         _ => {}
                     }
                 },
-                suffix: rsx! {
-                    SearchToggle {
-                        label: "Aa".to_string(),
-                        hint: translate("editor-find-case"),
-                        on: case_sensitive,
-                        on_press: move |_| search.draft(case_query.clone(), regex, !case_sensitive, whole_word),
+                suffix: rsx! { SearchOptions { search } },
+            }
+        }
+    }
+}
+
+#[component]
+fn SearchOptions(search: SearchState) -> Element {
+    let mut open = use_signal(|| false);
+    let (query, regex, case_sensitive, whole_word) = {
+        let results = search.results.read();
+        match results.as_ref() {
+            Some(results) => (
+                results.query.clone(),
+                results.regex,
+                results.case_sensitive,
+                results.whole_word,
+            ),
+            None => (String::new(), false, false, false),
+        }
+    };
+    let case_query = query.clone();
+    let whole_query = query.clone();
+    let active = regex || case_sensitive || whole_word;
+    rsx! {
+        Dropdown {
+            open: open(),
+            keyboard_navigation: true,
+            on_dismiss: move |_| open.set(false),
+            Button {
+                aria_label: translate("common-filter"),
+                aria_haspopup: "menu",
+                aria_expanded: open(),
+                "data-vmux-dropdown-trigger": "true",
+                size: ButtonSize::Icon,
+                variant: ButtonVariant::Ghost,
+                class: if active { "size-5 text-primary" } else { "size-5" },
+                onmousedown: move |event: MouseEvent| event.prevent_default(),
+                onclick: move |_| open.set(!open()),
+                LineIconView { icon: LineIcon::Ellipsis, class: "size-3.5" }
+            }
+            if open() {
+                DropdownPopup { align: DropdownAlign::End, class: "min-w-44 p-1",
+                    DropdownOption {
+                        label: translate("editor-find-case"), selected: case_sensitive,
+                        onclick: move |_| search.draft(case_query.clone(), regex, !case_sensitive, whole_word),
+                        trailing: rsx! { if case_sensitive { LineIconView { icon: LineIcon::Check, class: "size-3" } } },
                     }
-                    SearchToggle {
-                        label: "ab".to_string(),
-                        hint: translate("editor-find-whole-word"),
-                        on: whole_word,
-                        on_press: move |_| search.draft(whole_query.clone(), regex, case_sensitive, !whole_word),
+                    DropdownOption {
+                        label: translate("editor-find-whole-word"), selected: whole_word,
+                        onclick: move |_| search.draft(whole_query.clone(), regex, case_sensitive, !whole_word),
+                        trailing: rsx! { if whole_word { LineIconView { icon: LineIcon::Check, class: "size-3" } } },
                     }
-                    SearchToggle {
-                        label: ".*".to_string(),
-                        hint: translate("editor-find-regex"),
-                        on: regex,
-                        on_press: move |_| search.draft(regex_query.clone(), !regex, case_sensitive, whole_word),
+                    DropdownOption {
+                        label: translate("editor-find-regex"), selected: regex,
+                        onclick: move |_| search.draft(query.clone(), !regex, case_sensitive, whole_word),
+                        trailing: rsx! { if regex { LineIconView { icon: LineIcon::Check, class: "size-3" } } },
                     }
-                },
+                }
             }
         }
     }
