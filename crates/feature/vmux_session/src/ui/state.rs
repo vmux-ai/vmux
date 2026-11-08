@@ -718,14 +718,14 @@ impl Transcript {
     }
 
     pub(super) fn note_scroll_input(self) {
-        self.stop_following();
-    }
-
-    fn stop_following(self) {
         if *self.initial_follow.peek() {
             let mut initial_follow = self.initial_follow;
             initial_follow.set(false);
         }
+    }
+
+    fn stop_following(self) {
+        self.note_scroll_input();
         if *self.at_bottom.peek() {
             let mut at_bottom = self.at_bottom;
             at_bottom.set(false);

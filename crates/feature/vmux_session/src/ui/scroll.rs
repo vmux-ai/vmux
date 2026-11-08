@@ -74,7 +74,32 @@ mod tests {
             assert!(*transcript.at_bottom.peek());
             transcript.note_scroll_input();
             assert!(!*transcript.initial_follow.peek());
+            assert!(*transcript.at_bottom.peek());
+        });
+    }
+
+    #[test]
+    fn input_at_bottom_keeps_following_until_scrolled_away_and_resumes_on_return() {
+        let probe = Rc::new(RefCell::new(None));
+        let mut dom = VirtualDom::new_with_props(
+            InitialTranscript,
+            InitialTranscriptProps {
+                probe: probe.clone(),
+            },
+        );
+        dom.rebuild_to_vec();
+        let (mut root, transcript) = probe.borrow().unwrap();
+        dom.runtime().in_scope(ScopeId::ROOT, || {
+            root.write().snapshot.transcript_loading = false;
+            transcript.observe_scroll(900, 0, 800);
+            transcript.note_scroll_input();
+            assert!(*transcript.at_bottom.peek());
+            transcript.observe_scroll(895, 5, 800);
             assert!(!*transcript.at_bottom.peek());
+            transcript.observe_scroll(900, 0, 800);
+            assert!(*transcript.at_bottom.peek());
+            transcript.note_scroll_input();
+            assert!(*transcript.at_bottom.peek());
         });
     }
 

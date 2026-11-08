@@ -1382,8 +1382,10 @@ their loading state to the ACP protocol; they read and complete only their own p
 History loading starts and finishes publish a fresh chat snapshot independently of message
 changes, so empty or unchanged replays still release the conversation skeleton.
 Initial and pending bottom scrolls retain their follow state through layout-driven offset changes.
-Manual wheel, touch, or scroll-key input can pause following; older history is requested only after
-the initial scroll has settled.
+Scrolling away from the bottom pauses following; input that leaves the viewport at the bottom
+keeps it pinned, and returning to the bottom resumes it. Older history is requested only after
+the initial scroll has settled. The latest tool batch stays expanded until every call has a result
+and subsequent assistant text arrives; earlier batches remain folded.
 The Session manager publishes only to its active page and leases Git metadata for every displayed
 repository while that page remains active.
 Its first discovery reserves a skeleton in one persistent scroll surface until rows are available.

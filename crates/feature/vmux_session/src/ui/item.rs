@@ -1,8 +1,9 @@
 use std::cell::RefCell;
+use std::collections::HashSet;
 
 use dioxus::prelude::*;
 use vmux_api::chat::{
-    ChatDiffLineKind, ChatItem, ChatPlanStatus, ChatSubagentState, ChatSubagentStatus,
+    ChatBlock, ChatDiffLineKind, ChatItem, ChatPlanStatus, ChatSubagentState, ChatSubagentStatus,
     ChatSubagentSummary, ChatToolArgument, ChatToolArgumentValue, ChatToolArguments, ChatToolCall,
     ChatToolChild, ChatToolChildCall, ChatTurn, ChatTurnRow, WORKING_VERB_IDS,
 };
@@ -173,6 +174,7 @@ pub fn ChatItemRow(
     user_name: String,
     user_color: String,
     on_media_load: EventHandler<()>,
+    #[props(default)] latest: bool,
 ) -> Element {
     let key = absolute_index;
     let item = &item;
@@ -231,6 +233,7 @@ pub fn ChatItemRow(
                 agent_name,
                 agent_avatar,
                 agent_color,
+                latest,
             }
         },
     }
@@ -266,6 +269,140 @@ fn UserAttachment(attachment: ChatAttachment, onload: EventHandler<()>) -> Eleme
     }
 }
 
+struct ToolDisclosure<'a> {
+    turn: &'a ChatTurn,
+    latest: bool,
+    last_text: Option<usize>,
+    completed: HashSet<&'a str>,
+}
+
+#[cfg(test)]
+mod disclosure_tests {
+    use super::*;
+
+    #[component]
+    fn ToolBatch(first_done: bool, second_done: bool, text: bool, latest: bool) -> Element {
+        let mut blocks = Vec::new();
+        let mut calls = Vec::new();
+        for (index, call_id) in ["first", "second"].into_iter().enumerate() {
+            blocks.push(ChatBlock::ToolUse {
+                call_id: call_id.into(),
+                name: "read_file".into(),
+                args: "{}".into(),
+                parent_call_id: None,
+            });
+            calls.push(ChatToolCall {
+                index: index as u32,
+                name: "read_file".into(),
+                fallback_label: call_id.into(),
+                ..Default::default()
+            });
+        }
+        for (done, call_id) in [(first_done, "first"), (second_done, "second")] {
+            if done {
+                blocks.push(ChatBlock::ToolResult {
+                    call_id: call_id.into(),
+                    content: "done".into(),
+                    is_error: false,
+                });
+            }
+        }
+        let mut rows = vec![ChatTurnRow::FinishedTools { index: 0, calls }];
+        if text {
+            rows.push(ChatTurnRow::Text {
+                index: blocks.len() as u32,
+                text: "Continue".into(),
+            });
+            blocks.push(ChatBlock::Text("Continue".into()));
+        }
+        rsx! {
+            TurnView {
+                turn_index: 0,
+                turn: ChatTurn { blocks, rows, ..Default::default() },
+                agent_id: "codex", agent_name: "Codex",
+                agent_avatar: None, agent_color: String::new(), latest,
+            }
+        }
+    }
+
+    #[test]
+    fn latest_tool_batch_stays_open_until_all_results_and_the_following_text_arrive() {
+        for (first_done, second_done, text, latest, open) in [
+            (false, false, false, true, true),
+            (true, true, false, true, true),
+            (true, false, true, true, true),
+            (true, true, true, true, false),
+            (false, false, false, false, false),
+        ] {
+            let mut dom = VirtualDom::new_with_props(
+                ToolBatch,
+                ToolBatchProps {
+                    first_done,
+                    second_done,
+                    text,
+                    latest,
+                },
+            );
+            dom.rebuild_in_place();
+            let html = dioxus_ssr::render(&dom);
+            let disclosure = html
+                .split("<details")
+                .nth(1)
+                .unwrap()
+                .split('>')
+                .next()
+                .unwrap();
+            assert_eq!(disclosure.contains(" open"), open, "{html}");
+        }
+    }
+}
+
+impl<'a> ToolDisclosure<'a> {
+    fn new(turn: &'a ChatTurn, latest: bool) -> Self {
+        let mut last_text = None;
+        let mut completed = HashSet::new();
+        for (index, block) in turn.blocks.iter().enumerate() {
+            match block {
+                ChatBlock::Text(text) if !text.trim().is_empty() => last_text = Some(index),
+                ChatBlock::ToolResult { call_id, .. } => {
+                    completed.insert(call_id.as_str());
+                }
+                _ => {}
+            }
+        }
+        Self {
+            turn,
+            latest,
+            last_text,
+            completed,
+        }
+    }
+
+    fn expanded(&self, row: &ChatTurnRow) -> bool {
+        if !self.latest {
+            return false;
+        }
+        let ChatTurnRow::FinishedTools { calls, .. } = row else {
+            return false;
+        };
+        for call in calls {
+            if self
+                .last_text
+                .is_none_or(|index| call.index as usize > index)
+            {
+                return true;
+            }
+            if let Some(ChatBlock::ToolUse { call_id, .. }) =
+                self.turn.blocks.get(call.index as usize)
+                && !self.completed.contains(call_id.as_str())
+            {
+                return true;
+            }
+        }
+        false
+    }
+}
+
 #[component]
 pub fn TurnView(
     turn_index: usize,
@@ -274,9 +411,11 @@ pub fn TurnView(
     agent_name: String,
     agent_avatar: Option<String>,
     agent_color: String,
+    #[props(default)] latest: bool,
 ) -> Element {
     let key = turn_index;
     let turn = &turn;
+    let tools = ToolDisclosure::new(turn, latest);
     let reconnecting = matches!(turn.rows.last(), Some(ChatTurnRow::Reconnect { .. }));
     let live_text_index = turn
         .running
@@ -331,7 +470,7 @@ pub fn TurnView(
                         TurnBlock {
                             key: "{row.index()}",
                             streaming: live_text_index == Some(row.index()),
-                            expanded: false,
+                            expanded: tools.expanded(&row),
                             row,
                         }
                     }

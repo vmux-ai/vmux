@@ -346,7 +346,19 @@ pub(crate) const WRY_HOST_SHIM: &str = r#"
         ? new ResizeObserver(() => this.schedule())
         : null;
       this.observer?.observe(element);
-      const cancel = () => { this.cancelled = true; };
+      const cancel = () => {
+        const top = element.scrollTop;
+        const atBottom = element.scrollHeight - element.clientHeight - top <= 0.5;
+        this.cancelled = true;
+        requestAnimationFrame(() => {
+          if (this.disposed || !element.isConnected) return;
+          const remainedAtBottom = atBottom && element.scrollTop >= top - 0.5;
+          const reachedBottom = element.scrollHeight - element.clientHeight - element.scrollTop <= 0.5;
+          if (!remainedAtBottom && !reachedBottom) return;
+          this.cancelled = false;
+          this.schedule();
+        });
+      };
       for (const event of ['wheel', 'touchmove']) {
         element.addEventListener?.(event, cancel, { passive: true });
       }

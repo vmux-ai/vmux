@@ -58,6 +58,7 @@ pub(super) fn ChatTranscript(chat: Chat) -> Element {
     let loaded_start = transcript.loaded_start;
     let history_loading = transcript.loading;
     let items = transcript.items;
+    let item_count = items.len();
     let initial_scroll = chat.transcript.initial_scroll();
     let placement_pending = !transcript_loading && !items.is_empty() && initial_scroll.is_empty();
     let handoff_source = chat.handoff.source();
@@ -130,6 +131,7 @@ pub(super) fn ChatTranscript(chat: Chat) -> Element {
                                 agent_color: agent_color.clone(),
                                 user_name: user_name.clone(),
                                 user_color: user_color.clone(),
+                                latest: i + 1 == item_count,
                                 on_media_load: move |_| {
                                     if *at_bottom.peek() {
                                         chat.transcript.follow();
