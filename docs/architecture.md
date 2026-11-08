@@ -597,6 +597,8 @@ instead of feature-specific loading gates.
 Live UI-state frames apply patches in place. Unconsumed increments remain queued across later
 frames until their component processes them; constructing a retained cache snapshot is a separate
 operation. A controller or catalog update therefore cannot discard diff chunks awaiting a render.
+Project catalog workers retain their result until the matching initial detail state exists, so a
+fast first-frame completion cannot discard the breadcrumb's project choices.
 
 DOM delivery and presentation are separate acknowledgements. Delivery releases the next edit
 batch. Layout, selection, focus and routing respond in the input frame; background data, fonts

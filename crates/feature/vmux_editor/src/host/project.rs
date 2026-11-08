@@ -948,13 +948,25 @@ fn finish_catalogs(
     mut commands: Commands,
 ) {
     for (entity, mut task, page, revision) in &mut tasks {
+        if !ProjectRoute::is_page(&page.url) || revision.value != task.revision {
+            commands.entity(entity).remove::<ProjectCatalogTask>();
+            continue;
+        }
+        if !ProjectRoute::is_root(&page.url) {
+            let Ok(current) = states.get(entity) else {
+                continue;
+            };
+            let Some(current) = current.current() else {
+                continue;
+            };
+            if !matches!(&current.view, ProjectView::Detail(detail) if detail.id.0 == page.url) {
+                continue;
+            }
+        }
         let Some(state) = future::block_on(future::poll_once(&mut task.task)) else {
             continue;
         };
         commands.entity(entity).remove::<ProjectCatalogTask>();
-        if !ProjectRoute::is_page(&page.url) || revision.value != task.revision {
-            continue;
-        }
         let mut state = if ProjectRoute::is_root(&page.url) {
             ProjectCatalog::with_session_counts(state, &catalog)
         } else {
@@ -1375,6 +1387,62 @@ mod tests {
         std::fs::create_dir_all(root.path().join("two/.git")).unwrap();
         let mut page = ProjectPage::at(root.path(), "vmux://projects/one");
         page.wait_for_choices();
+        let state = page
+            .app
+            .world()
+            .get::<vmux_ecs::UiState<ProjectUiState>>(page.view)
+            .and_then(vmux_ecs::UiState::current)
+            .unwrap();
+        let ProjectView::Detail(detail) = &state.view else {
+            panic!("catalog completion must retain the selected project");
+        };
+        assert_eq!(detail.id.0, "vmux://projects/one");
+        assert_eq!(
+            detail
+                .choices
+                .iter()
+                .map(|entry| entry.url.as_str())
+                .collect::<Vec<_>>(),
+            ["vmux://projects/one", "vmux://projects/two"]
+        );
+    }
+
+    #[test]
+    fn catalog_completion_before_the_initial_detail_state_is_retained() {
+        let root = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(root.path().join("one/.git")).unwrap();
+        std::fs::create_dir_all(root.path().join("two/.git")).unwrap();
+        let mut page = ProjectPage::at(root.path(), "vmux://projects/one");
+        page.app
+            .world_mut()
+            .get_mut::<bevy_cef::prelude::BinIpcEpoch>(page.view)
+            .unwrap()
+            .0 = 0;
+        page.app.update();
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(3);
+        loop {
+            let task = page
+                .app
+                .world()
+                .get::<ProjectCatalogTask>(page.view)
+                .expect("catalog result must survive the initial state publication");
+            if task.task.is_finished() {
+                break;
+            }
+            assert!(std::time::Instant::now() < deadline);
+            std::thread::sleep(std::time::Duration::from_millis(1));
+        }
+        page.app
+            .world_mut()
+            .get_mut::<bevy_cef::prelude::BinIpcEpoch>(page.view)
+            .unwrap()
+            .0 = 1;
+        page.app.world_mut().trigger(UiInput {
+            webview: page.view,
+            payload: vmux_api::PageReady,
+        });
+        page.wait_for_choices();
+
         let state = page
             .app
             .world()
