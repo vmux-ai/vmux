@@ -32,6 +32,8 @@ pub enum BuiltinIcon {
     Search,
     Globe,
     Archive,
+    GitCommit,
+    Branch,
 }
 
 impl BuiltinIcon {

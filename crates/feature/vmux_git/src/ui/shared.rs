@@ -733,6 +733,7 @@ pub fn DiffView(
                                                 start,
                                                 end,
                                                 total: total_rows,
+                                                gutter_width: gw,
                                             }
                                         },
                                     }
@@ -1764,7 +1765,14 @@ impl DiffGapRange {
 }
 
 #[component]
-fn DiffGap(generation: u64, revision: u64, start: u32, end: u32, total: u32) -> Element {
+fn DiffGap(
+    generation: u64,
+    revision: u64,
+    start: u32,
+    end: u32,
+    total: u32,
+    gutter_width: usize,
+) -> Element {
     let range = DiffGapRange { start, end, total };
     let hidden = range.hidden();
     let chunk = range.chunk();
@@ -1775,66 +1783,74 @@ fn DiffGap(generation: u64, revision: u64, start: u32, end: u32, total: u32) -> 
         &[("count", TranslationValue::Number(hidden as i64))],
     );
     rsx! {
-        div { class: "flex min-w-full items-center border-y border-foreground/[0.055] bg-foreground/[0.018] px-3 py-1 font-sans",
-            div { class: "h-px min-w-4 flex-1 bg-foreground/[0.06]" }
-            div { class: "mx-2 flex shrink-0 items-center gap-1",
-                if let Some((start, end)) = previous {
-                    Button {
-                        variant: ButtonVariant::Ghost,
-                        class: "h-6 shrink-0 gap-1 rounded-md border border-foreground/[0.08] bg-background/70 px-2 text-[10px] text-muted-foreground hover:bg-foreground/[0.055] hover:text-foreground",
-                        title: translate_with(
-                            "git-show-previous-lines",
-                            &[("count", TranslationValue::Number(chunk as i64))],
-                        ),
-                        onclick: move |_| {
-                            let _ = send(&GitDiffRevealRequest {
-                                generation,
-                                revision,
-                                start,
-                                end,
-                            });
-                        },
-                        LineIconView { icon: LineIcon::ArrowUp, class: "size-3" }
-                        "{chunk}"
-                    }
-                }
-                Button {
-                    variant: ButtonVariant::Ghost,
-                    class: "h-6 shrink-0 gap-1.5 rounded-md border border-foreground/[0.08] bg-background/70 px-3 text-[10px] text-muted-foreground hover:bg-foreground/[0.055] hover:text-foreground",
-                    title: show_all.clone(),
-                    onclick: move |_| {
-                        let _ = send(&GitDiffRevealRequest {
-                            generation,
-                            revision,
-                            start,
-                            end,
-                        });
-                    },
-                    span { "⋯" }
-                    span { "{show_all}" }
-                }
+        div { class: "flex h-[34px] min-w-full items-stretch bg-git-hunk text-git-hunk-foreground",
+            div {
+                class: "flex shrink-0 flex-col bg-git-hunk-gutter",
+                style: "width:calc(var(--cw, 1ch) * {gutter_width} * 2 + 3.5rem);",
                 if let Some((start, end)) = next {
-                    Button {
-                        variant: ButtonVariant::Ghost,
-                        class: "h-6 shrink-0 gap-1 rounded-md border border-foreground/[0.08] bg-background/70 px-2 text-[10px] text-muted-foreground hover:bg-foreground/[0.055] hover:text-foreground",
-                        title: translate_with(
+                    DiffGapButton {
+                        generation, revision, start, end,
+                        icon: LineIcon::ArrowDown,
+                        label: translate_with(
                             "git-show-next-lines",
                             &[("count", TranslationValue::Number(chunk as i64))],
                         ),
-                        onclick: move |_| {
-                            let _ = send(&GitDiffRevealRequest {
-                                generation,
-                                revision,
-                                start,
-                                end,
-                            });
-                        },
-                        "{chunk}"
-                        LineIconView { icon: LineIcon::ArrowDown, class: "size-3" }
                     }
                 }
+                if let Some((start, end)) = previous {
+                    DiffGapButton {
+                        generation, revision, start, end,
+                        icon: LineIcon::ArrowUp,
+                        label: translate_with(
+                            "git-show-previous-lines",
+                            &[("count", TranslationValue::Number(chunk as i64))],
+                        ),
+                    }
+                }
+                if previous.is_none() && next.is_none() {
+                    DiffGapButton { generation, revision, start, end, icon: LineIcon::ChevronsUpDown, label: show_all.clone() }
+                }
             }
-            div { class: "h-px min-w-4 flex-1 bg-foreground/[0.06]" }
+            button {
+                r#type: "button",
+                class: "flex min-w-0 flex-1 items-center gap-2 bg-transparent px-2 text-left font-mono text-[11px] text-git-hunk-foreground outline-none transition-colors hover:bg-git-hunk-gutter/30 focus-visible:bg-git-hunk-gutter/40",
+                aria_label: show_all.clone(),
+                title: show_all.clone(),
+                onclick: move |_| {
+                    let _ = send(&GitDiffRevealRequest { generation, revision, start, end });
+                },
+                span { class: "shrink-0 opacity-70", "⋯" }
+                span { "{show_all}" }
+            }
+        }
+    }
+}
+
+#[component]
+fn DiffGapButton(
+    generation: u64,
+    revision: u64,
+    start: u32,
+    end: u32,
+    icon: LineIcon,
+    label: String,
+) -> Element {
+    rsx! {
+        button {
+            r#type: "button",
+            class: "flex min-h-0 w-full flex-1 flex-col items-center justify-center bg-transparent text-git-hunk-foreground outline-none transition-colors hover:bg-git-hunk-foreground/15 focus-visible:bg-git-hunk-foreground/20",
+            aria_label: label.clone(),
+            title: label,
+            onclick: move |_| {
+                let _ = send(&GitDiffRevealRequest { generation, revision, start, end });
+            },
+            if icon == LineIcon::ArrowDown {
+                span { class: "h-1 text-[8px] leading-none", "⋯" }
+            }
+            LineIconView { icon, class: "size-2.5 shrink-0" }
+            if icon == LineIcon::ArrowUp {
+                span { class: "h-1 text-[8px] leading-none", "⋯" }
+            }
         }
     }
 }

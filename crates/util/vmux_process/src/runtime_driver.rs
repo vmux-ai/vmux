@@ -34,6 +34,7 @@ struct ProcessRequestSenders {
     create: mpsc::UnboundedSender<CreateRequest>,
     subscribe: mpsc::UnboundedSender<SubscribeRequest>,
     input: mpsc::UnboundedSender<InputRequest>,
+    directory: mpsc::UnboundedSender<DirectoryRequest>,
     mouse_wheel: mpsc::UnboundedSender<MouseWheelRequest>,
     scroll_window: mpsc::UnboundedSender<ScrollWindowRequest>,
     resize: mpsc::UnboundedSender<ResizeRequest>,
@@ -63,6 +64,7 @@ struct ProcessRequestInboxes {
     create: RuntimeInbox<CreateRequest>,
     subscribe: RuntimeInbox<SubscribeRequest>,
     input: RuntimeInbox<InputRequest>,
+    directory: RuntimeInbox<DirectoryRequest>,
     mouse_wheel: RuntimeInbox<MouseWheelRequest>,
     scroll_window: RuntimeInbox<ScrollWindowRequest>,
     resize: RuntimeInbox<ResizeRequest>,
@@ -92,6 +94,7 @@ impl ProcessRuntime {
         let (create, create_inbox) = RuntimeInbox::channel();
         let (subscribe, subscribe_inbox) = RuntimeInbox::channel();
         let (input, input_inbox) = RuntimeInbox::channel();
+        let (directory, directory_inbox) = RuntimeInbox::channel();
         let (mouse_wheel, mouse_wheel_inbox) = RuntimeInbox::channel();
         let (scroll_window, scroll_window_inbox) = RuntimeInbox::channel();
         let (resize, resize_inbox) = RuntimeInbox::channel();
@@ -120,6 +123,7 @@ impl ProcessRuntime {
                     create,
                     subscribe,
                     input,
+                    directory,
                     mouse_wheel,
                     scroll_window,
                     resize,
@@ -151,6 +155,7 @@ impl ProcessRuntime {
                     create: create_inbox,
                     subscribe: subscribe_inbox,
                     input: input_inbox,
+                    directory: directory_inbox,
                     mouse_wheel: mouse_wheel_inbox,
                     scroll_window: scroll_window_inbox,
                     resize: resize_inbox,
@@ -201,6 +206,21 @@ impl ProcessRuntime {
         self.request(&self.requests.input, |reply| InputRequest {
             process_id,
             data,
+            reply,
+        })
+        .await?
+    }
+
+    pub async fn change_directory(
+        &self,
+        process_id: ProcessId,
+        cwd: String,
+        path: String,
+    ) -> Result<(), String> {
+        self.request(&self.requests.directory, |reply| DirectoryRequest {
+            process_id,
+            cwd,
+            path,
             reply,
         })
         .await?
@@ -587,4 +607,11 @@ pub(crate) struct RunCompletionRequest {
 pub(crate) struct ExitCodeRequest {
     pub(crate) process_id: ProcessId,
     pub(crate) reply: oneshot::Sender<Result<Option<i32>, String>>,
+}
+
+pub(crate) struct DirectoryRequest {
+    pub(crate) process_id: ProcessId,
+    pub(crate) cwd: String,
+    pub(crate) path: String,
+    pub(crate) reply: oneshot::Sender<Result<(), String>>,
 }

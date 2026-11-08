@@ -169,69 +169,6 @@ impl AddressSource {
                 ..Default::default()
             });
         }
-        if !root.is_empty() {
-            let label = project.map(|row| row.label.clone()).unwrap_or_else(|| {
-                Path::new(&root)
-                    .file_name()
-                    .unwrap_or_default()
-                    .to_string_lossy()
-                    .into_owned()
-            });
-            let identity = project.map(|row| row.identity_seed()).unwrap_or(&root);
-            let entry =
-                AddressOption::file(label, root.clone(), true).identity(identity.to_string());
-            let mut options = Vec::new();
-            for row in &self.projects.rows {
-                if row.depth == 0 && !row.missing {
-                    options.push(
-                        AddressOption::file(row.label.clone(), row.path.clone(), true)
-                            .identity(row.identity_seed().to_string()),
-                    );
-                }
-            }
-            if !options.iter().any(|option| option.path == root) {
-                options.insert(0, entry.clone());
-            }
-            result.fixed.push(AddressCrumb {
-                entry,
-                options,
-                ..Default::default()
-            });
-        }
-        if !git.branch.is_empty() {
-            let entry = AddressOption::file(git.branch.clone(), absolute.clone(), false)
-                .identity(git.branch.clone());
-            let mut options = Vec::new();
-            if let Ok(relative) = view.path.strip_prefix(&git.repo_root) {
-                for branch in &git.branches {
-                    if branch.checkout.is_empty() {
-                        continue;
-                    }
-                    let path = Path::new(&branch.checkout)
-                        .join(relative)
-                        .to_string_lossy()
-                        .into_owned();
-                    let mut option = AddressOption::file(branch.name.clone(), path.clone(), false)
-                        .identity(branch.name.clone());
-                    option.intent = Some(AddressIntent::Preview {
-                        path,
-                        repository: root.clone(),
-                        checkout: branch.checkout.clone(),
-                    });
-                    options.push(option);
-                }
-            }
-            if !options.iter().any(|option| option.label == git.branch) {
-                options.insert(0, entry.clone());
-            }
-            result.fixed.push(AddressCrumb {
-                entry,
-                options,
-                on_open: Some(AddressIntent::Branches),
-                pending: git.branches_loading,
-                ..Default::default()
-            });
-        }
         if let Some(checkout) = self
             .state
             .document
@@ -529,7 +466,9 @@ fn forward(
         | AddressIntent::Section { .. }
         | AddressIntent::GitBranch { .. }
         | AddressIntent::GitCommit { .. }
-        | AddressIntent::GitCatalogNext { .. } => {}
+        | AddressIntent::GitCatalogNext { .. }
+        | AddressIntent::TerminalDirectory { .. }
+        | AddressIntent::TerminalDirectories { .. } => {}
     }
 }
 
@@ -618,7 +557,7 @@ mod tests {
     }
 
     #[test]
-    fn project_relative_paths_and_branch_previews_keep_their_checkout_targets() {
+    fn file_breadcrumbs_stay_relative_without_workspace_context() {
         let mut app = App::new();
         app.add_plugins((MinimalPlugins, AddressPlugin));
         let page = app
@@ -661,19 +600,6 @@ mod tests {
                 )
             ]
         );
-        let branch = address.fixed.last().unwrap();
-        let preview = branch
-            .options
-            .iter()
-            .find(|option| option.label == "feature")
-            .unwrap();
-        assert_eq!(
-            preview.intent,
-            Some(AddressIntent::Preview {
-                path: "/worktrees/feature/source/very-long-file-name.rs".to_string(),
-                repository: "/repo".to_string(),
-                checkout: "/worktrees/feature".to_string()
-            })
-        );
+        assert!(address.fixed.is_empty());
     }
 }

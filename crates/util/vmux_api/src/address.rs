@@ -83,6 +83,12 @@ pub enum AddressIntent {
         branch: String,
         checkout: String,
     },
+    TerminalDirectory {
+        path: String,
+    },
+    TerminalDirectories {
+        path: String,
+    },
 }
 
 #[crate::ui_event]

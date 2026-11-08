@@ -433,6 +433,8 @@ mod wasm {
             BuiltinIcon::GitBranch => {
                 rsx! { GitIconView { class } }
             }
+            BuiltinIcon::GitCommit => rsx! { LineIconView { icon: LineIcon::GitCommit, class } },
+            BuiltinIcon::Branch => rsx! { LineIconView { icon: LineIcon::GitBranch, class } },
             BuiltinIcon::Bookmark => rsx! { Icon { class: "{class}",
                 path { d: "M19 21l-7-5-7 5V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z" }
             } },

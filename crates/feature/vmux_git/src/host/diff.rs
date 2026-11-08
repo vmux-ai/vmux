@@ -108,7 +108,7 @@ impl GitDiffTarget {
                 path_bytes: Vec::new(),
                 scope: DiffScope::Branch(controller.selected_branch.clone()),
             }),
-            GitPanel::Commits => Some(Self {
+            GitPanel::Commits if !controller.selected_commit.is_empty() => Some(Self {
                 repo_root,
                 path: PathBuf::new(),
                 path_bytes: Vec::new(),

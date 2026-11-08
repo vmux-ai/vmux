@@ -82,7 +82,13 @@ impl Plugin for ControllerPlugin {
                     )
                         .chain()
                         .before(ControllerSet::Reconcile),
-                    (reconcile, apply_location, settle_commit, sync_url)
+                    (
+                        reconcile,
+                        apply_location,
+                        select_default,
+                        settle_commit,
+                        sync_url,
+                    )
                         .chain()
                         .in_set(ControllerSet::Reconcile),
                     operations.in_set(ControllerSet::Operations),
@@ -351,6 +357,13 @@ impl GitPageControllerState {
         self.select_panel(GitPanel::Commits);
         self.selected_commit = commit.to_string();
         true
+    }
+
+    fn default_commit<'a>(&self, repository: &'a GitRepositorySnapshot) -> Option<&'a str> {
+        if self.focused_panel != GitPanel::Commits || !self.selected_commit.is_empty() {
+            return None;
+        }
+        Some(repository.commits.first()?.sha.as_str())
     }
 
     fn select_branch_diff(&mut self, repository: &GitRepositorySnapshot) {
@@ -765,6 +778,7 @@ fn reconcile(mut pages: Sources) {
             .unwrap_or_default();
         if state.snapshot.commits.loaded
             && !state.snapshot.commits.has_more
+            && !next.selected_commit_is_object_id()
             && !repository
                 .commits
                 .iter()
@@ -835,6 +849,31 @@ fn reconcile(mut pages: Sources) {
         if *controller != next {
             *controller = next;
         }
+    }
+}
+
+fn select_default(
+    mut pages: Query<
+        (&GitState, &mut GitPageControllerState),
+        Or<(
+            Changed<GitState>,
+            Changed<super::state::GitRepositoryRevision>,
+            Changed<super::state::GitCatalogRevision>,
+            Changed<GitPageControllerState>,
+        )>,
+    >,
+) {
+    for (state, mut controller) in &mut pages {
+        if state.snapshot.loading || !state.snapshot.commits.loaded {
+            continue;
+        }
+        let Some(repository) = state.repository() else {
+            continue;
+        };
+        let Some(commit) = controller.default_commit(repository) else {
+            continue;
+        };
+        controller.select_commit(commit, repository);
     }
 }
 
@@ -1554,6 +1593,145 @@ mod tests {
                 .directories
                 .push(trigger.event().payload.path.clone());
         }
+    }
+
+    struct CommitSelectionFixture {
+        app: App,
+        page: Entity,
+    }
+
+    impl CommitSelectionFixture {
+        fn new(panel: GitPanel, selected: Option<&str>) -> Self {
+            let path = "/tmp/commit-selection";
+            let request = GitRepositoryRequest::at(path);
+            let mut app = App::new();
+            app.add_plugins((MinimalPlugins, ControllerPlugin));
+            let page = app
+                .world_mut()
+                .spawn((
+                    GitState {
+                        snapshot: crate::state::GitPageSnapshot {
+                            workspace: path.to_string(),
+                            repository: Some(GitRepositorySnapshot {
+                                path: path.to_string(),
+                                repo_root: path.to_string(),
+                                branch: "main".to_string(),
+                                ..GitRepositorySnapshot::loading(&request)
+                            }),
+                            loading: false,
+                            ..Default::default()
+                        },
+                    },
+                    GitPageControllerState {
+                        focused_panel: panel,
+                        selected_commit: selected.unwrap_or_default().to_string(),
+                        ..Default::default()
+                    },
+                    vmux_ecs::PageMetadata {
+                        url: crate::GitUrl::from_view(Path::new(path), panel, selected).unwrap(),
+                        ..Default::default()
+                    },
+                ))
+                .id();
+            for _ in 0..3 {
+                app.update();
+            }
+            Self { app, page }
+        }
+
+        fn catalog(&mut self, shas: &[&str], loaded: bool) {
+            let mut commits = Vec::new();
+            for sha in shas {
+                commits.push(crate::event::GitCommitEntry {
+                    sha: sha.to_string(),
+                    short_sha: sha.chars().take(7).collect(),
+                    summary: "commit".to_string(),
+                    author: "author".to_string(),
+                    date: "2026-11-08".to_string(),
+                    body: String::new(),
+                    references: String::new(),
+                });
+            }
+            let mut state = self.app.world_mut().get_mut::<GitState>(self.page).unwrap();
+            let snapshot = &mut state.bypass_change_detection().snapshot;
+            snapshot.repository.as_mut().unwrap().commits = commits;
+            snapshot.commits.loaded = loaded;
+            self.app
+                .world_mut()
+                .get_mut::<super::super::state::GitCatalogRevision>(self.page)
+                .unwrap()
+                .advance();
+            self.app.update();
+        }
+
+        fn select_panel(&mut self, panel: GitPanel) {
+            self.app.world_mut().trigger(UiInput {
+                webview: self.page,
+                payload: GitPanelSelectRequest { panel },
+            });
+            self.app.update();
+        }
+
+        fn assert_commit(&self, selected: &str) {
+            let controller = self
+                .app
+                .world()
+                .get::<GitPageControllerState>(self.page)
+                .unwrap();
+            assert_eq!(controller.selected_commit, selected);
+            let metadata = self
+                .app
+                .world()
+                .get::<vmux_ecs::PageMetadata>(self.page)
+                .unwrap();
+            let parsed = url::Url::parse(&metadata.url).unwrap();
+            assert_eq!(
+                parsed
+                    .query_pairs()
+                    .find(|(key, _)| key == "commit")
+                    .map(|(_, value)| value.into_owned()),
+                (!selected.is_empty()).then(|| selected.to_string())
+            );
+        }
+    }
+
+    #[test]
+    fn commit_catalog_arrival_selects_latest_and_updates_the_url() {
+        let old = "a".repeat(40);
+        let latest = "b".repeat(40);
+        let mut fixture = CommitSelectionFixture::new(GitPanel::Commits, None);
+        fixture.catalog(&[&old], false);
+        fixture.assert_commit("");
+        fixture.catalog(&[&latest, &old], true);
+        fixture.assert_commit(&latest);
+    }
+
+    #[test]
+    fn switching_to_commits_selects_latest_from_an_existing_catalog() {
+        let latest = "a".repeat(40);
+        let old = "b".repeat(40);
+        let mut fixture = CommitSelectionFixture::new(GitPanel::Files, None);
+        fixture.catalog(&[&latest, &old], true);
+        fixture.assert_commit("");
+        fixture.select_panel(GitPanel::Commits);
+        fixture.assert_commit(&latest);
+    }
+
+    #[test]
+    fn explicit_commit_outside_head_history_survives_catalog_completion() {
+        let head = "a".repeat(40);
+        let selected = "b".repeat(40);
+        let mut fixture = CommitSelectionFixture::new(GitPanel::Commits, Some(&selected));
+        fixture.catalog(&[&head], true);
+        fixture.assert_commit(&selected);
+        fixture
+            .app
+            .world_mut()
+            .get_mut::<GitState>(fixture.page)
+            .unwrap()
+            .set_changed();
+        fixture.app.update();
+        fixture.assert_commit(&selected);
     }
 
     #[test]

@@ -9,7 +9,7 @@ use std::os::unix::process::CommandExt;
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, ExitStatus, Output, Stdio};
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
-use std::sync::{Arc, OnceLock, mpsc};
+use std::sync::{Arc, Mutex, OnceLock, mpsc};
 use std::time::{Duration, Instant};
 
 use bevy::prelude::Component;
@@ -122,7 +122,7 @@ pub(crate) struct ReviewDiffDocument {
     paths: Vec<PathBuf>,
     hunks: Vec<parse::HunkRange>,
     staged: HashSet<u32>,
-    new_spans: Option<Vec<Vec<StyledSpan>>>,
+    highlight: Option<Mutex<super::highlight::FileHighlight>>,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -156,6 +156,9 @@ impl ReviewDiffDocument {
         let mut path = 0u32;
         let mut saw_hunk = false;
         loop {
+            if super::runtime::GitRuntime::canceled() {
+                return Err(GitError("git command canceled".to_string()));
+            }
             buffer.clear();
             let read = reader
                 .read_until(b'\n', &mut buffer)
@@ -247,9 +250,6 @@ impl ReviewDiffDocument {
                 path,
                 text: ReviewDiffText::Raw,
             });
-            if entries.len() % 256 == 0 && super::runtime::GitRuntime::canceled() {
-                return Err(GitError("git command canceled".to_string()));
-            }
         }
         if !include_single_file && paths.len() <= 1 {
             entries.retain(|entry| entry.text != ReviewDiffText::Path);
@@ -260,7 +260,7 @@ impl ReviewDiffDocument {
             paths,
             hunks: Vec::new(),
             staged: HashSet::new(),
-            new_spans: None,
+            highlight: None,
         })
     }
 
@@ -268,12 +268,12 @@ impl ReviewDiffDocument {
         mut self,
         hunks: Vec<parse::HunkRange>,
         staged: HashSet<u32>,
-        new_spans: Option<Vec<Vec<StyledSpan>>>,
+        highlight: Option<super::highlight::FileHighlight>,
     ) -> Self {
         self.entries.retain(|entry| entry.kind != DiffKind::Hunk);
         self.hunks = hunks;
         self.staged = staged;
-        self.new_spans = new_spans;
+        self.highlight = highlight.map(Mutex::new);
         self
     }
 
@@ -296,7 +296,18 @@ impl ReviewDiffDocument {
             .map_err(|error| GitError(format!("failed to read diff spool: {error}")))?;
         let mut lines = Vec::with_capacity(end.saturating_sub(start));
         let mut buffer = Vec::new();
+        let mut highlight = match &self.highlight {
+            Some(highlight) => Some(
+                highlight
+                    .lock()
+                    .map_err(|_| GitError("diff syntax highlighter unavailable".to_string()))?,
+            ),
+            None => None,
+        };
         for entry in &self.entries[start..end] {
+            if super::runtime::GitRuntime::canceled() {
+                return Err(GitError("git command canceled".to_string()));
+            }
             let path = self
                 .paths
                 .get(entry.path as usize)
@@ -320,20 +331,18 @@ impl ReviewDiffDocument {
                 kind = DiffKind::Staged;
             }
             let hunk = parse::HunkRange::index_for(&self.hunks, kind, entry.old_no, entry.new_no);
+            let highlighted = match (entry.new_no, highlight.as_mut()) {
+                (Some(number), Some(highlight))
+                    if matches!(kind, DiffKind::Add | DiffKind::Context | DiffKind::Staged) =>
+                {
+                    highlight.line(number)?
+                }
+                _ => None,
+            };
             let spans = if kind == DiffKind::Hunk {
                 parse::DiffParser::source_spans(&text)
-            } else if matches!(kind, DiffKind::Add | DiffKind::Context | DiffKind::Staged) {
-                entry
-                    .new_no
-                    .and_then(|line| {
-                        self.new_spans
-                            .as_ref()?
-                            .get(line.saturating_sub(1) as usize)
-                    })
-                    .cloned()
-                    .unwrap_or_else(|| {
-                        crate::host::highlight::Highlighter::line(&text, &repository.join(path))
-                    })
+            } else if let Some(spans) = highlighted {
+                spans
             } else {
                 crate::host::highlight::Highlighter::line(&text, &repository.join(path))
             };
@@ -759,6 +768,17 @@ impl GitRepository {
         let target = self.relative_path(file);
         let baseline = self.index_text(&target)?;
         let staged = self.staged_lines(&target);
+        self.content_diff_source(file, content, &baseline, staged)
+    }
+
+    fn content_diff_source(
+        &self,
+        file: &Path,
+        content: &str,
+        baseline: &str,
+        staged: HashSet<u32>,
+    ) -> Result<DiffSource, GitError> {
+        let target = self.relative_path(file);
         let mut spool = tempfile::NamedTempFile::new()
             .map_err(|error| GitError(format!("failed to create diff spool: {error}")))?;
         let display = target.to_string_lossy();
@@ -767,7 +787,7 @@ impl GitRepository {
             .and_then(|_| writeln!(spool, "+++ b/{display}"))
             .and_then(|_| writeln!(spool, "@@ -1 +1 @@"))
             .map_err(|error| GitError(format!("failed to write diff spool: {error}")))?;
-        for (index, change) in TextDiff::from_lines(baseline.as_str(), content)
+        for (index, change) in TextDiff::from_lines(baseline, content)
             .iter_all_changes()
             .enumerate()
         {
@@ -790,10 +810,16 @@ impl GitRepository {
             .as_file_mut()
             .seek(SeekFrom::Start(0))
             .map_err(|error| GitError(format!("failed to rewind diff spool: {error}")))?;
-        let new_spans = (content.len() as u64 <= MAX_DIFF_FILE_BYTES)
-            .then(|| crate::host::highlight::Highlighter::file(content, file));
+        let highlight = if content.len() as u64 <= MAX_DIFF_FILE_BYTES {
+            Some(super::highlight::FileHighlight::new(
+                content.to_string(),
+                file,
+            ))
+        } else {
+            None
+        };
         let document =
-            ReviewDiffDocument::read(spool, false)?.file_state(Vec::new(), staged, new_spans);
+            ReviewDiffDocument::read(spool, false)?.file_state(Vec::new(), staged, highlight);
         Ok(DiffSource::Review(Arc::new(document)))
     }
 
@@ -809,9 +835,12 @@ impl GitRepository {
             .into_iter()
             .find(|(path, _, _)| path == &target)
         {
-            let diff = repository.branch_diff_text(&branch, 100_000, &target)?;
-            if !diff.trim().is_empty() {
-                return Ok(DiffSource::ready_lines(self.highlight_diff(&diff)));
+            let mut spool = tempfile::NamedTempFile::new()
+                .map_err(|error| GitError(format!("failed to create diff spool: {error}")))?;
+            repository.branch_diff_spool_at(&branch, 100_000, &target, spool.as_file_mut())?;
+            let document = ReviewDiffDocument::read(spool, true)?;
+            if !document.is_empty() {
+                return Ok(DiffSource::Review(Arc::new(document)));
             }
         }
         let staged = self.staged_lines(&target);
@@ -825,18 +854,16 @@ impl GitRepository {
                 }
                 return self.diff_source_with_content(file, &content.text().unwrap_or_default());
             }
-            return self
-                .staged_only_lines(file, &target, &staged)
-                .map(DiffSource::ready_lines);
+            return self.staged_only_source(file, &target, staged);
         }
         let ranges = self.diff_ranges(&target, false)?;
-        let new_spans = self
+        let highlight = self
             .read_diff_file(&target)
             .ok()
             .and_then(DiffFileContent::text)
-            .map(|content| crate::host::highlight::Highlighter::file(&content, file));
+            .map(|content| super::highlight::FileHighlight::new(content, file));
         Ok(DiffSource::Review(Arc::new(
-            document.file_state(ranges, staged, new_spans),
+            document.file_state(ranges, staged, highlight),
         )))
     }
 
@@ -1070,6 +1097,27 @@ impl GitRepository {
         self.branch_diff_text_with(&branch, context, prefix, &[])
     }
 
+    fn branch_diff_spool_at(
+        &self,
+        reference: &str,
+        context: u32,
+        prefix: &Path,
+        output: &mut std::fs::File,
+    ) -> Result<(), GitError> {
+        let reference = self.revision(reference)?;
+        if let Some(checkout) = self.branch_checkout(reference) {
+            return checkout.branch_diff_spool_at(reference, context, prefix, output);
+        }
+        let branch = self.branch_diff_context(reference)?;
+        Self::separate_diff_spool(output)?;
+        let mut command = self.branch_diff_command(&branch, context, prefix, &[]);
+        GitCommand::spool_into(&mut command, output)?;
+        for (path, repository, reference) in &branch.submodules {
+            repository.branch_diff_spool_at(reference, context, &prefix.join(path), output)?;
+        }
+        Ok(())
+    }
+
     fn branch_diff_context(&self, reference: &str) -> Result<BranchDiffContext, GitError> {
         let base = self.branch_base(reference)?;
         Ok(self.branch_diff_context_against(reference, base.merge_base))
@@ -1266,10 +1314,19 @@ impl GitRepository {
             .metadata()
             .map_err(|error| GitError(format!("failed to inspect diff spool: {error}")))?
             .len();
+        let mut last = [b'\n'];
+        if len > 0 {
+            output
+                .seek(SeekFrom::End(-1))
+                .and_then(|_| output.read_exact(&mut last))
+                .map_err(|error| {
+                    GitError(format!("failed to inspect diff spool ending: {error}"))
+                })?;
+        }
         output
             .seek(SeekFrom::End(0))
             .map_err(|error| GitError(format!("failed to append diff spool: {error}")))?;
-        if len > 0 {
+        if last[0] != b'\n' {
             output
                 .write_all(b"\n")
                 .map_err(|error| GitError(format!("failed to append diff spool: {error}")))?;
@@ -1733,43 +1790,25 @@ impl GitRepository {
         Ok(ranges)
     }
 
-    fn staged_only_lines(
+    fn staged_only_source(
         &self,
         file: &Path,
         target: &Path,
-        staged: &HashSet<u32>,
-    ) -> Result<Vec<DiffLine>, GitError> {
-        let staged_diff = self.diff_text(target, true, 100_000)?;
-        if staged_diff.trim().is_empty() {
-            return Ok(Vec::new());
+        staged: HashSet<u32>,
+    ) -> Result<DiffSource, GitError> {
+        let staged_diff = self.diff_spool(target, true, 100_000)?;
+        let document = ReviewDiffDocument::read(staged_diff, true)?;
+        if document.is_empty() {
+            return Ok(DiffSource::Review(Arc::new(document)));
         }
         let Some(content) = self
             .read_diff_file(target)
             .ok()
             .and_then(DiffFileContent::text)
         else {
-            return Ok(self.highlight_diff(&staged_diff));
+            return Ok(DiffSource::Review(Arc::new(document)));
         };
-        let spans = crate::host::highlight::Highlighter::file(&content, file);
-        let lines = content
-            .lines()
-            .enumerate()
-            .map(|(index, _)| {
-                let line = index as u32 + 1;
-                DiffLine {
-                    kind: if staged.contains(&line) {
-                        DiffKind::Staged
-                    } else {
-                        DiffKind::Context
-                    },
-                    old_no: Some(line),
-                    new_no: Some(line),
-                    hunk: None,
-                    spans: spans.get(index).cloned().unwrap_or_default(),
-                }
-            })
-            .collect();
-        Ok(lines)
+        self.content_diff_source(file, &content, &content, staged)
     }
 
     fn index_text(&self, target: &Path) -> Result<String, GitError> {
@@ -2758,6 +2797,7 @@ pub(crate) mod test_repo {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::host::highlight::Highlighter;
 
     use std::ffi::OsStr;
     use std::fs::{FileTimes, OpenOptions};
@@ -3316,7 +3356,13 @@ mod tests {
             .branch_files_catalog("feature")
             .unwrap()
             .page(0, 80);
-        let file_lines = repository.diff_lines(&checkout).unwrap();
+        Highlighter::take_line_count();
+        let file_source = repository.diff_source(&checkout).unwrap();
+        assert_eq!(Highlighter::take_line_count(), 0);
+        let (_, initial) = file_source.window(&repository, 0, 3).unwrap();
+        assert_eq!(initial.len(), 3);
+        assert!(Highlighter::take_line_count() <= 3);
+        let (_, file_lines) = file_source.window(&repository, 0, u32::MAX).unwrap();
         let snapshot = GitRepositorySnapshot::load(parent.path()).unwrap();
         let branch = snapshot
             .branches
@@ -4043,6 +4089,51 @@ mod tests {
                 .iter()
                 .any(|l| matches!(l.kind, DiffKind::Add | DiffKind::Remove))
         );
+    }
+
+    #[test]
+    fn file_diff_windows_defer_highlighting_and_preserve_staged_hunks_and_line_numbers() {
+        for staged_only in [false, true] {
+            let repo = test_repo::init();
+            let repository = GitRepository::at(repo.path());
+            let body = "line\n".repeat(2_000);
+            let file = test_repo::write(repo.path(), "large.txt", &body);
+            test_repo::run(repo.path(), &["add", "large.txt"]);
+            test_repo::run(repo.path(), &["commit", "-qm", "initial"]);
+            let changed = format!("changed\n{}", "line\n".repeat(1_999));
+            test_repo::write(repo.path(), "large.txt", &changed);
+            if staged_only {
+                repository.stage(&file).unwrap();
+            }
+            Highlighter::take_line_count();
+
+            let source = repository.diff_source(&file).unwrap();
+
+            assert_eq!(Highlighter::take_line_count(), 0);
+            let (total, initial) = source.window(&repository, 0, 8).unwrap();
+            assert_eq!(initial.len(), 8);
+            assert!(Highlighter::take_line_count() <= 8);
+            if staged_only {
+                assert_eq!(initial[0].kind, DiffKind::Staged);
+                assert_eq!((initial[0].old_no, initial[0].new_no), (Some(1), Some(1)));
+                assert!(initial.iter().all(|line| line.hunk.is_none()));
+            } else {
+                assert_eq!(initial[0].kind, DiffKind::Remove);
+                assert_eq!((initial[0].old_no, initial[0].new_no), (Some(1), None));
+                assert_eq!(initial[0].hunk, Some(0));
+                assert_eq!(initial[1].kind, DiffKind::Add);
+                assert_eq!((initial[1].old_no, initial[1].new_no), (None, Some(1)));
+                assert_eq!(initial[1].hunk, Some(0));
+            }
+            let (_, tail) = source.window(&repository, total - 1, 1).unwrap();
+            assert_eq!((tail[0].old_no, tail[0].new_no), (Some(2_000), Some(2_000)));
+            let text: String = tail[0]
+                .spans
+                .iter()
+                .map(|span| span.text.as_str())
+                .collect();
+            assert_eq!(text, "line");
+        }
     }
 
     #[test]

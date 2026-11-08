@@ -21,6 +21,7 @@ mod agent_run;
 mod command;
 pub(crate) mod component;
 pub(crate) mod contract;
+mod directory;
 mod input_queue;
 pub(crate) mod launch;
 mod loading;

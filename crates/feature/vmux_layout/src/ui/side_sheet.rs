@@ -5,6 +5,7 @@ use vmux_ecs::event::space::{
     SpaceFormOpenRequest, SpaceFormRegenerateRequest, SpaceFormState, SpaceOpenPageRequest,
     SpaceRenameRequest, SpaceRow, SpacesListEvent,
 };
+use vmux_ui::components::avatar::IdentityOrb;
 use vmux_ui::components::context_menu::{ContextMenuContent, ContextMenuItem, ContextMenuTrigger};
 use vmux_ui::components::dropdown::DropdownPopup;
 use vmux_ui::components::icon::Icon;
@@ -301,9 +302,10 @@ fn SideSheetSpaceRow(
                                         event.stop_propagation();
                                         open.set(!open());
                                     },
-                                    LineIconView {
-                                        icon: LineIcon::Planet,
-                                        class: "h-4 w-4 shrink-0".to_string(),
+                                    IdentityOrb {
+                                        seed: space.identity_seed().to_string(),
+                                        alt: space.display_name(),
+                                        class: "size-4 shrink-0".to_string(),
                                     }
                                 }
                             }
@@ -406,9 +408,10 @@ fn SpaceChoice(space: SpaceRow, deletable: bool, onselect: EventHandler<()>) -> 
                 },
             }
             div { class: "pointer-events-none relative z-10 flex min-w-0 flex-1 items-center gap-2 px-2",
-                LineIconView {
-                    icon: LineIcon::Planet,
-                    class: "size-3.5 shrink-0".to_string(),
+                IdentityOrb {
+                    seed: space.identity_seed().to_string(),
+                    alt: space.display_name(),
+                    class: "size-4 shrink-0".to_string(),
                 }
                 span { class: "min-w-0 flex-1 truncate", {space.display_name()} }
                 if deletable {

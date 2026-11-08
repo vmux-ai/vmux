@@ -8,6 +8,7 @@ use crate::event::{
 use dioxus::prelude::*;
 use vmux_api::input::KeyContextRequest;
 use vmux_ecs::event::team::TeamProfileSwitchRequest;
+use vmux_ui::components::avatar::IdentityOrb;
 use vmux_ui::components::dropdown::{Dropdown, DropdownAlign, DropdownPopup};
 use vmux_ui::components::input::ActionInput;
 use vmux_ui::components::manager::{ManagerSelect, ManagerSelectItem};
@@ -159,13 +160,10 @@ fn SpaceRowView(space: SpaceRow, selected: bool, deletable: bool, form: SpaceFor
                 },
             }
             div { class: "pointer-events-none relative z-10 flex min-w-0 flex-1 items-center gap-3",
-                LineIconView {
-                    icon: LineIcon::Planet,
-                    class: if active {
-                        "size-4 shrink-0 text-primary".to_string()
-                    } else {
-                        "size-4 shrink-0 text-muted-foreground".to_string()
-                    },
+                IdentityOrb {
+                    seed: space.identity_seed().to_string(),
+                    alt: space.display_name(),
+                    class: "size-5 shrink-0".to_string(),
                 }
                 div { class: "flex min-w-0 flex-1 items-center gap-2",
                     if editing {

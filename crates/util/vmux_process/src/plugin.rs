@@ -20,6 +20,7 @@ impl Plugin for ProcessPlugin {
                 (
                     subscribe,
                     input,
+                    change_directory,
                     mouse_wheel,
                     scroll_window,
                     resize,
@@ -201,6 +202,7 @@ fn create(
 
 fn subscribe(
     mut requests: Single<&mut RuntimeInbox<runtime::SubscribeRequest>>,
+    mut drivers: Processes,
     processes: Query<(&ProcessId, &ProcessUpdates)>,
 ) {
     while let Ok(request) = requests.0.try_recv() {
@@ -209,6 +211,9 @@ fn subscribe(
             .find(|(process, _)| **process == request.process_id)
             .map(|(_, updates)| updates.0.subscribe())
             .ok_or_else(|| format!("process not found: {}", request.process_id));
+        if result.is_ok() {
+            let _ = drivers.read(request.process_id, Process::publish_directory);
+        }
         let _ = request.reply.send(result);
     }
 }
@@ -231,8 +236,23 @@ fn input(
                     .map(|(_, input)| input)
                     .ok_or_else(|| format!("process not found: {}", request.process_id))?;
                 Process::write_input_to_writer(&input.0, &request.data);
+                processes.read(request.process_id, Process::publish_directory)?;
                 Ok(())
             });
+        let _ = request.reply.send(result);
+    }
+}
+
+fn change_directory(
+    mut requests: Single<&mut RuntimeInbox<runtime::DirectoryRequest>>,
+    mut processes: Processes,
+) {
+    while let Ok(request) = requests.0.try_recv() {
+        let result = processes
+            .mutate(request.process_id, |process| {
+                process.change_directory(&request.cwd, std::path::Path::new(&request.path))
+            })
+            .and_then(|result| result);
         let _ = request.reply.send(result);
     }
 }
@@ -524,13 +544,17 @@ fn poll(
         Entity,
         &mut ProcessDriver,
         &mut ProcessExit,
+        &mut ProcessDirectory,
         Option<&KeepAfterExit>,
     )>,
     mut commands: Commands,
 ) {
-    for (entity, mut driver, mut exit, keep_after_exit) in &mut processes {
+    for (entity, mut driver, mut exit, mut directory, keep_after_exit) in &mut processes {
         let process = driver.0.get();
         let exited = process.poll();
+        if directory.0 != process.current_directory().0 {
+            directory.0 = process.current_directory().0.to_string();
+        }
         exit.0 = process.process_exit();
         if !exited {
             continue;

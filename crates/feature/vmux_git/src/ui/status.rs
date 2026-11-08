@@ -34,15 +34,11 @@ pub(super) fn RepositoryHeader(
         ..Default::default()
     };
     let editor_url = "file://".to_string();
-    let (_panel, panel_label, _panel_icon) = match focused_panel {
-        GitPanel::Files => ("changes", "git-changes", vmux_api::BuiltinIcon::Files),
-        GitPanel::Branches => (
-            "branches",
-            "git-branch-changes",
-            vmux_api::BuiltinIcon::GitBranch,
-        ),
-        GitPanel::Commits => ("commits", "git-commits", vmux_api::BuiltinIcon::Clock),
-        GitPanel::Stash => ("stash", "git-stashes", vmux_api::BuiltinIcon::Archive),
+    let panel_label = match focused_panel {
+        GitPanel::Files => "git-changes",
+        GitPanel::Branches => "git-branch-changes",
+        GitPanel::Commits => "git-commits",
+        GitPanel::Stash => "git-stashes",
     };
     let mut address = PageAddress {
         current: current_page.clone(),
@@ -65,6 +61,7 @@ pub(super) fn RepositoryHeader(
             let entry = AddressOption {
                 label: commit.short_sha.clone(),
                 title: commit.summary.clone(),
+                identity: commit.sha.clone(),
                 intent: crate::GitUrl::from_view(
                     std::path::Path::new(&repository.repo_root),
                     GitPanel::Commits,
@@ -77,6 +74,22 @@ pub(super) fn RepositoryHeader(
                 selected = Some(entry.clone());
             }
             commits.push(entry);
+        }
+        if selected.is_none() && !selected_commit.is_empty() {
+            let entry = AddressOption {
+                label: selected_commit.chars().take(7).collect(),
+                title: selected_commit.clone(),
+                identity: selected_commit.clone(),
+                intent: crate::GitUrl::from_view(
+                    std::path::Path::new(&repository.repo_root),
+                    GitPanel::Commits,
+                    Some(&selected_commit),
+                )
+                .map(|url| AddressIntent::Navigate { url }),
+                ..Default::default()
+            };
+            commits.insert(0, entry.clone());
+            selected = Some(entry);
         }
         if let Some(entry) = selected {
             address.fixed.push(AddressCrumb {
@@ -119,6 +132,7 @@ pub(super) fn RepositoryHeader(
         {
             views.push(AddressOption {
                 label_key: label.into(),
+                icon: Some(panel.icon()),
                 intent: Some(AddressIntent::Navigate { url }),
                 ..Default::default()
             });
@@ -129,6 +143,7 @@ pub(super) fn RepositoryHeader(
         AddressCrumb {
             entry: AddressOption {
                 label_key: panel_label.into(),
+                icon: Some(focused_panel.icon()),
                 intent: crate::GitUrl::from_view(
                     std::path::Path::new(&repository.repo_root),
                     focused_panel,

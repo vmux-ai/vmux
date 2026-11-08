@@ -105,7 +105,7 @@ pub(super) fn ExplorerSidebar(
     let panel_class = if open {
         "absolute inset-y-0 left-0 h-full translate-x-0 opacity-100 transition-[translate,opacity] duration-[var(--vmux-sidebar-motion-ms)] ease-out motion-reduce:transition-none"
     } else {
-        "pointer-events-none absolute inset-y-0 left-0 h-full -translate-x-full opacity-0 transition-[translate,opacity] duration-[var(--vmux-sidebar-motion-ms)] ease-out motion-reduce:transition-none"
+        "pointer-events-none absolute inset-y-0 left-0 h-full -translate-x-3 opacity-0 transition-[translate,opacity] duration-[var(--vmux-sidebar-motion-ms)] ease-out motion-reduce:transition-none"
     };
     rsx! {
         div {

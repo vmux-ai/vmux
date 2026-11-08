@@ -51,6 +51,10 @@ pub struct SpaceRow {
 }
 
 impl SpaceRow {
+    pub fn identity_seed(&self) -> &str {
+        &self.id
+    }
+
     pub fn display_name(&self) -> String {
         let source = if self.name.trim().is_empty() {
             &self.id

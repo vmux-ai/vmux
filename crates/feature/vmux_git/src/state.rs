@@ -25,6 +25,15 @@ pub struct RepositoryName(pub String);
 pub struct CheckedOutBranch(pub String);
 
 impl GitPanel {
+    pub fn icon(self) -> vmux_api::BuiltinIcon {
+        match self {
+            Self::Files => vmux_api::BuiltinIcon::Files,
+            Self::Branches => vmux_api::BuiltinIcon::Branch,
+            Self::Commits => vmux_api::BuiltinIcon::GitCommit,
+            Self::Stash => vmux_api::BuiltinIcon::Archive,
+        }
+    }
+
     pub fn route(self) -> &'static str {
         match self {
             Self::Files => "changes",

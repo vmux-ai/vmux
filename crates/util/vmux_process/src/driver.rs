@@ -38,6 +38,7 @@ pub enum ProcessUpdate {
     Viewport(TermViewportPatch),
     Exited { exit_code: Option<i32> },
     Title(String),
+    Directory { cwd: String, ready: bool },
     Bell,
     CommandLifecycle(ProcessCommandLifecycle),
     Mode(ProcessMode),
@@ -66,6 +67,11 @@ impl ProcessUpdate {
                 exit_code,
             },
             Self::Title(title) => ServiceMessage::ProcessTitle { process_id, title },
+            Self::Directory { cwd, ready } => ServiceMessage::ProcessDirectory {
+                process_id,
+                cwd,
+                ready,
+            },
             Self::Bell => ServiceMessage::Bell { process_id },
             Self::CommandLifecycle(lifecycle) => ServiceMessage::CommandLifecycle {
                 process_id,
@@ -125,6 +131,7 @@ impl ProcessSnapshot {
 pub struct PtyInputWriter {
     writer: Arc<Mutex<Box<dyn Write + Send>>>,
     input_pending: Arc<AtomicBool>,
+    shell_input: Arc<Mutex<crate::shell_integration::ShellInput>>,
 }
 
 impl PtyInputWriter {
@@ -132,6 +139,7 @@ impl PtyInputWriter {
         Self {
             writer: Arc::new(Mutex::new(writer)),
             input_pending: Arc::new(AtomicBool::new(false)),
+            shell_input: Arc::default(),
         }
     }
 
@@ -318,13 +326,14 @@ pub struct Process {
     pub id: ProcessId,
     pub shell: String,
     pub cwd: String,
+    current_cwd: String,
     pub cols: u16,
     pub rows: u16,
     pub pid: u32,
     pub created_at: Instant,
     term: Term<ServiceEventProxy>,
     processor: Processor,
-    osc133: crate::osc133::Osc133Scanner,
+    shell_events: crate::shell_events::ShellEvents,
     command_ended_seq: u64,
     last_command_exit: Option<i32>,
     run_marker: crate::run_marker::RunMarkerScanner,
@@ -665,6 +674,7 @@ impl Process {
         Ok(Self {
             id,
             shell: command,
+            current_cwd: cwd.clone(),
             cwd,
             cols,
             rows,
@@ -672,7 +682,7 @@ impl Process {
             created_at: Instant::now(),
             term,
             processor: Processor::new(),
-            osc133: crate::osc133::Osc133Scanner::new(),
+            shell_events: crate::shell_events::ShellEvents::new(),
             command_ended_seq: 0,
             last_command_exit: None,
             run_marker: crate::run_marker::RunMarkerScanner::new(),
@@ -745,8 +755,65 @@ impl Process {
     pub fn write_input_to_writer(writer: &PtyInputWriter, data: &[u8]) {
         writer.input_pending.store(true, Ordering::Release);
         if let Ok(mut w) = writer.writer.lock() {
+            if let Ok(mut input) = writer.shell_input.lock() {
+                input.typed(data);
+            }
             let _ = w.write_all(data);
         }
+    }
+
+    pub fn current_directory(&self) -> (&str, bool) {
+        let ready = self
+            .pty_writer
+            .shell_input
+            .lock()
+            .is_ok_and(|input| input.ready());
+        (&self.current_cwd, ready)
+    }
+
+    pub fn publish_directory(&self) {
+        let (cwd, ready) = self.current_directory();
+        let _ = self.update_tx.send(ProcessUpdate::Directory {
+            cwd: cwd.to_string(),
+            ready,
+        });
+    }
+
+    pub fn change_directory(&mut self, cwd: &str, path: &std::path::Path) -> Result<(), String> {
+        self.poll();
+        if self.exited || self.is_copy_mode() || self.term.mode().contains(TermMode::ALT_SCREEN) {
+            return Err("terminal is not at an empty shell prompt".into());
+        }
+        if self.current_cwd != cwd {
+            return Err("terminal directory has changed".into());
+        }
+        if !path.is_absolute() || !path.is_dir() {
+            return Err("terminal directory is unavailable".into());
+        }
+        let command =
+            crate::shell_integration::ShellIntegration::directory_command(&self.shell, path)?;
+        let mut writer = self
+            .pty_writer
+            .writer
+            .lock()
+            .map_err(|error| error.to_string())?;
+        let mut input = self
+            .pty_writer
+            .shell_input
+            .lock()
+            .map_err(|error| error.to_string())?;
+        if !input.ready() || !self.pty_rx.is_empty() || !self.pty_reader_drained() {
+            return Err("terminal is not at an empty shell prompt".into());
+        }
+        input.typed(command.as_bytes());
+        writer
+            .write_all(command.as_bytes())
+            .map_err(|error| error.to_string())?;
+        writer.flush().map_err(|error| error.to_string())?;
+        drop(input);
+        drop(writer);
+        self.publish_directory();
+        Ok(())
     }
 
     #[cfg(any(test, debug_assertions))]
@@ -1597,10 +1664,25 @@ impl Process {
             };
             remaining -= 1;
             self.processor.advance(&mut self.term, &data);
-            for event in self.osc133.feed(&data) {
+            for event in self.shell_events.feed(&data) {
                 let kind = match event {
-                    crate::osc133::Osc133Event::CommandStart => ProcessCommandLifecycle::Started,
-                    crate::osc133::Osc133Event::CommandEnd(exit_code) => {
+                    crate::shell_events::ShellEvent::Directory(cwd) => {
+                        self.current_cwd = cwd;
+                        self.publish_directory();
+                        continue;
+                    }
+                    crate::shell_events::ShellEvent::CommandStart => {
+                        if let Ok(mut input) = self.pty_writer.shell_input.lock() {
+                            input.started();
+                        }
+                        self.publish_directory();
+                        ProcessCommandLifecycle::Started
+                    }
+                    crate::shell_events::ShellEvent::CommandEnd(exit_code) => {
+                        if let Ok(mut input) = self.pty_writer.shell_input.lock() {
+                            input.finished();
+                        }
+                        self.publish_directory();
                         self.command_ended_seq = self.command_ended_seq.wrapping_add(1);
                         self.last_command_exit = exit_code;
                         ProcessCommandLifecycle::Ended { exit_code }
@@ -1954,6 +2036,89 @@ mod tests {
     use super::*;
     use crate::ProcessManager;
     use std::time::{Duration, Instant};
+
+    struct DirectoryProcess {
+        process: Process,
+        root: std::path::PathBuf,
+        target: std::path::PathBuf,
+    }
+
+    impl DirectoryProcess {
+        fn start() -> Self {
+            let root =
+                std::env::temp_dir().join(format!("vmux-directory-pty-{}", ProcessId::new()));
+            let target = root.join("space ' $name `false` % # ?");
+            std::fs::create_dir_all(&target).unwrap();
+            let root = root.canonicalize().unwrap();
+            let target = target.canonicalize().unwrap();
+            let process = Process::new(
+                ProcessId::new(),
+                "/bin/bash".into(),
+                vec!["--noprofile".into(), "-i".into()],
+                root.to_string_lossy().into_owned(),
+                vec![("PATH".into(), "/usr/bin:/bin".into())],
+                160,
+                24,
+            )
+            .unwrap();
+            Self {
+                process,
+                root,
+                target,
+            }
+        }
+
+        fn ready(&mut self, target: &std::path::Path) {
+            let deadline = Instant::now() + Duration::from_secs(5);
+            loop {
+                self.process.poll();
+                let (cwd, ready) = self.process.current_directory();
+                if std::path::Path::new(cwd) == target && ready && self.process.pty_reader_drained()
+                {
+                    return;
+                }
+                assert!(
+                    Instant::now() < deadline,
+                    "shell directory or prompt did not settle: {}",
+                    self.process.full_text()
+                );
+                std::thread::sleep(Duration::from_millis(5));
+            }
+        }
+    }
+
+    impl Drop for DirectoryProcess {
+        fn drop(&mut self) {
+            self.process.kill();
+            let _ = std::fs::remove_dir_all(&self.root);
+        }
+    }
+
+    #[test]
+    fn terminal_directory_changes_use_the_shell_and_preserve_unsubmitted_input() {
+        let mut fixture = DirectoryProcess::start();
+        let root = fixture.root.clone();
+        let target = fixture.target.clone();
+        fixture.ready(&root);
+        fixture
+            .process
+            .change_directory(&root.to_string_lossy(), &target)
+            .unwrap();
+        fixture.ready(&target);
+        fixture.process.write_input(b"draft stays here");
+        assert!(
+            fixture
+                .process
+                .change_directory(&target.to_string_lossy(), &root)
+                .is_err()
+        );
+        assert_eq!(
+            fixture.process.current_directory().0,
+            target.to_string_lossy()
+        );
+        let text = wait_for_snapshot_text(&mut fixture.process, "draft stays here");
+        assert!(text.contains("draft stays here"));
+    }
 
     #[test]
     fn heavy_output_waits_for_frame_interval_but_sparse_and_final_output_do_not() {

@@ -386,6 +386,7 @@ impl Plugin for TerminalUpdatePlugin {
         app.add_plugins((
             crate::contract::TerminalContractPlugin,
             ServiceIngressPlugin,
+            super::directory::Plugin,
         ))
         .add_message::<ProcessExitedEvent>()
         .add_message::<CommandLifecycleEvent>()

@@ -346,13 +346,16 @@ pub fn DropdownOption(
     label: String,
     selected: bool,
     onclick: EventHandler<MouseEvent>,
+    #[props(default)] disabled: bool,
     #[props(default)] title: String,
     #[props(default)] secondary: String,
     #[props(default)] class: String,
     #[props(default = rsx! {})] leading: Element,
     #[props(default = rsx! {})] trailing: Element,
 ) -> Element {
-    let tone = if selected {
+    let tone = if disabled {
+        "cursor-not-allowed text-muted-foreground/45"
+    } else if selected {
         "bg-foreground/[0.075] text-foreground"
     } else {
         "text-muted-foreground hover:bg-foreground/[0.055] hover:text-foreground"
@@ -360,6 +363,7 @@ pub fn DropdownOption(
     rsx! {
         button {
             r#type: "button",
+            disabled,
             "data-vmux-dropdown-option": "",
             "data-vmux-dropdown-selected": if selected { "true" } else { "false" },
             class: cn([

@@ -900,28 +900,11 @@ fn rename(trigger: On<UiInput<SpaceRenameRequest>>, graph: SpaceGraph, mut comma
     {
         return;
     }
-    let existing: std::collections::HashSet<String> = graph
-        .spaces
-        .iter()
-        .filter(|(_, id, _, _, _)| id.0 != request.space_id)
-        .map(|(_, id, _, _, _)| id.0.clone())
-        .collect();
-    let new_id = SpaceRecord::unique_id(&existing, name);
     for (entity, id, _, _, _) in &graph.spaces {
         if id.0 != request.space_id {
             continue;
         }
-        commands
-            .entity(entity)
-            .insert((Name::new(new_id.clone()), SpaceId(new_id.clone())));
-    }
-    if new_id == request.space_id {
-        return;
-    }
-    for (tab, id, _, _) in &graph.tabs {
-        if id.0 == request.space_id {
-            commands.entity(tab).insert(SpaceId(new_id.clone()));
-        }
+        commands.entity(entity).insert(Name::new(name.to_string()));
     }
 }
 
@@ -1946,7 +1929,7 @@ mod tests {
     }
 
     #[test]
-    fn rename_reslugs_space_id_and_retags_tabs() {
+    fn rename_preserves_space_identity_and_tab_membership() {
         let mut app = App::new();
         app.add_plugins((MinimalPlugins, LayoutContractPlugin))
             .add_message::<TabLayoutSpawnRequest>()
@@ -1985,15 +1968,15 @@ mod tests {
 
         assert_eq!(
             app.world().get::<SpaceId>(space).map(|s| s.0.clone()),
-            Some("vmux-ai/vmux".to_string())
+            Some("rename-src-test".to_string())
         );
         assert_eq!(
             app.world().get::<Name>(space).map(|n| n.to_string()),
-            Some("vmux-ai/vmux".to_string())
+            Some("Vmux Ai/Vmux".to_string())
         );
         assert_eq!(
             app.world().get::<SpaceId>(tab).map(|s| s.0.clone()),
-            Some("vmux-ai/vmux".to_string())
+            Some("rename-src-test".to_string())
         );
         assert!(app.world().get::<CurrentSpace>(space).is_some());
     }

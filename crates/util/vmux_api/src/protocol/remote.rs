@@ -143,6 +143,16 @@ pub enum ClientMessage {
     CancelAcpSessionCatalog {
         request_id: u64,
     },
+    ChangeProcessDirectory {
+        process_id: ProcessId,
+        cwd: String,
+        path: String,
+    },
+    ListProcessDirectories {
+        process_id: ProcessId,
+        cwd: String,
+        path: String,
+    },
 }
 
 #[derive(Debug, Clone, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
@@ -274,6 +284,18 @@ pub enum ServiceMessage {
         agent_name: String,
         supported: bool,
         sessions: Vec<AcpProviderSession>,
+        error: Option<String>,
+    },
+    ProcessDirectory {
+        process_id: ProcessId,
+        cwd: String,
+        ready: bool,
+    },
+    ProcessDirectories {
+        process_id: ProcessId,
+        cwd: String,
+        path: String,
+        directories: Vec<String>,
         error: Option<String>,
     },
 }

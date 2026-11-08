@@ -82,40 +82,6 @@ impl SessionDetailUiState {
         let Some(session) = &self.session else {
             return address;
         };
-        let entry = match &self.repository {
-            Some(repository) => AddressOption {
-                label: repository.project.clone(),
-                identity: repository.project_identity.clone(),
-                intent: Some(AddressIntent::Navigate {
-                    url: repository.project_url.clone(),
-                }),
-                ..Default::default()
-            },
-            None => AddressOption {
-                label_key: "layout-projects".into(),
-                icon: Some(vmux_api::BuiltinIcon::Project),
-                intent: Some(AddressIntent::Navigate {
-                    url: "vmux://projects/".into(),
-                }),
-                ..Default::default()
-            },
-        };
-        let mut options = Vec::new();
-        for project in &self.navigation.projects {
-            options.push(AddressOption {
-                label: project.name.clone(),
-                identity: project.identity.clone(),
-                intent: Some(AddressIntent::Navigate {
-                    url: project.url.clone(),
-                }),
-                ..Default::default()
-            });
-        }
-        address.fixed.push(AddressCrumb {
-            entry,
-            options,
-            ..Default::default()
-        });
         if let Some(repository) = &self.repository
             && !repository.url.is_empty()
         {

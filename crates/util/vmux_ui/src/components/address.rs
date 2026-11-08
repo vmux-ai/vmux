@@ -220,7 +220,8 @@ fn AddressMenu(
                     let intent = entry.intent.clone();
                     rsx! { DropdownOption {
                         key: "{entry.identity}-{entry.path}-{entry.intent:?}",
-                        label: AddressLabel(&entry).text(), selected: entry.intent == crumb.entry.intent,
+                        label: AddressLabel(&entry).text(), selected: intent.is_some() && entry.intent == crumb.entry.intent,
+                        disabled: intent.is_none(),
                         onclick: move |_| { open.set(None); if let Some(intent) = &intent { requests.send(intent.clone()); } },
                         leading: rsx! { AddressIcon { entry } },
                     } }

@@ -618,7 +618,9 @@ the registered manifests supply the page-switch menu. Pages publish only typed `
 data through `AddressContribution` or `PageAddressPublish`: the current route, project and session
 choices, directories, symbols, and their intents. `vmux_layout` renders the active surface with
 one `AddressTrail`. No page component, callback, context, or mounted slot crosses into Layout.
-The URL row contains routing breadcrumbs. Code and Git use `file://` and `git://`; their root
+The URL row contains routing breadcrumbs and page-type icons. Project and branch selection stays
+in the Space card; Code and Session trails contain their viewed file or Session without repeating
+that workspace context. Code and Git use `file://` and `git://`; their root
 bookmarks resolve the working directory selected in the owning Space card through shared
 `page_context::Context`. Git view and commit or stash selections use query parameters. Its
 checkout follows the owning workspace, and old `vmux://git/` routes normalize before rendering.
@@ -663,6 +665,11 @@ presentation in the same frame; the final flush retains updates arriving later.
 Project rows carry an identity separate from their checkout path. Space cards, composer chips,
 project pages and Session metadata use that identity for identicons; branch icons use the branch
 name consistently. Moving a Project between worktrees preserves its icon.
+Spaces use their immutable Space ID for the same identicon in lists, menus and cards. Renaming
+changes only the display name, preserving tab membership and the icon. Commit selections use the
+full object ID for identicons in both the URL trail and its menu. An unselected Commits view picks
+the latest commit after its initial catalog arrives and writes that selection into the URL;
+explicit object IDs remain selected independently of the current branch's history.
 Search and page controls share `page::PageToolbarRow`, a 32 px row. Collection sidebars use the
 same default width as Code's file tree; their search and navigation icons share a 12 px left inset.
 `manager::ManagerSearch` fills that row with 13 px text and a subtle focus surface, retaining its
@@ -703,7 +710,7 @@ within the 160 ms budget, while selection and the actual layout update immediate
 skips both effects. A cached Stack returning from a hidden,
 zero-size frame restores its final rectangle immediately. Collapsible content may interpolate height
 within the shared layout budget. The editor sidebar keeps one panel icon in both states.
-Its width, slide, and opacity use the
+Its width, short slide, and opacity use the
 120 ms layout budget with a fixed inner width; pointer resizing and reduced motion skip width
 interpolation, and opening never waits for page data. Cached pages remain usable during refresh;
 new data occupies a reserved skeleton region, and page replacement keeps the outgoing surface
@@ -1094,6 +1101,11 @@ output through `alacritty_terminal`'s VTE engine into a cell grid. Each poll dif
 by row hash and broadcasts only the **changed lines**. The page applies each patch to
 per-row signals, so only those lines repaint. The daemon also owns what should outlive a
 frame: OSC 133 command tracking, per-shell integration, copy-mode motions.
+OSC 7 reports the shell's current directory through the same process subscription used by local
+and remote terminals, independently of the launch directory. The Terminal breadcrumb shows that
+directory and lists alternatives through the daemon. Choosing a directory sends a shell-escaped
+`cd` only after the daemon verifies an empty prompt, unchanged directory and no intervening input;
+running commands and input in progress reject the request instead of queuing it for later.
 Host input is one ordered ECS entity per write, related to its terminal until the process is
 ready. Multiple producers cannot overwrite one another through a singleton mailbox.
 
@@ -1115,6 +1127,11 @@ schedule work in proportion to the total repository history or block the ECS sch
 review advances one file and one bounded line window at a time; viewport demand requests another
 window. A large lockfile therefore cannot produce an unbounded first render, and an idle review
 cannot silently materialize the rest of the branch in the page DOM.
+File, staged-only, dirty-buffer and submodule comparisons share the disk-spooled review source.
+Syntax state and already generated lines are retained, while colors are generated only through
+the requested viewport and cancellation stops further work. Collapsed unchanged ranges use the
+same full-width hunk row and line-number gutter as the diff, with separate upward and downward
+expansion controls and a whole-range reveal target.
 The rendered diff subscribes to its scroll window independently of host data. Moving into a
 loaded region replaces virtual spacers with its rows even when no new data arrives.
 When earlier content changes height, the file and offset at the viewport define the next render

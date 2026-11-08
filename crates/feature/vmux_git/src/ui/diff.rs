@@ -83,7 +83,7 @@ pub(super) fn CommitDiffCard(
     let title = selected
         .as_ref()
         .map(|commit| format!("{}  {}", commit.short_sha, commit.summary))
-        .unwrap_or_default();
+        .unwrap_or_else(|| selected_commit.chars().take(7).collect());
     rsx! {
         RevisionDiffCard {
             repo_root,
@@ -91,7 +91,7 @@ pub(super) fn CommitDiffCard(
             diff_rows,
             rows_from,
             loading,
-            available: selected.is_some(),
+            available: !selected_commit.is_empty(),
             title,
             subtitle: selected
                 .as_ref()
