@@ -81,21 +81,33 @@ pub fn ManagerPage(children: Element) -> Element {
 pub fn WorkspaceLayout(
     #[props(default = rsx! {})] toolbar: Element,
     #[props(default = rsx! {})] sidebar: Element,
+    #[props(default)] search: Option<Element>,
     #[props(default = true)] show_sidebar: bool,
     children: Element,
 ) -> Element {
     rsx! {
         div { class: "flex min-h-0 flex-1 flex-col overflow-hidden",
+            div { class: "flex h-8 shrink-0 items-center",
+                if let Some(search) = search {
+                    div { class: "w-[min(14rem,50vw)] min-w-0 shrink-0 px-2", {search} }
+                }
+                div { class: "min-w-0 flex-1", {toolbar} }
+            }
             div { class: "flex min-h-0 flex-1 overflow-hidden",
                 if show_sidebar {
-                    aside { class: "hidden w-44 shrink-0 flex-col px-2 pb-2 sm:flex",
+                    aside { class: "hidden w-56 shrink-0 flex-col px-2 pb-2 sm:flex",
                         div { class: "min-h-0 flex-1 overflow-y-auto", {sidebar} }
                     }
                 }
-                div { class: "flex min-w-0 flex-1 flex-col overflow-hidden", {toolbar}, {children} }
+                div { class: "flex min-w-0 flex-1 flex-col overflow-hidden", {children} }
             }
         }
     }
+}
+
+#[component]
+pub fn ManagerSearchRow(children: Element) -> Element {
+    rsx! { div { class: "relative flex h-8 w-full min-w-0 shrink-0 items-center px-3", {children} } }
 }
 
 #[component]

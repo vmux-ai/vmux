@@ -115,7 +115,7 @@ pub(super) fn BranchesCard(
     let tree = BranchFileTree::from_files(visible_files);
     rsx! {
         FileTree {
-            div { class: "flex shrink-0 items-center px-2 pb-2",
+            vmux_ui::components::manager::ManagerSearchRow {
                 ManagerSearch {
                     value: file_query(),
                     placeholder: translate("common-filter"),

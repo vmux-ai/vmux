@@ -17,7 +17,7 @@ pub struct SessionCatalogUiStatePatch {
     pub loading: Option<bool>,
 }
 
-#[vmux_api::ui_state(patch = SessionCatalogUiStatePatch, version = 2)]
+#[vmux_api::ui_state(patch = SessionCatalogUiStatePatch, version = 3)]
 pub struct SessionCatalogUiState {
     pub catalog: CatalogSnapshot,
     pub repositories: SessionRepositories,
@@ -57,7 +57,7 @@ impl SessionCatalogUiState {
     }
 }
 
-#[vmux_api::ui_state(Default, Eq)]
+#[vmux_api::ui_state(Default, Eq, version = 2)]
 pub struct SessionDetailUiState {
     pub session: Option<SessionSummary>,
     pub repository: Option<SessionRepository>,
@@ -85,7 +85,7 @@ impl SessionDetailUiState {
         let entry = match &self.repository {
             Some(repository) => AddressOption {
                 label: repository.project.clone(),
-                identity: repository.project_url.clone(),
+                identity: repository.project_identity.clone(),
                 intent: Some(AddressIntent::Navigate {
                     url: repository.project_url.clone(),
                 }),
@@ -104,7 +104,7 @@ impl SessionDetailUiState {
         for project in &self.navigation.projects {
             options.push(AddressOption {
                 label: project.name.clone(),
-                identity: project.url.clone(),
+                identity: project.identity.clone(),
                 intent: Some(AddressIntent::Navigate {
                     url: project.url.clone(),
                 }),
@@ -187,6 +187,8 @@ pub struct Navigation {
 
 #[vmux_api::contract(Default, Eq)]
 pub struct NavigationProject {
+    #[serde(default)]
+    pub identity: String,
     pub name: String,
     pub url: String,
 }
@@ -227,7 +229,7 @@ pub struct ChatUiStatePatch {
     pub mcp: Option<Box<McpServersUiState>>,
 }
 
-#[vmux_api::ui_state(Default, patch = ChatUiStatePatch, version = 6)]
+#[vmux_api::ui_state(Default, patch = ChatUiStatePatch, version = 7)]
 pub struct ChatUiState {
     pub session_directory: Option<SessionDirectorySelection>,
     pub snapshot: ChatSnapshot,

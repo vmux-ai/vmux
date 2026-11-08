@@ -39,6 +39,8 @@ pub(crate) struct Dom {
     blocked: Rc<Cell<bool>>,
     ready_requested: Rc<Cell<bool>>,
     deferred_events: Rc<RefCell<DeferredEvents>>,
+    deferred_sends: Rc<RefCell<DeferredSends>>,
+    outbox: Rc<dyn Outbox>,
     document_loaded: Rc<Cell<bool>>,
     remount_pending: Rc<Cell<bool>>,
 }
@@ -72,6 +74,43 @@ struct DeferredEvent {
     epoch: u64,
     event: EventRequest,
     selection: EventSelection,
+}
+
+struct DeferredSend {
+    id: String,
+    bytes: Vec<u8>,
+    revision: u64,
+    epoch: u64,
+}
+
+#[derive(Default)]
+struct DeferredSends(VecDeque<DeferredSend>);
+
+impl DeferredSends {
+    fn push(&mut self, send: DeferredSend) {
+        if let Some(index) = self.0.iter().position(|pending| pending.id == send.id) {
+            self.0[index] = send;
+            return;
+        }
+        if self.0.len() == DeferredEvents::LIMIT {
+            self.0.pop_front();
+        }
+        self.0.push_back(send);
+    }
+
+    fn take(&mut self, revision: u64, epoch: u64) -> Vec<DeferredSend> {
+        let mut current = Vec::new();
+        for send in std::mem::take(&mut self.0) {
+            if send.revision == revision && send.epoch == epoch {
+                current.push(send);
+            }
+        }
+        current
+    }
+
+    fn clear(&mut self) {
+        self.0.clear();
+    }
 }
 
 #[derive(Default)]
@@ -212,6 +251,7 @@ impl Dom {
         let selection: Rc<RefCell<EventSelection>> = Rc::default();
         let navigation_revision = embed.navigation_revision.clone();
         let ready_requested = Rc::new(Cell::new(false));
+        let deferred_sends = Rc::new(RefCell::new(DeferredSends::default()));
         let host: Rc<dyn PageHost> = Rc::new(SurfaceHost {
             outbox: embed.outbox.clone(),
             listeners: listeners.clone(),
@@ -223,6 +263,7 @@ impl Dom {
             ipc_epoch: embed.ipc_epoch.clone(),
             blocked: blocked.clone(),
             ready_requested: ready_requested.clone(),
+            deferred_sends: deferred_sends.clone(),
             waker: embed.waker.clone(),
         });
         embed.lifecycle.update(LifecycleUpdate::Mounted);
@@ -253,6 +294,8 @@ impl Dom {
             blocked,
             ready_requested,
             deferred_events: Rc::default(),
+            deferred_sends,
+            outbox: embed.outbox.clone(),
             document_loaded: Rc::new(Cell::new(false)),
             remount_pending: Rc::new(Cell::new(false)),
         }
@@ -290,6 +333,7 @@ impl Dom {
         self.clear_transient_requests();
         if self.blocked.get() {
             self.deferred_events.borrow_mut().clear();
+            self.deferred_sends.borrow_mut().clear();
             self.waker.wake();
             return;
         }
@@ -300,6 +344,18 @@ impl Dom {
             .take(revision, previous_epoch);
         for (event, selection) in deferred {
             self.handle_event(event, selection);
+        }
+        let sends = self
+            .deferred_sends
+            .borrow_mut()
+            .take(revision, previous_epoch);
+        for send in sends {
+            if let Err(error) =
+                self.outbox
+                    .send(&send.id, &send.bytes, revision, self.ipc_epoch.get())
+            {
+                warn!(id = %send.id, %error, "deferred page subscription failed");
+            }
         }
         self.waker.wake();
     }
@@ -353,6 +409,7 @@ impl Dom {
     }
 
     fn next_navigation_revision(&self) -> u64 {
+        self.deferred_sends.borrow_mut().clear();
         let revision = self.navigation_revision.get().wrapping_add(1).max(1);
         self.navigation_revision.set(revision);
         revision
@@ -789,6 +846,7 @@ struct SurfaceHost {
     ipc_epoch: Rc<Cell<u64>>,
     blocked: Rc<Cell<bool>>,
     ready_requested: Rc<Cell<bool>>,
+    deferred_sends: Rc<RefCell<DeferredSends>>,
     waker: Rc<dyn Wake>,
 }
 
@@ -799,6 +857,24 @@ impl SurfaceHost {
 }
 
 impl PageHost for SurfaceHost {
+    fn navigation_revision(&self) -> u64 {
+        self.navigation_revision.get()
+    }
+
+    fn send_deferred(&self, id: &str, bytes: &[u8]) -> Result<(), EventListenerError> {
+        if !self.blocked.get() || id == vmux_api::PageReady::id() {
+            return self.send(id, bytes);
+        }
+        self.deferred_sends.borrow_mut().push(DeferredSend {
+            id: id.to_string(),
+            bytes: bytes.to_vec(),
+            revision: self.navigation_revision.get(),
+            epoch: self.ipc_epoch.get(),
+        });
+        self.waker.wake();
+        Ok(())
+    }
+
     fn send(&self, id: &str, bytes: &[u8]) -> Result<(), EventListenerError> {
         if id == vmux_api::PageReady::id() {
             tracing::info!(
@@ -1092,6 +1168,82 @@ mod tests {
             navigation_revision: Rc::new(Cell::new(1)),
             ipc_epoch: Rc::new(Cell::new(1)),
         }
+    }
+
+    #[derive(Default)]
+    struct RecordingOutbox(RefCell<Vec<SentEvent>>);
+
+    struct SentEvent {
+        id: String,
+        bytes: Vec<u8>,
+        revision: u64,
+        epoch: u64,
+    }
+
+    impl Outbox for RecordingOutbox {
+        fn send(
+            &self,
+            id: &str,
+            bytes: &[u8],
+            revision: u64,
+            epoch: u64,
+        ) -> Result<(), EventListenerError> {
+            self.0.borrow_mut().push(SentEvent {
+                id: id.to_string(),
+                bytes: bytes.to_vec(),
+                revision,
+                epoch,
+            });
+            Ok(())
+        }
+    }
+
+    #[component]
+    fn Subscribing() -> Element {
+        let revision = vmux_ui::transport::HostBinding::current()
+            .unwrap()
+            .navigation_revision();
+        use_effect(use_reactive!(|revision| {
+            let _ = revision;
+            vmux_ui::hooks::DeferredSend::new(&vmux_api::address::PageAddressPublish {
+                address: vmux_api::address::PageAddress::default(),
+            })
+            .send()
+            .unwrap();
+        }));
+        rsx! { div { "usable initial layout" } }
+    }
+
+    #[test]
+    fn initial_subscriptions_reissue_after_navigation_and_preserve_the_input_gate() {
+        let outbox = Rc::new(RecordingOutbox::default());
+        let mut embed = embedding();
+        embed.outbox = outbox.clone();
+        let blocked = Rc::new(Cell::new(true));
+        let dom = Dom::mount(Subscribing, Instance::default(), &embed, blocked.clone());
+        assert!(dom.next_batch().is_some());
+        dom.page_flushed();
+        dom.next_batch();
+        assert!(outbox.0.borrow().is_empty());
+        assert_eq!(
+            dom.host.send("mutation@1", &[]),
+            Err(EventListenerError::Unsupported)
+        );
+        dom.update_instance(Instance::default());
+        dom.next_batch();
+        dom.page_flushed();
+        dom.next_batch();
+        blocked.set(false);
+        dom.ipc_epoch.set(2);
+        dom.interaction_epoch_changed(1);
+        let sent = outbox.0.borrow();
+        assert_eq!(sent.len(), 1);
+        assert_eq!(sent[0].id, vmux_api::address::PageAddressPublish::id());
+        rkyv::from_bytes::<vmux_api::address::PageAddressPublish, rkyv::rancor::Error>(
+            &sent[0].bytes,
+        )
+        .unwrap();
+        assert_eq!((sent[0].revision, sent[0].epoch), (2, 2));
     }
 
     fn event_headers(event: HtmlEvent, revision: u64) -> wry::http::HeaderMap {
@@ -1637,6 +1789,7 @@ mod tests {
             ipc_epoch: Rc::new(Cell::new(1)),
             blocked,
             ready_requested: ready_requested.clone(),
+            deferred_sends: Rc::default(),
             waker: Rc::new(TestWake),
         };
 

@@ -127,6 +127,8 @@ impl SessionRepositories {
 
 #[vmux_api::contract(Default, Eq)]
 pub struct SessionRepository {
+    #[serde(default)]
+    pub project_identity: String,
     pub id: String,
     pub project: String,
     pub project_url: String,

@@ -660,6 +660,16 @@ lifecycle in the current Stack so its Session target and runtime follow the sele
 Code bookmarks resolve their directory from the active worktree, owning project, or cwd and open
 its README or entry file; directory favicons identify the Code page. Layout and address state flush before native
 presentation in the same frame; the final flush retains updates arriving later.
+Project rows carry an identity separate from their checkout path. Space cards, composer chips,
+project pages and Session metadata use that identity for identicons; branch icons use the branch
+name consistently. Moving a Project between worktrees preserves its icon.
+Search uses one fixed-height row across pages, alongside a fixed-height toolbar. The sidebar's
+scroll region starts below it. Filter menus use the shared popover layer and may extend beyond
+the sidebar without changing the search row, editor tabs, or content positions.
+Initial page subscriptions use `DeferredSend`: blocked surfaces retain the latest request by
+event ID and replay it only for the current navigation and source epoch. Navigation changes
+discard old requests; effects observe the navigation revision and reissue their current data.
+Ordinary input remains blocked until the surface is interactive.
 Tab presses and Stack card clicks select immediately; host projection reconciles their local
 selection. Earlier acknowledgements cannot replace a newer pending selection.
 UI motion is feedback rather than a completion condition. Selection, URL, focus, and the target

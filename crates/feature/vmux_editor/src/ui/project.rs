@@ -71,6 +71,7 @@ pub(super) fn ProjectList(
     rsx! {
         ManagerPage {
             WorkspaceLayout {
+                search: rsx! { ProjectSearch { entries: entries.clone(), presentation: presentation.clone(), controls } },
                 show_sidebar: entries.iter().any(|entry| entry.archived),
                 toolbar: rsx! {
                     ProjectManagerActions {
@@ -147,18 +148,7 @@ fn ProjectManagerActions(
     controls: CollectionController<ProjectFilter>,
     pending: bool,
 ) -> Element {
-    let mut toolbar = vec![
-        ToolbarControl::search(
-            controls.query(),
-            translate("layout-projects"),
-            move |query| controls.set_query(query),
-        )
-        .keys(&["Backspace"], move |_| {
-            if controls.query().is_empty() {
-                controls.pop_filter();
-            }
-        }),
-    ];
+    let mut toolbar = Vec::new();
     for (index, filter) in presentation.selected_filters.iter().enumerate() {
         toolbar.push(
             ToolbarControl::button(filter.label.clone(), move |_| controls.remove_filter(index))
@@ -166,13 +156,6 @@ fn ProjectManagerActions(
                 .text(),
         );
     }
-    toolbar.push(
-        ToolbarControl::button(translate("common-filter"), move |_| {
-            controls.toggle_filter()
-        })
-        .icon(LineIcon::Hash)
-        .active(presentation.filter_requested),
-    );
     if !entries.is_empty() {
         toolbar.extend(ToolbarControl::view(
             controls.view(),
@@ -187,8 +170,32 @@ fn ProjectManagerActions(
     }
     rsx! {
         ProjectAdd { pending, toolbar: Some(toolbar) }
-        if presentation.filter_requested {
-            div { class: "relative z-30 ml-auto w-72 [&>div]:top-0",
+    }
+}
+
+#[component]
+fn ProjectSearch(
+    entries: Vec<ProjectEntry>,
+    presentation: ProjectPresentation,
+    controls: CollectionController<ProjectFilter>,
+) -> Element {
+    rsx! {
+        Dropdown { open: presentation.filter_requested, keyboard_navigation: true, on_dismiss: move |_| controls.dismiss_filter(),
+            vmux_ui::components::manager::ManagerSearchRow {
+                vmux_ui::components::manager::ManagerSearch {
+                    value: controls.query(), placeholder: translate("layout-projects"),
+                    onsearch: move |query| controls.set_query(query),
+                    onkeydown: move |event: KeyboardEvent| {
+                        if event.key() == Key::Backspace && controls.query().is_empty() { controls.pop_filter(); }
+                    },
+                    suffix: rsx! { vmux_ui::components::filter::FilterTrigger {
+                        active: presentation.filter_requested, label: translate("common-filter"),
+                        onclick: move |_| controls.toggle_filter(),
+                    } },
+                }
+            }
+            if presentation.filter_requested {
+            DropdownPopup { class: "w-72 p-0",
                 ProjectFilterMenu {
                     entries, needle: presentation.filter_needle,
                     onselect: move |filter| {
@@ -196,6 +203,7 @@ fn ProjectManagerActions(
                         controls.dismiss_filter();
                     },
                 }
+            }
             }
         }
     }
@@ -750,13 +758,18 @@ fn ProjectSessions(projection: ProjectSessionList) -> Element {
 fn ProjectGitPanel(root: String) -> Element {
     let state = use_ui_state::<RepositorySummaryUiState>().state;
     let query_root = root.clone();
-    use_effect(use_reactive!(|(query_root,)| {
-        let _ = send(&RepositorySummaryRequest {
+    let revision =
+        vmux_ui::transport::HostBinding::current().map_or(0, |host| host.navigation_revision());
+    use_effect(use_reactive!(|(query_root, revision)| {
+        let _ = revision;
+        let _ = vmux_ui::hooks::DeferredSend::new(&RepositorySummaryRequest {
             roots: vec![query_root.clone()],
-        });
+        })
+        .send();
     }));
     use_drop(move || {
-        let _ = send(&RepositorySummaryRequest { roots: Vec::new() });
+        let _ = vmux_ui::hooks::DeferredSend::new(&RepositorySummaryRequest { roots: Vec::new() })
+            .send();
     });
     let state = state.read();
     let result = state
@@ -881,6 +894,16 @@ fn ProjectSection(
 
 struct ProjectPath;
 
+impl ProjectPath {
+    fn clean(path: &str) -> &str {
+        path.trim_end_matches('/')
+    }
+
+    fn same(left: &str, right: &str) -> bool {
+        Self::clean(left) == Self::clean(right)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -938,15 +961,5 @@ mod tests {
         );
         dom.render_immediate_to_vec();
         assert!(dioxus_ssr::render(&dom).contains("<article"));
-    }
-}
-
-impl ProjectPath {
-    fn clean(path: &str) -> &str {
-        path.trim_end_matches('/')
-    }
-
-    fn same(left: &str, right: &str) -> bool {
-        Self::clean(left) == Self::clean(right)
     }
 }

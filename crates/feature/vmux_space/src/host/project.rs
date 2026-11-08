@@ -249,6 +249,7 @@ impl ProjectCatalog {
                 LinkedRepoRoot::find(&checkout.root).unwrap_or_else(|| checkout.root.clone());
             let identity = identity.canonicalize().unwrap_or(identity);
             let mut projected = row.clone();
+            projected.identity = identity.to_string_lossy().into_owned();
             projected.path = checkout.root.to_string_lossy().into_owned();
             projected.display_path = vmux_path::DisplayPath::project(&identity);
             projected.label = identity
@@ -505,6 +506,7 @@ impl ExpandedProjectDirs {
             let path = entry.path().to_string_lossy().into_owned();
             rows.push(ProjectRow {
                 label: name,
+                identity: String::new(),
                 display_path: path.clone(),
                 depth,
                 kind: match kind.is_dir() {
@@ -1033,6 +1035,7 @@ mod tests {
         fn row(&self, path: &std::path::Path, active: bool) -> ProjectRow {
             let path = path.to_string_lossy().into_owned();
             ProjectRow {
+                identity: path.clone(),
                 label: std::path::Path::new(&path)
                     .file_name()
                     .unwrap()
@@ -1084,6 +1087,12 @@ mod tests {
         );
         assert!(projection[0].is_active);
         assert!(projection[0].is_worktree);
+        assert_eq!(
+            vmux_api::avatar::IdenticonSpec::favicon(projection[0].identity_seed()),
+            vmux_api::avatar::IdenticonSpec::favicon(
+                &fixture.cloud.canonicalize().unwrap().to_string_lossy()
+            )
+        );
         assert_eq!(
             projection[0].display_path,
             vmux_path::DisplayPath::project(fixture.cloud.canonicalize().unwrap())

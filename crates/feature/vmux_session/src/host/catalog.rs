@@ -857,6 +857,7 @@ impl Navigation {
                 continue;
             }
             projects.push(NavigationProject {
+                identity: repository.project_identity.clone(),
                 name: repository.project.clone(),
                 url: repository.project_url.clone(),
             });
@@ -1044,6 +1045,7 @@ fn sync_repositories(
             .and_then(|cache| cache.bypass_change_detection().cached(path));
         let repository = match info {
             Some(info) => SessionRepository {
+                project_identity: info.project_root().to_string_lossy().into_owned(),
                 id: session.id.clone(),
                 project: info.project_name(),
                 project_url: SessionProject::url(projects_root, info.project_root()),
@@ -1051,6 +1053,9 @@ fn sync_repositories(
                 url: vmux_git::GitUrl::from_path(&info.repo_root).unwrap_or_default(),
             },
             None => SessionRepository {
+                project_identity: SessionProject::root(path, session.managed)
+                    .to_string_lossy()
+                    .into_owned(),
                 id: session.id.clone(),
                 project: SessionProject::fallback(path, session.managed),
                 project_url: SessionProject::url(

@@ -4,7 +4,7 @@ pub use vmux_api::space::{
     ProjectBranch, ProjectPickerRequest, ProjectRow, ProjectRowKind, ProjectTreeToggle,
 };
 
-#[vmux_api::ui_state(Default, Eq, version = 1)]
+#[vmux_api::ui_state(Default, Eq, version = 2)]
 pub struct ProjectNavigation {
     pub rows: Vec<ProjectRow>,
 }

@@ -16,8 +16,8 @@ use vmux_ui::components::avatar::AgentThumbnail;
 use vmux_ui::components::breadcrumb::BreadcrumbOption;
 use vmux_ui::components::manager::{
     ManagerButton, ManagerButtonVariant, ManagerCard, ManagerCollection, ManagerDetails,
-    ManagerEmpty, ManagerList, ManagerPage, ManagerRow, ManagerSearchAction, ManagerSection,
-    ManagerSidebarItem, ManagerSpinner, ManagerThumbnail, ManagerView, WorkspaceLayout,
+    ManagerEmpty, ManagerList, ManagerPage, ManagerRow, ManagerSection, ManagerSidebarItem,
+    ManagerSpinner, ManagerThumbnail, ManagerView, WorkspaceLayout,
 };
 use vmux_ui::components::page_address::{PageBreadcrumbs, PageToolbar, ToolbarControl};
 use vmux_ui::hooks::{send, use_theme, use_ui_state};
@@ -86,6 +86,7 @@ pub fn Page() -> Element {
         ManagerPage {
             ToolsHeader { active: route.clone(), providers: state.snapshot.providers.clone() }
             WorkspaceLayout {
+                search: rsx! { ToolsSearch { active: route.clone(), state: state.clone(), extensions: extension_state.clone() } },
                 sidebar: rsx! { ToolsSidebar { active: route.clone(), state: state.clone(), extensions: extension_state.clone() } },
                 toolbar: rsx! { if !toolbar.is_empty() { PageToolbar { controls: toolbar } } },
                 if route == "extensions" {
@@ -311,8 +312,7 @@ fn ToolsHeader(active: String, providers: Vec<ToolProviderMetadata>) -> Element 
 }
 
 #[component]
-fn ToolsSidebar(active: String, state: ToolsUiState, extensions: ExtensionsUiState) -> Element {
-    let options = ToolRouteOption::all(state.snapshot.providers.clone());
+fn ToolsSearch(active: String, state: ToolsUiState, extensions: ExtensionsUiState) -> Element {
     let extension_search = active == "extensions";
     let query = if extension_search {
         extensions.query.clone()
@@ -321,8 +321,8 @@ fn ToolsSidebar(active: String, state: ToolsUiState, extensions: ExtensionsUiSta
     };
     let browse_query = query.clone();
     rsx! {
-        div { class: "flex h-10 items-center px-2",
-            ManagerSearchAction {
+        vmux_ui::components::manager::ManagerSearchRow {
+            vmux_ui::components::manager::ManagerSearch {
                 value: query,
                 placeholder: if extension_search { translate("extensions-search") } else { translate("tools-search") },
                 onsearch: move |query| {
@@ -339,6 +339,13 @@ fn ToolsSidebar(active: String, state: ToolsUiState, extensions: ExtensionsUiSta
                 })),
             }
         }
+    }
+}
+
+#[component]
+fn ToolsSidebar(active: String, state: ToolsUiState, extensions: ExtensionsUiState) -> Element {
+    let options = ToolRouteOption::all(state.snapshot.providers.clone());
+    rsx! {
         nav { class: "flex flex-col gap-0.5",
             for option in options {
                 ManagerSidebarItem {

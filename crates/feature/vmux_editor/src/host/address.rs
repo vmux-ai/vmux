@@ -177,13 +177,15 @@ impl AddressSource {
                     .to_string_lossy()
                     .into_owned()
             });
-            let entry = AddressOption::file(label, root.clone(), true).identity(root.clone());
+            let identity = project.map(|row| row.identity_seed()).unwrap_or(&root);
+            let entry =
+                AddressOption::file(label, root.clone(), true).identity(identity.to_string());
             let mut options = Vec::new();
             for row in &self.projects.rows {
                 if row.depth == 0 && !row.missing {
                     options.push(
                         AddressOption::file(row.label.clone(), row.path.clone(), true)
-                            .identity(row.path.clone()),
+                            .identity(row.identity_seed().to_string()),
                     );
                 }
             }

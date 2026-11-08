@@ -7,6 +7,8 @@ pub fn FilterTrigger(active: bool, label: String, onclick: EventHandler<MouseEve
     rsx! {
         button {
             r#type: "button",
+            "data-vmux-dropdown-trigger": "",
+            onmousedown: move |event: MouseEvent| event.prevent_default(),
             class: if active {
                 "flex size-5 shrink-0 items-center justify-center rounded text-[11px] font-medium text-foreground bg-foreground/[0.09]"
             } else {
@@ -54,7 +56,7 @@ pub fn FilterMenu(
     children: Element,
 ) -> Element {
     rsx! {
-        div { class: "absolute left-0 right-0 top-8 z-30 overflow-hidden rounded-md bg-background shadow-xl ring-1 ring-inset ring-foreground/[0.12]",
+        div { class: "flex min-w-0 flex-col overflow-hidden",
             if !title.is_empty() {
                 header { class: "flex h-8 items-center gap-1 border-b border-foreground/[0.07] px-1.5",
                     if let Some(onback) = onback {

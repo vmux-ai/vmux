@@ -1,7 +1,7 @@
 use crate::clipboard::Clipboard;
 use crate::components::icon::Icon;
 use crate::components::manager::ManagerView;
-use crate::hooks::{send, use_ui_state};
+use crate::hooks::use_ui_state;
 use crate::i18n::translate;
 use dioxus::prelude::*;
 use vmux_api::address::{AddressIntent, PageAddress, PageAddressPublish, PageAddressUiState};
@@ -11,10 +11,14 @@ pub fn PageBreadcrumbs(
     state: PageAddress,
     #[props(default)] onintent: Option<EventHandler<AddressIntent>>,
 ) -> Element {
-    use_effect(use_reactive!(|(state,)| {
-        let _ = send(&PageAddressPublish {
+    let revision =
+        crate::transport::HostBinding::current().map_or(0, |host| host.navigation_revision());
+    use_effect(use_reactive!(|(state, revision)| {
+        let _ = revision;
+        let _ = crate::hooks::DeferredSend::new(&PageAddressPublish {
             address: state.clone(),
-        });
+        })
+        .send();
     }));
     let source = use_ui_state::<PageAddressUiState>().state;
     let mut observed = use_signal(move || {
@@ -50,7 +54,7 @@ pub fn PageBreadcrumbs(
 
 #[component]
 pub fn PageToolbar(controls: Vec<ToolbarControl>) -> Element {
-    rsx! { div { class: "flex shrink-0 flex-wrap items-center justify-end gap-2 px-3 py-2",
+    rsx! { div { class: "flex h-8 min-w-0 shrink-0 items-center [justify-content:safe_flex-end] gap-2 overflow-x-auto px-3",
         for (index, control) in controls.into_iter().enumerate() {
             PageToolbarControl { key: "{index}:{control.description.label}", control }
         }

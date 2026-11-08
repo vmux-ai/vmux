@@ -159,6 +159,7 @@ impl AppSettings {
             }
             rows.push(ProjectRow {
                 path: in_use.to_string(),
+                identity: project.path.clone(),
                 label: project.display_label().to_string(),
                 display_path: project.path.clone(),
                 depth: 0,
@@ -544,6 +545,7 @@ impl SpaceOverrides {
             }
             rows.push(ProjectRow {
                 path: in_use.to_string(),
+                identity: project.path.clone(),
                 label: project.display_label().to_string(),
                 display_path: project.path.clone(),
                 depth: 0,

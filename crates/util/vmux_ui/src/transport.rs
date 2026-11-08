@@ -6,6 +6,14 @@ use crate::transport::event_listener::EventListenerError;
 pub trait PageHost {
     fn send(&self, id: &str, bytes: &[u8]) -> Result<(), EventListenerError>;
 
+    fn send_deferred(&self, id: &str, bytes: &[u8]) -> Result<(), EventListenerError> {
+        self.send(id, bytes)
+    }
+
+    fn navigation_revision(&self) -> u64 {
+        0
+    }
+
     fn listen(&self, id: &str, on_bytes: BytesListener) -> Result<(), EventListenerError>;
 
     fn focus_element(&self, _element_id: &str) {}
@@ -89,6 +97,12 @@ pub struct HostScope(Option<Rc<dyn PageHost>>);
 #[derive(Clone)]
 pub struct HostBinding(pub Rc<dyn PageHost>);
 
+impl HostBinding {
+    pub fn navigation_revision(&self) -> u64 {
+        self.0.navigation_revision()
+    }
+}
+
 impl PartialEq for HostBinding {
     fn eq(&self, other: &Self) -> bool {
         Rc::ptr_eq(&self.0, &other.0)
@@ -140,6 +154,10 @@ impl Host {
 
     pub(crate) fn emit(id: &str, bytes: &[u8]) -> Result<(), EventListenerError> {
         Self::with_installed(|host| host.send(id, bytes))?
+    }
+
+    pub(crate) fn emit_deferred(id: &str, bytes: &[u8]) -> Result<(), EventListenerError> {
+        Self::with_installed(|host| host.send_deferred(id, bytes))?
     }
 
     pub(crate) fn listen(id: &str, on_bytes: BytesListener) -> Result<(), EventListenerError> {

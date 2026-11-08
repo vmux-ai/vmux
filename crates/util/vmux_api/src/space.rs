@@ -156,6 +156,8 @@ pub struct ProjectForgetRequest {
 #[vmux_api::contract(Default, Eq)]
 pub struct ProjectRow {
     pub path: String,
+    #[serde(default)]
+    pub identity: String,
     pub label: String,
     pub display_path: String,
     pub depth: u32,
@@ -167,6 +169,16 @@ pub struct ProjectRow {
     pub kind: ProjectRowKind,
     #[serde(default)]
     pub expanded: bool,
+}
+
+impl ProjectRow {
+    pub fn identity_seed(&self) -> &str {
+        if self.identity.is_empty() {
+            &self.path
+        } else {
+            &self.identity
+        }
+    }
 }
 
 #[vmux_api::contract(Copy, Default, Eq)]

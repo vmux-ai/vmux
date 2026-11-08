@@ -1136,13 +1136,14 @@ mod tests {
         std::fs::write(&fixture.path, "previous complete snapshot").unwrap();
         let gate = std::sync::Arc::new(SerializationGate::default());
         fixture.app.register_persisted::<BlockingValue>();
-        let mut autosave = fixture
-            .app
-            .world_mut()
-            .get_mut::<AutoSave>(fixture.persistence)
-            .unwrap();
-        autosave.components = autosave.components.clone().allow::<BlockingValue>();
-        drop(autosave);
+        {
+            let mut autosave = fixture
+                .app
+                .world_mut()
+                .get_mut::<AutoSave>(fixture.persistence)
+                .unwrap();
+            autosave.components = autosave.components.clone().allow::<BlockingValue>();
+        }
         fixture.app.world_mut().spawn(BlockingValue(gate.clone()));
         fixture.app.update();
         assert!(

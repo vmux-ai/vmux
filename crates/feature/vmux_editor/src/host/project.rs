@@ -816,7 +816,7 @@ fn queue(
                 None => continue,
             };
             let seed = match &state.view {
-                ProjectView::Detail(detail) => detail.id.0.as_str(),
+                ProjectView::Detail(detail) => detail.path.as_str(),
                 _ => &url,
             };
             page.icon = vmux_api::PageIcon::favicon(IdenticonSpec::favicon_with_variant(

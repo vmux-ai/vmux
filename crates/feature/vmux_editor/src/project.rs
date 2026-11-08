@@ -20,14 +20,14 @@ pub struct ProjectEntry {
 
 impl ProjectEntry {
     pub fn identity_seed(&self) -> &str {
+        if !self.path.trim().is_empty() {
+            return &self.path;
+        }
         if !self.id.0.trim().is_empty() {
             return &self.id.0;
         }
         if !self.url.trim().is_empty() {
             return &self.url;
-        }
-        if !self.path.trim().is_empty() {
-            return &self.path;
         }
         &self.name
     }

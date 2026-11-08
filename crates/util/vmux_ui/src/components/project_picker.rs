@@ -81,7 +81,7 @@ pub fn ProjectSelectPopup(
                             title: "{project.display_path}",
                             onclick: move |_| on_pick.call(row.clone()),
                             leading: rsx! { IdentityOrb {
-                                seed: project.path.clone(),
+                                seed: project.identity_seed().to_string(),
                                 alt: project.label.clone(),
                                 class: "size-5".to_string(),
                             } },

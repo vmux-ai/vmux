@@ -42,7 +42,13 @@ impl ComposerChips {
         } else {
             composer.agent_url.clone()
         };
-        let project_seed = composer.project.clone();
+        let project_seed = composer
+            .projects
+            .iter()
+            .find(|project| project.depth == 0 && project.is_active)
+            .map(|project| project.identity_seed())
+            .unwrap_or(&composer.project)
+            .to_string();
         let agent = ComposerChip::ready(
             composer.agent_title.clone(),
             translate("composer-choose-agent"),
@@ -75,7 +81,7 @@ impl ComposerChips {
             false => None,
             true => Some(
                 ComposerChip::ready(composer.branch_label.clone(), composer.branch_title.clone())
-                    .with_identity(format!("{}:{}", project_seed, composer.branch_label))
+                    .with_identity(composer.branch_label.clone())
                     .opens(EventHandler::new(move |()| {
                         let _ = send(&CommandPaletteBranchMenuToggleRequest { open_id });
                         PromptFocus::end(PROMPT_INPUT_ID);

@@ -49,6 +49,30 @@ where
     Host::emit(T::id(), &bytes)
 }
 
+pub struct DeferredSend<'a, T>(&'a T);
+
+impl<'a, T> DeferredSend<'a, T> {
+    pub fn new(payload: &'a T) -> Self {
+        Self(payload)
+    }
+
+    pub fn send(self) -> Result<(), EventListenerError>
+    where
+        T: UiEvent
+            + for<'allocator> rkyv::Serialize<
+                rkyv::api::high::HighSerializer<
+                    rkyv::util::AlignedVec,
+                    rkyv::ser::allocator::ArenaHandle<'allocator>,
+                    rkyv::rancor::Error,
+                >,
+            >,
+    {
+        let bytes = rkyv::to_bytes::<rkyv::rancor::Error>(self.0)
+            .map_err(|_| EventListenerError::SerializePayload)?;
+        Host::emit_deferred(T::id(), &bytes)
+    }
+}
+
 impl Host {
     pub(crate) fn listen_state<T, F>(on_event: F) -> Result<(), EventListenerError>
     where

@@ -683,6 +683,7 @@ impl StageTarget {
 
 #[derive(Clone, PartialEq)]
 pub(super) struct SessionContext {
+    pub project_identity: String,
     pub project: String,
     pub project_url: String,
     pub branch: String,
@@ -700,6 +701,7 @@ impl SessionContext {
             .unwrap_or_default();
         match repository {
             Some(repository) => Self {
+                project_identity: repository.project_identity,
                 project: repository.project,
                 project_url: repository.project_url,
                 branch: repository.branch,
@@ -707,6 +709,7 @@ impl SessionContext {
                 editor_url,
             },
             None => Self {
+                project_identity: String::new(),
                 project: String::new(),
                 project_url: String::new(),
                 branch: String::new(),

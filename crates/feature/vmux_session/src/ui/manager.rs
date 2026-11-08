@@ -349,11 +349,11 @@ fn SessionsManagerContent(
     let location = SessionLocationBreadcrumb::new(&presentation);
     rsx! {
         WorkspaceLayout {
+            search: rsx! { SessionSearch { controls, filter_picker, presentation: Rc::clone(&presentation) } },
             toolbar: rsx! {
                 SessionsManagerActions { controls, location: location.address(), presentation: Rc::clone(&presentation) }
             },
             sidebar: rsx! {
-                SessionSearch { controls, filter_picker, presentation: Rc::clone(&presentation) }
                 SessionCategories {
                     groups: presentation.category_groups.clone(),
                     selected: presentation.selected_stage.clone(),
@@ -523,12 +523,12 @@ fn SessionSearch(
     filter_picker: SessionFilterPicker,
     presentation: Rc<ManagerPresentation>,
 ) -> Element {
-    vmux_ui::components::popup::Dismissal::use_listener(
-        presentation.filter_requested,
-        EventHandler::new(move |()| controls.dismiss_filter()),
-    );
     rsx! {
-        div { class: "relative z-40 flex min-w-0 px-2 pb-2 pt-1",
+        vmux_ui::components::dropdown::Dropdown {
+            open: presentation.filter_requested,
+            keyboard_navigation: true,
+            on_dismiss: move |_| controls.dismiss_filter(),
+            vmux_ui::components::manager::ManagerSearchRow {
             vmux_ui::components::manager::ManagerSearch {
                 value: controls.query(),
                 placeholder: translate("sessions-search"),
@@ -543,19 +543,16 @@ fn SessionSearch(
                     }
                 },
                 suffix: rsx! {
-                    vmux_ui::components::button::Button {
-                        aria_label: translate("common-filter"),
-                        size: vmux_ui::components::button::ButtonSize::Icon,
-                        variant: vmux_ui::components::button::ButtonVariant::Ghost,
-                        class: if presentation.filter_requested { "size-5 bg-foreground/10" } else { "size-5" },
-                        onmousedown: move |event: MouseEvent| event.prevent_default(),
+                    vmux_ui::components::filter::FilterTrigger {
+                        label: translate("common-filter"),
+                        active: presentation.filter_requested,
                         onclick: move |_| filter_picker.toggle(controls),
-                        LineIconView { icon: LineIcon::Hash, class: "size-3.5".to_string() }
                     }
                 },
             }
+            }
             if presentation.filter_requested {
-                div { class: "absolute left-2 top-full z-40 w-72 [&>div]:static",
+                vmux_ui::components::dropdown::DropdownPopup { class: "w-72 p-0",
                     SessionFilterMenu {
                         groups: presentation.category_groups.clone(),
                         sessions: presentation.snapshot.sessions.clone(),
@@ -1751,10 +1748,10 @@ fn StagePickerOption(
 
 #[component]
 fn SessionContextView(context: SessionContext, loading: bool) -> Element {
-    let project_seed = if context.project_url.is_empty() {
+    let project_seed = if context.project_identity.is_empty() {
         context.project.clone()
     } else {
-        context.project_url.clone()
+        context.project_identity.clone()
     };
     rsx! {
         div { class: "flex min-w-0 flex-1 items-center gap-1.5",

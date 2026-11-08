@@ -1629,10 +1629,10 @@ fn SearchInput(search: SearchState, view: ReadSignal<SidebarView>) -> Element {
     };
     rsx! {
         div {
-            class: "flex h-8 shrink-0 items-center px-3",
+            class: "contents",
             oncompositionstart: move |_| ime.start(),
             oncompositionend: move |_| ime.commit(),
-            ManagerSearch {
+            vmux_ui::components::manager::ManagerSearchRow { ManagerSearch {
                 id: Some(SEARCH_INPUT_ID.to_string()),
                 value: query,
                 placeholder: translate("editor-find-in-files-placeholder"),
@@ -1660,7 +1660,7 @@ fn SearchInput(search: SearchState, view: ReadSignal<SidebarView>) -> Element {
                     }
                 },
                 suffix: rsx! { SearchOptions { search } },
-            }
+            } }
         }
     }
 }

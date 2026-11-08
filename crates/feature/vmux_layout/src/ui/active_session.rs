@@ -148,6 +148,7 @@ fn ActiveWorkspaceProjectTree(project: ActiveWorkspaceProject, pane_id: u64) -> 
     )]));
     let selected_project = optimistic_project.value(&project_key, &root);
     let selected_path = selected_project.path.clone();
+    let selected_identity = selected_project.identity_seed().to_string();
     let selected_label = selected_project.label.clone();
     let selected_display_path = selected_project.display_path.clone();
     let selected_branch = optimistic_branch.value(&branch_key, &current_branch);
@@ -175,7 +176,7 @@ fn ActiveWorkspaceProjectTree(project: ActiveWorkspaceProject, pane_id: u64) -> 
                         title: selected_display_path.clone(),
                         open: choosing(),
                         leading: rsx! { IdentityOrb {
-                            seed: selected_path.clone(),
+                            seed: selected_identity,
                             alt: selected_label.clone(),
                             class: "size-4".to_string(),
                         } },
