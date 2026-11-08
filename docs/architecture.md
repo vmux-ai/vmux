@@ -663,9 +663,14 @@ presentation in the same frame; the final flush retains updates arriving later.
 Project rows carry an identity separate from their checkout path. Space cards, composer chips,
 project pages and Session metadata use that identity for identicons; branch icons use the branch
 name consistently. Moving a Project between worktrees preserves its icon.
-Search uses one fixed-height row across pages, alongside a fixed-height toolbar. The sidebar's
-scroll region starts below it. Filter menus use the shared popover layer and may extend beyond
-the sidebar without changing the search row, editor tabs, or content positions.
+Search and page controls share `page::PageToolbarRow`, a 32 px row. Collection sidebars use the
+same default width as Code's file tree; their search and navigation icons share a 12 px left inset.
+`manager::ManagerSearch` fills that row with 13 px text and a subtle focus surface, retaining its
+width and height during input. Editor tabs remain beside the sidebar search. The sidebar's scroll
+region starts below it. Filter menus use the shared popover layer and may extend beyond the
+sidebar without changing the search row, editor tabs, or content positions.
+Git's initial skeleton and loaded dashboard share the same split layout, sidebar width and
+toolbar rows; loading does not add a second breadcrumb header inside the page.
 Initial page subscriptions use `DeferredSend`: blocked surfaces retain the latest request by
 event ID and replay it only for the current navigation and source epoch. Navigation changes
 discard old requests; effects observe the navigation revision and reissue their current data.

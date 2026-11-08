@@ -21,6 +21,18 @@ pub fn PageShell(
 }
 
 #[component]
+pub fn PageToolbarRow(
+    children: Element,
+    #[props(default = "gap-2 px-3".to_string())] class: String,
+) -> Element {
+    rsx! {
+        div { class: "flex h-8 min-w-0 shrink-0 items-center font-sans text-xs text-muted-foreground {class}",
+            {children}
+        }
+    }
+}
+
+#[component]
 pub fn PageHeader(
     children: Element,
     #[props(default)] class: String,

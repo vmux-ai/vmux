@@ -25,19 +25,17 @@ pub(super) fn GitDashboard() -> Element {
     let mut list_width = use_signal(|| f64::from(vmux_api::editor::TreeWidth::DEFAULT));
     let mut resizing = use_signal(|| false);
     let mut resize_origin = use_signal(|| None::<(f64, f64)>);
-    let split_style = format!("--git-list-width:{}px;", list_width());
 
     if !repository_loaded() {
         return rsx! {};
     }
 
     rsx! {
-        main { class: "flex min-h-0 flex-1 flex-col bg-transparent pt-2",
-            div {
-                id: "git-dashboard-split",
-                class: "grid min-h-0 flex-1 grid-cols-1 grid-rows-[minmax(12rem,0.7fr)_minmax(18rem,1.3fr)] sm:grid-cols-[minmax(10rem,var(--git-list-width))_0.75rem_minmax(0,1fr)] sm:grid-rows-1",
-                style: "{split_style}",
-                GitListPane { navigation, file_query }
+        main { class: "flex min-h-0 flex-1 flex-col bg-transparent",
+            Split {
+                width: list_width(),
+                sidebar: rsx! { GitListPane { navigation, file_query } },
+                separator: rsx! {
                 div {
                     class: "group relative z-30 hidden h-full w-full cursor-col-resize items-center justify-center sm:flex",
                     onpointerdown: move |event: Event<PointerData>| {
@@ -50,6 +48,7 @@ pub(super) fn GitDashboard() -> Element {
                     },
                     div { class: "pointer-events-none h-10 w-1 rounded-full bg-foreground/20 opacity-0 transition-opacity duration-150 group-hover:opacity-100" }
                 }
+                },
                 div { class: "flex min-h-0 min-w-0 flex-col",
                     GitHeader { viewed_count }
                     GitDiffPane {
@@ -90,6 +89,25 @@ pub(super) fn GitDashboard() -> Element {
             }
         }
         GitShortcutOverlay {}
+    }
+}
+
+#[component]
+pub(super) fn Split(
+    width: f64,
+    sidebar: Element,
+    #[props(default = rsx! { div { class: "hidden sm:block" } })] separator: Element,
+    children: Element,
+) -> Element {
+    rsx! {
+        div {
+            id: "git-dashboard-split",
+            class: "grid min-h-0 flex-1 grid-cols-1 grid-rows-[minmax(12rem,0.7fr)_minmax(18rem,1.3fr)] sm:grid-cols-[minmax(10rem,var(--git-list-width))_0.75rem_minmax(0,1fr)] sm:grid-rows-1",
+            style: "--git-list-width:{width}px;",
+            {sidebar}
+            {separator}
+            {children}
+        }
     }
 }
 

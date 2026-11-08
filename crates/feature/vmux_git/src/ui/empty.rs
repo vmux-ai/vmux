@@ -1,12 +1,15 @@
 use dioxus::prelude::*;
 use vmux_ecs::event::space::ProjectActivateRequest;
 use vmux_ui::components::dropdown::{Dropdown, DropdownPopup};
+use vmux_ui::components::manager::ManagerSearchRow;
+use vmux_ui::components::page::PageToolbarRow;
 use vmux_ui::components::skeleton::Skeleton;
 use vmux_ui::components::tree_row::FileTreeSkeleton;
 use vmux_ui::hooks::send;
 use vmux_ui::i18n::translate;
-use vmux_ui::icon::{BuiltinIconView, GitSymbol, GitSymbolView, LineIcon, LineIconView};
+use vmux_ui::icon::{BuiltinIconView, LineIcon, LineIconView};
 
+use super::dashboard::Split;
 use super::state::GitPageState;
 use crate::event::{GitRepositoryPickerRequest, GitRepositoryRequest};
 
@@ -127,44 +130,28 @@ pub(super) fn EmptyRepository() -> Element {
 #[component]
 fn GitLoadingSkeleton() -> Element {
     rsx! {
-        header { class: "relative z-40 flex h-11 shrink-0 items-center gap-2 px-2.5", "data-vmux-loading-surface": "",
-            div { class: "flex min-w-0 flex-1 items-center gap-1 overflow-hidden",
-                div { class: "flex h-7 min-w-0 items-center gap-1.5 px-1.5",
-                    GitSymbolView {
-                        symbol: GitSymbol::Repository,
-                        class: "size-4 shrink-0 text-muted-foreground".to_string(),
-                    }
-                    Skeleton { class: "h-3 w-7 bg-foreground/[0.07]" }
-                }
-                span { class: "shrink-0 text-xs text-muted-foreground/45", "/" }
-                div { class: "flex h-7 min-w-0 items-center gap-1.5 px-1.5",
-                    LineIconView { icon: LineIcon::GitBranch, class: "size-3.5 shrink-0 text-muted-foreground" }
-                    Skeleton { class: "h-3 w-24 bg-foreground/[0.07]" }
-                }
-                span { class: "shrink-0 text-xs text-muted-foreground/45", "/" }
-                div { class: "flex h-7 min-w-0 items-center gap-1.5 px-1.5",
-                    Skeleton { class: "size-4 shrink-0 rounded-full bg-foreground/[0.07]" }
-                    Skeleton { class: "h-3 w-20 bg-foreground/[0.07]" }
-                }
-                span { class: "shrink-0 text-xs text-muted-foreground/45", "/" }
-                div { class: "flex h-7 min-w-0 items-center gap-1.5 px-1.5",
-                    Skeleton { class: "size-4 shrink-0 rounded-full bg-foreground/[0.07]" }
-                    Skeleton { class: "h-3 w-36 bg-foreground/[0.07]" }
-                }
-            }
-            div { class: "flex shrink-0 items-center gap-1",
-                Skeleton { class: "h-7 w-16 rounded-md bg-foreground/[0.055]" }
-            }
-        }
-        main { class: "flex min-h-0 flex-1 flex-col bg-transparent text-foreground",
-            div { class: "grid min-h-0 flex-1 grid-cols-1 grid-rows-[minmax(12rem,0.7fr)_minmax(18rem,1.3fr)] overflow-hidden sm:grid-cols-[minmax(18rem,336px)_0.75rem_minmax(0,1fr)] sm:grid-rows-1",
+        main { class: "flex min-h-0 flex-1 flex-col bg-transparent text-foreground", "data-vmux-loading-surface": "",
+            Split {
+                width: f64::from(vmux_api::editor::TreeWidth::DEFAULT),
+                sidebar: rsx! {
                 aside { class: "flex min-h-0 flex-col overflow-hidden bg-transparent",
-                    div { class: "flex min-h-0 flex-1 flex-col overflow-hidden px-2 pb-2 pt-1",
-                        FileTreeSkeleton { rows: 8 }
+                    ManagerSearchRow {
+                        div { class: "flex h-7 min-w-0 flex-1 items-center gap-1.5 px-1",
+                            LineIconView { icon: LineIcon::Search, class: "size-3.5 shrink-0 text-muted-foreground/70" }
+                            Skeleton { class: "h-2 w-20 bg-foreground/[0.045]" }
+                        }
+                    }
+                    div { class: "min-h-0 flex-1 overflow-hidden px-2 pb-2",
+                        FileTreeSkeleton { rows: 4, class: "py-2" }
                     }
                 }
-                div { class: "hidden sm:block" }
-                section { class: "min-h-0 min-w-0 overflow-hidden bg-transparent py-2.5 pr-2.5",
+                },
+                div { class: "flex min-h-0 min-w-0 flex-col",
+                    PageToolbarRow { class: "justify-end gap-2 px-3".to_string(),
+                        Skeleton { class: "h-2 w-16 bg-foreground/[0.045]" }
+                        Skeleton { class: "h-7 w-16 rounded-md bg-foreground/[0.055]" }
+                    }
+                    section { class: "min-h-0 min-w-0 flex-1 overflow-hidden bg-transparent pb-2.5 pr-2.5",
                     div { class: "flex h-full min-h-0 flex-col gap-3 overflow-hidden",
                         for (path_width, rows) in [("w-52", 8usize), ("w-44", 5usize)] {
                             div { class: "flex min-h-44 flex-col overflow-hidden rounded-lg bg-foreground/[0.025]",
@@ -179,6 +166,7 @@ fn GitLoadingSkeleton() -> Element {
                                 }
                             }
                         }
+                    }
                     }
                 }
             }

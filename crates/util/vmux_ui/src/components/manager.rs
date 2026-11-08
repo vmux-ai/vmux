@@ -1,7 +1,7 @@
 use crate::cn::cn;
 use crate::components::badge::Badge;
 use crate::components::dropdown::{Dropdown, DropdownOption, DropdownSelector};
-use crate::components::page::{PageContent, PageHeader, PageShell};
+use crate::components::page::{PageContent, PageHeader, PageShell, PageToolbarRow};
 use crate::components::skeleton::Skeleton;
 use crate::components::tooltip::Tooltip;
 use crate::i18n::translate;
@@ -85,17 +85,18 @@ pub fn WorkspaceLayout(
     #[props(default = true)] show_sidebar: bool,
     children: Element,
 ) -> Element {
+    let sidebar_width = vmux_api::editor::TreeWidth::DEFAULT;
     rsx! {
-        div { class: "flex min-h-0 flex-1 flex-col overflow-hidden",
-            div { class: "flex h-8 shrink-0 items-center",
+        div { class: "flex min-h-0 flex-1 flex-col overflow-hidden", style: "--vmux-sidebar-width:{sidebar_width}px;",
+            PageToolbarRow { class: "".to_string(),
                 if let Some(search) = search {
-                    div { class: "w-[min(14rem,50vw)] min-w-0 shrink-0 px-2", {search} }
+                    div { class: "w-[min(var(--vmux-sidebar-width),50vw)] min-w-0 shrink-0", {search} }
                 }
                 div { class: "min-w-0 flex-1", {toolbar} }
             }
             div { class: "flex min-h-0 flex-1 overflow-hidden",
                 if show_sidebar {
-                    aside { class: "hidden w-56 shrink-0 flex-col px-2 pb-2 sm:flex",
+                    aside { class: "hidden w-[min(var(--vmux-sidebar-width),50vw)] shrink-0 flex-col px-1 pb-2 sm:flex",
                         div { class: "min-h-0 flex-1 overflow-y-auto", {sidebar} }
                     }
                 }
@@ -107,7 +108,7 @@ pub fn WorkspaceLayout(
 
 #[component]
 pub fn ManagerSearchRow(children: Element) -> Element {
-    rsx! { div { class: "relative flex h-8 w-full min-w-0 shrink-0 items-center px-3", {children} } }
+    rsx! { PageToolbarRow { class: "relative w-full px-2".to_string(), {children} } }
 }
 
 #[component]
@@ -272,7 +273,6 @@ pub fn ManagerSearch(
     placeholder: String,
     #[props(default)] id: Option<String>,
     #[props(default)] autofocus: bool,
-    #[props(default)] minimal: bool,
     #[props(default)] onsearch: Option<EventHandler<String>>,
     #[props(default)] ondebounced: Option<EventHandler<String>>,
     #[props(default = 150)] debounce_ms: u32,
@@ -294,12 +294,8 @@ pub fn ManagerSearch(
             task.cancel();
         }
     });
-    let class = "group/manager-search relative z-30 flex h-7 min-w-0 flex-1 items-center gap-1.5";
-    let input_class = if minimal {
-        "h-full w-24 min-w-0 flex-[0_1_auto] bg-transparent text-[11px] text-foreground outline-none transition-[width,flex-grow] duration-100 ease-out placeholder:text-muted-foreground/55 group-focus-within/manager-search:w-full group-focus-within/manager-search:grow group-data-[vmux-search-active=true]/manager-search:w-full group-data-[vmux-search-active=true]/manager-search:grow motion-reduce:transition-none"
-    } else {
-        "h-full w-full min-w-0 flex-1 bg-transparent text-ui text-foreground outline-none placeholder:text-muted-foreground/55"
-    };
+    let class = "group/manager-search relative z-30 flex h-7 min-w-0 flex-1 items-center gap-1.5 rounded-md px-1 transition-colors duration-100 hover:bg-foreground/[0.025] focus-within:bg-foreground/[0.045] motion-reduce:transition-none";
+    let input_class = "h-full w-full min-w-0 flex-1 bg-transparent text-ui text-foreground outline-none placeholder:text-muted-foreground/55";
     rsx! {
         div { class, "data-vmux-search-active": if draft().is_empty() { "false" } else { "true" },
             label { r#for: id.clone(), class: "flex h-full shrink-0 cursor-text items-center",

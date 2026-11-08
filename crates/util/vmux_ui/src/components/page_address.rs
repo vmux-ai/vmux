@@ -1,6 +1,7 @@
 use crate::clipboard::Clipboard;
 use crate::components::icon::Icon;
 use crate::components::manager::ManagerView;
+use crate::components::page::PageToolbarRow;
 use crate::hooks::use_ui_state;
 use crate::i18n::translate;
 use dioxus::prelude::*;
@@ -54,7 +55,7 @@ pub fn PageBreadcrumbs(
 
 #[component]
 pub fn PageToolbar(controls: Vec<ToolbarControl>) -> Element {
-    rsx! { div { class: "flex h-8 min-w-0 shrink-0 items-center [justify-content:safe_flex-end] gap-2 overflow-x-auto px-3",
+    rsx! { PageToolbarRow { class: "[justify-content:safe_flex-end] gap-2 overflow-x-auto px-3".to_string(),
         for (index, control) in controls.into_iter().enumerate() {
             PageToolbarControl { key: "{index}:{control.description.label}", control }
         }

@@ -28,6 +28,7 @@ use vmux_ecs::event::*;
 use vmux_ecs::scroll::{EDGE_TRIGGER_K, ScrollWindow};
 use vmux_git::ui::{DiffView, GitFooter};
 use vmux_setting::EXPLORER_DEFAULT_WIDTH;
+use vmux_ui::components::page::PageToolbarRow;
 use vmux_ui::directory::{DirectoryKeys, DirectoryNavigator};
 use vmux_ui::focus::FocusClaim;
 use vmux_ui::hooks::{PressedKey, send, use_theme};
@@ -1831,8 +1832,7 @@ fn EditorHeader(
     tidy: Option<FileTidyState>,
 ) -> Element {
     rsx! {
-        div {
-            class: "flex h-8 shrink-0 items-center gap-2 px-3 font-sans text-xs text-muted-foreground",
+        PageToolbarRow {
             if mode() != Mode::Dir {
                 ExplorerToggleButton { pane, mode }
             }
