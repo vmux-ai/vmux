@@ -1419,6 +1419,12 @@ their bound Session state. The service carries serialized agent protocol message
 persistent daemon sessions; `vmux_acp` owns the client-host Bevy messages produced when those
 wire messages enter ECS.
 
+External session integration is a lifecycle-owned child plugin of `AcpPlugin`. It registers its
+catalog, history and archive state, observers, and ordered systems through `Plugin::build`;
+production and integration tests compose that same plugin through `add_plugins`.
+Its archive child owns native archive requests, workers, and reconciliation. This compatibility
+boundary remains necessary because the current ACP session catalog carries no archive state.
+
 ACP `session/list` is the primary provider catalog. The Sessions page starts each installed ACP only
 long enough to enumerate its paginated catalog, then stops it; transport failure does not switch data
 sources. A bounded provider-store adapter is used only when no installed ACP owns that agent family

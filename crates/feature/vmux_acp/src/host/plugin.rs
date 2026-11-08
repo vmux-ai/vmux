@@ -19,7 +19,7 @@ impl Plugin for AcpPlugin {
         super::attention::add(app);
         app.add_plugins(super::command::Plugin);
         super::continuation::add(app);
-        super::external::add(app);
+        app.add_plugins(super::external::Plugin);
         super::follow::add(app);
         super::handoff::add(app);
         super::ingress::add(app);
