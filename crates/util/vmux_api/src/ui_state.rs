@@ -2,6 +2,7 @@ pub trait UiState: crate::HostEvent + Clone + Send + Sync + 'static {
     type Update: Clone + Send + Sync + 'static;
 
     fn from_updates(previous: Option<Self>, updates: Vec<Self::Update>) -> Self;
+    fn apply_updates(&mut self, updates: Vec<Self::Update>);
     fn retain(&mut self);
 
     fn navigation_seed(&self) -> Option<Self> {

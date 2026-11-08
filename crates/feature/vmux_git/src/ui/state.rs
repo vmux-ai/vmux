@@ -396,11 +396,18 @@ mod tests {
                 vmux_api::UiStateFrame::<GitUiState, crate::state::GitUiStatePatch>::Snapshot(
                     state,
                 );
+            self.receive(frame);
+            self.render()
+        }
+
+        fn receive(
+            &mut self,
+            frame: vmux_api::UiStateFrame<GitUiState, crate::state::GitUiStatePatch>,
+        ) {
             let bytes = rkyv::to_bytes::<rkyv::rancor::Error>(&frame).unwrap();
             for listener in self.host.0.borrow_mut().iter_mut() {
                 listener(&bytes);
             }
-            self.render()
         }
 
         fn render(&mut self) -> String {
@@ -419,8 +426,63 @@ mod tests {
         let viewport = (state.diff.viewport)();
         let rows = (state.diff.rows)();
         rsx! { div {
+            "data-revision": viewport.as_ref().map(|viewport| viewport.revision).unwrap_or_default(),
+            "data-lines": viewport.as_ref().map(|viewport| viewport.lines.len()).unwrap_or_default(),
             if viewport.is_some() && !rows.is_empty() { "populated diff" } else { "empty diff" }
         } }
+    }
+
+    #[test]
+    fn diff_chunks_survive_other_updates_before_the_next_document_frame() {
+        let mut preview = DiffPreview::new();
+        let controller = GitPageControllerState {
+            focused_panel: GitPanel::Branches,
+            selected_branch: "feature".to_string(),
+            ..Default::default()
+        };
+        preview.publish(GitUiState {
+            snapshot: GitPageSnapshot {
+                workspace: "/repo".to_string(),
+                diff_viewport: Some(GitDiffViewport {
+                    generation: 1,
+                    revision: 1,
+                    first_line: 0,
+                    total_lines: 3,
+                    has_more: true,
+                    lines: vec![line(1)],
+                    markers: Vec::new(),
+                    error: String::new(),
+                }),
+                diff_rows: vec![GitDiffRow::Line(0)],
+                ..Default::default()
+            },
+            controller: controller.clone(),
+            ..Default::default()
+        });
+        for revision in 2..=3 {
+            preview.receive(vmux_api::UiStateFrame::Updates(vec![
+                GitDiffAppend {
+                    viewport: GitDiffViewport {
+                        generation: 1,
+                        revision,
+                        first_line: revision as u32 - 1,
+                        total_lines: 3,
+                        has_more: revision < 3,
+                        lines: vec![line(revision as u32)],
+                        markers: Vec::new(),
+                        error: String::new(),
+                    },
+                    rows_from: revision as u32 - 1,
+                    rows: vec![GitDiffRow::Line(revision as u32 - 1)],
+                }
+                .into(),
+            ]));
+        }
+        preview.receive(vmux_api::UiStateFrame::Updates(vec![controller.into()]));
+
+        let rendered = preview.render();
+        assert!(rendered.contains("data-revision=3"), "{rendered}");
+        assert!(rendered.contains("data-lines=3"), "{rendered}");
     }
 
     #[test]

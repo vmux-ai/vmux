@@ -235,6 +235,7 @@ struct BranchDiffProgress {
     in_flight: HashSet<Vec<u8>>,
     continuations: VecDeque<BranchDiffContinuation>,
     priority: Option<Vec<u8>>,
+    nearby: Option<usize>,
     next: usize,
 }
 
@@ -263,6 +264,7 @@ impl BranchDiffProgress {
             in_flight: HashSet::new(),
             continuations: VecDeque::new(),
             priority: None,
+            nearby: None,
             next: 0,
         }
     }
@@ -271,6 +273,9 @@ impl BranchDiffProgress {
         if let Some(path) = self.priority.clone()
             && let Some(batch) = self.seek(&path)
         {
+            return batch;
+        }
+        if let Some(batch) = self.next_nearby() {
             return batch;
         }
         if let Some(continuation) = self.continuations.pop_front() {
@@ -310,13 +315,12 @@ impl BranchDiffProgress {
     }
 
     fn seek(&mut self, path: &[u8]) -> Option<BranchDiffBatch> {
-        if !self.catalog.contains(path)
-            || self.loaded.contains(path)
-            || !self.in_flight.insert(path.to_vec())
-        {
+        let index = self.catalog.position(path)?;
+        if self.loaded.contains(path) || !self.in_flight.insert(path.to_vec()) {
             return None;
         }
         self.priority = Some(path.to_vec());
+        self.nearby = Some(index.saturating_add(1));
         if let Some(index) = self
             .continuations
             .iter()
@@ -341,6 +345,19 @@ impl BranchDiffProgress {
             top_line: 0,
             has_more: self.has_more(),
         })
+    }
+
+    fn next_nearby(&mut self) -> Option<BranchDiffBatch> {
+        let mut index = self.nearby?;
+        while let Some(path) = self.catalog.path(index).map(<[u8]>::to_vec) {
+            index += 1;
+            self.nearby = Some(index);
+            if let Some(batch) = self.seek(&path) {
+                return Some(batch);
+            }
+        }
+        self.nearby = None;
+        None
     }
 
     fn contains(&self, path: &[u8]) -> bool {
@@ -907,7 +924,7 @@ fn seek(
     let request = &trigger.event().payload;
     if request.generation != query.generation
         || request.generation != viewport.generation
-        || request.revision != viewport.revision
+        || request.revision > viewport.revision
     {
         return;
     }
@@ -1424,10 +1441,10 @@ mod tests {
     }
 
     #[test]
-    fn stale_or_unknown_visible_file_requests_do_not_schedule_reads() {
+    fn replaced_future_or_unknown_visible_file_requests_do_not_schedule_reads() {
         for (generation, revision, path) in [
             (0, 4, "file-4.rs"),
-            (1, 3, "file-4.rs"),
+            (1, 5, "file-4.rs"),
             (1, 4, "missing.rs"),
         ] {
             let mut reads = BranchReads::new();
@@ -1442,6 +1459,15 @@ mod tests {
                     .is_none()
             );
         }
+    }
+
+    #[test]
+    fn visible_file_demand_survives_a_completed_background_revision() {
+        let mut reads = BranchReads::new();
+        reads.seek(1, 3, "file-4.rs");
+        reads.app.update();
+
+        assert_eq!(reads.paths(), [b"file-4.rs".to_vec()]);
     }
 
     #[test]
@@ -1830,6 +1856,29 @@ mod tests {
 
         assert_eq!(next.paths, first.paths);
         assert_eq!(next.top_line, 800);
+    }
+
+    #[test]
+    fn prefetch_follows_the_visible_file_before_resuming_an_earlier_batch() {
+        let mut paths = Vec::new();
+        for index in 0..8 {
+            paths.push(format!("file-{index}.rs").into_bytes());
+        }
+        let mut progress = BranchDiffProgress::new(BranchFilesCatalog::for_paths(paths));
+        let first = progress.next();
+        progress.complete(&first.paths, 0, 640, false, true, None);
+        let visible = progress.seek(b"file-4.rs").unwrap();
+        progress.complete(&visible.paths, 0, 20, true, true, None);
+
+        for index in 5..8 {
+            let nearby = progress.next();
+            assert_eq!(nearby.paths, [format!("file-{index}.rs").into_bytes()]);
+            progress.complete(&nearby.paths, 0, 20, true, true, None);
+        }
+
+        let earlier = progress.next();
+        assert_eq!(earlier.paths, first.paths);
+        assert_eq!(earlier.top_line, 640);
     }
 
     #[test]

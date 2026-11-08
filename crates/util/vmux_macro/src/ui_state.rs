@@ -37,10 +37,14 @@ pub(crate) fn derive_state(input: &DeriveInput, patch: Option<&Type>) -> syn::Re
                 ) -> Self {
                     let mut state = previous.unwrap_or_default();
                     <Self as ::vmux_api::UiStateProjection<#patch>>::retain(&mut state);
-                    for update in updates {
-                        <Self as ::vmux_api::UiStateProjection<#patch>>::apply(&mut state, update);
-                    }
+                    <Self as ::vmux_api::UiState>::apply_updates(&mut state, updates);
                     state
+                }
+
+                fn apply_updates(&mut self, updates: ::std::vec::Vec<Self::Update>) {
+                    for update in updates {
+                        <Self as ::vmux_api::UiStateProjection<#patch>>::apply(self, update);
+                    }
                 }
 
                 fn retain(&mut self) {
@@ -69,6 +73,12 @@ pub(crate) fn derive_state(input: &DeriveInput, patch: Option<&Type>) -> syn::Re
             }
 
             fn retain(&mut self) {}
+
+            fn apply_updates(&mut self, mut updates: ::std::vec::Vec<Self::Update>) {
+                if let Some(state) = updates.pop() {
+                    *self = state;
+                }
+            }
         }
     })
 }

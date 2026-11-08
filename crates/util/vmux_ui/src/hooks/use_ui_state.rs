@@ -169,9 +169,7 @@ where
     let listener = use_ui_state_listener::<T, _>(move |frame| match frame {
         UiStateFrame::Snapshot(snapshot) => state.set(snapshot),
         UiStateFrame::Updates(updates) => {
-            let mut current = state.write();
-            let previous = std::mem::take(&mut *current);
-            *current = T::from_updates(Some(previous), updates);
+            state.write().apply_updates(updates);
         }
     });
     let binding = UiStateBinding {

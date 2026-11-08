@@ -215,6 +215,7 @@ pub fn DiffView(
     let layout_cache = use_hook(|| Rc::new(RefCell::new(DiffLayoutCache::default())));
     let geometry_cache = use_hook(|| Rc::new(RefCell::new(DiffGeometryCache::default())));
     let scroll_position = use_hook(|| Rc::new(Cell::new(0.0)));
+    let viewport_height = use_hook(|| Rc::new(Cell::new(0.0)));
     let geometry_window = use_hook(|| Rc::new(Cell::new(None::<DiffRenderWindow>)));
     let pending_anchor = use_hook(|| Rc::new(RefCell::new(None::<ScrollAnchor>)));
     let expected_path_count = expected_paths.len();
@@ -382,6 +383,8 @@ pub fn DiffView(
     let initial_next_request = Rc::clone(&next_request);
     let initial_layout_cache = Rc::clone(&layout_cache);
     let initial_geometry_cache = Rc::clone(&geometry_cache);
+    let initial_scroll_position = Rc::clone(&scroll_position);
+    let initial_viewport_height = Rc::clone(&viewport_height);
     use_effect(move || {
         layout_revision.read();
         geometry_revision.read();
@@ -392,19 +395,25 @@ pub fn DiffView(
             .as_ref()
             .map(|viewport| viewport.lines.len())
             .unwrap_or_default();
-        if loading || !has_more || row_count == 0 {
-            return;
-        }
         let next_request = Rc::clone(&initial_next_request);
         let placeholder = {
             let layout = initial_layout_cache.borrow();
             let geometry = initial_geometry_cache.borrow();
-            layout
-                .layout
-                .placeholder_path(&geometry.geometry, *render_window.peek())
+            layout.layout.placeholder_path(
+                &geometry.geometry,
+                DiffRenderWindow {
+                    top: initial_scroll_position.get(),
+                    height: initial_viewport_height.get(),
+                },
+            )
         };
-        if let Some(path) = placeholder {
+        if let Some(path) = placeholder
+            && next_request_key.is_some()
+        {
             next_request.send_seek(next_request_key, path);
+            return;
+        }
+        if loading || !has_more || row_count == 0 {
             return;
         }
         spawn(async move {
@@ -426,8 +435,10 @@ pub fn DiffView(
     let scroll_layout_cache = Rc::clone(&layout_cache);
     let scroll_geometry_cache = Rc::clone(&geometry_cache);
     let mounted_scroll_position = Rc::clone(&scroll_position);
+    let mounted_viewport_height = Rc::clone(&viewport_height);
     let mounted_geometry_window = Rc::clone(&geometry_window);
     let event_scroll_position = Rc::clone(&scroll_position);
+    let event_viewport_height = Rc::clone(&viewport_height);
     let event_geometry_window = Rc::clone(&geometry_window);
 
     let initial_loading = loading && viewport.read().is_none() && expected_path_count == 0;
@@ -447,12 +458,14 @@ pub fn DiffView(
                 let element = event.data();
                 scroll_container.set(Some(element.clone()));
                 let position = Rc::clone(&mounted_scroll_position);
+                let height = Rc::clone(&mounted_viewport_height);
                 spawn(async move {
                     let Ok(rect) = element.get_client_rect().await else {
                         return;
                     };
                     let top = element.get_scroll_offset().await.map(|offset| offset.y).unwrap_or_default();
                     position.set(top);
+                    height.set(rect.size.height);
                     render_window.set(DiffRenderWindow::at(top, rect.size.height));
                 });
             },
@@ -460,6 +473,7 @@ pub fn DiffView(
             style: "overflow-anchor:none;scrollbar-gutter:stable;",
             onscroll: move |event| {
                 event_scroll_position.set(event.scroll_top());
+                event_viewport_height.set(f64::from(event.client_height()));
                 let had_geometry_window = event_geometry_window.replace(None).is_some();
                 let viewport_window = DiffRenderWindow::from_scroll(
                     event.scroll_top(),
@@ -477,7 +491,10 @@ pub fn DiffView(
                 let geometry = scroll_geometry_cache.borrow();
                 let placeholder = layout
                     .layout
-                    .placeholder_path(&geometry.geometry, viewport_window);
+                    .placeholder_path(&geometry.geometry, DiffRenderWindow {
+                        top: event.scroll_top(),
+                        height: f64::from(event.client_height()),
+                    });
                 if let Some(path) = geometry
                     .geometry
                     .file_at(&layout.layout, event.scroll_top() + 1.0)
@@ -488,12 +505,10 @@ pub fn DiffView(
                         handler.call(path);
                     }
                 }
-                if has_more && !loading {
-                    if let Some(path) = placeholder {
-                        scroll_next_request.send_seek(next_request_key, path);
-                    } else if ScrollPreload::DOCUMENT.reached(&event) {
-                        scroll_next_request.send_key(next_request_key);
-                    }
+                if let Some(path) = placeholder {
+                    scroll_next_request.send_seek(next_request_key, path);
+                } else if has_more && !loading && ScrollPreload::DOCUMENT.reached(&event) {
+                    scroll_next_request.send_key(next_request_key);
                 }
             },
 

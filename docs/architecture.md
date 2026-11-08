@@ -594,6 +594,10 @@ remain input-inert but may exchange typed initialization events, and presentatio
 after the first host snapshot. This gives every vmux page one stale-while-revalidate lifecycle
 instead of feature-specific loading gates.
 
+Live UI-state frames apply patches in place. Unconsumed increments remain queued across later
+frames until their component processes them; constructing a retained cache snapshot is a separate
+operation. A controller or catalog update therefore cannot discard diff chunks awaiting a render.
+
 DOM delivery and presentation are separate acknowledgements. Delivery releases the next edit
 batch. Layout, selection, focus and routing respond in the input frame; background data, fonts
 and stability timers never hold a layout transition. The incoming page presents its first usable
@@ -1132,7 +1136,10 @@ window. A large lockfile therefore cannot produce an unbounded first render, and
 cannot silently materialize the rest of the branch in the page DOM.
 Visible placeholders request a path-specific seek without changing selection or history. Pending
 seeks and their continuation windows take priority over background prefetch while retaining the
-older batch for later; generation checks discard requests from replaced sources.
+older batch for later. Prefetch proceeds through files beside the requested path before resuming
+older batches. Demand uses the actual visible range rather than the larger render window;
+generation checks discard requests from replaced sources while allowing background revisions
+to advance without invalidating a path-specific request.
 File, staged-only, dirty-buffer and submodule comparisons share the disk-spooled review source.
 Syntax state and already generated lines are retained, while colors are generated only through
 the requested viewport and cancellation stops further work. Collapsed unchanged ranges use the

@@ -445,7 +445,16 @@ impl BranchFilesCatalog {
     }
 
     pub(crate) fn contains(&self, path: &[u8]) -> bool {
-        self.0.files.iter().any(|entry| entry.path_bytes == path)
+        self.position(path).is_some()
+    }
+
+    pub(crate) fn position(&self, path: &[u8]) -> Option<usize> {
+        for (index, entry) in self.0.files.iter().enumerate() {
+            if entry.path_bytes == path {
+                return Some(index);
+            }
+        }
+        None
     }
 
     pub(crate) fn path_labels(&self) -> Vec<String> {
