@@ -92,15 +92,6 @@ impl<'a> UrlPresentation<'a> {
         let Some(mut url) = self.url.clone() else {
             return edited.to_string();
         };
-        if edited.contains('%')
-            && let Ok(pasted) = url::Url::parse(edited)
-            && pasted.as_str() == edited
-            && pasted
-                .path_segments()
-                .is_some_and(|parts| parts.count() == self.segments.len())
-        {
-            return edited.to_string();
-        }
         let prefix = self
             .text
             .chars()
@@ -117,6 +108,15 @@ impl<'a> UrlPresentation<'a> {
             .sum::<usize>();
         let old_end = self.text.len() - suffix;
         let new_end = edited.len() - suffix;
+        if edited[prefix..new_end].contains('%')
+            && let Ok(pasted) = url::Url::parse(edited)
+            && pasted.as_str() == edited
+            && pasted
+                .path_segments()
+                .is_some_and(|parts| parts.count() == self.segments.len())
+        {
+            return edited.to_string();
+        }
         let Some(index) = self
             .segments
             .iter()
@@ -245,6 +245,15 @@ mod tests {
         assert_eq!(
             UrlPresentation::new("https://example.com/%0A").text(),
             "https://example.com/%0A"
+        );
+        let presentation = UrlPresentation::new("file:///tmp/a%20b/%252F");
+        assert_eq!(
+            presentation.edit("file:///tmp/ab/%2F"),
+            "file:///tmp/ab/%252F"
+        );
+        assert_eq!(
+            presentation.edit("file:///tmp/a%20c/%252F"),
+            "file:///tmp/a%20c/%252F"
         );
     }
 }
