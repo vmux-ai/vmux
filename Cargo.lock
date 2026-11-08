@@ -10502,6 +10502,7 @@ dependencies = [
  "vmux_layout",
  "vmux_page",
  "vmux_profile",
+ "vmux_service",
  "vmux_setting",
  "vmux_simulator",
  "vmux_space",

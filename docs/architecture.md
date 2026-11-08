@@ -1327,7 +1327,7 @@ React-style, in one atomic transaction.
 ### Manual iteration
 
 ```text
-agent: make build-dev -> signed debug binaries -> user: make run-dev
+agent: make build-dev -> signed Vmux Dev.app -> user: make run-dev
 ```
 
 Debug uses the full desktop feature set, Bevy dynamic linking, no LTO, and incremental
@@ -1341,9 +1341,13 @@ mock-key test sessions have their own data directory. Logs and service endpoints
 A process-lifetime desktop lock allows one GUI writer; desktop and daemon share a data lease
 whose owner is the build and worktree. A different owner cannot start until both have exited,
 and an endpoint lock prevents duplicate daemons from overwriting PID/socket files.
+The debug `.app` copies only application binaries and its icon; CEF stays in the installed SDK,
+and Bevy/Rust dylibs are linked from the build/toolchain cache. The executable has bundle rpaths
+so Finder and `open` need no shell library-path setup. This app is local, not a distributable bundle.
 Quit flushes pending layout changes. Switching named profiles restarts the GUI rather than
-opening another writer. Quit all old builds before switching; a daemon outlives its windows,
-so service stop waits for its shutdown and lock release. Old binaries without leases are not
+opening another writer. After the old GUI exits, a different build drains its daemon and waits
+for the data lease automatically; no manual stop is needed. This ends old terminals and agents,
+while reopening the same build keeps them. Old binaries without leases are not
 protected by these advisory locks. VMUX_DATA_DIR selects a separate data root and runtime
 endpoints for copied-state tests. Incompatible stores are preserved and startup is refused;
 changing persistence schemas against the live shared store is not an iteration shortcut.

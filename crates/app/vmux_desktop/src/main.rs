@@ -35,7 +35,7 @@ fn main() {
         }
     );
 
-    let _lease = match vmux_profile::DataLease::desktop() {
+    let _lease = match vmux_service::RuntimeHandoff::acquire() {
         Ok(lease) => lease,
         Err(error) => {
             eprintln!("Cannot open Vmux: {error}");

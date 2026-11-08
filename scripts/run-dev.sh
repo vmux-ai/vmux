@@ -24,5 +24,15 @@ if [[ "${1:-}" == stop ]]; then
     exec env -u CEF_PATH DYLD_LIBRARY_PATH="$dylib_path" \
         VMUX_PROFILE="${VMUX_PROFILE:-personal}" "$debug_dir/vmux" service stop
 fi
+if [[ "$(uname -s)" == Darwin ]]; then
+    app="$debug_dir/Vmux Dev.app"
+    [[ -d "$app" ]] || { echo "Debug app missing. Run make build-dev." >&2; exit 1; }
+    codesign --verify --strict "$app"
+    launch_args=(--env "VMUX_PROFILE=${VMUX_PROFILE:-personal}" --env "VMUX_TEST=${VMUX_TEST:-}")
+    if [[ -n "${VMUX_DATA_DIR:-}" ]]; then
+        launch_args+=(--env "VMUX_DATA_DIR=$VMUX_DATA_DIR")
+    fi
+    exec open "${launch_args[@]}" "$app"
+fi
 exec env -u CEF_PATH DYLD_LIBRARY_PATH="$dylib_path" \
     VMUX_PROFILE="${VMUX_PROFILE:-personal}" VMUX_TEST="${VMUX_TEST:-}" "$debug_dir/vmux_desktop"

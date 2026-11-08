@@ -7,13 +7,41 @@ pub struct DataLease {
 }
 
 impl DataLease {
-    pub fn desktop() -> std::io::Result<Self> {
+    pub fn reserve_desktop() -> std::io::Result<Self> {
         let paths = crate::ProfilePaths::current();
         let mut lease = Self { locks: Vec::new() };
         lease.exclusive(&paths.shared_data().join("desktop.lock"))?;
-        lease.join(&paths.shared_data(), &Self::owner())?;
-        paths.prepare_browser_profile()?;
         Ok(lease)
+    }
+
+    pub fn activate_runtime(&mut self) -> std::io::Result<()> {
+        let paths = crate::ProfilePaths::current();
+        self.join(&paths.shared_data(), &Self::owner())?;
+        paths.prepare_browser_profile()
+    }
+
+    pub fn active_build(&self) -> std::io::Result<String> {
+        let path = crate::ProfilePaths::current()
+            .shared_data()
+            .join("runtime.lock");
+        let owner = std::fs::read_to_string(path)?;
+        let (build, _) = owner.split_once(':').ok_or_else(|| {
+            std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                "Invalid Vmux runtime owner",
+            )
+        })?;
+        if build.is_empty()
+            || !build
+                .bytes()
+                .all(|byte| byte.is_ascii_alphanumeric() || byte == b'-')
+        {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                "Invalid Vmux build profile",
+            ));
+        }
+        Ok(build.to_string())
     }
 
     pub fn daemon() -> std::io::Result<Self> {

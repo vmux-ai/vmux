@@ -19,7 +19,7 @@ done
 CARGO
 cat > "$tmp/bin/uname" <<'UNAME'
 #!/usr/bin/env bash
-printf 'Linux\n'
+printf '%s\n' "${TEST_OS:-Linux}"
 UNAME
 cat > "$tmp/bin/rustc" <<'RUSTC'
 #!/usr/bin/env bash
@@ -44,6 +44,21 @@ VMUX_PROFILE=work CEF_PATH=wrong "$tmp/client/scripts/run-dev.sh"
 [[ "$(wc -l < "$TEST_LOG" | tr -d ' ')" == 3 ]]
 grep -Fq 'work|unset|' "$TEST_RUN"
 grep -Fq -- '-u CEF_PATH DYLD_LIBRARY_PATH=/test/toolchain/lib:' "$TEST_ENV"
+cat > "$tmp/bin/codesign" <<'SIGN'
+#!/usr/bin/env bash
+exit 0
+SIGN
+cat > "$tmp/bin/open" <<'OPEN'
+#!/usr/bin/env bash
+printf '%s\n' "$*" >> "$TEST_OPEN"
+OPEN
+chmod +x "$tmp/bin/codesign" "$tmp/bin/open"
+mkdir -p "$tmp/target/debug/Vmux Dev.app"
+export TEST_OPEN="$tmp/open.log"
+TEST_OS=Darwin VMUX_DATA_DIR="$tmp/data" "$tmp/client/scripts/run-dev.sh"
+grep -Fq "Vmux Dev.app" "$TEST_OPEN"
+grep -Fq "VMUX_DATA_DIR=$tmp/data" "$TEST_OPEN"
+[[ "$(wc -l < "$TEST_LOG" | tr -d ' ')" == 3 ]]
 printf '\nchanged\n' >> "$tmp/target/debug/vmux_desktop"
 if "$tmp/client/scripts/run-dev.sh"; then
     echo "run-dev accepted changed artifacts" >&2

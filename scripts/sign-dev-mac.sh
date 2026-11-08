@@ -39,7 +39,9 @@ sign_binary() {
 }
 
 helper_basename="$(printf '%s' "$(basename "$HELPER_BINARY")" | tr -c '[:alnum:]' '-')"
-sign_binary "$HELPER_BINARY" "$APP_IDENTIFIER.helper.$helper_basename"
+if ! codesign --verify --strict "$HELPER_BINARY" >/dev/null 2>&1; then
+    sign_binary "$HELPER_BINARY" "$APP_IDENTIFIER.helper.$helper_basename"
+fi
 sign_binary "$APP_BINARY" "$APP_IDENTIFIER"
 
 codesign --verify --strict --verbose=2 "$APP_BINARY"
