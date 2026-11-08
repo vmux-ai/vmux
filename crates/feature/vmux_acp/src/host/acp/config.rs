@@ -787,7 +787,7 @@ mod tests {
             .collect::<Vec<_>>();
         assert_eq!(remembered.len(), 1);
         assert_eq!(remembered[0].agent_id, "codex-acp");
-        assert_eq!(remembered[0].url, "vmux://sessions/?agent=codex-acp");
+        assert_eq!(remembered[0].url, "vmux://sessions/inbox?agent=codex-acp");
         assert_eq!(remembered[0].selected, "agent");
     }
 

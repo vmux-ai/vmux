@@ -189,8 +189,8 @@ mod tests {
         assert_eq!(pages.len(), 2);
         assert_eq!(pages[0].id, "codex");
         assert_eq!(pages[1].id, "claude-acp");
-        assert_eq!(pages[0].page.url, "vmux://sessions/?agent=codex");
-        assert_eq!(pages[1].page.url, "vmux://sessions/?agent=claude-acp");
+        assert_eq!(pages[0].page.url, "vmux://sessions/inbox?agent=codex");
+        assert_eq!(pages[1].page.url, "vmux://sessions/inbox?agent=claude-acp");
         assert!(matches!(
             pages[1].page.icon,
             vmux_api::PageIcon::Favicon(ref icon)
