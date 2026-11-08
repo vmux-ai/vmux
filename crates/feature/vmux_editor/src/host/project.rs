@@ -27,6 +27,7 @@ pub(super) struct ProjectPagePlugin;
 impl Plugin for ProjectPagePlugin {
     fn build(&self, app: &mut App) {
         app.add_plugins(vmux_ecs::UiStatePlugin::<ProjectUiState>::default())
+            .add_message::<vmux_layout::NewTabRequest>()
             .add_message::<vmux_layout::stack::OpenRequest>()
             .add_plugins(UiEventPlugin::<(
                 ProjectCreateRequest,
@@ -80,6 +81,7 @@ fn open_context(
     )>,
     space: vmux_layout::space::FocusedSpace,
     mut opens: MessageWriter<vmux_layout::stack::OpenRequest>,
+    mut tabs_open: MessageWriter<vmux_layout::NewTabRequest>,
 ) {
     let mut directory = space.startup_dir().map(PathBuf::from);
     let mut project = None;
@@ -123,6 +125,13 @@ fn open_context(
         {
             url = current;
         }
+    }
+    if request.open == Some(vmux_api::open_target::OpenTarget::InNewTab) {
+        tabs_open.write(vmux_layout::NewTabRequest {
+            url,
+            pending_prompt: None,
+        });
+        return;
     }
     opens.write(vmux_layout::stack::OpenRequest {
         url: Some(url),
@@ -1232,7 +1241,10 @@ mod tests {
 
         page.app
             .world_mut()
-            .trigger(vmux_ecs::workspace::ProjectContextOpenRequest { force_new: true });
+            .trigger(vmux_ecs::workspace::ProjectContextOpenRequest {
+                force_new: true,
+                open: None,
+            });
 
         let requests = page
             .app

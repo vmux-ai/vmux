@@ -622,6 +622,10 @@ The URL row contains routing breadcrumbs. Git view, repository, branch and commi
 use canonical vmux routes; legacy git paths remain input aliases. Requested references remain selected
 while their catalogs are incomplete. Search, filters, Details, Add, Create,
 Resume, Start, and Checkout render inside the page through `PageToolbar`, with local callbacks.
+The command bar displays decoded URL path segments, including embedded file paths. Edits retain
+their original segment boundaries; navigation and whole-URL copies use the canonical encoded URL.
+Ordinary bookmark clicks reuse an existing Stack or open one. Cmd-click, with or without Shift,
+opens a new Tab after resolving any project context.
 Fragment updates retain the page's breadcrumbs instead of replacing them with the generic route.
 `PageAddressRequest` validates the source window, active surface, revision, and URL before sending
 `AddressIntentRequest` to the page. Navigation opens in the owning Stack; page-local selection

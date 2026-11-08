@@ -44,7 +44,8 @@ impl Plugin for BookmarkPlugin {
         if !app.is_plugin_added::<CommandRuntimePlugin>() {
             app.add_plugins(CommandRuntimePlugin);
         }
-        app.add_message::<BookmarkToggleActiveRequest>()
+        app.add_message::<crate::NewTabRequest>()
+            .add_message::<BookmarkToggleActiveRequest>()
             .add_message::<BookmarkPinActiveRequest>()
             .add_message::<CreateFolderRequest>()
             .add_message::<ShowBookmarkMenuRequest>()
@@ -1072,12 +1073,23 @@ fn request_toggle(
 fn request_open(
     trigger: On<UiInput<BookmarkOpenRequest>>,
     mut requests: MessageWriter<OpenRequest>,
+    mut tabs: MessageWriter<crate::NewTabRequest>,
     mut commands: Commands,
 ) {
     let url = trigger.event().payload.url.clone();
     let force_new = trigger.event().payload.force_new;
     if url.trim_end_matches('/') == "vmux://projects" {
-        commands.trigger(vmux_ecs::workspace::ProjectContextOpenRequest { force_new });
+        commands.trigger(vmux_ecs::workspace::ProjectContextOpenRequest {
+            force_new,
+            open: trigger.event().payload.open,
+        });
+        return;
+    }
+    if trigger.event().payload.open == Some(vmux_api::open_target::OpenTarget::InNewTab) {
+        tabs.write(crate::NewTabRequest {
+            url,
+            pending_prompt: None,
+        });
         return;
     }
     requests.write(OpenRequest {
@@ -1456,6 +1468,7 @@ mod tests {
         app.add_plugins(MinimalPlugins)
             .add_message::<ShowBookmarkMenuRequest>()
             .add_message::<OpenRequest>()
+            .add_message::<crate::NewTabRequest>()
             .add_observer(request_open);
         let webview = app.world_mut().spawn_empty().id();
         app.world_mut().trigger(UiInput::<BookmarkOpenRequest> {
@@ -1463,6 +1476,7 @@ mod tests {
             payload: BookmarkOpenRequest {
                 url: "https://a.test".into(),
                 force_new: false,
+                open: None,
             },
         });
         let requests: Vec<_> = app
@@ -1485,6 +1499,7 @@ mod tests {
         app.add_plugins(MinimalPlugins)
             .add_message::<ShowBookmarkMenuRequest>()
             .add_message::<OpenRequest>()
+            .add_message::<crate::NewTabRequest>()
             .add_observer(request_open);
         let webview = app.world_mut().spawn_empty().id();
         app.world_mut().trigger(UiInput::<BookmarkOpenRequest> {
@@ -1492,6 +1507,7 @@ mod tests {
             payload: BookmarkOpenRequest {
                 url: "https://a.test".into(),
                 force_new: true,
+                open: None,
             },
         });
         let requests: Vec<_> = app
@@ -1506,6 +1522,32 @@ mod tests {
                 policy: OpenPolicy::NewStack,
             }]
         );
+    }
+
+    #[test]
+    fn modified_bookmark_open_requests_a_tab_instead_of_reusing_a_stack() {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins)
+            .add_message::<OpenRequest>()
+            .add_message::<crate::NewTabRequest>()
+            .add_observer(request_open);
+        let owner = app.world_mut().spawn_empty().id();
+        app.world_mut().trigger(UiInput {
+            webview: owner,
+            payload: BookmarkOpenRequest {
+                url: "https://example.com".into(),
+                open: Some(vmux_api::open_target::OpenTarget::InNewTab),
+                force_new: false,
+            },
+        });
+        let tabs = app
+            .world_mut()
+            .resource_mut::<Messages<crate::NewTabRequest>>()
+            .drain()
+            .collect::<Vec<_>>();
+        assert_eq!(tabs.len(), 1);
+        assert_eq!(tabs[0].url, "https://example.com");
+        assert!(app.world().resource::<Messages<OpenRequest>>().is_empty());
     }
 
     #[test]

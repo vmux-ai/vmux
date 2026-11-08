@@ -82,6 +82,8 @@ pub struct BookmarkMenuFolderRequest {
 pub struct BookmarkOpenRequest {
     pub url: String,
     #[serde(default)]
+    pub open: Option<crate::open_target::OpenTarget>,
+    #[serde(default)]
     pub force_new: bool,
 }
 

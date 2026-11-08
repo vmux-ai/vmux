@@ -134,7 +134,10 @@ impl CommandBarResultItem {
                 } else if *is_url {
                     translate_with(
                         "command-open-value",
-                        &[("value", TranslationValue::String(url))],
+                        &[(
+                            "value",
+                            TranslationValue::String(vmux_path::UrlPresentation::new(url).text()),
+                        )],
                     )
                 } else {
                     translate_with(

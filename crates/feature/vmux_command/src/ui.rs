@@ -161,9 +161,19 @@ pub fn CommandPalette(props: PaletteProps) -> Element {
     };
     let projection = std::rc::Rc::new(palette_data.projection.clone());
     let attachments = std::rc::Rc::new(palette_data.attachments.clone());
-    let q = projection.query.clone();
+    let canonical_q = projection.query.clone();
+    let url_presentation = vmux_path::UrlPresentation::new(&canonical_q);
+    let q = if is_start {
+        canonical_q.clone()
+    } else {
+        url_presentation.text().to_string()
+    };
     let file_only = q.trim_start().starts_with('@');
-    let ghost_text = projection.ghost.clone();
+    let ghost_text = if is_start {
+        projection.ghost.clone()
+    } else {
+        url_presentation.ghost(&projection.ghost)
+    };
     let media_menu_open = is_start && palette_data.media_query.is_some();
     let media_sel = (palette_data.media_selected as usize)
         .min(palette_data.media_options.len().saturating_sub(1));
@@ -388,16 +398,16 @@ pub fn CommandPalette(props: PaletteProps) -> Element {
     let modal_keydown = {
         let projection = projection.clone();
         let query = q.clone();
+        let canonical = canonical_q.clone();
+        let ghost = ghost_text.clone();
         move |e: KeyboardEvent| {
             if ime.swallows(&e) {
                 return;
             }
-            if let Some(edited) =
-                Readline::chord(&e, keys, &query, &projection.ghost, COMMAND_BAR_INPUT_ID)
-            {
+            if let Some(edited) = Readline::chord(&e, keys, &query, &ghost, COMMAND_BAR_INPUT_ID) {
                 let _ = send(&CommandPaletteDraftRequest {
                     open_id: state().open_id,
-                    query: edited,
+                    query: vmux_path::UrlPresentation::new(&canonical).edit(&edited),
                     start: is_start,
                 });
                 return;
@@ -520,10 +530,21 @@ pub fn CommandPalette(props: PaletteProps) -> Element {
                                 placeholder: if projection.row_text.is_some() { String::new() } else { projection.placeholder.clone() },
                                 value: "{q}",
                                 autofocus: true,
+                                oncopy: {
+                                    let canonical = canonical_q.clone();
+                                    let displayed = q.clone();
+                                    move |event| {
+                                        let (start, end) = DomSelection::in_field(COMMAND_BAR_INPUT_ID);
+                                        if start == 0 && end == displayed.len() && canonical != displayed {
+                                            event.prevent_default();
+                                            vmux_ui::clipboard::Clipboard::write(&canonical);
+                                        }
+                                    }
+                                },
                                 oninput: move |event| {
                                     let _ = send(&CommandPaletteDraftRequest {
                                         open_id: state().open_id,
-                                        query: event.value(),
+                                        query: vmux_path::UrlPresentation::new(&canonical_q).edit(&event.value()),
                                         start: is_start,
                                     });
                                 },

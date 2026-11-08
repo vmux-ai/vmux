@@ -5,10 +5,12 @@ use std::path::{Component, Path, PathBuf};
 pub use executable::Executable;
 pub use file_url::FileUrl;
 pub use navigation::NavigationText;
+pub use url_presentation::UrlPresentation;
 
 mod executable;
 mod file_url;
 mod navigation;
+mod url_presentation;
 
 pub struct DisplayPath;
 

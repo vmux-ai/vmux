@@ -29,6 +29,10 @@ impl NavigationGesture {
             OpenTarget::InPlace
         }
     }
+
+    pub fn bookmark_target(self) -> Option<OpenTarget> {
+        self.meta.then_some(OpenTarget::InNewTab)
+    }
 }
 
 impl PageNavigation {

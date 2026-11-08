@@ -24,6 +24,7 @@ use vmux_ui::dom::DomCaret;
 use vmux_ui::hooks::send;
 use vmux_ui::i18n::{TranslationValue, translate, translate_with};
 use vmux_ui::icon::{LineIcon, LineIconView, PageIconView};
+use vmux_ui::navigation::NavigationGesture;
 use vmux_ui::platform::Platform;
 
 use crate::event::{
@@ -595,7 +596,8 @@ fn PinTile(row: BookmarkRow, index: usize, active: bool) -> Element {
                                 }
                                 let _ = send(&BookmarkOpenRequest {
                                     url: u.clone(),
-                                    force_new: event.modifiers().meta(),
+                                    force_new: false,
+                                    open: NavigationGesture::from_mouse(&event).bookmark_target(),
                                 });
                             }
                         },
@@ -613,7 +615,7 @@ fn PinTile(row: BookmarkRow, index: usize, active: bool) -> Element {
                         ContextMenuItem {
                             index: 0usize,
                             value: Into::<ReadSignal<String>>::into(menu_val),
-                            on_select: { let u = url_open.clone(); move |_: String| { let _ = send(&BookmarkOpenRequest { url: u.clone(), force_new: false }); } },
+                            on_select: { let u = url_open.clone(); move |_: String| { let _ = send(&BookmarkOpenRequest { url: u.clone(), force_new: false, open: None }); } },
                             attributes: vec![],
                             {translate("common-open")}
                         }
@@ -1139,7 +1141,8 @@ fn BookmarkEntry(entry: BookmarkEntryState, edit: BookmarkEditState) -> Element 
                                         }
                                         let _ = send(&BookmarkOpenRequest {
                                             url: u.clone(),
-                                            force_new: event.modifiers().meta(),
+                                            force_new: false,
+                                            open: NavigationGesture::from_mouse(&event).bookmark_target(),
                                         });
                                     }
                                 },
@@ -1152,7 +1155,7 @@ fn BookmarkEntry(entry: BookmarkEntryState, edit: BookmarkEditState) -> Element 
                     ContextMenuItem {
                         index: 0usize,
                         value: Into::<ReadSignal<String>>::into(menu_val),
-                        on_select: { let u = url_open.clone(); move |_: String| { let _ = send(&BookmarkOpenRequest { url: u.clone(), force_new: false }); } },
+                        on_select: { let u = url_open.clone(); move |_: String| { let _ = send(&BookmarkOpenRequest { url: u.clone(), force_new: false, open: None }); } },
                         attributes: vec![],
                         {translate("common-open")}
                     }

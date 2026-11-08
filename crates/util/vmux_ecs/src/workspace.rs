@@ -22,4 +22,5 @@ pub struct ComputeFocusSet;
 #[derive(Event, Clone, Copy)]
 pub struct ProjectContextOpenRequest {
     pub force_new: bool,
+    pub open: Option<vmux_api::open_target::OpenTarget>,
 }
