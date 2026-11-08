@@ -115,6 +115,13 @@ pub struct GitDiffNextRequest {
     pub revision: u64,
 }
 
+#[vmux_api::ui_event(Eq)]
+pub struct GitDiffSeekRequest {
+    pub generation: u64,
+    pub revision: u64,
+    pub path: String,
+}
+
 #[vmux_api::ui_event]
 pub struct GitDiffRetryRequest;
 

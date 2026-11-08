@@ -670,6 +670,9 @@ changes only the display name, preserving tab membership and the icon. Commit se
 full object ID for identicons in both the URL trail and its menu. An unselected Commits view picks
 the latest commit after its initial catalog arrives and writes that selection into the URL;
 explicit object IDs remain selected independently of the current branch's history.
+Project detail trails reuse the asynchronous Project catalog for their switch menu. Cached choices
+remain available across project navigation, and completing a catalog refresh preserves the detail
+view rather than replacing it with the Project list.
 Search and page controls share `page::PageToolbarRow`, a 32 px row. Collection sidebars use the
 same default width as Code's file tree; their search and navigation icons share a 12 px left inset.
 `manager::ManagerSearch` fills that row with 13 px text and a subtle focus surface, retaining its
@@ -1127,6 +1130,9 @@ schedule work in proportion to the total repository history or block the ECS sch
 review advances one file and one bounded line window at a time; viewport demand requests another
 window. A large lockfile therefore cannot produce an unbounded first render, and an idle review
 cannot silently materialize the rest of the branch in the page DOM.
+Visible placeholders request a path-specific seek without changing selection or history. Pending
+seeks and their continuation windows take priority over background prefetch while retaining the
+older batch for later; generation checks discard requests from replaced sources.
 File, staged-only, dirty-buffer and submodule comparisons share the disk-spooled review source.
 Syntax state and already generated lines are retained, while colors are generated only through
 the requested viewport and cancellation stops further work. Collapsed unchanged ranges use the

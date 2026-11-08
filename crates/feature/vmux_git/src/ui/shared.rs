@@ -396,15 +396,15 @@ pub fn DiffView(
             return;
         }
         let next_request = Rc::clone(&initial_next_request);
-        let placeholder_within = {
+        let placeholder = {
             let layout = initial_layout_cache.borrow();
             let geometry = initial_geometry_cache.borrow();
             layout
                 .layout
-                .placeholder_within(&geometry.geometry, *render_window.peek())
+                .placeholder_path(&geometry.geometry, *render_window.peek())
         };
-        if placeholder_within {
-            next_request.send_key(next_request_key);
+        if let Some(path) = placeholder {
+            next_request.send_seek(next_request_key, path);
             return;
         }
         spawn(async move {
@@ -475,9 +475,9 @@ pub fn DiffView(
                 }
                 let layout = scroll_layout_cache.borrow();
                 let geometry = scroll_geometry_cache.borrow();
-                let placeholder_nearby = layout
+                let placeholder = layout
                     .layout
-                    .placeholder_within(&geometry.geometry, viewport_window);
+                    .placeholder_path(&geometry.geometry, viewport_window);
                 if let Some(path) = geometry
                     .geometry
                     .file_at(&layout.layout, event.scroll_top() + 1.0)
@@ -488,11 +488,12 @@ pub fn DiffView(
                         handler.call(path);
                     }
                 }
-                if (placeholder_nearby || ScrollPreload::DOCUMENT.reached(&event))
-                    && has_more
-                    && !loading
-                {
-                    scroll_next_request.send_key(next_request_key);
+                if has_more && !loading {
+                    if let Some(path) = placeholder {
+                        scroll_next_request.send_seek(next_request_key, path);
+                    } else if ScrollPreload::DOCUMENT.reached(&event) {
+                        scroll_next_request.send_key(next_request_key);
+                    }
                 }
             },
 
@@ -855,7 +856,10 @@ impl From<&GitDiffViewport> for DiffNextRequestKey {
 }
 
 #[derive(Default)]
-struct DiffNextRequest(Cell<Option<DiffNextRequestKey>>);
+struct DiffNextRequest {
+    next: Cell<Option<DiffNextRequestKey>>,
+    seek: RefCell<Option<(DiffNextRequestKey, String)>>,
+}
 
 impl DiffNextRequest {
     fn send_key(&self, key: Option<DiffNextRequestKey>) {
@@ -871,16 +875,36 @@ impl DiffNextRequest {
         })
         .is_err()
         {
-            self.0.set(None);
+            self.next.set(None);
         }
     }
 
     fn claim(&self, key: DiffNextRequestKey) -> bool {
-        if self.0.get() == Some(key) {
+        if self.next.get() == Some(key) {
             return false;
         }
-        self.0.set(Some(key));
+        self.next.set(Some(key));
         true
+    }
+
+    fn send_seek(&self, key: Option<DiffNextRequestKey>, path: String) {
+        let Some(key) = key else {
+            return;
+        };
+        let current = (key, path.clone());
+        if self.seek.borrow().as_ref() == Some(&current) {
+            return;
+        }
+        self.seek.borrow_mut().replace(current);
+        if send(&GitDiffSeekRequest {
+            generation: key.generation,
+            revision: key.revision,
+            path,
+        })
+        .is_err()
+        {
+            self.seek.borrow_mut().take();
+        }
     }
 }
 
@@ -1130,20 +1154,38 @@ impl DiffLayout {
             .filter_map(|section| section.file_path.as_deref())
     }
 
-    fn placeholder_within(&self, geometry: &DiffGeometry, window: DiffRenderWindow) -> bool {
+    fn placeholder_path(
+        &self,
+        geometry: &DiffGeometry,
+        window: DiffRenderWindow,
+    ) -> Option<String> {
+        if let Some(path) =
+            self.placeholder_between(geometry, window.top, window.top + window.height)
+        {
+            return Some(path);
+        }
         let (range_start, range_end) = window.range();
+        self.placeholder_between(geometry, range_start, range_end)
+    }
+
+    fn placeholder_between(
+        &self,
+        geometry: &DiffGeometry,
+        range_start: f64,
+        range_end: f64,
+    ) -> Option<String> {
         let first = geometry
             .ends
             .partition_point(|section_end| *section_end < range_start);
         for (index, section) in self.sections.iter().enumerate().skip(first) {
             if geometry.starts[index] > range_end {
-                return false;
+                return None;
             }
             if section.placeholder {
-                return true;
+                return section.file_path.clone();
             }
         }
-        false
+        None
     }
 
     fn visible(
@@ -1860,6 +1902,7 @@ mod tests {
     use super::*;
     use dioxus::core::{AttributeValue, Mutation, Mutations, VirtualDom};
     use dioxus::html::{EventData, SerializedMouseData, SerializedScrollData};
+    use vmux_api::BinEvent;
     use vmux_ui::hooks::EventListenerError;
     use vmux_ui::transport::{BytesListener, HostScope, PageHost};
 
@@ -1872,6 +1915,20 @@ mod tests {
 
     #[derive(Clone, Default)]
     struct RevealProbe(Rc<RefCell<Option<Signal<Target>>>>);
+
+    #[derive(Default)]
+    struct ReadRequests(RefCell<Vec<(String, Vec<u8>)>>);
+
+    impl PageHost for ReadRequests {
+        fn send(&self, id: &str, bytes: &[u8]) -> Result<(), EventListenerError> {
+            self.0.borrow_mut().push((id.to_string(), bytes.to_vec()));
+            Ok(())
+        }
+
+        fn listen(&self, _: &str, _: BytesListener) -> Result<(), EventListenerError> {
+            Ok(())
+        }
+    }
 
     impl PageHost for ScrollRequests {
         fn send(&self, _: &str, _: &[u8]) -> Result<(), EventListenerError> {
@@ -2363,6 +2420,59 @@ mod tests {
     }
 
     #[test]
+    fn scrolling_to_a_pending_file_requests_that_file_without_navigation() {
+        dioxus::html::set_event_converter(Box::new(dioxus::html::SerializedHtmlEventConverter));
+        let requests = Rc::new(ReadRequests::default());
+        let _host = HostScope::enter(requests.clone());
+        let probe = Rc::new(RefCell::new(None));
+        let mut dom = VirtualDom::new_with_props(
+            InitialDiffFiles,
+            InitialDiffFilesProps {
+                probe: probe.clone(),
+            },
+        );
+        let initial = dom.rebuild_to_vec();
+        let scroll_node = initial
+            .edits
+            .iter()
+            .find_map(|edit| match edit {
+                Mutation::NewEventListener { name, id } if name == "scroll" => Some(*id),
+                _ => None,
+            })
+            .unwrap();
+        let mut incoming = DiffScrollFixture::folding_viewport().unwrap();
+        incoming.lines.truncate(1_001);
+        incoming.total_lines = 1_001;
+        incoming.has_more = true;
+        let mut viewport = probe.borrow().unwrap();
+        dom.runtime()
+            .in_scope(ScopeId::ROOT, || viewport.set(Some(incoming)));
+        dom.render_immediate_to_vec();
+        requests.0.borrow_mut().clear();
+
+        let data = EventData::Scroll(SerializedScrollData {
+            scroll_top: 20_048.0,
+            scroll_left: 0.0,
+            scroll_width: 1_000,
+            scroll_height: 21_000,
+            client_width: 1_000,
+            client_height: 800,
+        });
+        dom.runtime()
+            .handle_event("scroll", Event::new(data.into_any(), false), scroll_node);
+        dom.render_immediate_to_vec();
+
+        let sent = requests.0.borrow();
+        assert_eq!(sent.len(), 1);
+        assert_eq!(sent[0].0, GitDiffSeekRequest::id());
+        let request = vmux_ui::transport::HostPayload::new(&sent[0].1)
+            .decode::<GitDiffSeekRequest>()
+            .unwrap();
+        assert_eq!(request.path, "second.rs");
+        assert_eq!((request.generation, request.revision), (1, 1));
+    }
+
+    #[test]
     fn next_diff_request_is_claimed_once_per_loaded_window() {
         let request = DiffNextRequest::default();
         let first = DiffNextRequestKey {
@@ -2393,20 +2503,47 @@ mod tests {
         };
         let geometry = DiffGeometry::new(&layout, "branch", &HashSet::new());
 
-        assert!(!layout.placeholder_within(
-            &geometry,
-            DiffRenderWindow {
-                top: 0.0,
-                height: 800.0,
-            },
-        ));
-        assert!(layout.placeholder_within(
-            &geometry,
-            DiffRenderWindow {
-                top: 4_000.0,
-                height: 800.0,
-            },
-        ));
+        assert_eq!(
+            layout.placeholder_path(
+                &geometry,
+                DiffRenderWindow {
+                    top: 0.0,
+                    height: 800.0,
+                },
+            ),
+            None
+        );
+        assert_eq!(
+            layout.placeholder_path(
+                &geometry,
+                DiffRenderWindow {
+                    top: 4_000.0,
+                    height: 800.0,
+                },
+            ),
+            Some("src/pending.rs".to_string())
+        );
+    }
+
+    #[test]
+    fn the_visible_placeholder_has_priority_over_an_earlier_overscan_file() {
+        let layout = DiffLayout {
+            sections: vec![
+                DiffSection::placeholder("before.rs".to_string()),
+                DiffSection::placeholder("visible.rs".to_string()),
+                DiffSection::placeholder("after.rs".to_string()),
+            ],
+        };
+        let geometry = DiffGeometry::new(&layout, "branch", &HashSet::new());
+        let window = DiffRenderWindow {
+            top: geometry.starts[1] + 1.0,
+            height: 100.0,
+        };
+
+        assert_eq!(
+            layout.placeholder_path(&geometry, window),
+            Some("visible.rs".to_string())
+        );
     }
 
     #[test]

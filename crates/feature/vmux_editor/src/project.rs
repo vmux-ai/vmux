@@ -53,9 +53,11 @@ pub struct ProjectDetailView {
     pub id: ProjectId,
     pub name: String,
     pub path: String,
+    pub choices: Vec<ProjectEntry>,
+    pub choices_pending: bool,
 }
 
-#[vmux_api::ui_state(Default, Eq, version = 3)]
+#[vmux_api::ui_state(Default, Eq, version = 4)]
 pub struct ProjectUiState {
     pub view: ProjectView,
     pub collection_view: vmux_ecs::CollectionView,
@@ -63,6 +65,14 @@ pub struct ProjectUiState {
 
 #[cfg(host)]
 impl ProjectUiState {
+    pub(crate) fn choices(&self) -> Vec<ProjectEntry> {
+        match &self.view {
+            ProjectView::Catalog(catalog) => catalog.entries.clone(),
+            ProjectView::Detail(detail) => detail.choices.clone(),
+            ProjectView::Loading | ProjectView::Error(_) => Vec::new(),
+        }
+    }
+
     pub(crate) fn pending(mut self) -> Self {
         if let ProjectView::Catalog(catalog) = &mut self.view {
             catalog.operation_pending = true;

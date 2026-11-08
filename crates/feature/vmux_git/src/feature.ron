@@ -34,6 +34,7 @@
                 "GitCatalogNextRequest",
                 "GitDiffRevealRequest",
                 "GitDiffNextRequest",
+                "GitDiffSeekRequest",
                 "GitBranchCollectionSelectRequest",
                 "GitBranchSelectRequest",
                 "GitBranchDiffSelectRequest",

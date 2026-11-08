@@ -786,6 +786,13 @@ fn queue(
             }
         };
         if !ProjectRoute::is_root(&url) {
+            let choices = if let Ok(current) = states.get(entity)
+                && let Some(current) = current.current()
+            {
+                current.choices()
+            } else {
+                Vec::new()
+            };
             let (state, cwd) = match ProjectRoute::resolve(&url, &root) {
                 Some(Ok(path)) => {
                     let name = path
@@ -800,6 +807,8 @@ fn queue(
                                 id: id.clone(),
                                 name,
                                 path: path.to_string_lossy().into_owned(),
+                                choices_pending: choices.is_empty(),
+                                choices,
                             }),
                             collection_view,
                         },
@@ -831,6 +840,12 @@ fn queue(
             commands.trigger(vmux_ecs::UiStateWrite::<ProjectUiState>::from_event(
                 entity, &state,
             ));
+            if matches!(state.view, ProjectView::Detail(_)) {
+                let wake = proxy.as_deref().map(|proxy| (**proxy).clone());
+                commands
+                    .entity(entity)
+                    .insert(ProjectCatalogTask::spawn(root, revision, wake));
+            }
             continue;
         }
         page.title = vmux_ui::i18n::translate("layout-projects");
@@ -937,10 +952,25 @@ fn finish_catalogs(
             continue;
         };
         commands.entity(entity).remove::<ProjectCatalogTask>();
-        if !ProjectRoute::is_root(&page.url) || revision.value != task.revision {
+        if !ProjectRoute::is_page(&page.url) || revision.value != task.revision {
             continue;
         }
-        let mut state = ProjectCatalog::with_session_counts(state, &catalog);
+        let mut state = if ProjectRoute::is_root(&page.url) {
+            ProjectCatalog::with_session_counts(state, &catalog)
+        } else {
+            let Ok(current) = states.get(entity) else {
+                continue;
+            };
+            let Some(mut current) = current.current().cloned() else {
+                continue;
+            };
+            let ProjectView::Detail(detail) = &mut current.view else {
+                continue;
+            };
+            detail.choices = state.choices();
+            detail.choices_pending = false;
+            current
+        };
         if let Ok(current) = states.get(entity)
             && let Some(current) = current.current()
         {
@@ -1315,6 +1345,54 @@ mod tests {
             });
             Self { app, view }
         }
+
+        fn wait_for_choices(&mut self) {
+            let deadline = std::time::Instant::now() + std::time::Duration::from_secs(3);
+            loop {
+                self.app.update();
+                let ready = self
+                    .app
+                    .world()
+                    .get::<vmux_ecs::UiState<ProjectUiState>>(self.view)
+                    .and_then(vmux_ecs::UiState::current)
+                    .is_some_and(|state| match &state.view {
+                        ProjectView::Detail(detail) => !detail.choices_pending,
+                        _ => false,
+                    });
+                if ready {
+                    return;
+                }
+                assert!(std::time::Instant::now() < deadline);
+                std::thread::yield_now();
+            }
+        }
+    }
+
+    #[test]
+    fn project_detail_loads_switch_choices_without_replacing_its_target() {
+        let root = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(root.path().join("one/.git")).unwrap();
+        std::fs::create_dir_all(root.path().join("two/.git")).unwrap();
+        let mut page = ProjectPage::at(root.path(), "vmux://projects/one");
+        page.wait_for_choices();
+        let state = page
+            .app
+            .world()
+            .get::<vmux_ecs::UiState<ProjectUiState>>(page.view)
+            .and_then(vmux_ecs::UiState::current)
+            .unwrap();
+        let ProjectView::Detail(detail) = &state.view else {
+            panic!("catalog completion must retain the selected project");
+        };
+        assert_eq!(detail.id.0, "vmux://projects/one");
+        assert_eq!(
+            detail
+                .choices
+                .iter()
+                .map(|entry| entry.url.as_str())
+                .collect::<Vec<_>>(),
+            ["vmux://projects/one", "vmux://projects/two"]
+        );
     }
 
     #[test]

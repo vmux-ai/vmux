@@ -830,7 +830,7 @@ fn deliver_catalog_outputs(
 
 fn deliver_diff_outputs(
     mut outputs: Query<(Entity, &GitJob, &mut DiffOutput)>,
-    presented: Query<(), With<vmux_ecs::PagePresented>>,
+    presented: Query<Has<super::diff::PendingGitDiffSeek>, With<vmux_ecs::PagePresented>>,
     mut views: Query<(
         &mut super::state::GitState,
         &mut super::state::GitDiffRevealRanges,
@@ -889,7 +889,7 @@ fn deliver_diff_outputs(
                 view.snapshot.diff_viewport = Some(event);
                 revealed.0.clear();
             }
-            if presented.contains(webview)
+            if presented.get(webview).is_ok_and(|seeking| !seeking)
                 && branch_has_more
                 && succeeded
                 && query.continue_prefetch(loaded_lines)

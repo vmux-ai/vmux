@@ -8,7 +8,7 @@ use bevy_cef::prelude::{UiEventPlugin, UiInput};
 
 use crate::event::{
     DiffKind, DiffLine, GitBranchFilesNextRequest, GitBranchFilesRetryRequest, GitDiffNextRequest,
-    GitDiffRetryRequest, GitDiffRevealRequest, GitLineMarker, GitLineStatus,
+    GitDiffRetryRequest, GitDiffRevealRequest, GitDiffSeekRequest, GitLineMarker, GitLineStatus,
 };
 use crate::state::{
     GitBranchFilesPagePatch, GitBranchFilesPatch, GitPageControllerState, GitPanel, GitUiState,
@@ -31,6 +31,7 @@ impl Plugin for DiffPlugin {
         app.add_plugins(UiEventPlugin::<(
             GitDiffRevealRequest,
             GitDiffNextRequest,
+            GitDiffSeekRequest,
             GitDiffRetryRequest,
             GitBranchFilesNextRequest,
             GitBranchFilesRetryRequest,
@@ -39,6 +40,7 @@ impl Plugin for DiffPlugin {
             .add_observer(file_refresh)
             .add_observer(reveal)
             .add_observer(load_next)
+            .add_observer(seek)
             .add_observer(retry)
             .add_observer(load_next_branch_files)
             .add_observer(retry_branch_files)
@@ -151,6 +153,7 @@ pub(super) struct PendingGitDiff {
 #[derive(Component)]
 pub(super) struct PendingGitDiffSeek {
     path_bytes: Vec<u8>,
+    generation: u64,
 }
 
 #[derive(Clone, Copy)]
@@ -231,6 +234,7 @@ struct BranchDiffProgress {
     loaded: HashSet<Vec<u8>>,
     in_flight: HashSet<Vec<u8>>,
     continuations: VecDeque<BranchDiffContinuation>,
+    priority: Option<Vec<u8>>,
     next: usize,
 }
 
@@ -258,11 +262,17 @@ impl BranchDiffProgress {
             loaded: HashSet::new(),
             in_flight: HashSet::new(),
             continuations: VecDeque::new(),
+            priority: None,
             next: 0,
         }
     }
 
     fn next(&mut self) -> BranchDiffBatch {
+        if let Some(path) = self.priority.clone()
+            && let Some(batch) = self.seek(&path)
+        {
+            return batch;
+        }
         if let Some(continuation) = self.continuations.pop_front() {
             self.in_flight.extend(continuation.paths.iter().cloned());
             return BranchDiffBatch {
@@ -306,6 +316,23 @@ impl BranchDiffProgress {
         {
             return None;
         }
+        self.priority = Some(path.to_vec());
+        if let Some(index) = self
+            .continuations
+            .iter()
+            .position(|continuation| continuation.paths.iter().any(|candidate| candidate == path))
+        {
+            let continuation = self.continuations.remove(index).unwrap();
+            self.in_flight.extend(continuation.paths.iter().cloned());
+            return Some(BranchDiffBatch {
+                source: self.catalog.source().to_path_buf(),
+                merge_base: self.catalog.merge_base().to_string(),
+                paths: continuation.paths,
+                document: continuation.document,
+                top_line: continuation.top_line,
+                has_more: true,
+            });
+        }
         Some(BranchDiffBatch {
             source: self.catalog.source().to_path_buf(),
             merge_base: self.catalog.merge_base().to_string(),
@@ -317,12 +344,17 @@ impl BranchDiffProgress {
     }
 
     fn contains(&self, path: &[u8]) -> bool {
-        self.loaded.contains(path)
-            || self.in_flight.contains(path)
-            || self
-                .continuations
-                .iter()
-                .any(|continuation| continuation.paths.iter().any(|candidate| candidate == path))
+        self.loaded.contains(path) || self.priority.as_deref() == Some(path)
+    }
+
+    fn path(&self, label: &str) -> Option<Vec<u8>> {
+        for index in 0..self.catalog.len() {
+            let path = self.catalog.path(index)?;
+            if String::from_utf8_lossy(path) == label {
+                return Some(path.to_vec());
+            }
+        }
+        None
     }
 
     fn complete(
@@ -339,6 +371,15 @@ impl BranchDiffProgress {
             if succeeded && page_complete {
                 self.loaded.insert(path.clone());
             }
+        }
+        if page_complete
+            && succeeded
+            && self
+                .priority
+                .as_ref()
+                .is_some_and(|path| self.loaded.contains(path))
+        {
+            self.priority = None;
         }
         if !succeeded || !page_complete {
             self.continuations.push_back(BranchDiffContinuation {
@@ -622,14 +663,22 @@ fn sync_page_targets(
         }) || current.is_some_and(|current| {
             current.target == target && current.page_revision == Some(page_revision)
         }) {
-            if !controller.selected_branch_path_bytes.is_empty()
-                && current.is_some_and(|current| {
-                    !current.contains_branch_path(&controller.selected_branch_path_bytes)
-                })
-            {
-                commands.entity(entity).insert(PendingGitDiffSeek {
-                    path_bytes: controller.selected_branch_path_bytes.clone(),
-                });
+            if let Some(query) = current {
+                let selected = &controller.selected_branch_path_bytes;
+                let selection_changed = controller.is_changed()
+                    || query
+                        .branch
+                        .as_ref()
+                        .is_some_and(|branch| branch.priority.is_none());
+                if !selected.is_empty()
+                    && selection_changed
+                    && !query.contains_branch_path(selected)
+                {
+                    commands.entity(entity).insert(PendingGitDiffSeek {
+                        path_bytes: selected.clone(),
+                        generation: query.generation,
+                    });
+                }
             }
             continue;
         }
@@ -778,14 +827,24 @@ fn retry_branch_files(
     commands.entity(entity).remove::<GitBranchFilesQuery>();
 }
 
+type DiffPages<'w, 's> = Query<
+    'w,
+    's,
+    (
+        &'static super::state::GitState,
+        &'static mut GitDiffQuery,
+        Option<&'static PendingGitDiffSeek>,
+    ),
+>;
+
 fn load_next(
     trigger: On<UiInput<GitDiffNextRequest>>,
-    mut pages: Query<(&super::state::GitState, &mut GitDiffQuery)>,
+    mut pages: DiffPages,
     sources: Query<&GitDiffSource>,
     mut commands: Commands,
 ) {
     let entity = trigger.event().webview;
-    let Ok((state, mut query)) = pages.get_mut(entity) else {
+    let Ok((state, mut query, pending)) = pages.get_mut(entity) else {
         return;
     };
     let Some(viewport) = state.snapshot.diff_viewport.as_ref() else {
@@ -801,7 +860,7 @@ fn load_next(
     let loaded = viewport
         .first_line
         .saturating_add(u32::try_from(viewport.lines.len()).unwrap_or(u32::MAX));
-    if query.loading || !viewport.has_more {
+    if query.loading || !viewport.has_more || pending.is_some() {
         return;
     }
     let content = sources
@@ -833,6 +892,40 @@ fn load_next(
     ));
 }
 
+fn seek(
+    trigger: On<UiInput<GitDiffSeekRequest>>,
+    pages: Query<(&super::state::GitState, &GitDiffQuery)>,
+    mut commands: Commands,
+) {
+    let entity = trigger.event().webview;
+    let Ok((state, query)) = pages.get(entity) else {
+        return;
+    };
+    let Some(viewport) = state.snapshot.diff_viewport.as_ref() else {
+        return;
+    };
+    let request = &trigger.event().payload;
+    if request.generation != query.generation
+        || request.generation != viewport.generation
+        || request.revision != viewport.revision
+    {
+        return;
+    }
+    let Some(branch) = &query.branch else {
+        return;
+    };
+    let Some(path_bytes) = branch.path(&request.path) else {
+        return;
+    };
+    if branch.loaded.contains(&path_bytes) {
+        return;
+    }
+    commands.entity(entity).insert(PendingGitDiffSeek {
+        path_bytes,
+        generation: query.generation,
+    });
+}
+
 fn retry(
     trigger: On<UiInput<GitDiffRetryRequest>>,
     mut pages: Query<(
@@ -854,17 +947,26 @@ fn retry(
     });
 }
 
-fn start_pending_seek(
-    mut pages: Query<(
+type PendingSeeks<'w, 's> = Query<
+    'w,
+    's,
+    (
         Entity,
-        &super::state::GitState,
-        &mut GitDiffQuery,
-        &PendingGitDiffSeek,
-    )>,
-    mut commands: Commands,
-) {
+        &'static super::state::GitState,
+        &'static mut GitDiffQuery,
+        &'static PendingGitDiffSeek,
+    ),
+>;
+
+fn start_pending_seek(mut pages: PendingSeeks, mut commands: Commands) {
     for (entity, state, mut query, pending) in &mut pages {
-        if query.loading || !matches!(query.target.scope, DiffScope::Branch(_)) {
+        if pending.generation != query.generation
+            || !matches!(query.target.scope, DiffScope::Branch(_))
+        {
+            commands.entity(entity).remove::<PendingGitDiffSeek>();
+            continue;
+        }
+        if query.loading {
             continue;
         }
         let loaded = state
@@ -939,6 +1041,7 @@ type PendingDiffRequests<'w, 's> = Query<
 
 fn start_requests(
     pending: PendingDiffRequests,
+    controllers: Query<&GitPageControllerState>,
     generations: Query<&Generation>,
     mut pages: Query<(
         &mut super::state::GitState,
@@ -977,12 +1080,20 @@ fn start_requests(
             .filter(|source| source.dirty)
             .map(|source| source.content.clone());
         queued_diffs.despawn_for(entity, &mut commands);
-        let branch = match &target.scope {
+        let mut branch = match &target.scope {
             DiffScope::Branch(_) => {
                 branch_files.map(|query| BranchDiffProgress::new(query.catalog.clone()))
             }
             DiffScope::File | DiffScope::Commit(_) | DiffScope::Stash(_) => None,
         };
+        if let Some(branch) = branch.as_mut()
+            && let Ok(controller) = controllers.get(entity)
+            && branch
+                .catalog
+                .contains(&controller.selected_branch_path_bytes)
+        {
+            branch.priority = Some(controller.selected_branch_path_bytes.clone());
+        }
         let mut query = GitDiffQuery {
             target: target.clone(),
             generation,
@@ -998,7 +1109,7 @@ fn start_requests(
         let batch = query.next_branch().unwrap_or_default();
         commands
             .entity(entity)
-            .remove::<PendingGitDiff>()
+            .remove::<(PendingGitDiff, PendingGitDiffSeek)>()
             .insert((query, sequence));
         commands.spawn((
             GitJob::new(entity),
@@ -1149,6 +1260,221 @@ mod tests {
             hunk: None,
             spans: Vec::<StyledSpan>::new(),
         }
+    }
+
+    struct BranchReads {
+        app: App,
+        page: Entity,
+    }
+
+    impl BranchReads {
+        fn new() -> Self {
+            let paths = (0..5)
+                .map(|index| format!("file-{index}.rs").into_bytes())
+                .collect();
+            let catalog = BranchFilesCatalog::for_paths(paths);
+            let mut progress = BranchDiffProgress::new(catalog.clone());
+            let first = progress.next();
+            progress.complete(
+                &first.paths,
+                0,
+                800,
+                false,
+                true,
+                Some(DiffSource::shared_source_lines(Arc::new(vec![
+                    line(
+                        DiffKind::Add,
+                        1
+                    );
+                    920
+                ]))),
+            );
+            let mut query = GitDiffQuery::for_test(1);
+            query.target.path = PathBuf::new();
+            query.target.scope = DiffScope::Branch("feature".to_string());
+            query.page_revision = Some(1);
+            query.revision = 4;
+            query.branch = Some(progress);
+            let request = crate::event::GitRepositoryRequest::project(
+                "/repo".to_string(),
+                "repo".to_string(),
+                "feature".to_string(),
+            );
+            let mut app = App::new();
+            app.add_plugins((
+                MinimalPlugins,
+                vmux_ecs::UiStatePlugin::<GitUiState>::default(),
+                DiffPlugin,
+            ));
+            let page = app
+                .world_mut()
+                .spawn((
+                    vmux_ecs::PageMetadata {
+                        url: crate::GIT_PAGE_URL.to_string(),
+                        ..Default::default()
+                    },
+                    super::super::state::GitState {
+                        snapshot: crate::state::GitPageSnapshot {
+                            workspace: "/repo".to_string(),
+                            repository: Some(crate::event::GitRepositorySnapshot::loading(
+                                &request,
+                            )),
+                            nonce: 1,
+                            diff_viewport: Some(GitDiffViewport {
+                                generation: 1,
+                                revision: 4,
+                                first_line: 0,
+                                total_lines: 800,
+                                has_more: true,
+                                lines: vec![line(DiffKind::Add, 1); 800],
+                                markers: Vec::new(),
+                                error: String::new(),
+                            }),
+                            ..Default::default()
+                        },
+                    },
+                    query,
+                    GitBranchFilesQuery {
+                        repository: PathBuf::from("/repo"),
+                        reference: "feature".to_string(),
+                        generation: 1,
+                        page_revision: 1,
+                        catalog,
+                        ready: true,
+                    },
+                ))
+                .id();
+            app.world_mut()
+                .get_mut::<GitPageControllerState>(page)
+                .unwrap()
+                .selected_branch = "feature".to_string();
+            Self { app, page }
+        }
+
+        fn seek(&mut self, generation: u64, revision: u64, path: &str) {
+            self.app.world_mut().trigger(UiInput {
+                webview: self.page,
+                payload: GitDiffSeekRequest {
+                    generation,
+                    revision,
+                    path: path.to_string(),
+                },
+            });
+            self.app.world_mut().flush();
+        }
+
+        fn next(&mut self) {
+            self.app.world_mut().trigger(UiInput {
+                webview: self.page,
+                payload: GitDiffNextRequest {
+                    generation: 1,
+                    revision: 4,
+                },
+            });
+            self.app.world_mut().flush();
+        }
+
+        fn paths(&mut self) -> Vec<Vec<u8>> {
+            let mut query = self.app.world_mut().query::<&DiffJob>();
+            let mut paths = Vec::new();
+            for job in query.iter(self.app.world()) {
+                paths.extend(job.branch_paths.clone());
+            }
+            paths
+        }
+    }
+
+    #[test]
+    fn visible_file_seek_wins_over_background_prefetch_without_changing_selection() {
+        let mut reads = BranchReads::new();
+        reads.seek(1, 4, "file-4.rs");
+        reads.next();
+
+        reads.app.update();
+
+        assert_eq!(reads.paths(), [b"file-4.rs".to_vec()]);
+        assert!(
+            reads
+                .app
+                .world()
+                .get::<GitPageControllerState>(reads.page)
+                .unwrap()
+                .selected_branch_path_bytes
+                .is_empty()
+        );
+        let query = reads.app.world().get::<GitDiffQuery>(reads.page).unwrap();
+        assert_eq!(query.generation, 1);
+        let continuation = query
+            .branch
+            .as_ref()
+            .unwrap()
+            .continuations
+            .front()
+            .unwrap();
+        assert_eq!(
+            continuation.paths,
+            [
+                b"file-0.rs".to_vec(),
+                b"file-1.rs".to_vec(),
+                b"file-2.rs".to_vec(),
+                b"file-3.rs".to_vec()
+            ]
+        );
+        assert_eq!(continuation.top_line, 800);
+    }
+
+    #[test]
+    fn stale_or_unknown_visible_file_requests_do_not_schedule_reads() {
+        for (generation, revision, path) in [
+            (0, 4, "file-4.rs"),
+            (1, 3, "file-4.rs"),
+            (1, 4, "missing.rs"),
+        ] {
+            let mut reads = BranchReads::new();
+            reads.seek(generation, revision, path);
+            reads.app.update();
+            assert!(reads.paths().is_empty());
+            assert!(
+                reads
+                    .app
+                    .world()
+                    .get::<PendingGitDiffSeek>(reads.page)
+                    .is_none()
+            );
+        }
+    }
+
+    #[test]
+    fn waiting_seek_runs_after_the_active_batch_before_another_prefetch() {
+        let mut reads = BranchReads::new();
+        reads
+            .app
+            .world_mut()
+            .get_mut::<GitDiffQuery>(reads.page)
+            .unwrap()
+            .loading = true;
+        reads.seek(1, 4, "file-4.rs");
+        reads.next();
+        reads.app.update();
+        assert!(reads.paths().is_empty());
+
+        reads
+            .app
+            .world_mut()
+            .get_mut::<GitDiffQuery>(reads.page)
+            .unwrap()
+            .complete_load();
+        reads.next();
+        reads.app.update();
+
+        assert_eq!(reads.paths(), [b"file-4.rs".to_vec()]);
+        assert!(
+            reads
+                .app
+                .world()
+                .get::<PendingGitDiffSeek>(reads.page)
+                .is_none()
+        );
     }
 
     #[test]
@@ -1461,7 +1787,7 @@ mod tests {
     }
 
     #[test]
-    fn large_branch_file_continues_before_the_next_file() {
+    fn selected_branch_file_continues_before_older_batches_without_losing_them() {
         let paths = (0..17)
             .map(|index| format!("file-{index}.lock").into_bytes())
             .collect::<Vec<_>>();
@@ -1488,22 +1814,22 @@ mod tests {
         );
         let continuation = progress.next();
 
-        assert_eq!(continuation.paths, first.paths);
-        assert_eq!(continuation.top_line, 800);
+        assert_eq!(continuation.paths, [b"file-16.lock".to_vec()]);
+        assert_eq!(continuation.top_line, 400);
         assert!(continuation.document.is_some());
 
         progress.complete(
             &continuation.paths,
             continuation.top_line,
-            120,
+            520,
             true,
             true,
             continuation.document,
         );
         let next = progress.next();
 
-        assert_eq!(next.paths, [b"file-16.lock".to_vec()]);
-        assert_eq!(next.top_line, 400);
+        assert_eq!(next.paths, first.paths);
+        assert_eq!(next.top_line, 800);
     }
 
     #[test]

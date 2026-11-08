@@ -852,17 +852,19 @@ fn reconcile(mut pages: Sources) {
     }
 }
 
-fn select_default(
-    mut pages: Query<
-        (&GitState, &mut GitPageControllerState),
-        Or<(
-            Changed<GitState>,
-            Changed<super::state::GitRepositoryRevision>,
-            Changed<super::state::GitCatalogRevision>,
-            Changed<GitPageControllerState>,
-        )>,
-    >,
-) {
+type DefaultCommitPages<'w, 's> = Query<
+    'w,
+    's,
+    (&'static GitState, &'static mut GitPageControllerState),
+    Or<(
+        Changed<GitState>,
+        Changed<super::state::GitRepositoryRevision>,
+        Changed<super::state::GitCatalogRevision>,
+        Changed<GitPageControllerState>,
+    )>,
+>;
+
+fn select_default(mut pages: DefaultCommitPages) {
     for (state, mut controller) in &mut pages {
         if state.snapshot.loading || !state.snapshot.commits.loaded {
             continue;

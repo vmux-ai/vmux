@@ -96,7 +96,6 @@ pub(super) fn ProjectList(
                             detail: controls.query(),
                         }
                     } else {
-                        ProjectOverview { entries: entries.clone(), controls }
                         ManagerCollection { view: controls.view(), grid_size: ManagerGridSize::Comfortable,
                             for entry in presentation.entries {
                                 ProjectItem {
@@ -107,34 +106,6 @@ pub(super) fn ProjectList(
                             }
                         }
                     }
-                }
-            }
-        }
-    }
-}
-
-#[component]
-fn ProjectOverview(
-    entries: Vec<ProjectEntry>,
-    controls: CollectionController<ProjectFilter>,
-) -> Element {
-    let mut active = 0u32;
-    let mut stale = 0u32;
-    let mut archived = 0u32;
-    for entry in &entries {
-        active = active.saturating_add(entry.ongoing_sessions);
-        stale = stale.saturating_add(entry.stale_sessions);
-        archived += u32::from(entry.archived);
-    }
-    rsx! {
-        div { class: "flex flex-wrap items-center gap-4 px-2 pb-1 text-xs text-muted-foreground",
-            span { "{entries.len()} ", {translate("layout-projects")} }
-            ProjectSessionLink { project: String::new(), status: "current", count: active, label: translate("session-stage-active") }
-            ProjectSessionLink { project: String::new(), status: "stale", count: stale, label: translate("sessions-stale") }
-            if archived > 0 {
-                button { class: "flex items-center gap-1.5 hover:text-foreground hover:underline",
-                    onclick: move |_| controls.update_filters(|filters| ProjectFilter::select(filters, Some(ProjectFilter::Archived))),
-                    "{archived} ", {translate("common-archived")}
                 }
             }
         }
@@ -628,6 +599,20 @@ fn ProjectAddItem(
 
 #[component]
 pub(super) fn ProjectDashboard(detail: ProjectDetailView) -> Element {
+    let mut options = Vec::new();
+    for project in detail.choices {
+        if project.url.is_empty() {
+            continue;
+        }
+        let identity = project.identity_seed().to_string();
+        options.push(AddressOption {
+            label: project.name,
+            title: project.path,
+            identity,
+            intent: Some(AddressIntent::Navigate { url: project.url }),
+            ..Default::default()
+        });
+    }
     let root = detail.path;
     let project_name = detail.name;
     let project_identity = detail.id.0;
@@ -655,6 +640,8 @@ pub(super) fn ProjectDashboard(detail: ProjectDetailView) -> Element {
                 }),
                 ..Default::default()
             },
+            options,
+            pending: detail.choices_pending,
             active: true,
             ..Default::default()
         }],
