@@ -107,6 +107,7 @@ impl Plugin for TerminalPlugin {
         ))
         .add_plugins(crate::contract::TerminalContractPlugin)
         .add_observer(open)
+        .add_observer(seed_renderer)
         .add_observer(contribute)
         .add_observer(activate)
         .add_observer(queue_presentation)
@@ -333,8 +334,26 @@ impl Plugin for TerminalInputPlugin {
     }
 }
 
-fn prewarm(settings: Res<AppSettings>) {
+fn prewarm(settings: Res<AppSettings>, mut commands: Commands) {
     vmux_process::LoginShellEnvironment::prewarm(TerminalBundle::default_shell(&settings));
+    commands.spawn(vmux_ecs::page::PrewarmPage::renderer(
+        TerminalPlugin::URL,
+        "Terminal",
+        2,
+    ));
+}
+
+fn seed_renderer(
+    added: On<Add, vmux_layout::warm_page::WarmPageSpare>,
+    pages: Query<&PageMetadata, Without<Terminal>>,
+    mut commands: Commands,
+) {
+    if pages
+        .get(added.entity)
+        .is_ok_and(|page| page.url == TerminalPlugin::URL)
+    {
+        commands.entity(added.entity).insert(Terminal);
+    }
 }
 
 fn initialize_state(terminals: Query<Entity, Added<Terminal>>, mut commands: Commands) {
@@ -522,6 +541,7 @@ fn handle_page_open(
     active_space: FocusedSpace,
     time: Res<Time>,
     mut commands: Commands,
+    mut renderers: vmux_layout::warm_page::RendererPool,
 ) {
     let space_id = active_space.id().unwrap_or(BOOTSTRAP_SPACE_ID);
     for (entity, task, restoring_task) in &tasks {
@@ -609,13 +629,18 @@ fn handle_page_open(
                 .entity(*surface)
                 .try_insert(vmux_layout::hosted_page::SurfaceBlocked);
         }
-        let terminal = commands
-            .spawn((
-                TerminalBundle::with_cwd(&settings, cwd.as_deref()),
-                vmux_layout::hosted_page::SurfaceHandoff::new(previous, task.id, 0, time.elapsed()),
-                ChildOf(task.stack),
-            ))
-            .id();
+        let bundle = (
+            TerminalBundle::with_cwd(&settings, cwd.as_deref()),
+            vmux_layout::hosted_page::SurfaceHandoff::new(previous, task.id, 0, time.elapsed()),
+            ChildOf(task.stack),
+        );
+        let terminal = match renderers.take(TerminalPlugin::URL, task.stack) {
+            Some(terminal) => {
+                commands.entity(terminal).insert(bundle);
+                terminal
+            }
+            None => commands.spawn(bundle).id(),
+        };
         if let Some(launch) = saved_launch {
             commands.entity(terminal).insert(launch);
         }

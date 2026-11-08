@@ -344,9 +344,19 @@ pub struct PrewarmPage {
 enum PrewarmScope {
     Exact,
     Host(&'static str),
+    Renderer,
 }
 
 impl PrewarmPage {
+    pub fn renderer(url: &'static str, title: impl Into<String>, pool_size: usize) -> Self {
+        Self {
+            scope: PrewarmScope::Renderer,
+            url,
+            title: title.into(),
+            pool_size,
+        }
+    }
+
     pub fn exact(url: &'static str, title: impl Into<String>, pool_size: usize) -> Self {
         Self {
             scope: PrewarmScope::Exact,
@@ -371,6 +381,9 @@ impl PrewarmPage {
     }
 
     pub fn answers_for(&self, url: &str) -> bool {
+        if self.scope == PrewarmScope::Renderer {
+            return false;
+        }
         if self.url == url {
             return true;
         }

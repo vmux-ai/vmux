@@ -561,6 +561,10 @@ composer focus again when its document becomes ready, including a reused prewarm
 Loading feedback includes the reload revision and page URL in its identity, so a completed delay
 cannot light up the next reload of the same stack. External-page address rows keep their origin
 pill and text; their favicon remains in the tab.
+Renderer-only `PrewarmPage` pools prepare Code and Terminal surfaces without intercepting their
+page requests. `RendererPool` leases ready surfaces once within the target window; feature plugins
+seed minimal context and still own file selection and PTY creation. Claiming a surface clears its
+old presentation acknowledgements before the new page's first usable frame appears.
 Dormant stack entries keep their page icon until a visible load is requested. Keyboard commands
 from the user target the focused page; page-origin commands retain their window scope. Hosted-page
 reloads publish loading immediately and clear it on the matching ready handshake or cancellation.

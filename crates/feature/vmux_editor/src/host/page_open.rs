@@ -21,6 +21,8 @@ pub(super) struct PageOpenPlugin;
 impl Plugin for PageOpenPlugin {
     fn build(&self, app: &mut App) {
         app.add_message::<vmux_ecs::event::RecordVisitRequest>()
+            .add_systems(Startup, prewarm)
+            .add_observer(seed_renderer)
             .add_systems(
                 Update,
                 handle_file
@@ -31,6 +33,27 @@ impl Plugin for PageOpenPlugin {
 }
 
 type PendingPageOpen = (Without<PageOpenHandled>, Without<PageOpenError>);
+
+fn prewarm(mut commands: Commands) {
+    commands.spawn(vmux_ecs::page::PrewarmPage::renderer("file://", "Code", 2));
+}
+
+fn seed_renderer(
+    added: On<Add, vmux_layout::warm_page::WarmPageSpare>,
+    pages: Query<&PageMetadata, Without<vmux_ecs::WorkspaceKind>>,
+    mut commands: Commands,
+) {
+    if pages
+        .get(added.entity)
+        .is_ok_and(|page| page.url == "file://")
+    {
+        commands.entity(added.entity).insert((
+            vmux_ecs::WorkspaceKind::Editor,
+            vmux_ecs::FileUiStateUpdates::default(),
+        ));
+    }
+}
+
 type RecentVisits<'w, 's> =
     Query<'w, 's, (&'static PageMetadata, &'static LastVisitedAt), (With<Url>, Without<FileView>)>;
 
@@ -186,6 +209,7 @@ fn new_file_view_bundle(
 fn handle_file(
     tasks: Query<(Entity, &PageOpenTask, Has<PageRestore>), PendingPageOpen>,
     mut context: FileOpenContext,
+    mut renderers: vmux_layout::warm_page::RendererPool,
 ) {
     for (entity, task, restoring) in &tasks {
         if !context
@@ -313,13 +337,22 @@ fn handle_file(
                         .entity(*surface)
                         .try_insert(vmux_layout::hosted_page::SurfaceBlocked);
                 }
-                let view = context
-                    .commands
-                    .spawn((
-                        new_file_view_bundle(&page_url, path, workspace),
-                        ChildOf(task.stack),
-                    ))
-                    .id();
+                let renderer = if workspace == vmux_ecs::WorkspaceKind::Editor {
+                    renderers.take("file://", task.stack)
+                } else {
+                    None
+                };
+                let bundle = (
+                    new_file_view_bundle(&page_url, path, workspace),
+                    ChildOf(task.stack),
+                );
+                let view = match renderer {
+                    Some(view) => {
+                        context.commands.entity(view).insert(bundle);
+                        view
+                    }
+                    None => context.commands.spawn(bundle).id(),
+                };
                 context.commands.entity(view).insert((
                     vmux_layout::hosted_page::SurfaceHandoff::new(
                         previous,

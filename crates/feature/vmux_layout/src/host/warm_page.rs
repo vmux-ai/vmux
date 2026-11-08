@@ -45,6 +45,48 @@ pub struct WarmPageSpare {
     url: &'static str,
 }
 
+#[derive(SystemParam)]
+pub struct RendererPool<'w, 's> {
+    spares: Query<
+        'w,
+        's,
+        (Entity, &'static WarmPageSpare),
+        (
+            With<PageReady>,
+            Without<crate::hosted_page::SurfaceHandoffFailed>,
+        ),
+    >,
+    windows: crate::window::WindowHierarchy<'w, 's>,
+    claimed: Local<'s, HashSet<Entity>>,
+    commands: Commands<'w, 's>,
+}
+
+impl RendererPool<'_, '_> {
+    pub fn take(&mut self, url: &str, stack: Entity) -> Option<Entity> {
+        self.claimed.retain(|entity| self.spares.contains(*entity));
+        let window = self.windows.get(stack);
+        for (entity, spare) in &self.spares {
+            if spare.url != url
+                || self.claimed.contains(&entity)
+                || self.windows.get(entity) != window
+            {
+                continue;
+            }
+            self.claimed.insert(entity);
+            self.commands.entity(entity).remove::<(
+                WarmPageSpare,
+                vmux_ecs::page::PrewarmedPage,
+                crate::hosted_page::SurfacePaintReady,
+                crate::hosted_page::SurfacePresentationReady,
+                crate::hosted_page::SurfaceTransitionReady,
+                vmux_ecs::PageIdentity,
+            )>();
+            return Some(entity);
+        }
+        None
+    }
+}
+
 #[derive(Component)]
 struct WarmPagePoolNode {
     url: &'static str,
@@ -523,10 +565,79 @@ fn pool_node_for(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use bevy::ecs::system::RunSystemOnce;
     use vmux_ecs::page::HostsPage;
     use vmux_ecs::{PageOpenId, PageOpenTask};
 
     use crate::cef::Browser;
+
+    #[test]
+    fn renderer_pool_claims_ready_pages_once_inside_the_target_window() {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins);
+        let window_a = app.world_mut().spawn_empty().id();
+        let window_b = app.world_mut().spawn_empty().id();
+        let root_a = app.world_mut().spawn(HostWindow(window_a)).id();
+        let root_b = app.world_mut().spawn(HostWindow(window_b)).id();
+        let stack_a = app.world_mut().spawn(ChildOf(root_a)).id();
+        let stack_b = app.world_mut().spawn(ChildOf(root_b)).id();
+        let ready_a = app
+            .world_mut()
+            .spawn((
+                WarmPageSpare { url: "file://" },
+                PageReady {},
+                ChildOf(root_a),
+            ))
+            .id();
+        let ready_b = app
+            .world_mut()
+            .spawn((
+                WarmPageSpare { url: "file://" },
+                PageReady {},
+                ChildOf(root_b),
+            ))
+            .id();
+        let cold = app
+            .world_mut()
+            .spawn((WarmPageSpare { url: "file://" }, ChildOf(root_a)))
+            .id();
+        let claims = app
+            .world_mut()
+            .run_system_once(move |mut pool: RendererPool| {
+                [
+                    pool.take("file://", stack_a),
+                    pool.take("file://", stack_a),
+                    pool.take("file://", stack_b),
+                ]
+            })
+            .unwrap();
+        assert_eq!(claims, [Some(ready_a), None, Some(ready_b)]);
+        assert!(app.world().get::<WarmPageSpare>(cold).is_some());
+    }
+
+    #[test]
+    fn renderer_only_pools_leave_page_open_work_to_the_feature() {
+        let mut app = App::new();
+        app.add_plugins((MinimalPlugins, PrewarmPagesPlugin));
+        app.world_mut()
+            .spawn(PrewarmPage::renderer("file://", "Code", 2));
+        let request = PageOpenId::new();
+        let stack = app
+            .world_mut()
+            .spawn(vmux_ecs::PageNavigation::new(request))
+            .id();
+        let task = app
+            .world_mut()
+            .spawn(PageOpenTask {
+                id: request,
+                stack,
+                url: "file:///work/README.md".to_string(),
+                request_id: None,
+            })
+            .id();
+        app.update();
+        assert!(app.world().get::<PageOpenHandled>(task).is_none());
+    }
 
     #[derive(Resource, Default)]
     struct ReadyEvents(Vec<Entity>);
