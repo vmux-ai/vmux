@@ -864,6 +864,11 @@ impl AcpProjector {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use agent_client_protocol::schema::v1::{
+        Content, ContentChunk, Diff, Plan, PlanEntry, PlanEntryPriority, SessionInfoUpdate,
+        SessionUpdate, Terminal, TextContent, ToolCall, ToolCallContent, ToolCallUpdate,
+        ToolCallUpdateFields,
+    };
 
     #[test]
     fn tool_kind_survives_title_changes_and_updates_without_kind_metadata() {
@@ -873,8 +878,7 @@ mod tests {
         ));
         projector.apply(SessionUpdate::ToolCallUpdate(ToolCallUpdate::new(
             "typed",
-            agent_client_protocol::schema::v1::ToolCallUpdateFields::default()
-                .title("Execute command"),
+            ToolCallUpdateFields::default().title("Execute command"),
         )));
         let Some(Message::Assistant { blocks }) = projector.messages().first() else {
             panic!("assistant tool");
@@ -883,11 +887,6 @@ mod tests {
             matches!(blocks.first(), Some(AssistantBlock::ToolUse { kind: Some(vmux_api::session::ToolKind::Read), name, .. }) if name == "Execute command")
         );
     }
-    use agent_client_protocol::schema::v1::{
-        Content, ContentChunk, Diff, Plan, PlanEntry, PlanEntryPriority, SessionInfoUpdate,
-        SessionUpdate, Terminal, TextContent, ToolCall, ToolCallContent, ToolCallUpdate,
-        ToolCallUpdateFields,
-    };
 
     fn chunk(text: &str) -> SessionUpdate {
         SessionUpdate::AgentMessageChunk(ContentChunk::new(ContentBlock::Text(TextContent::new(
