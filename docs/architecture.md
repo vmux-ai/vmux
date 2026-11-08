@@ -1373,6 +1373,10 @@ their runtime resume ID. Unsupported or failed loads report an error and keep th
 Empty replays preserve cached history, and failed loads release the loading state.
 Codex family aliases share rollout-watch identity without changing the provider ID. A failed
 resume still reads the local cursor and appends unseen messages to nonempty cached history.
+Open Codex Session views in use by another client also check their rollout's size and modification
+time every 250 ms on a sleeping worker. macOS file notifications can wait for the writer to close
+its file. Only changed files wake the host and trigger cursor reads; closing the view or regaining
+the writer releases this watch. No directory traversal or content hashing runs on that interval.
 ACP sessions withhold startup snapshots until history replay finishes. Compatibility readers leave
 their loading state to the ACP protocol; they read and complete only their own provider-store tasks.
 History loading starts and finishes publish a fresh chat snapshot independently of message

@@ -82,6 +82,7 @@ pub(super) fn add(app: &mut App) {
 const SCAN_DEBOUNCE: Duration = Duration::from_millis(350);
 const SCAN_MAX_LATENCY: Duration = Duration::from_secs(2);
 const ACTIVITY_REFRESH_INTERVAL: Duration = Duration::from_millis(100);
+const CONVERSATION_POLL_INTERVAL: Duration = Duration::from_millis(250);
 const CATALOG_CONCURRENCY: usize = 2;
 const CATALOG_REQUEST_TIMEOUT: Duration = Duration::from_secs(32);
 const PROVIDER_READ_LIMIT: usize = 256 * 1024 * 1024;
@@ -678,6 +679,7 @@ struct Runtime {
     sources: HashSet<SourceKind>,
     watch_codex_activity: bool,
     manager: bool,
+    conversation_watch: Option<ConversationWatch>,
 }
 
 impl Runtime {
@@ -844,6 +846,9 @@ struct ConversationRevision(i64);
 struct ConversationCursor(u64);
 
 #[derive(Component)]
+struct ConversationFile(PathBuf);
+
+#[derive(Component)]
 struct ConversationLoadTask {
     session: Entity,
     sid: SessionId,
@@ -852,6 +857,7 @@ struct ConversationLoadTask {
 }
 
 struct ConversationRead {
+    path: Option<PathBuf>,
     messages: Vec<vmux_api::session::Message>,
     cursor: u64,
     snapshot: bool,
@@ -902,6 +908,7 @@ impl ConversationSource {
                     read.messages
                 };
                 Ok(ConversationRead {
+                    path: read.path,
                     messages,
                     cursor: read.cursor,
                     snapshot,
@@ -909,6 +916,7 @@ impl ConversationSource {
                 })
             }
             _ => Ok(ConversationRead {
+                path: None,
                 messages: Vec::new(),
                 cursor: cursor.unwrap_or_default(),
                 snapshot: false,
@@ -1196,6 +1204,89 @@ struct SourceWatchEvents {
     receiver: mpsc::Receiver<SourceChanges>,
 }
 
+struct ConversationWatch {
+    sender: mpsc::Sender<HashSet<PathBuf>>,
+    paths: HashSet<PathBuf>,
+}
+
+impl ConversationWatch {
+    fn start(changes: mpsc::Sender<SourceChange>) -> Self {
+        let (sender, receiver) = mpsc::channel::<HashSet<PathBuf>>();
+        let worker = std::thread::Builder::new()
+            .name("vmux-acp-conversation-watch".to_string())
+            .spawn(move || {
+                let mut files = HashMap::<PathBuf, Option<ConversationStamp>>::new();
+                loop {
+                    let paths = if files.is_empty() {
+                        match receiver.recv() {
+                            Ok(paths) => paths,
+                            Err(_) => break,
+                        }
+                    } else {
+                        match receiver.recv_timeout(CONVERSATION_POLL_INTERVAL) {
+                            Ok(paths) => paths,
+                            Err(mpsc::RecvTimeoutError::Disconnected) => break,
+                            Err(mpsc::RecvTimeoutError::Timeout) => {
+                                for (path, previous) in &mut files {
+                                    let current = ConversationStamp::read(path);
+                                    if *previous != current {
+                                        *previous = current;
+                                        let _ =
+                                            changes.send(SourceChange::CodexActivity(path.clone()));
+                                    }
+                                }
+                                continue;
+                            }
+                        }
+                    };
+                    files.retain(|path, _| paths.contains(path));
+                    for path in paths {
+                        if files.contains_key(&path) {
+                            continue;
+                        }
+                        let stamp = ConversationStamp::read(&path);
+                        files.insert(path.clone(), stamp);
+                        let _ = changes.send(SourceChange::CodexActivity(path));
+                    }
+                }
+            });
+        if let Err(error) = worker {
+            bevy::log::warn!("ACP conversation watch init failed: {error}");
+        }
+        Self {
+            sender,
+            paths: HashSet::new(),
+        }
+    }
+
+    fn set_paths(&mut self, paths: HashSet<PathBuf>) {
+        if self.paths == paths {
+            return;
+        }
+        let _ = self.sender.send(paths.clone());
+        self.paths = paths;
+    }
+}
+
+#[derive(PartialEq, Eq)]
+struct ConversationStamp {
+    length: u64,
+    modified: std::time::SystemTime,
+}
+
+impl ConversationStamp {
+    fn read(path: &Path) -> Option<Self> {
+        let metadata = std::fs::symlink_metadata(path).ok()?;
+        if !metadata.file_type().is_file() {
+            return None;
+        }
+        Some(Self {
+            length: metadata.len(),
+            modified: metadata.modified().ok()?,
+        })
+    }
+}
+
 impl SourceWatchEvents {
     fn start(proxy: Option<bevy::winit::EventLoopProxy<WinitUserEvent>>) -> Self {
         let (input_tx, input_rx) = mpsc::channel::<SourceChange>();
@@ -1328,7 +1419,15 @@ fn activate(
     acp: Res<AcpSnapshot>,
     view_targets: SessionViews,
     views: Query<Entity, With<SessionView>>,
-    sessions: Query<(Entity, &ProviderKind), With<Session>>,
+    sessions: Query<
+        (
+            Entity,
+            &ProviderKind,
+            Option<&ConversationFile>,
+            Option<&RunState>,
+        ),
+        With<Session>,
+    >,
     mut dirty: ResMut<ActivationDirty>,
     mut runtime: Query<(Entity, &mut Runtime, &SourcePaths)>,
     proxy: Option<Res<EventLoopProxyWrapper>>,
@@ -1361,7 +1460,7 @@ fn activate(
     };
     let mut watch_codex_activity = watch_codex_activity;
     if !manager {
-        for (entity, kind) in &sessions {
+        for (entity, kind, _, _) in &sessions {
             let Some(agent) = kind.0.strip_prefix("acp:") else {
                 continue;
             };
@@ -1377,6 +1476,17 @@ fn activate(
             }
         }
     }
+    let mut conversation_paths = HashSet::new();
+    for (entity, kind, file, state) in &sessions {
+        if !viewed.contains(&entity) || ConversationSource::new(&kind.0, "", 0).is_none() {
+            continue;
+        }
+        if let (Some(file), Some(RunState::Errored(error))) = (file, state)
+            && vmux_session::Failure(error).in_use()
+        {
+            conversation_paths.insert(file.0.clone());
+        }
+    }
     if sources.is_empty() && !watch_codex_activity {
         for (entity, _, _) in &mut runtime {
             commands.entity(entity).despawn();
@@ -1384,6 +1494,9 @@ fn activate(
         return;
     }
     if let Ok((entity, mut runtime, paths)) = runtime.single_mut() {
+        if let Some(watch) = &mut runtime.conversation_watch {
+            watch.set_paths(conversation_paths);
+        }
         if runtime.sources != sources
             || runtime.watch_codex_activity != watch_codex_activity
             || runtime.manager != manager
@@ -1407,6 +1520,8 @@ fn activate(
     };
     let wake = proxy.as_deref().map(|proxy| (**proxy).clone());
     let events = SourceWatchEvents::start(wake);
+    let mut conversation_watch = ConversationWatch::start(events.sender.clone());
+    conversation_watch.set_paths(conversation_paths);
     let sender = events.sender;
     let watched_paths = paths.clone();
     let watcher =
@@ -1428,6 +1543,7 @@ fn activate(
         sources: sources.clone(),
         watch_codex_activity,
         manager,
+        conversation_watch: Some(conversation_watch),
     };
     runtime.ensure_watches(&paths);
     let mut entity = commands.spawn((Name::new("ACP provider session catalog"), runtime, paths));
@@ -1456,7 +1572,13 @@ fn mark_activation_dirty(
         (),
         (
             With<Session>,
-            Or<(Added<Session>, Added<ProviderKind>, Changed<ProviderKind>)>,
+            Or<(
+                Added<Session>,
+                Added<ProviderKind>,
+                Changed<ProviderKind>,
+                Changed<RunState>,
+                Changed<ConversationFile>,
+            )>,
         ),
     >,
     targets: Query<(), Changed<vmux_ecs::EntityTarget<Session>>>,
@@ -2228,6 +2350,7 @@ fn finish_conversations(
         Has<FailedConversationRead>,
     )>,
     states: Query<&RunState, With<Session>>,
+    files: Query<&ConversationFile>,
     transcripts: Transcripts,
     mut snapshots: MessageWriter<SnapshotReceived>,
     mut appended: MessageWriter<ConversationAppendReceived>,
@@ -2252,6 +2375,11 @@ fn finish_conversations(
         }
         match result {
             Ok(read) => {
+                if let Some(path) = read.path
+                    && !files.get(task.session).is_ok_and(|file| file.0 == path)
+                {
+                    commands.entity(task.session).insert(ConversationFile(path));
+                }
                 if !read.messages.is_empty() {
                     if read.snapshot {
                         snapshots.write(SnapshotReceived {
@@ -2493,6 +2621,64 @@ impl PromptText {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::io::Write;
+
+    #[test]
+    fn conversation_watch_reads_appends_before_the_writer_closes_and_releases_unused_files() {
+        let mut fixture = FailedReadFixture::new();
+        fixture.finish();
+        let path = fixture
+            .app
+            .world()
+            .get::<ConversationFile>(fixture.session)
+            .unwrap()
+            .0
+            .clone();
+        let cursor = fixture
+            .app
+            .world()
+            .get::<ConversationCursor>(fixture.session)
+            .unwrap()
+            .0;
+        let mut file = std::fs::OpenOptions::new()
+            .append(true)
+            .open(&path)
+            .unwrap();
+        let events = SourceWatchEvents::start(None);
+        let mut watch = ConversationWatch::start(events.sender.clone());
+        watch.set_paths([path.clone()].into_iter().collect());
+        events
+            .receiver
+            .recv_timeout(Duration::from_secs(2))
+            .unwrap();
+        file.write_all(b"{\"type\":\"response_item\",\"payload\":{\"type\":\"message\",\"role\":\"user\",\"content\":[{\"type\":\"input_text\",\"text\":\"live update\"}]}}\n").unwrap();
+        file.flush().unwrap();
+        let changed = events
+            .receiver
+            .recv_timeout(Duration::from_secs(2))
+            .unwrap();
+        assert_eq!(changed.codex_activity, HashSet::from([path]));
+        let read = codex::Reader::at(fixture._directory.path())
+            .conversation(
+                "01a14fcc-f46a-7c12-b000-779be98d72ae",
+                Timestamp::parse("2026-10-18T16:16:34.454Z"),
+                Some(cursor),
+            )
+            .unwrap();
+        assert_eq!(
+            read.messages,
+            [vmux_api::session::Message::user("live update")]
+        );
+        watch.set_paths(HashSet::new());
+        std::thread::sleep(CONVERSATION_POLL_INTERVAL * 2);
+        while events.receiver.try_recv().is_ok() {}
+        file.write_all(b"after detach\n").unwrap();
+        file.flush().unwrap();
+        assert!(matches!(
+            events.receiver.recv_timeout(CONVERSATION_POLL_INTERVAL * 3),
+            Err(mpsc::RecvTimeoutError::Timeout)
+        ));
+    }
 
     struct FailedReadFixture {
         app: App,
@@ -2771,6 +2957,7 @@ mod tests {
             sources: SourceKind::ALL.into_iter().collect(),
             watch_codex_activity: false,
             manager: true,
+            conversation_watch: None,
         };
 
         runtime.ensure_watches(&paths);
@@ -2798,6 +2985,7 @@ mod tests {
             sources: SourceKind::ALL.into_iter().collect(),
             watch_codex_activity: false,
             manager: true,
+            conversation_watch: None,
         };
 
         runtime.ensure_watches(&paths);
@@ -3099,6 +3287,7 @@ mod tests {
                 sources: HashSet::new(),
                 watch_codex_activity: false,
                 manager: false,
+                conversation_watch: None,
             },
         ));
         let session = app

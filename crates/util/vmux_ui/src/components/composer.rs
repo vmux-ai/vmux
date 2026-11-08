@@ -76,7 +76,11 @@ pub fn PromptComposer(
     } else {
         ""
     };
-    let prompt_box_class = cn(["vmux-prompt-composer flex-wrap", shared_transition_class]);
+    let prompt_box_class = cn([
+        "vmux-prompt-composer flex-wrap transition-opacity duration-150",
+        shared_transition_class,
+        if disabled { "opacity-60" } else { "" },
+    ]);
     let caret_class = if caret_visible {
         "caret-[var(--vmux-prompt-accent)]"
     } else {

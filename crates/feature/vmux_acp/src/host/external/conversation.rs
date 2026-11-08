@@ -1,13 +1,14 @@
 use std::collections::VecDeque;
 use std::fs::File;
 use std::io::{BufRead, BufReader, Read, Seek, SeekFrom};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use vmux_api::session::Message;
 
 use super::{BoundedLines, PROVIDER_LINE_LIMIT, PROVIDER_READ_LIMIT};
 
 pub(super) struct ReadResult {
+    pub path: Option<PathBuf>,
     pub messages: Vec<Message>,
     pub cursor: u64,
     pub tail: bool,
@@ -66,6 +67,7 @@ impl FileConversation {
             start.saturating_add(lines.consumed() as u64).min(length)
         };
         Ok(ReadResult {
+            path: Some(path.to_path_buf()),
             messages: messages.into_iter().collect(),
             cursor,
             tail,

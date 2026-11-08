@@ -50,6 +50,7 @@ impl Reader {
     ) -> Result<ReadResult, String> {
         let Some(path) = self.rollout(sid, created_at)? else {
             return Ok(ReadResult {
+                path: None,
                 messages: Vec::new(),
                 cursor: cursor.unwrap_or_default(),
                 tail: cursor.is_none(),

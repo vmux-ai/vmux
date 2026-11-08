@@ -443,6 +443,26 @@ fn ComposerChipSlot(kind: ComposerMenuKind, chip: ComposerChip, open: bool) -> E
             }
         },
     };
+    if chip.disabled {
+        return rsx! {
+            button {
+                class: cn([COMPOSER_CHIP, "cursor-not-allowed opacity-50"]),
+                disabled: true,
+                aria_disabled: true,
+                title: "{chip.title}",
+                {icon}
+                span { class: label_class, "{chip.label}" }
+                svg {
+                    class: "h-3 w-3 shrink-0 opacity-50",
+                    view_box: "0 0 24 24",
+                    fill: "none",
+                    stroke: "currentColor",
+                    stroke_width: "2",
+                    path { d: "m8 10 4 4 4-4" }
+                }
+            }
+        };
+    }
     let Some(on_open) = chip.on_open else {
         return rsx! {
             span { class: COMPOSER_CHIP, title: "{chip.title}",
@@ -578,6 +598,7 @@ pub struct ComposerChip {
     pub title: String,
     pub visual: ComposerChipVisual,
     pub loading: bool,
+    pub disabled: bool,
     pub on_open: Option<EventHandler<()>>,
 }
 
@@ -601,6 +622,7 @@ impl ComposerChip {
             title: String::new(),
             visual: ComposerChipVisual::Kind,
             loading: true,
+            disabled: false,
             on_open: None,
         }
     }
@@ -611,16 +633,19 @@ impl ComposerChip {
             title: title.into(),
             visual: ComposerChipVisual::Kind,
             loading: false,
+            disabled: false,
             on_open: None,
         }
     }
 
     pub fn opens(mut self, on_open: EventHandler<()>) -> Self {
+        self.disabled = false;
         self.on_open = Some(on_open);
         self
     }
 
     pub fn readonly(mut self) -> Self {
+        self.disabled = true;
         self.on_open = None;
         self
     }
