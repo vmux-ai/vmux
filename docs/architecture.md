@@ -1371,12 +1371,18 @@ the changed provider, and bound untrusted history traversal.
 Missing history resumes from the catalog owner's original provider ID. Cached continuations keep
 their runtime resume ID. Unsupported or failed loads report an error and keep the Session's identity.
 Empty replays preserve cached history, and failed loads release the loading state.
-Codex family aliases share rollout-watch identity without changing the provider ID. A failed
-resume still reads the local cursor and appends unseen messages to nonempty cached history.
-Open Codex Session views in use by another client also check their rollout's size and modification
-time every 250 ms on a sleeping worker. macOS file notifications can wait for the writer to close
-its file. Only changed files wake the host and trigger cursor reads; closing the view or regaining
-the writer releases this watch. No directory traversal or content hashing runs on that interval.
+External history adapters feed the same Session events as ACP updates. Source keys match agent
+family and provider ID. Failed resumes retain the canonical Session, read its original history,
+and append only unseen content; replay matching ignores presentation metadata and normalizes
+assistant-block grouping. Open read-only views share a sleeping 250 ms worker that checks only
+known files. Changed files wake cursor reads; leaving the view or regaining the writer releases
+those watches. macOS file notifications alone may wait for the writer to close its file.
+Claude and legacy chat JSONL share one record decoder and bounded file lookup. Current Vibe
+uses a small read-only adapter to its installed storage SDK, retaining its chunk cache and
+watching CURRENT plus the active recovery journal. The normal app-server launcher performs
+worktree cleanup, so this adapter imports storage directly and acquires no writer lease.
+Native mutable history entries retain their IDs and update existing events without duplicating
+unchanged entries. ACP tool kind survives replay and updates; names are fallback classification.
 ACP sessions withhold startup snapshots until history replay finishes. Compatibility readers leave
 their loading state to the ACP protocol; they read and complete only their own provider-store tasks.
 History loading starts and finishes publish a fresh chat snapshot independently of message
@@ -1385,7 +1391,9 @@ Initial and pending bottom scrolls retain their follow state through layout-driv
 Scrolling away from the bottom pauses following; input that leaves the viewport at the bottom
 keeps it pinned, and returning to the bottom resumes it. Older history is requested only after
 the initial scroll has settled. The latest tool batch stays expanded until every call has a result
-and subsequent assistant text arrives; earlier batches remain folded.
+and subsequent assistant text arrives; earlier batches remain folded. Tool rows share native
+Claude/Vibe name classification and summarize wrapped Codex command batches as Ran, Explored,
+or Edited. Exploration exposes Read, Search, and List steps from the actual shell commands.
 The Session manager publishes only to its active page and leases Git metadata for every displayed
 repository while that page remains active.
 Its first discovery reserves a skeleton in one persistent scroll surface until rows are available.
@@ -1464,6 +1472,12 @@ operation sequencing, and built-in Homebrew, NPM, MCP, and dotfile providers. Fe
 register their own provider entities, such as ACP in `vmux_acp` and LSP in `vmux_editor`;
 application crates only compose plugins. `vmux_path` gives filesystem boundaries one shared
 identity rule and rejects scoped paths that traverse or resolve outside their root.
+Tools use the shared workspace sidebar for category navigation and search; their URL trail is
+Tools / category. Provider metadata publishes before inventory scanning finishes, and inventory
+operations and view controls remain in the page. Project details publish Projects / project,
+while Session directory links open the Code entry file. Branch controls share branch identicons. Session lists use the same board switch and column
+icon in Project details. Popup dismissal starts after the first open, so mounting a closed native
+popover cannot cancel its opening.
 
 Repository tool versions live in `tool-versions.env`; CI loads the same values used by local
 scripts and the Makefile. Release asset names and URLs come from

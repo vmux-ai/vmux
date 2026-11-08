@@ -14,6 +14,55 @@ pub(super) struct Reader {
 impl Reader {
     const MAX_SESSIONS: usize = 50_000;
 
+    pub(super) fn conversation(
+        root: &Path,
+        sid: &str,
+        readers: &super::NativeReaders,
+    ) -> Result<super::ConversationRead, String> {
+        if !super::conversation::Files::valid_id(sid) {
+            return Err("invalid session history identifier".into());
+        }
+        let home = std::env::var_os("HOME").ok_or("local history reader is unavailable")?;
+        let python = PathBuf::from(home).join(".local/share/uv/tools/mistral-vibe/bin/python3");
+        let mut process = readers.0.lock().map_err(|error| error.to_string())?;
+        if process.is_none() {
+            *process = Some(super::conversation::ProcessReader::spawn(
+                &python,
+                &["-B", "-u", "-c", READER],
+            )?);
+        }
+        let result = process
+            .as_mut()
+            .unwrap()
+            .read(serde_json::json!({"root": root, "id": sid}));
+        if result.is_err() {
+            process.take();
+        }
+        let value = result?;
+        let watch_paths = value
+            .get("files")
+            .and_then(serde_json::Value::as_array)
+            .into_iter()
+            .flatten()
+            .filter_map(|value| value.as_str().map(PathBuf::from))
+            .collect::<Vec<_>>();
+        let records = super::conversation::ChatDecoder::history(
+            value.get("history").unwrap_or(&serde_json::Value::Null),
+        );
+        Ok(super::ConversationRead {
+            path: watch_paths.first().cloned(),
+            watch_paths,
+            records,
+            messages: Vec::new(),
+            cursor: value
+                .get("cursor")
+                .and_then(serde_json::Value::as_u64)
+                .unwrap_or_default(),
+            snapshot: false,
+            complete: true,
+        })
+    }
+
     pub(super) fn at(root: &Path) -> Self {
         Self {
             sessions: root.join("logs/session"),
@@ -42,6 +91,29 @@ impl Reader {
         Some(meta)
     }
 }
+
+const READER: &str = r#"
+import json, sys
+from pathlib import Path
+from mistralai_vibe_local_harness.vibe._storage import UnifiedSessionStore
+stores = {}
+for line in sys.stdin:
+    try:
+        request = json.loads(line)
+        root, session_id = request['root'], request['id']
+        if not session_id or Path(session_id).name != session_id or session_id in ('.', '..'):
+            raise ValueError('invalid session identifier')
+        key = (root, session_id)
+        if key not in stores: stores[key] = UnifiedSessionStore(Path(root), session_id)
+        store = stores[key]
+        stored = store.load()
+        response = {'history': stored.projection_state.snapshot.history.entries[-500:],
+                    'cursor': stored.projection_state.watermark,
+                    'files': [str(store.session_root / 'CURRENT'), str(store.session_root / stored.manifest.recovery_journal_segment.path)]}
+    except Exception as error:
+        response = {'error': str(error)}
+    print(json.dumps(response), flush=True)
+"#;
 
 impl ProviderReader for Reader {
     fn read(&self) -> Result<Vec<ProviderSession>, String> {

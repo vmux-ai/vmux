@@ -8,7 +8,7 @@ use vmux_ui::components::project_picker::ProjectSelectPopup;
 use vmux_ui::components::sheet::SheetSelectorRow;
 use vmux_ui::hooks::{send, use_optimistic_map};
 use vmux_ui::i18n::translate;
-use vmux_ui::icon::{GitSymbol, GitSymbolView, LineIcon, LineIconView};
+use vmux_ui::icon::{GitSymbol, GitSymbolView};
 
 use crate::event::{
     ActiveSession, ActiveWorkspaceProject, SideSheetProjectPageOpenRequest, TabBoundary,
@@ -115,7 +115,7 @@ fn ActiveSessionGit(boundary: TabBoundary) -> Element {
             }
             span { class: "truncate-fade min-w-0 font-medium text-foreground", title: "{repository}", "{repository}" }
             span { class: "shrink-0 text-xs text-muted-foreground/45", "›" }
-            LineIconView { icon: LineIcon::GitBranch, class: "size-3.5 shrink-0 text-muted-foreground".to_string() }
+            IdentityOrb { seed: boundary.branch.clone(), alt: boundary.branch.clone(), class: "size-3.5".to_string() }
             span { class: "truncate-fade min-w-0 font-mono text-foreground/85", title: "{boundary.branch}", "{boundary.branch}" }
         }
     }
@@ -221,7 +221,7 @@ fn ActiveWorkspaceProjectTree(project: ActiveWorkspaceProject, pane_id: u64) -> 
                 if !selected_branch.is_empty() || !branch_choices.is_empty() {
                     if branch_choices.is_empty() {
                         div { class: "flex h-8 w-full min-w-0 items-center gap-2 rounded px-2 transition-colors hover:bg-foreground/[0.04] @max-[12rem]:px-1",
-                            LineIconView { icon: LineIcon::GitBranch, class: "size-3.5 shrink-0 text-muted-foreground".to_string() }
+                            IdentityOrb { seed: selected_branch.clone(), alt: selected_branch.clone(), class: "size-3.5".to_string() }
                             span { class: "truncate-fade min-w-0 flex-1 font-mono text-[10px] text-foreground/85", title: "{selected_branch}", "{selected_branch}" }
                         }
                     } else {
@@ -235,9 +235,8 @@ fn ActiveWorkspaceProjectTree(project: ActiveWorkspaceProject, pane_id: u64) -> 
                                 title: current_branch_label.clone(),
                                 open: choosing_branch(),
                                 label_class: "font-mono font-normal".to_string(),
-                                leading: rsx! { LineIconView {
-                                    icon: LineIcon::GitBranch,
-                                    class: "size-3.5 shrink-0 text-muted-foreground".to_string(),
+                                leading: rsx! { IdentityOrb {
+                                    seed: selected_branch.clone(), alt: selected_branch.clone(), class: "size-3.5".to_string(),
                                 } },
                                 onclick: move |_| choosing_branch.set(!choosing_branch()),
                             }
@@ -292,7 +291,7 @@ fn ActiveWorkspaceBranchChoice(branch: WorkspaceBranch, on_pick: EventHandler<()
             r#type: "button",
             class: "flex w-full min-w-0 items-center gap-2 rounded-md px-2 py-1.5 text-left text-muted-foreground hover:bg-foreground/[0.05] hover:text-foreground",
             onclick: move |_| on_pick.call(()),
-            LineIconView { icon: LineIcon::GitBranch, class: "size-3.5 shrink-0".to_string() }
+            IdentityOrb { seed: branch.branch.clone(), alt: branch.branch.clone(), class: "size-3.5".to_string() }
             span { class: "min-w-0 flex-1 truncate font-mono text-[10px]", "{branch.branch}" }
             if !branch.label.is_empty() {
                 span { class: "max-w-24 truncate text-[9px] text-muted-foreground", "{branch.label}" }

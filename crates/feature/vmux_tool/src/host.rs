@@ -569,6 +569,10 @@ fn request_scan(
     }
     metadata.sort_by_key(|entry| entry.rank);
     metadata.dedup_by(|left, right| left.provider == right.provider);
+    if state.snapshot.providers != metadata {
+        state.snapshot.providers = metadata.clone();
+        state.revision = state.revision.wrapping_add(1);
+    }
     let task = IoTaskPool::get()
         .spawn(async move { scan_tools(&store, &providers, metadata, refresh_catalogs) });
     commands.spawn((

@@ -277,7 +277,7 @@ fn SessionsManagerActions(
                 .text(),
         );
     }
-    toolbar.extend(ToolbarControl::view(
+    toolbar.extend(ToolbarControl::board(
         controls.view(),
         translate("sessions-view-list"),
         translate("sessions-view-board"),
@@ -1326,7 +1326,7 @@ fn SessionProperties(
             if !context.project.is_empty() {
                 SessionDetailField { label: translate("resume-column-project"),
                     SessionPropertyLink { url: context.project_url.clone(),
-                        LineIconView { icon: LineIcon::Package, class: "size-3 shrink-0 text-muted-foreground".to_string() }
+                        IdentityOrb { seed: session.cwd.clone(), alt: context.project.clone(), class: "size-3.5".to_string() }
                         span { class: "truncate", "{context.project}" }
                     }
                 }
@@ -1334,7 +1334,7 @@ fn SessionProperties(
             if !context.branch.is_empty() {
                 SessionDetailField { label: translate("resume-column-branch"),
                     SessionPropertyLink { url: context.git_url.clone(),
-                        LineIconView { icon: LineIcon::GitBranch, class: "size-3 shrink-0 text-muted-foreground".to_string() }
+                        IdentityOrb { seed: context.branch.clone(), alt: context.branch.clone(), class: "size-3.5".to_string() }
                         code { class: "truncate font-mono", "{context.branch}" }
                     }
                 }

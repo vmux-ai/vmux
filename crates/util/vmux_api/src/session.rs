@@ -250,6 +250,20 @@ impl Message {
     }
 }
 
+#[vmux_api::contract(Copy, Eq)]
+pub enum ToolKind {
+    Read,
+    Edit,
+    Delete,
+    Move,
+    Search,
+    Execute,
+    Think,
+    Fetch,
+    SwitchMode,
+    Other,
+}
+
 #[vmux_api::contract]
 pub enum AssistantBlock {
     Text(String),
@@ -258,6 +272,8 @@ pub enum AssistantBlock {
         call_id: String,
         name: String,
         args: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        kind: Option<ToolKind>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         parent_call_id: Option<String>,
     },
@@ -450,6 +466,8 @@ mod tests {
                     name: "list_spaces".into(),
                     args: "{}".to_string(),
                     parent_call_id: None,
+
+                    kind: None,
                 },
             ],
         };

@@ -5,7 +5,7 @@ use dioxus::prelude::*;
 use vmux_api::chat::{
     ChatBlock, ChatDiffLineKind, ChatItem, ChatPlanStatus, ChatSubagentState, ChatSubagentStatus,
     ChatSubagentSummary, ChatToolArgument, ChatToolArgumentValue, ChatToolArguments, ChatToolCall,
-    ChatToolChild, ChatToolChildCall, ChatTurn, ChatTurnRow, WORKING_VERB_IDS,
+    ChatToolChild, ChatToolChildCall, ChatTurn, ChatTurnRow, ExploreStep, WORKING_VERB_IDS,
 };
 use vmux_api::prompt_media::ChatAttachment;
 use vmux_ui::components::avatar::{AgentThumbnail, Avatar};
@@ -280,6 +280,22 @@ struct ToolDisclosure<'a> {
 mod disclosure_tests {
     use super::*;
 
+    #[test]
+    fn command_rows_show_exploration_steps_and_real_commands_instead_of_the_wrapper() {
+        let call = ChatToolCall {
+            kind: vmux_api::chat::ChatToolKind::Command,
+            arguments: ChatToolArguments::Raw(r#"text(await tools.exec_command({cmd:"sed -n '1,10p' src/host.rs; rg -n 'fixed' crates"}));"#.into()),
+            ..Default::default()
+        };
+        let mut dom = VirtualDom::new_with_props(ToolCall, ToolCallProps { call });
+        dom.rebuild_in_place();
+        let html = dioxus_ssr::render(&dom);
+        assert!(html.contains(&translate("agent-tool-explored")));
+        assert!(html.contains("host.rs"));
+        assert!(html.contains("fixed"));
+        assert!(!html.contains("tools.exec_command"));
+    }
+
     #[component]
     fn ToolBatch(first_done: bool, second_done: bool, text: bool, latest: bool) -> Element {
         let mut blocks = Vec::new();
@@ -290,6 +306,8 @@ mod disclosure_tests {
                 name: "read_file".into(),
                 args: "{}".into(),
                 parent_call_id: None,
+
+                kind: None,
             });
             calls.push(ChatToolCall {
                 index: index as u32,
@@ -670,23 +688,63 @@ fn FinishedToolCalls(calls: Vec<ChatToolCall>, open: bool) -> Element {
 }
 
 #[component]
+fn ToolExploration(steps: Vec<ExploreStep>) -> Element {
+    rsx! {
+        div { class: "mt-1 flex min-w-0 flex-col gap-0.5 text-[11px] text-muted-foreground",
+            for step in steps {
+                {
+                    let message = match step {
+                        ExploreStep::Read { path } => {
+                            let label = std::path::Path::new(&path).file_name().and_then(|name| name.to_str()).unwrap_or(&path);
+                            translate_with("agent-tool-explore-read", &[("path", TranslationValue::String(label))])
+                        }
+                        ExploreStep::Search { query, path } => translate_with("agent-tool-explore-search", &[("query", TranslationValue::String(&query)), ("path", TranslationValue::String(&path))]),
+                        ExploreStep::List { path } => translate_with("agent-tool-explore-list", &[("path", TranslationValue::String(&path))]),
+                    };
+                    rsx! { div { class: "truncate", title: message.clone(), "{message}" } }
+                }
+            }
+        }
+    }
+}
+
+#[component]
 fn ToolCall(call: ChatToolCall) -> Element {
     let key = call.index;
-    let label = ToolPresentation::for_call(call.kind, &call.fallback_label).label;
-    let command = call.command();
+    let edits = call.edited_paths();
+    let command = if edits.is_empty() {
+        call.command()
+    } else {
+        None
+    };
+    let exploration = command.as_ref().and_then(|command| command.exploration());
+    let label = if !edits.is_empty() {
+        ToolPresentation::for_call(
+            vmux_api::chat::ChatToolKind::WriteFile,
+            &call.fallback_label,
+        )
+        .label
+    } else if exploration.is_some() {
+        translate("agent-tool-explored")
+    } else {
+        ToolPresentation::for_call(call.kind, &call.fallback_label).label
+    };
     let children = call.children.clone();
     rsx! {
         div { key: "{key}", class: "grid grid-cols-[1.5rem_minmax(0,1fr)] items-start gap-2.5 rounded-lg px-2 py-1.5 transition-colors hover:bg-foreground/[0.025]",
             ToolActivityIcon {
                 name: call.name.clone(),
                 file_path: call.file_path.clone(),
-                activity: call.activity,
+                activity: if !edits.is_empty() { vmux_api::chat::ChatActivityKind::WriteFile } else if exploration.is_some() { vmux_api::chat::ChatActivityKind::Search } else { call.activity },
             }
             div { class: "min-w-0",
                 details { open: false, class: "disclosure text-xs text-muted-foreground",
                     summary { class: ROW_SUMMARY,
                         span { class: "shrink-0 font-medium", "{label}" }
-                        if let Some(command) = &command {
+                        if !edits.is_empty() {
+                            span { class: "truncate", {edits.join(", ")} }
+                        }
+                        if exploration.is_none() && let Some(command) = &command {
                             div { class: "min-w-0 flex-1 overflow-hidden",
                                 ShellCode {
                                     source: command.preview.clone(),
@@ -707,6 +765,7 @@ fn ToolCall(call: ChatToolCall) -> Element {
                         ToolArguments { arguments: call.arguments.clone() }
                     }
                 }
+                if let Some(steps) = exploration { ToolExploration { steps } }
                 if !children.is_empty() {
                     div { class: "mt-1.5 flex flex-col gap-1",
                         for child in children {
@@ -915,13 +974,29 @@ fn ToolChild(child: ChatToolChild) -> Element {
 
 #[component]
 fn ToolChildCall(call: ChatToolChildCall) -> Element {
-    let label = ToolPresentation::for_call(call.kind, &call.fallback_label).label;
-    let command = call.command();
+    let edits = call.edited_paths();
+    let command = if edits.is_empty() {
+        call.command()
+    } else {
+        None
+    };
+    let exploration = command.as_ref().and_then(|command| command.exploration());
+    let label = if !edits.is_empty() {
+        ToolPresentation::for_call(
+            vmux_api::chat::ChatToolKind::WriteFile,
+            &call.fallback_label,
+        )
+        .label
+    } else if exploration.is_some() {
+        translate("agent-tool-explored")
+    } else {
+        ToolPresentation::for_call(call.kind, &call.fallback_label).label
+    };
     rsx! {
         details { class: "disclosure text-xs text-muted-foreground",
             summary { class: "flex cursor-pointer select-none items-center gap-2 py-0.5 list-none [&::-webkit-details-marker]:hidden",
                 span { class: "shrink-0 font-medium", "{label}" }
-                if let Some(command) = &command {
+                if exploration.is_none() && let Some(command) = &command {
                     div { class: "min-w-0 flex-1 overflow-hidden",
                         ShellCode {
                             source: command.preview.clone(),
@@ -942,6 +1017,7 @@ fn ToolChildCall(call: ChatToolChildCall) -> Element {
                 ToolArguments { arguments: call.arguments }
             }
         }
+        if let Some(steps) = exploration { ToolExploration { steps } }
     }
 }
 

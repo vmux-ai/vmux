@@ -14,6 +14,7 @@ base64 = "0.22"
 rkyv = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
+shlex = "1"
 vmux_macro = { path = "../vmux_macro" }
 url = { workspace = true }
 uuid = { workspace = true }

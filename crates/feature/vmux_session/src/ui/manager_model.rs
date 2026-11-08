@@ -693,7 +693,10 @@ pub(super) struct SessionContext {
 impl SessionContext {
     fn from(repository: Option<SessionRepository>, cwd: &str) -> Self {
         let editor_url = url::Url::from_directory_path(cwd)
-            .map(Into::into)
+            .map(|mut url| {
+                url.query_pairs_mut().append_pair("vmux-entry", "1");
+                url.to_string()
+            })
             .unwrap_or_default();
         match repository {
             Some(repository) => Self {
@@ -875,6 +878,18 @@ pub(super) fn runtime_label(runtime: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn working_directory_links_preserve_the_path_and_request_a_code_entry_file() {
+        let path = "/tmp/a project/日本語";
+        let context = SessionContext::from(None, path);
+        let url = url::Url::parse(&context.editor_url).unwrap();
+        assert_eq!(url.to_file_path().unwrap(), std::path::PathBuf::from(path));
+        assert!(
+            url.query_pairs()
+                .any(|(key, value)| key == "vmux-entry" && value == "1")
+        );
+    }
 
     #[test]
     fn discovery_shows_ready_rows_and_appends_without_reordering_them() {

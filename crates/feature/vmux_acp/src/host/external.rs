@@ -1,7 +1,7 @@
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::io::{BufRead, Read};
 use std::path::{Path, PathBuf};
-use std::sync::{Mutex, mpsc};
+use std::sync::{Arc, Mutex, mpsc};
 use std::time::{Duration, Instant};
 
 use bevy::ecs::system::SystemParam;
@@ -40,6 +40,7 @@ mod vibe;
 
 pub(super) fn add(app: &mut App) {
     app.init_resource::<SourceSnapshot>()
+        .init_resource::<NativeReaders>()
         .init_resource::<AcpSnapshot>()
         .init_resource::<CatalogRequests>()
         .init_resource::<PendingImports>()
@@ -49,6 +50,7 @@ pub(super) fn add(app: &mut App) {
         .init_resource::<ActivationDirty>()
         .add_message::<ToolInventoryChanged>()
         .add_message::<ProviderConversationChanged>()
+        .add_message::<vmux_session::OperationReceived>()
         .add_service_message::<AcpCatalogReceived>()
         .add_observer(open)
         .add_observer(attach)
@@ -858,10 +860,32 @@ struct ConversationLoadTask {
 
 struct ConversationRead {
     path: Option<PathBuf>,
+    watch_paths: Vec<PathBuf>,
+    records: Vec<conversation::Record>,
     messages: Vec<vmux_api::session::Message>,
     cursor: u64,
     snapshot: bool,
     complete: bool,
+}
+
+#[derive(Resource, Clone, Default)]
+struct NativeReaders(Arc<Mutex<Option<conversation::ProcessReader>>>);
+
+#[derive(Component)]
+struct ConversationWatchPaths(Vec<PathBuf>);
+
+impl ConversationRead {
+    fn empty(cursor: Option<u64>) -> Self {
+        Self {
+            path: None,
+            watch_paths: Vec::new(),
+            records: Vec::new(),
+            messages: Vec::new(),
+            cursor: cursor.unwrap_or_default(),
+            snapshot: false,
+            complete: true,
+        }
+    }
 }
 
 struct ConversationSource {
@@ -873,19 +897,20 @@ struct ConversationSource {
 impl ConversationSource {
     fn new(kind: &str, sid: &str, created_at: i64) -> Option<Self> {
         let agent = kind.strip_prefix("acp:")?;
-        (AgentFamily::of(agent) == SourceKind::Codex.family()).then(|| Self {
-            kind: "acp:codex".to_string(),
+        let family = AgentFamily::of(agent);
+        let source = SourceKind::for_family(&family)?;
+        if !conversation::Files::valid_id(sid) {
+            return None;
+        }
+        Some(Self {
+            kind: format!("acp:{}", source.id()),
             sid: sid.to_string(),
             created_at,
         })
     }
 
     fn for_failed(kind: &str, sid: &str, created_at: i64) -> Option<Self> {
-        let agent = kind.strip_prefix("acp:")?;
-        if AgentFamily::of(agent) != SourceKind::Codex.family() {
-            return None;
-        }
-        Self::new("acp:codex", sid, created_at)
+        Self::new(kind, sid, created_at)
     }
 
     fn read(
@@ -893,36 +918,79 @@ impl ConversationSource {
         paths: &SourcePaths,
         cursor: Option<u64>,
         known: Vec<vmux_api::session::Message>,
+        native: NativeReaders,
+        hint: Option<PathBuf>,
     ) -> Result<ConversationRead, String> {
-        match self.kind.as_str() {
-            "acp:codex" => {
-                let read = codex::Reader::at(&paths.codex).conversation(
-                    &self.sid,
-                    self.created_at,
-                    cursor,
-                )?;
-                let snapshot = cursor.is_none() && known.is_empty();
-                let messages = if read.tail && !known.is_empty() {
-                    KnownConversation(known).unseen(read.messages)
+        let source = SourceKind::for_family(&AgentFamily::of(
+            self.kind.strip_prefix("acp:").unwrap_or_default(),
+        ))
+        .ok_or("unsupported history source")?;
+        let read = match source {
+            SourceKind::Codex => {
+                if let Some(path) = hint {
+                    codex::Reader::conversation_file(
+                        &path,
+                        cursor,
+                        conversation::FileConversation::TAIL_BYTES,
+                    )?
                 } else {
-                    read.messages
-                };
-                Ok(ConversationRead {
-                    path: read.path,
-                    messages,
-                    cursor: read.cursor,
-                    snapshot,
-                    complete: read.complete,
-                })
+                    codex::Reader::at(&paths.codex).conversation(
+                        &self.sid,
+                        self.created_at,
+                        cursor,
+                    )?
+                }
             }
-            _ => Ok(ConversationRead {
-                path: None,
-                messages: Vec::new(),
-                cursor: cursor.unwrap_or_default(),
-                snapshot: false,
-                complete: true,
-            }),
-        }
+            SourceKind::Claude => {
+                let path = hint.or(conversation::Files::locate(
+                    &paths.claude.join("projects"),
+                    &self.sid,
+                    false,
+                )?);
+                let Some(path) = path else {
+                    return Ok(ConversationRead::empty(cursor));
+                };
+                conversation::FileConversation::read(
+                    &path,
+                    cursor,
+                    conversation::FileConversation::TAIL_BYTES,
+                    conversation::ChatDecoder,
+                )?
+            }
+            SourceKind::Vibe => {
+                let root = std::env::var_os("MISTRAL_VIBE_SESSION_ROOT")
+                    .map(PathBuf::from)
+                    .unwrap_or_else(|| paths.vibe.join("logs/session"));
+                if root.join("unified").join(&self.sid).is_dir() {
+                    return vibe::Reader::conversation(&root, &self.sid, &native);
+                }
+                let path = hint.or(conversation::Files::locate(&root, &self.sid, true)?);
+                let Some(path) = path else {
+                    return Ok(ConversationRead::empty(cursor));
+                };
+                conversation::FileConversation::read(
+                    &path,
+                    cursor,
+                    conversation::FileConversation::TAIL_BYTES,
+                    conversation::ChatDecoder,
+                )?
+            }
+        };
+        let snapshot = cursor.is_none() && known.is_empty();
+        let messages = if read.tail && !known.is_empty() {
+            KnownConversation(known).unseen(read.messages)
+        } else {
+            read.messages
+        };
+        Ok(ConversationRead {
+            path: read.path,
+            watch_paths: Vec::new(),
+            records: Vec::new(),
+            messages,
+            cursor: read.cursor,
+            snapshot,
+            complete: read.complete,
+        })
     }
 }
 
@@ -936,10 +1004,86 @@ impl KnownConversation {
         messages[start..].to_vec()
     }
 
+    fn units(messages: &[vmux_api::session::Message]) -> Vec<vmux_api::session::Message> {
+        let mut units = Vec::new();
+        for message in messages {
+            match message {
+                vmux_api::session::Message::Assistant { blocks } => {
+                    for block in blocks {
+                        units.push(vmux_api::session::Message::Assistant {
+                            blocks: vec![block.clone()],
+                        });
+                    }
+                }
+                _ => units.push(message.clone()),
+            }
+        }
+        units
+    }
+
+    fn same(left: &vmux_api::session::Message, right: &vmux_api::session::Message) -> bool {
+        match (left, right) {
+            (
+                vmux_api::session::Message::User {
+                    text: left,
+                    attachments: a,
+                },
+                vmux_api::session::Message::User {
+                    text: right,
+                    attachments: b,
+                },
+            ) => {
+                vmux_api::protocol::AgentPromptEnvelope::new(left)
+                    .display()
+                    .unwrap_or(left)
+                    == vmux_api::protocol::AgentPromptEnvelope::new(right)
+                        .display()
+                        .unwrap_or(right)
+                    && a == b
+            }
+            (
+                vmux_api::session::Message::Assistant { blocks: a },
+                vmux_api::session::Message::Assistant { blocks: b },
+            ) => match (a.as_slice(), b.as_slice()) {
+                (
+                    [
+                        vmux_api::session::AssistantBlock::ToolUse {
+                            call_id: a,
+                            args: x,
+                            ..
+                        },
+                    ],
+                    [
+                        vmux_api::session::AssistantBlock::ToolUse {
+                            call_id: b,
+                            args: y,
+                            ..
+                        },
+                    ],
+                ) => {
+                    a == b
+                        && (x == y
+                            || serde_json::from_str::<serde_json::Value>(x)
+                                .ok()
+                                .zip(serde_json::from_str::<serde_json::Value>(y).ok())
+                                .is_some_and(|(x, y)| x == y))
+                }
+                _ => a == b,
+            },
+            _ => left == right,
+        }
+    }
+
     fn unseen(&self, incoming: Vec<vmux_api::session::Message>) -> Vec<vmux_api::session::Message> {
-        let limit = self.0.len().min(incoming.len());
+        let known = Self::units(&self.0);
+        let incoming = Self::units(&incoming);
+        let limit = known.len().min(incoming.len());
         for overlap in (1..=limit).rev() {
-            if self.0[self.0.len() - overlap..] == incoming[..overlap] {
+            if known[known.len() - overlap..]
+                .iter()
+                .zip(&incoming[..overlap])
+                .all(|(left, right)| Self::same(left, right))
+            {
                 return incoming[overlap..].to_vec();
             }
         }
@@ -956,6 +1100,14 @@ enum SourceKind {
 
 impl SourceKind {
     const ALL: [Self; 3] = [Self::Codex, Self::Claude, Self::Vibe];
+
+    fn id(self) -> &'static str {
+        match self {
+            Self::Codex => "codex",
+            Self::Claude => "claude",
+            Self::Vibe => "mistral-vibe",
+        }
+    }
 
     fn family(self) -> AgentFamily {
         match self {
@@ -1204,18 +1356,35 @@ struct SourceWatchEvents {
     receiver: mpsc::Receiver<SourceChanges>,
 }
 
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+struct ConversationTarget {
+    session: ProviderSessionKey,
+    path: PathBuf,
+}
+
+impl ConversationTarget {
+    fn change(&self) -> SourceChange {
+        let updated_at = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_millis()
+            .min(i64::MAX as u128) as i64;
+        SourceChange::ConversationActivity(self.session.clone(), updated_at)
+    }
+}
+
 struct ConversationWatch {
-    sender: mpsc::Sender<HashSet<PathBuf>>,
-    paths: HashSet<PathBuf>,
+    sender: mpsc::Sender<HashSet<ConversationTarget>>,
+    paths: HashSet<ConversationTarget>,
 }
 
 impl ConversationWatch {
     fn start(changes: mpsc::Sender<SourceChange>) -> Self {
-        let (sender, receiver) = mpsc::channel::<HashSet<PathBuf>>();
+        let (sender, receiver) = mpsc::channel::<HashSet<ConversationTarget>>();
         let worker = std::thread::Builder::new()
             .name("vmux-acp-conversation-watch".to_string())
             .spawn(move || {
-                let mut files = HashMap::<PathBuf, Option<ConversationStamp>>::new();
+                let mut files = HashMap::<ConversationTarget, Option<ConversationStamp>>::new();
                 loop {
                     let paths = if files.is_empty() {
                         match receiver.recv() {
@@ -1228,11 +1397,10 @@ impl ConversationWatch {
                             Err(mpsc::RecvTimeoutError::Disconnected) => break,
                             Err(mpsc::RecvTimeoutError::Timeout) => {
                                 for (path, previous) in &mut files {
-                                    let current = ConversationStamp::read(path);
+                                    let current = ConversationStamp::read(&path.path);
                                     if *previous != current {
                                         *previous = current;
-                                        let _ =
-                                            changes.send(SourceChange::CodexActivity(path.clone()));
+                                        let _ = changes.send(path.change());
                                     }
                                 }
                                 continue;
@@ -1244,9 +1412,9 @@ impl ConversationWatch {
                         if files.contains_key(&path) {
                             continue;
                         }
-                        let stamp = ConversationStamp::read(&path);
+                        let stamp = ConversationStamp::read(&path.path);
                         files.insert(path.clone(), stamp);
-                        let _ = changes.send(SourceChange::CodexActivity(path));
+                        let _ = changes.send(path.change());
                     }
                 }
             });
@@ -1259,7 +1427,7 @@ impl ConversationWatch {
         }
     }
 
-    fn set_paths(&mut self, paths: HashSet<PathBuf>) {
+    fn set_paths(&mut self, paths: HashSet<ConversationTarget>) {
         if self.paths == paths {
             return;
         }
@@ -1336,6 +1504,7 @@ impl SourceWatchEvents {
 enum SourceChange {
     Scan(SourceKind),
     CodexActivity(PathBuf),
+    ConversationActivity(ProviderSessionKey, i64),
     CodexArchives,
 }
 
@@ -1351,7 +1520,8 @@ impl ProviderConversationChanged {
             return true;
         }
         self.session.id.0 == sid
-            && ConversationSource::new(&self.session.kind.0, sid, 0).is_some()
+            && AgentFamily::of(self.session.kind.0.strip_prefix("acp:").unwrap_or_default())
+                == AgentFamily::of(kind.strip_prefix("acp:").unwrap_or_default())
             && ConversationSource::new(kind, sid, 0).is_some()
     }
 
@@ -1368,6 +1538,7 @@ impl ProviderConversationChanged {
 
 #[derive(Default)]
 struct SourceChanges {
+    conversations: HashMap<ProviderSessionKey, i64>,
     scans: HashSet<SourceKind>,
     codex_activity: HashSet<PathBuf>,
     codex_archives: bool,
@@ -1382,22 +1553,37 @@ impl SourceChanges {
             SourceChange::CodexActivity(path) => {
                 self.codex_activity.insert(path);
             }
+            SourceChange::ConversationActivity(session, revision) => {
+                self.conversations
+                    .entry(session)
+                    .and_modify(|current| *current = (*current).max(revision))
+                    .or_insert(revision);
+            }
             SourceChange::CodexArchives => self.codex_archives = true,
         }
     }
 
     fn extend(&mut self, changes: Self) {
+        for (session, revision) in changes.conversations {
+            self.insert(SourceChange::ConversationActivity(session, revision));
+        }
         self.scans.extend(changes.scans);
         self.codex_activity.extend(changes.codex_activity);
         self.codex_archives |= changes.codex_archives;
     }
 
     fn is_empty(&self) -> bool {
-        self.scans.is_empty() && self.codex_activity.is_empty() && !self.codex_archives
+        self.scans.is_empty()
+            && self.codex_activity.is_empty()
+            && self.conversations.is_empty()
+            && !self.codex_archives
     }
 
     fn debounce(&self) -> Duration {
-        if self.scans.is_empty() && !self.codex_archives && !self.codex_activity.is_empty() {
+        if self.scans.is_empty()
+            && !self.codex_archives
+            && (!self.codex_activity.is_empty() || !self.conversations.is_empty())
+        {
             ACTIVITY_REFRESH_INTERVAL
         } else {
             SCAN_DEBOUNCE
@@ -1405,7 +1591,10 @@ impl SourceChanges {
     }
 
     fn max_latency(&self) -> Duration {
-        if self.scans.is_empty() && !self.codex_archives && !self.codex_activity.is_empty() {
+        if self.scans.is_empty()
+            && !self.codex_archives
+            && (!self.codex_activity.is_empty() || !self.conversations.is_empty())
+        {
             ACTIVITY_REFRESH_INTERVAL
         } else {
             SCAN_MAX_LATENCY
@@ -1423,8 +1612,10 @@ fn activate(
         (
             Entity,
             &ProviderKind,
+            &ProviderSessionId,
             Option<&ConversationFile>,
             Option<&RunState>,
+            Option<&ConversationWatchPaths>,
         ),
         With<Session>,
     >,
@@ -1460,7 +1651,7 @@ fn activate(
     };
     let mut watch_codex_activity = watch_codex_activity;
     if !manager {
-        for (entity, kind, _, _) in &sessions {
+        for (entity, kind, _, _, _, _) in &sessions {
             let Some(agent) = kind.0.strip_prefix("acp:") else {
                 continue;
             };
@@ -1477,17 +1668,23 @@ fn activate(
         }
     }
     let mut conversation_paths = HashSet::new();
-    for (entity, kind, file, state) in &sessions {
-        if !viewed.contains(&entity) || ConversationSource::new(&kind.0, "", 0).is_none() {
+    for (entity, kind, sid, file, state, watched) in &sessions {
+        if !viewed.contains(&entity) || ConversationSource::new(&kind.0, &sid.0, 0).is_none() {
             continue;
         }
-        if let (Some(file), Some(RunState::Errored(error))) = (file, state)
-            && vmux_session::Failure(error).in_use()
-        {
-            conversation_paths.insert(file.0.clone());
+        if let (Some(file), Some(RunState::Errored(_))) = (file, state) {
+            let paths = watched
+                .map(|watched| watched.0.clone())
+                .unwrap_or_else(|| vec![file.0.clone()]);
+            for path in paths {
+                conversation_paths.insert(ConversationTarget {
+                    session: ProviderSessionKey::new(kind.clone(), sid.clone()),
+                    path,
+                });
+            }
         }
     }
-    if sources.is_empty() && !watch_codex_activity {
+    if sources.is_empty() && !watch_codex_activity && conversation_paths.is_empty() {
         for (entity, _, _) in &mut runtime {
             commands.entity(entity).despawn();
         }
@@ -1578,6 +1775,7 @@ fn mark_activation_dirty(
                 Changed<ProviderKind>,
                 Changed<RunState>,
                 Changed<ConversationFile>,
+                Changed<ConversationWatchPaths>,
             )>,
         ),
     >,
@@ -1633,6 +1831,12 @@ fn watch(
     }
     if changes.is_empty() {
         return;
+    }
+    for (session, updated_at) in changes.conversations.drain() {
+        conversations.write(ProviderConversationChanged {
+            session,
+            updated_at,
+        });
     }
     changes
         .scans
@@ -2171,6 +2375,8 @@ fn queue_initial_conversations(
         ),
     >,
     transcripts: Transcripts,
+    native: Option<Res<NativeReaders>>,
+    files: Query<&ConversationFile>,
     proxy: Option<Res<EventLoopProxyWrapper>>,
     mut commands: Commands,
 ) {
@@ -2199,10 +2405,15 @@ fn queue_initial_conversations(
             |requested| requested.0,
         );
         let cursor = cursor.map(|cursor| cursor.0);
+        let native = native
+            .as_ref()
+            .map(|native| (**native).clone())
+            .unwrap_or_default();
+        let hint = files.get(session).ok().map(|file| file.0.clone());
         let paths = paths.clone();
         let wake = proxy.as_deref().map(|proxy| (**proxy).clone());
         let task = IoTaskPool::get().spawn(async move {
-            let result = source.read(&paths, cursor, Vec::new());
+            let result = source.read(&paths, cursor, Vec::new(), native, hint);
             if let Some(wake) = wake {
                 let _ = wake.send_event(WinitUserEvent::WakeUp);
             }
@@ -2241,6 +2452,8 @@ fn queue_failed_conversations(
         ),
     >,
     transcripts: Transcripts,
+    native: Option<Res<NativeReaders>>,
+    files: Query<&ConversationFile>,
     proxy: Option<Res<EventLoopProxyWrapper>>,
     mut commands: Commands,
 ) {
@@ -2264,12 +2477,17 @@ fn queue_failed_conversations(
         else {
             continue;
         };
+        let native = native
+            .as_ref()
+            .map(|native| (**native).clone())
+            .unwrap_or_default();
+        let hint = files.get(session).ok().map(|file| file.0.clone());
         let paths = paths.clone();
         let cursor = cursor.map(|cursor| cursor.0);
         let known = KnownConversation::tail(&transcripts.get(session).messages);
         let wake = proxy.as_deref().map(|proxy| (**proxy).clone());
         let task = IoTaskPool::get().spawn(async move {
-            let result = source.read(&paths, cursor, known);
+            let result = source.read(&paths, cursor, known, native, hint);
             if let Some(wake) = wake {
                 let _ = wake.send_event(WinitUserEvent::WakeUp);
             }
@@ -2308,6 +2526,8 @@ fn queue_conversation_refreshes(
         ),
     >,
     transcripts: Transcripts,
+    native: Option<Res<NativeReaders>>,
+    files: Query<&ConversationFile>,
     proxy: Option<Res<EventLoopProxyWrapper>>,
     mut commands: Commands,
 ) {
@@ -2321,10 +2541,15 @@ fn queue_conversation_refreshes(
         let revision = requested.0;
         let cursor = cursor.map(|cursor| cursor.0);
         let known = KnownConversation::tail(&transcripts.get(session).messages);
+        let native = native
+            .as_ref()
+            .map(|native| (**native).clone())
+            .unwrap_or_default();
+        let hint = files.get(session).ok().map(|file| file.0.clone());
         let paths = paths.clone();
         let wake = proxy.as_deref().map(|proxy| (**proxy).clone());
         let task = IoTaskPool::get().spawn(async move {
-            let result = source.read(&paths, cursor, known);
+            let result = source.read(&paths, cursor, known, native, hint);
             if let Some(wake) = wake {
                 let _ = wake.send_event(WinitUserEvent::WakeUp);
             }
@@ -2351,9 +2576,20 @@ fn finish_conversations(
     )>,
     states: Query<&RunState, With<Session>>,
     files: Query<&ConversationFile>,
+    watched: Query<&ConversationWatchPaths>,
+    children: Query<&Children, With<Session>>,
+    existing: Query<
+        (
+            &vmux_session::EventIdentity,
+            &vmux_session::MessageContent,
+            &ChildOf,
+        ),
+        With<vmux_session::ConversationEvent>,
+    >,
     transcripts: Transcripts,
     mut snapshots: MessageWriter<SnapshotReceived>,
     mut appended: MessageWriter<ConversationAppendReceived>,
+    mut operations: MessageWriter<vmux_session::OperationReceived>,
     mut commands: Commands,
 ) {
     for (task_entity, mut task, failed_read) in &mut tasks {
@@ -2375,6 +2611,63 @@ fn finish_conversations(
         }
         match result {
             Ok(read) => {
+                if !read.watch_paths.is_empty()
+                    && !watched
+                        .get(task.session)
+                        .is_ok_and(|paths| paths.0 == read.watch_paths)
+                {
+                    commands
+                        .entity(task.session)
+                        .insert(ConversationWatchPaths(read.watch_paths));
+                }
+                if !read.records.is_empty() {
+                    let mut indexed = HashMap::new();
+                    let mut sequence = 0u64;
+                    for child in children
+                        .get(task.session)
+                        .into_iter()
+                        .flat_map(|children| children.iter())
+                    {
+                        let Ok((identity, content, _)) = existing.get(child) else {
+                            continue;
+                        };
+                        sequence = sequence.max(identity.sequence);
+                        indexed.insert(identity.event_id.clone(), (identity.sequence, &content.0));
+                    }
+                    for record in read.records {
+                        let id = vmux_api::session::EventId::new(format!(
+                            "session:{}:external:{}",
+                            task.sid.0, record.id
+                        ));
+                        let event_sequence = if let Some((sequence, content)) = indexed.get(&id) {
+                            if **content == record.message {
+                                continue;
+                            }
+                            *sequence
+                        } else {
+                            sequence = sequence.saturating_add(1);
+                            sequence
+                        };
+                        let actor =
+                            if matches!(&record.message, vmux_api::session::Message::User { .. }) {
+                                vmux_api::session::MemberId::local(&task.sid)
+                            } else {
+                                vmux_api::session::MemberId::agent(&task.sid)
+                            };
+                        operations.write(vmux_session::OperationReceived(
+                            vmux_api::session::ConversationEvent {
+                                event_id: id,
+                                session_id: task.sid.clone(),
+                                actor_id: actor,
+                                client_op_id: None,
+                                server_seq: event_sequence,
+                                created_at_ms: task.revision.max(0) as u64,
+                                reply_to: None,
+                                message: record.message,
+                            },
+                        ));
+                    }
+                }
                 if let Some(path) = read.path
                     && !files.get(task.session).is_ok_and(|file| file.0 == path)
                 {
@@ -2624,6 +2917,96 @@ mod tests {
     use std::io::Write;
 
     #[test]
+    fn matching_conversations_requires_the_same_family_even_with_equal_provider_ids() {
+        let changed = ProviderConversationChanged {
+            session: ProviderSessionKey::new(
+                ProviderKind("acp:codex".into()),
+                ProviderSessionId("same".into()),
+            ),
+            updated_at: 1,
+        };
+        assert!(changed.matches("acp:codex-acp", "same"));
+        assert!(!changed.matches("acp:claude", "same"));
+        assert!(!changed.matches("acp:mistral-vibe", "same"));
+    }
+
+    #[test]
+    fn replay_matching_ignores_display_metadata_and_assistant_message_grouping() {
+        let tool = vmux_api::session::AssistantBlock::ToolUse {
+            call_id: "call".into(),
+            name: "Bash".into(),
+            args: "{}".into(),
+            parent_call_id: None,
+            kind: Some(vmux_api::session::ToolKind::Execute),
+        };
+        let known = KnownConversation(vec![vmux_api::session::Message::Assistant {
+            blocks: vec![
+                vmux_api::session::AssistantBlock::Text("context".into()),
+                tool.clone(),
+            ],
+        }]);
+        let mut replay = tool;
+        if let vmux_api::session::AssistantBlock::ToolUse { kind, name, .. } = &mut replay {
+            *kind = None;
+            *name = "Execute command".into();
+        }
+        let unseen = known.unseen(vec![
+            vmux_api::session::Message::Assistant {
+                blocks: vec![vmux_api::session::AssistantBlock::Text("context".into())],
+            },
+            vmux_api::session::Message::Assistant {
+                blocks: vec![replay],
+            },
+            vmux_api::session::Message::user("new"),
+        ]);
+        assert_eq!(unseen, [vmux_api::session::Message::user("new")]);
+    }
+
+    #[test]
+    fn shared_jsonl_reader_follows_a_wrapped_chat_log_with_a_cached_path() {
+        let directory = tempfile::tempdir().unwrap();
+        let root = directory.path().join("projects/work");
+        std::fs::create_dir_all(&root).unwrap();
+        let path = root.join("thread.jsonl");
+        std::fs::write(
+            &path,
+            "{\"type\":\"user\",\"message\":{\"role\":\"user\",\"content\":\"first\"}}\n",
+        )
+        .unwrap();
+        let paths = SourcePaths {
+            codex: directory.path().into(),
+            claude: directory.path().into(),
+            vibe: directory.path().into(),
+        };
+        let first = ConversationSource::new("acp:claude", "thread", 0)
+            .unwrap()
+            .read(&paths, None, Vec::new(), NativeReaders::default(), None)
+            .unwrap();
+        assert_eq!(first.messages, [vmux_api::session::Message::user("first")]);
+        let mut file = std::fs::OpenOptions::new()
+            .append(true)
+            .open(&path)
+            .unwrap();
+        file.write_all(b"{\"type\":\"assistant\",\"message\":{\"role\":\"assistant\",\"content\":[{\"type\":\"text\",\"text\":\"next\"}]}}\n").unwrap();
+        let next = ConversationSource::new("acp:claude", "thread", 0)
+            .unwrap()
+            .read(
+                &paths,
+                Some(first.cursor),
+                first.messages,
+                NativeReaders::default(),
+                first.path,
+            )
+            .unwrap();
+        assert_eq!(
+            next.messages,
+            [vmux_api::session::Message::Assistant {
+                blocks: vec![vmux_api::session::AssistantBlock::Text("next".into())]
+            }]
+        );
+    }
+
+    #[test]
     fn conversation_watch_reads_appends_before_the_writer_closes_and_releases_unused_files() {
         let mut fixture = FailedReadFixture::new();
         fixture.finish();
@@ -2646,7 +3029,18 @@ mod tests {
             .unwrap();
         let events = SourceWatchEvents::start(None);
         let mut watch = ConversationWatch::start(events.sender.clone());
-        watch.set_paths([path.clone()].into_iter().collect());
+        let key = ProviderSessionKey::new(
+            ProviderKind("acp:codex".into()),
+            ProviderSessionId("01a14fcc-f46a-7c12-b000-779be98d72ae".into()),
+        );
+        watch.set_paths(
+            [ConversationTarget {
+                session: key.clone(),
+                path: path.clone(),
+            }]
+            .into_iter()
+            .collect(),
+        );
         events
             .receiver
             .recv_timeout(Duration::from_secs(2))
@@ -2657,7 +3051,7 @@ mod tests {
             .receiver
             .recv_timeout(Duration::from_secs(2))
             .unwrap();
-        assert_eq!(changed.codex_activity, HashSet::from([path]));
+        assert!(changed.conversations.contains_key(&key));
         let read = codex::Reader::at(fixture._directory.path())
             .conversation(
                 "01a14fcc-f46a-7c12-b000-779be98d72ae",
@@ -2708,6 +3102,7 @@ mod tests {
             app.add_plugins(MinimalPlugins)
                 .add_message::<SnapshotReceived>()
                 .add_message::<ConversationAppendReceived>()
+                .add_message::<vmux_session::OperationReceived>()
                 .add_systems(Update, queue_failed_conversations);
             app.world_mut().spawn(SourcePaths {
                 codex: directory.path().to_path_buf(),
@@ -2779,6 +3174,93 @@ mod tests {
                 .drain()
                 .collect()
         }
+
+        fn native(
+            &mut self,
+            message: vmux_api::session::Message,
+        ) -> Vec<vmux_api::session::ConversationEvent> {
+            let session = self.session;
+            self.app
+                .world_mut()
+                .entity_mut(session)
+                .insert(ConversationLoadPending);
+            self.app.world_mut().spawn(ConversationLoadTask {
+                session,
+                sid: SessionId::new("canonical"),
+                revision: 1,
+                task: IoTaskPool::get().spawn(async move {
+                    Ok(ConversationRead {
+                        path: None,
+                        watch_paths: Vec::new(),
+                        records: vec![conversation::Record {
+                            id: "stable".into(),
+                            message,
+                        }],
+                        messages: Vec::new(),
+                        cursor: 1,
+                        snapshot: false,
+                        complete: true,
+                    })
+                }),
+            });
+            let deadline = Instant::now() + Duration::from_secs(3);
+            while self
+                .app
+                .world()
+                .get::<ConversationLoadPending>(session)
+                .is_some()
+            {
+                assert!(Instant::now() < deadline, "native history update");
+                self.app.update();
+                std::thread::sleep(Duration::from_millis(2));
+            }
+            self.app
+                .world_mut()
+                .resource_mut::<Messages<vmux_session::OperationReceived>>()
+                .drain()
+                .map(|event| event.0)
+                .collect()
+        }
+    }
+
+    #[test]
+    fn native_history_updates_keep_the_record_identity_and_ignore_unchanged_entries() {
+        let mut fixture = FailedReadFixture::new();
+        fixture.finish();
+        let first = fixture.native(vmux_api::session::Message::user("first"));
+        assert_eq!(first.len(), 1);
+        let event = &first[0];
+        let entity = fixture
+            .app
+            .world_mut()
+            .spawn((
+                vmux_session::ConversationEvent,
+                vmux_session::EventIdentity {
+                    event_id: event.event_id.clone(),
+                    actor_id: event.actor_id.clone(),
+                    client_op_id: None,
+                    sequence: event.server_seq,
+                    reply_to: None,
+                },
+                vmux_session::MessageContent(event.message.clone()),
+                CreatedAt(1),
+                ChildOf(fixture.session),
+            ))
+            .id();
+        let updated = fixture.native(vmux_api::session::Message::user("updated"));
+        assert_eq!(updated.len(), 1);
+        assert_eq!(updated[0].event_id, event.event_id);
+        assert_eq!(updated[0].server_seq, event.server_seq);
+        fixture
+            .app
+            .world_mut()
+            .entity_mut(entity)
+            .insert(vmux_session::MessageContent(updated[0].message.clone()));
+        assert!(
+            fixture
+                .native(vmux_api::session::Message::user("updated"))
+                .is_empty()
+        );
     }
 
     #[test]

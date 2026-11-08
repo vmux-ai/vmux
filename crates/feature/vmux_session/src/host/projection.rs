@@ -106,15 +106,16 @@ impl ChatTurnProjection {
                 text: text.clone(),
                 latest: index as usize + 1 == block_count,
             }),
-            ChatBlock::ToolUse { name, args, .. } => {
-                Some(ChatTurnRow::Tool(ChatTurnProjection::project_tool(
-                    turn,
-                    index,
-                    name,
-                    args,
-                    latest_tool == Some(index as usize),
-                )))
-            }
+            ChatBlock::ToolUse {
+                name, args, kind, ..
+            } => Some(ChatTurnRow::Tool(ChatTurnProjection::project_tool(
+                turn,
+                index,
+                name,
+                args,
+                *kind,
+                latest_tool == Some(index as usize),
+            ))),
             ChatBlock::Subagent(subagent) => Some(ChatTurnRow::Subagent(
                 ChatTurnProjection::project_subagent(turn, index, subagent),
             )),
@@ -159,13 +160,16 @@ impl ChatTurnProjection {
         index: u32,
         name: &str,
         args: &str,
+        kind: Option<vmux_api::session::ToolKind>,
         live: bool,
     ) -> ChatToolCall {
         ChatToolCall {
             index,
             name: name.to_string(),
-            kind: ChatTurnProjection::tool_kind(name, args),
-            activity: ChatTurnProjection::activity_for_tool(name, args),
+            kind: ChatTurnProjection::classified_kind(kind, name, args),
+            activity: kind
+                .and_then(Self::classified_activity)
+                .unwrap_or_else(|| Self::activity_for_tool(name, args)),
             fallback_label: ChatTurnProjection::fallback_tool_label(name),
             file_path: ChatTurnProjection::tool_file_path(args),
             arguments: ChatTurnProjection::tool_arguments(args),
@@ -174,12 +178,19 @@ impl ChatTurnProjection {
         }
     }
 
-    fn project_child_tool(index: usize, name: &str, args: &str) -> ChatToolChildCall {
+    fn project_child_tool(
+        index: usize,
+        name: &str,
+        args: &str,
+        kind: Option<vmux_api::session::ToolKind>,
+    ) -> ChatToolChildCall {
         ChatToolChildCall {
             index: u32::try_from(index).unwrap_or(u32::MAX),
             name: name.to_string(),
-            kind: ChatTurnProjection::tool_kind(name, args),
-            activity: ChatTurnProjection::activity_for_tool(name, args),
+            kind: ChatTurnProjection::classified_kind(kind, name, args),
+            activity: kind
+                .and_then(Self::classified_activity)
+                .unwrap_or_else(|| Self::activity_for_tool(name, args)),
             fallback_label: ChatTurnProjection::fallback_tool_label(name),
             file_path: ChatTurnProjection::tool_file_path(args),
             arguments: ChatTurnProjection::tool_arguments(args),
@@ -193,9 +204,11 @@ impl ChatTurnProjection {
                 continue;
             }
             match block {
-                ChatBlock::ToolUse { name, args, .. } => {
+                ChatBlock::ToolUse {
+                    name, args, kind, ..
+                } => {
                     children.push(ChatToolChild::Tool(ChatTurnProjection::project_child_tool(
-                        index, name, args,
+                        index, name, args, *kind,
                     )));
                 }
                 ChatBlock::Subagent(subagent) => {
@@ -356,11 +369,56 @@ impl ChatTurnProjection {
         ) || value.starts_with('/')
     }
 
+    fn classified_kind(
+        kind: Option<vmux_api::session::ToolKind>,
+        name: &str,
+        args: &str,
+    ) -> ChatToolKind {
+        match kind {
+            Some(vmux_api::session::ToolKind::Read) => {
+                if Self::arguments_read_skill(args) {
+                    ChatToolKind::ReadSkill
+                } else {
+                    ChatToolKind::ReadFile
+                }
+            }
+            Some(
+                vmux_api::session::ToolKind::Edit
+                | vmux_api::session::ToolKind::Delete
+                | vmux_api::session::ToolKind::Move,
+            ) => ChatToolKind::WriteFile,
+            Some(vmux_api::session::ToolKind::Search) => ChatToolKind::Search,
+            Some(vmux_api::session::ToolKind::Execute) => ChatToolKind::Command,
+            Some(vmux_api::session::ToolKind::Fetch) => ChatToolKind::Browser,
+            Some(vmux_api::session::ToolKind::Think | vmux_api::session::ToolKind::SwitchMode) => {
+                ChatToolKind::Other
+            }
+            _ => Self::tool_kind(name, args),
+        }
+    }
+
+    fn classified_activity(kind: vmux_api::session::ToolKind) -> Option<ChatActivityKind> {
+        Some(match kind {
+            vmux_api::session::ToolKind::Read => ChatActivityKind::ReadFile,
+            vmux_api::session::ToolKind::Edit
+            | vmux_api::session::ToolKind::Delete
+            | vmux_api::session::ToolKind::Move => ChatActivityKind::WriteFile,
+            vmux_api::session::ToolKind::Search => ChatActivityKind::Search,
+            vmux_api::session::ToolKind::Execute => ChatActivityKind::Command,
+            vmux_api::session::ToolKind::Think => ChatActivityKind::Thinking,
+            vmux_api::session::ToolKind::Fetch => ChatActivityKind::Browser,
+            _ => return None,
+        })
+    }
+
     fn tool_kind(name: &str, args: &str) -> ChatToolKind {
         let lower = name.to_ascii_lowercase();
         if ChatTurnProjection::is_guardian(name) {
             ChatToolKind::Guardian
         } else if lower.contains("read_file")
+            || lower == "read"
+            || lower.starts_with("read ")
+            || lower.ends_with("readfile")
             || lower.contains("read file")
             || lower.contains("open_file")
             || lower.contains("open file")
@@ -402,9 +460,17 @@ impl ChatTurnProjection {
         } else if lower.contains("browser") || lower.contains("navigate") || lower.contains("web_")
         {
             ChatToolKind::Browser
-        } else if lower.contains("grep") || lower.contains("search") || lower.contains("find") {
+        } else if lower.contains("grep")
+            || lower.contains("search")
+            || lower.contains("find")
+            || matches!(lower.as_str(), "glob" | "ls")
+            || lower.contains("list_files")
+            || lower.contains("list_directory")
+        {
             ChatToolKind::Search
-        } else if lower.contains("run")
+        } else if lower == "bash"
+            || lower.ends_with(".bash")
+            || lower.contains("run")
             || lower.contains("exec")
             || lower.contains("command")
             || lower.contains("shell")
@@ -447,9 +513,11 @@ impl ChatTurnProjection {
         match block {
             ChatBlock::Text(_) => ChatActivityKind::Writing,
             ChatBlock::Thinking(_) => ChatActivityKind::Thinking,
-            ChatBlock::ToolUse { name, args, .. } => {
-                ChatTurnProjection::activity_for_tool(name, args)
-            }
+            ChatBlock::ToolUse {
+                name, args, kind, ..
+            } => kind
+                .and_then(Self::classified_activity)
+                .unwrap_or_else(|| Self::activity_for_tool(name, args)),
             ChatBlock::Subagent(_) => ChatActivityKind::Subagent,
             ChatBlock::Diff { path, .. } => {
                 if let Some(path) = LanguageIconPath::from_hint(path) {
@@ -657,6 +725,49 @@ mod tests {
     use super::*;
 
     #[test]
+    fn typed_tool_kind_takes_precedence_over_an_agent_specific_title() {
+        let mut turn = ChatTurn {
+            running: true,
+            blocks: vec![ChatBlock::ToolUse {
+                call_id: "call".into(),
+                name: "execute command".into(),
+                args: "{}".into(),
+                parent_call_id: None,
+                kind: Some(vmux_api::session::ToolKind::Read),
+            }],
+            ..Default::default()
+        };
+        ChatTurnProjection::apply(&mut turn);
+        let ChatTurnRow::Tool(call) = &turn.rows[0] else {
+            panic!("tool row");
+        };
+        assert_eq!(call.kind, ChatToolKind::ReadFile);
+        assert_eq!(call.activity, ChatActivityKind::ReadFile);
+    }
+
+    #[test]
+    fn claude_and_vibe_tool_names_share_command_read_and_search_classification() {
+        for name in ["Bash", "run_command", "exec_command"] {
+            assert_eq!(
+                ChatTurnProjection::tool_kind(name, r#"{"command":"rg foo src"}"#),
+                ChatToolKind::Command
+            );
+        }
+        for name in ["Read", "read_file", "Read src/main.rs"] {
+            assert_eq!(
+                ChatTurnProjection::tool_kind(name, r#"{"file_path":"src/main.rs"}"#),
+                ChatToolKind::ReadFile
+            );
+        }
+        for name in ["Glob", "Grep", "list_directory"] {
+            assert_eq!(
+                ChatTurnProjection::tool_kind(name, "{}"),
+                ChatToolKind::Search
+            );
+        }
+    }
+
+    #[test]
     fn projects_nested_tools_typed_arguments_and_finished_groups() {
         let mut turn = ChatTurn {
             blocks: vec![
@@ -666,6 +777,8 @@ mod tests {
                     args: r#"{"arguments":{"path":"/tmp/SKILL.md","limit":3},"server":"vmux"}"#
                         .into(),
                     parent_call_id: None,
+
+                    kind: None,
                 },
                 ChatBlock::ToolResult {
                     call_id: "read".into(),
@@ -677,6 +790,8 @@ mod tests {
                     name: "run".into(),
                     args: r#"{"command":"cargo test"}"#.into(),
                     parent_call_id: None,
+
+                    kind: None,
                 },
             ],
             ..Default::default()
@@ -716,6 +831,8 @@ mod tests {
                     name: "python".into(),
                     args: r#"{"script":"print(1)"}"#.into(),
                     parent_call_id: None,
+
+                    kind: None,
                 },
                 ChatBlock::Diff {
                     call_id: "diff".into(),
@@ -764,12 +881,16 @@ mod tests {
                     name: "read_file".into(),
                     args: "{}".into(),
                     parent_call_id: None,
+
+                    kind: None,
                 },
                 ChatBlock::ToolUse {
                     call_id: "review".into(),
                     name: "guardian_review".into(),
                     args: "{}".into(),
                     parent_call_id: None,
+
+                    kind: None,
                 },
                 ChatBlock::ToolResult {
                     call_id: "review".into(),
@@ -786,6 +907,8 @@ mod tests {
                     name: "run".into(),
                     args: "{}".into(),
                     parent_call_id: None,
+
+                    kind: None,
                 },
             ],
             ..Default::default()

@@ -60,7 +60,7 @@ impl Reader {
         Self::conversation_file(&path, cursor, FileConversation::TAIL_BYTES)
     }
 
-    fn conversation_file(
+    pub(super) fn conversation_file(
         path: &Path,
         cursor: Option<u64>,
         tail_bytes: u64,
@@ -741,6 +741,8 @@ impl CodexConversationPayload {
                 name: self.name.clone(),
                 args: args.to_string(),
                 parent_call_id: None,
+
+                kind: None,
             }],
         })
     }
@@ -767,6 +769,8 @@ impl CodexConversationPayload {
                 name: "web_search".to_string(),
                 args,
                 parent_call_id: None,
+
+                kind: None,
             }],
         })
     }
@@ -1050,6 +1054,18 @@ mod tests {
             })
             .collect::<Vec<_>>();
 
+        let search_arguments = match &messages[4] {
+            Message::Assistant { blocks } => match &blocks[0] {
+                AssistantBlock::ToolUse { args, .. } => args.clone(),
+                _ => panic!("search tool"),
+            },
+            _ => panic!("search message"),
+        };
+        assert_eq!(
+            serde_json::from_str::<serde_json::Value>(&search_arguments).unwrap(),
+            serde_json::json!({"type":"search", "query":"vmux"})
+        );
+
         assert_eq!(
             messages,
             vec![
@@ -1060,6 +1076,8 @@ mod tests {
                         args: r#"const result = await tools.exec_command({"cmd":"git status"});"#
                             .into(),
                         parent_call_id: None,
+
+                        kind: None,
                     }],
                 },
                 Message::ToolResult {
@@ -1073,6 +1091,8 @@ mod tests {
                         name: "wait".into(),
                         args: r#"{"cell_id":"98"}"#.into(),
                         parent_call_id: None,
+
+                        kind: None,
                     }],
                 },
                 Message::ToolResult {
@@ -1084,8 +1104,10 @@ mod tests {
                     blocks: vec![AssistantBlock::ToolUse {
                         call_id: "ws_1".into(),
                         name: "web_search".into(),
-                        args: r#"{"query":"vmux","type":"search"}"#.into(),
+                        args: search_arguments,
                         parent_call_id: None,
+
+                        kind: None,
                     }],
                 },
                 Message::Assistant {

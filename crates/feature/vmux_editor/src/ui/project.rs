@@ -1,7 +1,7 @@
 use std::path::Path;
 
 use dioxus::prelude::*;
-use vmux_api::address::{AddressCrumb, AddressOption, PageAddress};
+use vmux_api::address::{AddressCrumb, AddressIntent, AddressOption, PageAddress};
 use vmux_git::event::{RepositorySummary, RepositorySummaryRequest, RepositorySummaryUiState};
 use vmux_session::state::SessionScopeUiState;
 use vmux_session::{SessionSummary, SessionSummaryProjection, StageSummary};
@@ -625,11 +625,26 @@ pub(super) fn ProjectDashboard(detail: ProjectDetailView) -> Element {
     let project_identity = detail.id.0;
     let start_url = "vmux://start/".to_string();
     let address = PageAddress {
+        current: AddressOption {
+            label_key: "layout-projects".into(),
+            icon: Some(vmux_api::BuiltinIcon::Project),
+            intent: Some(AddressIntent::Navigate {
+                url: crate::project::ProjectRoute::ROOT.to_string(),
+            }),
+            ..Default::default()
+        },
         fixed: vec![AddressCrumb {
             entry: AddressOption {
                 label: project_name.clone(),
                 title: root.clone(),
-                identity: project_identity.clone(),
+                identity: root.clone(),
+                intent: Some(AddressIntent::Navigate {
+                    url: try_consume_context::<vmux_ecs::PageMetadata>()
+                        .map(|metadata| metadata.url)
+                        .unwrap_or_else(|| {
+                            format!("{}{project_identity}", crate::project::ProjectRoute::ROOT)
+                        }),
+                }),
                 ..Default::default()
             },
             active: true,
@@ -698,6 +713,7 @@ impl ProjectSessionList {
 #[component]
 fn ProjectSessions(projection: ProjectSessionList) -> Element {
     let mut view = use_signal(ManagerView::default);
+    let selected_view = view();
     let visible = projection.visible_len();
     rsx! {
         ProjectSection {
@@ -706,9 +722,10 @@ fn ProjectSessions(projection: ProjectSessionList) -> Element {
             actions: rsx! {
                 if visible > 0 {
                     ManagerViewToggle {
-                        view: view(),
+                        view: selected_view,
                         list_label: translate("tools-view-list"),
-                        grid_label: translate("tools-view-grid"),
+                        grid_label: translate("sessions-view-board"),
+                        grid_icon: LineIcon::Columns3,
                         onchange: move |next| view.set(next),
                     }
                 }
@@ -721,7 +738,7 @@ fn ProjectSessions(projection: ProjectSessionList) -> Element {
                 vmux_session::ui::SessionCollection {
                     sessions: projection.sessions,
                     stages: projection.stages,
-                    view: view(),
+                    view: selected_view,
                     preview: Some(5),
                 }
             }
@@ -863,6 +880,66 @@ fn ProjectSection(
 }
 
 struct ProjectPath;
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use dioxus::core::{AttributeValue, Mutation};
+    use dioxus_html::{EventData, SerializedHtmlEventConverter, SerializedMouseData};
+
+    #[test]
+    fn project_sessions_switch_to_board_on_the_first_click() {
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_time()
+            .build()
+            .unwrap();
+        let _runtime = runtime.enter();
+        dioxus_html::set_event_converter(Box::new(SerializedHtmlEventConverter));
+        let projection = ProjectSessionList {
+            sessions: vec![SessionSummary {
+                id: "test".into(),
+                sid: "test".into(),
+                name: "Example session".into(),
+                stage: "active".into(),
+                ..Default::default()
+            }],
+            stages: vec![StageSummary {
+                id: "active".into(),
+                name: "Active".into(),
+                order: 0,
+                terminal: false,
+            }],
+        };
+        let mut dom =
+            VirtualDom::new_with_props(ProjectSessions, ProjectSessionsProps { projection });
+        let first = dom.rebuild_to_vec();
+        let title = translate("sessions-view-board");
+        let button = first
+            .edits
+            .iter()
+            .find_map(|edit| match edit {
+                Mutation::SetAttribute {
+                    name: "title",
+                    value: AttributeValue::Text(value),
+                    id,
+                    ..
+                } if value == &title => Some(*id),
+                _ => None,
+            })
+            .expect("board toggle");
+        assert!(!dioxus_ssr::render(&dom).contains("<article"));
+        dom.runtime().handle_event(
+            "click",
+            Event::new(
+                EventData::Mouse(SerializedMouseData::default()).into_any(),
+                true,
+            ),
+            button,
+        );
+        dom.render_immediate_to_vec();
+        assert!(dioxus_ssr::render(&dom).contains("<article"));
+    }
+}
 
 impl ProjectPath {
     fn clean(path: &str) -> &str {

@@ -1,3 +1,6 @@
+pub use crate::command::ExploreStep;
+use crate::command::Source;
+
 use crate::prompt_media::ChatAttachment;
 
 #[vmux_api::contract(Eq)]
@@ -8,6 +11,8 @@ pub enum ChatBlock {
         call_id: String,
         name: String,
         args: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        kind: Option<crate::session::ToolKind>,
         parent_call_id: Option<String>,
     },
     Subagent(Box<ChatSubagent>),
@@ -119,6 +124,13 @@ pub struct ChatToolCall {
 }
 
 impl ChatToolCall {
+    pub fn edited_paths(&self) -> Vec<String> {
+        if let ChatToolArguments::Raw(raw) = &self.arguments {
+            return Source::edited_paths(raw);
+        }
+        Vec::new()
+    }
+
     pub fn command(&self) -> Option<ChatCommand> {
         ChatCommand::from_arguments(self.kind, &self.arguments)
     }
@@ -132,6 +144,22 @@ pub struct ChatCommand {
 }
 
 impl ChatCommand {
+    pub fn exploration(&self) -> Option<Vec<ExploreStep>> {
+        let mut steps = ExploreStep::commands(&self.source)?;
+        for step in &mut steps {
+            match step {
+                ExploreStep::Read { path } | ExploreStep::List { path } => {
+                    *path = CommandPreview::from(path).unwrap_or_default();
+                }
+                ExploreStep::Search { query, path } => {
+                    *query = CommandPreview::from(query).unwrap_or_default();
+                    *path = CommandPreview::from(path).unwrap_or_default();
+                }
+            }
+        }
+        Some(steps)
+    }
+
     fn from_arguments(kind: ChatToolKind, arguments: &ChatToolArguments) -> Option<Self> {
         if kind != ChatToolKind::Command {
             return None;
@@ -159,7 +187,7 @@ impl ChatCommand {
                 (source, metadata)
             }
             ChatToolArguments::Value(value) => (value.text()?.to_string(), ChatToolArguments::None),
-            ChatToolArguments::Raw(raw) => (CommandSource::from_raw(raw)?, ChatToolArguments::None),
+            ChatToolArguments::Raw(raw) => (Source::from_raw(raw)?, ChatToolArguments::None),
         };
         let preview = CommandPreview::from(&source)?;
         Some(Self {
@@ -203,6 +231,13 @@ pub struct ChatToolChildCall {
 }
 
 impl ChatToolChildCall {
+    pub fn edited_paths(&self) -> Vec<String> {
+        if let ChatToolArguments::Raw(raw) = &self.arguments {
+            return Source::edited_paths(raw);
+        }
+        Vec::new()
+    }
+
     pub fn command(&self) -> Option<ChatCommand> {
         ChatCommand::from_arguments(self.kind, &self.arguments)
     }
@@ -337,40 +372,6 @@ pub enum ChatToolArguments {
 }
 
 struct CommandPreview;
-
-struct CommandSource;
-
-impl CommandSource {
-    fn from_raw(raw: &str) -> Option<String> {
-        let raw = raw.trim();
-        if raw.is_empty() {
-            return None;
-        }
-        if let Some(value) = Self::structured(raw) {
-            return Some(value);
-        }
-        Some(raw.to_string())
-    }
-
-    fn structured(raw: &str) -> Option<String> {
-        let candidate = if raw.starts_with('{') {
-            raw
-        } else {
-            raw.split_once("tools.exec_command(")?.1.trim_start()
-        };
-        let value = serde_json::Deserializer::from_str(candidate)
-            .into_iter::<serde_json::Value>()
-            .next()?
-            .ok()?;
-        let object = value.as_object()?;
-        for name in ["cmd", "command", "script"] {
-            if let Some(value) = object.get(name).and_then(serde_json::Value::as_str) {
-                return Some(value.to_string());
-            }
-        }
-        None
-    }
-}
 
 impl CommandPreview {
     fn from(command: &str) -> Option<String> {

@@ -874,6 +874,8 @@ mod tests {
                         name: "run".into(),
                         args: "{}".into(),
                         parent_call_id: None,
+
+                        kind: None,
                     }],
                 },
                 vmux_api::session::Message::ToolResult {

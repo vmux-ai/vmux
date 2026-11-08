@@ -483,7 +483,7 @@ __VMUX_DROPDOWN_CONNECTION_WATCHER__
 const id = '{}';
 const popup = document.getElementById(id);
 if (popup) {{
-  if (!popup.matches(':popover-open')) dioxus.send('dismissed');
+  let opened = popup.matches(':popover-open');
   const root = popup.closest('[data-vmux-dropdown-root]');
   const manual = popup.getAttribute('popover') === 'manual';
   const entries = globalThis.__vmuxDropdownToggleEntries ??= new Map();
@@ -505,7 +505,8 @@ if (popup) {{
     dioxus.send('dismissed');
   }};
   const beforetoggle = event => {{
-    if (event.newState === 'closed') dismiss();
+    if (event.newState === 'open') opened = true;
+    if (event.newState === 'closed' && opened) dismiss();
   }};
   const pointerdown = event => {{
     const path = event.composedPath();
@@ -743,6 +744,7 @@ mod tests {
                 "runtime": runtime,
                 "mount": DropdownPopupOwner(0).install_script(),
                 "keyboard": keyboard,
+                "dismiss": DropdownPopupOwner(0).dismiss_script().replace("__VMUX_DROPDOWN_CONNECTION_WATCHER__", DROPDOWN_CONNECTION_WATCHER),
             });
             let mut child = Command::new("node")
                 .args(["-e", include_str!("dropdown_placement_test.js")])

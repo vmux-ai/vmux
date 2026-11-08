@@ -106,10 +106,17 @@ const scope = {
   cancelAnimationFrame() {},
   MutationObserver: class { observe() {} disconnect() {} },
   ResizeObserver: class { observe() {} disconnect() {} },
-  dioxus: { send() {} },
+  dioxus: { send(message) { notifications.push(message); } },
 };
 scope.window = scope;
 scope.globalThis = scope;
+const notifications = [];
+vm.runInNewContext('(function () {' + source.dismiss + '})();', scope);
+assert.deepEqual(notifications, [], 'initial closed state must not dismiss a menu before its first presentation');
+popup.handlers.get('beforetoggle')({ newState: 'open' });
+assert.deepEqual(notifications, [], 'opening must keep the menu active');
+popup.handlers.get('beforetoggle')({ newState: 'closed' });
+assert.deepEqual(notifications, ['dismissed'], 'a real close must dismiss once');
 vm.runInNewContext(source.runtime, scope);
 popups = [popup];
 scope.__vmuxPopupPresentation.apply([]);

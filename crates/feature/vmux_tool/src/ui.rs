@@ -10,19 +10,20 @@ use crate::state::{
     ToolUnlinkRequest, ToolUpdateRequest, ToolsFilterRequest, ToolsUiState,
 };
 use dioxus::prelude::*;
-use vmux_api::address::{AddressCrumb, PageAddress};
+use vmux_api::address::{AddressCrumb, AddressIntent, AddressOption, PageAddress};
 use vmux_api::extension::ExtensionsUiState;
 use vmux_ui::components::avatar::AgentThumbnail;
 use vmux_ui::components::breadcrumb::BreadcrumbOption;
 use vmux_ui::components::manager::{
     ManagerButton, ManagerButtonVariant, ManagerCard, ManagerCollection, ManagerDetails,
-    ManagerEmpty, ManagerList, ManagerPage, ManagerRow, ManagerSection, ManagerSpinner,
-    ManagerThumbnail, ManagerView,
+    ManagerEmpty, ManagerList, ManagerPage, ManagerRow, ManagerSearchAction, ManagerSection,
+    ManagerSidebarItem, ManagerSpinner, ManagerThumbnail, ManagerView, WorkspaceLayout,
 };
 use vmux_ui::components::page_address::{PageBreadcrumbs, PageToolbar, ToolbarControl};
 use vmux_ui::hooks::{send, use_theme, use_ui_state};
 use vmux_ui::i18n::{TranslationValue, translate, translate_with};
 use vmux_ui::icon::{LineIcon, LineIconView};
+use vmux_ui::navigation::PageNavigation;
 
 use crate::route::ToolRoute;
 
@@ -41,37 +42,18 @@ pub fn Page() -> Element {
     let extensions = use_ui_state::<ExtensionsUiState>().state;
     let state = tools();
     let extension_state = extensions();
-    let route = state.view.route.clone();
-    let title = ToolRouteOption::selected_label(&route, state.snapshot.providers.clone());
-    let tools_query = state.view.query.clone();
-    let extension_query = extension_state.query.clone();
-    let browse_query = extension_query.clone();
-    let mut toolbar = Vec::new();
-    if route == "extensions" {
-        toolbar.push(
-            ToolbarControl::search(
-                extension_query,
-                translate("extensions-search"),
-                move |query| {
-                    let _ = send(&vmux_api::extension::ExtFilterRequest { query });
-                },
-            )
-            .keys(&["Enter"], move |_| {
-                if !browse_query.trim().is_empty() {
-                    let _ = send(&vmux_api::extension::ExtBrowseStoreRequest {
-                        query: browse_query.clone(),
-                    });
-                }
-            }),
-        );
+    let route = if state.view.route.is_empty() {
+        try_consume_context::<vmux_ecs::PageMetadata>()
+            .and_then(|metadata| ToolRoute::parse(&metadata.url))
+            .unwrap_or_else(|| ToolRoute::named("acp"))
+            .id()
+            .to_string()
     } else {
-        toolbar.push(ToolbarControl::search(
-            tools_query,
-            translate("tools-search"),
-            move |query| {
-                let _ = send(&ToolsFilterRequest { query });
-            },
-        ));
+        state.view.route.clone()
+    };
+    let title = ToolRouteOption::selected_label(&route, state.snapshot.providers.clone());
+    let mut toolbar = Vec::new();
+    if route != "extensions" {
         if state.snapshot.loaded && state.view.visible_count > 0 {
             toolbar.extend(ToolbarControl::view(
                 manager_view(),
@@ -102,15 +84,15 @@ pub fn Page() -> Element {
     rsx! {
         document::Title { "{title}" }
         ManagerPage {
-            ToolsHeader {
-                controls: toolbar,
-                active: route.clone(),
-                providers: state.snapshot.providers.clone(),
-            }
-            if route == "extensions" {
-                ExtensionManager { state: extension_state }
-            } else {
-                ToolManager { state, manager_view }
+            ToolsHeader { active: route.clone(), providers: state.snapshot.providers.clone() }
+            WorkspaceLayout {
+                sidebar: rsx! { ToolsSidebar { active: route.clone(), state: state.clone(), extensions: extension_state.clone() } },
+                toolbar: rsx! { if !toolbar.is_empty() { PageToolbar { controls: toolbar } } },
+                if route == "extensions" {
+                    ExtensionManager { state: extension_state }
+                } else {
+                    ToolManager { state, manager_view }
+                }
             }
         }
     }
@@ -191,6 +173,68 @@ impl From<ToolRouteOption> for BreadcrumbOption {
 }
 
 impl ToolRouteOption {
+    fn fallback(id: String) -> Self {
+        let label_key = match id.as_str() {
+            "acp" => "tools-provider-acp-agents",
+            "lsp" => "tools-provider-lsp-servers",
+            "homebrew" => "tools-homebrew",
+            "npm" => "tools-provider-npm",
+            "mcp" => "tools-provider-mcp-servers",
+            "dotfiles" => "tools-provider-dotfiles",
+            "extensions" => "extensions-title",
+            _ => "tools-title",
+        };
+        Self {
+            label: translate(label_key),
+            url: ToolRoute::named(id.clone()).url(),
+            icon_url: Self::icon_url(&id),
+            icon: Self::icon(&id),
+            id,
+        }
+    }
+
+    fn address(active: &str, providers: Vec<ToolProviderMetadata>) -> PageAddress {
+        let options = Self::all(providers);
+        let selected = options
+            .iter()
+            .find(|option| option.id == active)
+            .cloned()
+            .unwrap_or_else(|| Self::fallback(active.to_string()));
+        PageAddress {
+            current: AddressOption {
+                label_key: "tools-title".into(),
+                icon: Some(vmux_api::BuiltinIcon::Toolbox),
+                intent: Some(AddressIntent::Navigate {
+                    url: crate::ToolPlugin::URL.to_string(),
+                }),
+                ..Default::default()
+            },
+            fixed: vec![AddressCrumb {
+                entry: BreadcrumbOption::from(selected).address(),
+                options: options
+                    .into_iter()
+                    .map(|option| BreadcrumbOption::from(option).address())
+                    .collect(),
+                active: true,
+                ..Default::default()
+            }],
+            ..Default::default()
+        }
+    }
+
+    fn count(&self, snapshot: &crate::state::ToolsSnapshot) -> usize {
+        let mut count = 0;
+        for category in &snapshot.categories {
+            if snapshot
+                .provider(&category.provider)
+                .is_some_and(|provider| provider.route == self.id)
+            {
+                count += category.items.len();
+            }
+        }
+        count
+    }
+
     fn icon_url(route: &str) -> String {
         match route {
             "acp" => "assets/tool-logos/acp.png",
@@ -257,45 +301,54 @@ impl ToolRouteOption {
             .into_iter()
             .find(|option| option.id == active)
             .map(|option| option.label)
-            .unwrap_or_else(|| translate("tools-title"))
+            .unwrap_or_else(|| Self::fallback(active.to_string()).label)
     }
 }
 
 #[component]
-fn ToolsHeader(
-    active: String,
-    providers: Vec<ToolProviderMetadata>,
-    controls: Vec<ToolbarControl>,
-) -> Element {
-    let options = ToolRouteOption::all(providers);
-    let selected = options
-        .iter()
-        .find(|option| option.id == active)
-        .cloned()
-        .unwrap_or_else(|| ToolRouteOption {
-            id: active.clone(),
-            label: translate("tools-title"),
-            url: ToolRoute::named(active).url(),
-            icon_url: ToolRouteOption::icon_url("tools"),
-            icon: vmux_api::BuiltinIcon::Toolbox,
-        });
-    let selected_breadcrumb: BreadcrumbOption = selected.clone().into();
-    let address = PageAddress {
-        fixed: vec![AddressCrumb {
-            entry: selected_breadcrumb.address(),
-            options: options
-                .into_iter()
-                .map(|option| BreadcrumbOption::from(option).address())
-                .collect(),
-            active: true,
-            ..Default::default()
-        }],
-        ..Default::default()
+fn ToolsHeader(active: String, providers: Vec<ToolProviderMetadata>) -> Element {
+    rsx! { PageBreadcrumbs { state: ToolRouteOption::address(&active, providers) } }
+}
+
+#[component]
+fn ToolsSidebar(active: String, state: ToolsUiState, extensions: ExtensionsUiState) -> Element {
+    let options = ToolRouteOption::all(state.snapshot.providers.clone());
+    let extension_search = active == "extensions";
+    let query = if extension_search {
+        extensions.query.clone()
+    } else {
+        state.view.query.clone()
     };
+    let browse_query = query.clone();
     rsx! {
-        PageBreadcrumbs { state: address }
-        PageToolbar {
-            controls: controls,
+        div { class: "flex h-10 items-center px-2",
+            ManagerSearchAction {
+                value: query,
+                placeholder: if extension_search { translate("extensions-search") } else { translate("tools-search") },
+                onsearch: move |query| {
+                    if extension_search {
+                        let _ = send(&vmux_api::extension::ExtFilterRequest { query });
+                    } else {
+                        let _ = send(&ToolsFilterRequest { query });
+                    }
+                },
+                onkeydown: Some(EventHandler::new(move |event: KeyboardEvent| {
+                    if extension_search && event.key() == Key::Enter && !browse_query.trim().is_empty() {
+                        let _ = send(&vmux_api::extension::ExtBrowseStoreRequest { query: browse_query.clone() });
+                    }
+                })),
+            }
+        }
+        nav { class: "flex flex-col gap-0.5",
+            for option in options {
+                ManagerSidebarItem {
+                    key: "{option.id}",
+                    label: option.label.clone(), selected: option.id == active,
+                    count: if option.id == "extensions" { extensions.extensions.len() } else { option.count(&state.snapshot) },
+                    builtin_icon: option.icon,
+                    onclick: move |event| PageNavigation::click(option.url.clone(), &event),
+                }
+            }
         }
     }
 }
@@ -358,7 +411,7 @@ fn ToolManager(state: ToolsUiState, manager_view: Signal<ManagerView>) -> Elemen
         })
     });
     rsx! {
-        div { class: "flex min-h-0 flex-1 overflow-hidden bg-background/45",
+        div { class: "flex min-h-0 flex-1 overflow-hidden bg-background",
             ManagerList {
                     if view.show_brewfile {
                         HomebrewSourceCard {
@@ -785,6 +838,34 @@ fn open_tool_file(path: String) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn tool_breadcrumbs_keep_the_page_root_and_navigate_to_the_selected_category() {
+        let address = ToolRouteOption::address("acp", Vec::new());
+        assert_eq!(
+            address.current.intent,
+            Some(AddressIntent::Navigate {
+                url: "vmux://tools/".into()
+            })
+        );
+        assert_eq!(
+            address.fixed[0].entry.intent,
+            Some(AddressIntent::Navigate {
+                url: "vmux://tools/acp".into()
+            })
+        );
+        assert_eq!(
+            address.fixed[0].entry.label,
+            translate("tools-provider-acp-agents")
+        );
+        let extensions = ToolRouteOption::address("extensions", Vec::new());
+        assert_eq!(
+            extensions.fixed[0].entry.intent,
+            Some(AddressIntent::Navigate {
+                url: "vmux://tools/extensions".into()
+            })
+        );
+    }
 
     #[test]
     fn tool_routes_are_data_driven() {

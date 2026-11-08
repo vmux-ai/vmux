@@ -235,6 +235,19 @@ impl ToolbarControl {
         ]
     }
 
+    pub fn board(
+        view: ManagerView,
+        list_label: String,
+        board_label: String,
+        callback: impl FnMut(ManagerView) + 'static,
+    ) -> Vec<Self> {
+        let mut controls = Self::view(view, list_label, board_label, callback);
+        if let Some(board) = controls.last_mut() {
+            board.description.icon = "Columns3".into();
+        }
+        controls
+    }
+
     pub fn icon(mut self, icon: crate::icon::LineIcon) -> Self {
         self.description.icon = format!("{icon:?}");
         self

@@ -64,9 +64,12 @@ impl Failure<'_> {
     }
 
     pub fn in_use(&self) -> bool {
-        self.0.contains("thread_active_writer")
-            || self.0.contains("already has an active writer")
-            || self.0.contains("session is in use by another Codex client")
+        let message = self.0.to_ascii_lowercase();
+        message.contains("thread_active_writer")
+            || message.contains("already has an active writer")
+            || message.contains("session is in use")
+            || message.contains("session_busy")
+            || message.contains("session is already open")
     }
 }
 
@@ -90,6 +93,8 @@ mod tests {
             ("thread abc already has an active writer", true),
             ("This Codex session is in use by another Codex client", true),
             ("session/load timed out", false),
+            ("Session is already open: session-1", true),
+            ("Invalid request: session_busy", true),
             ("Invalid request: unknown session", false),
         ] {
             assert_eq!(Failure(message).in_use(), expected, "{message}");

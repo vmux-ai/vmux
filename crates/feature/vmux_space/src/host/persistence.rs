@@ -481,10 +481,13 @@ impl Command for WorkspaceWrite {
         };
         let captured = Ok(Saved { world: snapshot });
         self.save.after_save(world, &captured);
+        let Ok(saved) = captured else {
+            return;
+        };
         world.get_mut::<AutoSave>(entity).unwrap().dirty = false;
         let path = self.schema.0.clone();
         let writer = SnapshotWriter {
-            saved: captured.unwrap(),
+            saved,
             registry,
             path: self.schema,
         };

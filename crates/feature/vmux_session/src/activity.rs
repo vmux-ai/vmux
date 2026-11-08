@@ -19,7 +19,7 @@ impl ToolPresentation {
             ChatToolKind::Worktree => translate("layout-worktree"),
             ChatToolKind::Image | ChatToolKind::Screenshot => translate("agent-tool-viewed-image"),
             ChatToolKind::OpenPage | ChatToolKind::Browser => translate("agent-tool-used-browser"),
-            ChatToolKind::Search => translate("agent-tool-searched-files"),
+            ChatToolKind::Search => translate("agent-tool-explored"),
             ChatToolKind::Command => translate("agent-tool-ran-commands"),
             ChatToolKind::Other => fallback.to_string(),
         };

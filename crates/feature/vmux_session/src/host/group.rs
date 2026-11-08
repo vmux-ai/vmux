@@ -283,11 +283,14 @@ impl PageBuilder<'_> {
                     name,
                     args,
                     parent_call_id,
+                    kind,
                 } => turn.blocks.push(ChatBlock::ToolUse {
                     call_id: call_id.clone(),
                     name: name.clone(),
                     args: args.clone(),
                     parent_call_id: parent_call_id.clone(),
+
+                    kind: *kind,
                 }),
                 AssistantBlock::Subagent(subagent) => turn
                     .blocks
@@ -390,6 +393,8 @@ mod tests {
             name: "run".into(),
             args: "{}".into(),
             parent_call_id: None,
+
+            kind: None,
         }
     }
 
@@ -702,12 +707,16 @@ mod tests {
                     name: "read_file".into(),
                     args: "{}".into(),
                     parent_call_id: None,
+
+                    kind: None,
                 },
                 AssistantBlock::ToolUse {
                     call_id: "review-1".into(),
                     name: "guardian_review".into(),
                     args: "{}".into(),
                     parent_call_id: None,
+
+                    kind: None,
                 },
             ]),
             Message::ToolResult {
@@ -734,6 +743,8 @@ mod tests {
                     name: "read_file".into(),
                     args: "{}".into(),
                     parent_call_id: Some("agent-1".into()),
+
+                    kind: None,
                 },
             ]),
             Message::ToolResult {

@@ -586,6 +586,7 @@ impl AcpProjector {
             &tc.title,
             &AcpJson::input(tc.raw_input.as_ref()),
             None,
+            Some(Self::classification(tc.kind)),
         );
         let diff_locations = tc
             .locations
@@ -639,6 +640,7 @@ impl AcpProjector {
             &title,
             &AcpJson::input(update.fields.raw_input.as_ref()),
             None,
+            update.fields.kind.map(Self::classification),
         );
         let diff_locations = update
             .fields
@@ -751,12 +753,28 @@ impl AcpProjector {
         self.upsert_tool_result(call_id, AcpJson::pretty(raw_output), is_error);
     }
 
+    fn classification(kind: ToolKind) -> vmux_api::session::ToolKind {
+        match kind {
+            ToolKind::Read => vmux_api::session::ToolKind::Read,
+            ToolKind::Edit => vmux_api::session::ToolKind::Edit,
+            ToolKind::Delete => vmux_api::session::ToolKind::Delete,
+            ToolKind::Move => vmux_api::session::ToolKind::Move,
+            ToolKind::Search => vmux_api::session::ToolKind::Search,
+            ToolKind::Execute => vmux_api::session::ToolKind::Execute,
+            ToolKind::Think => vmux_api::session::ToolKind::Think,
+            ToolKind::Fetch => vmux_api::session::ToolKind::Fetch,
+            ToolKind::SwitchMode => vmux_api::session::ToolKind::SwitchMode,
+            _ => vmux_api::session::ToolKind::Other,
+        }
+    }
+
     fn upsert_tool_use(
         &mut self,
         call_id: &str,
         name: &str,
         args: &str,
         parent_call_id: Option<String>,
+        kind: Option<vmux_api::session::ToolKind>,
     ) {
         for message in self.messages.iter_mut() {
             if let Message::Assistant { blocks } = message {
@@ -766,6 +784,7 @@ impl AcpProjector {
                         name: existing_name,
                         args: existing_args,
                         parent_call_id: existing_parent_call_id,
+                        kind: existing_kind,
                     } = block
                         && existing == call_id
                     {
@@ -778,6 +797,9 @@ impl AcpProjector {
                         if parent_call_id.is_some() {
                             *existing_parent_call_id = parent_call_id;
                         }
+                        if kind.is_some() {
+                            *existing_kind = kind;
+                        }
                         return;
                     }
                 }
@@ -788,6 +810,8 @@ impl AcpProjector {
             name: name.to_string(),
             args: args.to_string(),
             parent_call_id,
+
+            kind,
         };
         match self.messages.last_mut() {
             Some(Message::Assistant { blocks }) => blocks.push(block),
@@ -840,6 +864,25 @@ impl AcpProjector {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn tool_kind_survives_title_changes_and_updates_without_kind_metadata() {
+        let mut projector = AcpProjector::default();
+        projector.apply(SessionUpdate::ToolCall(
+            ToolCall::new("typed", "Inspect configuration").kind(ToolKind::Read),
+        ));
+        projector.apply(SessionUpdate::ToolCallUpdate(ToolCallUpdate::new(
+            "typed",
+            agent_client_protocol::schema::v1::ToolCallUpdateFields::default()
+                .title("Execute command"),
+        )));
+        let Some(Message::Assistant { blocks }) = projector.messages().first() else {
+            panic!("assistant tool");
+        };
+        assert!(
+            matches!(blocks.first(), Some(AssistantBlock::ToolUse { kind: Some(vmux_api::session::ToolKind::Read), name, .. }) if name == "Execute command")
+        );
+    }
     use agent_client_protocol::schema::v1::{
         Content, ContentChunk, Diff, Plan, PlanEntry, PlanEntryPriority, SessionInfoUpdate,
         SessionUpdate, Terminal, TextContent, ToolCall, ToolCallContent, ToolCallUpdate,

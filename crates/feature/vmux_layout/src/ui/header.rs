@@ -295,6 +295,8 @@ fn Tab(row: TabStripRow, index: usize, drag: TabDrag, #[props(default)] loading:
     let visual = drag.visual(&tab.id, index);
     let id_switch = tab.id.clone();
     let id_close = tab.id.clone();
+    let id_close_press = id_close.clone();
+    let mut close_pressed = use_signal(|| false);
     let display_title = if display_title.is_empty() {
         translate("layout-tab")
     } else {
@@ -415,10 +417,15 @@ fn Tab(row: TabStripRow, index: usize, drag: TabDrag, #[props(default)] loading:
                     aria_label: translate("layout-close-tab"),
                     title: translate("layout-close-tab"),
                     class: "{close_class}",
-                    onpointerdown: move |evt| {
+                    onpointerdown: move |evt: Event<PointerData>| {
                         evt.prevent_default();
                         evt.stop_propagation();
+                        if evt.trigger_button() == Some(dioxus::html::input_data::MouseButton::Primary) {
+                            close_pressed.set(true);
+                            let _ = send(&TabCloseRequest { tab_id: Some(id_close_press.clone()) });
+                        }
                     },
+                    onpointercancel: move |_| close_pressed.set(false),
                     onmousedown: move |evt| {
                         evt.prevent_default();
                         evt.stop_propagation();
@@ -426,6 +433,7 @@ fn Tab(row: TabStripRow, index: usize, drag: TabDrag, #[props(default)] loading:
                     onclick: move |evt| {
                         evt.prevent_default();
                         evt.stop_propagation();
+                        if close_pressed() { close_pressed.set(false); return; }
                         let _ = send(&TabCloseRequest {
                             tab_id: Some(id_close.clone()),
                         });
