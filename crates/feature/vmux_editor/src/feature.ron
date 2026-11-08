@@ -97,7 +97,7 @@
             url: "file://",
             title: "Code",
             title_message_id: "editor-editor",
-            manifest_url: "vmux://files/",
+            asset_host: "files",
             bookmark: Some(50),
             placement: Some((
                 group: "files",

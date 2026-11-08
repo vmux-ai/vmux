@@ -3,7 +3,7 @@
 use dioxus::prelude::*;
 use vmux_ecs::event::{ProjectPickerRequest, ProjectRow};
 use vmux_ui::components::avatar::IdentityOrb;
-use vmux_ui::components::dropdown::DropdownPopup;
+use vmux_ui::components::dropdown::{DropdownPlacement, DropdownPopup};
 use vmux_ui::components::project_picker::ProjectSelectPopup;
 use vmux_ui::components::sheet::SheetSelectorRow;
 use vmux_ui::hooks::{send, use_optimistic_map};
@@ -89,6 +89,7 @@ pub(crate) fn ActiveSessionPanel(session: ActiveSession) -> Element {
 fn CurrentPagePath(url: String) -> Element {
     let label = vmux_path::FileUrl::parse(&url)
         .and_then(|file| file.path())
+        .or_else(|| vmux_git::GitUrl::parse(&url))
         .map(vmux_path::DisplayPath::project)
         .unwrap_or_else(|| url.clone());
     rsx! {
@@ -166,6 +167,7 @@ fn ActiveWorkspaceProjectTree(project: ActiveWorkspaceProject, pane_id: u64) -> 
                 LayoutDropdown {
                     id: format!("active-project-{pane_id}"),
                     open: choosing(),
+                    dismiss_on_mouseleave: true,
                     class: "w-full min-w-0".to_string(),
                     on_dismiss: move |_| choosing.set(false),
                     SheetSelectorRow {
@@ -177,13 +179,21 @@ fn ActiveWorkspaceProjectTree(project: ActiveWorkspaceProject, pane_id: u64) -> 
                             alt: selected_label.clone(),
                             class: "size-4".to_string(),
                         } },
-                        onclick: move |_| choosing.set(!choosing()),
+                        on_hover_open: move |_| {
+                            choosing_branch.set(false);
+                            choosing.set(true);
+                        },
+                        onclick: move |_| {
+                            choosing_branch.set(false);
+                            choosing.set(!choosing());
+                        },
                     }
                     if choosing() {
                         ProjectSelectPopup {
                             projects: project_choices.clone(),
                             selected_path: selected_path.clone(),
                             match_width: true,
+                            placement: DropdownPlacement::Right,
                             class: "max-h-64 min-w-0 overflow-y-auto".to_string(),
                             on_pick: move |project: ProjectRow| {
                                 choosing.set(false);
@@ -228,6 +238,7 @@ fn ActiveWorkspaceProjectTree(project: ActiveWorkspaceProject, pane_id: u64) -> 
                         LayoutDropdown {
                             id: format!("active-branch-{pane_id}"),
                             open: choosing_branch(),
+                            dismiss_on_mouseleave: true,
                             class: "w-full min-w-0".to_string(),
                             on_dismiss: move |_| choosing_branch.set(false),
                             SheetSelectorRow {
@@ -238,10 +249,17 @@ fn ActiveWorkspaceProjectTree(project: ActiveWorkspaceProject, pane_id: u64) -> 
                                 leading: rsx! { IdentityOrb {
                                     seed: selected_branch.clone(), alt: selected_branch.clone(), class: "size-3.5".to_string(),
                                 } },
-                                onclick: move |_| choosing_branch.set(!choosing_branch()),
+                                on_hover_open: move |_| {
+                                    choosing.set(false);
+                                    choosing_branch.set(true);
+                                },
+                                onclick: move |_| {
+                                    choosing.set(false);
+                                    choosing_branch.set(!choosing_branch());
+                                },
                             }
                             if choosing_branch() {
-                                DropdownPopup { match_width: true, class: "max-h-64 min-w-0 overflow-y-auto p-1",
+                                DropdownPopup { match_width: true, placement: DropdownPlacement::Right, class: "max-h-64 min-w-0 overflow-y-auto p-1",
                                     for branch in branch_choices {
                                         {
                                             let branch_name = branch.branch.clone();

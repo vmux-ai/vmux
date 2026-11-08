@@ -60,6 +60,7 @@ impl Plugin for GitPlugin {
         #[cfg(ui)]
         app.add_plugins(GitPage::plugin());
         app.add_systems(PreStartup, prewarm)
+            .add_observer(normalize)
             .add_message::<GitCheckForUpdatesRequest>()
             .add_plugins(UiEventPlugin::<(
                 GitConfigEditRequest,
@@ -105,6 +106,18 @@ impl Plugin for GitPlugin {
                     .hosted(HostedPage::subtree(crate::GIT_PAGE_URL, "Git"))
                     .alias(HostedPage::subtree(crate::LEGACY_GIT_PAGE_URL, "Git")),
             );
+    }
+}
+
+fn normalize(
+    event: On<Insert, vmux_ecs::PageMetadata>,
+    mut pages: Query<&mut vmux_ecs::PageMetadata>,
+) {
+    let Ok(mut page) = pages.get_mut(event.entity) else {
+        return;
+    };
+    if let Some(url) = crate::GitUrl::canonical_legacy(&page.url) {
+        page.url = url;
     }
 }
 

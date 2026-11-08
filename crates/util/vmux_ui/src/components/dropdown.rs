@@ -212,6 +212,7 @@ pub enum DropdownPlacement {
     #[default]
     Bottom,
     Top,
+    Right,
 }
 
 #[derive(Clone, Copy, Default, PartialEq, Eq)]
@@ -248,13 +249,19 @@ pub fn DropdownTrigger(
     #[props(default)] open_mode: DropdownOpenMode,
     #[props(default = 120)] hover_delay_ms: u32,
     #[props(default)] class: String,
+    #[props(default)] label_class: String,
     #[props(default = true)] truncate: bool,
     #[props(default = rsx! {})] leading: Element,
     #[props(default = rsx! {})] trailing: Element,
 ) -> Element {
     let mut hover_task = use_signal(|| None::<Task>);
+    let mut hover_preview = use_signal(|| false);
+    let context = try_consume_context::<DropdownContext>();
     use_effect(use_reactive!(|(open, open_mode)| {
         let _ = (open, open_mode);
+        if !open {
+            hover_preview.set(false);
+        }
         if let Some(task) = hover_task.write().take() {
             task.cancel();
         }
@@ -283,10 +290,13 @@ pub fn DropdownTrigger(
             disabled,
             onmouseenter: move |_| {
                 if open_mode == DropdownOpenMode::Hover
-                    && !open
                     && let Some(on_hover_open) = on_hover_open
                 {
                     if hover_delay_ms == 0 {
+                        if let Some(context) = context {
+                            context.activate.call(());
+                        }
+                        hover_preview.set(true);
                         on_hover_open.call(());
                         return;
                     }
@@ -295,6 +305,10 @@ pub fn DropdownTrigger(
                     }
                     hover_task.set(Some(spawn(async move {
                         crate::platform::Platform::sleep(hover_delay_ms).await;
+                        if let Some(context) = context {
+                            context.activate.call(());
+                        }
+                        hover_preview.set(true);
                         on_hover_open.call(());
                     })));
                 }
@@ -310,10 +324,18 @@ pub fn DropdownTrigger(
                     && let Some(task) = hover_task.write().take() {
                         task.cancel();
                 }
+                if open && *hover_preview.peek() {
+                    hover_preview.set(false);
+                    return;
+                }
+                hover_preview.set(false);
+                if !open && let Some(context) = context {
+                    context.activate.call(());
+                }
                 onclick.call(());
             },
             {leading}
-            span { class: if truncate { "min-w-0 truncate" } else { "shrink-0 whitespace-nowrap" }, "{label}" }
+            span { class: cn([if truncate { "min-w-0 truncate" } else { "shrink-0 whitespace-nowrap" }, label_class.as_str()]), "{label}" }
             {trailing}
         }
     }
@@ -383,12 +405,6 @@ pub fn DropdownSelector(
     #[props(default = rsx! {})] leading: Element,
     #[props(default = rsx! {})] trailing: Element,
 ) -> Element {
-    let mut hover_preview = use_signal(|| false);
-    use_effect(use_reactive!(|open| {
-        if !open {
-            hover_preview.set(false);
-        }
-    }));
     rsx! {
         Dropdown {
             open,
@@ -414,15 +430,9 @@ pub fn DropdownSelector(
                     }
                 },
                 on_hover_open: move |_| {
-                    hover_preview.set(true);
                     on_open_change.call(true);
                 },
                 onclick: move |_| {
-                    if open && *hover_preview.peek() {
-                        hover_preview.set(false);
-                        return;
-                    }
-                    hover_preview.set(false);
                     on_open_change.call(!open);
                 },
             }
@@ -447,6 +457,8 @@ struct DropdownContext {
     hover_enter: EventHandler<()>,
     hover_leave: EventHandler<()>,
     manual: bool,
+    activation: Signal<u64>,
+    activate: Callback<()>,
 }
 
 impl DropdownPlacement {
@@ -454,6 +466,7 @@ impl DropdownPlacement {
         match self {
             Self::Bottom => "bottom",
             Self::Top => "top",
+            Self::Right => "right",
         }
     }
 }
@@ -476,11 +489,12 @@ impl DropdownPopupOwner {
             .replace("__VMUX_DROPDOWN_POPUP__", &self.id())
     }
 
-    fn dismiss_script(self) -> String {
+    fn dismiss_script(self, activation: u64) -> String {
         format!(
             r#"
 __VMUX_DROPDOWN_CONNECTION_WATCHER__
 const id = '{}';
+const activation = {};
 const popup = document.getElementById(id);
 if (popup) {{
   let opened = popup.matches(':popover-open');
@@ -502,6 +516,7 @@ if (popup) {{
   const dismiss = () => {{
     if (!active) return;
     cleanup();
+    if (Number(root?.dataset.vmuxDropdownActivation ?? 0) !== activation) return;
     dioxus.send('dismissed');
   }};
   const beforetoggle = event => {{
@@ -528,7 +543,8 @@ if (popup) {{
   }}
 }}
 "#,
-            self.id()
+            self.id(),
+            activation
         )
         .replace(
             "__VMUX_DROPDOWN_CONNECTION_WATCHER__",
@@ -553,6 +569,11 @@ pub fn Dropdown(
 ) -> Element {
     let mut leave_task = use_signal(|| None::<Task>);
     let mut dismissing = use_signal(|| false);
+    let mut activation = use_signal(|| 0u64);
+    let activate = use_callback(move |()| {
+        let next = activation.peek().wrapping_add(1);
+        activation.set(next);
+    });
     use_effect(use_reactive!(|(open, dismiss_on_mouseleave)| {
         let _ = (open, dismiss_on_mouseleave);
         if let Some(task) = leave_task.write().take() {
@@ -603,6 +624,8 @@ pub fn Dropdown(
         hover_enter,
         hover_leave,
         manual: dismiss_on_mouseleave,
+        activation,
+        activate,
     });
     let root_id = format!("vmux-dropdown-root-{}", current_scope_id().0);
     let layer = if open { "z-[100]" } else { "z-auto" };
@@ -619,6 +642,7 @@ pub fn Dropdown(
             style: "--vmux-motion-ms:{duration}ms;",
             "data-vmux-dropdown-root": "",
             "data-vmux-dropdown-open": if open { "true" } else { "false" },
+            "data-vmux-dropdown-activation": activation().to_string(),
             "data-vmux-dropdown-keyboard": if keyboard_navigation { "true" } else { "false" },
             onmouseenter: move |_| hover_enter.call(()),
             onmouseleave: move |_| hover_leave.call(()),
@@ -652,6 +676,38 @@ pub fn DropdownPopup(
 ) -> Element {
     let owner = DropdownPopupOwner(current_scope_id().0);
     let context = use_context::<DropdownContext>();
+    let activation = (context.activation)();
+    let mut registered = use_signal(|| None::<u64>);
+    let mut listener = use_signal(|| None::<Task>);
+    let install = use_callback(move |activation: u64| {
+        if let Some(task) = listener.write().take() {
+            task.cancel();
+        }
+        registered.set(Some(activation));
+        let mut eval = document::eval(&owner.dismiss_script(activation));
+        owner.mount();
+        listener.set(Some(spawn(async move {
+            if eval
+                .recv::<String>()
+                .await
+                .is_ok_and(|message| message == "dismissed")
+                && *context.activation.peek() == activation
+            {
+                context.dismiss.call(());
+            }
+        })));
+    });
+    use_effect(use_reactive!(|activation| {
+        let previous = *registered.peek();
+        if previous.is_some_and(|previous| previous != activation) {
+            install.call(activation);
+        }
+    }));
+    use_drop(move || {
+        if let Some(task) = listener.write().take() {
+            task.cancel();
+        }
+    });
     let duration = crate::motion::Motion::CONTENT_MS;
     let animation = Surface::ENTER;
     let base = attributes!(div {
@@ -661,6 +717,7 @@ pub fn DropdownPopup(
         style: "--vmux-motion-ms:{duration}ms;",
         "data-vmux-dropdown-popup": "",
         "data-vmux-popup-kind": Surface::Dropdown.kind(),
+        "data-vmux-popup-activation": "{activation}",
         "data-vmux-popup-align": align.as_str(),
         "data-vmux-popup-placement": placement.as_str(),
         "data-vmux-popup-match-width": if match_width { "true" } else { "false" },
@@ -671,17 +728,7 @@ pub fn DropdownPopup(
     rsx! {
         div {
             onmounted: move |_| {
-                let mut eval = document::eval(&owner.dismiss_script());
-                owner.mount();
-                spawn(async move {
-                    if eval
-                        .recv::<String>()
-                        .await
-                        .is_ok_and(|message| message == "dismissed")
-                    {
-                        context.dismiss.call(());
-                    }
-                });
+                install.call(*context.activation.peek());
             },
             onmouseenter: move |_| context.hover_enter.call(()),
             onmouseleave: move |_| context.hover_leave.call(()),
@@ -744,7 +791,7 @@ mod tests {
                 "runtime": runtime,
                 "mount": DropdownPopupOwner(0).install_script(),
                 "keyboard": keyboard,
-                "dismiss": DropdownPopupOwner(0).dismiss_script().replace("__VMUX_DROPDOWN_CONNECTION_WATCHER__", DROPDOWN_CONNECTION_WATCHER),
+                "dismiss": DropdownPopupOwner(0).dismiss_script(0).replace("__VMUX_DROPDOWN_CONNECTION_WATCHER__", DROPDOWN_CONNECTION_WATCHER),
             });
             let mut child = Command::new("node")
                 .args(["-e", include_str!("dropdown_placement_test.js")])

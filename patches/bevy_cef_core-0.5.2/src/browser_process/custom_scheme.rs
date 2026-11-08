@@ -85,12 +85,19 @@ pub(crate) fn asset_load_path_from_request_url_with(
     // `file:///abs/path`. Serve the app's own assets (`/wasm/*`, `/assets/*`) same-scheme
     // from the embedded `files` host; every other `file://` path is a document navigation
     // and gets the SPA shell (the real source file's bytes arrive over the bin bridge).
-    if let Some(after) = url.strip_prefix("file://") {
-        let path = after.split(['?', '#']).next().unwrap_or(after);
-        if path.starts_with("/wasm/") || path.starts_with("/assets/") {
-            return format!("{EMBEDDED_SCHEME}files{path}");
+    for (scheme, host) in [("file://", "files"), ("git://", "git")] {
+        if let Some(after) = url.strip_prefix(scheme) {
+            let after = if scheme == "git://" && (after == "git" || after.starts_with("git/")) {
+                after.strip_prefix("git").unwrap_or(after)
+            } else {
+                after
+            };
+            let path = after.split(['?', '#']).next().unwrap_or(after);
+            if path.starts_with("/wasm/") || path.starts_with("/assets/") {
+                return format!("{EMBEDDED_SCHEME}{host}{path}");
+            }
+            return format!("{EMBEDDED_SCHEME}{host}/index.html");
         }
-        return format!("{EMBEDDED_SCHEME}files/index.html");
     }
 
     if let Some(rest) = url.strip_prefix(cfg.scheme_prefix()) {
@@ -514,5 +521,27 @@ mod custom_scheme_url_tests {
             asset_load_path_from_request_url_with("https://example.com/", &empty_hosts_config()),
             ""
         );
+    }
+
+    #[test]
+    fn git_protocol_documents_and_styles_use_the_git_asset_bundle() {
+        let config = empty_hosts_config();
+        for (url, expected) in [
+            ("git://git/", "embedded://git/index.html"),
+            (
+                "git://git/assets/index.css",
+                "embedded://git/assets/index.css",
+            ),
+            ("git:///assets/index.css", "embedded://git/assets/index.css"),
+            (
+                "git:///tmp/repo?view=branch-changes",
+                "embedded://git/index.html",
+            ),
+        ] {
+            assert_eq!(
+                asset_load_path_from_request_url_with(url, &config),
+                expected
+            );
+        }
     }
 }

@@ -2,7 +2,6 @@
 
 use dioxus::prelude::*;
 use vmux_api::address::{AddressCrumb, AddressIntent, AddressOption, PageAddress};
-use vmux_api::space::ProjectRow;
 use vmux_ecs::event::space::ProjectActivateRequest;
 use vmux_ui::components::page_address::{PageBreadcrumbs, PageToolbar, ToolbarControl};
 use vmux_ui::hooks::send;
@@ -15,16 +14,11 @@ use crate::state::{GitBranchCollection, GitCatalogProgress, GitPanel};
 #[component]
 pub(super) fn RepositoryHeader(
     repository: GitRepositorySnapshot,
-    projects: Vec<ProjectRow>,
     focused_panel: GitPanel,
     selected_branch: String,
-    selected_branch_base: String,
-    branch_collection: GitBranchCollection,
     selected_branch_collection: GitBranchCollection,
     selected_commit: String,
     can_push: bool,
-    branches_progress: GitCatalogProgress,
-    selected_branches_progress: GitCatalogProgress,
     commits_progress: GitCatalogProgress,
     viewed_count: usize,
     viewed_total: u32,
@@ -39,12 +33,7 @@ pub(super) fn RepositoryHeader(
         }),
         ..Default::default()
     };
-    let editor_url = vmux_path::FileUrl::from_path(
-        std::path::Path::new(&repository.repo_root),
-        None,
-        None,
-        None,
-    );
+    let editor_url = "file://".to_string();
     let (_panel, panel_label, _panel_icon) = match focused_panel {
         GitPanel::Files => ("changes", "git-changes", vmux_api::BuiltinIcon::Files),
         GitPanel::Branches => (
@@ -55,91 +44,6 @@ pub(super) fn RepositoryHeader(
         GitPanel::Commits => ("commits", "git-commits", vmux_api::BuiltinIcon::Clock),
         GitPanel::Stash => ("stash", "git-stashes", vmux_api::BuiltinIcon::Archive),
     };
-    let mut project_options = Vec::new();
-    for project in &projects {
-        if project.depth != 0 || project.missing {
-            continue;
-        }
-        let Some(url) = crate::GitUrl::from_path(std::path::Path::new(&project.path)) else {
-            continue;
-        };
-        project_options.push(AddressOption {
-            label: project.label.clone(),
-            title: project.path.clone(),
-            identity: project.path.clone(),
-            intent: Some(AddressIntent::Navigate { url }),
-            ..Default::default()
-        });
-    }
-    if !project_options
-        .iter()
-        .any(|option| option.identity == repository.repo_root)
-    {
-        project_options.insert(
-            0,
-            AddressOption {
-                label: repository.repo_name.clone(),
-                title: repository.repo_root.clone(),
-                identity: repository.repo_root.clone(),
-                intent: Some(AddressIntent::Navigate {
-                    url: git_url.clone(),
-                }),
-                ..Default::default()
-            },
-        );
-    }
-    project_options.push(AddressOption {
-        label_key: "agent-project-choose".into(),
-        intent: Some(AddressIntent::Section {
-            id: "browse-project".into(),
-        }),
-        ..Default::default()
-    });
-    let branch_label = if focused_panel == GitPanel::Branches {
-        selected_branch.clone()
-    } else {
-        repository.branch.clone()
-    };
-    let comparison = if focused_panel == GitPanel::Branches
-        && !selected_branch_base.is_empty()
-        && selected_branch_base != branch_label
-    {
-        format!("{selected_branch_base} ← {branch_label}")
-    } else {
-        branch_label.clone()
-    };
-    let mut branch_options = Vec::new();
-    for reference in branch_collection.references(&repository) {
-        branch_options.push(AddressOption {
-            label: reference.clone(),
-            identity: reference.clone(),
-            intent: crate::GitUrl::from_view(
-                std::path::Path::new(&repository.repo_root),
-                GitPanel::Branches,
-                Some(&reference),
-            )
-            .map(|url| AddressIntent::Navigate { url }),
-            ..Default::default()
-        });
-    }
-    let mut branch_tabs = Vec::new();
-    for (id, label) in [
-        ("local", "git-local"),
-        ("remote", "git-remote"),
-        ("tags", "git-tags"),
-    ] {
-        branch_tabs.push(AddressOption {
-            label_key: label.into(),
-            intent: Some(AddressIntent::Section { id: id.into() }),
-            ..Default::default()
-        });
-    }
-    let progress = if branch_collection == GitBranchCollection::Local {
-        branches_progress
-    } else {
-        selected_branches_progress
-    };
-    let catalog = GitCatalog::from(branch_collection);
     let mut address = PageAddress {
         current: current_page.clone(),
         contextual: vec![
@@ -151,50 +55,7 @@ pub(super) fn RepositoryHeader(
                 ..Default::default()
             },
         ],
-        fixed: vec![
-            AddressCrumb {
-                entry: AddressOption {
-                    label: repository.repo_name.clone(),
-                    title: repository.repo_root.clone(),
-                    identity: repository.repo_root.clone(),
-                    intent: Some(AddressIntent::Navigate { url: git_url }),
-                    ..Default::default()
-                },
-                options: project_options,
-                ..Default::default()
-            },
-            AddressCrumb {
-                entry: AddressOption {
-                    label: comparison.clone(),
-                    title: comparison,
-                    identity: branch_label.clone(),
-                    intent: crate::GitUrl::from_view(
-                        std::path::Path::new(&repository.repo_root),
-                        GitPanel::Branches,
-                        Some(&branch_label),
-                    )
-                    .map(|url| AddressIntent::Navigate { url }),
-                    ..Default::default()
-                },
-                options: branch_options,
-                tabs: branch_tabs,
-                selected_tab: Some(AddressIntent::Section {
-                    id: match branch_collection {
-                        GitBranchCollection::Local => "local",
-                        GitBranchCollection::Remote => "remote",
-                        GitBranchCollection::Tags => "tags",
-                    }
-                    .to_string(),
-                }),
-                pending: progress.loading,
-                on_open: (!progress.initialized)
-                    .then_some(AddressIntent::GitCatalogNext { catalog }),
-                on_more: progress
-                    .has_more
-                    .then_some(AddressIntent::GitCatalogNext { catalog }),
-                ..Default::default()
-            },
-        ],
+        fixed: Vec::new(),
         ..Default::default()
     };
     if focused_panel == GitPanel::Commits {

@@ -73,17 +73,7 @@ type ExistingViews<'w, 's> = Query<
 #[derive(bevy::ecs::system::SystemParam)]
 struct FileOpenContext<'w, 's> {
     restored: Query<'w, 's, &'static super::explorer::ArchivedEditorState>,
-    tabs: vmux_layout::tab::TabHierarchy<'w, 's>,
-    workspaces: Query<
-        'w,
-        's,
-        (
-            Option<&'static vmux_layout::tab::TabWorktree>,
-            Option<&'static vmux_layout::tab::TabWorkspace>,
-        ),
-    >,
-    spaces: vmux_layout::space::SpaceHierarchy<'w, 's>,
-    directories: Query<'w, 's, &'static vmux_layout::space::EffectiveStartupDir>,
+    workspace: vmux_layout::page_context::Context<'w, 's>,
     navigations: Query<'w, 's, &'static PageNavigation>,
     children: Query<'w, 's, &'static Children>,
     currents: Query<'w, 's, &'static vmux_layout::page_slot::Current>,
@@ -99,32 +89,7 @@ struct FileOpenContext<'w, 's> {
 
 impl FileOpenContext<'_, '_> {
     fn code_directory(&self, stack: Entity) -> Option<PathBuf> {
-        if let Some(tab) = self.tabs.entity(stack)
-            && let Ok((worktree, workspace)) = self.workspaces.get(tab)
-        {
-            if let Some(worktree) = worktree
-                && !worktree.checkout_dir.is_empty()
-            {
-                return Some(PathBuf::from(&worktree.checkout_dir));
-            }
-            if let Some(workspace) = workspace
-                && !workspace.project_dir.is_empty()
-            {
-                return Some(PathBuf::from(&workspace.project_dir));
-            }
-        }
-        if let Some(space) = self.spaces.get(stack)
-            && let Ok(directory) = self.directories.get(space)
-            && let Some(directory) = &directory.0
-        {
-            return Some(directory.clone());
-        }
-        if let Some(directory) = self.tabs.startup_dir(stack)
-            && !directory.is_empty()
-        {
-            return Some(PathBuf::from(directory));
-        }
-        std::env::current_dir().ok()
+        self.workspace.directory(stack)
     }
 
     fn reusable_view(&self, stack: Entity) -> Option<Entity> {
@@ -232,7 +197,7 @@ fn handle_file(
             .get(task.stack)
             .ok()
             .map(|state| PathBuf::from(&state.active));
-        let file_landing = if task.url.trim_end_matches('/') == "file:" {
+        let file_landing = if CodeLanding::is_root(&task.url) {
             context
                 .code_directory(task.stack)
                 .map(|directory| CodeLanding::select(&directory))
@@ -282,7 +247,7 @@ fn handle_file(
         };
         context.commands.entity(task.stack).insert(workspace);
         let clean_url = task.url.split('#').next().unwrap_or(&task.url).to_string();
-        let page_url = if clean_url.trim_end_matches('/') == "file:"
+        let page_url = if CodeLanding::is_root(&clean_url)
             || context.restored.contains(task.stack)
             || clean_url.trim_end_matches('/')
                 == vmux_knowledge::KnowledgePlugin::URL.trim_end_matches('/')
@@ -409,10 +374,10 @@ impl FilePageTarget {
                 error: String::new(),
             });
         }
-        if !url.starts_with("file:") {
+        if !url.starts_with("file:") && !CodeLanding::is_root(url) {
             return None;
         }
-        if url.trim_end_matches('/') == "file:" {
+        if CodeLanding::is_root(url) {
             if let Some(path) = file_landing {
                 return Some(Self {
                     path: Some(path.to_path_buf()),
@@ -443,6 +408,10 @@ impl FilePageTarget {
 struct CodeLanding;
 
 impl CodeLanding {
+    fn is_root(value: &str) -> bool {
+        vmux_path::NavigationText::new(value).native_root() == Some("file://")
+    }
+
     fn requested(value: &str) -> bool {
         url::Url::parse(value).is_ok_and(|url| {
             url.query_pairs()
@@ -788,6 +757,9 @@ mod tests {
         let page = stack.page();
         assert_eq!(stack.path(page), readme);
         assert_eq!(stack.url(page), FileView { path: readme }.url());
+        stack.open("vmux://files/");
+        let page = stack.page();
+        assert_eq!(stack.path(page), working.path().join("README.md"));
     }
 
     #[test]

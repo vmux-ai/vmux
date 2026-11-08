@@ -25,7 +25,9 @@ impl<'a> UrlPresentation<'a> {
         let Ok(url) = url::Url::parse(canonical) else {
             return presentation;
         };
-        if !matches!(url.scheme(), "vmux" | "file" | "http" | "https") || url.cannot_be_a_base() {
+        if !matches!(url.scheme(), "vmux" | "file" | "git" | "http" | "https")
+            || url.cannot_be_a_base()
+        {
             return presentation;
         }
         let Some(parts) = url.path_segments() else {

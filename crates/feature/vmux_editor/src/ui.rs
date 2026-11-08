@@ -29,6 +29,7 @@ mod workspace;
 
 #[vmux_page::page(
     component = Page,
+    document_url = "vmux://files/",
     states = ["PageAddressUiState", "ThemeUiState", "FileUiState", "ProjectNavigation", "KeyClaimsUiState", "PageLocationUiState"],
     dom_group = "editor",
     subtree,

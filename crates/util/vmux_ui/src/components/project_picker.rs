@@ -4,7 +4,7 @@ use vmux_api::space::{ProjectBranch, ProjectRow};
 use crate::cn::cn;
 use crate::components::avatar::IdentityOrb;
 use crate::components::dropdown::{
-    DropdownOpenMode, DropdownOption, DropdownPopup, DropdownTrigger,
+    DropdownOpenMode, DropdownOption, DropdownPlacement, DropdownPopup, DropdownTrigger,
 };
 use crate::components::prompt_box::{
     PROMPT_MENU_INDENT, PROMPT_MENU_ROW, PromptMenuRow, PromptPopup, PromptPopupPlacement,
@@ -56,6 +56,7 @@ pub fn ProjectSelectPopup(
     selected_path: String,
     #[props(default)] class: String,
     #[props(default)] match_width: bool,
+    #[props(default)] placement: DropdownPlacement,
     on_pick: EventHandler<ProjectRow>,
     on_add: EventHandler<()>,
     #[props(default)] on_open_selected: Option<EventHandler<ProjectRow>>,
@@ -66,7 +67,7 @@ pub fn ProjectSelectPopup(
         .find(|project| project.path == selected_path)
         .cloned();
     rsx! {
-        DropdownPopup { match_width, class: cn([class.as_str(), "p-1.5"]),
+        DropdownPopup { match_width, placement, class: cn([class.as_str(), "p-1.5"]),
             for project in projects {
                 {
                     let selected = project.path == selected_path;

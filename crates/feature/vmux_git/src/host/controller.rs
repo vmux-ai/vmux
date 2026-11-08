@@ -234,7 +234,7 @@ impl GitPageControllerState {
         let selection = crate::GitUrl::selection(value).unwrap_or_default();
         match panel {
             GitPanel::Branches => {
-                if self.selected_branch != selection {
+                if !selection.is_empty() && self.selected_branch != selection {
                     self.selected_branch = selection;
                     self.selected_branch_path.clear();
                     self.selected_branch_path_bytes.clear();
@@ -1053,11 +1053,7 @@ fn ui_state_write(
         page_url,
     }) = &patch.context
     {
-        let route_path = crate::GitUrl::parse(page_url);
-        let path = route_path
-            .as_ref()
-            .map(|path| path.to_string_lossy().into_owned())
-            .unwrap_or_else(|| working_directory.clone());
+        let path = working_directory.clone();
         if !states.repository_loaded_at(webview, &path)
             && !states.repository_loading_at(webview, &path)
         {
@@ -1966,7 +1962,7 @@ mod tests {
     }
 
     #[test]
-    fn cached_repository_applies_the_requested_branch_before_replaying_diff_content() {
+    fn cached_repository_keeps_the_checkout_when_a_legacy_url_names_another_branch() {
         for branch in ["main", "feature/ui"] {
             let mut app = App::new();
             app.add_plugins((
@@ -2002,27 +1998,26 @@ mod tests {
                 .id();
             app.world_mut().entity_mut(source).remove::<GitState>();
             let target = app.world_mut().spawn(GitState::default()).id();
-            let url = crate::GitUrl::from_view(Path::new(path), GitPanel::Branches, Some(branch))
-                .unwrap();
+            let mut url = url::Url::parse("vmux://git/").unwrap();
+            url.path_segments_mut().unwrap().clear().extend([
+                "branch-changes",
+                "file:///tmp/cached",
+                branch,
+            ]);
             app.world_mut()
                 .trigger(UiStateWrite::<GitUiState>::from_event(
                     target,
                     &GitPageContext {
                         working_directory: path.into(),
-                        page_url: url,
+                        page_url: url.to_string(),
                     },
                 ));
 
             let restored = app.world().get::<GitPageControllerState>(target).unwrap();
             assert_eq!(restored.focused_panel, GitPanel::Branches);
-            assert_eq!(restored.selected_branch, branch);
+            assert_eq!(restored.selected_branch, "main");
             let state = app.world().get::<GitState>(target).unwrap();
-            if branch == "main" {
-                assert_eq!(state.snapshot.branch_diff_paths, ["old.txt"]);
-            } else {
-                assert!(state.snapshot.branch_diff_paths.is_empty());
-                assert!(state.snapshot.branch_files_reference.is_empty());
-            }
+            assert_eq!(state.snapshot.branch_diff_paths, ["old.txt"]);
         }
     }
 
@@ -2068,7 +2063,7 @@ mod tests {
             let controller = app.world().get::<GitPageControllerState>(webview).unwrap();
             assert_eq!(controller.focused_panel, panel);
             match panel {
-                GitPanel::Branches => assert_eq!(controller.selected_branch, selection),
+                GitPanel::Branches => assert_eq!(controller.selected_branch, "main"),
                 GitPanel::Commits => assert_eq!(controller.selected_commit, selection),
                 GitPanel::Stash => assert_eq!(controller.selected_stash, selection),
                 GitPanel::Files => assert!(controller.selected_commit.is_empty()),

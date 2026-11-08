@@ -14,8 +14,7 @@ pub(crate) struct PageRoutes {
 
 impl PageRoutes {
     pub(crate) fn serves_document(url: &str, page: &Page) -> bool {
-        url.starts_with("vmux://")
-            && Route::belongs_to(url, page.document_url())
+        Route::belongs_to(url, page.document_url())
             && Route::path_of(url) == Route::path_of(page.document_url())
     }
 
@@ -98,7 +97,9 @@ impl Route {
     }
 
     fn belongs_to(request: &str, document: &str) -> bool {
-        Self::host_of(request) == Self::host_of(document)
+        request.split_once(':').map(|(scheme, _)| scheme)
+            == document.split_once(':').map(|(scheme, _)| scheme)
+            && Self::host_of(request) == Self::host_of(document)
     }
 
     fn host_of(url: &str) -> &str {
@@ -264,5 +265,18 @@ mod tests {
             "vmux://start/__edits",
             "vmux://sessions/"
         ));
+    }
+
+    #[test]
+    fn git_documents_assets_and_event_routes_share_the_git_origin() {
+        let page = Page::pane("git://", || unreachable!()).served_from("git://git/");
+        assert!(PageRoutes::serves_document("git://git/", &page));
+        assert!(matches!(
+            Route::for_page("git://git/assets/index.css", &page),
+            Route::Asset
+        ));
+        assert!(Route::Events.is_served_by("git://git/__events", &page));
+        assert!(Route::Edits.is_served_by("git://git/__edits", &page));
+        assert!(!Route::Events.is_served_by("vmux://git/__events", &page));
     }
 }

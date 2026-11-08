@@ -1024,6 +1024,9 @@ fn sync_metadata(
     }
     for (entity, bookmark) in &bookmarks {
         let mut metadata = PageMetadata::clone(&bookmark);
+        if let Some(url) = vmux_path::NavigationText::new(&metadata.url).native_root() {
+            metadata.url = url.to_string();
+        }
         if let Some(page) = metadata_by_url.get(&bookmark.url) {
             if bookmark.title == bookmark.url && !page.title.is_empty() {
                 metadata.title.clone_from(&page.title);
@@ -1048,7 +1051,9 @@ fn sync_metadata(
             }
             continue;
         };
-        if metadata.title == metadata.url || metadata.url == "file://" && metadata.title == "Files"
+        if metadata.title == metadata.url
+            || metadata.title == bookmark.url
+            || metadata.url == "file://" && metadata.title == "Files"
         {
             metadata.title = manifest.title.to_string();
         }
@@ -1076,7 +1081,10 @@ fn request_open(
     mut tabs: MessageWriter<crate::NewTabRequest>,
     mut commands: Commands,
 ) {
-    let url = trigger.event().payload.url.clone();
+    let url = vmux_path::NavigationText::new(&trigger.event().payload.url)
+        .native_root()
+        .unwrap_or(&trigger.event().payload.url)
+        .to_string();
     let force_new = trigger.event().payload.force_new;
     if url.trim_end_matches('/') == "vmux://projects" {
         commands.trigger(vmux_ecs::workspace::ProjectContextOpenRequest {

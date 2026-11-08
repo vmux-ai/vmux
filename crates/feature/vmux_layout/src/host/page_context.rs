@@ -38,6 +38,70 @@ impl Plugin for PageContextPlugin {
     }
 }
 
+#[derive(SystemParam)]
+pub struct Context<'w, 's> {
+    tabs: TabHierarchy<'w, 's>,
+    hierarchy: crate::space::SpaceHierarchy<'w, 's>,
+    spaces: Query<'w, 's, &'static crate::space::EffectiveStartupDir>,
+    workspaces: Query<'w, 's, (Option<&'static TabWorkspace>, Option<&'static TabWorktree>)>,
+}
+
+impl Context<'_, '_> {
+    pub fn tab(&self, entity: Entity) -> Option<Entity> {
+        self.tabs.entity(entity)
+    }
+
+    pub fn directory(&self, entity: Entity) -> Option<PathBuf> {
+        let startup = self
+            .tabs
+            .startup_dir(entity)
+            .filter(|directory| !directory.is_empty());
+        if let Some(directory) = startup.as_ref()
+            && directory != "/"
+        {
+            return Some(PathBuf::from(directory));
+        }
+        if let Some(tab) = self.tabs.entity(entity)
+            && let Ok((workspace, worktree)) = self.workspaces.get(tab)
+        {
+            if let Some(worktree) = worktree
+                && !worktree.checkout_dir.is_empty()
+            {
+                return Some(PathBuf::from(&worktree.checkout_dir));
+            }
+            if let Some(workspace) = workspace
+                && !workspace.project_dir.is_empty()
+            {
+                return Some(PathBuf::from(&workspace.project_dir));
+            }
+        }
+        self.hierarchy
+            .get(entity)
+            .and_then(|space| self.spaces.get(space).ok())
+            .and_then(|directory| directory.0.clone())
+            .or_else(|| startup.map(PathBuf::from))
+            .or_else(|| std::env::current_dir().ok())
+    }
+
+    pub fn project_directory(&self, entity: Entity) -> Option<PathBuf> {
+        if let Some(tab) = self.tabs.entity(entity)
+            && let Ok((workspace, worktree)) = self.workspaces.get(tab)
+        {
+            if let Some(workspace) = workspace
+                && !workspace.project_dir.is_empty()
+            {
+                return Some(PathBuf::from(&workspace.project_dir));
+            }
+            if let Some(worktree) = worktree
+                && !worktree.repo_root.is_empty()
+            {
+                return Some(PathBuf::from(&worktree.repo_root));
+            }
+        }
+        None
+    }
+}
+
 struct TabWorkspaceSelection {
     startup_dir: String,
     project_dir: String,
@@ -500,10 +564,8 @@ struct GitPageContextWriter<'w, 's> {
         ),
         With<crate::stack::Stack>,
     >,
-    hierarchy: crate::space::SpaceHierarchy<'w, 's>,
-    spaces: Query<'w, 's, &'static crate::space::EffectiveStartupDir>,
+    workspace: Context<'w, 's>,
     spares: Query<'w, 's, (), With<crate::warm_page::WarmPageSpare>>,
-    tabs: TabHierarchy<'w, 's>,
     pages: Query<'w, 's, &'static PageMetadata>,
     commands: Commands<'w, 's>,
 }
@@ -521,7 +583,7 @@ impl GitPageContextWriter<'_, '_> {
         if !allow_spare && self.spares.contains(webview) && owner.is_none() {
             return None;
         }
-        if owner.is_none() && self.tabs.entity(webview).is_none() {
+        if owner.is_none() && self.workspace.tab(webview).is_none() {
             return None;
         }
         let Ok(page) = self.pages.get(webview) else {
@@ -530,22 +592,7 @@ impl GitPageContextWriter<'_, '_> {
         if !vmux_git::GitUrl::is_page(&page.url) {
             return None;
         }
-        let path = self
-            .tabs
-            .startup_dir(webview)
-            .or_else(|| owner.and_then(|owner| self.tabs.startup_dir(owner)))
-            .map(PathBuf::from)
-            .or_else(|| {
-                self.hierarchy
-                    .get(owner.unwrap_or(webview))
-                    .and_then(|space| self.spaces.get(space).ok())
-                    .and_then(|directory| directory.0.clone())
-            })
-            .or_else(|| {
-                (!self.spares.contains(webview))
-                    .then(|| std::env::current_dir().ok())
-                    .flatten()
-            })?;
+        let path = self.workspace.directory(owner.unwrap_or(webview))?;
         let path = path.to_string_lossy().to_string();
         Some(GitPageContext {
             working_directory: path,

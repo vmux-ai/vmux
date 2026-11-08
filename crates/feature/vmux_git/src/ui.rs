@@ -17,6 +17,7 @@ mod status;
 
 #[vmux_page::page(
     component = Page,
+    document_url = "git://git/",
     states = ["PageAddressUiState", "ThemeUiState", "GitUiState", "KeyClaimsUiState", "PageLocationUiState"],
     subtree
 )]

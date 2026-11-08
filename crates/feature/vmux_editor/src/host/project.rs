@@ -74,24 +74,16 @@ fn open_context(
     request: On<vmux_ecs::workspace::ProjectContextOpenRequest>,
     mut source: ProjectSources,
     active: vmux_layout::stack::ActiveTabParam,
-    tabs: Query<(
-        &vmux_layout::tab::Tab,
-        Option<&vmux_layout::tab::TabWorktree>,
-        Option<&vmux_layout::tab::TabWorkspace>,
-    )>,
+    workspace: vmux_layout::page_context::Context,
     space: vmux_layout::space::FocusedSpace,
     mut opens: MessageWriter<vmux_layout::stack::OpenRequest>,
     mut tabs_open: MessageWriter<vmux_layout::NewTabRequest>,
 ) {
     let mut directory = space.startup_dir().map(PathBuf::from);
     let mut project = None;
-    if let Some(tab) = active.get()
-        && let Ok((tab, worktree, workspace)) = tabs.get(tab)
-    {
-        directory = tab.startup_dir.as_ref().map(PathBuf::from).or(directory);
-        project = worktree
-            .map(|worktree| PathBuf::from(&worktree.repo_root))
-            .or_else(|| workspace.map(|workspace| PathBuf::from(&workspace.project_dir)));
+    if let Some(tab) = active.get() {
+        directory = workspace.directory(tab).or(directory);
+        project = workspace.project_directory(tab);
     }
     if project.is_none()
         && let Some(directory) = directory.as_ref()

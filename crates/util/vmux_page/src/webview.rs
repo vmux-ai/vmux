@@ -98,12 +98,12 @@ impl WebView {
             embed.waker,
             lifecycle,
         );
-        let routes = PageRoutes::new(
+        let routes = Rc::new(PageRoutes::new(
             current_page.clone(),
             current_appearance.clone(),
             dom.clone(),
             embed.assets,
-        );
+        ));
         let frame_capability_script = format!(
             "globalThis.__vmuxFrameCapability='{}';",
             dom.frame_capability()
@@ -114,16 +114,27 @@ impl WebView {
             Some(config) => builder.with_webview_configuration(config),
             None => builder,
         };
-        let webview = builder
+        let navigation_page = current_page.clone();
+        let mut builder = builder
             .with_transparent(page.transparent)
             .with_background_color(appearance.surface_rgba(page.transparent))
             .with_visible(false)
             .with_initialization_script(&frame_capability_script)
             .with_initialization_script(Shim::source())
-            .with_navigation_handler(|url| url.starts_with("vmux://"))
-            .with_asynchronous_custom_protocol("vmux".into(), move |_id, request, responder| {
-                routes.serve(request, responder);
-            })
+            .with_navigation_handler(move |url| {
+                url.starts_with("vmux://")
+                    || PageRoutes::serves_document(&url, navigation_page.get())
+            });
+        for scheme in ["vmux", "git"] {
+            let routes = routes.clone();
+            builder = builder.with_asynchronous_custom_protocol(
+                scheme.into(),
+                move |_id, request, responder| {
+                    routes.serve(request, responder);
+                },
+            );
+        }
+        let webview = builder
             .with_on_page_load_handler(move |event, url| {
                 if matches!(event, wry::PageLoadEvent::Finished)
                     && PageRoutes::serves_document(&url, loaded_page.get())

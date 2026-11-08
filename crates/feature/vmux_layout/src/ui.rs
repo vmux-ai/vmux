@@ -88,6 +88,7 @@ pub(super) fn LayoutDropdown(
     open: bool,
     #[props(default)] class: String,
     #[props(default)] keyboard_navigation: bool,
+    #[props(default)] dismiss_on_mouseleave: bool,
     on_dismiss: EventHandler<()>,
     children: Element,
 ) -> Element {
@@ -123,6 +124,7 @@ pub(super) fn LayoutDropdown(
             open,
             class,
             keyboard_navigation,
+            dismiss_on_mouseleave,
             on_dismiss,
             {children}
         }

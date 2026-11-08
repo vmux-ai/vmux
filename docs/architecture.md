@@ -618,10 +618,16 @@ the registered manifests supply the page-switch menu. Pages publish only typed `
 data through `AddressContribution` or `PageAddressPublish`: the current route, project and session
 choices, directories, symbols, and their intents. `vmux_layout` renders the active surface with
 one `AddressTrail`. No page component, callback, context, or mounted slot crosses into Layout.
-The URL row contains routing breadcrumbs. Git view, repository, branch and commit selections
-use canonical vmux routes; legacy git paths remain input aliases. Requested references remain selected
-while their catalogs are incomplete. Search, filters, Details, Add, Create,
+The URL row contains routing breadcrumbs. Code and Git use `file://` and `git://`; their root
+bookmarks resolve the working directory selected in the owning Space card through shared
+`page_context::Context`. Git view and commit or stash selections use query parameters. Its
+checkout follows the owning workspace, and old `vmux://git/` routes normalize before rendering.
+Search, filters, Details, Add, Create,
 Resume, Start, and Checkout render inside the page through `PageToolbar`, with local callbacks.
+Git's document, styles and UI transport share the `git://` origin. Code uses `file://` for
+navigation and `vmux://files/` for the native renderer: WKWebView reserves the built-in file
+scheme and rejects a custom handler. Page routing and renderer asset origins are separate
+metadata; an asset origin never becomes a bookmark destination.
 The command bar displays decoded URL path segments, including embedded file paths. Edits retain
 their original segment boundaries; navigation and whole-URL copies use the canonical encoded URL.
 Ordinary bookmark clicks reuse an existing Stack or open one. Cmd-click, with or without Shift,
@@ -636,6 +642,10 @@ while their DOM decides outside-click dismissal; static header and sidebar recta
 close a popover before an item below them receives its click.
 Popup state belongs to the Layout that renders the breadcrumb and uses its existing overlay
 capture until dismissal or disposal. Hiding the window header leaves the full page working area.
+Space-card Project and Branch selectors share hover opening. Their menus align with the row
+on its right, falling back to the left at the viewport edge. A first click after hover keeps
+the menu open; the shared leave delay allows the pointer to cross the gap. Each opening advances
+an activation revision, so delayed closes and listeners from an earlier opening cannot dismiss it.
 Path overflow collapses whole directories using measured widths and keeps the filename intact.
 Git's branch-file filter sits above its file tree, with page-top spacing shared by the tree and
 diff. Side-sheet cards share their outer width; the Space card keeps an inner right inset.

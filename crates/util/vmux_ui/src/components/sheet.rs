@@ -1,7 +1,7 @@
 use dioxus::prelude::*;
 
 use crate::cn::cn;
-use crate::components::dropdown::DropdownToggleIndicator;
+use crate::components::dropdown::{DropdownOpenMode, DropdownToggleIndicator, DropdownTrigger};
 use crate::components::icon::Icon;
 use crate::components::tree_row::{SIDEBAR_CARD_CHEVRON_CLOSED, SIDEBAR_CARD_CHEVRON_OPEN};
 
@@ -100,7 +100,8 @@ pub fn SheetToggleRow(
 pub fn SheetSelectorRow(
     label: String,
     open: bool,
-    onclick: EventHandler<MouseEvent>,
+    onclick: EventHandler<()>,
+    #[props(default)] on_hover_open: Option<EventHandler<()>>,
     #[props(default)] title: String,
     #[props(default)] class: String,
     #[props(default)] label_class: String,
@@ -115,16 +116,18 @@ pub fn SheetSelectorRow(
         label_class.as_str(),
     ]);
     rsx! {
-        button {
-            r#type: "button",
+        DropdownTrigger {
+            label,
             title,
             class: row_class,
-            "data-vmux-dropdown-trigger": "",
-            aria_expanded: open,
-            onclick: move |event| onclick.call(event),
-            {leading}
-            span { class: text_class, "{label}" }
-            DropdownToggleIndicator { open }
+            label_class: text_class,
+            open,
+            open_mode: DropdownOpenMode::Hover,
+            hover_delay_ms: 0,
+            on_hover_open,
+            onclick,
+            leading,
+            trailing: rsx! { DropdownToggleIndicator { open } },
         }
     }
 }

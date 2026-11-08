@@ -144,6 +144,7 @@ globalThis.__vmuxPopupPresentation ??= (() => {
       const inset = Number(popup.dataset.vmuxPopupInset ?? 0);
       const gap = Number(popup.dataset.vmuxPopupGap ?? 4);
       const top = popup.dataset.vmuxPopupPlacement === 'top';
+      const side = popup.dataset.vmuxPopupPlacement === 'right';
       if (popup.dataset.vmuxPopupMatchWidth === 'true') popup.style.width = Math.max(0, bounds.width - inset * 2) + 'px';
       const availableWidth = Math.max(0, window.innerWidth - margin * 2);
       const availableHeight = Math.max(0, window.innerHeight - margin * 2);
@@ -159,11 +160,14 @@ globalThis.__vmuxPopupPresentation ??= (() => {
         popup.style.overflowY = 'auto';
         size = popup.getBoundingClientRect();
       }
-      let x = popup.dataset.vmuxPopupAlign === 'end' ? bounds.right - inset - size.width : bounds.left + inset;
-      let y = top ? bounds.top - gap - size.height : bounds.bottom + gap;
+      let x = side ? bounds.right + gap : popup.dataset.vmuxPopupAlign === 'end' ? bounds.right - inset - size.width : bounds.left + inset;
+      let y = side ? bounds.top : top ? bounds.top - gap - size.height : bounds.bottom + gap;
       const above = bounds.top - gap - size.height;
       const below = bounds.bottom + gap;
-      if (!top && y + size.height > window.innerHeight - margin && above >= margin) y = above;
+      if (side) {
+        const left = bounds.left - gap - size.width;
+        if (x + size.width > window.innerWidth - margin && left >= margin) x = left;
+      } else if (!top && y + size.height > window.innerHeight - margin && above >= margin) y = above;
       else if (top && y < margin && below + size.height <= window.innerHeight - margin) y = below;
       x = Math.min(Math.max(margin, x), Math.max(margin, window.innerWidth - size.width - margin));
       y = Math.min(Math.max(margin, y), Math.max(margin, window.innerHeight - size.height - margin));

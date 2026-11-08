@@ -2,7 +2,6 @@
 
 use dioxus::html::input_data::MouseButton;
 use dioxus::prelude::*;
-use vmux_api::space::ProjectRow;
 use vmux_ui::scroll::SectionNavigation;
 
 use super::branches::BranchesCard;
@@ -97,16 +96,11 @@ pub(super) fn GitDashboard() -> Element {
 #[derive(Clone, PartialEq)]
 struct HeaderState {
     repository: Option<GitRepositorySnapshot>,
-    projects: Vec<ProjectRow>,
     focused_panel: GitPanel,
     selected_branch: String,
-    selected_branch_base: String,
-    branch_collection: GitBranchCollection,
     selected_branch_collection: GitBranchCollection,
     selected_commit: String,
     can_push: bool,
-    branches_progress: GitCatalogProgress,
-    selected_branches_progress: GitCatalogProgress,
     commits_progress: GitCatalogProgress,
     viewed_total: u32,
 }
@@ -116,22 +110,16 @@ fn GitHeader(viewed_count: ReadSignal<usize>) -> Element {
     let state = use_context::<GitPageState>();
     let snapshot = state.snapshot;
     let controller = state.controller;
-    let projects = state.projects;
     let header = use_memo(move || {
         let snapshot = snapshot.read();
         let controller = controller.read();
         HeaderState {
             repository: snapshot.repository.clone(),
-            projects: projects.read().rows.clone(),
             focused_panel: controller.focused_panel,
             selected_branch: controller.selected_branch.clone(),
-            selected_branch_base: snapshot.branch_files_base_ref.clone(),
-            branch_collection: controller.branch_collection,
             selected_branch_collection: controller.selected_branch_collection,
             selected_commit: controller.selected_commit.clone(),
             can_push: controller.operations.push,
-            branches_progress: snapshot.local_branches,
-            selected_branches_progress: snapshot.catalog(controller.branch_collection.into()),
             commits_progress: snapshot.commits,
             viewed_total: snapshot.branch_files_total,
         }
@@ -143,16 +131,11 @@ fn GitHeader(viewed_count: ReadSignal<usize>) -> Element {
     rsx! {
         RepositoryHeader {
             repository,
-            projects: header.projects,
             focused_panel: header.focused_panel,
             selected_branch: header.selected_branch,
-            selected_branch_base: header.selected_branch_base,
-            branch_collection: header.branch_collection,
             selected_branch_collection: header.selected_branch_collection,
             selected_commit: header.selected_commit,
             can_push: header.can_push,
-            branches_progress: header.branches_progress,
-            selected_branches_progress: header.selected_branches_progress,
             commits_progress: header.commits_progress,
             viewed_count: viewed_count(),
             viewed_total: header.viewed_total,
