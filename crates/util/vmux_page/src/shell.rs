@@ -44,6 +44,7 @@ impl InterpreterShell {
         self
     }
 
+    #[cfg(ui)]
     pub(crate) fn with_initial_frame(mut self, frame: impl Into<String>) -> Self {
         self.initial_frame = frame.into();
         self
