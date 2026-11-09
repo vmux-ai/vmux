@@ -844,6 +844,15 @@ app and never clears newer changes. Explicit saves finish an earlier write to th
 Failed writes retain the changes and retry on the 60-second deadline; schema sidecars follow
 successful writes. Restored session children containing only a timestamp and parent reference are
 discarded after backing up the store; conversation content and live children remain intact.
+Workspace loads validate Space, Pane, and Session IDs and the ownership graph before replacing
+live entities. Space roots may reference the runtime window outside the snapshot. Failed loads
+discard partial entities, preserve the store and schema sidecar in a recovery backup, and let
+startup create a usable workspace. Saves cannot overwrite the failed store until that backup exists.
+
+Accepted project selections own their Git tasks on transient `Operation` entities. Each operation
+references its Tab and captures the selection revision; replacement, retirement, or removal cancels
+the old work before it can apply. Cleanup guards dispose of discarded checkouts. Results remain
+inspectable as `Succeeded`, `Failed` with an error, or `Canceled` for five minutes before cleanup.
 
 ---
 

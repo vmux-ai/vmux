@@ -1,3 +1,4 @@
+use bevy::ecs::resource::IsResource;
 use bevy::ecs::schedule::common_conditions::any_with_component;
 use bevy::ecs::system::Command;
 #[cfg(test)]
@@ -9,8 +10,10 @@ use bevy::winit::{EventLoopProxyWrapper, WinitUserEvent};
 #[cfg(test)]
 use bevy_cef::prelude::HostWindow;
 use bevy_world_serialization::{DynamicWorldBuilder, WorldFilter};
+use moonshine_save::load::{LoadCommand, LoadInput};
 use moonshine_save::prelude::*;
 use moonshine_save::save::{EntityFilter, SaveCommand, SaveEvent};
+use serde::de::DeserializeSeed;
 use std::path::{Path, PathBuf};
 use std::sync::{Mutex, mpsc};
 use vmux_ecs::CreatedAt;
@@ -19,8 +22,8 @@ use vmux_api::BuiltinIcon;
 #[cfg(test)]
 use vmux_ecs::persistence::PersistenceAppExt;
 use vmux_ecs::persistence::{
-    PersistenceDirty, WorkspacePersisted, WorkspaceRestore, WorkspaceSaveRequest,
-    WorkspaceStoreValidators,
+    PersistenceDirty, WorkspacePersisted, WorkspaceRestore, WorkspaceRestoreValidator,
+    WorkspaceSaveRequest, WorkspaceStoreValidators,
 };
 #[cfg(test)]
 use vmux_ecs::profile::ProfilePaths;
@@ -424,6 +427,16 @@ impl Command for WorkspaceWrite {
     type Out = ();
 
     fn apply(mut self, world: &mut World) {
+        let mut failures = world.query::<(&WorkspaceStorePath, &RestoreFailure)>();
+        for (path, failure) in failures.iter(world) {
+            if path.0 == self.schema.0 && failure.backup.is_none() {
+                warn!(
+                    "Workspace save blocked until the failed restore can be backed up: {:?}",
+                    path.0
+                );
+                return;
+            }
+        }
         let Some(entity) = self.autosave else {
             let mut pending = Vec::new();
             for (entity, write) in world.query::<(Entity, &PendingWrite)>().iter(world) {
@@ -616,9 +629,16 @@ fn auto_save(
     spaces: Query<(), With<Space>>,
     save_entities: SpaceSaveEntities,
     pending: Query<(), With<PendingWrite>>,
+    failures: Query<&RestoreFailure>,
     mut saver: SpaceSaver,
 ) {
     let (entity, mut auto_save) = auto_save.into_inner();
+    if failures
+        .get(entity)
+        .is_ok_and(|failure| failure.backup.is_none())
+    {
+        return;
+    }
     auto_save.periodic.tick(time.delta());
 
     if spaces.is_empty() {
@@ -662,6 +682,7 @@ fn load_on_startup(
     validators: WorkspaceStoreValidators,
     mut restore: Single<&mut WorkspaceRestore>,
     path: Single<&WorkspaceStorePath>,
+    persistence: Single<Entity, With<AutoSave>>,
     mut commands: Commands,
 ) {
     if SessionEnvironment::is_test() {
@@ -698,9 +719,195 @@ fn load_on_startup(
             }
             None => LoadWorld::default_from_file(path.clone()),
         };
-        commands.trigger_load(load);
+        commands.queue(WorkspaceLoad {
+            load,
+            persistence: *persistence,
+            path: path.clone(),
+        });
     } else {
         restore.complete = true;
+    }
+}
+
+struct WorkspaceLoad {
+    load: LoadWorld,
+    persistence: Entity,
+    path: PathBuf,
+}
+
+impl Command for WorkspaceLoad {
+    type Out = ();
+
+    fn apply(mut self, world: &mut World) {
+        let snapshot = {
+            let registry = world.resource::<AppTypeRegistry>().read();
+            let mut assets = world.resource::<AssetServer>().clone();
+            self.snapshot(&registry, &mut assets)
+        };
+        let snapshot = match snapshot {
+            Ok(snapshot) => snapshot,
+            Err(error) => {
+                WorkspaceRestoreFailed {
+                    persistence: self.persistence,
+                    path: self.path,
+                    error,
+                }
+                .apply(world);
+                return;
+            }
+        };
+        let mut rejected = None;
+        {
+            let mut validators = world.query::<&WorkspaceRestoreValidator>();
+            for validator in validators.iter(world) {
+                if let Err(error) = (validator.validate)(&snapshot) {
+                    rejected = Some(format!("{}: {error}", validator.name));
+                    break;
+                }
+            }
+        }
+        if let Some(error) = rejected {
+            WorkspaceRestoreFailed {
+                persistence: self.persistence,
+                path: self.path,
+                error,
+            }
+            .apply(world);
+            return;
+        }
+        let mut baseline = std::collections::HashSet::new();
+        for archetype in world.archetypes().iter() {
+            for entity in archetype.entities() {
+                baseline.insert(entity.id());
+            }
+        }
+        self.load.input = LoadInput::World(snapshot);
+        if let Err(error) = LoadCommand(self.load).apply(world) {
+            let mut resources = Vec::new();
+            for (_, entity) in world.resource_entities().iter() {
+                if !baseline.contains(&entity) {
+                    resources.push(entity);
+                }
+            }
+            for entity in resources {
+                world.entity_mut(entity).remove::<IsResource>();
+            }
+            world.flush();
+            let mut discarded = Vec::new();
+            for archetype in world.archetypes().iter() {
+                for entity in archetype.entities() {
+                    if !baseline.contains(&entity.id()) {
+                        discarded.push(entity.id());
+                    }
+                }
+            }
+            for entity in discarded {
+                world.despawn(entity);
+            }
+            WorkspaceRestoreFailed {
+                persistence: self.persistence,
+                path: self.path,
+                error: error.to_string(),
+            }
+            .apply(world);
+        }
+    }
+}
+
+impl WorkspaceLoad {
+    fn snapshot(
+        &mut self,
+        registry: &bevy::reflect::TypeRegistry,
+        assets: &mut AssetServer,
+    ) -> Result<bevy_world_serialization::DynamicWorld, String> {
+        let mut bytes = Vec::new();
+        match self.load.input.consume() {
+            Some(LoadInput::World(snapshot)) => return Ok(snapshot),
+            Some(LoadInput::File(path)) => {
+                bytes = std::fs::read(path).map_err(|error| error.to_string())?;
+            }
+            Some(LoadInput::Stream(mut stream)) => {
+                stream
+                    .read_to_end(&mut bytes)
+                    .map_err(|error| error.to_string())?;
+            }
+            _ => return Err("workspace load input is unavailable".to_string()),
+        }
+        let mut deserializer =
+            ron::Deserializer::from_bytes(&bytes).map_err(|error| error.to_string())?;
+        bevy_world_serialization::serde::WorldDeserializer {
+            type_registry: registry,
+            load_from_path: assets,
+        }
+        .deserialize(&mut deserializer)
+        .map_err(|error| error.to_string())
+    }
+}
+
+struct WorkspaceRestoreFailed {
+    persistence: Entity,
+    path: PathBuf,
+    error: String,
+}
+
+impl Command for WorkspaceRestoreFailed {
+    type Out = ();
+
+    fn apply(self, world: &mut World) {
+        warn!(
+            "Workspace restore failed for {:?}: {}",
+            self.path, self.error
+        );
+        let failure = RestoreFailure::preserve(&self.path);
+        if let Some(mut restore) = world.get_mut::<WorkspaceRestore>(self.persistence) {
+            restore.store_present = false;
+            restore.complete = true;
+        }
+        world.entity_mut(self.persistence).insert(failure);
+    }
+}
+
+#[derive(Component)]
+struct RestoreFailure {
+    backup: Option<PathBuf>,
+}
+
+impl RestoreFailure {
+    fn preserve(path: &Path) -> Self {
+        let stamp = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_nanos();
+        let backup = path.with_extension(format!("ron.restore-failed-{stamp}"));
+        match Self::copy(path, &backup) {
+            Ok(()) => {
+                warn!("Preserved failed workspace restore at {backup:?}");
+                Self {
+                    backup: Some(backup),
+                }
+            }
+            Err(error) => {
+                warn!("Unable to back up failed workspace restore from {path:?}: {error}");
+                Self { backup: None }
+            }
+        }
+    }
+
+    fn copy(path: &Path, backup: &Path) -> std::io::Result<()> {
+        let body = std::fs::read(path)?;
+        vmux_path::AtomicFile::write(backup, &body)?;
+        let version = WorkspaceStorePath(path.to_path_buf()).version();
+        match std::fs::read(version) {
+            Ok(version) => vmux_path::AtomicFile::write(Self::version(backup), &version),
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
+            Err(error) => Err(error),
+        }
+    }
+
+    fn version(backup: &Path) -> PathBuf {
+        let mut path = backup.as_os_str().to_os_string();
+        path.push(".version");
+        PathBuf::from(path)
     }
 }
 
@@ -876,6 +1083,199 @@ mod tests {
         _home: HomeEnvGuard,
     }
 
+    struct WorkspaceRestoreFixture {
+        app: App,
+        persistence: Entity,
+        path: PathBuf,
+        _home: HomeEnvGuard,
+    }
+
+    impl WorkspaceRestoreFixture {
+        fn new(name: &str) -> Self {
+            let home = HomeEnvGuard::use_temp_home(name);
+            let mut app = App::new();
+            app.add_plugins((
+                MinimalPlugins,
+                AssetPlugin::default(),
+                vmux_ecs::PrimitivesPlugin,
+            ))
+            .register_persisted::<SpaceId>()
+            .register_persisted::<PaneId>()
+            .register_persisted::<vmux_session::SessionId>()
+            .add_plugins(WorkspacePersistencePlugin);
+            app.world_mut()
+                .spawn(WorkspaceRestoreValidator::unique::<SpaceId>("Space ID"));
+            app.world_mut()
+                .spawn(WorkspaceRestoreValidator::unique::<PaneId>("Pane ID"));
+            app.world_mut()
+                .spawn(WorkspaceRestoreValidator::unique::<vmux_session::SessionId>("Session ID"));
+            app.update();
+            let persistence = app
+                .world_mut()
+                .query_filtered::<Entity, With<AutoSave>>()
+                .single(app.world())
+                .unwrap();
+            let path = app
+                .world()
+                .get::<WorkspaceStorePath>(persistence)
+                .unwrap()
+                .0
+                .clone();
+            Self {
+                app,
+                persistence,
+                path,
+                _home: home,
+            }
+        }
+
+        fn load(&mut self, snapshot: bevy_world_serialization::DynamicWorld) -> String {
+            let body = snapshot
+                .serialize(&self.app.world().resource::<AppTypeRegistry>().read())
+                .unwrap();
+            vmux_path::AtomicFile::write(&self.path, body.as_bytes()).unwrap();
+            WorkspaceStorePath(self.path.clone()).write_schema_version();
+            self.app.world_mut().commands().queue(WorkspaceLoad {
+                load: LoadWorld::default_from_file(self.path.clone()),
+                persistence: self.persistence,
+                path: self.path.clone(),
+            });
+            self.app.update();
+            body
+        }
+
+        fn preserved(&self) -> PathBuf {
+            self.app
+                .world()
+                .get::<RestoreFailure>(self.persistence)
+                .unwrap()
+                .backup
+                .clone()
+                .unwrap()
+        }
+    }
+
+    #[test]
+    fn duplicate_restored_ids_are_rejected_before_live_state_is_replaced() {
+        for kind in ["space", "pane", "session"] {
+            let mut fixture = WorkspaceRestoreFixture::new("duplicate-restored-id");
+            let live = fixture.app.world_mut().spawn(SpaceId("shared".into())).id();
+            let mut entities = Vec::new();
+            for entity in [Entity::from_bits(1), Entity::from_bits(2)] {
+                let component: Box<dyn bevy::reflect::PartialReflect> = match kind {
+                    "space" => Box::new(SpaceId("shared".into())),
+                    "pane" => Box::new(PaneId("shared".into())),
+                    _ => Box::new(vmux_session::SessionId::new("shared")),
+                };
+                entities.push(bevy_world_serialization::DynamicEntity {
+                    entity,
+                    components: vec![component],
+                });
+            }
+            let body = fixture.load(bevy_world_serialization::DynamicWorld {
+                resources: Vec::new(),
+                entities,
+            });
+            assert!(fixture.app.world().get::<SpaceId>(live).is_some());
+            assert!(
+                fixture
+                    .app
+                    .world()
+                    .resource::<Messages<LayoutRestoreRequest>>()
+                    .is_empty()
+            );
+            assert_eq!(std::fs::read_to_string(&fixture.path).unwrap(), body);
+            assert_eq!(std::fs::read_to_string(fixture.preserved()).unwrap(), body);
+            assert_eq!(
+                std::fs::read_to_string(RestoreFailure::version(&fixture.preserved())).unwrap(),
+                std::fs::read_to_string(WorkspaceStorePath(fixture.path.clone()).version())
+                    .unwrap()
+            );
+        }
+    }
+
+    #[test]
+    fn validated_ids_are_scoped_to_the_snapshot_and_then_request_layout_restore() {
+        let mut fixture = WorkspaceRestoreFixture::new("valid-restored-id");
+        fixture.app.world_mut().spawn(SpaceId("shared".into()));
+        fixture.load(bevy_world_serialization::DynamicWorld {
+            resources: Vec::new(),
+            entities: vec![bevy_world_serialization::DynamicEntity {
+                entity: Entity::from_bits(1),
+                components: vec![Box::new(SpaceId("shared".into()))],
+            }],
+        });
+        assert!(
+            fixture
+                .app
+                .world()
+                .get::<RestoreFailure>(fixture.persistence)
+                .is_none()
+        );
+        assert_eq!(
+            fixture
+                .app
+                .world_mut()
+                .query::<&SpaceId>()
+                .iter(fixture.app.world())
+                .count(),
+            1
+        );
+        assert_eq!(
+            fixture
+                .app
+                .world()
+                .resource::<Messages<LayoutRestoreRequest>>()
+                .len(),
+            1
+        );
+    }
+
+    #[derive(Reflect)]
+    struct Unspawnable;
+
+    #[test]
+    fn failed_materialization_removes_partial_entities_and_preserves_the_store() {
+        let mut fixture = WorkspaceRestoreFixture::new("failed-materialization");
+        fixture.app.register_type::<Unspawnable>();
+        let live = fixture
+            .app
+            .world_mut()
+            .spawn(Name::new("live runtime"))
+            .id();
+        let baseline = fixture.app.world().entities().len();
+        let body = fixture.load(bevy_world_serialization::DynamicWorld {
+            resources: Vec::new(),
+            entities: vec![
+                bevy_world_serialization::DynamicEntity {
+                    entity: Entity::from_bits(1),
+                    components: vec![Box::new(Unspawnable)],
+                },
+                bevy_world_serialization::DynamicEntity {
+                    entity: Entity::from_bits(2),
+                    components: Vec::new(),
+                },
+            ],
+        });
+        assert_eq!(fixture.app.world().entities().len(), baseline);
+        assert!(fixture.app.world().get::<Name>(live).is_some());
+        assert!(
+            fixture
+                .app
+                .world()
+                .resource::<Messages<LayoutRestoreRequest>>()
+                .is_empty()
+        );
+        assert_eq!(std::fs::read_to_string(fixture.preserved()).unwrap(), body);
+        let restore = fixture
+            .app
+            .world()
+            .get::<WorkspaceRestore>(fixture.persistence)
+            .unwrap();
+        assert!(restore.complete);
+        assert!(!restore.store_present);
+    }
+
     impl WorkspaceSaveFixture {
         fn finish_write(&mut self) {
             let deadline = std::time::Instant::now() + std::time::Duration::from_secs(3);
@@ -946,6 +1346,34 @@ mod tests {
 
         assert_eq!(fixture.app.world().resource::<SaveCount>().0, 0);
         assert!(!fixture.path.exists());
+    }
+
+    #[test]
+    fn failed_restore_without_a_backup_cannot_be_overwritten_by_automatic_or_explicit_saves() {
+        let mut fixture = WorkspaceSaveFixture::new("unprotected-restore");
+        vmux_path::AtomicFile::write(&fixture.path, b"original failed restore").unwrap();
+        fixture
+            .app
+            .world_mut()
+            .entity_mut(fixture.persistence)
+            .insert(RestoreFailure { backup: None });
+        fixture.app.update();
+        assert!(
+            fixture
+                .app
+                .world()
+                .get::<PendingWrite>(fixture.persistence)
+                .is_none()
+        );
+        fixture.app.world_mut().write_message(WorkspaceSaveRequest {
+            path: fixture.path.clone(),
+        });
+        fixture.app.update();
+        assert_eq!(
+            std::fs::read_to_string(&fixture.path).unwrap(),
+            "original failed restore"
+        );
+        assert_eq!(fixture.app.world().resource::<SaveCount>().0, 0);
     }
 
     #[test]

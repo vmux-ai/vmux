@@ -19,6 +19,10 @@ pub use launcher::{
 };
 #[cfg(all(host, feature = "host"))]
 pub use notify::{AgentAttention, AgentDoneUnseen, BellReceived, OsNotify};
+pub use operation::{
+    Operation, OperationError, OperationKind, OperationPlugin, OperationState, OperationTarget,
+    OperationTargetRevision, TargetedOperations,
+};
 #[cfg(all(host, feature = "host"))]
 pub use overlay::{Overlay, OverlayShownInline, OverlayState, WindowOverlay};
 pub use page_metadata::{PageIdentity, PageMetadata};
@@ -61,6 +65,7 @@ pub mod launcher;
 pub mod manifest;
 #[cfg(all(host, feature = "host"))]
 pub mod notify;
+mod operation;
 #[cfg(all(host, feature = "host"))]
 pub mod overlay;
 #[cfg(all(host, feature = "host"))]
