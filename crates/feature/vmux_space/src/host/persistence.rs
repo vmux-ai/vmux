@@ -702,6 +702,10 @@ impl WorkspaceStorePath {
                 Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
                 Err(error) => return Err(error),
             }
+            #[cfg(unix)]
+            if let Some(parent) = backup.parent() {
+                std::fs::File::open(parent)?.sync_all()?;
+            }
             std::fs::remove_file(&self.0)?;
             return Ok(backup);
         }

@@ -83,7 +83,17 @@ impl RuntimeHandoff {
             ));
         }
         stream.set_write_timeout(Some(remaining.min(Duration::from_secs(1))))?;
-        ServiceCodec::write_client_blocking(&mut stream, &ClientMessage::Shutdown)?;
+        if let Err(error) =
+            ServiceCodec::write_client_blocking(&mut stream, &ClientMessage::Shutdown)
+        {
+            if matches!(
+                error.kind(),
+                std::io::ErrorKind::BrokenPipe | std::io::ErrorKind::ConnectionReset
+            ) {
+                return Ok(());
+            }
+            return Err(error);
+        }
         let remaining = deadline.saturating_duration_since(Instant::now());
         if !remaining.is_zero() {
             stream.set_read_timeout(Some(remaining))?;
