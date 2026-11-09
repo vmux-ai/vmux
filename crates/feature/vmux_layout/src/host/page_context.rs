@@ -818,7 +818,7 @@ fn poll_project_activations(
                 .insert(OperationState::Canceled);
             continue;
         }
-        let result = match activation.poll() {
+        let mut result = match activation.poll() {
             ProjectActivationPoll::Pending => continue,
             ProjectActivationPoll::Retry => {
                 activation.retry(&runtime, wake.clone());
@@ -835,6 +835,11 @@ fn poll_project_activations(
             },
             ProjectActivationPoll::Rejected(error) => Err(error),
         };
+        if let Err(error) = &mut result
+            && error.trim().is_empty()
+        {
+            *error = "Git workspace operation failed".to_string();
+        }
         let mut operation = context.commands.entity(entity);
         operation.remove::<ProjectActivation>();
         match &result {
@@ -842,10 +847,10 @@ fn poll_project_activations(
                 operation.insert(OperationState::Succeeded);
             }
             Err(error) => {
-                operation.insert((
-                    OperationState::Failed,
-                    OperationError::new(error.clone()).unwrap(),
-                ));
+                operation.insert(OperationState::Failed);
+                if let Ok(error) = OperationError::new(error.clone()) {
+                    operation.insert(error);
+                }
             }
         }
         context
@@ -868,7 +873,7 @@ mod tests {
     struct ContextWrites(Vec<GitPageContext>);
 
     #[derive(Resource, Default)]
-    struct WorkspaceWrites(Vec<Entity>);
+    struct WorkspaceWrites(Vec<Entity>, Vec<String>);
 
     fn capture_context(
         trigger: On<vmux_ecs::UiStateWrite<vmux_git::state::GitUiState>>,
@@ -883,8 +888,9 @@ mod tests {
         trigger: On<vmux_ecs::UiStateWrite<vmux_git::state::GitUiState>>,
         mut writes: ResMut<WorkspaceWrites>,
     ) {
-        if trigger.event().update().workspace.is_some() {
+        if let Some(workspace) = &trigger.event().update().workspace {
             writes.0.push(trigger.event().webview());
+            writes.1.push(workspace.error.clone());
         }
     }
 
@@ -1215,58 +1221,80 @@ mod tests {
 
     #[test]
     fn rejected_activation_exposes_then_rolls_back_optimistic_branch() {
-        let mut app = App::new();
-        app.add_plugins((MinimalPlugins, PageContextPlugin));
-        let tab = app
-            .world_mut()
-            .spawn((
-                Tab::default(),
-                PendingWorkspaceSelection::new("/project".into(), "feature".into(), 1),
-            ))
-            .id();
-        let operation = app
-            .world_mut()
-            .spawn((
-                Operation,
-                OperationState::Running,
-                OperationTarget::new(tab),
-                OperationTargetRevision(1),
-                ProjectActivation {
-                    webview: Entity::PLACEHOLDER,
-                    branch: "feature".into(),
-                    request: ProjectActivationRequest {
-                        path: "/project".into(),
+        for (error, expected) in [
+            ("Git operation queue is busy", "Git operation queue is busy"),
+            ("", "Git workspace operation failed"),
+            (" \t", "Git workspace operation failed"),
+        ] {
+            let mut app = App::new();
+            app.add_plugins((MinimalPlugins, PageContextPlugin))
+                .init_resource::<WorkspaceWrites>()
+                .add_observer(capture_workspace);
+            let tab = app
+                .world_mut()
+                .spawn((
+                    Tab::default(),
+                    PendingWorkspaceSelection::new("/project".into(), "feature".into(), 1),
+                ))
+                .id();
+            let webview = app
+                .world_mut()
+                .spawn((
+                    PageMetadata {
+                        url: "vmux://git/".into(),
+                        ..Default::default()
+                    },
+                    ChildOf(tab),
+                ))
+                .id();
+            let operation = app
+                .world_mut()
+                .spawn((
+                    Operation,
+                    OperationState::Running,
+                    OperationTarget::new(tab),
+                    OperationTargetRevision(1),
+                    ProjectActivation {
+                        webview,
                         branch: "feature".into(),
-                        checkout: String::new(),
-                        managed_root: PathBuf::new(),
+                        request: ProjectActivationRequest {
+                            path: "/project".into(),
+                            branch: "feature".into(),
+                            checkout: String::new(),
+                            managed_root: PathBuf::new(),
+                        },
+                        work: ProjectActivationWork::Rejected {
+                            observed: false,
+                            error: error.to_string(),
+                            wake: None,
+                        },
                     },
-                    work: ProjectActivationWork::Rejected {
-                        observed: false,
-                        error: "Git operation queue is busy".into(),
-                        wake: None,
-                    },
-                },
-            ))
-            .id();
+                ))
+                .id();
 
-        app.update();
-        assert!(app.world().get::<PendingWorkspaceSelection>(tab).is_some());
-        assert!(app.world().get::<ProjectActivation>(operation).is_some());
+            app.update();
+            assert!(app.world().get::<PendingWorkspaceSelection>(tab).is_some());
+            assert!(app.world().get::<ProjectActivation>(operation).is_some());
 
-        app.update();
-        assert!(app.world().get::<PendingWorkspaceSelection>(tab).is_none());
-        assert!(app.world().get::<ProjectActivation>(operation).is_none());
-        assert_eq!(
-            app.world().get::<OperationState>(operation),
-            Some(&OperationState::Failed)
-        );
-        assert_eq!(
-            app.world()
-                .get::<OperationError>(operation)
-                .unwrap()
-                .message(),
-            "Git operation queue is busy"
-        );
+            app.update();
+            assert!(app.world().get::<PendingWorkspaceSelection>(tab).is_none());
+            assert!(app.world().get::<ProjectActivation>(operation).is_none());
+            assert_eq!(
+                app.world().get::<OperationState>(operation),
+                Some(&OperationState::Failed)
+            );
+            assert_eq!(
+                app.world()
+                    .get::<OperationError>(operation)
+                    .unwrap()
+                    .message(),
+                expected
+            );
+            assert_eq!(
+                app.world().resource::<WorkspaceWrites>().1,
+                vec![expected.to_string()]
+            );
+        }
     }
 
     #[test]
