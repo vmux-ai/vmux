@@ -86,6 +86,7 @@ jobs:
         run: |
           bash scripts/test-dev-build.sh
           bash scripts/test-dev-bundle.sh --fixture
+          bash scripts/test-dev-sign.sh
 
       - name: Run tests
         run: env -u CEF_PATH VMUX_SKIP_DX_BUILD=1 cargo test --workspace

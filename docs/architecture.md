@@ -1356,6 +1356,9 @@ The debug `.app` contains application binaries, its icon, generated plists, and 
 CEF stays in the installed SDK,
 and Bevy/Rust dylibs are linked from the build/toolchain cache. The executable has bundle rpaths
 so Finder and `open` need no shell library-path setup. This app is local, not a distributable bundle.
+CEF receives the host's main bundle path so its SDK subprocess uses the same IPC port namespace.
+Both host and helper signing caches include identity and entitlements; a valid linker signature
+alone does not satisfy the development signing contract.
 Quit flushes pending layout changes. Switching named profiles restarts the GUI rather than
 opening another writer. After the old GUI exits, a different build drains its daemon and waits
 for the data lease automatically; no manual stop is needed. This ends old terminals and agents,
