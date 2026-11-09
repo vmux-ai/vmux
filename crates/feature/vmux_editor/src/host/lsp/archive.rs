@@ -1,4 +1,6 @@
 use std::io::{Read, Write};
+#[cfg(unix)]
+use std::os::unix::fs::PermissionsExt;
 use std::path::{Component, Path, PathBuf};
 
 const MAX_ARCHIVE_ENTRIES: usize = 100_000;
@@ -243,6 +245,11 @@ impl ArchiveKind {
                 std::fs::File::create(&output).map_err(|error| error.to_string())?;
             std::io::copy(&mut entry, &mut output_file).map_err(|error| error.to_string())?;
             output_file.flush().map_err(|error| error.to_string())?;
+            #[cfg(unix)]
+            if let Some(mode) = entry.unix_mode() {
+                std::fs::set_permissions(&output, std::fs::Permissions::from_mode(mode & 0o777))
+                    .map_err(|error| error.to_string())?;
+            }
         }
         Ok(())
     }
@@ -297,6 +304,33 @@ mod tests {
         let dest = tmp.path().join("out");
         ArchiveKind::Zip.extract(&zip_path, &dest, "_").unwrap();
         assert_eq!(std::fs::read(dest.join("inner.txt")).unwrap(), b"zipped");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn extracted_zip_helpers_remain_executable() {
+        let tmp = tempfile::tempdir().unwrap();
+        let zip_path = tmp.path().join("agent.zip");
+        let file = std::fs::File::create(&zip_path).unwrap();
+        let mut writer = zip::ZipWriter::new(file);
+        let options: zip::write::FileOptions<()> =
+            zip::write::FileOptions::default().unix_permissions(0o755);
+        for name in ["claude-agent-acp", "runtime/claude"] {
+            writer.start_file(name, options).unwrap();
+            writer.write_all(b"#!/bin/sh\nprintf native-ready").unwrap();
+        }
+        writer.finish().unwrap();
+        let destination = tmp.path().join("out");
+        ArchiveKind::Zip
+            .extract(&zip_path, &destination, "_")
+            .unwrap();
+        for name in ["claude-agent-acp", "runtime/claude"] {
+            let output = std::process::Command::new(destination.join(name))
+                .output()
+                .unwrap();
+            assert!(output.status.success());
+            assert_eq!(output.stdout, b"native-ready");
+        }
     }
 
     #[test]

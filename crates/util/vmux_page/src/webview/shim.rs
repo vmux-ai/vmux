@@ -274,13 +274,46 @@ pub(crate) const WRY_HOST_SHIM: &str = r#"
     const ratio = Math.min(Math.max((x - rect.left) / rect.width, 0), 1);
     return [Math.round(ratio * length), 0, 0, 0];
   };
+  class ComposerHandoff {
+    static active = new WeakMap();
+    static capture(root) {
+      if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) return null;
+      const composer = root.querySelector?.('.vmux-agent-composer-shared');
+      if (!composer) return null;
+      const rect = composer.getBoundingClientRect();
+      this.active.get(composer)?.cancel();
+      this.active.delete(composer);
+      if (![rect.left, rect.top, rect.width, rect.height].every(Number.isFinite) || rect.width <= 0 || rect.height <= 0) return null;
+      return rect;
+    }
+    static apply(previous, root) {
+      if (!previous || window.matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+      const composer = root.querySelector?.('.vmux-agent-composer-shared');
+      if (!composer || typeof composer.animate !== 'function') return;
+      const next = composer.getBoundingClientRect();
+      if (![next.left, next.top, next.width, next.height].every(Number.isFinite) || next.width <= 0 || next.height <= 0) return;
+      const dx = previous.left - next.left;
+      const dy = previous.top - next.top;
+      const sx = previous.width / next.width;
+      const sy = previous.height / next.height;
+      if (Math.abs(dx) + Math.abs(dy) + Math.abs(previous.width - next.width) + Math.abs(previous.height - next.height) < 0.5) return;
+      this.active.get(composer)?.cancel();
+      const animation = composer.animate([
+        { transform: `translate(${dx}px, ${dy}px) scale(${sx}, ${sy})`, transformOrigin: 'top left' },
+        { transform: 'translate(0px, 0px) scale(1, 1)', transformOrigin: 'top left' },
+      ], { duration: __VMUX_MOTION_LAYOUT_MS__, fill: 'backwards', easing: 'cubic-bezier(0.2, 0, 0, 1)' });
+      this.active.set(composer, animation);
+      animation.finished.finally(() => { if (this.active.get(composer) === animation) this.active.delete(composer); }).catch(() => {});
+    }
+  }
   const prepareRemount = () => {
     const previous = window.interpreter;
+    const composer = ComposerHandoff.capture(previous.root);
     const root = previous.root.cloneNode(false);
     const interpreter = window.vmuxCreateInterpreter();
     interpreter.initialize(root);
     ScrollEvents.install(interpreter);
-    return { previousRoot: previous.root, root, interpreter };
+    return { previousRoot: previous.root, root, interpreter, composer };
   };
   const sectionAtTop = (element) => {
     const container = document.getElementById(element);
@@ -301,7 +334,9 @@ pub(crate) const WRY_HOST_SHIM: &str = r#"
   const commitRemount = (remount, revision) => {
     remount.previousRoot.replaceWith(remount.root);
     window.interpreter = remount.interpreter;
-    return commitNavigationRevision(revision);
+    const committed = commitNavigationRevision(revision);
+    if (committed) ComposerHandoff.apply(remount.composer, remount.root);
+    return committed;
   };
   const visibleScrollAnchor = (container, viewport) => {
     for (const y of [viewport.top + 1, viewport.top + 24, viewport.top + (viewport.bottom - viewport.top) / 4]) {
@@ -1144,5 +1179,10 @@ mod tests {
     #[test]
     fn first_layout_presents_without_waiting_for_background_data_or_fonts() {
         RuntimeProbe::verify(include_str!("presentation_test.js"));
+    }
+
+    #[test]
+    fn composer_handoff_preserves_final_layout_and_does_not_delay_navigation() {
+        RuntimeProbe::verify(include_str!("composer_handoff_test.js"));
     }
 }

@@ -20,6 +20,7 @@ mod format;
     subtree,
     preserve_title,
     no_favicon,
+    document_url = "vmux://start/",
     takes = vmux_ecs::PageMetadata
 )]
 pub(crate) struct ChatPage;

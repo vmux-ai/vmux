@@ -971,9 +971,11 @@ a 160 ms ceiling enforced at DOM animation transport boundaries. Reduced motion 
 state changes without visual interpolation. Same-document navigation and input-epoch changes
 retain in-flight edits and existing component scopes. The current document acknowledges a frame
 by its unique sequence after identity resynchronization, while old input and DOM requests remain
-rejected. Actual document replacement or failed edits still rebuild the document. Page replacement
-does not animate the whole surface or translate a shared composer; shared sidebar rows stay in
-place when page selection changes. Session detail-panel visibility belongs to the page shell,
+rejected. Actual document replacement or failed edits still rebuild the document. Start and Session
+pages share one native document surface; replacing their page root moves the shared composer from
+its previous rectangle into its final dock position within the layout motion budget. The layout,
+input identity, and first frame commit immediately, with no interpolation for reduced motion.
+Shared sidebar rows stay in place when page selection changes. Session detail-panel visibility belongs to the page shell,
 and its geometry remains reserved while the selected session loads.
 Session viewports remember their scroll position and loaded-history start on the owning Session.
 A floating composer overlaps the transcript's lower edge, with an input-inert surface gradient.
