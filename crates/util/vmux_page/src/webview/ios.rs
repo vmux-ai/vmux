@@ -32,6 +32,7 @@ impl WebView {
     }
 
     pub fn set_appearance(&self, appearance: Appearance) {
+        self.appearance.set(appearance);
         let style = match appearance {
             Appearance::Light => UIUserInterfaceStyle::Light,
             Appearance::Dark => UIUserInterfaceStyle::Dark,
@@ -42,14 +43,16 @@ impl WebView {
         view.setOverrideUserInterfaceStyle(style);
     }
 
-    pub fn take_first_responder(&self) {
+    pub fn take_first_responder(&self) -> bool {
         let wk = self.webview.webview();
         let view: &UIView = &wk;
         if view.isFirstResponder() {
-            return;
+            return true;
         }
-        if !view.becomeFirstResponder() {
+        let accepted = view.becomeFirstResponder();
+        if !accepted {
             warn!("vmux_page: the view refused first responder, this page cannot be typed in");
         }
+        accepted
     }
 }

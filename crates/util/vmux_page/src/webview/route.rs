@@ -2,18 +2,34 @@ use std::cell::Cell;
 use std::rc::Rc;
 
 use crate::page::Page;
-use crate::webview::dom::Dom;
 use crate::webview::embed::{AssetReply, Assets};
+use crate::webview::{Appearance, dom::Dom};
 
 pub(crate) struct PageRoutes {
     page: Rc<Cell<&'static Page>>,
+    appearance: Rc<Cell<Appearance>>,
     dom: Dom,
     assets: Rc<dyn Assets>,
 }
 
 impl PageRoutes {
-    pub(crate) fn new(page: Rc<Cell<&'static Page>>, dom: Dom, assets: Rc<dyn Assets>) -> Self {
-        Self { page, dom, assets }
+    pub(crate) fn serves_document(url: &str, page: &Page) -> bool {
+        Route::belongs_to(url, page.document_url())
+            && Route::path_of(url) == Route::path_of(page.document_url())
+    }
+
+    pub(crate) fn new(
+        page: Rc<Cell<&'static Page>>,
+        appearance: Rc<Cell<Appearance>>,
+        dom: Dom,
+        assets: Rc<dyn Assets>,
+    ) -> Self {
+        Self {
+            page,
+            appearance,
+            dom,
+            assets,
+        }
     }
 
     pub(crate) fn serve(
@@ -36,7 +52,9 @@ impl PageRoutes {
         match route {
             Route::Events => self.dom.answer_event(&request, responder),
             Route::Edits => self.dom.serve_edits(&request, responder),
-            Route::Document => responder.respond(page.shell()),
+            Route::Document => {
+                responder.respond(page.shell(self.appearance.get(), Some(self.dom.initial_frame())))
+            }
             Route::Asset => self.assets.fetch(&url, AssetReply::from(responder)),
         }
     }
@@ -52,12 +70,20 @@ enum Route {
 
 impl Route {
     fn for_page(url: &str, page: &Page) -> Self {
-        if Self::belongs_to(url, page.document_url())
-            && Self::path_of(url) == Self::path_of(page.document_url())
+        if PageRoutes::serves_document(url, page) {
+            return Self::Document;
+        }
+        let route = Self::from(url);
+        let path = Self::path_of(url);
+        if page.owns_subtree
+            && Self::belongs_to(url, page.url)
+            && !matches!(route, Self::Events | Self::Edits)
+            && !path.starts_with("assets/")
+            && !path.starts_with("__")
         {
             return Self::Document;
         }
-        Self::from(url)
+        route
     }
 
     fn is_served_by(self, request: &str, page: &Page) -> bool {
@@ -73,7 +99,9 @@ impl Route {
     }
 
     fn belongs_to(request: &str, document: &str) -> bool {
-        Self::host_of(request) == Self::host_of(document)
+        request.split_once(':').map(|(scheme, _)| scheme)
+            == document.split_once(':').map(|(scheme, _)| scheme)
+            && Self::host_of(request) == Self::host_of(document)
     }
 
     fn host_of(url: &str) -> &str {
@@ -105,6 +133,23 @@ impl From<&str> for Route {
 mod tests {
     use super::*;
 
+    fn test_page() -> Page {
+        Page::pane("vmux://layout/", || unreachable!())
+    }
+
+    #[test]
+    fn ipc_source_must_be_the_current_vmux_document() {
+        let page = test_page();
+
+        assert!(PageRoutes::serves_document("vmux://layout/", &page));
+        assert!(PageRoutes::serves_document(
+            "vmux://layout/?view=board#active",
+            &page
+        ));
+        assert!(!PageRoutes::serves_document("vmux://layout/other", &page));
+        assert!(!PageRoutes::serves_document("https://example.com/", &page));
+    }
+
     #[test]
     fn a_url_naming_no_path_asks_for_the_page_itself() {
         for url in [
@@ -129,6 +174,33 @@ mod tests {
         ));
         assert!(matches!(
             Route::for_page("vmux://tools/lsp/asset.svg", &page),
+            Route::Asset
+        ));
+    }
+
+    #[test]
+    fn a_subtree_url_asks_for_the_owning_page_document() {
+        let page = Page::pane("vmux://projects/", || unreachable!()).owning_subtree();
+
+        assert!(matches!(
+            Route::for_page("vmux://projects/github.com/mistralai/dashboard", &page),
+            Route::Document
+        ));
+        assert!(matches!(
+            Route::for_page("vmux://projects/assets/index.css", &page),
+            Route::Asset
+        ));
+    }
+
+    #[test]
+    fn a_subtree_page_keeps_reserved_endpoints_as_assets() {
+        let page = Page::pane("vmux://simulator/", || unreachable!()).owning_subtree();
+
+        assert!(matches!(
+            Route::for_page(
+                "vmux://simulator/__simulator-frame?port=58352&after=42",
+                &page
+            ),
             Route::Asset
         ));
     }
@@ -195,5 +267,18 @@ mod tests {
             "vmux://start/__edits",
             "vmux://sessions/"
         ));
+    }
+
+    #[test]
+    fn git_documents_assets_and_event_routes_share_the_git_origin() {
+        let page = Page::pane("git://", || unreachable!()).served_from("git://git/");
+        assert!(PageRoutes::serves_document("git://git/", &page));
+        assert!(matches!(
+            Route::for_page("git://git/assets/index.css", &page),
+            Route::Asset
+        ));
+        assert!(Route::Events.is_served_by("git://git/__events", &page));
+        assert!(Route::Edits.is_served_by("git://git/__edits", &page));
+        assert!(!Route::Events.is_served_by("vmux://git/__events", &page));
     }
 }

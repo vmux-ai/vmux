@@ -1,3 +1,4 @@
+use crate::components::popup::{Dismissal, Surface};
 use dioxus::prelude::*;
 use dioxus_primitives::dioxus_attributes::attributes;
 use dioxus_primitives::icon;
@@ -11,13 +12,25 @@ const SELECT_ROOT: &str = "relative";
 
 const SELECT_TRIGGER: &str = "relative box-border flex cursor-pointer flex-row items-center justify-between gap-1 rounded-md border-0 bg-background py-2 pl-3 pr-4 text-muted-foreground shadow-[inset_0_0_0_1px_var(--border)] transition-colors dark:bg-card hover:bg-accent hover:text-foreground focus-visible:outline-none focus-visible:shadow-[inset_0_0_0_1px_var(--primary)] data-[state=open]:shadow-[inset_0_0_0_1px_var(--primary)] data-[disabled=true]:cursor-not-allowed";
 
-const SELECT_LIST: &str = "absolute left-0 top-full z-[1000] mt-1 min-w-full origin-top rounded-lg border-0 bg-background p-1 opacity-0 shadow-[inset_0_0_0_1px_var(--border)] will-change-[transform,opacity] data-[state=closed]:pointer-events-none data-[state=closed]:animate-[dx-fade-zoom-out_150ms_ease-in_forwards] data-[state=open]:pointer-events-auto data-[state=open]:animate-[dx-fade-zoom-in_150ms_ease-out_forwards] dark:bg-muted dark:shadow-[inset_0_0_0_1px_var(--primary)]";
+const SELECT_LIST: &str = "absolute left-0 top-full z-[1000] mt-1 min-w-full origin-top rounded-lg border-0 bg-background p-1 shadow-[inset_0_0_0_1px_var(--border)] will-change-opacity dark:bg-muted dark:shadow-[inset_0_0_0_1px_var(--primary)]";
 
 const SELECT_OPTION: &str = "flex cursor-pointer items-center justify-between rounded-[calc(0.5rem-0.25rem)] px-3 py-2 text-sm hover:bg-accent hover:text-foreground focus-visible:outline-none data-[state=checked]:bg-primary/10 data-[state=checked]:text-primary data-[disabled=true]:cursor-not-allowed data-[disabled=true]:text-muted-foreground dark:hover:bg-primary dark:hover:text-foreground";
 
 #[component]
 pub fn Select<T: Clone + PartialEq + 'static>(props: SelectProps<T>) -> Element {
-    let base = attributes!(div { class: SELECT_ROOT });
+    let owner = use_hook(|| dioxus::core::current_scope_id().0);
+    Dismissal::use_listener(
+        true,
+        EventHandler::new(move |()| {
+            crate::transport::Host::run_script(format!(
+                "document.querySelector('[data-vmux-select-owner=\"{owner}\"] [aria-haspopup=\"listbox\"][aria-expanded=\"true\"]')?.click();"
+            ));
+        }),
+    );
+    let base = attributes!(div {
+        class: SELECT_ROOT,
+        "data-vmux-select-owner": owner.to_string(),
+    });
     let merged = merge_attributes(vec![base, props.attributes.clone()]);
     rsx! {
         select::Select {
@@ -65,7 +78,13 @@ pub fn SelectValue(props: SelectValueProps) -> Element {
 
 #[component]
 pub fn SelectList(props: SelectListProps) -> Element {
-    let base = attributes!(div { class: SELECT_LIST });
+    let animation = Surface::SELECT;
+    let motion_style = Surface::style();
+    let base = attributes!(div {
+        class: "{SELECT_LIST} {animation}",
+        style: motion_style,
+        "data-vmux-popup-kind": Surface::Select.kind(),
+    });
     let merged = merge_attributes(vec![base, props.attributes.clone()]);
     rsx! {
         select::SelectList {

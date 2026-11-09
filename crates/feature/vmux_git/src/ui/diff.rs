@@ -1,14 +1,68 @@
 #![allow(non_snake_case)]
 
 use dioxus::prelude::*;
-use vmux_ui::components::card::{Card, CardVariant};
+use vmux_ui::components::error_state::ErrorState;
 use vmux_ui::file_icon::TypeIcon;
+use vmux_ui::hooks::send;
 use vmux_ui::i18n::translate;
 use vmux_ui::icon::{LineIcon, LineIconView};
+use vmux_ui::scroll::Target;
 
 use crate::event::GitDiffRow;
-use crate::event::{GitDiffViewport, GitRepositorySnapshot};
+use crate::event::{GitBranchFileEntry, GitDiffViewport, GitRepositorySnapshot};
 use crate::ui::DiffView;
+
+#[component]
+pub(super) fn BranchDiffCard(
+    base_ref: String,
+    files: Vec<GitBranchFileEntry>,
+    expected_paths: Vec<String>,
+    onactivefile: EventHandler<String>,
+    repo_root: ReadSignal<String>,
+    selected_branch: ReadSignal<String>,
+    reveal_path: ReadSignal<Target>,
+    diff_viewport: ReadSignal<Option<GitDiffViewport>>,
+    diff_rows: ReadSignal<Vec<GitDiffRow>>,
+    rows_from: ReadSignal<Option<u32>>,
+    loading: bool,
+    error: String,
+    #[props(default)] onviewedchange: Option<EventHandler<usize>>,
+) -> Element {
+    let selected_branch_value = selected_branch();
+    let comparison = if base_ref.is_empty() {
+        selected_branch_value.clone()
+    } else {
+        format!("{}…{}", base_ref, selected_branch_value)
+    };
+    let has_files = !files.is_empty();
+    let available = loading || !selected_branch_value.is_empty() && has_files;
+    let empty = if selected_branch_value.is_empty() {
+        translate("git-no-branches")
+    } else {
+        translate("git-no-changes")
+    };
+    rsx! {
+        RevisionDiffCard {
+            repo_root,
+            diff_viewport,
+            diff_rows,
+            rows_from,
+            loading,
+            available,
+            title: comparison,
+            subtitle: String::new(),
+            file_path: String::new(),
+            empty,
+            icon: LineIcon::File,
+            error,
+            show_header: false,
+            reveal_path: Some(reveal_path),
+            onactivefile: Some(onactivefile),
+            onviewedchange,
+            expected_paths,
+        }
+    }
+}
 
 #[component]
 pub(super) fn CommitDiffCard(
@@ -17,40 +71,148 @@ pub(super) fn CommitDiffCard(
     selected_commit: ReadSignal<String>,
     diff_viewport: ReadSignal<Option<GitDiffViewport>>,
     diff_rows: ReadSignal<Vec<GitDiffRow>>,
+    rows_from: ReadSignal<Option<u32>>,
     loading: bool,
 ) -> Element {
-    let empty_path = use_signal(String::new);
+    let selected_commit = selected_commit();
     let selected = repository
         .commits
         .iter()
-        .find(|commit| commit.sha == selected_commit())
+        .find(|commit| commit.sha == selected_commit)
         .cloned();
     let title = selected
         .as_ref()
         .map(|commit| format!("{}  {}", commit.short_sha, commit.summary))
-        .unwrap_or_else(|| translate("git-no-commits"));
+        .unwrap_or_else(|| selected_commit.chars().take(7).collect());
     rsx! {
-        Card { variant: CardVariant::Panel, class: "order-2 min-h-[28rem] border-t-sky-400/25 sm:col-start-2 sm:row-start-1 sm:row-span-4 sm:min-h-0 sm:order-none",
-            div { class: "flex h-7 shrink-0 items-center gap-1.5 border-b border-foreground/[0.07] bg-gradient-to-r from-sky-400/[0.055] to-transparent px-2",
-                div { class: "flex size-5 shrink-0 items-center justify-center rounded-md bg-sky-400/10 text-sky-400 ring-1 ring-inset ring-sky-400/15",
-                    LineIconView { icon: LineIcon::GitCommit, class: "size-3" }
+        RevisionDiffCard {
+            repo_root,
+            diff_viewport,
+            diff_rows,
+            rows_from,
+            loading,
+            available: !selected_commit.is_empty(),
+            title,
+            subtitle: selected
+                .as_ref()
+                .map(|commit| format!("{} · {}", commit.author, commit.date))
+                .unwrap_or_default(),
+            file_path: String::new(),
+            empty: translate("git-no-commits"),
+            icon: LineIcon::GitCommit,
+            error: String::new(),
+            show_header: true,
+            reveal_path: None,
+        }
+    }
+}
+
+#[component]
+pub(super) fn StashDiffCard(
+    repository: GitRepositorySnapshot,
+    repo_root: ReadSignal<String>,
+    selected_stash: ReadSignal<String>,
+    diff_viewport: ReadSignal<Option<GitDiffViewport>>,
+    diff_rows: ReadSignal<Vec<GitDiffRow>>,
+    rows_from: ReadSignal<Option<u32>>,
+    loading: bool,
+) -> Element {
+    let selected_stash = selected_stash();
+    let selected = repository
+        .stashes
+        .iter()
+        .find(|stash| stash.reference == selected_stash)
+        .cloned();
+    rsx! {
+        RevisionDiffCard {
+            repo_root,
+            diff_viewport,
+            diff_rows,
+            rows_from,
+            loading,
+            available: selected.is_some(),
+            title: selected
+                .as_ref()
+                .map(|stash| stash.message.clone())
+                .unwrap_or_default(),
+            subtitle: selected_stash,
+            file_path: String::new(),
+            empty: translate("git-no-stashes"),
+            icon: LineIcon::Package,
+            error: String::new(),
+            show_header: true,
+            reveal_path: None,
+        }
+    }
+}
+
+#[component]
+fn RevisionDiffCard(
+    repo_root: ReadSignal<String>,
+    diff_viewport: ReadSignal<Option<GitDiffViewport>>,
+    diff_rows: ReadSignal<Vec<GitDiffRow>>,
+    rows_from: ReadSignal<Option<u32>>,
+    loading: bool,
+    available: bool,
+    title: String,
+    subtitle: String,
+    file_path: String,
+    empty: String,
+    icon: LineIcon,
+    error: String,
+    show_header: bool,
+    reveal_path: Option<ReadSignal<Target>>,
+    #[props(default)] onactivefile: Option<EventHandler<String>>,
+    #[props(default)] onviewedchange: Option<EventHandler<usize>>,
+    #[props(default)] expected_paths: Vec<String>,
+) -> Element {
+    let empty_path = use_signal(String::new);
+    let identity = title.clone();
+    rsx! {
+        section { class: "flex h-full min-h-0 flex-col overflow-hidden rounded-lg bg-transparent",
+            if show_header {
+                div { class: "flex min-h-12 shrink-0 items-center gap-2.5 bg-foreground/[0.025] px-3",
+                    if file_path.is_empty() {
+                        LineIconView { icon, class: "size-3.5 shrink-0 text-muted-foreground" }
+                    } else {
+                        TypeIcon { path: file_path, is_dir: false, class: "size-4 shrink-0" }
+                    }
+                    div { class: "min-w-0 flex-1",
+                        div { class: "truncate font-mono text-[11px] font-semibold text-foreground", "{title}" }
+                        if !subtitle.is_empty() {
+                            div { class: "mt-0.5 flex items-center gap-1 truncate text-[9px] text-muted-foreground",
+                                LineIconView { icon: LineIcon::GitBranch, class: "size-2.5 shrink-0" }
+                                span { class: "truncate", "{subtitle}" }
+                            }
+                        }
+                    }
                 }
-                span { class: "min-w-0 flex-1 truncate text-[11px] font-medium", "{title}" }
-                span { class: "rounded-full border border-sky-400/20 bg-sky-400/[0.08] px-2 py-0.5 text-[9px] font-semibold uppercase tracking-[0.08em] text-sky-400", "Diff" }
             }
-            if selected.is_none() {
-                div { class: "flex min-h-64 flex-1 items-center justify-center p-6 text-center text-sm text-muted-foreground",
-                    {translate("git-no-commits")}
+            if !error.is_empty() {
+                ErrorState {
+                    class: "flex-1".to_string(),
+                    message: error,
+                    on_retry: move |_| {
+                        let _ = send(&crate::event::GitBranchFilesRetryRequest);
+                    },
                 }
-            } else {
+            } else if available {
                 DiffView {
                     repo_root,
                     path: empty_path,
+                    identity,
                     viewport: diff_viewport,
                     display_rows: diff_rows,
+                    rows_from,
+                    reveal_path,
+                    onactivefile,
+                    onviewedchange,
+                    expected_paths,
                     loading,
                     visible: true,
                 }
+            } else {
+                div { class: "flex min-h-64 flex-1 items-center justify-center p-6 text-center text-sm text-muted-foreground", "{empty}" }
             }
         }
     }
@@ -64,26 +226,67 @@ pub(super) fn DiffCard(
     selected_abs_path: ReadSignal<String>,
     diff_viewport: ReadSignal<Option<GitDiffViewport>>,
     diff_rows: ReadSignal<Vec<GitDiffRow>>,
+    rows_from: ReadSignal<Option<u32>>,
     loading: bool,
 ) -> Element {
     rsx! {
-        Card { variant: CardVariant::Panel, class: "order-2 min-h-[28rem] border-t-emerald-400/25 sm:col-start-2 sm:row-start-1 sm:row-span-4 sm:min-h-0 sm:order-none",
-            div { class: "flex h-7 shrink-0 items-center gap-1.5 border-b border-foreground/[0.07] bg-gradient-to-r from-emerald-400/[0.055] to-transparent px-2",
-                div { class: "flex size-5 shrink-0 items-center justify-center rounded-md bg-emerald-400/10 text-emerald-400 ring-1 ring-inset ring-emerald-400/15",
-                    TypeIcon { path: selected_path(), is_dir: false, class: "h-3 w-3" }
-                }
+        section { class: "flex h-full min-h-0 flex-col overflow-hidden rounded-lg bg-transparent",
+            div { class: "flex h-10 shrink-0 items-center gap-2 bg-card/45 px-3",
+                TypeIcon { path: selected_path(), is_dir: false, class: "size-3.5 shrink-0" }
                 span { class: "min-w-0 flex-1 truncate font-mono text-[11px] font-medium",
                     if selected_path().is_empty() { {translate("git-select-file")} } else { "{selected_path}" }
                 }
-                span { class: "rounded-full border border-emerald-400/20 bg-emerald-400/[0.08] px-2 py-0.5 text-[9px] font-semibold uppercase tracking-[0.08em] text-emerald-400", "Diff" }
             }
             if selected_abs_path().is_empty() {
                 div { class: "flex min-h-64 flex-1 items-center justify-center p-6 text-center text-sm text-muted-foreground",
                     {translate("git-select-file")}
                 }
             } else {
-                DiffView { repo_root, path: selected_abs_path, path_bytes: selected_path_bytes(), viewport: diff_viewport, display_rows: diff_rows, loading, visible: true }
+                DiffView { repo_root, path: selected_abs_path, path_bytes: selected_path_bytes(), identity: selected_path(), viewport: diff_viewport, display_rows: diff_rows, rows_from, loading, visible: true, reveal_path: None }
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use dioxus::core::{Mutation, VirtualDom};
+
+    #[component]
+    fn PendingBranchReview() -> Element {
+        let mut active_path = use_signal(String::new);
+        let repo_root = use_signal(String::new);
+        let selected_branch = use_signal(String::new);
+        let reveal_path = use_signal(Target::default);
+        let diff_viewport = use_signal(|| None);
+        let diff_rows = use_signal(Vec::new);
+        let rows_from = use_signal(|| None);
+        rsx! {
+            BranchDiffCard {
+                base_ref: String::new(),
+                files: Vec::new(),
+                expected_paths: Vec::new(),
+                onactivefile: move |path: String| active_path.set(path),
+                repo_root,
+                selected_branch,
+                reveal_path,
+                diff_viewport,
+                diff_rows,
+                rows_from,
+                loading: true,
+                error: String::new(),
+            }
+        }
+    }
+
+    #[test]
+    fn pending_branch_selection_keeps_the_diff_surface_mounted() {
+        let mut dom = VirtualDom::new(PendingBranchReview);
+        let rendered = dom.rebuild_to_vec();
+        assert!(rendered.edits.iter().any(|edit| matches!(
+            edit,
+            Mutation::NewEventListener { name, .. } if name == "scroll"
+        )));
     }
 }

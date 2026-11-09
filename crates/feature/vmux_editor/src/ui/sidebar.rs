@@ -92,50 +92,54 @@ pub(super) fn ExplorerSidebar(
     let keys = use_context::<FileKeys>();
     let open = (pane.visible)();
     let panel_width = pane.rendered_width();
-    let wrapper_style = if open {
-        format!("width:{panel_width}px;min-width:{EXPLORER_MIN_WIDTH}px;")
+    let duration = vmux_ui::motion::Motion::LAYOUT_MS;
+    let wrapper_width = if open { panel_width } else { 0 };
+    let wrapper_style =
+        format!("--vmux-sidebar-motion-ms:{duration}ms;width:{wrapper_width}px;min-width:0px;");
+    let panel_style = format!("width:{panel_width}px;");
+    let wrapper_class = if (pane.resizing)() {
+        "relative z-[2] h-full shrink-0 [contain:layout_style] transition-none"
     } else {
-        "width:0px;min-width:0px;".to_string()
-    };
-    let panel_style = if open {
-        "width:100%;".to_string()
-    } else {
-        format!("width:{panel_width}px;")
+        "relative z-[2] h-full shrink-0 [contain:layout_style] transition-[width] duration-[var(--vmux-sidebar-motion-ms)] ease-out motion-reduce:transition-none"
     };
     let panel_class = if open {
-        "absolute inset-y-0 left-0 h-full translate-x-0 opacity-100 transition-[translate,opacity] duration-200 ease-out will-change-[translate]"
+        "absolute inset-y-0 left-0 h-full translate-x-0 opacity-100 transition-[translate,opacity] duration-[var(--vmux-sidebar-motion-ms)] ease-out motion-reduce:transition-none"
     } else {
-        "pointer-events-none absolute inset-y-0 left-0 h-full -translate-x-full opacity-0 transition-[translate,opacity] duration-200 ease-out will-change-[translate]"
+        "pointer-events-none absolute inset-y-0 left-0 h-full -translate-x-3 opacity-0 transition-[translate,opacity] duration-[var(--vmux-sidebar-motion-ms)] ease-out motion-reduce:transition-none"
     };
     rsx! {
         div {
-            class: "relative z-[2] h-full shrink [contain:layout_style]",
+            class: wrapper_class,
             style: "{wrapper_style}",
             onkeydown: move |event| {
                 keys.offer(&event);
             },
-            div { class: "{panel_class}", style: "{panel_style}", ExplorerPanel { visible: pane.visible, caret_line, view } }
-        }
-        div {
-            class: if open {
-                "relative z-[2] h-full w-1 shrink-0 cursor-col-resize bg-foreground/[0.06] opacity-100 transition-opacity duration-150 hover:bg-primary/40"
-            } else {
-                "pointer-events-none h-full w-0 shrink-0 opacity-0"
-            },
-            onmousedown: move |e: Event<MouseData>| {
-                e.prevent_default();
-                pane.start_resize();
-            },
+            div { class: "absolute inset-0 overflow-hidden",
+                div { class: "{panel_class}", style: "{panel_style}", ExplorerPanel { visible: pane.visible, caret_line, view } }
+            }
+            if open {
+                div {
+                    class: "group absolute inset-y-0 -right-1 z-[3] w-2 cursor-col-resize",
+                    onmousedown: move |e: Event<MouseData>| {
+                        e.prevent_default();
+                        pane.start_resize();
+                    },
+                    span { class: "pointer-events-none absolute left-1/2 top-1/2 h-9 w-1 -translate-x-1/2 -translate-y-1/2 rounded-full bg-foreground/20 opacity-0 transition-opacity group-hover:opacity-100" }
+                }
+            }
         }
     }
 }
 
 #[component]
 pub(super) fn ExplorerToggleButton(pane: ExplorerPane, mode: Memo<Mode>) -> Element {
+    let open = (pane.visible)();
     rsx! {
         button {
-            class: "shrink-0 cursor-default rounded p-0.5 text-foreground/60 hover:bg-foreground/[0.08] hover:text-foreground",
+            class: "flex size-6 shrink-0 cursor-default items-center justify-center rounded-md text-foreground/60 transition-[color,background-color,transform] duration-100 hover:bg-foreground/[0.045] hover:text-foreground active:scale-95 motion-reduce:transition-none",
             title: translate("editor-toggle-explorer"),
+            aria_label: translate("editor-toggle-explorer"),
+            aria_expanded: open,
             onclick: move |_| {
                 pane.toggle(mode)
             },
@@ -144,10 +148,17 @@ pub(super) fn ExplorerToggleButton(pane: ExplorerPane, mode: Memo<Mode>) -> Elem
                 view_box: "0 0 24 24",
                 fill: "none",
                 stroke: "currentColor",
-                stroke_width: "2",
+                stroke_width: "1.5",
                 stroke_linecap: "round",
                 stroke_linejoin: "round",
                 rect { x: "3", y: "3", width: "18", height: "18", rx: "2" }
+                rect { x: "4", y: "4", width: "4", height: "16", fill: "currentColor", stroke: "none",
+                    class: if open {
+                        "origin-[4px_12px] scale-x-100 opacity-[0.12] transition-[transform,opacity] duration-100 motion-reduce:transition-none"
+                    } else {
+                        "origin-[4px_12px] scale-x-0 opacity-0 transition-[transform,opacity] duration-100 motion-reduce:transition-none"
+                    },
+                }
                 line { x1: "9", y1: "3", x2: "9", y2: "21" }
             }
         }

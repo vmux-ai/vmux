@@ -4,12 +4,20 @@ use vmux_ecs::event::{OutlineEvent, OutlineRow};
 
 use super::OutlineDirty;
 use crate::host::editor::{Editor, FileView};
+use crate::host::file_lifecycle::EditorFileLoadedSet;
+use crate::host::markdown::ParsedNote;
+use crate::host::status::FileInitialMetaSent;
 
 pub(super) struct OutlinePlugin;
 
 impl Plugin for OutlinePlugin {
     fn build(&self, app: &mut App) {
-        app.add_systems(Update, (emit_markdown, clear_on_file_change));
+        app.add_systems(
+            Update,
+            (clear_on_file_change, emit_markdown)
+                .chain()
+                .after(EditorFileLoadedSet),
+        );
     }
 }
 
@@ -133,14 +141,22 @@ impl SymbolSpan {
     }
 }
 
-type DirtyOutline = (With<OutlineDirty>, With<vmux_ecs::page::PageReady>);
+type DirtyOutline = (
+    With<OutlineDirty>,
+    With<vmux_ecs::page::PageReady>,
+    With<FileInitialMetaSent>,
+);
 
 fn emit_markdown(
-    query: Query<(Entity, &Editor), DirtyOutline>,
+    query: Query<(Entity, &Editor, &FileView), DirtyOutline>,
     browsers: NonSend<Browsers>,
     mut commands: Commands,
 ) {
-    for (entity, edit) in &query {
+    for (entity, edit, file) in &query {
+        if !ParsedNote::supports(&file.path) {
+            commands.entity(entity).remove::<OutlineDirty>();
+            continue;
+        }
         if !browsers.can_emit_to(&entity) {
             continue;
         }
@@ -171,6 +187,128 @@ fn clear_on_file_change(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::edit::{EditCore, highlight_cache::HighlightCache};
+    use vmux_api::UiState;
+    use vmux_ecs::event::{FileDocumentKind, FileMetaEvent, FileUiState};
+
+    #[derive(Resource, Default)]
+    struct Published(FileUiState);
+
+    impl Published {
+        fn capture(event: On<vmux_ecs::FileUiStateWrite>, mut state: ResMut<Self>) {
+            let previous = std::mem::take(&mut state.0);
+            state.0 =
+                FileUiState::from_updates(Some(previous), vec![event.event().update().clone()]);
+        }
+    }
+
+    struct OutlinePage {
+        app: App,
+        page: Entity,
+    }
+
+    impl OutlinePage {
+        fn new() -> Self {
+            let mut app = App::new();
+            app.add_plugins((MinimalPlugins, OutlinePlugin))
+                .init_non_send::<Browsers>()
+                .init_resource::<Published>()
+                .add_observer(Published::capture);
+            let path = std::path::PathBuf::from("/repo/one.md");
+            let editor = Self::editor(path.clone(), "# One\nbody\n## Child\ntext\n");
+            let page = app
+                .world_mut()
+                .spawn((
+                    FileView { path },
+                    editor,
+                    OutlineDirty,
+                    vmux_ecs::page::PageReady {},
+                ))
+                .id();
+            app.world_mut()
+                .non_send_mut::<Browsers>()
+                .set_externally_hosted(page);
+            Self { app, page }
+        }
+
+        fn editor(path: std::path::PathBuf, text: &str) -> Editor {
+            let core = EditCore::new(
+                path.clone(),
+                "Markdown".to_string(),
+                text,
+                vmux_api::editor::EditMode::Normal,
+            );
+            Editor::new(core, HighlightCache::plain(&path), Default::default())
+        }
+
+        fn metadata(&mut self, revision: u64) {
+            let path = self
+                .app
+                .world()
+                .get::<FileView>(self.page)
+                .unwrap()
+                .path
+                .to_string_lossy()
+                .into_owned();
+            self.app
+                .world_mut()
+                .trigger(vmux_ecs::FileUiStateWrite::from_event(
+                    self.page,
+                    &FileMetaEvent {
+                        revision,
+                        path: path.clone(),
+                        abs_path: path,
+                        kind: FileDocumentKind::Markdown,
+                        language: "Markdown".to_string(),
+                        total_lines: 4,
+                        indent: Default::default(),
+                        line_ending: Default::default(),
+                        encoding: Default::default(),
+                    },
+                ));
+            self.app
+                .world_mut()
+                .entity_mut(self.page)
+                .insert(FileInitialMetaSent);
+        }
+
+        fn names(&self) -> Vec<String> {
+            let mut names = Vec::new();
+            if let Some(outline) = &self.app.world().resource::<Published>().0.explorer.outline {
+                for item in &outline.items {
+                    names.push(item.name.clone());
+                }
+            }
+            names
+        }
+    }
+
+    #[test]
+    fn markdown_outline_survives_document_metadata_arriving_after_page_readiness() {
+        let mut fixture = OutlinePage::new();
+        fixture.app.update();
+        fixture.metadata(1);
+        fixture.app.update();
+        assert_eq!(fixture.names(), ["One", "Child"]);
+    }
+
+    #[test]
+    fn markdown_outline_survives_file_change_and_metadata_in_the_same_frame() {
+        let mut fixture = OutlinePage::new();
+        fixture.metadata(1);
+        fixture.app.update();
+        assert_eq!(fixture.names(), ["One", "Child"]);
+        let path = std::path::PathBuf::from("/repo/two.md");
+        let editor = OutlinePage::editor(path.clone(), "# Two\nbody\n");
+        fixture.app.world_mut().entity_mut(fixture.page).insert((
+            FileView { path },
+            editor,
+            OutlineDirty,
+        ));
+        fixture.metadata(2);
+        fixture.app.update();
+        assert_eq!(fixture.names(), ["Two"]);
+    }
 
     #[test]
     fn markdown_outline_tracks_heading_ranges() {

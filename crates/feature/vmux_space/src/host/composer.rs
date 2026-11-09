@@ -1,29 +1,28 @@
 use bevy::prelude::*;
 use bevy_cef::prelude::{Browsers, UiEventPlugin, UiInput};
 
-use super::project::SpaceProjects;
+use super::project::{ActiveProjectRows, SpaceProjects};
 use super::{AgentChooseWorkspace, AgentChooseWorkspaceAtPath, AgentCreateWorktreeOnBranch};
 use vmux_api::protocol::{AgentRequest, AgentRequestId};
-use vmux_chat::event::{
-    ChatBranch, ChatBranchesRequest, ChatGoToBranch, ChatSelectWorkspace, ComposerContext,
-};
-use vmux_chat::host::{ChatBranchesProjection, ChatComposerContext, ChatView};
 use vmux_ecs::agent::{AgentRequestInput, CommandOrigin};
 use vmux_ecs::event::ProjectRow;
 use vmux_ecs::page::PageReady;
-use vmux_git::RepoInfoCache;
+use vmux_ecs::{Cwd, EntityTarget, KeyboardOwner, ProcessAnchor};
 use vmux_git::worktree::RepoInfo;
+use vmux_git::{GitRuntime, GitTask, RepoInfoCache};
 use vmux_layout::tab::{Tab, TabWorkspace, TabWorktree};
-use vmux_session::AcpSession;
-use vmux_session::AgentApprovalPolicy;
-
-use bevy::tasks::futures_lite::future;
+use vmux_session::event::{
+    ChatBranch, ChatBranchesRequest, ChatGoToBranch, ChatSelectWorkspace, ComposerContext,
+};
+use vmux_session::host::{ChatBranchesProjection, ChatComposerContext, SessionView};
+use vmux_session::{ApprovalPolicy, Route, Session, SessionId};
 
 pub(super) struct SpaceComposerPlugin;
 
 impl Plugin for SpaceComposerPlugin {
     fn build(&self, app: &mut App) {
         app.add_message::<AgentRequestInput>()
+            .init_resource::<GitRuntime>()
             .add_plugins(UiEventPlugin::<(
                 ChatSelectWorkspace,
                 ChatBranchesRequest,
@@ -52,10 +51,15 @@ struct ComposerProjection<'w, 's> {
         'w,
         's,
         (
-            Option<&'static AcpSession>,
-            Option<&'static AgentApprovalPolicy>,
+            Entity,
+            &'static SessionId,
+            Option<&'static Cwd>,
+            Option<&'static ApprovalPolicy>,
         ),
+        With<Session>,
     >,
+    pages: Query<'w, 's, &'static vmux_ecs::PageMetadata>,
+    targets: Query<'w, 's, &'static EntityTarget<Session>>,
     child_of: Query<'w, 's, &'static ChildOf>,
     tabs: Query<
         'w,
@@ -68,19 +72,46 @@ struct ComposerProjection<'w, 's> {
     >,
     repo_info: Option<Single<'w, 's, &'static mut RepoInfoCache>>,
     space_projects: SpaceProjects<'w, 's>,
+    active_project_rows: Res<'w, ActiveProjectRows>,
 }
 
 impl ComposerProjection<'_, '_> {
-    fn context(&mut self, stack: Entity) -> Option<ComposerContext> {
-        let (acp, policy) = self.sessions.get(stack).ok()?;
-        let mut input = self.input(stack, acp, policy);
-        input.projects = self.space_projects.rows(stack);
+    fn context(&mut self, stack: Entity, webview: Entity, active: bool) -> Option<ComposerContext> {
+        let route = self
+            .pages
+            .get(webview)
+            .ok()
+            .and_then(|page| Route::parse(&page.url));
+        let session = match route {
+            Some(Route::Session(id)) => {
+                self.sessions
+                    .iter()
+                    .find(|(_, candidate, _, _)| **candidate == id)?
+                    .0
+            }
+            _ => self.targets.get(stack).ok()?.entity(),
+        };
+        let (_, _, cwd, policy) = self.sessions.get(session).ok()?;
+        let observer = active.then_some(webview);
+        let mut input = self.input(stack, cwd, policy);
+        input.projects = self
+            .space_projects
+            .selector_rows(stack, &self.active_project_rows);
         let info = if input.cwd.as_os_str().is_empty() {
+            if let Some(observer) = observer
+                && let Some(cache) = self.repo_info.as_mut()
+            {
+                cache.bypass_change_detection().release(observer);
+            }
             None
         } else {
-            self.repo_info
-                .as_mut()
-                .and_then(|cache| cache.bypass_change_detection().lookup(&input.cwd))
+            self.repo_info.as_mut().and_then(|cache| {
+                let cache = cache.bypass_change_detection();
+                match observer {
+                    Some(observer) => cache.observe_active(observer, &input.cwd),
+                    None => cache.snapshot(&input.cwd),
+                }
+            })
         };
         Some(input.context(info.as_ref()))
     }
@@ -88,8 +119,8 @@ impl ComposerProjection<'_, '_> {
     fn input(
         &self,
         stack: Entity,
-        acp: Option<&AcpSession>,
-        policy: Option<&AgentApprovalPolicy>,
+        cwd: Option<&Cwd>,
+        policy: Option<&ApprovalPolicy>,
     ) -> ComposerContextInput {
         let mut current = stack;
         let mut tab_dir = None;
@@ -108,12 +139,10 @@ impl ComposerProjection<'_, '_> {
             current = parent.parent();
         }
         ComposerContextInput {
-            cwd: tab_dir
-                .or_else(|| acp.map(|session| session.cwd.clone()))
-                .unwrap_or_default(),
-            workspace_selected,
+            cwd: cwd.map(|cwd| cwd.0.clone()).or(tab_dir).unwrap_or_default(),
+            workspace_selected: workspace_selected || cwd.is_some(),
             worktree,
-            can_manage_workspace: acp.is_some(),
+            can_manage_workspace: cwd.is_some(),
             auto_allow_count: policy
                 .map(|policy| u32::try_from(policy.auto.len()).unwrap_or(u32::MAX))
                 .unwrap_or_default(),
@@ -123,26 +152,44 @@ impl ComposerProjection<'_, '_> {
 }
 
 fn push_context_to_page(
-    mut views: Query<(Entity, &ChildOf, Ref<PageReady>, &mut ChatComposerContext), With<ChatView>>,
+    mut views: Query<
+        (
+            Entity,
+            &ChildOf,
+            Ref<PageReady>,
+            Has<KeyboardOwner>,
+            &mut ChatComposerContext,
+            Option<&vmux_ecs::UiState<vmux_session::state::ChatUiState>>,
+        ),
+        With<SessionView>,
+    >,
     browsers: NonSend<Browsers>,
     mut projection: ComposerProjection,
     mut commands: Commands,
 ) {
-    for (webview, parent, ready, mut current) in &mut views {
+    for (webview, parent, ready, active, mut current, ui) in &mut views {
         if !browsers.can_emit_to(&webview) {
             continue;
         }
+        let pending = ui
+            .and_then(vmux_ecs::UiState::current)
+            .is_none_or(|state| !state.composer_ready);
+        if !active && !ready.is_changed() && !pending {
+            continue;
+        }
         let stack = parent.parent();
-        let Some(context) = projection.context(stack) else {
+        let context = projection.context(stack, webview, active);
+
+        let Some(context) = context else {
             continue;
         };
         let changed = current.0 != context;
         if changed {
             current.0.clone_from(&context);
         }
-        if changed || ready.is_changed() {
+        if changed || ready.is_changed() || pending {
             commands.trigger(
-                vmux_ecs::UiStateWrite::<vmux_chat::state::ChatUiState>::from_event(
+                vmux_ecs::UiStateWrite::<vmux_session::state::ChatUiState>::from_event(
                     webview, &context,
                 ),
             );
@@ -198,13 +245,14 @@ struct BranchRead {
     webview: Entity,
     request_id: u64,
     project: String,
-    task: bevy::tasks::Task<Vec<ChatBranch>>,
+    task: GitTask<Vec<ChatBranch>>,
 }
 
 fn chat_branches_request(
     trigger: On<UiInput<ChatBranchesRequest>>,
     proxy: Option<Res<bevy::winit::EventLoopProxyWrapper>>,
-    mut projections: Query<(&ChatComposerContext, &mut ChatBranchesProjection), With<ChatView>>,
+    runtime: Res<GitRuntime>,
+    mut projections: Query<(&ChatComposerContext, &mut ChatBranchesProjection), With<SessionView>>,
     mut commands: Commands,
 ) {
     let webview = trigger.event().webview;
@@ -217,12 +265,14 @@ fn chat_branches_request(
     }
     let request_id = projection.start(project.clone());
     commands.trigger(
-        vmux_ecs::UiStateWrite::<vmux_chat::state::ChatUiState>::from_event(webview, &projection.0),
+        vmux_ecs::UiStateWrite::<vmux_session::state::ChatUiState>::from_event(
+            webview,
+            &projection.0,
+        ),
     );
     let root = std::path::PathBuf::from(&project);
-    let wake = vmux_ecs::wake::Wake::beside(proxy.as_deref());
-    let task = bevy::tasks::IoTaskPool::get().spawn(async move {
-        let _wake = wake;
+    let wake = proxy.as_deref().map(|proxy| (**proxy).clone());
+    let Some(task) = runtime.spawn(wake, move || {
         let Ok(checkout) = vmux_git::worktree::CheckoutInfo::try_from(root.as_path()) else {
             return Vec::new();
         };
@@ -242,7 +292,16 @@ fn chat_branches_request(
             });
         }
         branches
-    });
+    }) else {
+        projection.finish(request_id, &project, Vec::new());
+        commands.trigger(
+            vmux_ecs::UiStateWrite::<vmux_session::state::ChatUiState>::from_event(
+                webview,
+                &projection.0,
+            ),
+        );
+        return;
+    };
     commands.spawn(BranchRead {
         webview,
         request_id,
@@ -253,12 +312,12 @@ fn chat_branches_request(
 
 fn drain_branch_reads(
     mut reads: Query<(Entity, &mut BranchRead)>,
-    mut projections: Query<&mut ChatBranchesProjection, With<ChatView>>,
+    mut projections: Query<&mut ChatBranchesProjection, With<SessionView>>,
     browsers: NonSend<Browsers>,
     mut commands: Commands,
 ) {
     for (entity, mut read) in &mut reads {
-        let Some(branches) = future::block_on(future::poll_once(&mut read.task)) else {
+        let Some(branches) = read.task.poll() else {
             continue;
         };
         commands.entity(entity).despawn();
@@ -268,11 +327,11 @@ fn drain_branch_reads(
         let Ok(mut projection) = projections.get_mut(read.webview) else {
             continue;
         };
-        if !projection.finish(read.request_id, &read.project, branches) {
+        if !projection.finish(read.request_id, &read.project, branches.unwrap_or_default()) {
             continue;
         }
         commands.trigger(
-            vmux_ecs::UiStateWrite::<vmux_chat::state::ChatUiState>::from_event(
+            vmux_ecs::UiStateWrite::<vmux_session::state::ChatUiState>::from_event(
                 read.webview,
                 &projection.0,
             ),
@@ -283,28 +342,37 @@ fn drain_branch_reads(
 fn chat_go_to_branch(
     trigger: On<UiInput<ChatGoToBranch>>,
     child_of: Query<&ChildOf>,
-    sessions: Query<&AcpSession>,
+    targets: Query<&EntityTarget<Session>>,
+    sessions: Query<&ProcessAnchor, With<Session>>,
     mut requests: MessageWriter<AgentRequestInput>,
 ) {
     let evt = &trigger.event().payload;
     let Ok(parent) = child_of.get(trigger.event().webview) else {
         return;
     };
-    let Ok(session) = sessions.get(parent.parent()) else {
+    let Ok(target) = targets.get(parent.parent()) else {
+        return;
+    };
+    let Ok(anchor) = sessions.get(target.entity()) else {
         return;
     };
     let checkout = evt.checkout.trim();
-    let request = if checkout.is_empty() {
-        let project = evt.project.trim();
-        AgentRequest::encode(&AgentCreateWorktreeOnBranch {
-            anchor: session.anchor,
-            branch: evt.branch.clone(),
-            project: (!project.is_empty()).then(|| project.to_string()),
+    let project = evt.project.trim();
+    let request = if !checkout.is_empty() {
+        AgentRequest::encode(&AgentChooseWorkspaceAtPath {
+            anchor: anchor.0,
+            path: checkout.to_string(),
+        })
+    } else if evt.branch.trim().is_empty() {
+        AgentRequest::encode(&AgentChooseWorkspaceAtPath {
+            anchor: anchor.0,
+            path: project.to_string(),
         })
     } else {
-        AgentRequest::encode(&AgentChooseWorkspaceAtPath {
-            anchor: session.anchor,
-            path: checkout.to_string(),
+        AgentRequest::encode(&AgentCreateWorktreeOnBranch {
+            anchor: anchor.0,
+            branch: evt.branch.clone(),
+            project: (!project.is_empty()).then(|| project.to_string()),
         })
     };
     let Ok(request) = request else {
@@ -320,18 +388,20 @@ fn chat_go_to_branch(
 fn chat_select_workspace(
     trigger: On<UiInput<ChatSelectWorkspace>>,
     child_of: Query<&ChildOf>,
-    sessions: Query<&AcpSession>,
+    targets: Query<&EntityTarget<Session>>,
+    sessions: Query<&ProcessAnchor, With<Session>>,
     mut requests: MessageWriter<AgentRequestInput>,
 ) {
     let Ok(parent) = child_of.get(trigger.event().webview) else {
         return;
     };
-    let Ok(session) = sessions.get(parent.parent()) else {
+    let Ok(target) = targets.get(parent.parent()) else {
         return;
     };
-    let Ok(request) = AgentRequest::encode(&AgentChooseWorkspace {
-        anchor: session.anchor,
-    }) else {
+    let Ok(anchor) = sessions.get(target.entity()) else {
+        return;
+    };
+    let Ok(request) = AgentRequest::encode(&AgentChooseWorkspace { anchor: anchor.0 }) else {
         return;
     };
     requests.write(AgentRequestInput {
@@ -344,6 +414,149 @@ fn chat_select_workspace(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[derive(Resource, Default)]
+    struct ContextWrites(usize);
+
+    impl ContextWrites {
+        fn record(
+            event: On<vmux_ecs::UiStateWrite<vmux_session::state::ChatUiState>>,
+            mut writes: ResMut<Self>,
+        ) {
+            if event.update().composer.is_some() {
+                writes.0 += 1;
+            }
+        }
+    }
+
+    struct ComposerPage {
+        app: App,
+        view: Entity,
+    }
+
+    impl ComposerPage {
+        fn waiting() -> Self {
+            let mut app = App::new();
+            app.add_plugins((
+                MinimalPlugins,
+                SpaceComposerPlugin,
+                vmux_ecs::UiStatePlugin::<vmux_session::state::ChatUiState>::default(),
+            ))
+            .init_resource::<ActiveProjectRows>()
+            .init_resource::<ContextWrites>()
+            .add_observer(ContextWrites::record)
+            .add_observer(Self::delivered);
+            let stack = app.world_mut().spawn_empty().id();
+            let view = app
+                .world_mut()
+                .spawn((
+                    SessionView,
+                    ChildOf(stack),
+                    PageReady {},
+                    vmux_ecs::PageMetadata {
+                        url: "vmux://sessions/late-session".to_string(),
+                        ..Default::default()
+                    },
+                    bevy_cef::prelude::BinIpcSurfaceGeneration(1),
+                    bevy_cef::prelude::BinIpcNavigationRevision(1),
+                    bevy_cef::prelude::BinIpcEpoch(1),
+                ))
+                .id();
+            app.world_mut().spawn(vmux_api::UiEventPermissions {
+                url: "vmux://sessions/",
+                owns_subtree: true,
+                permissions: &["ChatUiState"],
+            });
+            let mut browsers = Browsers::default();
+            browsers.set_externally_hosted(view);
+            app.insert_non_send(browsers);
+            Self { app, view }
+        }
+
+        fn delivered(event: On<bevy_cef::prelude::BinHostEmitEvent>) {
+            event.mark_delivered();
+        }
+
+        fn bind(&mut self, path: &std::path::Path) {
+            self.app.world_mut().spawn((
+                Session,
+                SessionId("late-session".to_string()),
+                Cwd(path.to_path_buf()),
+            ));
+        }
+
+        fn context(&self) -> &ComposerContext {
+            let state = self
+                .app
+                .world()
+                .get::<vmux_ecs::UiState<vmux_session::state::ChatUiState>>(self.view)
+                .unwrap()
+                .current()
+                .unwrap();
+            assert!(state.composer_ready);
+            &state.composer
+        }
+    }
+
+    #[test]
+    fn a_session_composer_finishes_loading_after_binding_missed_its_first_ready_frame() {
+        let root = tempfile::tempdir().unwrap();
+        let mut page = ComposerPage::waiting();
+        page.app.update();
+        assert_eq!(page.app.world().resource::<ContextWrites>().0, 0);
+        page.bind(root.path());
+        page.app.update();
+        assert_eq!(page.context().cwd, root.path().to_string_lossy());
+        assert!(page.context().workspace_selected);
+        assert!(
+            !page
+                .app
+                .world()
+                .entity(page.view)
+                .contains::<KeyboardOwner>()
+        );
+        assert_eq!(page.app.world().resource::<ContextWrites>().0, 1);
+        page.app.update();
+        assert_eq!(page.app.world().resource::<ContextWrites>().0, 1);
+    }
+
+    #[test]
+    fn an_unchanged_context_is_republished_when_the_page_has_not_received_it() {
+        let root = tempfile::tempdir().unwrap();
+        let mut page = ComposerPage::waiting();
+        page.bind(root.path());
+        page.app.update();
+        assert_eq!(page.context().cwd, root.path().to_string_lossy());
+        page.app
+            .world_mut()
+            .entity_mut(page.view)
+            .remove::<vmux_ecs::UiState<vmux_session::state::ChatUiState>>();
+        page.app.update();
+        assert_eq!(page.context().cwd, root.path().to_string_lossy());
+        assert_eq!(page.app.world().resource::<ContextWrites>().0, 2);
+    }
+
+    #[test]
+    fn session_workspace_context_uses_its_own_directory_instead_of_the_tabs_startup_directory() {
+        let session_root = tempfile::tempdir().unwrap();
+        let tab_root = tempfile::tempdir().unwrap();
+        let mut page = ComposerPage::waiting();
+        let stack = page.app.world().get::<ChildOf>(page.view).unwrap().parent();
+        let tab = page
+            .app
+            .world_mut()
+            .spawn(Tab {
+                startup_dir: Some(tab_root.path().display().to_string()),
+                ..Default::default()
+            })
+            .id();
+        page.app.world_mut().entity_mut(stack).insert(ChildOf(tab));
+        page.bind(session_root.path());
+        page.app.update();
+
+        assert_eq!(page.context().cwd, session_root.path().to_string_lossy());
+        assert!(page.context().workspace_selected);
+    }
 
     #[test]
     fn branch_projection_rejects_stale_results() {
@@ -362,15 +575,13 @@ mod tests {
         app.add_message::<AgentRequestInput>()
             .add_observer(chat_select_workspace);
         let anchor = vmux_ecs::ProcessId::new();
+        let session = app
+            .world_mut()
+            .spawn((Session, Cwd("/tmp".into()), ProcessAnchor(anchor)))
+            .id();
         let stack = app
             .world_mut()
-            .spawn(AcpSession {
-                agent_id: "claude".into(),
-                sid: "s1".into(),
-                cwd: "/tmp".into(),
-                anchor,
-                resume: None,
-            })
+            .spawn(EntityTarget::<Session>::new(session))
             .id();
         let webview = app.world_mut().spawn(ChildOf(stack)).id();
 
@@ -401,15 +612,13 @@ mod tests {
         app.add_message::<AgentRequestInput>()
             .add_observer(chat_go_to_branch);
         let anchor = vmux_ecs::ProcessId::new();
+        let session = app
+            .world_mut()
+            .spawn((Session, Cwd("/tmp/here".into()), ProcessAnchor(anchor)))
+            .id();
         let stack = app
             .world_mut()
-            .spawn(AcpSession {
-                agent_id: "claude".into(),
-                sid: "s1".into(),
-                cwd: "/tmp/here".into(),
-                anchor,
-                resume: None,
-            })
+            .spawn(EntityTarget::<Session>::new(session))
             .id();
         let webview = app.world_mut().spawn(ChildOf(stack)).id();
 

@@ -38,6 +38,7 @@ impl Plugin for EditorPlugin {
                 FileOpenEvent,
                 FileTextInput,
                 FilePointerEvent,
+                FileCheckoutPreviewRequest,
             )>::default())
             .add_plugins(UiEventPlugin::<(
                 KnowledgeLinkOpen,
@@ -84,7 +85,7 @@ fn open_ex(
     mut requests: MessageReader<OpenExRequest>,
     mut open: MessageWriter<CommandBarOpenRequest>,
 ) {
-    if requests.read().next().is_some() {
+    if requests.read().count() > 0 {
         open.write(CommandBarOpenRequest::query(":"));
     }
 }
@@ -347,8 +348,15 @@ fn reapply_keymap_on_change(
     }
 }
 
+#[derive(bevy::ecs::system::SystemParam)]
+struct PreviewAccess<'w, 's> {
+    checkout: crate::host::navigation::CheckoutContext<'w, 's>,
+    previews: Query<'w, 's, (), With<crate::host::navigation::CheckoutPreview>>,
+}
+
 fn apply_edit_request(
     trigger: On<EditRequest>,
+    preview: PreviewAccess,
     mut views: Query<(&mut Editor, &mut FileViewport, &mut vmux_git::GitDiffSource)>,
     mut clipboard: NonSendMut<ClipboardHandle>,
     mut self_writes: NonSendMut<SelfWrites>,
@@ -362,11 +370,19 @@ fn apply_edit_request(
         return;
     };
     let top_before = vp.top_row;
+    let read_only = preview.previews.contains(entity)
+        || preview
+            .checkout
+            .preview(entity, &edit.core.buffer.path)
+            .is_some();
     let mut text_changed = false;
     let mut cursor_stale = false;
     let mut dirty_changed = false;
     let mut fold_changed = false;
     for cmd in cmds {
+        if read_only && !cmd.allowed_in_preview() {
+            continue;
+        }
         if let EditCommand::ScrollViewport(lines) = &cmd {
             let visible = vp.visible_rows(&mut edit);
             let target = (vp.top_row as i64 + *lines as i64).clamp(0, u32::MAX as i64) as u32;
@@ -584,6 +600,9 @@ fn apply_edit_request(
     }
     if text_changed || cursor_stale || fold_changed {
         commands.trigger(CursorRenderRequest::new(entity));
+        if ParsedNote::supports(&edit.core.buffer.path) {
+            commands.entity(entity).remove::<NoteSent>();
+        }
     }
     if fold_changed {
         commands.entity(entity).insert(FoldsDirty);
@@ -818,6 +837,9 @@ fn file_pointer(
     }
     if let Some(command) = keymap.0.pointer_selection_mode(p.extend) {
         edit.core.apply(command);
+    }
+    if ParsedNote::supports(&edit.core.buffer.path) {
+        commands.entity(entity).remove::<NoteSent>();
     }
     commands.trigger(CursorRenderRequest::new(entity));
 }

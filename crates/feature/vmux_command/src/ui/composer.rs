@@ -59,7 +59,7 @@ pub fn CommandComposerMenus(
                         index: index as u32,
                     });
                 },
-                on_select: move |(_index, model): (usize, vmux_api::room::ModelOptionEntry)| {
+                on_select: move |(_index, model): (usize, vmux_api::session::ModelOptionEntry)| {
                     selection.model(&models, &model.id);
                 },
                 on_dismiss: move |()| {
@@ -91,7 +91,7 @@ pub fn CommandComposerMenus(
             ProjectPicker {
                 placement: PromptPopupPlacement::Downward,
                 projects: projects.clone(),
-                loaded: !composer.projects.is_empty(),
+                loaded: !composer.loading,
                 cursor,
                 on_hover: move |index| {
                     let _ = send(&CommandPaletteMenuHighlightRequest {

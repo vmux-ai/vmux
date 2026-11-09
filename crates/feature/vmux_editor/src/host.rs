@@ -30,10 +30,12 @@ impl Plugin for EditorPlugin {
         .add_plugins(panel::PanelPlugin)
         .add_plugins((
             page_open::PageOpenPlugin,
+            project::ProjectPagePlugin,
             file_lifecycle::FileLifecyclePlugin,
             workspace_edit::WorkspaceEditPlugin,
             feedback::Plugin,
             status::StatusPlugin,
+            address::AddressPlugin,
             viewport::ViewportPlugin,
             media::MediaPlugin,
             note::NotePlugin,
@@ -52,7 +54,12 @@ impl Plugin for EditorPlugin {
             Self::MANIFEST
                 .plugin()
                 .route(vmux_ecs::host_spawn::HostSpawnRoute::scheme("file")),
-            ProjectsPage::MANIFEST.plugin(),
+            ProjectsPage::MANIFEST
+                .plugin()
+                .hosted(vmux_ecs::page::HostedPage::subtree(
+                    ProjectsPage::URL,
+                    ProjectsPage::MANIFEST.title,
+                )),
         ));
     }
 }
@@ -69,10 +76,10 @@ pub(crate) mod highlight;
 pub mod keymap;
 pub mod lsp;
 pub mod markdown;
-pub mod palette;
 pub mod shape;
 pub mod tool;
 
+mod address;
 pub(crate) mod app_key;
 mod command_bar;
 pub(crate) mod directory;
@@ -90,6 +97,7 @@ pub(crate) mod page_open;
 pub(crate) mod panel;
 pub(crate) mod picker_driver;
 pub(crate) mod preview;
+pub(crate) mod project;
 pub(crate) mod search;
 pub(crate) mod status;
 pub(crate) mod viewport;

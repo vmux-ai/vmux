@@ -387,9 +387,10 @@ fn apply_loaded_file_buffers(
                     }
                 }
                 core.fold_view = folds.view(core.buffer.len_lines() as u32);
+                let editor = Editor::new(core, highlight, folds);
                 entity_commands
                     .insert((
-                        Editor::new(core, highlight, folds),
+                        editor,
                         keymap.keymap(),
                         vmux_git::GitDiffSource {
                             content: text,

@@ -52,8 +52,8 @@ fn request(
     }
     let path = PathBuf::from(&trigger.event().payload.path);
     let proxy = proxy.as_deref().map(|proxy| (**proxy).clone());
-    let initial = GitRepositoryPicker::initial_directory(&path);
     let task = IoTaskPool::get().spawn(async move {
+        let initial = GitRepositoryPicker::initial_directory(&path);
         let selected = rfd::AsyncFileDialog::new()
             .set_title("Choose Git repository")
             .set_directory(initial)

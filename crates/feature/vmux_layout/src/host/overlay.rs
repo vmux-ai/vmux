@@ -1,7 +1,7 @@
-use std::collections::BTreeSet;
+use std::collections::BTreeMap;
 
 use crate::cef::Browser;
-use crate::event::LayoutOverlayEvent;
+use crate::event::{LayoutOverlayEvent, LayoutOverlayKind};
 use crate::window::VmuxWindow;
 use bevy::prelude::*;
 use bevy_cef::prelude::{HostWindow, UiEventPlugin, UiInput};
@@ -12,25 +12,59 @@ pub(crate) struct LayoutOverlayPlugin;
 impl Plugin for LayoutOverlayPlugin {
     fn build(&self, app: &mut App) {
         app.add_plugins(UiEventPlugin::<(LayoutOverlayEvent,)>::default())
+            .add_message::<LayoutOverlayOpened>()
             .add_observer(emit)
-            .add_systems(PreUpdate, adopt_window_overlays);
+            .add_systems(PreUpdate, adopt_window_overlays)
+            .add_systems(PostUpdate, cleanup);
     }
 }
 
 #[derive(Component, Clone, Debug, Default, PartialEq, Eq)]
-pub struct LayoutOverlayActive(BTreeSet<String>);
+pub struct LayoutOverlayActive(BTreeMap<String, LayoutOverlayKind>);
+
+impl LayoutOverlayActive {
+    pub fn new(id: impl Into<String>, kind: LayoutOverlayKind) -> Self {
+        Self(BTreeMap::from([(id.into(), kind)]))
+    }
+
+    pub fn dismisses_background_click(&self) -> bool {
+        !self
+            .0
+            .values()
+            .any(|kind| *kind == LayoutOverlayKind::Popover)
+    }
+}
+
+#[derive(Component, Default)]
+pub struct LayoutOverlayDismissRevision(u64);
+
+#[derive(Message, Clone, Copy)]
+pub struct LayoutOverlayOpened {
+    pub layout: Entity,
+}
+
+impl LayoutOverlayDismissRevision {
+    pub fn next_effect(&mut self) -> crate::event::LayoutOverlayDismissEffect {
+        self.0 = self.0.wrapping_add(1).max(1);
+        crate::event::LayoutOverlayDismissEffect { revision: self.0 }
+    }
+}
 
 fn emit(
     trigger: On<UiInput<LayoutOverlayEvent>>,
     mut active: Query<&mut LayoutOverlayActive>,
+    mut opened: MessageWriter<LayoutOverlayOpened>,
     mut commands: Commands,
 ) {
     let event = &trigger.event().payload;
     if event.active {
+        opened.write(LayoutOverlayOpened {
+            layout: trigger.event().webview,
+        });
         if let Ok(mut overlays) = active.get_mut(trigger.event().webview) {
-            overlays.0.insert(event.id.clone());
+            overlays.0.insert(event.id.clone(), event.kind);
         } else if let Ok(mut webview) = commands.get_entity(trigger.event().webview) {
-            webview.insert(LayoutOverlayActive(BTreeSet::from([event.id.clone()])));
+            webview.insert(LayoutOverlayActive::new(event.id.clone(), event.kind));
         }
         return;
     }
@@ -39,10 +73,13 @@ fn emit(
         return;
     };
     overlays.0.remove(&event.id);
-    if overlays.0.is_empty()
-        && let Ok(mut webview) = commands.get_entity(trigger.event().webview)
-    {
-        webview.remove::<LayoutOverlayActive>();
+}
+
+fn cleanup(active: Query<(Entity, &LayoutOverlayActive)>, mut commands: Commands) {
+    for (entity, overlays) in &active {
+        if overlays.0.is_empty() {
+            commands.entity(entity).remove::<LayoutOverlayActive>();
+        }
     }
 }
 

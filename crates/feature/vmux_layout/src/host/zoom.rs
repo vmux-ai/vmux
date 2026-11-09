@@ -1,16 +1,21 @@
 use bevy::{
-    ecs::{lifecycle::HookContext, relationship::Relationship, world::DeferredWorld},
+    ecs::{
+        lifecycle::HookContext, relationship::Relationship, system::SystemParam,
+        world::DeferredWorld,
+    },
     prelude::*,
+    winit::EventLoopProxyWrapper,
 };
 use vmux_flex::prelude::*;
 use vmux_history::LastActivatedAt;
 
 use crate::{
-    pane::{FocusRequest, OpenRequest, Pane, PaneSplit, ToggleZoomRequest},
+    pane::{FocusRequest, OpenRequest, Pane, PaneSize, PaneSplit, ToggleZoomRequest},
     stack::{ActiveTabParam, LayoutFocus},
     tab::Tab,
 };
 
+use super::deadline::{DeadlineOwner, DeadlineScheduler};
 use super::{command::LayoutRequestSet, pane::ArrangementSet};
 
 pub(crate) struct PaneZoomPlugin;
@@ -18,6 +23,7 @@ pub(crate) struct PaneZoomPlugin;
 impl Plugin for PaneZoomPlugin {
     fn build(&self, app: &mut App) {
         app.add_message::<FocusRequest>()
+            .init_resource::<DeadlineScheduler>()
             .add_message::<OpenRequest>()
             .add_message::<ToggleZoomRequest>()
             .add_systems(
@@ -28,10 +34,9 @@ impl Plugin for PaneZoomPlugin {
             )
             .add_systems(
                 PostUpdate,
-                (
-                    sync_visibility.before(LayoutSystems::Layout),
-                    clear_on_pane_removal,
-                ),
+                (clear_on_pane_removal, sync_visibility, animate)
+                    .chain()
+                    .before(LayoutSystems::Layout),
             );
         Zoomed::register_hooks(app);
     }
@@ -51,13 +56,68 @@ impl Zoomed {
                 let Some(zoomed) = world.get::<Self>(ctx.entity) else {
                     return;
                 };
+                if world.get::<PaneZoomTransition>(ctx.entity).is_some() {
+                    return;
+                }
                 let hidden = zoomed.hidden.clone();
                 for entity in hidden {
+                    let flex_grow = world
+                        .get::<PaneSize>(entity)
+                        .map(|size| size.flex_grow)
+                        .unwrap_or(1.0);
                     if let Some(mut node) = world.get_mut::<Node>(entity) {
                         node.display = Display::Flex;
+                        node.flex_grow = flex_grow;
                     }
                 }
             });
+    }
+}
+
+#[derive(Clone, Copy, Debug)]
+struct PaneZoomWeight {
+    entity: Entity,
+    start: f32,
+    end: f32,
+}
+
+#[derive(Clone, Copy, Debug)]
+struct PaneZoomGap {
+    entity: Entity,
+    direction: crate::pane::PaneSplitDirection,
+    start: f32,
+    end: f32,
+}
+
+#[derive(Component, Debug)]
+pub(super) struct PaneZoomTransition {
+    leaf: Entity,
+    hidden: Vec<Entity>,
+    weights: Vec<PaneZoomWeight>,
+    gaps: Vec<PaneZoomGap>,
+    target_zoomed: bool,
+    elapsed: f32,
+    started: std::time::Duration,
+}
+
+impl PaneZoomTransition {
+    const DURATION: f32 = vmux_ui::motion::Motion::LAYOUT_MS as f32 / 1000.0;
+
+    fn progress(&mut self, now: std::time::Duration) -> f32 {
+        self.elapsed = now
+            .saturating_sub(self.started)
+            .as_secs_f32()
+            .min(Self::DURATION);
+        let linear = self.elapsed / Self::DURATION;
+        linear * linear * (3.0 - 2.0 * linear)
+    }
+
+    fn complete(&self) -> bool {
+        self.elapsed >= Self::DURATION
+    }
+
+    fn value(start: f32, end: f32, progress: f32) -> f32 {
+        start + (end - start) * progress
     }
 }
 
@@ -72,66 +132,145 @@ fn clear_on_pane_removal(
     }
     for (tab, zoomed) in &zoomed {
         if removed.contains(&zoomed.leaf) {
-            commands.entity(tab).remove::<Zoomed>();
+            commands
+                .entity(tab)
+                .remove::<(Zoomed, PaneZoomTransition)>();
         }
     }
 }
 
-fn tab_of(
-    leaf: Entity,
-    parents: &Query<&ChildOf>,
-    tabs: &Query<(Entity, &LastActivatedAt), With<Tab>>,
-) -> Option<Entity> {
-    let mut current = leaf;
-    loop {
-        if tabs.get(current).is_ok() {
-            return Some(current);
-        }
-        current = parents.get(current).ok()?.get();
-    }
+#[derive(SystemParam)]
+struct ZoomLayout<'w, 's> {
+    parents: Query<'w, 's, &'static ChildOf>,
+    children: Query<'w, 's, &'static Children>,
+    splits: Query<'w, 's, &'static PaneSplit>,
+    pane_sizes: Query<'w, 's, &'static PaneSize>,
+    nodes: Query<'w, 's, &'static mut Node>,
 }
 
-fn siblings_to_hide(
-    leaf: Entity,
-    tab: Entity,
-    parents: &Query<&ChildOf>,
-    children: &Query<&Children>,
-    splits: &Query<&PaneSplit>,
-) -> Vec<Entity> {
-    let mut hidden = Vec::new();
-    let mut current = leaf;
-    while current != tab {
-        let Ok(parent) = parents.get(current).map(Relationship::get) else {
-            break;
-        };
-        if splits.get(parent).is_ok()
-            && let Ok(children) = children.get(parent)
-        {
-            for child in children.iter() {
-                if child != current {
-                    hidden.push(child);
+impl ZoomLayout<'_, '_> {
+    fn tab_of(
+        &self,
+        leaf: Entity,
+        tabs: &Query<(Entity, &LastActivatedAt), With<Tab>>,
+    ) -> Option<Entity> {
+        let mut current = leaf;
+        loop {
+            if tabs.get(current).is_ok() {
+                return Some(current);
+            }
+            current = self.parents.get(current).ok()?.get();
+        }
+    }
+
+    fn siblings_to_hide(&self, leaf: Entity, tab: Entity) -> Vec<Entity> {
+        let mut hidden = Vec::new();
+        let mut current = leaf;
+        while current != tab {
+            let Ok(parent) = self.parents.get(current).map(Relationship::get) else {
+                break;
+            };
+            if self.splits.get(parent).is_ok()
+                && let Ok(children) = self.children.get(parent)
+            {
+                for child in children.iter() {
+                    if child != current {
+                        hidden.push(child);
+                    }
                 }
             }
+            current = parent;
         }
-        current = parent;
+        hidden
     }
-    hidden
+
+    fn transition(
+        &mut self,
+        leaf: Entity,
+        hidden: Vec<Entity>,
+        target_zoomed: bool,
+        started: std::time::Duration,
+    ) -> PaneZoomTransition {
+        let mut weights = Vec::with_capacity(hidden.len());
+        let mut split_entities = Vec::new();
+        for &entity in &hidden {
+            let restore = self
+                .pane_sizes
+                .get(entity)
+                .map(|size| size.flex_grow)
+                .unwrap_or(1.0);
+            if let Ok(mut node) = self.nodes.get_mut(entity) {
+                node.display = Display::Flex;
+                weights.push(PaneZoomWeight {
+                    entity,
+                    start: node.flex_grow,
+                    end: if target_zoomed { 0.0 } else { restore },
+                });
+            }
+            if let Ok(parent) = self.parents.get(entity).map(Relationship::get)
+                && self.splits.contains(parent)
+                && !split_entities.contains(&parent)
+            {
+                split_entities.push(parent);
+            }
+        }
+        let mut gaps = Vec::with_capacity(split_entities.len());
+        for entity in split_entities {
+            let Ok(split) = self.splits.get(entity) else {
+                continue;
+            };
+            let Ok(node) = self.nodes.get_mut(entity) else {
+                continue;
+            };
+            let start = match split.direction {
+                crate::pane::PaneSplitDirection::Row => match node.column_gap {
+                    Val::Px(value) => value,
+                    _ => crate::event::PANE_GAP_PX,
+                },
+                crate::pane::PaneSplitDirection::Column => match node.row_gap {
+                    Val::Px(value) => value,
+                    _ => crate::event::PANE_GAP_PX,
+                },
+            };
+            gaps.push(PaneZoomGap {
+                entity,
+                direction: split.direction,
+                start,
+                end: if target_zoomed {
+                    0.0
+                } else {
+                    crate::event::PANE_GAP_PX
+                },
+            });
+        }
+        PaneZoomTransition {
+            leaf,
+            hidden,
+            weights,
+            gaps,
+            target_zoomed,
+            elapsed: 0.0,
+            started,
+        }
+    }
 }
 
 fn handle_command(
+    time: Res<Time>,
     mut focus_requests: MessageReader<FocusRequest>,
     mut open_requests: MessageReader<OpenRequest>,
     mut toggle_requests: MessageReader<ToggleZoomRequest>,
     tabs: Query<(Entity, &LastActivatedAt), With<Tab>>,
     active_tab: ActiveTabParam,
-    children: Query<&Children>,
     focus: LayoutFocus,
-    parents: Query<&ChildOf>,
-    splits: Query<&PaneSplit>,
-    zoomed: Query<(), With<Zoomed>>,
+    zoomed: Query<&Zoomed>,
+    transitions: Query<&PaneZoomTransition>,
+    mut layout: ZoomLayout,
     mut commands: Commands,
 ) {
-    let unzoom_only = focus_requests.read().count() > 0 || open_requests.read().count() > 0;
+    let focus_requested = focus_requests.read().count() > 0;
+    let open_requested = open_requests.read().count() > 0;
+    let unzoom_only = focus_requested || open_requested;
     let toggle_count = toggle_requests.read().count();
     if !unzoom_only && toggle_count == 0 {
         return;
@@ -140,38 +279,108 @@ fn handle_command(
     let Some(active_pane) = active_pane else {
         return;
     };
-    let Some(tab) = tab_of(active_pane, &parents, &tabs) else {
+    let Some(tab) = layout.tab_of(active_pane, &tabs) else {
         return;
     };
 
-    if unzoom_only {
-        if zoomed.get(tab).is_ok() {
-            commands.entity(tab).remove::<Zoomed>();
-        }
+    let transition = transitions.get(tab).ok();
+    let existing_zoom = zoomed.get(tab).ok();
+    let current_target = transition
+        .map(|transition| transition.target_zoomed)
+        .unwrap_or(existing_zoom.is_some());
+    let target_zoomed = if unzoom_only {
+        false
+    } else if toggle_count.is_multiple_of(2) {
+        current_target
+    } else {
+        !current_target
+    };
+    if target_zoomed == current_target && transition.is_none() {
         return;
     }
+    let (leaf, hidden) = transition
+        .map(|transition| (transition.leaf, transition.hidden.clone()))
+        .or_else(|| {
+            zoomed
+                .get(tab)
+                .ok()
+                .map(|zoomed| (zoomed.leaf, zoomed.hidden.clone()))
+        })
+        .unwrap_or_else(|| (active_pane, layout.siblings_to_hide(active_pane, tab)));
+    if hidden.is_empty() {
+        return;
+    }
+    let transition = layout.transition(leaf, hidden.clone(), target_zoomed, time.elapsed());
+    let mut tab = commands.entity(tab);
+    tab.insert(transition);
+    if target_zoomed {
+        tab.insert(Zoomed { leaf, hidden });
+    } else {
+        tab.remove::<Zoomed>();
+    }
+}
 
-    for _ in 0..toggle_count {
-        if zoomed.get(tab).is_ok() {
-            commands.entity(tab).remove::<Zoomed>();
+fn sync_visibility(
+    zoomed: Query<(Entity, &Zoomed), Added<Zoomed>>,
+    transitions: Query<(), With<PaneZoomTransition>>,
+    mut nodes: Query<&mut Node>,
+) {
+    for (tab, zoomed) in &zoomed {
+        if transitions.contains(tab) {
             continue;
         }
-        let hidden = siblings_to_hide(active_pane, tab, &parents, &children, &splits);
-        if !hidden.is_empty() {
-            commands.entity(tab).insert(Zoomed {
-                leaf: active_pane,
-                hidden,
-            });
+        for &entity in &zoomed.hidden {
+            if let Ok(mut node) = nodes.get_mut(entity) {
+                node.flex_grow = 0.0;
+                node.display = Display::None;
+            }
         }
     }
 }
 
-fn sync_visibility(zoomed: Query<&Zoomed, Added<Zoomed>>, mut nodes: Query<&mut Node>) {
-    for zoomed in &zoomed {
-        for &entity in &zoomed.hidden {
-            if let Ok(mut node) = nodes.get_mut(entity) {
-                node.display = Display::None;
+fn animate(
+    time: Res<Time>,
+    scheduler: Res<DeadlineScheduler>,
+    proxy: Option<Res<EventLoopProxyWrapper>>,
+    mut transitions: Query<(Entity, &mut PaneZoomTransition)>,
+    mut nodes: Query<&mut Node>,
+    mut commands: Commands,
+) {
+    for (tab, mut transition) in &mut transitions {
+        let progress = transition.progress(time.elapsed());
+        for weight in &transition.weights {
+            if let Ok(mut node) = nodes.get_mut(weight.entity) {
+                node.display = Display::Flex;
+                node.flex_grow = PaneZoomTransition::value(weight.start, weight.end, progress);
             }
+        }
+        for gap in &transition.gaps {
+            let Ok(mut node) = nodes.get_mut(gap.entity) else {
+                continue;
+            };
+            let value = Val::Px(PaneZoomTransition::value(gap.start, gap.end, progress));
+            match gap.direction {
+                crate::pane::PaneSplitDirection::Row => node.column_gap = value,
+                crate::pane::PaneSplitDirection::Column => node.row_gap = value,
+            }
+        }
+        if transition.complete() {
+            if transition.target_zoomed {
+                for entity in &transition.hidden {
+                    if let Ok(mut node) = nodes.get_mut(*entity) {
+                        node.flex_grow = 0.0;
+                        node.display = Display::None;
+                    }
+                }
+            }
+            commands.entity(tab).remove::<PaneZoomTransition>();
+            scheduler.cancel(DeadlineOwner::PaneZoomAnimation(tab));
+        } else {
+            scheduler.schedule(
+                DeadlineOwner::PaneZoomAnimation(tab),
+                std::time::Instant::now() + std::time::Duration::from_millis(16),
+                proxy.as_deref(),
+            );
         }
     }
 }

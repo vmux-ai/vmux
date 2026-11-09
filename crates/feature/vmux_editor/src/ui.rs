@@ -4,7 +4,7 @@ pub(crate) use input::EditorFocus;
 pub use workspace::Page;
 pub(super) use workspace::{HOVER_DELAY_MS, Mode, SCROLL_ID};
 
-mod breadcrumb;
+mod address;
 mod diagnostic;
 mod directory;
 mod dom;
@@ -16,6 +16,9 @@ mod markdown;
 mod menu;
 mod note;
 mod note_text;
+mod outline_navigation;
+mod project;
+mod project_manager;
 mod sidebar;
 mod state;
 mod status;
@@ -26,23 +29,32 @@ mod workspace;
 
 #[vmux_page::page(
     component = Page,
+    document_url = "vmux://files/",
+    states = ["PageAddressUiState", "ThemeUiState", "FileUiState", "ProjectNavigation", "KeyClaimsUiState", "PageLocationUiState"],
     dom_group = "editor",
-    subtree
+    subtree,
+    reactive_takes,
+    takes = vmux_ecs::WorkspaceKind
 )]
 pub(crate) struct FilePage;
 
 #[vmux_page::page(
     page = "projects",
     component = Page,
+    states = ["PageAddressUiState", "ThemeUiState", "FileUiState", "ProjectUiState", "SessionScopeUiState", "RepositorySummaryUiState", "GitUiState", "KeyClaimsUiState", "PageLocationUiState"],
     dom_group = "editor",
-    subtree
+    subtree,
+    takes = vmux_ecs::PageMetadata
 )]
 pub(crate) struct ProjectsPage;
 
 #[vmux_page::page(
     file = "../vmux_knowledge/src/feature.ron",
     component = Page,
+    states = ["PageAddressUiState", "ThemeUiState", "FileUiState", "ProjectNavigation", "KeyClaimsUiState", "PageLocationUiState"],
     dom_group = "editor",
-    subtree
+    subtree,
+    reactive_takes,
+    takes = vmux_ecs::WorkspaceKind
 )]
 pub(crate) struct KnowledgePage;

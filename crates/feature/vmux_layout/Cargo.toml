@@ -14,13 +14,17 @@ debug = []
 path = "src/lib.rs"
 
 [dependencies]
+percent-encoding = "2"
 rkyv = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 vmux_ecs = { path = "../../util/vmux_ecs" }
 vmux_page = { path = "../../util/vmux_page" }
+vmux_path = { path = "../../util/vmux_path" }
 vmux_ui = { path = "../../util/vmux_ui", default-features = false }
 vmux_api = { path = "../../util/vmux_api" }
+vmux_session = { path = "../vmux_session", default-features = false }
+vmux_git = { path = "../vmux_git" }
 
 [dev-dependencies]
 serde_json = { workspace = true }
@@ -41,9 +45,9 @@ sha2 = "0.10"
 uuid = { workspace = true }
 vmux_command = { path = "../vmux_command" }
 vmux_flex = { path = "../../util/vmux_flex" }
-vmux_git = { path = "../vmux_git" }
 vmux_history = { path = "../vmux_history" }
 vmux_input = { path = "../vmux_input" }
+vmux_session = { path = "../vmux_session", default-features = false, features = ["app"] }
 vmux_tool = { path = "../vmux_tool" }
 
 [target.'cfg(any(target_os = "ios", target_os = "macos"))'.dependencies]
@@ -53,6 +57,9 @@ vmux_command = { path = "../vmux_command" }
 
 [target.'cfg(not(target_os = "ios"))'.dev-dependencies]
 tempfile = "3"
+tokio = { workspace = true }
+dioxus-html = { version = "=0.7.9", features = ["serialize"] }
+dioxus-ssr = "=0.7.9"
 
 [lints]
 workspace = true

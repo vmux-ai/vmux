@@ -1,10 +1,16 @@
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::ffi::OsString;
-use std::io::Write;
+use std::fs::OpenOptions;
+use std::io::{BufRead, BufReader, Read, Seek, SeekFrom, Write};
 use std::os::unix::ffi::{OsStrExt, OsStringExt};
+use std::os::unix::fs::OpenOptionsExt;
+#[cfg(unix)]
+use std::os::unix::process::CommandExt;
 use std::path::{Path, PathBuf};
-use std::process::{Command, Stdio};
-use std::sync::OnceLock;
+use std::process::{Child, Command, ExitStatus, Output, Stdio};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+use std::sync::{Arc, Mutex, OnceLock, mpsc};
+use std::time::{Duration, Instant};
 
 use bevy::prelude::Component;
 use similar::{ChangeTag, TextDiff};
@@ -12,8 +18,482 @@ use similar::{ChangeTag, TextDiff};
 use crate::event::*;
 use crate::host::parse;
 
+const MAX_DIFF_FILE_BYTES: u64 = 2 * 1024 * 1024;
+
 #[derive(Debug, Clone)]
 pub struct GitError(pub String);
+
+pub(crate) struct BranchFilesPage {
+    pub(crate) files: Vec<GitBranchFileEntry>,
+    pub(crate) total: u32,
+    pub(crate) has_more: bool,
+}
+
+struct BranchDiffContext {
+    merge_base: String,
+    selected: Option<String>,
+    submodules: Vec<(PathBuf, GitRepository, String)>,
+}
+
+struct BranchBase {
+    reference: String,
+    merge_base: String,
+}
+
+enum DiffFileContent {
+    Text(String),
+    TooLarge(u64),
+}
+
+impl DiffFileContent {
+    fn text(self) -> Option<String> {
+        match self {
+            Self::Text(content) => Some(content),
+            Self::TooLarge(_) => None,
+        }
+    }
+
+    fn unavailable_line(&self, file: &Path) -> Option<DiffLine> {
+        let Self::TooLarge(bytes) = self else {
+            return None;
+        };
+        let megabytes = *bytes as f64 / (1024.0 * 1024.0);
+        let text = format!("Preview unavailable for this {megabytes:.1} MB file");
+        Some(DiffLine {
+            kind: DiffKind::Context,
+            old_no: None,
+            new_no: None,
+            hunk: None,
+            spans: crate::host::highlight::Highlighter::line(&text, file),
+        })
+    }
+}
+
+#[derive(Clone)]
+pub(crate) struct RepositorySummary {
+    pub(crate) snapshot: GitRepositorySnapshot,
+    pub(super) watch: super::watch::GitWatchSubscription,
+}
+
+pub(crate) enum GitCatalogPage {
+    LocalBranches(Vec<GitBranchEntry>, bool),
+    RemoteBranches(Vec<GitBranchEntry>, bool),
+    Tags(Vec<GitTagEntry>, bool),
+    Commits(Vec<GitCommitEntry>, bool),
+    Stashes(Vec<GitStashEntry>, bool),
+}
+
+#[derive(Clone)]
+pub(crate) enum DiffSource {
+    ReadyLines(Arc<Vec<DiffLine>>),
+    #[cfg(test)]
+    SourceLines(Arc<Vec<DiffLine>>),
+    Review(Arc<ReviewDiffDocument>),
+}
+
+impl DiffSource {
+    pub(crate) fn ready_lines(lines: Vec<DiffLine>) -> Self {
+        Self::ReadyLines(Arc::new(lines))
+    }
+
+    #[cfg(test)]
+    pub(crate) fn shared_source_lines(lines: Arc<Vec<DiffLine>>) -> Self {
+        Self::SourceLines(lines)
+    }
+
+    pub(crate) fn window(
+        &self,
+        repository: &GitRepository,
+        top_line: u32,
+        rows: u32,
+    ) -> Result<(u32, Vec<DiffLine>), GitError> {
+        match self {
+            Self::ReadyLines(lines) => Ok(parse::DiffParser::window(lines, top_line, rows)),
+            #[cfg(test)]
+            Self::SourceLines(lines) => Ok(repository.highlight_diff_window(lines, top_line, rows)),
+            Self::Review(document) => document.window(repository.path(), top_line, rows),
+        }
+    }
+}
+
+pub(crate) struct ReviewDiffDocument {
+    file: Arc<tempfile::NamedTempFile>,
+    entries: Vec<ReviewDiffEntry>,
+    paths: Vec<PathBuf>,
+    hunks: Vec<parse::HunkRange>,
+    staged: HashSet<u32>,
+    highlight: Option<Mutex<super::highlight::FileHighlight>>,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum ReviewDiffText {
+    Raw,
+    Path,
+}
+
+struct ReviewDiffEntry {
+    offset: u64,
+    len: u32,
+    kind: DiffKind,
+    old_no: Option<u32>,
+    new_no: Option<u32>,
+    path: u32,
+    text: ReviewDiffText,
+}
+
+impl ReviewDiffDocument {
+    fn read(file: tempfile::NamedTempFile, include_single_file: bool) -> Result<Self, GitError> {
+        let mut reader = BufReader::new(
+            file.reopen()
+                .map_err(|error| GitError(format!("failed to read diff spool: {error}")))?,
+        );
+        let mut entries = Vec::new();
+        let mut paths = Vec::new();
+        let mut buffer = Vec::new();
+        let mut offset = 0u64;
+        let mut old_no = 0u32;
+        let mut new_no = 0u32;
+        let mut path = 0u32;
+        let mut saw_hunk = false;
+        loop {
+            if super::runtime::GitRuntime::canceled() {
+                return Err(GitError("git command canceled".to_string()));
+            }
+            buffer.clear();
+            let read = reader
+                .read_until(b'\n', &mut buffer)
+                .map_err(|error| GitError(format!("failed to index diff spool: {error}")))?;
+            if read == 0 {
+                break;
+            }
+            let line_offset = offset;
+            offset = offset.saturating_add(read as u64);
+            let mut len = buffer.len();
+            if buffer.get(len.saturating_sub(1)) == Some(&b'\n') {
+                len -= 1;
+            }
+            if buffer.get(len.saturating_sub(1)) == Some(&b'\r') {
+                len -= 1;
+            }
+            let raw = String::from_utf8_lossy(&buffer[..len]);
+            if raw.starts_with("\\ No newline") {
+                continue;
+            }
+            if let Some((_, next_path)) = raw.split_once(" b/")
+                && raw.starts_with("diff --git")
+            {
+                saw_hunk = false;
+                old_no = 0;
+                new_no = 0;
+                paths.push(PathBuf::from(next_path));
+                path = u32::try_from(paths.len().saturating_sub(1)).unwrap_or(u32::MAX);
+                entries.push(ReviewDiffEntry {
+                    offset: 0,
+                    len: 0,
+                    kind: DiffKind::Hunk,
+                    old_no: None,
+                    new_no: None,
+                    path,
+                    text: ReviewDiffText::Path,
+                });
+                continue;
+            }
+            if raw.starts_with("index ") || raw.starts_with("--- ") || raw.starts_with("+++ ") {
+                continue;
+            }
+            if raw.starts_with("@@") {
+                saw_hunk = true;
+                if let Some((old, new)) = parse::DiffParser::hunk_start(&raw) {
+                    old_no = old;
+                    new_no = new;
+                }
+                entries.push(ReviewDiffEntry {
+                    offset: line_offset,
+                    len: u32::try_from(len).unwrap_or(u32::MAX),
+                    kind: DiffKind::Hunk,
+                    old_no: None,
+                    new_no: None,
+                    path,
+                    text: ReviewDiffText::Raw,
+                });
+                continue;
+            }
+            if !saw_hunk {
+                continue;
+            }
+            let (kind, old, new) = match raw.as_bytes().first() {
+                Some(b'+') => {
+                    let line = new_no;
+                    new_no = new_no.saturating_add(1);
+                    (DiffKind::Add, None, Some(line))
+                }
+                Some(b'-') => {
+                    let line = old_no;
+                    old_no = old_no.saturating_add(1);
+                    (DiffKind::Remove, Some(line), None)
+                }
+                _ => {
+                    let old = old_no;
+                    let new = new_no;
+                    old_no = old_no.saturating_add(1);
+                    new_no = new_no.saturating_add(1);
+                    (DiffKind::Context, Some(old), Some(new))
+                }
+            };
+            let prefix = usize::from(matches!(raw.as_bytes().first(), Some(b'+' | b'-' | b' ')));
+            entries.push(ReviewDiffEntry {
+                offset: line_offset.saturating_add(prefix as u64),
+                len: u32::try_from(len.saturating_sub(prefix)).unwrap_or(u32::MAX),
+                kind,
+                old_no: old,
+                new_no: new,
+                path,
+                text: ReviewDiffText::Raw,
+            });
+        }
+        if !include_single_file && paths.len() <= 1 {
+            entries.retain(|entry| entry.text != ReviewDiffText::Path);
+        }
+        Ok(Self {
+            file: Arc::new(file),
+            entries,
+            paths,
+            hunks: Vec::new(),
+            staged: HashSet::new(),
+            highlight: None,
+        })
+    }
+
+    fn file_state(
+        mut self,
+        hunks: Vec<parse::HunkRange>,
+        staged: HashSet<u32>,
+        highlight: Option<super::highlight::FileHighlight>,
+    ) -> Self {
+        self.entries.retain(|entry| entry.kind != DiffKind::Hunk);
+        self.hunks = hunks;
+        self.staged = staged;
+        self.highlight = highlight.map(Mutex::new);
+        self
+    }
+
+    fn is_empty(&self) -> bool {
+        self.entries.is_empty()
+    }
+
+    fn window(
+        &self,
+        repository: &Path,
+        top_line: u32,
+        rows: u32,
+    ) -> Result<(u32, Vec<DiffLine>), GitError> {
+        let total = u32::try_from(self.entries.len()).unwrap_or(u32::MAX);
+        let start = top_line.min(total) as usize;
+        let end = top_line.saturating_add(rows).min(total) as usize;
+        let mut file = self
+            .file
+            .reopen()
+            .map_err(|error| GitError(format!("failed to read diff spool: {error}")))?;
+        let mut lines = Vec::with_capacity(end.saturating_sub(start));
+        let mut buffer = Vec::new();
+        let mut highlight = match &self.highlight {
+            Some(highlight) => Some(
+                highlight
+                    .lock()
+                    .map_err(|_| GitError("diff syntax highlighter unavailable".to_string()))?,
+            ),
+            None => None,
+        };
+        for entry in &self.entries[start..end] {
+            if super::runtime::GitRuntime::canceled() {
+                return Err(GitError("git command canceled".to_string()));
+            }
+            let path = self
+                .paths
+                .get(entry.path as usize)
+                .cloned()
+                .unwrap_or_default();
+            let text = match entry.text {
+                ReviewDiffText::Path => path.to_string_lossy().into_owned(),
+                ReviewDiffText::Raw => {
+                    buffer.resize(entry.len as usize, 0);
+                    file.seek(SeekFrom::Start(entry.offset))
+                        .map_err(|error| GitError(format!("failed to seek diff spool: {error}")))?;
+                    file.read_exact(&mut buffer)
+                        .map_err(|error| GitError(format!("failed to read diff spool: {error}")))?;
+                    String::from_utf8_lossy(&buffer).into_owned()
+                }
+            };
+            let mut kind = entry.kind;
+            if kind == DiffKind::Context
+                && entry.old_no.is_some_and(|line| self.staged.contains(&line))
+            {
+                kind = DiffKind::Staged;
+            }
+            let hunk = parse::HunkRange::index_for(&self.hunks, kind, entry.old_no, entry.new_no);
+            let highlighted = match (entry.new_no, highlight.as_mut()) {
+                (Some(number), Some(highlight))
+                    if matches!(kind, DiffKind::Add | DiffKind::Context | DiffKind::Staged) =>
+                {
+                    highlight.line(number)?
+                }
+                _ => None,
+            };
+            let spans = if kind == DiffKind::Hunk {
+                parse::DiffParser::source_spans(&text)
+            } else if let Some(spans) = highlighted {
+                spans
+            } else {
+                crate::host::highlight::Highlighter::line(&text, &repository.join(path))
+            };
+            lines.push(DiffLine {
+                kind,
+                old_no: entry.old_no,
+                new_no: entry.new_no,
+                hunk,
+                spans,
+            });
+        }
+        Ok((total, lines))
+    }
+}
+
+#[derive(Clone)]
+pub(crate) enum GitCatalogSnapshot {
+    LocalBranches(Vec<GitBranchEntry>),
+    RemoteBranches(Vec<GitBranchEntry>),
+    Tags(Vec<GitTagEntry>),
+    Stashes(Vec<GitStashEntry>),
+}
+
+impl GitCatalogSnapshot {
+    pub(crate) fn page(&self, offset: usize, limit: usize) -> GitCatalogPage {
+        match self {
+            Self::LocalBranches(entries) => {
+                let page = CatalogPage::from_slice(entries, offset, limit);
+                GitCatalogPage::LocalBranches(page.entries, page.has_more)
+            }
+            Self::RemoteBranches(entries) => {
+                let page = CatalogPage::from_slice(entries, offset, limit);
+                GitCatalogPage::RemoteBranches(page.entries, page.has_more)
+            }
+            Self::Tags(entries) => {
+                let page = CatalogPage::from_slice(entries, offset, limit);
+                GitCatalogPage::Tags(page.entries, page.has_more)
+            }
+            Self::Stashes(entries) => {
+                let page = CatalogPage::from_slice(entries, offset, limit);
+                GitCatalogPage::Stashes(page.entries, page.has_more)
+            }
+        }
+    }
+}
+
+struct CatalogPage<T> {
+    entries: Vec<T>,
+    has_more: bool,
+}
+
+impl<T> CatalogPage<T> {
+    fn from_all(entries: Vec<T>, offset: usize, limit: usize) -> Self {
+        let has_more = offset.saturating_add(limit) < entries.len();
+        let entries = entries.into_iter().skip(offset).take(limit).collect();
+        Self { entries, has_more }
+    }
+}
+
+impl<T: Clone> CatalogPage<T> {
+    fn from_slice(entries: &[T], offset: usize, limit: usize) -> Self {
+        let end = offset.saturating_add(limit).min(entries.len());
+        Self {
+            entries: entries.get(offset..end).unwrap_or_default().to_vec(),
+            has_more: end < entries.len(),
+        }
+    }
+}
+
+#[derive(Clone, Default)]
+pub(crate) struct BranchFilesCatalog(Arc<BranchFilesCatalogData>);
+
+#[derive(Default)]
+struct BranchFilesCatalogData {
+    files: Vec<GitBranchFileEntry>,
+    source: PathBuf,
+    base_ref: String,
+    merge_base: String,
+}
+
+impl BranchFilesCatalog {
+    pub(crate) fn page(&self, offset: usize, limit: usize) -> BranchFilesPage {
+        let end = offset.saturating_add(limit).min(self.0.files.len());
+        BranchFilesPage {
+            files: self.0.files.get(offset..end).unwrap_or_default().to_vec(),
+            total: u32::try_from(self.0.files.len()).unwrap_or(u32::MAX),
+            has_more: end < self.0.files.len(),
+        }
+    }
+
+    pub(crate) fn len(&self) -> usize {
+        self.0.files.len()
+    }
+
+    pub(crate) fn path(&self, index: usize) -> Option<&[u8]> {
+        self.0
+            .files
+            .get(index)
+            .map(|entry| entry.path_bytes.as_slice())
+    }
+
+    pub(crate) fn contains(&self, path: &[u8]) -> bool {
+        self.position(path).is_some()
+    }
+
+    pub(crate) fn position(&self, path: &[u8]) -> Option<usize> {
+        for (index, entry) in self.0.files.iter().enumerate() {
+            if entry.path_bytes == path {
+                return Some(index);
+            }
+        }
+        None
+    }
+
+    pub(crate) fn path_labels(&self) -> Vec<String> {
+        self.0
+            .files
+            .iter()
+            .map(|entry| entry.path.clone())
+            .collect()
+    }
+
+    pub(crate) fn source(&self) -> &Path {
+        &self.0.source
+    }
+
+    pub(crate) fn merge_base(&self) -> &str {
+        &self.0.merge_base
+    }
+
+    pub(crate) fn base_ref(&self) -> &str {
+        &self.0.base_ref
+    }
+
+    #[cfg(test)]
+    pub(crate) fn for_paths(paths: Vec<Vec<u8>>) -> Self {
+        Self(Arc::new(BranchFilesCatalogData {
+            files: paths
+                .into_iter()
+                .map(|path_bytes| GitBranchFileEntry {
+                    path: String::from_utf8_lossy(&path_bytes).into_owned(),
+                    path_bytes,
+                    previous_path: None,
+                    previous_path_bytes: None,
+                    change: GitPathChange::Modified,
+                })
+                .collect(),
+            ..Default::default()
+        }))
+    }
+}
 
 #[derive(Clone, Component, Debug)]
 pub struct GitRepository(PathBuf);
@@ -24,16 +504,97 @@ impl GitRepository {
     }
 
     pub fn discover(file: &Path) -> Result<Self, GitError> {
-        let (stdout, stderr, ok) =
-            GitCommand::run(&Self::start_dir(file), &["rev-parse", "--show-toplevel"])?;
+        let (repository, _) = Self::discover_with_worktree(file)?;
+        Ok(repository)
+    }
+
+    pub(crate) fn discover_with_worktree(file: &Path) -> Result<(Self, bool), GitError> {
+        let (stdout, stderr, ok) = GitCommand::run(
+            &Self::start_dir(file),
+            &[
+                "rev-parse",
+                "--path-format=absolute",
+                "--show-toplevel",
+                "--git-dir",
+                "--git-common-dir",
+            ],
+        )?;
         if !ok {
             return Err(GitError(stderr.trim().to_string()));
         }
-        Ok(Self(PathBuf::from(stdout.trim())))
+        let mut paths = stdout.lines().map(PathBuf::from);
+        let Some(repo_root) = paths.next() else {
+            return Err(GitError("missing repository root".into()));
+        };
+        let Some(git_dir) = paths.next() else {
+            return Err(GitError("missing git directory".into()));
+        };
+        let Some(common_dir) = paths.next() else {
+            return Err(GitError("missing common git directory".into()));
+        };
+        Ok((Self(repo_root), git_dir != common_dir))
     }
 
     pub fn path(&self) -> &Path {
         &self.0
+    }
+
+    pub(crate) fn catalog_page(
+        &self,
+        catalog: GitCatalog,
+        current_branch: &str,
+        offset: usize,
+        limit: usize,
+    ) -> Result<GitCatalogPage, GitError> {
+        match catalog {
+            GitCatalog::LocalBranches => {
+                let page = CatalogPage::from_all(
+                    GitBranchEntry::local(self.path(), current_branch)?,
+                    offset,
+                    limit,
+                );
+                Ok(GitCatalogPage::LocalBranches(page.entries, page.has_more))
+            }
+            GitCatalog::RemoteBranches => {
+                let page =
+                    CatalogPage::from_all(GitBranchEntry::remote(self.path())?, offset, limit);
+                Ok(GitCatalogPage::RemoteBranches(page.entries, page.has_more))
+            }
+            GitCatalog::Tags => {
+                let page = CatalogPage::from_all(GitTagEntry::list(self.path())?, offset, limit);
+                Ok(GitCatalogPage::Tags(page.entries, page.has_more))
+            }
+            GitCatalog::Commits => {
+                let page = GitCommitEntry::page(self.path(), offset, limit)?;
+                Ok(GitCatalogPage::Commits(page.entries, page.has_more))
+            }
+            GitCatalog::Stashes => {
+                let page = CatalogPage::from_all(GitStashEntry::list(self.path())?, offset, limit);
+                Ok(GitCatalogPage::Stashes(page.entries, page.has_more))
+            }
+        }
+    }
+
+    pub(crate) fn catalog_snapshot(
+        &self,
+        catalog: GitCatalog,
+        current_branch: &str,
+    ) -> Result<Option<GitCatalogSnapshot>, GitError> {
+        match catalog {
+            GitCatalog::LocalBranches => Ok(Some(GitCatalogSnapshot::LocalBranches(
+                GitBranchEntry::local(self.path(), current_branch)?,
+            ))),
+            GitCatalog::RemoteBranches => Ok(Some(GitCatalogSnapshot::RemoteBranches(
+                GitBranchEntry::remote(self.path())?,
+            ))),
+            GitCatalog::Tags => Ok(Some(GitCatalogSnapshot::Tags(GitTagEntry::list(
+                self.path(),
+            )?))),
+            GitCatalog::Stashes => Ok(Some(GitCatalogSnapshot::Stashes(GitStashEntry::list(
+                self.path(),
+            )?))),
+            GitCatalog::Commits => Ok(None),
+        }
     }
 
     pub fn has_repository(file: &Path) -> bool {
@@ -59,6 +620,20 @@ impl GitRepository {
         self.statuses(&[file.to_path_buf()])?
             .pop()
             .ok_or_else(|| GitError("missing git status result".into()))
+    }
+
+    pub(crate) fn file_branches(&self) -> Result<Vec<crate::event::FileGitBranch>, GitError> {
+        Ok(crate::host::worktree::CheckoutInfo::try_from(self.path())?
+            .branch_holders()?
+            .into_iter()
+            .map(|branch| {
+                let checkout = branch.checkout_path();
+                crate::event::FileGitBranch {
+                    name: branch.branch,
+                    checkout,
+                }
+            })
+            .collect())
     }
 
     pub(crate) fn statuses(&self, files: &[PathBuf]) -> Result<Vec<GitFileStatus>, GitError> {
@@ -95,7 +670,7 @@ impl GitRepository {
             .collect())
     }
 
-    pub fn file_statuses(&self) -> Result<std::collections::HashMap<String, FileStatus>, GitError> {
+    pub fn file_statuses(&self) -> Result<HashMap<String, FileStatus>, GitError> {
         let (stdout, stderr, ok) = GitCommand::read_bytes(
             &self.0,
             &[
@@ -123,6 +698,48 @@ impl GitRepository {
         Ok(parse::ParsedStatuses::changed_paths(&stdout))
     }
 
+    pub(crate) fn has_unignored_changes<'a>(
+        &self,
+        paths: impl IntoIterator<Item = &'a Path>,
+    ) -> bool {
+        let mut candidates = Vec::new();
+        for path in paths {
+            let Ok(relative) = path.strip_prefix(&self.0) else {
+                return true;
+            };
+            if relative.as_os_str().is_empty() {
+                return true;
+            }
+            candidates.push(path_bytes(relative));
+        }
+        if candidates.is_empty() {
+            return false;
+        }
+        let input_capacity = candidates.iter().map(|candidate| candidate.len() + 1).sum();
+        let mut input = Vec::with_capacity(input_capacity);
+        for candidate in &candidates {
+            input.extend_from_slice(candidate);
+            input.push(0);
+        }
+        let Ok(output) =
+            GitCommand::output_with_input(&self.0, &["check-ignore", "--stdin", "-z"], &input)
+        else {
+            return true;
+        };
+        if !matches!(output.status.code(), Some(0 | 1)) {
+            return true;
+        }
+        let ignored = output
+            .stdout
+            .split(|byte| *byte == 0)
+            .filter(|path| !path.is_empty())
+            .map(ToOwned::to_owned)
+            .collect::<HashSet<_>>();
+        candidates
+            .iter()
+            .any(|candidate| !ignored.contains(candidate))
+    }
+
     pub(crate) fn config_path(&self) -> Result<PathBuf, GitError> {
         let (stdout, stderr, ok) = GitCommand::read(
             &self.0,
@@ -148,130 +765,811 @@ impl GitRepository {
         file: &Path,
         content: &str,
     ) -> Result<Vec<DiffLine>, GitError> {
+        let source = self.diff_source_with_content(file, content)?;
+        source.window(self, 0, u32::MAX).map(|(_, lines)| lines)
+    }
+
+    pub(crate) fn diff_source_with_content(
+        &self,
+        file: &Path,
+        content: &str,
+    ) -> Result<DiffSource, GitError> {
         let target = self.relative_path(file);
         let baseline = self.index_text(&target)?;
         let staged = self.staged_lines(&target);
-        let new_spans = crate::host::highlight::Highlighter::file(content, file);
-        let mut old_no = 1u32;
-        let mut new_no = 1u32;
-        let mut lines = Vec::new();
+        self.content_diff_source(file, content, &baseline, staged)
+    }
 
-        for change in TextDiff::from_lines(baseline.as_str(), content).iter_all_changes() {
-            let text = change.value().trim_end_matches(['\n', '\r']);
-            match change.tag() {
-                ChangeTag::Equal => {
-                    lines.push(DiffLine {
-                        kind: if staged.contains(&old_no) {
-                            DiffKind::Staged
-                        } else {
-                            DiffKind::Context
-                        },
-                        old_no: Some(old_no),
-                        new_no: Some(new_no),
-                        hunk: None,
-                        spans: new_spans
-                            .get(new_no.saturating_sub(1) as usize)
-                            .cloned()
-                            .unwrap_or_else(|| {
-                                crate::host::highlight::Highlighter::line(text, file)
-                            }),
-                    });
-                    old_no += 1;
-                    new_no += 1;
-                }
-                ChangeTag::Delete => {
-                    lines.push(DiffLine {
-                        kind: DiffKind::Remove,
-                        old_no: Some(old_no),
-                        new_no: None,
-                        hunk: None,
-                        spans: crate::host::highlight::Highlighter::line(text, file),
-                    });
-                    old_no += 1;
-                }
-                ChangeTag::Insert => {
-                    lines.push(DiffLine {
-                        kind: DiffKind::Add,
-                        old_no: None,
-                        new_no: Some(new_no),
-                        hunk: None,
-                        spans: new_spans
-                            .get(new_no.saturating_sub(1) as usize)
-                            .cloned()
-                            .unwrap_or_else(|| {
-                                crate::host::highlight::Highlighter::line(text, file)
-                            }),
-                    });
-                    new_no += 1;
-                }
+    fn content_diff_source(
+        &self,
+        file: &Path,
+        content: &str,
+        baseline: &str,
+        staged: HashSet<u32>,
+    ) -> Result<DiffSource, GitError> {
+        let target = self.relative_path(file);
+        let mut spool = tempfile::NamedTempFile::new()
+            .map_err(|error| GitError(format!("failed to create diff spool: {error}")))?;
+        let display = target.to_string_lossy();
+        writeln!(spool, "diff --git a/{display} b/{display}")
+            .and_then(|_| writeln!(spool, "--- a/{display}"))
+            .and_then(|_| writeln!(spool, "+++ b/{display}"))
+            .and_then(|_| writeln!(spool, "@@ -1 +1 @@"))
+            .map_err(|error| GitError(format!("failed to write diff spool: {error}")))?;
+        for (index, change) in TextDiff::from_lines(baseline, content)
+            .iter_all_changes()
+            .enumerate()
+        {
+            if index % 256 == 0 && super::runtime::GitRuntime::canceled() {
+                return Err(GitError("git command canceled".to_string()));
+            }
+            let prefix = match change.tag() {
+                ChangeTag::Equal => ' ',
+                ChangeTag::Delete => '-',
+                ChangeTag::Insert => '+',
+            };
+            write!(spool, "{prefix}{}", change.value())
+                .map_err(|error| GitError(format!("failed to write diff spool: {error}")))?;
+            if !change.value().ends_with('\n') {
+                writeln!(spool)
+                    .map_err(|error| GitError(format!("failed to write diff spool: {error}")))?;
             }
         }
-        Ok(lines)
+        spool
+            .as_file_mut()
+            .seek(SeekFrom::Start(0))
+            .map_err(|error| GitError(format!("failed to rewind diff spool: {error}")))?;
+        let highlight = if content.len() as u64 <= MAX_DIFF_FILE_BYTES {
+            Some(super::highlight::FileHighlight::new(
+                content.to_string(),
+                file,
+            ))
+        } else {
+            None
+        };
+        let document =
+            ReviewDiffDocument::read(spool, false)?.file_state(Vec::new(), staged, highlight);
+        Ok(DiffSource::Review(Arc::new(document)))
     }
 
     pub fn diff_lines(&self, file: &Path) -> Result<Vec<DiffLine>, GitError> {
+        let source = self.diff_source(file)?;
+        source.window(self, 0, u32::MAX).map(|(_, lines)| lines)
+    }
+
+    pub(crate) fn diff_source(&self, file: &Path) -> Result<DiffSource, GitError> {
         let target = self.relative_path(file);
-        let staged = self.staged_lines(&target);
-
-        let unstaged = self.diff_text(&target, false, 100_000)?;
-        if unstaged.trim().is_empty() {
-            if self.status(file)?.file_status == FileStatus::Untracked {
-                let content = std::fs::read_to_string(file).unwrap_or_default();
-                return self.diff_lines_with_content(file, &content);
-            }
-            return self.staged_only_lines(file, &target, &staged);
-        }
-        let ranges = parse::HunkRange::parse_all(&self.diff_text(&target, false, 0)?);
-
-        let new_spans = std::fs::read_to_string(file)
-            .map(|content| crate::host::highlight::Highlighter::file(&content, file))
-            .unwrap_or_default();
-
-        let lines = parse::DiffParser::parse(&unstaged)
+        if let Some((_, repository, branch)) = self
+            .branch_submodules()
             .into_iter()
-            .filter(|line| !matches!(line.kind, DiffKind::Hunk))
-            .map(|mut line| {
-                line.hunk = Self::tag_hunk(&line, &ranges);
-                let text = line
-                    .spans
-                    .first()
-                    .map(|span| span.text.clone())
-                    .unwrap_or_default();
-                line.spans = match line.kind {
-                    DiffKind::Add | DiffKind::Context => line
-                        .new_no
-                        .and_then(|line| new_spans.get(line.saturating_sub(1) as usize))
-                        .cloned()
-                        .unwrap_or_else(|| crate::host::highlight::Highlighter::line(&text, file)),
-                    _ => crate::host::highlight::Highlighter::line(&text, file),
-                };
-                if matches!(line.kind, DiffKind::Context)
-                    && line.old_no.is_some_and(|line| staged.contains(&line))
-                {
-                    line.kind = DiffKind::Staged;
+            .find(|(path, _, _)| path == &target)
+        {
+            let mut spool = tempfile::NamedTempFile::new()
+                .map_err(|error| GitError(format!("failed to create diff spool: {error}")))?;
+            repository.branch_diff_spool_at(&branch, 100_000, &target, spool.as_file_mut())?;
+            let document = ReviewDiffDocument::read(spool, true)?;
+            if !document.is_empty() {
+                return Ok(DiffSource::Review(Arc::new(document)));
+            }
+        }
+        let staged = self.staged_lines(&target);
+        let unstaged = self.diff_spool(&target, false, 100_000)?;
+        let document = ReviewDiffDocument::read(unstaged, false)?;
+        if document.is_empty() {
+            if self.status(file)?.file_status == FileStatus::Untracked {
+                let content = self.read_diff_file(&target)?;
+                if let Some(line) = content.unavailable_line(file) {
+                    return Ok(DiffSource::ready_lines(vec![line]));
                 }
-                line
-            })
-            .collect();
-        Ok(lines)
+                return self.diff_source_with_content(file, &content.text().unwrap_or_default());
+            }
+            return self.staged_only_source(file, &target, staged);
+        }
+        let ranges = self.diff_ranges(&target, false)?;
+        let highlight = self
+            .read_diff_file(&target)
+            .ok()
+            .and_then(DiffFileContent::text)
+            .map(|content| super::highlight::FileHighlight::new(content, file));
+        Ok(DiffSource::Review(Arc::new(
+            document.file_state(ranges, staged, highlight),
+        )))
     }
 
     pub fn commit_diff_lines(&self, reference: &str) -> Result<Vec<DiffLine>, GitError> {
-        let (stdout, stderr, ok) = GitCommand::read(
-            &self.0,
-            &[
-                "show",
-                "--format=",
-                "--find-renames",
-                "--find-copies",
-                "--unified=100000",
-                reference,
-            ],
+        let source = self.commit_diff_source(reference)?;
+        source.window(self, 0, u32::MAX).map(|(_, lines)| lines)
+    }
+
+    pub(crate) fn commit_diff_source(&self, reference: &str) -> Result<DiffSource, GitError> {
+        let reference = self.revision(reference)?;
+        let mut command = GitCommand::command(&self.0);
+        command.args([
+            "show",
+            "--format=",
+            "--find-renames",
+            "--find-copies",
+            "--submodule=diff",
+            "--unified=3",
+            reference,
+        ]);
+        let file = GitCommand::spool(&mut command)?;
+        Ok(DiffSource::Review(Arc::new(ReviewDiffDocument::read(
+            file, true,
+        )?)))
+    }
+
+    pub fn stash_diff_lines(&self, reference: &str) -> Result<Vec<DiffLine>, GitError> {
+        let source = self.stash_diff_source(reference)?;
+        source.window(self, 0, u32::MAX).map(|(_, lines)| lines)
+    }
+
+    pub(crate) fn stash_diff_source(&self, reference: &str) -> Result<DiffSource, GitError> {
+        let reference = self.revision(reference)?;
+        let mut command = GitCommand::command(&self.0);
+        command.args([
+            "stash",
+            "show",
+            "--patch",
+            "--include-untracked",
+            "--find-renames",
+            "--find-copies",
+            "--submodule=diff",
+            "--unified=3",
+            reference,
+        ]);
+        let file = GitCommand::spool(&mut command)?;
+        Ok(DiffSource::Review(Arc::new(ReviewDiffDocument::read(
+            file, true,
+        )?)))
+    }
+
+    pub fn branch_diff_lines(&self, reference: &str) -> Result<Vec<DiffLine>, GitError> {
+        let stdout = self.branch_diff_text(reference, 3, Path::new(""))?;
+        Ok(self.highlight_diff(&stdout))
+    }
+
+    #[cfg(test)]
+    fn branch_diff_lines_for_paths(
+        &self,
+        reference: &str,
+        paths: &[Vec<u8>],
+    ) -> Result<Vec<DiffLine>, GitError> {
+        let source = self.branch_diff_source_for_paths(reference, paths)?;
+        source.window(self, 0, u32::MAX).map(|(_, lines)| lines)
+    }
+
+    pub(crate) fn branch_diff_source_for_paths(
+        &self,
+        reference: &str,
+        paths: &[Vec<u8>],
+    ) -> Result<DiffSource, GitError> {
+        let paths = paths
+            .iter()
+            .map(|path| PathBuf::from(OsString::from_vec(path.clone())))
+            .collect::<Vec<_>>();
+        self.branch_diff_source_for_paths_at(reference, Path::new(""), &paths)
+    }
+
+    pub(crate) fn branch_diff_source_for_paths_against(
+        &self,
+        reference: &str,
+        merge_base: &str,
+        paths: &[Vec<u8>],
+    ) -> Result<DiffSource, GitError> {
+        let paths = paths
+            .iter()
+            .map(|path| PathBuf::from(OsString::from_vec(path.clone())))
+            .collect::<Vec<_>>();
+        let mut file = tempfile::NamedTempFile::new()
+            .map_err(|error| GitError(format!("failed to create diff spool: {error}")))?;
+        self.branch_diff_spool_for_paths_at_against(
+            reference,
+            merge_base,
+            Path::new(""),
+            &paths,
+            file.as_file_mut(),
         )?;
-        if !ok {
-            return Err(GitCommand::error(&stdout, &stderr));
+        file.as_file_mut()
+            .seek(SeekFrom::Start(0))
+            .map_err(|error| GitError(format!("failed to rewind diff spool: {error}")))?;
+        Ok(DiffSource::Review(Arc::new(ReviewDiffDocument::read(
+            file, true,
+        )?)))
+    }
+
+    pub(crate) fn branch_files_catalog(
+        &self,
+        reference: &str,
+    ) -> Result<BranchFilesCatalog, GitError> {
+        let repository = self
+            .branch_checkout(reference)
+            .unwrap_or_else(|| self.clone());
+        let base = repository.branch_base(reference)?;
+        let mut files =
+            repository.branch_files_against(reference, Path::new(""), &base.merge_base)?;
+        files.sort_by(|left, right| left.path_bytes.cmp(&right.path_bytes));
+        files.dedup_by(|left, right| left.path_bytes == right.path_bytes);
+        Ok(BranchFilesCatalog(Arc::new(BranchFilesCatalogData {
+            files,
+            source: repository.path().to_path_buf(),
+            base_ref: base.reference,
+            merge_base: base.merge_base,
+        })))
+    }
+
+    fn branch_files(
+        &self,
+        reference: &str,
+        prefix: &Path,
+    ) -> Result<Vec<GitBranchFileEntry>, GitError> {
+        let repository = self
+            .branch_checkout(reference)
+            .unwrap_or_else(|| self.clone());
+        let base = repository.branch_base(reference)?;
+        repository.branch_files_against(reference, prefix, &base.merge_base)
+    }
+
+    fn branch_files_against(
+        &self,
+        reference: &str,
+        prefix: &Path,
+        merge_base: &str,
+    ) -> Result<Vec<GitBranchFileEntry>, GitError> {
+        let current = self.branch_is_current(reference);
+        let submodules = if current {
+            self.branch_submodules()
+        } else {
+            Vec::new()
+        };
+        let mut command = GitCommand::command(&self.0);
+        command
+            .env("GIT_OPTIONAL_LOCKS", "0")
+            .arg("diff")
+            .arg("--name-status")
+            .arg("-z")
+            .arg("--find-renames")
+            .arg("--find-copies")
+            .arg(merge_base);
+        if !current {
+            command.arg(reference);
         }
-        Ok(parse::DiffParser::parse(&stdout))
+        if !submodules.is_empty() {
+            command.arg("--").arg(".");
+            for (path, _, _) in &submodules {
+                command.arg(format!(":(exclude,literal){}", path.to_string_lossy()));
+            }
+        }
+        let output = GitCommand::output(&mut command)?;
+        if !output.status.success() {
+            return Err(GitCommand::error(
+                &String::from_utf8_lossy(&output.stdout),
+                &String::from_utf8_lossy(&output.stderr),
+            ));
+        }
+        let mut files = GitBranchFileEntries::parse(&output.stdout, prefix);
+        if current {
+            let (untracked, stderr, ok) = GitCommand::read_bytes(
+                &self.0,
+                &["ls-files", "--others", "--exclude-standard", "-z"],
+            )?;
+            if !ok {
+                return Err(GitCommand::error(
+                    &String::from_utf8_lossy(&untracked),
+                    &stderr,
+                ));
+            }
+            for path in untracked
+                .split(|byte| *byte == 0)
+                .filter(|path| !path.is_empty())
+            {
+                files.push(GitBranchFileEntries::entry(
+                    prefix,
+                    path,
+                    None,
+                    GitPathChange::Added,
+                ));
+            }
+            for (path, repository, branch) in submodules {
+                files.extend(repository.branch_files(&branch, &prefix.join(path))?);
+            }
+        }
+        Ok(files)
+    }
+
+    fn branch_base(&self, reference: &str) -> Result<BranchBase, GitError> {
+        let reference = self.revision(reference)?;
+        let base = crate::host::worktree::BaseRef::resolve_for(&self.0, reference)
+            .ok_or_else(|| GitError("no base branch found".to_string()))?;
+        let (merge_base, stderr, ok) =
+            GitCommand::read(&self.0, &["merge-base", reference, base.as_str()])?;
+        if !ok {
+            return Err(GitCommand::error(&merge_base, &stderr));
+        }
+        Ok(BranchBase {
+            reference: base.branch().to_string(),
+            merge_base: merge_base.trim().to_string(),
+        })
+    }
+
+    fn branch_diff_text(
+        &self,
+        reference: &str,
+        context: u32,
+        prefix: &Path,
+    ) -> Result<String, GitError> {
+        let reference = self.revision(reference)?;
+        if let Some(checkout) = self.branch_checkout(reference) {
+            return checkout.branch_diff_text(reference, context, prefix);
+        }
+        let branch = self.branch_diff_context(reference)?;
+        self.branch_diff_text_with(&branch, context, prefix, &[])
+    }
+
+    fn branch_diff_spool_at(
+        &self,
+        reference: &str,
+        context: u32,
+        prefix: &Path,
+        output: &mut std::fs::File,
+    ) -> Result<(), GitError> {
+        let reference = self.revision(reference)?;
+        if let Some(checkout) = self.branch_checkout(reference) {
+            return checkout.branch_diff_spool_at(reference, context, prefix, output);
+        }
+        let branch = self.branch_diff_context(reference)?;
+        Self::separate_diff_spool(output)?;
+        let mut command = self.branch_diff_command(&branch, context, prefix, &[]);
+        GitCommand::spool_into(&mut command, output)?;
+        for (path, repository, reference) in &branch.submodules {
+            repository.branch_diff_spool_at(reference, context, &prefix.join(path), output)?;
+        }
+        Ok(())
+    }
+
+    fn branch_diff_context(&self, reference: &str) -> Result<BranchDiffContext, GitError> {
+        let base = self.branch_base(reference)?;
+        Ok(self.branch_diff_context_against(reference, base.merge_base))
+    }
+
+    fn branch_diff_context_against(
+        &self,
+        reference: &str,
+        merge_base: String,
+    ) -> BranchDiffContext {
+        let current = self.branch_is_current(reference);
+        BranchDiffContext {
+            merge_base,
+            selected: (!current).then(|| reference.to_string()),
+            submodules: if current {
+                self.branch_submodules()
+            } else {
+                Vec::new()
+            },
+        }
+    }
+
+    fn branch_diff_text_with(
+        &self,
+        branch: &BranchDiffContext,
+        context: u32,
+        prefix: &Path,
+        targets: &[PathBuf],
+    ) -> Result<String, GitError> {
+        let mut command = self.branch_diff_command(branch, context, prefix, targets);
+        let output = GitCommand::output(&mut command)?;
+        if !output.status.success() {
+            return Err(GitCommand::error(
+                &String::from_utf8_lossy(&output.stdout),
+                &String::from_utf8_lossy(&output.stderr),
+            ));
+        }
+        let mut stdout = String::from_utf8_lossy(&output.stdout).into_owned();
+        if !targets.is_empty() {
+            return Ok(stdout);
+        }
+        for (path, repository, reference) in &branch.submodules {
+            let nested_prefix = prefix.join(path);
+            let nested = repository.branch_diff_text(reference, context, &nested_prefix)?;
+            if nested.trim().is_empty() {
+                continue;
+            }
+            if !stdout.is_empty() && !stdout.ends_with('\n') {
+                stdout.push('\n');
+            }
+            stdout.push_str(&nested);
+        }
+        Ok(stdout)
+    }
+
+    fn branch_diff_command(
+        &self,
+        branch: &BranchDiffContext,
+        context: u32,
+        prefix: &Path,
+        targets: &[PathBuf],
+    ) -> Command {
+        let unified = format!("--unified={context}");
+        let mut command = GitCommand::command(&self.0);
+        command
+            .arg("diff")
+            .arg("--find-renames")
+            .arg("--find-copies")
+            .arg("--submodule=diff")
+            .arg(&unified);
+        if !prefix.as_os_str().is_empty() {
+            let prefix = prefix.to_string_lossy();
+            command
+                .arg(format!("--src-prefix=a/{prefix}/"))
+                .arg(format!("--dst-prefix=b/{prefix}/"));
+        }
+        command.arg(&branch.merge_base);
+        if let Some(selected) = &branch.selected {
+            command.arg(selected);
+        }
+        if !targets.is_empty() {
+            command.env("GIT_LITERAL_PATHSPECS", "1").arg("--");
+            for target in targets {
+                command.arg(target);
+            }
+        } else if !branch.submodules.is_empty() {
+            command.arg("--").arg(".");
+            for (path, _, _) in &branch.submodules {
+                command.arg(format!(":(exclude,literal){}", path.to_string_lossy()));
+            }
+        }
+        command
+    }
+
+    fn branch_diff_source_for_paths_at(
+        &self,
+        reference: &str,
+        prefix: &Path,
+        paths: &[PathBuf],
+    ) -> Result<DiffSource, GitError> {
+        let mut file = tempfile::NamedTempFile::new()
+            .map_err(|error| GitError(format!("failed to create diff spool: {error}")))?;
+        self.branch_diff_spool_for_paths_at(reference, prefix, paths, file.as_file_mut())?;
+        file.as_file_mut()
+            .seek(SeekFrom::Start(0))
+            .map_err(|error| GitError(format!("failed to rewind diff spool: {error}")))?;
+        Ok(DiffSource::Review(Arc::new(ReviewDiffDocument::read(
+            file, true,
+        )?)))
+    }
+
+    fn branch_diff_spool_for_paths_at(
+        &self,
+        reference: &str,
+        prefix: &Path,
+        paths: &[PathBuf],
+        output: &mut std::fs::File,
+    ) -> Result<(), GitError> {
+        if let Some(checkout) = self.branch_checkout(reference) {
+            return checkout.branch_diff_spool_for_paths_at(reference, prefix, paths, output);
+        }
+        let base = self.branch_base(reference)?;
+        self.branch_diff_spool_for_paths_at_against(
+            reference,
+            &base.merge_base,
+            prefix,
+            paths,
+            output,
+        )
+    }
+
+    fn branch_diff_spool_for_paths_at_against(
+        &self,
+        reference: &str,
+        merge_base: &str,
+        prefix: &Path,
+        paths: &[PathBuf],
+        output: &mut std::fs::File,
+    ) -> Result<(), GitError> {
+        let reference = self.revision(reference)?;
+        let merge_base = self.revision(merge_base)?;
+        let branch = self.branch_diff_context_against(reference, merge_base.to_string());
+        let mut root_paths = Vec::new();
+        let mut nested_paths = vec![Vec::new(); branch.submodules.len()];
+        for path in paths {
+            if !Self::safe_relative_path(path) {
+                return Err(GitError("invalid branch diff path".to_string()));
+            }
+            let mut nested = false;
+            for (index, (submodule, _, _)) in branch.submodules.iter().enumerate() {
+                let Ok(path) = path.strip_prefix(submodule) else {
+                    continue;
+                };
+                if path.as_os_str().is_empty() {
+                    continue;
+                }
+                nested_paths[index].push(path.to_path_buf());
+                nested = true;
+                break;
+            }
+            if !nested {
+                root_paths.push(path.clone());
+            }
+        }
+        if !root_paths.is_empty() {
+            Self::separate_diff_spool(output)?;
+            let mut command = self.branch_diff_command(&branch, 3, prefix, &root_paths);
+            GitCommand::spool_into(&mut command, output)?;
+        }
+        if branch.selected.is_none() && !root_paths.is_empty() {
+            let untracked = self.untracked_paths(&root_paths)?;
+            for path in &root_paths {
+                if untracked.contains(&path_bytes(path)) {
+                    self.append_untracked_diff(output, prefix, path)?;
+                }
+            }
+        }
+        for (index, (path, repository, reference)) in branch.submodules.iter().enumerate() {
+            if nested_paths[index].is_empty() {
+                continue;
+            }
+            repository.branch_diff_spool_for_paths_at(
+                reference,
+                &prefix.join(path),
+                &nested_paths[index],
+                output,
+            )?;
+        }
+        Ok(())
+    }
+
+    fn separate_diff_spool(output: &mut std::fs::File) -> Result<(), GitError> {
+        let len = output
+            .metadata()
+            .map_err(|error| GitError(format!("failed to inspect diff spool: {error}")))?
+            .len();
+        let mut last = [b'\n'];
+        if len > 0 {
+            output
+                .seek(SeekFrom::End(-1))
+                .and_then(|_| output.read_exact(&mut last))
+                .map_err(|error| {
+                    GitError(format!("failed to inspect diff spool ending: {error}"))
+                })?;
+        }
+        output
+            .seek(SeekFrom::End(0))
+            .map_err(|error| GitError(format!("failed to append diff spool: {error}")))?;
+        if last[0] != b'\n' {
+            output
+                .write_all(b"\n")
+                .map_err(|error| GitError(format!("failed to append diff spool: {error}")))?;
+        }
+        Ok(())
+    }
+
+    fn append_untracked_diff(
+        &self,
+        output: &mut std::fs::File,
+        prefix: &Path,
+        path: &Path,
+    ) -> Result<(), GitError> {
+        Self::separate_diff_spool(output)?;
+        let content = self.read_diff_file(path)?;
+        let display = prefix.join(path).to_string_lossy().into_owned();
+        writeln!(output, "diff --git a/{display} b/{display}")
+            .and_then(|_| writeln!(output, "--- /dev/null"))
+            .and_then(|_| writeln!(output, "+++ b/{display}"))
+            .and_then(|_| writeln!(output, "@@ -0,0 +1 @@"))
+            .map_err(|error| GitError(format!("failed to append diff spool: {error}")))?;
+        match content {
+            DiffFileContent::Text(content) => {
+                for (index, line) in content.lines().enumerate() {
+                    if index % 256 == 0 && super::runtime::GitRuntime::canceled() {
+                        return Err(GitError("git command canceled".to_string()));
+                    }
+                    writeln!(output, "+{line}").map_err(|error| {
+                        GitError(format!("failed to append diff spool: {error}"))
+                    })?;
+                }
+            }
+            DiffFileContent::TooLarge(bytes) => {
+                let megabytes = bytes as f64 / (1024.0 * 1024.0);
+                writeln!(
+                    output,
+                    "+Preview unavailable for this {megabytes:.1} MB file"
+                )
+                .map_err(|error| GitError(format!("failed to append diff spool: {error}")))?;
+            }
+        }
+        Ok(())
+    }
+
+    fn untracked_paths(&self, paths: &[PathBuf]) -> Result<HashSet<Vec<u8>>, GitError> {
+        if paths.is_empty() {
+            return Ok(HashSet::new());
+        }
+        let mut command = GitCommand::command(&self.0);
+        command
+            .env("GIT_LITERAL_PATHSPECS", "1")
+            .arg("ls-files")
+            .arg("--others")
+            .arg("--exclude-standard")
+            .arg("-z")
+            .arg("--");
+        for path in paths {
+            command.arg(path);
+        }
+        let output = GitCommand::output(&mut command)?;
+        if !output.status.success() {
+            return Err(GitCommand::error(
+                &String::from_utf8_lossy(&output.stdout),
+                &String::from_utf8_lossy(&output.stderr),
+            ));
+        }
+        Ok(output
+            .stdout
+            .split(|byte| *byte == 0)
+            .filter(|path| !path.is_empty())
+            .map(<[u8]>::to_vec)
+            .collect())
+    }
+
+    fn read_diff_file(&self, path: &Path) -> Result<DiffFileContent, GitError> {
+        if !Self::safe_relative_path(path) {
+            return Err(GitError("invalid branch diff path".to_string()));
+        }
+        let root = self
+            .0
+            .canonicalize()
+            .map_err(|error| GitError(format!("failed to resolve repository: {error}")))?;
+        let absolute = self.0.join(path);
+        let parent = absolute
+            .parent()
+            .ok_or_else(|| GitError("invalid branch diff path".to_string()))?
+            .canonicalize()
+            .map_err(|error| GitError(format!("failed to resolve file parent: {error}")))?;
+        if !parent.starts_with(&root) {
+            return Err(GitError("branch diff path escapes repository".to_string()));
+        }
+        let metadata = std::fs::symlink_metadata(&absolute)
+            .map_err(|error| GitError(format!("failed to inspect diff file: {error}")))?;
+        if metadata.file_type().is_symlink() || !metadata.file_type().is_file() {
+            return Err(GitError("branch diff only reads regular files".to_string()));
+        }
+        if metadata.len() > MAX_DIFF_FILE_BYTES {
+            return Ok(DiffFileContent::TooLarge(metadata.len()));
+        }
+        let mut file = OpenOptions::new()
+            .read(true)
+            .custom_flags(libc::O_NOFOLLOW)
+            .open(&absolute)
+            .map_err(|error| GitError(format!("failed to open diff file: {error}")))?;
+        let opened = file
+            .metadata()
+            .map_err(|error| GitError(format!("failed to inspect opened diff file: {error}")))?;
+        if !opened.file_type().is_file() {
+            return Err(GitError("branch diff only reads regular files".to_string()));
+        }
+        if opened.len() > MAX_DIFF_FILE_BYTES {
+            return Ok(DiffFileContent::TooLarge(opened.len()));
+        }
+        let mut bytes = Vec::with_capacity(opened.len() as usize);
+        Read::by_ref(&mut file)
+            .take(MAX_DIFF_FILE_BYTES + 1)
+            .read_to_end(&mut bytes)
+            .map_err(|error| GitError(format!("failed to read diff file: {error}")))?;
+        if bytes.len() as u64 > MAX_DIFF_FILE_BYTES {
+            return Ok(DiffFileContent::TooLarge(bytes.len() as u64));
+        }
+        Ok(DiffFileContent::Text(
+            String::from_utf8_lossy(&bytes).into_owned(),
+        ))
+    }
+
+    fn safe_relative_path(path: &Path) -> bool {
+        !path.as_os_str().is_empty()
+            && path.components().all(|component| {
+                matches!(
+                    component,
+                    std::path::Component::Normal(_) | std::path::Component::CurDir
+                )
+            })
+    }
+
+    fn branch_submodules(&self) -> Vec<(PathBuf, Self, String)> {
+        crate::host::worktree::SubmoduleCheckout::list(&self.0)
+            .into_iter()
+            .map(|submodule| {
+                (
+                    submodule.relative().to_path_buf(),
+                    Self::at(submodule.root()),
+                    submodule.branch().to_string(),
+                )
+            })
+            .collect()
+    }
+
+    fn branch_checkout(&self, reference: &str) -> Option<Self> {
+        let checkout = crate::host::worktree::CheckoutInfo::try_from(self.0.as_path()).ok()?;
+        let root = self.0.canonicalize().ok()?;
+        let holder = checkout
+            .branch_holders()
+            .ok()?
+            .into_iter()
+            .find(|holder| holder.branch == reference)?;
+        let path = holder.checkout?.canonicalize().ok()?;
+        (path != root).then(|| Self::at(path))
+    }
+
+    fn branch_is_current(&self, reference: &str) -> bool {
+        let Ok((branch, _, true)) =
+            GitCommand::read(&self.0, &["symbolic-ref", "--quiet", "--short", "HEAD"])
+        else {
+            return false;
+        };
+        let branch = branch.trim();
+        reference == branch || reference.strip_prefix("refs/heads/") == Some(branch)
+    }
+
+    fn highlight_diff(&self, stdout: &str) -> Vec<DiffLine> {
+        let lines = self.parse_diff(stdout);
+        self.highlight_diff_lines(lines)
+    }
+
+    fn parse_diff(&self, stdout: &str) -> Vec<DiffLine> {
+        parse::DiffParser::parse_review(stdout)
+    }
+
+    fn highlight_diff_lines(&self, mut lines: Vec<DiffLine>) -> Vec<DiffLine> {
+        let mut path = PathBuf::new();
+        self.highlight_diff_slice(&mut lines, &mut path);
+        lines
+    }
+
+    #[cfg(test)]
+    pub(crate) fn highlight_diff_window(
+        &self,
+        source: &[DiffLine],
+        top_line: u32,
+        rows: u32,
+    ) -> (u32, Vec<DiffLine>) {
+        let total = u32::try_from(source.len()).unwrap_or(u32::MAX);
+        let start = top_line.min(total) as usize;
+        let end = top_line.saturating_add(rows).min(total) as usize;
+        let mut path = source[..start]
+            .iter()
+            .rev()
+            .find_map(Self::diff_line_path)
+            .map(|path| self.0.join(path))
+            .unwrap_or_default();
+        let mut lines = source[start..end].to_vec();
+        self.highlight_diff_slice(&mut lines, &mut path);
+        (total, lines)
+    }
+
+    fn highlight_diff_slice(&self, lines: &mut [DiffLine], path: &mut PathBuf) {
+        for (index, line) in lines.iter_mut().enumerate() {
+            if index % 256 == 0 && super::runtime::GitRuntime::canceled() {
+                break;
+            }
+            let text = line
+                .spans
+                .first()
+                .map(|span| span.text.clone())
+                .unwrap_or_default();
+            if matches!(line.kind, DiffKind::Hunk) {
+                if !text.starts_with("@@") && !text.is_empty() {
+                    *path = self.0.join(&text);
+                }
+                continue;
+            }
+            line.spans = crate::host::highlight::Highlighter::line(&text, path);
+        }
+    }
+
+    #[cfg(test)]
+    fn diff_line_path(line: &DiffLine) -> Option<&str> {
+        if !matches!(line.kind, DiffKind::Hunk) {
+            return None;
+        }
+        let text = line.spans.first()?.text.as_str();
+        (!text.starts_with("@@") && !text.is_empty()).then_some(text)
     }
 
     pub fn apply_hunk(&self, file: &Path, index: u32, accept: bool) -> Result<(), GitError> {
@@ -325,11 +1623,13 @@ impl GitRepository {
     }
 
     pub(crate) fn checkout_commit(&self, commit: &str) -> Result<String, GitError> {
-        self.operation(&["switch", "--detach", commit])
+        let commit = self.revision(commit)?;
+        self.operation(&["switch", "--detach", "--", commit])
     }
 
     pub(crate) fn cherry_pick(&self, commit: &str) -> Result<String, GitError> {
-        self.operation(&["cherry-pick", commit])
+        let commit = self.revision(commit)?;
+        self.operation(&["cherry-pick", "--", commit])
     }
 
     pub(crate) fn create_branch(
@@ -339,6 +1639,7 @@ impl GitRepository {
     ) -> Result<String, GitError> {
         crate::host::worktree::CheckoutInfo::try_from(self.0.as_path())?
             .validate_branch_name(branch)?;
+        let start_point = self.revision(start_point)?;
         self.operation(&["branch", "--", branch, start_point])
     }
 
@@ -347,27 +1648,33 @@ impl GitRepository {
     }
 
     pub(crate) fn fast_forward(&self, branch: &str) -> Result<String, GitError> {
-        self.operation(&["merge", "--ff-only", branch])
+        let branch = self.revision(branch)?;
+        self.operation(&["merge", "--ff-only", "--", branch])
     }
 
     pub(crate) fn merge(&self, branch: &str) -> Result<String, GitError> {
-        self.operation(&["merge", "--no-edit", branch])
+        let branch = self.revision(branch)?;
+        self.operation(&["merge", "--no-edit", "--", branch])
     }
 
     pub(crate) fn rebase(&self, branch: &str) -> Result<String, GitError> {
-        self.operation(&["rebase", branch])
+        let branch = self.revision(branch)?;
+        self.operation(&["rebase", "--", branch])
     }
 
     pub(crate) fn revert(&self, commit: &str) -> Result<String, GitError> {
-        self.operation(&["revert", "--no-edit", commit])
+        let commit = self.revision(commit)?;
+        self.operation(&["revert", "--no-edit", "--", commit])
     }
 
     pub(crate) fn stash_drop(&self, reference: &str) -> Result<String, GitError> {
-        self.operation(&["stash", "drop", reference])
+        let reference = self.revision(reference)?;
+        self.operation(&["stash", "drop", "--", reference])
     }
 
     pub(crate) fn stash_pop(&self, reference: &str) -> Result<String, GitError> {
-        self.operation(&["stash", "pop", reference])
+        let reference = self.revision(reference)?;
+        self.operation(&["stash", "pop", "--", reference])
     }
 
     pub(crate) fn stash_push(&self) -> Result<String, GitError> {
@@ -375,7 +1682,8 @@ impl GitRepository {
     }
 
     fn run(&self, args: &[&str]) -> Result<String, GitError> {
-        let (stdout, stderr, ok) = GitCommand::run(&self.0, args)?;
+        let (stdout, stderr, ok) =
+            GitCommand::run_with_timeout(&self.0, args, GIT_OPERATION_TIMEOUT)?;
         if ok {
             Ok(stdout)
         } else {
@@ -383,8 +1691,21 @@ impl GitRepository {
         }
     }
 
+    fn revision<'a>(&self, value: &'a str) -> Result<&'a str, GitError> {
+        if value.is_empty()
+            || value.starts_with('-')
+            || value
+                .chars()
+                .any(|character| character.is_whitespace() || character.is_control())
+        {
+            return Err(GitError("invalid Git revision".to_string()));
+        }
+        Ok(value)
+    }
+
     fn operation(&self, args: &[&str]) -> Result<String, GitError> {
-        let (stdout, stderr, ok) = GitCommand::run(&self.0, args)?;
+        let (stdout, stderr, ok) =
+            GitCommand::run_with_timeout(&self.0, args, GIT_OPERATION_TIMEOUT)?;
         if !ok {
             return Err(GitCommand::error(&stdout, &stderr));
         }
@@ -416,18 +1737,8 @@ impl GitRepository {
     }
 
     fn diff_text(&self, target: &Path, cached: bool, context: u32) -> Result<String, GitError> {
-        let unified = format!("--unified={context}");
-        let mut command = GitCommand::command(&self.0);
-        command.arg("diff");
-        if cached {
-            command.arg("--cached");
-        }
-        let output = command
-            .arg(&unified)
-            .arg("--")
-            .arg(target)
-            .output()
-            .map_err(|error| GitError(format!("failed to run git: {error}")))?;
+        let mut command = self.diff_command(target, cached, context);
+        let output = GitCommand::output(&mut command)?;
         if output.status.success() {
             return Ok(String::from_utf8_lossy(&output.stdout).into_owned());
         }
@@ -436,10 +1747,31 @@ impl GitRepository {
         ))
     }
 
+    fn diff_spool(
+        &self,
+        target: &Path,
+        cached: bool,
+        context: u32,
+    ) -> Result<tempfile::NamedTempFile, GitError> {
+        let mut command = self.diff_command(target, cached, context);
+        GitCommand::spool(&mut command)
+    }
+
+    fn diff_command(&self, target: &Path, cached: bool, context: u32) -> Command {
+        let unified = format!("--unified={context}");
+        let mut command = GitCommand::command(&self.0);
+        command.arg("diff");
+        if cached {
+            command.arg("--cached");
+        }
+        command.arg(&unified).arg("--").arg(target);
+        command
+    }
+
     fn staged_lines(&self, target: &Path) -> HashSet<u32> {
-        self.diff_text(target, true, 0)
-            .map(|text| {
-                parse::HunkRange::parse_all(&text)
+        self.diff_ranges(target, true)
+            .map(|ranges| {
+                ranges
                     .iter()
                     .flat_map(|range| range.new_start..range.new_start + range.new_count)
                     .collect()
@@ -447,60 +1779,45 @@ impl GitRepository {
             .unwrap_or_default()
     }
 
-    fn tag_hunk(line: &DiffLine, ranges: &[parse::HunkRange]) -> Option<u32> {
-        match line.kind {
-            DiffKind::Add => {
-                let line = line.new_no?;
-                ranges
-                    .iter()
-                    .position(|range| {
-                        line >= range.new_start && line < range.new_start + range.new_count
-                    })
-                    .map(|index| index as u32)
+    fn diff_ranges(&self, target: &Path, cached: bool) -> Result<Vec<parse::HunkRange>, GitError> {
+        let file = self.diff_spool(target, cached, 0)?;
+        let reader = BufReader::new(
+            file.reopen()
+                .map_err(|error| GitError(format!("failed to read diff spool: {error}")))?,
+        );
+        let mut ranges = Vec::new();
+        for (index, line) in reader.lines().enumerate() {
+            if index % 256 == 0 && super::runtime::GitRuntime::canceled() {
+                return Err(GitError("git command canceled".to_string()));
             }
-            DiffKind::Remove => {
-                let line = line.old_no?;
-                ranges
-                    .iter()
-                    .position(|range| {
-                        line >= range.old_start && line < range.old_start + range.old_count
-                    })
-                    .map(|index| index as u32)
+            let line =
+                line.map_err(|error| GitError(format!("failed to read diff spool: {error}")))?;
+            if let Some(range) = parse::HunkRange::parse(&line) {
+                ranges.push(range);
             }
-            _ => None,
         }
+        Ok(ranges)
     }
 
-    fn staged_only_lines(
+    fn staged_only_source(
         &self,
         file: &Path,
         target: &Path,
-        staged: &HashSet<u32>,
-    ) -> Result<Vec<DiffLine>, GitError> {
-        if self.diff_text(target, true, 100_000)?.trim().is_empty() {
-            return Ok(Vec::new());
+        staged: HashSet<u32>,
+    ) -> Result<DiffSource, GitError> {
+        let staged_diff = self.diff_spool(target, true, 100_000)?;
+        let document = ReviewDiffDocument::read(staged_diff, true)?;
+        if document.is_empty() {
+            return Ok(DiffSource::Review(Arc::new(document)));
         }
-        let content = std::fs::read_to_string(file).unwrap_or_default();
-        let spans = crate::host::highlight::Highlighter::file(&content, file);
-        let lines = content
-            .lines()
-            .enumerate()
-            .map(|(index, _)| {
-                let line = index as u32 + 1;
-                DiffLine {
-                    kind: if staged.contains(&line) {
-                        DiffKind::Staged
-                    } else {
-                        DiffKind::Context
-                    },
-                    old_no: Some(line),
-                    new_no: Some(line),
-                    hunk: None,
-                    spans: spans.get(index).cloned().unwrap_or_default(),
-                }
-            })
-            .collect();
-        Ok(lines)
+        let Some(content) = self
+            .read_diff_file(target)
+            .ok()
+            .and_then(DiffFileContent::text)
+        else {
+            return Ok(DiffSource::Review(Arc::new(document)));
+        };
+        self.content_diff_source(file, &content, &content, staged)
     }
 
     fn index_text(&self, target: &Path) -> Result<String, GitError> {
@@ -513,11 +1830,9 @@ impl GitRepository {
         #[cfg(not(unix))]
         let spec = OsString::from(format!(":{}", target.to_string_lossy()));
 
-        let output = GitCommand::command(&self.0)
-            .arg("show")
-            .arg(spec)
-            .output()
-            .map_err(|error| GitError(format!("failed to run git: {error}")))?;
+        let mut command = GitCommand::command(&self.0);
+        command.arg("show").arg(spec);
+        let output = GitCommand::output(&mut command)?;
         if output.status.success() {
             return Ok(String::from_utf8_lossy(&output.stdout).into_owned());
         }
@@ -532,22 +1847,7 @@ impl GitRepository {
             args.push("--cached");
         }
         args.push("--unidiff-zero");
-        let mut child = GitCommand::command(&self.0)
-            .args(&args)
-            .stdin(Stdio::piped())
-            .stdout(Stdio::piped())
-            .stderr(Stdio::piped())
-            .spawn()
-            .map_err(|error| GitError(format!("failed to run git apply: {error}")))?;
-        child
-            .stdin
-            .take()
-            .ok_or_else(|| GitError("git apply: no stdin".into()))?
-            .write_all(patch.as_bytes())
-            .map_err(|error| GitError(format!("git apply write: {error}")))?;
-        let output = child
-            .wait_with_output()
-            .map_err(|error| GitError(format!("git apply wait: {error}")))?;
+        let output = GitCommand::output_with_input(&self.0, &args, patch.as_bytes())?;
         if output.status.success() {
             return Ok(());
         }
@@ -559,11 +1859,9 @@ impl GitRepository {
 
     fn file_operation(&self, file: &Path, verb: &[&str]) -> Result<(), GitError> {
         let target = self.relative_path(file);
-        let output = GitCommand::command(&self.0)
-            .args(verb)
-            .arg(&target)
-            .output()
-            .map_err(|error| GitError(format!("failed to run git: {error}")))?;
+        let mut command = GitCommand::command(&self.0);
+        command.args(verb).arg(&target);
+        let output = GitCommand::output(&mut command)?;
         if output.status.success() {
             return Ok(());
         }
@@ -594,13 +1892,125 @@ const FALLBACK_LOCAL_ENV_VARS: &[&str] = &[
 
 pub(crate) struct GitCommand;
 
+const GIT_COMMAND_TIMEOUT: Duration = Duration::from_secs(120);
+const GIT_OPERATION_TIMEOUT: Duration = Duration::from_secs(900);
+const GIT_COMMAND_POLL: Duration = Duration::from_millis(50);
+const GIT_IO_DRAIN_TIMEOUT: Duration = Duration::from_secs(2);
+const GIT_OUTPUT_LIMIT: usize = 32 * 1024 * 1024;
+
+struct GitOutputCapture {
+    bytes: Vec<u8>,
+}
+
+struct GitChild {
+    child: Child,
+    reaped: bool,
+    poll_delay: Duration,
+}
+
+impl GitChild {
+    fn new(child: Child) -> Self {
+        Self {
+            child,
+            reaped: false,
+            poll_delay: Duration::from_millis(2),
+        }
+    }
+
+    fn try_wait(&mut self) -> std::io::Result<Option<ExitStatus>> {
+        let status = self.child.try_wait()?;
+        self.reaped |= status.is_some();
+        Ok(status)
+    }
+
+    fn pause(&mut self, deadline: Instant) {
+        let remaining = deadline.saturating_duration_since(Instant::now());
+        std::thread::sleep(remaining.min(self.poll_delay));
+        self.poll_delay = self.poll_delay.saturating_mul(2).min(GIT_COMMAND_POLL);
+    }
+
+    fn stop(&mut self) -> std::io::Result<ExitStatus> {
+        if let Some(status) = self.try_wait()? {
+            return Ok(status);
+        }
+        self.signal(libc::SIGTERM);
+        let deadline = Instant::now() + Duration::from_millis(500);
+        while Instant::now() < deadline {
+            if let Some(status) = self.try_wait()? {
+                return Ok(status);
+            }
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        self.signal(libc::SIGKILL);
+        let _ = self.child.kill();
+        let status = self.child.wait()?;
+        self.reaped = true;
+        Ok(status)
+    }
+
+    fn abort_group(&mut self) {
+        self.signal(libc::SIGTERM);
+        std::thread::sleep(Duration::from_millis(50));
+        self.signal(libc::SIGKILL);
+        if !self.reaped {
+            let _ = self.child.kill();
+            let _ = self.child.wait();
+            self.reaped = true;
+        }
+    }
+
+    #[cfg(unix)]
+    fn signal(&self, signal: libc::c_int) {
+        unsafe {
+            libc::kill(-(self.child.id() as i32), signal);
+        }
+    }
+
+    #[cfg(not(unix))]
+    fn signal(&self, _signal: libc::c_int) {}
+}
+
+impl Drop for GitChild {
+    fn drop(&mut self) {
+        if !self.reaped {
+            self.abort_group();
+        }
+    }
+}
+
+impl GitOutputCapture {
+    fn read(
+        mut source: impl Read,
+        used: Arc<AtomicUsize>,
+        overflow: Arc<AtomicBool>,
+    ) -> std::io::Result<Self> {
+        let mut bytes = Vec::new();
+        let mut chunk = [0_u8; 16 * 1024];
+        loop {
+            let read = source.read(&mut chunk)?;
+            if read == 0 {
+                break;
+            }
+            let before = used.fetch_add(read, Ordering::AcqRel);
+            let remaining = GIT_OUTPUT_LIMIT.saturating_sub(before);
+            let kept = read.min(remaining);
+            bytes.extend_from_slice(&chunk[..kept]);
+            if kept != read {
+                overflow.store(true, Ordering::Release);
+                break;
+            }
+        }
+        Ok(Self { bytes })
+    }
+}
+
 impl GitCommand {
     fn local_env_vars() -> &'static [String] {
         static VARS: OnceLock<Vec<String>> = OnceLock::new();
         VARS.get_or_init(|| {
-            Command::new("git")
-                .args(["rev-parse", "--local-env-vars"])
-                .output()
+            let mut command = Command::new("git");
+            command.args(["rev-parse", "--local-env-vars"]);
+            Self::output_raw(&mut command, None, GIT_COMMAND_TIMEOUT)
                 .ok()
                 .filter(|out| out.status.success())
                 .map(|out| {
@@ -631,10 +2041,17 @@ impl GitCommand {
     }
 
     pub(crate) fn run(root: &Path, args: &[&str]) -> Result<(String, String, bool), GitError> {
-        let output = Self::command(root)
-            .args(args)
-            .output()
-            .map_err(|error| GitError(format!("failed to run git: {error}")))?;
+        Self::run_with_timeout(root, args, GIT_COMMAND_TIMEOUT)
+    }
+
+    pub(super) fn run_with_timeout(
+        root: &Path,
+        args: &[&str],
+        timeout: Duration,
+    ) -> Result<(String, String, bool), GitError> {
+        let mut command = Self::command(root);
+        command.args(args);
+        let output = Self::output_raw(&mut command, None, timeout)?;
         Ok((
             String::from_utf8_lossy(&output.stdout).into_owned(),
             String::from_utf8_lossy(&output.stderr).into_owned(),
@@ -647,17 +2064,281 @@ impl GitCommand {
         Ok((String::from_utf8_lossy(&stdout).into_owned(), stderr, ok))
     }
 
-    fn read_bytes(root: &Path, args: &[&str]) -> Result<(Vec<u8>, String, bool), GitError> {
-        let output = Self::command(root)
-            .env("GIT_OPTIONAL_LOCKS", "0")
-            .args(args)
-            .output()
-            .map_err(|error| GitError(format!("failed to run git: {error}")))?;
+    pub(super) fn read_bytes(
+        root: &Path,
+        args: &[&str],
+    ) -> Result<(Vec<u8>, String, bool), GitError> {
+        let mut command = Self::command(root);
+        command.env("GIT_OPTIONAL_LOCKS", "0").args(args);
+        let output = Self::output(&mut command)?;
         Ok((
             output.stdout,
             String::from_utf8_lossy(&output.stderr).into_owned(),
             output.status.success(),
         ))
+    }
+
+    fn output_with_input(root: &Path, args: &[&str], input: &[u8]) -> Result<Output, GitError> {
+        let mut command = Self::command(root);
+        command.env("GIT_OPTIONAL_LOCKS", "0").args(args);
+        Self::output_raw(&mut command, Some(input), GIT_COMMAND_TIMEOUT)
+    }
+
+    fn output(command: &mut Command) -> Result<Output, GitError> {
+        Self::output_raw(command, None, GIT_COMMAND_TIMEOUT)
+    }
+
+    fn spool(command: &mut Command) -> Result<tempfile::NamedTempFile, GitError> {
+        let mut file = tempfile::NamedTempFile::new()
+            .map_err(|error| GitError(format!("failed to create diff spool: {error}")))?;
+        Self::spool_into(command, file.as_file_mut())?;
+        file.as_file_mut()
+            .seek(SeekFrom::Start(0))
+            .map_err(|error| GitError(format!("failed to rewind diff spool: {error}")))?;
+        Ok(file)
+    }
+
+    fn spool_into(command: &mut Command, file: &mut std::fs::File) -> Result<(), GitError> {
+        if super::runtime::GitRuntime::canceled() {
+            return Err(GitError("git command canceled".to_string()));
+        }
+        file.seek(SeekFrom::End(0))
+            .map_err(|error| GitError(format!("failed to append diff spool: {error}")))?;
+        let stdout = file
+            .try_clone()
+            .map_err(|error| GitError(format!("failed to open diff spool: {error}")))?;
+        command
+            .stdin(Stdio::null())
+            .stdout(Stdio::from(stdout))
+            .stderr(Stdio::piped());
+        #[cfg(unix)]
+        {
+            command.process_group(0);
+        }
+        let mut child = GitChild::new(
+            command
+                .spawn()
+                .map_err(|error| GitError(format!("failed to run git: {error}")))?,
+        );
+        let stderr = child
+            .child
+            .stderr
+            .take()
+            .ok_or_else(|| GitError("git stderr unavailable".to_string()))?;
+        let used = Arc::new(AtomicUsize::new(0));
+        let overflow = Arc::new(AtomicBool::new(false));
+        let (stderr_tx, stderr_rx) = mpsc::sync_channel(1);
+        let stderr_overflow = Arc::clone(&overflow);
+        if let Err(error) = std::thread::Builder::new()
+            .name("vmux-git-stderr".to_string())
+            .spawn(move || {
+                let _ = stderr_tx.send(GitOutputCapture::read(stderr, used, stderr_overflow));
+            })
+        {
+            return Err(GitError(format!("failed to read git stderr: {error}")));
+        }
+        let deadline = Instant::now() + GIT_COMMAND_TIMEOUT;
+        let mut interrupted = None;
+        let status = loop {
+            if overflow.load(Ordering::Acquire) {
+                interrupted = Some("git command output exceeded 32 MiB");
+                break child
+                    .stop()
+                    .map_err(|error| GitError(format!("failed to wait for git: {error}")))?;
+            }
+            if super::runtime::GitRuntime::canceled() {
+                interrupted = Some("git command canceled");
+                break child
+                    .stop()
+                    .map_err(|error| GitError(format!("failed to wait for git: {error}")))?;
+            }
+            let now = Instant::now();
+            if now >= deadline {
+                interrupted = Some("git command timed out");
+                break child
+                    .stop()
+                    .map_err(|error| GitError(format!("failed to wait for git: {error}")))?;
+            }
+            if let Some(status) = child
+                .try_wait()
+                .map_err(|error| GitError(format!("failed to wait for git: {error}")))?
+            {
+                break status;
+            }
+            child.pause(deadline);
+        };
+        let stderr = Self::receive(
+            stderr_rx,
+            Instant::now() + GIT_IO_DRAIN_TIMEOUT,
+            "git stderr",
+        )?
+        .map_err(|error| GitError(format!("failed to read git stderr: {error}")))?;
+        if let Some(message) = interrupted {
+            return Err(GitError(message.to_string()));
+        }
+        if !status.success() {
+            return Err(Self::error("", &String::from_utf8_lossy(&stderr.bytes)));
+        }
+        Ok(())
+    }
+
+    fn output_raw(
+        command: &mut Command,
+        input: Option<&[u8]>,
+        timeout: Duration,
+    ) -> Result<Output, GitError> {
+        if super::runtime::GitRuntime::canceled() {
+            return Err(GitError("git command canceled".to_string()));
+        }
+        command
+            .stdin(if input.is_some() {
+                Stdio::piped()
+            } else {
+                Stdio::null()
+            })
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped());
+        #[cfg(unix)]
+        {
+            command.process_group(0);
+        }
+        let mut child = GitChild::new(
+            command
+                .spawn()
+                .map_err(|error| GitError(format!("failed to run git: {error}")))?,
+        );
+        let stdout = child
+            .child
+            .stdout
+            .take()
+            .ok_or_else(|| GitError("git stdout unavailable".to_string()))?;
+        let stderr = child
+            .child
+            .stderr
+            .take()
+            .ok_or_else(|| GitError("git stderr unavailable".to_string()))?;
+        let stdin = child.child.stdin.take();
+        let used = Arc::new(AtomicUsize::new(0));
+        let overflow = Arc::new(AtomicBool::new(false));
+        let (stdout_tx, stdout_rx) = mpsc::sync_channel(1);
+        let stdout_used = Arc::clone(&used);
+        let stdout_overflow = Arc::clone(&overflow);
+        if let Err(error) = std::thread::Builder::new()
+            .name("vmux-git-stdout".to_string())
+            .spawn(move || {
+                let _ =
+                    stdout_tx.send(GitOutputCapture::read(stdout, stdout_used, stdout_overflow));
+            })
+        {
+            return Err(GitError(format!("failed to read git stdout: {error}")));
+        }
+        let (stderr_tx, stderr_rx) = mpsc::sync_channel(1);
+        let stderr_used = Arc::clone(&used);
+        let stderr_overflow = Arc::clone(&overflow);
+        if let Err(error) = std::thread::Builder::new()
+            .name("vmux-git-stderr".to_string())
+            .spawn(move || {
+                let _ =
+                    stderr_tx.send(GitOutputCapture::read(stderr, stderr_used, stderr_overflow));
+            })
+        {
+            return Err(GitError(format!("failed to read git stderr: {error}")));
+        }
+        let writer = match (stdin, input) {
+            (Some(mut stdin), Some(input)) => {
+                let input = input.to_vec();
+                let (tx, rx) = mpsc::sync_channel(1);
+                if let Err(error) = std::thread::Builder::new()
+                    .name("vmux-git-stdin".to_string())
+                    .spawn(move || {
+                        let _ = tx.send(stdin.write_all(&input));
+                    })
+                {
+                    return Err(GitError(format!("failed to write git stdin: {error}")));
+                }
+                Some(rx)
+            }
+            _ => None,
+        };
+        let deadline = Instant::now() + timeout;
+        let mut interrupted = None;
+        let status = loop {
+            if overflow.load(Ordering::Acquire) {
+                interrupted = Some("git command output exceeded 32 MiB");
+                break child
+                    .stop()
+                    .map_err(|error| GitError(format!("failed to wait for git: {error}")))?;
+            }
+            if super::runtime::GitRuntime::canceled() {
+                interrupted = Some("git command canceled");
+                break child
+                    .stop()
+                    .map_err(|error| GitError(format!("failed to wait for git: {error}")))?;
+            }
+            let now = Instant::now();
+            if now >= deadline {
+                interrupted = Some("git command timed out");
+                break child
+                    .stop()
+                    .map_err(|error| GitError(format!("failed to wait for git: {error}")))?;
+            }
+            if let Some(status) = child
+                .try_wait()
+                .map_err(|error| GitError(format!("failed to wait for git: {error}")))?
+            {
+                break status;
+            }
+            child.pause(deadline);
+        };
+        let drain_deadline = Instant::now() + GIT_IO_DRAIN_TIMEOUT;
+        let write = writer.map(|writer| Self::receive(writer, drain_deadline, "git stdin"));
+        let stdout = Self::receive(stdout_rx, drain_deadline, "git stdout");
+        let stderr = Self::receive(stderr_rx, drain_deadline, "git stderr");
+        if let Some(message) = interrupted {
+            return Err(GitError(message.to_string()));
+        }
+        if let Some(write) = write {
+            let write = match write {
+                Ok(write) => write,
+                Err(error) => {
+                    child.abort_group();
+                    return Err(error);
+                }
+            };
+            write.map_err(|error| GitError(format!("failed to write git stdin: {error}")))?;
+        }
+        let stdout = match stdout {
+            Ok(stdout) => stdout,
+            Err(error) => {
+                child.abort_group();
+                return Err(error);
+            }
+        }
+        .map_err(|error| GitError(format!("failed to read git stdout: {error}")))?;
+        let stderr = match stderr {
+            Ok(stderr) => stderr,
+            Err(error) => {
+                child.abort_group();
+                return Err(error);
+            }
+        }
+        .map_err(|error| GitError(format!("failed to read git stderr: {error}")))?;
+        Ok(Output {
+            status,
+            stdout: stdout.bytes,
+            stderr: stderr.bytes,
+        })
+    }
+
+    fn receive<T>(
+        receiver: mpsc::Receiver<T>,
+        deadline: Instant,
+        stream: &str,
+    ) -> Result<T, GitError> {
+        let remaining = deadline.saturating_duration_since(Instant::now());
+        receiver
+            .recv_timeout(remaining)
+            .map_err(|_| GitError(format!("{stream} did not close")))
     }
 
     pub(crate) fn error(stdout: &str, stderr: &str) -> GitError {
@@ -695,6 +2376,69 @@ pub(crate) struct RequestPath<'a> {
     bytes: &'a [u8],
 }
 
+struct GitBranchFileEntries;
+
+impl GitBranchFileEntries {
+    fn parse(output: &[u8], prefix: &Path) -> Vec<GitBranchFileEntry> {
+        let fields = output
+            .split(|byte| *byte == 0)
+            .filter(|field| !field.is_empty())
+            .collect::<Vec<_>>();
+        let mut entries = Vec::new();
+        let mut index = 0;
+        while index < fields.len() {
+            let status = fields[index];
+            let Some(change) = Self::change(status.first().copied()) else {
+                index += 1;
+                continue;
+            };
+            let moved = matches!(change, GitPathChange::Renamed | GitPathChange::Copied);
+            let needed = if moved { 3 } else { 2 };
+            if index + needed > fields.len() {
+                break;
+            }
+            let previous = moved.then_some(fields[index + 1]);
+            let path = fields[index + needed - 1];
+            entries.push(Self::entry(prefix, path, previous, change));
+            index += needed;
+        }
+        entries
+    }
+
+    fn change(status: Option<u8>) -> Option<GitPathChange> {
+        match status? {
+            b'A' => Some(GitPathChange::Added),
+            b'M' => Some(GitPathChange::Modified),
+            b'D' => Some(GitPathChange::Deleted),
+            b'R' => Some(GitPathChange::Renamed),
+            b'C' => Some(GitPathChange::Copied),
+            b'T' => Some(GitPathChange::TypeChanged),
+            b'U' => Some(GitPathChange::Unmerged),
+            _ => None,
+        }
+    }
+
+    fn entry(
+        prefix: &Path,
+        path: &[u8],
+        previous: Option<&[u8]>,
+        change: GitPathChange,
+    ) -> GitBranchFileEntry {
+        let path = prefix.join(path_from_bytes(path));
+        let encoded_path = path_bytes(&path);
+        let previous = previous.map(|previous| prefix.join(path_from_bytes(previous)));
+        GitBranchFileEntry {
+            path: path.to_string_lossy().into_owned(),
+            path_bytes: encoded_path,
+            previous_path: previous
+                .as_ref()
+                .map(|previous| previous.to_string_lossy().into_owned()),
+            previous_path_bytes: previous.as_ref().map(|previous| path_bytes(previous)),
+            change,
+        }
+    }
+}
+
 impl<'a> RequestPath<'a> {
     pub(crate) fn new(display: &'a str, bytes: &'a [u8]) -> Self {
         Self { display, bytes }
@@ -710,15 +2454,25 @@ impl<'a> RequestPath<'a> {
 
 impl GitCommitEntry {
     fn recent(root: &Path) -> Result<Vec<Self>, GitError> {
+        Ok(Self::page(root, 0, 50)?.entries)
+    }
+
+    fn page(root: &Path, offset: usize, limit: usize) -> Result<CatalogPage<Self>, GitError> {
         let (_, _, has_head) = GitCommand::read(root, &["rev-parse", "--verify", "HEAD"])?;
         if !has_head {
-            return Ok(Vec::new());
+            return Ok(CatalogPage {
+                entries: Vec::new(),
+                has_more: false,
+            });
         }
+        let skip = format!("--skip={offset}");
+        let count = format!("-{}", limit.saturating_add(1));
         let (stdout, stderr, ok) = GitCommand::read(
             root,
             &[
                 "log",
-                "-50",
+                &skip,
+                &count,
                 "--date=short",
                 "--format=%H%x00%h%x00%an%x00%ad%x00%s",
             ],
@@ -742,52 +2496,29 @@ impl GitCommitEntry {
                 references: String::new(),
             });
         }
-        Ok(commits)
-    }
-
-    pub(crate) fn for_reference(root: &Path, reference: &str) -> Result<Vec<Self>, GitError> {
-        let (stdout, stderr, ok) = GitCommand::read(
-            root,
-            &[
-                "log",
-                "-50",
-                "--date=relative",
-                "--format=%H%x1f%h%x1f%an%x1f%ar%x1f%s%x1f%b%x1f%D%x1e",
-                reference,
-                "--",
-            ],
-        )?;
-        if !ok {
-            return Err(GitCommand::error(&stdout, &stderr));
-        }
-        let mut commits = Vec::new();
-        for record in stdout.split('\x1e') {
-            let record = record.trim_matches(['\n', '\r']);
-            if record.is_empty() {
-                continue;
-            }
-            let fields = record.splitn(7, '\x1f').collect::<Vec<_>>();
-            if fields.len() != 7 {
-                continue;
-            }
-            commits.push(Self {
-                sha: fields[0].to_string(),
-                short_sha: fields[1].to_string(),
-                author: fields[2].to_string(),
-                date: fields[3].to_string(),
-                summary: fields[4].to_string(),
-                body: fields[5].trim().to_string(),
-                references: fields[6].trim().to_string(),
-            });
-        }
-        Ok(commits)
+        let has_more = commits.len() > limit;
+        commits.truncate(limit);
+        Ok(CatalogPage {
+            entries: commits,
+            has_more,
+        })
     }
 }
 
 impl GitBranchEntry {
     fn local(root: &Path, current: &str) -> Result<Vec<Self>, GitError> {
-        let registrations =
-            crate::host::worktree::CheckoutInfo::try_from(root)?.worktree_registrations()?;
+        let checkout = crate::host::worktree::CheckoutInfo::try_from(root)?;
+        let mut holders = checkout.branch_holders()?;
+        if let Some(holder) = holders.iter_mut().find(|holder| holder.branch == current)
+            && let Some(path) = holder.checkout.as_ref()
+        {
+            holder.change =
+                crate::host::worktree::BranchChange::for_branch(root, path, holder.branch.as_str());
+        }
+        let holders = holders
+            .into_iter()
+            .map(|holder| (holder.branch.clone(), holder))
+            .collect::<HashMap<_, _>>();
         let (_, _, has_head) = GitCommand::read(root, &["rev-parse", "--verify", "HEAD"])?;
         let format = if has_head {
             "--format=%(refname:short)%00%(HEAD)%00%(upstream:short)%00%(objectname:short)%00%(ahead-behind:HEAD)"
@@ -813,18 +2544,22 @@ impl GitBranchEntry {
                 continue;
             }
             let (ahead, behind) = Self::relation(fields[4]);
+            let holder = holders.get(fields[0]);
+            let change = holder.map(|holder| holder.change).unwrap_or_default();
             branches.push(Self {
                 name: fields[0].to_string(),
                 current: fields[1] == "*",
                 upstream: fields[2].to_string(),
-                checkout: registrations
-                    .iter()
-                    .find(|registration| registration.branch.as_deref() == Some(fields[0]))
-                    .map(|registration| registration.path.to_string_lossy().into_owned())
+                checkout: holder
+                    .and_then(|holder| holder.checkout.as_ref())
+                    .map(|path| path.to_string_lossy().into_owned())
                     .unwrap_or_default(),
                 short_sha: fields[3].to_string(),
                 ahead,
                 behind,
+                changed_files: change.changed_files,
+                insertions: change.insertions,
+                deletions: change.deletions,
             });
         }
         if branches.is_empty() && !current.is_empty() && current != "(detached)" {
@@ -836,8 +2571,12 @@ impl GitBranchEntry {
                 short_sha: String::new(),
                 ahead: 0,
                 behind: 0,
+                changed_files: 0,
+                insertions: 0,
+                deletions: 0,
             });
         }
+        branches.sort_by_key(|branch| (!branch.current, branch.checkout.is_empty()));
         Ok(branches)
     }
 
@@ -875,6 +2614,9 @@ impl GitBranchEntry {
                 short_sha: fields[2].to_string(),
                 ahead,
                 behind,
+                changed_files: 0,
+                insertions: 0,
+                deletions: 0,
             });
         }
         Ok(branches)
@@ -953,9 +2695,31 @@ impl GitStashEntry {
 }
 
 impl GitRepositorySnapshot {
+    pub fn summary(path: &Path) -> Result<Self, GitError> {
+        Ok(Self::load_summary(path)?.snapshot)
+    }
+
     pub fn load(path: &Path) -> Result<Self, GitError> {
-        let requested_path = path.to_string_lossy().into_owned();
-        let repository = GitRepository::discover(path)?;
+        let mut snapshot = Self::load_summary(path)?.snapshot;
+        let root = Path::new(&snapshot.repo_root);
+        snapshot.commits = GitCommitEntry::recent(root)?;
+        snapshot.branches = GitBranchEntry::local(root, &snapshot.branch)?;
+        snapshot.remote_branches = GitBranchEntry::remote(root)?;
+        snapshot.tags = GitTagEntry::list(root)?;
+        snapshot.stashes = GitStashEntry::list(root)?;
+        Ok(snapshot)
+    }
+
+    pub(crate) fn load_summary(path: &Path) -> Result<RepositorySummary, GitError> {
+        let (repository, is_worktree) = GitRepository::discover_with_worktree(path)?;
+        Self::load_discovered_summary(path, &repository, is_worktree)
+    }
+
+    pub(crate) fn load_discovered_summary(
+        requested_path: &Path,
+        repository: &GitRepository,
+        is_worktree: bool,
+    ) -> Result<RepositorySummary, GitError> {
         let repo_root = repository.path();
         let (stdout, stderr, ok) = GitCommand::read_bytes(
             repo_root,
@@ -980,29 +2744,30 @@ impl GitRepositorySnapshot {
         let behind = parsed.behind;
         let mut files = parsed.into_file_entries();
         files.sort_by(|left, right| left.path_bytes.cmp(&right.path_bytes));
-        let repo_name = repo_root
-            .file_name()
-            .map(|name| name.to_string_lossy().to_string())
-            .unwrap_or_else(|| repo_root.to_string_lossy().to_string());
-        let commits = GitCommitEntry::recent(repo_root)?;
-        let branches = GitBranchEntry::local(repo_root, &branch)?;
-        let remote_branches = GitBranchEntry::remote(repo_root)?;
-        let tags = GitTagEntry::list(repo_root)?;
-        let stashes = GitStashEntry::list(repo_root)?;
-        Ok(Self {
-            path: requested_path,
-            repo_root: repo_root.to_string_lossy().to_string(),
-            repo_name,
-            branch,
-            upstream,
-            ahead,
-            behind,
-            files,
-            commits,
-            branches,
-            remote_branches,
-            tags,
-            stashes,
+        let repo_name = crate::host::worktree::RepoInfo::name_at(repo_root);
+        let base_ref = crate::host::worktree::BaseRef::resolve(repo_root)
+            .map(|reference| reference.branch().to_string())
+            .unwrap_or_default();
+        let watch = super::watch::GitWatchSubscription::read(repo_root)?;
+        Ok(RepositorySummary {
+            snapshot: Self {
+                path: requested_path.to_string_lossy().into_owned(),
+                repo_root: repo_root.to_string_lossy().to_string(),
+                repo_name,
+                is_worktree,
+                branch,
+                base_ref,
+                upstream,
+                ahead,
+                behind,
+                files,
+                commits: Vec::new(),
+                branches: Vec::new(),
+                remote_branches: Vec::new(),
+                tags: Vec::new(),
+                stashes: Vec::new(),
+            },
+            watch,
         })
     }
 }
@@ -1041,9 +2806,12 @@ pub(crate) mod test_repo {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::host::highlight::Highlighter;
 
     use std::ffi::OsStr;
     use std::fs::{FileTimes, OpenOptions};
+    #[cfg(unix)]
+    use std::os::unix::fs::symlink;
     use std::time::{Duration, SystemTime};
 
     #[test]
@@ -1073,6 +2841,18 @@ mod tests {
                 "{key} must appear in git's local-env-vars"
             );
         }
+    }
+
+    #[test]
+    fn excessive_git_output_is_terminated_at_the_shared_limit() {
+        let repo = test_repo::init();
+        let alias = "alias.vmux-flood=!yes x | head -c 40000000";
+        let started = Instant::now();
+
+        let error = GitCommand::run(repo.path(), &["-c", alias, "vmux-flood"]).unwrap_err();
+
+        assert_eq!(error.0, "git command output exceeded 32 MiB");
+        assert!(started.elapsed() < Duration::from_secs(5));
     }
 
     #[test]
@@ -1129,6 +2909,46 @@ mod tests {
     }
 
     #[test]
+    fn ignored_watch_paths_do_not_refresh_the_repository() {
+        let repo = test_repo::init();
+        test_repo::write(repo.path(), ".gitignore", "target/\n");
+        std::fs::create_dir_all(repo.path().join("target")).unwrap();
+        std::fs::create_dir_all(repo.path().join("src")).unwrap();
+        let ignored = test_repo::write(repo.path(), "target/out.bin", "generated");
+        let source = test_repo::write(repo.path(), "src/lib.rs", "fn main() {}\n");
+        let repository = GitRepository::at(repo.path());
+
+        assert!(!repository.has_unignored_changes([ignored.as_path()]));
+        assert!(repository.has_unignored_changes([source.as_path()]));
+    }
+
+    #[test]
+    fn ignored_watch_path_batches_larger_than_pipe_capacity_complete() {
+        let repo = test_repo::init();
+        test_repo::write(repo.path(), ".gitignore", "target/\n");
+        let paths = (0..20_000)
+            .map(|index| repo.path().join(format!("target/generated-{index:05}.bin")))
+            .collect::<Vec<_>>();
+        let repository = GitRepository::at(repo.path());
+
+        assert!(!repository.has_unignored_changes(paths.iter().map(PathBuf::as_path)));
+    }
+
+    #[test]
+    fn tracked_paths_remain_relevant_when_an_ignore_pattern_matches() {
+        let repo = test_repo::init();
+        test_repo::write(repo.path(), ".gitignore", "target/\n");
+        std::fs::create_dir_all(repo.path().join("target")).unwrap();
+        let tracked = test_repo::write(repo.path(), "target/tracked.txt", "one\n");
+        test_repo::run(repo.path(), &["add", "-f", "target/tracked.txt"]);
+        test_repo::run(repo.path(), &["commit", "-qm", "tracked"]);
+        test_repo::write(repo.path(), "target/tracked.txt", "two\n");
+        let repository = GitRepository::at(repo.path());
+
+        assert!(repository.has_unignored_changes([tracked.as_path()]));
+    }
+
+    #[test]
     fn repository_loads_changes_history_and_branches() {
         let repo = test_repo::init();
         test_repo::write(repo.path(), "tracked.txt", "one\n");
@@ -1146,6 +2966,7 @@ mod tests {
         let repository = GitRepositorySnapshot::load(repo.path()).unwrap();
 
         assert_eq!(repository.branch, "main");
+        assert!(!repository.is_worktree);
         assert!(
             repository
                 .files
@@ -1182,6 +3003,42 @@ mod tests {
     }
 
     #[test]
+    fn repository_snapshot_names_the_project_and_reports_worktree_changes() {
+        let origin = tempfile::tempdir().unwrap();
+        test_repo::run(origin.path(), &["init", "-q", "--bare"]);
+        let repo = test_repo::init();
+        test_repo::write(repo.path(), "tracked.txt", "one\n");
+        test_repo::run(repo.path(), &["add", "tracked.txt"]);
+        test_repo::run(repo.path(), &["commit", "-qm", "initial"]);
+        test_repo::run(
+            repo.path(),
+            &["remote", "add", "origin", origin.path().to_str().unwrap()],
+        );
+        let worktree = repo.path().join(".worktrees/feature");
+        crate::host::worktree::CheckoutInfo::try_from(repo.path())
+            .unwrap()
+            .add_worktree(&worktree, "feature", "main")
+            .unwrap();
+        test_repo::write(&worktree, "tracked.txt", "one\ntwo\n");
+
+        let repository = GitRepositorySnapshot::load(&worktree).unwrap();
+        let branch = repository
+            .branches
+            .iter()
+            .find(|branch| branch.name == "feature")
+            .unwrap();
+
+        assert_eq!(
+            repository.repo_name,
+            origin.path().file_name().unwrap().to_string_lossy()
+        );
+        assert!(repository.is_worktree);
+        assert_eq!(branch.changed_files, 1);
+        assert_eq!(branch.insertions, 1);
+        assert_eq!(branch.deletions, 0);
+    }
+
+    #[test]
     fn commit_diff_lines_separate_files_in_the_selected_commit() {
         let repo = test_repo::init();
         test_repo::write(repo.path(), "a.txt", "one\n");
@@ -1202,6 +3059,436 @@ mod tests {
 
         assert_eq!(files, vec!["a.txt", "b.txt"]);
         assert!(lines.iter().any(|line| line.kind == DiffKind::Add));
+    }
+
+    #[test]
+    fn commit_diff_lines_use_each_files_syntax() {
+        let repo = test_repo::init();
+        test_repo::write(repo.path(), "lib.rs", "pub fn answer() -> u32 { 42 }\n");
+        test_repo::run(repo.path(), &["add", "."]);
+        test_repo::run(repo.path(), &["commit", "-qm", "initial"]);
+
+        let lines = GitRepository::at(repo.path())
+            .commit_diff_lines("HEAD")
+            .unwrap();
+        let colors = lines
+            .iter()
+            .filter(|line| !matches!(line.kind, DiffKind::Hunk))
+            .flat_map(|line| line.spans.iter().map(|span| span.dark_fg))
+            .collect::<std::collections::HashSet<_>>();
+
+        assert!(
+            colors.len() > 1,
+            "Rust commit diff should be syntax highlighted"
+        );
+    }
+
+    #[test]
+    fn diff_window_uses_the_file_selected_before_its_first_visible_line() {
+        let repo = test_repo::init();
+        test_repo::write(repo.path(), "a.txt", "plain\n");
+        test_repo::write(repo.path(), "lib.rs", "pub fn answer() -> u32 { 42 }\n");
+        test_repo::run(repo.path(), &["add", "."]);
+        test_repo::run(repo.path(), &["commit", "-qm", "initial"]);
+        let repository = GitRepository::at(repo.path());
+        let source = repository.commit_diff_source("HEAD").unwrap();
+        let (_, all) = source.window(&repository, 0, u32::MAX).unwrap();
+        let header = all
+            .iter()
+            .position(|line| line.spans.first().is_some_and(|span| span.text == "lib.rs"))
+            .unwrap();
+        let first_code = all[header..]
+            .iter()
+            .position(|line| line.kind == DiffKind::Add)
+            .map(|offset| header + offset)
+            .unwrap();
+
+        let (_, lines) = source.window(&repository, first_code as u32, 1).unwrap();
+        let colors = lines[0]
+            .spans
+            .iter()
+            .map(|span| span.dark_fg)
+            .collect::<std::collections::HashSet<_>>();
+
+        assert!(colors.len() > 1);
+    }
+
+    #[test]
+    fn commit_diff_rejects_git_options_as_revisions() {
+        let repo = test_repo::init();
+
+        let error = GitRepository::at(repo.path())
+            .commit_diff_lines("--output=/tmp/vmux-git-injected")
+            .unwrap_err();
+
+        assert_eq!(error.0, "invalid Git revision");
+    }
+
+    #[test]
+    fn branch_diff_lines_include_every_commit_since_the_base_branch() {
+        let repo = test_repo::init();
+        test_repo::write(repo.path(), "base.txt", "base\n");
+        test_repo::run(repo.path(), &["add", "."]);
+        test_repo::run(repo.path(), &["commit", "-qm", "base"]);
+        test_repo::run(repo.path(), &["switch", "-qc", "feature"]);
+        test_repo::write(repo.path(), "first.txt", "first\n");
+        test_repo::run(repo.path(), &["add", "."]);
+        test_repo::run(repo.path(), &["commit", "-qm", "first"]);
+        test_repo::write(repo.path(), "second.txt", "second\n");
+        test_repo::run(repo.path(), &["add", "."]);
+        test_repo::run(repo.path(), &["commit", "-qm", "second"]);
+
+        test_repo::run(repo.path(), &["switch", "-q", "main"]);
+
+        let lines = GitRepository::at(repo.path())
+            .branch_diff_lines("feature")
+            .unwrap();
+        let files = lines
+            .iter()
+            .filter(|line| matches!(line.kind, DiffKind::Hunk))
+            .filter_map(|line| line.spans.first())
+            .map(|span| span.text.as_str())
+            .filter(|text| !text.starts_with("@@"))
+            .collect::<Vec<_>>();
+
+        assert_eq!(files, vec!["first.txt", "second.txt"]);
+    }
+
+    #[test]
+    fn branch_file_pages_report_total_and_only_return_the_requested_page() {
+        let repo = test_repo::init();
+        test_repo::write(repo.path(), "base.txt", "base\n");
+        test_repo::run(repo.path(), &["add", "."]);
+        test_repo::run(repo.path(), &["commit", "-qm", "base"]);
+        test_repo::run(repo.path(), &["switch", "-qc", "feature"]);
+        for name in ["a.txt", "b.txt", "c.txt"] {
+            test_repo::write(repo.path(), name, name);
+        }
+        test_repo::run(repo.path(), &["add", "."]);
+        test_repo::run(repo.path(), &["commit", "-qm", "files"]);
+
+        let repository = GitRepository::at(repo.path());
+        let catalog = repository.branch_files_catalog("feature").unwrap();
+        let first = catalog.page(0, 2);
+        let second = catalog.page(2, 2);
+
+        assert_eq!(first.total, 3);
+        assert_eq!(first.files.len(), 2);
+        assert!(first.has_more);
+        assert_eq!(second.total, 3);
+        assert_eq!(second.files.len(), 1);
+        assert!(!second.has_more);
+        assert_eq!(second.files[0].path, "c.txt");
+    }
+
+    #[test]
+    fn branch_diff_page_loads_only_requested_files() {
+        let repo = test_repo::init();
+        test_repo::write(repo.path(), "base.txt", "base\n");
+        test_repo::run(repo.path(), &["add", "."]);
+        test_repo::run(repo.path(), &["commit", "-qm", "base"]);
+        test_repo::run(repo.path(), &["switch", "-qc", "feature"]);
+        test_repo::write(repo.path(), "first.txt", "first\n");
+        test_repo::write(repo.path(), "second.txt", "second\n");
+        test_repo::run(repo.path(), &["add", "."]);
+        test_repo::run(repo.path(), &["commit", "-qm", "files"]);
+
+        let lines = GitRepository::at(repo.path())
+            .branch_diff_lines_for_paths("feature", &[b"second.txt".to_vec()])
+            .unwrap();
+        let files = lines
+            .iter()
+            .filter_map(DiffLine::file_path)
+            .collect::<Vec<_>>();
+
+        assert_eq!(files, ["second.txt"]);
+    }
+
+    #[test]
+    fn branch_diff_paths_are_literal_git_pathspecs() {
+        let repo = test_repo::init();
+        test_repo::write(repo.path(), "base.txt", "base\n");
+        test_repo::run(repo.path(), &["add", "."]);
+        test_repo::run(repo.path(), &["commit", "-qm", "base"]);
+        test_repo::run(repo.path(), &["switch", "-qc", "feature"]);
+        test_repo::write(repo.path(), ":(glob)**", "literal\n");
+        test_repo::write(repo.path(), "other.txt", "other\n");
+        test_repo::run(repo.path(), &["add", "."]);
+        test_repo::run(repo.path(), &["commit", "-qm", "files"]);
+        test_repo::run(repo.path(), &["switch", "-q", "main"]);
+
+        let lines = GitRepository::at(repo.path())
+            .branch_diff_lines_for_paths("feature", &[b":(glob)**".to_vec()])
+            .unwrap();
+        let files = lines
+            .iter()
+            .filter_map(DiffLine::file_path)
+            .collect::<Vec<_>>();
+
+        assert_eq!(files, [":(glob)**"]);
+    }
+
+    #[test]
+    fn current_branch_diff_page_includes_untracked_file() {
+        let repo = test_repo::init();
+        test_repo::write(repo.path(), "base.txt", "base\n");
+        test_repo::run(repo.path(), &["add", "."]);
+        test_repo::run(repo.path(), &["commit", "-qm", "base"]);
+        test_repo::run(repo.path(), &["switch", "-qc", "feature"]);
+        test_repo::write(repo.path(), "new.txt", "new\n");
+
+        let lines = GitRepository::at(repo.path())
+            .branch_diff_lines_for_paths("feature", &[b"new.txt".to_vec()])
+            .unwrap();
+
+        assert_eq!(lines.first().and_then(DiffLine::file_path), Some("new.txt"));
+        assert!(lines.iter().any(|line| matches!(line.kind, DiffKind::Add)));
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn current_branch_diff_rejects_untracked_symlink() {
+        let repo = test_repo::init();
+        test_repo::write(repo.path(), "base.txt", "base\n");
+        test_repo::run(repo.path(), &["add", "."]);
+        test_repo::run(repo.path(), &["commit", "-qm", "base"]);
+        test_repo::run(repo.path(), &["switch", "-qc", "feature"]);
+        let secret = tempfile::NamedTempFile::new().unwrap();
+        std::fs::write(secret.path(), "private").unwrap();
+        symlink(secret.path(), repo.path().join("linked.txt")).unwrap();
+
+        let error = GitRepository::at(repo.path())
+            .branch_diff_lines_for_paths("feature", &[b"linked.txt".to_vec()])
+            .unwrap_err();
+
+        assert!(error.0.contains("regular files"));
+        assert!(!error.0.contains("private"));
+    }
+
+    #[test]
+    fn current_branch_diff_describes_oversized_untracked_file_without_reading_it() {
+        let repo = test_repo::init();
+        test_repo::write(repo.path(), "base.txt", "base\n");
+        test_repo::run(repo.path(), &["add", "."]);
+        test_repo::run(repo.path(), &["commit", "-qm", "base"]);
+        test_repo::run(repo.path(), &["switch", "-qc", "feature"]);
+        let file = std::fs::File::create(repo.path().join("large.bin")).unwrap();
+        file.set_len(MAX_DIFF_FILE_BYTES + 1).unwrap();
+
+        let lines = GitRepository::at(repo.path())
+            .branch_diff_lines_for_paths("feature", &[b"large.bin".to_vec()])
+            .unwrap();
+        let text = lines
+            .iter()
+            .flat_map(|line| line.spans.iter())
+            .map(|span| span.text.as_str())
+            .collect::<String>();
+
+        assert!(text.contains("Preview unavailable"));
+        assert!(text.contains("large.bin"));
+    }
+
+    #[test]
+    fn branch_file_entries_preserve_rename_paths() {
+        let entries =
+            GitBranchFileEntries::parse(b"R100\0src/old.rs\0src/new.rs\0", Path::new("client"));
+
+        assert_eq!(entries.len(), 1);
+        assert_eq!(entries[0].change, GitPathChange::Renamed);
+        assert_eq!(entries[0].path, "client/src/new.rs");
+        assert_eq!(
+            entries[0].previous_path.as_deref(),
+            Some("client/src/old.rs")
+        );
+    }
+
+    #[test]
+    fn current_branch_diff_includes_uncommitted_work() {
+        let repo = test_repo::init();
+        test_repo::write(repo.path(), "tracked.txt", "base\n");
+        test_repo::run(repo.path(), &["add", "."]);
+        test_repo::run(repo.path(), &["commit", "-qm", "base"]);
+        test_repo::run(repo.path(), &["switch", "-qc", "feature"]);
+        test_repo::write(repo.path(), "tracked.txt", "branch\n");
+        test_repo::run(repo.path(), &["add", "."]);
+        test_repo::run(repo.path(), &["commit", "-qm", "branch"]);
+        test_repo::write(repo.path(), "tracked.txt", "working\n");
+
+        let lines = GitRepository::at(repo.path())
+            .branch_diff_lines("feature")
+            .unwrap();
+        let text = lines
+            .iter()
+            .flat_map(|line| line.spans.iter())
+            .map(|span| span.text.as_str())
+            .collect::<String>();
+
+        assert!(text.contains("working"));
+    }
+
+    #[test]
+    fn current_branch_diff_expands_submodule_branch_changes() {
+        let child = test_repo::init();
+        test_repo::write(child.path(), "inside.rs", "fn old() {}\n");
+        test_repo::write(child.path(), "other.rs", "fn before() {}\n");
+        test_repo::run(child.path(), &["add", "."]);
+        test_repo::run(child.path(), &["commit", "-qm", "base"]);
+
+        let parent = test_repo::init();
+        test_repo::run(
+            parent.path(),
+            &[
+                "-c",
+                "protocol.file.allow=always",
+                "submodule",
+                "add",
+                "-q",
+                child.path().to_str().unwrap(),
+                "client",
+            ],
+        );
+        test_repo::run(parent.path(), &["commit", "-qam", "base"]);
+        test_repo::run(parent.path(), &["switch", "-qc", "feature"]);
+
+        let checkout = parent.path().join("client");
+        test_repo::run(&checkout, &["config", "user.email", "t@example.com"]);
+        test_repo::run(&checkout, &["config", "user.name", "Test"]);
+        test_repo::run(&checkout, &["switch", "-qc", "feature"]);
+        test_repo::write(&checkout, "inside.rs", "fn new() {}\n");
+        test_repo::write(&checkout, "other.rs", "fn after() {}\n");
+        test_repo::run(&checkout, &["add", "."]);
+        test_repo::run(&checkout, &["commit", "-qm", "feature"]);
+
+        let repository = GitRepository::at(parent.path());
+        let branch_lines = repository.branch_diff_lines("feature").unwrap();
+        let branch_files = repository
+            .branch_files_catalog("feature")
+            .unwrap()
+            .page(0, 80);
+        Highlighter::take_line_count();
+        let file_source = repository.diff_source(&checkout).unwrap();
+        assert_eq!(Highlighter::take_line_count(), 0);
+        let (_, initial) = file_source.window(&repository, 0, 3).unwrap();
+        assert_eq!(initial.len(), 3);
+        assert!(Highlighter::take_line_count() <= 3);
+        let (_, file_lines) = file_source.window(&repository, 0, u32::MAX).unwrap();
+        let snapshot = GitRepositorySnapshot::load(parent.path()).unwrap();
+        let branch = snapshot
+            .branches
+            .iter()
+            .find(|branch| branch.name == "feature")
+            .unwrap();
+        let files = branch_lines
+            .iter()
+            .filter(|line| matches!(line.kind, DiffKind::Hunk))
+            .filter_map(|line| line.spans.first())
+            .map(|span| span.text.as_str())
+            .filter(|text| !text.starts_with("@@"))
+            .collect::<Vec<_>>();
+        let file_text = file_lines
+            .iter()
+            .flat_map(|line| line.spans.iter())
+            .map(|span| span.text.as_str())
+            .collect::<String>();
+
+        assert_eq!(files, ["client/inside.rs", "client/other.rs"]);
+        assert_eq!(
+            branch_files
+                .files
+                .iter()
+                .map(|entry| entry.path.as_str())
+                .collect::<Vec<_>>(),
+            ["client/inside.rs", "client/other.rs"]
+        );
+        assert!(file_text.contains("fn old() {}"));
+        assert!(file_text.contains("fn new() {}"));
+        assert!(!file_text.contains("Subproject commit"));
+        assert_eq!(branch.changed_files, 2);
+        assert_eq!(branch.insertions, 2);
+        assert_eq!(branch.deletions, 2);
+    }
+
+    #[test]
+    fn selected_worktree_branch_expands_its_submodule_changes() {
+        let child = test_repo::init();
+        test_repo::write(child.path(), "inside.rs", "fn old() {}\n");
+        test_repo::write(child.path(), "other.rs", "fn before() {}\n");
+        test_repo::run(child.path(), &["add", "."]);
+        test_repo::run(child.path(), &["commit", "-qm", "base"]);
+
+        let parent = test_repo::init();
+        test_repo::run(
+            parent.path(),
+            &[
+                "-c",
+                "protocol.file.allow=always",
+                "submodule",
+                "add",
+                "-q",
+                child.path().to_str().unwrap(),
+                "client",
+            ],
+        );
+        test_repo::run(parent.path(), &["commit", "-qam", "base"]);
+
+        let worktrees = tempfile::tempdir().unwrap();
+        let feature = worktrees.path().join("feature");
+        test_repo::run(
+            parent.path(),
+            &[
+                "worktree",
+                "add",
+                "-q",
+                "-b",
+                "feature",
+                feature.to_str().unwrap(),
+            ],
+        );
+        test_repo::run(
+            &feature,
+            &[
+                "-c",
+                "protocol.file.allow=always",
+                "submodule",
+                "update",
+                "--init",
+                "-q",
+            ],
+        );
+
+        let checkout = feature.join("client");
+        test_repo::run(&checkout, &["config", "user.email", "t@example.com"]);
+        test_repo::run(&checkout, &["config", "user.name", "Test"]);
+        test_repo::run(&checkout, &["switch", "-qc", "feature"]);
+        test_repo::write(&checkout, "inside.rs", "fn new() {}\n");
+        test_repo::write(&checkout, "other.rs", "fn after() {}\n");
+        test_repo::run(&checkout, &["add", "."]);
+        test_repo::run(&checkout, &["commit", "-qm", "feature"]);
+
+        let repository = GitRepository::at(parent.path());
+        let branch_files = repository
+            .branch_files_catalog("feature")
+            .unwrap()
+            .page(0, 80);
+        let lines = repository
+            .branch_diff_lines_for_paths("feature", &[b"client/inside.rs".to_vec()])
+            .unwrap();
+        let text = lines
+            .iter()
+            .flat_map(|line| line.spans.iter())
+            .map(|span| span.text.as_str())
+            .collect::<String>();
+
+        assert_eq!(
+            branch_files
+                .files
+                .iter()
+                .map(|entry| entry.path.as_str())
+                .collect::<Vec<_>>(),
+            ["client/inside.rs", "client/other.rs"]
+        );
+        assert!(text.contains("fn old() {}"));
+        assert!(text.contains("fn new() {}"));
     }
 
     #[test]
@@ -1227,6 +3514,27 @@ mod tests {
                 .iter()
                 .all(|branch| branch.name != "feature")
         );
+    }
+
+    #[test]
+    fn local_branches_put_current_and_checked_out_branches_first() {
+        let repo = test_repo::init();
+        test_repo::write(repo.path(), "a.txt", "one\n");
+        test_repo::run(repo.path(), &["add", "."]);
+        test_repo::run(repo.path(), &["commit", "-qm", "initial"]);
+        let checkout = crate::host::worktree::CheckoutInfo::try_from(repo.path()).unwrap();
+        checkout
+            .add_worktree(&repo.path().join(".worktrees/held"), "held", "main")
+            .unwrap();
+        test_repo::run(repo.path(), &["branch", "loose", "main"]);
+
+        let branches = GitBranchEntry::local(repo.path(), "main").unwrap();
+        let names = branches
+            .iter()
+            .map(|branch| branch.name.as_str())
+            .collect::<Vec<_>>();
+
+        assert_eq!(names, ["main", "held", "loose"]);
     }
 
     #[test]
@@ -1789,6 +4097,70 @@ mod tests {
             !lines
                 .iter()
                 .any(|l| matches!(l.kind, DiffKind::Add | DiffKind::Remove))
+        );
+    }
+
+    #[test]
+    fn file_diff_windows_defer_highlighting_and_preserve_staged_hunks_and_line_numbers() {
+        for staged_only in [false, true] {
+            let repo = test_repo::init();
+            let repository = GitRepository::at(repo.path());
+            let body = "line\n".repeat(2_000);
+            let file = test_repo::write(repo.path(), "large.txt", &body);
+            test_repo::run(repo.path(), &["add", "large.txt"]);
+            test_repo::run(repo.path(), &["commit", "-qm", "initial"]);
+            let changed = format!("changed\n{}", "line\n".repeat(1_999));
+            test_repo::write(repo.path(), "large.txt", &changed);
+            if staged_only {
+                repository.stage(&file).unwrap();
+            }
+            Highlighter::take_line_count();
+
+            let source = repository.diff_source(&file).unwrap();
+
+            assert_eq!(Highlighter::take_line_count(), 0);
+            let (total, initial) = source.window(&repository, 0, 8).unwrap();
+            assert_eq!(initial.len(), 8);
+            assert!(Highlighter::take_line_count() <= 8);
+            if staged_only {
+                assert_eq!(initial[0].kind, DiffKind::Staged);
+                assert_eq!((initial[0].old_no, initial[0].new_no), (Some(1), Some(1)));
+                assert!(initial.iter().all(|line| line.hunk.is_none()));
+            } else {
+                assert_eq!(initial[0].kind, DiffKind::Remove);
+                assert_eq!((initial[0].old_no, initial[0].new_no), (Some(1), None));
+                assert_eq!(initial[0].hunk, Some(0));
+                assert_eq!(initial[1].kind, DiffKind::Add);
+                assert_eq!((initial[1].old_no, initial[1].new_no), (None, Some(1)));
+                assert_eq!(initial[1].hunk, Some(0));
+            }
+            let (_, tail) = source.window(&repository, total - 1, 1).unwrap();
+            assert_eq!((tail[0].old_no, tail[0].new_no), (Some(2_000), Some(2_000)));
+            let text: String = tail[0]
+                .spans
+                .iter()
+                .map(|span| span.text.as_str())
+                .collect();
+            assert_eq!(text, "line");
+        }
+    }
+
+    #[test]
+    fn staged_deletion_uses_the_git_diff_without_a_working_tree_file() {
+        let repo = test_repo::init();
+        let repository = GitRepository::at(repo.path());
+        let file = test_repo::write(repo.path(), "deleted.txt", "one\ntwo\n");
+        test_repo::run(repo.path(), &["add", "deleted.txt"]);
+        test_repo::run(repo.path(), &["commit", "-qm", "init"]);
+        std::fs::remove_file(&file).unwrap();
+        test_repo::run(repo.path(), &["add", "-u"]);
+
+        let lines = repository.diff_lines(&file).unwrap();
+
+        assert!(
+            lines
+                .iter()
+                .any(|line| matches!(line.kind, DiffKind::Remove))
         );
     }
 }

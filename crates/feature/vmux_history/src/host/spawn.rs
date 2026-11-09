@@ -154,6 +154,7 @@ mod system_tests {
             webview: Entity::PLACEHOLDER,
             url: url.into(),
             is_main_frame: true,
+            navigation_epoch: None,
             transition,
             qualifiers: CefTransitionQualifiers {
                 forward_back,
@@ -248,6 +249,7 @@ mod system_tests {
             webview: Entity::PLACEHOLDER,
             url: "https://example.com".into(),
             is_main_frame: false,
+            navigation_epoch: None,
             transition: CefTransitionCore::Link,
             qualifiers: CefTransitionQualifiers::default(),
         });

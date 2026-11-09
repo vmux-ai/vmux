@@ -38,6 +38,9 @@ pub struct PickRequest {
 #[vmux_api::ui_event]
 pub struct DismissRequest;
 
+#[vmux_api::ui_event]
+pub struct DeactivateRequest;
+
 #[vmux_api::ui_event(Default, Eq)]
 pub struct CommandPaletteDraftRequest {
     pub open_id: super::OpenId,
@@ -174,7 +177,7 @@ pub struct AgentModels {
     pub agent_key: String,
     pub url: String,
     pub selected: String,
-    pub models: Vec<crate::room::ModelOptionEntry>,
+    pub models: Vec<crate::session::ModelOptionEntry>,
 }
 
 #[vmux_api::contract(Default)]

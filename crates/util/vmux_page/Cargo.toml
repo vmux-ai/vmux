@@ -20,6 +20,7 @@ serde_json = { workspace = true }
 tracing = "0.1"
 vmux_api = { path = "../vmux_api", features = ["bevy"] }
 vmux_macro = { path = "../vmux_macro" }
+vmux_ui = { path = "../vmux_ui", default-features = false }
 
 [target.'cfg(any(target_os = "ios", target_os = "macos"))'.dependencies]
 objc2-quartz-core = { version = "0.3", default-features = false, features = [
@@ -28,7 +29,6 @@ objc2-quartz-core = { version = "0.3", default-features = false, features = [
 ] }
 tokio = { workspace = true, features = ["rt-multi-thread", "time"] }
 vmux_clipboard = { path = "../vmux_clipboard" }
-vmux_ui = { path = "../vmux_ui", default-features = false }
 wry = { version = "0.53", features = ["transparent"] }
 
 [target.'cfg(target_os = "macos")'.dependencies]
@@ -36,6 +36,7 @@ objc2 = { version = "0.6", default-features = false, features = ["std"] }
 objc2-app-kit = { version = "0.3", default-features = false, features = [
     "std",
     "NSAppearance",
+    "NSColor",
     "NSResponder",
     "NSView",
     "NSWindow",
@@ -43,6 +44,7 @@ objc2-app-kit = { version = "0.3", default-features = false, features = [
 objc2-web-kit = { version = "0.3", default-features = false, features = [
     "std",
     "WKProcessPool",
+    "WKWebView",
     "WKWebViewConfiguration",
 ] }
 
@@ -57,6 +59,7 @@ objc2-ui-kit = { version = "0.3", default-features = false, features = [
 
 [dev-dependencies]
 dioxus = { workspace = true }
+rkyv = { workspace = true }
 
 [lints]
 workspace = true

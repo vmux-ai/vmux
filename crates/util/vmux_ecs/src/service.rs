@@ -5,6 +5,7 @@ use std::sync::Arc;
 use bevy::prelude::*;
 use tokio::sync::mpsc;
 use vmux_api::protocol::{ClientMessage, ServiceMessage};
+pub use vmux_api::service::ServiceMessageSet;
 use vmux_api::service::ServiceMessageVariant;
 use vmux_transport::service::{RemoteDriver, RemoteOperationStore, ServiceProtocolDriver};
 
@@ -69,9 +70,6 @@ impl ServiceMessageAppExt for App {
 
 #[derive(SystemSet, Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct ServiceMessageIngressSet;
-
-#[derive(SystemSet, Clone, Copy, Debug, PartialEq, Eq, Hash)]
-pub struct ServiceMessageSet;
 
 #[derive(SystemSet, Clone, Copy, Debug, PartialEq, Eq, Hash)]
 struct ServiceMessageDecodeSet;

@@ -10,7 +10,7 @@ use crate::host::file_lifecycle::{EditorFileLoadedSet, FileBuffer};
 use crate::host::keymap::KeymapConfig;
 use crate::host::markdown::ParsedNote;
 use crate::host::note::{NoteEditing, NoteRevealLine, NoteSent};
-use crate::host::viewport::{CursorRenderRequest, FileViewport, ViewportRenderRequest};
+use crate::host::viewport::{CursorRenderRequest, FileViewport};
 
 pub(crate) struct StatusPlugin;
 
@@ -18,6 +18,7 @@ impl Plugin for StatusPlugin {
     fn build(&self, app: &mut App) {
         app.add_systems(Startup, spawn_shared_file_view_mode)
             .add_message::<SettingsSaveRequest>()
+            .add_message::<FileViewModeRequest>()
             .add_plugins(UiEventPlugin::<(FileViewModeSet, FileKeymapSet)>::default())
             .add_systems(
                 Update,
@@ -33,7 +34,8 @@ impl Plugin for StatusPlugin {
                 ),
             )
             .add_observer(file_view_mode_set)
-            .add_observer(file_keymap_set);
+            .add_observer(file_keymap_set)
+            .add_observer(render_document);
     }
 }
 
@@ -108,43 +110,71 @@ fn send_initial_meta(
 }
 
 fn send_initial_text_meta(
+    files: Query<Entity, (ReadyUnsentMeta, With<FileView>, With<Editor>)>,
+    mut commands: Commands,
+) {
+    for entity in &files {
+        commands.trigger(DocumentRenderRequest::new(entity));
+    }
+}
+
+#[derive(EntityEvent)]
+pub(crate) struct DocumentRenderRequest {
+    #[event_target]
+    entity: Entity,
+}
+
+impl DocumentRenderRequest {
+    pub(crate) fn new(entity: Entity) -> Self {
+        Self { entity }
+    }
+}
+
+fn render_document(
+    request: On<DocumentRenderRequest>,
     mut files: Query<
-        (
-            Entity,
-            &FileView,
-            &FileDocumentRevision,
-            &Editor,
-            &FileViewport,
-        ),
-        ReadyUnsentMeta,
+        (&FileView, &FileDocumentRevision, &mut Editor, &FileViewport),
+        With<PageReady>,
     >,
     browsers: NonSend<Browsers>,
     mut commands: Commands,
 ) {
-    for (entity, file, revision, edit, viewport) in &mut files {
-        if !browsers.can_emit_to(&entity) {
-            continue;
-        }
-        let shape = crate::shape::BufferShape::detect(&edit.core.buffer.rope);
-        commands.trigger(FileUiStateWrite::from_event(
-            entity,
-            &FileMetaEvent {
-                revision: revision.get(),
-                path: file.display_path(),
-                abs_path: file.path.to_string_lossy().into_owned(),
-                kind: file.document_kind(),
-                language: edit.core.buffer.language.clone(),
-                total_lines: edit.core.buffer.len_lines() as u32,
-                indent: shape.indent,
-                line_ending: shape.line_ending,
-                encoding: edit.core.buffer.encoding,
-            },
-        ));
-        if viewport.rows > 0 {
-            commands.trigger(ViewportRenderRequest::new(entity));
-        }
-        commands.trigger(CursorRenderRequest::new(entity));
-        commands.entity(entity).insert(FileInitialMetaSent);
+    let entity = request.entity;
+    if !browsers.can_emit_to(&entity) {
+        return;
+    }
+    let Ok((file, revision, mut edit, viewport)) = files.get_mut(entity) else {
+        return;
+    };
+    let shape = crate::shape::BufferShape::detect(&edit.core.buffer.rope);
+    let meta = FileMetaEvent {
+        revision: revision.get(),
+        path: file.display_path(),
+        abs_path: file.path.to_string_lossy().into_owned(),
+        kind: file.document_kind(),
+        language: edit.core.buffer.language.clone(),
+        total_lines: edit.core.buffer.len_lines() as u32,
+        indent: shape.indent,
+        line_ending: shape.line_ending,
+        encoding: edit.core.buffer.encoding,
+    };
+    let content = if viewport.rows > 0 {
+        Some(viewport.patch(&mut edit))
+    } else {
+        None
+    };
+    commands.trigger(FileUiStateWrite::from_event(
+        entity,
+        &FileUiStatePatch {
+            meta: Some(meta),
+            viewport: content,
+            ..Default::default()
+        },
+    ));
+    commands.trigger(CursorRenderRequest::new(entity));
+    commands.entity(entity).insert(FileInitialMetaSent);
+    if edit.is_note() {
+        commands.trigger(super::note::RenderRequest::new(entity));
     }
 }
 

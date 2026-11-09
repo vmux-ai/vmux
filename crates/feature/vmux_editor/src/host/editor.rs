@@ -12,6 +12,7 @@ use crate::host::viewport::FileViewport;
 #[derive(Component, Clone, Debug)]
 #[require(
     vmux_ecs::FileUiStateUpdates,
+    super::address::AddressSource,
     FileDocumentRevision,
     crate::host::panel::FilePanel,
     crate::host::directory::FileDirectoryNavigation,
@@ -84,6 +85,34 @@ impl FileView {
             return format!("~/{}", relative.to_string_lossy());
         }
         self.path.to_string_lossy().to_string()
+    }
+
+    pub(crate) fn directory_title(&self) -> String {
+        if let Some(home) = std::env::home_dir()
+            && let Ok(relative) = self.path.strip_prefix(&home)
+        {
+            return Path::new("~").join(relative).to_string_lossy().into_owned();
+        }
+        self.path.to_string_lossy().into_owned()
+    }
+
+    pub(crate) fn page_title(&self) -> String {
+        if self.path.is_dir() {
+            return self.directory_title();
+        }
+        self.path
+            .file_name()
+            .map(|name| name.to_string_lossy().into_owned())
+            .unwrap_or_else(|| self.path.to_string_lossy().into_owned())
+    }
+
+    pub(crate) fn page_icon(&self) -> vmux_api::PageIcon {
+        let path = self.path.to_string_lossy();
+        vmux_api::PageIcon::favicon(
+            vmux_ui::file_icon::FilePath(&path)
+                .icon(self.path.is_dir())
+                .favicon(),
+        )
     }
 
     pub(crate) fn raw_media_url(&self) -> String {
@@ -223,7 +252,10 @@ impl ParkedEdits {
         self.recent.push(path.clone());
         self.by_path.insert(path, edit);
         while self.recent.len() > Self::CAPACITY {
-            let evicted = self.recent.remove(0);
+            let Some(index) = self.recent.iter().position(|path| !self.is_dirty(path)) else {
+                break;
+            };
+            let evicted = self.recent.remove(index);
             self.by_path.remove(&evicted);
         }
     }
@@ -309,6 +341,9 @@ mod tests {
         dir: tempfile::TempDir,
     }
 
+    #[derive(Resource, Default)]
+    struct RenderedDocuments(Vec<vmux_ecs::event::FileUiState>);
+
     impl Session {
         fn open(first: &str) -> Self {
             let dir = tempfile::tempdir().unwrap();
@@ -389,12 +424,50 @@ mod tests {
         }
 
         fn navigate_to(&mut self, name: &str) {
+            self.select(name);
+            self.settle();
+        }
+
+        fn select(&mut self, name: &str) {
             let path = self.dir.path().join(name).to_string_lossy().into_owned();
             self.app.world_mut().trigger(UiInput {
                 webview: self.entity,
                 payload: FileOpenEvent { path },
             });
-            self.settle();
+            self.app.world_mut().flush();
+        }
+
+        fn present(&mut self) {
+            self.app
+                .init_resource::<vmux_setting::AppSettings>()
+                .init_resource::<RenderedDocuments>()
+                .add_plugins(crate::host::status::StatusPlugin)
+                .add_observer(
+                    |request: On<vmux_ecs::FileUiStateWrite>,
+                     mut rendered: ResMut<RenderedDocuments>| {
+                        let state =
+                            <vmux_ecs::event::FileUiState as vmux_api::UiState>::from_updates(
+                                None,
+                                vec![request.update().clone()],
+                            );
+                        if state.document.meta.is_some() {
+                            rendered.0.push(state);
+                        }
+                    },
+                );
+            self.app
+                .world_mut()
+                .entity_mut(self.entity)
+                .insert(vmux_ecs::page::PageReady);
+            self.app
+                .world_mut()
+                .get_mut::<FileViewport>(self.entity)
+                .unwrap()
+                .rows = 20;
+            self.app
+                .world_mut()
+                .non_send_mut::<Browsers>()
+                .set_externally_hosted(self.entity);
         }
 
         fn settle(&mut self) {
@@ -402,12 +475,13 @@ mod tests {
         }
 
         fn type_into_buffer(&mut self, text: &str) {
-            let mut edit = self
-                .app
+            self.app
                 .world_mut()
-                .get_mut::<Editor>(self.entity)
-                .expect("a loaded buffer");
-            edit.core.apply(EditCommand::InsertText(text.to_string()));
+                .trigger(crate::host::editing::EditRequest::new(
+                    self.entity,
+                    vec![EditCommand::InsertText(text.to_string())],
+                ));
+            self.app.world_mut().flush();
         }
 
         fn text(&self) -> String {
@@ -423,10 +497,11 @@ mod tests {
         fn undo(&mut self) {
             self.app
                 .world_mut()
-                .get_mut::<Editor>(self.entity)
-                .unwrap()
-                .core
-                .apply(EditCommand::Undo);
+                .trigger(crate::host::editing::EditRequest::new(
+                    self.entity,
+                    vec![EditCommand::Undo],
+                ));
+            self.app.world_mut().flush();
         }
     }
 
@@ -562,6 +637,201 @@ mod tests {
             "one\n",
             "and so does the undo tree behind it"
         );
+    }
+
+    #[test]
+    fn another_checkout_refuses_typing_and_save_until_it_is_the_spaces_checkout() {
+        let mut session = Session::open("main.rs");
+        session.write("main.rs", "original\n");
+        std::fs::create_dir(session.dir.path().join(".git")).unwrap();
+        let checkout = session.dir.path().join(".worktrees/task");
+        std::fs::create_dir_all(&checkout).unwrap();
+        std::fs::write(checkout.join(".git"), "gitdir: ../../.git/worktrees/task\n").unwrap();
+        let tab = session
+            .app
+            .world_mut()
+            .spawn((
+                vmux_layout::tab::Tab {
+                    name: "Task".to_string(),
+                    startup_dir: Some(checkout.to_string_lossy().into_owned()),
+                },
+                vmux_layout::tab::TabWorkspace {
+                    project_dir: session.dir.path().to_string_lossy().into_owned(),
+                },
+            ))
+            .id();
+        session
+            .app
+            .world_mut()
+            .entity_mut(session.entity)
+            .insert(ChildOf(tab));
+        session.settle();
+        session.type_into_buffer("BLOCKED");
+        session
+            .app
+            .world_mut()
+            .trigger(crate::host::editing::EditRequest::new(
+                session.entity,
+                vec![EditCommand::Save],
+            ));
+        session.app.world_mut().flush();
+        assert_eq!(session.text(), "original\n");
+        assert_eq!(session.bytes("main.rs"), b"original\n");
+        session
+            .app
+            .world_mut()
+            .get_mut::<vmux_layout::tab::Tab>(tab)
+            .unwrap()
+            .startup_dir = Some(session.dir.path().to_string_lossy().into_owned());
+        session.app.update();
+        session.type_into_buffer("ALLOWED");
+        session
+            .app
+            .world_mut()
+            .trigger(crate::host::editing::EditRequest::new(
+                session.entity,
+                vec![EditCommand::Save],
+            ));
+        session.app.world_mut().flush();
+        assert_eq!(session.bytes("main.rs"), b"ALLOWEDoriginal\n");
+        session.write(".worktrees/task/other.rs", "feature\n");
+        session.navigate_to(".worktrees/task/other.rs");
+        session.type_into_buffer("BLOCKED");
+        assert_eq!(session.text(), "feature\n");
+    }
+
+    #[test]
+    fn archiving_the_editor_moves_unsaved_buffers_and_undo_without_saving() {
+        let mut session = Session::open("main.rs");
+        session.app.add_plugins(crate::host::explorer::TabsPlugin);
+        session
+            .app
+            .world_mut()
+            .entity_mut(session.entity)
+            .insert(crate::host::explorer::ExplorerState::default());
+        session
+            .app
+            .world_mut()
+            .get_mut::<PageMetadata>(session.entity)
+            .unwrap()
+            .url = FileView {
+            path: session.dir.path().join("main.rs"),
+        }
+        .url();
+        session.write("main.rs", "original\n");
+        session.write("lib.rs", "other\n");
+        session.settle();
+        session.type_into_buffer("EDIT");
+        session.navigate_to("lib.rs");
+        session.navigate_to("main.rs");
+        let archive = session.app.world_mut().spawn_empty().id();
+        session
+            .app
+            .world_mut()
+            .trigger(vmux_ecs::page::ArchiveCaptureRequest {
+                archive,
+                source: session.entity,
+            });
+        session.app.world_mut().flush();
+        session.app.world_mut().entity_mut(session.entity).despawn();
+        let stack = session.app.world_mut().spawn_empty().id();
+        session
+            .app
+            .world_mut()
+            .trigger(vmux_ecs::page::ArchiveRestoreRequest { stack, archive });
+        session.app.world_mut().flush();
+        let view = session
+            .app
+            .world_mut()
+            .spawn((
+                FileView {
+                    path: session.dir.path().join("main.rs"),
+                },
+                FileViewport {
+                    top_row: 0,
+                    rows: 20,
+                    wrap_columns: 0,
+                    word_wrap: vmux_api::editor::WordWrap::default(),
+                    word_wrap_column: 80,
+                    scroll_revision: 0,
+                },
+                PageMetadata::default(),
+                crate::host::explorer::ExplorerState::default(),
+            ))
+            .id();
+        crate::host::explorer::RestoreEditors { stack, view }.apply(session.app.world_mut());
+        session.entity = view;
+        assert_eq!(session.text(), "EDIToriginal\n");
+        assert_eq!(session.bytes("main.rs"), b"original\n");
+        session.undo();
+        assert_eq!(session.text(), "original\n");
+    }
+
+    #[test]
+    fn returning_to_a_loaded_tab_restores_and_projects_the_document_before_an_update() {
+        let mut session = Session::open("main.rs");
+        session.write("main.rs", "original\n");
+        session.write("lib.rs", "other\n");
+        session.present();
+        session.settle();
+        session.type_into_buffer("EDIT");
+        session.navigate_to("lib.rs");
+        session
+            .app
+            .world_mut()
+            .resource_mut::<RenderedDocuments>()
+            .0
+            .clear();
+
+        session.select("main.rs");
+
+        assert_eq!(session.text(), "EDIToriginal\n");
+        assert!(
+            session
+                .app
+                .world()
+                .get::<FileLoadTask>(session.entity)
+                .is_none()
+        );
+        assert!(
+            session
+                .app
+                .world()
+                .get::<crate::host::keymap::EditorKeymap>(session.entity)
+                .is_some()
+        );
+        assert!(
+            session
+                .app
+                .world()
+                .get::<crate::host::status::FileInitialMetaSent>(session.entity)
+                .is_some()
+        );
+        let documents = &session.app.world().resource::<RenderedDocuments>().0;
+        assert_eq!(documents.len(), 1);
+        let document = &documents[0];
+        let meta = document.document.meta.as_ref().unwrap();
+        assert_eq!(
+            meta.abs_path,
+            session.dir.path().join("main.rs").to_string_lossy()
+        );
+        assert_eq!(
+            meta.revision,
+            session
+                .app
+                .world()
+                .get::<FileDocumentRevision>(session.entity)
+                .unwrap()
+                .get()
+        );
+        let viewport = document.viewport.content.as_ref().unwrap();
+        let mut displayed = String::new();
+        for span in &viewport.lines[0].spans {
+            displayed.push_str(&span.text);
+        }
+        assert_eq!(displayed.trim_end(), "EDIToriginal");
+        session.undo();
+        assert_eq!(session.text(), "original\n");
     }
 
     #[test]

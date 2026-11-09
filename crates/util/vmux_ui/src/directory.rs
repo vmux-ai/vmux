@@ -29,6 +29,13 @@ pub fn DirectoryNavigator(
     on_parent: EventHandler<()>,
     on_toggle_hidden: EventHandler<()>,
 ) -> Element {
+    let keys = DirectoryKeys {
+        on_next,
+        on_previous,
+        on_activate,
+        on_parent,
+        on_toggle_hidden,
+    };
     let clicks = DirectoryClick {
         pending: use_signal(|| Option::<PendingOpen>::None),
         on_select,
@@ -42,6 +49,15 @@ pub fn DirectoryNavigator(
         .next()
         .unwrap_or_default()
         .to_string();
+    let parent_identity = path
+        .rsplit_once('/')
+        .map(|(parent, _)| parent)
+        .unwrap_or("/")
+        .to_string();
+    let child_identity = entries
+        .get(selected)
+        .map(|entry| entry.path.clone())
+        .unwrap_or_default();
     use_effect(move || {
         ScrollIntoView::nearest(&format!("dir-row-{selected}"));
     });
@@ -51,42 +67,14 @@ pub fn DirectoryNavigator(
             id: DIRECTORY_NAVIGATOR_ID,
             tabindex: "-1",
             autofocus: true,
-            class: "grid min-h-0 flex-1 grid-cols-[minmax(8rem,14rem)_minmax(10rem,1fr)_minmax(12rem,1.3fr)] gap-3 p-3 outline-none",
-            onmousedown: move |_| FocusClaim::new(DIRECTORY_NAVIGATOR_ID).request(),
+            class: "grid min-h-0 flex-1 grid-cols-[minmax(8rem,14rem)_minmax(10rem,18rem)_minmax(12rem,1fr)] gap-4 px-3 py-3 font-sans outline-none",
+            onmousedown: move |_| DirectoryKeys::focus(),
             onclick: move |event: Event<MouseData>| clicks.pane(event.client_coordinates()),
             onkeydown: move |event: KeyboardEvent| {
-                let key = event.key().to_string();
-                match key.as_str() {
-                    "j" | "ArrowDown" => {
-                        event.prevent_default();
-                        event.stop_propagation();
-                        on_next.call(());
-                    }
-                    "k" | "ArrowUp" => {
-                        event.prevent_default();
-                        event.stop_propagation();
-                        on_previous.call(());
-                    }
-                    "l" | "ArrowRight" | "Enter" => {
-                        event.prevent_default();
-                        event.stop_propagation();
-                        on_activate.call(());
-                    }
-                    "h" | "ArrowLeft" => {
-                        event.prevent_default();
-                        event.stop_propagation();
-                        on_parent.call(());
-                    }
-                    "." => {
-                        event.prevent_default();
-                        event.stop_propagation();
-                        on_toggle_hidden.call(());
-                    }
-                    _ => {}
-                }
+                keys.offer(&event);
             },
 
-            div { class: DIRECTORY_PANE_CLASS,
+            DirectoryColumn { identity: parent_identity,
                 for entry in parent_entries {
                     {
                         let row = entry.clone();
@@ -94,21 +82,21 @@ pub fn DirectoryNavigator(
                         rsx! {
                             div {
                                 key: "{entry.path}",
-                                class: if entry.name == current_name { DIRECTORY_PARENT_CURRENT_CLASS } else { DIRECTORY_PARENT_CLASS },
+                                class: DirectoryRowStyle::parent(entry.name == current_name),
                                 title: "{entry.path}",
                                 onclick: move |event: Event<MouseData>| {
                                     event.stop_propagation();
                                     clicks.ascend(target.clone(), row.clone(), event.client_coordinates());
                                 },
                                 DirectoryEntryVisual { entry: entry.clone(), thumb: None }
-                                span { class: "truncate text-xs", "{entry.name}" }
+                                span { class: "truncate text-[13px]", "{entry.name}" }
                             }
                         }
                     }
                 }
             }
 
-            div { class: DIRECTORY_PANE_CLASS,
+            DirectoryColumn { identity: path.clone(),
                 for (index, entry) in entries.into_iter().enumerate() {
                     {
                         let row = entry.clone();
@@ -125,7 +113,7 @@ pub fn DirectoryNavigator(
                                 },
                                 ondoubleclick: move |_| on_open.call(opened.clone()),
                                 DirectoryEntryVisual { entry: entry.clone(), thumb: thumbs.get(&entry.path).cloned() }
-                                span { class: "truncate text-xs", "{entry.name}" }
+                                span { class: "truncate text-[13px]", "{entry.name}" }
                             }
                         }
                     }
@@ -133,7 +121,7 @@ pub fn DirectoryNavigator(
             }
 
             if let Some(children) = children {
-                div { class: DIRECTORY_PANE_CLASS,
+                DirectoryColumn { identity: child_identity.clone(),
                     for entry in children {
                         {
                             let row = entry.clone();
@@ -148,14 +136,14 @@ pub fn DirectoryNavigator(
                                         clicks.descend(target.clone(), row.clone(), event.client_coordinates());
                                     },
                                     DirectoryEntryVisual { entry: entry.clone(), thumb: None }
-                                    span { class: "truncate text-xs", "{entry.name}" }
+                                    span { class: "truncate text-[13px]", "{entry.name}" }
                                 }
                             }
                         }
                     }
                 }
             } else {
-                div { class: "flex min-h-0 items-center justify-center overflow-auto rounded-2xl bg-foreground/[0.02] p-4 ring-1 ring-inset ring-primary/10 backdrop-blur-2xl shadow-lg dark:shadow-[0_8px_40px_-12px_rgba(0,0,0,0.6)]",
+                DirectoryColumn { identity: child_identity, preview: true,
                     {preview}
                 }
             }
@@ -163,22 +151,78 @@ pub fn DirectoryNavigator(
     }
 }
 
-pub const DIRECTORY_PANE_CLASS: &str = "min-h-0 overflow-y-auto rounded-2xl bg-foreground/[0.025] p-2 ring-1 ring-inset ring-primary/10 backdrop-blur-2xl shadow-lg dark:shadow-[0_8px_40px_-12px_rgba(0,0,0,0.6)]";
+pub const DIRECTORY_PANE_CLASS: &str = "min-h-0 overflow-y-auto py-1";
 const DIRECTORY_NAVIGATOR_ID: &str = "directory-navigator";
-const DIRECTORY_PARENT_CLASS: &str = "flex items-center gap-2 rounded-md px-2 py-1 text-foreground/45 cursor-default transition-colors hover:bg-foreground/[0.04]";
-const DIRECTORY_PARENT_CURRENT_CLASS: &str = "flex items-center gap-2 rounded-md bg-primary/10 px-2 py-1 text-foreground cursor-default shadow-[inset_2px_0_0_0_color-mix(in_oklab,var(--primary)_60%,transparent)]";
+
+#[component]
+fn DirectoryColumn(
+    identity: String,
+    #[props(default)] preview: bool,
+    children: Element,
+) -> Element {
+    let class = if preview {
+        "animate-[dx-fade-in_140ms_ease-out_both] motion-reduce:animate-none flex min-h-0 items-center justify-center overflow-auto px-3 py-2"
+    } else {
+        "animate-[dx-fade-in_140ms_ease-out_both] motion-reduce:animate-none min-h-0 overflow-y-auto py-1"
+    };
+    rsx! { for identity in [identity] { div { key: "{identity}", "data-vmux-directory-column": identity.clone(), class, {children.clone()} } } }
+}
+
+#[derive(Clone, Copy)]
+pub struct DirectoryKeys {
+    pub on_next: EventHandler<()>,
+    pub on_previous: EventHandler<()>,
+    pub on_activate: EventHandler<()>,
+    pub on_parent: EventHandler<()>,
+    pub on_toggle_hidden: EventHandler<()>,
+}
+
+impl DirectoryKeys {
+    pub fn focus() {
+        FocusClaim::new(DIRECTORY_NAVIGATOR_ID).request();
+    }
+
+    pub fn offer(self, event: &Event<KeyboardData>) -> bool {
+        let modifiers = event.modifiers();
+        if modifiers.ctrl() || modifiers.meta() || modifiers.alt() {
+            return false;
+        }
+        let handler = match event.key().to_string().as_str() {
+            "j" | "ArrowDown" => self.on_next,
+            "k" | "ArrowUp" => self.on_previous,
+            "l" | "ArrowRight" | "Enter" => self.on_activate,
+            "h" | "ArrowLeft" => self.on_parent,
+            "." => self.on_toggle_hidden,
+            _ => return false,
+        };
+        event.prevent_default();
+        event.stop_propagation();
+        handler.call(());
+        true
+    }
+}
 
 struct DirectoryRowStyle;
 
 impl DirectoryRowStyle {
+    const ROW: &'static str = "relative flex h-8 min-w-0 cursor-default items-center gap-2 rounded-lg px-2.5 outline-none transition-colors duration-150";
+
     fn class(selected: bool) -> String {
-        let base = "flex items-center gap-2 rounded-md px-2 py-1 cursor-default transition-all duration-100";
-        let state = if selected {
-            "bg-primary/12 text-foreground shadow-[inset_2px_0_0_0_var(--primary),0_0_18px_-4px_color-mix(in_oklab,var(--primary)_45%,transparent)]"
+        let tone = if selected {
+            "[--directory-tint:18%] bg-[linear-gradient(110deg,color-mix(in_oklab,var(--primary-action-start)_var(--directory-tint),transparent),color-mix(in_oklab,var(--primary-action-middle)_var(--directory-tint),transparent),color-mix(in_oklab,var(--primary-action-end)_var(--directory-tint),transparent))] text-foreground"
         } else {
-            "text-foreground/75 hover:bg-foreground/[0.05]"
+            "text-foreground/80 hover:bg-foreground/[0.035] hover:text-foreground"
         };
-        cn([base, state])
+        cn([Self::ROW, tone])
+    }
+
+    fn parent(selected: bool) -> String {
+        let tone = if selected {
+            "[--directory-tint:9%] bg-[linear-gradient(110deg,color-mix(in_oklab,var(--primary-action-start)_var(--directory-tint),transparent),color-mix(in_oklab,var(--primary-action-middle)_var(--directory-tint),transparent),color-mix(in_oklab,var(--primary-action-end)_var(--directory-tint),transparent))] text-foreground/80"
+        } else {
+            "text-foreground/45 hover:bg-foreground/[0.035] hover:text-foreground/80"
+        };
+        cn([Self::ROW, tone])
     }
 }
 

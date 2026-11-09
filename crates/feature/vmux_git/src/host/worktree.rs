@@ -1,7 +1,10 @@
 use std::{
+    ffi::OsString,
     fs::{File, OpenOptions},
     os::fd::AsRawFd,
+    os::unix::ffi::OsStringExt,
     path::{Path, PathBuf},
+    sync::Arc,
 };
 
 use crate::host::repository::{GitCommand, GitError};
@@ -24,6 +27,71 @@ pub struct WorktreeStatus {
 pub struct CheckoutInfo {
     pub root: PathBuf,
     pub common_dir: PathBuf,
+}
+
+pub(crate) struct SubmoduleCheckout {
+    relative: PathBuf,
+    root: PathBuf,
+    branch: String,
+    base: BaseRef,
+}
+
+impl SubmoduleCheckout {
+    pub(crate) fn list(checkout: &Path) -> Vec<Self> {
+        let Ok((output, _, true)) =
+            GitCommand::read_bytes(checkout, &["ls-files", "--stage", "-z"])
+        else {
+            return Vec::new();
+        };
+        let mut submodules = Vec::new();
+        for record in output.split(|byte| *byte == 0) {
+            let Some(record) = record.strip_prefix(b"160000 ") else {
+                continue;
+            };
+            let Some(separator) = record.iter().position(|byte| *byte == b'\t') else {
+                continue;
+            };
+            let relative = PathBuf::from(OsString::from_vec(record[separator + 1..].to_vec()));
+            let root = checkout.join(&relative);
+            if CheckoutInfo::try_from(root.as_path()).is_err() {
+                continue;
+            }
+            let Ok((branch, _, true)) =
+                GitCommand::run(&root, &["symbolic-ref", "--quiet", "--short", "HEAD"])
+            else {
+                continue;
+            };
+            let branch = branch.trim();
+            let Some(base) = BaseRef::resolve(&root) else {
+                continue;
+            };
+            if !branch.is_empty() {
+                submodules.push(Self {
+                    relative,
+                    root,
+                    branch: branch.to_string(),
+                    base,
+                });
+            }
+        }
+        submodules
+    }
+
+    pub(crate) fn relative(&self) -> &Path {
+        &self.relative
+    }
+
+    pub(crate) fn root(&self) -> &Path {
+        &self.root
+    }
+
+    pub(crate) fn branch(&self) -> &str {
+        &self.branch
+    }
+
+    fn base(&self) -> &BaseRef {
+        &self.base
+    }
 }
 
 impl TryFrom<&Path> for CheckoutInfo {
@@ -100,36 +168,11 @@ pub struct BranchChange {
 }
 
 impl BranchChange {
-    const WORKERS: usize = 8;
-
-    fn fill(root: &Path, holders: &mut [BranchHolder]) {
+    pub(crate) fn for_branch(root: &Path, checkout: &Path, branch: &str) -> Self {
         let Some(base) = BaseRef::resolve(root) else {
-            return;
+            return Self::default();
         };
-        let mut measured = Vec::new();
-        for holder in holders.iter_mut() {
-            if holder.checkout.is_some() {
-                measured.push(holder);
-            }
-        }
-        if measured.is_empty() {
-            return;
-        }
-        let base = &base;
-        let per_worker = measured.len().div_ceil(Self::WORKERS);
-        std::thread::scope(|scope| {
-            for chunk in measured.chunks_mut(per_worker) {
-                scope.spawn(move || {
-                    for holder in chunk {
-                        let Some(checkout) = holder.checkout.clone() else {
-                            continue;
-                        };
-                        let change = Self::against(root, base, &checkout, &holder.branch);
-                        holder.change = change;
-                    }
-                });
-            }
-        });
+        Self::against(root, &base, checkout, branch)
     }
 
     fn against(root: &Path, base: &BaseRef, checkout: &Path, branch: &str) -> Self {
@@ -139,12 +182,39 @@ impl BranchChange {
         else {
             return Self::default();
         };
-        let Ok((numstat, _, true)) =
-            GitCommand::run(checkout, &["diff", "--numstat", merge_base.trim()])
-        else {
+        let submodules = SubmoduleCheckout::list(checkout);
+        let mut args = vec![
+            "diff".to_string(),
+            "--numstat".to_string(),
+            merge_base.trim().to_string(),
+        ];
+        if !submodules.is_empty() {
+            args.push("--".to_string());
+            args.push(".".to_string());
+            for submodule in &submodules {
+                args.push(format!(
+                    ":(exclude,literal){}",
+                    submodule.relative().to_string_lossy()
+                ));
+            }
+        }
+        let args = args.iter().map(String::as_str).collect::<Vec<_>>();
+        let Ok((numstat, _, true)) = GitCommand::run(checkout, &args) else {
             return Self::default();
         };
-        Self::summed(&numstat)
+        let mut change = Self::summed(&numstat);
+        for submodule in submodules {
+            let nested = Self::against(
+                submodule.root(),
+                submodule.base(),
+                submodule.root(),
+                submodule.branch(),
+            );
+            change.changed_files = change.changed_files.saturating_add(nested.changed_files);
+            change.insertions = change.insertions.saturating_add(nested.insertions);
+            change.deletions = change.deletions.saturating_add(nested.deletions);
+        }
+        change
     }
 
     fn summed(numstat: &str) -> Self {
@@ -177,6 +247,41 @@ impl BaseRef {
     ];
 
     pub fn resolve(root: &Path) -> Option<Self> {
+        let current = Self::current(root);
+        match current {
+            Some(current) => Self::resolve_for(root, &current),
+            None => Self::default(root),
+        }
+    }
+
+    pub fn resolve_for(root: &Path, reference: &str) -> Option<Self> {
+        let default = Self::default(root);
+        let branch = Self::branch_name(reference);
+        if !branch.is_empty() {
+            if let Some(configured) = Self::configured(root, branch)
+                && configured.exists(root)
+            {
+                return Some(configured);
+            }
+            if default
+                .as_ref()
+                .is_some_and(|candidate| candidate.branch() == branch)
+            {
+                return default;
+            }
+        }
+        default
+    }
+
+    fn branch_name(reference: &str) -> &str {
+        reference
+            .strip_prefix("refs/remotes/origin/")
+            .or_else(|| reference.strip_prefix("refs/heads/"))
+            .or_else(|| reference.strip_prefix("origin/"))
+            .unwrap_or(reference)
+    }
+
+    fn default(root: &Path) -> Option<Self> {
         if let Ok((stdout, _, true)) =
             GitCommand::run(root, &["symbolic-ref", "refs/remotes/origin/HEAD"])
         {
@@ -193,6 +298,29 @@ impl BaseRef {
             }
         }
         None
+    }
+
+    fn current(root: &Path) -> Option<String> {
+        let Ok((stdout, _, true)) = GitCommand::run(root, &["symbolic-ref", "--short", "HEAD"])
+        else {
+            return None;
+        };
+        let branch = stdout.trim();
+        (!branch.is_empty()).then(|| branch.to_string())
+    }
+
+    fn configured(root: &Path, branch: &str) -> Option<Self> {
+        let key = format!("branch.{branch}.vmux-base");
+        let Ok((stdout, _, true)) = GitCommand::run(root, &["config", "--get", &key]) else {
+            return None;
+        };
+        let reference = stdout.trim();
+        (!reference.is_empty()).then(|| Self(reference.to_string()))
+    }
+
+    fn exists(&self, root: &Path) -> bool {
+        GitCommand::run(root, &["rev-parse", "--verify", "--quiet", self.as_str()])
+            .is_ok_and(|(_, _, ok)| ok)
     }
 
     pub fn as_str(&self) -> &str {
@@ -382,6 +510,7 @@ impl CheckoutInfo {
         if !ok {
             return Err(GitCommand::error(&stdout, &stderr));
         }
+        self.record_base_or_rollback(path, branch, base, true)?;
         Ok(WorktreeInfo {
             path: path.to_path_buf(),
             branch: branch.to_string(),
@@ -449,6 +578,7 @@ impl CheckoutInfo {
         if !ok {
             return Err(GitCommand::error(&stdout, &stderr));
         }
+        self.record_base_or_rollback(&normalized_path, branch, base_ref, false)?;
         Ok(WorktreeInfo {
             path: normalized_path,
             branch: branch.to_string(),
@@ -470,6 +600,126 @@ impl CheckoutInfo {
             return Err(GitCommand::error(&stdout, &stderr));
         }
         let _ = GitCommand::run(&self.root, &["branch", "-D", branch]);
+        Ok(())
+    }
+
+    fn record_base(&self, branch: &str, base: &str) -> Result<(), GitError> {
+        let key = format!("branch.{branch}.vmux-base");
+        let (stdout, stderr, ok) = GitCommand::run(&self.root, &["config", "--local", &key, base])?;
+        if !ok {
+            return Err(GitCommand::error(&stdout, &stderr));
+        }
+        Ok(())
+    }
+
+    fn record_base_or_rollback(
+        &self,
+        path: &Path,
+        branch: &str,
+        base: &str,
+        delete_branch: bool,
+    ) -> Result<(), GitError> {
+        let Err(error) = self.record_base(branch, base) else {
+            return Ok(());
+        };
+        if let Err(rollback) = super::runtime::GitRuntime::without_cancellation(|| {
+            self.rollback_worktree(path, branch, delete_branch)
+        }) {
+            return Err(GitError(format!(
+                "{}; failed to roll back worktree: {}",
+                error.0, rollback.0
+            )));
+        }
+        Err(error)
+    }
+
+    fn rollback_worktree(
+        &self,
+        path: &Path,
+        branch: &str,
+        delete_branch: bool,
+    ) -> Result<(), GitError> {
+        let path = self.validate_discard(path, branch)?;
+        let path = path.to_string_lossy();
+        let args = ["worktree", "remove", path.as_ref()];
+        let (stdout, stderr, removed) = GitCommand::run(&self.root, &args)?;
+        if !removed {
+            return Err(GitCommand::error(&stdout, &stderr));
+        }
+        if delete_branch {
+            let (stdout, stderr, deleted) = GitCommand::run(&self.root, &["branch", "-D", branch])?;
+            if !deleted {
+                return Err(GitCommand::error(&stdout, &stderr));
+            }
+        }
+        Ok(())
+    }
+
+    fn validate_discard(&self, path: &Path, branch: &str) -> Result<PathBuf, GitError> {
+        let path = Self::normalize_worktree_path(path)?;
+        let registration = self
+            .worktree_registrations()?
+            .into_iter()
+            .find(|registration| registration.path == path)
+            .ok_or_else(|| {
+                GitError(format!(
+                    "worktree is no longer registered: {}",
+                    path.display()
+                ))
+            })?;
+        if registration.branch.as_deref() != Some(branch) {
+            return Err(GitError(format!(
+                "worktree branch changed before cleanup: {}",
+                path.display()
+            )));
+        }
+        let current = CheckoutInfo::try_from(path.as_path())?.head_ref()?;
+        if current != branch {
+            return Err(GitError(format!(
+                "worktree no longer owns branch {branch}: {}",
+                path.display()
+            )));
+        }
+        let (stdout, stderr, clean) = GitCommand::run(
+            &path,
+            &[
+                "status",
+                "--porcelain=v1",
+                "--untracked-files=all",
+                "--ignored=matching",
+            ],
+        )?;
+        if !clean {
+            return Err(GitCommand::error(&stdout, &stderr));
+        }
+        if !stdout.trim().is_empty() {
+            return Err(GitError(format!(
+                "worktree contains local files and was not removed: {}",
+                path.display()
+            )));
+        }
+        Ok(path)
+    }
+
+    pub fn discard_worktree(
+        &self,
+        path: &Path,
+        branch: &str,
+        delete_branch: bool,
+    ) -> Result<(), GitError> {
+        let _lock = RepositoryWorktreeLock::acquire(&self.root)?;
+        super::runtime::GitRuntime::without_cancellation(|| {
+            self.rollback_worktree(path, branch, delete_branch)
+        })
+    }
+
+    pub fn prune_worktrees(&self) -> Result<(), GitError> {
+        let _lock = RepositoryWorktreeLock::acquire(&self.root)?;
+        let (stdout, stderr, ok) =
+            GitCommand::run(&self.root, &["worktree", "prune", "--expire", "now"])?;
+        if !ok {
+            return Err(GitCommand::error(&stdout, &stderr));
+        }
         Ok(())
     }
 
@@ -538,7 +788,10 @@ impl CheckoutInfo {
         for branch in self.local_branches()? {
             let mut checkout = None;
             for registration in &registrations {
-                if registration.branch.as_deref() == Some(branch.as_str()) {
+                if !registration.prunable
+                    && registration.path.is_dir()
+                    && registration.branch.as_deref() == Some(branch.as_str())
+                {
                     checkout = Some(registration.path.clone());
                     break;
                 }
@@ -549,7 +802,6 @@ impl CheckoutInfo {
                 change: BranchChange::default(),
             });
         }
-        BranchChange::fill(&self.root, &mut holders);
         Ok(holders)
     }
 
@@ -606,6 +858,7 @@ impl WorktreeStatus {
 pub struct RepoInfo {
     pub name: String,
     pub branch: String,
+    pub branches: Arc<[BranchHolder]>,
     pub base_ref: String,
     pub is_worktree: bool,
     pub uncommitted: u32,
@@ -614,13 +867,26 @@ pub struct RepoInfo {
     pub insertions: u32,
     pub deletions: u32,
     pub repo_root: PathBuf,
+    project_root: PathBuf,
     pub(crate) git_dir: PathBuf,
     pub(crate) common_dir: PathBuf,
+    pub(crate) worktrees_dir: Option<PathBuf>,
+    pub(crate) identity: PathBuf,
 }
 
 impl RepoInfo {
     pub fn project_root(&self) -> &Path {
-        self.common_dir.parent().unwrap_or(&self.repo_root)
+        if !self.project_root.as_os_str().is_empty() {
+            return &self.project_root;
+        }
+        if self
+            .common_dir
+            .file_name()
+            .is_some_and(|name| name == ".git")
+        {
+            return self.common_dir.parent().unwrap_or(&self.repo_root);
+        }
+        &self.repo_root
     }
 
     pub fn project_name(&self) -> String {
@@ -630,6 +896,18 @@ impl RepoInfo {
             .map(|name| name.to_string_lossy().into_owned())
             .filter(|name| !name.is_empty());
         named.unwrap_or_else(|| self.name.clone())
+    }
+
+    pub fn name_at(dir: &Path) -> String {
+        if let Ok((remote, _, true)) = GitCommand::read(dir, &["remote", "get-url", "origin"])
+            && let Some(name) = Self::name_from_remote(&remote)
+        {
+            return name;
+        }
+        dir.file_name()
+            .map(|name| name.to_string_lossy().into_owned())
+            .filter(|name| !name.is_empty())
+            .unwrap_or_else(|| dir.to_string_lossy().into_owned())
     }
 
     fn name_from_remote(url: &str) -> Option<String> {
@@ -727,12 +1005,68 @@ impl LinkedRepoRoot {
         if git_dir == common_dir {
             return None;
         }
-        Some(common_dir.parent()?.to_path_buf())
+        let checkout = CheckoutInfo::try_from(dir).ok()?;
+        Some(
+            ProjectRoot {
+                checkout: &checkout.root,
+                common: &common_dir,
+            }
+            .resolve(),
+        )
+    }
+}
+
+struct ProjectRoot<'a> {
+    checkout: &'a Path,
+    common: &'a Path,
+}
+
+impl ProjectRoot<'_> {
+    fn resolve(&self) -> PathBuf {
+        if self.common.file_name().is_some_and(|name| name == ".git") {
+            return self.common.parent().unwrap_or(self.checkout).to_path_buf();
+        }
+        let common = self.common.to_string_lossy();
+        if let Ok((configured, _, true)) = GitCommand::read(
+            self.checkout,
+            &[
+                "--git-dir",
+                &common,
+                "config",
+                "--path",
+                "--get",
+                "core.worktree",
+            ],
+        ) {
+            let configured = configured.strip_suffix('\n').unwrap_or(&configured);
+            if !configured.is_empty() {
+                let path = PathBuf::from(configured);
+                let root = if path.is_absolute() {
+                    path
+                } else {
+                    self.common.join(path)
+                };
+                if let Ok(root) = root.canonicalize() {
+                    return root;
+                }
+            }
+        }
+        self.checkout.to_path_buf()
     }
 }
 
 impl RepoInfo {
     pub fn read(dir: &Path) -> Option<Self> {
+        Self::read_with_branches(dir, None)
+    }
+
+    pub(crate) fn read_with_branches(
+        dir: &Path,
+        cached_branches: Option<Arc<[BranchHolder]>>,
+    ) -> Option<Self> {
+        let identity = dir
+            .canonicalize()
+            .unwrap_or_else(|_| vmux_path::PathIdentity::lexical(dir).into_path_buf());
         let (status, _, ok) =
             GitCommand::read(dir, &["status", "--porcelain=v2", "--branch"]).ok()?;
         if !ok {
@@ -772,42 +1106,41 @@ impl RepoInfo {
         let repo_root = dirs.next()?;
         let git_dir = dirs.next()?;
         let common_dir = dirs.next()?;
-        let mut name = None;
-        if let Ok((remote, _, ok)) = GitCommand::read(dir, &["remote", "get-url", "origin"])
-            && ok
-        {
-            name = Self::name_from_remote(&remote);
-        }
-        let name = name.unwrap_or_else(|| {
-            repo_root
-                .file_name()
+        let worktrees = common_dir.join("worktrees");
+        let worktrees_dir = worktrees.is_dir().then_some(worktrees);
+        let name = Self::name_at(&repo_root);
+        let branches = match cached_branches {
+            Some(branches) => branches,
+            None => CheckoutInfo::try_from(repo_root.as_path())
+                .and_then(|checkout| checkout.branch_holders())
                 .unwrap_or_default()
-                .to_string_lossy()
-                .into_owned()
-        });
-        let base = BaseRef::resolve(&repo_root);
-        let change = if branch.is_empty() {
-            BranchChange::default()
-        } else {
-            base.as_ref()
-                .map(|base| BranchChange::against(&repo_root, base, &repo_root, &branch))
-                .unwrap_or_default()
+                .into(),
         };
+        let base = BaseRef::resolve(&repo_root);
+        let project_root = ProjectRoot {
+            checkout: &repo_root,
+            common: &common_dir,
+        }
+        .resolve();
         Some(Self {
             name,
             branch,
+            branches,
             base_ref: base
                 .map(|base| base.branch().to_string())
                 .unwrap_or_default(),
             is_worktree: git_dir != common_dir,
             uncommitted,
             ahead,
-            changed_files: change.changed_files,
-            insertions: change.insertions,
-            deletions: change.deletions,
+            changed_files: 0,
+            insertions: 0,
+            deletions: 0,
             repo_root,
+            project_root,
             git_dir,
             common_dir,
+            worktrees_dir,
+            identity,
         })
     }
 }
@@ -934,6 +1267,31 @@ mod tests {
                 .any(|p| p.canonicalize().ok() == wt.canonicalize().ok()),
             "worktree appears in list: {listed:?}"
         );
+        let (base, _, ok) = GitCommand::run(
+            repo.path(),
+            &["config", "--get", "branch.vmux/feat.vmux-base"],
+        )
+        .unwrap();
+        assert!(ok);
+        assert_eq!(base.trim(), "main");
+    }
+
+    #[test]
+    fn base_ref_defaults_to_main_without_configuration() {
+        let repo = test_repo::init();
+        commit_initial(repo.path());
+        test_repo::run(repo.path(), &["checkout", "-qb", "parent"]);
+        test_repo::write(repo.path(), "parent.txt", "parent\n");
+        test_repo::run(repo.path(), &["add", "parent.txt"]);
+        test_repo::run(repo.path(), &["commit", "-qm", "parent"]);
+        test_repo::run(repo.path(), &["checkout", "-qb", "child"]);
+        test_repo::write(repo.path(), "child.txt", "child\n");
+        test_repo::run(repo.path(), &["add", "child.txt"]);
+        test_repo::run(repo.path(), &["commit", "-qm", "child"]);
+
+        let base = BaseRef::resolve(repo.path()).unwrap();
+
+        assert_eq!(base.branch(), "main");
     }
 
     #[test]
@@ -970,6 +1328,92 @@ mod tests {
         let (_, _, branch_exists) =
             GitCommand::run(repo.path(), &["rev-parse", "--verify", "-q", "vmux/feat"]).unwrap();
         assert!(!branch_exists, "branch deleted");
+    }
+
+    #[test]
+    fn discard_preserves_a_dirty_worktree() {
+        let repo = test_repo::init();
+        commit_initial(repo.path());
+        let wt = repo.path().join(".worktrees/feat");
+        let checkout = CheckoutInfo::try_from(repo.path()).unwrap();
+        checkout.add_worktree(&wt, "vmux/feat", "main").unwrap();
+        test_repo::write(&wt, "dirty.txt", "keep\n");
+
+        let error = checkout
+            .discard_worktree(&wt, "vmux/feat", false)
+            .unwrap_err();
+
+        assert!(!error.0.is_empty());
+        assert!(wt.join("dirty.txt").is_file());
+        assert_eq!(
+            CheckoutInfo::try_from(wt.as_path())
+                .unwrap()
+                .head_ref()
+                .unwrap(),
+            "vmux/feat"
+        );
+    }
+
+    #[test]
+    fn discard_preserves_ignored_files() {
+        let repo = test_repo::init();
+        commit_initial(repo.path());
+        test_repo::write(repo.path(), ".gitignore", ".cache/\n");
+        test_repo::run(repo.path(), &["add", ".gitignore"]);
+        test_repo::run(repo.path(), &["commit", "-qm", "ignore cache"]);
+        let wt = repo.path().join(".worktrees/feat");
+        let checkout = CheckoutInfo::try_from(repo.path()).unwrap();
+        checkout.add_worktree(&wt, "vmux/feat", "main").unwrap();
+        std::fs::create_dir_all(wt.join(".cache")).unwrap();
+        test_repo::write(&wt, ".cache/secret.txt", "keep\n");
+
+        let error = checkout
+            .discard_worktree(&wt, "vmux/feat", false)
+            .unwrap_err();
+
+        assert!(!error.0.is_empty());
+        assert!(wt.join(".cache/secret.txt").is_file());
+    }
+
+    #[test]
+    fn discard_rejects_a_repurposed_worktree() {
+        let repo = test_repo::init();
+        commit_initial(repo.path());
+        let wt = repo.path().join(".worktrees/feat");
+        let checkout = CheckoutInfo::try_from(repo.path()).unwrap();
+        checkout.add_worktree(&wt, "vmux/feat", "main").unwrap();
+        test_repo::run(&wt, &["checkout", "-qb", "replacement"]);
+
+        let error = checkout
+            .discard_worktree(&wt, "vmux/feat", false)
+            .unwrap_err();
+
+        assert!(error.0.contains("branch changed"));
+        assert!(wt.is_dir());
+        assert_eq!(
+            CheckoutInfo::try_from(wt.as_path())
+                .unwrap()
+                .head_ref()
+                .unwrap(),
+            "replacement"
+        );
+    }
+
+    #[test]
+    fn discard_rejects_a_detached_worktree() {
+        let repo = test_repo::init();
+        commit_initial(repo.path());
+        let wt = repo.path().join(".worktrees/feat");
+        let checkout = CheckoutInfo::try_from(repo.path()).unwrap();
+        checkout.add_worktree(&wt, "vmux/feat", "main").unwrap();
+        test_repo::run(&wt, &["checkout", "--detach", "-q"]);
+
+        let error = checkout
+            .discard_worktree(&wt, "vmux/feat", false)
+            .unwrap_err();
+
+        assert!(!error.0.is_empty());
+        assert!(wt.is_dir());
     }
 
     #[test]
@@ -1153,6 +1597,25 @@ mod tests {
     }
 
     #[test]
+    fn branch_holders_ignore_deleted_worktree_checkouts() {
+        let repo = test_repo::init();
+        commit_initial(repo.path());
+        let wt = repo.path().join(".worktrees/feat");
+        let checkout = CheckoutInfo::try_from(repo.path()).unwrap();
+        checkout.add_worktree(&wt, "vmux/feat", "main").unwrap();
+        std::fs::remove_dir_all(&wt).unwrap();
+
+        let holder = checkout
+            .branch_holders()
+            .unwrap()
+            .into_iter()
+            .find(|holder| holder.branch == "vmux/feat")
+            .unwrap();
+
+        assert_eq!(holder.checkout, None);
+    }
+
+    #[test]
     fn a_numstat_counts_files_and_ignores_binary_line_totals() {
         let change = BranchChange::summed("3\t1\tsrc/a.rs\n10\t0\tsrc/b.rs\n-\t-\tlogo.png\n");
 
@@ -1179,21 +1642,12 @@ mod tests {
             repo.path().file_name().unwrap().to_string_lossy()
         );
         assert_eq!(info.base_ref, "main");
-        assert_eq!(info.changed_files, 2);
-        assert_eq!(info.insertions, 3);
-        assert_eq!(info.deletions, 1);
-
-        let holders = checkout.branch_holders().unwrap();
-        let change = |branch: &str| {
-            holders
-                .iter()
-                .find(|holder| holder.branch == branch)
-                .unwrap_or_else(|| panic!("{branch} listed"))
-                .change
-        };
+        assert_eq!(info.changed_files, 0);
+        assert_eq!(info.insertions, 0);
+        assert_eq!(info.deletions, 0);
 
         assert_eq!(
-            change("vmux/feat"),
+            BranchChange::for_branch(repo.path(), &wt, "vmux/feat"),
             BranchChange {
                 changed_files: 2,
                 insertions: 3,
@@ -1202,7 +1656,7 @@ mod tests {
             "a worktree branch is measured from where it left the base, in that direction"
         );
         assert_eq!(
-            change("main"),
+            BranchChange::for_branch(repo.path(), repo.path(), "main"),
             BranchChange::default(),
             "the base branch has nothing to report against itself"
         );
@@ -1217,14 +1671,8 @@ mod tests {
         checkout.add_worktree(&wt, "vmux/feat", "main").unwrap();
         test_repo::write(&wt, "seed.txt", "seed\nscratch\n");
 
-        let holders = checkout.branch_holders().unwrap();
-        let feat = holders
-            .iter()
-            .find(|holder| holder.branch == "vmux/feat")
-            .expect("vmux/feat listed");
-
         assert_eq!(
-            feat.change,
+            BranchChange::for_branch(repo.path(), &wt, "vmux/feat"),
             BranchChange {
                 changed_files: 1,
                 insertions: 1,
@@ -1257,7 +1705,7 @@ mod tests {
         assert_eq!(
             spare.change,
             BranchChange::default(),
-            "measuring every local branch would cost two git calls each, so only worktrees pay"
+            "unheld branches stay cheap until a worktree needs their full change summary"
         );
     }
 
@@ -1363,6 +1811,44 @@ mod tests {
             unsafe { libc::flock(competing.as_raw_fd(), libc::LOCK_EX | libc::LOCK_NB) },
             0
         );
+    }
+
+    #[test]
+    fn submodule_project_roots_use_the_primary_checkout_instead_of_git_modules() {
+        let child = test_repo::init();
+        commit_initial(child.path());
+        let parent = test_repo::init();
+        test_repo::run(
+            parent.path(),
+            &[
+                "-c",
+                "protocol.file.allow=always",
+                "submodule",
+                "add",
+                "-q",
+                child.path().to_str().unwrap(),
+                "client",
+            ],
+        );
+        let checkout = parent.path().join("client").canonicalize().unwrap();
+        let info = RepoInfo::read(&checkout).unwrap();
+        assert_eq!(info.project_root(), checkout);
+        assert_eq!(info.project_name(), "client");
+        let linked = parent.path().join("linked-client");
+        test_repo::run(
+            &checkout,
+            &[
+                "worktree",
+                "add",
+                "-q",
+                "-b",
+                "feature",
+                linked.to_str().unwrap(),
+            ],
+        );
+        let info = RepoInfo::read(&linked).unwrap();
+        assert_eq!(info.project_root(), checkout);
+        assert_eq!(LinkedRepoRoot::find(&linked).unwrap(), checkout);
     }
 
     #[test]

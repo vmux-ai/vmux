@@ -1,5 +1,13 @@
 use serde::{Deserialize, Serialize};
 
+pub struct TreeWidth;
+
+impl TreeWidth {
+    pub const DEFAULT: u32 = 240;
+    pub const MIN: u32 = 160;
+    pub const MAX: u32 = 600;
+}
+
 #[vmux_api::contract(Copy, Eq, Default)]
 pub enum EditMode {
     #[default]

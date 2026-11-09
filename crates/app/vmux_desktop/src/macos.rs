@@ -5,9 +5,11 @@ use std::time::{Duration, Instant};
 
 use bevy::prelude::*;
 use bevy::winit::{EventLoopProxyWrapper, WINIT_WINDOWS, WinitUserEvent};
+use bevy_cef_core::prelude::MessageLoopWakePolicy;
 use objc2_app_kit::{
-    NSAnimatablePropertyContainer, NSAnimationContext, NSApp, NSEvent, NSEventMask, NSEventType,
-    NSView, NSWindowDidEndLiveResizeNotification, NSWindowStyleMask,
+    NSAnimatablePropertyContainer, NSAnimationContext, NSApp,
+    NSApplicationDidResignActiveNotification, NSEvent, NSEventMask, NSEventModifierFlags,
+    NSEventPhase, NSEventType, NSView, NSWindowDidEndLiveResizeNotification, NSWindowStyleMask,
     NSWindowWillStartLiveResizeNotification,
 };
 use objc2_foundation::{
@@ -27,13 +29,16 @@ pub(super) struct RuntimePlatformPlugin;
 impl Plugin for RuntimePlatformPlugin {
     fn build(&self, app: &mut App) {
         app.add_systems(Startup, seed)
+            .add_message::<vmux_ecs::overlay::PopupDismissRequest>()
+            .add_systems(First, deactivate)
             .add_systems(Update, activate_app_during_boot)
             .add_systems(Update, grab_key_window_on_pane_hover)
             .add_systems(
                 Startup,
                 (
-                    install_mouse_wake_monitor,
+                    install_input_wake_monitor,
                     install_live_resize_monitor,
+                    install_activation_monitor,
                     activate_primary_window,
                 ),
             );
@@ -58,11 +63,43 @@ fn seed(_non_send: bevy::ecs::system::NonSendMarker, mut system: Single<&mut Sys
 const MOUSE_MOVE_WAKE_INTERVAL: Duration = Duration::from_millis(33);
 const MOUSE_DRAG_WAKE_INTERVAL: Duration = Duration::from_millis(16);
 
-static MOUSE_WAKE_MONITOR_INSTALLED: AtomicBool = AtomicBool::new(false);
+static INPUT_WAKE_MONITOR_INSTALLED: AtomicBool = AtomicBool::new(false);
 static IN_LIVE_RESIZE: AtomicBool = AtomicBool::new(false);
 static LIVE_RESIZE_MONITOR_INSTALLED: AtomicBool = AtomicBool::new(false);
 static HOVER_OVER_PANE: AtomicBool = AtomicBool::new(false);
 static WINDOWED_POINTER_INSIDE: AtomicBool = AtomicBool::new(false);
+static ACTIVATION_MONITOR_INSTALLED: AtomicBool = AtomicBool::new(false);
+static APP_DEACTIVATED: AtomicBool = AtomicBool::new(false);
+
+fn deactivate(mut dismiss: MessageWriter<vmux_ecs::overlay::PopupDismissRequest>) {
+    if APP_DEACTIVATED.swap(false, Ordering::Relaxed) {
+        dismiss.write_default();
+    }
+}
+
+fn install_activation_monitor(proxy: Option<Res<EventLoopProxyWrapper>>) {
+    if ACTIVATION_MONITOR_INSTALLED.load(Ordering::Relaxed) {
+        return;
+    }
+    let Some(proxy) = proxy else {
+        return;
+    };
+    let proxy = (**proxy).clone();
+    let block = block2::RcBlock::new(move |_notification: NonNull<NSNotification>| {
+        APP_DEACTIVATED.store(true, Ordering::Relaxed);
+        let _ = proxy.send_event(WinitUserEvent::WakeUp);
+    });
+    let token = unsafe {
+        NSNotificationCenter::defaultCenter().addObserverForName_object_queue_usingBlock(
+            Some(NSApplicationDidResignActiveNotification),
+            None,
+            None,
+            &block,
+        )
+    };
+    std::mem::forget(token);
+    ACTIVATION_MONITOR_INSTALLED.store(true, Ordering::Relaxed);
+}
 
 fn activate_primary_window(
     primary_window: Query<(Entity, &Window), With<bevy::window::PrimaryWindow>>,
@@ -393,13 +430,17 @@ impl WindowZoom {
     }
 }
 
-fn install_mouse_wake_monitor(proxy: Option<Res<EventLoopProxyWrapper>>) {
+fn install_input_wake_monitor(
+    proxy: Option<Res<EventLoopProxyWrapper>>,
+    cef_wake_policy: Res<MessageLoopWakePolicy>,
+) {
     let Some(proxy) = proxy else {
         return;
     };
-    if MOUSE_WAKE_MONITOR_INSTALLED.load(Ordering::Relaxed) {
+    if INPUT_WAKE_MONITOR_INSTALLED.load(Ordering::Relaxed) {
         return;
     }
+    let cef_wake_policy = cef_wake_policy.clone();
     let proxy = (**proxy).clone();
     let wake = wake_throttle("mouse-wake-throttle", move || {
         let _ = proxy.send_event(WinitUserEvent::WakeUp);
@@ -410,6 +451,7 @@ fn install_mouse_wake_monitor(proxy: Option<Res<EventLoopProxyWrapper>>) {
     let window_zoom = Arc::new(Mutex::new(WindowZoom::default()));
     let local_wake = wake.clone();
     let local_block = block2::RcBlock::new(move |event: NonNull<NSEvent>| -> *mut NSEvent {
+        cef_wake_policy.begin_interaction();
         let ev = unsafe { event.as_ref() };
         let event_type = ev.r#type();
         let mut titlebar_gesture = None;
@@ -492,6 +534,17 @@ fn install_mouse_wake_monitor(proxy: Option<Res<EventLoopProxyWrapper>>) {
                 | NSEventType::OtherMouseUp
         );
         let scroll = event_type == NSEventType::ScrollWheel;
+        if scroll {
+            HistoryScroll::record(ev);
+        } else if matches!(
+            event_type,
+            NSEventType::Magnify
+                | NSEventType::Rotate
+                | NSEventType::KeyDown
+                | NSEventType::FlagsChanged
+        ) {
+            HistoryScroll::cancel();
+        }
         let location = event_location_in_window_physical_px(ev);
         let pointer_position_changed = motion || button_event;
         let was_over_windowed_page = WINDOWED_POINTER_INSIDE.load(Ordering::Relaxed);
@@ -562,7 +615,13 @@ fn install_mouse_wake_monitor(proxy: Option<Res<EventLoopProxyWrapper>>) {
         | NSEventMask::OtherMouseDown
         | NSEventMask::OtherMouseUp
         | NSEventMask::OtherMouseDragged;
-    let local_mask = mouse_mask | NSEventMask::ScrollWheel;
+    let local_mask = mouse_mask
+        | NSEventMask::ScrollWheel
+        | NSEventMask::Magnify
+        | NSEventMask::Rotate
+        | NSEventMask::KeyDown
+        | NSEventMask::KeyUp
+        | NSEventMask::FlagsChanged;
     let global_mask = NSEventMask::LeftMouseDown
         | NSEventMask::LeftMouseUp
         | NSEventMask::RightMouseDown
@@ -574,7 +633,7 @@ fn install_mouse_wake_monitor(proxy: Option<Res<EventLoopProxyWrapper>>) {
     let global_token =
         NSEvent::addGlobalMonitorForEventsMatchingMask_handler(global_mask, &global_block);
     if local_token.is_some() || global_token.is_some() {
-        MOUSE_WAKE_MONITOR_INSTALLED.store(true, Ordering::Relaxed);
+        INPUT_WAKE_MONITOR_INSTALLED.store(true, Ordering::Relaxed);
         if let Some(token) = local_token {
             std::mem::forget(token);
         }
@@ -636,6 +695,87 @@ fn event_location_in_window_physical_px(event: &NSEvent) -> Option<(f32, f32)> {
         Some((x as f32, y as f32))
     } else {
         None
+    }
+}
+
+struct HistoryScroll;
+
+impl HistoryScroll {
+    fn record(event: &NSEvent) {
+        let source = event.CGEvent();
+        let modifiers = NSEventModifierFlags::Control
+            | NSEventModifierFlags::Command
+            | NSEventModifierFlags::Option
+            | NSEventModifierFlags::Shift;
+        if source.is_none()
+            || !event.hasPreciseScrollingDeltas()
+            || event.modifierFlags().intersects(modifiers)
+        {
+            Self::cancel();
+            return;
+        }
+        let Some((window, position)) = Self::position(event) else {
+            Self::cancel();
+            return;
+        };
+        let phase = if event.momentumPhase() != NSEventPhase::None {
+            vmux_browser::NativeHistoryPhase::Momentum
+        } else if event.phase().intersects(NSEventPhase::Cancelled) {
+            vmux_browser::NativeHistoryPhase::Cancel
+        } else if event.phase().intersects(NSEventPhase::Ended) {
+            vmux_browser::NativeHistoryPhase::End
+        } else if event
+            .phase()
+            .intersects(NSEventPhase::Began | NSEventPhase::MayBegin)
+        {
+            vmux_browser::NativeHistoryPhase::Begin
+        } else if event
+            .phase()
+            .intersects(NSEventPhase::Changed | NSEventPhase::Stationary)
+        {
+            vmux_browser::NativeHistoryPhase::Changed
+        } else {
+            vmux_browser::NativeHistoryPhase::Unsupported
+        };
+        let delta = Vec2::new(
+            -event.scrollingDeltaX() as f32,
+            -event.scrollingDeltaY() as f32,
+        );
+        vmux_browser::NativeBridge::record_history_wheel(window, position, delta, phase);
+    }
+
+    fn position(event: &NSEvent) -> Option<(isize, Vec2)> {
+        let mtm = objc2::MainThreadMarker::new()?;
+        let mut window = event.window(mtm)?;
+        let screen = window.convertPointToScreen(event.locationInWindow());
+        for _ in 0..8 {
+            let Some(parent) = window.parentWindow() else {
+                break;
+            };
+            window = parent;
+        }
+        let content = window.contentView()?;
+        let point = content.convertPoint_fromView(window.convertPointFromScreen(screen), None);
+        let y = if content.isFlipped() {
+            point.y
+        } else {
+            content.bounds().size.height - point.y
+        };
+        let scale = window.backingScaleFactor();
+        let position = Vec2::new((point.x * scale) as f32, (y * scale) as f32);
+        if !position.is_finite() || !scale.is_finite() || scale <= 0.0 {
+            return None;
+        }
+        Some((window.windowNumber(), position))
+    }
+
+    fn cancel() {
+        vmux_browser::NativeBridge::record_history_wheel(
+            0,
+            Vec2::ZERO,
+            Vec2::ZERO,
+            vmux_browser::NativeHistoryPhase::Cancel,
+        );
     }
 }
 

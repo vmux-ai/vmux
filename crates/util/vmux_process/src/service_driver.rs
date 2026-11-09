@@ -109,6 +109,77 @@ impl ProcessConnection {
             ClientMessage::ProcessInput { process_id, data } => {
                 let _ = self.processes.input(process_id, data).await;
             }
+            ClientMessage::ChangeProcessDirectory {
+                process_id,
+                cwd,
+                path,
+            } => {
+                if !self.attached.contains_key(&process_id) {
+                    return Ok(());
+                }
+                if let Err(message) = self.processes.change_directory(process_id, cwd, path).await {
+                    let _ = self.outbound.send(ServiceMessage::Error { message });
+                }
+            }
+            ClientMessage::ListProcessDirectories {
+                process_id,
+                cwd,
+                path,
+            } => {
+                if !self.attached.contains_key(&process_id) {
+                    return Ok(());
+                }
+                let processes = self.processes.clone();
+                let outbound = self.outbound.clone();
+                tokio::spawn(async move {
+                    let mut directories = Vec::new();
+                    let result = async {
+                        let current = processes.list().await?;
+                        if !current
+                            .iter()
+                            .any(|process| process.id == process_id && process.cwd == cwd)
+                        {
+                            return Err("terminal directory has changed".to_string());
+                        }
+                        let root = std::path::Path::new(&path);
+                        if !root.is_absolute() {
+                            return Err("terminal directory is not absolute".into());
+                        }
+                        if let Some(parent) = root.parent() {
+                            directories.push(parent.to_string_lossy().into_owned());
+                        }
+                        let mut entries = tokio::fs::read_dir(root)
+                            .await
+                            .map_err(|error| error.to_string())?;
+                        while let Some(entry) = entries
+                            .next_entry()
+                            .await
+                            .map_err(|error| error.to_string())?
+                        {
+                            if directories.len() == 1024 {
+                                break;
+                            }
+                            if entry
+                                .metadata()
+                                .await
+                                .is_ok_and(|metadata| metadata.is_dir())
+                            {
+                                directories.push(entry.path().to_string_lossy().into_owned());
+                            }
+                        }
+                        directories.sort();
+                        Ok::<(), String>(())
+                    }
+                    .await;
+                    let _ = outbound.send(ServiceMessage::ProcessDirectories {
+                        process_id,
+                        cwd,
+                        path,
+                        directories,
+                        error: result.err(),
+                    });
+                });
+            }
             ClientMessage::MouseWheel {
                 process_id,
                 up,

@@ -3,11 +3,11 @@ use dioxus_primitives::toast::ToastProvider;
 
 use crate::{docs, landing, markdown};
 
-const SEO_TITLE: &str = "Vmux — One prompt. Anything, done.";
+const SEO_TITLE: &str = "Vmux — Any prompt. Anything, done.";
 const SEO_DESCRIPTION: &str = "The browser + IDE that get sh*t done — booking a flight, building a website, opening a PR, all handled by your agents while you watch.";
 const SITE_URL: &str = "https://vmux.ai/";
 const OG_IMAGE: &str = "https://vmux.ai/og.png";
-const OG_IMAGE_ALT: &str = "Vmux — One prompt. Anything, done.";
+const OG_IMAGE_ALT: &str = "Vmux — Any prompt. Anything, done.";
 
 #[derive(Routable, Clone, PartialEq)]
 #[rustfmt::skip]

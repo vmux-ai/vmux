@@ -1,29 +1,20 @@
 use bevy::prelude::*;
-use bevy_cef::prelude::{Receive, UiInput};
+use bevy_cef::prelude::UiInput;
 use vmux_api::service::RelaunchRequest;
 
 pub(crate) struct RelaunchPlugin;
 
 impl Plugin for RelaunchPlugin {
     fn build(&self, app: &mut App) {
-        app.add_plugins((
-            bevy_cef::prelude::UiEventPlugin::<(RelaunchRequest,)>::default(),
-            bevy_cef::prelude::JsEmitEventPlugin::<UiRelaunchRequest>::default(),
-        ))
-        .add_message::<RelaunchApplication>()
-        .add_message::<LaunchProfile>()
-        .add_observer(restart_request)
-        .add_observer(page)
-        .add_systems(
-            Update,
-            (request_profile_launch, relaunch, launch_profiles).chain(),
-        );
+        app.add_plugins(bevy_cef::prelude::UiEventPlugin::<(RelaunchRequest,)>::default())
+            .add_message::<RelaunchApplication>()
+            .add_message::<LaunchProfile>()
+            .add_observer(restart_request)
+            .add_systems(
+                Update,
+                (request_profile_launch, relaunch, launch_profiles).chain(),
+            );
     }
-}
-
-#[derive(serde::Deserialize)]
-struct UiRelaunchRequest {
-    channel: String,
 }
 
 fn relaunch_plan(
@@ -100,7 +91,7 @@ struct RelaunchApplication;
 struct LaunchProfile(String);
 
 fn relaunch(mut requests: MessageReader<RelaunchApplication>, mut exit: MessageWriter<AppExit>) {
-    if requests.read().next().is_none() {
+    if requests.read().count() == 0 {
         return;
     }
     let Ok(exe) = std::env::current_exe() else {
@@ -174,12 +165,6 @@ fn restart_request(
     mut requests: MessageWriter<RelaunchApplication>,
 ) {
     requests.write(RelaunchApplication);
-}
-
-fn page(trigger: On<Receive<UiRelaunchRequest>>, mut requests: MessageWriter<RelaunchApplication>) {
-    if trigger.payload.channel == "vmux-relaunch" {
-        requests.write(RelaunchApplication);
-    }
 }
 
 fn request_profile_launch(

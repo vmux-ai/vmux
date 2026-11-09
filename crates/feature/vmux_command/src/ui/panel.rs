@@ -1,6 +1,7 @@
 use super::{CommandPalette, use_command_bar_ui};
 use dioxus::prelude::*;
-use vmux_api::command_bar::DismissRequest;
+use vmux_api::command_bar::{DeactivateRequest, DismissRequest};
+use vmux_ui::components::popup::Dismissal;
 use vmux_ui::hooks::send;
 
 use crate::CommandPaletteSurface;
@@ -12,13 +13,20 @@ pub fn CommandBarPanel() -> Element {
         let _ = send(&DismissRequest);
     });
 
-    if !state().snapshot.open_id.is_open() {
+    let open = state().snapshot.open_id.is_open();
+    Dismissal::use_listener(
+        open,
+        EventHandler::new(move |()| {
+            let _ = send(&DeactivateRequest);
+        }),
+    );
+    if !open {
         return rsx! {};
     }
 
     rsx! {
         div {
-            class: "pointer-events-auto fixed inset-0",
+            class: "pointer-events-auto fixed inset-0 bg-scrim/50",
             onmousedown: move |event| {
                 event.prevent_default();
                 close.call(());
@@ -29,7 +37,7 @@ pub fn CommandBarPanel() -> Element {
                 onmousedown: move |event| event.stop_propagation(),
                 div {
                     id: "command-bar-shell",
-                    class: "relative flex w-full flex-col overflow-hidden rounded-2xl border border-border bg-background shadow-2xl",
+                    class: "relative flex w-full flex-col overflow-hidden rounded-2xl border border-foreground/15 bg-popover shadow-[0_24px_80px_-16px_rgb(0_0_0_/_55%),0_8px_24px_rgb(0_0_0_/_25%)]",
                     div {
                         class: "flex min-h-0 flex-1 flex-col",
                         CommandPalette {

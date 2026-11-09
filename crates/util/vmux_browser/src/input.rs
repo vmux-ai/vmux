@@ -13,6 +13,7 @@ use std::sync::atomic::Ordering;
 use vmux_ecs::overlay::Overlay;
 use vmux_layout::Browser;
 use vmux_layout::LayoutCef;
+use vmux_layout::overlay::{LayoutOverlayActive, LayoutOverlayDismissRevision};
 
 use crate::host::{CefPointerRegions, LayoutPointerCapture, NATIVE_LAYOUT_POINTER_INSIDE};
 
@@ -24,6 +25,8 @@ impl Plugin for InputPlugin {
             PreUpdate,
             (
                 publish_layout_pointer_inside,
+                #[cfg(target_os = "macos")]
+                dismiss_layout_overlay_from_native_pointer,
                 forward_layout_cef_cursor_move.run_if(on_message::<CursorMoved>),
                 forward_layout_cef_mouse_button.run_if(on_message::<MouseButtonInput>),
             )
@@ -32,6 +35,56 @@ impl Plugin for InputPlugin {
         )
         .add_systems(PreUpdate, log_command_bar_keyboard)
         .add_systems(Update, track_interaction);
+    }
+}
+
+#[cfg(target_os = "macos")]
+fn dismiss_layout_overlay_from_native_pointer(
+    windows: Query<&Window>,
+    mut layouts: Query<(Entity, &HostWindow, &mut LayoutOverlayDismissRevision), With<LayoutCef>>,
+    active_overlays: Query<&LayoutOverlayActive>,
+    cef_regions: CefPointerRegions,
+    mut previous_sequence: Local<u64>,
+    mut previous_pressed: Local<bool>,
+    mut commands: Commands,
+) {
+    let Some(pointer) = vmux_input::NativePointer::snapshot() else {
+        return;
+    };
+    if pointer.sequence == *previous_sequence {
+        return;
+    }
+    *previous_sequence = pointer.sequence;
+    let pressed = pointer.buttons.left || pointer.buttons.right || pointer.buttons.middle;
+    let began = pressed && !*previous_pressed;
+    *previous_pressed = pressed;
+    if !began {
+        return;
+    }
+    for (layout, host, mut revision) in &mut layouts {
+        if !active_overlays
+            .get(layout)
+            .is_ok_and(LayoutOverlayActive::dismisses_background_click)
+        {
+            continue;
+        }
+        let Ok(window) = windows.get(host.0) else {
+            continue;
+        };
+        let scale = window.resolution.scale_factor();
+        if !scale.is_finite() || scale <= 0.0 {
+            continue;
+        }
+        let position = pointer.position_px / scale;
+        if cef_regions.contains(position) {
+            continue;
+        }
+        commands.trigger(
+            vmux_ecs::UiStateWrite::<vmux_layout::state::LayoutUiState>::from_event(
+                layout,
+                &revision.next_effect(),
+            ),
+        );
     }
 }
 
@@ -144,10 +197,12 @@ fn forward_layout_cef_mouse_button(
     windows: Query<&Window>,
     suppress: Res<CefSuppressPointerInput>,
     browsers: NonSend<Browsers>,
-    layout_q: Query<(Entity, &HostWindow), With<LayoutCef>>,
+    mut layout_q: Query<(Entity, &HostWindow, &mut LayoutOverlayDismissRevision), With<LayoutCef>>,
+    active_overlays: Query<&LayoutOverlayActive>,
     pointer_capture_q: Query<(), (With<LayoutCef>, LayoutPointerCapture)>,
     cef_regions: CefPointerRegions,
     mut captured: Local<Option<Entity>>,
+    mut commands: Commands,
 ) {
     if suppress.0 {
         for _ in events.read() {}
@@ -161,9 +216,10 @@ fn forward_layout_cef_mouse_button(
         let Ok(window) = windows.get(event.window) else {
             continue;
         };
-        let Some(layout) = layout_q
-            .iter()
-            .find_map(|(entity, host)| (host.0 == event.window).then_some(entity))
+        let Some((layout, mut dismiss_revision)) =
+            layout_q.iter_mut().find_map(|(entity, host, revision)| {
+                (host.0 == event.window).then_some((entity, revision))
+            })
         else {
             continue;
         };
@@ -178,7 +234,21 @@ fn forward_layout_cef_mouse_button(
         let Some(position) = position else {
             continue;
         };
-        let inside = pointer_capture_q.contains(layout) || cef_regions.contains(position);
+        let in_region = cef_regions.contains(position);
+        if event.state == ButtonState::Pressed
+            && active_overlays
+                .get(layout)
+                .is_ok_and(LayoutOverlayActive::dismisses_background_click)
+            && !in_region
+        {
+            commands.trigger(
+                vmux_ecs::UiStateWrite::<vmux_layout::state::LayoutUiState>::from_event(
+                    layout,
+                    &dismiss_revision.next_effect(),
+                ),
+            );
+        }
+        let inside = pointer_capture_q.contains(layout) || in_region;
         if event.state == ButtonState::Pressed && inside {
             *captured = Some(layout);
         }
@@ -225,13 +295,16 @@ fn track_interaction(
     browsers: Query<&ChildOf, With<Browser>>,
     mut commands: Commands,
 ) {
-    let interacted = mouse_buttons
-        .read()
-        .any(|event| event.state == ButtonState::Pressed)
-        || mouse_wheels.read().next().is_some()
-        || keyboard
-            .read()
-            .any(|event| event.state == ButtonState::Pressed);
+    let mut mouse_pressed = false;
+    for event in mouse_buttons.read() {
+        mouse_pressed |= event.state == ButtonState::Pressed;
+    }
+    let mouse_wheel = mouse_wheels.read().count() > 0;
+    let mut key_pressed = false;
+    for event in keyboard.read() {
+        key_pressed |= event.state == ButtonState::Pressed;
+    }
+    let interacted = mouse_pressed || mouse_wheel || key_pressed;
     if !interacted {
         return;
     }
@@ -240,5 +313,70 @@ fn track_interaction(
         commands
             .entity(stack)
             .insert(RecentBrowserInteraction::now());
+    }
+}
+
+#[cfg(all(test, target_os = "macos"))]
+mod tests {
+    use super::*;
+    use bevy_cef_core::prelude::NativeMouseButtons;
+    use vmux_layout::event::LayoutOverlayKind;
+    use vmux_layout::state::LayoutUiState;
+
+    #[derive(Resource, Default)]
+    struct Dismissals(usize);
+
+    fn record(
+        event: On<vmux_ecs::UiStateWrite<LayoutUiState>>,
+        mut dismissals: ResMut<Dismissals>,
+    ) {
+        if event.update().overlay_dismiss.is_some() {
+            dismissals.0 += 1;
+        }
+    }
+
+    #[test]
+    fn native_background_clicks_leave_popover_items_to_their_dom_handlers() {
+        let mut app = App::new();
+        app.add_plugins((MinimalPlugins, bevy::input::InputPlugin, InputPlugin))
+            .add_message::<CursorMoved>()
+            .init_resource::<Dismissals>()
+            .init_resource::<CefSuppressPointerInput>()
+            .init_non_send::<Browsers>()
+            .add_observer(record);
+        let window = app
+            .world_mut()
+            .spawn((Window::default(), vmux_ecs::Active))
+            .id();
+        let layout = app.world_mut().spawn(LayoutCef::bundle(window)).id();
+        for (kind, expected) in [
+            (LayoutOverlayKind::Popover, 0),
+            (LayoutOverlayKind::Panel, 1),
+        ] {
+            app.world_mut()
+                .entity_mut(layout)
+                .insert(LayoutOverlayActive::new("test", kind));
+            vmux_input::NativePointer::publish(
+                Vec2::new(400.0, 300.0),
+                NativeMouseButtons::default(),
+                true,
+            );
+            app.update();
+            vmux_input::NativePointer::publish(
+                Vec2::new(400.0, 300.0),
+                NativeMouseButtons {
+                    left: true,
+                    ..Default::default()
+                },
+                true,
+            );
+            app.update();
+            assert_eq!(app.world().resource::<Dismissals>().0, expected);
+        }
+        vmux_input::NativePointer::publish(
+            Vec2::new(400.0, 300.0),
+            NativeMouseButtons::default(),
+            true,
+        );
     }
 }

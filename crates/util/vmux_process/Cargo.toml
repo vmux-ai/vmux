@@ -15,12 +15,13 @@ bevy = { workspace = true }
 portable-pty = { workspace = true }
 rkyv = { workspace = true }
 serde = { workspace = true }
-tokio = { workspace = true }
+tokio = { workspace = true, features = ["fs"] }
 vmux_api = { path = "../vmux_api" }
 vmux_ecs = { path = "../vmux_ecs" }
 vmux_profile = { path = "../vmux_profile" }
 vmux_transport = { path = "../vmux_transport" }
 vte = "0.15"
+url = { workspace = true }
 
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"

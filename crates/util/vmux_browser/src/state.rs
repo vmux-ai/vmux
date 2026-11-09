@@ -14,6 +14,7 @@ use vmux_ecs::{
 use vmux_git::worktree::RepoInfo;
 use vmux_git::{GitDiffSource, RepoInfoCache};
 use vmux_history::LastActivatedAt;
+use vmux_layout::hosted_page::StackSurface;
 use vmux_layout::projection::{
     BookmarkProjection, PaneTreeProjection, ProjectProjection, StackProjection,
 };
@@ -21,16 +22,18 @@ use vmux_layout::{Browser, Loading};
 use vmux_layout::{
     Header, LayoutCef, NavigationState, Open, UpdateState,
     event::{
-        AddressParts, HEADER_HEIGHT_PX, LayoutGeometry, PANE_GAP_PX, PaneNode, PaneTreeState,
+        AddressParts, HEADER_HEIGHT_PX, LayoutGeometry, PaneNode, PaneTreeState, SIDE_SHEET_GAP_PX,
         StackNavigationState, StackNode, StackRow, TabBoundary, TabBoundaryState, TabListState,
         TabRow, UpdateCleared, UpdateProgress, UpdateReady,
     },
     pane::{Pane, PaneSplit, SideSheetCardCollapsed, Zoomed},
+    presentation::Retiring,
     side_sheet::{SideSheet, SideSheetPosition, SideSheetSections, SideSheetSectionsExpanded},
     space::{CurrentSpace, Space, SpaceId},
     stack::{ActiveTabParam, FocusedStack, LayoutFocus, Stack},
     state::LayoutUiState,
     tab::Tab,
+    toggle::LayoutHidden,
     window::{FocusedWindow, VmuxWindow, WindowHierarchy},
 };
 
@@ -49,16 +52,38 @@ impl PagePresentation {
             _ => metadata.title.clone(),
         }
     }
+
+    fn metadata<'a>(
+        pending: Option<&'a PageMetadata>,
+        presented: Option<&'a PageMetadata>,
+    ) -> Option<&'a PageMetadata> {
+        pending
+            .filter(|metadata| !metadata.url.is_empty())
+            .or(presented)
+    }
+
+    fn identity<'a>(
+        metadata: &PageMetadata,
+        presented: Option<&PageMetadata>,
+        identity: Option<&'a PageIdentity>,
+    ) -> Option<&'a PageIdentity> {
+        presented
+            .is_some_and(|presented| presented.url == metadata.url)
+            .then_some(identity)
+            .flatten()
+    }
 }
 
 #[derive(bevy::ecs::system::SystemParam)]
 struct TabProjectionData<'w, 's> {
-    tabs: Query<'w, 's, (Entity, &'static Tab, &'static LastActivatedAt)>,
+    tabs: Query<'w, 's, (Entity, &'static Tab, &'static LastActivatedAt), Without<Retiring>>,
     hierarchy: vmux_layout::tab::TabHierarchy<'w, 's>,
     active_tab: ActiveTabParam<'w, 's>,
     focus: LayoutFocus<'w, 's>,
-    stack_timestamps: Query<'w, 's, (Entity, &'static LastActivatedAt), With<Stack>>,
-    stack_children: Query<'w, 's, &'static Children>,
+    stack_timestamps:
+        Query<'w, 's, (Entity, &'static LastActivatedAt), (With<Stack>, Without<Retiring>)>,
+    surfaces: StackSurface<'w, 's>,
+    stack_metadata: Query<'w, 's, &'static PageMetadata, With<Stack>>,
     browser_metadata:
         Query<'w, 's, (&'static PageMetadata, Option<&'static PageIdentity>), With<Browser>>,
     done_agents: Query<'w, 's, Entity, With<AgentDoneUnseen>>,
@@ -75,11 +100,20 @@ impl TabProjectionData<'_, '_> {
             .map(|(entity, _)| entity)
     }
 
-    fn page(&self, stack: Entity) -> Option<(&PageMetadata, Option<&PageIdentity>)> {
-        let children = self.stack_children.get(stack).ok()?;
-        children
-            .iter()
-            .find_map(|child| self.browser_metadata.get(child).ok())
+    fn page(&self, stack: Entity) -> Option<(PageMetadata, Option<&PageIdentity>)> {
+        let presented = self
+            .surfaces
+            .current(stack)
+            .and_then(|surface| self.browser_metadata.get(surface).ok());
+        let pending = self.stack_metadata.get(stack).ok();
+        let metadata =
+            PagePresentation::metadata(pending, presented.map(|(metadata, _)| metadata))?;
+        let identity = PagePresentation::identity(
+            metadata,
+            presented.map(|(presented, _)| presented),
+            presented.and_then(|(_, identity)| identity),
+        );
+        Some((metadata.clone(), identity))
     }
 
     fn rows(&self) -> Vec<TabRow> {
@@ -99,18 +133,15 @@ impl TabProjectionData<'_, '_> {
                 continue;
             };
             let page = self.active_stack(entity).and_then(|stack| self.page(stack));
-            let title = page
-                .map(|(metadata, identity)| PagePresentation::title(metadata, identity))
-                .unwrap_or_default();
-            let (url, icon, bg_color) = page
-                .map(|(metadata, _)| {
-                    (
-                        metadata.url.clone(),
-                        metadata.icon.clone(),
-                        metadata.bg_color.clone(),
-                    )
-                })
-                .unwrap_or_default();
+            let (title, url, icon, bg_color) = match page {
+                Some((metadata, identity)) => (
+                    PagePresentation::title(&metadata, identity),
+                    metadata.url,
+                    metadata.icon,
+                    metadata.bg_color,
+                ),
+                None => Default::default(),
+            };
             rows.push(TabRow {
                 id: entity.to_bits().to_string(),
                 name: if tab.name.is_empty() {
@@ -139,15 +170,15 @@ struct FocusedLayout<'w, 's> {
 
 impl FocusedLayout<'_, '_> {
     fn get(&self) -> Option<(Entity, bool)> {
-        let entity = self
-            .focused
-            .entity()
-            .and_then(|window| {
-                self.layouts.iter().find_map(|(entity, _)| {
-                    (self.hierarchy.get(entity) == Some(window)).then_some(entity)
-                })
+        let entity = if self.hierarchy.is_empty() {
+            self.layouts.iter().next().map(|(entity, _)| entity)
+        } else if let Some(window) = self.focused.entity() {
+            self.layouts.iter().find_map(|(entity, _)| {
+                (self.hierarchy.get(entity) == Some(window)).then_some(entity)
             })
-            .or_else(|| self.layouts.iter().next().map(|(entity, _)| entity))?;
+        } else {
+            None
+        }?;
         let (_, ready) = self.layouts.get(entity).ok()?;
         Some((entity, ready.is_changed()))
     }
@@ -159,15 +190,12 @@ impl Plugin for StatePlugin {
     fn build(&self, app: &mut App) {
         app.add_systems(Startup, spawn_revision)
             .add_systems(
-                Update,
-                mark_page_dirty
-                    .after(vmux_layout::LayoutCefStateSet::Apply)
-                    .after(vmux_layout::stack::ComputeFocusSet),
+                PostUpdate,
+                mark_page_dirty.after(vmux_layout::presentation::PresentationFlushSet),
             )
             .add_systems(
-                Update,
+                PostUpdate,
                 (
-                    push_layout_emit,
                     push_stacks_host_emit,
                     push_pane_tree_emit,
                     push_tabs_host_emit,
@@ -175,19 +203,40 @@ impl Plugin for StatePlugin {
                     push_update_notice_emit,
                     push_projects_host_emit,
                 )
+                    .in_set(vmux_layout::projection::LayoutUiProjectionSet::Source)
                     .after(mark_page_dirty),
+            )
+            .add_systems(
+                PostUpdate,
+                (mark_computed_layout_dirty, push_layout_emit)
+                    .chain()
+                    .before(vmux_ecs::UiStateFlushSet)
+                    .after(LayoutSystems::Layout),
             );
     }
 }
 
 fn spawn_revision(mut commands: Commands) {
-    commands.spawn((Name::new("Page state revision"), StateRevision::default()));
+    commands.spawn((
+        Name::new("Page state revision"),
+        StateRevision::default(),
+        LayoutGeometryRevision::default(),
+    ));
 }
 
 #[derive(Component, Default)]
 struct StateRevision(u64);
 
+#[derive(Component, Default)]
+struct LayoutGeometryRevision(u64);
+
 impl StateRevision {
+    fn advance(&mut self) {
+        self.0 = self.0.wrapping_add(1);
+    }
+}
+
+impl LayoutGeometryRevision {
     fn advance(&mut self) {
         self.0 = self.0.wrapping_add(1);
     }
@@ -302,20 +351,49 @@ struct ProjectionTarget {
     page_ready_changed: bool,
 }
 
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct ProjectProjectionSelection {
+    tab: Entity,
+    revision: u64,
+}
+
+#[derive(Default)]
+struct ProjectProjectionCursor(EntityHashMap<Option<ProjectProjectionSelection>>);
+
+impl ProjectProjectionCursor {
+    fn needs_emit(&self, entity: Entity, selection: &Option<ProjectProjectionSelection>) -> bool {
+        self.0.get(&entity) != Some(selection)
+    }
+
+    fn record(&mut self, entity: Entity, selection: Option<ProjectProjectionSelection>) {
+        self.0.insert(entity, selection);
+    }
+}
+
 impl LayoutProjection<'_, '_> {
     fn target(&self) -> Option<ProjectionTarget> {
+        self.target_for_revision(self.revision.0, false)
+    }
+
+    fn target_for(&self, force: bool) -> Option<ProjectionTarget> {
+        self.target_for_revision(self.revision.0, force)
+    }
+
+    fn target_for_revision(&self, revision: u64, force: bool) -> Option<ProjectionTarget> {
         let (entity, page_ready_changed) = self.layout.get()?;
         if !self.browsers.can_emit_to(&entity) {
             return None;
         }
         let target = ProjectionTarget {
             entity,
-            revision: self.revision.0,
+            revision,
             page_ready_changed,
         };
-        self.cache
-            .needs_rebuild(entity, target.revision, page_ready_changed)
-            .then_some(target)
+        (force
+            || self
+                .cache
+                .needs_rebuild(entity, target.revision, page_ready_changed))
+        .then_some(target)
     }
 
     fn should_emit(&mut self, target: ProjectionTarget, body: String) -> bool {
@@ -329,6 +407,7 @@ impl LayoutProjection<'_, '_> {
 }
 
 type PageProjectionChanged = Or<(
+    Changed<vmux_layout::page_slot::Current>,
     Changed<PageMetadata>,
     Changed<PageIdentity>,
     Changed<NavigationState>,
@@ -343,15 +422,72 @@ type LayoutProjectionChanged = Or<(
     Changed<Children>,
     Changed<LastActivatedAt>,
     Changed<Open>,
-    Changed<Node>,
     Changed<SideSheetPosition>,
     Changed<SideSheetCardCollapsed>,
     Changed<Tab>,
-    Changed<Window>,
     Changed<HostWindow>,
     Changed<SpaceId>,
     Changed<SideSheetSectionsExpanded>,
 )>;
+
+type LayoutGeometryChanged = Or<(
+    Changed<Node>,
+    Changed<Open>,
+    Changed<SideSheetPosition>,
+    Changed<HostWindow>,
+    Changed<LayoutHidden>,
+)>;
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct WindowGeometryState {
+    width: u32,
+    height: u32,
+    scale: u32,
+}
+
+impl WindowGeometryState {
+    fn of(window: &Window) -> Self {
+        Self {
+            width: window.resolution.physical_width(),
+            height: window.resolution.physical_height(),
+            scale: window.resolution.scale_factor().to_bits(),
+        }
+    }
+}
+
+#[derive(Default)]
+struct WindowGeometryCache(EntityHashMap<WindowGeometryState>);
+
+impl WindowGeometryCache {
+    fn update<'a>(
+        &mut self,
+        windows: impl Iterator<Item = (Entity, &'a Window)>,
+        removed: impl Iterator<Item = Entity>,
+    ) -> bool {
+        let mut changed = false;
+        for (entity, window) in windows {
+            let geometry = WindowGeometryState::of(window);
+            changed |= self.0.insert(entity, geometry) != Some(geometry);
+        }
+        for entity in removed {
+            changed |= self.0.remove(&entity).is_some();
+        }
+        changed
+    }
+}
+
+#[derive(Default)]
+struct FocusedWindowCursor(Option<Entity>);
+
+impl FocusedWindowCursor {
+    fn update(&mut self, current: Option<Entity>) -> bool {
+        if self.0 == current {
+            return false;
+        }
+        self.0 = current;
+        true
+    }
+}
 
 type LayoutMarkerChanged = Or<(
     Changed<Browser>,
@@ -367,6 +503,8 @@ type LayoutMarkerChanged = Or<(
     Changed<Space>,
     Changed<CurrentSpace>,
     Changed<Active>,
+    Changed<LayoutHidden>,
+    Changed<Retiring>,
 )>;
 
 type BookmarkProjectionChanged = Or<(
@@ -389,6 +527,17 @@ struct StateChanges<'w, 's> {
     projects: Query<'w, 's, (), Changed<ExpandedProjectDirs>>,
 }
 
+#[derive(bevy::ecs::system::SystemParam)]
+struct LayoutGeometryChanges<'w, 's> {
+    changed: Query<'w, 's, (), LayoutGeometryChanged>,
+}
+
+impl LayoutGeometryChanges<'_, '_> {
+    fn any(&self) -> bool {
+        !self.changed.is_empty()
+    }
+}
+
 impl StateChanges<'_, '_> {
     fn any(&self) -> bool {
         !self.pages.is_empty()
@@ -401,6 +550,7 @@ impl StateChanges<'_, '_> {
 
 #[derive(bevy::ecs::system::SystemParam)]
 struct PageStateRemovals<'w, 's> {
+    current: RemovedComponents<'w, 's, vmux_layout::page_slot::Current>,
     browser: RemovedComponents<'w, 's, Browser>,
     child_of: RemovedComponents<'w, 's, ChildOf>,
     children: RemovedComponents<'w, 's, Children>,
@@ -442,83 +592,135 @@ struct PageStateRemovals<'w, 's> {
     collapsed: RemovedComponents<'w, 's, Collapsed>,
     smart_folder: RemovedComponents<'w, 's, SmartBookmarkFolder>,
     expanded_projects: RemovedComponents<'w, 's, ExpandedProjectDirs>,
+    layout_hidden: RemovedComponents<'w, 's, LayoutHidden>,
+    retiring: RemovedComponents<'w, 's, Retiring>,
 }
 
 impl PageStateRemovals<'_, '_> {
-    fn any(&mut self) -> bool {
-        let mut any = false;
-        any |= self.browser.read().count() > 0;
-        any |= self.child_of.read().count() > 0;
-        any |= self.children.read().count() > 0;
-        any |= self.page_metadata.read().count() > 0;
-        any |= self.page_identity.read().count() > 0;
-        any |= self.page_ready.read().count() > 0;
-        any |= self.navigation.read().count() > 0;
-        any |= self.history.read().count() > 0;
-        any |= self.loading.read().count() > 0;
-        any |= self.git_diff.read().count() > 0;
-        any |= self.done.read().count() > 0;
-        any |= self.active.read().count() > 0;
-        any |= self.header.read().count() > 0;
-        any |= self.open.read().count() > 0;
-        any |= self.side_sheet.read().count() > 0;
-        any |= self.side_sheet_position.read().count() > 0;
-        any |= self.collapsed_pane.read().count() > 0;
-        any |= self.vmux_window.read().count() > 0;
-        any |= self.window.read().count() > 0;
-        any |= self.node.read().count() > 0;
-        any |= self.layout_cef.read().count() > 0;
-        any |= self.host_window.read().count() > 0;
-        any |= self.tab.read().count() > 0;
-        any |= self.stack.read().count() > 0;
-        any |= self.last_activated.read().count() > 0;
-        any |= self.pane.read().count() > 0;
-        any |= self.pane_split.read().count() > 0;
-        any |= self.zoomed.read().count() > 0;
-        any |= self.space.read().count() > 0;
-        any |= self.space_id.read().count() > 0;
-        any |= self.current_space.read().count() > 0;
-        any |= self.sections_expanded.read().count() > 0;
-        any |= self.uuid.read().count() > 0;
-        any |= self.bookmark_order.read().count() > 0;
-        any |= self.bookmark.read().count() > 0;
-        any |= self.pin.read().count() > 0;
-        any |= self.folder.read().count() > 0;
-        any |= self.name.read().count() > 0;
-        any |= self.collapsed.read().count() > 0;
-        any |= self.smart_folder.read().count() > 0;
-        any |= self.expanded_projects.read().count() > 0;
-        any
+    fn changes(&mut self) -> PageStateRemovalChanges {
+        let header = self.header.read().count() > 0;
+        let open = self.open.read().count() > 0;
+        let side_sheet = self.side_sheet.read().count() > 0;
+        let side_sheet_position = self.side_sheet_position.read().count() > 0;
+        let vmux_window = self.vmux_window.read().count() > 0;
+        let removed_windows = self.window.read().collect::<Vec<_>>();
+        let window = !removed_windows.is_empty();
+        let node = self.node.read().count() > 0;
+        let host_window = self.host_window.read().count() > 0;
+        let layout_hidden = self.layout_hidden.read().count() > 0;
+        let geometry = header
+            || open
+            || side_sheet
+            || side_sheet_position
+            || vmux_window
+            || window
+            || node
+            || host_window
+            || layout_hidden;
+        let mut state = geometry;
+        state |= self.current.read().count() > 0;
+        state |= self.browser.read().count() > 0;
+        state |= self.child_of.read().count() > 0;
+        state |= self.children.read().count() > 0;
+        state |= self.page_metadata.read().count() > 0;
+        state |= self.page_identity.read().count() > 0;
+        state |= self.page_ready.read().count() > 0;
+        state |= self.navigation.read().count() > 0;
+        state |= self.history.read().count() > 0;
+        state |= self.loading.read().count() > 0;
+        state |= self.git_diff.read().count() > 0;
+        state |= self.done.read().count() > 0;
+        state |= self.active.read().count() > 0;
+        state |= self.collapsed_pane.read().count() > 0;
+        state |= self.layout_cef.read().count() > 0;
+        state |= self.tab.read().count() > 0;
+        state |= self.stack.read().count() > 0;
+        state |= self.last_activated.read().count() > 0;
+        state |= self.pane.read().count() > 0;
+        state |= self.pane_split.read().count() > 0;
+        state |= self.zoomed.read().count() > 0;
+        state |= self.space.read().count() > 0;
+        state |= self.space_id.read().count() > 0;
+        state |= self.current_space.read().count() > 0;
+        state |= self.sections_expanded.read().count() > 0;
+        state |= self.uuid.read().count() > 0;
+        state |= self.bookmark_order.read().count() > 0;
+        state |= self.bookmark.read().count() > 0;
+        state |= self.pin.read().count() > 0;
+        state |= self.folder.read().count() > 0;
+        state |= self.name.read().count() > 0;
+        state |= self.collapsed.read().count() > 0;
+        state |= self.smart_folder.read().count() > 0;
+        state |= self.expanded_projects.read().count() > 0;
+        state |= self.retiring.read().count() > 0;
+        PageStateRemovalChanges {
+            state,
+            geometry,
+            removed_windows,
+        }
     }
+}
+
+struct PageStateRemovalChanges {
+    state: bool,
+    geometry: bool,
+    removed_windows: Vec<Entity>,
 }
 
 fn mark_page_dirty(
     changes: StateChanges,
+    geometry: LayoutGeometryChanges,
     mut removals: PageStateRemovals,
     focused_window: FocusedWindow,
     focused_stack: FocusedStack,
     settings: Res<AppSettings>,
     repo_info: Option<Single<Ref<RepoInfoCache>>>,
+    windows: Query<(Entity, &Window), Changed<Window>>,
+    mut window_geometry: Local<WindowGeometryCache>,
+    mut focused_window_cursor: Local<FocusedWindowCursor>,
     mut revision: Single<&mut StateRevision>,
+    mut geometry_revision: Single<&mut LayoutGeometryRevision>,
 ) {
-    let resource_changed = focused_window.is_changed()
+    let removals = removals.changes();
+    let focused_window_changed = focused_window_cursor.update(focused_window.entity());
+    let window_geometry_changed =
+        window_geometry.update(windows.iter(), removals.removed_windows.iter().copied());
+    let resource_changed = focused_window_changed
         || focused_stack.is_changed()
         || settings.is_changed()
         || repo_info.as_ref().is_some_and(|value| value.is_changed());
-    if resource_changed || changes.any() || removals.any() {
+    if resource_changed || changes.any() || removals.state {
         revision.advance();
+    }
+    if focused_window_changed
+        || settings.is_changed()
+        || window_geometry_changed
+        || geometry.any()
+        || removals.geometry
+    {
+        geometry_revision.advance();
+    }
+}
+
+fn mark_computed_layout_dirty(
+    headers: Query<(), (With<Header>, Changed<ComputedNode>)>,
+    mut geometry_revision: Single<&mut LayoutGeometryRevision>,
+) {
+    if !headers.is_empty() {
+        geometry_revision.advance();
     }
 }
 
 fn push_layout_emit(
     mut projection: LayoutProjection,
+    geometry_revision: Single<&LayoutGeometryRevision>,
     header_q: Query<(Entity, Has<Open>, Option<&ComputedNode>), With<Header>>,
     side_sheet_q: Query<(Entity, &SideSheetPosition, Has<Open>, &Node), With<SideSheet>>,
     window_q: Query<(&HostWindow, &Node), With<VmuxWindow>>,
-    windows: Query<&Window>,
+    windows: Query<(&Window, Has<LayoutHidden>)>,
     settings: Res<AppSettings>,
 ) {
-    let Some(target) = projection.target() else {
+    let Some(target) = projection.target_for_revision(geometry_revision.0, false) else {
         return;
     };
     let cef_e = target.entity;
@@ -533,11 +735,11 @@ fn push_layout_emit(
     let header_open = header_q.iter().any(|(entity, is_open, _)| {
         is_open && projection.layout.hierarchy.get(entity) == Some(host_window)
     });
-    let window_width_px = windows
+    let (window_width_px, zen) = windows
         .get(host_window)
         .ok()
-        .map(|window| window.resolution.physical_width() as f32)
-        .unwrap_or(0.0);
+        .map(|(window, zen)| (window.resolution.physical_width() as f32, zen))
+        .unwrap_or((0.0, false));
     let header_offsets = header_q.iter().find_map(|(entity, _, computed)| {
         if projection.layout.hierarchy.get(entity) == Some(host_window) {
             LayoutFixedOffsets::from_node(computed?, window_width_px)
@@ -563,13 +765,18 @@ fn push_layout_emit(
     }
 
     let payload = LayoutGeometry {
+        zen,
         header_open,
         side_sheet_open,
         header_height: header_offsets
             .map(|offsets| offsets.height)
             .unwrap_or(HEADER_HEIGHT_PX),
         side_sheet_width,
-        pane_gap: PANE_GAP_PX,
+        side_sheet_content_width: vmux_layout::event::SideSheetResizeEvent::live(
+            settings.layout.side_sheet.width,
+        )
+        .clamped(),
+        pane_gap: SIDE_SHEET_GAP_PX,
         radius: settings.layout.radius,
         header_left: header_offsets.map(|offsets| offsets.left),
         header_top: header_offsets.map(|offsets| offsets.top),
@@ -579,6 +786,7 @@ fn push_layout_emit(
         window_pad_bottom: window_padding.bottom,
         window_pad_left: window_padding.left,
     };
+
     let body = ron::ser::to_string(&payload).unwrap_or_default();
     if !projection.should_emit(target, body) {
         return;
@@ -612,7 +820,7 @@ impl AddressRoots<'_> {
             true => path,
             false => path.parent()?,
         };
-        self.repos.as_mut()?.lookup(dir)
+        self.repos.as_mut()?.snapshot(dir)
     }
 }
 
@@ -620,6 +828,7 @@ fn push_stacks_host_emit(
     mut projection: LayoutProjection,
     browser_q: Query<
         (
+            Entity,
             &PageMetadata,
             &ChildOf,
             Option<&NavigationState>,
@@ -628,9 +837,11 @@ fn push_stacks_host_emit(
         ),
         With<Browser>,
     >,
-    stack_q: Query<(), With<Stack>>,
+    stacks: Query<(&PageMetadata, Option<&HostHistory>), (With<Stack>, Without<Retiring>)>,
     zoomed_q: Query<(), With<Zoomed>>,
     focus: FocusedStack,
+    surfaces: StackSurface,
+    retiring: Query<(), With<Retiring>>,
     child_of_q: Query<&ChildOf>,
     mut repo_info: Option<Single<&mut RepoInfoCache>>,
 ) {
@@ -639,12 +850,7 @@ fn push_stacks_host_emit(
     };
     let cef_e = target.entity;
     let active_pane = focus.pane;
-    let active_stack_opt = focus.stack;
-    if let Some(active_stack_entity) = active_stack_opt
-        && !stack_q.contains(active_stack_entity)
-    {
-        return;
-    }
+    let active_stack_opt = focus.stack.filter(|stack| stacks.contains(*stack));
     let mut rows: Vec<StackRow> = Vec::new();
     let mut can_go_back = false;
     let mut can_go_forward = false;
@@ -657,15 +863,28 @@ fn push_stacks_host_emit(
             .unwrap_or_default(),
     };
     if let Some(active_stack_entity) = active_stack_opt {
-        for (meta, child_of, nav_state, host_history, osc) in &browser_q {
+        let mut active_found = false;
+        for (browser, meta, child_of, nav_state, host_history, osc) in &browser_q {
             let stack_entity = child_of.get();
+            if retiring.contains(stack_entity) {
+                continue;
+            }
+            if !surfaces.is_current(stack_entity, browser) {
+                continue;
+            }
             let stack_pane = child_of_q.get(stack_entity).ok().map(|co| co.get());
             if stack_pane != active_pane {
                 continue;
             }
             let is_active = stack_entity == active_stack_entity;
             if is_active {
-                if let Some(history) = host_history {
+                active_found = true;
+                if let Ok((metadata, Some(history))) = stacks.get(stack_entity)
+                    && VmuxRoute::parse(&metadata.url).is_some()
+                {
+                    can_go_back = history.can_go_back();
+                    can_go_forward = history.can_go_forward();
+                } else if let Some(history) = host_history {
                     can_go_back = history.can_go_back();
                     can_go_forward = history.can_go_forward();
                 } else if let Some(ns) = nav_state {
@@ -673,19 +892,40 @@ fn push_stacks_host_emit(
                     can_go_forward = ns.can_go_forward;
                 }
             }
-            let title = PagePresentation::title(meta, osc);
+            let pending = is_active
+                .then(|| stacks.get(stack_entity).ok().map(|(metadata, _)| metadata))
+                .flatten();
+            let projected = PagePresentation::metadata(pending, Some(meta)).unwrap_or(meta);
+            let identity = PagePresentation::identity(projected, Some(meta), osc);
+            let title = PagePresentation::title(projected, identity);
             rows.push(StackRow {
-                address: roots.resolve(&meta.url, &title),
+                address: roots.resolve(&projected.url, &title),
                 title,
-                url: meta.url.clone(),
-                icon: meta.icon.clone(),
+                url: projected.url.clone(),
+                icon: projected.icon.clone(),
                 is_active,
-                bg_color: meta.bg_color.clone(),
+                bg_color: projected.bg_color.clone(),
             });
         }
-    }
-    if active_stack_opt.is_some() && rows.is_empty() {
-        return;
+        if !active_found
+            && let Ok((metadata, history)) = stacks.get(active_stack_entity)
+            && !metadata.url.is_empty()
+        {
+            if let Some(history) = history
+                && VmuxRoute::parse(&metadata.url).is_some()
+            {
+                can_go_back = history.can_go_back();
+                can_go_forward = history.can_go_forward();
+            }
+            rows.push(StackRow {
+                address: roots.resolve(&metadata.url, &metadata.title),
+                title: metadata.title.clone(),
+                url: metadata.url.clone(),
+                icon: metadata.icon.clone(),
+                is_active: true,
+                bg_color: metadata.bg_color.clone(),
+            });
+        }
     }
     let is_zoomed = focus.tab.map(|t| zoomed_q.get(t).is_ok()).unwrap_or(false);
     let payload = StackNavigationState {
@@ -694,14 +934,14 @@ fn push_stacks_host_emit(
         can_go_forward,
         is_zoomed,
     };
-    projection
-        .commands
-        .entity(cef_e)
-        .insert(StackProjection(payload.clone()));
     let ron_body = ron::ser::to_string(&payload).unwrap_or_default();
     if !projection.should_emit(target, ron_body) {
         return;
     }
+    projection
+        .commands
+        .entity(cef_e)
+        .insert(StackProjection(payload.clone()));
     projection
         .commands
         .trigger(UiStateWrite::<LayoutUiState>::from_event(cef_e, &payload));
@@ -714,8 +954,10 @@ fn push_pane_tree_emit(
     tab_q: Query<(), With<Tab>>,
     sections_of: SideSheetSections,
     collapsed_panes: Query<(), With<SideSheetCardCollapsed>>,
-    stack_q: Query<Entity, With<Stack>>,
+    stack_q: Query<Entity, (With<Stack>, Without<Retiring>)>,
+    stack_metadata: Query<&PageMetadata, (With<Stack>, Without<Retiring>)>,
     stack_children: Query<&Children>,
+    surfaces: StackSurface,
     browser_meta: Query<
         (
             &PageMetadata,
@@ -754,52 +996,67 @@ fn push_pane_tree_emit(
                     continue;
                 }
                 let stack_is_active = active_stack == Some(child);
+                let pending_metadata = stack_metadata
+                    .get(child)
+                    .ok()
+                    .filter(|metadata| !metadata.url.is_empty());
                 let mut found_browser = false;
                 if let Ok(stack_kids) = stack_children.get(child) {
                     for browser_e in stack_kids.iter() {
+                        if !surfaces.is_current(child, browser_e) {
+                            continue;
+                        }
                         if let Ok((meta, loading, osc, diff, is_agent)) =
                             browser_meta.get(browser_e)
                         {
-                            let is_new_stack = false;
+                            let projected =
+                                PagePresentation::metadata(pending_metadata, Some(meta))
+                                    .unwrap_or(meta);
+                            let same_page = projected.url == meta.url;
                             stacks.push(StackNode {
                                 id: child.to_bits(),
-                                agent_id: is_agent.then(|| browser_e.to_bits().to_string()),
-                                title: if is_new_stack {
-                                    "New Stack".to_string()
-                                } else {
-                                    PagePresentation::title(meta, osc)
-                                },
-                                url: if is_new_stack {
-                                    String::new()
-                                } else {
-                                    meta.url.clone()
-                                },
-                                icon: if is_new_stack {
-                                    PageIcon::None
-                                } else {
-                                    meta.icon.clone()
-                                },
+                                agent_id: (is_agent && same_page)
+                                    .then(|| browser_e.to_bits().to_string()),
+                                title: PagePresentation::title(
+                                    projected,
+                                    same_page.then_some(osc).flatten(),
+                                ),
+                                url: projected.url.clone(),
+                                icon: projected.icon.clone(),
                                 is_active: stack_is_active,
-                                is_loading: loading,
-                                is_dirty: diff.is_some_and(|source| source.dirty),
-                                bg_color: meta.bg_color.clone(),
+                                is_loading: loading || !same_page,
+                                is_dirty: same_page && diff.is_some_and(|source| source.dirty),
+                                bg_color: projected.bg_color.clone(),
                             });
                             found_browser = true;
                         }
                     }
                 }
                 if !found_browser {
-                    stacks.push(StackNode {
-                        id: child.to_bits(),
-                        agent_id: None,
-                        title: "New Stack".to_string(),
-                        url: String::new(),
-                        icon: PageIcon::None,
-                        is_active: stack_is_active,
-                        is_loading: false,
-                        is_dirty: false,
-                        bg_color: None,
-                    });
+                    match pending_metadata {
+                        Some(metadata) => stacks.push(StackNode {
+                            id: child.to_bits(),
+                            agent_id: None,
+                            title: metadata.title.clone(),
+                            url: metadata.url.clone(),
+                            icon: metadata.icon.clone(),
+                            is_active: stack_is_active,
+                            is_loading: stack_is_active,
+                            is_dirty: false,
+                            bg_color: metadata.bg_color.clone(),
+                        }),
+                        None => stacks.push(StackNode {
+                            id: child.to_bits(),
+                            agent_id: None,
+                            title: "New Stack".to_string(),
+                            url: String::new(),
+                            icon: PageIcon::None,
+                            is_active: stack_is_active,
+                            is_loading: false,
+                            is_dirty: false,
+                            bg_color: None,
+                        }),
+                    }
                 }
             }
         }
@@ -812,68 +1069,102 @@ fn push_pane_tree_emit(
         });
     }
     let payload = PaneTreeState { panes };
-    projection
-        .commands
-        .entity(cef_e)
-        .insert(PaneTreeProjection(payload.clone()));
     let ron_body = ron::ser::to_string(&payload).unwrap_or_default();
     if !projection.should_emit(target, ron_body) {
         return;
     }
     projection
         .commands
-        .trigger(UiStateWrite::<LayoutUiState>::from_event(cef_e, &payload));
-}
+        .entity(cef_e)
+        .insert(PaneTreeProjection(payload.clone()));
 
-fn abbreviate_project_path(path: &std::path::Path) -> String {
-    let path = path.to_string_lossy();
-    let Some(home) = std::env::var_os("HOME") else {
-        return path.into_owned();
-    };
-    let home = home.to_string_lossy();
-    if home.is_empty() {
-        return path.into_owned();
-    }
-    let Some(rest) = path.strip_prefix(home.as_ref()) else {
-        return path.into_owned();
-    };
-    format!("~{rest}")
+    projection
+        .commands
+        .trigger(UiStateWrite::<LayoutUiState>::from_event(cef_e, &payload));
 }
 
 fn push_projects_host_emit(
     mut projection: LayoutProjection,
+    focus: FocusedStack,
     space_projects: SpaceProjects,
+    active_projects: Res<vmux_space::ActiveProjectRows>,
+    pending_selections: Query<&vmux_layout::page_context::PendingWorkspaceSelection>,
+    worktrees: Query<&vmux_layout::tab::TabWorktree>,
     mut repo_info: Option<Single<&mut RepoInfoCache>>,
+    mut cursor: Local<ProjectProjectionCursor>,
 ) {
-    let Some(target) = projection.target() else {
+    let selection = focus.tab.and_then(|tab| {
+        let pending = pending_selections.get(tab).ok()?;
+        Some(ProjectProjectionSelection {
+            tab,
+            revision: pending.revision(),
+        })
+    });
+    let Some((layout, _)) = projection.layout.get() else {
+        return;
+    };
+    let selection_changed = cursor.needs_emit(layout, &selection);
+    let Some(target) = projection.target_for(selection_changed) else {
         return;
     };
     let cef_e = target.entity;
-    let mut projects = space_projects.active_rows();
+    let source = space_projects.active_rows();
+    let mut projects = active_projects.layout_rows(space_projects.active_space_id(), &source);
     for row in &mut projects {
-        row.display_path = abbreviate_project_path(std::path::Path::new(&row.path));
+        let display_path = match row.display_path.is_empty() {
+            true => &row.path,
+            false => &row.display_path,
+        };
+        row.display_path = vmux_path::DisplayPath::project(display_path);
     }
     let mut boundary = projects
         .iter()
         .find(|project| project.depth == 0 && project.is_active)
         .map(|project| TabBoundary {
             effective_dir: project.path.clone(),
+            project_dir: project.path.clone(),
             source: "project".to_string(),
             branch: project.branch.clone(),
             ..Default::default()
         });
+    let mut branches = Vec::new();
     if let Some(cache) = repo_info.as_mut() {
         let cache = cache.bypass_change_detection();
+        cache.release(cef_e);
         for row in &mut projects {
             if row.missing || row.kind != vmux_api::space::ProjectRowKind::Project {
                 continue;
             }
-            if let Some(info) = cache.lookup(std::path::Path::new(&row.path)) {
+            let path = std::path::Path::new(&row.path);
+            let info = row
+                .is_active
+                .then(|| cache.observe_active(cef_e, path))
+                .flatten();
+            if let Some(info) = info {
                 row.branch = info.branch.clone();
                 if row.is_active {
                     let repository = info.project_name();
+                    let path = std::path::Path::new(&row.path);
+                    let Ok(relative) = path.strip_prefix(&info.repo_root) else {
+                        continue;
+                    };
+                    let project_dir = info.project_root().join(relative);
+                    branches.reserve(info.branches.len());
+                    for holder in info.branches.iter() {
+                        let checkout = holder
+                            .checkout
+                            .as_ref()
+                            .map(|checkout| checkout.join(relative).to_string_lossy().into_owned())
+                            .unwrap_or_default();
+                        branches.push(vmux_layout::event::WorkspaceBranch {
+                            branch: holder.branch.clone(),
+                            checkout,
+                            label: holder.checkout_label(),
+                        });
+                    }
                     boundary = Some(TabBoundary {
                         effective_dir: row.path.clone(),
+                        project_dir: project_dir.to_string_lossy().into_owned(),
                         source: "project".to_string(),
                         repository,
                         is_git_repo: true,
@@ -891,15 +1182,44 @@ fn push_projects_host_emit(
             }
         }
     }
-    let payload = TabBoundaryState { boundary, projects };
+    if let Some(tab) = focus.tab
+        && let Ok(worktree) = worktrees.get(tab)
+    {
+        if let Some(project) = projects.iter_mut().find(|project| project.is_active) {
+            project.branch.clone_from(&worktree.branch);
+        }
+        if let Some(boundary) = boundary.as_mut() {
+            boundary.branch.clone_from(&worktree.branch);
+        }
+    }
+    if let Some(tab) = focus.tab
+        && let Ok(pending) = pending_selections.get(tab)
+        && !pending.branch().is_empty()
+        && boundary
+            .as_ref()
+            .is_some_and(|boundary| pending.matches_project_dir(&boundary.project_dir))
+    {
+        if let Some(project) = projects.iter_mut().find(|project| project.is_active) {
+            project.branch = pending.branch().to_string();
+        }
+        if let Some(boundary) = boundary.as_mut() {
+            boundary.branch = pending.branch().to_string();
+        }
+    }
+    let payload = TabBoundaryState {
+        boundary,
+        projects,
+        branches,
+    };
+    let ron_body = ron::ser::to_string(&payload).unwrap_or_default();
+    cursor.record(target.entity, selection);
+    if !projection.should_emit(target, ron_body) {
+        return;
+    }
     projection
         .commands
         .entity(cef_e)
         .insert(ProjectProjection(payload.clone()));
-    let ron_body = ron::ser::to_string(&payload).unwrap_or_default();
-    if !projection.should_emit(target, ron_body) {
-        return;
-    }
     projection
         .commands
         .trigger(UiStateWrite::<LayoutUiState>::from_event(cef_e, &payload));
@@ -989,14 +1309,14 @@ fn push_bookmarks_host_emit(
         roots,
         folders,
     };
-    projection
-        .commands
-        .entity(cef_e)
-        .insert(BookmarkProjection(payload.clone()));
     let body = ron::ser::to_string(&payload).unwrap_or_default();
     if !projection.should_emit(target, body) {
         return;
     }
+    projection
+        .commands
+        .entity(cef_e)
+        .insert(BookmarkProjection(payload.clone()));
     projection
         .commands
         .trigger(UiStateWrite::<LayoutUiState>::from_event(cef_e, &payload));
@@ -1083,6 +1403,310 @@ fn push_update_notice_emit(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use bevy::ecs::system::RunSystemOnce;
+
+    #[test]
+    fn dormant_stack_keeps_its_favicon_without_a_loading_indicator() {
+        let mut app = App::new();
+        app.add_plugins((MinimalPlugins, StatePlugin))
+            .insert_resource(AppSettings::default())
+            .init_resource::<vmux_space::ActiveProjectRows>()
+            .init_non_send::<Browsers>();
+        app.world_mut().spawn(UpdateState::Idle);
+        let layout = app.world_mut().spawn((LayoutCef, PageReady {})).id();
+        app.world_mut()
+            .non_send_mut::<Browsers>()
+            .set_externally_hosted(layout);
+        let tab = app
+            .world_mut()
+            .spawn((Tab::default(), LastActivatedAt(1)))
+            .id();
+        let pane = app
+            .world_mut()
+            .spawn((Pane, LastActivatedAt(1), ChildOf(tab)))
+            .id();
+        let metadata = PageMetadata {
+            title: "Start".into(),
+            url: "vmux://start/".into(),
+            icon: PageIcon::Builtin(vmux_api::BuiltinIcon::Sparkles),
+            ..Default::default()
+        };
+        let dormant = app
+            .world_mut()
+            .spawn((
+                Stack::default(),
+                LastActivatedAt(1),
+                metadata.clone(),
+                ChildOf(pane),
+            ))
+            .id();
+        let selected = app
+            .world_mut()
+            .spawn((
+                Stack::default(),
+                LastActivatedAt(2),
+                metadata.clone(),
+                Active,
+                ChildOf(pane),
+            ))
+            .id();
+        app.world_mut().spawn(
+            vmux_layout::active_pane::ActiveStack {
+                tab: Some(tab),
+                pane: Some(pane),
+                stack: Some(selected),
+            }
+            .local_bundle(),
+        );
+        app.update();
+        let projection = &app.world().get::<PaneTreeProjection>(layout).unwrap().0;
+        let rows = &projection.panes[0].stacks;
+        let start = rows.iter().find(|row| row.id == dormant.to_bits()).unwrap();
+        assert!(!start.is_loading);
+        assert_eq!(start.icon, metadata.icon);
+        assert!(
+            rows.iter()
+                .find(|row| row.id == selected.to_bits())
+                .unwrap()
+                .is_loading
+        );
+
+        let browser = app
+            .world_mut()
+            .spawn((Browser, Loading, metadata.clone(), ChildOf(dormant)))
+            .id();
+        app.world_mut()
+            .entity_mut(dormant)
+            .insert(vmux_layout::page_slot::Current::new(
+                Some(browser),
+                metadata,
+            ));
+        app.update();
+        let projection = &app.world().get::<PaneTreeProjection>(layout).unwrap().0;
+        assert!(
+            projection.panes[0]
+                .stacks
+                .iter()
+                .find(|row| row.id == dormant.to_bits())
+                .unwrap()
+                .is_loading
+        );
+    }
+
+    #[test]
+    fn retiring_tabs_and_stacks_leave_navigation_immediately() {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins);
+        let space = app.world_mut().spawn_empty().id();
+        let tab = app
+            .world_mut()
+            .spawn((Tab::default(), LastActivatedAt(2), ChildOf(space)))
+            .id();
+        let retiring_tab = app
+            .world_mut()
+            .spawn((Tab::default(), LastActivatedAt(3), Retiring, ChildOf(space)))
+            .id();
+        let pane = app
+            .world_mut()
+            .spawn((Pane, LastActivatedAt(2), ChildOf(tab)))
+            .id();
+        let stack = app
+            .world_mut()
+            .spawn((Stack::default(), LastActivatedAt(2), ChildOf(pane)))
+            .id();
+        app.world_mut().spawn((
+            Stack::default(),
+            LastActivatedAt(3),
+            Retiring,
+            ChildOf(pane),
+        ));
+
+        let (active_tab, active_stack, rows) = app
+            .world_mut()
+            .run_system_once(move |projection: TabProjectionData| {
+                (
+                    projection.active_tab.get(),
+                    projection.active_stack(tab),
+                    projection.rows(),
+                )
+            })
+            .unwrap();
+
+        assert_eq!(active_tab, Some(tab));
+        assert_eq!(active_stack, Some(stack));
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].id, tab.to_bits().to_string());
+        assert!(rows[0].is_active);
+        assert_ne!(rows[0].id, retiring_tab.to_bits().to_string());
+    }
+
+    #[test]
+    fn retiring_state_invalidates_layout_projection() {
+        let mut app = App::new();
+        app.add_plugins((MinimalPlugins, StatePlugin))
+            .insert_resource(AppSettings::default())
+            .init_resource::<vmux_space::ActiveProjectRows>();
+        app.world_mut().insert_non_send(Browsers::default());
+        app.world_mut().spawn(UpdateState::Idle);
+        app.update();
+        let revision = {
+            let world = app.world_mut();
+            let mut revisions = world.query::<&StateRevision>();
+            revisions.single(world).unwrap().0
+        };
+        let closing = app.world_mut().spawn(Retiring).id();
+
+        app.update();
+
+        let added = {
+            let world = app.world_mut();
+            let mut revisions = world.query::<&StateRevision>();
+            revisions.single(world).unwrap().0
+        };
+        assert!(added > revision);
+
+        app.world_mut().entity_mut(closing).remove::<Retiring>();
+        app.update();
+
+        let removed = {
+            let world = app.world_mut();
+            let mut revisions = world.query::<&StateRevision>();
+            revisions.single(world).unwrap().0
+        };
+        assert!(removed > added);
+    }
+
+    #[test]
+    fn computed_header_resize_invalidates_layout_geometry() {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins)
+            .add_systems(Update, mark_computed_layout_dirty);
+        app.world_mut().spawn(LayoutGeometryRevision::default());
+        let header = app
+            .world_mut()
+            .spawn((Header, ComputedNode::default()))
+            .id();
+
+        app.update();
+        let added = app
+            .world_mut()
+            .query::<&LayoutGeometryRevision>()
+            .single(app.world())
+            .unwrap()
+            .0;
+        app.update();
+        let stable = app
+            .world_mut()
+            .query::<&LayoutGeometryRevision>()
+            .single(app.world())
+            .unwrap()
+            .0;
+        assert_eq!(stable, added);
+
+        app.world_mut()
+            .get_mut::<ComputedNode>(header)
+            .unwrap()
+            .size = Vec2::new(800.0, 84.0);
+        app.update();
+
+        let resized = app
+            .world_mut()
+            .query::<&LayoutGeometryRevision>()
+            .single(app.world())
+            .unwrap()
+            .0;
+        assert!(resized > stable);
+    }
+
+    #[test]
+    fn pending_stack_metadata_wins_before_the_surface_commits() {
+        let presented = PageMetadata {
+            url: "git://old".to_string(),
+            title: "Old".to_string(),
+            ..Default::default()
+        };
+        let pending = PageMetadata {
+            url: "vmux://projects/".to_string(),
+            title: "Projects".to_string(),
+            ..Default::default()
+        };
+        let identity = PageIdentity::from("Old page identity");
+
+        let projected = PagePresentation::metadata(Some(&pending), Some(&presented)).unwrap();
+
+        assert_eq!(projected.url, "vmux://projects/");
+        assert!(PagePresentation::identity(projected, Some(&presented), Some(&identity)).is_none());
+    }
+
+    #[test]
+    fn window_focus_does_not_dirty_layout_geometry() {
+        let mut window = Window::default();
+        let before = WindowGeometryState::of(&window);
+        window.focused = !window.focused;
+
+        assert_eq!(WindowGeometryState::of(&window), before);
+    }
+
+    #[test]
+    fn pending_workspace_selection_does_not_invalidate_unrelated_projections() {
+        let mut app = App::new();
+        app.add_plugins((MinimalPlugins, StatePlugin))
+            .insert_resource(AppSettings::default())
+            .init_resource::<vmux_space::ActiveProjectRows>();
+        app.world_mut().insert_non_send(Browsers::default());
+        app.world_mut().spawn(UpdateState::Idle);
+        app.update();
+        let revision = {
+            let world = app.world_mut();
+            let mut revisions = world.query::<&StateRevision>();
+            revisions.single(world).unwrap().0
+        };
+        let tab = app
+            .world_mut()
+            .spawn(vmux_layout::page_context::PendingWorkspaceSelection::new(
+                "/project".into(),
+                "feature".into(),
+                1,
+            ))
+            .id();
+
+        app.update();
+
+        let after_add = {
+            let world = app.world_mut();
+            let mut revisions = world.query::<&StateRevision>();
+            revisions.single(world).unwrap().0
+        };
+        assert_eq!(after_add, revision);
+
+        app.world_mut()
+            .entity_mut(tab)
+            .remove::<vmux_layout::page_context::PendingWorkspaceSelection>();
+        app.update();
+
+        let after_remove = {
+            let world = app.world_mut();
+            let mut revisions = world.query::<&StateRevision>();
+            revisions.single(world).unwrap().0
+        };
+        assert_eq!(after_remove, after_add);
+    }
+
+    #[test]
+    fn project_projection_selection_stays_dirty_until_emitted() {
+        let layout = Entity::from_bits(1);
+        let tab = Entity::from_bits(2);
+        let selection = Some(ProjectProjectionSelection { tab, revision: 1 });
+        let mut cursor = ProjectProjectionCursor::default();
+
+        assert!(cursor.needs_emit(layout, &selection));
+        assert!(cursor.needs_emit(layout, &selection));
+
+        cursor.record(layout, selection.clone());
+
+        assert!(!cursor.needs_emit(layout, &selection));
+        assert!(cursor.needs_emit(layout, &None));
+    }
 
     #[test]
     fn projection_cache_rebuilds_once_per_revision() {

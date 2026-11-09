@@ -10,12 +10,12 @@ use crate::active_pane::ActivePanePlugin;
 use crate::archive::ArchivePlugin;
 use crate::bookmark::BookmarkPlugin;
 use crate::contract::LayoutContractPlugin;
-use crate::event::CEF_RESERVED_HEIGHT_PX;
 use crate::host::webview_reveal::WebviewRevealPlugin;
 use crate::hosted_page::HostedPagePlugin;
 use crate::overlay::LayoutOverlayPlugin;
 use crate::page_context::PageContextPlugin;
 use crate::pane::PanePlugin;
+use crate::presentation::PresentationPlugin;
 use crate::side_sheet::SideSheetLayoutPlugin;
 use crate::space::SpaceLayoutPlugin;
 use crate::stack::StackPlugin;
@@ -79,15 +79,16 @@ impl Plugin for LayoutPlugin {
                 ErrorPage::MANIFEST.plugin(),
                 LayoutPersistencePlugin,
                 PageContextPlugin,
+                crate::page_slot::PageSlotPlugin,
                 TogglePlugin,
                 WebviewRevealPlugin,
                 ArchivePlugin,
                 PrewarmPagesPlugin,
                 HostedPagePlugin,
                 BookmarkPlugin,
-                vmux_ecs::UiStatePlugin::<crate::state::LayoutUiState>::default(),
+                vmux_ecs::UiStatePlugin::<crate::state::LayoutUiState>::with_post_update_flush(),
                 crate::workspace_snapshot_publish::SnapshotPlugin,
-                crate::pending_stack::PendingStackPlugin,
+                PresentationPlugin,
             ));
     }
 }
@@ -105,7 +106,6 @@ fn sync_header_visibility(
         if let Ok((mut visibility, mut node)) = headers.get_mut(entity) {
             *visibility = Visibility::Visible;
             node.display = Display::Flex;
-            node.height = Val::Px(CEF_RESERVED_HEIGHT_PX);
         }
     }
 

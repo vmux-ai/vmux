@@ -2,12 +2,14 @@
 
 use std::rc::Rc;
 
+use super::LayoutDropdown;
 use dioxus::prelude::*;
 use vmux_api::extension::{
     ExtOpenManagerRequest, ExtPinRequest, ExtRow, ExtensionPopupAnchor,
     ExtensionPopupBoundsRequest, ExtensionPopupCloseRequest, ExtensionPopupEvent,
     ExtensionPopupOpenRequest, ExtensionPopupSizeEvent,
 };
+use vmux_ui::components::dropdown::{DropdownAlign, DropdownPopup};
 use vmux_ui::components::icon::Icon;
 use vmux_ui::hooks::send;
 use vmux_ui::i18n::translate;
@@ -40,12 +42,14 @@ pub(crate) fn ExtensionPopupModal(
         let _ = send(&LayoutOverlayEvent {
             id: "extension-popup".to_string(),
             active: true,
+            ..Default::default()
         });
     });
     use_drop(move || {
         let _ = send(&LayoutOverlayEvent {
             id: "extension-popup".to_string(),
             active: false,
+            ..Default::default()
         });
         let _ = send(&ExtensionPopupCloseRequest);
     });
@@ -115,6 +119,7 @@ impl ExtensionPopupState {
         let _ = send(&LayoutOverlayEvent {
             id: "extension-popup".to_string(),
             active: false,
+            ..Default::default()
         });
         let _ = send(&ExtensionPopupCloseRequest);
     }
@@ -159,25 +164,13 @@ pub(crate) fn ExtensionBar(extensions: Vec<ExtRow>) -> Element {
         .filter(|extension| extension.enabled)
         .map(Rc::new)
         .collect::<Vec<_>>();
-    use_effect(move || {
-        let _ = send(&LayoutOverlayEvent {
-            id: "extensions".to_string(),
-            active: open(),
-        });
-    });
-    use_drop(move || {
-        let _ = send(&LayoutOverlayEvent {
-            id: "extensions".to_string(),
-            active: false,
-        });
-    });
-
     rsx! {
-        div { class: "relative flex shrink-0 items-center gap-1 pl-1",
+        LayoutDropdown { id: "extensions", open: open(), keyboard_navigation: true, on_dismiss: move |_| menu.close(), class: "relative flex shrink-0 items-center gap-1 pl-1",
             for ext in enabled.iter().filter(|extension| extension.pinned) {
                 ExtensionButton { key: "{ext.id}", extension: ext.clone() }
             }
             button {
+                "data-vmux-dropdown-trigger": "true",
                 r#type: "button",
                 class: "flex h-7 w-7 items-center justify-center rounded-lg text-foreground/80 hover:bg-foreground/[0.08]",
                 title: translate("layout-manage-extensions"),
@@ -190,33 +183,7 @@ pub(crate) fn ExtensionBar(extensions: Vec<ExtRow>) -> Element {
                 }
             }
             if open() {
-                div {
-                    class: "pointer-events-auto fixed inset-0 z-[998] h-screen w-screen bg-transparent",
-                    aria_hidden: "true",
-                    onpointerdown: move |event| {
-                        event.prevent_default();
-                        menu.close();
-                    },
-                    oncontextmenu: move |event| {
-                        event.prevent_default();
-                        menu.close();
-                    },
-                }
-                div {
-                    class: "glass absolute right-0 top-9 z-[999] w-72 overflow-hidden rounded-xl border border-border/80 bg-background/95 shadow-2xl backdrop-blur-xl outline-none",
-                    tabindex: "-1",
-                    onmounted: move |event: Event<MountedData>| {
-                        let target = event.data();
-                        spawn(async move {
-                            let _ = target.set_focus(true).await;
-                        });
-                    },
-                    onkeydown: move |event| {
-                        if event.key() == Key::Escape {
-                            event.prevent_default();
-                            menu.close();
-                        }
-                    },
+                DropdownPopup { align: DropdownAlign::End, class: "w-72 p-0",
                     div { class: "border-b border-border/70 px-3 py-2 text-xs font-semibold text-foreground",
                         {translate("extensions-title")}
                     }

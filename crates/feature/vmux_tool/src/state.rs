@@ -41,6 +41,20 @@ pub enum ToolStatus {
     Failed,
 }
 
+#[cfg(all(host, ui))]
+impl ToolStatus {
+    pub(crate) fn display_order(self) -> u8 {
+        match self {
+            Self::Outdated => 0,
+            Self::Installed => 1,
+            Self::Conflict => 2,
+            Self::Failed => 3,
+            Self::Missing => 4,
+            Self::Available => 5,
+        }
+    }
+}
+
 #[vmux_api::contract(Copy, Eq, PartialOrd, Ord, Hash)]
 pub enum ToolOperationKind {
     Install,

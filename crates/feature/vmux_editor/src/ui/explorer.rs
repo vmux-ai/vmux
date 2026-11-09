@@ -9,13 +9,17 @@ use dioxus::prelude::*;
 use vmux_ecs::event::*;
 use vmux_ui::components::button::{Button, ButtonSize, ButtonVariant};
 use vmux_ui::components::dialog::{DialogContent, DialogDescription, DialogRoot, DialogTitle};
+use vmux_ui::components::dropdown::{Dropdown, DropdownAlign, DropdownOption, DropdownPopup};
+use vmux_ui::components::manager::ManagerSearch;
+use vmux_ui::components::skeleton::Skeleton;
 use vmux_ui::components::tree_row::{
-    SIDEBAR_STICKY_SURFACE, SIDEBAR_TREE_LIST_GROUP, SIDEBAR_TREE_ROW_BASE, TreeRowAccent,
+    FILE_TREE_LIST_GROUP, FILE_TREE_ROW_BASE, FILE_TREE_STICKY_SURFACE, TreeRowAccent,
 };
 use vmux_ui::file_icon::TypeIcon;
 use vmux_ui::focus::FocusClaim;
 use vmux_ui::hooks::send;
 use vmux_ui::i18n::{TranslationValue, translate, translate_with};
+use vmux_ui::icon::{LineIcon, LineIconView};
 use vmux_ui::ime::use_ime_guard;
 use vmux_ui::platform::Platform;
 use vmux_ui::scroll::ScrollIntoView;
@@ -61,6 +65,11 @@ fn collapse_all_dirs() {
 }
 
 fn goto_line(line: u32) {
+    if let Some(navigation) = try_consume_context::<super::outline_navigation::OutlineNavigation>()
+    {
+        navigation.select(line);
+        return;
+    }
     let _ = send(&ExplorerGoto {
         path: String::new(),
         line,
@@ -81,31 +90,10 @@ impl SidebarView {
         self == Self::Search
     }
 
-    fn other(self) -> Self {
-        match self {
-            Self::Explorer => Self::Search,
-            Self::Search => Self::Explorer,
-        }
-    }
-
     fn title(self) -> String {
         match self {
             Self::Explorer => translate("editor-explorer"),
             Self::Search => translate("editor-search"),
-        }
-    }
-
-    fn switch_glyph(self) -> TitleGlyph {
-        match self {
-            Self::Explorer => TitleGlyph::Search,
-            Self::Search => TitleGlyph::Files,
-        }
-    }
-
-    fn switch_label(self) -> String {
-        match self {
-            Self::Explorer => translate("editor-show-search"),
-            Self::Search => translate("editor-show-explorer"),
         }
     }
 }
@@ -259,6 +247,11 @@ impl SearchState {
 
     fn clear(self) {
         let _ = send(&ExplorerSearchClear);
+    }
+
+    fn close(self) {
+        self.clear();
+        let _ = send(&ExplorerPanelViewSet { search: false });
     }
 
     fn is_collapsed(self, path: &str) -> bool {
@@ -653,13 +646,19 @@ fn Chevron(expanded: bool, loading: bool) -> Element {
 }
 
 #[component]
-fn SectionHeader(title: String, open: bool, on_toggle: EventHandler<()>) -> Element {
+fn SectionHeader(
+    title: String,
+    open: bool,
+    on_toggle: EventHandler<()>,
+    #[props(default = rsx! {})] trailing: Element,
+) -> Element {
     rsx! {
         div {
-            class: "flex items-center gap-1 px-2 py-1 cursor-default text-[11px] font-bold uppercase tracking-wide text-foreground/70 transition-colors hover:text-foreground",
+            class: "group/section flex h-7 items-center gap-1 px-3 cursor-default text-[11px] font-bold uppercase tracking-wide text-foreground/70 transition-colors hover:text-foreground",
             onclick: move |_| on_toggle.call(()),
             Chevron { expanded: open, loading: false }
-            span { class: "truncate", "{title}" }
+            span { class: "min-w-0 flex-1 truncate", "{title}" }
+            {trailing}
         }
     }
 }
@@ -670,8 +669,6 @@ enum TitleGlyph {
     NewFolder,
     Refresh,
     CollapseAll,
-    Search,
-    Files,
     Clear,
 }
 
@@ -696,11 +693,6 @@ impl TitleGlyph {
                 "M8 16H3v5",
             ],
             Self::CollapseAll => &["m7 20 5-5 5 5", "m7 4 5 5 5-5"],
-            Self::Search => &["M19 11a8 8 0 1 1-16 0 8 8 0 0 1 16 0Z", "m21 21-4.35-4.35"],
-            Self::Files => &[
-                "M5 3h14a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2Z",
-                "M10 3v18",
-            ],
             Self::Clear => &[
                 "M20 12a8 8 0 1 1-16 0 8 8 0 0 1 16 0Z",
                 "m6.34 6.34 11.32 11.32",
@@ -746,7 +738,7 @@ fn TitleButtonIcon(glyph: TitleGlyph) -> Element {
 fn StickyOverlay(children: Element) -> Element {
     rsx! {
         div { class: "sticky top-0 z-[12] h-0",
-            div { class: "absolute inset-x-0 top-0 {SIDEBAR_STICKY_SURFACE}", {children} }
+            div { class: "absolute inset-x-0 top-0 {FILE_TREE_STICKY_SURFACE}", {children} }
         }
     }
 }
@@ -811,26 +803,15 @@ fn StickyOutlineRow(row: OutlineRow, on_pick: EventHandler<u32>) -> Element {
 }
 
 #[component]
-fn SearchView(view: ReadSignal<SidebarView>) -> Element {
-    let results = FileUi::current().use_value(|state| Some(&state.explorer.explorer_search));
-    let search = SearchState {
-        results: results.into(),
-    };
+fn SearchView(view: ReadSignal<SidebarView>, search: SearchState) -> Element {
     let hit_focus = TreeFocus {
         key: use_signal(String::new),
     };
-    let ime = use_ime_guard();
 
     let active = view().is_search();
     let focused = hit_focus.key.cloned();
     let current = search.results.read().as_ref().cloned().unwrap_or_default();
     let query = current.query.clone();
-    let regex = current.regex;
-    let case_sensitive = current.case_sensitive;
-    let whole_word = current.whole_word;
-    let case_query = query.clone();
-    let whole_query = query.clone();
-    let regex_query = query.clone();
     let mut summary = None;
     let mut root = String::new();
     let mut files = Vec::new();
@@ -845,7 +826,6 @@ fn SearchView(view: ReadSignal<SidebarView>) -> Element {
     rsx! {
         div { class: if active { "contents" } else { "hidden" },
             div { class: "flex h-9 shrink-0 items-center gap-1.5 pl-2 pr-2 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground",
-                SidebarViewSwitch { view }
                 span { class: "truncate", {SidebarView::Search.title()} }
                 div {
                     class: "pointer-events-none ml-auto flex shrink-0 items-center gap-0.5 opacity-0 transition-opacity duration-100 focus-within:pointer-events-auto focus-within:opacity-100 group-hover/panel:pointer-events-auto group-hover/panel:opacity-100",
@@ -857,7 +837,7 @@ fn SearchView(view: ReadSignal<SidebarView>) -> Element {
                     TitleButton {
                         glyph: TitleGlyph::Clear,
                         label: translate("editor-search-clear"),
-                        on_press: move |_| search.clear(),
+                        on_press: move |_| search.close(),
                     }
                     TitleButton {
                         glyph: TitleGlyph::CollapseAll,
@@ -866,76 +846,10 @@ fn SearchView(view: ReadSignal<SidebarView>) -> Element {
                     }
                 }
             }
-            div { class: "shrink-0 px-2 pb-1",
-                div { class: "flex h-7 items-center gap-1 rounded-md bg-foreground/[0.06] px-2 text-foreground/85 ring-1 ring-inset ring-foreground/10 focus-within:ring-primary/50",
-                    input {
-                        id: SEARCH_INPUT_ID,
-                        r#type: "text",
-                        class: "min-w-0 flex-1 bg-transparent font-sans text-[11px] text-foreground outline-none placeholder:text-muted-foreground",
-                        placeholder: translate("editor-find-in-files-placeholder"),
-                        value: "{query}",
-                        oninput: move |event| {
-                            search.draft(event.value(), regex, case_sensitive, whole_word);
-                        },
-                        oncompositionstart: move |_| ime.start(),
-                        oncompositionend: move |_| ime.commit(),
-                        onkeydown: move |event: Event<KeyboardData>| {
-                            event.stop_propagation();
-                            if ime.swallows(&event) {
-                                return;
-                            }
-                            match event.key() {
-                                Key::Enter => {
-                                    event.prevent_default();
-                                    search.run();
-                                }
-                                Key::Escape => {
-                                    event.prevent_default();
-                                    search.clear();
-                                }
-                                _ => {}
-                            }
-                        },
-                    }
-                    SearchToggle {
-                        label: "Aa".to_string(),
-                        hint: translate("editor-find-case"),
-                        on: case_sensitive,
-                        on_press: move |_| search.draft(
-                            case_query.clone(),
-                            regex,
-                            !case_sensitive,
-                            whole_word,
-                        ),
-                    }
-                    SearchToggle {
-                        label: "ab".to_string(),
-                        hint: translate("editor-find-whole-word"),
-                        on: whole_word,
-                        on_press: move |_| search.draft(
-                            whole_query.clone(),
-                            regex,
-                            case_sensitive,
-                            !whole_word,
-                        ),
-                    }
-                    SearchToggle {
-                        label: ".*".to_string(),
-                        hint: translate("editor-find-regex"),
-                        on: regex,
-                        on_press: move |_| search.draft(
-                            regex_query.clone(),
-                            !regex,
-                            case_sensitive,
-                            whole_word,
-                        ),
-                    }
-                }
-            }
             div { class: "min-h-0 flex-1 overflow-y-auto pb-4",
                 if let Some(summary) = summary {
                     div { class: "px-3 py-1 text-[10px] text-muted-foreground", "{summary}" }
-                    div { class: "{SIDEBAR_TREE_LIST_GROUP}",
+                    div { class: "{FILE_TREE_LIST_GROUP}",
                         for file in files {
                             SearchFileGroup {
                                 key: "{file.path}",
@@ -978,7 +892,7 @@ fn SearchFileGroup(
     rsx! {
         div {
             div {
-                class: "{SIDEBAR_STICKY_SURFACE} sticky top-0 z-[11] flex h-[22px] cursor-default items-center gap-1 px-1 text-foreground/85 transition-colors duration-100 hover:bg-foreground/[0.08]",
+                class: "{FILE_TREE_STICKY_SURFACE} sticky top-0 z-[11] flex h-[22px] cursor-default items-center gap-1 px-1 text-foreground/85 transition-colors duration-100 hover:bg-foreground/[0.08]",
                 title: "{file.path}",
                 onclick: move |_| search.toggle_group(&path_toggle),
                 Chevron { expanded: !collapsed, loading: false }
@@ -1032,7 +946,7 @@ fn SearchHitRow(
         div {
             id: "{tree_row_id(&key)}",
             tabindex: "-1",
-            class: "{SIDEBAR_TREE_ROW_BASE} {accent.classes()} pl-6",
+            class: "{FILE_TREE_ROW_BASE} {accent.classes()} pl-6",
             title: "{path}:{hit.line}",
             onkeydown: move |event: Event<KeyboardData>| {
                 let forward = match event.key() {
@@ -1063,45 +977,6 @@ fn SearchHitRow(
     }
 }
 
-#[component]
-fn SearchToggle(label: String, hint: String, on: bool, on_press: EventHandler<()>) -> Element {
-    rsx! {
-        button {
-            r#type: "button",
-            class: if on {
-                "shrink-0 rounded bg-foreground/15 px-1 font-mono text-[10px] text-foreground"
-            } else {
-                "shrink-0 rounded px-1 font-mono text-[10px] text-foreground/50 hover:bg-foreground/10 hover:text-foreground"
-            },
-            title: "{hint}",
-            onclick: move |event: Event<MouseData>| {
-                event.stop_propagation();
-                on_press.call(());
-            },
-            "{label}"
-        }
-    }
-}
-
-#[component]
-fn SidebarViewSwitch(view: ReadSignal<SidebarView>) -> Element {
-    let current = view();
-    rsx! {
-        button {
-            class: "flex h-5 w-5 shrink-0 items-center justify-center rounded text-foreground/55 outline-none transition-colors hover:bg-foreground/[0.12] hover:text-foreground focus-visible:bg-foreground/[0.12] focus-visible:text-foreground",
-            title: current.switch_label(),
-            onclick: move |event: Event<MouseData>| {
-                event.stop_propagation();
-                let next = view.peek().other();
-                let _ = send(&ExplorerPanelViewSet {
-                    search: next.is_search(),
-                });
-            },
-            TitleButtonIcon { glyph: current.switch_glyph() }
-        }
-    }
-}
-
 fn localize_notice(message: &str) -> String {
     for (prefix, id) in [
         ("Created folder ", "editor-created-folder"),
@@ -1124,11 +999,14 @@ pub fn ExplorerPanel(
 ) -> Element {
     let tree_state = FileUi::current().use_value(|state| state.explorer.explorer_tree.as_ref());
     let focus_state = FileUi::current().use_value(|state| state.explorer.explorer_focus.as_ref());
-    let editors_state = FileUi::current().use_value(|state| state.explorer.open_editors.as_ref());
     let outline_state = FileUi::current().use_value(|state| state.explorer.outline.as_ref());
     let notice = FileUi::current().use_value(|state| Some(&state.explorer.explorer_notice));
     let panel = FileUi::current().use_value(|state| state.explorer.explorer_panel.as_ref());
     let prompt = FileUi::current().use_value(|state| Some(&state.explorer.explorer_prompt));
+    let results = FileUi::current().use_value(|state| Some(&state.explorer.explorer_search));
+    let search = SearchState {
+        results: results.into(),
+    };
     let root_name = use_memo(move || {
         tree_state
             .read()
@@ -1157,15 +1035,7 @@ pub fn ExplorerPanel(
             })
             .unwrap_or_default()
     });
-    let root_loading =
-        use_memo(move || tree_state.read().as_ref().is_some_and(|tree| tree.loading));
-    let open_editors = use_memo(move || {
-        editors_state
-            .read()
-            .as_ref()
-            .map(|editors| editors.items.clone())
-            .unwrap_or_default()
-    });
+    let root_loading = use_memo(move || tree_state.read().as_ref().is_none_or(|tree| tree.loading));
     let outline = use_memo(move || {
         outline_state
             .read()
@@ -1210,7 +1080,6 @@ pub fn ExplorerPanel(
     let outline_focus = TreeFocus {
         key: use_signal(String::new),
     };
-    let show_open = panel.read().as_ref().is_none_or(|panel| panel.open_editors);
     let show_files = panel.read().as_ref().is_none_or(|panel| panel.files);
     let show_outline = panel.read().as_ref().is_none_or(|panel| panel.outline);
     let mut menu = use_signal(|| None::<TreeMenu>);
@@ -1241,11 +1110,6 @@ pub fn ExplorerPanel(
             }
         })
     });
-    let open_body = if show_open {
-        "grid grid-rows-[1fr] opacity-100 transition-[grid-template-rows,opacity] duration-200 ease-out"
-    } else {
-        "grid grid-rows-[0fr] opacity-0 transition-[grid-template-rows,opacity] duration-200 ease-out"
-    };
     let files_body = if show_files {
         "grid grid-rows-[1fr] opacity-100 transition-[grid-template-rows,opacity] duration-200 ease-out"
     } else {
@@ -1261,10 +1125,8 @@ pub fn ExplorerPanel(
         let _layout = (
             visible(),
             view().is_search(),
-            show_open,
             show_files,
             show_outline,
-            open_editors.read().len(),
             rows.read().len(),
             outline.read().len(),
         );
@@ -1302,7 +1164,14 @@ pub fn ExplorerPanel(
     let focused_path = tree_focus.key.cloned();
     let focused_symbol = outline_focus.key.cloned();
     let caret_symbol = CaretSymbol::from_rows(&outline.read(), caret_line);
+    let followed_symbol = caret_symbol.clone();
+    use_effect(use_reactive!(|(followed_symbol, show_outline)| {
+        if visible() && show_outline && !view().is_search() && !followed_symbol.is_empty() {
+            ScrollIntoView::nearest_vertical(&tree_row_id(&followed_symbol));
+        }
+    }));
     let tree_empty = rows.read().is_empty();
+    let tree_unpainted = !rows.read().iter().any(|row| row.visible);
     let notice = notice().and_then(|notice| {
         let message = notice.message?;
         let message = if notice.ok {
@@ -1314,46 +1183,9 @@ pub fn ExplorerPanel(
     });
 
     rsx! {
-        div { class: "group/panel relative flex h-full w-full flex-col overflow-hidden bg-foreground/[0.04] font-sans text-xs text-foreground select-none",
-            SearchView { view }
-            div {
-                class: if view().is_search() {
-                    "hidden"
-                } else {
-                    "flex h-9 shrink-0 items-center gap-1.5 pl-2 pr-2 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground"
-                },
-                SidebarViewSwitch { view }
-                span { class: "truncate", {SidebarView::Explorer.title()} }
-                div {
-                    class: "pointer-events-none ml-auto flex shrink-0 items-center gap-0.5 opacity-0 transition-opacity duration-100 focus-within:pointer-events-auto focus-within:opacity-100 group-hover/panel:pointer-events-auto group-hover/panel:opacity-100",
-                    TitleButton {
-                        glyph: TitleGlyph::NewFile,
-                        label: translate("editor-new-file"),
-                        on_press: move |_| {
-                            let focus = tree_focus.key.peek().clone();
-                            let _ = send(&ExplorerCreateFilePromptRequest { path: focus });
-                        },
-                    }
-                    TitleButton {
-                        glyph: TitleGlyph::NewFolder,
-                        label: translate("editor-new-folder"),
-                        on_press: move |_| {
-                            let focus = tree_focus.key.peek().clone();
-                            let _ = send(&ExplorerCreateDirectoryPromptRequest { path: focus });
-                        },
-                    }
-                    TitleButton {
-                        glyph: TitleGlyph::Refresh,
-                        label: translate("common-refresh"),
-                        on_press: move |_| tree.refresh(root_path()),
-                    }
-                    TitleButton {
-                        glyph: TitleGlyph::CollapseAll,
-                        label: translate("common-collapse-all"),
-                        on_press: move |_| tree.collapse_all(),
-                    }
-                }
-            }
+        div { class: "group/panel relative flex h-full w-full flex-col overflow-hidden bg-background font-sans text-xs text-foreground select-none",
+            SearchInput { search, view }
+            SearchView { view, search }
             div {
                 class: if view().is_search() {
                     "hidden"
@@ -1370,60 +1202,10 @@ pub fn ExplorerPanel(
                     files_sticky.measure();
                     outline_sticky.measure();
                 },
-                SectionHeader {
-                    title: translate("editor-open-editors"),
-                    open: show_open,
-                    on_toggle: EventHandler::new(move |_| {
-                        let _ = send(&ExplorerOpenEditorsToggle);
-                    }),
-                }
-                div { class: "{open_body}",
-                    div { class: "min-h-0 overflow-hidden",
-                        for it in open_editors() {
-                            {
-                                let open_path = it.path.clone();
-                                let close_path = it.path.clone();
-                                let active = it.active;
-                                let dirty = it.dirty;
-                                rsx! {
-                                    div {
-                                        key: "{it.path}",
-                                        class: if active {
-                                            "group flex cursor-default items-center gap-1 bg-primary/12 py-0.5 pl-5 pr-2 text-foreground transition-[background-color,opacity,transform] duration-150"
-                                        } else {
-                                            "group flex cursor-default items-center gap-1 py-0.5 pl-5 pr-2 text-foreground/75 transition-[background-color,opacity,transform] duration-150 hover:bg-foreground/[0.08]"
-                                        },
-                                        onclick: move |_| {
-                                            let _ = send(&FileOpenEvent {
-                                                path: open_path.clone(),
-                                            });
-                                        },
-                                        span {
-                                            class: "inline-block w-3 shrink-0 cursor-default text-center text-foreground/50 opacity-0 transition-opacity group-hover:opacity-100 hover:text-foreground",
-                                            onclick: move |e: Event<MouseData>| {
-                                                e.stop_propagation();
-                                                let _ = send(&ExplorerCloseEditor {
-                                                    path: close_path.clone(),
-                                                });
-                                            },
-                                            "\u{00D7}"
-                                        }
-                                        {rsx! { TypeIcon { path: it.path.to_string(), is_dir: false, class: "h-4 w-4 shrink-0 opacity-80" } }}
-                                        span { class: "truncate", "{it.name}" }
-                                        if dirty {
-                                            span { class: "ml-auto h-1.5 w-1.5 shrink-0 rounded-full bg-primary" }
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-
                 div {
                     id: "{tree_row_id(&root_path())}",
                     tabindex: "-1",
-                    class: if current_path() == root_path() { "bg-primary/10 outline-none" } else { "outline-none" },
+                    class: if current_path() == root_path() { "vmux-directory-selection outline-none" } else { "outline-none" },
                     oncontextmenu: move |e: Event<MouseData>| {
                         e.prevent_default();
                         let coordinates = e.client_coordinates();
@@ -1443,6 +1225,37 @@ pub fn ExplorerPanel(
                         on_toggle: EventHandler::new(move |_| {
                             let _ = send(&ExplorerFilesToggle);
                         }),
+                        trailing: rsx! {
+                            div {
+                                class: "pointer-events-none ml-auto flex shrink-0 items-center gap-0.5 opacity-0 transition-opacity duration-100 focus-within:pointer-events-auto focus-within:opacity-100 group-hover/section:pointer-events-auto group-hover/section:opacity-100",
+                                TitleButton {
+                                    glyph: TitleGlyph::NewFile,
+                                    label: translate("editor-new-file"),
+                                    on_press: move |_| {
+                                        let focus = tree_focus.key.peek().clone();
+                                        let _ = send(&ExplorerCreateFilePromptRequest { path: focus });
+                                    },
+                                }
+                                TitleButton {
+                                    glyph: TitleGlyph::NewFolder,
+                                    label: translate("editor-new-folder"),
+                                    on_press: move |_| {
+                            let focus = tree_focus.key.peek().clone();
+                            let _ = send(&ExplorerCreateDirectoryPromptRequest { path: focus });
+                                    },
+                                }
+                                TitleButton {
+                                    glyph: TitleGlyph::Refresh,
+                                    label: translate("common-refresh"),
+                                    on_press: move |_| tree.refresh(root_path()),
+                                }
+                                TitleButton {
+                                    glyph: TitleGlyph::CollapseAll,
+                                    label: translate("common-collapse-all"),
+                                    on_press: move |_| tree.collapse_all(),
+                                }
+                            }
+                        },
                     }
                 }
                 StickyFolders {
@@ -1453,14 +1266,11 @@ pub fn ExplorerPanel(
                 }
                 div { class: "{files_body}",
                     div {
-                        class: "{SIDEBAR_TREE_LIST_GROUP} min-h-0 overflow-hidden",
+                        class: "{FILE_TREE_LIST_GROUP} min-h-0 overflow-hidden",
                         onmounted: move |event: Event<MountedData>| files_sticky.mounted(event.data()),
-                        if tree_empty {
-                            if root_loading() {
-                                div { class: "flex h-6 items-center gap-2 px-3 text-foreground/45",
-                                    span { class: "h-3 w-3 animate-spin rounded-full border border-foreground/20 border-t-foreground/60" }
-                                    {translate("common-loading")}
-                                }
+                        if tree_empty || tree_unpainted {
+                            if root_loading() || !tree_empty {
+                                ExplorerTreeSkeleton {}
                             } else {
                                 div { class: "flex h-6 items-center px-3 text-foreground/45",
                                     {translate("editor-explorer-empty")}
@@ -1493,7 +1303,7 @@ pub fn ExplorerPanel(
                                             div {
                                                 id: "{tree_row_id(&row.path)}",
                                                 tabindex: "-1",
-                                                class: "{SIDEBAR_TREE_ROW_BASE} {accent.classes()}",
+                                                class: "{FILE_TREE_ROW_BASE} {accent.classes()}",
                                                 style: "padding-left:{pad}px;",
                                                 title: "{row.path}",
                                                 onmouseenter: move |_| {
@@ -1587,7 +1397,7 @@ pub fn ExplorerPanel(
                 StickyOutline { rows: sticky_outline, on_pick: move |line: u32| goto_line(line) }
                 div { class: "{outline_body}",
                     div {
-                        class: "{SIDEBAR_TREE_LIST_GROUP} min-h-0 overflow-hidden",
+                        class: "{FILE_TREE_LIST_GROUP} min-h-0 overflow-hidden",
                         onmounted: move |event: Event<MountedData>| outline_sticky.mounted(event.data()),
                         for s in outline() {
                             {
@@ -1604,7 +1414,7 @@ pub fn ExplorerPanel(
                                         key: "{key}",
                                         id: "{tree_row_id(&key)}",
                                         tabindex: "-1",
-                                        class: "{SIDEBAR_TREE_ROW_BASE} {accent.classes()}",
+                                        class: "{FILE_TREE_ROW_BASE} {accent.classes()}",
                                         style: "padding-left:{pad}px;",
                                         onkeydown: move |e: Event<KeyboardData>| {
                                             let forward = match e.key() {
@@ -1796,6 +1606,131 @@ pub fn ExplorerPanel(
                         let _ = send(&ExplorerNoticeDismissRequest);
                     },
                     "{message}"
+                }
+            }
+        }
+    }
+}
+
+#[component]
+fn SearchInput(search: SearchState, view: ReadSignal<SidebarView>) -> Element {
+    let ime = use_ime_guard();
+    let (query, regex, case_sensitive, whole_word) = {
+        let results = search.results.read();
+        match results.as_ref() {
+            Some(results) => (
+                results.query.clone(),
+                results.regex,
+                results.case_sensitive,
+                results.whole_word,
+            ),
+            None => (String::new(), false, false, false),
+        }
+    };
+    rsx! {
+        div {
+            class: "contents",
+            oncompositionstart: move |_| ime.start(),
+            oncompositionend: move |_| ime.commit(),
+            vmux_ui::components::manager::ManagerSearchRow { ManagerSearch {
+                id: Some(SEARCH_INPUT_ID.to_string()),
+                value: query,
+                placeholder: translate("editor-find-in-files-placeholder"),
+                onsearch: move |query: String| {
+                    let searching = !query.trim().is_empty();
+                    search.draft(query, regex, case_sensitive, whole_word);
+                    if searching != view().is_search() {
+                        let _ = send(&ExplorerPanelViewSet { search: searching });
+                    }
+                },
+                onkeydown: move |event: KeyboardEvent| {
+                    if ime.swallows(&event) {
+                        return;
+                    }
+                    match event.key() {
+                        Key::Enter => {
+                            event.prevent_default();
+                            search.run();
+                        }
+                        Key::Escape => {
+                            event.prevent_default();
+                            search.close();
+                        }
+                        _ => {}
+                    }
+                },
+                suffix: rsx! { SearchOptions { search } },
+            } }
+        }
+    }
+}
+
+#[component]
+fn SearchOptions(search: SearchState) -> Element {
+    let mut open = use_signal(|| false);
+    let (query, regex, case_sensitive, whole_word) = {
+        let results = search.results.read();
+        match results.as_ref() {
+            Some(results) => (
+                results.query.clone(),
+                results.regex,
+                results.case_sensitive,
+                results.whole_word,
+            ),
+            None => (String::new(), false, false, false),
+        }
+    };
+    let case_query = query.clone();
+    let whole_query = query.clone();
+    let active = regex || case_sensitive || whole_word;
+    rsx! {
+        Dropdown {
+            open: open(),
+            keyboard_navigation: true,
+            on_dismiss: move |_| open.set(false),
+            Button {
+                aria_label: translate("common-filter"),
+                aria_haspopup: "menu",
+                aria_expanded: open(),
+                "data-vmux-dropdown-trigger": "true",
+                size: ButtonSize::Icon,
+                variant: ButtonVariant::Ghost,
+                class: if active { "size-5 text-primary" } else { "size-5" },
+                onmousedown: move |event: MouseEvent| event.prevent_default(),
+                onclick: move |_| open.set(!open()),
+                LineIconView { icon: LineIcon::Ellipsis, class: "size-3.5" }
+            }
+            if open() {
+                DropdownPopup { align: DropdownAlign::End, class: "min-w-44 p-1",
+                    DropdownOption {
+                        label: translate("editor-find-case"), selected: case_sensitive,
+                        onclick: move |_| search.draft(case_query.clone(), regex, !case_sensitive, whole_word),
+                        trailing: rsx! { if case_sensitive { LineIconView { icon: LineIcon::Check, class: "size-3" } } },
+                    }
+                    DropdownOption {
+                        label: translate("editor-find-whole-word"), selected: whole_word,
+                        onclick: move |_| search.draft(whole_query.clone(), regex, case_sensitive, !whole_word),
+                        trailing: rsx! { if whole_word { LineIconView { icon: LineIcon::Check, class: "size-3" } } },
+                    }
+                    DropdownOption {
+                        label: translate("editor-find-regex"), selected: regex,
+                        onclick: move |_| search.draft(query.clone(), !regex, case_sensitive, whole_word),
+                        trailing: rsx! { if regex { LineIconView { icon: LineIcon::Check, class: "size-3" } } },
+                    }
+                }
+            }
+        }
+    }
+}
+
+#[component]
+fn ExplorerTreeSkeleton() -> Element {
+    rsx! {
+        div { aria_busy: true, class: "flex flex-col gap-1 px-3 py-1",
+            for width in ["w-7/12", "w-10/12", "w-8/12", "w-9/12", "w-6/12"] {
+                div { class: "flex h-5 items-center gap-2",
+                    Skeleton { class: "size-3 shrink-0 rounded-sm bg-foreground/[0.05]" }
+                    Skeleton { class: "h-3 {width} bg-foreground/[0.055]" }
                 }
             }
         }

@@ -20,6 +20,21 @@ impl EventRequest {
     pub fn into_event(self) -> HtmlEvent {
         self.0
     }
+
+    #[cfg(any(target_os = "macos", target_os = "ios"))]
+    pub(crate) fn deferred_while_blocked(&self) -> bool {
+        matches!(
+            (self.0.name.as_str(), &self.0.data),
+            ("error" | "load", dioxus_html::EventData::Image(_))
+                | ("mounted", dioxus_html::EventData::Mounted)
+                | ("resize", dioxus_html::EventData::Resize(_))
+        )
+    }
+
+    #[cfg(any(target_os = "macos", target_os = "ios"))]
+    pub(crate) fn coalesces_with(&self, other: &Self) -> bool {
+        self.0.element == other.0.element && self.0.name == other.0.name
+    }
 }
 
 #[derive(Debug)]
@@ -54,6 +69,10 @@ impl EventOutcome {
         Self::new(false)
     }
 
+    pub fn refused() -> Self {
+        Self::new(true)
+    }
+
     pub fn prevent_default(&self) -> bool {
         self.prevent_default
     }
@@ -80,9 +99,9 @@ mod tests {
         };
         let header = STANDARD.encode(serde_json::to_vec(&sent).expect("an event serializes"));
 
-        let received = EventRequest::from_header(&header)
-            .expect("the page encodes exactly this")
-            .into_event();
+        let received = EventRequest::from_header(&header).expect("the page encodes exactly this");
+
+        let received = received.into_event();
 
         assert_eq!(received.element, ElementId(7));
         assert_eq!(received.name, "click");
@@ -116,5 +135,6 @@ mod tests {
             r#"{"preventDefault":true}"#,
             "native.js reads response.preventDefault; any other spelling is silently falsy"
         );
+        assert!(EventOutcome::refused().prevent_default());
     }
 }

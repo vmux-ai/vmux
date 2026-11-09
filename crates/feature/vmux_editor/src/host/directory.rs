@@ -80,7 +80,7 @@ impl Default for FileDirectoryNavigation {
 impl FileDirectoryNavigation {
     fn state(&self, file: &FileView, directory: &FileDir) -> FileDirectoryState {
         FileDirectoryState {
-            path: file.display_path(),
+            path: file.directory_title(),
             abs_path: file.path.to_string_lossy().into_owned(),
             entries: Self::visible(&directory.entries, self.show_hidden),
             parent_entries: Self::visible(&self.parent_entries, self.show_hidden),
@@ -472,9 +472,11 @@ fn toggle_hidden(
 
 impl FileDir {
     pub(crate) fn read(path: &Path) -> Vec<FileDirEntry> {
-        let Ok(read) = std::fs::read_dir(path) else {
-            return Vec::new();
-        };
+        Self::try_read(path).unwrap_or_default()
+    }
+
+    pub(crate) fn try_read(path: &Path) -> Result<Vec<FileDirEntry>, String> {
+        let read = std::fs::read_dir(path).map_err(|error| error.to_string())?;
         let mut entries: Vec<FileDirEntry> = read
             .flatten()
             .map(|entry| {
@@ -502,7 +504,7 @@ impl FileDir {
                 .cmp(&left.is_dir)
                 .then(left.name.to_lowercase().cmp(&right.name.to_lowercase()))
         });
-        entries
+        Ok(entries)
     }
 
     pub(crate) fn parent(path: &Path) -> (String, Vec<FileDirEntry>) {

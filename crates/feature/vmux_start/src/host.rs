@@ -3,11 +3,10 @@ use std::path::{Path, PathBuf};
 use bevy::ecs::system::SystemParam;
 use bevy::prelude::*;
 use bevy::tasks::{IoTaskPool, Task, futures_lite::future};
-use bevy_cef::prelude::{Browsers, UiEventPlugin, UiInput};
+use bevy_cef::prelude::{UiEventPlugin, UiInput};
 use vmux_api::chat::{SlashCommand, SlashCommandEntry};
 use vmux_api::command_bar::{CommandBarOpenEvent, CommandBarPromptContext, OpenId};
 use vmux_api::open_target::OpenTarget;
-use vmux_api::space::ProjectBranch;
 use vmux_command::{
     ClaimedUrl, CommandBarContextSnapshot, CommandBarPagesSnapshot, CommandBarProjectRoots,
     CommandBarWorkSnapshot, ContributedAgentModels, ContributedAgentModes, ContributedCommand,
@@ -39,27 +38,32 @@ impl Plugin for StartPlugin {
                 .hosted(vmux_ecs::page::HostedPage::page(Self::URL, "Start")),
         )
         .add_message::<InlineTransitionRequested>()
-        .add_systems(Update, (mark_launcher, begin_inline));
+        .add_systems(Startup, prewarm)
+        .add_systems(
+            Update,
+            (mark_launcher, begin_inline, ApplyDeferred, sync_pages).chain(),
+        );
         app.add_plugins(UiEventPlugin::<(
             StartSelectWorkspace,
-            vmux_api::command_bar::StartBranchesRequest,
             vmux_api::command_bar::StartGoToBranch,
         )>::default())
             .add_observer(select_workspace)
-            .add_observer(branches_request)
             .add_observer(go_to_branch)
             .add_observer(apply_chosen_project)
             .add_observer(focus_command_bar)
-            .add_systems(
-                Update,
-                (
-                    sync_pages,
-                    finish_workspace_pickers,
-                    read_branches,
-                    finish_branch_reads,
-                ),
-            );
+            .add_observer(focus_ready)
+            .add_plugins(crate::branches::Plugin)
+            .add_systems(Update, finish_workspace_pickers);
     }
+}
+
+fn prewarm(mut commands: Commands) {
+    commands.spawn(vmux_ecs::page::PrewarmPage::host(
+        "start",
+        StartPlugin::URL,
+        "Start",
+        2,
+    ));
 }
 
 #[derive(Component)]
@@ -102,7 +106,6 @@ struct StartPromptContext<'w, 's> {
     pages: Single<'w, 's, Ref<'static, CommandBarPagesSnapshot>>,
     projects: Single<'w, 's, Ref<'static, CommandBarProjectRoots>>,
     work: Single<'w, 's, Ref<'static, CommandBarWorkSnapshot>>,
-    warmed_branches_for: Local<'s, String>,
 }
 
 impl StartPromptContext<'_, '_> {
@@ -180,6 +183,7 @@ impl StartPromptContext<'_, '_> {
             return Self::unrooted();
         }
         let path = Path::new(&cwd);
+        let is_git_repo = info.is_some() || worktree.is_some() || path.join(".git").exists();
         let named = match info {
             Some(info) => info.project_name(),
             None => path
@@ -191,7 +195,7 @@ impl StartPromptContext<'_, '_> {
         CommandBarPromptContext {
             workspace_name: named,
             cwd,
-            is_git_repo: info.is_some(),
+            is_git_repo,
             is_worktree: info.is_some_and(|info| info.is_worktree),
             branch: info.map(|info| info.branch.clone()).unwrap_or_default(),
             base_ref: worktree
@@ -334,97 +338,6 @@ fn finish_workspace_pickers(
     }
 }
 
-#[derive(Component)]
-struct StartBranchQuery {
-    webview: Entity,
-    project: String,
-}
-
-#[derive(Component)]
-struct StartBranchRead {
-    webview: Entity,
-    project: String,
-    task: Task<Vec<ProjectBranch>>,
-}
-
-fn read_branches(
-    queries: Query<(Entity, &StartBranchQuery), Added<StartBranchQuery>>,
-    proxy: Option<Res<bevy::winit::EventLoopProxyWrapper>>,
-    mut commands: Commands,
-) {
-    for (entity, query) in &queries {
-        let project = query.project.trim().to_string();
-        if project.is_empty() {
-            commands.entity(entity).despawn();
-            continue;
-        }
-        let root = PathBuf::from(&project);
-        let wake = vmux_ecs::wake::Wake::beside(proxy.as_deref());
-        let task = IoTaskPool::get().spawn(async move {
-            let _wake = wake;
-            let mut branches = Vec::new();
-            if let Ok(checkout) = vmux_git::worktree::CheckoutInfo::try_from(root.as_path())
-                && let Ok(holders) = checkout.branch_holders()
-            {
-                branches.reserve(holders.len());
-                for holder in holders {
-                    let checkout = holder.checkout_path();
-                    let label = holder.checkout_label();
-                    branches.push(ProjectBranch {
-                        branch: holder.branch,
-                        checkout,
-                        label,
-                        insertions: holder.change.insertions,
-                        deletions: holder.change.deletions,
-                    });
-                }
-            }
-            branches
-        });
-        commands.entity(entity).insert(StartBranchRead {
-            webview: query.webview,
-            project,
-            task,
-        });
-        commands.entity(entity).remove::<StartBranchQuery>();
-    }
-}
-
-fn branches_request(
-    trigger: On<UiInput<vmux_api::command_bar::StartBranchesRequest>>,
-    mut commands: Commands,
-) {
-    commands.spawn(StartBranchQuery {
-        webview: trigger.event().webview,
-        project: trigger.event().payload.project.clone(),
-    });
-}
-
-fn finish_branch_reads(
-    mut reads: Query<(Entity, &mut StartBranchRead)>,
-    browsers: NonSend<Browsers>,
-    mut commands: Commands,
-) {
-    for (entity, mut read) in &mut reads {
-        let Some(branches) = future::block_on(future::poll_once(&mut read.task)) else {
-            continue;
-        };
-        commands.entity(entity).despawn();
-        if !browsers.can_emit_to(&read.webview) {
-            continue;
-        }
-        commands.trigger(vmux_ecs::UiStateWrite::<
-            vmux_api::command_bar::CommandBarUiState,
-        >::from_event(
-            read.webview,
-            &vmux_api::command_bar::StartProjectBranches {
-                project: read.project.clone(),
-                branches,
-            },
-        ));
-    }
-}
-
 fn go_to_branch(
     trigger: On<UiInput<vmux_api::command_bar::StartGoToBranch>>,
     child_of: Query<&ChildOf>,
@@ -516,7 +429,7 @@ fn apply_chosen_project(
 
 fn sync_pages(
     tab_gather: TabGather,
-    mut prompt_context: StartPromptContext,
+    prompt_context: StartPromptContext,
     contributions: (
         Query<
             (),
@@ -543,13 +456,16 @@ fn sync_pages(
             Has<StartWorkSynced>,
             Has<KeyboardOwner>,
         ),
-        Without<crate::StartInlineTransitionView>,
+        (
+            With<HostsLauncher>,
+            Without<crate::StartInlineTransitionView>,
+        ),
     >,
     added_keyboard_targets: Query<(), Added<KeyboardOwner>>,
-    browsers: NonSend<Browsers>,
     mut repo_info: Option<Single<&mut vmux_git::RepoInfoCache>>,
     mut last_git: Local<(String, Option<vmux_git::worktree::RepoInfo>)>,
     space_projects: vmux_space::SpaceProjects,
+    active_project_rows: Res<vmux_space::ActiveProjectRows>,
     projector: CommandBarProjector,
     mut commands: Commands,
 ) {
@@ -562,24 +478,36 @@ fn sync_pages(
         mut removed_modes,
     ) = contributions;
     let cwd = prompt_context.cwd(tab_gather.active_tab.get());
-    let git_info = (!cwd.is_empty())
-        .then(|| {
-            repo_info
-                .as_mut()
-                .and_then(|cache| cache.bypass_change_detection().lookup(Path::new(&cwd)))
+    let observer = starts.iter().find_map(|(entity, metadata, _, active)| {
+        (active && metadata.url.starts_with(StartPlugin::URL)).then_some(entity)
+    });
+    let git_info = observer.and_then(|observer| {
+        repo_info.as_mut().and_then(|cache| {
+            let cache = cache.bypass_change_detection();
+            if cwd.is_empty() {
+                cache.release(observer);
+                return None;
+            }
+            cache.observe_active(observer, Path::new(&cwd))
         })
-        .flatten();
+    });
     let git_changed = last_git.0 != cwd || last_git.1 != git_info;
     let focus_changed = focused.is_changed();
+    let page_removed = removed_pages.read().count() > 0;
+    let command_removed = removed_commands.read().count() > 0;
+    let claim_removed = removed_claims.read().count() > 0;
+    let model_removed = removed_models.read().count() > 0;
+    let mode_removed = removed_modes.read().count() > 0;
     let contributions_changed = !contribution_changes.is_empty()
-        || removed_pages.read().next().is_some()
-        || removed_commands.read().next().is_some()
-        || removed_claims.read().next().is_some()
-        || removed_models.read().next().is_some()
-        || removed_modes.read().next().is_some();
+        || page_removed
+        || command_removed
+        || claim_removed
+        || model_removed
+        || mode_removed;
     let changed = contributions_changed
         || focus_changed
         || prompt_context.changed(tab_gather.active_tab.get())
+        || active_project_rows.is_changed()
         || git_changed
         || locale.as_ref().is_some_and(|locale| locale.is_changed());
     let locale = locale
@@ -590,9 +518,6 @@ fn sync_pages(
         .iter()
         .filter_map(|(e, meta, synced, keyboard_target)| {
             if !meta.url.starts_with(StartPlugin::URL) {
-                return None;
-            }
-            if !browsers.can_emit_to(&e) {
                 return None;
             }
             let focus_requested =
@@ -606,32 +531,16 @@ fn sync_pages(
     if git_changed {
         *last_git = (cwd.clone(), git_info.clone());
     }
+    let active_tab = tab_gather.active_tab.get().unwrap_or(Entity::PLACEHOLDER);
     let payload = prompt_context.project(
         &projector,
         &tab_gather,
         tab_gather.active_tab.get(),
         git_info.as_ref(),
-        space_projects.rows(tab_gather.active_tab.get().unwrap_or(Entity::PLACEHOLDER)),
+        space_projects.selector_rows(active_tab, &active_project_rows),
         &locale,
     );
-    let project = payload
-        .prompt_context
-        .projects
-        .iter()
-        .find(|project| project.is_active)
-        .map(|project| project.path.clone())
-        .unwrap_or_else(|| payload.prompt_context.cwd.clone());
-    let warm_branches = !project.is_empty() && *prompt_context.warmed_branches_for != project;
-    if warm_branches {
-        *prompt_context.warmed_branches_for = project.clone();
-    }
     for (e, focus_requested) in targets {
-        if warm_branches {
-            commands.spawn(StartBranchQuery {
-                webview: e,
-                project: project.clone(),
-            });
-        }
         commands.trigger(vmux_ecs::UiStateWrite::<
             vmux_api::command_bar::CommandBarUiState,
         >::from_event(e, &payload));
@@ -639,6 +548,28 @@ fn sync_pages(
             commands.trigger(CommandBarFocusRequested { webview: e });
         }
         commands.entity(e).try_insert(StartWorkSynced);
+    }
+}
+
+fn focus_ready(
+    event: On<UiInput<vmux_ecs::page::PageReady>>,
+    starts: Query<
+        &PageMetadata,
+        (
+            With<HostsLauncher>,
+            With<KeyboardOwner>,
+            Without<crate::StartInlineTransitionView>,
+        ),
+    >,
+    mut commands: Commands,
+) {
+    if starts
+        .get(event.webview)
+        .is_ok_and(|metadata| metadata.url.starts_with(StartPlugin::URL))
+    {
+        commands.trigger(CommandBarFocusRequested {
+            webview: event.webview,
+        });
     }
 }
 
@@ -653,7 +584,7 @@ fn focus_command_bar(
         Err(_) => {
             let mut revision = CommandBarFocusRevision::default();
             let effect = revision.next();
-            commands.entity(webview).insert(revision);
+            commands.entity(webview).try_insert(revision);
             effect
         }
     };
@@ -687,6 +618,7 @@ fn begin_inline(
             .entity(request.stack)
             .try_insert(crate::StartInlineTransition {
                 webview: request.webview,
+                navigation: None,
             });
         commands
             .entity(request.webview)
@@ -701,6 +633,10 @@ fn begin_inline(
 mod tests {
     use super::*;
     use vmux_api::command_bar::CommandBarUiState;
+    #[cfg(ui)]
+    use vmux_api::input::{KeyClaimsUiState, KeyContextRequest};
+    #[cfg(ui)]
+    use vmux_api::{BinEvent, UiEventPermissions};
     use vmux_ecs::UiStateWrite;
     use vmux_ecs::page::PageManifest;
 
@@ -726,6 +662,7 @@ mod tests {
         let mut app = App::new();
         app.init_resource::<EmittedIds>()
             .add_observer(focus_command_bar)
+            .add_observer(focus_ready)
             .add_observer(capture_state);
         app
     }
@@ -737,12 +674,31 @@ mod tests {
     }
 
     #[test]
-    fn start_plugin_spawns_manifest() {
+    fn start_plugin_registers_manifest_before_startup() {
+        let mut app = App::new();
+        app.add_plugins(StartPlugin);
+        let mut q = app.world_mut().query::<&PageManifest>();
+        assert!(q.iter(app.world()).any(|m| m.url == StartPlugin::URL));
+    }
+
+    #[test]
+    #[cfg(ui)]
+    fn start_page_allows_keyboard_routing() {
         let mut app = App::new();
         app.add_plugins(StartPlugin);
         app.world_mut().run_schedule(PreStartup);
-        let mut q = app.world_mut().query::<&PageManifest>();
-        assert!(q.iter(app.world()).any(|m| m.url == StartPlugin::URL));
+        let mut permissions = app.world_mut().query::<&UiEventPermissions>();
+
+        assert!(UiEventPermissions::allows_page(
+            permissions.iter(app.world()),
+            StartPlugin::URL,
+            KeyContextRequest::PERMISSION,
+        ));
+        assert!(UiEventPermissions::allows_page(
+            permissions.iter(app.world()),
+            StartPlugin::URL,
+            KeyClaimsUiState::PERMISSION,
+        ));
     }
 
     #[test]
@@ -764,6 +720,39 @@ mod tests {
                 .is_some(),
             "the surviving half of the transition still applies"
         );
+    }
+
+    #[test]
+    fn selected_start_requests_prompt_focus_after_its_document_is_ready() {
+        let mut app = start_focus_app();
+        let metadata = PageMetadata {
+            url: StartPlugin::URL.to_string(),
+            ..Default::default()
+        };
+        let selected = app
+            .world_mut()
+            .spawn((HostsLauncher, KeyboardOwner, metadata.clone()))
+            .id();
+        let dormant = app.world_mut().spawn((HostsLauncher, metadata)).id();
+        let another = app
+            .world_mut()
+            .spawn((
+                HostsLauncher,
+                KeyboardOwner,
+                PageMetadata {
+                    url: "vmux://sessions/".to_string(),
+                    ..Default::default()
+                },
+            ))
+            .id();
+        for webview in [selected, dormant, another] {
+            app.world_mut().trigger(UiInput {
+                webview,
+                payload: vmux_ecs::page::PageReady,
+            });
+        }
+        app.update();
+        assert_eq!(app.world().resource::<EmittedIds>().0, [("focus", 1)]);
     }
 
     #[test]

@@ -4,8 +4,10 @@ use std::path::{Path, PathBuf};
 
 use bevy::prelude::*;
 use bevy_cef::prelude::*;
-use vmux_api::BinEvent;
+use vmux_api::{BinEvent, UiEventPermissions};
+#[cfg(ui)]
 use vmux_ecs::event::*;
+use vmux_ecs::event::{ExplorerReveal, FileUiState};
 
 use super::*;
 use crate::host::editor::FileView;
@@ -16,6 +18,55 @@ impl ExplorerState {
             open_editors: paths.iter().map(PathBuf::from).collect(),
             ..Self::default()
         }
+    }
+}
+
+#[test]
+#[cfg(ui)]
+fn editor_page_allows_explorer_section_toggles() {
+    let mut app = App::new();
+    app.add_plugins((MinimalPlugins, crate::ui::FilePage::plugin()));
+    app.world_mut().run_schedule(PreStartup);
+    let mut permissions = app.world_mut().query::<&UiEventPermissions>();
+    let permissions = permissions.iter(app.world()).collect::<Vec<_>>();
+
+    for permission in [
+        ExplorerOpenEditorsToggle::PERMISSION,
+        ExplorerFilesToggle::PERMISSION,
+        ExplorerOutlineToggle::PERMISSION,
+    ] {
+        assert!(UiEventPermissions::allows_page(
+            permissions.iter().copied(),
+            "file:///project/main.rs",
+            permission,
+        ));
+    }
+}
+
+#[test]
+#[cfg(ui)]
+fn projects_page_allows_every_shared_editor_action() {
+    let mut app = App::new();
+    app.add_plugins((
+        MinimalPlugins,
+        crate::ui::FilePage::plugin(),
+        crate::ui::ProjectsPage::plugin(),
+    ));
+    app.world_mut().run_schedule(PreStartup);
+    let mut query = app.world_mut().query::<&UiEventPermissions>();
+    let pages = query.iter(app.world()).copied().collect::<Vec<_>>();
+    let file = pages.iter().find(|page| page.url == "file://").unwrap();
+    let projects = pages
+        .iter()
+        .find(|page| page.url == "vmux://projects/")
+        .unwrap();
+
+    assert!(projects.owns_subtree);
+    for permission in file.permissions {
+        assert!(
+            projects.permissions.contains(permission),
+            "Projects page is missing shared editor permission {permission}"
+        );
     }
 }
 
@@ -557,26 +608,50 @@ fn opening_a_file_leaves_a_hidden_explorer_collapsed() {
 struct SentReveals {
     revision: u64,
     reveals: Vec<ExplorerReveal>,
+    state: Option<FileUiState>,
 }
 
 impl SentReveals {
     fn watch(app: &mut App, webview: Entity) {
         let mut browsers = Browsers::default();
         browsers.set_externally_hosted(webview);
-        app.add_plugins(vmux_ecs::UiStatePlugin::<vmux_ecs::event::FileUiState>::default())
+        app.add_plugins(vmux_ecs::UiStatePlugin::<FileUiState>::default())
             .insert_non_send(browsers)
             .init_resource::<Self>()
             .add_observer(Self::record);
+        app.world_mut().entity_mut(webview).insert((
+            bevy_cef::prelude::BinIpcSurfaceGeneration(1),
+            bevy_cef::prelude::BinIpcNavigationRevision(1),
+            bevy_cef::prelude::BinIpcEpoch(1),
+            vmux_ecs::PageMetadata {
+                url: "file:///repo".to_string(),
+                ..Default::default()
+            },
+        ));
+        app.world_mut().spawn(UiEventPermissions {
+            url: "file:///repo",
+            owns_subtree: false,
+            permissions: &["FileUiState"],
+        });
     }
 
     fn record(emit: On<BinHostEmitEvent>, mut sent: ResMut<Self>) {
         if emit.id() != FileUiState::id() {
             return;
         }
-        let decoded = rkyv::from_bytes::<FileUiState, rkyv::rancor::Error>(emit.payload());
-        let Ok(event) = decoded else {
-            return;
+        emit.mark_delivered();
+        let frame = rkyv::from_bytes::<
+            vmux_api::UiStateFrame<FileUiState, <FileUiState as vmux_api::UiState>::Update>,
+            rkyv::rancor::Error,
+        >(emit.payload())
+        .unwrap();
+        let event = match frame {
+            vmux_api::UiStateFrame::Snapshot(state) => state,
+            vmux_api::UiStateFrame::Updates(updates) => {
+                <FileUiState as vmux_api::UiState>::from_updates(sent.state.take(), updates)
+            }
         };
+        sent.state = Some(event.clone());
         let Some(focus) = event.explorer.explorer_focus else {
             return;
         };

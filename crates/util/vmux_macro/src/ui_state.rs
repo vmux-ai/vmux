@@ -36,14 +36,27 @@ pub(crate) fn derive_state(input: &DeriveInput, patch: Option<&Type>) -> syn::Re
                     updates: ::std::vec::Vec<Self::Update>,
                 ) -> Self {
                     let mut state = previous.unwrap_or_default();
-                    for update in updates {
-                        <Self as ::vmux_api::UiStateProjection<#patch>>::apply(&mut state, update);
-                    }
+                    <Self as ::vmux_api::UiStateProjection<#patch>>::retain(&mut state);
+                    <Self as ::vmux_api::UiState>::apply_updates(&mut state, updates);
                     state
                 }
 
-                fn retained(&self) -> ::core::option::Option<Self> {
-                    ::core::option::Option::Some(self.clone())
+                fn apply_updates(&mut self, updates: ::std::vec::Vec<Self::Update>) {
+                    for update in updates {
+                        <Self as ::vmux_api::UiStateProjection<#patch>>::apply(self, update);
+                    }
+                }
+
+                fn retain(&mut self) {
+                    <Self as ::vmux_api::UiStateProjection<#patch>>::retain(self);
+                }
+
+                fn navigation_seed(&self) -> ::core::option::Option<Self> {
+                    <Self as ::vmux_api::UiStateProjection<#patch>>::navigation_seed(self)
+                }
+
+                fn navigation_ready(&self) -> bool {
+                    <Self as ::vmux_api::UiStateProjection<#patch>>::navigation_ready(self)
                 }
             }
         });
@@ -59,8 +72,12 @@ pub(crate) fn derive_state(input: &DeriveInput, patch: Option<&Type>) -> syn::Re
                 updates.pop().expect("UI state update is never empty")
             }
 
-            fn retained(&self) -> ::core::option::Option<Self> {
-                ::core::option::Option::Some(self.clone())
+            fn retain(&mut self) {}
+
+            fn apply_updates(&mut self, mut updates: ::std::vec::Vec<Self::Update>) {
+                if let Some(state) = updates.pop() {
+                    *self = state;
+                }
             }
         }
     })

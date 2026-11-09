@@ -3,8 +3,10 @@ use quote::quote;
 use serde::Deserialize;
 use std::path::PathBuf;
 use syn::parse::{Parse, ParseStream};
+use syn::punctuated::Punctuated;
 use syn::{
-    Data, DeriveInput, Expr, ExprArray, Fields, Ident, LitStr, Path, Token, Type, parse_quote,
+    Data, DeriveInput, Expr, ExprArray, Fields, Ident, LitStr, Path, Token, Type, bracketed,
+    parse_quote,
 };
 
 #[derive(Deserialize)]
@@ -64,6 +66,7 @@ struct PagePlacementFile {
 enum PageReuseFile {
     #[default]
     Exact,
+    Group,
     Route,
     Fragmentless,
 }
@@ -85,6 +88,38 @@ enum PageSplitAxisFile {
 #[derive(Deserialize)]
 struct FeatureManifestFile {
     pages: Vec<PageManifestFile>,
+}
+
+struct PageStates(Vec<LitStr>);
+
+impl Parse for PageStates {
+    fn parse(input: ParseStream<'_>) -> syn::Result<Self> {
+        let content;
+        bracketed!(content in input);
+        let states = Punctuated::<LitStr, Token![,]>::parse_terminated(&content)?;
+        Ok(Self(states.into_iter().collect()))
+    }
+}
+
+impl PageStates {
+    fn validate(&self, permissions: &[LitStr]) -> syn::Result<()> {
+        for state in &self.0 {
+            if permissions
+                .iter()
+                .any(|permission| permission.value() == state.value())
+            {
+                continue;
+            }
+            return Err(syn::Error::new(
+                state.span(),
+                format!(
+                    "page manifest permissions must include subscribed UI state {}",
+                    state.value()
+                ),
+            ));
+        }
+        Ok(())
+    }
 }
 
 fn default_manifest_file() -> LitStr {
@@ -229,6 +264,7 @@ impl PageManifestFile {
                 let refresh = placement.refresh;
                 let reuse = match placement.reuse {
                     PageReuseFile::Exact => quote! { ::vmux_ecs::page::PageReuse::Exact },
+                    PageReuseFile::Group => quote! { ::vmux_ecs::page::PageReuse::Group },
                     PageReuseFile::Route => quote! { ::vmux_ecs::page::PageReuse::Route },
                     PageReuseFile::Fragmentless => {
                         quote! { ::vmux_ecs::page::PageReuse::Fragmentless }
@@ -358,6 +394,7 @@ struct Args {
     transparent: bool,
     owns_subtree: bool,
     takes: Option<Type>,
+    reactive_takes: bool,
     claims: Option<Type>,
     manifest: bool,
     title_message_id: Option<LitStr>,
@@ -395,6 +432,7 @@ impl Parse for Args {
         let mut transparent = false;
         let mut owns_subtree = false;
         let mut takes = None;
+        let mut reactive_takes = false;
         let mut claims = None;
         let mut manifest = false;
         let mut title_message_id = None;
@@ -403,6 +441,7 @@ impl Parse for Args {
         let mut icon = None;
         let mut command_bar = false;
         let mut permissions = Vec::new();
+        let mut states = None;
 
         while !input.is_empty() {
             let key: Ident = input.parse()?;
@@ -413,6 +452,7 @@ impl Parse for Args {
                 "transparent" => transparent = true,
                 "manifest" => manifest = true,
                 "command_bar" => command_bar = true,
+                "reactive_takes" => reactive_takes = true,
                 "file" => {
                     input.parse::<Token![=]>()?;
                     file = Some(input.parse()?);
@@ -432,6 +472,10 @@ impl Parse for Args {
                 "component" => {
                     input.parse::<Token![=]>()?;
                     component = Some(input.parse()?);
+                }
+                "states" => {
+                    input.parse::<Token![=]>()?;
+                    states = Some(input.parse::<PageStates>()?);
                 }
                 "placement" => {
                     input.parse::<Token![=]>()?;
@@ -548,6 +592,7 @@ impl Parse for Args {
                 icon = page_manifest.icon(manifest_file)?;
             }
             command_bar |= page_manifest.command_bar;
+            owns_subtree |= page_manifest.owns_subtree;
             manifest |= page_manifest.manifest;
             permissions = page_manifest
                 .permissions
@@ -555,6 +600,9 @@ impl Parse for Args {
                 .map(|permission| LitStr::new(permission, manifest_file.span()))
                 .collect();
         }
+
+        let states = states.ok_or_else(|| input.error("page requires states = [...]"))?;
+        states.validate(&permissions)?;
 
         Ok(Self {
             file,
@@ -580,13 +628,13 @@ impl Parse for Args {
             }),
             html_attributes: html_attributes.unwrap_or_else(|| {
                 LitStr::new(
-                    r#"lang="en" class="h-full" style="color-scheme: light dark""#,
+                    r#"lang="en" class="h-full""#,
                     proc_macro2::Span::call_site(),
                 )
             }),
             body_class: body_class.unwrap_or_else(|| {
                 LitStr::new(
-                    "m-0 flex h-full min-h-0 flex-col overflow-hidden p-0 text-foreground antialiased",
+                    "m-0 flex h-full min-h-0 flex-col overflow-hidden bg-background p-0 text-foreground antialiased",
                     proc_macro2::Span::call_site(),
                 )
             }),
@@ -595,6 +643,7 @@ impl Parse for Args {
             transparent,
             owns_subtree,
             takes,
+            reactive_takes,
             claims,
             manifest,
             title_message_id,
@@ -695,9 +744,16 @@ fn expand_native(args: TokenStream, input: DeriveInput) -> syn::Result<TokenStre
         Placement::Pane => quote! { ::vmux_page::PagePlugin::in_pane(&Self::PAGE) },
         Placement::Modal => quote! { ::vmux_page::PagePlugin::as_modal(&Self::PAGE) },
     };
-    let plugin = match args.takes {
-        Some(takes) => quote! { (#plugin).takes::<#takes>() },
-        None => plugin,
+    let plugin = match (args.takes, args.reactive_takes) {
+        (Some(takes), true) => quote! { (#plugin).takes_reactive::<#takes>() },
+        (Some(takes), false) => quote! { (#plugin).takes::<#takes>() },
+        (None, true) => {
+            return Err(syn::Error::new_spanned(
+                &input.ident,
+                "reactive_takes requires takes = Type",
+            ));
+        }
+        (None, false) => plugin,
     };
     let plugin = match args.claims {
         Some(claims) => quote! { (#plugin).claims::<#claims>() },
@@ -824,6 +880,18 @@ mod tests {
             )
             .is_err()
         );
+    }
+
+    #[test]
+    fn page_states_require_matching_manifest_permissions() {
+        let states = syn::parse2::<PageStates>(quote!(["ThemeUiState", "FileUiState"])).unwrap();
+        let permissions = [
+            LitStr::new("ThemeUiState", proc_macro2::Span::call_site()),
+            LitStr::new("FileUiState", proc_macro2::Span::call_site()),
+        ];
+
+        assert!(states.validate(&permissions).is_ok());
+        assert!(states.validate(&permissions[..1]).is_err());
     }
 
     #[test]

@@ -8,6 +8,7 @@ pub struct InterpreterShell {
     html_attributes: String,
     body_class: String,
     root_class: String,
+    initial_frame: String,
 }
 
 impl InterpreterShell {
@@ -19,6 +20,7 @@ impl InterpreterShell {
             html_attributes: String::new(),
             body_class: String::new(),
             root_class: String::new(),
+            initial_frame: String::new(),
         }
     }
 
@@ -42,6 +44,12 @@ impl InterpreterShell {
         self
     }
 
+    #[cfg(ui)]
+    pub(crate) fn with_initial_frame(mut self, frame: impl Into<String>) -> Self {
+        self.initial_frame = frame.into();
+        self
+    }
+
     pub fn html(&self) -> String {
         let Self {
             root_id,
@@ -50,6 +58,7 @@ impl InterpreterShell {
             html_attributes,
             body_class,
             root_class,
+            initial_frame,
         } = self;
 
         format!(
@@ -58,6 +67,7 @@ impl InterpreterShell {
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width">
+<script>document.documentElement.dataset.theme||=matchMedia('(prefers-color-scheme: dark)').matches?'dark':'light';document.documentElement.style.colorScheme=document.documentElement.dataset.theme;</script>
 {head}
 </head>
 <body class="{body_class}">
@@ -65,14 +75,14 @@ impl InterpreterShell {
 <script type="module">
 {SLEDGEHAMMER_JS}
 {NATIVE_JS}
-window.interpreter = new NativeInterpreter("{base_uri}", false);
-window.onload = function() {{
-  const root = window.document.getElementById("{root_id}");
-  if (root != null) {{
-    window.interpreter.initialize(root);
-    window.vmuxWry.start();
-  }}
-}};
+{initial_frame}
+window.vmuxCreateInterpreter = () => new NativeInterpreter("{base_uri}", false);
+window.interpreter = window.vmuxCreateInterpreter();
+const vmuxRoot = window.document.getElementById("{root_id}");
+if (vmuxRoot != null) {{
+  window.interpreter.initialize(vmuxRoot);
+  window.vmuxWry.start();
+}}
 </script>
 </body>
 </html>"#
@@ -124,6 +134,7 @@ mod tests {
         assert!(shell.contains(r#"<base href="/">"#));
         assert!(shell.contains("./assets/index.css"));
         assert!(shell.contains(r#"<html class="h-full">"#));
+        assert!(shell.contains("document.documentElement.dataset.theme||=matchMedia"));
         assert!(shell.contains(r#"<body class="flex h-full">"#));
         assert!(
             shell.contains(r#"<div id="main" class="flex flex-1"></div>"#),

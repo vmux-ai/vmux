@@ -2,7 +2,7 @@ use std::fmt;
 
 use crate::transport::Host;
 use crate::transport::HostPayload;
-use vmux_api::{PageReady, UiEvent, UiState};
+use vmux_api::{PageReady, UiEvent, UiState, UiStateFrame};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum EventListenerError {
@@ -49,6 +49,30 @@ where
     Host::emit(T::id(), &bytes)
 }
 
+pub struct DeferredSend<'a, T>(&'a T);
+
+impl<'a, T> DeferredSend<'a, T> {
+    pub fn new(payload: &'a T) -> Self {
+        Self(payload)
+    }
+
+    pub fn send(self) -> Result<(), EventListenerError>
+    where
+        T: UiEvent
+            + for<'allocator> rkyv::Serialize<
+                rkyv::api::high::HighSerializer<
+                    rkyv::util::AlignedVec,
+                    rkyv::ser::allocator::ArenaHandle<'allocator>,
+                    rkyv::rancor::Error,
+                >,
+            >,
+    {
+        let bytes = rkyv::to_bytes::<rkyv::rancor::Error>(self.0)
+            .map_err(|_| EventListenerError::SerializePayload)?;
+        Host::emit_deferred(T::id(), &bytes)
+    }
+}
+
 impl Host {
     pub(crate) fn listen_state<T, F>(on_event: F) -> Result<(), EventListenerError>
     where
@@ -57,15 +81,24 @@ impl Host {
             + for<'a> rkyv::bytecheck::CheckBytes<
                 rkyv::api::high::HighValidator<'a, rkyv::rancor::Error>,
             >,
-        F: FnMut(T) + 'static,
+        UiStateFrame<T, T::Update>: rkyv::Archive,
+        <UiStateFrame<T, T::Update> as rkyv::Archive>::Archived:
+            rkyv::Deserialize<
+                    UiStateFrame<T, T::Update>,
+                    rkyv::api::high::HighDeserializer<rkyv::rancor::Error>,
+                > + for<'a> rkyv::bytecheck::CheckBytes<
+                    rkyv::api::high::HighValidator<'a, rkyv::rancor::Error>,
+                >,
+        F: FnMut(UiStateFrame<T, T::Update>) -> bool + 'static,
     {
         let mut on_event = on_event;
         Self::listen(
             T::id(),
             Box::new(move |bytes| {
-                if let Some(msg) = HostPayload::new(bytes).decode::<T>() {
-                    on_event(msg);
+                if let Some(msg) = HostPayload::new(bytes).decode::<UiStateFrame<T, T::Update>>() {
+                    return on_event(msg);
                 }
+                true
             }),
         )
     }

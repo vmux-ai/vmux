@@ -1,4 +1,4 @@
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
 use bevy::ecs::relationship::Relationship;
 use bevy::prelude::*;
@@ -24,7 +24,7 @@ use vmux_layout::pane::{PaneSplitDirection, SpawnCounter, SpawnSeq};
 #[cfg(test)]
 use vmux_layout::stack::Stack;
 use vmux_layout::tab::Tab;
-use vmux_setting::{AppSettings, StartupDir};
+use vmux_setting::AppSettings;
 #[cfg(test)]
 use vmux_setting::{TerminalSettings, TerminalTheme};
 
@@ -469,8 +469,8 @@ impl<'a> RunCommand<'a> {
         }
     }
 
-    fn for_new_terminal(&self, settings: &AppSettings) -> (AgentTerminalShell, Vec<u8>) {
-        let shell = AgentTerminalShell::configured(settings);
+    fn for_new_terminal(&self, settings: &AppSettings) -> (ConfiguredShell, Vec<u8>) {
+        let shell = ConfiguredShell::from_settings(settings);
         let input = self.input(shell.as_str(), PagerEnv::Set);
         (shell, input)
     }
@@ -518,26 +518,18 @@ fn command_with_marker(shell: &str, command: &str, token: &str, env: PagerEnv) -
 }
 
 #[derive(Clone, Debug)]
-pub struct AgentTerminalShell(String);
+struct ConfiguredShell(String);
 
-impl AgentTerminalShell {
-    pub fn configured(settings: &AppSettings) -> Self {
-        Self(
-            settings
-                .terminal
-                .as_ref()
-                .map(|t| t.resolve_theme(&t.default_theme).shell)
-                .unwrap_or_else(|| {
-                    std::env::var("SHELL").unwrap_or_else(|_| "/bin/zsh".to_string())
-                }),
-        )
+impl ConfiguredShell {
+    fn from_settings(settings: &AppSettings) -> Self {
+        Self(settings.shell())
     }
 
     fn as_str(&self) -> &str {
         &self.0
     }
 
-    pub fn into_string(self) -> String {
+    fn into_string(self) -> String {
         self.0
     }
 
@@ -571,37 +563,6 @@ impl RunPlacementPolicy {
         } else {
             Ok(())
         }
-    }
-}
-
-pub struct AgentCwd<'a> {
-    tab_cwd: Option<&'a str>,
-}
-
-impl<'a> AgentCwd<'a> {
-    pub fn from_tab(tab_cwd: Option<&'a str>) -> Self {
-        Self { tab_cwd }
-    }
-
-    pub fn stored(&self) -> Result<Option<PathBuf>, String> {
-        let Some(tab_cwd) = self.tab_cwd else {
-            return Ok(None);
-        };
-        StartupDir::from_tab(tab_cwd).map(|dir| Some(dir.path))
-    }
-
-    pub fn or_agent_launch(&self, agent_launch_cwd: Option<&str>) -> Result<PathBuf, String> {
-        if let Some(path) = self.stored()? {
-            return Ok(path);
-        }
-        if let Some(cwd) = agent_launch_cwd
-            && let Ok(cwd) = WorkspaceCwd::try_from(cwd)
-        {
-            return cwd
-                .into_path()
-                .ok_or_else(|| "agent project directory is missing".to_string());
-        }
-        Err("tab and agent project directories are missing".to_string())
     }
 }
 
@@ -642,7 +603,8 @@ pub(super) struct AgentRunContext<'w, 's> {
         ),
     >,
     terminals: RunTerminals<'w, 's>,
-    acp_sessions: Query<'w, 's, &'static vmux_session::AcpSession>,
+    session_targets: Query<'w, 's, &'static vmux_ecs::EntityTarget<vmux_session::Session>>,
+    sessions: Query<'w, 's, &'static vmux_ecs::Cwd, With<vmux_session::Session>>,
     panes: AgentPanes<'w, 's>,
     tabs: Query<'w, 's, &'static Tab>,
     next_pane_sequence: NextPaneSpawnSequence<'w, 's>,
@@ -673,8 +635,10 @@ impl AgentRunContext<'_, '_> {
         self.terminals.cwd(terminal).or_else(|| {
             let mut current = terminal;
             loop {
-                if let Ok(session) = self.acp_sessions.get(current) {
-                    return Some(session.cwd.to_string_lossy().into_owned());
+                if let Ok(target) = self.session_targets.get(current)
+                    && let Ok(cwd) = self.sessions.get(target.entity())
+                {
+                    return Some(cwd.0.to_string_lossy().into_owned());
                 }
                 current = self.panes.placement.child_of_q.get(current).ok()?.parent();
             }
@@ -743,9 +707,7 @@ fn run_agent_commands(
             };
             let tab_cwd = context.tab_cwd(agent_pane);
             let agent_cwd = context.agent_cwd(agent_terminal);
-            let cwd = match AgentCwd::from_tab(tab_cwd.as_deref())
-                .or_agent_launch(agent_cwd.as_deref())
-            {
+            let cwd = match WorkspaceCwd::resolve(tab_cwd.as_deref(), agent_cwd.as_deref()) {
                 Ok(cwd) => cwd,
                 Err(message) => break 'run AgentCommandResult::Error(message),
             };
@@ -884,6 +846,7 @@ fn run_agent_commands(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::path::PathBuf;
     use vmux_layout::settings::{
         FocusRingSettings, LayoutSettings, PaneSettings, SideSheetSettings, WindowSettings,
     };
@@ -997,9 +960,11 @@ mod tests {
         std::fs::create_dir_all(&agent_dir).unwrap();
         let canonical_tab_dir = tab_dir.canonicalize().unwrap();
         assert_eq!(
-            AgentCwd::from_tab(Some(tab_dir.to_string_lossy().as_ref()))
-                .or_agent_launch(Some(agent_dir.to_string_lossy().as_ref()))
-                .unwrap(),
+            WorkspaceCwd::resolve(
+                Some(tab_dir.to_string_lossy().as_ref()),
+                Some(agent_dir.to_string_lossy().as_ref()),
+            )
+            .unwrap(),
             canonical_tab_dir
         );
         let _ = std::fs::remove_dir_all(&agent_dir);
@@ -1038,17 +1003,15 @@ mod tests {
     fn run_terminal_cwd_inherits_agent_launch_dir() {
         let dir = std::env::temp_dir().join(format!("vmux-run-cwd-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
-        let got = AgentCwd::from_tab(None)
-            .or_agent_launch(Some(&dir.to_string_lossy()))
-            .unwrap();
+        let got = WorkspaceCwd::resolve(None, Some(&dir.to_string_lossy())).unwrap();
         let _ = std::fs::remove_dir_all(&dir);
         assert_eq!(got, dir);
     }
 
     #[test]
     fn run_terminal_cwd_requires_tab_or_agent_workspace() {
-        assert!(AgentCwd::from_tab(None).or_agent_launch(Some("")).is_err());
-        assert!(AgentCwd::from_tab(None).or_agent_launch(None).is_err());
+        assert!(WorkspaceCwd::resolve(None, Some("")).is_err());
+        assert!(WorkspaceCwd::resolve(None, None).is_err());
     }
 
     #[test]
@@ -1056,15 +1019,13 @@ mod tests {
         let agent_dir = std::env::temp_dir();
 
         assert!(
-            AgentCwd::from_tab(Some("/no/such/vmux-tab-workspace"))
-                .or_agent_launch(agent_dir.to_str())
-                .is_err()
+            WorkspaceCwd::resolve(Some("/no/such/vmux-tab-workspace"), agent_dir.to_str()).is_err()
         );
     }
 
     #[test]
     fn run_terminal_cwd_rejects_relative_stored_tab_directory() {
-        assert!(AgentCwd::from_tab(Some(".")).or_agent_launch(None).is_err());
+        assert!(WorkspaceCwd::resolve(Some("."), None).is_err());
     }
 
     #[test]
@@ -1167,7 +1128,7 @@ mod tests {
         let shell = "/definitely/missing/vmux-terminal-shell";
 
         assert_eq!(
-            AgentTerminalShell(shell.to_string()).validate(),
+            ConfiguredShell(shell.to_string()).validate(),
             Err(format!(
                 "terminal shell not found or not executable: {shell}"
             ))

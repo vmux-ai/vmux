@@ -1,4 +1,5 @@
 use crate::cn::cn;
+use crate::components::popup::Dismissal;
 use dioxus::prelude::*;
 use dioxus_primitives::dialog::{
     self, DialogContentProps, DialogDescriptionProps, DialogRootProps, DialogTitleProps,
@@ -14,14 +15,17 @@ const DIALOG_DESC: &str = "m-0 text-base text-muted-foreground";
 
 #[component]
 pub fn DialogRoot(props: DialogRootProps) -> Element {
+    let (open, on_open_change) =
+        Dismissal::use_open(props.open, props.default_open, props.on_open_change);
+    let controlled = use_memo(move || Some(open()));
     rsx! {
         dialog::DialogRoot {
             class: DIALOG_ROOT,
             id: props.id,
             is_modal: props.is_modal,
-            open: props.open,
+            open: controlled,
             default_open: props.default_open,
-            on_open_change: props.on_open_change,
+            on_open_change,
             attributes: props.attributes,
             {props.children}
         }

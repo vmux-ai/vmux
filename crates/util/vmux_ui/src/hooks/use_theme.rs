@@ -14,6 +14,10 @@ pub fn use_theme() -> Signal<String> {
             return;
         }
         Host::set_root_radius(data.radius);
+        let scheme = data.scheme.as_str();
+        Host::run_script(format!(
+            "document.documentElement.dataset.theme='{scheme}';document.documentElement.style.colorScheme='{scheme}';"
+        ));
         let resolved = Locale::from(data.locale.as_str());
         if let Some(catalog) = data.catalog.as_deref() {
             let _ = resolved.register_catalog(catalog);

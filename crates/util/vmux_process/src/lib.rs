@@ -1,4 +1,5 @@
 pub use driver::*;
+pub use login_shell::*;
 pub use plugin::*;
 pub use runtime_driver::*;
 pub use service::*;
@@ -8,13 +9,14 @@ pub use service_driver::*;
 pub use manager::*;
 
 mod driver;
+mod login_shell;
 #[cfg(any(test, feature = "test-support"))]
 mod manager;
-mod osc133;
 mod plugin;
 mod render;
 mod run_marker;
 mod runtime_driver;
 mod service;
 mod service_driver;
+mod shell_events;
 mod shell_integration;

@@ -1,7 +1,17 @@
+#[vmux_api::contract(Copy, Eq)]
+pub enum GitCatalog {
+    LocalBranches,
+    RemoteBranches,
+    Tags,
+    Commits,
+    Stashes,
+}
+
 #[vmux_api::contract(Eq)]
 pub struct StyledSpan {
     pub text: String,
-    pub fg: [u8; 3],
+    pub light_fg: [u8; 3],
+    pub dark_fg: [u8; 3],
     pub bold: bool,
     pub italic: bool,
 }
@@ -13,6 +23,16 @@ pub struct DiffLine {
     pub new_no: Option<u32>,
     pub hunk: Option<u32>,
     pub spans: Vec<StyledSpan>,
+}
+
+impl DiffLine {
+    pub fn file_path(&self) -> Option<&str> {
+        if self.kind != DiffKind::Hunk || self.hunk.is_some() {
+            return None;
+        }
+        let text = self.spans.first()?.text.as_str();
+        (!text.starts_with("@@")).then_some(text)
+    }
 }
 
 #[vmux_api::contract(Copy, Eq, Default)]
@@ -66,11 +86,37 @@ pub struct GitLineMarker {
 #[vmux_api::contract(Eq)]
 pub struct GitDiffViewport {
     pub generation: u64,
+    pub revision: u64,
     pub first_line: u32,
     pub total_lines: u32,
+    pub has_more: bool,
     pub lines: Vec<DiffLine>,
     pub markers: Vec<GitLineMarker>,
     pub error: String,
+}
+
+impl GitDiffViewport {
+    pub fn can_append(&self, next: &Self) -> bool {
+        let loaded = self
+            .first_line
+            .saturating_add(u32::try_from(self.lines.len()).unwrap_or(u32::MAX));
+        self.generation == next.generation && next.first_line == loaded
+    }
+
+    pub fn append(&mut self, next: &Self) -> bool {
+        if !self.can_append(next) {
+            return false;
+        }
+        self.revision = next.revision;
+        self.total_lines = next.total_lines;
+        self.has_more = next.has_more;
+        self.lines.extend(next.lines.clone());
+        self.markers.extend(next.markers.clone());
+        self.markers.sort_by_key(|marker| marker.line);
+        self.markers.dedup();
+        self.error.clone_from(&next.error);
+        true
+    }
 }
 
 #[vmux_api::contract(Copy, Eq)]
@@ -84,6 +130,22 @@ pub enum GitDiffRow {
     },
 }
 
+impl GitDiffRow {
+    pub fn start(self) -> u32 {
+        match self {
+            Self::Line(index) => index,
+            Self::Gap { start, .. } => start,
+        }
+    }
+
+    pub fn end(self) -> u32 {
+        match self {
+            Self::Line(index) => index.saturating_add(1),
+            Self::Gap { end, .. } => end,
+        }
+    }
+}
+
 #[vmux_api::contract(Eq)]
 pub struct GitOperationResult {
     pub operation: String,
@@ -92,11 +154,20 @@ pub struct GitOperationResult {
 }
 
 #[vmux_api::contract(Eq, Default)]
+pub struct FileGitBranch {
+    pub name: String,
+    pub checkout: String,
+}
+
+#[vmux_api::contract(Eq, Default)]
 pub struct FileGitState {
     pub path: String,
     pub repo_root: String,
     pub has_diff: bool,
     pub branch: String,
+    pub branches: Vec<FileGitBranch>,
+    pub branches_loading: bool,
+    pub branches_loaded: bool,
     pub ahead: u32,
     pub behind: u32,
     pub staged_count: u32,
@@ -129,7 +200,8 @@ mod tests {
             hunk: Some(2),
             spans: vec![StyledSpan {
                 text: "x".into(),
-                fg: [1, 2, 3],
+                light_fg: [1, 2, 3],
+                dark_fg: [4, 5, 6],
                 bold: false,
                 italic: false,
             }],

@@ -1,14 +1,16 @@
 use crate::cef_state::{MediaPermissionSender, WebviewCefStateSender};
 use crate::common::{
-    BinIpcEventRawSender, HostWindow, IpcEventRawSender, ResolvedWebviewUri, SnapshotResultSender,
-    WebviewMaxFrameRate, WebviewNativeLiquidGlass, WebviewOpaqueWindowedBackground, WebviewSize,
-    WebviewSource, WebviewTransparent, WebviewWindowed, WebviewWindowedNativeFocus,
+    BinIpcEventRawSender, HistorySwipeEventSender, HostWindow, IpcEventRawSender,
+    ResolvedWebviewUri, SnapshotResultSender, WebviewMaxFrameRate, WebviewNativeLiquidGlass,
+    WebviewOpaqueWindowedBackground, WebviewSize, WebviewSource, WebviewTransparent,
+    WebviewWindowed, WebviewWindowedNativeFocus,
 };
 use crate::cursor_icon::SystemCursorIconSender;
 use crate::loading_state::{WebviewCommittedNavigationSender, WebviewLoadingStateSender};
 use crate::popup_state::WebviewPopupSender;
 use crate::prelude::PreloadScripts;
 use crate::prelude::PrivatePreloadScripts;
+use crate::renderer_state::WebviewRendererTerminatedSender;
 use bevy::ecs::lifecycle::HookContext;
 use bevy::ecs::world::DeferredWorld;
 use bevy::prelude::*;
@@ -130,6 +132,7 @@ impl Plugin for WebviewPlugin {
                     create_webview,
                     navigate_on_source_change,
                 )
+                    .chain()
                     .run_if(not(on_message::<AppExit>))
                     .in_set(CefSystems::CreateAndResize),
             )
@@ -233,10 +236,22 @@ fn shared_texture_enabled(windowed: bool) -> bool {
     !windowed
 }
 
+fn opaque_windowed_background_color(mode: CefColorMode) -> u32 {
+    match mode {
+        CefColorMode::Light => 0xFFF0F0F0,
+        CefColorMode::Dark | CefColorMode::System => 0xFF141414,
+    }
+}
+
 #[allow(clippy::too_many_arguments)]
 fn create_webview(
+    mut commands: Commands,
     mut browsers: NonSendMut<Browsers>,
-    cef_settings: (Res<CefDiskProfileRoot>, Res<CefAcceptLanguageList>),
+    cef_settings: (
+        Res<CefDiskProfileRoot>,
+        Res<CefAcceptLanguageList>,
+        Res<CefColorScheme>,
+    ),
     requester: Res<Requester>,
     ipc_event_sender: Res<IpcEventRawSender>,
     bin_ipc_event_sender: Res<BinIpcEventRawSender>,
@@ -247,7 +262,9 @@ fn create_webview(
     cef_senders: (
         Res<WebviewCefStateSender>,
         Res<MediaPermissionSender>,
+        Res<WebviewRendererTerminatedSender>,
         Option<Res<crate::common::CefShutdownState>>,
+        Res<HistorySwipeEventSender>,
     ),
     popup_sender: Res<WebviewPopupSender>,
     render_callbacks: Res<TextureWakeCallback>,
@@ -265,13 +282,14 @@ fn create_webview(
             Has<WebviewNativeLiquidGlass>,
             Has<WebviewOpaqueWindowedBackground>,
             Has<WebviewWindowedNativeFocus>,
+            Has<BinIpcBlocked>,
         ),
         With<ResolvedWebviewUri>,
     >,
     windows: Query<&Window>,
     primary_window: Query<Entity, With<PrimaryWindow>>,
 ) {
-    if cef_senders.2.is_some_and(|state| state.started()) {
+    if cef_senders.3.is_some_and(|state| state.started()) {
         return;
     }
     WINIT_WINDOWS.with(|winit_windows| {
@@ -289,6 +307,7 @@ fn create_webview(
             native_liquid_glass,
             opaque_windowed_background,
             windowed_native_focus,
+            bin_ipc_blocked,
         ) in webviews.iter()
         {
             if browsers.has_browser(entity) {
@@ -337,6 +356,7 @@ fn create_webview(
                 requester.clone(),
                 ipc_event_sender.0.clone(),
                 bin_ipc_event_sender.0.clone(),
+                cef_senders.4.0.clone(),
                 snapshot_result_sender.0.clone(),
                 cursor_icon_sender.clone(),
                 loading_state_sender.0.clone(),
@@ -344,13 +364,14 @@ fn create_webview(
                 cef_senders.0.0.clone(),
                 cef_senders.1.0.clone(),
                 popup_sender.0.clone(),
+                cef_senders.2.0.clone(),
                 render_callbacks.0.clone(),
                 &initialize_scripts,
                 host_window,
                 cef_settings.0.0.as_deref(),
                 &cef_settings.1.0,
                 if windowed && opaque_windowed_background {
-                    Some(0xFF212124)
+                    Some(opaque_windowed_background_color(cef_settings.2.0))
                 } else if transparent {
                     Some(0x00000000)
                 } else {
@@ -361,7 +382,14 @@ fn create_webview(
                 shared_texture_enabled(windowed),
                 native_liquid_glass,
                 windowed && windowed_native_focus,
+                bin_ipc_blocked,
             );
+            if let Some((generation, revision, _)) = browsers.bin_ipc_context(&entity) {
+                commands.entity(entity).insert((
+                    BinIpcSurfaceGeneration(generation),
+                    BinIpcNavigationRevision(revision),
+                ));
+            }
         }
     });
 }
@@ -370,12 +398,18 @@ fn navigate_on_source_change(
     browsers: NonSend<Browsers>,
     webviews: Query<(Entity, &ResolvedWebviewUri), Changed<ResolvedWebviewUri>>,
     added: Query<Entity, Added<ResolvedWebviewUri>>,
+    mut commands: Commands,
 ) {
     for (entity, uri) in webviews.iter() {
         if added.contains(entity) {
             continue;
         }
-        browsers.navigate(&entity, &uri.0);
+        if let Some((generation, revision)) = browsers.navigate(&entity, &uri.0) {
+            commands.entity(entity).insert((
+                BinIpcSurfaceGeneration(generation),
+                BinIpcNavigationRevision(revision),
+            ));
+        }
     }
 }
 
@@ -425,5 +459,21 @@ mod tests {
     fn shared_textures_feed_every_windowless_webview() {
         assert!(shared_texture_enabled(false));
         assert!(!shared_texture_enabled(true));
+    }
+
+    #[test]
+    fn opaque_windowed_background_follows_the_resolved_scheme() {
+        assert_eq!(
+            opaque_windowed_background_color(CefColorMode::Light),
+            0xFFF0F0F0
+        );
+        assert_eq!(
+            opaque_windowed_background_color(CefColorMode::Dark),
+            0xFF141414
+        );
+        assert_eq!(
+            opaque_windowed_background_color(CefColorMode::System),
+            0xFF141414
+        );
     }
 }

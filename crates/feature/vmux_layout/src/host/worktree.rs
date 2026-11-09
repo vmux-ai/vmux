@@ -1,6 +1,7 @@
 use std::{
     collections::HashMap,
     path::{Path, PathBuf},
+    sync::{Arc, Mutex, MutexGuard, OnceLock, mpsc},
     time::SystemTime,
 };
 
@@ -8,7 +9,7 @@ use std::{
 use std::os::unix::{ffi::OsStrExt, fs::MetadataExt};
 
 use bevy::prelude::*;
-use bevy::tasks::{IoTaskPool, Task, futures_lite::future};
+use bevy::winit::{EventLoopProxy, WinitUserEvent};
 use sha2::{Digest, Sha256};
 
 use crate::tab::{Tab, TabWorkspace, TabWorktree, TabWorktreeUnavailable};
@@ -18,6 +19,7 @@ use vmux_git::worktree::{self, CheckoutInfo};
 impl Plugin for WorktreePlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<ManagedWorktreeRoot>()
+            .init_resource::<vmux_git::GitRuntime>()
             .add_message::<TabDirectoryObserved>()
             .add_systems(
                 Update,
@@ -61,6 +63,95 @@ pub struct TabWorktreeActivation {
     pub ready: TabWorktreeReady,
 }
 
+pub(crate) struct TabWorktreeCheckout {
+    activation: Option<TabWorktreeActivation>,
+    cleanup: Option<ManagedCheckoutCleanup>,
+}
+
+pub(crate) struct ManagedCheckoutCleanup {
+    checkout: CheckoutInfo,
+    path: PathBuf,
+    branch: String,
+    delete_branch: bool,
+    lease: Arc<ManagedCheckoutLease>,
+    token: u64,
+    armed: bool,
+}
+
+struct ManagedCheckoutDiscard {
+    checkout: CheckoutInfo,
+    path: PathBuf,
+    branch: String,
+    delete_branch: bool,
+    lease: Arc<ManagedCheckoutLease>,
+    token: u64,
+}
+
+struct ManagedCheckoutDiscardQueue {
+    pending: Arc<Mutex<HashMap<(PathBuf, u64), ManagedCheckoutDiscard>>>,
+    wake: mpsc::SyncSender<()>,
+    active: bool,
+}
+
+#[derive(Default)]
+struct ManagedCheckoutRegistry {
+    owners: HashMap<PathBuf, ManagedCheckoutOwner>,
+}
+
+#[derive(Clone)]
+struct ManagedCheckoutOwner {
+    lease: Arc<ManagedCheckoutLease>,
+    token: u64,
+}
+
+struct ManagedCheckoutLease {
+    state: Mutex<ManagedCheckoutLeaseState>,
+}
+
+struct ManagedCheckoutLeaseState {
+    phase: ManagedCheckoutLeasePhase,
+    token: u64,
+    waiters: Vec<EventLoopProxy<WinitUserEvent>>,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum ManagedCheckoutLeasePhase {
+    Pending,
+    Cleaning,
+    Claimed,
+    Finished,
+}
+
+enum ManagedCheckoutClaim {
+    Adopted {
+        lease: Arc<ManagedCheckoutLease>,
+        token: u64,
+    },
+    Busy(ManagedCheckoutWait),
+    Unmanaged,
+}
+
+enum ManagedCheckoutTransfer {
+    Adopted(u64),
+    Busy,
+    Stale,
+}
+
+pub(crate) enum TabWorktreeCheckoutResult {
+    Ready(Box<TabWorktreeCheckout>),
+    Retry(ManagedCheckoutWait),
+}
+
+impl TabWorktreeCheckoutResult {
+    fn ready(checkout: TabWorktreeCheckout) -> Self {
+        Self::Ready(Box::new(checkout))
+    }
+}
+
+pub(crate) struct ManagedCheckoutWait {
+    lease: Arc<ManagedCheckoutLease>,
+}
+
 #[derive(Component, Clone, Debug)]
 pub struct TabWorktreeReady {
     startup_dir: String,
@@ -79,7 +170,7 @@ struct TabWorktreeTask {
     startup_dir: Option<String>,
     workspace: TabWorkspace,
     metadata: TabWorktree,
-    task: Task<Result<TabWorktreeActivation, String>>,
+    task: vmux_git::GitTask<Result<TabWorktreeActivation, String>>,
 }
 
 #[derive(Component, Clone, Copy)]
@@ -331,7 +422,7 @@ impl TabWorktreeActivation {
             .map_err(|error| error.0)?;
         let activation = Self::activate_added_worktree(base_dir, checkout, relative_dir, &info);
         if activation.is_err() {
-            let _ = checkout.remove_worktree(&info.path, &info.branch, false);
+            let _ = checkout.discard_worktree(&info.path, &info.branch, true);
         }
         activation
     }
@@ -409,11 +500,11 @@ impl TabWorktreeActivation {
         )
     }
 
-    pub fn checkout_branch(
+    pub(crate) fn checkout_branch(
         base_dir: &Path,
         branch: &str,
         managed_root: &Path,
-    ) -> Result<Self, String> {
+    ) -> Result<TabWorktreeCheckoutResult, String> {
         let base_dir = base_dir
             .canonicalize()
             .map_err(|error| format!("invalid project directory: {error}"))?;
@@ -424,32 +515,67 @@ impl TabWorktreeActivation {
         let relative_dir = base_dir
             .strip_prefix(&checkout.root)
             .map_err(|_| "project directory is outside its checkout".to_string())?;
-        if let Some(registration) = checkout
-            .worktree_registrations()
-            .map_err(|error| error.0)?
-            .into_iter()
-            .find(|registration| registration.branch.as_deref() == Some(branch))
-        {
-            let info = worktree::WorktreeInfo {
-                path: registration.path,
-                branch: branch.to_string(),
-                base_ref: worktree::BaseRef::resolve(&checkout.root)
-                    .map(|base| base.branch().to_string())
-                    .unwrap_or_default(),
-                repo_root: checkout.root.clone(),
-            };
-            return Self::activate_added_worktree(&base_dir, &checkout, relative_dir, &info);
-        }
         let base_ref = worktree::BaseRef::resolve(&checkout.root)
             .map(|base| base.branch().to_string())
             .unwrap_or_default();
-        let checkout_dir = Self::plan_existing_worktree_path(&checkout, managed_root, branch);
-        let checkout_dir =
-            Self::prepare_managed_destination(managed_root, &checkout, &checkout_dir)?;
-        let info = checkout
-            .add_existing_worktree(&checkout_dir, branch, &base_ref)
-            .map_err(|error| error.0)?;
-        Self::activate_added_worktree(&base_dir, &checkout, relative_dir, &info)
+        let mut pruned_missing_registration = false;
+        loop {
+            if let Some(registration) = checkout
+                .worktree_registrations()
+                .map_err(|error| error.0)?
+                .into_iter()
+                .find(|registration| registration.branch.as_deref() == Some(branch))
+            {
+                if !registration.path.is_dir() {
+                    if pruned_missing_registration {
+                        return Err(format!(
+                            "branch {branch} is registered to a missing worktree: {}",
+                            registration.path.display()
+                        ));
+                    }
+                    checkout.prune_worktrees().map_err(|error| error.0)?;
+                    pruned_missing_registration = true;
+                    continue;
+                }
+                let info = worktree::WorktreeInfo {
+                    path: registration.path,
+                    branch: branch.to_string(),
+                    base_ref: base_ref.clone(),
+                    repo_root: checkout.root.clone(),
+                };
+                let cleanup = match ManagedCheckoutRegistry::claim(&info.path) {
+                    ManagedCheckoutClaim::Adopted { lease, token } => Some(
+                        ManagedCheckoutCleanup::adopt(checkout.clone(), &info, false, lease, token),
+                    ),
+                    ManagedCheckoutClaim::Busy(wait) => {
+                        return Ok(TabWorktreeCheckoutResult::Retry(wait));
+                    }
+                    ManagedCheckoutClaim::Unmanaged => None,
+                };
+                let activation =
+                    Self::activate_added_worktree(&base_dir, &checkout, relative_dir, &info)?;
+                let checkout = match cleanup {
+                    Some(cleanup) => TabWorktreeCheckout::created(activation, cleanup),
+                    None => TabWorktreeCheckout::existing(activation),
+                };
+                return Ok(TabWorktreeCheckoutResult::ready(checkout));
+            }
+            let checkout_dir = Self::plan_existing_worktree_path(&checkout, managed_root, branch);
+            if let Some(wait) = ManagedCheckoutRegistry::wait(&checkout_dir) {
+                return Ok(TabWorktreeCheckoutResult::Retry(wait));
+            }
+            let checkout_dir =
+                Self::prepare_managed_destination(managed_root, &checkout, &checkout_dir)?;
+            let info = checkout
+                .add_existing_worktree(&checkout_dir, branch, &base_ref)
+                .map_err(|error| error.0)?;
+            let cleanup = ManagedCheckoutCleanup::new(checkout.clone(), &info, false);
+            let activation =
+                Self::activate_added_worktree(&base_dir, &checkout, relative_dir, &info)?;
+            return Ok(TabWorktreeCheckoutResult::ready(
+                TabWorktreeCheckout::created(activation, cleanup),
+            ));
+        }
     }
 
     pub fn restore(
@@ -525,6 +651,369 @@ impl TabWorktreeActivation {
     }
 }
 
+impl TabWorktreeCheckout {
+    fn existing(activation: TabWorktreeActivation) -> Self {
+        Self {
+            activation: Some(activation),
+            cleanup: None,
+        }
+    }
+
+    fn created(activation: TabWorktreeActivation, cleanup: ManagedCheckoutCleanup) -> Self {
+        Self {
+            activation: Some(activation),
+            cleanup: Some(cleanup),
+        }
+    }
+
+    pub(crate) fn into_parts(mut self) -> (TabWorktreeActivation, Option<ManagedCheckoutCleanup>) {
+        (
+            self.activation
+                .take()
+                .expect("worktree activation available"),
+            self.cleanup.take(),
+        )
+    }
+}
+
+impl ManagedCheckoutCleanup {
+    fn new(checkout: CheckoutInfo, info: &worktree::WorktreeInfo, delete_branch: bool) -> Self {
+        let owner = ManagedCheckoutRegistry::reserve(&info.path);
+        Self {
+            checkout,
+            path: info.path.clone(),
+            branch: info.branch.clone(),
+            delete_branch,
+            lease: owner.lease,
+            token: owner.token,
+            armed: true,
+        }
+    }
+
+    fn adopt(
+        checkout: CheckoutInfo,
+        info: &worktree::WorktreeInfo,
+        delete_branch: bool,
+        lease: Arc<ManagedCheckoutLease>,
+        token: u64,
+    ) -> Self {
+        Self {
+            checkout,
+            path: info.path.clone(),
+            branch: info.branch.clone(),
+            delete_branch,
+            lease,
+            token,
+            armed: true,
+        }
+    }
+
+    pub(crate) fn path(&self) -> &Path {
+        &self.path
+    }
+
+    pub(crate) fn branch(&self) -> &str {
+        &self.branch
+    }
+
+    pub(crate) fn commit(&mut self) {
+        if !self.armed {
+            return;
+        }
+        self.lease.commit(self.token);
+        ManagedCheckoutRegistry::release(&self.path, &self.lease, self.token);
+        self.armed = false;
+    }
+
+    #[cfg(test)]
+    fn discard_now(mut self) {
+        if !self.armed {
+            return;
+        }
+        self.armed = false;
+        ManagedCheckoutDiscard {
+            checkout: self.checkout.clone(),
+            path: self.path.clone(),
+            branch: self.branch.clone(),
+            delete_branch: self.delete_branch,
+            lease: Arc::clone(&self.lease),
+            token: self.token,
+        }
+        .run();
+    }
+}
+
+impl ManagedCheckoutRegistry {
+    fn lock() -> MutexGuard<'static, Self> {
+        static REGISTRY: OnceLock<Mutex<ManagedCheckoutRegistry>> = OnceLock::new();
+        let registry = REGISTRY.get_or_init(|| Mutex::new(Self::default()));
+        match registry.lock() {
+            Ok(registry) => registry,
+            Err(poisoned) => poisoned.into_inner(),
+        }
+    }
+
+    fn reserve(path: &Path) -> ManagedCheckoutOwner {
+        let lease = Arc::new(ManagedCheckoutLease::new());
+        let owner = ManagedCheckoutOwner { lease, token: 1 };
+        Self::lock()
+            .owners
+            .insert(path.to_path_buf(), owner.clone());
+        owner
+    }
+
+    fn wait(path: &Path) -> Option<ManagedCheckoutWait> {
+        Self::lock()
+            .owners
+            .get(path)
+            .map(|owner| ManagedCheckoutWait {
+                lease: Arc::clone(&owner.lease),
+            })
+    }
+
+    fn claim(path: &Path) -> ManagedCheckoutClaim {
+        let mut registry = Self::lock();
+        let Some(owner) = registry.owners.get(path).cloned() else {
+            return ManagedCheckoutClaim::Unmanaged;
+        };
+        match owner.lease.transfer(owner.token) {
+            ManagedCheckoutTransfer::Adopted(token) => {
+                if let Some(held) = registry.owners.get_mut(path)
+                    && Arc::ptr_eq(&held.lease, &owner.lease)
+                    && held.token == owner.token
+                {
+                    held.token = token;
+                }
+                ManagedCheckoutClaim::Adopted {
+                    lease: owner.lease,
+                    token,
+                }
+            }
+            ManagedCheckoutTransfer::Busy => {
+                ManagedCheckoutClaim::Busy(ManagedCheckoutWait { lease: owner.lease })
+            }
+            ManagedCheckoutTransfer::Stale => {
+                registry.owners.remove(path);
+                ManagedCheckoutClaim::Unmanaged
+            }
+        }
+    }
+
+    fn release(path: &Path, lease: &Arc<ManagedCheckoutLease>, token: u64) {
+        let mut registry = Self::lock();
+        let owned = registry
+            .owners
+            .get(path)
+            .is_some_and(|held| Arc::ptr_eq(&held.lease, lease) && held.token == token);
+        if owned {
+            registry.owners.remove(path);
+        }
+    }
+}
+
+impl ManagedCheckoutLease {
+    fn new() -> Self {
+        Self {
+            state: Mutex::new(ManagedCheckoutLeaseState {
+                phase: ManagedCheckoutLeasePhase::Pending,
+                token: 1,
+                waiters: Vec::new(),
+            }),
+        }
+    }
+
+    fn lock(&self) -> MutexGuard<'_, ManagedCheckoutLeaseState> {
+        match self.state.lock() {
+            Ok(state) => state,
+            Err(poisoned) => poisoned.into_inner(),
+        }
+    }
+
+    fn transfer(&self, token: u64) -> ManagedCheckoutTransfer {
+        let mut state = self.lock();
+        if state.token != token {
+            return ManagedCheckoutTransfer::Stale;
+        }
+        match state.phase {
+            ManagedCheckoutLeasePhase::Pending => {
+                state.token = state.token.wrapping_add(1).max(1);
+                ManagedCheckoutTransfer::Adopted(state.token)
+            }
+            ManagedCheckoutLeasePhase::Cleaning => ManagedCheckoutTransfer::Busy,
+            ManagedCheckoutLeasePhase::Claimed | ManagedCheckoutLeasePhase::Finished => {
+                ManagedCheckoutTransfer::Stale
+            }
+        }
+    }
+
+    fn commit(&self, token: u64) {
+        let mut state = self.lock();
+        if state.token != token {
+            return;
+        }
+        if state.phase != ManagedCheckoutLeasePhase::Pending {
+            return;
+        }
+        state.phase = ManagedCheckoutLeasePhase::Claimed;
+        let waiters = std::mem::take(&mut state.waiters);
+        drop(state);
+        for wake in waiters {
+            let _ = wake.send_event(WinitUserEvent::WakeUp);
+        }
+    }
+
+    fn begin_cleanup(&self, token: u64) -> bool {
+        let mut state = self.lock();
+        if state.token != token || state.phase != ManagedCheckoutLeasePhase::Pending {
+            return false;
+        }
+        state.phase = ManagedCheckoutLeasePhase::Cleaning;
+        true
+    }
+
+    fn finish_cleanup(&self, token: u64) {
+        let mut state = self.lock();
+        if state.token != token || state.phase != ManagedCheckoutLeasePhase::Cleaning {
+            return;
+        }
+        state.phase = ManagedCheckoutLeasePhase::Finished;
+        let waiters = std::mem::take(&mut state.waiters);
+        drop(state);
+        for wake in waiters {
+            let _ = wake.send_event(WinitUserEvent::WakeUp);
+        }
+    }
+}
+
+impl ManagedCheckoutWait {
+    pub(crate) fn is_ready(&self) -> bool {
+        matches!(
+            self.lease.lock().phase,
+            ManagedCheckoutLeasePhase::Claimed | ManagedCheckoutLeasePhase::Finished
+        )
+    }
+
+    pub(crate) fn subscribe(&self, wake: Option<EventLoopProxy<WinitUserEvent>>) {
+        let Some(wake) = wake else {
+            return;
+        };
+        let mut state = self.lease.lock();
+        if matches!(
+            state.phase,
+            ManagedCheckoutLeasePhase::Pending | ManagedCheckoutLeasePhase::Cleaning
+        ) {
+            if state.waiters.is_empty() {
+                state.waiters.push(wake);
+            }
+            return;
+        }
+        drop(state);
+        let _ = wake.send_event(WinitUserEvent::WakeUp);
+    }
+}
+
+impl ManagedCheckoutDiscard {
+    fn enqueue(self) {
+        ManagedCheckoutDiscardQueue::shared().enqueue(self);
+    }
+
+    fn run(self) {
+        if !self.lease.begin_cleanup(self.token) {
+            ManagedCheckoutRegistry::release(&self.path, &self.lease, self.token);
+            return;
+        }
+        let _ = self
+            .checkout
+            .discard_worktree(&self.path, &self.branch, self.delete_branch);
+        self.lease.finish_cleanup(self.token);
+        ManagedCheckoutRegistry::release(&self.path, &self.lease, self.token);
+    }
+
+    fn abandon(self) {
+        self.lease.commit(self.token);
+        ManagedCheckoutRegistry::release(&self.path, &self.lease, self.token);
+    }
+}
+
+impl ManagedCheckoutDiscardQueue {
+    const CAPACITY: usize = 64;
+
+    fn shared() -> &'static Self {
+        static QUEUE: OnceLock<ManagedCheckoutDiscardQueue> = OnceLock::new();
+        QUEUE.get_or_init(|| {
+            let pending = Arc::new(Mutex::new(
+                HashMap::<(PathBuf, u64), ManagedCheckoutDiscard>::new(),
+            ));
+            let worker_pending = Arc::clone(&pending);
+            let (wake, receiver) = mpsc::sync_channel::<()>(1);
+            let active = std::thread::Builder::new()
+                .name("vmux-worktree-cleanup".to_string())
+                .spawn(move || {
+                    while receiver.recv().is_ok() {
+                        loop {
+                            let cleanup = {
+                                let mut pending = match worker_pending.lock() {
+                                    Ok(pending) => pending,
+                                    Err(poisoned) => poisoned.into_inner(),
+                                };
+                                let key = pending.keys().next().cloned();
+                                key.and_then(|key| pending.remove(&key))
+                            };
+                            let Some(cleanup) = cleanup else {
+                                break;
+                            };
+                            cleanup.run();
+                        }
+                    }
+                })
+                .is_ok();
+            Self {
+                pending,
+                wake,
+                active,
+            }
+        })
+    }
+
+    fn enqueue(&self, cleanup: ManagedCheckoutDiscard) {
+        if !self.active {
+            cleanup.abandon();
+            return;
+        }
+        let key = (cleanup.path.clone(), cleanup.token);
+        let mut pending = match self.pending.lock() {
+            Ok(pending) => pending,
+            Err(poisoned) => poisoned.into_inner(),
+        };
+        if pending.len() >= Self::CAPACITY && !pending.contains_key(&key) {
+            drop(pending);
+            cleanup.abandon();
+            return;
+        }
+        pending.insert(key, cleanup);
+        drop(pending);
+        let _ = self.wake.try_send(());
+    }
+}
+
+impl Drop for ManagedCheckoutCleanup {
+    fn drop(&mut self) {
+        if !self.armed {
+            return;
+        }
+        self.armed = false;
+        ManagedCheckoutDiscard {
+            checkout: self.checkout.clone(),
+            path: self.path.clone(),
+            branch: self.branch.clone(),
+            delete_branch: self.delete_branch,
+            lease: Arc::clone(&self.lease),
+            token: self.token,
+        }
+        .enqueue();
+    }
+}
+
 fn ensure_tab_workspaces(
     tabs: Query<(Entity, &Tab, Option<&TabWorktree>), Without<TabWorkspace>>,
     mut commands: Commands,
@@ -562,6 +1051,7 @@ fn start_reconcile(
     running: Query<(), With<TabWorktreeTask>>,
     tabs: Query<(&Tab, &TabWorkspace, &TabWorktree), Without<TabWorktreeReady>>,
     managed_root: Res<ManagedWorktreeRoot>,
+    runtime: Res<vmux_git::GitRuntime>,
     proxy: Option<Res<bevy::winit::EventLoopProxyWrapper>>,
     mut commands: Commands,
 ) {
@@ -584,14 +1074,11 @@ fn start_reconcile(
         let task_metadata = metadata.clone();
         let root = managed_root.0.clone();
         let wake = proxy.as_deref().map(|proxy| (**proxy).clone());
-        let task = IoTaskPool::get().spawn(async move {
-            let result =
-                TabWorktreeActivation::restore(&tab, &task_workspace, &task_metadata, &root);
-            if let Some(wake) = wake {
-                let _ = wake.send_event(bevy::winit::WinitUserEvent::WakeUp);
-            }
-            result
-        });
+        let Some(task) = runtime.spawn_operation(wake, move || {
+            TabWorktreeActivation::restore(&tab, &task_workspace, &task_metadata, &root)
+        }) else {
+            return;
+        };
         commands.entity(entity).insert(TabWorktreeTask {
             startup_dir,
             workspace,
@@ -608,9 +1095,10 @@ fn finish_reconcile(
     mut commands: Commands,
 ) {
     for (entity, mut pending) in &mut pending {
-        let Some(result) = future::block_on(future::poll_once(&mut pending.task)) else {
+        let Some(result) = pending.task.poll() else {
             continue;
         };
+        let result = result.unwrap_or_else(|_| Err("Git worktree worker panicked".to_string()));
         let Ok((mut tab, workspace, metadata)) = tabs.get_mut(entity) else {
             commands
                 .entity(entity)
@@ -1201,12 +1689,22 @@ mod tests {
         let first =
             TabWorktreeActivation::checkout_branch(repo.path(), "feature", managed_root.path())
                 .unwrap();
+        let TabWorktreeCheckoutResult::Ready(first) = first else {
+            panic!("checkout unexpectedly waited for cleanup");
+        };
+        let (first, mut cleanup) = first.into_parts();
+        cleanup.as_mut().unwrap().commit();
         let second =
             TabWorktreeActivation::checkout_branch(repo.path(), "feature", managed_root.path())
                 .unwrap();
+        let TabWorktreeCheckoutResult::Ready(second) = second else {
+            panic!("checkout unexpectedly waited for cleanup");
+        };
+        let (second, cleanup) = second.into_parts();
 
         assert_eq!(first.execution_dir, second.execution_dir);
         assert_eq!(first.metadata.branch, "feature");
+        assert!(cleanup.is_none());
         assert_eq!(
             CheckoutInfo::try_from(first.execution_dir.as_path())
                 .unwrap()
@@ -1214,6 +1712,104 @@ mod tests {
                 .unwrap(),
             "feature"
         );
+    }
+
+    #[test]
+    fn reused_checkout_is_not_removed_by_a_canceled_owner() {
+        let repo = init_repo();
+        let managed_root = tempfile::tempdir().unwrap();
+        git(repo.path(), &["branch", "feature"]);
+
+        let first =
+            TabWorktreeActivation::checkout_branch(repo.path(), "feature", managed_root.path())
+                .unwrap();
+        let TabWorktreeCheckoutResult::Ready(first) = first else {
+            panic!("checkout unexpectedly waited for cleanup");
+        };
+        let (first, cleanup) = first.into_parts();
+        let second =
+            TabWorktreeActivation::checkout_branch(repo.path(), "feature", managed_root.path())
+                .unwrap();
+        let TabWorktreeCheckoutResult::Ready(second) = second else {
+            panic!("checkout unexpectedly waited for cleanup");
+        };
+        let (second, mut second_cleanup) = second.into_parts();
+
+        cleanup.unwrap().discard_now();
+
+        assert_eq!(first.execution_dir, second.execution_dir);
+        assert!(second_cleanup.is_some());
+        assert!(second.execution_dir.is_dir());
+        assert_eq!(
+            CheckoutInfo::try_from(second.execution_dir.as_path())
+                .unwrap()
+                .head_ref()
+                .unwrap(),
+            "feature"
+        );
+        second_cleanup.as_mut().unwrap().commit();
+    }
+
+    #[test]
+    fn adopted_checkout_keeps_cleanup_responsibility() {
+        let repo = init_repo();
+        let managed_root = tempfile::tempdir().unwrap();
+        git(repo.path(), &["branch", "feature"]);
+
+        let first =
+            TabWorktreeActivation::checkout_branch(repo.path(), "feature", managed_root.path())
+                .unwrap();
+        let TabWorktreeCheckoutResult::Ready(first) = first else {
+            panic!("checkout unexpectedly waited for cleanup");
+        };
+        let (_, first_cleanup) = first.into_parts();
+        let second =
+            TabWorktreeActivation::checkout_branch(repo.path(), "feature", managed_root.path())
+                .unwrap();
+        let TabWorktreeCheckoutResult::Ready(second) = second else {
+            panic!("checkout unexpectedly waited for cleanup");
+        };
+        let (second, second_cleanup) = second.into_parts();
+        let checkout = second.execution_dir;
+
+        drop(first_cleanup);
+        drop(second_cleanup);
+
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(2);
+        while checkout.exists() {
+            assert!(std::time::Instant::now() < deadline);
+            std::thread::yield_now();
+        }
+        assert!(!checkout.exists());
+    }
+
+    #[test]
+    fn missing_registered_checkout_is_pruned_and_recreated() {
+        let repo = init_repo();
+        let managed_root = tempfile::tempdir().unwrap();
+        git(repo.path(), &["branch", "feature"]);
+
+        let first =
+            TabWorktreeActivation::checkout_branch(repo.path(), "feature", managed_root.path())
+                .unwrap();
+        let TabWorktreeCheckoutResult::Ready(first) = first else {
+            panic!("checkout unexpectedly waited for cleanup");
+        };
+        let (first, mut cleanup) = first.into_parts();
+        cleanup.as_mut().unwrap().commit();
+        std::fs::remove_dir_all(&first.execution_dir).unwrap();
+
+        let restored =
+            TabWorktreeActivation::checkout_branch(repo.path(), "feature", managed_root.path())
+                .unwrap();
+        let TabWorktreeCheckoutResult::Ready(restored) = restored else {
+            panic!("checkout unexpectedly waited for cleanup");
+        };
+        let (restored, mut cleanup) = restored.into_parts();
+
+        assert!(restored.execution_dir.is_dir());
+        assert_eq!(restored.metadata.branch, "feature");
+        cleanup.as_mut().unwrap().commit();
     }
 
     #[test]
@@ -1282,7 +1878,7 @@ mod tests {
             ))
             .id();
 
-        for _ in 0..200 {
+        for _ in 0..1000 {
             app.update();
             if app.world().get::<TabWorktreeReady>(tab).is_some()
                 || app.world().get::<TabWorktreeUnavailable>(tab).is_some()
@@ -1452,7 +2048,7 @@ mod tests {
             ));
         }
 
-        for _ in 0..200 {
+        for _ in 0..1000 {
             app.update();
             let ready = app
                 .world()
@@ -1472,7 +2068,7 @@ mod tests {
             1
         );
 
-        for _ in 0..200 {
+        for _ in 0..1000 {
             app.update();
             let ready = app
                 .world()

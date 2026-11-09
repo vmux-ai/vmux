@@ -42,34 +42,9 @@ impl UiEventPermissions {
     }
 
     fn specificity(&self, page_url: &str) -> Option<usize> {
-        if self.url.ends_with("://") {
-            return page_url.starts_with(self.url).then_some(self.url.len());
-        }
-        if let (Some(page), Some(candidate)) = (
-            crate::VmuxRoute::parse(self.url),
-            crate::VmuxRoute::parse(page_url),
-        ) {
-            let matches = match self.owns_subtree {
-                true => candidate.in_subtree(&page),
-                false => candidate.same_page(&page),
-            };
-            return matches.then_some(self.url.len());
-        }
-        let (Ok(page), Ok(candidate)) = (url::Url::parse(self.url), url::Url::parse(page_url))
-        else {
-            return None;
-        };
-        if page.scheme() != candidate.scheme() || page.host_str() != candidate.host_str() {
-            return None;
-        }
-        let page_path = page.path().trim_end_matches('/');
-        let candidate_path = candidate.path().trim_end_matches('/');
-        let matches = candidate_path == page_path
-            || (self.owns_subtree
-                && candidate_path
-                    .strip_prefix(page_path)
-                    .is_some_and(|suffix| suffix.starts_with('/')));
-        matches.then_some(self.url.len())
+        crate::RoutePattern::new(self.url, self.owns_subtree)
+            .specificity(page_url)
+            .map(|(_, specificity)| specificity)
     }
 }
 
@@ -82,8 +57,8 @@ pub struct UiStateEmit {
 impl UiStateEmit {
     pub fn from_state<T>(state: &T) -> Option<Self>
     where
-        T: crate::UiState
-            + for<'a> rkyv::Serialize<
+        T: crate::UiState,
+        crate::UiStateFrame<T, T::Update>: for<'a> rkyv::Serialize<
                 rkyv::api::high::HighSerializer<
                     rkyv::util::AlignedVec,
                     rkyv::ser::allocator::ArenaHandle<'a>,
@@ -91,7 +66,8 @@ impl UiStateEmit {
                 >,
             >,
     {
-        let bytes = rkyv::to_bytes::<rkyv::rancor::Error>(state).ok()?;
+        let frame = crate::UiStateFrame::<T, T::Update>::Snapshot(state.clone());
+        let bytes = rkyv::to_bytes::<rkyv::rancor::Error>(&frame).ok()?;
         Some(Self {
             id: T::id().to_string(),
             bytes: bytes.to_vec(),
@@ -102,6 +78,23 @@ impl UiStateEmit {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[vmux_api::ui_state(Default, Eq)]
+    struct TestState {
+        value: u32,
+    }
+
+    #[test]
+    fn ui_state_emit_uses_the_shared_frame_contract() {
+        let emit = UiStateEmit::from_state(&TestState { value: 7 }).unwrap();
+        let frame = rkyv::from_bytes::<
+            crate::UiStateFrame<TestState, TestState>,
+            rkyv::rancor::Error,
+        >(&emit.bytes)
+        .unwrap();
+
+        assert_eq!(frame, crate::UiStateFrame::Snapshot(TestState { value: 7 }));
+    }
 
     #[test]
     fn page_permissions_use_exact_names() {

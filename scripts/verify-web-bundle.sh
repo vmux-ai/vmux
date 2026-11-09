@@ -10,6 +10,20 @@ if [[ ! -f "$stamp" ]]; then
   exit 1
 fi
 
+for required in \
+  assets/index.css \
+  assets/theme.css \
+  assets/favicons/tools.svg \
+  assets/tool-logos/acp.png \
+  assets/tool-logos/homebrew.svg \
+  assets/tool-logos/mcp.png \
+  assets/tool-logos/npm.svg; do
+  if [[ ! -f "$dist/$required" ]]; then
+    echo "stylesheet bundle is incomplete: no $dist/$required" >&2
+    exit 1
+  fi
+done
+
 stamp_paths="$(mktemp)"
 actual_paths="$(mktemp)"
 trap 'rm -f "$stamp_paths" "$actual_paths"' EXIT

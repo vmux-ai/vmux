@@ -1,7 +1,7 @@
 use bevy_app::prelude::*;
 use tokio::sync::mpsc;
 use tracing_subscriber::{EnvFilter, fmt};
-use vmux_agent::AgentServicePlugin;
+use vmux_acp::AcpServicePlugin;
 use vmux_ecs::service::{Executor, Wake};
 use vmux_profile::ServicePaths;
 use vmux_service::DaemonBinary;
@@ -19,11 +19,8 @@ fn main() {
     let listener = runtime.block_on(DaemonBootstrap::start(signal_tx.clone()));
     let handle = runtime.handle().clone();
     let mut app = App::new();
-    app.add_plugins((
-        vmux_service::server::ServiceDaemonPlugin,
-        AgentServicePlugin,
-    ))
-    .set_runner(WakeDrivenRunner::new(handle, wake_rx, signal_rx).into_runner());
+    app.add_plugins((vmux_service::server::ServiceDaemonPlugin, AcpServicePlugin))
+        .set_runner(WakeDrivenRunner::new(handle, wake_rx, signal_rx).into_runner());
     app.world_mut().spawn((
         Daemon,
         SocketListener(Some(listener)),

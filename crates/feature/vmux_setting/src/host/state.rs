@@ -193,7 +193,7 @@ fn handle_open_settings_command(
 #[cfg(test)]
 mod page_open_tests {
     use super::*;
-    use vmux_ecs::{PageOpenHandled, PageOpenId, PageOpenTask};
+    use vmux_ecs::{PageNavigation, PageOpenHandled, PageOpenId, PageOpenTask};
     use vmux_layout::hosted_page::{HostedPagePlugin, HostedUiPlugin};
 
     #[test]
@@ -204,11 +204,12 @@ mod page_open_tests {
             .add_plugins(HostedUiPlugin::<Settings>::new(
                 super::super::SettingsPlugin::MANIFEST,
             ));
-        let stack = app.world_mut().spawn_empty().id();
+        let navigation = PageOpenId::new();
+        let stack = app.world_mut().spawn(PageNavigation::new(navigation)).id();
         let claimed = app
             .world_mut()
             .spawn(PageOpenTask {
-                id: PageOpenId::new(),
+                id: navigation,
                 stack,
                 url: crate::SettingsPlugin::URL.to_string(),
                 request_id: None,
@@ -238,10 +239,11 @@ mod page_open_tests {
             .add_plugins(HostedUiPlugin::<Settings>::new(
                 super::super::SettingsPlugin::MANIFEST,
             ));
-        let stack = app.world_mut().spawn_empty().id();
+        let navigation = PageOpenId::new();
+        let stack = app.world_mut().spawn(PageNavigation::new(navigation)).id();
         for _ in 0..2 {
             app.world_mut().spawn(PageOpenTask {
-                id: PageOpenId::new(),
+                id: navigation,
                 stack,
                 url: crate::SettingsPlugin::URL.to_string(),
                 request_id: None,

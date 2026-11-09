@@ -2,21 +2,148 @@ use bevy::ecs::system::SystemParam;
 use bevy::{
     asset::io::embedded::EmbeddedAssetRegistry,
     prelude::{
-        App, Commands, Component, Entity, IntoScheduleConfigs, Message, MessageReader,
-        MessageWriter, On, Plugin, PreStartup, Query, ResMut, Startup, SystemSet, Update, With,
+        App, Commands, Component, Entity, EntityEvent, IntoScheduleConfigs, Message, MessageReader,
+        MessageWriter, On, Plugin, Query, ResMut, Startup, SystemSet, Update, With,
     },
 };
 use bevy_cef::prelude::{UiEventPlugin, UiInput};
 use bevy_cef_core::prelude::CefEmbeddedHost;
+use std::sync::{
+    Arc,
+    atomic::{AtomicBool, Ordering},
+};
 pub use vmux_api::PageReady;
 
+use crate::KeyboardOwner;
 use crate::page_driver::PageAssets;
+
+#[derive(Component, Clone, Debug, PartialEq)]
+pub struct AddressContribution(pub vmux_api::address::PageAddress);
+
+#[derive(EntityEvent, Clone)]
+pub struct AddressIntentRequest {
+    #[event_target]
+    pub entity: Entity,
+    pub revision: u64,
+    pub url: String,
+    pub intent: vmux_api::address::AddressIntent,
+}
+
+#[derive(EntityEvent, Clone)]
+pub struct CloseItemRequest {
+    #[event_target]
+    pub entity: Entity,
+    handled: Arc<AtomicBool>,
+}
+
+impl CloseItemRequest {
+    pub fn new(entity: Entity) -> Self {
+        Self {
+            entity,
+            handled: Arc::new(AtomicBool::new(false)),
+        }
+    }
+    pub fn handle(&self) {
+        self.handled.store(true, Ordering::Release);
+    }
+    pub fn handled(&self) -> bool {
+        self.handled.load(Ordering::Acquire)
+    }
+}
+
+#[derive(EntityEvent, Clone)]
+pub struct ReopenItemRequest {
+    #[event_target]
+    pub entity: Entity,
+    pub closed_after: i64,
+    handled: Arc<AtomicBool>,
+}
+
+impl ReopenItemRequest {
+    pub fn new(entity: Entity, closed_after: i64) -> Self {
+        Self {
+            entity,
+            closed_after,
+            handled: Arc::new(AtomicBool::new(false)),
+        }
+    }
+    pub fn handle(&self) {
+        self.handled.store(true, Ordering::Release);
+    }
+    pub fn handled(&self) -> bool {
+        self.handled.load(Ordering::Acquire)
+    }
+}
+
+#[derive(EntityEvent, Clone, Copy)]
+pub struct ArchiveCaptureRequest {
+    #[event_target]
+    pub archive: Entity,
+    pub source: Entity,
+}
+
+#[derive(EntityEvent, Clone, Copy)]
+pub struct ArchiveRestoreRequest {
+    #[event_target]
+    pub stack: Entity,
+    pub archive: Entity,
+}
+
+#[derive(Component, Clone, Copy)]
+pub struct PageItemHistory {
+    pub closed_at: i64,
+}
+
+#[derive(Clone, Copy, EntityEvent)]
+pub struct PageActivated {
+    #[event_target]
+    webview: Entity,
+}
+
+#[derive(Component, Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct PrewarmedPage;
+
+impl PageActivated {
+    pub fn new(webview: Entity) -> Self {
+        Self { webview }
+    }
+
+    pub fn webview(&self) -> Entity {
+        self.webview
+    }
+}
+
+type PresentPages<'w, 's, M> = Query<'w, 's, (), (With<M>, With<PageReady>)>;
+type ActivePages<'w, 's, M> = Query<'w, 's, (), (With<M>, With<PageReady>, With<KeyboardOwner>)>;
+
+#[derive(SystemParam)]
+pub struct Activity<'w, 's, M: Component> {
+    present: PresentPages<'w, 's, M>,
+    active: ActivePages<'w, 's, M>,
+}
+
+impl<M: Component> Activity<'_, '_, M> {
+    pub fn present(activity: Activity<M>) -> bool {
+        !activity.present.is_empty()
+    }
+
+    pub fn active(activity: Activity<M>) -> bool {
+        !activity.active.is_empty()
+    }
+}
 
 pub struct PagePlugin;
 
 impl Plugin for PagePlugin {
     fn build(&self, app: &mut App) {
-        app.add_plugins(UiEventPlugin::<(PageReady,)>::default())
+        if !app.is_plugin_added::<crate::address::AddressPlugin>() {
+            app.add_plugins(crate::address::AddressPlugin);
+        }
+        app.add_plugins(UiEventPlugin::<(
+            PageReady,
+            vmux_api::address::PageAddressRequest,
+        )>::default())
+            .add_plugins(crate::page_location::Plugin)
             .add_plugins(HostHistoryPlugin)
             .add_observer(mark_webview_ready)
             .configure_sets(Startup, PageEmbedSet)
@@ -65,6 +192,7 @@ impl PagePlacement {
         }
         match self.reuse {
             PageReuse::Exact => request_url == existing_url,
+            PageReuse::Group => true,
             PageReuse::Route => {
                 let Some(request) = vmux_api::VmuxRoute::parse(request_url) else {
                     return false;
@@ -93,6 +221,7 @@ impl Default for PagePlacement {
 pub enum PageReuse {
     #[default]
     Exact,
+    Group,
     Route,
     Fragmentless,
 }
@@ -137,11 +266,40 @@ impl PagePlacementCatalog<'_, '_> {
         self.resolve(left).group == self.resolve(right).group
     }
 
+    pub fn group_entrypoint(&self, url: &str) -> bool {
+        self.pages
+            .iter()
+            .any(|page| page.url == url && page.placement.reuse == PageReuse::Group)
+    }
+
     pub fn reports_title(&self, url: &str) -> bool {
         self.pages
             .iter()
             .find(|page| page.routes(url))
             .is_some_and(|page| page.reports_title)
+    }
+}
+
+#[derive(SystemParam)]
+pub struct PageMetadataCatalog<'w, 's> {
+    pages: Query<'w, 's, &'static PageManifest>,
+}
+
+impl PageMetadataCatalog<'_, '_> {
+    pub fn metadata_for(&self, url: &str, fallback_title: &str) -> crate::PageMetadata {
+        let manifest = self
+            .pages
+            .iter()
+            .filter(|page| page.routes(url))
+            .max_by_key(|page| page.route.len());
+        match manifest {
+            Some(manifest) => manifest.metadata_for(url),
+            None => crate::PageMetadata {
+                title: fallback_title.to_string(),
+                url: url.to_string(),
+                ..Default::default()
+            },
+        }
     }
 }
 
@@ -174,12 +332,78 @@ impl StartupPageUrl<'_, '_> {
 #[derive(Component, Clone, Copy, Debug, PartialEq, Eq)]
 pub struct BindsEditingChords;
 
-#[derive(Component, Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Component, Clone, Debug, PartialEq, Eq)]
 pub struct PrewarmPage {
-    pub host: &'static str,
+    scope: PrewarmScope,
     pub url: &'static str,
-    pub title: &'static str,
+    pub title: String,
     pub pool_size: usize,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum PrewarmScope {
+    Exact,
+    Host(&'static str),
+    Renderer,
+}
+
+impl PrewarmPage {
+    pub fn renderer(url: &'static str, title: impl Into<String>, pool_size: usize) -> Self {
+        Self {
+            scope: PrewarmScope::Renderer,
+            url,
+            title: title.into(),
+            pool_size,
+        }
+    }
+
+    pub fn exact(url: &'static str, title: impl Into<String>, pool_size: usize) -> Self {
+        Self {
+            scope: PrewarmScope::Exact,
+            url,
+            title: title.into(),
+            pool_size,
+        }
+    }
+
+    pub fn host(
+        host: &'static str,
+        url: &'static str,
+        title: impl Into<String>,
+        pool_size: usize,
+    ) -> Self {
+        Self {
+            scope: PrewarmScope::Host(host),
+            url,
+            title: title.into(),
+            pool_size,
+        }
+    }
+
+    pub fn answers_for(&self, url: &str) -> bool {
+        if self.scope == PrewarmScope::Renderer {
+            return false;
+        }
+        if self.url == url {
+            return true;
+        }
+        let PrewarmScope::Host(host) = self.scope else {
+            return false;
+        };
+        let Some((scheme, rest)) = url.split_once("://") else {
+            return false;
+        };
+        let candidate = if scheme.eq_ignore_ascii_case("vmux") {
+            rest.split('/').next().unwrap_or_default()
+        } else {
+            scheme
+        };
+        candidate.eq_ignore_ascii_case(host)
+    }
+
+    pub fn reuses(&self, url: &str) -> bool {
+        self.answers_for(url)
+    }
 }
 
 #[derive(Component, Clone, Copy, Debug, PartialEq, Eq)]
@@ -207,48 +431,11 @@ impl HostedPage {
     }
 
     pub fn answers_for(&self, url: &str) -> bool {
-        PageRoute {
-            url: self.url,
-            owns_subtree: self.owns_subtree,
-        }
-        .matches(url)
+        vmux_api::RoutePattern::new(self.url, self.owns_subtree).matches(url)
     }
-}
 
-struct PageRoute<'a> {
-    url: &'a str,
-    owns_subtree: bool,
-}
-
-impl PageRoute<'_> {
-    fn matches(&self, url: &str) -> bool {
-        if let Some(scheme) = self.url.strip_suffix("://") {
-            return url
-                .split_once(':')
-                .is_some_and(|(candidate, _)| candidate.eq_ignore_ascii_case(scheme));
-        }
-        if let (Some(base), Some(candidate)) = (
-            vmux_api::VmuxRoute::parse(self.url),
-            vmux_api::VmuxRoute::parse(url),
-        ) {
-            return match self.owns_subtree {
-                true => candidate.in_subtree(&base),
-                false => candidate.same_page(&base),
-            };
-        }
-        let (Ok(base), Ok(candidate)) = (url::Url::parse(self.url), url::Url::parse(url)) else {
-            return false;
-        };
-        if base.scheme() != candidate.scheme() || base.host_str() != candidate.host_str() {
-            return false;
-        }
-        let base_path = base.path().trim_end_matches('/');
-        let candidate_path = candidate.path().trim_end_matches('/');
-        candidate_path == base_path
-            || (self.owns_subtree
-                && candidate_path
-                    .strip_prefix(base_path)
-                    .is_some_and(|suffix| suffix.starts_with('/')))
+    pub fn specificity(&self, url: &str) -> Option<(bool, usize)> {
+        vmux_api::RoutePattern::new(self.url, self.owns_subtree).specificity(url)
     }
 }
 
@@ -261,6 +448,7 @@ pub struct PageManifestPlugin {
 
 impl PageManifestPlugin {
     pub const fn hosted(mut self, hosted: HostedPage) -> Self {
+        self.manifest.owns_subtree = self.manifest.owns_subtree || hosted.owns_subtree;
         self.hosted = Some(hosted);
         self
     }
@@ -278,25 +466,20 @@ impl PageManifestPlugin {
 
 impl Plugin for PageManifestPlugin {
     fn build(&self, app: &mut App) {
-        let manifest = self.manifest;
-        let hosted = self.hosted;
-        let route = self.route;
-        let alias = self.alias;
-        app.add_systems(PreStartup, move |mut commands: Commands| {
-            if let Some(alias) = alias {
-                commands.spawn(alias);
-            }
-            let mut registration = commands.spawn(manifest);
-            if manifest.startup {
-                registration.insert(StartupPage);
-            }
-            if let Some(hosted) = hosted {
-                registration.insert(hosted);
-            }
-            if let Some(route) = route {
-                registration.insert(route);
-            }
-        });
+        let world = app.world_mut();
+        if let Some(alias) = self.alias {
+            world.spawn(alias);
+        }
+        let mut registration = world.spawn(self.manifest);
+        if self.manifest.startup {
+            registration.insert(StartupPage);
+        }
+        if let Some(hosted) = self.hosted {
+            registration.insert(hosted);
+        }
+        if let Some(route) = self.route {
+            registration.insert(route);
+        }
     }
 
     fn is_unique(&self) -> bool {
@@ -361,6 +544,13 @@ impl HostHistory {
 
     pub fn can_go_forward(&self) -> bool {
         self.cursor + 1 < self.entries.len()
+    }
+
+    pub fn can_step(&self, delta: HostHistoryDelta) -> bool {
+        match delta {
+            HostHistoryDelta::Back => self.can_go_back(),
+            HostHistoryDelta::Forward => self.can_go_forward(),
+        }
     }
 
     pub fn showing(&self, url: &str, top_line: u32) -> bool {
@@ -473,11 +663,8 @@ impl PageManifest {
     }
 
     pub fn routes(&self, url: &str) -> bool {
-        PageRoute {
-            url: self.route,
-            owns_subtree: self.owns_subtree,
-        }
-        .matches(url)
+        vmux_api::RoutePattern::new(self.route, self.owns_subtree).matches(url)
+            || vmux_api::RoutePattern::new(self.url, self.owns_subtree).matches(url)
     }
 
     pub fn metadata_for(&self, url: impl Into<String>) -> crate::PageMetadata {
@@ -720,6 +907,7 @@ mod page_ready_tests {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use bevy_ecs::{prelude::World, system::RunSystemOnce};
     use std::path::{Path, PathBuf};
 
     #[test]
@@ -771,6 +959,105 @@ mod tests {
     }
 
     #[test]
+    fn hosted_subtree_registration_exposes_the_same_routes_to_page_metadata() {
+        let mut app = App::new();
+        app.add_plugins(
+            PageManifest {
+                route: "vmux://tools/",
+                url: "vmux://tools/",
+                asset_host: "tools",
+                owns_subtree: false,
+                title: "Tools",
+                title_message_id: None,
+                replaces_command: None,
+                keywords: &[],
+                icon: None,
+                command_bar: true,
+                startup: false,
+                reports_title: false,
+                placement: PagePlacement::DEFAULT,
+            }
+            .plugin()
+            .hosted(HostedPage::subtree("vmux://tools/", "Tools")),
+        );
+        let mut pages = app.world_mut().query::<(&PageManifest, &HostedPage)>();
+        let (metadata, hosted) = pages.single(app.world()).unwrap();
+
+        for url in [
+            "vmux://tools/extensions",
+            "vmux://tools/lsp",
+            "vmux://tools/mcp",
+        ] {
+            assert!(hosted.answers_for(url));
+            assert!(metadata.answers_for(url));
+        }
+    }
+
+    #[test]
+    fn metadata_catalog_preserves_the_registered_page_icon() {
+        let mut world = World::new();
+        world.spawn(PageManifest {
+            route: "vmux://simulator/",
+            url: "vmux://simulator/",
+            asset_host: "simulator",
+            owns_subtree: true,
+            title: "Simulator",
+            title_message_id: None,
+            replaces_command: None,
+            keywords: &[],
+            icon: Some(vmux_api::BuiltinIcon::Smartphone),
+            command_bar: true,
+            startup: false,
+            reports_title: false,
+            placement: PagePlacement::DEFAULT,
+        });
+
+        let metadata = world
+            .run_system_once(|catalog: PageMetadataCatalog| {
+                catalog.metadata_for("vmux://simulator/ios/27.0", "Fallback")
+            })
+            .unwrap();
+
+        assert_eq!(metadata.title, "Simulator");
+        assert_eq!(
+            metadata.icon,
+            vmux_api::PageIcon::Builtin(vmux_api::BuiltinIcon::Smartphone)
+        );
+    }
+
+    #[test]
+    fn metadata_catalog_resolves_a_route_with_a_different_manifest_url() {
+        let mut world = World::new();
+        world.spawn(PageManifest {
+            route: "git://",
+            url: "vmux://git/",
+            asset_host: "git",
+            owns_subtree: true,
+            title: "Git",
+            title_message_id: None,
+            replaces_command: None,
+            keywords: &[],
+            icon: Some(vmux_api::BuiltinIcon::GitBranch),
+            command_bar: true,
+            startup: false,
+            reports_title: false,
+            placement: PagePlacement::DEFAULT,
+        });
+
+        let metadata = world
+            .run_system_once(|catalog: PageMetadataCatalog| {
+                catalog.metadata_for("git://Users/me/repository", "Fallback")
+            })
+            .unwrap();
+
+        assert_eq!(metadata.title, "Git");
+        assert_eq!(
+            metadata.icon,
+            vmux_api::PageIcon::Builtin(vmux_api::BuiltinIcon::GitBranch)
+        );
+    }
+
+    #[test]
     fn scheme_page_answers_for_every_path_in_that_scheme() {
         let hosted = HostedPage::subtree("git://", "Git");
 
@@ -778,6 +1065,37 @@ mod tests {
         assert!(hosted.answers_for("git:///Users/me/repo"));
         assert!(hosted.answers_for("GIT://Users/me/repo"));
         assert!(!hosted.answers_for("https://example.com"));
+    }
+
+    #[test]
+    fn group_reuse_matches_changed_state_inside_one_feature() {
+        let git = PagePlacement {
+            group: "git",
+            reuse: PageReuse::Group,
+            ..PagePlacement::DEFAULT
+        };
+
+        assert!(git.reuses("git://", git, "git:///repo?branch=feature"));
+        assert!(!git.reuses("git://", PagePlacement::DEFAULT, "https://example.com"));
+    }
+
+    #[test]
+    fn a_prewarmed_host_answers_for_a_specific_route() {
+        let git = PrewarmPage::host("git", "git://", "Git", 1);
+        let projects = PrewarmPage::host("projects", "vmux://projects/", "Projects", 1);
+
+        assert!(git.answers_for("git://Users/me/repository"));
+        assert!(projects.answers_for("vmux://projects/github.com/vmux-ai/vmux"));
+        assert!(!projects.answers_for("vmux://sessions/"));
+    }
+
+    #[test]
+    fn an_exact_prewarm_does_not_claim_descendant_routes() {
+        let sessions = PrewarmPage::exact("vmux://sessions/", "Sessions", 1);
+
+        assert!(sessions.answers_for("vmux://sessions/"));
+        assert!(!sessions.answers_for("vmux://sessions/session-1"));
+        assert!(!sessions.reuses("vmux://sessions/session-1"));
     }
 
     #[test]
@@ -830,7 +1148,6 @@ mod tests {
                 .plugin()
                 .hosted(HostedPage::page(manifest.url, manifest.title)),
         );
-        app.update();
         let mut query = app.world_mut().query::<&PageManifest>();
 
         let hosts = bevy_cef_core::prelude::CefEmbeddedHosts(

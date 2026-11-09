@@ -26,7 +26,7 @@ pub struct CommandBarUiStatePatch {
     pub palette: Option<Box<CommandPaletteUiState>>,
 }
 
-#[vmux_api::ui_state(Default, patch = CommandBarUiStatePatch)]
+#[vmux_api::ui_state(Default, patch = CommandBarUiStatePatch, version = 2)]
 pub struct CommandBarUiState {
     pub snapshot: CommandBarOpenEvent,
     pub path_completion: Option<PathCompleteResponse>,
@@ -40,7 +40,7 @@ pub struct CommandBarUiState {
     pub palette: CommandPaletteUiState,
 }
 
-#[vmux_api::ui_state(Default)]
+#[vmux_api::ui_state(Default, version = 2)]
 pub struct CommandPaletteUiState {
     pub open_id: super::OpenId,
     pub projection: super::CommandPaletteProjection,

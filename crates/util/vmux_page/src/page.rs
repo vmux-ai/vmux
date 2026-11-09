@@ -18,13 +18,15 @@ pub struct Page {
 
 impl Page {
     pub fn answers_for(&self, url: &str) -> bool {
-        url == self.url || (self.owns_subtree && url.starts_with(self.url))
+        vmux_api::RoutePattern::new(self.url, self.owns_subtree).matches(url)
+            || vmux_api::RoutePattern::new(self.document_url(), self.owns_subtree).matches(url)
     }
 
     pub fn preserves_dom_for(&self, next: &Self) -> bool {
-        self.document_url() == next.document_url()
-            && self.dom_group.is_some()
-            && self.dom_group == next.dom_group
+        std::ptr::eq(self, next)
+            || (self.document_url() == next.document_url()
+                && self.dom_group.is_some()
+                && self.dom_group == next.dom_group)
     }
 
     pub fn document_url(&self) -> &'static str {
@@ -62,8 +64,8 @@ impl Page {
             root_id: "main",
             root_class: "flex min-h-0 min-w-0 flex-1 flex-col",
             stylesheet: "./assets/index.css",
-            html_attributes: r#"lang="en" class="h-full" style="color-scheme: light dark""#,
-            body_class: "m-0 flex h-full min-h-0 flex-col overflow-hidden p-0 text-foreground antialiased",
+            html_attributes: r#"lang="en" class="h-full""#,
+            body_class: "m-0 flex h-full min-h-0 flex-col overflow-hidden bg-background p-0 text-foreground antialiased",
             transparent: false,
             owns_subtree: false,
             permissions: &[],
@@ -94,7 +96,15 @@ impl Page {
 
 #[cfg(ui)]
 impl Page {
-    pub(crate) fn shell(&self) -> wry::http::Response<Vec<u8>> {
+    pub(crate) fn shell(
+        &self,
+        appearance: crate::webview::Appearance,
+        initial_frame: Option<crate::webview::InitialFrame>,
+    ) -> wry::http::Response<Vec<u8>> {
+        let scheme = match appearance {
+            crate::webview::Appearance::Light => "light",
+            crate::webview::Appearance::Dark | crate::webview::Appearance::System => "dark",
+        };
         let favicon = if self.favicon {
             vmux_ui::favicon::FaviconSource::vmux(self.url)
                 .or_else(|| vmux_ui::favicon::FaviconSource::vmux(self.document_url()))
@@ -103,19 +113,37 @@ impl Page {
         } else {
             String::new()
         };
+        let surface = if self.transparent {
+            String::new()
+        } else {
+            let (red, green, blue, _) = appearance.surface_rgba(false);
+            format!(
+                "<style>html, body {{ color-scheme: {scheme}; background-color: var(--background, rgb({red}, {green}, {blue})); }}</style>"
+            )
+        };
         let head = format!(
-            "<title>{}</title>\n<base href=\"/\"/>\n<link rel=\"stylesheet\" href=\"{}\"/>\n{favicon}",
-            self.title, self.stylesheet
+            "<title>{}</title>\n<base href=\"/\"/>\n{surface}\n<link rel=\"stylesheet\" href=\"{}\"/>\n{favicon}",
+            self.title, self.stylesheet,
+        );
+        let html_attributes = format!(
+            r#"{} data-theme="{scheme}" style="color-scheme: {scheme}""#,
+            self.html_attributes
         );
         let html = crate::InterpreterShell::new(self.root_id, self.document_url())
             .with_head(head)
-            .with_html_attributes(self.html_attributes)
+            .with_html_attributes(html_attributes)
             .with_body_class(self.body_class)
             .with_root_class(self.root_class)
+            .with_initial_frame(
+                initial_frame
+                    .map(|frame| frame.script())
+                    .unwrap_or_default(),
+            )
             .html();
 
         wry::http::Response::builder()
             .header(wry::http::header::CONTENT_TYPE, "text/html")
+            .header(wry::http::header::CACHE_CONTROL, "no-store")
             .body(html.into_bytes())
             .unwrap_or_else(|_| wry::http::Response::new(Vec::new()))
     }
@@ -133,7 +161,8 @@ mod shell_tests {
 
     #[test]
     fn the_interpreter_talks_to_the_origin_the_document_came_from() {
-        let html = String::from_utf8(page().shell().into_body()).unwrap();
+        let html =
+            String::from_utf8(page().shell(crate::Appearance::Dark, None).into_body()).unwrap();
 
         assert!(html.contains(r#"new NativeInterpreter("vmux://files", false)"#));
         assert!(
@@ -147,13 +176,44 @@ mod shell_tests {
         let html = String::from_utf8(
             Page::pane("vmux://history/", || unreachable!())
                 .titled("History")
-                .shell()
+                .shell(crate::Appearance::Dark, None)
                 .into_body(),
         )
         .unwrap();
 
         assert!(html.contains("vmux://history/assets/favicons/history.svg"));
         assert!(html.contains("<title>History</title>"));
+    }
+
+    #[test]
+    fn the_page_shell_paints_its_surface_before_the_component_mounts() {
+        let html = String::from_utf8(
+            Page::pane("vmux://start/", || unreachable!())
+                .titled("Start")
+                .shell(crate::Appearance::Dark, None)
+                .into_body(),
+        )
+        .unwrap();
+
+        assert!(html.contains(
+            "<body class=\"m-0 flex h-full min-h-0 flex-col overflow-hidden bg-background"
+        ));
+        assert!(html.contains(r#"data-theme="dark" style="color-scheme: dark""#));
+        assert!(html.contains("background-color: var(--background, rgb(20, 20, 20))"));
+    }
+
+    #[test]
+    fn the_page_shell_uses_the_resolved_light_surface_before_styles_load() {
+        let html = String::from_utf8(
+            Page::pane("vmux://start/", || unreachable!())
+                .titled("Start")
+                .shell(crate::Appearance::Light, None)
+                .into_body(),
+        )
+        .unwrap();
+
+        assert!(html.contains(r#"data-theme="light" style="color-scheme: light""#));
+        assert!(html.contains("background-color: var(--background, rgb(240, 240, 240))"));
     }
 }
 
@@ -193,6 +253,13 @@ mod tests {
             .sharing_dom("editor");
 
         assert!(directory.preserves_dom_for(&file));
+    }
+
+    #[test]
+    fn a_route_owned_by_the_same_page_preserves_its_dom() {
+        static PAGE: Page = Page::pane("vmux://sessions/", first).owning_subtree();
+
+        assert!(PAGE.preserves_dom_for(&PAGE));
     }
 
     #[test]

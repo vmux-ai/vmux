@@ -19,8 +19,6 @@ serde_json = { workspace = true }
 vmux_api = { path = "../../util/vmux_api" }
 vmux_ecs = { path = "../../util/vmux_ecs" }
 vmux_layout = { path = "../vmux_layout" }
-vmux_page = { path = "../../util/vmux_page" }
-vmux_ui = { path = "../../util/vmux_ui", default-features = false }
 
 [target.'cfg(not(target_os = "ios"))'.dependencies]
 bevy = { workspace = true }
@@ -41,9 +39,6 @@ vmux_flex = { path = "../../util/vmux_flex" }
 vmux_history = { path = "../vmux_history" }
 vmux_tool = { path = "../vmux_tool" }
 zip = { version = "2", default-features = false, features = ["deflate"] }
-
-[target.'cfg(any(target_os = "ios", target_os = "macos"))'.dependencies]
-dioxus = { workspace = true }
 
 [lints]
 workspace = true

@@ -1,4 +1,5 @@
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
+use std::rc::Rc;
 
 use dioxus::html::geometry::{ClientPoint, ElementPoint};
 use dioxus::prelude::*;
@@ -20,7 +21,7 @@ use vmux_ui::text_run::TextRun;
 
 use super::EditorFocus;
 use super::markdown::{
-    HeadingStyle, ListEditLine, ListLineHit, MdBlockView, NoteLineChunk, NoteSourceLine,
+    CaretStyle, HeadingStyle, ListEditLine, ListLineHit, MdBlockView, NoteLineChunk, NoteSourceLine,
 };
 use super::note_text::{NoteInlineKind, NoteInlineNode, NoteText};
 use super::text_style::GitLineTone;
@@ -32,9 +33,37 @@ pub(super) struct NoteCursor {
     active: Memo<Option<u32>>,
     editing: Memo<bool>,
     edit_line: Memo<Option<u32>>,
+    mounted: Signal<BTreeMap<usize, Rc<MountedData>>>,
 }
 
 impl NoteCursor {
+    fn place_rendered(
+        self,
+        index: usize,
+        start: u32,
+        source: String,
+        at: ClientPoint,
+        extend: bool,
+    ) {
+        spawn(async move {
+            let Some(offset) = TextRun::in_element(format!("note-block-{index}"))
+                .offset_at(at.x, at.y)
+                .await
+            else {
+                return;
+            };
+            let (line, col) = NoteText::new(&source).rendered_position(start, offset);
+            self.edit();
+            let _ = send(&FilePointerEvent {
+                line,
+                col,
+                extend,
+                add: false,
+            });
+            EditorFocus::file();
+        });
+    }
+
     pub(super) fn new(
         active: Memo<Option<u32>>,
         editing: Memo<bool>,
@@ -44,7 +73,70 @@ impl NoteCursor {
             active,
             editing,
             edit_line,
+            mounted: use_signal(BTreeMap::new),
         }
+    }
+
+    fn mounted(mut self, index: usize, element: Rc<MountedData>) {
+        self.mounted.write().insert(index, element);
+    }
+
+    fn unmounted(mut self, index: usize) {
+        if let Ok(mut elements) = self.mounted.try_write() {
+            elements.remove(&index);
+        }
+    }
+
+    pub(super) fn place_nearest(self, blocks: Vec<NoteBlock>, at: ClientPoint, extend: bool) {
+        spawn(async move {
+            let elements = self
+                .mounted
+                .peek()
+                .iter()
+                .map(|(index, element)| (*index, Rc::clone(element)))
+                .collect::<Vec<_>>();
+            let mut low = 0;
+            let mut high = elements.len();
+            let mut nearest = None;
+            let mut distance = f64::INFINITY;
+            while low < high {
+                let middle = (low + high) / 2;
+                let (index, element) = &elements[middle];
+                let Ok(rect) = element.get_client_rect().await else {
+                    break;
+                };
+                let top = rect.origin.y;
+                let bottom = top + rect.size.height;
+                let delta = (top - at.y).max(at.y - bottom).max(0.0);
+                if delta < distance {
+                    distance = delta;
+                    nearest = Some((*index, rect));
+                }
+                if at.y < top {
+                    high = middle;
+                } else if at.y > bottom {
+                    low = middle + 1;
+                } else {
+                    break;
+                }
+            }
+            let Some((index, rect)) = nearest else {
+                return;
+            };
+            let Some(block) = blocks.get(index) else {
+                return;
+            };
+            let point = ClientPoint::new(
+                at.x.clamp(rect.origin.x, rect.origin.x + rect.size.width.max(1.0)),
+                at.y.clamp(rect.origin.y, rect.origin.y + rect.size.height.max(1.0)),
+            );
+            if self.editing() && self.active() == Some(index as u32) {
+                self.edit();
+                place_note_block_caret(index, block.start_line, block.source.clone(), point);
+            } else {
+                self.place_rendered(index, block.start_line, block.source.clone(), point, extend);
+            }
+        });
     }
 
     pub(super) fn active(self) -> Option<u32> {
@@ -149,7 +241,7 @@ fn note_edit_line_class(block: &MdBlock) -> &'static str {
 }
 
 fn note_edit_overlay_class() -> &'static str {
-    "visible absolute inset-0 z-10 cursor-text overflow-visible"
+    "visible absolute inset-0 z-10 flex items-center cursor-text overflow-visible"
 }
 
 pub(super) trait NoteBlocks {
@@ -184,11 +276,7 @@ impl NoteBlocks for [NoteBlock] {
 pub(super) fn NoteBlankLine(line: u32, col: u32, keymap: vmux_api::editor::KeymapKind) -> Element {
     let text = " ".repeat(col as usize);
     let chunks = NoteLineChunk::split(&text, Some(col), None);
-    let caret_width_class = if keymap == vmux_api::editor::KeymapKind::Vscode {
-        "w-px"
-    } else {
-        "w-[2px]"
-    };
+    let caret_width_class = CaretStyle::width(keymap);
     rsx! {
         div {
             id: "note-line-{line}",
@@ -204,10 +292,9 @@ pub(super) fn NoteBlankLine(line: u32, col: u32, keymap: vmux_api::editor::Keyma
 
 fn place_note_caret(element_id: String, line: u32, prefix: u32, at: ClientPoint, extend: bool) {
     spawn(async move {
-        let offset = TextRun::in_element(element_id)
-            .offset_at(at.x, at.y)
-            .await
-            .unwrap_or_default();
+        let Some(offset) = TextRun::in_element(element_id).offset_at(at.x, at.y).await else {
+            return;
+        };
         let _ = send(&FilePointerEvent {
             line,
             col: prefix + offset,
@@ -218,13 +305,34 @@ fn place_note_caret(element_id: String, line: u32, prefix: u32, at: ClientPoint,
     });
 }
 
-fn place_note_block_caret(index: usize, start_line: u32, source: String, at: ClientPoint) {
+fn place_rendered_list_caret(line: u32, source: String, at: ClientPoint) {
     spawn(async move {
-        let offset = TextRun::in_element(format!("note-live-block-{index}"))
+        let Some(offset) = TextRun::in_element(format!("note-list-line-{line}"))
             .offset_at(at.x, at.y)
             .await
-            .unwrap_or_default();
-        let (line, col) = NoteText::new(&source).position(start_line, offset);
+        else {
+            return;
+        };
+        let (line, col) = NoteText::new(&source).rendered_position(line, offset);
+        let _ = send(&FilePointerEvent {
+            line,
+            col,
+            extend: false,
+            add: false,
+        });
+        EditorFocus::file();
+    });
+}
+
+fn place_note_block_caret(index: usize, start_line: u32, source: String, at: ClientPoint) {
+    spawn(async move {
+        let Some(offset) = TextRun::in_element(format!("note-live-block-{index}"))
+            .offset_at(at.x, at.y)
+            .await
+        else {
+            return;
+        };
+        let (line, col) = NoteText::new(&source).cell_position(start_line, offset);
         let _ = send(&FilePointerEvent {
             line,
             col,
@@ -299,11 +407,12 @@ fn note_inline_class(kind: NoteInlineKind) -> &'static str {
 
 #[component]
 fn NoteCaret(width_class: String) -> Element {
+    let caret_class = CaretStyle::BAR;
     rsx! {
         span {
             id: NOTE_CARET_ID,
             class: "relative inline-block h-[1.15em] w-0 scroll-mb-8 scroll-mt-8 align-text-bottom",
-            span { class: "pointer-events-none absolute inset-y-0 left-0 {width_class} bg-current" }
+            span { class: "{caret_class} {width_class}" }
         }
     }
 }
@@ -499,8 +608,8 @@ pub(super) fn NoteProperties(
         }
     };
     rsx! {
-        div { class: "mb-5 rounded-xl bg-foreground/[0.025] ring-1 ring-inset ring-foreground/[0.07]",
-            div { class: "flex h-9 items-center gap-2 px-3",
+        div { class: "mb-3 rounded-lg bg-foreground/[0.025] ring-1 ring-inset ring-foreground/[0.07]",
+            div { class: "flex h-8 items-center gap-2 px-3",
                 button {
                     r#type: "button",
                     class: "flex min-w-0 flex-1 items-center gap-2 text-left text-xs font-medium text-foreground/65 hover:text-foreground",
@@ -593,6 +702,7 @@ pub(super) fn NoteBlockView(
     comp_filtered: Vec<CompletionItem>,
     comp_sel_clamped: usize,
 ) -> Element {
+    use_drop(move || note_cursor.unmounted(index));
     let Some(note_block) = note_blocks.read().get(index).cloned() else {
         return rsx! {};
     };
@@ -665,11 +775,8 @@ pub(super) fn NoteBlockView(
     } else {
         (Vec::new(), Vec::new(), 0, Vec::new())
     };
-    let caret_width_class = if keymap == vmux_api::editor::KeymapKind::Vscode {
-        "w-px"
-    } else {
-        "w-[2px]"
-    };
+    let caret_width_class = CaretStyle::width(keymap);
+    let caret_class = CaretStyle::BAR;
     let line_chunks = |line: u32, raw: &str, prefix: u32| {
         let selection = selections
             .iter()
@@ -727,21 +834,29 @@ pub(super) fn NoteBlockView(
         div {
             id: "note-block-{index}",
             "data-note-block": "{index}",
+            "data-vmux-scroll-section": matches!(note_block.block, MdBlock::Heading { .. }).then(|| start.to_string()),
             class: "relative flow-root w-full cursor-text",
+            onmounted: move |event: Event<MountedData>| note_cursor.mounted(index, event.data()),
             onresize: move |event: Event<ResizeData>| {
                 if let Ok(size) = event.get_border_box_size() {
                     block_height.set(size.height);
                 }
             },
             onclick: move |event: Event<MouseData>| {
+                event.stop_propagation();
                 if editing && !is_list {
+                    note_cursor.edit();
+                    place_note_block_caret(index, start, live_pointer_source.clone(), event.client_coordinates());
                     return;
                 }
-                event.stop_propagation();
                 if DomSelection::in_document() {
                     return;
                 }
                 let at = event.client_coordinates();
+                if !editing {
+                    note_cursor.place_rendered(index, start, pointer_source.clone(), at, event.modifiers().shift());
+                    return;
+                }
                 if is_live_inline {
                     note_cursor.edit();
                     place_note_block_caret(index, start, live_pointer_source.clone(), at);
@@ -756,6 +871,15 @@ pub(super) fn NoteBlockView(
                     list_hit(),
                 );
                 note_cursor.edit();
+                if is_list && line != active_edit_line {
+                    let source = pointer_source
+                        .lines()
+                        .nth(line.saturating_sub(start) as usize)
+                        .unwrap_or_default()
+                        .to_string();
+                    place_rendered_list_caret(line, source, at);
+                    return;
+                }
                 place_note_caret(
                     format!("note-line-{line}"),
                     line,
@@ -784,7 +908,7 @@ pub(super) fn NoteBlockView(
                         div {
                             id: "note-live-block-{index}",
                             "data-note-edit-block": "{index}",
-                            class: edit_class,
+                            class: "w-full min-w-0 shrink-0 {edit_class}",
                             onclick: move |event: Event<MouseData>| {
                                 event.stop_propagation();
                                 event.prevent_default();
@@ -821,7 +945,7 @@ pub(super) fn NoteBlockView(
                         }
                     } else {
                         div {
-                            class: if is_list { "" } else { edit_class },
+                            class: "w-full min-w-0 shrink-0 {edit_class}",
                             for (line, raw, prefix) in edit_lines.iter() {
                                 {
                                     let line = *line;
@@ -874,7 +998,7 @@ pub(super) fn NoteBlockView(
                                                             key: "caret-{chunk_index}",
                                                             id: NOTE_CARET_ID,
                                                             class: "relative inline-block h-[1.15em] w-0 scroll-mb-8 scroll-mt-8 align-text-bottom",
-                                                            span { class: "pointer-events-none absolute inset-y-0 left-0 {caret_width_class} bg-current" }
+                                                            span { class: "{caret_class} {caret_width_class}" }
                                                         }
                                                     }
                                                     if !chunk.text.is_empty() {
@@ -1152,6 +1276,242 @@ impl NoteCaretAnchor {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use dioxus::core::{AttributeValue, Mutation, VirtualDom};
+    use dioxus::html::{EventData, SerializedMouseData, SerializedPointerData};
+    use std::{cell::RefCell, future::Future, rc::Rc};
+    use vmux_api::BinEvent;
+    use vmux_ui::hooks::EventListenerError;
+    use vmux_ui::transport::{BytesListener, HostScope, PageHost, TextOffsetAnswer};
+
+    #[derive(Default)]
+    struct PointerHost {
+        events: RefCell<Vec<String>>,
+        positions: RefCell<Vec<FilePointerEvent>>,
+        measured_elements: RefCell<std::collections::HashSet<String>>,
+    }
+
+    impl PageHost for PointerHost {
+        fn send(&self, id: &str, bytes: &[u8]) -> Result<(), EventListenerError> {
+            self.events.borrow_mut().push(id.to_string());
+            if id == FilePointerEvent::id() {
+                self.positions.borrow_mut().push(
+                    rkyv::from_bytes::<FilePointerEvent, rkyv::rancor::Error>(bytes).unwrap(),
+                );
+            }
+            Ok(())
+        }
+
+        fn listen(&self, _: &str, _: BytesListener) -> Result<(), EventListenerError> {
+            Ok(())
+        }
+
+        fn text_offset_at(&self, element: &str, _: f64, _: f64) -> TextOffsetAnswer {
+            self.events.borrow_mut().push(format!("measure:{element}"));
+            Box::pin(std::future::ready(
+                (element == "note-block-0" || self.measured_elements.borrow().contains(element))
+                    .then_some(8),
+            ))
+        }
+    }
+
+    #[component]
+    fn ClickableNote() -> Element {
+        let blocks = use_memo(|| {
+            vec![NoteBlock {
+                start_line: 3,
+                end_line: 4,
+                source: "日本 `code` end".to_string(),
+                block: MdBlock::Paragraph {
+                    inlines: vec![
+                        vmux_ecs::event::MdInline::Text("日本 ".to_string()),
+                        vmux_ecs::event::MdInline::Code("code".to_string()),
+                        vmux_ecs::event::MdInline::Text(" end".to_string()),
+                    ],
+                },
+            }]
+        });
+        let active = use_memo(|| None);
+        let editing = use_memo(|| false);
+        let line = use_memo(|| None);
+        let cursor = NoteCursor::new(active, editing, line);
+        let source_cursor = use_signal(vmux_api::editor::CursorPos::default);
+        let selections = use_signal(Vec::new);
+        let markers = use_signal(HashMap::new);
+        let dragging = use_signal(|| false);
+        rsx! { NoteBlockView {
+            note_blocks: blocks, diff_markers: markers, index: 0, editing: false,
+            source_cursor, source_selections: selections, note_diff_marker: None,
+            keymap: vmux_api::editor::KeymapKind::Vim, note_cursor: cursor,
+            note_dragging: dragging, comp_open: false, comp_filtered: Vec::new(), comp_sel_clamped: 0,
+        } }
+    }
+
+    #[test]
+    fn one_click_measures_the_rendered_block_before_activating_the_note() {
+        dioxus::html::set_event_converter(Box::new(dioxus::html::SerializedHtmlEventConverter));
+        let host = Rc::new(PointerHost::default());
+        let _host = HostScope::enter(host.clone());
+        let mut dom = VirtualDom::new(ClickableNote);
+        let initial = dom.rebuild_to_vec();
+        let target = initial
+            .edits
+            .iter()
+            .find_map(|edit| match edit {
+                Mutation::NewEventListener { name, id } if name == "click" => Some(*id),
+                _ => None,
+            })
+            .unwrap();
+        dom.render_immediate_to_vec();
+        host.events.borrow_mut().clear();
+        let data = EventData::Mouse(SerializedMouseData::default());
+        dom.runtime()
+            .handle_event("click", Event::new(data.into_any(), true), target);
+        let mut context = std::task::Context::from_waker(std::task::Waker::noop());
+        let _ = std::pin::pin!(dom.wait_for_work()).poll(&mut context);
+        dom.render_immediate_to_vec();
+        assert_eq!(
+            host.events.borrow().as_slice(),
+            [
+                "measure:note-block-0",
+                FileNoteEditRequest::id(),
+                FilePointerEvent::id()
+            ]
+        );
+        let positions = host.positions.borrow();
+        assert_eq!(positions.len(), 1);
+        assert_eq!((positions[0].line, positions[0].col), (3, 12));
+    }
+
+    #[component]
+    fn EditingList() -> Element {
+        let blocks = use_memo(|| {
+            vec![NoteBlock {
+                start_line: 3,
+                end_line: 5,
+                source: "- first\n- 日本 `code` end".to_string(),
+                block: MdBlock::List {
+                    ordered: false,
+                    start: 1,
+                    items: vec![
+                        vmux_ecs::event::MdListItem {
+                            source_line: 3,
+                            task: None,
+                            blocks: vec![MdBlock::Paragraph {
+                                inlines: vec![vmux_ecs::event::MdInline::Text("first".to_string())],
+                            }],
+                        },
+                        vmux_ecs::event::MdListItem {
+                            source_line: 4,
+                            task: None,
+                            blocks: vec![MdBlock::Paragraph {
+                                inlines: vec![
+                                    vmux_ecs::event::MdInline::Text("日本 ".to_string()),
+                                    vmux_ecs::event::MdInline::Code("code".to_string()),
+                                    vmux_ecs::event::MdInline::Text(" end".to_string()),
+                                ],
+                            }],
+                        },
+                    ],
+                },
+            }]
+        });
+        let active = use_memo(|| Some(0));
+        let editing = use_memo(|| true);
+        let line = use_memo(|| Some(3));
+        let cursor = NoteCursor::new(active, editing, line);
+        let source_cursor = use_signal(|| vmux_api::editor::CursorPos {
+            line: 3,
+            col: 2,
+            ..Default::default()
+        });
+        let selections = use_signal(Vec::new);
+        let markers = use_signal(HashMap::new);
+        let dragging = use_signal(|| false);
+        rsx! { NoteBlockView {
+            note_blocks: blocks, diff_markers: markers, index: 0, editing: true,
+            source_cursor, source_selections: selections, note_diff_marker: None,
+            keymap: vmux_api::editor::KeymapKind::Vim, note_cursor: cursor,
+            note_dragging: dragging, comp_open: false, comp_filtered: Vec::new(), comp_sel_clamped: 0,
+        } }
+    }
+
+    #[test]
+    fn clicking_another_list_item_uses_its_rendered_text_before_the_edit_overlay_exists() {
+        dioxus::html::set_event_converter(Box::new(dioxus::html::SerializedHtmlEventConverter));
+        let host = Rc::new(PointerHost::default());
+        let _host = HostScope::enter(host.clone());
+        let mut dom = VirtualDom::new(EditingList);
+        let initial = dom.rebuild_to_vec();
+        let mut identifiers = HashMap::new();
+        for edit in &initial.edits {
+            if let Mutation::SetAttribute {
+                name: "id",
+                value: AttributeValue::Text(value),
+                id,
+                ..
+            } = edit
+            {
+                identifiers.insert(value.to_string(), *id);
+                if value.starts_with("note-list-line-") {
+                    host.measured_elements
+                        .borrow_mut()
+                        .insert(value.to_string());
+                }
+            }
+        }
+        assert!(!identifiers.contains_key("note-line-4"));
+        let item = identifiers["note-list-line-4"];
+        let block = identifiers["note-block-0"];
+        dom.render_immediate_to_vec();
+        host.events.borrow_mut().clear();
+        let mut pointer = serde_json::to_value(SerializedMouseData::default()).unwrap();
+        let properties = pointer.as_object_mut().unwrap();
+        for (name, value) in [
+            ("pointer_id", 1),
+            ("width", 1),
+            ("height", 1),
+            ("pressure", 0),
+            ("tangential_pressure", 0),
+            ("tilt_x", 0),
+            ("tilt_y", 0),
+            ("twist", 0),
+        ] {
+            properties.insert(name.to_string(), value.into());
+        }
+        properties.insert("pointer_type".to_string(), "mouse".into());
+        properties.insert("is_primary".to_string(), true.into());
+        let pointer: SerializedPointerData = serde_json::from_value(pointer).unwrap();
+        dom.runtime().handle_event(
+            "pointerdown",
+            Event::new(EventData::Pointer(pointer).into_any(), true),
+            item,
+        );
+        dom.runtime().handle_event(
+            "click",
+            Event::new(
+                EventData::Mouse(SerializedMouseData::default()).into_any(),
+                true,
+            ),
+            block,
+        );
+        let mut context = std::task::Context::from_waker(std::task::Waker::noop());
+        let _ = std::pin::pin!(dom.wait_for_work()).poll(&mut context);
+        dom.render_immediate_to_vec();
+        assert_eq!(
+            host.positions
+                .borrow()
+                .iter()
+                .map(|position| (position.line, position.col))
+                .collect::<Vec<_>>(),
+            [(4, 14)]
+        );
+        assert!(
+            host.events
+                .borrow()
+                .iter()
+                .any(|event| event == "measure:note-list-line-4")
+        );
+    }
 
     fn block(start_line: u32, end_line: u32) -> NoteBlock {
         NoteBlock {

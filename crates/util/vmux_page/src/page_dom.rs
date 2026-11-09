@@ -14,8 +14,13 @@ pub type PageComponent = fn() -> Element;
 
 pub struct PageDom {
     dom: VirtualDom,
+    component: PageComponent,
+    contexts: crate::instance::Contexts,
     mutations: MutationState,
     unflushed: bool,
+    rebuilt: bool,
+    snapshots: vmux_ui::hooks::UiStateSnapshots,
+    host: Option<vmux_ui::transport::HostBinding>,
 }
 
 impl PageDom {
@@ -23,12 +28,23 @@ impl PageDom {
         Self::install_event_converter();
 
         let dom = VirtualDom::new(app);
-        instance.provide_to(&dom);
+        let contexts = instance.provide_to(&dom);
+        let snapshots = vmux_ui::hooks::UiStateSnapshots::default();
+        dom.provide_root_context(snapshots.clone());
+        let host = vmux_ui::transport::HostScope::binding();
+        if let Some(host) = &host {
+            dom.provide_root_context(host.clone());
+        }
 
         Self {
             dom,
+            component: app,
+            contexts,
             mutations: MutationState::default(),
             unflushed: false,
+            rebuilt: false,
+            snapshots,
+            host,
         }
     }
 
@@ -41,29 +57,64 @@ impl PageDom {
     }
 
     pub fn rebuild(&mut self) -> Vec<u8> {
+        self.rebuild_with_waker(Waker::noop())
+    }
+
+    pub fn rebuild_with_waker(&mut self, waker: &Waker) -> Vec<u8> {
+        if self.rebuilt {
+            self.snapshots.capture();
+            let dom = VirtualDom::new(self.component);
+            self.contexts.provide_to(&dom);
+            dom.provide_root_context(self.snapshots.clone());
+            if let Some(host) = &self.host {
+                dom.provide_root_context(host.clone());
+            }
+            self.dom = dom;
+        }
+        self.rebuilt = true;
+        self.mutations = MutationState::default();
         self.dom.rebuild(&mut self.mutations);
+        self.snapshots.finish_restore();
         self.unflushed = true;
-        self.mutations.export_memory()
+        let mutations = self.mutations.export_memory();
+        self.arm_waker(waker);
+        mutations
     }
 
     pub fn render(&mut self) -> Option<Vec<u8>> {
-        if self.unflushed || !self.has_work() {
+        self.render_with_waker(Waker::noop())
+    }
+
+    pub fn render_with_waker(&mut self, waker: &Waker) -> Option<Vec<u8>> {
+        if self.unflushed || !self.has_work(waker) {
             return None;
         }
 
         self.dom.render_immediate(&mut self.mutations);
         self.unflushed = true;
 
-        Some(self.mutations.export_memory())
+        let mutations = self.mutations.export_memory();
+        self.arm_waker(waker);
+        Some(mutations)
     }
 
-    fn has_work(&mut self) -> bool {
-        let mut context = Context::from_waker(Waker::noop());
+    pub fn update_instance(&mut self, instance: crate::Instance) {
+        self.contexts = instance.provide_to(&self.dom);
+        self.dom.mark_all_dirty();
+    }
+
+    fn has_work(&mut self, waker: &Waker) -> bool {
+        let mut context = Context::from_waker(waker);
 
         matches!(
             std::pin::pin!(self.dom.wait_for_work()).poll(&mut context),
             Poll::Ready(())
         )
+    }
+
+    fn arm_waker(&mut self, waker: &Waker) {
+        let mut context = Context::from_waker(waker);
+        let _ = std::pin::pin!(self.dom.wait_for_work()).poll(&mut context);
     }
 
     pub fn flushed(&mut self) {
@@ -117,9 +168,188 @@ mod tests {
     use std::cell::Cell;
     use std::rc::Rc;
 
+    #[derive(Default)]
+    struct BindingHost(Cell<usize>);
+
+    impl vmux_ui::transport::PageHost for BindingHost {
+        fn send(&self, _: &str, _: &[u8]) -> Result<(), vmux_ui::hooks::EventListenerError> {
+            self.0.set(self.0.get() + 1);
+            Ok(())
+        }
+
+        fn listen(
+            &self,
+            _: &str,
+            _: vmux_ui::transport::BytesListener,
+        ) -> Result<(), vmux_ui::hooks::EventListenerError> {
+            Ok(())
+        }
+    }
+
+    #[component]
+    fn BoundPage() -> Element {
+        consume_context::<vmux_ui::transport::HostBinding>()
+            .0
+            .send("binding", &[])
+            .unwrap();
+        rsx! {}
+    }
+
+    #[component]
+    fn MountWithinAnotherPage() -> Element {
+        let host = consume_context::<Rc<BindingHost>>();
+        let _host = vmux_ui::transport::HostScope::enter(host);
+        let mut page = PageDom::mount(BoundPage, crate::Instance::default());
+        page.rebuild();
+        rsx! {}
+    }
+
+    #[test]
+    fn mounting_a_page_binds_its_host_instead_of_the_callers_context() {
+        let outer = Rc::new(BindingHost::default());
+        let inner = Rc::new(BindingHost::default());
+        let mut dom = VirtualDom::new(MountWithinAnotherPage);
+        dom.provide_root_context(vmux_ui::transport::HostBinding(outer.clone()));
+        dom.provide_root_context(inner.clone());
+        dom.rebuild_in_place();
+        assert_eq!(outer.0.get(), 0);
+        assert_eq!(inner.0.get(), 1);
+    }
+
+    #[cfg(ui)]
+    #[derive(Clone, Default)]
+    struct AddressClicks {
+        url: Rc<Cell<usize>>,
+        item: Rc<Cell<usize>>,
+    }
+
+    #[cfg(ui)]
+    #[component]
+    fn ClickableAddress() -> Element {
+        let clicks = consume_context::<AddressClicks>();
+        let url = clicks.url;
+        let item = clicks.item;
+        rsx! {
+            vmux_ui::components::page_address::AddressSurface {
+                url: "vmux://settings/".to_string(),
+                onactivate: move |_| url.set(url.get() + 1),
+                button { id: "address-navigation-item".to_string(), onclick: move |_| item.set(item.get() + 1), "Settings" }
+            }
+        }
+    }
+
+    #[test]
+    #[cfg(ui)]
+    fn address_background_and_navigation_buttons_have_independent_click_events() {
+        let clicks = AddressClicks::default();
+        let provided = clicks.clone();
+        let mut page = PageDom::mount(
+            ClickableAddress,
+            crate::Instance::from(move |scope: crate::PageScope<'_>| scope.provide(provided)),
+        );
+        let initial = page.dom.rebuild_to_vec();
+        let background = initial
+            .edits
+            .iter()
+            .find_map(|edit| match edit {
+                dioxus_core::Mutation::SetAttribute {
+                    name: "title",
+                    value: dioxus_core::AttributeValue::Text(value),
+                    id,
+                    ..
+                } if value == "vmux://settings/" => Some(*id),
+                _ => None,
+            })
+            .unwrap();
+        let navigation = initial
+            .edits
+            .iter()
+            .find_map(|edit| match edit {
+                dioxus_core::Mutation::SetAttribute {
+                    name: "id",
+                    value: dioxus_core::AttributeValue::Text(value),
+                    id,
+                    ..
+                } if value == "address-navigation-item" => Some(*id),
+                _ => None,
+            })
+            .unwrap();
+        page.handle(click_on(background), ());
+        assert_eq!(clicks.url.get(), 1);
+        assert_eq!(clicks.item.get(), 0);
+        page.handle(click_on(navigation), ());
+        assert_eq!(clicks.item.get(), 1);
+        assert_eq!(clicks.url.get(), 1);
+    }
+
     #[component]
     fn Static() -> Element {
         rsx! { div { "hello" } }
+    }
+
+    #[component]
+    fn InstanceContext() -> Element {
+        let value = consume_context::<String>();
+        rsx! { div { "{value}" } }
+    }
+
+    #[derive(Clone, Default)]
+    struct ActiveScopes(Rc<Cell<usize>>);
+
+    impl ActiveScopes {
+        fn enter(&self) {
+            self.0.set(self.0.get() + 1);
+        }
+
+        fn leave(&self) {
+            self.0.set(self.0.get() - 1);
+        }
+    }
+
+    #[component]
+    fn Tracked() -> Element {
+        let scopes = consume_context::<ActiveScopes>();
+        let mounted = scopes.clone();
+        use_hook(move || mounted.enter());
+        use_drop(move || scopes.leave());
+        rsx! { div { "tracked" } }
+    }
+
+    #[test]
+    fn full_rebuild_releases_the_previous_component_scopes() {
+        let scopes = ActiveScopes::default();
+        let provided = scopes.clone();
+        let mut page = PageDom::mount(
+            Tracked,
+            crate::Instance::from(move |scope: crate::PageScope<'_>| {
+                scope.provide(provided.clone());
+            }),
+        );
+        page.rebuild();
+        assert_eq!(scopes.0.get(), 1);
+        page.flushed();
+        page.rebuild();
+
+        assert_eq!(scopes.0.get(), 1);
+        drop(page);
+        assert_eq!(scopes.0.get(), 0);
+    }
+
+    #[test]
+    fn document_recovery_reapplies_the_latest_instance_context() {
+        let mut page = PageDom::mount(
+            InstanceContext,
+            crate::Instance::from(|scope: crate::PageScope<'_>| scope.provide("first".to_string())),
+        );
+        page.rebuild();
+        page.flushed();
+        page.update_instance(crate::Instance::from(|scope: crate::PageScope<'_>| {
+            scope.provide("updated".to_string());
+        }));
+        let recovered = page.rebuild();
+
+        assert!(String::from_utf8_lossy(&recovered).contains("updated"));
+        assert!(!String::from_utf8_lossy(&recovered).contains("first"));
     }
 
     #[test]
@@ -192,6 +422,22 @@ mod tests {
             "a field the reader cannot edit by hand is only ever set by its state, so a batch \
              that leaves the new text out leaves the field showing the old one for good"
         );
+    }
+
+    #[test]
+    fn updating_an_instance_renders_again_without_rebuilding_the_dom() {
+        let mut page = PageDom::mount(
+            InstanceContext,
+            crate::Instance::from(|scope: crate::PageScope<'_>| scope.provide("first".to_string())),
+        );
+        page.rebuild();
+        page.flushed();
+        page.update_instance(crate::Instance::from(|scope: crate::PageScope<'_>| {
+            scope.provide("second".to_string())
+        }));
+
+        let batch = page.render().expect("the changed context dirties the page");
+        assert!(String::from_utf8_lossy(&batch).contains("second"));
     }
 
     #[test]

@@ -1,5 +1,5 @@
 use bevy::{
-    ecs::{relationship::Relationship, system::SystemParam},
+    ecs::system::SystemParam,
     prelude::*,
     winit::{EventLoopProxyWrapper, WinitUserEvent},
 };
@@ -17,33 +17,39 @@ use vmux_command::{
     ClaimedUrls, CommandBarWorkspaceSnapshot, ContributedCommand, ContributedPages,
 };
 use vmux_command::{CommandInvocation, ReadCommandRequests, ResolvedLocale};
-use vmux_ecs::host_spawn::HostSpawnRoute;
 use vmux_ecs::launcher::{HostsLauncher, InlineTransitionRequested};
 use vmux_ecs::manifest::FeatureManifest;
 #[cfg(test)]
 use vmux_ecs::manifest::FeaturePlugin;
 #[cfg(test)]
 use vmux_ecs::page::HostHistoryObserve;
-use vmux_ecs::page::HostedPage;
 use vmux_ecs::{
-    PageMetadata, PageOpenRequest, PageOpenTarget, UiStateWrite,
-    page::{HostHistory, HostHistoryDelta, HostHistoryStep, PageReady},
+    Active, PageMetadata, PageOpenRequest, PageOpenTarget, UiStateWrite,
+    page::{HostHistoryDelta, HostHistoryStep, PageReady},
 };
 use vmux_history::LastActivatedAt;
 use vmux_layout::Browser;
 use vmux_layout::event::{
-    SideSheetProjectOpenRequest, SideSheetResizeEvent, SideSheetSectionRequest,
-    SideSheetStackActivateRequest, SideSheetStackCloseRequest, SideSheetStackCreateRequest,
+    SideSheetProjectOpenRequest, SideSheetProjectPageOpenRequest, SideSheetResizeEvent,
+    SideSheetSectionRequest, SideSheetStackActivateRequest, SideSheetStackCloseRequest,
+    SideSheetStackCreateRequest,
 };
+#[cfg(test)]
+use vmux_layout::space::CurrentSpace;
 use vmux_layout::{
-    Header, LayoutCef, ReloadRevision,
+    LayoutCef, ReloadRevision,
     event::{
         HeaderAddressFocusRequest, HeaderBackRequest, HeaderForwardRequest, HeaderReloadRequest,
+        HeaderStopRequest,
     },
     pane::{Pane, PaneHoverCooldown, PaneSplit, SideSheetCardCollapsed},
+    presentation::Retiring,
     side_sheet::{SideSheet, SideSheetPaneExpanded, SideSheetPosition, SideSheetSectionsExpanded},
-    stack::{CloseStackRequest, FocusedStack, Stack},
+    space::{Space, SpaceHierarchy},
+    stack::{CloseStackRequest, FocusedStack, LayoutFocus, Stack},
     state::LayoutUiState,
+    tab::Tab,
+    window::{WindowHierarchy, WindowScope},
 };
 
 use vmux_ecs::terminal::{TerminalSpawnRequest, TerminalSpawnTarget};
@@ -62,6 +68,9 @@ impl Plugin for CommandPlugin {
         if !app.is_plugin_added::<vmux_command::CommandRuntimePlugin>() {
             app.add_plugins(vmux_command::CommandRuntimePlugin);
         }
+        if !app.is_plugin_added::<vmux_ecs::PrimitivesPlugin>() {
+            app.add_plugins(vmux_ecs::PrimitivesPlugin);
+        }
         app.add_message::<HostHistoryStep>()
             .add_message::<NavigationRequest>()
             .add_message::<OpenRequest>()
@@ -71,11 +80,13 @@ impl Plugin for CommandPlugin {
             .add_observer(header_back)
             .add_observer(header_forward)
             .add_observer(header_reload)
+            .add_observer(header_stop)
             .add_observer(header_address_focus)
             .add_observer(side_sheet_stack_activate)
             .add_observer(side_sheet_stack_close)
             .add_observer(side_sheet_stack_create)
             .add_observer(side_sheet_project_open)
+            .add_observer(side_sheet_project_page_open)
             .add_observer(side_sheet_section)
             .add_observer(side_sheet_resize)
             .add_observer(open_from_bar)
@@ -211,14 +222,12 @@ fn open_from_bar(
     mut chosen_writer: MessageWriter<vmux_ecs::ContributedCommandChosen>,
     mut inline_transition: MessageWriter<InlineTransitionRequested>,
     mut command_invocations: MessageWriter<CommandInvocation>,
-    users: Query<Entity, With<vmux_ecs::team::User>>,
     proxy: Option<Res<EventLoopProxyWrapper>>,
     mut commands: Commands,
 ) {
     let focus = &*workspace;
     let webview = trigger.event().webview;
     let request = &trigger.event().payload;
-    let caller = users.single().unwrap_or(Entity::PLACEHOLDER);
     let mut custom_keyboard_restore = false;
     let inline_stack = launcher_hosts
         .contains(webview)
@@ -282,7 +291,7 @@ fn open_from_bar(
                 custom_keyboard_restore = true;
             }
         } else {
-            command_invocations.write(PageOpenCommand::for_target(caller, request.open, url));
+            command_invocations.write(PageOpenCommand::for_target(webview, request.open, url));
         }
     }
     commands.trigger(CommandBarDismiss::new(webview, !custom_keyboard_restore));
@@ -315,7 +324,7 @@ fn invoke_from_bar(
             custom_keyboard_restore = true;
         }
     } else if let Some(url) = contributed_pages.page_url(&request.id) {
-        invocations.write(PageOpenCommand::for_target(caller, request.open, url));
+        invocations.write(PageOpenCommand::for_target(webview, request.open, url));
         custom_keyboard_restore = true;
     } else {
         invocations.write(CommandInvocation::new(caller, &request.id));
@@ -325,7 +334,19 @@ fn invoke_from_bar(
 
 #[vmux_command::command(message)]
 #[derive(Message, Clone, Copy, Debug, PartialEq, Eq)]
-pub enum NavigationRequest {
+pub struct NavigationRequest {
+    target: NavigationTarget,
+    operation: NavigationOperation,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum NavigationTarget {
+    Origin(Entity),
+    Surface(Entity),
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum NavigationOperation {
     Back,
     Forward,
     Reload,
@@ -333,29 +354,56 @@ pub enum NavigationRequest {
     Stop,
 }
 
+impl NavigationRequest {
+    pub fn focused(operation: NavigationOperation) -> Self {
+        Self {
+            target: NavigationTarget::Origin(Entity::PLACEHOLDER),
+            operation,
+        }
+    }
+
+    pub fn surface(webview: Entity, operation: NavigationOperation) -> Self {
+        Self {
+            target: NavigationTarget::Surface(webview),
+            operation,
+        }
+    }
+}
+
 impl TryFrom<&CommandInvocation> for NavigationRequest {
     type Error = ();
 
     fn try_from(invocation: &CommandInvocation) -> Result<Self, Self::Error> {
-        let request = match invocation.id.as_str() {
-            "browser_prev_page" => Self::Back,
-            "browser_next_page" => Self::Forward,
-            "browser_reload" => Self::Reload,
-            "browser_hard_reload" => Self::HardReload,
-            "browser_stop" => Self::Stop,
+        let operation = match invocation.id.as_str() {
+            "browser_prev_page" => NavigationOperation::Back,
+            "browser_next_page" => NavigationOperation::Forward,
+            "browser_reload" => NavigationOperation::Reload,
+            "browser_hard_reload" => NavigationOperation::HardReload,
+            "browser_stop" => NavigationOperation::Stop,
             _ => return Err(()),
         };
-        Ok(request)
+        Ok(Self {
+            target: NavigationTarget::Origin(invocation.caller),
+            operation,
+        })
     }
 }
 
 #[vmux_command::command(message)]
 #[derive(Message, Clone, Debug, PartialEq, Eq)]
 pub struct OpenRequest {
+    origin: Entity,
     pub url: Option<String>,
 }
 
 impl OpenRequest {
+    pub fn focused(url: Option<String>) -> Self {
+        Self {
+            origin: Entity::PLACEHOLDER,
+            url,
+        }
+    }
+
     fn resolved_url(&self, startup_url: Option<&str>) -> String {
         for candidate in [self.url.as_deref(), startup_url] {
             if let Some(url) = candidate.filter(|url| !url.is_empty()) {
@@ -372,6 +420,7 @@ impl TryFrom<&CommandInvocation> for OpenRequest {
     fn try_from(invocation: &CommandInvocation) -> Result<Self, Self::Error> {
         (invocation.id == "open_in_place")
             .then(|| Self {
+                origin: invocation.caller,
                 url: invocation.argument("url"),
             })
             .ok_or(())
@@ -380,226 +429,329 @@ impl TryFrom<&CommandInvocation> for OpenRequest {
 
 #[vmux_command::command(message)]
 #[derive(Message, Clone, Copy, Debug, PartialEq, Eq)]
-pub enum ZoomRequest {
+pub struct ZoomRequest {
+    origin: Entity,
+    change: ZoomChange,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ZoomChange {
     In,
     Out,
     Reset,
+}
+
+impl ZoomRequest {
+    pub fn focused(change: ZoomChange) -> Self {
+        Self {
+            origin: Entity::PLACEHOLDER,
+            change,
+        }
+    }
 }
 
 impl TryFrom<&CommandInvocation> for ZoomRequest {
     type Error = ();
 
     fn try_from(invocation: &CommandInvocation) -> Result<Self, Self::Error> {
-        let request = match invocation.id.as_str() {
-            "browser_zoom_in" => Self::In,
-            "browser_zoom_out" => Self::Out,
-            "browser_zoom_reset" => Self::Reset,
+        let change = match invocation.id.as_str() {
+            "browser_zoom_in" => ZoomChange::In,
+            "browser_zoom_out" => ZoomChange::Out,
+            "browser_zoom_reset" => ZoomChange::Reset,
             _ => return Err(()),
         };
-        Ok(request)
+        Ok(Self {
+            origin: invocation.caller,
+            change,
+        })
     }
 }
 
 #[vmux_command::command(message)]
 #[derive(Message, Clone, Copy, Debug, PartialEq, Eq)]
-pub struct ShowDevToolsRequest;
+pub struct ShowDevToolsRequest {
+    origin: Entity,
+}
+
+impl ShowDevToolsRequest {
+    pub fn focused() -> Self {
+        Self {
+            origin: Entity::PLACEHOLDER,
+        }
+    }
+}
 
 impl TryFrom<&CommandInvocation> for ShowDevToolsRequest {
     type Error = ();
 
     fn try_from(invocation: &CommandInvocation) -> Result<Self, Self::Error> {
         (invocation.id == "browser_dev_tools")
-            .then_some(Self)
+            .then_some(Self {
+                origin: invocation.caller,
+            })
             .ok_or(())
+    }
+}
+
+#[derive(SystemParam)]
+struct BrowserRequestTarget<'w, 's> {
+    focus: FocusedStack<'w, 's>,
+    users: Query<'w, 's, (), With<vmux_ecs::team::User>>,
+    focused_space: vmux_layout::space::FocusedSpace<'w, 's>,
+    hierarchy: WindowHierarchy<'w, 's>,
+    scope: WindowScope<'w, 's>,
+    space_hierarchy: SpaceHierarchy<'w, 's>,
+    spaces: Query<'w, 's, &'static vmux_ecs::EffectiveStartupUrl, With<Space>>,
+    active_tabs:
+        Query<'w, 's, (Entity, &'static ChildOf), (With<Tab>, With<Active>, Without<Retiring>)>,
+    layout: LayoutFocus<'w, 's>,
+    stacks: Query<'w, 's, (), (With<Stack>, Without<Retiring>)>,
+    parents: Query<'w, 's, &'static ChildOf>,
+}
+
+impl BrowserRequestTarget<'_, '_> {
+    fn stack(&self, origin: Entity) -> Option<Entity> {
+        if origin != Entity::PLACEHOLDER && !self.users.contains(origin) {
+            self.hierarchy.get(origin)?;
+            let space = self.scope.current_space(origin)?;
+            if self
+                .space_hierarchy
+                .get(origin)
+                .is_some_and(|origin_space| origin_space != space)
+            {
+                return None;
+            }
+            let tab = self
+                .active_tabs
+                .iter()
+                .find(|(_, parent)| parent.parent() == space)
+                .map(|(tab, _)| tab);
+            return self
+                .layout
+                .resolve(tab)
+                .2
+                .filter(|stack| self.stacks.contains(*stack));
+        }
+        self.focus
+            .stack
+            .filter(|stack| self.stacks.contains(*stack))
+    }
+
+    fn startup_url(&self, origin: Entity) -> Option<&str> {
+        if origin != Entity::PLACEHOLDER && !self.users.contains(origin) {
+            self.hierarchy.get(origin)?;
+            let space = self.scope.current_space(origin)?;
+            return self.spaces.get(space).ok().map(|url| url.0.as_str());
+        }
+        self.focused_space.startup_url()
+    }
+}
+
+impl BrowserRequestTarget<'_, '_> {
+    fn navigation_stack(
+        &self,
+        target: NavigationTarget,
+        surfaces: &vmux_layout::hosted_page::StackSurface,
+    ) -> Option<Entity> {
+        match target {
+            NavigationTarget::Origin(origin) => self.stack(origin),
+            NavigationTarget::Surface(webview) => {
+                let stack = self.parents.get(webview).ok()?.parent();
+                if !self.stacks.contains(stack) || !surfaces.is_current(stack, webview) {
+                    return None;
+                }
+                if let Some(space) = self.space_hierarchy.get(webview)
+                    && self.scope.current_space(webview) != Some(space)
+                {
+                    return None;
+                }
+                Some(stack)
+            }
+        }
+    }
+}
+
+#[derive(Default)]
+struct GestureCooldown {
+    stacks: std::collections::HashMap<Entity, std::time::Instant>,
+}
+
+impl GestureCooldown {
+    fn accepts(&mut self, stack: Entity, now: std::time::Instant) -> bool {
+        self.stacks
+            .retain(|_, last| now.duration_since(*last) < std::time::Duration::from_millis(650));
+        if self
+            .stacks
+            .get(&stack)
+            .is_some_and(|last| now.duration_since(*last) < std::time::Duration::from_millis(650))
+        {
+            return false;
+        }
+        self.stacks.insert(stack, now);
+        true
     }
 }
 
 fn handle_navigation_requests(
     mut navigation_requests: MessageReader<NavigationRequest>,
-    focus: FocusedStack,
-    browsers: Query<(Entity, &ChildOf), (With<Browser>, Without<Header>, Without<SideSheet>)>,
+    target: BrowserRequestTarget,
+    surfaces: vmux_layout::hosted_page::StackSurface,
+    blocked: Query<
+        (),
+        Or<(
+            With<BinIpcBlocked>,
+            With<vmux_layout::hosted_page::SurfaceBlocked>,
+            With<Retiring>,
+        )>,
+    >,
     kind_q: Query<(Has<Terminal>, Has<vmux_editor::FileView>)>,
-    host_histories: Query<(), With<HostHistory>>,
+    histories: crate::navigation::NavigationHistory,
     mut host_history_steps: MessageWriter<HostHistoryStep>,
     mut commands: Commands,
+    mut gestures: Local<GestureCooldown>,
+    browsers: Option<NonSend<Browsers>>,
 ) {
     for request in navigation_requests.read() {
-        let Some(active) = focus.stack else {
+        if let NavigationTarget::Surface(webview) = request.target
+            && blocked.contains(webview)
+        {
+            continue;
+        }
+        let Some(active) = target.navigation_stack(request.target, &surfaces) else {
             continue;
         };
-        let Some(webview) = browsers
-            .iter()
-            .find(|(_, co)| co.get() == active)
-            .map(|(e, _)| e)
+        let Some(webview) = surfaces
+            .current(active)
+            .or_else(|| surfaces.incoming(active))
         else {
             continue;
         };
         let (is_terminal, _) = kind_q.get(webview).unwrap_or((false, false));
-        match request {
-            NavigationRequest::Back => {
+        if matches!(request.target, NavigationTarget::Surface(_))
+            && matches!(
+                request.operation,
+                NavigationOperation::Back | NavigationOperation::Forward
+            )
+            && (is_terminal || !gestures.accepts(active, std::time::Instant::now()))
+        {
+            continue;
+        }
+        match request.operation {
+            NavigationOperation::Back => {
                 if is_terminal {
                     continue;
                 }
-                if host_histories.contains(webview) {
+                if let Some(owner) = histories.owner(active, webview, HostHistoryDelta::Back) {
                     host_history_steps.write(HostHistoryStep {
-                        webview,
+                        webview: owner,
                         delta: HostHistoryDelta::Back,
                     });
                 } else {
                     commands.trigger(RequestGoBack { webview });
                 }
             }
-            NavigationRequest::Forward => {
+            NavigationOperation::Forward => {
                 if is_terminal {
                     continue;
                 }
-                if host_histories.contains(webview) {
+                if let Some(owner) = histories.owner(active, webview, HostHistoryDelta::Forward) {
                     host_history_steps.write(HostHistoryStep {
-                        webview,
+                        webview: owner,
                         delta: HostHistoryDelta::Forward,
                     });
                 } else {
                     commands.trigger(RequestGoForward { webview });
                 }
             }
-            NavigationRequest::Reload => {
+            NavigationOperation::Reload => {
                 if is_terminal {
                     commands.trigger(RestartPty { entity: webview });
                 } else {
                     commands.trigger(RequestReload { webview });
                 }
             }
-            NavigationRequest::HardReload => {
+            NavigationOperation::HardReload => {
                 if is_terminal {
                     commands.trigger(RestartPty { entity: webview });
                 } else {
                     commands.trigger(RequestReloadIgnoreCache { webview });
                 }
             }
-            NavigationRequest::Stop => {}
+            NavigationOperation::Stop => {
+                let loading = surfaces.incoming(active).unwrap_or(webview);
+                if let Some(browsers) = &browsers {
+                    browsers.stop_loading_webview(&loading);
+                }
+                commands.trigger(StopLoadingRequested { webview: loading });
+                commands
+                    .trigger(vmux_layout::hosted_page::SurfaceCancelRequest { webview: loading });
+            }
         }
     }
 }
 
-#[derive(SystemParam)]
-struct BrowserOpen<'w, 's> {
-    focus: FocusedStack<'w, 's>,
-    browsers: Query<
-        'w,
-        's,
-        (Entity, &'static ChildOf),
-        (With<Browser>, Without<Header>, Without<SideSheet>),
-    >,
-    kinds: Query<'w, 's, (Has<Terminal>, Has<vmux_editor::FileView>)>,
-    focused_space: vmux_layout::space::FocusedSpace<'w, 's>,
-    hosted_pages: Query<'w, 's, &'static HostedPage>,
-    host_spawn_routes: Query<'w, 's, &'static HostSpawnRoute>,
-    metadata: Query<'w, 's, &'static mut PageMetadata, With<Browser>>,
-}
-
-impl BrowserOpen<'_, '_> {
-    fn target(&self) -> Option<(Entity, Entity, bool)> {
-        let stack = self.focus.stack?;
-        let webview = self
-            .browsers
-            .iter()
-            .find_map(|(entity, child_of)| (child_of.get() == stack).then_some(entity))?;
-        let is_terminal = self.kinds.get(webview).is_ok_and(|kind| kind.0);
-        Some((stack, webview, is_terminal))
-    }
-
-    fn hosted(&self, url: &str) -> bool {
-        self.hosted_pages.iter().any(|page| page.answers_for(url))
-            || self
-                .host_spawn_routes
-                .iter()
-                .any(|route| route.answers_for(url))
-    }
+#[derive(EntityEvent)]
+pub(crate) struct StopLoadingRequested {
+    #[event_target]
+    pub webview: Entity,
 }
 
 fn handle_open_requests(
     mut open_requests: MessageReader<OpenRequest>,
-    mut browser: BrowserOpen,
+    target: BrowserRequestTarget,
     mut page_open_requests: MessageWriter<PageOpenRequest>,
-    mut commands: Commands,
 ) {
     for request in open_requests.read() {
-        let Some((active, webview, is_terminal)) = browser.target() else {
+        let Some(active) = target.stack(request.origin) else {
             continue;
         };
-        let resolved = request.resolved_url(browser.focused_space.startup_url());
+        let resolved = request.resolved_url(target.startup_url(request.origin));
         if resolved.is_empty() {
             continue;
         }
         let resolved =
             VmuxRoute::canonical(&resolved).unwrap_or_else(|| resolved.trim().to_string());
-        let current_url = browser
-            .metadata
-            .get(webview)
-            .map(|metadata| metadata.url.clone())
-            .unwrap_or_default();
-        let current_is_hosted = browser.hosted(&current_url);
-        let resolved_is_hosted = browser.hosted(&resolved);
-        if is_terminal || current_is_hosted || resolved_is_hosted {
-            page_open_requests.write(PageOpenRequest {
-                target: PageOpenTarget::Stack(active),
-                url: resolved,
-                request_id: None,
-            });
-            continue;
-        }
-        if let Ok(mut metadata) = browser.metadata.get_mut(webview) {
-            metadata.url = resolved.clone();
-            metadata.title = resolved.clone();
-            metadata.icon = vmux_api::PageIcon::None;
-        }
-        commands
-            .entity(webview)
-            .insert(WebviewSource::new(&resolved));
-        commands.trigger(RequestNavigate {
-            webview,
+        page_open_requests.write(PageOpenRequest {
+            target: PageOpenTarget::Stack(active),
             url: resolved,
+            request_id: None,
         });
     }
 }
 
 fn handle_zoom_requests(
     mut requests: MessageReader<ZoomRequest>,
-    focus: FocusedStack,
-    browsers: Query<(Entity, &ChildOf), (With<Browser>, Without<Header>, Without<SideSheet>)>,
+    target: BrowserRequestTarget,
+    surfaces: vmux_layout::hosted_page::StackSurface,
     kind_q: Query<(Has<Terminal>, Has<vmux_editor::FileView>)>,
     mut zoom_q: Query<&mut ZoomLevel, With<Browser>>,
     mut font_size_writer: MessageWriter<vmux_terminal::TerminalFontSizeCommand>,
 ) {
     for request in requests.read() {
-        let Some(active) = focus.stack else {
+        let Some(active) = target.stack(request.origin) else {
             continue;
         };
-        let Some(webview) = browsers
-            .iter()
-            .find(|(_, child_of)| child_of.get() == active)
-            .map(|(entity, _)| entity)
-        else {
+        let Some(webview) = surfaces.current(active) else {
             continue;
         };
         let (is_terminal, is_file) = kind_q.get(webview).unwrap_or((false, false));
         let is_text_grid = is_terminal || is_file;
-        match request {
-            ZoomRequest::In => {
+        match request.change {
+            ZoomChange::In => {
                 if is_text_grid {
                     font_size_writer.write(vmux_terminal::TerminalFontSizeCommand::Increase);
                 } else if let Ok(mut zoom) = zoom_q.get_mut(webview) {
                     zoom.0 += 0.5;
                 }
             }
-            ZoomRequest::Out => {
+            ZoomChange::Out => {
                 if is_text_grid {
                     font_size_writer.write(vmux_terminal::TerminalFontSizeCommand::Decrease);
                 } else if let Ok(mut zoom) = zoom_q.get_mut(webview) {
                     zoom.0 -= 0.5;
                 }
             }
-            ZoomRequest::Reset => {
+            ZoomChange::Reset => {
                 if is_text_grid {
                     font_size_writer.write(vmux_terminal::TerminalFontSizeCommand::Reset);
                 } else if let Ok(mut zoom) = zoom_q.get_mut(webview) {
@@ -612,19 +764,15 @@ fn handle_zoom_requests(
 
 fn show_dev_tools(
     mut requests: MessageReader<ShowDevToolsRequest>,
-    focus: FocusedStack,
-    browsers: Query<(Entity, &ChildOf), (With<Browser>, Without<Header>, Without<SideSheet>)>,
+    target: BrowserRequestTarget,
+    surfaces: vmux_layout::hosted_page::StackSurface,
     mut commands: Commands,
 ) {
-    for _ in requests.read() {
-        let Some(active) = focus.stack else {
+    for request in requests.read() {
+        let Some(active) = target.stack(request.origin) else {
             continue;
         };
-        let Some(webview) = browsers
-            .iter()
-            .find(|(_, child_of)| child_of.get() == active)
-            .map(|(entity, _)| entity)
-        else {
+        let Some(webview) = surfaces.current(active) else {
             continue;
         };
         commands.trigger(RequestShowDevTool { webview });
@@ -658,6 +806,16 @@ fn header_reload(
     command_invocations.write(CommandInvocation::new(
         trigger.event().webview,
         "browser_reload",
+    ));
+}
+
+fn header_stop(
+    trigger: On<UiInput<HeaderStopRequest>>,
+    mut command_invocations: MessageWriter<CommandInvocation>,
+) {
+    command_invocations.write(CommandInvocation::new(
+        trigger.event().webview,
+        "browser_stop",
     ));
 }
 
@@ -713,18 +871,23 @@ fn hard_reload_notify_header(
 
 fn side_sheet_resize(
     trigger: On<UiInput<SideSheetResizeEvent>>,
-    mut sheets: Query<(&SideSheetPosition, &mut vmux_flex::prelude::Node), With<SideSheet>>,
+    mut sheets: Query<(Entity, &SideSheetPosition, &mut vmux_flex::prelude::Node), With<SideSheet>>,
+    scope: WindowScope,
     settings: Option<ResMut<vmux_setting::AppSettings>>,
     saves: Option<MessageWriter<vmux_setting::SettingsSaveRequest>>,
 ) {
     let resize = trigger.event().payload;
     let next = resize.clamped();
-    for (position, mut node) in &mut sheets {
-        if *position == SideSheetPosition::Left && node.width != vmux_flex::prelude::Val::Px(next) {
-            node.width = vmux_flex::prelude::Val::Px(next);
+    let mut accepted = false;
+    for (entity, position, mut node) in &mut sheets {
+        if scope.contains(trigger.event().webview, entity) && *position == SideSheetPosition::Left {
+            accepted = true;
+            if node.width != vmux_flex::prelude::Val::Px(next) {
+                node.width = vmux_flex::prelude::Val::Px(next);
+            }
         }
     }
-    if !resize.settled {
+    if !accepted || !resize.settled {
         return;
     }
     let Some(mut settings) = settings else {
@@ -740,16 +903,16 @@ fn side_sheet_stack_activate(
     trigger: On<UiInput<SideSheetStackActivateRequest>>,
     leaf_panes: Query<Entity, (With<Pane>, Without<PaneSplit>)>,
     pane_children: Query<&Children, With<Pane>>,
-    stack_q: Query<Entity, With<Stack>>,
-    mut last_activated: Query<&mut LastActivatedAt>,
+    stack_q: Query<Entity, (With<Stack>, Without<Retiring>)>,
+    scope: WindowScope,
     proxy: Option<Res<EventLoopProxyWrapper>>,
     mut commands: Commands,
 ) {
     let request = &trigger.event().payload;
-    let Some(target_pane) = leaf_panes
-        .iter()
-        .find(|entity| entity.to_bits() == request.pane_id)
-    else {
+    let Some(target_pane) = leaf_panes.iter().find(|entity| {
+        entity.to_bits() == request.pane_id
+            && scope.contains_current_space(trigger.event().webview, *entity)
+    }) else {
         return;
     };
     let Ok(children) = pane_children.get(target_pane) else {
@@ -761,14 +924,9 @@ fn side_sheet_stack_activate(
     let Some(target_stack) = target_stack else {
         return;
     };
-    let activated_at = LastActivatedAt::now();
-    for entity in [target_pane, target_stack] {
-        if let Ok(mut value) = last_activated.get_mut(entity) {
-            *value = activated_at;
-        } else {
-            commands.entity(entity).insert(activated_at);
-        }
-    }
+    commands.trigger(vmux_ecs::ActivateRequest {
+        entity: target_stack,
+    });
     commands
         .entity(target_pane)
         .insert(PaneHoverCooldown::start());
@@ -781,15 +939,16 @@ fn side_sheet_stack_close(
     trigger: On<UiInput<SideSheetStackCloseRequest>>,
     leaf_panes: Query<Entity, (With<Pane>, Without<PaneSplit>)>,
     pane_children: Query<&Children, With<Pane>>,
-    stack_q: Query<Entity, With<Stack>>,
+    stack_q: Query<Entity, (With<Stack>, Without<Retiring>)>,
+    scope: WindowScope,
     mut requests: MessageWriter<CloseStackRequest>,
     mut commands: Commands,
 ) {
     let request = &trigger.event().payload;
-    let Some(target_pane) = leaf_panes
-        .iter()
-        .find(|entity| entity.to_bits() == request.pane_id)
-    else {
+    let Some(target_pane) = leaf_panes.iter().find(|entity| {
+        entity.to_bits() == request.pane_id
+            && scope.contains_current_space(trigger.event().webview, *entity)
+    }) else {
         return;
     };
     let Ok(children) = pane_children.get(target_pane) else {
@@ -810,29 +969,44 @@ fn side_sheet_stack_close(
 fn side_sheet_stack_create(
     trigger: On<UiInput<SideSheetStackCreateRequest>>,
     leaf_panes: Query<Entity, (With<Pane>, Without<PaneSplit>)>,
-    mut requests: MessageWriter<vmux_layout::stack::OpenRequest>,
+    spaces: SpaceHierarchy,
+    startup_urls: Query<&vmux_ecs::EffectiveStartupUrl, With<Space>>,
+    scope: WindowScope,
+    mut requests: MessageWriter<PageOpenRequest>,
     mut commands: Commands,
 ) {
-    let Some(target_pane) = leaf_panes
-        .iter()
-        .find(|entity| entity.to_bits() == trigger.event().payload.pane_id)
+    let Some(target_pane) = leaf_panes.iter().find(|entity| {
+        entity.to_bits() == trigger.event().payload.pane_id
+            && scope.contains_current_space(trigger.event().webview, *entity)
+    }) else {
+        return;
+    };
+    let Some(url) = spaces
+        .get(target_pane)
+        .and_then(|space| startup_urls.get(space).ok())
+        .map(|url| url.0.clone())
     else {
         return;
     };
     commands.entity(target_pane).insert(LastActivatedAt::now());
-    requests.write(vmux_layout::stack::OpenRequest { url: None });
+    requests.write(PageOpenRequest {
+        target: PageOpenTarget::NewStackInPane(target_pane),
+        url,
+        request_id: None,
+    });
 }
 
 fn side_sheet_project_open(
     trigger: On<UiInput<SideSheetProjectOpenRequest>>,
     leaf_panes: Query<Entity, (With<Pane>, Without<PaneSplit>)>,
+    scope: WindowScope,
     mut requests: MessageWriter<PageOpenRequest>,
 ) {
     let request = &trigger.event().payload;
-    let Some(target_pane) = leaf_panes
-        .iter()
-        .find(|entity| entity.to_bits() == request.pane_id)
-    else {
+    let Some(target_pane) = leaf_panes.iter().find(|entity| {
+        entity.to_bits() == request.pane_id
+            && scope.contains_current_space(trigger.event().webview, *entity)
+    }) else {
         return;
     };
     let Ok(url) = url::Url::from_file_path(&request.path) else {
@@ -845,17 +1019,46 @@ fn side_sheet_project_open(
     });
 }
 
+fn side_sheet_project_page_open(
+    trigger: On<UiInput<SideSheetProjectPageOpenRequest>>,
+    leaf_panes: Query<Entity, (With<Pane>, Without<PaneSplit>)>,
+    projects: vmux_ecs::profile::Projects,
+    scope: WindowScope,
+    mut requests: MessageWriter<PageOpenRequest>,
+) {
+    let request = &trigger.event().payload;
+    let Some(target_pane) = leaf_panes.iter().find(|entity| {
+        entity.to_bits() == request.pane_id
+            && scope.contains_current_space(trigger.event().webview, *entity)
+    }) else {
+        return;
+    };
+    let Ok(root) = projects.path() else {
+        return;
+    };
+    let Some(url) = vmux_editor::ProjectRoute::from_path(root, std::path::Path::new(&request.path))
+    else {
+        return;
+    };
+    requests.write(PageOpenRequest {
+        target: PageOpenTarget::ActiveStackInPane(target_pane),
+        url,
+        request_id: None,
+    });
+}
+
 fn side_sheet_section(
     trigger: On<UiInput<SideSheetSectionRequest>>,
     leaf_panes: Query<Entity, (With<Pane>, Without<PaneSplit>)>,
     sections_of: vmux_layout::side_sheet::SideSheetSections,
+    scope: WindowScope,
     mut commands: Commands,
 ) {
     let request = &trigger.event().payload;
-    let Some(target_pane) = leaf_panes
-        .iter()
-        .find(|entity| entity.to_bits() == request.pane_id)
-    else {
+    let Some(target_pane) = leaf_panes.iter().find(|entity| {
+        entity.to_bits() == request.pane_id
+            && scope.contains_current_space(trigger.event().webview, *entity)
+    }) else {
         return;
     };
     if request.path == "pane" {
@@ -897,6 +1100,81 @@ mod tests {
 
     #[derive(Resource, Default)]
     struct CefNavigations(Vec<Entity>);
+
+    #[derive(Resource, Default)]
+    struct StoppedPages(Vec<Entity>);
+
+    impl StoppedPages {
+        fn record(request: On<StopLoadingRequested>, mut pages: ResMut<Self>) {
+            pages.0.push(request.event().webview);
+        }
+    }
+
+    #[derive(Resource, Default)]
+    struct ReloadedPages(Vec<(Entity, NavigationOperation)>);
+
+    impl ReloadedPages {
+        fn record(request: On<RequestReload>, mut pages: ResMut<Self>) {
+            pages.0.push((request.webview, NavigationOperation::Reload));
+        }
+
+        fn record_ignore_cache(request: On<RequestReloadIgnoreCache>, mut pages: ResMut<Self>) {
+            pages
+                .0
+                .push((request.webview, NavigationOperation::HardReload));
+        }
+    }
+
+    #[test]
+    fn keyboard_reload_uses_the_selected_page_for_the_user_caller() {
+        let mut fixture = NavArrow::over(HostHistory::default());
+        fixture
+            .app
+            .init_resource::<ReloadedPages>()
+            .add_observer(ReloadedPages::record)
+            .add_observer(ReloadedPages::record_ignore_cache);
+        let user = fixture.app.world_mut().spawn(vmux_ecs::team::User).id();
+        for id in ["browser_reload", "browser_hard_reload"] {
+            fixture
+                .app
+                .world_mut()
+                .write_message(CommandInvocation::new(user, id));
+            fixture.app.update();
+            fixture.app.update();
+        }
+        let unrelated = fixture.app.world_mut().spawn_empty().id();
+        fixture
+            .app
+            .world_mut()
+            .write_message(CommandInvocation::new(unrelated, "browser_reload"));
+        fixture.app.update();
+        fixture.app.update();
+        assert_eq!(
+            fixture.app.world().resource::<ReloadedPages>().0,
+            [
+                (fixture.view, NavigationOperation::Reload),
+                (fixture.view, NavigationOperation::HardReload),
+            ]
+        );
+    }
+
+    #[test]
+    fn the_stop_command_reaches_the_selected_page() {
+        let mut fixture = NavArrow::over(HostHistory::default());
+        fixture
+            .app
+            .init_resource::<StoppedPages>()
+            .add_observer(StoppedPages::record);
+        fixture
+            .app
+            .world_mut()
+            .write_message(NavigationRequest::focused(NavigationOperation::Stop));
+        fixture.app.update();
+        assert_eq!(
+            fixture.app.world().resource::<StoppedPages>().0,
+            [fixture.view]
+        );
+    }
 
     impl CefNavigations {
         fn record_back(trigger: On<RequestGoBack>, mut navigations: ResMut<Self>) {
@@ -979,6 +1257,12 @@ mod tests {
                 .spawn((Stack::bundle(), LastActivatedAt::now(), ChildOf(pane)))
                 .id();
             let view = app.world_mut().spawn((Browser, ChildOf(stack), page)).id();
+            app.world_mut()
+                .entity_mut(stack)
+                .insert(vmux_layout::page_slot::Current::new(
+                    Some(view),
+                    PageMetadata::default(),
+                ));
             app.world_mut().spawn(
                 vmux_layout::active_pane::ActiveStack {
                     tab: Some(tab),
@@ -1023,6 +1307,122 @@ mod tests {
         fn cef_navigations(&self) -> Vec<Entity> {
             self.app.world().resource::<CefNavigations>().0.clone()
         }
+
+        fn another_hosted_page(&mut self) -> Entity {
+            let stack = self.app.world().get::<ChildOf>(self.view).unwrap().parent();
+            let pane = self.app.world().get::<ChildOf>(stack).unwrap().parent();
+            let tab = self.app.world().get::<ChildOf>(pane).unwrap().parent();
+            let other_pane = self
+                .app
+                .world_mut()
+                .spawn((Pane, LastActivatedAt::now(), ChildOf(tab)))
+                .id();
+            let other_stack = self
+                .app
+                .world_mut()
+                .spawn((Stack::bundle(), LastActivatedAt::now(), ChildOf(other_pane)))
+                .id();
+            let view = self
+                .app
+                .world_mut()
+                .spawn((Browser, HostHistory::default(), ChildOf(other_stack)))
+                .id();
+            self.app.world_mut().entity_mut(other_stack).insert(
+                vmux_layout::page_slot::Current::new(Some(view), PageMetadata::default()),
+            );
+            for url in ["file:///other-a.rs", "file:///other-b.rs"] {
+                self.app.world_mut().write_message(HostHistoryObserve {
+                    webview: view,
+                    url: url.to_string(),
+                    top_line: 0,
+                });
+                self.app.update();
+            }
+            view
+        }
+
+        fn swiped_back(&mut self, view: Entity) {
+            self.app
+                .world_mut()
+                .write_message(NavigationRequest::surface(view, NavigationOperation::Back));
+            self.app.update();
+            self.app.update();
+        }
+    }
+
+    #[test]
+    fn a_swipe_moves_the_source_panes_host_history_without_changing_the_focused_pane() {
+        let mut arrow = NavArrow::over_a_hosted_page();
+        let source = arrow.another_hosted_page();
+        arrow.swiped_back(source);
+        assert!(!arrow.walked_back());
+        assert!(
+            arrow
+                .app
+                .world()
+                .get::<HostHistory>(source)
+                .unwrap()
+                .can_go_forward()
+        );
+        assert!(arrow.cef_navigations().is_empty());
+    }
+
+    #[test]
+    fn a_swipe_from_a_replaced_or_blocked_surface_is_ignored() {
+        let mut arrow = NavArrow::over_a_hosted_page();
+        arrow
+            .app
+            .world_mut()
+            .entity_mut(arrow.view)
+            .insert(BinIpcBlocked);
+        arrow.swiped_back(arrow.view);
+        assert!(!arrow.walked_back());
+        arrow
+            .app
+            .world_mut()
+            .entity_mut(arrow.view)
+            .remove::<BinIpcBlocked>();
+        let stack = arrow
+            .app
+            .world()
+            .get::<ChildOf>(arrow.view)
+            .unwrap()
+            .parent();
+        let current = arrow.app.world_mut().spawn((Browser, ChildOf(stack))).id();
+        arrow
+            .app
+            .world_mut()
+            .entity_mut(stack)
+            .insert(vmux_layout::page_slot::Current::new(
+                Some(current),
+                PageMetadata::default(),
+            ));
+        arrow.swiped_back(arrow.view);
+        assert!(!arrow.walked_back());
+        assert!(arrow.cef_navigations().is_empty());
+    }
+
+    #[test]
+    fn momentum_from_a_new_document_cannot_navigate_the_same_stack_twice() {
+        let mut arrow = NavArrow::over(());
+        let stack = arrow
+            .app
+            .world()
+            .get::<ChildOf>(arrow.view)
+            .unwrap()
+            .parent();
+        arrow.swiped_back(arrow.view);
+        let replacement = arrow.app.world_mut().spawn((Browser, ChildOf(stack))).id();
+        arrow
+            .app
+            .world_mut()
+            .entity_mut(stack)
+            .insert(vmux_layout::page_slot::Current::new(
+                Some(replacement),
+                PageMetadata::default(),
+            ));
+        arrow.swiped_back(replacement);
+        assert_eq!(arrow.cef_navigations(), [arrow.view]);
     }
 
     #[test]
@@ -1060,10 +1460,171 @@ mod tests {
         assert_eq!(
             open_requests,
             [OpenRequest {
+                origin: Entity::PLACEHOLDER,
                 url: Some("https://vmux.ai".to_string()),
             }]
         );
-        assert_eq!(navigation_requests, [NavigationRequest::Reload]);
+        assert_eq!(
+            navigation_requests,
+            [NavigationRequest::focused(NavigationOperation::Reload)]
+        );
+    }
+
+    #[test]
+    fn sidebar_selection_advances_the_entire_restored_ancestry() {
+        let mut app = App::new();
+        app.add_plugins((MinimalPlugins, vmux_ecs::PrimitivesPlugin))
+            .add_observer(side_sheet_stack_activate);
+        let restored = LastActivatedAt(LastActivatedAt::now().0 + 5_000);
+        let window = app.world_mut().spawn_empty().id();
+        let root = app.world_mut().spawn((HostWindow(window), restored)).id();
+        let space = app
+            .world_mut()
+            .spawn((Space, CurrentSpace, Active, restored, ChildOf(root)))
+            .id();
+        let tab = app
+            .world_mut()
+            .spawn((Tab::default(), Active, restored, ChildOf(space)))
+            .id();
+        let branch = app
+            .world_mut()
+            .spawn((
+                Pane,
+                PaneSplit {
+                    direction: vmux_layout::pane::PaneSplitDirection::Row,
+                },
+                restored,
+                ChildOf(tab),
+            ))
+            .id();
+        let leaf = app
+            .world_mut()
+            .spawn((Pane, restored, ChildOf(branch)))
+            .id();
+        let stack = app
+            .world_mut()
+            .spawn((Stack::bundle(), restored, ChildOf(leaf)))
+            .id();
+        let view = app.world_mut().spawn(ChildOf(root)).id();
+        app.world_mut().trigger(UiInput {
+            webview: view,
+            payload: SideSheetStackActivateRequest {
+                pane_id: leaf.to_bits(),
+                stack_id: stack.to_bits(),
+            },
+        });
+        app.update();
+        let selected = app.world().get::<LastActivatedAt>(stack).unwrap().0;
+        assert!(selected > restored.0);
+        for entity in [root, space, tab, branch, leaf] {
+            assert_eq!(
+                app.world().get::<LastActivatedAt>(entity).unwrap().0,
+                selected
+            );
+        }
+    }
+
+    #[test]
+    fn header_origin_targets_its_own_window_stack() {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins)
+            .add_message::<OpenRequest>()
+            .add_message::<PageOpenRequest>()
+            .add_systems(Update, handle_open_requests);
+        let first_window = app.world_mut().spawn_empty().id();
+        let second_window = app.world_mut().spawn_empty().id();
+        let first_root = app.world_mut().spawn(HostWindow(first_window)).id();
+        let second_root = app.world_mut().spawn(HostWindow(second_window)).id();
+        let first_space = app
+            .world_mut()
+            .spawn((
+                Space,
+                CurrentSpace,
+                Active,
+                vmux_ecs::EffectiveStartupUrl::default(),
+                ChildOf(first_root),
+            ))
+            .id();
+        let second_space = app
+            .world_mut()
+            .spawn((
+                Space,
+                CurrentSpace,
+                Active,
+                vmux_ecs::EffectiveStartupUrl::default(),
+                ChildOf(second_root),
+            ))
+            .id();
+        let first_tab = app
+            .world_mut()
+            .spawn((
+                Tab::default(),
+                Active,
+                LastActivatedAt(1),
+                ChildOf(first_space),
+            ))
+            .id();
+        let second_tab = app
+            .world_mut()
+            .spawn((
+                Tab::default(),
+                Active,
+                LastActivatedAt(1),
+                ChildOf(second_space),
+            ))
+            .id();
+        let first_pane = app
+            .world_mut()
+            .spawn((Pane, LastActivatedAt(1), ChildOf(first_tab)))
+            .id();
+        let second_pane = app
+            .world_mut()
+            .spawn((Pane, LastActivatedAt(1), ChildOf(second_tab)))
+            .id();
+        let first_stack = app
+            .world_mut()
+            .spawn((
+                Stack::bundle(),
+                Active,
+                LastActivatedAt(1),
+                ChildOf(first_pane),
+            ))
+            .id();
+        let second_stack = app
+            .world_mut()
+            .spawn((
+                Stack::bundle(),
+                Active,
+                LastActivatedAt(1),
+                ChildOf(second_pane),
+            ))
+            .id();
+        let second_header = app.world_mut().spawn(ChildOf(second_root)).id();
+        app.world_mut().spawn(
+            vmux_layout::active_pane::ActiveStack {
+                tab: Some(first_tab),
+                pane: Some(first_pane),
+                stack: Some(first_stack),
+            }
+            .local_bundle(),
+        );
+        app.world_mut().write_message(OpenRequest {
+            origin: second_header,
+            url: Some("vmux://projects/".to_string()),
+        });
+
+        app.update();
+
+        let opened = app
+            .world_mut()
+            .resource_mut::<Messages<PageOpenRequest>>()
+            .drain()
+            .collect::<Vec<_>>();
+        assert_eq!(opened.len(), 1);
+        assert!(matches!(
+            opened[0].target,
+            PageOpenTarget::Stack(stack) if stack == second_stack
+        ));
     }
 
     #[test]
@@ -1276,13 +1837,15 @@ mod tests {
     }
 
     #[test]
-    fn an_expanded_card_stays_expanded_on_another_tab_of_the_same_space() {
+    fn files_start_closed_and_stay_expanded_across_pages() {
         let mut spaces = SideSheetSpaces::start();
-        spaces.expand("bookmarks");
+        let first_pane = spaces.pane_in_first_tab;
+        assert!(!spaces.sections_under(first_pane).projects);
+        spaces.expand("projects");
 
         let second_tab = spaces.second_tab;
         assert!(
-            spaces.sections_under(second_tab).bookmarks,
+            spaces.sections_under(second_tab).projects,
             "a card is expanded for the whole space, so switching tab must not fold it"
         );
     }

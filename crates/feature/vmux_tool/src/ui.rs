@@ -2,25 +2,34 @@
 
 use std::collections::BTreeSet;
 
+use crate::extension::ExtensionManager;
 use crate::state::{
     ToolAdoptRequest, ToolApplyRequest, ToolForgetRequest, ToolImportRequest, ToolInstallRequest,
     ToolItem, ToolLinkRequest, ToolOpenRequest, ToolOperationKey, ToolOperationKind,
     ToolOperationNotice, ToolProvider, ToolProviderMetadata, ToolStatus, ToolUninstallRequest,
-    ToolUnlinkRequest, ToolUpdateRequest, ToolsFilterRequest, ToolsNavigateRequest,
-    ToolsRefreshRequest, ToolsUiState,
+    ToolUnlinkRequest, ToolUpdateRequest, ToolsFilterRequest, ToolsUiState,
 };
 use dioxus::prelude::*;
+use vmux_api::address::{AddressCrumb, AddressIntent, AddressOption, PageAddress};
+use vmux_api::extension::ExtensionsUiState;
+use vmux_ui::components::avatar::AgentThumbnail;
+use vmux_ui::components::breadcrumb::{BreadcrumbOption, BreadcrumbOptionIcon};
 use vmux_ui::components::manager::{
-    ManagerButton, ManagerButtonVariant, ManagerEmpty, ManagerHeader, ManagerList, ManagerPage,
-    ManagerRow, ManagerSpinner, ManagerTab, ManagerTabs, ManagerThumbnail,
+    ManagerButton, ManagerButtonVariant, ManagerCard, ManagerCollection, ManagerDetails,
+    ManagerEmpty, ManagerList, ManagerPage, ManagerRow, ManagerSection, ManagerSidebarItem,
+    ManagerSpinner, ManagerThumbnail, ManagerView, WorkspaceLayout,
 };
+use vmux_ui::components::page_address::{PageBreadcrumbs, PageToolbar, ToolbarControl};
 use vmux_ui::hooks::{send, use_theme, use_ui_state};
 use vmux_ui::i18n::{TranslationValue, translate, translate_with};
+use vmux_ui::icon::{LineIcon, LineIconView};
+use vmux_ui::navigation::PageNavigation;
 
 use crate::route::ToolRoute;
 
 #[vmux_page::page(
     component = Page,
+    states = ["PageAddressUiState", "ThemeUiState", "ToolsUiState", "ExtensionsUiState"],
     subtree
 )]
 pub struct ToolsPage;
@@ -28,8 +37,66 @@ pub struct ToolsPage;
 #[component]
 pub fn Page() -> Element {
     use_theme();
-    let state = use_ui_state::<ToolsUiState>().state;
-    rsx! { ToolManager { state: state() } }
+    let mut manager_view = use_signal(ManagerView::default);
+    let tools = use_ui_state::<ToolsUiState>().state;
+    let extensions = use_ui_state::<ExtensionsUiState>().state;
+    let state = tools();
+    let extension_state = extensions();
+    let route = if state.view.route.is_empty() {
+        try_consume_context::<vmux_ecs::PageMetadata>()
+            .and_then(|metadata| ToolRoute::parse(&metadata.url))
+            .unwrap_or_else(|| ToolRoute::named("acp"))
+            .id()
+            .to_string()
+    } else {
+        state.view.route.clone()
+    };
+    let title = ToolRouteOption::selected_label(&route, state.snapshot.providers.clone());
+    let mut toolbar = Vec::new();
+    if route != "extensions" {
+        if state.snapshot.loaded && state.view.visible_count > 0 {
+            toolbar.extend(ToolbarControl::view(
+                manager_view(),
+                translate("tools-view-list"),
+                translate("tools-view-grid"),
+                move |view| manager_view.set(view),
+            ));
+        }
+        if let Some(provider) = state.view.apply_provider.clone() {
+            let pending = state.pending.contains(&ToolOperationKey::new(
+                provider.clone(),
+                ToolOperationKind::Apply,
+                "",
+            ));
+            toolbar.push(
+                ToolbarControl::button(translate("tools-apply"), move |_| {
+                    send_operation(
+                        provider.clone(),
+                        ToolOperationKind::Apply,
+                        String::new(),
+                        String::new(),
+                    );
+                })
+                .disabled(pending),
+            );
+        }
+    }
+    rsx! {
+        document::Title { "{title}" }
+        ManagerPage {
+            ToolsHeader { active: route.clone(), providers: state.snapshot.providers.clone() }
+            WorkspaceLayout {
+                search: rsx! { ToolsSearch { active: route.clone(), state: state.clone(), extensions: extension_state.clone() } },
+                sidebar: rsx! { ToolsSidebar { active: route.clone(), state: state.clone(), extensions: extension_state.clone() } },
+                toolbar: rsx! { if !toolbar.is_empty() { PageToolbar { controls: toolbar } } },
+                if route == "extensions" {
+                    ExtensionManager { state: extension_state }
+                } else {
+                    ToolManager { state, manager_view }
+                }
+            }
+        }
+    }
 }
 
 impl ToolProviderMetadata {
@@ -50,135 +117,413 @@ impl ToolProviderMetadata {
     }
 }
 
-#[component]
-fn ToolsManagerTabs(active: String, providers: Vec<ToolProviderMetadata>) -> Element {
-    let mut seen = BTreeSet::new();
-    let mut tabs = Vec::new();
-    for provider in providers {
-        if provider.route.is_empty() || !seen.insert(provider.route.clone()) {
-            continue;
+#[derive(Clone, PartialEq, Eq)]
+struct ToolSelection {
+    provider: ToolProvider,
+    id: String,
+}
+
+impl ToolSelection {
+    fn of(item: &ToolItem) -> Self {
+        Self {
+            provider: item.provider.clone(),
+            id: item.id.clone(),
         }
-        let route = ToolRoute::named(provider.route.clone());
-        let label = provider.localized_route_title();
-        tabs.push(ManagerTab {
-            id: provider.route,
-            label,
-            href: route.url(),
-        });
     }
-    rsx! {
-        ManagerTabs {
-            active,
-            tabs,
-            onselect: move |url: String| {
-                let _ = send(&ToolsNavigateRequest { url });
+
+    fn matches(&self, item: &ToolItem) -> bool {
+        self.provider == item.provider && self.id == item.id
+    }
+}
+
+impl ToolItem {
+    fn installed(&self) -> bool {
+        matches!(self.status, ToolStatus::Installed | ToolStatus::Outdated)
+    }
+
+    fn installable(&self) -> bool {
+        self.operations.contains(&ToolOperationKind::Install)
+    }
+}
+
+#[derive(Clone, PartialEq)]
+struct ToolEntry {
+    item: ToolItem,
+    provider: ToolProviderMetadata,
+}
+
+#[derive(Clone, PartialEq)]
+struct ToolRouteOption {
+    id: String,
+    label: String,
+    url: String,
+    icon_url: String,
+    icon: vmux_api::BuiltinIcon,
+}
+
+impl From<ToolRouteOption> for BreadcrumbOption {
+    fn from(option: ToolRouteOption) -> Self {
+        Self {
+            label: option.label,
+            value: option.url,
+            identity_seed: String::new(),
+            icon_url: option.icon_url,
+            icon: Some(option.icon),
+        }
+    }
+}
+
+impl ToolRouteOption {
+    fn fallback(id: String) -> Self {
+        let label_key = match id.as_str() {
+            "acp" => "tools-provider-acp-agents",
+            "lsp" => "tools-provider-lsp-servers",
+            "homebrew" => "tools-homebrew",
+            "npm" => "tools-provider-npm",
+            "mcp" => "tools-provider-mcp-servers",
+            "dotfiles" => "tools-provider-dotfiles",
+            "extensions" => "extensions-title",
+            _ => "tools-title",
+        };
+        Self {
+            label: translate(label_key),
+            url: ToolRoute::named(id.clone()).url(),
+            icon_url: Self::icon_url(&id),
+            icon: Self::icon(&id),
+            id,
+        }
+    }
+
+    fn address(active: &str, providers: Vec<ToolProviderMetadata>) -> PageAddress {
+        let options = Self::all(providers);
+        let selected = options
+            .iter()
+            .find(|option| option.id == active)
+            .cloned()
+            .unwrap_or_else(|| Self::fallback(active.to_string()));
+        PageAddress {
+            current: AddressOption {
+                label_key: "tools-title".into(),
+                icon: Some(vmux_api::BuiltinIcon::Toolbox),
+                intent: Some(AddressIntent::Navigate {
+                    url: crate::ToolPlugin::URL.to_string(),
+                }),
+                ..Default::default()
             },
+            fixed: vec![AddressCrumb {
+                entry: BreadcrumbOption::from(selected).address(),
+                options: options
+                    .into_iter()
+                    .map(|option| BreadcrumbOption::from(option).address())
+                    .collect(),
+                active: true,
+                ..Default::default()
+            }],
+            ..Default::default()
+        }
+    }
+
+    fn count(&self, snapshot: &crate::state::ToolsSnapshot) -> usize {
+        let mut count = 0;
+        for category in &snapshot.categories {
+            if snapshot
+                .provider(&category.provider)
+                .is_some_and(|provider| provider.route == self.id)
+            {
+                count += category.items.len();
+            }
+        }
+        count
+    }
+
+    fn icon_url(route: &str) -> String {
+        match route {
+            "acp" => "assets/tool-logos/acp.png",
+            "lsp" => "assets/favicons/lsp.svg",
+            "homebrew" => "assets/tool-logos/homebrew.svg",
+            "npm" => "assets/tool-logos/npm.svg",
+            "mcp" => "assets/tool-logos/mcp.png",
+            "dotfiles" => "assets/favicons/files.svg",
+            "extensions" => "assets/favicons/extensions.svg",
+            _ => "assets/favicons/tools.svg",
+        }
+        .to_string()
+    }
+
+    fn icon(route: &str) -> vmux_api::BuiltinIcon {
+        match route {
+            "acp" => vmux_api::BuiltinIcon::Sparkles,
+            "lsp" => vmux_api::BuiltinIcon::Brain,
+            "homebrew" => vmux_api::BuiltinIcon::Hammer,
+            "npm" => vmux_api::BuiltinIcon::Layers,
+            "mcp" => vmux_api::BuiltinIcon::Server,
+            "dotfiles" => vmux_api::BuiltinIcon::Files,
+            "extensions" => vmux_api::BuiltinIcon::Puzzle,
+            _ => vmux_api::BuiltinIcon::Toolbox,
+        }
+    }
+
+    fn all(providers: Vec<ToolProviderMetadata>) -> Vec<Self> {
+        let mut options = Vec::new();
+        let mut seen = BTreeSet::new();
+        for provider in providers {
+            if provider.route.is_empty() || !seen.insert(provider.route.clone()) {
+                continue;
+            }
+            let route = ToolRoute::named(provider.route.clone());
+            let label = provider.localized_route_title();
+            let icon_url = Self::icon_url(&provider.route);
+            let icon = Self::icon(&provider.route);
+            options.push(Self {
+                id: provider.route,
+                label,
+                url: route.url(),
+                icon_url,
+                icon,
+            });
+        }
+        options.push(Self {
+            id: "extensions".to_string(),
+            label: translate("extensions-title"),
+            url: crate::EXTENSIONS_URL.to_string(),
+            icon_url: Self::icon_url("extensions"),
+            icon: Self::icon("extensions"),
+        });
+        options.sort_by(|left, right| {
+            left.label
+                .to_ascii_lowercase()
+                .cmp(&right.label.to_ascii_lowercase())
+        });
+        options
+    }
+
+    fn selected_label(active: &str, providers: Vec<ToolProviderMetadata>) -> String {
+        Self::all(providers)
+            .into_iter()
+            .find(|option| option.id == active)
+            .map(|option| option.label)
+            .unwrap_or_else(|| Self::fallback(active.to_string()).label)
+    }
+}
+
+#[component]
+fn ToolsHeader(active: String, providers: Vec<ToolProviderMetadata>) -> Element {
+    rsx! { PageBreadcrumbs { state: ToolRouteOption::address(&active, providers) } }
+}
+
+#[component]
+fn ToolsSearch(active: String, state: ToolsUiState, extensions: ExtensionsUiState) -> Element {
+    let extension_search = active == "extensions";
+    let query = if extension_search {
+        extensions.query.clone()
+    } else {
+        state.view.query.clone()
+    };
+    let browse_query = query.clone();
+    rsx! {
+        vmux_ui::components::manager::ManagerSearchRow {
+            vmux_ui::components::manager::ManagerSearch {
+                value: query,
+                placeholder: if extension_search { translate("extensions-search") } else { translate("tools-search") },
+                onsearch: move |query| {
+                    if extension_search {
+                        let _ = send(&vmux_api::extension::ExtFilterRequest { query });
+                    } else {
+                        let _ = send(&ToolsFilterRequest { query });
+                    }
+                },
+                onkeydown: Some(EventHandler::new(move |event: KeyboardEvent| {
+                    if extension_search && event.key() == Key::Enter && !browse_query.trim().is_empty() {
+                        let _ = send(&vmux_api::extension::ExtBrowseStoreRequest { query: browse_query.clone() });
+                    }
+                })),
+            }
         }
     }
 }
 
 #[component]
-fn ToolManager(state: ToolsUiState) -> Element {
+fn ToolsSidebar(active: String, state: ToolsUiState, extensions: ExtensionsUiState) -> Element {
+    let options = ToolRouteOption::all(state.snapshot.providers.clone());
+    rsx! {
+        nav { class: "flex flex-col gap-0.5",
+            for option in options {
+                ManagerSidebarItem {
+                    key: "{option.id}",
+                    label: option.label.clone(), selected: option.id == active,
+                    count: if option.id == "extensions" { extensions.extensions.len() } else { option.count(&state.snapshot) },
+                    leading: rsx! { BreadcrumbOptionIcon {
+                        option: BreadcrumbOption::from(option.clone()),
+                        class: "size-4 shrink-0".to_string(),
+                    } },
+                    onclick: move |event| PageNavigation::click(option.url.clone(), &event),
+                }
+            }
+        }
+    }
+}
+
+#[component]
+fn ToolThumbnail(item: ToolItem, provider: ToolProviderMetadata, class: String) -> Element {
+    if provider.provider.is("acp") {
+        return rsx! {
+            AgentThumbnail {
+                src: item.icon,
+                seed: item.id,
+                background: String::new(),
+                alt: item.name,
+                class,
+            }
+        };
+    }
+    rsx! {
+        ManagerThumbnail { src: item.icon, fallback: provider.short_label }
+    }
+}
+
+#[component]
+fn ToolManager(state: ToolsUiState, manager_view: Signal<ManagerView>) -> Element {
+    let mut selected = use_signal(|| None::<ToolSelection>);
     let current = state;
     let pending = current.pending.into_iter().collect::<BTreeSet<_>>();
     let notice = current.notice;
     let snapshot = &current.snapshot;
     let view = &current.view;
-    let apply_provider = view.apply_provider.clone();
-    let route_title = if view.route_title_message_id.is_empty() {
-        view.route_title.clone()
-    } else {
-        translate(&view.route_title_message_id)
-    };
-    rsx! {
-        ManagerPage {
-            ToolsManagerTabs { active: view.route.clone(), providers: snapshot.providers.clone() }
-            ManagerHeader {
-                title: route_title,
-                count: view.visible_count as usize,
-                search_value: view.query.clone(),
-                search_placeholder: translate("tools-search"),
-                onsearch: move |event: FormEvent| {
-                    let _ = send(&ToolsFilterRequest { query: event.value() });
-                },
-                onkeydown: None,
-                actions: rsx! {
-                    if let Some(provider) = apply_provider {
-                        ManagerButton {
-                            variant: ManagerButtonVariant::Secondary,
-                            disabled: pending.contains(&ToolOperationKey::new(
-                                provider.clone(),
-                                ToolOperationKind::Apply,
-                                "",
-                            )),
-                            onclick: move |_| {
-                                send_operation(
-                                    provider.clone(),
-                                    ToolOperationKind::Apply,
-                                    String::new(),
-                                    String::new(),
-                                );
-                            },
-                            {translate("tools-apply")}
-                        }
-                    }
-                    ManagerButton {
-                        variant: ManagerButtonVariant::Secondary,
-                        onclick: move |_| {
-                            request_snapshot(true);
-                        },
-                        {translate("common-refresh")}
-                    }
-                },
+    let active_route = view.route.clone();
+    use_effect(use_reactive!(|active_route| {
+        let _ = active_route;
+        selected.set(None);
+    }));
+    let selection = selected();
+    let mut installed = Vec::new();
+    let mut available = Vec::new();
+    for category in &view.categories {
+        let Some(provider) = snapshot.provider(&category.provider) else {
+            continue;
+        };
+        for item in &category.items {
+            let entry = ToolEntry {
+                item: item.clone(),
+                provider: provider.clone(),
+            };
+            if item.installed() {
+                installed.push(entry);
+            } else {
+                available.push(entry);
             }
+        }
+    }
+    let selected_tool = selection.as_ref().and_then(|selection| {
+        view.categories.iter().find_map(|category| {
+            let item = category.items.iter().find(|item| selection.matches(item))?;
+            let provider = snapshot.provider(&category.provider)?;
+            Some((item.clone(), provider.clone()))
+        })
+    });
+    rsx! {
+        div { class: "flex min-h-0 flex-1 overflow-hidden bg-background",
             ManagerList {
-                if view.show_brewfile {
-                    HomebrewSourceCard {
-                        root: snapshot.root.clone(),
-                    }
-                }
-                if let Some(result) = notice {
-                    {
-                        rsx! {
-                    div {
-                        class: if result.success {
-                            "rounded-xl bg-success/10 px-4 py-3 text-xs text-success ring-1 ring-inset ring-success/20"
-                        } else {
-                            "rounded-xl bg-ansi-1/10 px-4 py-3 text-xs text-ansi-1 ring-1 ring-inset ring-ansi-1/20"
-                        },
-                        if result.success {
-                            {operation_result_message(&result)}
-                        } else {
-                            "{result.message}"
+                    if view.show_brewfile {
+                        HomebrewSourceCard {
+                            root: snapshot.root.clone(),
                         }
                     }
+                    if let Some(result) = notice {
+                        {
+                            rsx! {
+                        div {
+                            class: if result.success {
+                                "rounded-xl bg-success/10 px-4 py-3 text-xs text-success ring-1 ring-inset ring-success/20"
+                            } else {
+                                "rounded-xl bg-ansi-1/10 px-4 py-3 text-xs text-ansi-1 ring-1 ring-inset ring-ansi-1/20"
+                            },
+                            if result.success {
+                                {operation_result_message(&result)}
+                            } else {
+                                "{result.message}"
+                            }
+                        }
+                            }
                         }
                     }
-                }
-                if !snapshot.error.is_empty() {
-                    div { class: "whitespace-pre-wrap rounded-xl bg-amber-400/10 px-4 py-3 text-xs text-amber-700 ring-1 ring-inset ring-amber-400/20 dark:text-amber-300",
-                        "{snapshot.error}"
+                    if !snapshot.error.is_empty() {
+                        div { class: "whitespace-pre-wrap rounded-xl bg-amber-400/10 px-4 py-3 text-xs text-amber-700 ring-1 ring-inset ring-amber-400/20 dark:text-amber-300",
+                            "{snapshot.error}"
+                        }
                     }
-                }
-                if !snapshot.loaded {
-                    ManagerSpinner { detail: translate("tools-scanning") }
-                } else if view.visible_count == 0 {
-                    ManagerEmpty {
-                        title: translate("tools-empty"),
-                        detail: translate("tools-empty-detail"),
+                    if !snapshot.loaded {
+                        ManagerSpinner { detail: translate("tools-scanning") }
+                    } else if view.visible_count == 0 {
+                        ManagerEmpty {
+                            title: translate("tools-empty"),
+                            detail: translate("tools-empty-detail"),
+                        }
+                    } else {
+                        if !installed.is_empty() {
+                            ToolSection {
+                                label: translate("common-installed"),
+                                entries: installed,
+                                view: manager_view(),
+                                selection: selection.clone(),
+                                pending: pending.clone(),
+                                onselect: move |selection| selected.set(Some(selection)),
+                            }
+                        }
+                        if !available.is_empty() {
+                            ToolSection {
+                                label: translate("tools-status-available"),
+                                entries: available,
+                                view: manager_view(),
+                                selection,
+                                pending: pending.clone(),
+                                onselect: move |selection| selected.set(Some(selection)),
+                            }
+                        }
                     }
-                } else {
-                    for category in view.categories.iter() {
-                        if let Some(provider) = snapshot.provider(&category.provider) {
-                            div { class: "mt-3 flex items-center gap-2 px-1 first:mt-0",
-                                h2 { class: "text-xs font-semibold uppercase tracking-[0.14em] text-muted-foreground", {provider.localized_title()} }
-                                span { class: "text-[10px] text-muted-foreground/60",
-                                    "{category.items.len()}"
-                                }
-                            }
-                            for item in category.items.iter() {
-                                ToolRow { key: "{category.provider.id()}:{item.id}", item: item.clone(), provider: provider.clone(), pending: pending.clone() }
-                            }
+            }
+            if let Some((item, provider)) = selected_tool {
+                ToolDetails {
+                    item,
+                    provider,
+                    pending: pending.clone(),
+                    onclose: move |_| selected.set(None),
+                }
+            }
+        }
+    }
+}
+
+#[component]
+fn ToolSection(
+    label: String,
+    entries: Vec<ToolEntry>,
+    view: ManagerView,
+    selection: Option<ToolSelection>,
+    pending: BTreeSet<ToolOperationKey>,
+    onselect: EventHandler<ToolSelection>,
+) -> Element {
+    let count = entries.len();
+    rsx! {
+        ManagerSection { label, count,
+            ManagerCollection { view,
+                for entry in entries {
+                    if view == ManagerView::Grid {
+                        ToolCard {
+                            key: "{entry.provider.provider.id()}:{entry.item.id}",
+                            item: entry.item.clone(),
+                            provider: entry.provider,
+                            selected: selection.as_ref().is_some_and(|selected| selected.matches(&entry.item)),
+                            pending: pending.clone(),
+                            onselect,
+                        }
+                    } else {
+                        ToolRow {
+                            key: "{entry.provider.provider.id()}:{entry.item.id}",
+                            item: entry.item.clone(),
+                            provider: entry.provider,
+                            selected: selection.as_ref().is_some_and(|selected| selected.matches(&entry.item)),
+                            pending: pending.clone(),
+                            onselect,
                         }
                     }
                 }
@@ -223,62 +568,193 @@ fn HomebrewSourceCard(root: String) -> Element {
 fn ToolRow(
     item: ToolItem,
     provider: ToolProviderMetadata,
+    selected: bool,
     pending: BTreeSet<ToolOperationKey>,
+    onselect: EventHandler<ToolSelection>,
 ) -> Element {
     let version = item.version.clone().unwrap_or_default();
-    let provider_id = item.provider.clone();
-    let id = item.id.clone();
     let show_icon = provider.thumbnails;
+    let selection = ToolSelection::of(&item);
     rsx! {
         ManagerRow {
             show_icon,
+            icon_surface: !provider.provider.is("acp"),
+            selected,
+            onselect: move |_| onselect.call(selection.clone()),
             icon: rsx! {
-                ManagerThumbnail { src: item.icon.clone(), fallback: "ACP".to_string() }
+                ToolThumbnail {
+                    item: item.clone(),
+                    provider: provider.clone(),
+                    class: "size-7 text-[8px]".to_string(),
+                }
             },
             title: item.name.clone(),
             subtitle: version,
             meta: rsx! {
-                span { class: "shrink-0 text-[10px] text-muted-foreground/60", "{provider.short_label}" }
-                if item.managed {
-                    span { class: "shrink-0 text-[10px] text-muted-foreground/60", {format!("· {}", translate("tools-managed"))} }
-                }
-                span { class: "flex shrink-0 items-center gap-1 text-[10px] text-muted-foreground/70",
-                    span { class: "size-1.5 rounded-full {status_dot_class(item.status)}" }
-                    {status_label(item.status)}
-                }
+                ToolMeta { item: item.clone(), provider: provider.clone() }
             },
             actions: rsx! {
-                for kind in item.operations.iter().copied() {
-                    {
-                        let operation_id = id.clone();
-                        let operation_provider = provider_id.clone();
-                        let operation = ToolOperationKey::new(operation_provider.clone(), kind, operation_id.clone());
-                        let key = format!("{}:{kind:?}:{operation_id}", provider_id.id());
-                        rsx! {
-                            ManagerButton {
-                                key: "{key}",
-                                variant: operation_variant(kind),
-                                disabled: pending.contains(&operation),
-                                onclick: move |_| {
-                                    send_operation(
-                                        operation_provider.clone(),
-                                        kind,
-                                        operation_id.clone(),
-                                        String::new(),
-                                    );
-                                },
-                                {operation_label(kind)}
-                            }
-                        }
-                    }
-                }
+                ToolQuickInstall { item: item.clone(), pending }
             },
         }
     }
 }
 
-fn request_snapshot(refresh: bool) {
-    let _ = send(&ToolsRefreshRequest { refresh });
+#[component]
+fn ToolCard(
+    item: ToolItem,
+    provider: ToolProviderMetadata,
+    selected: bool,
+    pending: BTreeSet<ToolOperationKey>,
+    onselect: EventHandler<ToolSelection>,
+) -> Element {
+    let version = item.version.clone().unwrap_or_default();
+    let selection = ToolSelection::of(&item);
+    rsx! {
+        ManagerCard {
+            show_icon: provider.thumbnails,
+            icon_surface: !provider.provider.is("acp"),
+            selected,
+            onselect: move |_| onselect.call(selection.clone()),
+            icon: rsx! {
+                ToolThumbnail {
+                    item: item.clone(),
+                    provider: provider.clone(),
+                    class: "size-10 text-[10px]".to_string(),
+                }
+            },
+            title: item.name.clone(),
+            subtitle: version,
+            actions: rsx! {
+                ToolQuickInstall { item: item.clone(), pending }
+            },
+            meta: rsx! {
+                ToolMeta { item: item.clone(), provider }
+            },
+        }
+    }
+}
+
+#[component]
+fn ToolQuickInstall(item: ToolItem, pending: BTreeSet<ToolOperationKey>) -> Element {
+    if !item.installable() {
+        return rsx! {};
+    }
+    let operation = ToolOperationKey::new(
+        item.provider.clone(),
+        ToolOperationKind::Install,
+        item.id.clone(),
+    );
+    let disabled = pending.contains(&operation);
+    let provider = item.provider;
+    let id = item.id;
+    rsx! {
+        button {
+            r#type: "button",
+            class: "flex size-6 shrink-0 items-center justify-center rounded-md bg-foreground/[0.04] text-muted-foreground/70 opacity-60 transition-[background-color,color,opacity] hover:bg-foreground/[0.10] hover:text-foreground hover:opacity-100 disabled:pointer-events-none disabled:opacity-25",
+            title: translate("common-install"),
+            aria_label: translate("common-install"),
+            disabled,
+            onclick: move |event| {
+                event.stop_propagation();
+                send_operation(
+                    provider.clone(),
+                    ToolOperationKind::Install,
+                    id.clone(),
+                    String::new(),
+                );
+            },
+            LineIconView { icon: LineIcon::Plus, class: "size-3.5".to_string() }
+        }
+    }
+}
+
+#[component]
+fn ToolDetails(
+    item: ToolItem,
+    provider: ToolProviderMetadata,
+    pending: BTreeSet<ToolOperationKey>,
+    onclose: EventHandler<MouseEvent>,
+) -> Element {
+    let version = item.version.clone().unwrap_or_default();
+    rsx! {
+        ManagerDetails {
+            show_icon: provider.thumbnails,
+            icon: rsx! {
+                ToolThumbnail {
+                    item: item.clone(),
+                    provider: provider.clone(),
+                    class: "size-9 text-[9px]".to_string(),
+                }
+            },
+            title: item.name.clone(),
+            subtitle: version,
+            onclose,
+            actions: rsx! {
+                if !item.operations.is_empty() {
+                    ToolActions { item: item.clone(), pending }
+                }
+            },
+            div {
+                if !item.detail.is_empty() {
+                    p { class: "mb-4 whitespace-pre-wrap text-xs leading-5 text-muted-foreground", "{item.detail}" }
+                }
+                section { class: "rounded-lg bg-foreground/[0.035] p-3",
+                    div { class: "flex flex-wrap items-center gap-1.5",
+                        ToolMeta { item: item.clone(), provider: provider.clone() }
+                    }
+                    div { class: "mt-3 break-all font-mono text-[10px] text-muted-foreground/65", "{item.id}" }
+                    div { class: "mt-2 text-[10px] text-muted-foreground/60", {provider.localized_title()} }
+                }
+            }
+        }
+    }
+}
+
+#[component]
+fn ToolMeta(item: ToolItem, provider: ToolProviderMetadata) -> Element {
+    rsx! {
+        span { class: "shrink-0 text-[10px] text-muted-foreground/60", "{provider.short_label}" }
+        if item.managed {
+            span { class: "shrink-0 text-[10px] text-muted-foreground/60", {format!("· {}", translate("tools-managed"))} }
+        }
+        span { class: "flex shrink-0 items-center gap-1 text-[10px] text-muted-foreground/70",
+            span { class: "size-1.5 rounded-full {status_dot_class(item.status)}" }
+            {status_label(item.status)}
+        }
+    }
+}
+
+#[component]
+fn ToolActions(item: ToolItem, pending: BTreeSet<ToolOperationKey>) -> Element {
+    let provider_id = item.provider.clone();
+    let id = item.id.clone();
+    rsx! {
+        for kind in item.operations.iter().copied() {
+            {
+                let operation_id = id.clone();
+                let operation_provider = provider_id.clone();
+                let operation = ToolOperationKey::new(operation_provider.clone(), kind, operation_id.clone());
+                let key = format!("{}:{kind:?}:{operation_id}", provider_id.id());
+                rsx! {
+                    ManagerButton {
+                        key: "{key}",
+                        variant: operation_variant(kind),
+                        disabled: pending.contains(&operation),
+                        onclick: move |_| {
+                            send_operation(
+                                operation_provider.clone(),
+                                kind,
+                                operation_id.clone(),
+                                String::new(),
+                            );
+                        },
+                        {operation_label(kind)}
+                    }
+                }
+            }
+        }
+    }
 }
 
 fn send_operation(provider: ToolProvider, kind: ToolOperationKind, id: String, value: String) {
@@ -372,6 +848,34 @@ fn open_tool_file(path: String) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn tool_breadcrumbs_keep_the_page_root_and_navigate_to_the_selected_category() {
+        let address = ToolRouteOption::address("acp", Vec::new());
+        assert_eq!(
+            address.current.intent,
+            Some(AddressIntent::Navigate {
+                url: "vmux://tools/".into()
+            })
+        );
+        assert_eq!(
+            address.fixed[0].entry.intent,
+            Some(AddressIntent::Navigate {
+                url: "vmux://tools/acp".into()
+            })
+        );
+        assert_eq!(
+            address.fixed[0].entry.label,
+            translate("tools-provider-acp-agents")
+        );
+        let extensions = ToolRouteOption::address("extensions", Vec::new());
+        assert_eq!(
+            extensions.fixed[0].entry.intent,
+            Some(AddressIntent::Navigate {
+                url: "vmux://tools/extensions".into()
+            })
+        );
+    }
 
     #[test]
     fn tool_routes_are_data_driven() {

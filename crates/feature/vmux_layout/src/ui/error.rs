@@ -8,7 +8,9 @@ use vmux_ui::i18n::translate;
 #[vmux_page::page(
     page = "error",
     component = Page,
-    takes = vmux_api::error::ErrorPageData
+    states = ["ThemeUiState"],
+    takes = vmux_api::error::ErrorPageData,
+    claims = vmux_api::error::ErrorPageData
 )]
 pub struct ErrorPage;
 
@@ -37,5 +39,39 @@ pub fn Page() -> Element {
                 }
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use bevy::prelude::*;
+
+    use super::*;
+
+    #[test]
+    fn failed_url_is_rendered_by_the_error_page() {
+        let mut app = App::new();
+        app.add_plugins((MinimalPlugins, ErrorPage::plugin()));
+        let failed = app
+            .world_mut()
+            .spawn((
+                ErrorPageData::default(),
+                vmux_ecs::PageMetadata {
+                    url: "vmux://start/".into(),
+                    ..Default::default()
+                },
+            ))
+            .id();
+
+        app.world_mut().run_schedule(PreStartup);
+
+        let registration = app
+            .world_mut()
+            .query::<&vmux_page::PageRegistration>()
+            .iter(app.world())
+            .copied()
+            .find(|registration| registration.page().url == ErrorPage::URL)
+            .unwrap();
+        assert!(registration.answers_for(app.world().entity(failed), "vmux://start/"));
     }
 }

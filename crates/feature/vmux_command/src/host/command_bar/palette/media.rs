@@ -21,6 +21,7 @@ use super::{
     NewPalette, OpenVersion, PaletteDraftInput, PaletteSnapshot, PendingPaletteRequest,
     RequestDelay, RequestGeneration,
 };
+use crate::host::command_bar::driver::CompletionQuery;
 
 const MEDIA_DEBOUNCE: Duration = Duration::from_millis(300);
 
@@ -57,6 +58,15 @@ pub(super) struct PaletteMedia {
     start: bool,
     query: Option<String>,
     generation: RequestGeneration,
+}
+
+impl PaletteMedia {
+    fn inline_query(start: bool, draft: &str) -> Option<String> {
+        if !start || CompletionQuery::only_files(draft) {
+            return None;
+        }
+        InlineMediaQuery::parse(draft).map(|query| query.query.to_string())
+    }
 }
 
 #[derive(Component)]
@@ -107,11 +117,7 @@ fn update(
         snapshot.0.attachment_sequence = 0;
     }
     media.start = request.start;
-    let query = if request.start {
-        InlineMediaQuery::parse(&request.query).map(|query| query.query.to_string())
-    } else {
-        None
-    };
+    let query = PaletteMedia::inline_query(request.start, &request.query);
     commands.entity(target).insert(PendingMediaQuery(query));
 }
 
@@ -479,6 +485,15 @@ mod tests {
     use super::*;
     use vmux_api::command_bar::{CommandPaletteUiState, OpenId};
     use vmux_api::prompt_media::ChatMediaEntry;
+
+    #[test]
+    fn file_prefix_bypasses_the_inline_media_picker() {
+        assert_eq!(PaletteMedia::inline_query(true, "@main.rs"), None);
+        assert_eq!(
+            PaletteMedia::inline_query(true, "inspect @photo"),
+            Some("photo".to_string())
+        );
+    }
 
     #[test]
     fn navigation_and_dismiss_update_host_state() {

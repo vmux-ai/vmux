@@ -78,7 +78,11 @@
 
   html {
     height: 100%;
-    color-scheme: light dark;
+    color-scheme: light;
+  }
+
+  html[data-theme="dark"] {
+    color-scheme: dark;
   }
 
   html,
@@ -117,21 +121,35 @@
   }
 }
 
-.pane-loading-ring {
-  --ring-color: var(--ring);
-  box-shadow:
-    0 0 0 2px var(--ring-color),
-    0 0 8px 0 color-mix(in oklch, var(--ring-color) 40%, transparent);
-  background-image: linear-gradient(
-    90deg,
-    transparent 0%,
-    transparent 30%,
-    color-mix(in oklch, var(--ring-color) 60%, transparent) 50%,
-    transparent 70%,
-    transparent 100%
-  );
-  background-size: 200% 100%;
-  animation: loading-sweep 2s cubic-bezier(0.4, 0, 0.2, 1) infinite;
+.loading-icon {
+  animation: loading-icon-turn 1.6s linear infinite;
+}
+
+.loading-icon circle {
+  stroke-dasharray: 1 44;
+  animation: loading-icon-arc 1.3s ease-in-out infinite;
+}
+
+@keyframes loading-icon-turn {
+  to { transform: rotate(360deg); }
+}
+
+@keyframes loading-icon-arc {
+  0% { stroke-dasharray: 1 44; stroke-dashoffset: 0; }
+  50% { stroke-dasharray: 32 44; stroke-dashoffset: -12; }
+  100% { stroke-dasharray: 1 44; stroke-dashoffset: -43; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .loading-icon,
+  .loading-icon circle {
+    animation: none;
+  }
+
+  .loading-icon circle {
+    stroke-dasharray: 28 44;
+  }
+
 }
 
 @keyframes update-indeterminate {

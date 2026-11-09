@@ -5,13 +5,13 @@ pub use json_schema::{JsonSchema, JsonSchemaType};
 pub use page::UiEventPermissions;
 pub use page_metadata::{PageIdentity, PageMetadata};
 pub use process_id::ProcessId;
-pub use route::{InvalidVmuxRoute, VmuxRoute};
+pub use route::{InvalidVmuxRoute, RoutePattern, VmuxRoute};
 pub use terminal::{
     AnsiPalette, CursorShape, CursorStyle, FLAG_BOLD, FLAG_DIM, FLAG_INVERSE, FLAG_ITALIC,
     FLAG_STRIKETHROUGH, FLAG_UNDERLINE, LinkRange, RgbColor, TermColor, TermCursor, TermLine,
     TermSelectionRange, TermSpan,
 };
-pub use ui_state::{UiState, UiStatePatch, UiStateProjection};
+pub use ui_state::{UiState, UiStateFrame, UiStatePatch, UiStateProjection};
 pub use vmux_macro::{
     agent, bidirectional_event, contract, host_event, service_message, ui_event, ui_event_variants,
     ui_state, ui_state_patch,
@@ -19,10 +19,12 @@ pub use vmux_macro::{
 
 extern crate self as vmux_api;
 
+pub mod address;
 pub mod avatar;
 pub mod bin_event;
 pub mod bookmark;
 pub mod chat;
+mod command;
 pub mod command_bar;
 pub mod editor;
 pub mod error;
@@ -40,13 +42,14 @@ pub mod media;
 pub mod open_target;
 #[cfg(feature = "bevy")]
 pub mod page;
+pub mod page_location;
 pub mod page_metadata;
 pub mod process_id;
 pub mod prompt_media;
 pub mod protocol;
-pub mod room;
 pub mod route;
 pub mod service;
+pub mod session;
 pub mod space;
 pub mod team;
 pub mod terminal;

@@ -2,6 +2,7 @@ use dioxus::prelude::*;
 use vmux_api::PageIcon;
 use vmux_api::bookmark::{BookmarkAddRequest, BookmarkPinUrlRequest};
 use vmux_ecs::PageMetadata;
+use vmux_ui::components::avatar::{AgentThumbnail, IdentityOrb};
 use vmux_ui::components::context_menu::{ContextMenuItem, ContextMenuTrigger};
 use vmux_ui::components::icon::Icon;
 use vmux_ui::hooks::send;
@@ -17,7 +18,8 @@ use crate::event::StackNode;
 #[component]
 pub(super) fn SideSheetStackRow(stack: StackNode, pane_id: u64) -> Element {
     let drag_state: Signal<Option<BookmarkDragState>> = use_context();
-    let folders = LayoutUi::current().value().bookmarks.folders;
+    let layout = LayoutUi::current();
+    let folders = layout.use_selector(|state| state.bookmarks.folders.clone())();
     let is_active = stack.is_active;
     let stack_id = stack.id;
     let mut hovered = use_signal(|| false);
@@ -60,10 +62,12 @@ pub(super) fn SideSheetStackRow(stack: StackNode, pane_id: u64) -> Element {
                         move |event| BookmarkDragState::begin(drag_state, &event, item.clone())
                     },
                     id: "sidesheet-stack-{pane_id}-{stack_id}",
+                    "data-vmux-stack-row": "{stack_id}",
+                    aria_current: if is_active { "page" } else { "false" },
                     class: if is_active {
-                        "flex h-9 cursor-default items-center gap-2 rounded-md bg-primary/[0.07] px-2 shadow-[inset_2px_0_0_var(--primary)] ring-1 ring-inset ring-primary/15"
+                        "flex h-9 cursor-default items-center gap-2 rounded-md bg-foreground/[0.09] px-2 @max-[12rem]:gap-1.5 @max-[12rem]:px-1"
                     } else {
-                        "flex h-9 cursor-pointer items-center gap-2 rounded-md px-2 border border-transparent text-muted-foreground hover:bg-glass-hover hover:text-foreground"
+                        "flex h-9 cursor-pointer items-center gap-2 rounded-md px-2 text-muted-foreground transition-colors hover:bg-foreground/[0.07] hover:text-foreground @max-[12rem]:gap-1.5 @max-[12rem]:px-1"
                     },
                     onmouseenter: move |_| hovered.set(true),
                     onmouseleave: move |_| hovered.set(false),
@@ -73,13 +77,10 @@ pub(super) fn SideSheetStackRow(stack: StackNode, pane_id: u64) -> Element {
                             event.stop_propagation();
                             return;
                         }
-                        let _ = send(&crate::event::SideSheetStackActivateRequest {
-                            pane_id,
-                            stack_id,
-                        });
+                        layout.select_stack(pane_id, stack_id);
                     },
-                    StackIcon { icon: stack.icon.clone(), url: stack.url.clone(), title: stack.title.clone() }
-                    span { class: "{title_class}", "{display_title}" }
+                    StackIcon { icon: stack.icon.clone(), url: stack.url.clone(), title: stack.title.clone(), loading: stack.is_loading }
+                    span { class: "{title_class}", title: "{display_title}", "{display_title}" }
                     button {
                         r#type: "button",
                         aria_label: "{close_title}",
@@ -187,7 +188,33 @@ pub(super) fn NewStackRow(pane_id: u64) -> Element {
 }
 
 #[component]
-pub(super) fn StackIcon(icon: PageIcon, url: String, title: String) -> Element {
+pub(super) fn StackIcon(
+    icon: PageIcon,
+    url: String,
+    title: String,
+    #[props(default)] loading: bool,
+) -> Element {
+    if loading {
+        return rsx! { vmux_ui::components::progress::LoadingIcon {} };
+    }
+    if let Some(vmux_session::Route::Session(id)) = vmux_session::Route::parse(&url) {
+        let agent_icon = icon.favicon_url().to_string();
+        return rsx! {
+            span { class: "relative inline-flex size-4 shrink-0",
+                IdentityOrb { seed: id.0, alt: title, class: "size-full".to_string() }
+                if !agent_icon.is_empty() {
+                    span { class: "absolute -bottom-0.5 -right-0.5 flex size-2.5 items-center justify-center rounded-full bg-card ring-1 ring-card",
+                        AgentThumbnail {
+                            src: Some(agent_icon.clone()),
+                            seed: agent_icon,
+                            background: String::new(),
+                            class: "size-2 object-contain".to_string(),
+                        }
+                    }
+                }
+            }
+        };
+    }
     if title == "New Stack" && url.is_empty() {
         return rsx! {
             Icon { class: "h-4 w-4 shrink-0 text-muted-foreground",
@@ -211,9 +238,9 @@ pub(super) struct StackTitle;
 impl StackTitle {
     pub(super) fn truncate_class(title: &str) -> &'static str {
         if title.contains('/') {
-            "truncate-start"
+            "truncate-fade-start"
         } else {
-            "truncate"
+            "truncate-fade"
         }
     }
 
@@ -255,7 +282,7 @@ fn SheetNewButton(label: String, icon: Element, onclick: EventHandler<MouseEvent
     rsx! {
         button {
             r#type: "button",
-            class: "group flex h-9 cursor-pointer items-center gap-2 rounded-md px-2 border border-transparent text-left text-muted-foreground hover:bg-glass-hover hover:text-foreground",
+            class: "group flex h-9 w-full cursor-pointer items-center gap-2 px-2 text-left text-muted-foreground transition-colors hover:bg-foreground/[0.07] hover:text-foreground @max-[12rem]:gap-1.5 @max-[12rem]:px-1",
             onclick: move |e| onclick.call(e),
             {icon}
             span { class: "min-w-0 flex-1 truncate text-ui font-medium", "{label}" }

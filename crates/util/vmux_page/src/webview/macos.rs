@@ -2,7 +2,7 @@ use objc2::MainThreadMarker;
 use objc2::rc::Retained;
 use objc2_app_kit::{
     NSAppearance, NSAppearanceCustomization, NSAppearanceNameAqua, NSAppearanceNameDarkAqua,
-    NSColor, NSView, NSWindowOrderingMode,
+    NSAutoresizingMaskOptions, NSColor, NSView, NSWindowOrderingMode,
 };
 use objc2_quartz_core::CACornerMask;
 use objc2_web_kit::WKWebViewConfiguration;
@@ -11,7 +11,109 @@ use wry::WebViewExtMacOS;
 
 use super::{Appearance, SiblingOrder, WebView};
 
+struct SurfaceBackground;
+
+impl SurfaceBackground {
+    fn apply(webview: &wry::WebView, appearance: Appearance, transparent: bool) {
+        let wk = webview.webview();
+        let (red, green, blue, alpha) = appearance.surface_rgba(transparent);
+        let color = NSColor::colorWithSRGBRed_green_blue_alpha(
+            red as f64 / 255.0,
+            green as f64 / 255.0,
+            blue as f64 / 255.0,
+            alpha as f64 / 255.0,
+        );
+        unsafe {
+            wk.setUnderPageBackgroundColor(Some(&color));
+        }
+        let view: &NSView = &wk;
+        view.setWantsLayer(true);
+        if let Some(layer) = view.layer() {
+            layer.setOpaque(!transparent);
+            layer.setBackgroundColor(Some(&color.CGColor()));
+        }
+    }
+}
+
 impl WebView {
+    pub fn reload_ignore_cache(&self) -> bool {
+        unsafe { self.webview.webview().reloadFromOrigin().is_some() }
+    }
+
+    pub fn presentation_settled(&self, expected_opacity: f32) -> bool {
+        let wk = self.webview.webview();
+        let view: &NSView = &wk;
+        if view.window().is_none() || view.isHidden() {
+            return false;
+        }
+        let Some(layer) = view.layer() else {
+            return false;
+        };
+        let Some(presented) = (unsafe { layer.presentationLayer() }) else {
+            return false;
+        };
+        let model = layer.frame();
+        let actual = presented.frame();
+        PresentedLayer {
+            frame: [
+                actual.origin.x,
+                actual.origin.y,
+                actual.size.width,
+                actual.size.height,
+            ],
+            opacity: presented.opacity(),
+        }
+        .matches(PresentedLayer {
+            frame: [
+                model.origin.x,
+                model.origin.y,
+                model.size.width,
+                model.size.height,
+            ],
+            opacity: expected_opacity,
+        })
+    }
+
+    pub(super) fn anchor_native_frame(&self) {
+        let wk = self.webview.webview();
+        let view: &NSView = &wk;
+        let Some(parent) = (unsafe { view.superview() }) else {
+            return;
+        };
+        let mask = if parent.isFlipped() {
+            NSAutoresizingMaskOptions::ViewMaxYMargin
+        } else {
+            NSAutoresizingMaskOptions::ViewMinYMargin
+        };
+        view.setAutoresizingMask(mask);
+    }
+
+    pub(crate) fn platform_bounds(&self) -> Option<wry::Rect> {
+        let wk = self.webview.webview();
+        let view: &NSView = &wk;
+        let parent = unsafe { view.superview() }?;
+        let frame = view.frame();
+        let top = if parent.isFlipped() {
+            frame.origin.y
+        } else {
+            parent.frame().size.height - frame.origin.y - frame.size.height
+        };
+        Some(wry::Rect {
+            position: wry::dpi::LogicalPosition::new(frame.origin.x, top).into(),
+            size: wry::dpi::LogicalSize::new(frame.size.width, frame.size.height).into(),
+        })
+    }
+
+    pub fn set_opacity(&self, opacity: f32) {
+        let wk = self.webview.webview();
+        let view: &NSView = &wk;
+        view.setWantsLayer(true);
+        let Some(layer) = view.layer() else {
+            return;
+        };
+        layer.setOpacity(opacity.clamp(0.0, 1.0));
+    }
+
     pub fn order_among_siblings(&self, order: SiblingOrder) {
         let wk = self.webview.webview();
         let view: &NSView = &wk;
@@ -88,6 +190,7 @@ impl WebView {
     }
 
     pub fn set_appearance(&self, appearance: Appearance) {
+        self.appearance.set(appearance);
         let named = match appearance {
             Appearance::Light => NSAppearance::appearanceNamed(unsafe { NSAppearanceNameAqua }),
             Appearance::Dark => NSAppearance::appearanceNamed(unsafe { NSAppearanceNameDarkAqua }),
@@ -96,23 +199,79 @@ impl WebView {
         let wk = self.webview.webview();
         let view: &NSView = &wk;
         view.setAppearance(named.as_deref());
+        SurfaceBackground::apply(&self.webview, appearance, self.page.get().transparent);
     }
 
-    pub fn take_first_responder(&self) {
+    pub fn take_first_responder(&self) -> bool {
         let wk = self.webview.webview();
         let view: &NSView = &wk;
         let Some(window) = view.window() else {
-            return;
+            return false;
         };
         let holds_it = window
             .firstResponder()
             .is_some_and(|current| std::ptr::eq(&*current as *const _ as *const NSView, view));
         if holds_it {
-            return;
+            return true;
         }
-        if !window.makeFirstResponder(Some(view)) {
+        let accepted = window.makeFirstResponder(Some(view));
+        if !accepted {
             warn!("vmux_page: the window refused first responder, this page cannot be typed in");
         }
+        accepted
+    }
+}
+
+struct PresentedLayer {
+    frame: [f64; 4],
+    opacity: f32,
+}
+
+impl PresentedLayer {
+    fn matches(&self, expected: Self) -> bool {
+        for (actual, expected) in self.frame.iter().zip(expected.frame) {
+            if (*actual - expected).abs() > 1.0 || !actual.is_finite() {
+                return false;
+            }
+        }
+        (self.opacity - expected.opacity).abs() <= 0.001
+    }
+}
+
+#[cfg(test)]
+mod presentation_tests {
+    use super::*;
+
+    #[test]
+    fn native_presentation_must_match_the_requested_frame_and_fade_phase() {
+        for (actual, expected, settled) in [
+            (0.0, 1.0, false),
+            (0.0, 0.0, true),
+            (1.0, 1.0, true),
+            (0.5, 1.0, false),
+        ] {
+            assert_eq!(
+                PresentedLayer {
+                    frame: [0.0, 0.0, 800.0, 600.0],
+                    opacity: actual
+                }
+                .matches(PresentedLayer {
+                    frame: [0.0, 0.0, 800.0, 600.0],
+                    opacity: expected
+                }),
+                settled
+            );
+        }
+        assert!(
+            !PresentedLayer {
+                frame: [0.0, 0.0, 800.0, 600.0],
+                opacity: 1.0
+            }
+            .matches(PresentedLayer {
+                frame: [20.0, 0.0, 800.0, 600.0],
+                opacity: 1.0
+            })
+        );
     }
 }
 

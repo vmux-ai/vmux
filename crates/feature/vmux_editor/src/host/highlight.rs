@@ -70,7 +70,7 @@ impl Highlighter {
     }
 
     pub(crate) fn theme() -> syntect::highlighting::Theme {
-        crate::palette::Palette::for_scheme(Self::is_dark()).theme()
+        vmux_syntax::Palette::for_scheme(Self::is_dark()).theme()
     }
 
     pub(crate) fn foreground(theme: &syntect::highlighting::Theme) -> [u8; 3] {
@@ -78,9 +78,7 @@ impl Highlighter {
             .settings
             .foreground
             .map(|color| [color.r, color.g, color.b])
-            .unwrap_or_else(|| {
-                crate::palette::Palette::for_scheme(Self::is_dark()).foreground_rgb()
-            })
+            .unwrap_or_else(|| vmux_syntax::Palette::for_scheme(Self::is_dark()).foreground_rgb())
     }
 
     pub(crate) fn span(style: Style, text: &str) -> StyledSpan {
