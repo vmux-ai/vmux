@@ -336,9 +336,7 @@ pub(crate) const WRY_HOST_SHIM: &str = r#"
     remount.previousRoot.replaceWith(remount.root);
     window.interpreter = remount.interpreter;
     const committed = commitNavigationRevision(revision);
-    if (committed) {
-      try { ComposerHandoff.apply(remount.composer, remount.root); } catch (e) {}
-    }
+    try { ComposerHandoff.apply(remount.composer, remount.root); } catch (e) {}
     return committed;
   };
   const visibleScrollAnchor = (container, viewport) => {

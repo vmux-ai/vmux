@@ -975,6 +975,7 @@ rejected. Actual document replacement or failed edits still rebuild the document
 pages share one native document surface; replacing their page root moves the shared composer from
 its previous rectangle into its final dock position within the layout motion budget. The layout,
 input identity, and first frame commit immediately, with no interpolation for reduced motion.
+The composer handoff follows root replacement even when frame identity has already resynchronized.
 Shared sidebar rows stay in place when page selection changes. Session detail-panel visibility belongs to the page shell,
 and its geometry remains reserved while the selected session loads.
 Session viewports remember their scroll position and loaded-history start on the owning Session.

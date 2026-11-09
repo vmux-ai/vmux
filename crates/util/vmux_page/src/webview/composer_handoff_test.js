@@ -64,9 +64,13 @@ class HandoffProbe {
       headers: { get: name => ({ 'x-vmux-navigation': this.revision, 'x-vmux-frame-epoch': '1', 'x-vmux-frame-capability': '777', 'x-vmux-frame': String(sequence) })[name] || null },
       arrayBuffer: async () => packet.buffer.slice(packet.byteOffset, packet.byteOffset + packet.byteLength) };
   }
-  async remount() {
+  async remount(resynchronize = false) {
     await new Promise(resolve => setImmediate(resolve));
     this.revision = '2';
+    if (resynchronize) {
+      this.deliver(this.response(412));
+      await new Promise(resolve => setImmediate(resolve));
+    }
     this.deliver(this.response(200, 1));
     await new Promise(resolve => setImmediate(resolve));
     assert.equal(this.requests.at(-1)['x-vmux-applied-frame'], '1', 'the DOM must acknowledge navigation without waiting for animation or paint');
@@ -84,6 +88,9 @@ class HandoffProbe {
   assert.equal(animation.frames[1].transform, 'translate(0px, 0px) scale(1, 1)');
   assert.equal(animation.frames[0].transformOrigin, 'top left');
   assert.ok(animation.options.duration > 0 && animation.options.duration <= 160);
+  const resynchronized = new HandoffProbe();
+  await resynchronized.remount(true);
+  assert.equal(resynchronized.target.animations.length, 1, 'resynchronizing navigation before remount must preserve the composer handoff');
   const reduced = new HandoffProbe(true);
   await reduced.remount();
   assert.equal(reduced.root.composer, reduced.target);
