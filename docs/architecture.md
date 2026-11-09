@@ -636,7 +636,8 @@ checkout follows the owning workspace, and old `vmux://git/` routes normalize be
 Search, filters, Details, Add, Create,
 Resume, Start, and Checkout render inside the page through `PageToolbar`, with local callbacks.
 Settings and manager pages share `WorkspaceLayout`: navigation opens by default on desktop,
-and its toggle animates the sidebar and icon. Search uses the shared expandable search control.
+and its toggle animates the sidebar and icon. The content-column toolbar matches Editor and Note:
+the common `PageSidebarToggle` sits on the left, with expandable search on the right.
 Settings section icons and the active viewport section update the address trail and URL fragment;
 command-bar search providers resolve their favicons through the common favicon source.
 Git's document, styles and UI transport share the `git://` origin. Code uses `file://` for

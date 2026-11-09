@@ -1,7 +1,9 @@
 use crate::cn::cn;
 use crate::components::badge::Badge;
 use crate::components::dropdown::{Dropdown, DropdownOption, DropdownSelector};
-use crate::components::page::{PageContent, PageHeader, PageShell, PageToolbarRow};
+use crate::components::page::{
+    PageContent, PageHeader, PageShell, PageSidebarToggle, PageToolbarRow,
+};
 use crate::components::skeleton::Skeleton;
 use crate::components::tooltip::Tooltip;
 use crate::i18n::translate;
@@ -87,7 +89,7 @@ pub fn WorkspaceLayout(
 ) -> Element {
     let sidebar_width = vmux_api::editor::TreeWidth::DEFAULT;
     let mut sidebar_open = use_signal(|| !cfg!(any(target_os = "ios", target_os = "android")));
-    let duration = crate::motion::Motion::CONTENT_MS;
+    let duration = crate::motion::Motion::LAYOUT_MS;
     let sidebar_style = if sidebar_open() {
         format!(
             "width:min(var(--vmux-sidebar-width),50vw);opacity:1;transition-duration:{duration}ms;"
@@ -96,20 +98,7 @@ pub fn WorkspaceLayout(
         format!("width:0px;opacity:0;transition-duration:{duration}ms;")
     };
     rsx! {
-        div { class: "flex min-h-0 flex-1 flex-col overflow-hidden", style: "--vmux-sidebar-width:{sidebar_width}px;",
-            PageToolbarRow { class: "".to_string(),
-                if show_sidebar {
-                    WorkspaceSidebarToggle {
-                        open: sidebar_open(),
-                        ontoggle: move |_| sidebar_open.set(!sidebar_open()),
-                    }
-                }
-                if let Some(search) = search {
-                    div { class: "w-[min(var(--vmux-sidebar-width),50vw)] min-w-0 shrink-0", {search} }
-                }
-                div { class: "min-w-0 flex-1", {toolbar} }
-            }
-            div { class: "flex min-h-0 flex-1 overflow-hidden",
+        div { class: "flex min-h-0 flex-1 overflow-hidden", style: "--vmux-sidebar-width:{sidebar_width}px;",
                 if show_sidebar {
                     aside {
                         class: "flex min-h-0 shrink-0 flex-col overflow-hidden transition-[width,opacity] ease-out motion-reduce:transition-none",
@@ -119,35 +108,22 @@ pub fn WorkspaceLayout(
                         div { class: "min-h-0 w-[min(var(--vmux-sidebar-width),50vw)] flex-1 overflow-y-auto px-1 pb-2", {sidebar} }
                     }
                 }
-                div { class: "flex min-w-0 flex-1 flex-col overflow-hidden", {children} }
-            }
-        }
-    }
-}
-
-#[component]
-fn WorkspaceSidebarToggle(open: bool, ontoggle: EventHandler<()>) -> Element {
-    let duration = crate::motion::Motion::CONTENT_MS;
-    let rotation = if open { 0 } else { 180 };
-    rsx! {
-        crate::components::button::Button {
-            variant: crate::components::button::ButtonVariant::Ghost,
-            size: crate::components::button::ButtonSize::Xs,
-            r#type: "button",
-            class: "mx-1 h-7 w-7 shrink-0 p-0",
-            aria_label: translate("schema-side-sheet"),
-            title: translate("schema-side-sheet"),
-            aria_expanded: open,
-            onclick: move |_| ontoggle.call(()),
-            crate::components::icon::Icon { class: "size-3.5",
-                rect { x: "3", y: "3", width: "18", height: "18", rx: "2" }
-                path { d: "M9 3v18" }
-                path {
-                    d: "m15 9-3 3 3 3",
-                    class: "transition-transform motion-reduce:transition-none",
-                    style: "transform:rotate({rotation}deg);transform-origin:center;transform-box:fill-box;transition-duration:{duration}ms;",
+                div { class: "flex min-w-0 flex-1 flex-col overflow-hidden",
+                    PageToolbarRow {
+                        if show_sidebar {
+                            PageSidebarToggle {
+                                open: sidebar_open(),
+                                label: translate("schema-side-sheet"),
+                                ontoggle: move |_| sidebar_open.set(!sidebar_open()),
+                            }
+                        }
+                        div { class: "min-w-0 flex-1", {toolbar} }
+                        if let Some(search) = search {
+                            div { class: "flex w-[min(var(--vmux-sidebar-width),40vw)] min-w-0 shrink-0 justify-end", {search} }
+                        }
+                    }
+                    {children}
                 }
-            }
         }
     }
 }
