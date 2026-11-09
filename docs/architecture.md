@@ -849,6 +849,11 @@ live entities. Space roots may reference the runtime window outside the snapshot
 discard partial entities, preserve the store and schema sidecar in a recovery backup, and let
 startup create a usable workspace. Saves cannot overwrite the failed store until that backup exists.
 
+Identity indexes reuse existing ID components within a marker scope. ID or marker changes and
+removals rebuild the index; duplicate IDs refuse lookup until the ambiguity is removed. Session
+conversation and composer lookup share one index, refreshed after deferred creation and service
+mutations before either consumes the Session. These indexes are runtime state, not stored identities.
+
 Accepted project selections own their Git tasks on transient `Operation` entities. Each operation
 references its Tab and captures the selection revision; replacement, retirement, or removal cancels
 the old work before it can apply. Cleanup guards dispose of discarded checkouts. Results remain

@@ -4,10 +4,14 @@ use bevy_cef::prelude::{Browsers, UiEventPlugin, UiInput};
 use super::project::{ActiveProjectRows, SpaceProjects};
 use super::{AgentChooseWorkspace, AgentChooseWorkspaceAtPath, AgentCreateWorktreeOnBranch};
 use vmux_api::protocol::{AgentRequest, AgentRequestId};
+use vmux_api::service::ServiceMessageSet;
 use vmux_ecs::agent::{AgentRequestInput, CommandOrigin};
 use vmux_ecs::event::ProjectRow;
 use vmux_ecs::page::PageReady;
-use vmux_ecs::{Cwd, EntityTarget, KeyboardOwner, ProcessAnchor};
+use vmux_ecs::{
+    Cwd, EntityTarget, IdentityIndex, IdentityIndexPlugin, IdentityIndexSet, KeyboardOwner,
+    ProcessAnchor,
+};
 use vmux_git::worktree::RepoInfo;
 use vmux_git::{GitRuntime, GitTask, RepoInfoCache};
 use vmux_layout::tab::{Tab, TabWorkspace, TabWorktree};
@@ -21,7 +25,12 @@ pub(super) struct SpaceComposerPlugin;
 
 impl Plugin for SpaceComposerPlugin {
     fn build(&self, app: &mut App) {
-        app.add_message::<AgentRequestInput>()
+        if !app.is_plugin_added::<IdentityIndexPlugin<SessionId, Session>>() {
+            app.add_plugins(IdentityIndexPlugin::<SessionId, Session>::default());
+        }
+        let index = IdentityIndexSet::of::<SessionId, Session>();
+        app.configure_sets(Update, index.after(ServiceMessageSet))
+            .add_message::<AgentRequestInput>()
             .init_resource::<GitRuntime>()
             .add_plugins(UiEventPlugin::<(
                 ChatSelectWorkspace,
@@ -31,7 +40,10 @@ impl Plugin for SpaceComposerPlugin {
             .add_observer(chat_select_workspace)
             .add_observer(chat_branches_request)
             .add_observer(chat_go_to_branch)
-            .add_systems(Update, (push_context_to_page, drain_branch_reads));
+            .add_systems(
+                Update,
+                (push_context_to_page.after(index), drain_branch_reads),
+            );
     }
 }
 
@@ -47,6 +59,7 @@ struct ComposerContextInput {
 
 #[derive(bevy::ecs::system::SystemParam)]
 struct ComposerProjection<'w, 's> {
+    identities: Res<'w, IdentityIndex<SessionId, Session>>,
     sessions: Query<
         'w,
         's,
@@ -84,10 +97,10 @@ impl ComposerProjection<'_, '_> {
             .and_then(|page| Route::parse(&page.url));
         let session = match route {
             Some(Route::Session(id)) => {
-                self.sessions
-                    .iter()
-                    .find(|(_, candidate, _, _)| **candidate == id)?
-                    .0
+                let Ok(Some(session)) = self.identities.entity(&id) else {
+                    return None;
+                };
+                session
             }
             _ => self.targets.get(stack).ok()?.entity(),
         };
@@ -477,12 +490,15 @@ mod tests {
             event.mark_delivered();
         }
 
-        fn bind(&mut self, path: &std::path::Path) {
-            self.app.world_mut().spawn((
-                Session,
-                SessionId("late-session".to_string()),
-                Cwd(path.to_path_buf()),
-            ));
+        fn bind(&mut self, path: &std::path::Path) -> Entity {
+            self.app
+                .world_mut()
+                .spawn((
+                    Session,
+                    SessionId("late-session".to_string()),
+                    Cwd(path.to_path_buf()),
+                ))
+                .id()
         }
 
         fn context(&self) -> &ComposerContext {
@@ -517,6 +533,21 @@ mod tests {
         );
         assert_eq!(page.app.world().resource::<ContextWrites>().0, 1);
         page.app.update();
+        assert_eq!(page.app.world().resource::<ContextWrites>().0, 1);
+    }
+
+    #[test]
+    fn ambiguous_session_routes_wait_until_one_identity_remains() {
+        let first = tempfile::tempdir().unwrap();
+        let other = tempfile::tempdir().unwrap();
+        let mut page = ComposerPage::waiting();
+        page.bind(first.path());
+        let duplicate = page.bind(other.path());
+        page.app.update();
+        assert_eq!(page.app.world().resource::<ContextWrites>().0, 0);
+        page.app.world_mut().despawn(duplicate);
+        page.app.update();
+        assert_eq!(page.context().cwd, first.path().to_string_lossy());
         assert_eq!(page.app.world().resource::<ContextWrites>().0, 1);
     }
 
