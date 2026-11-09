@@ -128,6 +128,7 @@ pub fn ManagerSidebarItem(
     selected: bool,
     #[props(default)] icon: Option<LineIcon>,
     #[props(default)] builtin_icon: Option<vmux_api::BuiltinIcon>,
+    #[props(default)] leading: Option<Element>,
     #[props(default)] dot: String,
     onclick: EventHandler<MouseEvent>,
 ) -> Element {
@@ -141,7 +142,9 @@ pub fn ManagerSidebarItem(
             r#type: "button",
             class: "flex h-8 w-full items-center gap-2 rounded-md px-2 text-left text-[11px] transition-colors {class}",
             onclick: move |event| onclick.call(event),
-            if let Some(icon) = builtin_icon {
+            if let Some(leading) = leading {
+                {leading}
+            } else if let Some(icon) = builtin_icon {
                 crate::icon::BuiltinIconView { icon, class: "size-3.5 shrink-0".to_string() }
             } else if let Some(icon) = icon {
                 LineIconView { icon, class: "size-3.5 shrink-0".to_string() }

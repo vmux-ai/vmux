@@ -13,7 +13,7 @@ use dioxus::prelude::*;
 use vmux_api::address::{AddressCrumb, AddressIntent, AddressOption, PageAddress};
 use vmux_api::extension::ExtensionsUiState;
 use vmux_ui::components::avatar::AgentThumbnail;
-use vmux_ui::components::breadcrumb::BreadcrumbOption;
+use vmux_ui::components::breadcrumb::{BreadcrumbOption, BreadcrumbOptionIcon};
 use vmux_ui::components::manager::{
     ManagerButton, ManagerButtonVariant, ManagerCard, ManagerCollection, ManagerDetails,
     ManagerEmpty, ManagerList, ManagerPage, ManagerRow, ManagerSection, ManagerSidebarItem,
@@ -352,7 +352,10 @@ fn ToolsSidebar(active: String, state: ToolsUiState, extensions: ExtensionsUiSta
                     key: "{option.id}",
                     label: option.label.clone(), selected: option.id == active,
                     count: if option.id == "extensions" { extensions.extensions.len() } else { option.count(&state.snapshot) },
-                    builtin_icon: option.icon,
+                    leading: rsx! { BreadcrumbOptionIcon {
+                        option: BreadcrumbOption::from(option.clone()),
+                        class: "size-4 shrink-0".to_string(),
+                    } },
                     onclick: move |event| PageNavigation::click(option.url.clone(), &event),
                 }
             }
