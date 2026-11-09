@@ -448,6 +448,7 @@ pub struct PageManifestPlugin {
 
 impl PageManifestPlugin {
     pub const fn hosted(mut self, hosted: HostedPage) -> Self {
+        self.manifest.owns_subtree = self.manifest.owns_subtree || hosted.owns_subtree;
         self.hosted = Some(hosted);
         self
     }
@@ -955,6 +956,41 @@ mod tests {
             manifest.metadata_for("vmux://simulator/ios/27.0").icon,
             vmux_api::PageIcon::Builtin(vmux_api::BuiltinIcon::Smartphone)
         );
+    }
+
+    #[test]
+    fn hosted_subtree_registration_exposes_the_same_routes_to_page_metadata() {
+        let mut app = App::new();
+        app.add_plugins(
+            PageManifest {
+                route: "vmux://tools/",
+                url: "vmux://tools/",
+                asset_host: "tools",
+                owns_subtree: false,
+                title: "Tools",
+                title_message_id: None,
+                replaces_command: None,
+                keywords: &[],
+                icon: None,
+                command_bar: true,
+                startup: false,
+                reports_title: false,
+                placement: PagePlacement::DEFAULT,
+            }
+            .plugin()
+            .hosted(HostedPage::subtree("vmux://tools/", "Tools")),
+        );
+        let mut pages = app.world_mut().query::<(&PageManifest, &HostedPage)>();
+        let (metadata, hosted) = pages.single(app.world()).unwrap();
+
+        for url in [
+            "vmux://tools/extensions",
+            "vmux://tools/lsp",
+            "vmux://tools/mcp",
+        ] {
+            assert!(hosted.answers_for(url));
+            assert!(metadata.answers_for(url));
+        }
     }
 
     #[test]

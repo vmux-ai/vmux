@@ -625,6 +625,9 @@ the registered manifests supply the page-switch menu. Pages publish only typed `
 data through `AddressContribution` or `PageAddressPublish`: the current route, project and session
 choices, directories, symbols, and their intents. `vmux_layout` renders the active surface with
 one `AddressTrail`. No page component, callback, context, or mounted slot crosses into Layout.
+Hosted subtree registration also extends its route metadata's ownership. During navigation,
+Layout reads the incoming surface and existing breadcrumb choices supply the selected label and
+icon immediately, before the page publishes its enriched address.
 The URL row contains routing breadcrumbs and page-type icons. Project and branch selection stays
 in the Space card; Code and Session trails contain their viewed file or Session without repeating
 that workspace context. Code and Git use `file://` and `git://`; their root

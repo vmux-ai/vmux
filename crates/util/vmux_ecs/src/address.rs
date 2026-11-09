@@ -43,6 +43,16 @@ type Sources<'w, 's> = Query<
 fn project(routes: Query<&PageManifest>, pages: Sources, mut commands: Commands) {
     for (owner, metadata, current, automatic) in &pages {
         if let Some(current) = current
+            && current.0.url != metadata.url
+            && let Some(address) = current.0.for_navigation(&metadata.url)
+        {
+            commands
+                .entity(owner)
+                .remove::<RouteAddress>()
+                .insert(AddressContribution(address));
+            continue;
+        }
+        if let Some(current) = current
             && automatic.is_none()
             && current.0.url != metadata.url
             && current.0.document_url() == metadata.url.split('#').next().unwrap_or_default()
@@ -415,6 +425,65 @@ mod tests {
             .url = "vmux://projects/two".into();
         trail.app.update();
         assert_eq!(trail.address().current.label, "Projects");
+    }
+
+    #[test]
+    fn navigation_uses_the_known_breadcrumb_choice_before_the_page_publishes() {
+        let mut trail = Trail::new();
+        trail.declare("vmux://tools/", "Tools", true);
+        trail
+            .app
+            .world_mut()
+            .get_mut::<PageMetadata>(trail.page)
+            .unwrap()
+            .url = "vmux://tools/acp".into();
+        let option = AddressOption {
+            label: "Extensions".into(),
+            icon: Some(vmux_api::BuiltinIcon::Toolbox),
+            intent: Some(AddressIntent::Navigate {
+                url: "vmux://tools/extensions".into(),
+            }),
+            ..Default::default()
+        };
+        trail.app.world_mut().trigger(UiInput {
+            webview: trail.page,
+            payload: PageAddressPublish {
+                address: PageAddress {
+                    url: "vmux://tools/acp".into(),
+                    current: AddressOption {
+                        label: "Tools".into(),
+                        ..Default::default()
+                    },
+                    fixed: vec![vmux_api::address::AddressCrumb {
+                        entry: AddressOption {
+                            label: "ACP Agents".into(),
+                            ..Default::default()
+                        },
+                        options: vec![option.clone()],
+                        ..Default::default()
+                    }],
+                    ..Default::default()
+                },
+            },
+        });
+        trail.app.world_mut().flush();
+        let previous = trail.address();
+        trail
+            .app
+            .world_mut()
+            .get_mut::<PageMetadata>(trail.page)
+            .unwrap()
+            .url = "vmux://tools/extensions".into();
+
+        trail.app.update();
+
+        let address = trail.address();
+        assert_eq!(address.current.label, "Tools");
+        assert_eq!(address.fixed[0].entry, option);
+        assert_eq!(address.url, "vmux://tools/extensions");
+        assert!(address.revision > previous.revision);
+        trail.app.update();
+        assert_eq!(trail.address(), address);
     }
 
     #[test]

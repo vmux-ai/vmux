@@ -129,6 +129,28 @@ impl PageAddress {
     pub fn accepts(&self, request: &PageAddressRequest) -> bool {
         self.owner == request.owner && self.revision == request.revision && self.url == request.url
     }
+
+    pub fn for_navigation(&self, url: &str) -> Option<Self> {
+        let mut next = self.clone();
+        let mut selected = false;
+        for crumbs in [&mut next.fixed, &mut next.paths, &mut next.symbols] {
+            for crumb in crumbs {
+                for option in &crumb.options {
+                    if option.navigates_to(url) {
+                        crumb.entry = option.clone();
+                        selected = true;
+                        break;
+                    }
+                }
+            }
+        }
+        if !selected {
+            return None;
+        }
+        next.url = url.to_string();
+        next.revision = next.revision.saturating_add(1);
+        Some(next)
+    }
 }
 
 #[crate::ui_state_patch(Default)]
@@ -166,6 +188,10 @@ impl crate::UiStateProjection<PageAddressUiStatePatch> for PageAddressUiState {
 }
 
 impl AddressOption {
+    fn navigates_to(&self, url: &str) -> bool {
+        matches!(&self.intent, Some(AddressIntent::Navigate { url: target }) if target == url)
+    }
+
     pub fn file(label: String, path: String, is_dir: bool) -> Self {
         Self {
             label,

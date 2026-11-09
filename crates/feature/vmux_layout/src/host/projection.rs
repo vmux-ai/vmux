@@ -36,52 +36,57 @@ impl Plugin for LayoutUiProjectionPlugin {
     fn build(&self, app: &mut App) {
         app.configure_sets(
             PostUpdate,
+            vmux_ecs::address::AddressProjectionSet
+                .after(crate::presentation::PresentationFlushSet),
+        )
+        .configure_sets(
+            PostUpdate,
             LayoutUiProjectionSet::SourceFlush.after(vmux_ecs::address::AddressProjectionSet),
+        )
+        .add_observer(address_request)
+        .add_observer(capture_tab_list)
+        .configure_sets(
+            PostUpdate,
+            (
+                LayoutUiProjectionSet::Source,
+                LayoutUiProjectionSet::SourceFlush,
+                LayoutUiProjectionSet::Derive,
+                LayoutUiProjectionSet::DeriveFlush,
+                LayoutUiProjectionSet::Publish,
+            )
+                .chain()
+                .after(crate::presentation::PresentationFlushSet)
+                .before(vmux_flex::prelude::LayoutSystems::Layout),
+        )
+        .add_systems(
+            PostUpdate,
+            bevy::ecs::schedule::ApplyDeferred.in_set(LayoutUiProjectionSet::SourceFlush),
+        )
+        .add_systems(
+            PostUpdate,
+            (
+                publish_active_session,
+                project_header,
+                project_tab_strip,
+                project_side_sheet,
+                project_bookmark_ui,
+            )
+                .in_set(LayoutUiProjectionSet::Derive),
+        )
+        .add_systems(
+            PostUpdate,
+            bevy::ecs::schedule::ApplyDeferred.in_set(LayoutUiProjectionSet::DeriveFlush),
+        )
+        .add_systems(
+            PostUpdate,
+            (
+                publish_header,
+                publish_tab_strip,
+                publish_side_sheet,
+                publish_bookmark_ui,
+            )
+                .in_set(LayoutUiProjectionSet::Publish),
         );
-        app.add_observer(address_request)
-            .add_observer(capture_tab_list)
-            .configure_sets(
-                PostUpdate,
-                (
-                    LayoutUiProjectionSet::Source,
-                    LayoutUiProjectionSet::SourceFlush,
-                    LayoutUiProjectionSet::Derive,
-                    LayoutUiProjectionSet::DeriveFlush,
-                    LayoutUiProjectionSet::Publish,
-                )
-                    .chain()
-                    .after(crate::presentation::PresentationFlushSet)
-                    .before(vmux_flex::prelude::LayoutSystems::Layout),
-            )
-            .add_systems(
-                PostUpdate,
-                bevy::ecs::schedule::ApplyDeferred.in_set(LayoutUiProjectionSet::SourceFlush),
-            )
-            .add_systems(
-                PostUpdate,
-                (
-                    publish_active_session,
-                    project_header,
-                    project_tab_strip,
-                    project_side_sheet,
-                    project_bookmark_ui,
-                )
-                    .in_set(LayoutUiProjectionSet::Derive),
-            )
-            .add_systems(
-                PostUpdate,
-                bevy::ecs::schedule::ApplyDeferred.in_set(LayoutUiProjectionSet::DeriveFlush),
-            )
-            .add_systems(
-                PostUpdate,
-                (
-                    publish_header,
-                    publish_tab_strip,
-                    publish_side_sheet,
-                    publish_bookmark_ui,
-                )
-                    .in_set(LayoutUiProjectionSet::Publish),
-            );
     }
 }
 
@@ -949,7 +954,6 @@ fn project_header(
             Option<&BookmarkProjection>,
             Option<&TeamProjection>,
             Option<&HeaderProjection>,
-            Option<&vmux_ecs::UiState<LayoutUiState>>,
         ),
         With<LayoutCef>,
     >,
@@ -964,8 +968,10 @@ fn project_header(
     let empty_stacks = StackNavigationState::default();
     let empty_bookmarks = BookmarkStateEvent::default();
     let empty_team = TeamUiState::default();
-    let active = focus.stack.and_then(|stack| surfaces.current(stack));
-    for (entity, stacks, bookmarks, team, current, state) in &layouts {
+    let active = focus
+        .stack
+        .and_then(|stack| surfaces.incoming(stack).or_else(|| surfaces.current(stack)));
+    for (entity, stacks, bookmarks, team, current) in &layouts {
         let stacks = stacks
             .map(|projection| &projection.0)
             .unwrap_or(&empty_stacks);
@@ -973,16 +979,12 @@ fn project_header(
             .map(|projection| &projection.0)
             .unwrap_or(&empty_bookmarks);
         let team = team.map(|projection| &projection.0).unwrap_or(&empty_team);
-        let visible = state
-            .and_then(|state| state.current())
-            .and_then(|state| state.layout.as_ref())
-            .is_some_and(|geometry| geometry.header_visible());
         let mut next = HeaderProjection(HeaderState::from_projections(stacks, bookmarks, team));
         for (owner, address, metadata) in &addresses {
             if !scope.contains(entity, owner) {
                 continue;
             }
-            if visible && Some(owner) == active && address.0.url == metadata.url {
+            if Some(owner) == active && address.0.url == metadata.url {
                 let mut contribution = address.0.clone();
                 if contribution.current.label.is_empty()
                     && contribution.current.label_key.is_empty()
