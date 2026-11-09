@@ -64,7 +64,7 @@ impl Space {
     }
 }
 
-#[derive(Component, Reflect, Default, Clone, Debug, PartialEq, Eq)]
+#[derive(Component, Reflect, Default, Clone, Debug, PartialEq, Eq, Hash)]
 #[reflect(Component)]
 #[type_path = "vmux_desktop::space"]
 #[require(Save)]

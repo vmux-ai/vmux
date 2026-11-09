@@ -10,7 +10,7 @@ use vmux_ecs::manifest::FeaturePlugin;
 #[cfg(all(host, not(target_os = "android")))]
 use vmux_ecs::page::PrewarmPage;
 #[cfg(all(host, not(target_os = "android")))]
-use vmux_ecs::persistence::WorkspaceStoreValidator;
+use vmux_ecs::persistence::{WorkspaceRestoreValidator, WorkspaceStoreValidator};
 
 #[cfg(host)]
 pub use catalog::{ScopeProjectionRequest, SessionCatalogView, SessionManagerView};
@@ -99,6 +99,9 @@ fn prewarm(mut commands: Commands) {
 
 #[cfg(all(host, not(target_os = "android")))]
 fn spawn_store_validator(mut commands: Commands) {
+    commands.spawn(WorkspaceRestoreValidator::unique::<crate::SessionId>(
+        "Session ID",
+    ));
     commands.spawn((
         Name::new("Session workspace-store validator"),
         WorkspaceStoreValidator {

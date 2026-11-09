@@ -3,11 +3,15 @@ use bevy_ecs::prelude::*;
 #[cfg(test)]
 use bevy_ecs::reflect::AppTypeRegistry;
 use bevy_ecs::system::SystemParam;
-use bevy_reflect::{FromType, GetTypeRegistration, Reflect, TypePath, TypeRegistry};
-use bevy_world_serialization::WorldFilter;
+use bevy_reflect::{FromReflect, FromType, GetTypeRegistration, Reflect, TypePath, TypeRegistry};
+use bevy_world_serialization::{DynamicEntity, DynamicWorld, WorldFilter};
 use moonshine_save::prelude::Save;
 use std::marker::PhantomData;
 use std::path::PathBuf;
+use std::{
+    collections::{HashMap, HashSet},
+    hash::Hash,
+};
 
 pub struct PersistenceDomain<D>(PhantomData<fn() -> D>);
 
@@ -60,6 +64,110 @@ pub struct WorkspaceSaveRequest {
 pub struct WorkspaceStoreValidator {
     pub name: &'static str,
     pub rejects: fn(&str) -> bool,
+}
+
+#[derive(Component)]
+pub struct WorkspaceRestoreValidator {
+    pub name: &'static str,
+    pub validate: fn(&DynamicWorld) -> Result<(), String>,
+}
+
+impl WorkspaceRestoreValidator {
+    pub fn unique<T>(name: &'static str) -> Self
+    where
+        T: Component + FromReflect + Eq + Hash,
+    {
+        Self {
+            name,
+            validate: Self::validate_unique::<T>,
+        }
+    }
+
+    pub fn ownership<R: Component>() -> Self {
+        Self {
+            name: "ownership graph",
+            validate: Self::validate_ownership::<R>,
+        }
+    }
+
+    fn validate_unique<T>(snapshot: &DynamicWorld) -> Result<(), String>
+    where
+        T: Component + FromReflect + Eq + Hash,
+    {
+        let mut seen = HashSet::new();
+        for entity in &snapshot.entities {
+            let Some(value) = RestoreEntity(entity).component::<T>()? else {
+                continue;
+            };
+            if !seen.insert(value) {
+                return Err(format!("duplicate {}", std::any::type_name::<T>()));
+            }
+        }
+        Ok(())
+    }
+
+    fn validate_ownership<R: Component>(snapshot: &DynamicWorld) -> Result<(), String> {
+        let mut entities = HashSet::new();
+        let mut parents = HashMap::new();
+        for entity in &snapshot.entities {
+            if !entities.insert(entity.entity) {
+                return Err(format!("duplicate entity {}", entity.entity));
+            }
+            if let Some(parent) = RestoreEntity(entity).component::<ChildOf>()? {
+                parents.insert(entity.entity, parent.parent());
+            }
+        }
+        for entity in &snapshot.entities {
+            let Some(parent) = parents.get(&entity.entity) else {
+                continue;
+            };
+            if !entities.contains(parent) && !RestoreEntity(entity).contains::<R>() {
+                return Err(format!("{} has missing owner {parent}", entity.entity));
+            }
+            let mut visited = HashSet::new();
+            let mut current = entity.entity;
+            while let Some(parent) = parents.get(&current) {
+                if !visited.insert(current) {
+                    return Err(format!("ownership cycle contains {current}"));
+                }
+                current = *parent;
+            }
+        }
+        Ok(())
+    }
+}
+
+struct RestoreEntity<'a>(&'a DynamicEntity);
+
+impl RestoreEntity<'_> {
+    fn contains<T: 'static>(&self) -> bool {
+        self.0.components.iter().any(|component| {
+            component
+                .get_represented_type_info()
+                .is_some_and(|info| info.type_id() == std::any::TypeId::of::<T>())
+        })
+    }
+
+    fn component<T: FromReflect>(&self) -> Result<Option<T>, String> {
+        for component in &self.0.components {
+            if component
+                .get_represented_type_info()
+                .is_none_or(|info| info.type_id() != std::any::TypeId::of::<T>())
+            {
+                continue;
+            }
+            return T::from_reflect(component.as_partial_reflect())
+                .map(Some)
+                .ok_or_else(|| {
+                    format!(
+                        "invalid {} on {}",
+                        std::any::type_name::<T>(),
+                        self.0.entity
+                    )
+                });
+        }
+        Ok(None)
+    }
 }
 
 #[derive(SystemParam)]
@@ -148,6 +256,44 @@ mod tests {
     #[derive(Component, Reflect)]
     #[reflect(Component)]
     struct Transient;
+
+    #[derive(Component, Reflect)]
+    struct Root;
+
+    #[test]
+    fn restore_ownership_rejects_cycles_and_missing_owners_but_allows_runtime_roots() {
+        let root = Entity::from_bits(1);
+        let child = Entity::from_bits(2);
+        let runtime = Entity::from_bits(3);
+        let validator = WorkspaceRestoreValidator::ownership::<Root>();
+        let mut snapshot = DynamicWorld {
+            resources: Vec::new(),
+            entities: vec![
+                DynamicEntity {
+                    entity: root,
+                    components: vec![Box::new(Root), Box::new(ChildOf(runtime))],
+                },
+                DynamicEntity {
+                    entity: child,
+                    components: vec![Box::new(ChildOf(root))],
+                },
+            ],
+        };
+        assert!((validator.validate)(&snapshot).is_ok());
+        snapshot.entities[1].components = vec![Box::new(ChildOf(runtime))];
+        assert!(
+            (validator.validate)(&snapshot)
+                .unwrap_err()
+                .contains("missing owner")
+        );
+        snapshot.entities[1].components = vec![Box::new(ChildOf(root))];
+        snapshot.entities[0].components = vec![Box::new(Root), Box::new(ChildOf(child))];
+        assert!(
+            (validator.validate)(&snapshot)
+                .unwrap_err()
+                .contains("ownership cycle")
+        );
+    }
 
     #[derive(Resource, Default)]
     struct DirtyCount(u32);

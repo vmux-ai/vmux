@@ -2,7 +2,7 @@ use bevy::ecs::relationship::Relationship;
 use bevy::prelude::*;
 use bevy::window::PrimaryWindow;
 use bevy_cef::prelude::HostWindow;
-use vmux_ecs::persistence::{PageRestore, WorkspaceStoreValidator};
+use vmux_ecs::persistence::{PageRestore, WorkspaceRestoreValidator, WorkspaceStoreValidator};
 use vmux_ecs::{CreatedAt, Order, PageMetadata, PageNavigation, PageOpenId, PageOpenTask};
 use vmux_flex::prelude::*;
 
@@ -46,6 +46,13 @@ impl Plugin for LayoutPersistencePlugin {
 }
 
 fn spawn_store_validator(mut commands: Commands) {
+    commands.spawn(WorkspaceRestoreValidator::unique::<crate::space::SpaceId>(
+        "Space ID",
+    ));
+    commands.spawn(WorkspaceRestoreValidator::unique::<crate::pane::PaneId>(
+        "Pane ID",
+    ));
+    commands.spawn(WorkspaceRestoreValidator::ownership::<Space>());
     commands.spawn((
         Name::new("Layout workspace-store validator"),
         WorkspaceStoreValidator {
