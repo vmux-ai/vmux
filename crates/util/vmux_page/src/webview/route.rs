@@ -52,7 +52,9 @@ impl PageRoutes {
         match route {
             Route::Events => self.dom.answer_event(&request, responder),
             Route::Edits => self.dom.serve_edits(&request, responder),
-            Route::Document => responder.respond(page.shell(self.appearance.get())),
+            Route::Document => {
+                responder.respond(page.shell(self.appearance.get(), Some(self.dom.initial_frame())))
+            }
             Route::Asset => self.assets.fetch(&url, AssetReply::from(responder)),
         }
     }

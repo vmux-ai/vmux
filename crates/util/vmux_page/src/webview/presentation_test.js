@@ -4,7 +4,7 @@ const assert = require('node:assert/strict');
 const shim = fs.readFileSync(0, 'utf8');
 
 class PageProbe {
-  constructor() {
+  constructor(initialFrame) {
     this.frames = [];
     this.messages = [];
     this.requests = [];
@@ -15,6 +15,7 @@ class PageProbe {
     this.revision = '1';
     this.epoch = '1';
     this.sequence = 0;
+    this.applied = 0;
     this.fonts = { status: 'loaded', ready: Promise.resolve() };
     this.container = {
       isConnected: true, clientHeight: 200, scrollTop: 0,
@@ -27,7 +28,7 @@ class PageProbe {
     });
     const probe = this;
     const document = {
-      title: '', head: {}, fonts: this.fonts, addEventListener() {},
+      title: '', head: {}, body: {}, fonts: this.fonts, addEventListener() {},
       querySelector: () => null,
       querySelectorAll: selector => {
         if (selector === '[data-vmux-presentation-pending]') return this.pending;
@@ -52,15 +53,17 @@ class PageProbe {
       btoa: value => Buffer.from(value, 'binary').toString('base64'),
       atob: value => Buffer.from(value, 'base64').toString('binary'),
       ipc: { postMessage: message => this.messages.push(message) }, __vmuxFrameCapability: '777',
-      interpreter: { root: {}, sendSerializedEvent() {}, run_from_bytes: () => this.edit?.() },
+      interpreter: { root: {}, sendSerializedEvent() {}, run_from_bytes: () => { this.applied++; this.edit?.(); } },
       fetch: async (_, options) => {
         this.requests.push(options.headers);
-        if (this.requests.length === 1) return this.response(412);
+        if (this.requests.length === 1 && !initialFrame) return this.response(412);
         return new Promise(resolve => { this.deliver = resolve; });
       },
     };
     scope.window = scope;
     scope.globalThis = scope;
+    this.scope = scope;
+    scope.__vmuxInitialFrame = initialFrame;
     vm.runInNewContext(shim, scope);
     scope.vmuxWry.start();
   }
@@ -110,6 +113,37 @@ class PageProbe {
 }
 
 (async () => {
+  const initial = new PageProbe({
+    revision: '7', epoch: '9', capability: '777', sequence: '41',
+    interactive: false,
+    body: Buffer.from([0, 0, 0, 0, 1]).toString('base64'),
+  });
+  assert.equal(initial.requests.length, 0, 'the document must apply its initial frame before requesting more edits');
+  await initial.flush();
+  assert.equal(initial.applied, 1);
+  assert.equal(initial.requests.length, 1);
+  assert.equal(initial.requests[0]['x-vmux-applied-frame'], '41');
+  assert.equal(initial.requests[0]['x-vmux-navigation'], '7');
+  assert.equal(initial.requests[0]['x-vmux-frame-epoch'], '9');
+  assert.equal(initial.scope.document.body.inert, true);
+  await initial.paint();
+  await initial.paint();
+  assert.deepEqual(initial.presented, ['9:7:presented:7']);
+
+  const resynchronized = new PageProbe({
+    revision: '1', epoch: '1', capability: '777', sequence: '1', interactive: true,
+    body: Buffer.from([0, 0, 0, 0, 1]).toString('base64'),
+  });
+  await resynchronized.flush();
+  resynchronized.sequence = 1;
+  resynchronized.epoch = '2';
+  resynchronized.deliver(resynchronized.response(412));
+  await resynchronized.flush();
+  await resynchronized.paint();
+  await resynchronized.paint();
+  assert.deepEqual(resynchronized.presented, ['2:1:presented:1'], 'an applied initial layout must be presented after its input epoch changes');
+  assert.equal(resynchronized.applied, 1, 'input synchronization must not rebuild the applied layout');
+
   const loading = new PageProbe();
   loading.loadingFonts();
   loading.loading = [{}];

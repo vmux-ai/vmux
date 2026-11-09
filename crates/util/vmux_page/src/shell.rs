@@ -8,6 +8,7 @@ pub struct InterpreterShell {
     html_attributes: String,
     body_class: String,
     root_class: String,
+    initial_frame: String,
 }
 
 impl InterpreterShell {
@@ -19,6 +20,7 @@ impl InterpreterShell {
             html_attributes: String::new(),
             body_class: String::new(),
             root_class: String::new(),
+            initial_frame: String::new(),
         }
     }
 
@@ -42,6 +44,11 @@ impl InterpreterShell {
         self
     }
 
+    pub(crate) fn with_initial_frame(mut self, frame: impl Into<String>) -> Self {
+        self.initial_frame = frame.into();
+        self
+    }
+
     pub fn html(&self) -> String {
         let Self {
             root_id,
@@ -50,6 +57,7 @@ impl InterpreterShell {
             html_attributes,
             body_class,
             root_class,
+            initial_frame,
         } = self;
 
         format!(
@@ -66,15 +74,14 @@ impl InterpreterShell {
 <script type="module">
 {SLEDGEHAMMER_JS}
 {NATIVE_JS}
+{initial_frame}
 window.vmuxCreateInterpreter = () => new NativeInterpreter("{base_uri}", false);
 window.interpreter = window.vmuxCreateInterpreter();
-window.onload = function() {{
-  const root = window.document.getElementById("{root_id}");
-  if (root != null) {{
-    window.interpreter.initialize(root);
-    window.vmuxWry.start();
-  }}
-}};
+const vmuxRoot = window.document.getElementById("{root_id}");
+if (vmuxRoot != null) {{
+  window.interpreter.initialize(vmuxRoot);
+  window.vmuxWry.start();
+}}
 </script>
 </body>
 </html>"#

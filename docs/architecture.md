@@ -571,10 +571,9 @@ reloads publish loading immediately and clear it on the matching ready handshake
 The favicon loader rotates a growing and shrinking arc. Diff loading surfaces retain their full
 geometry while showing a short, sparse preview with thinner bars and blank rows; known file headers
 remain visible while their bodies load.
-Native-page transitions fade the two retained surfaces by painting the incoming surface above the
-opaque committed surface. Commit waits for the platform to acknowledge the incoming surface at full
-opacity, so no frame exposes the window background. Content pages use the same lifecycle with an
-immediate presentation step. Feature page-open handlers create or retarget the incoming surface;
+Native pages keep the committed surface until the incoming layout has painted and native placement
+is ready, then commit immediately without a timed fade. Content pages use the same presentation
+lifecycle. Feature page-open handlers create or retarget the incoming surface;
 they never despawn the committed surface themselves. Only the page reducer retires it after
 presentation commits.
 
@@ -590,8 +589,10 @@ behind that committed intent. `UiStatePlugin` retains a small route-keyed snapsh
 typed page state. Reopening a route replays that snapshot before a background refresh, so cached
 content remains usable and loading placeholders describe only data that has never existed. Page
 readiness is deferred until the current render has registered its state listeners. Incoming pages
-remain input-inert but may exchange typed initialization events, and presentation waits for a paint
-after the first host snapshot. This gives every vmux page one stale-while-revalidate lifecycle
+remain input-inert but may exchange typed initialization events. The document carries its initial
+DOM frame; the interpreter applies it as soon as the root exists, and its first poll acknowledges
+that frame. Presentation uses the first usable layout, including reserved placeholders, while
+later data arrives as incremental frames. This gives every vmux page one stale-while-revalidate lifecycle
 instead of feature-specific loading gates.
 
 Live UI-state frames apply patches in place. Unconsumed increments remain queued across later

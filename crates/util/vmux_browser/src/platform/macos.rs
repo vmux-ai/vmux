@@ -1739,6 +1739,7 @@ fn open(
                 embedder.embed(entity, &url, generation),
                 instance,
                 appearance,
+                !blocked,
             ))
         });
         match built {

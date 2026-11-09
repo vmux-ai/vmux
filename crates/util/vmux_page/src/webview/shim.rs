@@ -822,7 +822,22 @@ pub(crate) const WRY_HOST_SHIM: &str = r#"
     const editable = target.closest('input, textarea, [contenteditable]:not([contenteditable="false"])');
     if (!editable) event.preventDefault();
   }, true);
-  const pumpEdits = async () => {
+  const initialResponse = (frame) => {
+    const headers = {
+      'x-vmux-navigation': frame.revision,
+      'x-vmux-frame': frame.sequence,
+      'x-vmux-frame-epoch': frame.epoch,
+      'x-vmux-frame-capability': frame.capability,
+    };
+    return {
+      status: 200,
+      ok: true,
+      headers: { get: name => headers[name] ?? null },
+      arrayBuffer: async () => fromBase64(frame.body),
+    };
+  };
+  const pumpEdits = async (initialFrame) => {
+    let initial = initialFrame ? initialResponse(initialFrame) : null;
     let retryDelay = 50;
     let lastError = '';
     for (;;) {
@@ -838,9 +853,8 @@ pub(crate) const WRY_HOST_SHIM: &str = r#"
         if (failedFrame !== null) {
           headers['x-vmux-failed-frame'] = failedFrame;
         }
-        const response = await fetch('/__edits', {
-          headers,
-        });
+        const response = initial ?? await fetch('/__edits', { headers });
+        initial = null;
         if (document !== documentIdentity) return;
         const revision = response.headers.get('x-vmux-navigation');
         const responseEpoch = response.headers.get('x-vmux-frame-epoch');
@@ -851,10 +865,12 @@ pub(crate) const WRY_HOST_SHIM: &str = r#"
             && responseEpoch !== null
             && responseCapability === String(globalThis.__vmuxFrameCapability)
           ) {
+            const pendingFrame = response.headers.get('x-vmux-frame');
+            const retainedLayout = revision === navigationRevision
+              && appliedFrame !== null && appliedFrame === pendingFrame;
             navigationRevision = revision;
             globalThis.__vmuxIpcEpoch = Number(responseEpoch);
             abandonApplyingRevision();
-            const pendingFrame = response.headers.get('x-vmux-frame');
             if (appliedFrame !== pendingFrame) appliedFrame = null;
             if (failedFrame !== pendingFrame) {
               failedFrame = null;
@@ -866,6 +882,7 @@ pub(crate) const WRY_HOST_SHIM: &str = r#"
               failedFrame = pendingFrame;
               failedRevision = revision;
             }
+            if (retainedLayout) PagePresentation.applied(revision, responseEpoch);
             retryDelay = 50;
             continue;
           }
@@ -943,6 +960,9 @@ pub(crate) const WRY_HOST_SHIM: &str = r#"
           failedRevision = null;
           retryDelay = 50;
           lastError = '';
+          ScrollPlacement.apply();
+          if (commitNavigationRevision(revision)) reportMetadata();
+          PagePresentation.applied(revision, String(globalThis.__vmuxIpcEpoch));
           continue;
         }
         for (const queued of requests) {
@@ -1048,11 +1068,17 @@ pub(crate) const WRY_HOST_SHIM: &str = r#"
     start() {
       if (started) return;
       started = true;
+      const initialFrame = globalThis.__vmuxInitialFrame;
+      delete globalThis.__vmuxInitialFrame;
+      if (initialFrame) {
+        globalThis.__vmuxIpcEpoch = Number(initialFrame.epoch);
+        if (document.body) document.body.inert = !initialFrame.interactive;
+      }
       ScrollEvents.install(window.interpreter);
       holdLinks();
       reportInteractions();
       watchMetadata();
-      pumpEdits();
+      pumpEdits(initialFrame);
     },
     binEmit(buffer) { postMessage(toBase64(buffer)); },
     binListen(id, callback) {

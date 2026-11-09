@@ -4,6 +4,7 @@ use crate::webview::report::PageMessage;
 use crate::webview::route::PageRoutes;
 use crate::webview::shim::Shim;
 pub use embed::{AssetReply, Assets, Embedding, LifecycleSink, LifecycleUpdate, Outbox, Wake};
+pub(crate) use frame::InitialFrame;
 use std::cell::Cell;
 use std::rc::Rc;
 use tracing::error;
@@ -72,8 +73,9 @@ impl WebView {
         embed: Embedding,
         instance: crate::Instance,
         appearance: Appearance,
+        interactive: bool,
     ) -> Result<Self, wry::Error> {
-        let blocked = Rc::new(Cell::new(false));
+        let blocked = Rc::new(Cell::new(!interactive));
         let ipc_epoch = embed.ipc_epoch.clone();
         let dom = Dom::mount(page.component, instance, &embed, blocked.clone());
         let lifecycle = embed.lifecycle.clone();
@@ -86,7 +88,6 @@ impl WebView {
         let loaded_sync_attempted = interactive_sync_attempted.clone();
         let loaded_waker = embed.waker.clone();
         let waker = embed.waker.clone();
-        let loaded_dom = dom.clone();
         let loaded_page = current_page.clone();
         let message = PageMessage::new(
             current_page.clone(),
@@ -139,7 +140,6 @@ impl WebView {
                 if matches!(event, wry::PageLoadEvent::Finished)
                     && PageRoutes::serves_document(&url, loaded_page.get())
                 {
-                    loaded_dom.document_loaded();
                     loaded_sync.set(true);
                     loaded_sync_attempted.set(false);
                     loaded_waker.wake();

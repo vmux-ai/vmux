@@ -12,7 +12,7 @@ use crate::webview::dom_request::{DomRequest, QueuedDomRequest, RequestQueue};
 use crate::webview::element::Element;
 use crate::webview::embed::{Embedding, LifecycleSink, LifecycleUpdate, Outbox, Wake};
 use crate::webview::event_selection::EventSelection;
-use crate::webview::frame::PageFrame;
+use crate::webview::frame::{InitialFrame, PageFrame};
 use crate::webview::measurement::PendingReads;
 use crate::{EventOutcome, EventRequest, PageDom};
 
@@ -41,7 +41,7 @@ pub(crate) struct Dom {
     deferred_events: Rc<RefCell<DeferredEvents>>,
     deferred_sends: Rc<RefCell<DeferredSends>>,
     outbox: Rc<dyn Outbox>,
-    document_loaded: Rc<Cell<bool>>,
+    document_started: Rc<Cell<bool>>,
     remount_pending: Rc<Cell<bool>>,
 }
 
@@ -296,7 +296,7 @@ impl Dom {
             deferred_events: Rc::default(),
             deferred_sends,
             outbox: embed.outbox.clone(),
-            document_loaded: Rc::new(Cell::new(false)),
+            document_started: Rc::new(Cell::new(false)),
             remount_pending: Rc::new(Cell::new(false)),
         }
     }
@@ -394,8 +394,19 @@ impl Dom {
         self.waker.wake();
     }
 
-    pub(crate) fn document_loaded(&self) {
-        if !self.document_loaded.replace(true) {
+    pub(crate) fn initial_frame(&self) -> InitialFrame {
+        self.begin_document();
+        self.remount_pending.set(false);
+        let frame = self
+            .next_frame()
+            .expect("a new document produces an initial frame");
+        let sequence = self.next_sequence();
+        let identity = self.stamp_frame(&frame, sequence, 0);
+        InitialFrame::new(frame, identity, !self.blocked.get())
+    }
+
+    fn begin_document(&self) {
+        if !self.document_started.replace(true) {
             self.waker.wake();
             return;
         }
@@ -724,9 +735,14 @@ impl Dom {
     }
 
     fn respond(&self, responder: wry::RequestAsyncResponder, frame: PageFrame) {
+        let sequence = self.next_sequence();
+        self.respond_attempt(responder, frame, sequence, 0);
+    }
+
+    fn next_sequence(&self) -> u64 {
         let sequence = self.next_frame_sequence.get().wrapping_add(1).max(1);
         self.next_frame_sequence.set(sequence);
-        self.respond_attempt(responder, frame, sequence, 0);
+        sequence
     }
 
     fn respond_attempt(
@@ -736,6 +752,11 @@ impl Dom {
         sequence: u64,
         failures: u8,
     ) {
+        let identity = self.stamp_frame(&frame, sequence, failures);
+        Self::send(responder, frame, Some(identity));
+    }
+
+    fn stamp_frame(&self, frame: &PageFrame, sequence: u64, failures: u8) -> (u64, u64, u64, u64) {
         let revision = self.navigation_revision.get();
         let epoch = self.ipc_epoch.get();
         let requests = frame
@@ -750,14 +771,10 @@ impl Dom {
             failures,
             requests,
         });
-        Self::send(
-            responder,
-            frame,
-            Some((revision, sequence, epoch, self.frame_capability)),
-        );
         self.delivered_revision.set(revision);
         self.lifecycle
             .update(LifecycleUpdate::FrameDelivered(revision));
+        (revision, sequence, epoch, self.frame_capability)
     }
 
     fn send(
@@ -1097,6 +1114,7 @@ mod tests {
     };
     use crate::webview::dom_request::{DomRequest, RequestQueue};
     use crate::webview::event_selection::EventSelection;
+    use crate::webview::frame::InitialFrame;
     use crate::webview::measurement::PendingReads;
     use crate::{
         AssetReply, Assets, Embedding, EventRequest, Instance, LifecycleSink, LifecycleUpdate,
@@ -1275,6 +1293,60 @@ mod tests {
             .unwrap();
 
         FramePoll::from(&request).unwrap()
+    }
+
+    impl FramePoll {
+        fn initial(frame: &InitialFrame) -> Self {
+            let script = frame.script();
+            let json = script
+                .strip_prefix("globalThis.__vmuxInitialFrame=")
+                .unwrap()
+                .strip_suffix(';')
+                .unwrap();
+            let packet: serde_json::Value = serde_json::from_str(json).unwrap();
+            let request = wry::http::Request::builder()
+                .header(NAVIGATION_REVISION, packet["revision"].as_str().unwrap())
+                .header(FRAME_EPOCH, packet["epoch"].as_str().unwrap())
+                .header(FRAME_CAPABILITY, packet["capability"].as_str().unwrap())
+                .header(FRAME_APPLIED, packet["sequence"].as_str().unwrap())
+                .body(Vec::new())
+                .unwrap();
+            Self::from(&request).unwrap()
+        }
+    }
+
+    #[test]
+    fn the_document_carries_an_initial_frame_that_the_next_poll_can_acknowledge() {
+        let dom = Dom::mount(
+            First,
+            Instance::default(),
+            &embedding(),
+            Rc::new(Cell::new(false)),
+        );
+        dom.ipc_epoch.set(7);
+        let frame = dom.initial_frame();
+        let acknowledgement = FramePoll::initial(&frame);
+
+        assert!(acknowledgement.accepted_by(&dom));
+        assert!(acknowledgement.acknowledge(&dom));
+        assert!(dom.next_frame().is_none());
+    }
+
+    #[test]
+    fn a_reloaded_document_rejects_the_previous_initial_frame_acknowledgement() {
+        let dom = Dom::mount(
+            First,
+            Instance::default(),
+            &embedding(),
+            Rc::new(Cell::new(false)),
+        );
+        let old = FramePoll::initial(&dom.initial_frame());
+        let current = FramePoll::initial(&dom.initial_frame());
+
+        assert!(!old.accepted_by(&dom));
+        assert!(!old.acknowledge(&dom));
+        assert!(current.accepted_by(&dom));
+        assert!(current.acknowledge(&dom));
     }
 
     #[test]
@@ -1500,7 +1572,7 @@ mod tests {
         let _ = dom.next_batch().unwrap();
         assert!(dom.page.borrow().awaiting_flush());
 
-        dom.document_loaded();
+        dom.begin_document();
 
         assert_eq!(dom.navigation_revision.get(), 1);
         assert!(dom.requests.take().is_empty());
@@ -1519,7 +1591,7 @@ mod tests {
             Rc::new(Cell::new(false)),
         );
 
-        dom.document_loaded();
+        dom.begin_document();
 
         assert_eq!(dom.navigation_revision.get(), 1);
         assert!(dom.requests.take().is_empty());
@@ -1537,9 +1609,9 @@ mod tests {
         );
         let _ = dom.next_batch().unwrap();
         dom.page_flushed();
-        dom.document_loaded();
+        dom.begin_document();
 
-        dom.document_loaded();
+        dom.begin_document();
 
         assert_eq!(dom.navigation_revision.get(), 2);
         let rebuilt = dom.next_batch().unwrap();

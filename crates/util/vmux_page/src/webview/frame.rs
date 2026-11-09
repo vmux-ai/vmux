@@ -1,3 +1,6 @@
+use base64::Engine;
+use base64::engine::general_purpose::STANDARD;
+use serde::Serialize;
 use tracing::error;
 
 use crate::webview::dom_request::QueuedDomRequest;
@@ -32,6 +35,34 @@ impl PageFrame {
         body.extend_from_slice(&self.edits);
 
         body
+    }
+}
+
+#[derive(Serialize)]
+pub(crate) struct InitialFrame {
+    revision: String,
+    sequence: String,
+    epoch: String,
+    capability: String,
+    interactive: bool,
+    body: String,
+}
+
+impl InitialFrame {
+    pub(crate) fn new(frame: PageFrame, identity: (u64, u64, u64, u64), interactive: bool) -> Self {
+        Self {
+            revision: identity.0.to_string(),
+            sequence: identity.1.to_string(),
+            epoch: identity.2.to_string(),
+            capability: identity.3.to_string(),
+            interactive,
+            body: STANDARD.encode(frame.into_body()),
+        }
+    }
+
+    pub(crate) fn script(&self) -> String {
+        let frame = serde_json::to_string(self).expect("initial page frame is serializable");
+        format!("globalThis.__vmuxInitialFrame={frame};")
     }
 }
 

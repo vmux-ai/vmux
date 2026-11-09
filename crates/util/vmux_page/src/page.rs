@@ -99,6 +99,7 @@ impl Page {
     pub(crate) fn shell(
         &self,
         appearance: crate::webview::Appearance,
+        initial_frame: Option<crate::webview::InitialFrame>,
     ) -> wry::http::Response<Vec<u8>> {
         let scheme = match appearance {
             crate::webview::Appearance::Light => "light",
@@ -133,10 +134,16 @@ impl Page {
             .with_html_attributes(html_attributes)
             .with_body_class(self.body_class)
             .with_root_class(self.root_class)
+            .with_initial_frame(
+                initial_frame
+                    .map(|frame| frame.script())
+                    .unwrap_or_default(),
+            )
             .html();
 
         wry::http::Response::builder()
             .header(wry::http::header::CONTENT_TYPE, "text/html")
+            .header(wry::http::header::CACHE_CONTROL, "no-store")
             .body(html.into_bytes())
             .unwrap_or_else(|_| wry::http::Response::new(Vec::new()))
     }
@@ -154,7 +161,8 @@ mod shell_tests {
 
     #[test]
     fn the_interpreter_talks_to_the_origin_the_document_came_from() {
-        let html = String::from_utf8(page().shell(crate::Appearance::Dark).into_body()).unwrap();
+        let html =
+            String::from_utf8(page().shell(crate::Appearance::Dark, None).into_body()).unwrap();
 
         assert!(html.contains(r#"new NativeInterpreter("vmux://files", false)"#));
         assert!(
@@ -168,7 +176,7 @@ mod shell_tests {
         let html = String::from_utf8(
             Page::pane("vmux://history/", || unreachable!())
                 .titled("History")
-                .shell(crate::Appearance::Dark)
+                .shell(crate::Appearance::Dark, None)
                 .into_body(),
         )
         .unwrap();
@@ -182,7 +190,7 @@ mod shell_tests {
         let html = String::from_utf8(
             Page::pane("vmux://start/", || unreachable!())
                 .titled("Start")
-                .shell(crate::Appearance::Dark)
+                .shell(crate::Appearance::Dark, None)
                 .into_body(),
         )
         .unwrap();
@@ -199,7 +207,7 @@ mod shell_tests {
         let html = String::from_utf8(
             Page::pane("vmux://start/", || unreachable!())
                 .titled("Start")
-                .shell(crate::Appearance::Light)
+                .shell(crate::Appearance::Light, None)
                 .into_body(),
         )
         .unwrap();

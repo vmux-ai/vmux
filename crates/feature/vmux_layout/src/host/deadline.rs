@@ -17,7 +17,6 @@ pub(super) enum DeadlineOwner {
     PaneZoomAnimation(Entity),
     StackAnimation(Entity),
     PageSlot(Entity),
-    PageSlotAnimation(Entity),
     Prewarm(&'static str),
     Presentation(Entity),
 }
