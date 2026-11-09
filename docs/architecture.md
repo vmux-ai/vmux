@@ -1361,6 +1361,9 @@ CEF stays in the installed SDK,
 and Bevy/Rust dylibs are linked from the build/toolchain cache. The executable has bundle rpaths
 so Finder and `open` need no shell library-path setup. This app is local, not a distributable bundle.
 CEF receives the host's main bundle path so its SDK subprocess uses the same IPC port namespace.
+macOS debug child launches normalize renderer and alert helper paths to the installed SDK
+executable and retain the configured no-sandbox mode. Prewarmed terminal pages have no process
+identity and do not count as running terminals in quit confirmation.
 Both host and helper signing caches include identity and entitlements; a valid linker signature
 alone does not satisfy the development signing contract.
 Quit flushes pending layout changes. Switching named profiles restarts the GUI rather than
