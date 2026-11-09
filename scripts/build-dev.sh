@@ -10,6 +10,11 @@ debug_dir="$(vmux_cargo_profile_dir "$root" debug)"
 stamp="$debug_dir/.vmux-dev-ready"
 mkdir -p "$debug_dir"
 rm -f "$stamp"
+release_dir="$(vmux_cargo_profile_dir "$root" release)"
+alias="$release_dir/Vmux Dev.app"
+if [[ -L "$alias" ]]; then
+    rm -f "$alias"
+fi
 
 cd "$root"
 "$root/scripts/cargo-with-cef-cache.sh" build -p vmux_cli
@@ -38,5 +43,13 @@ fi
         shasum -a 256 "$debug_dir/Vmux Dev.app/Contents/MacOS/vmux_desktop"
     fi
 } > "$stamp.tmp"
+if [[ "$(uname -s)" == Darwin ]]; then
+    mkdir -p "$release_dir"
+    if [[ -e "$alias" && ! -L "$alias" ]]; then
+        echo "Cannot publish debug app over an existing bundle: $alias" >&2
+        exit 1
+    fi
+    ln -sfn "$debug_dir/Vmux Dev.app" "$alias"
+fi
 mv -f "$stamp.tmp" "$stamp"
 printf 'Debug build ready: %s\nRun: make run-dev\n' "$debug_dir/vmux_desktop"

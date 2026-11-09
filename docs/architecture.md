@@ -1327,12 +1327,17 @@ React-style, in one atomic transaction.
 ### Manual iteration
 
 ```text
-agent: make build-dev -> signed Vmux Dev.app -> user: make run-dev
+agent: make build-dev -> signed Vmux Dev.app -> user: make <worktree>
+standalone client: make run-dev
 ```
 
 Debug uses the full desktop feature set, Bevy dynamic linking, no LTO, and incremental
 compilation. Build and launch are separate: run-dev verifies the completed artifacts and
-never compiles or kills an existing app. build-local remains the bundle/OS-integration gate.
+never compiles or kills an existing app. After a successful build, a launch link under
+`target/release/` lets the existing vmux-cloud `make <worktree>` launcher find the debug app
+without depending on cloud-specific files or changing the public client's build prerequisites.
+Failed builds remove that link; real release bundles are never replaced. build-local remains
+the bundle/OS-integration gate.
 
 Local and debug share the workspace store and a stable Chromium directory per named profile,
 not per worktree. On first use the most recently modified legacy local profile is reused

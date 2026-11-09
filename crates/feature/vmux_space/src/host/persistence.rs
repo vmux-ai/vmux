@@ -1350,6 +1350,46 @@ mod tests {
     }
 
     #[test]
+    fn exit_waits_for_pending_write_and_saves_the_latest_workspace() {
+        let mut fixture = WorkspaceSaveFixture::new("exit-drains-pending-layout");
+        let (sender, result) = mpsc::channel();
+        let pending = fixture.path.clone();
+        fixture
+            .app
+            .world_mut()
+            .entity_mut(fixture.persistence)
+            .insert(PendingWrite {
+                path: pending.clone(),
+                result: Mutex::new(result),
+            });
+        let writer = std::thread::spawn(move || {
+            std::thread::sleep(std::time::Duration::from_millis(20));
+            std::fs::write(pending, b"older snapshot").unwrap();
+            sender.send(Ok(())).unwrap();
+        });
+        fixture
+            .app
+            .insert_resource(bevy::time::TimeUpdateStrategy::ManualDuration(
+                std::time::Duration::ZERO,
+            ));
+        fixture.app.world_mut().write_message(AppExit::Success);
+        fixture.app.update();
+        writer.join().unwrap();
+        assert!(
+            std::fs::read_to_string(&fixture.path)
+                .unwrap()
+                .contains("Workspace")
+        );
+        assert!(
+            fixture
+                .app
+                .world()
+                .get::<PendingWrite>(fixture.persistence)
+                .is_none()
+        );
+    }
+
+    #[test]
     fn clean_workspaces_do_not_write_periodic_snapshots() {
         let mut fixture = WorkspaceSaveFixture::new("clean-periodic-autosave");
         fixture

@@ -6,6 +6,9 @@ source "$root/scripts/cargo-target-paths.sh"
 app="$(vmux_cargo_profile_dir "$root" debug)/Vmux Dev.app"
 plist="$app/Contents/Info.plist"
 [[ -f "$plist" ]]
+launch_alias="$(vmux_cargo_profile_dir "$root" release)/Vmux Dev.app"
+[[ -L "$launch_alias" && -f "$launch_alias/Contents/Info.plist" ]]
+[[ "$(readlink "$launch_alias")" == "$app" ]]
 [[ "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleExecutable' "$plist")" == vmux_desktop ]]
 [[ "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$plist")" == ai.vmux.desktop.dev ]]
 [[ "$(/usr/libexec/PlistBuddy -c 'Print :NSCameraUsageDescription' "$plist")" == *camera* ]]

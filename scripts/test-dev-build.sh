@@ -64,11 +64,14 @@ if "$tmp/client/scripts/run-dev.sh"; then
     echo "run-dev accepted changed artifacts" >&2
     exit 1
 fi
+mkdir -p "$tmp/target/release"
+ln -s "$tmp/target/debug/Vmux Dev.app" "$tmp/target/release/Vmux Dev.app"
 if FAIL_BUILD=1 "$tmp/client/scripts/build-dev.sh" --features dev,full; then
     echo "build-dev accepted a failed build" >&2
     exit 1
 fi
 [[ ! -f "$tmp/target/debug/.vmux-dev-ready" ]]
+[[ ! -L "$tmp/target/release/Vmux Dev.app" ]]
 "$tmp/client/scripts/run-dev.sh" stop
 grep -Fq 'service stop' "$TEST_RUN"
 printf 'build-only and launch-only lifecycle passed\n'
