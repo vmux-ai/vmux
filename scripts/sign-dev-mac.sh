@@ -42,6 +42,22 @@ helper_basename="$(printf '%s' "$(basename "$HELPER_BINARY")" | tr -c '[:alnum:]
 if ! codesign --verify --strict "$HELPER_BINARY" >/dev/null 2>&1; then
     sign_binary "$HELPER_BINARY" "$APP_IDENTIFIER.helper.$helper_basename"
 fi
-sign_binary "$APP_BINARY" "$APP_IDENTIFIER"
+stamp="${APP_BINARY}.dev-signed"
+current="${stamp}.tmp"
+{
+    printf '%s\n' "$APPLE_SIGNING_IDENTITY" "$APP_IDENTIFIER" "$CODESIGN_KEYCHAIN"
+    shasum -a 256 "$APP_BINARY" "$ENTITLEMENTS"
+} > "$current"
+if [[ ! -f "$stamp" ]] || ! cmp -s "$current" "$stamp" \
+    || ! codesign --verify --strict "$APP_BINARY" >/dev/null 2>&1; then
+    sign_binary "$APP_BINARY" "$APP_IDENTIFIER"
+    {
+        printf '%s\n' "$APPLE_SIGNING_IDENTITY" "$APP_IDENTIFIER" "$CODESIGN_KEYCHAIN"
+        shasum -a 256 "$APP_BINARY" "$ENTITLEMENTS"
+    } > "$current"
+    mv -f "$current" "$stamp"
+else
+    rm -f "$current"
+fi
 
 codesign --verify --strict --verbose=2 "$APP_BINARY"

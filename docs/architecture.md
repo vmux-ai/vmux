@@ -827,8 +827,11 @@ inside that Space. Cross-space leaks are impossible by construction — the lega
 tagged tabs with a detached id and computed selection globally, which let creating a space
 corrupt another's panes.
 
-State snapshots to `store.ron` via `moonshine-save`. A schema-version sidecar hard-resets
-on an incompatible version rather than loading a broken store.
+State snapshots to `store.ron` via `moonshine-save`. A schema-version sidecar rejects newer
+versions unchanged; older, unversioned, or incompatible stores are copied to unique backups
+before starting a new workspace. Backup failures refuse startup rather than lose the original.
+Both outcomes show a localized warning with the preserved path. Exit waits for pending
+autosaves and writes the final snapshot synchronously before releasing the data lease.
 
 World persistence uses named type-registry domains. A persisted component or resource registers
 once with its domain; that metadata produces the component and resource allowlists used by saves.
@@ -1332,9 +1335,12 @@ standalone client: make run-dev
 ```
 
 Debug uses the full desktop feature set, Bevy dynamic linking, no LTO, and incremental
-compilation. Build and launch are separate: run-dev verifies the completed artifacts and
-never compiles or kills an existing app. After a successful build, a launch link under
-`target/release/` lets the existing vmux-cloud `make <worktree>` launcher find the debug app
+compilation. Build and launch are separate: plain run-dev verifies the completed artifacts
+and never compiles or kills an existing app. The cloud launcher requests build-if-needed,
+which builds only when the completion stamp is missing or invalid. Unchanged signed inputs
+reuse their bundled executables so a no-op build does not replace the daemon identity.
+After a successful build, a launch link under `target/release/` lets the existing vmux-cloud
+`make <worktree>` launcher find the debug app
 without depending on cloud-specific files or changing the public client's build prerequisites.
 Failed builds remove that link; real release bundles are never replaced. build-local remains
 the bundle/OS-integration gate.
@@ -1346,7 +1352,8 @@ mock-key test sessions have their own data directory. Logs and service endpoints
 A process-lifetime desktop lock allows one GUI writer; desktop and daemon share a data lease
 whose owner is the build and worktree. A different owner cannot start until both have exited,
 and an endpoint lock prevents duplicate daemons from overwriting PID/socket files.
-The debug `.app` copies only application binaries and its icon; CEF stays in the installed SDK,
+The debug `.app` contains application binaries, its icon, generated plists, and a service login item.
+CEF stays in the installed SDK,
 and Bevy/Rust dylibs are linked from the build/toolchain cache. The executable has bundle rpaths
 so Finder and `open` need no shell library-path setup. This app is local, not a distributable bundle.
 Quit flushes pending layout changes. Switching named profiles restarts the GUI rather than
@@ -1354,8 +1361,11 @@ opening another writer. After the old GUI exits, a different build drains its da
 for the data lease automatically; no manual stop is needed. This ends old terminals and agents,
 while reopening the same build keeps them. Old binaries without leases are not
 protected by these advisory locks. VMUX_DATA_DIR selects a separate data root and runtime
-endpoints for copied-state tests. Incompatible stores are preserved and startup is refused;
-changing persistence schemas against the live shared store is not an iteration shortcut.
+endpoints for copied-state tests; manual service start inherits that root and named profile
+instead of using a global launchd environment. Browser paths outside the chosen data root
+are refused, including copied symlinks back to live data. Newer schemas refuse startup;
+older or incompatible stores are backed up before resetting. Changing persistence schemas
+against the live shared store is not an iteration shortcut.
 
 | Platform | Role | Status |
 |---|---|---|

@@ -1114,3 +1114,7 @@ common-copy-url = URL kopiëren
 sessions-history-unavailable = Dit gesprek kan niet opnieuw worden geopend. Je kunt een nieuw gesprek starten.
 sessions-connection-interrupted = De verbinding is verbroken. Probeer opnieuw verbinding te maken.
 sessions-operation-failed = De bewerking kon niet worden voltooid.
+
+workspace-store-title = Werkruimtegegevens
+workspace-store-recovered = De eerdere gegevens zijn bewaard in { $path }. Er wordt een nieuwe werkruimte gemaakt.
+workspace-store-refused = Deze werkruimte kan niet veilig worden geopend. De gegevens in { $path } zijn ongewijzigd. Gebruik een nieuwere versie of een kopie van de gegevens.

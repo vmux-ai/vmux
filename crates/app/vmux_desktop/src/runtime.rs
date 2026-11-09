@@ -79,6 +79,11 @@ fn install_shutdown_signal(mut commands: Commands, wake: Option<Res<EventLoopPro
             if let Some(wake) = wake {
                 let _ = wake.send_event(WinitUserEvent::WakeUp);
             }
+            tokio::select! {
+                _ = tokio::signal::ctrl_c() => {}
+                _ = terminate.recv() => {}
+            }
+            std::process::exit(130);
         });
     });
     commands.insert_resource(ShutdownSignal(std::sync::Mutex::new(receiver)));

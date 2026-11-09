@@ -1094,3 +1094,7 @@ common-copy-url = URL をコピー
 sessions-history-unavailable = この会話を再開できません。新しい会話を開始できます。
 sessions-connection-interrupted = 接続が中断されました。もう一度接続してください。
 sessions-operation-failed = 操作を完了できませんでした。
+
+workspace-store-title = ワークスペースのデータ
+workspace-store-recovered = 以前のワークスペースを { $path } に保存しました。新しいワークスペースを作成します。
+workspace-store-refused = このワークスペースは安全に開けません。{ $path } のデータは変更していません。新しいビルドかデータのコピーを使ってください。

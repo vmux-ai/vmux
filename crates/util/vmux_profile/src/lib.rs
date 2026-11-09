@@ -26,6 +26,12 @@ pub struct Profile {
 pub struct SessionEnvironment;
 
 impl SessionEnvironment {
+    pub fn requires_inherited_service_environment() -> bool {
+        Self::is_test()
+            || Profile::current().id() != "personal"
+            || std::env::var_os("VMUX_DATA_DIR").is_some_and(|path| !path.is_empty())
+    }
+
     pub fn is_test() -> bool {
         matches!(
             std::env::var("VMUX_TEST").ok().as_deref(),
@@ -233,8 +239,16 @@ impl ProfilePaths {
 
     pub fn prepare_browser_profile(&self) -> std::io::Result<()> {
         let destination = self.cef_directory();
-        if destination.exists() || self.test || self.build == "release" {
+        self.validate_browser_directory(&destination)?;
+        if self.test || self.build == "release" {
             return Ok(());
+        }
+        if let Ok(metadata) = destination.symlink_metadata() {
+            if metadata.file_type().is_symlink() && !destination.exists() {
+                std::fs::remove_file(&destination)?;
+            } else {
+                return Ok(());
+            }
         }
         let Some(parent) = destination.parent() else {
             return Ok(());
@@ -260,6 +274,27 @@ impl ProfilePaths {
         if let Some(source) = source {
             #[cfg(unix)]
             std::os::unix::fs::symlink(source.file_name().unwrap(), destination)?;
+        }
+        Ok(())
+    }
+
+    fn validate_browser_directory(&self, directory: &Path) -> std::io::Result<()> {
+        let mut existing = directory;
+        while !existing.exists() {
+            let Some(parent) = existing.parent() else {
+                return Ok(());
+            };
+            existing = parent;
+        }
+        if self.data.exists()
+            && !existing
+                .canonicalize()?
+                .starts_with(self.data.canonicalize()?)
+        {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::PermissionDenied,
+                "Vmux browser profile resolves outside VMUX_DATA_DIR; copy its contents instead of linking to live data",
+            ));
         }
         Ok(())
     }
@@ -468,6 +503,52 @@ mod tests {
         assert_eq!(
             std::fs::read(other.join("Cookies")).unwrap(),
             b"other login"
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn copied_browser_profile_cannot_link_back_to_live_data() {
+        let live = tempfile::tempdir().unwrap();
+        let copy = tempfile::tempdir().unwrap();
+        let paths = ProfilePaths {
+            build: "dev",
+            profile: Profile::named("personal"),
+            data: copy.path().to_path_buf(),
+            test: false,
+        };
+        std::fs::write(live.path().join("Cookies"), b"live login").unwrap();
+        std::fs::create_dir_all(paths.profile().join("cef")).unwrap();
+        std::os::unix::fs::symlink(live.path(), paths.cef_directory()).unwrap();
+        let error = paths.prepare_browser_profile().unwrap_err();
+        assert_eq!(error.kind(), std::io::ErrorKind::PermissionDenied);
+        assert_eq!(
+            std::fs::read(live.path().join("Cookies")).unwrap(),
+            b"live login"
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn dangling_browser_profile_link_recovers_without_blocking_startup() {
+        let directory = tempfile::tempdir().unwrap();
+        let paths = ProfilePaths {
+            build: "dev",
+            profile: Profile::named("personal"),
+            data: directory.path().to_path_buf(),
+            test: false,
+        };
+        std::fs::create_dir_all(paths.profile().join("cef")).unwrap();
+        std::os::unix::fs::symlink("local-removed", paths.cef_directory()).unwrap();
+        paths.prepare_browser_profile().unwrap();
+        assert!(paths.cef_directory().symlink_metadata().is_err());
+        std::fs::create_dir_all(paths.profile().join("cef/local-existing")).unwrap();
+        std::os::unix::fs::symlink("local-removed", paths.cef_directory()).unwrap();
+        paths.prepare_browser_profile().unwrap();
+        assert!(paths.cef_directory().is_dir());
+        assert_eq!(
+            std::fs::read_link(paths.cef_directory()).unwrap(),
+            PathBuf::from("local-existing")
         );
     }
 

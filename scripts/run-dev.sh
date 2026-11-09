@@ -1,18 +1,26 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)"
 source "$root/scripts/cargo-target-paths.sh"
 debug_dir="$(vmux_cargo_profile_dir "$root" debug)"
 stamp="$debug_dir/.vmux-dev-ready"
 
-if [[ "${1:-}" != stop ]] && [[ ! -f "$stamp" || "$(head -n 1 "$stamp")" != "$root" ]]; then
-    echo "No debug build for this worktree. Run make build-dev first." >&2
-    exit 1
-fi
-if [[ "${1:-}" != stop ]] && ! (tail -n +2 "$stamp" | shasum -a 256 --check --status); then
-    echo "Debug artifacts changed after the build. Run make build-dev again." >&2
-    exit 1
+if [[ "${1:-}" != stop ]]; then
+    ready=false
+    if [[ -f "$stamp" && "$(head -n 1 "$stamp")" == "$root" ]] \
+        && (tail -n +2 "$stamp" | shasum -a 256 --check --status) \
+        && { [[ "$(uname -s)" != Darwin ]] || [[ -d "$debug_dir/Vmux Dev.app" ]]; }; then
+        ready=true
+    fi
+    if [[ "$ready" != true ]]; then
+        if [[ "${1:-}" == build-if-needed ]]; then
+            "${MAKE:-make}" -C "$root" build-dev
+            exec "$root/scripts/run-dev.sh"
+        fi
+        echo "No completed debug build for this worktree. Run make build-dev first." >&2
+        exit 1
+    fi
 fi
 
 rust_target_libdir="$(rustc --print target-libdir)"

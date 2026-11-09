@@ -1103,3 +1103,7 @@ common-copy-url = Copy URL
 sessions-history-unavailable = This conversation cannot be reopened. You can start a new one.
 sessions-connection-interrupted = The connection was interrupted. Try connecting again.
 sessions-operation-failed = The operation could not be completed.
+
+workspace-store-title = Workspace data
+workspace-store-recovered = Older workspace data was preserved at { $path }. A new workspace will be created.
+workspace-store-refused = This workspace cannot be opened safely. Your data is unchanged at { $path }. Use a newer build or a copy of the data.

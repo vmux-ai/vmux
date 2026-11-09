@@ -2,6 +2,9 @@ use std::fs::{File, OpenOptions};
 use std::io::{Read, Seek, SeekFrom, Write};
 use std::path::Path;
 
+#[cfg(unix)]
+use std::os::unix::fs::OpenOptionsExt;
+
 pub struct DataLease {
     locks: Vec<File>,
 }
@@ -24,7 +27,9 @@ impl DataLease {
         let path = crate::ProfilePaths::current()
             .shared_data()
             .join("runtime.lock");
-        let owner = std::fs::read_to_string(path)?;
+        let mut file = Self::open(&path)?;
+        let mut owner = String::new();
+        file.read_to_string(&mut owner)?;
         let (build, _) = owner.split_once(':').ok_or_else(|| {
             std::io::Error::new(
                 std::io::ErrorKind::InvalidData,
@@ -60,12 +65,18 @@ impl DataLease {
         if let Some(parent) = path.parent() {
             std::fs::create_dir_all(parent)?;
         }
-        OpenOptions::new()
-            .create(true)
-            .read(true)
-            .write(true)
-            .truncate(false)
-            .open(path)
+        let mut options = OpenOptions::new();
+        options.create(true).read(true).write(true).truncate(false);
+        #[cfg(unix)]
+        options.custom_flags(libc::O_NOFOLLOW | libc::O_NONBLOCK);
+        let file = options.open(path)?;
+        if !file.metadata()?.is_file() {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                "Vmux data leases require a regular file",
+            ));
+        }
+        Ok(file)
     }
 
     fn exclusive(&mut self, path: &Path) -> std::io::Result<()> {
@@ -139,6 +150,21 @@ mod tests {
         assert!(next.join(directory.path(), "dev:worktree-b").is_err());
         drop(daemon);
         next.join(directory.path(), "dev:worktree-b").unwrap();
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn runtime_lock_symlink_is_rejected_without_modifying_its_target() {
+        let directory = tempfile::tempdir().unwrap();
+        let store = directory.path().join("store.ron");
+        std::fs::write(&store, "persisted workspace").unwrap();
+        std::os::unix::fs::symlink(&store, directory.path().join("runtime.lock")).unwrap();
+        let mut lease = DataLease { locks: Vec::new() };
+        assert!(lease.join(directory.path(), "dev:worktree").is_err());
+        assert_eq!(
+            std::fs::read_to_string(&store).unwrap(),
+            "persisted workspace"
+        );
     }
 
     #[test]

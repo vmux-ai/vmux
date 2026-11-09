@@ -120,9 +120,7 @@ fn status(requests: Query<Entity, Added<ServiceStatusRequest>>, mut commands: Co
 fn start(requests: Query<Entity, Added<ServiceStartRequest>>, mut commands: Commands) {
     for entity in &requests {
         #[cfg(target_os = "macos")]
-        let result = DaemonBinary::current()
-            .and_then(|binary| LaunchAgent::current().ensure_running(binary.path()))
-            .map(|_| 0);
+        let result = ServiceStart::current().map(|_| 0);
         #[cfg(not(target_os = "macos"))]
         let result = {
             eprintln!("vmux service: launchd commands are macOS-only");
@@ -136,6 +134,42 @@ fn stop(requests: Query<Entity, Added<ServiceStopRequest>>, mut commands: Comman
     for entity in &requests {
         let result = ServiceStop::current().map(|_| 0);
         commands.entity(entity).insert(CliResult::from(result));
+    }
+}
+
+#[cfg(target_os = "macos")]
+struct ServiceStart;
+
+#[cfg(target_os = "macos")]
+impl ServiceStart {
+    fn detached() -> bool {
+        ServicePaths::build_profile() != "release"
+            || vmux_profile::SessionEnvironment::requires_inherited_service_environment()
+    }
+
+    fn current() -> std::io::Result<()> {
+        if StatusInfo::live().is_some() {
+            return Ok(());
+        }
+        let binary = DaemonBinary::current()?;
+        if Self::detached() {
+            binary.spawn_detached()?;
+        } else {
+            LaunchAgent::current().ensure_running(binary.path())?;
+        }
+        let deadline = std::time::Instant::now() + Duration::from_secs(5);
+        loop {
+            if StatusInfo::live().is_some() {
+                return Ok(());
+            }
+            if std::time::Instant::now() >= deadline {
+                return Err(std::io::Error::new(
+                    std::io::ErrorKind::TimedOut,
+                    "Vmux service did not start for the selected data root and profile",
+                ));
+            }
+            std::thread::sleep(Duration::from_millis(25));
+        }
     }
 }
 
@@ -159,7 +193,7 @@ impl ServiceStop {
             )
         })?;
         #[cfg(target_os = "macos")]
-        if ServicePaths::build_profile() == "release" {
+        if !ServiceStart::detached() {
             LaunchAgent::current().bootout()?;
         }
         if let Ok(mut stream) = std::os::unix::net::UnixStream::connect(paths.socket()) {
@@ -197,12 +231,9 @@ impl ServiceStop {
 fn restart(requests: Query<Entity, Added<ServiceRestartRequest>>, mut commands: Commands) {
     for entity in &requests {
         #[cfg(target_os = "macos")]
-        let result = DaemonBinary::current().and_then(|binary| {
-            let agent = LaunchAgent::current();
-            let _ = agent.bootout();
-            agent.ensure_running(binary.path())?;
-            Ok(0)
-        });
+        let result = ServiceStop::current()
+            .and_then(|_| ServiceStart::current())
+            .map(|_| 0);
         #[cfg(not(target_os = "macos"))]
         let result = {
             eprintln!("vmux service: launchd commands are macOS-only");

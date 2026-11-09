@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)"
 source "$root/scripts/cargo-target-paths.sh"
 export CARGO_INCREMENTAL="${CARGO_INCREMENTAL:-1}"
 export VMUX_BUILD_PROFILE=dev

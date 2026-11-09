@@ -368,6 +368,35 @@ struct SpaceSaver<'w, 's> {
 #[derive(Resource)]
 struct WorkspaceLoadRefused;
 
+enum WorkspaceFeedback {
+    Recovered(PathBuf),
+    Refused(PathBuf),
+}
+
+impl Command for WorkspaceFeedback {
+    type Out = ();
+
+    fn apply(self, _world: &mut World) {
+        if cfg!(test) || SessionEnvironment::is_test() {
+            return;
+        }
+        let (message, path) = match self {
+            Self::Recovered(path) => ("workspace-store-recovered", path),
+            Self::Refused(path) => ("workspace-store-refused", path),
+        };
+        let path = path.to_string_lossy();
+        let description = vmux_ui::i18n::translate_with(
+            message,
+            &[("path", vmux_ui::i18n::TranslationValue::String(&path))],
+        );
+        rfd::MessageDialog::new()
+            .set_title(vmux_ui::i18n::translate("workspace-store-title"))
+            .set_description(description)
+            .set_level(rfd::MessageLevel::Warning)
+            .show();
+    }
+}
+
 impl SpaceSaver<'_, '_> {
     fn save(
         &mut self,
@@ -445,8 +474,9 @@ impl SnapshotWriter {
         self.path
             .write_snapshot(&data)
             .map_err(|error| error.to_string())?;
-        self.path.write_schema_version();
-        Ok(())
+        self.path
+            .write_schema_version()
+            .map_err(|error| error.to_string())
     }
 }
 
@@ -486,10 +516,13 @@ impl Command for WorkspaceWrite {
                 }
             }
             match SaveCommand(self.save).apply(world) {
-                Ok(()) => {
-                    self.schema.write_schema_version();
-                    world.trigger(Written);
-                }
+                Ok(()) => match self.schema.write_schema_version() {
+                    Ok(()) => world.trigger(Written),
+                    Err(error) => warn!(
+                        "Workspace schema save failed for {:?}: {error}",
+                        self.schema.0
+                    ),
+                },
                 Err(error) => warn!("Workspace save failed for {:?}: {error}", self.schema.0),
             }
             return;
@@ -632,15 +665,51 @@ impl WorkspaceStorePath {
             .unwrap_or_else(|| PathBuf::from("store.version"))
     }
 
-    fn schema_is_current(&self) -> bool {
+    fn schema_version(&self) -> Option<u32> {
         std::fs::read_to_string(self.version())
             .ok()
             .and_then(|value| value.trim().parse::<u32>().ok())
-            .is_some_and(|version| version == STORE_SCHEMA_VERSION)
     }
 
-    fn write_schema_version(&self) {
-        let _ = std::fs::write(self.version(), STORE_SCHEMA_VERSION.to_string());
+    fn backup_for_reset(&self) -> std::io::Result<PathBuf> {
+        for sequence in 0.. {
+            let backup = self
+                .0
+                .with_extension(format!("ron.pre-v{STORE_SCHEMA_VERSION}.{sequence}"));
+            let mut destination = match std::fs::OpenOptions::new()
+                .write(true)
+                .create_new(true)
+                .open(&backup)
+            {
+                Ok(file) => file,
+                Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => continue,
+                Err(error) => return Err(error),
+            };
+            let mut source = std::fs::File::open(&self.0)?;
+            std::io::copy(&mut source, &mut destination)?;
+            destination.sync_all()?;
+            match std::fs::File::open(self.version()) {
+                Ok(mut version) => {
+                    let mut name = backup.as_os_str().to_owned();
+                    name.push(".version");
+                    let mut destination = std::fs::OpenOptions::new()
+                        .write(true)
+                        .create_new(true)
+                        .open(PathBuf::from(name))?;
+                    std::io::copy(&mut version, &mut destination)?;
+                    destination.sync_all()?;
+                }
+                Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+                Err(error) => return Err(error),
+            }
+            std::fs::remove_file(&self.0)?;
+            return Ok(backup);
+        }
+        unreachable!()
+    }
+
+    fn write_schema_version(&self) -> std::io::Result<()> {
+        std::fs::write(self.version(), STORE_SCHEMA_VERSION.to_string())
     }
 }
 
@@ -718,20 +787,41 @@ fn load_on_startup(
         return;
     }
     let path = &path.0;
+    let store = WorkspaceStorePath(path.clone());
+    let version = store.schema_version();
+    if path.exists() && version.is_some_and(|version| version > STORE_SCHEMA_VERSION) {
+        error!(
+            "Refusing newer workspace {:?}; the original store is unchanged.",
+            path
+        );
+        restore.store_present = true;
+        commands.insert_resource(WorkspaceLoadRefused);
+        commands.write_message(AppExit::error());
+        commands.queue(WorkspaceFeedback::Refused(path.clone()));
+        return;
+    }
     if let Ok(body) = std::fs::read_to_string(path) {
         let registry = registry.read();
-        if validators.rejected_by(&body).is_some()
+        if version != Some(STORE_SCHEMA_VERSION)
+            || validators.rejected_by(&body).is_some()
             || space_has_unregistered_types(&body, &registry)
-            || !WorkspaceStorePath(path.clone()).schema_is_current()
         {
-            error!(
-                "Refusing incompatible workspace {:?}; the original store is unchanged. Use VMUX_DATA_DIR for migration tests.",
-                path
-            );
-            restore.store_present = true;
-            commands.insert_resource(WorkspaceLoadRefused);
-            commands.write_message(AppExit::error());
-            return;
+            match store.backup_for_reset() {
+                Ok(backup) => {
+                    warn!(
+                        ?backup,
+                        "Preserved an older or incompatible workspace before resetting"
+                    );
+                    commands.queue(WorkspaceFeedback::Recovered(backup));
+                }
+                Err(error) => {
+                    error!(%error, "Cannot preserve workspace {:?}; refusing startup", path);
+                    commands.insert_resource(WorkspaceLoadRefused);
+                    commands.write_message(AppExit::error());
+                    commands.queue(WorkspaceFeedback::Refused(path.clone()));
+                    return;
+                }
+            }
         }
     }
     normalize_workspace_resources_if_needed(path);
@@ -889,6 +979,14 @@ impl Command for WorkspaceRestoreFailed {
             self.path, self.error
         );
         let failure = RestoreFailure::preserve(&self.path);
+        match &failure.backup {
+            Some(backup) => WorkspaceFeedback::Recovered(backup.clone()).apply(world),
+            None => {
+                world.insert_resource(WorkspaceLoadRefused);
+                world.write_message(AppExit::error());
+                WorkspaceFeedback::Refused(self.path.clone()).apply(world);
+            }
+        }
         if let Some(mut restore) = world.get_mut::<WorkspaceRestore>(self.persistence) {
             restore.store_present = false;
             restore.complete = true;
@@ -1131,7 +1229,9 @@ mod tests {
                 .serialize(&self.app.world().resource::<AppTypeRegistry>().read())
                 .unwrap();
             vmux_path::AtomicFile::write(&self.path, body.as_bytes()).unwrap();
-            WorkspaceStorePath(self.path.clone()).write_schema_version();
+            WorkspaceStorePath(self.path.clone())
+                .write_schema_version()
+                .unwrap();
             self.app.world_mut().commands().queue(WorkspaceLoad {
                 load: LoadWorld::default_from_file(self.path.clone()),
                 persistence: self.persistence,
@@ -2486,51 +2586,189 @@ mod tests {
     fn newer_store_schema_is_preserved_and_startup_refused() {
         let _home = HomeEnvGuard::use_temp_home("newer-store-is-preserved-on-startup");
         let store = WorkspaceStorePath::default();
-        std::fs::write(&store.0, "(resources: {}, entities: {})").unwrap();
         let newer = (STORE_SCHEMA_VERSION + 1).to_string();
-        std::fs::write(store.version(), &newer).unwrap();
+        for body in [b"(resources: {}, entities: {})".as_slice(), &[0xff]] {
+            std::fs::write(&store.0, body).unwrap();
+            std::fs::write(store.version(), &newer).unwrap();
+            let mut app = App::new();
+            app.add_plugins(MinimalPlugins)
+                .insert_resource(test_settings())
+                .add_plugins(WorkspacePersistencePlugin);
+            app.update();
+            assert_eq!(std::fs::read_to_string(store.version()).unwrap(), newer);
+            assert_eq!(std::fs::read(&store.0).unwrap(), body);
+            assert!(app.world().contains_resource::<WorkspaceLoadRefused>());
+            assert_eq!(app.should_exit(), Some(AppExit::error()));
+        }
+    }
+
+    #[test]
+    fn incompatible_store_is_backed_up_before_starting_a_new_workspace() {
+        let _home = HomeEnvGuard::use_temp_home("incompatible-store-is-backed-up-on-startup");
+        let store = WorkspaceStorePath::default();
+        let original = store_body_with_key("vmux_desktop::ghost::DoesNotExist");
+        std::fs::write(&store.0, &original).unwrap();
+        std::fs::write(store.version(), STORE_SCHEMA_VERSION.to_string()).unwrap();
+
+        let mut app = App::new();
+        app.add_plugins((MinimalPlugins, vmux_ecs::PrimitivesPlugin))
+            .register_persisted::<Space>()
+            .insert_resource(test_settings())
+            .add_plugins(WorkspacePersistencePlugin);
+        app.update();
+
+        let backup = store
+            .0
+            .with_extension(format!("ron.pre-v{STORE_SCHEMA_VERSION}.0"));
+        assert_eq!(std::fs::read_to_string(&backup).unwrap(), original);
+        assert!(!store.0.exists());
+        assert!(!app.world().contains_resource::<WorkspaceLoadRefused>());
+        assert_eq!(app.should_exit(), None);
+        app.world_mut()
+            .spawn((Save, Space, Name::new("New workspace")));
+        app.world_mut().write_message(AppExit::Success);
+        app.update();
+        assert!(
+            std::fs::read_to_string(&store.0)
+                .unwrap()
+                .contains("New workspace")
+        );
+        assert_eq!(store.schema_version(), Some(STORE_SCHEMA_VERSION));
+        assert_eq!(std::fs::read_to_string(&backup).unwrap(), original);
+    }
+
+    #[test]
+    fn missing_older_and_invalid_schema_versions_recover_without_overwriting_backups() {
+        let _home = HomeEnvGuard::use_temp_home("older-workspace-schema-backups");
+        let store = WorkspaceStorePath::default();
+        for (sequence, version) in [None, Some("3"), Some("invalid")].into_iter().enumerate() {
+            if let Some(version) = version {
+                std::fs::write(store.version(), version).unwrap();
+            }
+            let original = format!("(resources: {{}}, entities: {{}})\n{sequence}");
+            std::fs::write(&store.0, &original).unwrap();
+            let mut app = App::new();
+            app.add_plugins(MinimalPlugins)
+                .insert_resource(test_settings())
+                .add_plugins(WorkspacePersistencePlugin);
+            app.update();
+            let backup = store
+                .0
+                .with_extension(format!("ron.pre-v{STORE_SCHEMA_VERSION}.{sequence}"));
+            assert_eq!(std::fs::read_to_string(&backup).unwrap(), original);
+            let mut schema = backup.as_os_str().to_owned();
+            schema.push(".version");
+            let schema = PathBuf::from(schema);
+            if let Some(version) = version {
+                assert_eq!(std::fs::read_to_string(schema).unwrap(), version);
+            } else {
+                assert!(!schema.exists());
+            }
+            assert!(!store.0.exists());
+            assert!(!app.world().contains_resource::<WorkspaceLoadRefused>());
+            assert_eq!(app.should_exit(), None);
+        }
+        assert_eq!(
+            std::fs::read_to_string(
+                store
+                    .0
+                    .with_extension(format!("ron.pre-v{STORE_SCHEMA_VERSION}.1.version"))
+            )
+            .unwrap(),
+            "3"
+        );
+    }
+
+    #[test]
+    fn failed_schema_backup_refuses_startup_without_removing_the_original_store() {
+        let _home = HomeEnvGuard::use_temp_home("failed-workspace-schema-backup");
+        let store = WorkspaceStorePath::default();
+        let original = "(resources: {}, entities: {})";
+        std::fs::write(&store.0, original).unwrap();
+        std::fs::write(store.version(), "3").unwrap();
+        std::fs::create_dir(
+            store
+                .0
+                .with_extension(format!("ron.pre-v{STORE_SCHEMA_VERSION}.0.version")),
+        )
+        .unwrap();
         let mut app = App::new();
         app.add_plugins(MinimalPlugins)
             .insert_resource(test_settings())
             .add_plugins(WorkspacePersistencePlugin);
         app.update();
-        assert_eq!(std::fs::read_to_string(store.version()).unwrap(), newer);
-        assert_eq!(
-            std::fs::read_to_string(&store.0).unwrap(),
-            "(resources: {}, entities: {})"
-        );
+        assert_eq!(std::fs::read_to_string(&store.0).unwrap(), original);
+        assert_eq!(std::fs::read_to_string(store.version()).unwrap(), "3");
         assert!(app.world().contains_resource::<WorkspaceLoadRefused>());
         assert_eq!(app.should_exit(), Some(AppExit::error()));
     }
 
     #[test]
-    fn incompatible_store_is_preserved_and_startup_refused() {
-        let _home = HomeEnvGuard::use_temp_home("incompatible-store-is-preserved-on-startup");
+    fn truncated_and_invalid_registered_components_recover_from_current_schema_stores() {
+        let _home = HomeEnvGuard::use_temp_home("invalid-current-workspace-store");
         let store = WorkspaceStorePath::default();
-        let path = store.0.clone();
-        if let Some(parent) = path.parent() {
-            std::fs::create_dir_all(parent).expect("store dir");
+        let invalid_component = store_body_with_key("bevy_ecs::name::Name");
+        for body in ["(resources: {}, entities: {", invalid_component.as_str()] {
+            std::fs::write(&store.0, body).unwrap();
+            std::fs::write(store.version(), STORE_SCHEMA_VERSION.to_string()).unwrap();
+            let mut app = App::new();
+            app.add_plugins((MinimalPlugins, AssetPlugin::default()))
+                .register_type::<Name>()
+                .insert_resource(test_settings())
+                .add_plugins(WorkspacePersistencePlugin);
+            app.update();
+            let failure = app
+                .world_mut()
+                .query::<&RestoreFailure>()
+                .single(app.world())
+                .unwrap();
+            let backup = failure.backup.as_ref().unwrap();
+            assert_eq!(std::fs::read_to_string(backup).unwrap(), body);
+            assert_eq!(std::fs::read_to_string(&store.0).unwrap(), body);
+            assert!(!app.world().contains_resource::<WorkspaceLoadRefused>());
+            assert_eq!(app.should_exit(), None);
+            let restore = app
+                .world_mut()
+                .query::<&WorkspaceRestore>()
+                .single(app.world())
+                .unwrap();
+            assert!(restore.complete);
+            assert!(!restore.store_present);
         }
-        std::fs::write(
-            &path,
-            store_body_with_key("vmux_desktop::ghost::DoesNotExist"),
-        )
-        .expect("write store");
-        std::fs::write(store.version(), STORE_SCHEMA_VERSION.to_string()).expect("write version");
+    }
 
-        let mut app = App::new();
-        app.add_plugins(MinimalPlugins)
-            .insert_resource(test_settings())
-            .add_plugins(WorkspacePersistencePlugin);
-        app.update();
-
-        assert_eq!(
-            std::fs::read_to_string(&path).unwrap(),
-            store_body_with_key("vmux_desktop::ghost::DoesNotExist")
+    #[test]
+    fn failed_schema_writes_retry_instead_of_reporting_a_saved_workspace() {
+        let mut fixture = WorkspaceSaveFixture::new("failed-workspace-schema-write");
+        let version = WorkspaceStorePath(fixture.path.clone()).version();
+        std::fs::create_dir(&version).unwrap();
+        fixture.app.update();
+        fixture.finish_write();
+        assert!(
+            fixture
+                .app
+                .world()
+                .get::<AutoSave>(fixture.persistence)
+                .unwrap()
+                .dirty
         );
-        assert!(store.version().exists());
-        assert!(app.world().contains_resource::<WorkspaceLoadRefused>());
-        assert_eq!(app.should_exit(), Some(AppExit::error()));
+        assert_eq!(fixture.app.world().resource::<SaveCount>().0, 0);
+        std::fs::remove_dir(version).unwrap();
+        fixture.app.update();
+        fixture.finish_write();
+        assert!(
+            !fixture
+                .app
+                .world()
+                .get::<AutoSave>(fixture.persistence)
+                .unwrap()
+                .dirty
+        );
+        assert_eq!(fixture.app.world().resource::<SaveCount>().0, 1);
+        assert_eq!(
+            WorkspaceStorePath(fixture.path.clone()).schema_version(),
+            Some(STORE_SCHEMA_VERSION)
+        );
     }
 
     #[test]

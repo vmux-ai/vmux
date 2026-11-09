@@ -22,8 +22,8 @@ impl RuntimeHandoff {
         } else {
             data.join(&build).join("services")
         };
-        Self::shutdown_services(&directory, &build)?;
         let deadline = Instant::now() + Duration::from_secs(5);
+        Self::shutdown_services(&directory, &build, deadline)?;
         loop {
             match lease.activate_runtime() {
                 Ok(()) => return Ok(lease),
@@ -41,7 +41,7 @@ impl RuntimeHandoff {
         }
     }
 
-    fn shutdown_services(directory: &Path, build: &str) -> std::io::Result<()> {
+    fn shutdown_services(directory: &Path, build: &str, deadline: Instant) -> std::io::Result<()> {
         if !directory.exists() {
             return Ok(());
         }
@@ -57,12 +57,12 @@ impl RuntimeHandoff {
             if stem != prefix && !stem.starts_with(&format!("{prefix}-")) {
                 continue;
             }
-            Self::shutdown(&path)?;
+            Self::shutdown(&path, deadline)?;
         }
         Ok(())
     }
 
-    fn shutdown(socket: &Path) -> std::io::Result<()> {
+    fn shutdown(socket: &Path, deadline: Instant) -> std::io::Result<()> {
         let mut stream = match std::os::unix::net::UnixStream::connect(socket) {
             Ok(stream) => stream,
             Err(error)
@@ -75,10 +75,20 @@ impl RuntimeHandoff {
             }
             Err(error) => return Err(error),
         };
-        stream.set_write_timeout(Some(Duration::from_secs(1)))?;
-        stream.set_read_timeout(Some(Duration::from_secs(5)))?;
+        let remaining = deadline.saturating_duration_since(Instant::now());
+        if remaining.is_zero() {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::TimedOut,
+                "Vmux service handoff timed out",
+            ));
+        }
+        stream.set_write_timeout(Some(remaining.min(Duration::from_secs(1))))?;
         ServiceCodec::write_client_blocking(&mut stream, &ClientMessage::Shutdown)?;
-        let _ = ServiceCodec::read_service_blocking(&mut std::io::BufReader::new(&mut stream));
+        let remaining = deadline.saturating_duration_since(Instant::now());
+        if !remaining.is_zero() {
+            stream.set_read_timeout(Some(remaining))?;
+            let _ = ServiceCodec::read_service_blocking(&mut std::io::BufReader::new(&mut stream));
+        }
         Ok(())
     }
 }
@@ -106,7 +116,12 @@ mod tests {
             let message = rkyv::from_bytes::<ClientMessage, rkyv::rancor::Error>(&payload).unwrap();
             assert!(matches!(message, ClientMessage::Shutdown));
         });
-        RuntimeHandoff::shutdown_services(directory.path(), "local").unwrap();
+        RuntimeHandoff::shutdown_services(
+            directory.path(),
+            "local",
+            Instant::now() + Duration::from_secs(1),
+        )
+        .unwrap();
         worker.join().unwrap();
         assert!(
             matches!(other.accept(), Err(error) if error.kind() == std::io::ErrorKind::WouldBlock)

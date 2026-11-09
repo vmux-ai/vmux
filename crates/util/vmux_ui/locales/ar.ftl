@@ -1114,3 +1114,7 @@ common-copy-url = نسخ الرابط
 sessions-history-unavailable = لا يمكن فتح هذه المحادثة مجددًا. يمكنك بدء محادثة جديدة.
 sessions-connection-interrupted = انقطع الاتصال. حاول الاتصال مرة أخرى.
 sessions-operation-failed = تعذر إكمال العملية.
+
+workspace-store-title = بيانات مساحة العمل
+workspace-store-recovered = حُفظت البيانات السابقة في { $path }. ستُنشأ مساحة عمل جديدة.
+workspace-store-refused = لا يمكن فتح مساحة العمل هذه بأمان. لم تتغير البيانات في { $path }. استخدم إصدارًا أحدث أو نسخة من البيانات.

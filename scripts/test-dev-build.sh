@@ -3,6 +3,7 @@ set -euo pipefail
 
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 tmp="$(mktemp -d)"
+tmp="$(cd "$tmp" && pwd -P)"
 trap 'rm -rf "$tmp"' EXIT
 mkdir -p "$tmp/client/scripts" "$tmp/target/debug/deps" "$tmp/bin"
 cp "$root/scripts/build-dev.sh" "$root/scripts/run-dev.sh" "$root/scripts/cargo-target-paths.sh" "$tmp/client/scripts/"
@@ -33,6 +34,7 @@ ENV
 chmod +x "$tmp/client/scripts/"*.sh "$tmp/bin/"*
 export PATH="$tmp/bin:$PATH"
 export CARGO_TARGET_DIR="$tmp/target"
+export CARGO_INCREMENTAL=1
 export TEST_LOG="$tmp/build.log"
 export TEST_RUN="$tmp/run.log"
 export TEST_ENV="$tmp/env.log"
@@ -74,4 +76,13 @@ fi
 [[ ! -L "$tmp/target/release/Vmux Dev.app" ]]
 "$tmp/client/scripts/run-dev.sh" stop
 grep -Fq 'service stop' "$TEST_RUN"
+cat > "$tmp/client/Makefile" <<'MAKE'
+.PHONY: build-dev
+build-dev:
+	@./scripts/build-dev.sh
+MAKE
+"$tmp/client/scripts/run-dev.sh" build-if-needed
+[[ "$(wc -l < "$TEST_LOG" | tr -d ' ')" == 7 ]]
+"$tmp/client/scripts/run-dev.sh" build-if-needed
+[[ "$(wc -l < "$TEST_LOG" | tr -d ' ')" == 7 ]]
 printf 'build-only and launch-only lifecycle passed\n'
