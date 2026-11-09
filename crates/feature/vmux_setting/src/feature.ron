@@ -461,6 +461,8 @@
                 "PageAddressPublish",
                 "PageAddressRequest",
                 "PageAddressUiState",
+                "PageLocationUiState",
+                "PageLocationRequest",
                 "PageReady",
                 "ThemeUiState",
                 "OpenRequest",

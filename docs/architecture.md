@@ -614,9 +614,8 @@ document's inert state without adding persistent JavaScript bindings.
 Page-local navigation uses `PageLocationRequest` and `PageLocationUiState`, with the fragment
 stored in `PageMetadata`. Fragment-only changes update the hosted URL and the committed Stack
 without rebuilding the document or changing its data-cache identity. Pages resolve that shared
-location to their own file or section and use the common scroll transport; Settings can consume
-the same location state for its section navigation.
-Git file selection and the editor Outline share `SectionNavigation`: clicks request smooth
+location to their own file or section and use the common scroll transport.
+Settings, Git file selection, and the editor Outline share `SectionNavigation`: clicks request smooth
 scrolling, scrolling publishes the current section, and echoed location updates do not restart
 navigation. Notes resolve `#L<line>` to a rendered block and measure the heading at the viewport
 edge in one DOM request. Outline following preserves the editor caret. Page routes are declared once in `feature.ron`.
@@ -636,6 +635,10 @@ bookmarks resolve the working directory selected in the owning Space card throug
 checkout follows the owning workspace, and old `vmux://git/` routes normalize before rendering.
 Search, filters, Details, Add, Create,
 Resume, Start, and Checkout render inside the page through `PageToolbar`, with local callbacks.
+Settings and manager pages share `WorkspaceLayout`: navigation opens by default on desktop,
+and its toggle animates the sidebar and icon. Search uses the shared expandable search control.
+Settings section icons and the active viewport section update the address trail and URL fragment;
+command-bar search providers resolve their favicons through the common favicon source.
 Git's document, styles and UI transport share the `git://` origin. Code uses `file://` for
 navigation and `vmux://files/` for the native renderer: WKWebView reserves the built-in file
 scheme and rejects a custom handler. Page routing and renderer asset origins are separate

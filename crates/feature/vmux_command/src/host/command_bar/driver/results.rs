@@ -154,6 +154,8 @@ impl CommandBarResultItem {
                 row.title = format!("Search with {}", engine.name);
                 row.url = engine.query_url(query);
                 row.icon = PageIcon::Builtin(BuiltinIcon::Globe);
+                row.favicon_url =
+                    vmux_ui::favicon::FaviconSource::resolve("", &row.url).unwrap_or_default();
                 row.trailing = "\u{21b5}".to_string();
             }
             Self::File {
