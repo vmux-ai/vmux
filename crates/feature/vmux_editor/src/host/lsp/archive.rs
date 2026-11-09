@@ -1,10 +1,44 @@
-use std::io::{Read, Write};
+use std::io::{Read, Seek, SeekFrom, Write};
 #[cfg(unix)]
 use std::os::unix::fs::PermissionsExt;
 use std::path::{Component, Path, PathBuf};
 
 const MAX_ARCHIVE_ENTRIES: usize = 100_000;
 const MAX_EXPANDED_BYTES: u64 = 2 * 1024 * 1024 * 1024;
+
+struct ZipEntryMode(Option<u32>);
+
+impl ZipEntryMode {
+    fn read(
+        headers: &mut std::fs::File,
+        offset: u64,
+        standard: Option<u32>,
+    ) -> Result<Self, String> {
+        if standard.is_some() {
+            return Ok(Self(standard));
+        }
+        headers
+            .seek(SeekFrom::Start(offset))
+            .map_err(|error| error.to_string())?;
+        let mut header = [0u8; 46];
+        headers
+            .read_exact(&mut header)
+            .map_err(|error| error.to_string())?;
+        if &header[..4] != b"PK\x01\x02" {
+            return Err("invalid ZIP central directory entry".to_string());
+        }
+        if header[5] != 19 {
+            return Ok(Self(None));
+        }
+        let attributes = u32::from_le_bytes(header[38..42].try_into().unwrap());
+        let mode = attributes >> 16;
+        Ok(Self((mode != 0).then_some(mode)))
+    }
+
+    fn is_symlink(&self) -> bool {
+        self.0.is_some_and(|mode| mode & 0o170000 == 0o120000)
+    }
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ArchiveKind {
@@ -213,6 +247,7 @@ impl ArchiveKind {
     }
 
     fn extract_zip(file: &Path, destination: &Path) -> Result<(), String> {
+        let mut headers = std::fs::File::open(file).map_err(|error| error.to_string())?;
         let file = std::fs::File::open(file).map_err(|error| error.to_string())?;
         let mut archive = zip::ZipArchive::new(file).map_err(|error| error.to_string())?;
         if archive.len() > MAX_ARCHIVE_ENTRIES {
@@ -227,10 +262,12 @@ impl ArchiveKind {
                 .enclosed_name()
                 .ok_or_else(|| format!("unsafe archive path: {}", entry.name()))?;
             let output = ArchivePath::parse(&enclosed)?.join(destination);
-            if entry
-                .unix_mode()
-                .is_some_and(|mode| mode & 0o170000 == 0o120000)
-            {
+            let mode = ZipEntryMode::read(
+                &mut headers,
+                entry.central_header_start(),
+                entry.unix_mode(),
+            )?;
+            if mode.is_symlink() {
                 continue;
             }
             if entry.is_dir() {
@@ -246,7 +283,7 @@ impl ArchiveKind {
             std::io::copy(&mut entry, &mut output_file).map_err(|error| error.to_string())?;
             output_file.flush().map_err(|error| error.to_string())?;
             #[cfg(unix)]
-            if let Some(mode) = entry.unix_mode() {
+            if let Some(mode) = mode.0 {
                 std::fs::set_permissions(&output, std::fs::Permissions::from_mode(mode & 0o777))
                     .map_err(|error| error.to_string())?;
             }
@@ -309,27 +346,45 @@ mod tests {
     #[cfg(unix)]
     #[test]
     fn extracted_zip_helpers_remain_executable() {
-        let tmp = tempfile::tempdir().unwrap();
-        let zip_path = tmp.path().join("agent.zip");
-        let file = std::fs::File::create(&zip_path).unwrap();
-        let mut writer = zip::ZipWriter::new(file);
-        let options: zip::write::FileOptions<()> =
-            zip::write::FileOptions::default().unix_permissions(0o755);
-        for name in ["claude-agent-acp", "runtime/claude"] {
-            writer.start_file(name, options).unwrap();
-            writer.write_all(b"#!/bin/sh\nprintf native-ready").unwrap();
-        }
-        writer.finish().unwrap();
-        let destination = tmp.path().join("out");
-        ArchiveKind::Zip
-            .extract(&zip_path, &destination, "_")
-            .unwrap();
-        for name in ["claude-agent-acp", "runtime/claude"] {
-            let output = std::process::Command::new(destination.join(name))
-                .output()
+        for host in [3, 19] {
+            let tmp = tempfile::tempdir().unwrap();
+            let zip_path = tmp.path().join("agent.zip");
+            let file = std::fs::File::create(&zip_path).unwrap();
+            let mut writer = zip::ZipWriter::new(file);
+            let options: zip::write::FileOptions<()> =
+                zip::write::FileOptions::default().unix_permissions(0o755);
+            for name in ["claude-agent-acp", "runtime/claude"] {
+                writer.start_file(name, options).unwrap();
+                writer.write_all(b"#!/bin/sh\nprintf native-ready").unwrap();
+            }
+            writer.finish().unwrap();
+            let mut offsets = Vec::new();
+            let mut archive =
+                zip::ZipArchive::new(std::fs::File::open(&zip_path).unwrap()).unwrap();
+            for index in 0..archive.len() {
+                offsets.push(archive.by_index(index).unwrap().central_header_start() + 5);
+            }
+            drop(archive);
+            let mut file = std::fs::OpenOptions::new()
+                .write(true)
+                .open(&zip_path)
                 .unwrap();
-            assert!(output.status.success());
-            assert_eq!(output.stdout, b"native-ready");
+            for offset in offsets {
+                file.seek(SeekFrom::Start(offset)).unwrap();
+                file.write_all(&[host]).unwrap();
+            }
+            drop(file);
+            let destination = tmp.path().join("out");
+            ArchiveKind::Zip
+                .extract(&zip_path, &destination, "_")
+                .unwrap();
+            for name in ["claude-agent-acp", "runtime/claude"] {
+                let output = std::process::Command::new(destination.join(name))
+                    .output()
+                    .unwrap();
+                assert!(output.status.success());
+                assert_eq!(output.stdout, b"native-ready");
+            }
         }
     }
 

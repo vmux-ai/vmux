@@ -308,7 +308,8 @@ pub(crate) const WRY_HOST_SHIM: &str = r#"
   }
   const prepareRemount = () => {
     const previous = window.interpreter;
-    const composer = ComposerHandoff.capture(previous.root);
+    let composer = null;
+    try { composer = ComposerHandoff.capture(previous.root); } catch (e) {}
     const root = previous.root.cloneNode(false);
     const interpreter = window.vmuxCreateInterpreter();
     interpreter.initialize(root);
@@ -335,7 +336,9 @@ pub(crate) const WRY_HOST_SHIM: &str = r#"
     remount.previousRoot.replaceWith(remount.root);
     window.interpreter = remount.interpreter;
     const committed = commitNavigationRevision(revision);
-    if (committed) ComposerHandoff.apply(remount.composer, remount.root);
+    if (committed) {
+      try { ComposerHandoff.apply(remount.composer, remount.root); } catch (e) {}
+    }
     return committed;
   };
   const visibleScrollAnchor = (container, viewport) => {

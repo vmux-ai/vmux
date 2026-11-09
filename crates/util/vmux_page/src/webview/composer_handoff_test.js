@@ -92,4 +92,13 @@ class HandoffProbe {
   await missing.remount();
   assert.equal(missing.root.composer, missing.target);
   assert.equal(missing.target.animations.length, 0);
+  const failedAnimation = new HandoffProbe();
+  failedAnimation.target.animate = () => { throw new Error('animation unsupported'); };
+  await failedAnimation.remount();
+  assert.equal(failedAnimation.root.composer, failedAnimation.target);
+  const failedCapture = new HandoffProbe();
+  failedCapture.source.getBoundingClientRect = () => { throw new Error('detached source'); };
+  await failedCapture.remount();
+  assert.equal(failedCapture.root.composer, failedCapture.target);
+  assert.equal(failedCapture.target.animations.length, 0);
 })().catch(error => { console.error(error); process.exitCode = 1; });
