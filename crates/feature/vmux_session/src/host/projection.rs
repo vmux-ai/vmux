@@ -168,7 +168,7 @@ impl ChatTurnProjection {
             name: name.to_string(),
             kind: ChatTurnProjection::classified_kind(kind, name, args),
             activity: kind
-                .and_then(Self::classified_activity)
+                .and_then(|kind| Self::classified_activity(kind, name))
                 .unwrap_or_else(|| Self::activity_for_tool(name, args)),
             fallback_label: ChatTurnProjection::fallback_tool_label(name),
             file_path: ChatTurnProjection::tool_file_path(args),
@@ -189,7 +189,7 @@ impl ChatTurnProjection {
             name: name.to_string(),
             kind: ChatTurnProjection::classified_kind(kind, name, args),
             activity: kind
-                .and_then(Self::classified_activity)
+                .and_then(|kind| Self::classified_activity(kind, name))
                 .unwrap_or_else(|| Self::activity_for_tool(name, args)),
             fallback_label: ChatTurnProjection::fallback_tool_label(name),
             file_path: ChatTurnProjection::tool_file_path(args),
@@ -375,6 +375,9 @@ impl ChatTurnProjection {
         args: &str,
     ) -> ChatToolKind {
         match kind {
+            Some(vmux_api::session::ToolKind::Think) if Self::is_guardian(name) => {
+                ChatToolKind::Guardian
+            }
             Some(vmux_api::session::ToolKind::Read) => {
                 if Self::arguments_read_skill(args) {
                     ChatToolKind::ReadSkill
@@ -397,7 +400,10 @@ impl ChatTurnProjection {
         }
     }
 
-    fn classified_activity(kind: vmux_api::session::ToolKind) -> Option<ChatActivityKind> {
+    fn classified_activity(
+        kind: vmux_api::session::ToolKind,
+        name: &str,
+    ) -> Option<ChatActivityKind> {
         Some(match kind {
             vmux_api::session::ToolKind::Read => ChatActivityKind::ReadFile,
             vmux_api::session::ToolKind::Edit
@@ -405,6 +411,9 @@ impl ChatTurnProjection {
             | vmux_api::session::ToolKind::Move => ChatActivityKind::WriteFile,
             vmux_api::session::ToolKind::Search => ChatActivityKind::Search,
             vmux_api::session::ToolKind::Execute => ChatActivityKind::Command,
+            vmux_api::session::ToolKind::Think if Self::is_guardian(name) => {
+                ChatActivityKind::Guardian
+            }
             vmux_api::session::ToolKind::Think => ChatActivityKind::Thinking,
             vmux_api::session::ToolKind::Fetch => ChatActivityKind::Browser,
             _ => return None,
@@ -516,7 +525,7 @@ impl ChatTurnProjection {
             ChatBlock::ToolUse {
                 name, args, kind, ..
             } => kind
-                .and_then(Self::classified_activity)
+                .and_then(|kind| Self::classified_activity(kind, name))
                 .unwrap_or_else(|| Self::activity_for_tool(name, args)),
             ChatBlock::Subagent(_) => ChatActivityKind::Subagent,
             ChatBlock::Diff { path, .. } => {
@@ -723,6 +732,48 @@ impl ChatTurnProjection {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn guardian_authorization_uses_its_own_activity_instead_of_general_thinking() {
+        for (name, protocol, kind, activity) in [
+            (
+                "Guardian Review",
+                vmux_api::session::ToolKind::Think,
+                ChatToolKind::Guardian,
+                ChatActivityKind::Guardian,
+            ),
+            (
+                "Consider the next step",
+                vmux_api::session::ToolKind::Think,
+                ChatToolKind::Other,
+                ChatActivityKind::Thinking,
+            ),
+            (
+                "guardian_read_policy",
+                vmux_api::session::ToolKind::Read,
+                ChatToolKind::ReadFile,
+                ChatActivityKind::ReadFile,
+            ),
+        ] {
+            let mut turn = ChatTurn {
+                running: true,
+                blocks: vec![ChatBlock::ToolUse {
+                    call_id: "call".into(),
+                    name: name.into(),
+                    args: "{}".into(),
+                    parent_call_id: None,
+                    kind: Some(protocol),
+                }],
+                ..Default::default()
+            };
+            ChatTurnProjection::apply(&mut turn);
+            let ChatTurnRow::Tool(call) = &turn.rows[0] else {
+                panic!("tool row");
+            };
+            assert_eq!(call.kind, kind);
+            assert_eq!(call.activity, activity);
+        }
+    }
 
     #[test]
     fn typed_tool_kind_takes_precedence_over_an_agent_specific_title() {

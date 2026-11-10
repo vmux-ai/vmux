@@ -1969,7 +1969,8 @@ and subsequent assistant text arrives; earlier batches remain folded. Tool rows 
 Claude/Vibe name classification and summarize wrapped Codex command batches as Read, Ran,
 Explored, or Edited. Parsed exploration steps stay inside the call details. Output summaries show
 the first nonempty output line and retain the full text for expansion. Guardian rows report Codex's
-automatic action authorization checks.
+automatic action authorization checks and use a shield/check icon even when ACP classifies them
+as Think; ordinary thinking retains its brain icon.
 Folded tool rows and batches retain their file references, including reads inside Codex wrappers.
 File links retain the tool's working directory when available and otherwise use the Session's.
 Default file clicks preserve the conversation: a pane at least 1280 CSS pixels wide opens the editor
