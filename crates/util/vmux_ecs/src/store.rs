@@ -1,17 +1,67 @@
-use bevy_app::{App, Update};
+use bevy_app::{App, Plugin, Update};
 use bevy_ecs::prelude::*;
-#[cfg(test)]
+use bevy_ecs::query::QueryFilter;
 use bevy_ecs::reflect::AppTypeRegistry;
 use bevy_ecs::system::SystemParam;
-use bevy_reflect::{FromReflect, FromType, GetTypeRegistration, Reflect, TypePath, TypeRegistry};
+pub use bevy_reflect::TypeRegistry;
+use bevy_reflect::{FromReflect, FromType, GetTypeRegistration, Reflect, TypePath};
 use bevy_world_serialization::{DynamicEntity, DynamicWorld, WorldFilter};
-use moonshine_save::prelude::Save;
+use moonshine_save::prelude::{Save, SaveWorld};
 use std::marker::PhantomData;
 use std::path::PathBuf;
 use std::{
     collections::{HashMap, HashSet},
     hash::Hash,
 };
+
+pub struct SchemaPlugin<S: Schema>(PhantomData<fn() -> S>);
+
+impl<S: Schema> Default for SchemaPlugin<S> {
+    fn default() -> Self {
+        Self(PhantomData)
+    }
+}
+
+impl<S: Schema> Plugin for SchemaPlugin<S> {
+    fn build(&self, app: &mut App) {
+        app.init_resource::<AppTypeRegistry>();
+        let filter = {
+            let mut registry = app.world().resource::<AppTypeRegistry>().write();
+            S::register(&mut registry);
+            StoreDomain::<S>::filter(&registry)
+        };
+        app.insert_resource(Types::<S> {
+            filter,
+            schema: PhantomData,
+        });
+    }
+}
+
+pub trait Schema: Send + Sync + 'static {
+    fn register(registry: &mut TypeRegistry);
+}
+
+#[derive(Resource)]
+pub struct Types<S: Schema> {
+    filter: WorldFilter,
+    schema: PhantomData<fn() -> S>,
+}
+
+impl<S: Schema> Clone for Types<S> {
+    fn clone(&self) -> Self {
+        Self {
+            filter: self.filter.clone(),
+            schema: PhantomData,
+        }
+    }
+}
+
+impl<S: Schema> Types<S> {
+    pub fn apply<F: QueryFilter>(&self, save: &mut SaveWorld<F>) {
+        save.components = self.filter.clone();
+        save.resources = self.filter.clone();
+    }
+}
 
 pub struct StoreDomain<D>(PhantomData<fn() -> D>);
 
@@ -284,11 +334,6 @@ impl WorkspaceStoreValidators<'_, '_> {
 }
 
 pub trait StoreAppExt {
-    fn register_store_type<D, T>(&mut self) -> &mut Self
-    where
-        D: 'static,
-        T: Reflect + TypePath + GetTypeRegistration;
-
     fn register_stored<T>(&mut self) -> &mut Self
     where
         T: Component + Reflect + TypePath + GetTypeRegistration;
@@ -299,20 +344,12 @@ pub trait StoreAppExt {
 }
 
 impl StoreAppExt for App {
-    fn register_store_type<D, T>(&mut self) -> &mut Self
-    where
-        D: 'static,
-        T: Reflect + TypePath + GetTypeRegistration,
-    {
-        self.register_type::<T>()
-            .register_type_data::<T, StoreDomain<D>>()
-    }
-
     fn register_stored<T>(&mut self) -> &mut Self
     where
         T: Component + Reflect + TypePath + GetTypeRegistration,
     {
-        self.register_store_type::<WorkspaceStore, T>()
+        self.register_type::<T>()
+            .register_type_data::<T, StoreDomain<WorkspaceStore>>()
             .track_store::<T>()
     }
 
@@ -462,9 +499,10 @@ mod tests {
         assert!(app.world().resource::<DirtyCount>().0 > 0);
     }
 
-    enum FeatureStore {}
+    #[crate::store(Saved)]
+    struct FeatureStore;
 
-    type FeaturePersisted = StoreDomain<FeatureStore>;
+    type FeatureStored = StoreDomain<FeatureStore>;
 
     #[test]
     fn feature_registration_builds_the_component_allowlist() {
@@ -478,12 +516,12 @@ mod tests {
     }
 
     #[test]
-    fn named_persistence_domains_build_independent_allowlists() {
+    fn store_schemas_build_independent_allowlists() {
         let mut app = App::new();
-        app.register_store_type::<FeatureStore, Saved>()
+        app.add_plugins(SchemaPlugin::<FeatureStore>::default())
             .register_stored::<Transient>();
         let registry = app.world().resource::<AppTypeRegistry>().read();
-        let feature = FeaturePersisted::filter(&registry);
+        let feature = FeatureStored::filter(&registry);
         let workspace = WorkspaceStored::filter(&registry);
 
         assert!(feature.is_allowed::<Saved>());

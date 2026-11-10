@@ -874,8 +874,10 @@ Failed writes retain the changes and retry on the 60-second deadline; schema sid
 successful writes. Restored session children containing only a timestamp and parent reference are
 discarded after backing up the store; conversation content and live children remain intact.
 `vmux_ecs::store` shares type-registry domains and entity-owned `State` across workspace and
-bookmark stores. Loaded, dirty, and saving revisions stay distinct: a completion acknowledges only
-its captured revision, and failure returns that revision to the dirty set. Restore progresses
+bookmark stores. A store schema declares its component and resource types with `#[vmux_ecs::store(...)]`;
+`SchemaPlugin` registers the declared types and provides a shared, cached save filter. Loaded, dirty,
+and saving revisions stay distinct: a completion acknowledges only its captured revision, and failure
+returns that revision to the dirty set. Restore progresses
 through materialization and resolution; workspace saves wait for `LayoutRestoreCommitted`.
 Store paths, snapshot formats, schema sidecars, validation, and recovery remain feature-owned.
 

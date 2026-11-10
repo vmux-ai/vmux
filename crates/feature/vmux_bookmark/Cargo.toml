@@ -10,7 +10,6 @@ path = "src/lib.rs"
 
 [dependencies]
 bevy = { workspace = true }
-bevy_world_serialization = { workspace = true }
 moonshine-save = { workspace = true }
 raw-window-handle = "0.6"
 rkyv = { workspace = true }

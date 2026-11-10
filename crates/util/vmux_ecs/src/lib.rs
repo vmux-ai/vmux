@@ -1,3 +1,7 @@
+extern crate self as vmux_ecs;
+
+pub use vmux_macro::store;
+
 #[cfg(all(host, feature = "host"))]
 pub use archive::{
     ArchivedPage, ArchivedPagePosition, ArchivedTabPage, PageArchiveRequest, PaneStep, SplitAxis,

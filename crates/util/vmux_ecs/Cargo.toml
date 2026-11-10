@@ -32,6 +32,7 @@ serde_json = { workspace = true }
 uuid = { workspace = true }
 vmux_profile = { path = "../vmux_profile" }
 vmux_path = { path = "../vmux_path" }
+vmux_macro = { path = "../vmux_macro" }
 vmux_api = { path = "../vmux_api", features = ["bevy"] }
 
 [dev-dependencies]

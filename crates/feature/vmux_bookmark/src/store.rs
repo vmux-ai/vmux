@@ -1,13 +1,12 @@
 use bevy::ecs::system::SystemParam;
 use bevy::prelude::*;
-use bevy_world_serialization::WorldFilter;
 use moonshine_save::prelude::*;
 use std::collections::{HashMap, HashSet};
 use vmux_api::PageIcon;
 use vmux_api::bookmark::SmartBookmarkFolder;
 use vmux_ecs::profile::SessionEnvironment;
 use vmux_ecs::store::State;
-use vmux_ecs::store::{StoreAppExt, StoreDomain};
+use vmux_ecs::store::{SchemaPlugin, Types};
 use vmux_ecs::{Bookmark, BookmarkOrder, Collapsed, Folder, PageMetadata, Pin, Uuid};
 use vmux_layout::LayoutStartupSet;
 use vmux_setting::AppSettings;
@@ -15,49 +14,12 @@ use vmux_shortcut::ShortcutUrl;
 
 use crate::store_driver::{BookmarkFilter, BookmarkStorePath};
 
-const BOOKMARK_PIN_ORDER_REVISION: u32 = 4;
-const RETIRED_DEFAULT_BOOKMARKS: [&str; 2] = ["vmux://spaces/", "vmux://team/"];
-
-enum BookmarkStore {}
-
-type BookmarkStored = StoreDomain<BookmarkStore>;
-
-#[derive(Resource, Clone)]
-struct BookmarkStoreTypes(WorldFilter);
-
-impl BookmarkStoreTypes {
-    fn register(app: &mut App) {
-        app.register_store_type::<BookmarkStore, ChildOf>()
-            .register_store_type::<BookmarkStore, Children>()
-            .register_store_type::<BookmarkStore, Name>()
-            .register_store_type::<BookmarkStore, BookmarkOrder>()
-            .register_store_type::<BookmarkStore, Pin>()
-            .register_store_type::<BookmarkStore, Bookmark>()
-            .register_store_type::<BookmarkStore, Folder>()
-            .register_store_type::<BookmarkStore, SmartBookmarkFolder>()
-            .register_store_type::<BookmarkStore, Collapsed>()
-            .register_store_type::<BookmarkStore, Uuid>()
-            .register_store_type::<BookmarkStore, PageMetadata>()
-            .register_store_type::<BookmarkStore, OfferedBookmarkDefaults>();
-        let filter = {
-            let registry = app.world().resource::<AppTypeRegistry>().read();
-            BookmarkStored::filter(&registry)
-        };
-        app.insert_resource(Self(filter));
-    }
-
-    fn apply(&self, save: &mut SaveWorld<BookmarkFilter>) {
-        save.components = self.0.clone();
-        save.resources = self.0.clone();
-    }
-}
-
 pub(super) struct BookmarkStorePlugin;
 
 impl Plugin for BookmarkStorePlugin {
     fn build(&self, app: &mut App) {
-        BookmarkStoreTypes::register(app);
-        app.init_resource::<OfferedBookmarkDefaults>()
+        app.add_plugins(SchemaPlugin::<BookmarkStore>::default())
+            .init_resource::<OfferedBookmarkDefaults>()
             .add_observer(save_on::<SaveWorld<BookmarkFilter>>)
             .add_observer(load_on::<LoadWorld<BookmarkFilter>>)
             .add_observer(seed_defaults)
@@ -74,6 +36,27 @@ impl Plugin for BookmarkStorePlugin {
             );
     }
 }
+
+const BOOKMARK_PIN_ORDER_REVISION: u32 = 4;
+const RETIRED_DEFAULT_BOOKMARKS: [&str; 2] = ["vmux://spaces/", "vmux://team/"];
+
+#[vmux_ecs::store(
+    ChildOf,
+    Children,
+    Name,
+    BookmarkOrder,
+    Pin,
+    Bookmark,
+    Folder,
+    SmartBookmarkFolder,
+    Collapsed,
+    Uuid,
+    PageMetadata,
+    OfferedBookmarkDefaults
+)]
+struct BookmarkStore;
+
+type BookmarkStoreTypes = Types<BookmarkStore>;
 
 fn spawn(profile: vmux_ecs::profile::CurrentProfile, mut commands: Commands) {
     let path = match profile.paths() {
@@ -497,10 +480,10 @@ mod tests {
             MinimalPlugins,
             bevy::asset::AssetPlugin::default(),
             vmux_ecs::PrimitivesPlugin,
-        ));
-        BookmarkStoreTypes::register(&mut app);
-        app.insert_resource(OfferedBookmarkDefaults::default())
-            .add_systems(Update, autosave_bookmarks);
+        ))
+        .add_plugins(SchemaPlugin::<BookmarkStore>::default())
+        .insert_resource(OfferedBookmarkDefaults::default())
+        .add_systems(Update, autosave_bookmarks);
         let store = app
             .world_mut()
             .spawn((BookmarkAutoSave, BookmarkStorePath(path.clone())))
@@ -540,9 +523,8 @@ mod tests {
         save_app
             .add_plugins(MinimalPlugins)
             .add_plugins(bevy::asset::AssetPlugin::default())
-            .add_plugins(vmux_ecs::PrimitivesPlugin);
-        BookmarkStoreTypes::register(&mut save_app);
-        save_app
+            .add_plugins(vmux_ecs::PrimitivesPlugin)
+            .add_plugins(SchemaPlugin::<BookmarkStore>::default())
             .insert_resource(OfferedBookmarkDefaults {
                 urls: vec!["vmux://start/".into()],
                 ..default()
@@ -587,9 +569,8 @@ mod tests {
         load_app
             .add_plugins(MinimalPlugins)
             .add_plugins(bevy::asset::AssetPlugin::default())
-            .add_plugins(vmux_ecs::PrimitivesPlugin);
-        BookmarkStoreTypes::register(&mut load_app);
-        load_app
+            .add_plugins(vmux_ecs::PrimitivesPlugin)
+            .add_plugins(SchemaPlugin::<BookmarkStore>::default())
             .init_resource::<OfferedBookmarkDefaults>()
             .add_observer(load_on::<LoadWorld<BookmarkFilter>>);
         let p2 = path.clone();
@@ -644,9 +625,9 @@ mod tests {
         save_app
             .add_plugins(MinimalPlugins)
             .add_plugins(bevy::asset::AssetPlugin::default())
-            .add_plugins(vmux_ecs::PrimitivesPlugin);
-        BookmarkStoreTypes::register(&mut save_app);
-        save_app.add_observer(save_on::<SaveWorld<BookmarkFilter>>);
+            .add_plugins(vmux_ecs::PrimitivesPlugin)
+            .add_plugins(SchemaPlugin::<BookmarkStore>::default())
+            .add_observer(save_on::<SaveWorld<BookmarkFilter>>);
         save_app.world_mut().spawn((
             Pin,
             Uuid("existing".into()),
@@ -688,9 +669,8 @@ mod tests {
             .add_plugins(MinimalPlugins)
             .add_plugins(bevy::asset::AssetPlugin::default())
             .add_plugins(vmux_ecs::PrimitivesPlugin)
-            .insert_resource(settings);
-        BookmarkStoreTypes::register(&mut load_app);
-        load_app
+            .insert_resource(settings)
+            .add_plugins(SchemaPlugin::<BookmarkStore>::default())
             .init_resource::<OfferedBookmarkDefaults>()
             .add_observer(load_on::<LoadWorld<BookmarkFilter>>)
             .add_observer(seed_defaults)
