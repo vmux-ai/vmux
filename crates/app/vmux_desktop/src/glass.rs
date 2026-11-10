@@ -163,6 +163,7 @@ fn install_window(mut state: NonSendMut<GlassState>, windows: Query<(Entity, &Wi
         unsafe {
             parent_window.addChildWindow_ordered(backdrop, NSWindowOrderingMode::Below);
         }
+        parent_window.setHasShadow(false);
         let installed = WindowGlass {
             visible: true,
             shadowed: false,

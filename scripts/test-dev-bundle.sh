@@ -12,6 +12,8 @@ if [[ "${1:-}" != --fixture ]]; then
     [[ "$(readlink "$launch_alias")" == "$app" ]]
     [[ "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleExecutable' "$plist")" == vmux_desktop ]]
     [[ "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$plist")" == ai.vmux.desktop.dev ]]
+    [[ "$(/usr/libexec/PlistBuddy -c 'Print :LSUIElement' "$plist")" == false ]]
+    [[ "$(/usr/libexec/PlistBuddy -c 'Print :LSUIElement' "$app/Contents/Library/LoginItems/Vmux Service.app/Contents/Info.plist")" == true ]]
     [[ "$(/usr/libexec/PlistBuddy -c 'Print :NSCameraUsageDescription' "$plist")" == *camera* ]]
     [[ "$(/usr/libexec/PlistBuddy -c 'Print :NSMicrophoneUsageDescription' "$plist")" == *microphone* ]]
     [[ -x "$app/Contents/MacOS/vmux" ]]
@@ -75,8 +77,8 @@ export CARGO_TARGET_DIR="$target"
 export APPLE_SIGNING_IDENTITY='fixture identity'
 export TEST_SIGN_LOG="$tmp/sign.log"
 export TEST_LINK_LOG="$tmp/link.log"
-if [[ -x /usr/libexec/PlistBuddy ]]; then
-    plist_buddy=/usr/libexec/PlistBuddy
+if [[ -x "${PLIST_BUDDY:-/usr/libexec/PlistBuddy}" ]]; then
+    plist_buddy="${PLIST_BUDDY:-/usr/libexec/PlistBuddy}"
 else
     cat > "$tmp/bin/PlistBuddy" <<'PLIST'
 #!/usr/bin/env python3
@@ -91,7 +93,12 @@ if parts[0] == 'Merge':
     with open(parts[1], 'rb') as source:
         data.update(plistlib.load(source))
 elif parts[0] == 'Set':
-    data[parts[1].removeprefix(':')] = ' '.join(parts[2:])
+    key = parts[1].removeprefix(':')
+    value = ' '.join(parts[2:])
+    if isinstance(data.get(key), bool):
+        assert value in ('true', 'false')
+        value = value == 'true'
+    data[key] = value
 else:
     raise SystemExit(f'Unsupported plist operation: {command}')
 with open(filename, 'wb') as destination:
@@ -123,12 +130,13 @@ printf 'changed desktop\n' >> "$target/debug/vmux_desktop"
 python3 - "$app/Contents/Info.plist" "$service/Contents/Info.plist" <<'VERIFY'
 import plistlib
 import sys
-for filename in sys.argv[1:]:
+for index, filename in enumerate(sys.argv[1:]):
     with open(filename, 'rb') as source:
         data = plistlib.load(source)
     assert data['NSMicrophoneUsageDescription'] == 'Updated microphone prompt'
     assert data['NSCameraUsageDescription'].startswith('Vmux needs camera access')
     assert data['LSMinimumSystemVersion'] == '14.0'
     assert data['CFBundleShortVersionString'] == '0.1.2'
+    assert data['LSUIElement'] is (index == 1)
 VERIFY
 printf 'Debug bundle templates, spaced paths, and no-op service identity passed\n'

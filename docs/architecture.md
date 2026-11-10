@@ -522,6 +522,15 @@ interpreted within that window's tree. Closing a window removes only its tree an
 another window if the primary closes. The primary tree and geometry persist across launches;
 additional windows are runtime workspaces.
 
+The macOS desktop bundle is a regular application, with Dock and app-switcher presence;
+opening it from another app's fullscreen Space returns to its own window's desktop Space.
+Only the embedded Service bundle uses `LSUIElement` for background operation, including in
+debug builds.
+
+With native Glass installed, only its backdrop window casts the focus shadow; the transparent
+content window disables its own shadow to avoid a doubled outline. Systems without native Glass
+retain the normal window shadow.
+
 Native page frames keep their top edge fixed in their parent view's coordinate system.
 Flipped AppKit parents use a flexible maximum-Y margin, so restoring the window's height cannot
 shift a page down by the size difference before ECS observes another resize.
