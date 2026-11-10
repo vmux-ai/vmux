@@ -14,7 +14,10 @@ const COMPILER: Option<&str> = option_env!("VMUX_BUILDER_COMPILER");
 const SOURCES: &[(&str, &[u8])] = &[
     ("main.rs", include_bytes!("main.rs")),
     ("bootstrap.rs", include_bytes!("bootstrap.rs")),
+    ("debug.rs", include_bytes!("debug.rs")),
+    ("environment.rs", include_bytes!("environment.rs")),
     ("execution.rs", include_bytes!("execution.rs")),
+    ("mac_package.rs", include_bytes!("mac_package.rs")),
     ("policy.rs", include_bytes!("policy.rs")),
     ("processes.rs", include_bytes!("processes.rs")),
     ("profile.rs", include_bytes!("profile.rs")),
@@ -22,6 +25,7 @@ const SOURCES: &[(&str, &[u8])] = &[
     ("signals.rs", include_bytes!("signals.rs")),
     ("storage.rs", include_bytes!("storage.rs")),
     ("target_lock.rs", include_bytes!("target_lock.rs")),
+    ("temporary.rs", include_bytes!("temporary.rs")),
 ];
 
 pub struct Bootstrap {

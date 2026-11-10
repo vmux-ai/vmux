@@ -8,6 +8,25 @@ use support::{ChildGuard, Project};
 pub mod support;
 
 #[test]
+fn completed_build_survives_a_cleanup_inspection_failure() {
+    let project = Project::create();
+    project.script("bin/lsof", "#!/bin/sh\nexit 1\n");
+    let output = project.make("build-dev");
+    assert!(
+        project
+            .target()
+            .join("debug/Vmux Dev.app/Contents/MacOS/vmux_desktop")
+            .is_file()
+    );
+    assert!(project.target().join("debug/deps/cache.o").is_file());
+    assert!(
+        String::from_utf8(output.stderr)
+            .unwrap()
+            .contains("cleanup skipped after successful build")
+    );
+}
+
+#[test]
 fn build_lifecycle_preserves_artifacts_and_resolves_launch_paths() {
     let project = Project::create();
     for index in 1..=5 {

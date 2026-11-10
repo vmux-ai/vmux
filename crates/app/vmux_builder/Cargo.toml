@@ -13,5 +13,13 @@ path = "tests/lifecycle.rs"
 name = "bootstrap"
 path = "tests/bootstrap.rs"
 
+[[test]]
+name = "debug"
+path = "tests/debug.rs"
+
+[[test]]
+name = "mac_package"
+path = "tests/mac_package.rs"
+
 [lints]
 workspace = true

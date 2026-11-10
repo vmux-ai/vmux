@@ -27,7 +27,7 @@ build-dev:
 _build-dev: export CARGO_INCREMENTAL = 1
 _build-dev: ensure-native-deps ensure-codesign-deps install-debug-render-process
 	CARGO_BIN="$(CARGO_BIN)" CEF_DEBUG_RENDER="$(CEF_DEBUG_RENDER)" \
-	  ./scripts/build-dev.sh $(VMUX_DESKTOP_FEATURES)
+	  ./scripts/vmux-builder prepare-dev $(VMUX_DESKTOP_FEATURES)
 
 run-dev:
 	./scripts/run-dev.sh
@@ -104,7 +104,7 @@ build-local:
 	./scripts/vmux-builder local $(MAKE) _build-local
 
 _build-local: ensure-mac-deps ensure-package-deps ensure-codesign-deps
-	./scripts/build-mac-release.sh local
+	./scripts/vmux-builder prepare-local
 
 local: build-local
 	./scripts/vmux-builder open-local
@@ -113,7 +113,7 @@ build-release:
 	./scripts/vmux-builder release $(MAKE) _build-release
 
 _build-release: ensure-mac-deps ensure-package-deps
-	./scripts/build-mac-release.sh release
+	./scripts/vmux-builder prepare-release
 
 release: build-release
 	./scripts/vmux-builder open-release

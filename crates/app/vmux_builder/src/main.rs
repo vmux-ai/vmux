@@ -15,7 +15,12 @@ use storage::Storage;
 #[cfg(unix)]
 mod bootstrap;
 #[cfg(unix)]
+mod debug;
+mod environment;
+#[cfg(unix)]
 mod execution;
+#[cfg(unix)]
+mod mac_package;
 mod policy;
 mod processes;
 mod profile;
@@ -26,6 +31,8 @@ mod signals;
 mod storage;
 #[cfg(unix)]
 mod target_lock;
+#[cfg(unix)]
+mod temporary;
 
 #[cfg(not(unix))]
 compile_error!("vmux_builder requires a Unix host");
@@ -83,6 +90,11 @@ impl Arguments {
                     }
                     break;
                 }
+                Some(value @ ("prepare-dev" | "prepare-local" | "prepare-release")) => {
+                    mode = Some(value.to_owned());
+                    command.extend(args);
+                    break;
+                }
                 Some("--profile") => {
                     profile = args
                         .next()
@@ -124,6 +136,10 @@ impl Arguments {
             return Ok(0);
         }
         let runner = Runner::new(self.root, self.target)?;
+        if let Some(profile) = self.mode.strip_prefix("prepare-") {
+            runner.prepare(profile, &self.command)?;
+            return Ok(0);
+        }
         if self.mode == "inherited" {
             return Ok(if runner.inherited() { 0 } else { 1 });
         }

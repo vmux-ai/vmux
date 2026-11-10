@@ -1381,6 +1381,16 @@ Linux. Lock waits remain cancellable. Each build command gets a separate process
 minimal POSIX signal handlers record cancellation and forward it to that group without
 allocating. The builder waits for its child, skips successful-build cleanup on failure or
 cancellation, and releases its locks before returning the original exit code.
+Preflight failures refuse the build. After the command succeeds, cleanup inspection or
+filesystem failures warn and preserve that success; cancellation still returns its signal code.
+
+Debug preparation and macOS package orchestration are Rust stages. Debug owns Cargo
+command order and the ready stamp/launch alias; macOS packaging owns env overrides,
+temporary signing keychains, restoration, and certificate verification. Environment
+overrides are attached to child commands without changing process-global env. Signing
+keychains and private certificate files live in scoped temporary directories and are
+removed on failure or cancellation. The legacy build scripts only delegate to these stages;
+platform tools and the existing bundle/sign adapters remain subprocesses.
 
 Local and debug share the workspace store and a stable Chromium directory per named profile,
 not per worktree. On first use the most recently modified legacy local profile is reused

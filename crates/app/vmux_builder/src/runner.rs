@@ -3,7 +3,10 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 
 use crate::Result;
+use crate::debug::Debug;
+use crate::environment::Environment;
 use crate::execution::Execution;
+use crate::mac_package::MacPackage;
 use crate::policy::Policy;
 use crate::signals::Signals;
 use crate::storage::Storage;
@@ -15,6 +18,33 @@ pub struct Runner {
 }
 
 impl Runner {
+    pub fn prepare(&self, profile: &str, args: &[OsString]) -> Result<()> {
+        if !self.inherited() {
+            let executable = std::env::current_exe()?;
+            let mut command = Command::new(&executable);
+            command
+                .arg("--root")
+                .arg(&self.root)
+                .arg(profile)
+                .arg(executable)
+                .arg("--root")
+                .arg(&self.root)
+                .arg(format!("prepare-{profile}"))
+                .args(args);
+            if profile != "dev" {
+                let mut environment = Environment::current();
+                environment.load(&self.root)?;
+                environment.apply(&mut command);
+            }
+            return Execution::new(command).run();
+        }
+        if profile == "dev" {
+            Debug::new(self.root.clone(), self.target.clone()).prepare(args)
+        } else {
+            MacPackage::new(self.root.clone(), self.target.clone()).prepare(profile)
+        }
+    }
+
     pub fn inherited(&self) -> bool {
         let owner = std::env::var("VMUX_TARGET_LOCK_OWNER_PID")
             .ok()
@@ -81,7 +111,11 @@ impl Runner {
             .env("CARGO_TARGET_DIR", &self.target);
         Execution::new(child).run()?;
         Signals::check()?;
-        storage.finish(profile)
+        if let Err(error) = storage.finish(profile) {
+            Signals::check()?;
+            eprintln!("Build storage: cleanup skipped after successful build: {error}");
+        }
+        Signals::check()
     }
 
     pub fn clean(&self) -> Result<()> {
