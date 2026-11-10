@@ -5,7 +5,7 @@ use vmux_service::DaemonBinary;
 #[test]
 fn start_mode_depends_on_profile_bundle_and_inherited_environment() {
     let variables = ["VMUX_DATA_DIR", "VMUX_TEST", "VMUX_PROFILE"];
-    let previous = variables.map(|name| std::env::var_os(name));
+    let previous = variables.map(std::env::var_os);
     for name in variables {
         unsafe { std::env::remove_var(name) };
     }
