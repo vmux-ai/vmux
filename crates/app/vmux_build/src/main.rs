@@ -1,14 +1,14 @@
 use std::ffi::OsString;
 use std::path::PathBuf;
 
+use policy::Policy;
+use processes::Processes;
+use storage::Storage;
+
 mod policy;
 mod processes;
 mod profile;
 mod storage;
-
-use policy::Policy;
-use processes::Processes;
-use storage::Storage;
 
 type Result<T> = std::result::Result<T, Box<dyn std::error::Error>>;
 
