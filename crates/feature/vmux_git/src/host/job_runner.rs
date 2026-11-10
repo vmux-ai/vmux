@@ -26,6 +26,7 @@ use crate::event::{
 use crate::state::{
     GitBranchFilesPagePatch, GitBranchFilesPatch, GitCatalogEntries, GitCatalogPatch, GitUiState,
 };
+use vmux_ecs::{Operation, OperationCompleted, OperationPlugin, OperationState, OperationTarget};
 use vmux_path::PathIdentity;
 
 const REPOSITORY_LOAD_CACHE_CAPACITY: usize = 128;
@@ -36,7 +37,13 @@ pub(super) struct JobPlugin;
 
 impl Plugin for JobPlugin {
     fn build(&self, app: &mut App) {
-        app.init_resource::<GitRuntime>()
+        if !app.is_plugin_added::<OperationPlugin>() {
+            app.add_plugins(OperationPlugin);
+        }
+        app.add_observer(accept)
+            .add_observer(running)
+            .add_observer(cancel)
+            .init_resource::<GitRuntime>()
             .init_resource::<RepositoryLoads>()
             .init_resource::<RepositoryLoadEpoch>()
             .init_resource::<CatalogSnapshots>()
@@ -120,6 +127,53 @@ pub(super) struct GitJobs(Vec<Entity>);
 
 #[derive(Component)]
 struct GitJobRunning;
+
+fn accept(
+    trigger: On<Add, GitJob>,
+    jobs: Query<(&GitJob, Has<super::job::GitReadJob>)>,
+    mut commands: Commands,
+) {
+    let entity = trigger.event_target();
+    let Ok((job, read)) = jobs.get(entity) else {
+        return;
+    };
+    if read {
+        return;
+    }
+    commands.entity(entity).insert((
+        Operation::bundle("git.change").unwrap(),
+        OperationTarget::new(job.webview),
+    ));
+}
+
+fn running(
+    trigger: On<Add, GitJobRunning>,
+    operations: Query<(), With<Operation>>,
+    mut commands: Commands,
+) {
+    let entity = trigger.event_target();
+    if operations.contains(entity) {
+        commands.entity(entity).insert(OperationState::Running);
+    }
+}
+
+fn cancel(
+    trigger: On<Remove, GitJob>,
+    operations: Query<&OperationState, With<Operation>>,
+    mut commands: Commands,
+) {
+    let entity = trigger.event_target();
+    let Ok(state) = operations.get(entity) else {
+        return;
+    };
+    if !matches!(state, OperationState::Pending | OperationState::Running) {
+        return;
+    }
+    commands
+        .entity(entity)
+        .try_remove::<(GitJobRunning, GitJobTask<OperationOutput>, GitRepository)>()
+        .try_insert(OperationState::Canceled);
+}
 
 #[derive(SystemParam)]
 pub(super) struct QueuedGitJobs<'w, 's, J: Component> {
@@ -633,15 +687,24 @@ fn cancel_orphaned_jobs(
         Option<&super::status::FileGit>,
     )>,
     load_revisions: Query<&super::state::GitRepositoryLoadRevision>,
+    operations: Query<(), With<Operation>>,
     mut commands: Commands,
 ) {
     for (entity, job, repository) in &jobs {
         let Ok((state, file)) = owners.get(job.webview) else {
-            commands.entity(entity).despawn();
+            if operations.contains(entity) {
+                commands.entity(entity).remove::<GitJob>();
+            } else {
+                commands.entity(entity).despawn();
+            }
             continue;
         };
         if state.is_none() && file.is_none() {
-            commands.entity(entity).despawn();
+            if operations.contains(entity) {
+                commands.entity(entity).remove::<GitJob>();
+            } else {
+                commands.entity(entity).despawn();
+            }
             continue;
         }
         let Some((state, repository)) = state.zip(repository) else {
@@ -988,10 +1051,18 @@ fn deliver_operation_outputs(
 ) {
     let wake = wake.as_deref().map(|wake| (**wake).clone());
     for (entity, job, output) in &outputs {
+        let result = if output.result.ok {
+            Ok(())
+        } else {
+            Err(output.result.message.clone())
+        };
+        commands.trigger(OperationCompleted { entity, result });
+        commands
+            .entity(entity)
+            .remove::<(GitJob, OperationOutput, GitRepository)>();
         let webview = job.webview;
         if states.contains(webview) {
             if !states.repository_matches(webview, &output.repository) {
-                commands.entity(entity).despawn();
                 continue;
             }
             let branch = if output.result.operation == "new branch" && output.result.ok {
@@ -1041,7 +1112,6 @@ fn deliver_operation_outputs(
                 commands.entity(webview).insert(refresh);
             }
         }
-        commands.entity(entity).despawn();
     }
 }
 
@@ -1066,9 +1136,20 @@ fn deliver_failure_outputs(
     diff_queries: Query<&super::diff::GitDiffQuery>,
     mut states: super::state::GitStates,
     mut files: super::status::FileGitStates,
+    operations: Query<(), With<Operation>>,
     mut commands: Commands,
 ) {
     for (entity, job, output, repository, catalog, branch_files, diff, authority) in &outputs {
+        let operation = operations.contains(entity);
+        if operation {
+            commands.trigger(OperationCompleted {
+                entity,
+                result: Err(output.0.message.clone()),
+            });
+            commands
+                .entity(entity)
+                .remove::<(GitJob, FailureOutput, GitRepository)>();
+        }
         if let Some(repository) = repository {
             if states.repository_requested_at(job.webview, &repository.path, repository.revision) {
                 states.fail_repository(job.webview, &output.0);
@@ -1078,7 +1159,9 @@ fn deliver_failure_outputs(
                 states.repository_matches(job.webview, repository.path())
             });
             if !current {
-                commands.entity(entity).despawn();
+                if !operation {
+                    commands.entity(entity).despawn();
+                }
                 continue;
             }
             if let Some(catalog) = catalog {
@@ -1102,7 +1185,9 @@ fn deliver_failure_outputs(
             let current = authority
                 .is_some_and(|repository| files.repository_matches(job.webview, repository.path()));
             if !current {
-                commands.entity(entity).despawn();
+                if !operation {
+                    commands.entity(entity).despawn();
+                }
                 continue;
             }
             if let Some(diff) = diff
@@ -1115,7 +1200,9 @@ fn deliver_failure_outputs(
                 files.apply_error(job.webview, output.0.message.clone());
             }
         }
-        commands.entity(entity).despawn();
+        if !operation {
+            commands.entity(entity).despawn();
+        }
     }
 }
 
@@ -2345,7 +2432,7 @@ mod tests {
         let first = test_repo::init();
         let second = test_repo::init();
         let mut app = App::new();
-        app.add_systems(Update, deliver_operation_outputs);
+        app.add_plugins(JobPlugin);
         let request =
             crate::event::GitRepositoryRequest::at(second.path().to_string_lossy().into_owned());
         let mut repository = GitRepositorySnapshot::loading(&request);
@@ -2379,7 +2466,11 @@ mod tests {
 
         app.update();
 
-        assert!(app.world().get_entity(job).is_err());
+        assert!(app.world().get::<GitJob>(job).is_none());
+        assert_eq!(
+            app.world().get::<OperationState>(job),
+            Some(&OperationState::Succeeded)
+        );
         let state = app
             .world()
             .get::<super::super::state::GitState>(webview)
@@ -2393,7 +2484,7 @@ mod tests {
         let first = test_repo::init();
         let second = test_repo::init();
         let mut app = App::new();
-        app.add_systems(Update, deliver_failure_outputs);
+        app.add_plugins(JobPlugin);
         let request =
             crate::event::GitRepositoryRequest::at(second.path().to_string_lossy().into_owned());
         let mut repository = GitRepositorySnapshot::loading(&request);
@@ -2410,13 +2501,16 @@ mod tests {
                 },
             })
             .id();
-        app.world_mut().spawn((
-            GitJob::new(webview),
-            GitRepository::at(first.path()),
-            FailureOutput(GitOperationError {
-                message: "worker failed".to_string(),
-            }),
-        ));
+        let operation = app
+            .world_mut()
+            .spawn((
+                GitJob::new(webview),
+                GitRepository::at(first.path()),
+                FailureOutput(GitOperationError {
+                    message: "worker failed".to_string(),
+                }),
+            ))
+            .id();
 
         app.update();
 
@@ -2425,6 +2519,35 @@ mod tests {
             .get::<super::super::state::GitState>(webview)
             .unwrap();
         assert!(state.snapshot.message.is_empty());
+        assert_eq!(
+            app.world().get::<OperationState>(operation),
+            Some(&OperationState::Failed)
+        );
+        assert_eq!(
+            app.world()
+                .get::<vmux_ecs::OperationError>(operation)
+                .unwrap()
+                .message(),
+            "worker failed"
+        );
+        assert!(app.world().get::<GitJob>(operation).is_none());
+    }
+
+    #[test]
+    fn removing_a_git_owner_retains_its_canceled_operation() {
+        let mut app = App::new();
+        app.add_plugins(JobPlugin);
+        let owner = app.world_mut().spawn_empty().id();
+        let operation = app.world_mut().spawn(GitJob::new(owner)).id();
+        app.world_mut().entity_mut(owner).despawn();
+
+        app.update();
+
+        assert_eq!(
+            app.world().get::<OperationState>(operation),
+            Some(&OperationState::Canceled)
+        );
+        assert!(app.world().get::<GitJob>(operation).is_none());
     }
 
     #[test]

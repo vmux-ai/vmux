@@ -5,6 +5,8 @@ use bevy_ecs::prelude::*;
 use bevy_reflect::{Reflect, std_traits::ReflectDefault};
 use serde::{Deserialize, Serialize};
 
+use crate::Uuid;
+
 const RETENTION: Duration = Duration::from_secs(300);
 
 pub struct OperationPlugin;
@@ -17,6 +19,7 @@ impl Plugin for OperationPlugin {
             .register_type::<OperationTargetRevision>()
             .register_type::<OperationError>()
             .init_resource::<OperationExpiry>()
+            .add_observer(complete)
             .add_systems(PostUpdate, (finish, cleanup).chain());
     }
 }
@@ -25,6 +28,62 @@ impl Plugin for OperationPlugin {
 #[reflect(Component, Default)]
 #[type_path = "vmux_ecs"]
 pub struct Operation;
+
+impl Operation {
+    pub fn bundle(kind: impl Into<String>) -> Result<OperationBundle, String> {
+        Ok(OperationBundle {
+            operation: Self,
+            id: Uuid(uuid::Uuid::new_v4().to_string()),
+            kind: OperationKind::new(kind)?,
+            state: OperationState::Pending,
+        })
+    }
+}
+
+#[derive(Bundle)]
+pub struct OperationBundle {
+    operation: Operation,
+    id: Uuid,
+    kind: OperationKind,
+    state: OperationState,
+}
+
+#[derive(EntityEvent)]
+pub struct OperationCompleted {
+    #[event_target]
+    pub entity: Entity,
+    pub result: Result<(), String>,
+}
+
+fn complete(
+    trigger: On<OperationCompleted>,
+    mut operations: Query<&mut OperationState, With<Operation>>,
+    mut commands: Commands,
+) {
+    let event = trigger.event();
+    let Ok(mut state) = operations.get_mut(event.entity) else {
+        return;
+    };
+    if !matches!(*state, OperationState::Pending | OperationState::Running) {
+        return;
+    }
+    let mut entity = commands.entity(event.entity);
+    match &event.result {
+        Ok(()) => {
+            *state = OperationState::Succeeded;
+            entity.remove::<OperationError>();
+        }
+        Err(error) => {
+            *state = OperationState::Failed;
+            let message = if error.trim().is_empty() {
+                "Operation failed"
+            } else {
+                error
+            };
+            entity.insert(OperationError::new(message).unwrap());
+        }
+    }
+}
 
 #[derive(Component, Clone, Debug, PartialEq, Eq, Reflect, Serialize, Deserialize)]
 #[reflect(Component)]
@@ -82,6 +141,12 @@ pub struct TargetedOperations(Vec<Entity>);
 #[reflect(Component)]
 #[type_path = "vmux_ecs"]
 pub struct OperationTargetRevision(pub u64);
+
+impl OperationTargetRevision {
+    pub fn accepts(&self, current: Option<u64>) -> bool {
+        current == Some(self.0)
+    }
+}
 
 #[derive(Component, Clone, Debug, PartialEq, Eq, Reflect)]
 #[reflect(Component)]
@@ -152,6 +217,45 @@ fn cleanup(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn completed_work_keeps_its_result_and_late_completion_cannot_revive_cancellation() {
+        let mut app = App::new();
+        app.add_plugins(OperationPlugin);
+        let failed = app
+            .world_mut()
+            .spawn(Operation::bundle("test.write").unwrap())
+            .id();
+        let canceled = app
+            .world_mut()
+            .spawn(Operation::bundle("test.cancel").unwrap())
+            .id();
+        app.world_mut()
+            .entity_mut(canceled)
+            .insert(OperationState::Canceled);
+        app.world_mut().trigger(OperationCompleted {
+            entity: failed,
+            result: Err("disk full".into()),
+        });
+        app.world_mut().trigger(OperationCompleted {
+            entity: canceled,
+            result: Ok(()),
+        });
+        app.update();
+        assert_eq!(
+            app.world().get::<OperationState>(failed),
+            Some(&OperationState::Failed)
+        );
+        assert_eq!(
+            app.world().get::<OperationError>(failed).unwrap().message(),
+            "disk full"
+        );
+        assert_eq!(
+            app.world().get::<OperationState>(canceled),
+            Some(&OperationState::Canceled)
+        );
+        assert!(app.world().get::<OperationExpiresAt>(failed).is_some());
+    }
 
     #[test]
     fn cleanup_retains_live_work_and_releases_expired_results() {

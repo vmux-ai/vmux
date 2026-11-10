@@ -21,6 +21,7 @@ pub use provider::*;
 pub use query::*;
 pub use registry::*;
 use vmux_ecs::manifest::FeaturePlugin;
+use vmux_ecs::{Operation, OperationCompleted, OperationPlugin, OperationState, OperationTarget};
 pub use vmux_macro::input;
 
 #[doc(hidden)]
@@ -103,10 +104,23 @@ pub struct ToolRuntimePlugin;
 
 impl Plugin for ToolRuntimePlugin {
     fn build(&self, app: &mut App) {
+        if !app.is_plugin_added::<OperationPlugin>() {
+            app.add_plugins(OperationPlugin);
+        }
         if !app.is_plugin_added::<ToolRegistryPlugin>() {
             app.add_plugins(ToolRegistryPlugin);
         }
-        app.add_message::<ToolInventoryChanged>()
+        app.add_observer(accept::<ToolInstallRequest>)
+            .add_observer(accept::<ToolUpdateRequest>)
+            .add_observer(accept::<ToolUninstallRequest>)
+            .add_observer(accept::<ToolForgetRequest>)
+            .add_observer(accept::<ToolAdoptRequest>)
+            .add_observer(accept::<ToolLinkRequest>)
+            .add_observer(accept::<ToolUnlinkRequest>)
+            .add_observer(accept::<ToolApplyRequest>)
+            .add_observer(accept::<ToolImportRequest>)
+            .add_observer(completed)
+            .add_message::<ToolInventoryChanged>()
             .configure_sets(
                 Update,
                 (ToolOperationRouteSet, ToolOperationRouteFlush).chain(),
@@ -184,11 +198,49 @@ pub struct ToolOperationFailed(pub String);
 #[derive(Component)]
 pub(crate) struct ToolOperationTask<T: Component>(Task<Result<T, String>>);
 
-fn finish_operation<T: Component>(
-    mut operations: Query<(Entity, &mut ToolOperationTask<T>)>,
+fn accept<R: Clone + Send + Sync + 'static>(
+    trigger: On<Add, ToolOperationRequest<R>>,
+    requests: Query<(&ToolOperationRequest<R>, Option<&ToolStoreTarget>)>,
+    mut commands: Commands,
+) where
+    state::ToolOperationKey: From<R>,
+{
+    let entity = trigger.event_target();
+    let Ok((request, target)) = requests.get(entity) else {
+        return;
+    };
+    let operation = state::ToolOperationKey::from(request.0.clone());
+    let mut entity = commands.entity(entity);
+    entity.insert(Operation::bundle(operation.kind.operation_kind()).unwrap());
+    if let Some(target) = target {
+        entity.insert(OperationTarget::new(target.entity()));
+    }
+}
+
+fn completed(
+    trigger: On<Add, ToolOperationFinished>,
+    outcomes: Query<Option<&ToolOperationFailed>>,
     mut commands: Commands,
 ) {
-    for (entity, mut operation) in &mut operations {
+    let entity = trigger.event_target();
+    let Ok(failure) = outcomes.get(entity) else {
+        return;
+    };
+    let result = match failure {
+        Some(failure) => Err(failure.0.clone()),
+        None => Ok(()),
+    };
+    commands.trigger(OperationCompleted { entity, result });
+}
+
+fn finish_operation<T: Component>(
+    mut operations: Query<(Entity, &mut ToolOperationTask<T>, Option<&OperationState>)>,
+    mut commands: Commands,
+) {
+    for (entity, mut operation, state) in &mut operations {
+        if state == Some(&OperationState::Pending) {
+            commands.entity(entity).insert(OperationState::Running);
+        }
         let Some(result) = future::block_on(future::poll_once(&mut operation.0)) else {
             continue;
         };
@@ -413,6 +465,10 @@ brew "ripgrep"
                 .is_none()
         );
         assert_eq!(store.load().unwrap().packages["npm"], ["typescript"]);
+        assert_eq!(
+            app.world().get::<OperationState>(operation),
+            Some(&OperationState::Succeeded)
+        );
     }
 
     #[test]

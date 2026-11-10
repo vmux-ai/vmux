@@ -68,6 +68,22 @@ pub enum ToolOperationKind {
     Import,
 }
 
+impl ToolOperationKind {
+    pub fn operation_kind(self) -> &'static str {
+        match self {
+            Self::Install => "tool.install",
+            Self::Update => "tool.update",
+            Self::Uninstall => "tool.uninstall",
+            Self::Forget => "tool.forget",
+            Self::Adopt => "tool.adopt",
+            Self::Link => "tool.link",
+            Self::Unlink => "tool.unlink",
+            Self::Apply => "tool.apply",
+            Self::Import => "tool.import",
+        }
+    }
+}
+
 #[vmux_api::contract(Eq)]
 pub struct ToolItem {
     pub provider: ToolProvider,

@@ -676,7 +676,10 @@ fn start_external_operations(
             commands
                 .entity(entity)
                 .remove::<ExternalToolOperation>()
-                .insert(ToolProviderOperationTask(task));
+                .insert((
+                    ToolProviderOperationTask(task),
+                    vmux_ecs::OperationState::Running,
+                ));
             continue;
         }
         let Some((_, operator)) = providers
@@ -699,7 +702,10 @@ fn start_external_operations(
         commands
             .entity(entity)
             .remove::<ExternalToolOperation>()
-            .insert(ToolProviderOperationTask(task));
+            .insert((
+                ToolProviderOperationTask(task),
+                vmux_ecs::OperationState::Running,
+            ));
     }
 }
 
@@ -837,7 +843,7 @@ fn drain_succeeded_operations(
         state.dirty = true;
         state.generation = state.generation.wrapping_add(1);
         changed.write(ToolInventoryChanged(operation.operation.provider.clone()));
-        commands.entity(entity).despawn();
+        commands.entity(entity).remove::<ToolOperationContext>();
     }
 }
 
@@ -858,7 +864,7 @@ fn drain_failed_operations(
                 failure.0.clone(),
             );
         }
-        commands.entity(entity).despawn();
+        commands.entity(entity).remove::<ToolOperationContext>();
     }
 }
 

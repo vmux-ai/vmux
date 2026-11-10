@@ -883,10 +883,14 @@ removals rebuild the index; duplicate IDs refuse lookup until the ambiguity is r
 conversation and composer lookup share one index, refreshed after deferred creation and service
 mutations before either consumes the Session. These indexes are runtime state, not stored identities.
 
-Accepted project selections own their Git tasks on transient `Operation` entities. Each operation
-references its Tab and captures the selection revision; replacement, retirement, or removal cancels
-the old work before it can apply. Cleanup guards dispose of discarded checkouts. Results remain
-inspectable as `Succeeded`, `Failed` with an error, or `Canceled` for five minutes before cleanup.
+Finite product work uses `Operation::bundle` for a stable UUID, kind, and initial state. Project
+selection, tool operations, Git changes, and extension installation share the same lifecycle and
+terminal cleanup. Feature tasks execute the work; `OperationCompleted` records its result. Results
+remain inspectable as `Succeeded`, `Failed` with an error, or `Canceled` for five minutes. Completed
+feature payloads are released without removing the operation identity, and late completion cannot
+revive canceled work. Reads and long-lived transport actors keep their own task lifecycles.
+Project selections additionally reference their Tab and capture `OperationTargetRevision`;
+`accepts` rejects a result after selection changes. Cleanup guards dispose of discarded checkouts.
 
 ---
 
