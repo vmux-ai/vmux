@@ -880,6 +880,12 @@ and saving revisions stay distinct: a completion acknowledges only its captured 
 returns that revision to the dirty set. Restore progresses
 through materialization and resolution; workspace saves wait for `LayoutRestoreCommitted`.
 Store paths, snapshot formats, schema sidecars, validation, and recovery remain feature-owned.
+`vmux_ecs::revision` owns the revision value and committed-record metadata shared by Session
+mutations and store state. Session payloads remain feature-owned; record bundles compose their
+operation UUID, base and committed revisions, timestamp, and owning entity. Existing reflected
+Session type paths and record contents remain compatible. Durable mutation increments fail on
+overflow; store counters retain their saturating behavior and acknowledge only captured saves.
+
 
 Workspace loads validate Space, Pane, and Session IDs and the ownership graph before replacing
 live entities. Space roots may reference the runtime window outside the snapshot. Failed loads

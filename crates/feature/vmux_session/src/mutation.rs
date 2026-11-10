@@ -2,7 +2,7 @@ use bevy_app::{App, Plugin, Update};
 use bevy_ecs::message::MessageCursor;
 use bevy_ecs::prelude::*;
 use bevy_reflect::Reflect;
-use moonshine_save::prelude::Save;
+pub use vmux_ecs::revision::{BaseRevision, Record, Revision};
 use vmux_ecs::store::StoreAppExt;
 use vmux_ecs::{ArchivedAt, CreatedAt, Cwd, Description, LastActivatedAt, UnixMillis, Uuid};
 
@@ -72,21 +72,6 @@ pub struct Creation {
     pub activated_at: i64,
     pub local: bool,
 }
-
-#[derive(Component, Clone, Copy, Debug, Default, PartialEq, Eq, Reflect)]
-#[reflect(Component)]
-#[type_path = "vmux_session"]
-pub struct Revision(pub u64);
-
-#[derive(Component, Clone, Copy, Debug, PartialEq, Eq, Reflect)]
-#[reflect(Component)]
-#[type_path = "vmux_session"]
-pub struct BaseRevision(pub u64);
-
-#[derive(Component, Reflect)]
-#[reflect(Component)]
-#[type_path = "vmux_session"]
-pub struct Record;
 
 #[derive(Message, Clone, Debug)]
 pub struct Request {
@@ -174,12 +159,7 @@ fn commit(request: &Request, world: &mut World) -> Result<Committed, Rejection> 
             actual: current,
         });
     }
-    let next = Revision(
-        current
-            .0
-            .checked_add(1)
-            .ok_or(Rejection::RevisionExhausted)?,
-    );
+    let next = current.next().ok_or(Rejection::RevisionExhausted)?;
     let stage = match &request.mutation {
         Mutation::Create(created) => Some(&created.stage),
         Mutation::ChangeStage(stage) => Some(stage),
@@ -220,16 +200,15 @@ fn commit(request: &Request, world: &mut World) -> Result<Committed, Rejection> 
     };
     change(&request.mutation, world, entity);
     world.entity_mut(entity).insert(next);
-    world.spawn((
-        Record,
-        Save,
-        ChildOf(entity),
+    let record = Record::bundle(
+        entity,
         Uuid(request.operation.clone()),
-        CreatedAt(UnixMillis::now().0),
-        BaseRevision(current.0),
+        current,
         next,
-        request.mutation.clone(),
-    ));
+        CreatedAt(UnixMillis::now().0),
+    )
+    .unwrap();
+    world.spawn((record, request.mutation.clone()));
     if matches!(request.mutation, Mutation::Create(_)) {
         world.trigger(Created {
             entity,
@@ -345,6 +324,47 @@ fn receive(world: &mut World, mut cursor: Local<MessageCursor<Request>>) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn exhausted_revision_refuses_the_mutation_without_changing_state_or_adding_a_record() {
+        let mut app = App::new();
+        app.add_plugins(MutationPlugin);
+        let id = SessionId("exhausted".into());
+        let entity = app
+            .world_mut()
+            .spawn((
+                Session,
+                id.clone(),
+                Name::new("Original"),
+                Revision(u64::MAX),
+            ))
+            .id();
+        app.world_mut()
+            .write_message(Request::local(id, Mutation::Rename("Changed".into())));
+        app.update();
+        assert_eq!(
+            app.world().get::<Name>(entity).unwrap().as_str(),
+            "Original"
+        );
+        assert_eq!(
+            app.world().get::<Revision>(entity),
+            Some(&Revision(u64::MAX))
+        );
+        assert_eq!(
+            app.world_mut()
+                .query_filtered::<Entity, With<Record>>()
+                .iter(app.world())
+                .count(),
+            0
+        );
+        let rejected = app
+            .world_mut()
+            .resource_mut::<Messages<Rejected>>()
+            .drain()
+            .next()
+            .unwrap();
+        assert_eq!(rejected.reason, Rejection::RevisionExhausted);
+    }
 
     #[test]
     fn committed_records_replay_creation_and_later_mutations_through_the_same_path() {

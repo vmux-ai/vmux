@@ -44,6 +44,7 @@ pub use primitives::PrimitivesPlugin;
 pub use process_id::ProcessId;
 #[cfg(all(host, feature = "host"))]
 pub use process_id::ProcessPresentationRequest;
+pub use revision::{BaseRevision, Revision};
 #[cfg(all(host, feature = "host"))]
 pub use ui_state::{UiState, UiStateFlushSet, UiStatePlugin, UiStateWrite, UiStateWriter};
 pub use workspace::WorkspaceKind;
@@ -92,6 +93,7 @@ pub mod process_id;
 pub mod profile;
 #[cfg(all(host, feature = "host"))]
 mod registry;
+pub mod revision;
 pub mod scroll;
 #[cfg(all(host, feature = "host"))]
 pub mod search;
