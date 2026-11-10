@@ -107,8 +107,7 @@ _build-local: ensure-mac-deps ensure-package-deps ensure-codesign-deps
 	./scripts/build-mac-release.sh local
 
 local: build-local
-	@sha="$$(git rev-parse --short=7 HEAD)" && \
-	open "target/release/Vmux ($$sha).app"
+	@bash -ec 'source ./scripts/cargo-target-paths.sh; sha="$$(git rev-parse --short=7 HEAD)"; exec open "$$(vmux_cargo_profile_dir "$$(pwd -P)" release)/Vmux ($$sha).app"'
 
 build-release:
 	./scripts/with-build-storage.sh release $(MAKE) _build-release
@@ -117,7 +116,7 @@ _build-release: ensure-mac-deps ensure-package-deps
 	./scripts/build-mac-release.sh release
 
 release: build-release
-	open "target/release/Vmux.app"
+	@bash -ec 'source ./scripts/cargo-target-paths.sh; exec open "$$(vmux_cargo_profile_dir "$$(pwd -P)" release)/Vmux.app"'
 
 build-storage-status:
 	./scripts/with-build-storage.sh status

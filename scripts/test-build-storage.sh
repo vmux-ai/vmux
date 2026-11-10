@@ -40,6 +40,12 @@ else
     exec /usr/bin/git "$@"
 fi
 GIT
+cat > "$tmp/bin/open" <<'OPEN'
+#!/usr/bin/env bash
+set -euo pipefail
+[[ -f "$1/Contents/MacOS/vmux_desktop" ]]
+printf '%s\n' "$1" >> "$TEST_OPEN_LOG"
+OPEN
 cat > "$tmp/bin/cargo" <<'CARGO'
 #!/usr/bin/env bash
 if [[ "${1:-}" == metadata ]]; then
@@ -54,16 +60,19 @@ cat > "$fixture/scripts/package.sh" <<'PACKAGE'
 set -euo pipefail
 printf 'package:%s\n' "$1" >> "$TEST_STORAGE_LOG"
 [[ "${FAIL_PACKAGE:-}" != 1 ]] || exit 42
+source ./scripts/cargo-target-paths.sh
+release_dir="$(vmux_cargo_profile_dir "$PWD" release)"
+mkdir -p "$release_dir"
 if [[ "$1" == local ]]; then
-    app="$CARGO_TARGET_DIR/release/Vmux (9999999).app"
+    app="$release_dir/Vmux (9999999).app"
 else
-    app="$CARGO_TARGET_DIR/release/Vmux.app"
-    printf 'distribution image\n' > "$CARGO_TARGET_DIR/release/Vmux.dmg"
+    app="$release_dir/Vmux.app"
+    printf 'distribution image\n' > "$release_dir/Vmux.dmg"
 fi
 mkdir -p "$app/Contents/MacOS"
 printf 'signed executable\n' > "$app/Contents/MacOS/vmux_desktop"
-mkdir -p "$CARGO_TARGET_DIR/release/deps"
-printf 'compile artifact\n' > "$CARGO_TARGET_DIR/release/deps/cache.o"
+mkdir -p "$release_dir/deps"
+printf 'compile artifact\n' > "$release_dir/deps/cache.o"
 PACKAGE
 cat > "$fixture/scripts/fixture-build.sh" <<'BUILD'
 #!/usr/bin/env bash
@@ -97,6 +106,7 @@ export PATH="$tmp/bin:$PATH"
 export CARGO_TARGET_DIR="$target"
 export APPLE_SIGNING_IDENTITY='fixture identity'
 export TEST_STORAGE_LOG="$tmp/build.log"
+export TEST_OPEN_LOG="$tmp/open.log"
 export VMUX_BUILD_STORAGE_MIN_GIB=0
 export VMUX_BUILD_STORAGE_WARN_GIB=0
 export VMUX_BUILD_STORAGE_CACHE_GIB=0
@@ -138,6 +148,26 @@ make -C "$fixture" build-release
 [[ -f "$target/release/Vmux.app/Contents/MacOS/vmux_desktop" ]]
 [[ "$(cat "$target/release/Vmux.dmg")" == 'distribution image' ]]
 [[ ! -f "$target/release/deps/cache.o" ]]
+
+make -C "$fixture" local
+[[ "$(tail -n 1 "$TEST_OPEN_LOG")" == "$target/release/Vmux (9999999).app" ]]
+make -C "$fixture" release
+[[ "$(tail -n 1 "$TEST_OPEN_LOG")" == "$target/release/Vmux.app" ]]
+for goal in local release; do
+    CARGO_BUILD_TARGET=fixture-target make -C "$fixture" "$goal"
+    if [[ "$goal" == local ]]; then
+        expected='Vmux (9999999).app'
+    else
+        expected='Vmux.app'
+    fi
+    [[ "$(tail -n 1 "$TEST_OPEN_LOG")" == "$target/fixture-target/release/$expected" ]]
+done
+for setting in 'relative output' ''; do
+    mkdir -p "$fixture/${setting:-target}"
+    cp "$target/CACHEDIR.TAG" "$fixture/${setting:-target}/CACHEDIR.TAG"
+    make -C "$fixture" local CARGO_TARGET_DIR="$setting"
+    [[ "$(tail -n 1 "$TEST_OPEN_LOG")" == "$fixture/${setting:-target}/release/Vmux (9999999).app" ]]
+done
 
 for goal in build-dev build-local build-release; do
     before="$(wc -l < "$TEST_STORAGE_LOG")"

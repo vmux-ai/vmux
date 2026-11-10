@@ -63,7 +63,7 @@ if [[ -n "${APPLE_CERTIFICATE:-}" || -n "${APPLE_CERTIFICATE_PASSWORD:-}" ]]; th
     : "${APPLE_SIGNING_IDENTITY:?missing APPLE_SIGNING_IDENTITY}"
 
     echo "==> Setting up ephemeral signing keychain"
-    TMP_DIR="$(mktemp -d -t vmux-build)"
+    TMP_DIR="$(mktemp -d "${TMPDIR:-/tmp}/vmux-build.XXXXXX")"
     CERT_FILE="$TMP_DIR/cert.p12"
     KEYCHAIN="$TMP_DIR/signing.keychain-db"
     KEYCHAIN_PASSWORD="$(uuidgen)"
@@ -101,7 +101,7 @@ case "$PROFILE" in
 esac
 
 codesign --verify --deep --strict --verbose=2 "$APP_BUNDLE"
-VERIFY_DIR="$(mktemp -d -t vmux-signature-check)"
+VERIFY_DIR="$(mktemp -d "${TMPDIR:-/tmp}/vmux-signature-check.XXXXXX")"
 if ! (cd "$VERIFY_DIR" && codesign --display --extract-certificates \
     "$APP_BUNDLE/Contents/MacOS/vmux" >/dev/null 2>&1); then
     rm -rf "$VERIFY_DIR"
