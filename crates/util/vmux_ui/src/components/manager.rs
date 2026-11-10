@@ -105,6 +105,9 @@ pub fn WorkspaceLayout(
                         style: sidebar_style,
                         aria_hidden: !sidebar_open(),
                         inert: !sidebar_open(),
+                        if let Some(search) = &search {
+                            div { class: "w-[min(var(--vmux-sidebar-width),50vw)] shrink-0", {search.clone()} }
+                        }
                         div { class: "min-h-0 w-[min(var(--vmux-sidebar-width),50vw)] flex-1 overflow-y-auto px-1 pb-2", {sidebar} }
                     }
                 }
@@ -117,10 +120,12 @@ pub fn WorkspaceLayout(
                                 ontoggle: move |_| sidebar_open.set(!sidebar_open()),
                             }
                         }
-                        div { class: "min-w-0 flex-1", {toolbar} }
-                        if let Some(search) = search {
-                            div { class: "flex w-[min(var(--vmux-sidebar-width),40vw)] min-w-0 shrink-0 justify-end", {search} }
+                        if !show_sidebar {
+                            if let Some(search) = search {
+                                div { class: "w-[min(var(--vmux-sidebar-width),50vw)] min-w-0 shrink-0", {search} }
+                            }
                         }
+                        div { class: "min-w-0 flex-1", {toolbar} }
                     }
                     {children}
                 }

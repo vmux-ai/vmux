@@ -53,7 +53,7 @@ pub fn PageSidebarToggle(open: bool, label: String, ontoggle: EventHandler<()>) 
                 rect { x: "3", y: "3", width: "18", height: "18", rx: "2" }
                 rect { x: "4", y: "4", width: "4", height: "16", fill: "currentColor", stroke: "none",
                     class: if open {
-                        "origin-[4px_12px] scale-x-100 opacity-[0.12] transition-[transform,opacity] duration-100 motion-reduce:transition-none"
+                        "origin-[4px_12px] scale-x-100 opacity-100 transition-[transform,opacity] duration-100 motion-reduce:transition-none"
                     } else {
                         "origin-[4px_12px] scale-x-0 opacity-0 transition-[transform,opacity] duration-100 motion-reduce:transition-none"
                     },

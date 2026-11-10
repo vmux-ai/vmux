@@ -637,7 +637,8 @@ Search, filters, Details, Add, Create,
 Resume, Start, and Checkout render inside the page through `PageToolbar`, with local callbacks.
 Settings and manager pages share `WorkspaceLayout`: navigation opens by default on desktop,
 and its toggle animates the sidebar and icon. The content-column toolbar matches Editor and Note:
-the common `PageSidebarToggle` sits on the left, with expandable search on the right.
+the common `PageSidebarToggle` sits on the left and fills its left segment while open.
+Sidebar search uses the same top-left `ManagerSearchRow` and `ManagerSearch` as Editor and Git.
 Settings section icons and the active viewport section update the address trail and URL fragment;
 command-bar search providers resolve their favicons through the common favicon source.
 Git's document, styles and UI transport share the `git://` origin. Code uses `file://` for

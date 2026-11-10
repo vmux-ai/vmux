@@ -16,7 +16,7 @@ use vmux_api::page_location::PageLocationUiState;
 use vmux_ui::components::button::{Button, ButtonSize, ButtonVariant};
 use vmux_ui::components::input::Input;
 use vmux_ui::components::manager::{
-    ManagerSearchAction, ManagerSelect, ManagerSelectItem, WorkspaceLayout,
+    ManagerSearch, ManagerSearchRow, ManagerSelect, ManagerSelectItem, WorkspaceLayout,
 };
 use vmux_ui::components::page_address::PageBreadcrumbs;
 use vmux_ui::components::switch::{Switch, SwitchThumb};
@@ -118,12 +118,19 @@ pub fn Page() -> Element {
             }
             WorkspaceLayout {
                 search: rsx! {
-                    ManagerSearchAction {
-                        value: query.clone(),
-                        placeholder: translate("command-search"),
-                        onsearch: move |query| {
-                            let _ = send(&SettingsFilterRequest { query });
-                        },
+                    ManagerSearchRow {
+                        ManagerSearch {
+                            value: query.clone(),
+                            placeholder: translate("command-search"),
+                            onsearch: move |query| {
+                                let _ = send(&SettingsFilterRequest { query });
+                            },
+                            onkeydown: move |event: KeyboardEvent| {
+                                if event.key() == Key::Escape {
+                                    let _ = send(&SettingsFilterRequest { query: String::new() });
+                                }
+                            },
+                        }
                     }
                 },
                 sidebar: rsx! {
