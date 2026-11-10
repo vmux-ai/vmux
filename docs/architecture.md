@@ -1702,3 +1702,12 @@ Repository tool versions live in `tool-versions.env`; CI loads the same values u
 scripts and the Makefile. Release asset names and URLs come from
 `scripts/release-artifacts.sh`, while the standalone installer selects the matching asset from
 the published release instead of reconstructing its name.
+
+Feature PRs run Linux lint and tests, iOS checks, and macOS type checks of the desktop, CLI,
+and daemon, including the lean desktop composition and generated UI asset validation.
+The required `Build macOS` gate requires full packaging and the startup smoke test for changes
+to native adapters, application composition,
+dependency manifests, lockfiles, toolchains, build scripts, and packaging. Other feature PRs
+require the macOS checks without a release build or DMG. Main pushes and manual CI runs retain
+full packaging and startup validation; nightly and release workflows retain signing and
+notarization. New PR commits cancel superseded CI runs without canceling main builds.
