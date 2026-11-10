@@ -88,6 +88,8 @@ mod primitives;
 pub mod process_id;
 #[cfg(all(host, feature = "host"))]
 pub mod profile;
+#[cfg(all(host, feature = "host"))]
+mod registry;
 pub mod scroll;
 #[cfg(all(host, feature = "host"))]
 pub mod search;
