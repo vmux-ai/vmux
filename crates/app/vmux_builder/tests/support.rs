@@ -117,9 +117,11 @@ printf 'library\n' > "$CARGO_TARGET_DIR/debug/deps/current.dylib"
     pub fn root(&self) -> &Path {
         &self.root
     }
+
     pub fn target(&self) -> &Path {
         &self.target
     }
+
     pub fn repo(&self) -> &Path {
         &self.repo
     }
