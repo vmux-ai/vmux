@@ -154,6 +154,16 @@ class StorageTests(unittest.TestCase):
                     fixture.storage.preflight()
         self.assertTrue((fixture.target / 'debug/deps/object.o').exists())
 
+    def test_warning_only_space_keeps_warm_compile_cache(self):
+        fixture = self.fixture
+        fixture.caches('debug')
+        with patch.object(fixture.storage, 'available', return_value=30 * 1024**3):
+            with patch.object(module.Processes, 'capture', return_value=fixture.idle):
+                fixture.storage.preflight()
+                fixture.storage.finish('dev')
+        self.assertTrue((fixture.target / 'debug/deps/object.o').exists())
+        self.assertTrue((fixture.target / 'debug/.fingerprint/current').exists())
+
     def test_success_prunes_cache_over_budget_and_keeps_release_output(self):
         fixture = self.fixture
         fixture.caches('release')

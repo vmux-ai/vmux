@@ -220,7 +220,7 @@ class Storage:
             print(f'Build storage: warning, less than {self.policy.warning / 1024**3:g} GiB free', file=sys.stderr)
 
     def preflight(self):
-        if self.available() < self.policy.warning:
+        if self.available() < self.policy.minimum:
             self.prune_caches(Processes.capture())
         self.check()
 
@@ -229,7 +229,7 @@ class Storage:
         if profile == 'local':
             self.prune_apps(processes, profile)
         size = self.cache_bytes()
-        if size > self.policy.cache_limit or self.available() < self.policy.warning:
+        if size > self.policy.cache_limit or self.available() < self.policy.minimum:
             print(f'Build storage: cache uses {size / 1024**3:.1f} GiB; pruning unused profiles')
             self.prune_caches(processes)
         free = self.available()
