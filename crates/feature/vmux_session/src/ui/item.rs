@@ -406,6 +406,15 @@ mod disclosure_tests {
         }
         let content = "Script completed\nWall time 0.2 seconds\nOutput:\n{\"exit_code\":0,\"output\":\"Actual output\\nRemaining output\"}";
         assert_eq!(OutputPreview::new(content).0, "Actual output");
+        assert_eq!(OutputPreview::new("Script completed\n\nclean").0, "clean");
+        assert_eq!(
+            OutputPreview::new("Script completed successfully\n\nDetails").0,
+            "Script completed successfully"
+        );
+        assert_eq!(
+            OutputPreview::new("First line\n\nSecond line").0,
+            "First line"
+        );
     }
 
     #[test]
@@ -1752,6 +1761,8 @@ impl OutputPreview {
         if (body.starts_with("Script completed") || body.starts_with("Script running"))
             && let Some((_, output)) = body.split_once("\nOutput:\n")
         {
+            body = output.trim();
+        } else if let Some(output) = body.strip_prefix("Script completed\n\n") {
             body = output.trim();
         }
         if let Ok(serde_json::Value::Object(value)) = serde_json::from_str(body)
