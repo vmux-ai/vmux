@@ -42,6 +42,7 @@ impl Plugin for JobPlugin {
         }
         app.add_observer(accept)
             .add_observer(running)
+            .add_observer(cancel)
             .init_resource::<GitRuntime>()
             .init_resource::<RepositoryLoads>()
             .init_resource::<RepositoryLoadEpoch>()
@@ -154,6 +155,24 @@ fn running(
     if operations.contains(entity) {
         commands.entity(entity).insert(OperationState::Running);
     }
+}
+
+fn cancel(
+    trigger: On<Remove, GitJob>,
+    operations: Query<&OperationState, With<Operation>>,
+    mut commands: Commands,
+) {
+    let entity = trigger.event_target();
+    let Ok(state) = operations.get(entity) else {
+        return;
+    };
+    if !matches!(state, OperationState::Pending | OperationState::Running) {
+        return;
+    }
+    commands
+        .entity(entity)
+        .try_remove::<(GitJobRunning, GitJobTask<OperationOutput>, GitRepository)>()
+        .try_insert(OperationState::Canceled);
 }
 
 #[derive(SystemParam)]
@@ -674,15 +693,7 @@ fn cancel_orphaned_jobs(
     for (entity, job, repository) in &jobs {
         let Ok((state, file)) = owners.get(job.webview) else {
             if operations.contains(entity) {
-                commands
-                    .entity(entity)
-                    .remove::<(
-                        GitJob,
-                        GitJobRunning,
-                        GitJobTask<OperationOutput>,
-                        GitRepository,
-                    )>()
-                    .insert(OperationState::Canceled);
+                commands.entity(entity).remove::<GitJob>();
             } else {
                 commands.entity(entity).despawn();
             }
@@ -690,15 +701,7 @@ fn cancel_orphaned_jobs(
         };
         if state.is_none() && file.is_none() {
             if operations.contains(entity) {
-                commands
-                    .entity(entity)
-                    .remove::<(
-                        GitJob,
-                        GitJobRunning,
-                        GitJobTask<OperationOutput>,
-                        GitRepository,
-                    )>()
-                    .insert(OperationState::Canceled);
+                commands.entity(entity).remove::<GitJob>();
             } else {
                 commands.entity(entity).despawn();
             }
@@ -2481,7 +2484,7 @@ mod tests {
         let first = test_repo::init();
         let second = test_repo::init();
         let mut app = App::new();
-        app.add_systems(Update, deliver_failure_outputs);
+        app.add_plugins(JobPlugin);
         let request =
             crate::event::GitRepositoryRequest::at(second.path().to_string_lossy().into_owned());
         let mut repository = GitRepositorySnapshot::loading(&request);
@@ -2498,13 +2501,16 @@ mod tests {
                 },
             })
             .id();
-        app.world_mut().spawn((
-            GitJob::new(webview),
-            GitRepository::at(first.path()),
-            FailureOutput(GitOperationError {
-                message: "worker failed".to_string(),
-            }),
-        ));
+        let operation = app
+            .world_mut()
+            .spawn((
+                GitJob::new(webview),
+                GitRepository::at(first.path()),
+                FailureOutput(GitOperationError {
+                    message: "worker failed".to_string(),
+                }),
+            ))
+            .id();
 
         app.update();
 
@@ -2513,6 +2519,35 @@ mod tests {
             .get::<super::super::state::GitState>(webview)
             .unwrap();
         assert!(state.snapshot.message.is_empty());
+        assert_eq!(
+            app.world().get::<OperationState>(operation),
+            Some(&OperationState::Failed)
+        );
+        assert_eq!(
+            app.world()
+                .get::<vmux_ecs::OperationError>(operation)
+                .unwrap()
+                .message(),
+            "worker failed"
+        );
+        assert!(app.world().get::<GitJob>(operation).is_none());
+    }
+
+    #[test]
+    fn removing_a_git_owner_retains_its_canceled_operation() {
+        let mut app = App::new();
+        app.add_plugins(JobPlugin);
+        let owner = app.world_mut().spawn_empty().id();
+        let operation = app.world_mut().spawn(GitJob::new(owner)).id();
+        app.world_mut().entity_mut(owner).despawn();
+
+        app.update();
+
+        assert_eq!(
+            app.world().get::<OperationState>(operation),
+            Some(&OperationState::Canceled)
+        );
+        assert!(app.world().get::<GitJob>(operation).is_none());
     }
 
     #[test]

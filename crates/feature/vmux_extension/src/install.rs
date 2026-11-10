@@ -515,6 +515,67 @@ mod tests {
     }
 
     #[test]
+    fn installation_results_remain_after_feature_payloads_are_released() {
+        let root = tempfile::tempdir().unwrap();
+        let fixture = FixtureCrx::new(r#"{"manifest_version":3,"name":"Fixture","version":"1.0"}"#);
+        let store = FixtureStore::at(root.path());
+        let mut app = App::new();
+        app.add_plugins(InstallPlugin);
+        app.world_mut().spawn(ExtensionCatalog::default());
+        let succeeded = app
+            .world_mut()
+            .spawn((
+                Operation::bundle("extension.install").unwrap(),
+                ExtensionInstallOperation,
+                ExtensionInstallRequest {
+                    source: fixture.id.clone(),
+                    requester: None,
+                },
+                InstallSucceeded(store.unpack(&fixture)),
+            ))
+            .id();
+        let failed = app
+            .world_mut()
+            .spawn((
+                Operation::bundle("extension.install").unwrap(),
+                ExtensionInstallOperation,
+                ExtensionInstallRequest {
+                    source: "invalid".into(),
+                    requester: None,
+                },
+                InstallFailed("invalid package".into()),
+            ))
+            .id();
+
+        app.update();
+
+        assert_eq!(
+            app.world().get::<OperationState>(succeeded),
+            Some(&OperationState::Succeeded)
+        );
+        assert_eq!(
+            app.world().get::<OperationState>(failed),
+            Some(&OperationState::Failed)
+        );
+        assert_eq!(
+            app.world()
+                .get::<vmux_ecs::OperationError>(failed)
+                .unwrap()
+                .message(),
+            "invalid package"
+        );
+        for operation in [succeeded, failed] {
+            assert!(
+                app.world()
+                    .get::<ExtensionInstallRequest>(operation)
+                    .is_none()
+            );
+            assert!(app.world().get::<InstallSucceeded>(operation).is_none());
+            assert!(app.world().get::<InstallFailed>(operation).is_none());
+        }
+    }
+
+    #[test]
     fn installs_source_under_immutable_package_path() {
         let root = tempfile::tempdir().unwrap();
         let fixture = FixtureCrx::new(

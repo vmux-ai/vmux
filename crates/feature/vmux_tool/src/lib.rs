@@ -465,6 +465,10 @@ brew "ripgrep"
                 .is_none()
         );
         assert_eq!(store.load().unwrap().packages["npm"], ["typescript"]);
+        assert_eq!(
+            app.world().get::<OperationState>(operation),
+            Some(&OperationState::Succeeded)
+        );
     }
 
     #[test]
