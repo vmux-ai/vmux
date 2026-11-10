@@ -1,7 +1,7 @@
 use bevy::prelude::*;
 use moonshine_save::prelude::Save;
 
-use super::persistence::PersistenceAppExt;
+use super::store::StoreAppExt;
 use crate::PageMetadata;
 use crate::WorkspaceKind;
 use crate::component::{
@@ -17,21 +17,21 @@ pub struct PrimitivesPlugin;
 impl Plugin for PrimitivesPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<ActivationClock>()
-            .register_persisted::<PageMetadata>()
-            .register_persisted::<WorkspaceKind>()
+            .register_stored::<PageMetadata>()
+            .register_stored::<WorkspaceKind>()
             .register_type::<PageIcon>()
             .register_type::<BuiltinIcon>()
-            .register_persisted::<Cwd>()
-            .register_persisted::<Description>()
-            .register_persisted::<CollectionView>()
-            .register_persisted::<CreatedAt>()
-            .register_persisted::<LastActivatedAt>()
-            .register_persisted::<ArchivedAt>()
-            .register_persisted::<Order>()
+            .register_stored::<Cwd>()
+            .register_stored::<Description>()
+            .register_stored::<CollectionView>()
+            .register_stored::<CreatedAt>()
+            .register_stored::<LastActivatedAt>()
+            .register_stored::<ArchivedAt>()
+            .register_stored::<Order>()
             .register_type::<Active>()
             .register_type::<Children>()
             .register_type::<ChildOf>()
-            .track_persistence::<Save>()
+            .track_store::<Save>()
             .add_observer(activate);
     }
 }
@@ -84,7 +84,7 @@ mod tests {
         app.add_plugins(PrimitivesPlugin);
 
         let registry = app.world().resource::<AppTypeRegistry>().read();
-        let filter = super::super::persistence::WorkspacePersisted::filter(&registry);
+        let filter = super::super::store::WorkspaceStored::filter(&registry);
         assert!(
             registry
                 .get(std::any::TypeId::of::<PageMetadata>())

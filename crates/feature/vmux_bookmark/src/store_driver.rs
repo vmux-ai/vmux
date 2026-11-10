@@ -9,16 +9,16 @@ use vmux_ecs::{Bookmark, Folder, Pin};
 pub(super) type BookmarkFilter = Or<(With<Pin>, With<Bookmark>, With<Folder>)>;
 
 #[derive(Component)]
-pub(super) struct BookmarkPersistencePath(pub(super) PathBuf);
+pub(super) struct BookmarkStorePath(pub(super) PathBuf);
 
 #[cfg(test)]
-impl Default for BookmarkPersistencePath {
+impl Default for BookmarkStorePath {
     fn default() -> Self {
         Self(ProfilePaths::current().profile().join("bookmarks.ron"))
     }
 }
 
-impl BookmarkPersistencePath {
+impl BookmarkStorePath {
     pub(super) fn load(&self) -> std::io::Result<LoadWorld<BookmarkFilter>> {
         let mut source = std::fs::read_to_string(&self.0)?;
         for (legacy, current) in [

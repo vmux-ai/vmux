@@ -1,7 +1,7 @@
 use bevy::{ecs::relationship::Relationship, prelude::*};
 use moonshine_save::prelude::*;
 use vmux_api::open_target::PaneDirection;
-use vmux_ecs::persistence::PersistenceAppExt;
+use vmux_ecs::store::StoreAppExt;
 use vmux_flex::prelude::*;
 #[cfg(test)]
 use vmux_history::LastActivatedAt;
@@ -24,7 +24,7 @@ pub(super) struct ResizePlugin;
 impl Plugin for ResizePlugin {
     fn build(&self, app: &mut App) {
         app.add_message::<ResizeRequest>()
-            .register_persisted::<PaneSize>()
+            .register_stored::<PaneSize>()
             .add_systems(Update, from_commands.in_set(LayoutRequestSet::Handle))
             .add_systems(Update, from_pointer)
             .add_systems(PostUpdate, sync_split_gaps);

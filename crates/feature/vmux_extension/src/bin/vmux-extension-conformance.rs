@@ -262,7 +262,7 @@ fn capture(target: &str, browser: &Path, diagnostics: &Path) -> Result<Capture, 
         errors.push(format!("service cleanup failed: {error}"));
     }
     if let Err(error) = diagnostics_result {
-        errors.push(format!("diagnostics persistence failed: {error}"));
+        errors.push(format!("diagnostics store failed: {error}"));
     }
     if !errors.is_empty() {
         return Err(errors.join("\n"));

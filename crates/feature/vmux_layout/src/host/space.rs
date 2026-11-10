@@ -1,14 +1,14 @@
 use bevy::prelude::*;
 use moonshine_save::prelude::*;
-use vmux_ecs::persistence::PersistenceAppExt;
+use vmux_ecs::store::StoreAppExt;
 use vmux_ecs::{Active, EffectiveStartupUrl};
 use vmux_flex::prelude::*;
 
 impl Plugin for SpaceLayoutPlugin {
     fn build(&self, app: &mut App) {
         app.add_plugins(crate::active::ActivePlugin)
-            .register_persisted::<Space>()
-            .register_persisted::<SpaceId>()
+            .register_stored::<Space>()
+            .register_stored::<SpaceId>()
             .add_systems(
                 Update,
                 sync_current

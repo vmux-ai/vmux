@@ -873,6 +873,12 @@ app and never clears newer changes. Explicit saves finish an earlier write to th
 Failed writes retain the changes and retry on the 60-second deadline; schema sidecars follow
 successful writes. Restored session children containing only a timestamp and parent reference are
 discarded after backing up the store; conversation content and live children remain intact.
+`vmux_ecs::store` shares type-registry domains and entity-owned `State` across workspace and
+bookmark stores. Loaded, dirty, and saving revisions stay distinct: a completion acknowledges only
+its captured revision, and failure returns that revision to the dirty set. Restore progresses
+through materialization and resolution; workspace saves wait for `LayoutRestoreCommitted`.
+Store paths, snapshot formats, schema sidecars, validation, and recovery remain feature-owned.
+
 Workspace loads validate Space, Pane, and Session IDs and the ownership graph before replacing
 live entities. Space roots may reference the runtime window outside the snapshot. Failed loads
 discard partial entities, preserve the store and schema sidecar in a recovery backup, and let

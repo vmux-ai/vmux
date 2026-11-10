@@ -2,7 +2,7 @@ use bevy::ecs::system::SystemParam;
 use bevy::prelude::*;
 use moonshine_save::prelude::*;
 use vmux_api::open_target::PaneDirection;
-use vmux_ecs::persistence::PersistenceAppExt;
+use vmux_ecs::store::StoreAppExt;
 use vmux_flex::prelude::*;
 use vmux_history::LastActivatedAt;
 
@@ -12,8 +12,8 @@ pub(super) struct TreePlugin;
 
 impl Plugin for TreePlugin {
     fn build(&self, app: &mut App) {
-        app.register_persisted::<Pane>()
-            .register_persisted::<PaneSplit>()
+        app.register_stored::<Pane>()
+            .register_stored::<PaneSplit>()
             .register_type::<PaneSplitDirection>()
             .add_systems(PostUpdate, sync_direction);
     }

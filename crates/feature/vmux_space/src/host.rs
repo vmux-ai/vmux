@@ -19,11 +19,11 @@ mod agent_workspace;
 mod composer;
 mod cwd;
 mod key;
-mod persistence;
 mod plugin;
 mod project;
 mod snapshot_updater;
 mod spaces;
+mod store;
 mod tool;
 mod workspace;
 

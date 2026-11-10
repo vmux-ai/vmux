@@ -81,8 +81,6 @@ pub mod page_location;
 pub mod page_metadata;
 #[cfg(all(host, feature = "host"))]
 pub mod page_open;
-#[cfg(host)]
-pub mod persistence;
 #[cfg(all(host, feature = "host"))]
 mod primitives;
 pub mod process_id;
@@ -95,6 +93,8 @@ pub mod scroll;
 pub mod search;
 #[cfg(all(host, feature = "host"))]
 pub mod service;
+#[cfg(host)]
+pub mod store;
 pub mod team;
 #[cfg(all(host, feature = "host"))]
 pub mod terminal;

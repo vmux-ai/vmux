@@ -7,9 +7,9 @@ pub use cef::{
 };
 pub use contract::LayoutContractPlugin;
 pub use pane::OpenBesideRequest;
-pub use persistence::{LayoutPersistenceSet, LayoutRestoreCommitted, LayoutRestoreRequest};
 pub use plugin::{ErrorPage, LayoutPlugin};
 pub use stack::{CloseStackReason, CloseStackRequest};
+pub use store::{LayoutRestoreCommitted, LayoutRestoreRequest, LayoutStoreSet};
 pub use vmux_ecs::ContributedCommandChosen;
 pub use vmux_ecs::launcher::LauncherDismissRequest;
 pub use webview_reveal::PendingWebviewReveal;
@@ -29,7 +29,6 @@ pub mod overlay;
 pub mod page_context;
 pub mod page_slot;
 pub mod pane;
-mod persistence;
 pub mod placement;
 pub mod plugin;
 pub mod presentation;
@@ -40,6 +39,7 @@ pub mod side_sheet;
 pub mod snapshot;
 pub mod space;
 pub mod stack;
+mod store;
 pub mod tab;
 pub mod target;
 pub mod toggle;
@@ -60,7 +60,7 @@ pub type LayoutUiStateUpdates = vmux_ecs::UiState<crate::state::LayoutUiState>;
 #[derive(SystemSet, Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum LayoutStartupSet {
     Window,
-    Persistence,
+    Store,
     DefaultTab,
     Post,
 }

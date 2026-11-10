@@ -7,12 +7,12 @@ use vmux_ecs::event::{ExplorerCloseEditor, OpenEditorItem, OpenEditorsEvent};
 
 use super::{ExplorerState, OpenEditorsDirty, TabsPlugin};
 use crate::host::editor::{Editor, FileNavigateRequest, FileView, ParkedEdits};
-use vmux_ecs::persistence::PersistenceAppExt;
+use vmux_ecs::store::StoreAppExt;
 
 impl Plugin for TabsPlugin {
     fn build(&self, app: &mut App) {
         app.add_message::<vmux_layout::CloseStackRequest>()
-            .register_persisted::<ArchivedEditorState>()
+            .register_stored::<ArchivedEditorState>()
             .add_systems(Update, (sync_open_editors, emit_open_editors))
             .add_observer(close)
             .add_observer(close_item)

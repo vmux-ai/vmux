@@ -8,7 +8,7 @@ use vmux_ecs::event::{
     ExplorerReveal,
 };
 use vmux_ecs::page::PageReady;
-use vmux_ecs::persistence::PersistenceAppExt;
+use vmux_ecs::store::StoreAppExt;
 use vmux_setting::{
     AppSettings, EXPLORER_DEFAULT_WIDTH, EXPLORER_MAX_WIDTH, EXPLORER_MIN_WIDTH,
     SettingsSaveRequest,
@@ -26,7 +26,7 @@ pub(super) struct PanelPlugin;
 impl Plugin for PanelPlugin {
     fn build(&self, app: &mut App) {
         app.add_systems(Startup, spawn_defaults)
-            .register_persisted::<StackExplorerVisibility>()
+            .register_stored::<StackExplorerVisibility>()
             .add_systems(Update, (load_defaults, mark_document, reflow, emit).chain())
             .add_observer(toggle)
             .add_observer(reveal_in)

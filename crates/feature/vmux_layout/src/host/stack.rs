@@ -19,7 +19,7 @@ use vmux_command::CommandManifest;
 #[cfg(test)]
 use vmux_ecs::manifest::FeaturePlugin;
 use vmux_ecs::page::{PageMetadataCatalog, PagePlacementCatalog};
-use vmux_ecs::persistence::PersistenceAppExt;
+use vmux_ecs::store::StoreAppExt;
 pub use vmux_ecs::workspace::{ComputeFocusSet, StackCommandSet};
 use vmux_ecs::{Active, PageMetadata, PageOpenRequest, PageOpenTarget};
 use vmux_flex::prelude::*;
@@ -53,7 +53,7 @@ impl Plugin for StackPlugin {
                     .in_set(crate::LayoutStartupSet::Post)
                     .in_set(OpenStartupPageSet),
             )
-            .register_persisted::<Stack>()
+            .register_stored::<Stack>()
             .add_message::<CloseStackRequest>()
             .add_systems(
                 Update,

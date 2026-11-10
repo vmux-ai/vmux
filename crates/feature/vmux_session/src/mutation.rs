@@ -3,7 +3,7 @@ use bevy_ecs::message::MessageCursor;
 use bevy_ecs::prelude::*;
 use bevy_reflect::Reflect;
 use moonshine_save::prelude::Save;
-use vmux_ecs::persistence::PersistenceAppExt;
+use vmux_ecs::store::StoreAppExt;
 use vmux_ecs::{ArchivedAt, CreatedAt, Cwd, Description, LastActivatedAt, UnixMillis, Uuid};
 
 use crate::{
@@ -15,11 +15,11 @@ pub(crate) struct MutationPlugin;
 
 impl Plugin for MutationPlugin {
     fn build(&self, app: &mut App) {
-        app.register_persisted::<Mutation>()
-            .register_persisted::<Record>()
-            .register_persisted::<Revision>()
-            .register_persisted::<BaseRevision>()
-            .register_persisted::<Uuid>()
+        app.register_stored::<Mutation>()
+            .register_stored::<Record>()
+            .register_stored::<Revision>()
+            .register_stored::<BaseRevision>()
+            .register_stored::<Uuid>()
             .register_type::<Creation>()
             .add_message::<Request>()
             .add_message::<Committed>()

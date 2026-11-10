@@ -10,6 +10,6 @@ impl vmux_ecs::manifest::FeatureManifestSource for Feature {
 }
 
 mod menu;
-mod persistence;
-mod persistence_driver;
+mod store;
+mod store_driver;
 mod tool;

@@ -11,7 +11,7 @@ use vmux_api::session::{
     ClientOpId, ConversationEvent as SerializedEvent, EventId, MemberId, MemberKind, MemberRole,
     Message,
 };
-use vmux_ecs::persistence::PersistenceAppExt;
+use vmux_ecs::store::StoreAppExt;
 use vmux_ecs::{CreatedAt, IdentityIndex, IdentityIndexPlugin, IdentityIndexSet};
 
 use crate::{AgentId, Session, SessionId};
@@ -35,13 +35,13 @@ impl Plugin for ConversationPlugin {
         .add_message::<ConversationAppendReceived>()
         .add_message::<OperationReceived>()
         .add_message::<OperationCommitted>()
-        .register_persisted::<Document>()
-        .register_persisted::<DocumentKind>()
-        .register_persisted::<ConversationEvent>()
-        .register_persisted::<EventIdentity>()
-        .register_persisted::<MessageContent>()
-        .register_persisted::<MaterializedEvent>()
-        .register_persisted::<SnapshotEvent>()
+        .register_stored::<Document>()
+        .register_stored::<DocumentKind>()
+        .register_stored::<ConversationEvent>()
+        .register_stored::<EventIdentity>()
+        .register_stored::<MessageContent>()
+        .register_stored::<MaterializedEvent>()
+        .register_stored::<SnapshotEvent>()
         .add_systems(
             Update,
             (ensure, sync_agent).after(index).before(TranscriptReadySet),
@@ -819,8 +819,8 @@ mod tests {
                 vmux_ecs::PrimitivesPlugin,
                 ConversationPlugin,
             ))
-            .register_persisted::<Session>()
-            .register_persisted::<SessionId>()
+            .register_stored::<Session>()
+            .register_stored::<SessionId>()
             .add_observer(moonshine_save::save::save_on_default_event);
         let session = source.world_mut().spawn((Session, id.clone())).id();
         source.world_mut().write_message(SnapshotReceived {
@@ -836,7 +836,7 @@ mod tests {
             .world()
             .resource::<bevy_ecs::reflect::AppTypeRegistry>()
             .read();
-        let filter = vmux_ecs::persistence::WorkspacePersisted::filter(&registry)
+        let filter = vmux_ecs::store::WorkspaceStored::filter(&registry)
             .allow::<Save>()
             .allow::<ChildOf>()
             .allow::<Children>()
@@ -855,8 +855,8 @@ mod tests {
                 vmux_ecs::PrimitivesPlugin,
                 ConversationPlugin,
             ))
-            .register_persisted::<Session>()
-            .register_persisted::<SessionId>()
+            .register_stored::<Session>()
+            .register_stored::<SessionId>()
             .add_observer(moonshine_save::load::load_on_default_event);
         restored.update();
         restored

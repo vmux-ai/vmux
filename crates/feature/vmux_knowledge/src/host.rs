@@ -1,5 +1,5 @@
 use bevy::prelude::*;
-use vmux_ecs::persistence::PersistenceAppExt;
+use vmux_ecs::store::StoreAppExt;
 
 pub(crate) use agent::{AgentReadKnowledge, AgentSearchKnowledge, AgentWriteKnowledge};
 
@@ -17,7 +17,7 @@ impl Plugin for KnowledgePlugin {
                 agent::KnowledgeAgentPlugin,
                 index::KnowledgeIndexPlugin,
             ))
-            .register_persisted::<ExpandedKnowledgeDirs>();
+            .register_stored::<ExpandedKnowledgeDirs>();
     }
 }
 
