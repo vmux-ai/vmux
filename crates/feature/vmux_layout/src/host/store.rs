@@ -32,7 +32,7 @@ pub(crate) struct LayoutStorePlugin;
 
 impl Plugin for LayoutStorePlugin {
     fn build(&self, app: &mut App) {
-        app.add_systems(PreStartup, spawn_store_validator)
+        app.add_systems(PreStartup, register)
             .add_message::<LayoutRestoreRequest>()
             .add_message::<LayoutRestoreCommitted>()
             .init_resource::<RestoreState>()
@@ -45,7 +45,7 @@ impl Plugin for LayoutStorePlugin {
     }
 }
 
-fn spawn_store_validator(mut commands: Commands) {
+fn register(mut commands: Commands) {
     commands.spawn(WorkspaceRestoreValidator::unique::<crate::space::SpaceId>(
         "Space ID",
     ));

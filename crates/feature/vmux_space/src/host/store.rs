@@ -1197,6 +1197,11 @@ fn component_type_path_keys(body: &str) -> impl Iterator<Item = &str> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use bevy::ecs::system::RunSystemOnce;
+    use vmux_layout::settings::{
+        FocusRingSettings, LayoutSettings, PaneSettings, SideSheetSettings, WindowSettings,
+    };
+    use vmux_setting::{AppSettings, BrowserSettings, ShortcutSettings};
 
     #[test]
     fn explicit_workspace_saves_wait_for_runtime_restore_commit() {
@@ -1231,12 +1236,6 @@ mod tests {
         fixture.app.update();
         assert!(fixture.path.is_file());
     }
-    use bevy::ecs::system::RunSystemOnce;
-    use vmux_layout::settings::{
-        FocusRingSettings, LayoutSettings, PaneSettings, SideSheetSettings, WindowSettings,
-    };
-    use vmux_setting::{AppSettings, BrowserSettings, ShortcutSettings};
-
     #[derive(Resource, Default)]
     struct SaveCount(u32);
 
