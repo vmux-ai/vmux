@@ -31,6 +31,6 @@
 	<key>NSHumanReadableCopyright</key>
 	<string>Copyright 2024-2025 Junichi Sugiura. GPL-3.0-or-later.</string>
 	<key>LSUIElement</key>
-	<true/>
+	<false/>
 </dict>
 </plist>
