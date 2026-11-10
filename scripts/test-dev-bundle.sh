@@ -77,8 +77,8 @@ export CARGO_TARGET_DIR="$target"
 export APPLE_SIGNING_IDENTITY='fixture identity'
 export TEST_SIGN_LOG="$tmp/sign.log"
 export TEST_LINK_LOG="$tmp/link.log"
-if [[ -x /usr/libexec/PlistBuddy ]]; then
-    plist_buddy=/usr/libexec/PlistBuddy
+if [[ -x "${PLIST_BUDDY:-/usr/libexec/PlistBuddy}" ]]; then
+    plist_buddy="${PLIST_BUDDY:-/usr/libexec/PlistBuddy}"
 else
     cat > "$tmp/bin/PlistBuddy" <<'PLIST'
 #!/usr/bin/env python3

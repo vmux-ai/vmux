@@ -519,6 +519,10 @@ opening it from another app's fullscreen Space returns to its own window's deskt
 Only the embedded Service bundle uses `LSUIElement` for background operation, including in
 debug builds.
 
+With native Glass installed, only its backdrop window casts the focus shadow; the transparent
+content window disables its own shadow to avoid a doubled outline. Systems without native Glass
+retain the normal window shadow.
+
 Native page frames keep their top edge fixed in their parent view's coordinate system.
 Flipped AppKit parents use a flexible maximum-Y margin, so restoring the window's height cannot
 shift a page down by the size difference before ECS observes another resize.
