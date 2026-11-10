@@ -104,7 +104,7 @@ pub fn WorkspaceLayout(
                         class: "flex min-h-0 shrink-0 flex-col overflow-hidden transition-[width,opacity] ease-out motion-reduce:transition-none",
                         style: sidebar_style,
                         aria_hidden: !sidebar_open(),
-                        inert: !sidebar_open(),
+                        inert: (!sidebar_open()).then_some(""),
                         if let Some(search) = &search {
                             div { class: "w-[min(var(--vmux-sidebar-width),50vw)] shrink-0", {search.clone()} }
                         }
@@ -987,5 +987,68 @@ pub fn ManagerSkeleton() -> Element {
             }
         }
         }
+    }
+}
+
+#[cfg(all(test, not(any(target_os = "ios", target_os = "android"))))]
+mod tests {
+    use super::*;
+    use dioxus::core::{AttributeValue, ElementId, Mutation, VirtualDom};
+    use dioxus::html::{EventData, SerializedMouseData};
+
+    #[component]
+    fn SidebarSearch() -> Element {
+        rsx! {
+            WorkspaceLayout {
+                search: rsx! { input { r#type: "search", id: "sidebar-search" } },
+                sidebar: rsx! { div { "Navigation" } },
+                div { "Content" }
+            }
+        }
+    }
+
+    #[derive(Default)]
+    struct SidebarInert {
+        blocked: bool,
+        toggle: Option<ElementId>,
+    }
+
+    impl SidebarInert {
+        fn apply(&mut self, edits: Vec<Mutation>) {
+            for edit in edits {
+                match edit {
+                    Mutation::SetAttribute { name, value, .. } if name == "inert" => {
+                        self.blocked = !matches!(value, AttributeValue::None);
+                    }
+                    Mutation::NewEventListener { name, id } if name == "click" => {
+                        self.toggle = Some(id);
+                    }
+                    _ => {}
+                }
+            }
+        }
+
+        fn click(&mut self, dom: &mut VirtualDom) {
+            let event = EventData::Mouse(SerializedMouseData::default());
+            dom.runtime().handle_event(
+                "click",
+                Event::new(event.into_any(), true),
+                self.toggle.unwrap(),
+            );
+            self.apply(dom.render_immediate_to_vec().edits);
+        }
+    }
+
+    #[test]
+    fn sidebar_search_is_interactive_while_open_and_inert_only_while_closed() {
+        dioxus::html::set_event_converter(Box::new(dioxus::html::SerializedHtmlEventConverter));
+        let mut dom = VirtualDom::new(SidebarSearch);
+        let mut sidebar = SidebarInert::default();
+        sidebar.apply(dom.rebuild_to_vec().edits);
+        assert!(!sidebar.blocked);
+        sidebar.click(&mut dom);
+        assert!(sidebar.blocked);
+        sidebar.click(&mut dom);
+        assert!(!sidebar.blocked);
     }
 }
