@@ -67,6 +67,7 @@ fi
 VMUX_BUILD_PROFILE="$PROFILE" "$ROOT/scripts/cargo-with-cef-cache.sh" "${packager_args[@]}"
 
 if [[ "$PROFILE" == "local" && -d "$VMUX_APP_BUNDLE" ]]; then
+    "$ROOT/scripts/build-title.sh" local "$ROOT" "$VMUX_APP_BUNDLE/Contents/Info.plist" >/dev/null
     echo "==> Injecting CEF into .app (local build)"
     CARGO_PACKAGER_FORMAT=dmg bash "$ROOT/scripts/inject-cef.sh"
 

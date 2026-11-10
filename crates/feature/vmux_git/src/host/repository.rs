@@ -3327,6 +3327,43 @@ mod tests {
     }
 
     #[test]
+    fn uninitialized_submodules_do_not_recurse_into_the_parent_branch() {
+        let child = test_repo::init();
+        test_repo::write(child.path(), "inside.rs", "fn base() {}\n");
+        test_repo::run(child.path(), &["add", "."]);
+        test_repo::run(child.path(), &["commit", "-qm", "base"]);
+        let parent = test_repo::init();
+        test_repo::run(
+            parent.path(),
+            &[
+                "-c",
+                "protocol.file.allow=always",
+                "submodule",
+                "add",
+                "-q",
+                child.path().to_str().unwrap(),
+                "client",
+            ],
+        );
+        test_repo::run(parent.path(), &["commit", "-qam", "submodule"]);
+        let linked = tempfile::tempdir().unwrap();
+        let checkout = linked.path().join("feature");
+        crate::host::worktree::CheckoutInfo::try_from(parent.path())
+            .unwrap()
+            .add_worktree(&checkout, "feature", "main")
+            .unwrap();
+        assert!(checkout.join("client").is_dir());
+        assert!(crate::host::worktree::SubmoduleCheckout::list(&checkout).is_empty());
+        test_repo::write(&checkout, "root.txt", "working change\n");
+        let catalog = GitRepository::at(&checkout)
+            .branch_files_catalog("feature")
+            .unwrap();
+        let files = catalog.page(0, 80).files;
+        assert!(files.iter().any(|file| file.path == "root.txt"));
+        assert!(files.iter().all(|file| !file.path.starts_with("client/")));
+    }
+
+    #[test]
     fn current_branch_diff_expands_submodule_branch_changes() {
         let child = test_repo::init();
         test_repo::write(child.path(), "inside.rs", "fn old() {}\n");

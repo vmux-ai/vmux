@@ -655,8 +655,11 @@ pub(crate) const WRY_HOST_SHIM: &str = r#"
       for (const request of requests) {
         if (request.kind !== 'animateLayout') continue;
         const container = document.getElementById(request.element);
-        if (!container) continue;
         const rects = new Map();
+        if (!container) {
+          captures.push({ request, rects });
+          continue;
+        }
         const bounds = container.getBoundingClientRect();
         for (const element of this.items(container)) {
           const rect = element.getBoundingClientRect();
@@ -692,7 +695,12 @@ pub(crate) const WRY_HOST_SHIM: &str = r#"
       for (const { request, rects } of captures) {
         if (!requestMatchesDocument(request)) continue;
         const container = document.getElementById(request.element);
-        if (!container) continue;
+        if (!container) {
+          if (document.body) {
+            for (const capture of rects.values()) this.retire(document.body, capture);
+          }
+          continue;
+        }
         const items = [...this.items(container)];
         const present = new Set(items.map(element => this.key(element)));
         let retired = false;
@@ -705,7 +713,16 @@ pub(crate) const WRY_HOST_SHIM: &str = r#"
         const delay = retired ? Math.min(__VMUX_MOTION_FEEDBACK_MS__ / 2, __VMUX_MOTION_MAX_MS__ - duration) : 0;
         for (const element of items) {
           const previous = rects.get(this.key(element))?.rect;
-          if (!previous || typeof element.animate !== 'function') continue;
+          if (typeof element.animate !== 'function') continue;
+          if (!previous) {
+            const animation = element.animate([
+              { opacity: 0, transform: 'translateY(4px) scale(0.96)' },
+              { opacity: 1, transform: 'translateY(0px) scale(1)' },
+            ], { duration, fill: 'backwards', easing: 'cubic-bezier(0.2, 0, 0, 1)' });
+            this.active.set(element, animation);
+            animation.finished.finally(() => { if (this.active.get(element) === animation) this.active.delete(element); }).catch(() => {});
+            continue;
+          }
           const next = element.getBoundingClientRect();
           const dx = previous.left - next.left;
           const dy = previous.top - next.top;

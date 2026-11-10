@@ -46,8 +46,7 @@ record_bundle() {
 plist="$temporary/Info.plist"
 cp "$root/packaging/macos/Info.plist" "$plist"
 "$plist_buddy" -c 'Set :CFBundleIdentifier ai.vmux.desktop.dev' "$plist"
-"$plist_buddy" -c 'Set :CFBundleDisplayName Vmux Dev' "$plist"
-"$plist_buddy" -c 'Set :CFBundleName Vmux Dev' "$plist"
+"$root/scripts/build-title.sh" dev "$root" "$plist" >/dev/null
 "$plist_buddy" -c "Merge '$root/packaging/macos/usage-descriptions.plist'" "$plist"
 version="$(sed -n 's/^version = "\(.*\)"/\1/p' "$root/Cargo.toml" | head -n 1)"
 "$plist_buddy" -c "Set :CFBundleShortVersionString $version" "$plist"

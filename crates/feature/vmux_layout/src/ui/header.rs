@@ -31,6 +31,20 @@ use crate::event::{
 #[component]
 pub(crate) fn HeaderView() -> Element {
     let layout = LayoutUi::current();
+    let order = layout.use_selector(|ui| {
+        ui.tab_strip
+            .as_ref()
+            .map(|strip| strip.order.clone())
+            .unwrap_or_default()
+    });
+    let previous_order = use_hook(|| Rc::new(std::cell::Cell::new(None::<Vec<String>>)));
+    let current_order = order();
+    if previous_order
+        .replace(Some(current_order.clone()))
+        .is_some_and(|previous| previous != current_order)
+    {
+        vmux_ui::animation::Movement::transition("layout-tab-strip");
+    }
     let geometry = layout.use_selector(|ui| ui.layout);
     let Some(state) = geometry() else {
         return rsx! {};
@@ -133,10 +147,6 @@ fn HeaderContent() -> Element {
         order: _,
         drag_region_revision: tab_drag_region_revision,
     } = tab_strip;
-    let previous_tab_count = use_hook(|| Rc::new(std::cell::Cell::new(tabs.len())));
-    if tabs.len() < previous_tab_count.replace(tabs.len()) {
-        vmux_ui::animation::Movement::transition("layout-tab-strip");
-    }
     let tab_metrics_style = TabDrag::metrics_style();
     let active_bg_color = active_row.as_ref().and_then(|r| r.bg_color.clone());
     let active_url = active_row
@@ -356,6 +366,14 @@ fn Tab(row: TabStripRow, index: usize, drag: TabDrag, #[props(default)] loading:
         )
     };
     let tab_style = visual.style();
+    let surface_style = format!(
+        "{surface_style}transition-duration:{}ms;",
+        vmux_ui::motion::Motion::LAYOUT_MS
+    );
+    let surface_class = cn([
+        surface_class.as_str(),
+        "transition-[background-color,color,height,border-radius] ease-out motion-reduce:transition-none",
+    ]);
 
     if metadata.title.is_empty() {
         metadata.title = display_title.clone();

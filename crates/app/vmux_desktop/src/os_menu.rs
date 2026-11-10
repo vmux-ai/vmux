@@ -347,12 +347,7 @@ fn append_standard_edit_menu(menu: &Menu) {
 }
 
 fn append_application_menu(menu: &Menu) -> Result<(), muda::Error> {
-    let app_name = match env!("VMUX_BUILD_PROFILE") {
-        "release" => "Vmux".to_string(),
-        "local" => format!("Vmux ({})", env!("VMUX_GIT_HASH")),
-        "dev" => format!("Vmux Dev ({})", env!("VMUX_GIT_HASH")),
-        other => format!("Vmux ({other})"),
-    };
+    let app_name = env!("VMUX_BUILD_TITLE").to_string();
     let version = match env!("VMUX_BUILD_PROFILE") {
         "local" | "dev" => format!("v{} ({})", env!("CARGO_PKG_VERSION"), env!("VMUX_GIT_HASH")),
         _ => format!("v{}", env!("CARGO_PKG_VERSION")),

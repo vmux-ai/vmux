@@ -1,9 +1,8 @@
 use dioxus::prelude::*;
 use vmux_api::command_bar::{
-    CommandPaletteAgentMenuToggleRequest, CommandPaletteBranchMenuToggleRequest,
-    CommandPaletteComposer, CommandPaletteMenuActivateRequest, CommandPaletteMenus,
-    CommandPaletteModelMenuToggleRequest, CommandPalettePermissionMenuToggleRequest,
-    CommandPaletteProjectMenuToggleRequest, OpenId,
+    CommandPaletteAgentMenuToggleRequest, CommandPaletteComposer,
+    CommandPaletteMenuActivateRequest, CommandPaletteMenus, CommandPaletteModelMenuToggleRequest,
+    CommandPalettePermissionMenuToggleRequest, OpenId,
 };
 use vmux_ui::components::composer::{PROMPT_INPUT_ID, PromptFocus};
 use vmux_ui::components::composer_bar::{ComposerChip, ComposerMenuKind};
@@ -15,8 +14,6 @@ pub(super) struct ComposerChips {
     pub(super) agent: ComposerChip,
     pub(super) model: Option<ComposerChip>,
     pub(super) permission: Option<ComposerChip>,
-    pub(super) project: ComposerChip,
-    pub(super) branch: Option<ComposerChip>,
 }
 
 impl ComposerChips {
@@ -26,8 +23,6 @@ impl ComposerChips {
                 agent: ComposerChip::loading(),
                 model: Some(ComposerChip::loading()),
                 permission: None,
-                project: ComposerChip::loading(),
-                branch: Some(ComposerChip::loading()),
             };
         }
 
@@ -42,13 +37,6 @@ impl ComposerChips {
         } else {
             composer.agent_url.clone()
         };
-        let project_seed = composer
-            .projects
-            .iter()
-            .find(|project| project.depth == 0 && project.is_active)
-            .map(|project| project.identity_seed())
-            .unwrap_or(&composer.project)
-            .to_string();
         let agent = ComposerChip::ready(
             composer.agent_title.clone(),
             translate("composer-choose-agent"),
@@ -64,26 +52,6 @@ impl ComposerChips {
                 ComposerChip::ready(composer.model_name.clone(), translate("agent-change-model"))
                     .opens(EventHandler::new(move |()| {
                         let _ = send(&CommandPaletteModelMenuToggleRequest { open_id });
-                        PromptFocus::end(PROMPT_INPUT_ID);
-                    })),
-            ),
-        };
-        let project = ComposerChip::ready(
-            composer.workspace_label.clone(),
-            composer.workspace_title.clone(),
-        )
-        .with_identity(project_seed.clone())
-        .opens(EventHandler::new(move |()| {
-            let _ = send(&CommandPaletteProjectMenuToggleRequest { open_id });
-            PromptFocus::end(PROMPT_INPUT_ID);
-        }));
-        let branch = match composer.is_git_repo {
-            false => None,
-            true => Some(
-                ComposerChip::ready(composer.branch_label.clone(), composer.branch_title.clone())
-                    .with_identity(composer.branch_label.clone())
-                    .opens(EventHandler::new(move |()| {
-                        let _ = send(&CommandPaletteBranchMenuToggleRequest { open_id });
                         PromptFocus::end(PROMPT_INPUT_ID);
                     })),
             ),
@@ -107,8 +75,6 @@ impl ComposerChips {
             agent,
             model,
             permission,
-            project,
-            branch,
         }
     }
 }

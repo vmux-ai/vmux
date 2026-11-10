@@ -305,11 +305,10 @@ mod wasm {
         if let Some(symbol) = GitSymbol::for_line(icon) {
             return rsx! { GitSymbolView { symbol, class } };
         }
+        let d = icon.paths().join(" ");
         rsx! {
             Icon { class: "{class}", stroke_width: 1.8,
-                for d in icon.paths() {
-                    path { d: "{d}" }
-                }
+                path { d }
             }
         }
     }

@@ -762,6 +762,8 @@ The macOS desktop bundle is a regular application, with Dock and app-switcher pr
 opening it from another app's fullscreen Space returns to its own window's desktop Space.
 Only the embedded Service bundle uses `LSUIElement` for background operation, including in
 debug builds.
+Debug and local application names identify the source branch, falling back to the commit when
+detached. Release names remain `Vmux`.
 
 With native Glass installed, only its backdrop window casts the focus shadow; the transparent
 content window disables its own shadow to avoid a doubled outline. Systems without native Glass
@@ -992,10 +994,11 @@ Initial tail following remains active until user scroll input. Placeholder and z
 events neither finish placement nor replace the remembered reader position.
 Viewport updates validate the originating page URL and Session ID; where a canonical Session ID
 is available, transcript readiness is bound to it. These viewport records are transient.
-Discrete tabs and search widths change immediately. Removing a tab retains an inert, identifier-free
-copy of that specific tab for an 80 ms fade. Remaining tabs move from their previous rectangles
-within the 160 ms budget, while selection and the actual layout update immediately. Reduced motion
-skips both effects. A cached Stack returning from a hidden,
+Discrete tabs and search widths change immediately. New tabs fade into their final position;
+removal retains an inert, identifier-free copy for an 80 ms fade, including when the last tab removes
+the strip itself. Reordered and remaining tabs move from their previous rectangles, and selection
+interpolates the tab surface. All effects fit within 160 ms while actual layout and selection update
+immediately. Reduced motion skips the effects. A cached Stack returning from a hidden,
 zero-size frame restores its final rectangle immediately. Collapsible content may interpolate height
 within the shared layout budget. The editor sidebar keeps one panel icon in both states.
 Its width, short slide, and opacity use the
@@ -1503,6 +1506,8 @@ older batches. Demand uses the actual visible range rather than the larger rende
 generation checks discard requests from replaced sources while allowing background revisions
 to advance without invalidating a path-specific request.
 File, staged-only, dirty-buffer and submodule comparisons share the disk-spooled review source.
+Uninitialized submodule directories never resolve as their parent repository during recursive
+branch reads. Loading diffs reserve multiple file cards with hunk-shaped placeholders.
 Syntax state and already generated lines are retained, while colors are generated only through
 the requested viewport and cancellation stops further work. Collapsed unchanged ranges use the
 same full-width hunk row and line-number gutter as the diff, with separate upward and downward
@@ -2008,8 +2013,9 @@ the refusal; a successful retry or an already-populated transcript discards a la
 Retry preserves its provider identity and replaces only the failed local runtime.
 Failed conversations release their transcript skeleton.
 Composer workspace context resolves the Session named by the page URL even before runtime attachment
-has bound the Stack. Unpublished context is retried after the first ready frame, so a late binding
-cannot leave project and branch controls as placeholders. Branch menus enqueue their checkout reads
+has bound the Stack. Project and branch selection live in the Space card, while the composer retains
+its effective working directory and exposes agent settings. Unpublished context is retried after
+the first ready frame. Branch menus enqueue their checkout reads
 through `vmux_git::GitRuntime` and finish empty results rather than leaving a loading request open.
 Project dashboards and resume suggestions use the same catalog stage and staleness projection.
 Embedded Session groups show five entries at a time, with stale groups initially collapsed.

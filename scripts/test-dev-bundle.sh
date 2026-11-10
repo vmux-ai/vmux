@@ -36,10 +36,12 @@ trap 'rm -r "$tmp"' EXIT
 fixture="$tmp/checkout with spaces"
 target="$fixture/output with spaces"
 mkdir -p "$fixture/scripts" "$fixture/packaging/macos" "$target/debug/deps" "$tmp/bin"
-cp "$root/scripts/bundle-dev.sh" "$root/scripts/cargo-target-paths.sh" "$fixture/scripts/"
+cp "$root/scripts/bundle-dev.sh" "$root/scripts/cargo-target-paths.sh" "$root/scripts/build-title.sh" "$fixture/scripts/"
 cp "$root/packaging/macos/Info.plist" "$root/packaging/macos/usage-descriptions.plist" \
     "$root/packaging/macos/VmuxDev.entitlements" "$root/packaging/macos/Vmux.icns" "$fixture/packaging/macos/"
 printf '[workspace.package]\nversion = "0.1.2"\n' > "$fixture/Cargo.toml"
+unset GIT_DIR GIT_WORK_TREE GIT_INDEX_FILE GIT_COMMON_DIR
+git -C "$fixture" init -q -b fixture/topic
 for binary in vmux vmux_service vmux_desktop; do
     printf 'compiled %s\n' "$binary" > "$target/debug/$binary"
 done
@@ -112,6 +114,9 @@ app="$target/debug/Vmux Dev.app"
 service="$app/Contents/Library/LoginItems/Vmux Service.app"
 "$fixture/scripts/bundle-dev.sh"
 [[ "$(wc -l < "$TEST_SIGN_LOG" | tr -d ' ')" == 2 ]]
+[[ "$("$fixture/scripts/build-title.sh" dev "$fixture")" == 'Vmux Dev (fixture/topic)' ]]
+[[ "$("$fixture/scripts/build-title.sh" local "$fixture")" == 'Vmux (fixture/topic)' ]]
+[[ "$("$fixture/scripts/build-title.sh" release "$fixture")" == Vmux ]]
 service_before="$(shasum -a 256 "$service/Contents/MacOS/Vmux Service")"
 mtime_before="$(python3 -c 'import os,sys; print(os.stat(sys.argv[1]).st_mtime_ns)' "$service/Contents/MacOS/Vmux Service")"
 "$fixture/scripts/bundle-dev.sh"
@@ -127,6 +132,11 @@ printf 'changed desktop\n' >> "$target/debug/vmux_desktop"
 "$plist_buddy" -c 'Set :LSMinimumSystemVersion 14.0' "$fixture/packaging/macos/Info.plist"
 "$fixture/scripts/bundle-dev.sh"
 [[ "$(wc -l < "$TEST_SIGN_LOG" | tr -d ' ')" == 5 ]]
+service_before_branch="$(shasum -a 256 "$service/Contents/MacOS/Vmux Service")"
+git -C "$fixture" symbolic-ref HEAD refs/heads/fixture/renamed
+"$fixture/scripts/bundle-dev.sh"
+[[ "$(wc -l < "$TEST_SIGN_LOG" | tr -d ' ')" == 6 ]]
+[[ "$service_before_branch" == "$(shasum -a 256 "$service/Contents/MacOS/Vmux Service")" ]]
 python3 - "$app/Contents/Info.plist" "$service/Contents/Info.plist" <<'VERIFY'
 import plistlib
 import sys
@@ -138,5 +148,8 @@ for index, filename in enumerate(sys.argv[1:]):
     assert data['LSMinimumSystemVersion'] == '14.0'
     assert data['CFBundleShortVersionString'] == '0.1.2'
     assert data['LSUIElement'] is (index == 1)
+    expected_name = 'Vmux Service' if index == 1 else 'Vmux Dev (fixture/renamed)'
+    assert data['CFBundleName'] == expected_name
+    assert data['CFBundleDisplayName'] == expected_name
 VERIFY
 printf 'Debug bundle templates, spaced paths, and no-op service identity passed\n'

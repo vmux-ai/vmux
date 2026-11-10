@@ -120,8 +120,6 @@ fn ComposerFooter(chat: Chat) -> Element {
             model,
             effort,
             permission,
-            project: chat.project_chip(),
-            branch: chat.branch_chip(),
             is_git_repo: context.is_git_repo,
             workspace_known: context.workspace_selected,
             uncommitted: 0,
@@ -147,8 +145,8 @@ mod tests {
     use crate::state::{ChatUiState, ChatUiStatePatch};
     use crate::ui::keys::use_chat_keys;
     use crate::ui::state::use_chat;
-    use dioxus::core::{AttributeValue, Mutation, VirtualDom};
-    use dioxus_html::{EventData, SerializedHtmlEventConverter, SerializedMouseData};
+    use dioxus::core::VirtualDom;
+    use dioxus_html::SerializedHtmlEventConverter;
     use std::{cell::RefCell, rc::Rc};
     use vmux_api::{BinEvent, UiStateFrame};
     use vmux_ecs::event::ProjectRow;
@@ -232,7 +230,7 @@ mod tests {
     }
 
     #[test]
-    fn busy_sessions_can_open_project_navigation_while_the_prompt_stays_disabled() {
+    fn busy_sessions_keep_drafts_without_repeating_space_project_controls() {
         let runtime = tokio::runtime::Builder::new_current_thread()
             .enable_time()
             .build()
@@ -245,37 +243,13 @@ mod tests {
         dom.rebuild_in_place();
         dom.render_immediate_to_vec();
         host.show(None);
-        let loaded = dom.render_immediate_to_vec();
+        dom.render_immediate_to_vec();
         dom.render_immediate_to_vec();
         let title = format!("{} · /tmp/current", translate("agent-project-choose"));
-        let button = loaded
-            .edits
-            .iter()
-            .find_map(|edit| match edit {
-                Mutation::SetAttribute {
-                    name: "title",
-                    value: AttributeValue::Text(value),
-                    id,
-                    ..
-                } if value == &title => Some(*id),
-                _ => None,
-            })
-            .expect("the project navigation control must render");
-        dom.runtime().handle_event(
-            "click",
-            Event::new(
-                EventData::Mouse(SerializedMouseData::default()).into_any(),
-                true,
-            ),
-            button,
-        );
-        dom.render_immediate_to_vec();
-        assert_eq!(*host.menus.borrow(), [Some(ChatComposerMenuKind::Project)]);
-        host.show(Some(ChatComposerMenuKind::Project));
-        dom.render_immediate_to_vec();
-        dom.render_immediate_to_vec();
         let html = dioxus_ssr::render(&dom);
-        assert!(html.contains("Another project"), "{html}");
+        assert!(!html.contains(&title), "{html}");
+        assert!(!html.contains("Another project"), "{html}");
+        assert!(host.menus.borrow().is_empty());
         assert!(html.contains("Unsent draft"));
         let textarea = html
             .split("<textarea")

@@ -216,8 +216,6 @@ pub fn CommandPalette(props: PaletteProps) -> Element {
             agent: Some(chips.agent),
             model: chips.model,
             permission: chips.permission,
-            project: Some(chips.project),
-            branch: chips.branch,
             is_git_repo: composer.is_git_repo,
             workspace_known: !composer.cwd.is_empty(),
             uncommitted: 0,
