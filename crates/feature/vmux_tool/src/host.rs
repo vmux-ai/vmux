@@ -1,6 +1,7 @@
 use std::collections::BTreeMap;
 use std::path::Path;
 
+use crate::catalog::{Catalog, Inventory, Received};
 use crate::state::{
     ToolAdoptRequest, ToolApplyRequest, ToolForgetRequest, ToolImportRequest, ToolInstallRequest,
     ToolLinkRequest, ToolOpenRequest, ToolOperationKey, ToolOperationKind, ToolOperationNotice,
@@ -29,6 +30,7 @@ pub(crate) struct ToolHostPlugin;
 impl Plugin for ToolHostPlugin {
     fn build(&self, app: &mut App) {
         app.add_plugins((
+            crate::catalog::Plugin,
             crate::McpConnectionPlugin,
             UiStatePlugin::<ToolsUiState>::default(),
         ))
@@ -51,6 +53,7 @@ impl Plugin for ToolHostPlugin {
                 ToolsNavigateRequest,
             )>::default(),
         ))
+        .configure_sets(Update, ProjectionSet)
         .add_observer(page_ready)
         .add_observer(refresh_request)
         .add_observer(operation_request::<ToolInstallRequest>)
@@ -78,12 +81,15 @@ impl Plugin for ToolHostPlugin {
                 finish_external_operations,
                 drain_succeeded_operations,
                 drain_failed_operations,
-                emit_tools_state,
+                emit_tools_state.in_set(ProjectionSet),
             )
                 .chain(),
         );
     }
 }
+
+#[derive(SystemSet, Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub(crate) struct ProjectionSet;
 
 fn bind(
     providers: Query<(Entity, &ToolProviderBinding), Without<ToolProviderId>>,
@@ -185,6 +191,7 @@ fn spawn_registry(mut commands: Commands) {
     commands.spawn((
         Name::new("Tool registry"),
         ToolRegistry::default(),
+        Catalog::default(),
         ToolStore::current(),
         ToolsManifest::default(),
         OperationRequestSequence::default(),
@@ -196,8 +203,6 @@ struct ToolRegistry {
     dirty: bool,
     refresh_catalogs: bool,
     generation: u64,
-    revision: u64,
-    snapshot: ToolsSnapshot,
 }
 
 impl Default for ToolRegistry {
@@ -206,8 +211,6 @@ impl Default for ToolRegistry {
             dirty: true,
             refresh_catalogs: false,
             generation: 1,
-            revision: 0,
-            snapshot: ToolsSnapshot::default(),
         }
     }
 }
@@ -405,11 +408,11 @@ struct PendingToolOperation;
 
 fn refresh_request(
     trigger: On<UiInput<ToolsRefreshRequest>>,
-    mut registry: Query<&mut ToolRegistry>,
+    mut registry: Query<(&mut ToolRegistry, &mut Catalog)>,
     subscribers: Query<(), With<ToolSubscriber>>,
     mut commands: Commands,
 ) {
-    let Ok(mut state) = registry.single_mut() else {
+    let Ok((mut state, mut catalog)) = registry.single_mut() else {
         return;
     };
     let request = &trigger.event().payload;
@@ -418,13 +421,13 @@ fn refresh_request(
             .entity(trigger.event().webview)
             .insert(ToolSubscriber::default());
     }
-    if request.refresh || !state.snapshot.loaded {
+    if request.refresh || !catalog.loaded {
         state.dirty = true;
         state.refresh_catalogs |= request.refresh;
         state.generation = state.generation.wrapping_add(1);
-        if request.refresh && state.snapshot.loaded {
-            state.snapshot.loaded = false;
-            state.revision = state.revision.wrapping_add(1);
+        if request.refresh && catalog.loaded {
+            catalog.loaded = false;
+            catalog.revision = catalog.revision.wrapping_add(1);
         }
     }
 }
@@ -523,7 +526,7 @@ fn start_operation(
 }
 
 fn request_scan(
-    mut registry: Query<(&mut ToolRegistry, &ToolStore)>,
+    mut registry: Query<(&mut ToolRegistry, &mut Catalog, &ToolStore)>,
     providers: Query<(&ToolProviderId, &ToolScanner)>,
     features: Query<&FeatureManifest>,
     scans: Query<(), With<ToolScanTask>>,
@@ -531,7 +534,7 @@ fn request_scan(
     pending_tool_operations: Query<(), With<PendingToolOperation>>,
     mut commands: Commands,
 ) {
-    let Ok((mut state, store)) = registry.single_mut() else {
+    let Ok((mut state, mut catalog, store)) = registry.single_mut() else {
         return;
     };
     if !state.dirty
@@ -569,9 +572,9 @@ fn request_scan(
     }
     metadata.sort_by_key(|entry| entry.rank);
     metadata.dedup_by(|left, right| left.provider == right.provider);
-    if state.snapshot.providers != metadata {
-        state.snapshot.providers = metadata.clone();
-        state.revision = state.revision.wrapping_add(1);
+    if catalog.providers != metadata {
+        catalog.providers = metadata.clone();
+        catalog.revision = catalog.revision.wrapping_add(1);
     }
     let task = IoTaskPool::get()
         .spawn(async move { scan_tools(&store, &providers, metadata, refresh_catalogs) });
@@ -585,10 +588,10 @@ fn request_scan(
 
 fn finish_scans(
     mut scans: Query<(Entity, &mut ToolScanTask)>,
-    mut registry: Query<(&mut ToolRegistry, &mut ToolsManifest)>,
+    mut registry: Query<(Entity, &mut ToolRegistry, &mut ToolsManifest)>,
     mut commands: Commands,
 ) {
-    let Ok((mut state, mut manifest)) = registry.single_mut() else {
+    let Ok((registry, mut state, mut manifest)) = registry.single_mut() else {
         return;
     };
     for (entity, mut scan) in &mut scans {
@@ -600,9 +603,11 @@ fn finish_scans(
             state.dirty = true;
             continue;
         }
-        state.snapshot.clone_from(&output.snapshot);
+        commands.trigger(Received {
+            entity: registry,
+            snapshot: output.snapshot,
+        });
         manifest.clone_from(&output.manifest);
-        state.revision = state.revision.wrapping_add(1);
     }
 }
 
@@ -622,7 +627,8 @@ fn start_external_operations(
     >,
     providers: Query<(&ToolProviderId, &ToolOperator)>,
     appliers: Query<&ToolApplier>,
-    registry: Query<&ToolRegistry>,
+    registry: Query<Entity, With<ToolRegistry>>,
+    inventory: Inventory,
     stores: Query<&ToolStore>,
     mut commands: Commands,
 ) {
@@ -647,12 +653,14 @@ fn start_external_operations(
             let Ok(registry) = registry.single() else {
                 continue;
             };
+            let Some(snapshot) = inventory.snapshot(registry) else {
+                continue;
+            };
             let operators = providers
                 .iter()
                 .map(|(provider, operator)| (provider.clone(), *operator))
                 .collect::<Vec<_>>();
-            let installs = registry
-                .snapshot
+            let installs = snapshot
                 .categories
                 .iter()
                 .flat_map(|category| &category.items)
@@ -869,15 +877,26 @@ fn drain_failed_operations(
 }
 
 fn emit_tools_state(
-    registry: Query<&ToolRegistry>,
+    registry: Query<(Entity, &Catalog), With<ToolRegistry>>,
+    inventory: Inventory,
     mut subscribers: Query<(Entity, &mut ToolSubscriber)>,
     mut commands: Commands,
 ) {
-    let Ok(state) = registry.single() else {
+    let Ok((registry, catalog)) = registry.single() else {
         return;
     };
+    let snapshot = if subscribers
+        .iter()
+        .any(|(_, subscriber)| subscriber.snapshot_revision != catalog.revision)
+    {
+        inventory.snapshot(registry)
+    } else {
+        None
+    };
     for (entity, mut subscriber) in &mut subscribers {
-        subscriber.synchronize(state.revision, &state.snapshot);
+        if let Some(snapshot) = &snapshot {
+            subscriber.synchronize(catalog.revision, snapshot);
+        }
         if subscriber.emitted_revision == subscriber.revision {
             continue;
         }

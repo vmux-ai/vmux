@@ -1697,6 +1697,12 @@ operations and view controls remain in the page. Project details publish Project
 while Session directory links open the Code entry file. Branch controls share branch identicons. Session lists use the same board switch and column
 icon in Project details. Popup dismissal starts after the first open, so mounting a closed native
 popover cannot cancel its opening.
+Accepted inventory scans reconcile catalog-owned Item entities by provider and item ID. Each item
+composes `Name`, `ToolProviderId`, `RegistrationOrder`, and typed version, icon, detail, status,
+management, and operation components. Refresh preserves surviving entity identities and removes
+missing items. `ToolsSnapshot` and `ToolItem` are UI projections; counts and Apply selection read
+the same canonical entities, and component changes advance the catalog publication revision.
+
 
 Repository tool versions live in `tool-versions.env`; CI loads the same values used by local
 scripts and the Makefile. Release asset names and URLs come from
