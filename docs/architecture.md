@@ -976,6 +976,10 @@ pages share one native document surface; replacing their page root moves the sha
 its previous rectangle into its final dock position within the layout motion budget. The layout,
 input identity, and first frame commit immediately, with no interpolation for reduced motion.
 The composer handoff follows root replacement even when frame identity has already resynchronized.
+Submitting on Start immediately appends the initial user message to the local conversation and
+queues the same payload for agent delivery. Service snapshots reconcile that message by its stable
+conversation event identity. The first transcript update binds the Session viewport before page
+readiness, so agent startup and response latency never hide an accepted prompt behind a skeleton.
 Shared sidebar rows stay in place when page selection changes. Session detail-panel visibility belongs to the page shell,
 and its geometry remains reserved while the selected session loads.
 Session viewports remember their scroll position and loaded-history start on the owning Session.

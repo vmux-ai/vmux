@@ -73,6 +73,7 @@ impl Plugin for ChatHostPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<PendingSessionStarts>()
             .add_message::<StartRequest>()
+            .add_message::<vmux_session::ConversationAppendReceived>()
             .add_plugins((
                 AgentProjectionPlugin,
                 super::key::ChatKeyPlugin,
@@ -155,14 +156,26 @@ fn open_started(
     trigger: On<Created>,
     mut pending: ResMut<PendingSessionStarts>,
     mut requests: MessageWriter<PageOpenRequest>,
+    mut appended: MessageWriter<vmux_session::ConversationAppendReceived>,
     mut commands: Commands,
 ) {
     let Some(created) = pending.0.remove(&trigger.event().id) else {
         return;
     };
     let mut queue = PromptQueue::default();
-    queue.enqueue_with_attachments(created.prompt.clone(), created.attachments);
-    commands.entity(trigger.event().entity).insert(queue);
+    let message = queue.enqueue_initial(created.prompt.clone(), created.attachments);
+    commands
+        .entity(trigger.event().entity)
+        .insert((queue, vmux_session::RunState::default()));
+    appended.write(vmux_session::ConversationAppendReceived {
+        session: trigger.event().id.clone(),
+        messages: vec![message],
+    });
+    if let PageOpenTarget::Stack(stack) = &created.target {
+        commands
+            .entity(*stack)
+            .insert(EntityTarget::<Session>::new(trigger.event().entity));
+    }
     if let Some(title) = AgentConversationTitle::from_prompt(&created.prompt) {
         commands
             .entity(trigger.event().entity)
@@ -587,7 +600,8 @@ impl ChatTranscriptProjection {
     }
 
     pub fn merge_tail(&mut self, tail: TranscriptTail) -> bool {
-        if self.tail_start == tail.start
+        if self.state.generation != 0
+            && self.tail_start == tail.start
             && self.tail == tail.items
             && self.state.total == tail.total
         {
@@ -731,18 +745,37 @@ pub struct ChatSynced;
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::event::ChatItem;
     use vmux_api::protocol::{AgentRequest, AgentRequestId};
     use vmux_ecs::agent::{AgentRequestInput, CommandOrigin};
 
+    #[derive(Resource, Default)]
+    struct Published(ChatUiState);
+
+    impl Published {
+        fn record(trigger: On<vmux_ecs::UiStateWrite<ChatUiState>>, mut published: ResMut<Self>) {
+            vmux_api::UiStateProjection::apply(&mut published.0, trigger.event().update().clone());
+        }
+    }
+
     #[test]
-    fn created_session_owns_the_initial_prompt_before_opening() {
+    fn created_session_publishes_the_initial_prompt_before_agent_attachment() {
         let mut app = App::new();
-        app.init_resource::<PendingSessionStarts>()
-            .add_message::<StartRequest>()
-            .add_message::<CreateRequest>()
-            .add_message::<PageOpenRequest>()
-            .add_observer(open_started)
-            .add_systems(Update, start);
+        app.add_plugins((
+            bevy::prelude::MinimalPlugins,
+            crate::conversation::ConversationPlugin,
+            crate::host::transcript::Plugin,
+            vmux_ecs::UiStatePlugin::<ChatUiState>::default(),
+        ))
+        .init_resource::<PendingSessionStarts>()
+        .init_resource::<Published>()
+        .add_message::<StartRequest>()
+        .add_message::<CreateRequest>()
+        .add_message::<PageOpenRequest>()
+        .add_message::<vmux_session::ConversationAppendReceived>()
+        .add_observer(open_started)
+        .add_observer(Published::record)
+        .add_systems(Update, start);
         let stack = app.world_mut().spawn_empty().id();
         app.world_mut()
             .resource_mut::<Messages<StartRequest>>()
@@ -766,12 +799,21 @@ mod tests {
             .next()
             .unwrap();
         let id = create.id().clone();
-        let session = app.world_mut().spawn_empty().id();
+        let session = app
+            .world_mut()
+            .spawn((
+                Session,
+                id.clone(),
+                AgentId("mock".into()),
+                Name::new("Fix session startup"),
+            ))
+            .id();
 
         app.world_mut().trigger(Created {
             entity: session,
             id: id.clone(),
         });
+        app.world_mut().spawn((SessionView, ChildOf(stack)));
         app.update();
 
         let queue = app.world().get::<PromptQueue>(session).unwrap();
@@ -781,6 +823,20 @@ mod tests {
         assert_eq!(
             app.world().get::<AgentConversationTitle>(session),
             Some(&AgentConversationTitle("Fix session startup".into()))
+        );
+        let state = &app.world().resource::<Published>().0;
+        assert_eq!(state.viewport.session, id.0);
+        assert!(!state.snapshot.transcript_loading);
+        assert!(state.snapshot.queued.is_empty());
+        assert!(matches!(
+            &state.transcript.items[0],
+            ChatItem::User { text, attachments, .. }
+                if text == "Fix session startup" && attachments[0].path == "/tmp/screenshot.png"
+        ));
+        assert!(
+            app.world()
+                .get::<vmux_ecs::ProcessAnchor>(session)
+                .is_none()
         );
         assert!(
             app.world()
@@ -795,6 +851,41 @@ mod tests {
         assert_eq!(requests.len(), 1);
         assert_eq!(requests[0].url, Route::Session(id).url());
         assert!(matches!(requests[0].target, PageOpenTarget::Stack(target) if target == stack));
+        let prompt = app
+            .world_mut()
+            .get_mut::<PromptQueue>(session)
+            .unwrap()
+            .take_next()
+            .unwrap();
+        app.update();
+        assert!(matches!(
+            &app.world().resource::<Published>().0.transcript.items[0],
+            ChatItem::User { text, .. } if text == "Fix session startup"
+        ));
+        let id = app.world().get::<SessionId>(session).unwrap().clone();
+        app.world_mut()
+            .write_message(vmux_session::SnapshotReceived {
+                session: id,
+                messages: vec![
+                    vmux_api::session::Message::user_with_attachments(
+                        prompt.text,
+                        prompt.attachments,
+                    ),
+                    vmux_api::session::Message::Assistant {
+                        blocks: vec![vmux_api::session::AssistantBlock::Text("Started".into())],
+                    },
+                ],
+            });
+        app.update();
+        let items = &app.world().resource::<Published>().0.transcript.items;
+        assert_eq!(
+            items
+                .iter()
+                .filter(|item| matches!(item, ChatItem::User { .. }))
+                .count(),
+            1
+        );
+        assert!(matches!(&items[1], ChatItem::Turn(turn) if turn.copy_text == "Started"));
     }
 
     struct Conversation {

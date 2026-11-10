@@ -78,6 +78,7 @@ pub struct QueuedPrompt {
     pub id: u64,
     pub text: String,
     pub attachments: Vec<AgentAttachment>,
+    pub shown_in_transcript: bool,
 }
 
 impl PromptQueue {
@@ -93,6 +94,20 @@ impl PromptQueue {
         self.enqueue_with_attachments(text, Vec::new());
     }
 
+    pub fn enqueue_initial(
+        &mut self,
+        text: String,
+        attachments: Vec<AgentAttachment>,
+    ) -> vmux_api::session::Message {
+        let message =
+            vmux_api::session::Message::user_with_attachments(text.clone(), attachments.clone());
+        self.enqueue_with_attachments(text, attachments);
+        if let Some(prompt) = self.items.back_mut() {
+            prompt.shown_in_transcript = true;
+        }
+        message
+    }
+
     pub fn enqueue_with_attachments(&mut self, text: String, attachments: Vec<AgentAttachment>) {
         let id = self.next_id;
         self.next_id = self.next_id.wrapping_add(1);
@@ -100,6 +115,7 @@ impl PromptQueue {
             id,
             text,
             attachments,
+            shown_in_transcript: false,
         });
         self.paused = false;
     }
