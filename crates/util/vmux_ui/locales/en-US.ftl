@@ -644,6 +644,7 @@ agent-choosing = Choosing…
 agent-choose-folder = Choose folder
 agent-queued = queued
 agent-attached = Attached:
+agent-video-play = Play video
 agent-cancel-queued = Cancel queued prompt
 agent-resume-queued = Resume queued prompts
 agent-clear-queue = Clear queue
@@ -1117,3 +1118,7 @@ project-new-repository = Empty repository
 project-local-folder = Local folder
 project-github-repository = GitHub repository
 project-edit-conflict = This project changed. Reopen the editor to try again.
+
+command-toggle-url-bar = Layout > Layout > Toggle URL Bar
+
+project-rename = Rename project

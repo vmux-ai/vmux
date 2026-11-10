@@ -1128,3 +1128,9 @@ project-new-repository = مستودع فارغ
 project-local-folder = مجلد محلي
 project-github-repository = مستودع GitHub
 project-edit-conflict = تغيّر هذا المشروع. أعد فتح المحرر للمحاولة مرة أخرى.
+
+agent-video-play = تشغيل الفيديو
+
+command-toggle-url-bar = Layout > التخطيط > تبديل شريط العنوان
+
+project-rename = إعادة تسمية المشروع

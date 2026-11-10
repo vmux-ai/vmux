@@ -1128,3 +1128,9 @@ project-new-repository = Lege repository
 project-local-folder = Lokale map
 project-github-repository = GitHub-repository
 project-edit-conflict = Dit project is gewijzigd. Open de editor opnieuw.
+
+agent-video-play = Video afspelen
+
+command-toggle-url-bar = Layout > Indeling > Adresbalk schakelen
+
+project-rename = Project hernoemen

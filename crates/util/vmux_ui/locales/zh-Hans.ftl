@@ -1125,3 +1125,9 @@ project-new-repository = 空仓库
 project-local-folder = 本地文件夹
 project-github-repository = GitHub 仓库
 project-edit-conflict = 项目已更改。请重新打开编辑界面。
+
+agent-video-play = 播放视频
+
+command-toggle-url-bar = Layout > 布局 > 切换地址栏
+
+project-rename = 重命名项目

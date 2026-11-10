@@ -1108,3 +1108,9 @@ project-new-repository = 空のリポジトリ
 project-local-folder = ローカルフォルダ
 project-github-repository = GitHub リポジトリ
 project-edit-conflict = Project が更新されました。編集画面を開き直してください。
+
+agent-video-play = 動画を再生
+
+command-toggle-url-bar = Layout > レイアウト > URLバーを切り替え
+
+project-rename = プロジェクト名を変更

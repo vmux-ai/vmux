@@ -1036,10 +1036,12 @@ fn side_sheet_project_page_open(
     let Ok(root) = projects.path() else {
         return;
     };
-    let Some(url) =
-        vmux_project::ProjectRoute::from_path(root, std::path::Path::new(&request.path))
-    else {
-        return;
+    let url = match vmux_project::ProjectRoute::attach(root, std::path::Path::new(&request.path)) {
+        Ok(url) => url,
+        Err(error) => {
+            bevy::log::warn!("project could not be opened: {error}");
+            return;
+        }
     };
     requests.write(PageOpenRequest {
         target: PageOpenTarget::ActiveStackInPane(target_pane),

@@ -60,6 +60,7 @@ pub fn ProjectSelectPopup(
     on_pick: EventHandler<ProjectRow>,
     on_add: EventHandler<()>,
     #[props(default)] on_open_selected: Option<EventHandler<ProjectRow>>,
+    #[props(default)] on_rename_selected: Option<EventHandler<ProjectRow>>,
 ) -> Element {
     let has_projects = !projects.is_empty();
     let selected_project = projects
@@ -94,6 +95,14 @@ pub fn ProjectSelectPopup(
             }
             if has_projects {
                 div { class: "mx-1 my-1 h-px bg-foreground/[0.08]" }
+            }
+            if let (Some(handler), Some(project)) = (on_rename_selected, selected_project.clone()) {
+                DropdownOption {
+                    label: translate("project-rename"),
+                    selected: false,
+                    onclick: move |_| handler.call(project.clone()),
+                    leading: rsx! { LineIconView { icon: LineIcon::Pencil, class: "size-4 shrink-0" } },
+                }
             }
             if let (Some(handler), Some(project)) = (on_open_selected, selected_project) {
                 {

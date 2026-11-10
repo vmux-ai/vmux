@@ -1,6 +1,6 @@
 #![allow(non_snake_case)]
 
-use self::agent::ChatHeader;
+use self::agent::DetailsToggle;
 use self::approval::ChatApprovalDock;
 use self::composer::ChatDock;
 use self::item::MD_CSS;
@@ -86,8 +86,8 @@ fn SessionDetail(session_id: String, mut details_open: Signal<bool>) -> Element 
             },
             style { dangerous_inner_html: MD_CSS }
             div { class: "flex min-h-0 flex-1 overflow-hidden",
-                section { class: "flex min-w-0 flex-1 flex-col",
-                    ChatHeader {
+                section { class: "relative flex min-w-0 flex-1 flex-col",
+                    DetailsToggle {
                         details_available,
                         details_open: details_open(),
                         on_details_toggle: move |_| details_open.set(!details_open()),

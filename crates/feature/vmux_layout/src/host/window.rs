@@ -807,6 +807,7 @@ fn spawn_requested_tab_layouts(
 
 fn persist(
     settings: Res<LayoutSettings>,
+    transitions: Query<(), With<crate::toggle::LayoutTransition>>,
     hidden_windows: Query<(), With<crate::toggle::LayoutHidden>>,
     mut window_q: Query<
         (&HostWindow, &mut Node),
@@ -833,6 +834,9 @@ fn persist(
     let configured_width =
         crate::event::SideSheetResizeEvent::live(settings.side_sheet.width).clamped();
     for (host, mut node) in &mut window_q {
+        if transitions.contains(host.0) {
+            continue;
+        }
         let full_padding = hidden_windows.contains(host.0);
         node.padding = UiRect {
             top: Val::Px(if full_padding { pad_top } else { 0.0 }),
@@ -840,7 +844,7 @@ fn persist(
             right: Val::Px(pad_right),
             bottom: Val::Px(pad_bottom),
         };
-        node.column_gap = Val::Px(gap);
+        node.column_gap = Val::Px(if full_padding { 0.0 } else { gap });
     }
 
     for _ in &mut main_column_q {}

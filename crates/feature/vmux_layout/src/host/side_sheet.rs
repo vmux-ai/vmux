@@ -121,16 +121,16 @@ fn sync_visibility(
 
 #[cfg(target_os = "macos")]
 fn sync_window_buttons_visibility(
-    side_sheet_q: Query<(Entity, &SideSheetPosition, Has<Open>), With<SideSheet>>,
+    header_q: Query<(Entity, Has<Open>), With<crate::Header>>,
     hierarchy: crate::window::WindowHierarchy,
     window_q: Query<Entity, With<Window>>,
     mut last_open: Local<std::collections::HashMap<Entity, bool>>,
     _non_send: NonSendMarker,
 ) {
     for entity in &window_q {
-        let is_open = side_sheet_q.iter().any(|(side_sheet, pos, open)| {
-            *pos == SideSheetPosition::Left && open && hierarchy.get(side_sheet) == Some(entity)
-        });
+        let is_open = header_q
+            .iter()
+            .any(|(header, open)| open && hierarchy.get(header) == Some(entity));
         if last_open.get(&entity) == Some(&is_open) {
             continue;
         }

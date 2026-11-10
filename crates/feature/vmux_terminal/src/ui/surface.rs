@@ -4,7 +4,7 @@ use super::state::{TerminalRowState, TerminalState};
 use crate::event::*;
 use crate::render_model::TermSpanPresentation;
 use dioxus::html::Modifiers;
-use dioxus::html::geometry::{ClientPoint, PixelsVector2D, WheelDelta};
+use dioxus::html::geometry::{ClientPoint, WheelDelta};
 use dioxus::html::input_data::MouseButton;
 use dioxus::prelude::*;
 use std::rc::Rc;
@@ -14,7 +14,7 @@ use vmux_ecs::scroll::{BottomPadding, EDGE_TRIGGER_K, ScrollWindow};
 use vmux_ui::agent_accent::AgentAccent;
 use vmux_ui::favicon::{Favicon, FaviconSource};
 use vmux_ui::hooks::Unclaimed;
-use vmux_ui::hooks::{send, use_key_claim, use_theme};
+use vmux_ui::hooks::{DeferredSend, send, use_key_claim, use_theme};
 use vmux_ui::i18n::{TranslationValue, translate, translate_with};
 use vmux_ui::matrix_rain::MatrixRain;
 use vmux_ui::prompt_ghost::PromptGhost;
@@ -51,6 +51,9 @@ impl Viewport {
     }
 
     fn container_resized(&mut self, client: (f64, f64), padding: f64) {
+        if client.0 <= 2.0 * padding + 1.0 || client.1 <= 2.0 * padding + 1.0 {
+            return;
+        }
         if self.client == client {
             return;
         }
@@ -68,15 +71,20 @@ impl Viewport {
 
     fn announce(&self, padding: f64) {
         let (cw, ch) = self.cell;
-        if cw <= 0.0 || ch <= 0.0 || self.client.1 <= 0.0 {
+        if cw <= 0.0
+            || ch <= 0.0
+            || self.client.0 <= 2.0 * padding + cw
+            || self.client.1 <= 2.0 * padding + ch
+        {
             return;
         }
-        let _ = send(&TermResizeEvent {
+        let _ = DeferredSend::new(&TermResizeEvent {
             char_width: cw as f32,
             char_height: ch as f32,
             viewport_width: (self.client.0 - 2.0 * padding) as f32,
             viewport_height: (self.client.1 - 2.0 * padding) as f32,
-        });
+        })
+        .send();
     }
 }
 
@@ -130,40 +138,22 @@ pub fn Page() -> Element {
         context
     });
 
-    use_effect(move || {
-        let _ = total_rows();
-        let _ = viewport().client;
-        if !following() {
-            return;
-        }
-        spawn(async move {
-            let Some(element) = container.peek().clone() else {
-                return;
-            };
-            let Ok(size) = element.get_scroll_size().await else {
-                return;
-            };
-            let _ = element
-                .scroll(
-                    PixelsVector2D::new(0.0, size.height),
-                    ScrollBehavior::Instant,
-                )
-                .await;
-        });
-    });
-
     let locate_container = move || {
         spawn(async move {
             let Some(element) = container() else {
                 return;
             };
-            let Ok(rect) = element.get_client_rect().await else {
-                return;
-            };
-            let padding = theme.peek().as_ref().map(|t| t.padding).unwrap_or(4.0) as f64;
-            let mut viewport = viewport.write();
-            viewport.origin = (rect.origin.x, rect.origin.y);
-            viewport.container_resized((rect.size.width, rect.size.height), padding);
+            for _ in 0..16 {
+                if let Ok(rect) = element.get_client_rect().await {
+                    let padding = theme.peek().as_ref().map(|t| t.padding).unwrap_or(4.0) as f64;
+                    let mut view = viewport.write();
+                    view.origin = (rect.origin.x, rect.origin.y);
+                    view.container_resized((rect.size.width, rect.size.height), padding);
+                    view.announce(padding);
+                    return;
+                }
+                vmux_ui::platform::Platform::sleep(32).await;
+            }
         });
     };
 
@@ -233,6 +223,9 @@ pub fn Page() -> Element {
         }
         div {
             id: CONTAINER_ID,
+            "data-vmux-initial-scroll": if alt() || copy_mode() || mouse() { "0" } else { "bottom" },
+            "data-vmux-follow-scroll": (following() && !alt() && !copy_mode() && !mouse()).to_string(),
+            "data-vmux-preserve-scroll": "auto",
             tabindex: "0",
             class: "relative h-full w-full {overflow_class} bg-term-bg text-term-fg font-mono text-sm leading-tight select-none outline-none",
             style: "{theme_style}{cell_style}",
@@ -245,7 +238,12 @@ pub fn Page() -> Element {
                 }
             },
 
-            onresize: move |_: Event<ResizeData>| locate_container(),
+            onresize: move |event: Event<ResizeData>| {
+                if let Ok(size) = event.get_border_box_size() {
+                    viewport.write().container_resized((size.width, size.height), padding);
+                }
+                locate_container();
+            },
 
             onmousedown: move |e: Event<MouseData>| {
                 if let Some((col, row)) = viewport().cell_at(e.client_coordinates(), padding) {

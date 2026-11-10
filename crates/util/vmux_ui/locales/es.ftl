@@ -1128,3 +1128,9 @@ project-new-repository = Repositorio vacío
 project-local-folder = Carpeta local
 project-github-repository = Repositorio de GitHub
 project-edit-conflict = Este proyecto ha cambiado. Vuelve a abrir el editor.
+
+agent-video-play = Reproducir vídeo
+
+command-toggle-url-bar = Layout > Diseño > Alternar barra de direcciones
+
+project-rename = Renombrar proyecto

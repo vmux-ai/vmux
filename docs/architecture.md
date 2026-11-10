@@ -940,9 +940,11 @@ lifecycle in the current Stack so its Session target and runtime follow the sele
 Code bookmarks resolve their directory from the active worktree, owning project, or cwd and open
 its README or entry file; directory favicons identify the Code page. Layout and address state flush before native
 presentation in the same frame; the final flush retains updates arriving later.
-Project rows carry an identity separate from their checkout path. Space cards, composer chips,
-project pages and Session metadata use that identity for identicons; branch icons use the branch
-name consistently. Moving a Project between worktrees preserves its icon.
+Projects persist a stable ID and a shared display name; their directory and current checkout
+are attachments. Legacy path records acquire one ID shared across Spaces. Renaming updates every
+reference without changing cwd. Space cards and project pages use the ID for identicons; branch
+icons use the branch name. External directories open through managed imported links, including
+worktrees with a `.git` file; removing an imported link never removes its source directory.
 Spaces use their immutable Space ID for the same identicon in lists, menus and cards. Renaming
 changes only the display name, preserving tab membership and the icon. Commit selections use the
 full object ID for identicons in both the URL trail and its menu. An unselected Commits view picks
@@ -965,6 +967,11 @@ discard old requests; effects observe the navigation revision and reissue their 
 Ordinary input remains blocked until the surface is interactive.
 Tab presses and Stack card clicks select immediately; host projection reconciles their local
 selection. Earlier acknowledgements cannot replace a newer pending selection.
+Zen retains a compact tab and Stack strip. The URL row has an independent visibility command.
+Header height, sidebar width, padding and their separating gap share one transition from current
+geometry; native window buttons follow the retained header. URL-only toggles preserve the rest
+of the layout, including unfinished transitions.
+
 UI motion is feedback rather than a completion condition. Selection, URL, focus, and the target
 layout commit in the input frame; no request waits for an animation, and fresh input supersedes
 an in-flight transition from its current visual state. Native layout and shared UI animations
@@ -1857,6 +1864,12 @@ their own contracts.
 Conversation events persist their identities, contents, timestamps, and source markers with the
 Session. Restore displays that history before runtime attachment; provider replay reconciles the
 same event identities without duplicating cached messages.
+
+Session video attachments and video paths in user text hydrate into render-only media URLs.
+The original prompt and persisted attachments remain unchanged. Each page retains registered
+file handles with opaque capabilities; dropping the final owner revokes access. A loopback
+endpoint streams bounded chunks and implements GET, HEAD and byte ranges for seeking. Paused
+video frames provide thumbnails, and playback starts only from the user control.
 
 `vmux_acp` attaches transient runtime and ACP capability state to Session entities and owns the
 provider-owned `AcpSessionId`, its persistence, and the single runtime detach path used by cleanup

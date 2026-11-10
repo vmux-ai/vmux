@@ -1128,3 +1128,9 @@ project-new-repository = Dépôt vide
 project-local-folder = Dossier local
 project-github-repository = Dépôt GitHub
 project-edit-conflict = Ce projet a changé. Rouvrez le formulaire pour réessayer.
+
+agent-video-play = Lire la vidéo
+
+command-toggle-url-bar = Layout > Disposition > Afficher ou masquer la barre d’adresse
+
+project-rename = Renommer le projet

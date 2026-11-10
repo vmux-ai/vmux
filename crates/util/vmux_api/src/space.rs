@@ -157,6 +157,12 @@ pub struct ProjectForgetRequest {
     pub path: String,
 }
 
+#[vmux_api::ui_event(Eq)]
+pub struct ProjectRenameRequest {
+    pub id: String,
+    pub name: String,
+}
+
 #[vmux_api::contract(Default, Eq)]
 pub struct ProjectRow {
     pub path: String,

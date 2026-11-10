@@ -7,6 +7,7 @@ use vmux_ui::scroll::SectionNavigation;
 use super::branches::BranchesCard;
 use super::changes::ChangesCard;
 use super::diff::{BranchDiffCard, CommitDiffCard, DiffCard, StashDiffCard};
+use super::empty::{RepositoryEmpty, RepositoryEmptyView};
 use super::history::{HistoryCard, StashCard};
 use super::shortcuts::GitShortcutHelp;
 use super::state::GitPageState;
@@ -25,6 +26,7 @@ pub(super) fn GitDashboard() -> Element {
     let mut list_width = use_signal(|| f64::from(vmux_api::editor::TreeWidth::DEFAULT));
     let mut resizing = use_signal(|| false);
     let mut resize_origin = use_signal(|| None::<(f64, f64)>);
+    let empty = use_memo(move || RepositoryEmpty::of(&snapshot.read(), &state.controller.read()));
 
     if !repository_loaded() {
         return rsx! {};
@@ -32,6 +34,10 @@ pub(super) fn GitDashboard() -> Element {
 
     rsx! {
         main { class: "flex min-h-0 flex-1 flex-col bg-transparent",
+            if let Some(empty) = empty() {
+                GitHeader { viewed_count }
+                RepositoryEmptyView { state: empty }
+            } else {
             Split {
                 width: list_width(),
                 sidebar: rsx! { GitListPane { navigation, file_query } },
@@ -56,6 +62,7 @@ pub(super) fn GitDashboard() -> Element {
                         viewed_count,
                     }
                 }
+            }
             }
         }
         if resizing() {

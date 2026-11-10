@@ -84,6 +84,31 @@ impl Plugin for ProjectPagePlugin {
     }
 }
 
+struct ProjectNames<'a>(&'a vmux_setting::AppSettings);
+
+impl ProjectNames<'_> {
+    fn apply(&self, mut state: ProjectUiState) -> ProjectUiState {
+        let entries = match &mut state.view {
+            ProjectView::Catalog(catalog) => &mut catalog.entries,
+            ProjectView::Detail(detail) => {
+                if let Some(project) = self.0.project(&detail.path) {
+                    detail.name = project.display_label().to_string();
+                    detail.identity = project.identity().to_string();
+                }
+                &mut detail.choices
+            }
+            _ => return state,
+        };
+        for entry in entries {
+            if let Some(project) = self.0.project(&entry.path) {
+                entry.name = project.display_label().to_string();
+                entry.identity = project.identity().to_string();
+            }
+        }
+        state
+    }
+}
+
 #[derive(bevy::ecs::system::SystemParam)]
 struct ProjectSources<'w, 's> {
     info: Query<'w, 's, &'static mut vmux_git::RepoInfoCache>,
@@ -379,43 +404,7 @@ impl ProjectImport {
         if !selected.join(".git").exists() {
             return Err(vmux_ui::i18n::translate("project-import-not-repository"));
         }
-        if selected.starts_with(root) {
-            return Ok(selected);
-        }
-        let imports = root.join("imported");
-        std::fs::create_dir_all(&imports).map_err(|error| error.to_string())?;
-        let name = selected
-            .file_name()
-            .and_then(|name| name.to_str())
-            .ok_or_else(|| vmux_ui::i18n::translate("project-name-invalid"))?;
-        let link = ImportedProject::available_path(&imports, name, &selected)?;
-        if !link.exists() {
-            std::os::unix::fs::symlink(&selected, &link).map_err(|error| error.to_string())?;
-        }
-        Ok(link)
-    }
-}
-
-struct ImportedProject;
-
-impl ImportedProject {
-    fn available_path(imports: &Path, name: &str, selected: &Path) -> Result<PathBuf, String> {
-        for suffix in 1..=999 {
-            let candidate = if suffix == 1 {
-                imports.join(name)
-            } else {
-                imports.join(format!("{name}-{suffix}"))
-            };
-            if let Ok(existing) = candidate.canonicalize()
-                && existing == selected
-            {
-                return Ok(candidate);
-            }
-            if std::fs::symlink_metadata(&candidate).is_err() {
-                return Ok(candidate);
-            }
-        }
-        Err(vmux_ui::i18n::translate("project-import-name-conflict"))
+        ProjectRoute::attach(root, &selected)
     }
 }
 
@@ -938,6 +927,7 @@ fn queue(
                     (
                         ProjectUiState {
                             view: ProjectView::Detail(ProjectDetailView {
+                                identity: String::new(),
                                 id: id.clone(),
                                 name,
                                 path: path.to_string_lossy().into_owned(),
@@ -960,7 +950,14 @@ fn queue(
                 ),
                 None => continue,
             };
+            let state = ProjectNames(&settings).apply(state);
+            if let ProjectView::Detail(detail) = &state.view {
+                page.title.clone_from(&detail.name);
+            }
             let seed = match &state.view {
+                ProjectView::Detail(detail) if !detail.identity.is_empty() => {
+                    detail.identity.as_str()
+                }
                 ProjectView::Detail(detail) => detail.path.as_str(),
                 _ => &url,
             };
@@ -1019,21 +1016,40 @@ fn queue(
 
 fn sync_icons(
     settings: Res<vmux_setting::AppSettings>,
-    mut pages: Query<&mut vmux_ecs::PageMetadata>,
+    mut pages: Query<(
+        Entity,
+        &mut vmux_ecs::PageMetadata,
+        &vmux_ecs::UiState<ProjectUiState>,
+    )>,
+    mut commands: Commands,
 ) {
     if !settings.is_changed() {
         return;
     }
-    for mut page in &mut pages {
-        if !ProjectRoute::is_page(&page.url) || ProjectRoute::is_root(&page.url) {
+    for (entity, mut page, state) in &mut pages {
+        if !ProjectRoute::is_page(&page.url) {
             continue;
         }
-        let icon = vmux_api::PageIcon::favicon(IdenticonSpec::favicon_with_variant(
-            &page.url,
-            settings.appearance.project_icon,
-        ));
-        if page.icon != icon {
-            page.icon = icon;
+        let Some(current) = state.current() else {
+            continue;
+        };
+        let next = ProjectNames(&settings).apply(current.clone());
+        if let ProjectView::Detail(detail) = &next.view {
+            page.title.clone_from(&detail.name);
+            let seed = if detail.identity.is_empty() {
+                &detail.path
+            } else {
+                &detail.identity
+            };
+            page.icon = vmux_api::PageIcon::favicon(IdenticonSpec::favicon_with_variant(
+                seed,
+                settings.appearance.project_icon,
+            ));
+        }
+        if next != *current {
+            commands.trigger(vmux_ecs::UiStateWrite::<ProjectUiState>::from_event(
+                entity, &next,
+            ));
         }
     }
 }
@@ -1155,6 +1171,7 @@ fn finish_deletes(
 }
 
 fn finish_catalogs(
+    settings: Res<vmux_setting::AppSettings>,
     mut tasks: Query<(
         Entity,
         &mut ProjectCatalogTask,
@@ -1228,6 +1245,7 @@ fn finish_catalogs(
         {
             state.collection_view = current.collection_view;
         }
+        let state = ProjectNames(&settings).apply(state);
         commands.trigger(vmux_ecs::UiStateWrite::<ProjectUiState>::from_event(
             entity, &state,
         ));
@@ -1422,9 +1440,14 @@ impl ProjectCatalog {
             if path == root.as_path() {
                 break;
             }
-            if !path.join(".git").is_dir() {
+            if !path.join(".git").exists() {
                 continue;
             }
+            let primary = vmux_git::worktree::LinkedRepoRoot::find(path);
+            if path.join(".git").is_file() && primary.is_none() {
+                continue;
+            }
+            let path = primary.as_deref().unwrap_or(path);
             if let Some(url) = ProjectRoute::from_path(&root, path)
                 && ProjectRoute::resolve(&url, &root).is_some_and(|result| {
                     result.is_ok_and(|resolved| directory.starts_with(resolved))
@@ -1535,7 +1558,9 @@ impl ProjectCatalog {
         archive: &BTreeSet<String>,
         entries: &mut Vec<ProjectEntry>,
     ) {
-        if depth > 0 && directory.join(".git").exists() {
+        let attachment = directory.parent() == Some(root.join("imported").as_path())
+            && std::fs::symlink_metadata(directory).is_ok_and(|metadata| metadata.is_symlink());
+        if depth > 0 && (directory.join(".git").exists() || attachment) {
             let Some(url) = ProjectRoute::from_path(root, directory) else {
                 return;
             };
@@ -1560,6 +1585,7 @@ impl ProjectCatalog {
             let archived = archive.contains(&url);
             let id = ProjectId(url.clone());
             entries.push(ProjectEntry {
+                identity: String::new(),
                 id,
                 name: name.to_string(),
                 source,

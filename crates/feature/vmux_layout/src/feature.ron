@@ -129,6 +129,7 @@
                 "SpaceCreateRequest",
                 "ProjectActivateRequest",
                 "ProjectPickerRequest",
+                "ProjectRenameRequest",
                 "ProjectTreeToggle",
                 "ExtensionsUiState",
                 "ExtensionPopupOpenRequest",
@@ -662,6 +663,7 @@
                 group: "Layout > Layout",
                 shortcuts: [(shortcut: Direct("Super+Shift+S"), when: None)],
             ),
+            (id: "toggle_url_bar", label: "Toggle URL Bar", group: "Layout > Layout"),
             (
                 id: "minimize_window",
                 label: "Minimize Window",

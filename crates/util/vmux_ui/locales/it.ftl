@@ -1128,3 +1128,9 @@ project-new-repository = Repository vuoto
 project-local-folder = Cartella locale
 project-github-repository = Repository GitHub
 project-edit-conflict = Il progetto è cambiato. Riapri il modulo per riprovare.
+
+agent-video-play = Riproduci video
+
+command-toggle-url-bar = Layout > Layout > Mostra o nascondi barra degli indirizzi
+
+project-rename = Rinomina progetto

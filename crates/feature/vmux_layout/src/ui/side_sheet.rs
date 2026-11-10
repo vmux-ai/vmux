@@ -268,8 +268,6 @@ fn SideSheetSpaceRow(
     let menu_value = use_signal(|| space.id.clone());
     let menu_id = space.id.clone();
     let menu_name = space.name.clone();
-    let edit_id = space.id.clone();
-    let edit_name = space.name.clone();
     let deletable = spaces.spaces.len() > 1;
 
     rsx! {
@@ -314,13 +312,12 @@ fn SideSheetSpaceRow(
                             } else {
                                 button {
                                     r#type: "button",
-                                    class: "pointer-events-auto h-6 min-w-0 flex-1 truncate rounded px-1.5 py-0 text-left text-ui font-medium text-foreground outline-none hover:bg-foreground/[0.045] focus-visible:bg-foreground/[0.055] @max-[12rem]:text-ui-xs",
+                                    class: "pointer-events-auto h-6 min-w-0 flex-1 truncate px-1.5 py-0 text-left text-ui font-medium text-foreground outline-none hover:text-foreground/80 focus-visible:underline @max-[12rem]:text-ui-xs",
+                                    aria_haspopup: "menu",
+                                    aria_expanded: open(),
                                     onclick: move |event| {
                                         event.stop_propagation();
-                                        let _ = send(&SpaceFormOpenRequest {
-                                            space_id: Some(edit_id.clone()),
-                                            draft: edit_name.clone(),
-                                        });
+                                        open.set(!open());
                                     },
                                     {space.display_name()}
                                 }
@@ -347,6 +344,7 @@ fn SideSheetSpaceRow(
                         index: 0usize,
                         value: Into::<ReadSignal<String>>::into(menu_value),
                         on_select: move |_: String| {
+                            open.set(false);
                             let _ = send(&SpaceFormOpenRequest {
                                 space_id: Some(menu_id.clone()),
                                 draft: menu_name.clone(),

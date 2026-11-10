@@ -1128,3 +1128,9 @@ project-new-repository = Puste repozytorium
 project-local-folder = Lokalny folder
 project-github-repository = Repozytorium GitHub
 project-edit-conflict = Projekt został zmieniony. Otwórz edytor ponownie.
+
+agent-video-play = Odtwórz wideo
+
+command-toggle-url-bar = Layout > Układ > Przełącz pasek adresu
+
+project-rename = Zmień nazwę projektu

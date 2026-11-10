@@ -1128,3 +1128,9 @@ project-new-repository = Пустой репозиторий
 project-local-folder = Локальная папка
 project-github-repository = Репозиторий GitHub
 project-edit-conflict = Проект изменился. Откройте редактор снова.
+
+agent-video-play = Воспроизвести видео
+
+command-toggle-url-bar = Layout > Макет > Переключить адресную строку
+
+project-rename = Переименовать проект

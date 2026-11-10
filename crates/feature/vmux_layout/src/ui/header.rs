@@ -81,6 +81,8 @@ fn HeaderContent() -> Element {
             ui.remote.clone(),
         )
     });
+    let url_bar_hidden =
+        layout.use_selector(|ui| ui.layout.is_some_and(|geometry| geometry.url_bar_hidden))();
     let (stacks_state, tab_strip, header, extensions, remote) = header();
     let active_loading = layout.use_selector(|state| {
         state
@@ -195,10 +197,13 @@ fn HeaderContent() -> Element {
                         }
                     }
                 }
+                CompactStacks {}
             }
             div {
                 class: "{url_row_class}",
                 style: "{url_row_style}",
+                "inert": url_bar_hidden.then_some(""),
+                aria_hidden: url_bar_hidden,
                 if let Some(err) = stacks_error {
                     span { class: "text-ui text-destructive", "{err}" }
                 } else {
@@ -283,6 +288,59 @@ fn HeaderContent() -> Element {
                     ExtensionBar { extensions }
                     div { class: "hidden", RemoteControl { remote } }
                 }
+            }
+        }
+    }
+}
+
+#[component]
+fn CompactStacks() -> Element {
+    let layout = LayoutUi::current();
+    let state = layout.use_selector(|ui| {
+        (
+            ui.layout,
+            ui.side_sheet
+                .as_ref()
+                .and_then(|sheet| sheet.active_pane.clone()),
+        )
+    })();
+    let recent_zen = use_hook(|| Rc::new(std::cell::Cell::new(false)));
+    let (geometry, pane) = state;
+    let mut progress = 0.0;
+    let mut zen = false;
+    if let Some(geometry) = geometry {
+        zen = geometry.zen;
+        if zen {
+            recent_zen.set(true);
+        } else if geometry.side_sheet_width >= geometry.side_sheet_content_width {
+            recent_zen.set(false);
+        }
+        if recent_zen.get() {
+            progress = (1.0
+                - geometry.side_sheet_width / geometry.side_sheet_content_width.max(1.0))
+            .clamp(0.0, 1.0);
+        }
+    }
+    let hidden = !zen || progress <= 0.0;
+    let style = format!("max-width:{}%;opacity:{};", progress * 40.0, progress);
+    rsx! {
+        div { class: "flex min-w-0 items-center gap-1 overflow-x-auto", style,
+            "inert": hidden.then_some(""),
+            aria_hidden: hidden,
+            if let Some(pane) = pane {
+            for stack in pane.stacks {
+                button {
+                    key: "compact-stack-{stack.id}",
+                    r#type: "button",
+                    title: stack.title.clone(),
+                    aria_label: stack.title.clone(),
+                    aria_pressed: stack.is_active,
+                    class: if stack.is_active { "flex h-7 shrink-0 items-center gap-1 rounded-md bg-card px-2 text-xs" } else { "flex h-7 shrink-0 items-center gap-1 rounded-md px-2 text-xs text-muted-foreground hover:bg-card/60" },
+                    onclick: move |_| { let _ = send(&crate::event::SideSheetStackActivateRequest { pane_id: pane.id, stack_id: stack.id }); },
+                    StackIcon { icon: stack.icon.clone(), url: stack.url.clone(), title: stack.title.clone() }
+                    span { class: "max-w-24 truncate", "{stack.title}" }
+                }
+            }
             }
         }
     }
@@ -425,7 +483,7 @@ fn Tab(row: TabStripRow, index: usize, drag: TabDrag, #[props(default)] loading:
                         url: tab.url.clone(),
                         title: display_title.clone(),
                     }
-                    span { class: "{title_class}", "{display_title}" }
+                    TabTitle { text: display_title.clone(), class: title_class.clone() }
                 }
                 if tab.is_done_unseen {
                     span { class: "size-2 shrink-0 rounded-full bg-amber-400 ring-2 ring-background" }
@@ -485,6 +543,43 @@ fn Tab(row: TabStripRow, index: usize, drag: TabDrag, #[props(default)] loading:
 }
 
 #[component]
+fn TabTitle(text: String, class: String) -> Element {
+    let mut viewport_width = use_signal(|| 0.0f64);
+    let mut text_width = use_signal(|| 0.0f64);
+    let mut hovering = use_signal(|| false);
+    let distance = (text_width() - viewport_width()).max(0.0);
+    let offset = if hovering() { -distance } else { 0.0 };
+    let duration = if hovering() {
+        (distance / 35.0 * 1000.0).max(120.0)
+    } else {
+        120.0
+    };
+    let delay = if hovering() && distance > 0.0 { 300 } else { 0 };
+    rsx! {
+        span {
+            class: "min-w-0 flex-1 overflow-hidden {class}",
+            onmouseenter: move |_| hovering.set(true),
+            onmouseleave: move |_| hovering.set(false),
+            onresize: move |event: Event<ResizeData>| {
+                if let Ok(size) = event.get_border_box_size() {
+                    viewport_width.set(size.width);
+                }
+            },
+            span {
+                class: "inline-block w-max whitespace-nowrap [transform:translateX(var(--tab-title-offset))] transition-transform duration-[var(--tab-title-duration)] delay-[var(--tab-title-delay)] ease-linear motion-reduce:transform-none motion-reduce:transition-none",
+                style: "--tab-title-offset:{offset}px;--tab-title-duration:{duration}ms;--tab-title-delay:{delay}ms;",
+                onresize: move |event: Event<ResizeData>| {
+                    if let Ok(size) = event.get_border_box_size() {
+                        text_width.set(size.width);
+                    }
+                },
+                "{text}"
+            }
+        }
+    }
+}
+
+#[component]
 fn NewTabButton() -> Element {
     let mut pressed = use_signal(|| false);
     rsx! {
@@ -501,7 +596,7 @@ fn NewTabButton() -> Element {
                 r#type: "button",
                 aria_label: translate("layout-new-tab"),
                 title: translate("layout-new-tab"),
-                class: "absolute inset-0 flex appearance-none cursor-pointer items-center justify-center rounded-md border-0 bg-foreground/[0.04] text-muted-foreground shadow-none outline-none transition-colors hover:bg-foreground/[0.09] hover:text-foreground active:bg-foreground/[0.12] focus-visible:bg-foreground/[0.09] focus-visible:text-foreground",
+                class: "absolute inset-0 flex appearance-none cursor-pointer items-center justify-center rounded-md border-0 bg-card/80 text-foreground shadow-none outline-none transition-[background-color,transform] hover:bg-card active:scale-95 focus-visible:bg-card",
                 onpointerdown: move |event: Event<PointerData>| {
                     if event.trigger_button() == Some(dioxus::html::input_data::MouseButton::Primary) {
                         pressed.set(true);

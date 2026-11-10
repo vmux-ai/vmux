@@ -236,6 +236,7 @@ impl<'a> PageBuilder<'a> {
                         mime_type: attachment.mime_type.clone(),
                         size: attachment.size,
                         preview_data_url: String::new(),
+                        media_url: String::new(),
                     })
                     .collect(),
                 created_at_ms,

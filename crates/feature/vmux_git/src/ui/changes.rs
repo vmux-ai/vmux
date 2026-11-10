@@ -136,11 +136,13 @@ pub(super) fn ChangesCard(
                     }
                 }
             }
+            if !repository.files.is_empty() || !commit_pending.is_empty() {
             CommitPanel {
                 staged_count,
                 commit_message,
                 commit_pending,
                 can_commit: operations.commit,
+            }
             }
         }
     }

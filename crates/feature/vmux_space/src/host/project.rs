@@ -30,6 +30,10 @@ impl Plugin for SpaceProjectPlugin {
             .register_stored::<ExpandedProjectDirs>()
             .add_observer(tree_toggle)
             .add_observer(pick)
+            .add_plugins(bevy_cef::prelude::UiEventPlugin::<(
+                vmux_api::space::ProjectRenameRequest,
+            )>::default())
+            .add_observer(rename)
             .add_systems(
                 Update,
                 (
@@ -45,6 +49,21 @@ impl Plugin for SpaceProjectPlugin {
                     finish_picks,
                 ),
             );
+    }
+}
+
+fn rename(
+    trigger: On<UiInput<vmux_api::space::ProjectRenameRequest>>,
+    scope: vmux_layout::window::WindowScope,
+    mut settings: ResMut<AppSettings>,
+    mut saves: MessageWriter<SettingsSaveRequest>,
+) {
+    if scope.current_space(trigger.event().webview).is_none() {
+        return;
+    }
+    let request = &trigger.event().payload;
+    if settings.rename_project(&request.id, &request.name) {
+        saves.write(SettingsSaveRequest);
     }
 }
 
@@ -91,8 +110,12 @@ struct PendingProjectPicker {
 struct ProjectPicker;
 
 impl ProjectPicker {
-    fn initial_directory(path: &str) -> std::path::PathBuf {
-        let mut current = std::path::PathBuf::from(path.trim());
+    fn initial_directory(path: &str, projects: &std::path::Path) -> std::path::PathBuf {
+        let mut current = if path.trim().is_empty() {
+            projects.to_path_buf()
+        } else {
+            std::path::PathBuf::from(path.trim())
+        };
         while !current.is_dir() && current.pop() {}
         if current.is_dir() {
             return current;
@@ -107,6 +130,7 @@ impl ProjectPicker {
 fn pick(
     trigger: On<UiInput<ProjectPickerRequest>>,
     pending: Query<&PendingProjectPicker>,
+    catalog: vmux_ecs::profile::Projects,
     proxy: Option<Res<EventLoopProxyWrapper>>,
     mut commands: Commands,
 ) {
@@ -116,8 +140,12 @@ fn pick(
     }
     let wake = proxy.as_deref().map(|proxy| (**proxy).clone());
     let current_dir = event.payload.current_dir.clone();
+    let projects = catalog
+        .path()
+        .map(std::path::PathBuf::from)
+        .unwrap_or_default();
     let task = IoTaskPool::get().spawn(async move {
-        let initial = ProjectPicker::initial_directory(&current_dir);
+        let initial = ProjectPicker::initial_directory(&current_dir, &projects);
         let selected = rfd::AsyncFileDialog::new()
             .set_title(vmux_ui::i18n::translate("agent-project-choose"))
             .set_directory(initial)
@@ -249,14 +277,23 @@ impl ProjectCatalog {
                 LinkedRepoRoot::find(&checkout.root).unwrap_or_else(|| checkout.root.clone());
             let identity = identity.canonicalize().unwrap_or(identity);
             let mut projected = row.clone();
-            projected.identity = identity.to_string_lossy().into_owned();
+            if row.identity.is_empty() || row.identity == row.path {
+                projected.identity = identity.to_string_lossy().into_owned();
+                if row.label
+                    == std::path::Path::new(&row.path)
+                        .file_name()
+                        .unwrap_or_default()
+                        .to_string_lossy()
+                {
+                    projected.label = identity
+                        .file_name()
+                        .unwrap_or_default()
+                        .to_string_lossy()
+                        .into_owned();
+                }
+            }
             projected.path = checkout.root.to_string_lossy().into_owned();
             projected.display_path = vmux_path::DisplayPath::project(&identity);
-            projected.label = identity
-                .file_name()
-                .map(|name| name.to_string_lossy().into_owned())
-                .filter(|name| !name.is_empty())
-                .unwrap_or_else(|| projected.label.clone());
             projected.is_worktree = checkout.root != identity;
             candidates.push((Some(identity), projected));
         }
@@ -1007,7 +1044,7 @@ mod tests {
 
     impl GitProjectRowsFixture {
         fn start() -> Self {
-            let root = tempfile::tempdir().unwrap();
+            let root = tempfile::tempdir_in("/tmp").unwrap();
             let cloud = root.path().join("vmux-cloud");
             let dashboard = root.path().join("dashboard");
             std::fs::create_dir_all(&cloud).unwrap();
@@ -1100,6 +1137,25 @@ mod tests {
     }
 
     #[test]
+    fn repository_discovery_preserves_project_identity_and_custom_name() {
+        let fixture = GitProjectRowsFixture::start();
+        let mut row = fixture.row(&fixture.cloud_worktree, true);
+        row.identity = "project-identity".into();
+        row.label = "Product workspace".into();
+        let projected = ProjectCatalog::from_rows(&[row]).rows;
+        assert_eq!(projected[0].identity, "project-identity");
+        assert_eq!(projected[0].label, "Product workspace");
+        assert_eq!(
+            projected[0].path,
+            fixture
+                .cloud_worktree
+                .canonicalize()
+                .unwrap()
+                .to_string_lossy()
+        );
+    }
+
+    #[test]
     fn project_catalog_collapses_internal_and_linked_repository_paths() {
         let fixture = GitProjectRowsFixture::start();
         let notes = fixture._root.path().join("notes");
@@ -1174,9 +1230,17 @@ mod tests {
         let missing = existing.join("github.com/vmux-ai/vmux");
 
         assert_eq!(
-            ProjectPicker::initial_directory(&missing.to_string_lossy()),
+            ProjectPicker::initial_directory(&missing.to_string_lossy(), &existing),
             existing
         );
+    }
+
+    #[test]
+    fn adding_a_project_starts_in_the_project_catalog() {
+        let root = tempfile::tempdir().unwrap();
+        let projects = root.path().join("projects");
+        std::fs::create_dir(&projects).unwrap();
+        assert_eq!(ProjectPicker::initial_directory("", &projects), projects);
     }
 
     #[test]

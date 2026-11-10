@@ -25,23 +25,13 @@ pub fn Page() -> Element {
     let connected = snapshot.connected;
     let has_processes = snapshot.total_count != 0;
     let has_managed_processes = snapshot.managed_count != 0;
-    let process_count = snapshot.total_count as usize;
-    let mut toolbar = vec![
-        ToolbarControl::search(
-            snapshot.query.clone(),
-            translate("services-filter"),
-            move |query| {
-                let _ = send(&ProcessSearchRequest { query });
-            },
-        ),
-        ToolbarControl::badge(process_count.to_string()),
-        ToolbarControl::badge(translate(if connected {
-            "services-connected"
-        } else {
-            "services-disconnected"
-        }))
-        .active(connected),
-    ];
+    let mut toolbar = vec![ToolbarControl::search(
+        snapshot.query.clone(),
+        translate("services-filter"),
+        move |query| {
+            let _ = send(&ProcessSearchRequest { query });
+        },
+    )];
     if has_managed_processes {
         toolbar.push(
             ToolbarControl::button(translate("services-kill-all"), move |_| {

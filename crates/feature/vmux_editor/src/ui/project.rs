@@ -454,9 +454,14 @@ pub(super) fn ProjectDashboard(detail: ProjectDetailView) -> Element {
             ..Default::default()
         });
     }
+    let project_identity = if detail.identity.is_empty() {
+        detail.path.clone()
+    } else {
+        detail.identity
+    };
     let root = detail.path;
     let project_name = detail.name;
-    let project_identity = detail.id.0;
+    let project_route = detail.id.0;
     let start_url = "vmux://start/".to_string();
     let address = PageAddress {
         current: AddressOption {
@@ -471,13 +476,11 @@ pub(super) fn ProjectDashboard(detail: ProjectDetailView) -> Element {
             entry: AddressOption {
                 label: project_name.clone(),
                 title: root.clone(),
-                identity: root.clone(),
+                identity: project_identity,
                 intent: Some(AddressIntent::Navigate {
                     url: try_consume_context::<vmux_ecs::PageMetadata>()
                         .map(|metadata| metadata.url)
-                        .unwrap_or_else(|| {
-                            format!("{}{project_identity}", crate::project::ProjectRoute::ROOT)
-                        }),
+                        .unwrap_or_else(|| project_route.clone()),
                 }),
                 ..Default::default()
             },

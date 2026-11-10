@@ -88,7 +88,11 @@ fn term_resize(
     let Ok(webview_size) = webviews.get(entity) else {
         return;
     };
-    if event.char_width <= 0.0 || event.char_height <= 0.0 {
+    if !event.char_width.is_finite()
+        || !event.char_height.is_finite()
+        || event.char_width <= 0.0
+        || event.char_height <= 0.0
+    {
         return;
     }
 
@@ -102,6 +106,13 @@ fn term_resize(
     } else {
         webview_size.0.y
     };
+    if !viewport_width.is_finite()
+        || !viewport_height.is_finite()
+        || viewport_width < event.char_width
+        || viewport_height < event.char_height
+    {
+        return;
+    }
     let cols = (viewport_width / event.char_width).floor().max(1.0) as u16;
     let rows = (viewport_height / event.char_height).floor().max(1.0) as u16;
 
@@ -140,6 +151,48 @@ fn term_scroll(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn resize_before_process_creation_is_retained_and_sent_when_bound() {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins)
+            .add_message::<ServiceRequest>()
+            .add_observer(term_resize);
+        let entity = app
+            .world_mut()
+            .spawn((
+                Terminal,
+                WebviewSize(Vec2::new(1000.0, 768.0)),
+                TerminalGridSize::default(),
+            ))
+            .id();
+        let payload = TermResizeEvent {
+            char_width: 8.0,
+            char_height: 16.0,
+            viewport_width: 1000.0,
+            viewport_height: 768.0,
+        };
+        app.world_mut().trigger(UiInput {
+            webview: entity,
+            payload: payload.clone(),
+        });
+        let grid = app.world().get::<TerminalGridSize>(entity).unwrap();
+        assert_eq!((grid.cols, grid.rows), (125, 48));
+        let process_id = ProcessId::new();
+        app.world_mut().entity_mut(entity).insert(process_id);
+        app.world_mut().trigger(UiInput {
+            webview: entity,
+            payload,
+        });
+        let messages: Vec<_> = app
+            .world_mut()
+            .resource_mut::<Messages<ServiceRequest>>()
+            .drain()
+            .collect();
+        assert!(
+            matches!(messages.as_slice(), [ServiceRequest(ClientMessage::ResizeProcess { process_id: id, cols: 125, rows: 48 })] if *id == process_id)
+        );
+    }
 
     #[test]
     fn page_ready_without_service_owes_a_snapshot() {

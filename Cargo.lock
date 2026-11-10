@@ -11084,6 +11084,7 @@ dependencies = [
  "serde",
  "serde_json",
  "tempfile",
+ "uuid",
  "vmux_api",
  "vmux_command",
  "vmux_ecs",

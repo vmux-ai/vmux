@@ -133,9 +133,10 @@ fn ActiveWorkspaceProjectTree(project: ActiveWorkspaceProject, pane_id: u64) -> 
         branches,
         expanded: _,
     } = project;
-    let picker_root = root.path.clone();
     let mut choosing = use_signal(|| false);
     let mut choosing_branch = use_signal(|| false);
+    let mut renaming = use_signal(|| None::<ProjectRow>);
+    let mut name_draft = use_signal(String::new);
     let project_key = pane_id;
     let optimistic_project = use_optimistic_map(std::collections::HashMap::from([(
         project_key,
@@ -157,14 +158,45 @@ fn ActiveWorkspaceProjectTree(project: ActiveWorkspaceProject, pane_id: u64) -> 
     } else {
         selected_branch.clone()
     };
-    let branch_choices = branches
-        .into_iter()
-        .filter(|branch| branch.branch != selected_branch)
-        .collect::<Vec<_>>();
+    let mut branch_choices = branches;
+    if !selected_branch.is_empty()
+        && !branch_choices
+            .iter()
+            .any(|branch| branch.branch == selected_branch)
+    {
+        branch_choices.insert(
+            0,
+            WorkspaceBranch {
+                branch: selected_branch.clone(),
+                checkout: project_dir.clone(),
+                label: String::new(),
+            },
+        );
+    }
     let project_choices = choices;
     rsx! {
         div { class: "relative w-full max-w-full min-w-0 self-stretch overflow-visible",
             div { class: "flex min-w-0 flex-col gap-0.5 py-1 @max-[12rem]:py-0.5",
+                if let Some(project) = renaming() {
+                    input {
+                        class: "h-8 min-w-0 rounded-md bg-card px-2 text-ui text-foreground outline-none focus:ring-1 focus:ring-primary/40",
+                        value: name_draft(),
+                        aria_label: translate("project-rename"),
+                        onmounted: move |event| { spawn(async move { let _ = event.data().set_focus(true).await; }); },
+                        oninput: move |event| name_draft.set(event.value()),
+                        onkeydown: move |event| match event.key() {
+                            Key::Enter => {
+                                event.prevent_default();
+                                if !name_draft().trim().is_empty() {
+                                    let _ = send(&vmux_api::space::ProjectRenameRequest { id: project.identity.clone(), name: name_draft() });
+                                    renaming.set(None);
+                                }
+                            }
+                            Key::Escape => { event.prevent_default(); renaming.set(None); }
+                            _ => {}
+                        },
+                    }
+                } else {
                 LayoutDropdown {
                     id: format!("active-project-{pane_id}"),
                     open: choosing(),
@@ -186,7 +218,7 @@ fn ActiveWorkspaceProjectTree(project: ActiveWorkspaceProject, pane_id: u64) -> 
                         },
                         onclick: move |_| {
                             choosing_branch.set(false);
-                            choosing.set(!choosing());
+                            choosing.set(true);
                         },
                     }
                     if choosing() {
@@ -215,7 +247,7 @@ fn ActiveWorkspaceProjectTree(project: ActiveWorkspaceProject, pane_id: u64) -> 
                             on_add: move |_| {
                                 choosing.set(false);
                                 let _ = send(&ProjectPickerRequest {
-                                    current_dir: picker_root.clone(),
+                                    current_dir: String::new(),
                                     pane_id: Some(pane_id),
                                 });
                             },
@@ -226,16 +258,16 @@ fn ActiveWorkspaceProjectTree(project: ActiveWorkspaceProject, pane_id: u64) -> 
                                     path: project.path,
                                 });
                             },
+                            on_rename_selected: move |project: ProjectRow| {
+                                choosing.set(false);
+                                name_draft.set(project.label.clone());
+                                renaming.set(Some(project));
+                            },
                         }
                     }
                 }
+                }
                 if !selected_branch.is_empty() || !branch_choices.is_empty() {
-                    if branch_choices.is_empty() {
-                        div { class: "flex h-8 w-full min-w-0 items-center gap-2 rounded px-2 transition-colors hover:bg-foreground/[0.04] @max-[12rem]:px-1",
-                            IdentityOrb { seed: selected_branch.clone(), alt: selected_branch.clone(), class: "size-3.5".to_string() }
-                            span { class: "truncate-fade min-w-0 flex-1 font-mono text-[10px] text-foreground/85", title: "{selected_branch}", "{selected_branch}" }
-                        }
-                    } else {
                         LayoutDropdown {
                             id: format!("active-branch-{pane_id}"),
                             open: choosing_branch(),
@@ -256,7 +288,7 @@ fn ActiveWorkspaceProjectTree(project: ActiveWorkspaceProject, pane_id: u64) -> 
                                 },
                                 onclick: move |_| {
                                     choosing.set(false);
-                                    choosing_branch.set(!choosing_branch());
+                                    choosing_branch.set(true);
                                 },
                             }
                             if choosing_branch() {
@@ -268,12 +300,17 @@ fn ActiveWorkspaceProjectTree(project: ActiveWorkspaceProject, pane_id: u64) -> 
                                             let project_path = project_dir.clone();
                                             let observed_branch = current_branch.clone();
                                             let optimistic_key = branch_key.clone();
+                                            let selected = branch_name == selected_branch;
                                             rsx! {
                                                 ActiveWorkspaceBranchChoice {
                                                     key: "{branch.branch}",
                                                     branch,
+                                                    selected,
                                                     on_pick: move |_| {
                                                         choosing_branch.set(false);
+                                                        if selected {
+                                                            return;
+                                                        }
                                                         optimistic_branch.set(
                                                             optimistic_key.clone(),
                                                             observed_branch.clone(),
@@ -295,7 +332,6 @@ fn ActiveWorkspaceProjectTree(project: ActiveWorkspaceProject, pane_id: u64) -> 
                                 }
                             }
                         }
-                    }
                 }
             }
 
@@ -304,7 +340,11 @@ fn ActiveWorkspaceProjectTree(project: ActiveWorkspaceProject, pane_id: u64) -> 
 }
 
 #[component]
-fn ActiveWorkspaceBranchChoice(branch: WorkspaceBranch, on_pick: EventHandler<()>) -> Element {
+fn ActiveWorkspaceBranchChoice(
+    branch: WorkspaceBranch,
+    selected: bool,
+    on_pick: EventHandler<()>,
+) -> Element {
     rsx! {
         button {
             r#type: "button",
@@ -314,6 +354,9 @@ fn ActiveWorkspaceBranchChoice(branch: WorkspaceBranch, on_pick: EventHandler<()
             span { class: "min-w-0 flex-1 truncate font-mono text-[10px]", "{branch.branch}" }
             if !branch.label.is_empty() {
                 span { class: "max-w-24 truncate text-[9px] text-muted-foreground", "{branch.label}" }
+            }
+            if selected {
+                vmux_ui::icon::LineIconView { icon: vmux_ui::icon::LineIcon::Check, class: "ml-auto size-3.5 shrink-0" }
             }
         }
     }

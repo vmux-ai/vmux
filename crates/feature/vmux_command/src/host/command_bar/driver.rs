@@ -1322,6 +1322,7 @@ mod tests {
             mime_type: "image/png".into(),
             size: 12,
             preview_data_url: String::new(),
+            media_url: String::new(),
         }];
 
         let submitted = palette.submit_start(&attached);
@@ -1349,6 +1350,7 @@ mod tests {
             mime_type: "image/png".into(),
             size: 12,
             preview_data_url: String::new(),
+            media_url: String::new(),
         }];
 
         let submitted = palette.submit_start(&attached);

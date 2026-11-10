@@ -1,5 +1,5 @@
 use super::agent::AgentBanner;
-use super::item::ChatItemRow;
+use super::item::{ChatItemRow, UserAttachment};
 use super::state::Chat;
 use crate::event::{ChatCancelQueuedPrompt, ChatClearQueue, ChatResume};
 use dioxus::prelude::*;
@@ -14,7 +14,12 @@ use vmux_ui::scroll::ScrollPreload;
 fn QueuedAttachments(attachments: Vec<ChatAttachment>) -> Element {
     let mut thumbs = Vec::new();
     let mut plain = Vec::new();
+    let mut videos = Vec::new();
     for attachment in attachments {
+        if attachment.mime_type.starts_with("video/") && !attachment.media_url.is_empty() {
+            videos.push(attachment);
+            continue;
+        }
         match attachment.preview_data_url.is_empty() {
             true => plain.push(attachment.name),
             false => thumbs.push((
@@ -25,6 +30,13 @@ fn QueuedAttachments(attachments: Vec<ChatAttachment>) -> Element {
         }
     }
     rsx! {
+        if !videos.is_empty() {
+            div { class: "mt-1 flex flex-wrap gap-2",
+                for attachment in videos {
+                    UserAttachment { attachment, onload: move |_| {} }
+                }
+            }
+        }
         if !thumbs.is_empty() {
             div { class: "mt-1 flex flex-wrap gap-1.5",
                 for (path , name , preview) in thumbs {

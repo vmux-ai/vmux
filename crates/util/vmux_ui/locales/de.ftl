@@ -1128,3 +1128,9 @@ project-new-repository = Leeres Repository
 project-local-folder = Lokaler Ordner
 project-github-repository = GitHub-Repository
 project-edit-conflict = Dieses Projekt wurde geändert. Öffnen Sie den Editor erneut.
+
+agent-video-play = Video abspielen
+
+command-toggle-url-bar = Layout > Layout > URL-Leiste umschalten
+
+project-rename = Projekt umbenennen

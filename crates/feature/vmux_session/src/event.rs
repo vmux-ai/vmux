@@ -559,6 +559,7 @@ mod tests {
                         mime_type: "image/png".into(),
                         size: 3,
                         preview_data_url: "data:image/png;base64,cG5n".into(),
+                        media_url: String::new(),
                     }],
                 },
                 QueuedPromptSnapshot {
@@ -686,6 +687,7 @@ mod tests {
                     mime_type: "image/png".into(),
                     size: 3,
                     preview_data_url: "data:image/png;base64,cG5n".into(),
+                    media_url: String::new(),
                 }],
                 created_at_ms: 100,
             },

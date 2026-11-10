@@ -1125,3 +1125,9 @@ project-new-repository = 빈 저장소
 project-local-folder = 로컬 폴더
 project-github-repository = GitHub 저장소
 project-edit-conflict = 프로젝트가 변경되었습니다. 편집 화면을 다시 열어 주세요.
+
+agent-video-play = 동영상 재생
+
+command-toggle-url-bar = Layout > 레이아웃 > 주소 표시줄 전환
+
+project-rename = 프로젝트 이름 변경

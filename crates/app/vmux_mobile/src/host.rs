@@ -299,6 +299,7 @@ impl MobileHost {
                     mime_type: entry.mime_type.clone(),
                     size: entry.size,
                     preview_data_url: entry.preview_data_url.clone(),
+                    media_url: String::new(),
                 });
                 break;
             }

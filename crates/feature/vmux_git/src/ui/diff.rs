@@ -231,11 +231,13 @@ pub(super) fn DiffCard(
 ) -> Element {
     rsx! {
         section { class: "flex h-full min-h-0 flex-col overflow-hidden rounded-lg bg-transparent",
+            if !selected_path().is_empty() {
             div { class: "flex h-10 shrink-0 items-center gap-2 bg-card/45 px-3",
                 TypeIcon { path: selected_path(), is_dir: false, class: "size-3.5 shrink-0" }
                 span { class: "min-w-0 flex-1 truncate font-mono text-[11px] font-medium",
-                    if selected_path().is_empty() { {translate("git-select-file")} } else { "{selected_path}" }
+                    "{selected_path}"
                 }
+            }
             }
             if selected_abs_path().is_empty() {
                 div { class: "flex min-h-64 flex-1 items-center justify-center p-6 text-center text-sm text-muted-foreground",

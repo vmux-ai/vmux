@@ -379,7 +379,10 @@ impl ActiveWorkspaceProject {
                 continue;
             }
             let existing = choices.iter_mut().find(|held| {
-                held.display_path == project.display_path && held.label == project.label
+                if !held.identity.is_empty() && !project.identity.is_empty() {
+                    return held.identity == project.identity;
+                }
+                held.display_path == project.display_path
             });
             if let Some(existing) = existing {
                 if project.is_active && !existing.is_active {

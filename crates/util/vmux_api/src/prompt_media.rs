@@ -6,6 +6,8 @@ pub struct ChatAttachment {
     pub size: u64,
     #[serde(default)]
     pub preview_data_url: String,
+    #[serde(default)]
+    pub media_url: String,
 }
 
 #[vmux_api::contract(Default, Eq)]
@@ -50,12 +52,93 @@ impl ChatAttachments {
                         .preview_data_url
                         .clone_from(&existing.preview_data_url);
                 }
+                if replacement.media_url.is_empty()
+                    && replacement.name == existing.name
+                    && replacement.mime_type == existing.mime_type
+                    && replacement.size == existing.size
+                {
+                    replacement.media_url.clone_from(&existing.media_url);
+                }
                 *existing = replacement;
             } else {
                 current.push(attachment.clone());
             }
         }
         *current != previous
+    }
+}
+
+pub struct PromptMediaPaths;
+
+impl PromptMediaPaths {
+    pub fn videos(text: &str) -> Vec<String> {
+        let mut paths = Vec::new();
+        let mut chars = text.char_indices().peekable();
+        while let Some((start, character)) = chars.next() {
+            let boundary =
+                start == 0 || text[..start].ends_with([' ', '\n', '\t', '"', '\'', '`', '(']);
+            if !boundary
+                || !(character == '/' || character == '~' || text[start..].starts_with("file://"))
+            {
+                continue;
+            }
+            let quoted = text[..start]
+                .chars()
+                .next_back()
+                .filter(|c| matches!(c, '"' | '\'' | '`'));
+            let mut token = String::from(character);
+            while let Some(&(_, next)) = chars.peek() {
+                if quoted == Some(next)
+                    || (quoted.is_none()
+                        && (next.is_whitespace() || matches!(next, '"' | '\'' | '`' | ')')))
+                {
+                    break;
+                }
+                chars.next();
+                if next == '\\' {
+                    if let Some((_, escaped)) = chars.next() {
+                        token.push(escaped);
+                    }
+                } else {
+                    token.push(next);
+                }
+            }
+            let path = if token.starts_with("file://") {
+                let Ok(url) = url::Url::parse(&token) else {
+                    continue;
+                };
+                let Ok(path) = url.to_file_path() else {
+                    continue;
+                };
+                path.to_string_lossy().into_owned()
+            } else {
+                token
+            };
+            if crate::media::MediaKind::from_path(&path) == Some(crate::media::MediaKind::Video)
+                && !paths.contains(&path)
+            {
+                paths.push(path);
+            }
+        }
+        paths
+    }
+
+    pub fn append_videos(text: &str, attachments: &mut Vec<ChatAttachment>) {
+        for path in Self::videos(text) {
+            if attachments.iter().any(|attachment| attachment.path == path) {
+                continue;
+            }
+            let name = path.rsplit('/').next().unwrap_or(&path).to_string();
+            let mime_type = crate::media::MediaKind::mime(&path)
+                .unwrap_or_default()
+                .to_string();
+            attachments.push(ChatAttachment {
+                path,
+                name,
+                mime_type,
+                ..Default::default()
+            });
+        }
     }
 }
 
@@ -171,6 +254,30 @@ mod tests {
     use super::*;
 
     #[test]
+    fn prompt_video_paths_handle_shell_escapes_quotes_and_file_urls() {
+        let text = r#"animate /Users/test/Screen\ Recording\ 2026-11-10.mov and \"unrelated\" '/tmp/a clip.webm' ~/Movies/clip.mp4 file:///tmp/second%20clip.mov https://example.com/remote.mov"#;
+        assert_eq!(
+            PromptMediaPaths::videos(text),
+            vec![
+                "/Users/test/Screen Recording 2026-11-10.mov",
+                "/tmp/a clip.webm",
+                "~/Movies/clip.mp4",
+                "/tmp/second clip.mov",
+            ]
+        );
+        let mut attachments = vec![ChatAttachment {
+            path: "/tmp/a clip.webm".into(),
+            ..Default::default()
+        }];
+        PromptMediaPaths::append_videos(
+            "'/tmp/a clip.webm' /tmp/b.mov /tmp/b.mov",
+            &mut attachments,
+        );
+        assert_eq!(attachments.len(), 2);
+        assert_eq!(attachments[1].path, "/tmp/b.mov");
+    }
+
+    #[test]
     fn inline_media_query_requires_a_token_boundary_and_open_tail() {
         assert_eq!(
             InlineMediaQuery::parse("inspect @Pictures/scr"),
@@ -209,6 +316,7 @@ mod tests {
             mime_type: "image/png".into(),
             size: 1,
             preview_data_url: "data:image/png;base64,preview".into(),
+            media_url: "http://127.0.0.1:12345/render-only".into(),
         };
         let submitted = ChatSubmitAttachment::from(&first);
 
@@ -216,6 +324,9 @@ mod tests {
         assert_eq!(submitted.name, first.name);
         assert_eq!(submitted.mime_type, first.mime_type);
         assert_eq!(submitted.size, first.size);
+        let payload = serde_json::to_value(&submitted).unwrap();
+        assert!(payload.get("preview_data_url").is_none());
+        assert!(payload.get("media_url").is_none());
     }
 
     #[test]
@@ -243,6 +354,7 @@ mod tests {
             mime_type: "image/png".into(),
             size: 1,
             preview_data_url: "data:image/png;base64,preview".into(),
+            media_url: String::new(),
         };
         let refreshed = ChatAttachment {
             preview_data_url: String::new(),

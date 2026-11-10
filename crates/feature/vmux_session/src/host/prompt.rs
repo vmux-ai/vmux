@@ -531,6 +531,7 @@ mod tests {
                     mime_type: String::new(),
                     size: 0,
                     preview_data_url: String::new(),
+                    media_url: String::new(),
                 });
             }
             self.0.world_mut().write_message(Attach(added));

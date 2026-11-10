@@ -159,7 +159,7 @@ impl AppSettings {
             }
             rows.push(ProjectRow {
                 path: in_use.to_string(),
-                identity: project.path.clone(),
+                identity: project.identity().to_string(),
                 label: project.display_label().to_string(),
                 display_path: project.path.clone(),
                 depth: 0,
@@ -192,6 +192,7 @@ impl AppSettings {
         let mut new_settings: AppSettings = serde_json::from_value(value_json)
             .map_err(|e| format!("invalid value for path '{path}': {e}"))?;
         new_settings.agent.normalize();
+        new_settings.normalize_projects();
         *self = new_settings;
         Ok(())
     }
@@ -200,7 +201,14 @@ impl AppSettings {
         serde_json::to_string(self).unwrap_or_else(|_| "{}".to_string())
     }
 
-    pub fn remember_space_project(&mut self, space_id: &str, project: SpaceProject) -> bool {
+    pub fn remember_space_project(&mut self, space_id: &str, mut project: SpaceProject) -> bool {
+        if let Some(known) = self.project(&project.path) {
+            project.id.clone_from(&known.id);
+            project.label.clone_from(&known.label);
+        }
+        if project.id.is_empty() {
+            project.id = uuid::Uuid::new_v4().to_string();
+        }
         let known = self.remember_known_project(&project);
         let key = self
             .space_key(space_id)
@@ -225,6 +233,8 @@ impl AppSettings {
             Some(held) => {
                 let moved = held.checkout != project.checkout;
                 held.checkout = project.checkout.clone();
+                held.id.clone_from(&project.id);
+                held.label.clone_from(&project.label);
                 moved
             }
             None => {
@@ -283,6 +293,81 @@ impl AppSettings {
         None
     }
 
+    pub fn project(&self, path: &str) -> Option<&SpaceProject> {
+        for project in &self.projects {
+            if project.path == path || project.in_use() == path || project.id == path {
+                return Some(project);
+            }
+        }
+        for space in self.spaces.values() {
+            for project in &space.projects {
+                if project.path == path || project.in_use() == path || project.id == path {
+                    return Some(project);
+                }
+            }
+        }
+        None
+    }
+
+    pub fn normalize_projects(&mut self) {
+        let mut canonical = std::collections::BTreeMap::<String, SpaceProject>::new();
+        for project in self
+            .projects
+            .iter()
+            .chain(self.spaces.values().flat_map(|space| &space.projects))
+        {
+            let held = canonical
+                .entry(project.path.clone())
+                .or_insert_with(|| project.clone());
+            if held.id.is_empty() && !project.id.is_empty() {
+                held.id.clone_from(&project.id);
+            }
+            if held.label.is_none() {
+                held.label.clone_from(&project.label);
+            }
+        }
+        for held in canonical.values_mut() {
+            if held.id.is_empty() {
+                held.id = uuid::Uuid::new_v4().to_string();
+            }
+        }
+        for project in self.projects.iter_mut().chain(
+            self.spaces
+                .values_mut()
+                .flat_map(|space| &mut space.projects),
+        ) {
+            let Some(held) = canonical.get(&project.path) else {
+                continue;
+            };
+            project.id.clone_from(&held.id);
+            project.label.clone_from(&held.label);
+        }
+        for project in canonical.into_values() {
+            if !self.projects.iter().any(|held| held.id == project.id) {
+                self.projects.push(project);
+            }
+        }
+    }
+
+    pub fn rename_project(&mut self, id: &str, name: &str) -> bool {
+        let name = name.trim();
+        if name.is_empty() {
+            return false;
+        }
+        let mut changed = false;
+        for project in self.projects.iter_mut().chain(
+            self.spaces
+                .values_mut()
+                .flat_map(|space| &mut space.projects),
+        ) {
+            if project.id == id && project.label.as_deref() != Some(name) {
+                project.label = Some(name.to_string());
+                changed = true;
+            }
+        }
+        changed
+    }
+
     fn remember_known_project(&mut self, project: &SpaceProject) -> bool {
         match self.projects.iter().position(|p| p.path == project.path) {
             Some(0) => false,
@@ -293,7 +378,19 @@ impl AppSettings {
             }
             None => {
                 self.projects.insert(0, project.clone());
-                self.projects.truncate(KNOWN_PROJECT_LIMIT);
+                let mut removable = 0;
+                let referenced: std::collections::HashSet<&str> = self
+                    .spaces
+                    .values()
+                    .flat_map(|space| space.projects.iter().map(|project| project.path.as_str()))
+                    .collect();
+                self.projects.retain(|project| {
+                    if project.label.is_some() || referenced.contains(project.path.as_str()) {
+                        return true;
+                    }
+                    removable += 1;
+                    removable <= KNOWN_PROJECT_LIMIT
+                });
                 true
             }
         }
@@ -434,6 +531,8 @@ pub struct RecordingSettings {
 
 #[derive(Clone, Debug, Default, Deserialize, Serialize, PartialEq, Eq)]
 pub struct SpaceProject {
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub id: String,
     pub path: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub checkout: Option<String>,
@@ -444,8 +543,17 @@ pub struct SpaceProject {
 }
 
 impl SpaceProject {
+    pub fn identity(&self) -> &str {
+        if self.id.is_empty() {
+            &self.path
+        } else {
+            &self.id
+        }
+    }
+
     pub fn at(path: impl Into<String>) -> Self {
         Self {
+            id: String::new(),
             path: path.into(),
             checkout: None,
             parent: None,
@@ -457,6 +565,7 @@ impl SpaceProject {
         let path = path.into();
         let checkout = checkout.into();
         Self {
+            id: String::new(),
             checkout: (checkout != path).then_some(checkout),
             path,
             parent: None,
@@ -545,7 +654,7 @@ impl SpaceOverrides {
             }
             rows.push(ProjectRow {
                 path: in_use.to_string(),
-                identity: project.path.clone(),
+                identity: project.identity().to_string(),
                 label: project.display_label().to_string(),
                 display_path: project.path.clone(),
                 depth: 0,
@@ -1137,6 +1246,29 @@ struct PartialAppSettings {
 }
 
 impl PartialAppSettings {
+    fn needs_project_ids(&self) -> bool {
+        if let Some(projects) = &self.projects {
+            for project in projects {
+                if project.id.is_empty() {
+                    return true;
+                }
+            }
+        }
+        if let Some(spaces) = &self.spaces {
+            for space in spaces.values() {
+                if space.startup_dir.is_some() {
+                    return true;
+                }
+                for project in &space.projects {
+                    if project.id.is_empty() {
+                        return true;
+                    }
+                }
+            }
+        }
+        false
+    }
+
     fn apply_to(&self, settings: &mut AppSettings) {
         if let Some(browser) = &self.browser {
             settings.browser.clone_from(browser);
@@ -1169,6 +1301,7 @@ impl PartialAppSettings {
         if let Some(projects) = &self.projects {
             settings.projects.clone_from(projects);
         }
+        settings.normalize_projects();
         if let Some(recording) = &self.recording {
             settings.recording.clone_from(recording);
         }
@@ -1274,12 +1407,25 @@ fn load_settings(
     profile: vmux_ecs::profile::CurrentProfile,
     mut commands: Commands,
     runtime: Single<Entity, With<LastSelfWriteHash>>,
+    mut saves: MessageWriter<SettingsSaveRequest>,
 ) {
     let config_path = profile.paths().map(|paths| paths.settings());
+    let mut migrate_projects = false;
+    if let Some(path) = config_path.as_ref()
+        && let Ok(source) = std::fs::read_to_string(path)
+        && let Ok(partial) = ron::Options::default()
+            .with_default_extension(ron::extensions::Extensions::IMPLICIT_SOME)
+            .from_str::<PartialAppSettings>(&source)
+    {
+        migrate_projects = partial.needs_project_ids();
+    }
     let (settings, config_path) = match config_path {
         Some(path) => read_settings_and_path(&defaults.0, path),
         None => (defaults.0.clone(), None),
     };
+    if migrate_projects {
+        saves.write(SettingsSaveRequest);
+    }
     vmux_ui::i18n::Locale::requested(Some(&settings.appearance.locale)).make_current();
 
     commands.insert_resource(settings.layout.clone());
@@ -1853,6 +1999,31 @@ mod tests {
 
     fn sparse_settings_ron(settings: &AppSettings) -> Result<String, String> {
         sparse_with_defaults(settings, &load_embedded_settings())
+    }
+
+    #[test]
+    fn project_names_and_identity_survive_checkout_changes_and_settings_roundtrip() {
+        let defaults = load_embedded_settings();
+        let mut settings = parse_with_defaults(
+            r#"(spaces: {"first": (projects: [(path: "/repo/app")]), "second": (projects: [(path: "/repo/app", checkout: "/worktrees/second")])})"#,
+            &defaults,
+        ).unwrap();
+        let id = settings.project("/repo/app").unwrap().id.clone();
+        assert!(!id.is_empty());
+        assert!(settings.rename_project(&id, "Product workspace"));
+        settings.remember_space_project(
+            "first",
+            SpaceProject::checked_out("/repo/app", "/worktrees/first"),
+        );
+        let persisted = sparse_with_defaults(&settings, &defaults).unwrap();
+        let restored = parse_with_defaults(&persisted, &defaults).unwrap();
+        for space in ["first", "second"] {
+            let rows = restored.project_rows(space);
+            let active = rows.iter().find(|row| row.identity == id).unwrap();
+            assert_eq!(active.label, "Product workspace");
+        }
+        assert_eq!(restored.project("/worktrees/first").unwrap().id, id);
+        assert_eq!(restored.project("/worktrees/second").unwrap().id, id);
     }
 
     #[test]
@@ -2540,8 +2711,12 @@ mod tests {
         let space = settings.spaces.get("work").expect("space");
 
         assert_eq!(
-            space.projects,
-            vec![SpaceProject::at("/tmp/alpha")],
+            space
+                .projects
+                .iter()
+                .map(SpaceProject::in_use)
+                .collect::<Vec<_>>(),
+            vec!["/tmp/alpha"],
             "the one directory a space remembered has to survive as its first project"
         );
         assert_eq!(space.active_project.as_deref(), Some("/tmp/alpha"));
@@ -2556,6 +2731,7 @@ mod tests {
         let settings =
             parse_settings(r#"(spaces: {"work": (startup_dir: "/tmp/alpha")})"#).expect("legacy");
         let written = sparse_settings_ron(&settings).expect("serialize");
+        let project_id = settings.spaces["work"].projects[0].id.clone();
 
         let space = parse_settings(&written)
             .expect("reload")
@@ -2563,7 +2739,9 @@ mod tests {
             .remove("work")
             .expect("space");
 
-        assert_eq!(space.projects, vec![SpaceProject::at("/tmp/alpha")]);
+        assert_eq!(space.projects.len(), 1);
+        assert_eq!(space.projects[0].path, "/tmp/alpha");
+        assert_eq!(space.projects[0].id, project_id);
         assert_eq!(space.active_project.as_deref(), Some("/tmp/alpha"));
     }
 

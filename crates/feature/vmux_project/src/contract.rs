@@ -3,6 +3,8 @@ use crate::ProjectId;
 #[vmux_api::contract(Default, Eq)]
 pub struct ProjectEntry {
     pub id: ProjectId,
+    #[serde(default)]
+    pub identity: String,
     pub name: String,
     pub source: String,
     pub path: String,
@@ -21,6 +23,9 @@ pub struct ProjectEntry {
 
 impl ProjectEntry {
     pub fn identity_seed(&self) -> &str {
+        if !self.identity.is_empty() {
+            return &self.identity;
+        }
         if !self.path.trim().is_empty() {
             return &self.path;
         }
@@ -62,6 +67,8 @@ pub enum ProjectView {
 #[vmux_api::contract(Default, Eq)]
 pub struct ProjectDetailView {
     pub id: ProjectId,
+    #[serde(default)]
+    pub identity: String,
     pub name: String,
     pub path: String,
     pub choices: Vec<ProjectEntry>,

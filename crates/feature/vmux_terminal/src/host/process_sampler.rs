@@ -25,6 +25,8 @@ pub(super) struct LocalProcess {
 const DISCOVERY_POLL_INTERVAL_SECONDS: f32 = 300.0;
 const DISCOVERY_REQUEST_MIN_INTERVAL: Duration = Duration::from_secs(2);
 const PROCESS_TREE_LIMIT: usize = 4096;
+const SAMPLE_INTERVAL: Duration = Duration::from_secs(5);
+const CPU_WARMUP_INTERVAL: Duration = Duration::from_millis(250);
 
 struct DiscoveryGate {
     poll: Timer,
@@ -77,7 +79,7 @@ pub(super) struct ProcessSampler {
 impl Default for ProcessSampler {
     fn default() -> Self {
         Self {
-            sample_poll: Timer::from_seconds(5.0, TimerMode::Repeating),
+            sample_poll: Timer::new(CPU_WARMUP_INTERVAL, TimerMode::Repeating),
             discovery: DiscoveryGate::default(),
             discovered: false,
             sampled: false,
@@ -108,6 +110,11 @@ impl ProcessSampler {
         self.sample_poll.reset();
         let mut snapshot = self.snapshot(service_roots);
         snapshot.cpu_ready = self.sampled;
+        self.sample_poll.set_duration(if self.sampled {
+            SAMPLE_INTERVAL
+        } else {
+            CPU_WARMUP_INTERVAL
+        });
         self.sampled = true;
         Some(snapshot)
     }
@@ -407,7 +414,7 @@ pub(super) struct ProcessSampler {
 impl Default for ProcessSampler {
     fn default() -> Self {
         Self {
-            sample_poll: Timer::from_seconds(5.0, TimerMode::Repeating),
+            sample_poll: Timer::new(CPU_WARMUP_INTERVAL, TimerMode::Repeating),
             discovery: DiscoveryGate::default(),
             sampled: false,
             system: sysinfo::System::new(),
@@ -450,6 +457,11 @@ impl ProcessSampler {
         );
         let mut snapshot = monitored.snapshot(&self.system);
         snapshot.cpu_ready = self.sampled;
+        self.sample_poll.set_duration(if self.sampled {
+            SAMPLE_INTERVAL
+        } else {
+            CPU_WARMUP_INTERVAL
+        });
         self.sampled = true;
         Some(snapshot)
     }

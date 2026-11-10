@@ -1125,3 +1125,9 @@ project-new-repository = 空儲存庫
 project-local-folder = 本機資料夾
 project-github-repository = GitHub 儲存庫
 project-edit-conflict = 專案已變更。請重新開啟編輯畫面。
+
+agent-video-play = 播放影片
+
+command-toggle-url-bar = Layout > 版面配置 > 切換網址列
+
+project-rename = 重新命名專案

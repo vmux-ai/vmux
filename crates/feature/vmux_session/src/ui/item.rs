@@ -190,7 +190,10 @@ pub fn ChatItemRow(
             context,
             attachments,
             created_at_ms,
-        } => rsx! {
+        } => {
+            let mut attachments = attachments.clone();
+            vmux_api::prompt_media::PromptMediaPaths::append_videos(text, &mut attachments);
+            rsx! {
             UserBubble {
                 key: "{key}",
                 avatar_name: user_name,
@@ -230,7 +233,8 @@ pub fn ChatItemRow(
                     }
                 }
             }
-        },
+            }
+        }
         ChatItem::Turn(turn) => rsx! {
             TurnView {
                 turn_index: key,
@@ -246,7 +250,50 @@ pub fn ChatItemRow(
 }
 
 #[component]
-fn UserAttachment(attachment: ChatAttachment, onload: EventHandler<()>) -> Element {
+pub(super) fn UserAttachment(attachment: ChatAttachment, onload: EventHandler<()>) -> Element {
+    let mut playing = use_signal(|| false);
+    let mut started = use_signal(|| false);
+    let mut failed = use_signal(|| false);
+    let media_id = use_hook(|| format!("chat-video-{}", uuid::Uuid::new_v4()));
+    if attachment.mime_type.starts_with("video/") && !failed() {
+        let play_id = media_id.clone();
+        return rsx! {
+            figure {
+                key: "message-attachment-{attachment.path}",
+                class: "w-96 max-w-full min-w-0 overflow-hidden rounded-xl bg-background/50",
+                div { class: "relative aspect-video w-full",
+                    video {
+                        id: media_id,
+                        src: (!attachment.media_url.is_empty()).then(|| format!("{}#t=0.001", attachment.media_url)),
+                        preload: "metadata",
+                        playsinline: true,
+                        controls: started(),
+                        class: "h-full w-full object-contain",
+                        onloadeddata: move |_| onload.call(()),
+                        onplay: move |_| { started.set(true); playing.set(true); },
+                        onpause: move |_| playing.set(false),
+                        onended: move |_| playing.set(false),
+                        onerror: move |_| { failed.set(true); onload.call(()); },
+                    }
+                    if !playing() {
+                        button {
+                            r#type: "button",
+                            class: "absolute inset-0 flex cursor-pointer items-center justify-center bg-black/10",
+                            aria_label: translate("agent-video-play"),
+                            disabled: attachment.media_url.is_empty(),
+                            onclick: move |_| vmux_ui::media::MediaElement::with_id(&play_id).toggle_playback(),
+                            span { class: "flex size-12 items-center justify-center rounded-full bg-black/60 text-white backdrop-blur-sm transition-transform hover:scale-105 motion-reduce:transition-none",
+                                svg { class: "size-6", view_box: "0 0 24 24", fill: "currentColor", "aria-hidden": "true",
+                                    path { d: "M8 5v14l11-7z" }
+                                }
+                            }
+                        }
+                    }
+                }
+                figcaption { class: "truncate px-3 py-2 text-xs text-muted-foreground", ToolFileLink { path: attachment.path.clone() } }
+            }
+        };
+    }
     let preview_data_url = &attachment.preview_data_url;
     if attachment.mime_type.starts_with("image/") && !preview_data_url.is_empty() {
         return rsx! {
@@ -270,7 +317,7 @@ fn UserAttachment(attachment: ChatAttachment, onload: EventHandler<()>) -> Eleme
             key: "message-attachment-{attachment.path}",
             class: "flex min-w-32 max-w-64 items-center gap-2 rounded-xl bg-foreground/[0.06] px-3 py-2 ring-1 ring-inset ring-foreground/10",
             span { class: "font-mono text-[10px] font-semibold tracking-wide text-muted-foreground", "{FilePath(&attachment.name).extension_label()}" }
-            span { class: "truncate text-xs text-muted-foreground", "{attachment.name}" }
+            span { class: "truncate text-xs text-muted-foreground", ToolFileLink { path: attachment.path.clone() } }
         }
     }
 }
@@ -296,6 +343,52 @@ mod disclosure_tests {
     use vmux_ui::transport::{
         BytesListener, HostBinding, PageHost, event_listener::EventListenerError,
     };
+
+    #[component]
+    fn VideoAttachmentFixture() -> Element {
+        rsx! { UserAttachment {
+            attachment: ChatAttachment {
+                path: "/tmp/clip.mov".into(),
+                name: "clip.mov".into(),
+                mime_type: "video/mp4".into(),
+                media_url: "http://127.0.0.1:12345/capability".into(),
+                ..Default::default()
+            },
+            onload: move |_| {},
+        } }
+    }
+
+    #[test]
+    fn video_attachment_has_a_preview_play_button_and_no_autoplay() {
+        let mut dom = VirtualDom::new(VideoAttachmentFixture);
+        dom.rebuild_in_place();
+        let html = dioxus_ssr::render(&dom);
+        assert!(html.contains("<video"));
+        assert!(html.contains("src=\"http://127.0.0.1:12345/capability#t=0.001\""));
+        assert!(html.contains(&translate("agent-video-play")));
+        assert!(!html.contains("autoplay"));
+    }
+
+    #[component]
+    fn PastedVideoFixture() -> Element {
+        rsx! { ChatItemRow {
+            absolute_index: 0,
+            item: ChatItem::User { text: r"inspect /tmp/Screen\ Recording.mov".into(), context: None, attachments: Vec::new(), created_at_ms: 0 },
+            agent_id: String::new(), agent_name: String::new(), agent_avatar: None, agent_color: String::new(),
+            user_name: "Junichi".to_string(), user_color: "#888888".to_string(),
+            on_media_load: move |_| {},
+        } }
+    }
+
+    #[test]
+    fn pasted_video_reserves_its_preview_before_host_hydration() {
+        let mut dom = VirtualDom::new(PastedVideoFixture);
+        dom.rebuild_in_place();
+        let html = dioxus_ssr::render(&dom);
+        assert!(html.contains("<video"));
+        assert!(html.contains("disabled"));
+        assert!(html.contains(r"inspect /tmp/Screen\ Recording.mov"));
+    }
 
     #[derive(Default)]
     struct FileHost(RefCell<Vec<OpenRequest>>);

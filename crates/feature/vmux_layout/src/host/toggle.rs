@@ -25,6 +25,7 @@ impl Plugin for TogglePlugin {
         }
         app.init_resource::<DeadlineScheduler>()
             .add_message::<ToggleLayoutRequest>()
+            .add_message::<ToggleUrlBarRequest>()
             .add_systems(
                 Update,
                 (
@@ -52,6 +53,23 @@ impl TryFrom<&vmux_command::CommandInvocation> for ToggleLayoutRequest {
     }
 }
 
+#[vmux_command::command(message)]
+#[derive(Message)]
+struct ToggleUrlBarRequest;
+
+impl TryFrom<&vmux_command::CommandInvocation> for ToggleUrlBarRequest {
+    type Error = ();
+
+    fn try_from(invocation: &vmux_command::CommandInvocation) -> Result<Self, Self::Error> {
+        (invocation.id == "toggle_url_bar")
+            .then_some(Self)
+            .ok_or(())
+    }
+}
+
+#[derive(Component, Default, Debug)]
+pub struct UrlBarHidden;
+
 #[derive(Component, Default, Debug)]
 pub struct LayoutHidden;
 
@@ -64,6 +82,12 @@ pub(super) struct LayoutTransition {
     side_sheet_start: f32,
     pad_top_start: f32,
     pad_left_start: f32,
+    gap_start: f32,
+    header_end: f32,
+    side_sheet_end: f32,
+    pad_top_end: f32,
+    pad_left_end: f32,
+    gap_end: f32,
 }
 
 impl LayoutTransition {
@@ -113,6 +137,10 @@ fn sync_window_padding(
 
 fn handle_visibility_requests(
     mut reader: MessageReader<ToggleLayoutRequest>,
+    mut url_reader: MessageReader<ToggleUrlBarRequest>,
+    url_hidden: Query<(), With<UrlBarHidden>>,
+    existing: Query<&LayoutTransition>,
+    settings: Res<LayoutSettings>,
     time: Res<Time>,
     focused_window: crate::window::FocusedWindow,
     hidden_windows: Query<(), With<LayoutHidden>>,
@@ -122,15 +150,35 @@ fn handle_visibility_requests(
     hierarchy: crate::window::WindowHierarchy,
     mut commands: Commands,
 ) {
-    for _ in reader.read() {
+    for url_only in reader
+        .read()
+        .map(|_| false)
+        .chain(url_reader.read().map(|_| true))
+    {
         let Some(window) = focused_window.entity() else {
             continue;
         };
-        let hide = !hidden_windows.contains(window);
-        if hide {
-            commands.entity(window).insert(LayoutHidden);
+        let hide = if url_only {
+            hidden_windows.contains(window)
         } else {
-            commands.entity(window).remove::<LayoutHidden>();
+            !hidden_windows.contains(window)
+        };
+        let hide_url = if url_only {
+            !url_hidden.contains(window)
+        } else {
+            hide
+        };
+        if !url_only {
+            if hide {
+                commands.entity(window).insert(LayoutHidden);
+            } else {
+                commands.entity(window).remove::<LayoutHidden>();
+            }
+        }
+        if hide_url {
+            commands.entity(window).insert(UrlBarHidden);
+        } else {
+            commands.entity(window).remove::<UrlBarHidden>();
         }
         let header_start = header_q
             .iter()
@@ -150,7 +198,7 @@ fn handle_visibility_requests(
                 _ => None,
             })
             .unwrap_or_default();
-        let (pad_top_start, pad_left_start) = roots
+        let (pad_top_start, pad_left_start, gap_start) = roots
             .iter()
             .find(|(host, _)| host.0 == window)
             .map(|(_, node)| {
@@ -162,24 +210,79 @@ fn handle_visibility_requests(
                     Val::Px(value) => value,
                     _ => 0.0,
                 };
-                (top, left)
+                let gap = match node.column_gap {
+                    Val::Px(value) => value,
+                    _ => 0.0,
+                };
+                (top, left, gap)
             })
             .unwrap_or_default();
+        let previous = if url_only {
+            existing.get(window).ok()
+        } else {
+            None
+        };
         commands.entity(window).insert(LayoutTransition {
-            hide,
+            hide: if url_only {
+                previous.is_some_and(|transition| transition.hide)
+            } else {
+                hide
+            },
             elapsed: 0.0,
             started: time.elapsed(),
             header_start,
             side_sheet_start,
             pad_top_start,
             pad_left_start,
+            gap_start,
+            header_end: if hide_url {
+                36.0
+            } else {
+                CEF_RESERVED_HEIGHT_PX
+            },
+            side_sheet_end: if url_only {
+                previous
+                    .map(|transition| transition.side_sheet_end)
+                    .unwrap_or(side_sheet_start)
+            } else if hide {
+                0.0
+            } else {
+                crate::event::SideSheetResizeEvent::live(settings.side_sheet.width).clamped()
+            },
+            pad_top_end: if url_only {
+                previous
+                    .map(|transition| transition.pad_top_end)
+                    .unwrap_or(pad_top_start)
+            } else if hide {
+                settings.window.pad_top()
+            } else {
+                0.0
+            },
+            pad_left_end: if url_only {
+                previous
+                    .map(|transition| transition.pad_left_end)
+                    .unwrap_or(pad_left_start)
+            } else if hide {
+                settings.window.pad_left()
+            } else {
+                0.0
+            },
+            gap_end: if url_only {
+                previous
+                    .map(|transition| transition.gap_end)
+                    .unwrap_or(gap_start)
+            } else if hide {
+                0.0
+            } else {
+                crate::event::SIDE_SHEET_GAP_PX
+            },
         });
-        if !hide {
-            for (entity, _) in &header_q {
-                if hierarchy.get(entity) == Some(window) {
-                    commands.entity(entity).insert(Open);
-                }
+        for (entity, _) in &header_q {
+            if hierarchy.get(entity) == Some(window) {
+                commands.entity(entity).insert(Open);
             }
+        }
+        if !url_only && !hide {
             for (entity, position, _) in &sidesheet_q {
                 if *position == SideSheetPosition::Left && hierarchy.get(entity) == Some(window) {
                     commands.entity(entity).insert(Open);
@@ -192,7 +295,6 @@ fn handle_visibility_requests(
 fn animate(
     time: Res<Time>,
     scheduler: Res<DeadlineScheduler>,
-    settings: Res<LayoutSettings>,
     proxy: Option<Res<EventLoopProxyWrapper>>,
     mut transitions: Query<(Entity, &mut LayoutTransition), With<Window>>,
     mut layout: ParamSet<(
@@ -205,26 +307,10 @@ fn animate(
 ) {
     for (window, mut transition) in &mut transitions {
         let progress = transition.progress(time.elapsed());
-        let header_end = if transition.hide {
-            0.0
-        } else {
-            CEF_RESERVED_HEIGHT_PX
-        };
-        let side_sheet_end = if transition.hide {
-            0.0
-        } else {
-            crate::event::SideSheetResizeEvent::live(settings.side_sheet.width).clamped()
-        };
-        let pad_top_end = if transition.hide {
-            settings.window.pad_top()
-        } else {
-            0.0
-        };
-        let pad_left_end = if transition.hide {
-            settings.window.pad_left()
-        } else {
-            0.0
-        };
+        let header_end = transition.header_end;
+        let side_sheet_end = transition.side_sheet_end;
+        let pad_top_end = transition.pad_top_end;
+        let pad_left_end = transition.pad_left_end;
         {
             let mut headers = layout.p0();
             for (entity, mut node) in &mut headers {
@@ -253,6 +339,11 @@ fn animate(
             let mut roots = layout.p2();
             for (host, mut node) in &mut roots {
                 if host.0 == window {
+                    node.column_gap = Val::Px(LayoutTransition::value(
+                        transition.gap_start,
+                        transition.gap_end,
+                        progress,
+                    ));
                     node.padding.top = Val::Px(LayoutTransition::value(
                         transition.pad_top_start,
                         pad_top_end,
@@ -268,14 +359,6 @@ fn animate(
         }
         if transition.complete() {
             if transition.hide {
-                {
-                    let mut headers = layout.p0();
-                    for (entity, _) in &mut headers {
-                        if hierarchy.get(entity) == Some(window) {
-                            commands.entity(entity).remove::<Open>();
-                        }
-                    }
-                }
                 {
                     let mut side_sheets = layout.p1();
                     for (entity, position, _) in &mut side_sheets {
@@ -310,6 +393,12 @@ impl LayoutTransition {
             side_sheet_start: 0.0,
             pad_top_start: 0.0,
             pad_left_start: 0.0,
+            gap_start: 0.0,
+            header_end: CEF_RESERVED_HEIGHT_PX,
+            side_sheet_end: 0.0,
+            pad_top_end: 0.0,
+            pad_left_end: 0.0,
+            gap_end: 0.0,
         }
     }
 }
@@ -336,6 +425,12 @@ mod tests {
             side_sheet_start: 240.0,
             pad_top_start: 0.0,
             pad_left_start: 0.0,
+            gap_start: 8.0,
+            header_end: 36.0,
+            side_sheet_end: 0.0,
+            pad_top_end: 0.0,
+            pad_left_end: 0.0,
+            gap_end: 0.0,
         };
         let first = transition.progress(started);
         assert_eq!(LayoutTransition::value(80.0, 0.0, first), 80.0);
@@ -462,6 +557,9 @@ mod tests {
     fn toggle_changes_only_the_focused_window() {
         let mut app = App::new();
         app.add_plugins((MinimalPlugins, TogglePlugin))
+            .insert_resource(bevy::time::TimeUpdateStrategy::ManualDuration(
+                std::time::Duration::from_millis(60),
+            ))
             .insert_resource(LayoutSettings {
                 radius: 0.0,
                 window: WindowSettings { padding: 16.0 },
@@ -474,7 +572,17 @@ mod tests {
         app.world_mut()
             .entity_mut(first_window)
             .insert(vmux_ecs::Active);
-        let first_root = app.world_mut().spawn(HostWindow(first_window)).id();
+        let first_root = app
+            .world_mut()
+            .spawn((
+                HostWindow(first_window),
+                VmuxWindow,
+                Node {
+                    column_gap: Val::Px(8.0),
+                    ..default()
+                },
+            ))
+            .id();
         let second_root = app.world_mut().spawn(HostWindow(second_window)).id();
         let first_header = app
             .world_mut()
@@ -521,5 +629,48 @@ mod tests {
         assert!(app.world().entity(first_sheet).contains::<Open>());
         assert!(app.world().entity(second_header).contains::<Open>());
         assert!(app.world().entity(second_sheet).contains::<Open>());
+        app.update();
+        app.update();
+        assert!(app.world().entity(first_header).contains::<Open>());
+        assert!(!app.world().entity(first_sheet).contains::<Open>());
+        assert_eq!(
+            app.world().get::<Node>(first_header).unwrap().height,
+            Val::Px(36.0)
+        );
+        assert_eq!(
+            app.world().get::<Node>(first_root).unwrap().column_gap,
+            Val::Px(0.0)
+        );
+        let padding = app.world().get::<Node>(first_root).unwrap().padding;
+        app.world_mut()
+            .resource_mut::<Messages<ToggleUrlBarRequest>>()
+            .write(ToggleUrlBarRequest);
+        for _ in 0..3 {
+            app.update();
+        }
+        assert!(app.world().entity(first_window).contains::<LayoutHidden>());
+        assert!(!app.world().entity(first_window).contains::<UrlBarHidden>());
+        assert!(!app.world().entity(first_sheet).contains::<Open>());
+        assert_eq!(
+            app.world().get::<Node>(first_header).unwrap().height,
+            Val::Px(CEF_RESERVED_HEIGHT_PX)
+        );
+        assert_eq!(
+            app.world().get::<Node>(first_root).unwrap().padding,
+            padding
+        );
+        app.world_mut().entity_mut(first_sheet).insert(Open);
+        app.world_mut().get_mut::<Node>(first_sheet).unwrap().width = Val::Px(120.0);
+        app.world_mut()
+            .resource_mut::<Messages<ToggleUrlBarRequest>>()
+            .write(ToggleUrlBarRequest);
+        for _ in 0..3 {
+            app.update();
+        }
+        assert!(app.world().entity(first_sheet).contains::<Open>());
+        assert_eq!(
+            app.world().get::<Node>(first_sheet).unwrap().width,
+            Val::Px(120.0)
+        );
     }
 }
