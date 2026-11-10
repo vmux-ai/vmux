@@ -10333,7 +10333,6 @@ name = "vmux_bookmark"
 version = "0.0.35"
 dependencies = [
  "bevy",
- "bevy_world_serialization",
  "moonshine-save",
  "raw-window-handle 0.6.2",
  "rkyv",
@@ -10537,6 +10536,7 @@ dependencies = [
  "uuid",
  "vmux_api",
  "vmux_flex",
+ "vmux_macro",
  "vmux_path",
  "vmux_profile",
  "vmux_transport",
