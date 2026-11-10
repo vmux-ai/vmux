@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)"
 PROFILE="${1:-release}"
 
-if [[ -f "$ROOT/.env" ]]; then
+if [[ "${VMUX_BUILD_STORAGE_ROOT:-}" != "$ROOT" && -f "$ROOT/.env" ]]; then
     while IFS= read -r line || [[ -n "$line" ]]; do
         [[ -z "$line" || "$line" == \#* ]] && continue
         [[ "$line" == *=* ]] || continue
@@ -13,6 +13,14 @@ if [[ -f "$ROOT/.env" ]]; then
         [[ "$key" =~ ^[A-Za-z_][A-Za-z0-9_]*$ ]] || continue
         export "$key=$value"
     done < "$ROOT/.env"
+fi
+
+source "$ROOT/scripts/cargo-target-paths.sh"
+if [[ "${VMUX_BUILD_STORAGE_ROOT:-}" != "$ROOT" \
+    || "${VMUX_BUILD_STORAGE_TARGET:-}" != "$(vmux_cargo_target_dir "$ROOT")" \
+    || ! "${VMUX_TARGET_LOCK_OWNER_PID:-}" =~ ^[1-9][0-9]*$ ]] \
+    || ! kill -0 "${VMUX_TARGET_LOCK_OWNER_PID:-0}" 2>/dev/null; then
+    exec "$ROOT/scripts/with-build-storage.sh" "$PROFILE" "$0" "$@"
 fi
 
 if [[ "$PROFILE" == "local" ]]; then

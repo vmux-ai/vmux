@@ -1359,6 +1359,17 @@ without depending on cloud-specific files or changing the public client's build 
 Failed builds remove that link; real release bundles are never replaced. build-local remains
 the bundle/OS-integration gate.
 
+Dev, local, and release builds share a storage preflight and hold the target-cache lock
+through dependency preparation, compilation, signing, and cleanup. Builds warn below
+50 GiB free and refuse below 20 GiB after attempting to reclaim unused compile caches.
+Successful local builds retain three local app bundles plus running apps; all builds prune compile
+caches above a 50 GiB budget. Ready executables, runtime libraries, and release distribution
+artifacts survive cleanup; active profiles and raw Cargo locks prevent cache deletion.
+Removing compile caches invalidates their seed marker and requires recompilation on the
+next build. The thresholds are configurable with `VMUX_BUILD_STORAGE_*`; cache size uses
+allocated blocks, which can count shared APFS clones more than once. Storage cleanup stays
+inside the selected Cargo target and never walks sibling worktrees or application data.
+
 Local and debug share the workspace store and a stable Chromium directory per named profile,
 not per worktree. On first use the most recently modified legacy local profile is reused
 without merging or overwriting other profiles. Normal builds use the same Safe Storage key;

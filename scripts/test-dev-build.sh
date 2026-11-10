@@ -6,7 +6,9 @@ tmp="$(mktemp -d)"
 tmp="$(cd "$tmp" && pwd -P)"
 trap 'rm -rf "$tmp"' EXIT
 mkdir -p "$tmp/client/scripts" "$tmp/target/debug/deps" "$tmp/bin"
-cp "$root/scripts/build-dev.sh" "$root/scripts/run-dev.sh" "$root/scripts/cargo-target-paths.sh" "$tmp/client/scripts/"
+cp "$root/scripts/build-dev.sh" "$root/scripts/run-dev.sh" "$root/scripts/cargo-target-paths.sh" \
+    "$root/scripts/with-build-storage.sh" "$root/scripts/build-storage.py" \
+    "$root/scripts/target-cache-common.sh" "$tmp/client/scripts/"
 
 cat > "$tmp/client/scripts/cargo-with-cef-cache.sh" <<'CARGO'
 #!/usr/bin/env bash
@@ -38,6 +40,22 @@ export CARGO_INCREMENTAL=1
 export TEST_LOG="$tmp/build.log"
 export TEST_RUN="$tmp/run.log"
 export TEST_ENV="$tmp/env.log"
+export VMUX_BUILD_STORAGE_MIN_GIB=0
+export VMUX_BUILD_STORAGE_WARN_GIB=0
+cat > "$tmp/bin/flock" <<'LOCK'
+#!/usr/bin/env bash
+exit 0
+LOCK
+chmod +x "$tmp/bin/flock"
+cat > "$tmp/bin/ps" <<'PS'
+#!/usr/bin/env bash
+printf '%s fixture\n' "$$"
+PS
+cat > "$tmp/bin/lsof" <<'LSOF'
+#!/usr/bin/env bash
+printf 'p%s\nn/\n' "$$"
+LSOF
+chmod +x "$tmp/bin/ps" "$tmp/bin/lsof"
 
 "$tmp/client/scripts/build-dev.sh" --no-default-features --features dev,full
 [[ "$(wc -l < "$TEST_LOG" | tr -d ' ')" == 3 ]]

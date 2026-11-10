@@ -3,6 +3,12 @@ set -euo pipefail
 
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)"
 source "$root/scripts/cargo-target-paths.sh"
+if [[ "${VMUX_BUILD_STORAGE_ROOT:-}" != "$root" \
+    || "${VMUX_BUILD_STORAGE_TARGET:-}" != "$(vmux_cargo_target_dir "$root")" \
+    || ! "${VMUX_TARGET_LOCK_OWNER_PID:-}" =~ ^[1-9][0-9]*$ ]] \
+    || ! kill -0 "${VMUX_TARGET_LOCK_OWNER_PID:-0}" 2>/dev/null; then
+    exec "$root/scripts/with-build-storage.sh" dev "$0" "$@"
+fi
 export CARGO_INCREMENTAL="${CARGO_INCREMENTAL:-1}"
 export VMUX_BUILD_PROFILE=dev
 

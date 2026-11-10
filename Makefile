@@ -19,8 +19,13 @@ CEF_VERSION := $(shell awk -F'"' '/^name = "cef"$$/{getline; print $$2; exit}' C
 CEF_FRAMEWORK_DIR := $(HOME)/.local/share/Chromium Embedded Framework.framework
 CEF_DEBUG_RENDER := $(CEF_FRAMEWORK_DIR)/Libraries/bevy_cef_debug_render_process
 
-build-dev: export CARGO_INCREMENTAL = 1
-build-dev: ensure-native-deps ensure-codesign-deps install-debug-render-process
+.PHONY: _build-dev _build-local _build-release build-storage-status clean-build-cache
+
+build-dev:
+	./scripts/with-build-storage.sh dev $(MAKE) _build-dev
+
+_build-dev: export CARGO_INCREMENTAL = 1
+_build-dev: ensure-native-deps ensure-codesign-deps install-debug-render-process
 	CARGO_BIN="$(CARGO_BIN)" CEF_DEBUG_RENDER="$(CEF_DEBUG_RENDER)" \
 	  ./scripts/build-dev.sh $(VMUX_DESKTOP_FEATURES)
 
@@ -90,20 +95,35 @@ mobile-android-run: ensure-mobile-android-deps
 	"$(DX_BIN)" serve --android -p vmux_mobile
 
 -include .env
+ifneq ($(VMUX_BUILD_STORAGE_TARGET),)
+override CARGO_TARGET_DIR := $(VMUX_BUILD_STORAGE_TARGET)
+endif
 export
 
-build-local: ensure-mac-deps ensure-package-deps ensure-codesign-deps
+build-local:
+	./scripts/with-build-storage.sh local $(MAKE) _build-local
+
+_build-local: ensure-mac-deps ensure-package-deps ensure-codesign-deps
 	./scripts/build-mac-release.sh local
 
 local: build-local
 	@sha="$$(git rev-parse --short=7 HEAD)" && \
 	open "target/release/Vmux ($$sha).app"
 
-build-release: ensure-mac-deps ensure-package-deps
+build-release:
+	./scripts/with-build-storage.sh release $(MAKE) _build-release
+
+_build-release: ensure-mac-deps ensure-package-deps
 	./scripts/build-mac-release.sh release
 
 release: build-release
 	open "target/release/Vmux.app"
+
+build-storage-status:
+	./scripts/with-build-storage.sh status
+
+clean-build-cache:
+	./scripts/with-build-storage.sh clean
 
 setup-cef:
 	CARGO_BIN="$(CARGO_BIN)" EXPORT_CEF_BIN="$(EXPORT_CEF_BIN)" ./scripts/install-cef.sh "$$HOME/.local/share"

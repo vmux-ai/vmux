@@ -54,6 +54,14 @@ When adding temporary diagnostics to investigate a bug, make logging uncondition
 
 Diagnostics must use the tracing macros (`bevy::log::info!`/`warn!`) to land in the tracing log — **raw `eprintln!`/stderr is NOT captured there**.
 
+## Build Storage
+
+Prepare apps through `make build-dev`, `make build-local`, or `make build-release`. These entry points share a target lock, disk-space preflight, and successful-build cleanup; do not bypass them to work around a storage refusal. The defaults warn below 50 GiB free, refuse below 20 GiB, prune unused compile caches above 50 GiB, and retain three local app bundles plus running apps. Prepared debug binaries and runtime libraries and release distribution artifacts are kept.
+
+Before handing over a build, verify its ready artifact and the final free-space report. If an active app or build prevents cleanup, report the retained target instead of stopping it. `make clean-build-cache` previews cache deletion; `VMUX_BUILD_STORAGE_APPLY=1 make clean-build-cache` applies it under the same lock. Remove task-owned temporary compile/dependency caches when work ends, preserving source edits and fixtures that must survive.
+
+Before removing a worktree after its PR merges, inspect its own repository's worktree registrations, including initialized submodules, and preserve any still-active client worktree. Never infer that a client worktree is orphaned solely because its parent repository does not list it.
+
 ## Platform-Specific Code
 
 This project targets macOS (primary) and Linux (CI). When adding imports or code that uses platform-specific APIs (CEF, winit, AppKit), always add appropriate `#[cfg(...)]` gates. Let rustfmt reorder cfg-gated imports.
