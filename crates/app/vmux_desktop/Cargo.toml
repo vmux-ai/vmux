@@ -83,6 +83,7 @@ ron = { workspace = true }
 semver = { version = "1", optional = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
+tokio = { workspace = true }
 tracing = "0.1"
 tracing-appender = "0.2"
 tracing-subscriber = { version = "0.3", features = ["fmt"] }
@@ -102,6 +103,7 @@ vmux_knowledge = { path = "../../feature/vmux_knowledge" }
 vmux_layout = { path = "../../feature/vmux_layout" }
 vmux_page = { path = "../../util/vmux_page" }
 vmux_profile = { path = "../../util/vmux_profile" }
+vmux_service = { path = "../../feature/vmux_service" }
 vmux_setting = { path = "../../feature/vmux_setting" }
 vmux_start = { path = "../../feature/vmux_start" }
 vmux_space = { path = "../../feature/vmux_space" }

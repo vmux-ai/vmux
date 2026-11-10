@@ -38,8 +38,30 @@ sign_binary() {
         "$binary"
 }
 
+sign_if_needed() {
+    local binary="$1"
+    local identifier="$2"
+    local stamp="${binary}.dev-signed"
+    local current="${stamp}.tmp"
+    {
+        printf '%s\n' "$APPLE_SIGNING_IDENTITY" "$identifier" "$CODESIGN_KEYCHAIN"
+        shasum -a 256 "$binary" "$ENTITLEMENTS"
+    } > "$current"
+    if [[ ! -f "$stamp" ]] || ! cmp -s "$current" "$stamp" \
+        || ! codesign --verify --strict "$binary" >/dev/null 2>&1; then
+        sign_binary "$binary" "$identifier"
+        {
+            printf '%s\n' "$APPLE_SIGNING_IDENTITY" "$identifier" "$CODESIGN_KEYCHAIN"
+            shasum -a 256 "$binary" "$ENTITLEMENTS"
+        } > "$current"
+        mv -f "$current" "$stamp"
+    else
+        rm -f "$current"
+    fi
+}
+
 helper_basename="$(printf '%s' "$(basename "$HELPER_BINARY")" | tr -c '[:alnum:]' '-')"
-sign_binary "$HELPER_BINARY" "$APP_IDENTIFIER.helper.$helper_basename"
-sign_binary "$APP_BINARY" "$APP_IDENTIFIER"
+sign_if_needed "$HELPER_BINARY" "$APP_IDENTIFIER.helper.$helper_basename"
+sign_if_needed "$APP_BINARY" "$APP_IDENTIFIER"
 
 codesign --verify --strict --verbose=2 "$APP_BINARY"

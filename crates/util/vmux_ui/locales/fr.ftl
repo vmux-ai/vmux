@@ -1114,3 +1114,7 @@ common-copy-url = Copier l’URL
 sessions-history-unavailable = Cette conversation ne peut pas être rouverte. Vous pouvez en démarrer une nouvelle.
 sessions-connection-interrupted = La connexion a été interrompue. Réessayez de vous connecter.
 sessions-operation-failed = L’opération n’a pas pu être terminée.
+
+workspace-store-title = Données de l’espace de travail
+workspace-store-recovered = Les anciennes données ont été conservées dans { $path }. Un nouvel espace de travail sera créé.
+workspace-store-refused = Cet espace de travail ne peut pas être ouvert en toute sécurité. Les données dans { $path } sont inchangées. Utilisez une version plus récente ou une copie des données.

@@ -1114,3 +1114,7 @@ common-copy-url = Копировать URL
 sessions-history-unavailable = Этот разговор нельзя открыть снова. Вы можете начать новый.
 sessions-connection-interrupted = Соединение прервано. Попробуйте подключиться снова.
 sessions-operation-failed = Не удалось завершить операцию.
+
+workspace-store-title = Данные рабочего пространства
+workspace-store-recovered = Предыдущие данные сохранены в { $path }. Будет создано новое рабочее пространство.
+workspace-store-refused = Невозможно безопасно открыть это рабочее пространство. Данные в { $path } не изменены. Используйте более новую сборку или копию данных.

@@ -9,6 +9,13 @@ use vmux_service::runner::WakeDrivenRunner;
 use vmux_service::server::{Daemon, ExitSignal, SocketListener};
 
 fn main() {
+    let _lease = match vmux_profile::DataLease::daemon() {
+        Ok(lease) => lease,
+        Err(error) => {
+            eprintln!("Cannot start Vmux service: {error}");
+            std::process::exit(1);
+        }
+    };
     let runtime = tokio::runtime::Builder::new_multi_thread()
         .enable_all()
         .build()
@@ -29,11 +36,21 @@ fn main() {
         ExitSignal(signal_tx),
     ));
     app.run();
+    drop(app);
+    drop(runtime);
+    DaemonBootstrap::cleanup();
 }
 
 struct DaemonBootstrap;
 
 impl DaemonBootstrap {
+    fn cleanup() {
+        let paths = ServicePaths::current();
+        let _ = std::fs::remove_file(paths.socket());
+        let _ = std::fs::remove_file(paths.pid());
+        let _ = std::fs::remove_file(paths.identity());
+    }
+
     async fn start(signal_tx: mpsc::Sender<()>) -> tokio::net::UnixListener {
         let paths = ServicePaths::current();
         let dir = ServicePaths::dir();

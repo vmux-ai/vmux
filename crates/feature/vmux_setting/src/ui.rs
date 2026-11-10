@@ -12,64 +12,26 @@ use crate::state::{
 };
 use dioxus::prelude::*;
 use vmux_api::address::{AddressCrumb, AddressIntent, AddressOption, PageAddress};
+use vmux_api::page_location::PageLocationUiState;
 use vmux_ui::components::button::{Button, ButtonSize, ButtonVariant};
 use vmux_ui::components::input::Input;
-use vmux_ui::components::manager::{ManagerSelect, ManagerSelectItem};
-use vmux_ui::components::page_address::{PageBreadcrumbs, PageToolbar, ToolbarControl};
+use vmux_ui::components::manager::{
+    ManagerEmpty, ManagerSearch, ManagerSearchRow, ManagerSelect, ManagerSelectItem,
+    ManagerSkeleton, WorkspaceLayout,
+};
+use vmux_ui::components::page_address::PageBreadcrumbs;
 use vmux_ui::components::switch::{Switch, SwitchThumb};
 use vmux_ui::dioxus_ext::attributes;
 use vmux_ui::focus::FocusClaim;
 use vmux_ui::hooks::{send, use_theme, use_ui_state};
 use vmux_ui::i18n::translate;
+use vmux_ui::scroll::{ScrollIntoView, SectionNavigation};
 
-const SETTINGS_SCROLL_SPY: &str = r#"
-globalThis.__vmuxSettingsScrollSpyCleanup?.();
-const viewport = document.getElementById('settings-scroll-viewport');
-const sections = [...document.querySelectorAll('[data-vmux-settings-section]')];
-if (viewport && sections.length) {
-  let active = '';
-  let frame = 0;
-  const update = () => {
-    frame = 0;
-    const threshold = viewport.getBoundingClientRect().top + 24;
-    let selected = sections[0];
-    for (const section of sections) {
-      if (section.getBoundingClientRect().top <= threshold) selected = section;
-      else break;
-    }
-    if (viewport.scrollTop + viewport.clientHeight >= viewport.scrollHeight - 2) {
-      selected = sections[sections.length - 1];
-    }
-    if (selected.id !== active) {
-      active = selected.id;
-      dioxus.send(active);
-    }
-  };
-  const schedule = () => {
-    if (frame) return;
-    frame = requestAnimationFrame(update);
-  };
-  const observer = new ResizeObserver(schedule);
-  observer.observe(viewport);
-  for (const section of sections) observer.observe(section);
-  viewport.addEventListener('scroll', schedule, { passive: true });
-  document.addEventListener('scroll', schedule, true);
-  window.addEventListener('resize', schedule, true);
-  globalThis.__vmuxSettingsScrollSpyCleanup = () => {
-    if (frame) cancelAnimationFrame(frame);
-    observer.disconnect();
-    viewport.removeEventListener('scroll', schedule);
-    document.removeEventListener('scroll', schedule, true);
-    window.removeEventListener('resize', schedule, true);
-    delete globalThis.__vmuxSettingsScrollSpyCleanup;
-  };
-  update();
-}
-"#;
+const SETTINGS_SCROLL_ID: &str = "settings-scroll-viewport";
 
 #[vmux_page::page(
     component = Page,
-    states = ["PageAddressUiState", "ThemeUiState", "SettingsUiState"]
+    states = ["PageAddressUiState", "PageLocationUiState", "ThemeUiState", "SettingsUiState"]
 )]
 pub(crate) struct SettingsPage;
 
@@ -99,15 +61,8 @@ pub fn Page() -> Element {
         fields,
         items,
     } = state();
-    let mut active_section = use_signal(String::new);
-
-    if sections.is_empty() {
-        return rsx! {
-            div { class: "flex h-full items-center justify-center bg-background",
-                div { class: "h-1.5 w-24 animate-pulse rounded-full bg-muted" }
-            }
-        };
-    }
+    let navigation = SettingsSectionNavigation::use_state(state);
+    let active_section = navigation.navigation.active;
 
     let catalog = SettingsRenderCatalog {
         fields: Rc::new(fields),
@@ -122,6 +77,7 @@ pub fn Page() -> Element {
         .iter()
         .map(|section| AddressOption {
             label: section.title.clone(),
+            icon: Some(section.icon()),
             intent: Some(AddressIntent::Section {
                 id: section.id.clone(),
             }),
@@ -130,9 +86,11 @@ pub fn Page() -> Element {
         .collect::<Vec<_>>();
     let mut address = PageAddress::default();
     if let Some(section) = current_section {
+        let icon = section.icon();
         address.fixed.push(AddressCrumb {
             entry: AddressOption {
                 label: section.title,
+                icon: Some(icon),
                 intent: Some(AddressIntent::Section { id: section.id }),
                 ..Default::default()
             },
@@ -147,52 +105,80 @@ pub fn Page() -> Element {
                 state: address,
                 onintent: move |intent| {
                     if let AddressIntent::Section { id } = intent {
-                        active_section.set(id.clone());
-                        SettingsSectionNavigation::open(&id);
+                        navigation.select(id);
                     }
                 },
             }
-            div { class: "flex min-h-0 flex-1 flex-row",
-                aside { class: "hidden w-56 shrink-0 px-4 py-4 lg:block",
-                    nav { class: "flex flex-col gap-0.5",
+            WorkspaceLayout {
+                search: rsx! {
+                    ManagerSearchRow {
+                        ManagerSearch {
+                            value: query.clone(),
+                            placeholder: translate("command-search"),
+                            onsearch: move |query| {
+                                let _ = send(&SettingsFilterRequest { query });
+                            },
+                            onkeydown: move |event: KeyboardEvent| {
+                                if event.key() == Key::Escape {
+                                    let _ = send(&SettingsFilterRequest { query: String::new() });
+                                }
+                            },
+                        }
+                    }
+                },
+                sidebar: rsx! {
+                    nav { class: "flex flex-col gap-0.5 px-2 py-4",
                         for section in &sections {
                             button {
                                 key: "{section.id}",
                                 r#type: "button",
                                 class: if section.id == active_section() {
-                                    "rounded-md bg-foreground/[0.065] px-2 py-1.5 text-left text-sm text-foreground"
+                                    "flex items-center gap-2 rounded-md bg-foreground/[0.065] px-2 py-1.5 text-left text-sm text-foreground"
                                 } else {
-                                    "rounded-md px-2 py-1.5 text-left text-sm text-muted-foreground transition-colors hover:bg-foreground/[0.04] hover:text-foreground"
+                                    "flex items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm text-muted-foreground transition-colors hover:bg-foreground/[0.04] hover:text-foreground"
                                 },
                                 onclick: {
                                     let id = section.id.clone();
                                     move |_| {
-                                        active_section.set(id.clone());
-                                        SettingsSectionNavigation::open(&id);
+                                        navigation.select(id.clone());
                                     }
                                 },
-                                "{section.title}"
+                                vmux_ui::icon::BuiltinIconView {
+                                    icon: section.icon(),
+                                    class: "size-3.5 shrink-0".to_string(),
+                                }
+                                span { class: "min-w-0 truncate", "{section.title}" }
                             }
                         }
                     }
-                }
-                main { id: "settings-scroll-viewport", class: "min-h-0 min-w-0 flex-1 overflow-y-auto",
-                    PageToolbar { controls: vec![ToolbarControl::search(query.clone(), translate("command-search"), move |query| {
-                        let _ = send(&SettingsFilterRequest { query });
-                    })] }
-                    SettingsScrollSpy {
-                        active: active_section,
-                    }
+                },
+                main {
+                    id: SETTINGS_SCROLL_ID,
+                    class: "min-h-0 min-w-0 flex-1 overflow-y-auto",
+                    onmounted: move |_| navigation.measure(),
+                    onscroll: move |_| navigation.measure(),
+                    onresize: move |_| navigation.measure(),
                     div { class: "mx-auto max-w-3xl px-6 py-6 lg:px-10",
+                        if sections.is_empty() {
+                            if query.is_empty() {
+                                ManagerSkeleton {}
+                            } else {
+                                ManagerEmpty {
+                                    title: translate("common-no-results"),
+                                    detail: String::new(),
+                                }
+                            }
+                        }
                         div { class: "mb-8 lg:hidden",
                             p { class: "text-sm text-muted-foreground",
                                 {translate("settings-stored")}
                             }
                         }
                         div { class: "flex flex-col",
-                            for section in sections {
+                            for (index, section) in sections.into_iter().enumerate() {
                                 SectionView {
                                     key: "{section.id}",
+                                    index,
                                     section,
                                     catalog: catalog.clone(),
                                 }
@@ -206,12 +192,12 @@ pub fn Page() -> Element {
 }
 
 #[component]
-fn SectionView(section: SettingsSection, catalog: SettingsRenderCatalog) -> Element {
+fn SectionView(index: usize, section: SettingsSection, catalog: SettingsRenderCatalog) -> Element {
     rsx! {
         section {
             id: "{section.id}",
             class: "scroll-mt-3 border-b border-foreground/[0.07] py-6 first:pt-3 last:border-b-0",
-            "data-vmux-settings-section": "",
+            "data-vmux-scroll-section": "{index}",
             header { class: "mb-3",
                 h2 { class: "text-sm font-semibold text-foreground/85", "{section.title}" }
                 if let Some(description) = section.description {
@@ -223,29 +209,79 @@ fn SectionView(section: SettingsSection, catalog: SettingsRenderCatalog) -> Elem
     }
 }
 
-struct SettingsSectionNavigation;
-
-impl SettingsSectionNavigation {
-    fn open(id: &str) {
-        let id = serde_json::to_string(id).unwrap_or_else(|_| "\"\"".to_string());
-        let _ = document::eval(&format!(
-            "document.getElementById({id})?.scrollIntoView({{behavior:'smooth',block:'start'}});"
-        ));
-    }
+#[derive(Clone, Copy)]
+struct SettingsSectionNavigation {
+    section_ids: Memo<Vec<String>>,
+    navigation: SectionNavigation,
+    measuring: Signal<bool>,
+    pending: Signal<bool>,
 }
 
-#[component]
-fn SettingsScrollSpy(active: Signal<String>) -> Element {
-    use_future(move || async move {
-        let mut eval = document::eval(SETTINGS_SCROLL_SPY);
-        while let Ok(id) = eval.recv::<String>().await {
-            active.set(id);
+impl SettingsSectionNavigation {
+    fn use_state(state: Signal<SettingsUiState>) -> Self {
+        let section_ids = use_memo(move || {
+            let mut ids = Vec::new();
+            for section in &state.read().sections {
+                ids.push(section.id.clone());
+            }
+            ids
+        });
+        let navigation = Self {
+            section_ids,
+            navigation: SectionNavigation::use_state(),
+            measuring: use_signal(|| false),
+            pending: use_signal(|| false),
+        };
+        let location = use_ui_state::<PageLocationUiState>().state;
+        use_effect(move || {
+            let fragment = location.read().fragment.clone();
+            let ids = section_ids.read();
+            if ids.contains(&fragment) {
+                navigation.navigation.receive(&fragment, fragment.clone());
+            }
+        });
+        let mut applied = use_signal(|| 0u64);
+        use_effect(move || {
+            let reveal = (navigation.navigation.reveal)();
+            if reveal.target.is_empty() || *applied.peek() == reveal.revision {
+                return;
+            }
+            applied.set(reveal.revision);
+            ScrollIntoView::section(SETTINGS_SCROLL_ID, &reveal.target, reveal.behavior);
+        });
+        use_effect(move || {
+            section_ids.read();
+            navigation.measure();
+        });
+        navigation
+    }
+
+    fn select(self, id: String) {
+        self.navigation.select(id.clone(), id);
+    }
+
+    fn measure(mut self) {
+        if *self.measuring.peek() {
+            self.pending.set(true);
+            return;
         }
-    });
-    use_drop(move || {
-        let _ = document::eval("globalThis.__vmuxSettingsScrollSpyCleanup?.();");
-    });
-    rsx! {}
+        self.measuring.set(true);
+        let ids = (self.section_ids)();
+        spawn(async move {
+            let section = ScrollIntoView::section_at_top(SETTINGS_SCROLL_ID).await;
+            self.measuring.set(false);
+            if (self.section_ids)() == ids
+                && let Some(index) = section
+                && let Some(id) = ids.get(index as usize)
+            {
+                self.navigation.follow(id.clone(), id.clone());
+            }
+            if *self.pending.peek() {
+                self.pending.set(false);
+                self.measure();
+            }
+        });
+    }
 }
 
 #[component]
@@ -674,6 +710,181 @@ fn Kbd(text: String) -> Element {
     rsx! {
         span { class: "inline-flex items-center rounded-md bg-foreground/[0.055] px-2 py-1 font-mono text-[11px] text-foreground",
             "{text}"
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use dioxus::core::{Mutation, VirtualDom};
+    use dioxus::html::{EventData, ScrollBehavior, SerializedScrollData};
+    use std::cell::{Cell, RefCell};
+    use std::future::Future;
+    use vmux_api::address::PageAddressPublish;
+    use vmux_api::page_location::PageLocationRequest;
+    use vmux_api::{BinEvent, UiStateFrame};
+    use vmux_ui::hooks::EventListenerError;
+    use vmux_ui::transport::{BytesListener, HostScope, PageHost, TextOffsetAnswer};
+
+    #[derive(Default)]
+    struct SettingsHost {
+        section: Cell<u32>,
+        locations: RefCell<Vec<String>>,
+        addresses: RefCell<Vec<PageAddress>>,
+        scrolls: RefCell<Vec<String>>,
+        listeners: RefCell<Vec<(String, BytesListener)>>,
+    }
+
+    impl PageHost for SettingsHost {
+        fn send(&self, id: &str, bytes: &[u8]) -> Result<(), EventListenerError> {
+            if id == PageLocationRequest::id() {
+                let request =
+                    rkyv::from_bytes::<PageLocationRequest, rkyv::rancor::Error>(bytes).unwrap();
+                self.locations.borrow_mut().push(request.fragment);
+            } else if id == PageAddressPublish::id() {
+                let request =
+                    rkyv::from_bytes::<PageAddressPublish, rkyv::rancor::Error>(bytes).unwrap();
+                self.addresses.borrow_mut().push(request.address);
+            }
+            Ok(())
+        }
+
+        fn listen(&self, id: &str, listener: BytesListener) -> Result<(), EventListenerError> {
+            self.listeners.borrow_mut().push((id.to_string(), listener));
+            Ok(())
+        }
+
+        fn section_at_top(&self, _: &str) -> TextOffsetAnswer {
+            Box::pin(std::future::ready(Some(self.section.get())))
+        }
+
+        fn scroll_section(&self, _: &str, element: &str, _: ScrollBehavior) {
+            self.scrolls.borrow_mut().push(element.to_string());
+        }
+    }
+
+    impl SettingsHost {
+        fn publish(&self, state: SettingsUiState) {
+            let frame = UiStateFrame::<SettingsUiState, SettingsUiState>::Snapshot(state);
+            let bytes = rkyv::to_bytes::<rkyv::rancor::Error>(&frame).unwrap();
+            self.receive(SettingsUiState::id(), &bytes);
+        }
+
+        fn receive(&self, id: &str, bytes: &[u8]) {
+            let mut found = false;
+            for (source, listener) in self.listeners.borrow_mut().iter_mut() {
+                if source == id {
+                    listener(bytes);
+                    found = true;
+                }
+            }
+            assert!(found, "the page must subscribe to {id}");
+        }
+
+        fn settle(dom: &mut VirtualDom) {
+            for _ in 0..8 {
+                let mut context = std::task::Context::from_waker(std::task::Waker::noop());
+                let _ = std::pin::pin!(dom.wait_for_work()).poll(&mut context);
+                dom.render_immediate_to_vec();
+            }
+        }
+    }
+
+    #[test]
+    fn scrolling_settings_updates_the_breadcrumb_and_location_without_replaying_scroll() {
+        dioxus::html::set_event_converter(Box::new(dioxus::html::SerializedHtmlEventConverter));
+        let host = Rc::new(SettingsHost::default());
+        let _host = HostScope::enter(host.clone());
+        let mut dom = VirtualDom::new(Page);
+        let scroll = dom
+            .rebuild_to_vec()
+            .edits
+            .into_iter()
+            .find_map(|edit| match edit {
+                Mutation::NewEventListener { name, id } if name == "scroll" => Some(id),
+                _ => None,
+            })
+            .unwrap();
+        SettingsHost::settle(&mut dom);
+        let mut state = SettingsUiState::default();
+        for (id, title) in [
+            ("general", "General"),
+            ("appearance", "Appearance"),
+            ("spaces", "Spaces"),
+        ] {
+            state.sections.push(SettingsSection {
+                id: id.to_string(),
+                title: title.to_string(),
+                description: None,
+                search_text: title.to_string(),
+                fields: Vec::new(),
+            });
+        }
+        let frame = UiStateFrame::<SettingsUiState, SettingsUiState>::Snapshot(state);
+        let bytes = rkyv::to_bytes::<rkyv::rancor::Error>(&frame).unwrap();
+        host.receive(SettingsUiState::id(), &bytes);
+        SettingsHost::settle(&mut dom);
+        host.locations.borrow_mut().clear();
+        host.section.set(2);
+        let event = EventData::Scroll(SerializedScrollData {
+            scroll_top: 600.0,
+            scroll_left: 0.0,
+            scroll_width: 800,
+            scroll_height: 1200,
+            client_width: 800,
+            client_height: 400,
+        });
+        dom.runtime()
+            .handle_event("scroll", Event::new(event.into_any(), false), scroll);
+        SettingsHost::settle(&mut dom);
+        assert_eq!(host.locations.borrow().as_slice(), ["spaces"]);
+        assert_eq!(
+            host.addresses.borrow().last().unwrap().fixed[0].entry.label,
+            "Spaces"
+        );
+        let frame = UiStateFrame::<PageLocationUiState, PageLocationUiState>::Snapshot(
+            PageLocationUiState {
+                fragment: "spaces".to_string(),
+            },
+        );
+        let bytes = rkyv::to_bytes::<rkyv::rancor::Error>(&frame).unwrap();
+        host.receive(PageLocationUiState::id(), &bytes);
+        SettingsHost::settle(&mut dom);
+        assert!(host.scrolls.borrow().is_empty());
+    }
+
+    #[test]
+    fn unmatched_settings_search_keeps_the_input_and_recovers_when_cleared() {
+        let host = Rc::new(SettingsHost::default());
+        let _host = HostScope::enter(host.clone());
+        let mut dom = VirtualDom::new(Page);
+        dom.rebuild_to_vec();
+        SettingsHost::settle(&mut dom);
+        let mut populated = SettingsUiState::default();
+        populated.sections.push(SettingsSection {
+            id: "general".to_string(),
+            title: "General".to_string(),
+            description: None,
+            search_text: "General".to_string(),
+            fields: Vec::new(),
+        });
+        let unmatched = SettingsUiState {
+            query: "unmatched settings".to_string(),
+            ..Default::default()
+        };
+        for (state, visible) in [
+            (populated.clone(), "General".to_string()),
+            (unmatched, translate("common-no-results")),
+            (populated, "General".to_string()),
+        ] {
+            let query = state.query.clone();
+            host.publish(state);
+            SettingsHost::settle(&mut dom);
+            let html = dioxus_ssr::render(&dom);
+            assert_eq!(html.matches("type=\"search\"").count(), 1);
+            assert!(html.contains(&format!("value=\"{query}\"")));
+            assert!(html.contains(&visible));
         }
     }
 }

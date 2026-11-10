@@ -614,9 +614,8 @@ document's inert state without adding persistent JavaScript bindings.
 Page-local navigation uses `PageLocationRequest` and `PageLocationUiState`, with the fragment
 stored in `PageMetadata`. Fragment-only changes update the hosted URL and the committed Stack
 without rebuilding the document or changing its data-cache identity. Pages resolve that shared
-location to their own file or section and use the common scroll transport; Settings can consume
-the same location state for its section navigation.
-Git file selection and the editor Outline share `SectionNavigation`: clicks request smooth
+location to their own file or section and use the common scroll transport.
+Settings, Git file selection, and the editor Outline share `SectionNavigation`: clicks request smooth
 scrolling, scrolling publishes the current section, and echoed location updates do not restart
 navigation. Notes resolve `#L<line>` to a rendered block and measure the heading at the viewport
 edge in one DOM request. Outline following preserves the editor caret. Page routes are declared once in `feature.ron`.
@@ -636,6 +635,16 @@ bookmarks resolve the working directory selected in the owning Space card throug
 checkout follows the owning workspace, and old `vmux://git/` routes normalize before rendering.
 Search, filters, Details, Add, Create,
 Resume, Start, and Checkout render inside the page through `PageToolbar`, with local callbacks.
+Settings and manager pages share `WorkspaceLayout`: navigation opens by default on desktop,
+and its toggle animates the sidebar and icon. The content-column toolbar matches Editor and Note:
+the common `PageSidebarToggle` sits on the left and fills its left segment while open.
+Sidebar search uses the same top-left `ManagerSearchRow` and `ManagerSearch` as Editor and Git.
+Settings keeps that layout mounted while loading or showing no search results, so the query
+remains editable and clearing it restores the sections without replacing the search control.
+The Settings shortcut uses the shared stack open request and a settings reuse group, focusing
+the existing page with its current section instead of opening another stack.
+Settings section icons and the active viewport section update the address trail and URL fragment;
+command-bar search providers resolve their favicons through the common favicon source.
 Git's document, styles and UI transport share the `git://` origin. Code uses `file://` for
 navigation and `vmux://files/` for the native renderer: WKWebView reserves the built-in file
 scheme and rejects a custom handler. Page routing and renderer asset origins are separate
@@ -827,8 +836,11 @@ inside that Space. Cross-space leaks are impossible by construction — the lega
 tagged tabs with a detached id and computed selection globally, which let creating a space
 corrupt another's panes.
 
-State snapshots to `store.ron` via `moonshine-save`. A schema-version sidecar hard-resets
-on an incompatible version rather than loading a broken store.
+State snapshots to `store.ron` via `moonshine-save`. A schema-version sidecar rejects newer
+versions unchanged; older, unversioned, or incompatible stores are copied to unique backups
+before starting a new workspace. Backup failures refuse startup rather than lose the original.
+Both outcomes show a localized warning with the preserved path. Exit waits for pending
+autosaves and writes the final snapshot synchronously before releasing the data lease.
 
 World persistence uses named type-registry domains. A persisted component or resource registers
 once with its domain; that metadata produces the component and resource allowlists used by saves.
@@ -1323,6 +1335,52 @@ React-style, in one atomic transaction.
 ---
 
 ## Platforms
+
+### Manual iteration
+
+```text
+agent: make build-dev -> signed Vmux Dev.app -> user: make <worktree>
+standalone client: make run-dev
+```
+
+Debug uses the full desktop feature set, Bevy dynamic linking, no LTO, and incremental
+compilation. Build and launch are separate: plain run-dev verifies the completed artifacts
+and never compiles or kills an existing app. The cloud launcher requests build-if-needed,
+which builds only when the completion stamp is missing or invalid. Unchanged signed inputs
+reuse their bundled executables so a no-op build does not replace the daemon identity.
+After a successful build, a launch link under `target/release/` lets the existing vmux-cloud
+`make <worktree>` launcher find the debug app
+without depending on cloud-specific files or changing the public client's build prerequisites.
+Failed builds remove that link; real release bundles are never replaced. build-local remains
+the bundle/OS-integration gate.
+
+Local and debug share the workspace store and a stable Chromium directory per named profile,
+not per worktree. On first use the most recently modified legacy local profile is reused
+without merging or overwriting other profiles. Normal builds use the same Safe Storage key;
+mock-key test sessions have their own data directory. Logs and service endpoints stay separate.
+A process-lifetime desktop lock allows one GUI writer; desktop and daemon share a data lease
+whose owner is the build and worktree. A different owner cannot start until both have exited,
+and an endpoint lock prevents duplicate daemons from overwriting PID/socket files.
+The debug `.app` contains application binaries, its icon, generated plists, and a service login item.
+CEF stays in the installed SDK,
+and Bevy/Rust dylibs are linked from the build/toolchain cache. The executable has bundle rpaths
+so Finder and `open` need no shell library-path setup. This app is local, not a distributable bundle.
+CEF receives the host's main bundle path so its SDK subprocess uses the same IPC port namespace.
+macOS debug child launches normalize renderer and alert helper paths to the installed SDK
+executable and retain the configured no-sandbox mode. Prewarmed terminal pages have no process
+identity and do not count as running terminals in quit confirmation.
+Both host and helper signing caches include identity and entitlements; a valid linker signature
+alone does not satisfy the development signing contract.
+Quit flushes pending layout changes. Switching named profiles restarts the GUI rather than
+opening another writer. After the old GUI exits, a different build drains its daemon and waits
+for the data lease automatically; no manual stop is needed. This ends old terminals and agents,
+while reopening the same build keeps them. Old binaries without leases are not
+protected by these advisory locks. VMUX_DATA_DIR selects a separate data root and runtime
+endpoints for copied-state tests; manual service start inherits that root and named profile
+instead of using a global launchd environment. Browser paths outside the chosen data root
+are refused, including copied symlinks back to live data. Newer schemas refuse startup;
+older or incompatible stores are backed up before resetting. Changing persistence schemas
+against the live shared store is not an iteration shortcut.
 
 | Platform | Role | Status |
 |---|---|---|

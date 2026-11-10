@@ -1,3 +1,5 @@
+use vmux_api::BuiltinIcon;
+
 pub const EXPLORER_DEFAULT_WIDTH: u32 = vmux_api::editor::TreeWidth::DEFAULT;
 pub const EXPLORER_MIN_WIDTH: u32 = vmux_api::editor::TreeWidth::MIN;
 pub const EXPLORER_MAX_WIDTH: u32 = vmux_api::editor::TreeWidth::MAX;
@@ -18,6 +20,23 @@ pub struct SettingsSection {
     pub description: Option<String>,
     pub search_text: String,
     pub fields: Vec<SettingsRenderFieldId>,
+}
+
+impl SettingsSection {
+    pub fn icon(&self) -> BuiltinIcon {
+        match self.id.as_str() {
+            "appearance" => BuiltinIcon::Sparkles,
+            "layout" => BuiltinIcon::Layers,
+            "agent" => BuiltinIcon::Brain,
+            "shortcuts" => BuiltinIcon::Keyboard,
+            "terminal" => BuiltinIcon::Terminal,
+            "browser" => BuiltinIcon::Globe,
+            "editor" => BuiltinIcon::Code,
+            "recording" => BuiltinIcon::Activity,
+            "spaces" => BuiltinIcon::Planet,
+            _ => BuiltinIcon::Settings,
+        }
+    }
 }
 
 #[vmux_api::contract(Copy, Eq, Default)]

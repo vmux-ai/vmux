@@ -44,7 +44,9 @@ impl Backend {
 
 impl DaemonBinary {
     pub fn requires_registration(&self, profile: &str) -> bool {
-        profile == "release" && AppBundle::try_from(self.path()).is_ok()
+        profile == "release"
+            && !vmux_profile::SessionEnvironment::requires_inherited_service_environment()
+            && AppBundle::try_from(self.path()).is_ok()
     }
 
     pub fn prepare_detached_spawn(&self) {
@@ -52,7 +54,8 @@ impl DaemonBinary {
         let _ = self;
 
         #[cfg(target_os = "macos")]
-        if AppBundle::try_from(self.path()).is_ok()
+        if !vmux_profile::SessionEnvironment::requires_inherited_service_environment()
+            && AppBundle::try_from(self.path()).is_ok()
             && let Err(error) =
                 crate::sm_app_service::AgentService::new(EMBEDDED_AGENT_PLIST).unregister()
         {

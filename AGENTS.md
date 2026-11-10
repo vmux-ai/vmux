@@ -41,7 +41,9 @@ Keep module-specific tests inline. Split tests only when they form an independen
 
 ## Debugging
 
-**Never launch or run vmux yourself.** Do not execute `make dev`, `vmux_desktop`, `Vmux.app`, or automate input against the app. Build it when needed, then ask the user to run the normal build. After the user runs it, inspect the app logs directly.
+**Never launch or run vmux yourself.** Do not execute `make dev`, `make run-dev`, `vmux_desktop`, `Vmux.app`, or automate input against the app. For manual iteration, run `make build-dev`: it builds and signs the debug binaries without launching or stopping anything. On macOS it leaves `target/debug/Vmux Dev.app`, backed by the local CEF SDK and Bevy dylib cache rather than a copied release framework. For vmux-cloud worktrees, a completed build publishes a `target/release/Vmux Dev.app` link so the user opens it from the cloud root with only `make <worktree>`; standalone client work uses `make run-dev`. Neither launch path compiles once an artifact exists. Keep `make build-local` for packaging, permissions, and release-like final checks. After the user runs the app, inspect its logs directly.
+
+Local and debug builds share the workspace store and one Chromium profile per named profile across worktrees. Quit the previous GUI before switching; the next build drains its old daemon automatically while holding the GUI lock, then waits for its data lease. Switching builds ends the old daemon's terminals and agents; reopening the same build retains them. `make stop-dev` is optional explicit shutdown, not an iteration step. Use `VMUX_DATA_DIR=/absolute/path/to/a/copy` for persistence/schema/migration work, never `VMUX_TEST=1` with real shared data. Legacy builds without leases must be quit before the first shared-data launch.
 
 When adding temporary diagnostics to investigate a bug, make logging unconditional (default-on) — never gate it behind an env var or flag the user must set. The user runs the normal build; logs must appear without extra setup. Strip every temporary diagnostic before committing the fix.
 

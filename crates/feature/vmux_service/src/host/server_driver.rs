@@ -149,8 +149,9 @@ impl Connection {
                         processes: Vec::new(),
                     };
                     let mut writer = writer.lock().await;
-                    ServiceCodec::write_service(&mut *writer, &response).await?;
+                    let response = ServiceCodec::write_service(&mut *writer, &response).await;
                     shutdown_tx.send(()).await.ok();
+                    response?;
                     break;
                 }
                 ClientMessage::Status => {

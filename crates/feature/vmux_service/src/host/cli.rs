@@ -120,9 +120,7 @@ fn status(requests: Query<Entity, Added<ServiceStatusRequest>>, mut commands: Co
 fn start(requests: Query<Entity, Added<ServiceStartRequest>>, mut commands: Commands) {
     for entity in &requests {
         #[cfg(target_os = "macos")]
-        let result = DaemonBinary::current()
-            .and_then(|binary| LaunchAgent::current().ensure_running(binary.path()))
-            .map(|_| 0);
+        let result = ServiceStart::current().map(|_| 0);
         #[cfg(not(target_os = "macos"))]
         let result = {
             eprintln!("vmux service: launchd commands are macOS-only");
@@ -134,26 +132,108 @@ fn start(requests: Query<Entity, Added<ServiceStartRequest>>, mut commands: Comm
 
 fn stop(requests: Query<Entity, Added<ServiceStopRequest>>, mut commands: Commands) {
     for entity in &requests {
-        #[cfg(target_os = "macos")]
-        let result = LaunchAgent::current().bootout().map(|_| 0);
-        #[cfg(not(target_os = "macos"))]
-        let result = {
-            eprintln!("vmux service: launchd commands are macOS-only");
-            Ok(2)
-        };
+        let result = ServiceStop::current().map(|_| 0);
         commands.entity(entity).insert(CliResult::from(result));
+    }
+}
+
+#[cfg(target_os = "macos")]
+struct ServiceStart;
+
+#[cfg(target_os = "macos")]
+impl ServiceStart {
+    fn detached() -> bool {
+        ServicePaths::build_profile() != "release"
+            || vmux_profile::SessionEnvironment::requires_inherited_service_environment()
+    }
+
+    fn current() -> std::io::Result<()> {
+        if StatusInfo::live().is_some() {
+            return Ok(());
+        }
+        let binary = DaemonBinary::current()?;
+        if Self::detached() {
+            binary.spawn_detached()?;
+        } else {
+            LaunchAgent::current().ensure_running(binary.path())?;
+        }
+        let deadline = std::time::Instant::now() + Duration::from_secs(5);
+        loop {
+            if StatusInfo::live().is_some() {
+                return Ok(());
+            }
+            if std::time::Instant::now() >= deadline {
+                return Err(std::io::Error::new(
+                    std::io::ErrorKind::TimedOut,
+                    "Vmux service did not start for the selected data root and profile",
+                ));
+            }
+            std::thread::sleep(Duration::from_millis(25));
+        }
+    }
+}
+
+struct ServiceStop;
+
+impl ServiceStop {
+    fn current() -> std::io::Result<()> {
+        let paths = ServicePaths::current();
+        let data = vmux_profile::ProfilePaths::current().shared_data();
+        std::fs::create_dir_all(&data)?;
+        let desktop = std::fs::OpenOptions::new()
+            .create(true)
+            .read(true)
+            .write(true)
+            .truncate(false)
+            .open(data.join("desktop.lock"))?;
+        desktop.try_lock().map_err(|error| {
+            std::io::Error::new(
+                std::io::ErrorKind::WouldBlock,
+                format!("Quit Vmux before stopping its service: {error}"),
+            )
+        })?;
+        #[cfg(target_os = "macos")]
+        if !ServiceStart::detached() {
+            LaunchAgent::current().bootout()?;
+        }
+        if let Ok(mut stream) = std::os::unix::net::UnixStream::connect(paths.socket()) {
+            stream.set_read_timeout(Some(Duration::from_secs(5)))?;
+            stream.set_write_timeout(Some(Duration::from_secs(1)))?;
+            ServiceCodec::write_client_blocking(&mut stream, &ClientMessage::Shutdown)?;
+            let mut reader = std::io::BufReader::new(&mut stream);
+            let _ = ServiceCodec::read_service_blocking(&mut reader)?;
+        }
+        std::fs::create_dir_all(ServicePaths::dir())?;
+        let lock = std::fs::OpenOptions::new()
+            .create(true)
+            .read(true)
+            .write(true)
+            .truncate(false)
+            .open(paths.daemon_lock())?;
+        let deadline = std::time::Instant::now() + Duration::from_secs(5);
+        loop {
+            match lock.try_lock() {
+                Ok(()) => return Ok(()),
+                Err(std::fs::TryLockError::WouldBlock) => {}
+                Err(std::fs::TryLockError::Error(error)) => return Err(error),
+            }
+            if std::time::Instant::now() >= deadline {
+                return Err(std::io::Error::new(
+                    std::io::ErrorKind::TimedOut,
+                    "Vmux service did not stop",
+                ));
+            }
+            std::thread::sleep(Duration::from_millis(25));
+        }
     }
 }
 
 fn restart(requests: Query<Entity, Added<ServiceRestartRequest>>, mut commands: Commands) {
     for entity in &requests {
         #[cfg(target_os = "macos")]
-        let result = DaemonBinary::current().and_then(|binary| {
-            let agent = LaunchAgent::current();
-            let _ = agent.bootout();
-            agent.ensure_running(binary.path())?;
-            Ok(0)
-        });
+        let result = ServiceStop::current()
+            .and_then(|_| ServiceStart::current())
+            .map(|_| 0);
         #[cfg(not(target_os = "macos"))]
         let result = {
             eprintln!("vmux service: launchd commands are macOS-only");

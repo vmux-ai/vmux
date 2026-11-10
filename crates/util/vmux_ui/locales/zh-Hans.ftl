@@ -1111,3 +1111,7 @@ common-copy-url = 复制 URL
 sessions-history-unavailable = 无法重新打开此对话。你可以开始新对话。
 sessions-connection-interrupted = 连接已中断。请重新连接。
 sessions-operation-failed = 无法完成操作。
+
+workspace-store-title = 工作区数据
+workspace-store-recovered = 旧工作区数据已保存在 { $path }。将创建新的工作区。
+workspace-store-refused = 无法安全打开此工作区。{ $path } 中的数据未被更改。请使用更新的版本或数据副本。

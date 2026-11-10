@@ -6,6 +6,7 @@ pub use vmux_transport::DeviceId;
 
 pub use cli::ServiceCliPlugin;
 pub use daemon::{DaemonBinary, DaemonIdentity};
+pub use handoff::RuntimeHandoff;
 pub use launch_agent::LaunchAgent;
 pub use vmux_profile::{RemotePaths, ServicePaths};
 
@@ -13,6 +14,7 @@ pub mod bundle;
 pub mod cleanup;
 pub mod cli;
 mod client;
+mod handoff;
 mod launch_agent;
 #[cfg(target_os = "macos")]
 pub mod launchd;

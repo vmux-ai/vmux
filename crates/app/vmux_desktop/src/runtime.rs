@@ -11,6 +11,8 @@ use bevy_cef_core::prelude::{
 };
 use std::time::Duration;
 #[cfg(feature = "tray")]
+use vmux_api::protocol::ProcessId;
+#[cfg(feature = "tray")]
 use vmux_terminal::{PtyExited, Terminal};
 
 #[cfg(not(target_os = "macos"))]
@@ -37,7 +39,9 @@ impl Plugin for RuntimePlugin {
         app.add_message::<HideAllWindowsRequest>()
             .add_message::<vmux_input::HideWindowsShortcut>()
             .add_systems(Update, hide_all_windows)
-            .add_systems(Update, keep_awake_while_revealing);
+            .add_systems(Update, keep_awake_while_revealing)
+            .add_systems(Startup, install_shutdown_signal)
+            .add_systems(Update, receive_shutdown_signal);
         #[cfg(feature = "tray")]
         app.add_message::<ShowAllWindowsRequest>()
             .add_message::<QuitRequest>()
@@ -51,6 +55,49 @@ impl Plugin for RuntimePlugin {
             .add_systems(Update, sync_winit_power_mode.after(request_quit));
         #[cfg(not(feature = "tray"))]
         app.add_systems(Update, sync_winit_power_mode.after(hide_all_windows));
+    }
+}
+
+#[derive(Resource)]
+struct ShutdownSignal(std::sync::Mutex<std::sync::mpsc::Receiver<()>>);
+
+fn install_shutdown_signal(mut commands: Commands, wake: Option<Res<EventLoopProxyWrapper>>) {
+    let (sender, receiver) = std::sync::mpsc::channel();
+    let wake = wake.map(|proxy| (**proxy).clone());
+    std::thread::spawn(move || {
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .expect("create shutdown signal runtime");
+        runtime.block_on(async move {
+            let mut terminate =
+                tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())
+                    .expect("install termination signal");
+            tokio::select! {
+                _ = tokio::signal::ctrl_c() => {}
+                _ = terminate.recv() => {}
+            }
+            let _ = sender.send(());
+            if let Some(wake) = wake {
+                let _ = wake.send_event(WinitUserEvent::WakeUp);
+            }
+            tokio::select! {
+                _ = tokio::signal::ctrl_c() => {}
+                _ = terminate.recv() => {}
+            }
+            std::process::exit(130);
+        });
+    });
+    commands.insert_resource(ShutdownSignal(std::sync::Mutex::new(receiver)));
+}
+
+fn receive_shutdown_signal(signal: Res<ShutdownSignal>, mut exits: MessageWriter<AppExit>) {
+    if signal
+        .0
+        .lock()
+        .is_ok_and(|receiver| receiver.try_recv().is_ok())
+    {
+        exits.write(AppExit::Success);
     }
 }
 
@@ -251,7 +298,7 @@ fn show_all_windows(
 #[cfg(feature = "tray")]
 fn request_quit(
     mut requests: MessageReader<QuitRequest>,
-    terminals: Query<(), (With<Terminal>, Without<PtyExited>)>,
+    terminals: Query<(), (With<Terminal>, With<ProcessId>, Without<PtyExited>)>,
     confirmation: Query<(), With<QuitConfirmation>>,
     wake: Option<Res<EventLoopProxyWrapper>>,
     mut exits: MessageWriter<AppExit>,
@@ -298,11 +345,15 @@ mod tests {
 
     #[cfg(feature = "tray")]
     #[test]
-    fn quit_without_live_terminal_exits_immediately() {
+    fn prewarmed_terminal_pages_do_not_trigger_quit_confirmation() {
         let mut app = App::new();
         app.add_message::<QuitRequest>()
             .add_message::<AppExit>()
             .add_systems(Update, request_quit);
+        for _ in 0..2 {
+            app.world_mut()
+                .spawn((Terminal, vmux_ecs::page::PrewarmedPage));
+        }
         app.world_mut()
             .resource_mut::<Messages<QuitRequest>>()
             .write(QuitRequest);
@@ -315,6 +366,25 @@ mod tests {
             .drain()
             .collect();
         assert_eq!(exits, vec![AppExit::Success]);
+    }
+
+    #[cfg(feature = "tray")]
+    #[test]
+    fn a_live_terminal_process_still_requires_quit_confirmation() {
+        let mut app = App::new();
+        app.add_message::<QuitRequest>()
+            .add_message::<AppExit>()
+            .add_systems(Update, request_quit);
+        app.world_mut().spawn((Terminal, ProcessId::new()));
+        app.world_mut().write_message(QuitRequest);
+        app.update();
+        assert!(app.world().resource::<Messages<AppExit>>().is_empty());
+        let confirmation = app
+            .world_mut()
+            .query::<&QuitConfirmation>()
+            .single(app.world())
+            .unwrap();
+        assert_eq!(confirmation.count, 1);
     }
 
     #[test]

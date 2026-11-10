@@ -1,4 +1,4 @@
-.PHONY: dev dev-full dev-player test-app local release build-local build-release build setup-cef install-debug-render-process seed-target doctor ensure-mac-deps ensure-native-deps ensure-dioxus-deps ensure-mobile-ios-deps ensure-mobile-android-deps ios android mobile-ios mobile-android mobile-ios-run mobile-android-run build-ios-release ios-release ensure-ios-release-deps ensure-package-deps ensure-codesign-deps website build-website-release build-website-css lint lint-fix test setup-hooks cleanup cleanup-local
+.PHONY: dev build-dev run-dev stop-dev dev-full dev-player test-app local release build-local build-release build setup-cef install-debug-render-process seed-target doctor ensure-mac-deps ensure-native-deps ensure-dioxus-deps ensure-mobile-ios-deps ensure-mobile-android-deps ios android mobile-ios mobile-android mobile-ios-run mobile-android-run build-ios-release ios-release ensure-ios-release-deps ensure-package-deps ensure-codesign-deps website build-website-release build-website-css lint lint-fix test setup-hooks cleanup cleanup-local
 
 .DEFAULT_GOAL := dev
 
@@ -19,27 +19,19 @@ CEF_VERSION := $(shell awk -F'"' '/^name = "cef"$$/{getline; print $$2; exit}' C
 CEF_FRAMEWORK_DIR := $(HOME)/.local/share/Chromium Embedded Framework.framework
 CEF_DEBUG_RENDER := $(CEF_FRAMEWORK_DIR)/Libraries/bevy_cef_debug_render_process
 
-dev: ensure-native-deps ensure-codesign-deps install-debug-render-process
-	$(CARGO_WITH_CEF_CACHE) build -p vmux_cli
-	$(CARGO_WITH_CEF_CACHE) build -p vmux_app --bin vmux_service --features service-daemon
-	$(CARGO_WITH_CEF_CACHE) build -p vmux_desktop $(VMUX_DESKTOP_FEATURES)
-	@identity="$$(./scripts/ensure-local-codesign-identity.sh)" && \
-	APPLE_SIGNING_IDENTITY="$$identity" \
-	APP_BINARY="target/debug/vmux_desktop" \
-	HELPER_BINARY="$(CEF_DEBUG_RENDER)" \
-	./scripts/sign-dev-mac.sh
-	@for pid in $$(pgrep -f "target/debug/vmux_desktop" 2>/dev/null); do \
-		ps eww -p $$pid 2>/dev/null | grep -q "VMUX_PROFILE=$(VMUX_PROFILE)" && kill $$pid 2>/dev/null || true; \
-	done
-	@for pid in $$(pgrep -f "bevy_cef_debug_render_process" 2>/dev/null); do \
-		ps eww -p $$pid 2>/dev/null | grep -q "VMUX_PROFILE=$(VMUX_PROFILE)" && kill $$pid 2>/dev/null || true; \
-	done
-	@rust_target_libdir="$$(rustc --print target-libdir)" && \
-	dylib_path="$$rust_target_libdir:$(CURDIR)/target/debug/deps" && \
-	if [ -n "$${DYLD_LIBRARY_PATH:-}" ]; then \
-		dylib_path="$$dylib_path:$$DYLD_LIBRARY_PATH"; \
-	fi; \
-	exec env -u CEF_PATH DYLD_LIBRARY_PATH="$$dylib_path" VMUX_PROFILE="$(VMUX_PROFILE)" VMUX_TEST="$(VMUX_TEST)" ./target/debug/vmux_desktop
+build-dev: export CARGO_INCREMENTAL = 1
+build-dev: ensure-native-deps ensure-codesign-deps install-debug-render-process
+	CARGO_BIN="$(CARGO_BIN)" CEF_DEBUG_RENDER="$(CEF_DEBUG_RENDER)" \
+	  ./scripts/build-dev.sh $(VMUX_DESKTOP_FEATURES)
+
+run-dev:
+	./scripts/run-dev.sh
+
+stop-dev:
+	./scripts/run-dev.sh stop
+
+dev: build-dev
+	$(MAKE) run-dev
 
 dev-player:
 	$(MAKE) dev VMUX_DESKTOP_FEATURES="--no-default-features --features dev,player-mode"

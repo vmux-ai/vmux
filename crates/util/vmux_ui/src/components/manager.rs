@@ -1,7 +1,9 @@
 use crate::cn::cn;
 use crate::components::badge::Badge;
 use crate::components::dropdown::{Dropdown, DropdownOption, DropdownSelector};
-use crate::components::page::{PageContent, PageHeader, PageShell, PageToolbarRow};
+use crate::components::page::{
+    PageContent, PageHeader, PageShell, PageSidebarToggle, PageToolbarRow,
+};
 use crate::components::skeleton::Skeleton;
 use crate::components::tooltip::Tooltip;
 use crate::i18n::translate;
@@ -86,22 +88,47 @@ pub fn WorkspaceLayout(
     children: Element,
 ) -> Element {
     let sidebar_width = vmux_api::editor::TreeWidth::DEFAULT;
+    let mut sidebar_open = use_signal(|| !cfg!(any(target_os = "ios", target_os = "android")));
+    let duration = crate::motion::Motion::LAYOUT_MS;
+    let sidebar_style = if sidebar_open() {
+        format!(
+            "width:min(var(--vmux-sidebar-width),50vw);opacity:1;transition-duration:{duration}ms;"
+        )
+    } else {
+        format!("width:0px;opacity:0;transition-duration:{duration}ms;")
+    };
     rsx! {
-        div { class: "flex min-h-0 flex-1 flex-col overflow-hidden", style: "--vmux-sidebar-width:{sidebar_width}px;",
-            PageToolbarRow { class: "".to_string(),
-                if let Some(search) = search {
-                    div { class: "w-[min(var(--vmux-sidebar-width),50vw)] min-w-0 shrink-0", {search} }
-                }
-                div { class: "min-w-0 flex-1", {toolbar} }
-            }
-            div { class: "flex min-h-0 flex-1 overflow-hidden",
+        div { class: "flex min-h-0 flex-1 overflow-hidden", style: "--vmux-sidebar-width:{sidebar_width}px;",
                 if show_sidebar {
-                    aside { class: "hidden w-[min(var(--vmux-sidebar-width),50vw)] shrink-0 flex-col px-1 pb-2 sm:flex",
-                        div { class: "min-h-0 flex-1 overflow-y-auto", {sidebar} }
+                    aside {
+                        class: "flex min-h-0 shrink-0 flex-col overflow-hidden transition-[width,opacity] ease-out motion-reduce:transition-none",
+                        style: sidebar_style,
+                        aria_hidden: !sidebar_open(),
+                        inert: (!sidebar_open()).then_some(""),
+                        if let Some(search) = &search {
+                            div { class: "w-[min(var(--vmux-sidebar-width),50vw)] shrink-0", {search.clone()} }
+                        }
+                        div { class: "min-h-0 w-[min(var(--vmux-sidebar-width),50vw)] flex-1 overflow-y-auto px-1 pb-2", {sidebar} }
                     }
                 }
-                div { class: "flex min-w-0 flex-1 flex-col overflow-hidden", {children} }
-            }
+                div { class: "flex min-w-0 flex-1 flex-col overflow-hidden",
+                    PageToolbarRow {
+                        if show_sidebar {
+                            PageSidebarToggle {
+                                open: sidebar_open(),
+                                label: translate("schema-side-sheet"),
+                                ontoggle: move |_| sidebar_open.set(!sidebar_open()),
+                            }
+                        }
+                        if !show_sidebar {
+                            if let Some(search) = search {
+                                div { class: "w-[min(var(--vmux-sidebar-width),50vw)] min-w-0 shrink-0", {search} }
+                            }
+                        }
+                        div { class: "min-w-0 flex-1", {toolbar} }
+                    }
+                    {children}
+                }
         }
     }
 }
@@ -960,5 +987,72 @@ pub fn ManagerSkeleton() -> Element {
             }
         }
         }
+    }
+}
+
+#[cfg(all(test, not(any(target_os = "ios", target_os = "android"))))]
+mod tests {
+    use super::*;
+    use dioxus::core::{AttributeValue, ElementId, Mutation, VirtualDom};
+    use dioxus::html::{EventData, SerializedMouseData};
+
+    #[component]
+    fn SidebarSearch() -> Element {
+        rsx! {
+            WorkspaceLayout {
+                search: rsx! { input { r#type: "search", id: "sidebar-search" } },
+                sidebar: rsx! { div { "Navigation" } },
+                div { "Content" }
+            }
+        }
+    }
+
+    #[derive(Default)]
+    struct SidebarInert {
+        blocked: bool,
+        toggle: Option<ElementId>,
+    }
+
+    impl SidebarInert {
+        fn apply(&mut self, edits: Vec<Mutation>) {
+            for edit in edits {
+                match edit {
+                    Mutation::SetAttribute {
+                        name: "inert",
+                        value,
+                        ..
+                    } => {
+                        self.blocked = !matches!(value, AttributeValue::None);
+                    }
+                    Mutation::NewEventListener { name, id } if name == "click" => {
+                        self.toggle = Some(id);
+                    }
+                    _ => {}
+                }
+            }
+        }
+
+        fn click(&mut self, dom: &mut VirtualDom) {
+            let event = EventData::Mouse(SerializedMouseData::default());
+            dom.runtime().handle_event(
+                "click",
+                Event::new(event.into_any(), true),
+                self.toggle.unwrap(),
+            );
+            self.apply(dom.render_immediate_to_vec().edits);
+        }
+    }
+
+    #[test]
+    fn sidebar_search_is_interactive_while_open_and_inert_only_while_closed() {
+        dioxus::html::set_event_converter(Box::new(dioxus::html::SerializedHtmlEventConverter));
+        let mut dom = VirtualDom::new(SidebarSearch);
+        let mut sidebar = SidebarInert::default();
+        sidebar.apply(dom.rebuild_to_vec().edits);
+        assert!(!sidebar.blocked);
+        sidebar.click(&mut dom);
+        assert!(sidebar.blocked);
+        sidebar.click(&mut dom);
+        assert!(!sidebar.blocked);
     }
 }

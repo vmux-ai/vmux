@@ -104,6 +104,41 @@ fn wake_deadline(
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[cfg(all(target_os = "macos", feature = "debug"))]
+    use crate::prelude::DebugLibraryLoader;
+    #[cfg(all(target_os = "macos", feature = "debug"))]
+    use crate::util::IntoString;
+
+    #[cfg(all(target_os = "macos", feature = "debug"))]
+    #[test]
+    fn debug_renderer_and_alert_processes_use_the_installed_sdk_helper() {
+        let loader = DebugLibraryLoader::new();
+        assert!(loader.load());
+        let _ = api_hash(sys::CEF_API_VERSION_LAST, 0);
+        let helper = crate::util::debug_render_process_path();
+        assert!(helper.is_file(), "the debug SDK helper must be installed");
+        let (tx, _rx) = mpsc::channel();
+        let handler = BrowserProcessHandlerBuilder::build(
+            tx,
+            CefExtensions::default(),
+            None,
+            MessageLoopWakePolicy::default(),
+        );
+        for (kind, suffix) in [
+            ("renderer", "Renderer"),
+            ("utility", "Alerts"),
+            ("gpu-process", "GPU"),
+        ] {
+            let mut command = command_line_create().unwrap();
+            let missing =
+                format!("/missing/helper ({suffix}).app/Contents/MacOS/helper ({suffix})");
+            command.set_program(Some(&missing.as_str().into()));
+            command.append_switch_with_value(Some(&"type".into()), Some(&kind.into()));
+            handler.on_before_child_process_launch(Some(&mut command));
+            assert_eq!(command.program().into_string(), helper.to_string_lossy());
+            assert_eq!(command.has_switch(Some(&"no-sandbox".into())), 1);
+        }
+    }
 
     #[test]
     fn cef_wake_throttle_uses_policy_interval() {
@@ -165,6 +200,13 @@ impl ImplBrowserProcessHandler for BrowserProcessHandlerBuilder {
         let Some(command_line) = command_line else {
             return;
         };
+
+        #[cfg(all(target_os = "macos", feature = "debug"))]
+        {
+            let helper = crate::util::debug_render_process_path();
+            command_line.set_program(Some(&helper.to_string_lossy().as_ref().into()));
+            command_line.append_switch(Some(&"no-sandbox".into()));
+        }
 
         command_line.append_switch(Some(&"disable-web-security".into()));
         command_line.append_switch(Some(&"allow-running-insecure-content".into()));

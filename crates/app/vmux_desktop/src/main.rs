@@ -35,16 +35,16 @@ fn main() {
         }
     );
 
+    let _lease = match vmux_service::RuntimeHandoff::acquire() {
+        Ok(lease) => lease,
+        Err(error) => {
+            eprintln!("Cannot open Vmux: {error}");
+            std::process::exit(1);
+        }
+    };
     let mut app = App::new();
     app.add_plugins(VmuxPlugin);
     run_update_on_one_thread(&mut app);
-
-    unsafe {
-        libc::signal(
-            libc::SIGINT,
-            sigint_handler as *const () as libc::sighandler_t,
-        );
-    }
 
     app.run();
 }
@@ -60,13 +60,5 @@ fn run_update_on_one_thread(app: &mut App) {
         app.edit_schedule(label, |schedule| {
             schedule.set_executor(bevy::ecs::schedule::SingleThreadedExecutor::new());
         });
-    }
-}
-
-extern "C" fn sigint_handler(_: libc::c_int) {
-    unsafe {
-        let msg = b"\nShutting down...\n";
-        libc::write(2, msg.as_ptr() as *const libc::c_void, msg.len());
-        libc::_exit(0);
     }
 }

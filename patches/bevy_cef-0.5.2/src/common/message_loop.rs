@@ -157,6 +157,21 @@ fn load_cef_library(app: &mut App) {
     app.insert_non_send(loader);
 }
 
+#[cfg(all(target_os = "macos", feature = "debug"))]
+struct MainBundle<'a>(&'a std::path::Path);
+
+#[cfg(all(target_os = "macos", feature = "debug"))]
+impl MainBundle<'_> {
+    fn path(&self) -> String {
+        for path in self.0.ancestors() {
+            if path.extension().is_some_and(|extension| extension == "app") {
+                return path.to_string_lossy().into_owned();
+            }
+        }
+        String::new()
+    }
+}
+
 #[cfg(target_os = "macos")]
 fn cef_initialize(
     args: &Args,
@@ -215,6 +230,11 @@ Fix: make install-debug-render-process  (or: cargo build -p bevy_cef_debug_rende
         framework_dir_path: debug_chromium_embedded_framework_dir_path()
             .to_str()
             .unwrap()
+            .into(),
+        #[cfg(feature = "debug")]
+        main_bundle_path: MainBundle(&std::env::current_exe().unwrap())
+            .path()
+            .as_str()
             .into(),
         browser_subprocess_path: browser_subprocess_path.as_str().into(),
         no_sandbox: true as _,
@@ -395,7 +415,25 @@ pub fn early_exit_if_subprocess() {
 }
 
 #[cfg(test)]
-mod tests {}
+mod tests {
+    #[cfg(all(target_os = "macos", feature = "debug"))]
+    #[test]
+    fn debug_subprocesses_share_the_hosts_main_bundle() {
+        for (executable, expected) in [
+            (
+                "/tmp/worktree/target/debug/Vmux Dev.app/Contents/MacOS/vmux_desktop",
+                "/tmp/worktree/target/debug/Vmux Dev.app",
+            ),
+            ("/tmp/worktree/target/debug/vmux_desktop", ""),
+            ("/tmp/worktree.app-name/target/debug/vmux_desktop", ""),
+        ] {
+            assert_eq!(
+                super::MainBundle(std::path::Path::new(executable)).path(),
+                expected
+            );
+        }
+    }
+}
 
 #[cfg(target_os = "macos")]
 mod cef_pump_timer {
