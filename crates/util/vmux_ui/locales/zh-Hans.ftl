@@ -1115,3 +1115,10 @@ sessions-operation-failed = 无法完成操作。
 workspace-store-title = 工作区数据
 workspace-store-recovered = 旧工作区数据已保存在 { $path }。将创建新的工作区。
 workspace-store-refused = 无法安全打开此工作区。{ $path } 中的数据未被更改。请使用更新的版本或数据副本。
+
+project-edit = 编辑项目
+project-source = 来源
+project-new-repository = 空仓库
+project-local-folder = 本地文件夹
+project-github-repository = GitHub 仓库
+project-edit-conflict = 项目已更改。请重新打开编辑界面。

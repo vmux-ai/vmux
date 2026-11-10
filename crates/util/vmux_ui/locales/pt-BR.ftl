@@ -1118,3 +1118,10 @@ sessions-operation-failed = Não foi possível concluir a operação.
 workspace-store-title = Dados do espaço de trabalho
 workspace-store-recovered = Os dados anteriores foram preservados em { $path }. Um novo espaço de trabalho será criado.
 workspace-store-refused = Não é possível abrir este espaço de trabalho com segurança. Os dados em { $path } não foram alterados. Use uma versão mais recente ou uma cópia dos dados.
+
+project-edit = Editar projeto
+project-source = Origem
+project-new-repository = Repositório vazio
+project-local-folder = Pasta local
+project-github-repository = Repositório do GitHub
+project-edit-conflict = Este projeto mudou. Abra o editor novamente.

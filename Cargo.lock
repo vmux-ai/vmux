@@ -10588,6 +10588,7 @@ dependencies = [
  "unicode-segmentation",
  "unicode-width",
  "url",
+ "uuid",
  "vmux_api",
  "vmux_command",
  "vmux_ecs",

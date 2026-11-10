@@ -98,6 +98,8 @@ pub(crate) mod panel;
 pub(crate) mod picker_driver;
 pub(crate) mod preview;
 pub(crate) mod project;
+mod project_form;
+pub(crate) mod project_registry;
 pub(crate) mod search;
 pub(crate) mod status;
 pub(crate) mod viewport;

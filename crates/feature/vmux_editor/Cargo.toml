@@ -13,6 +13,7 @@ default = []
 path = "src/lib.rs"
 
 [dependencies]
+uuid.workspace = true
 regex.workspace = true
 serde = { workspace = true }
 rkyv = { workspace = true }

@@ -1098,3 +1098,10 @@ sessions-operation-failed = 操作を完了できませんでした。
 workspace-store-title = ワークスペースのデータ
 workspace-store-recovered = 以前のワークスペースを { $path } に保存しました。新しいワークスペースを作成します。
 workspace-store-refused = このワークスペースは安全に開けません。{ $path } のデータは変更していません。新しいビルドかデータのコピーを使ってください。
+
+project-edit = Project を編集
+project-source = 関連付け元
+project-new-repository = 空のリポジトリ
+project-local-folder = ローカルフォルダ
+project-github-repository = GitHub リポジトリ
+project-edit-conflict = Project が更新されました。編集画面を開き直してください。

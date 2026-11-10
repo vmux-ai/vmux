@@ -11,7 +11,6 @@ use vmux_ui::components::alert_dialog::{
 };
 use vmux_ui::components::avatar::IdentityOrb;
 use vmux_ui::components::button::{Button, ButtonSize, ButtonVariant};
-use vmux_ui::components::dialog::{DialogContent, DialogRoot, DialogTitle};
 use vmux_ui::components::dropdown::{Dropdown, DropdownAlign, DropdownPopup};
 use vmux_ui::components::manager::{
     ManagerAddButton, ManagerCollection, ManagerEmpty, ManagerGridSize, ManagerList, ManagerPage,
@@ -26,13 +25,13 @@ use vmux_ui::i18n::{TranslationValue, translate, translate_with};
 use vmux_ui::icon::{GitSymbol, GitSymbolView, LineIcon, LineIconView};
 use vmux_ui::navigation::{NavigationGesture, PageNavigation};
 
+use super::project_form::ProjectEditor;
 use super::project_manager::{
     ProjectFilter, ProjectFilterMenu, ProjectPresentation, ViewPreference,
 };
 use crate::project::{
-    ProjectArchiveRequest, ProjectCatalogView, ProjectCloneRequest, ProjectCollectionViewRequest,
-    ProjectCreateRequest, ProjectDeleteRequest, ProjectDetailView, ProjectEntry,
-    ProjectImportRequest, ProjectUiState, ProjectView,
+    ProjectArchiveRequest, ProjectCatalogView, ProjectCollectionViewRequest, ProjectDeleteRequest,
+    ProjectDetailView, ProjectEntry, ProjectUiState, ProjectView,
 };
 
 #[component]
@@ -266,6 +265,7 @@ fn ProjectSessionLink(project: String, status: String, count: u32, label: String
 fn ProjectActions(entry: ProjectEntry) -> Element {
     let mut open = use_signal(|| false);
     let mut confirm_open = use_signal(|| false);
+    let mut editing = use_signal(|| false);
     let archived = entry.archived;
     let archive_label = if archived {
         translate("project-restore")
@@ -313,6 +313,12 @@ fn ProjectActions(entry: ProjectEntry) -> Element {
                         },
                     }
                     ProjectActionMenuItem {
+                        icon: LineIcon::Pencil,
+                        label: translate("project-edit"),
+                        danger: false,
+                        onclick: move |_| { open.set(false); editing.set(true); },
+                    }
+                    ProjectActionMenuItem {
                         icon: if archived { LineIcon::RotateCcw } else { LineIcon::Archive },
                         label: archive_label.clone(),
                         danger: false,
@@ -336,6 +342,7 @@ fn ProjectActions(entry: ProjectEntry) -> Element {
                 }
             }
         }
+        if editing() { ProjectEditor { entry: Some(entry.clone()), onclose: move |_| editing.set(false) } }
         AlertDialogRoot {
             open: Into::<ReadSignal<Option<bool>>>::into(confirm),
             on_open_change: Callback::new(move |next| confirm_open.set(next)),
@@ -402,12 +409,6 @@ impl ProjectEntry {
     }
 }
 
-#[derive(Clone, Copy, PartialEq)]
-enum ProjectPrompt {
-    New,
-    Clone,
-}
-
 #[component]
 fn ProjectAdd(
     pending: bool,
@@ -415,190 +416,36 @@ fn ProjectAdd(
     #[props(default)] toolbar: Option<Vec<ToolbarControl>>,
 ) -> Element {
     let mut open = use_signal(|| false);
-    let mut prompt = use_signal(|| None::<ProjectPrompt>);
-    let mut draft = use_signal(String::new);
-    let ready = !draft().trim().is_empty();
-    let mut header = None;
-    if let Some(mut controls) = toolbar {
-        let mut options = Vec::new();
-        for (value, label, icon) in [
-            ("new", "project-new", LineIcon::Plus),
-            ("import", "project-import", LineIcon::FileOutput),
-            ("clone", "project-clone", LineIcon::GitFork),
-        ] {
-            options.push(vmux_ui::components::page_address::ToolbarChoice {
-                value: value.into(),
-                label: translate(label),
-                icon: format!("{icon:?}"),
-            });
-        }
-        controls.push(
-            ToolbarControl::menu(translate("common-add"), options, move |value| {
-                draft.set(String::new());
-                match value.as_str() {
-                    "new" => prompt.set(Some(ProjectPrompt::New)),
-                    "clone" => prompt.set(Some(ProjectPrompt::Clone)),
-                    "import" => {
-                        let _ = send(&ProjectImportRequest);
-                    }
-                    _ => {}
-                }
-            })
-            .icon(LineIcon::Plus)
-            .disabled(pending),
-        );
-        header = Some(controls);
-    }
     rsx! {
-        if let Some(controls) = header {
-            PageToolbar { controls: controls }
+        if let Some(mut controls) = toolbar {
+            {
+                controls.push(ToolbarControl::button(translate("common-add"), move |_| open.set(true)).icon(LineIcon::Plus).disabled(pending));
+                rsx! { PageToolbar { controls } }
+            }
+        } else if compact {
+            ManagerAddButton { label: translate("common-add"), disabled: pending, active: open(), onclick: move |_| open.set(true) }
         } else {
-        Dropdown {
-            open: open(),
-            class: "shrink-0".to_string(),
-            on_dismiss: move |_| open.set(false),
-            if compact {
-                ManagerAddButton {
-                    label: translate("common-add"),
-                    disabled: pending,
-                    active: open(),
-                    onclick: move |_| open.set(!open()),
-                }
-            } else {
-                Button {
-                    variant: ButtonVariant::Primary,
-                    size: ButtonSize::Sm,
-                    class: "h-8 gap-1.5 text-xs".to_string(),
-                    disabled: pending,
-                    onclick: move |_| open.set(!open()),
-                    LineIconView { icon: LineIcon::Plus, class: "size-3.5".to_string() }
-                    span { {translate("common-add")} }
-                }
-            }
-            if open() {
-                DropdownPopup { align: DropdownAlign::End, class: "w-72 p-1.5",
-                    ProjectAddItem {
-                        icon: LineIcon::Plus,
-                        title: translate("project-new"),
-                        description: translate("project-new-description"),
-                        onclick: move |_| {
-                            open.set(false);
-                            draft.set(String::new());
-                            prompt.set(Some(ProjectPrompt::New));
-                        },
-                    }
-                    ProjectAddItem {
-                        icon: LineIcon::FileOutput,
-                        title: translate("project-import"),
-                        description: translate("project-import-description"),
-                        onclick: move |_| {
-                            open.set(false);
-                            let _ = send(&ProjectImportRequest);
-                        },
-                    }
-                    ProjectAddItem {
-                        icon: LineIcon::GitFork,
-                        title: translate("project-clone"),
-                        description: translate("project-clone-description"),
-                        onclick: move |_| {
-                            open.set(false);
-                            draft.set(String::new());
-                            prompt.set(Some(ProjectPrompt::Clone));
-                        },
-                    }
-                }
+            Button { variant: ButtonVariant::Primary, size: ButtonSize::Sm, disabled: pending, onclick: move |_| open.set(true),
+                LineIconView { icon: LineIcon::Plus, class: "size-3.5" }
+                {translate("common-add")}
             }
         }
-        }
-        if let Some(kind) = prompt() {
-            DialogRoot {
-                open: true,
-                on_open_change: move |next: bool| {
-                    if !next {
-                        prompt.set(None);
-                    }
-                },
-                attributes: vec![],
-                DialogContent { class: "max-w-[420px] p-4", attributes: vec![],
-                    DialogTitle { attributes: vec![],
-                        {translate(if kind == ProjectPrompt::New { "project-new" } else { "project-clone" })}
-                    }
-                    input {
-                        class: "w-full rounded-md bg-foreground/[0.045] px-3 py-2 text-sm text-foreground outline-none focus:bg-foreground/[0.065]",
-                        autofocus: true,
-                        value: "{draft}",
-                        placeholder: translate(if kind == ProjectPrompt::New { "project-name-placeholder" } else { "project-repository-placeholder" }),
-                        oninput: move |event: Event<FormData>| draft.set(event.value()),
-                        onkeydown: move |event: KeyboardEvent| {
-                            event.stop_propagation();
-                            if event.key() == Key::Enter && ready {
-                                event.prevent_default();
-                                ProjectPrompt::submit(kind, draft());
-                                prompt.set(None);
-                            }
-                        },
-                    }
-                    div { class: "flex justify-end gap-2",
-                        Button {
-                            variant: ButtonVariant::Ghost,
-                            size: ButtonSize::Xs,
-                            onclick: move |_| prompt.set(None),
-                            {translate("common-cancel")}
-                        }
-                        Button {
-                            variant: ButtonVariant::Primary,
-                            size: ButtonSize::Sm,
-                            class: "h-8 px-4 text-xs".to_string(),
-                            disabled: !ready,
-                            onclick: move |_| {
-                                ProjectPrompt::submit(kind, draft());
-                                prompt.set(None);
-                            },
-                            {translate(if kind == ProjectPrompt::New { "project-create" } else { "project-clone" })}
-                        }
-                    }
-                }
-            }
-        }
-    }
-}
-
-impl ProjectPrompt {
-    fn submit(self, draft: String) {
-        match self {
-            Self::New => {
-                let _ = send(&ProjectCreateRequest { name: draft });
-            }
-            Self::Clone => {
-                let _ = send(&ProjectCloneRequest { repository: draft });
-            }
-        }
-    }
-}
-
-#[component]
-fn ProjectAddItem(
-    icon: LineIcon,
-    title: String,
-    description: String,
-    onclick: EventHandler<()>,
-) -> Element {
-    rsx! {
-        button {
-            r#type: "button",
-            class: "flex w-full items-start gap-3 rounded-md px-2.5 py-2.5 text-left hover:bg-foreground/[0.055]",
-            onclick: move |_| onclick.call(()),
-            LineIconView { icon, class: "mt-0.5 size-4 shrink-0 text-muted-foreground".to_string() }
-            div { class: "min-w-0 flex-1",
-                div { class: "text-xs font-medium text-foreground", "{title}" }
-                div { class: "mt-0.5 text-[10px] leading-4 text-muted-foreground", "{description}" }
-            }
-        }
+        if open() { ProjectEditor { entry: None, onclose: move |_| open.set(false) } }
     }
 }
 
 #[component]
 pub(super) fn ProjectDashboard(detail: ProjectDetailView) -> Element {
+    let mut editing = use_signal(|| false);
+    let entry = ProjectEntry {
+        id: detail.id.clone(),
+        url: detail.id.0.clone(),
+        name: detail.name.clone(),
+        path: detail.path.clone(),
+        repository: detail.repository.clone(),
+        revision: detail.revision,
+        ..Default::default()
+    };
     let mut options = Vec::new();
     for project in detail.choices {
         if project.url.is_empty() {
@@ -655,6 +502,7 @@ pub(super) fn ProjectDashboard(detail: ProjectDetailView) -> Element {
                 show_sidebar: false,
                 toolbar: rsx! {
                     PageToolbar { controls: vec![
+                        ToolbarControl::button(translate("project-edit"), move |_| editing.set(true)).icon(LineIcon::Pencil),
                         ToolbarControl::button(translate("sessions-start"), move |_| PageNavigation::replace(start_url.clone())).icon(LineIcon::MessagesRound).primary(),
                     ] }
                 },
@@ -667,6 +515,7 @@ pub(super) fn ProjectDashboard(detail: ProjectDetailView) -> Element {
                 }
             }
         }
+        if editing() { ProjectEditor { entry: Some(entry), onclose: move |_| editing.set(false) } }
     }
 }
 

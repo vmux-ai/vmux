@@ -1658,6 +1658,14 @@ Project dashboards and resume suggestions use the same catalog stage and stalene
 Embedded Session groups show five entries at a time, with stale groups initially collapsed.
 Resume suggestions restrict host contributions to the visible entries, so keyboard selection
 cannot reach hidden sessions; each status has its own explicit expansion limit.
+Project creation and editing share one form for a display name and a local folder or GitHub
+repository. GitHub sources clone through the existing Git provisioning lifecycle before registration.
+The Projects root stores registrations in `.projects.ron`, with a stable Project URL as a key
+independent of the current checkout. Source edits preserve existing repository files and use
+revision checks to reject stale saves. Registered Project removal detaches its registration; it does
+not delete the checkout. Native folder selection authorizes a new external directory, and the form
+retains its draft on validation or clone failure.
+
 Project dashboards show related sessions, repository status and an entry point into Code,
 without reading or listing arbitrary directories in the overview. Repository status uses the Git
 feature's shared `RepositorySummaryRequest` subscription rather than loading a Git page. Reads

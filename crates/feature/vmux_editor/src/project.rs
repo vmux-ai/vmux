@@ -16,6 +16,8 @@ pub struct ProjectEntry {
     pub ongoing_sessions: u32,
     pub stale_sessions: u32,
     pub archived: bool,
+    pub repository: Option<String>,
+    pub revision: u64,
 }
 
 impl ProjectEntry {
@@ -55,9 +57,11 @@ pub struct ProjectDetailView {
     pub path: String,
     pub choices: Vec<ProjectEntry>,
     pub choices_pending: bool,
+    pub repository: Option<String>,
+    pub revision: u64,
 }
 
-#[vmux_api::ui_state(Default, Eq, version = 4)]
+#[vmux_api::ui_state(Default, Eq, version = 5)]
 pub struct ProjectUiState {
     pub view: ProjectView,
     pub collection_view: vmux_ecs::CollectionView,
@@ -108,6 +112,37 @@ pub struct ProjectDeleteRequest {
 #[vmux_api::ui_event(Copy, Eq)]
 pub struct ProjectCollectionViewRequest {
     pub view: vmux_ecs::CollectionView,
+}
+
+#[vmux_api::contract(Eq)]
+pub enum ProjectSource {
+    New,
+    Local(String),
+    Github(String),
+}
+
+#[vmux_api::ui_event(Eq)]
+pub struct ProjectSaveRequest {
+    pub request_id: String,
+    pub project: Option<ProjectId>,
+    pub revision: u64,
+    pub name: String,
+    pub source: ProjectSource,
+}
+
+#[vmux_api::ui_event(Eq)]
+pub struct ProjectFolderPickRequest {
+    pub request_id: String,
+    pub directory: String,
+}
+
+#[vmux_api::ui_state(Default, Eq)]
+pub struct ProjectFormUiState {
+    pub request_id: String,
+    pub folder: Option<String>,
+    pub pending: bool,
+    pub error: Option<String>,
+    pub saved: Option<ProjectId>,
 }
 
 pub struct ProjectRoute;
@@ -217,6 +252,27 @@ impl ProjectRoute {
             Ok(path) => path,
             Err(error) => return Some(Err(error)),
         };
+        let registry = match crate::host::project_registry::ProjectRegistry::load(&root) {
+            Ok(registry) => registry,
+            Err(error) => return Some(Err(error)),
+        };
+        if registry.hidden(value) {
+            return Some(Err("project is unavailable".to_string()));
+        }
+        if let Some(directory) = registry.directory(value) {
+            return Some(
+                directory
+                    .canonicalize()
+                    .map_err(|error| error.to_string())
+                    .and_then(|path| {
+                        if path.is_dir() {
+                            Ok(path)
+                        } else {
+                            Err("project is unavailable".to_string())
+                        }
+                    }),
+            );
+        }
         let canonical = match path.canonicalize() {
             Ok(path) => path,
             Err(error) => {

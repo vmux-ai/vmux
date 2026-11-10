@@ -1115,3 +1115,10 @@ sessions-operation-failed = 작업을 완료하지 못했습니다.
 workspace-store-title = 작업 공간 데이터
 workspace-store-recovered = 이전 작업 공간 데이터를 { $path }에 보관했습니다. 새 작업 공간을 만듭니다.
 workspace-store-refused = 이 작업 공간을 안전하게 열 수 없습니다. { $path }의 데이터는 변경되지 않았습니다. 더 최신 빌드나 데이터 복사본을 사용하세요.
+
+project-edit = 프로젝트 편집
+project-source = 연결 대상
+project-new-repository = 빈 저장소
+project-local-folder = 로컬 폴더
+project-github-repository = GitHub 저장소
+project-edit-conflict = 프로젝트가 변경되었습니다. 편집 화면을 다시 열어 주세요.
