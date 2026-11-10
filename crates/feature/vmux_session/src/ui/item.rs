@@ -18,7 +18,7 @@ use vmux_ui::components::context_menu::{
 use vmux_ui::file_icon::{FilePath, TypeIcon};
 use vmux_ui::i18n::{TranslationValue, translate, translate_with};
 use vmux_ui::icon::{LineIcon, LineIconView};
-use vmux_ui::navigation::PageNavigation;
+use vmux_ui::navigation::NavigationGesture;
 
 use super::activity::{ActivityIconView, FileActivityIcon, ToolActivityIcon};
 use crate::activity::{ActivityIcon, ToolPresentation};
@@ -289,7 +289,7 @@ mod disclosure_tests {
     use dioxus::prelude::Event as UiEvent;
     use dioxus_html::{
         Code, EventData, Key, Location, Modifiers, SerializedHtmlEventConverter,
-        SerializedKeyboardData, SerializedMouseData,
+        SerializedKeyboardData, SerializedMouseData, SerializedResizeData,
     };
     use std::rc::Rc;
     use vmux_api::BinEvent;
@@ -372,7 +372,7 @@ mod disclosure_tests {
     fn file_clicks_send_native_open_requests_without_toggling_the_disclosure() {
         dioxus_html::set_event_converter(Box::new(SerializedHtmlEventConverter));
         for (meta, shift, target) in [
-            (false, false, OpenTarget::InPlace),
+            (false, false, OpenTarget::InNewStack),
             (true, false, OpenTarget::InNewStack),
             (true, true, OpenTarget::InNewTab),
         ] {
@@ -412,6 +412,84 @@ mod disclosure_tests {
             assert_eq!(opened[0].value, "file:///work/a%20%23%3F.rs");
             assert_eq!(opened[0].open, Some(target));
         }
+    }
+
+    #[component]
+    fn ResponsiveFileLink() -> Element {
+        let placement = FilePlacement::provide();
+        rsx! {
+            main {
+                onresize: move |event: UiEvent<ResizeData>| placement.resize(&event.data()),
+                ToolFileLink { path: "/work/main.rs" }
+            }
+        }
+    }
+
+    #[test]
+    fn file_clicks_adapt_to_pane_resizing_and_keep_modifier_destinations() {
+        dioxus_html::set_event_converter(Box::new(SerializedHtmlEventConverter));
+        let host = Rc::new(FileHost::default());
+        let mut dom = VirtualDom::new(ResponsiveFileLink);
+        dom.provide_root_context(HostBinding(host.clone()));
+        let edits = dom.rebuild_to_vec();
+        let resize = edits
+            .edits
+            .iter()
+            .find_map(|edit| match edit {
+                Mutation::NewEventListener { name, id } if name == "resize" => Some(*id),
+                _ => None,
+            })
+            .unwrap();
+        let link = edits
+            .edits
+            .iter()
+            .find_map(|edit| match edit {
+                Mutation::SetAttribute {
+                    name: "href",
+                    value: AttributeValue::Text(url),
+                    id,
+                    ..
+                } if url == "file:///work/main.rs" => Some(*id),
+                _ => None,
+            })
+            .unwrap();
+        for (width, meta, shift, target) in [
+            (800.0, false, false, OpenTarget::InNewStack),
+            (
+                1600.0,
+                false,
+                false,
+                OpenTarget::InPane {
+                    direction: PaneDirection::Right,
+                    target: PaneTarget::Existing,
+                    mode: PaneOpenMode::NewStack,
+                },
+            ),
+            (900.0, false, false, OpenTarget::InNewStack),
+            (1600.0, true, false, OpenTarget::InNewStack),
+            (1600.0, true, true, OpenTarget::InNewTab),
+        ] {
+            let size = dioxus_html::geometry::PixelsSize::new(width, 900.0);
+            dom.runtime().handle_event(
+                "resize",
+                UiEvent::new(
+                    EventData::Resize(SerializedResizeData::new(size, size)).into_any(),
+                    true,
+                ),
+                resize,
+            );
+            dom.render_immediate_to_vec();
+            let mut data = serde_json::to_value(SerializedMouseData::default()).unwrap();
+            data["meta_key"] = meta.into();
+            data["shift_key"] = shift.into();
+            let mouse = serde_json::from_value::<SerializedMouseData>(data).unwrap();
+            let event = UiEvent::new(EventData::Mouse(mouse).into_any(), true);
+            dom.runtime().handle_event("click", event.clone(), link);
+            assert!(!event.default_action_enabled());
+            assert!(!event.propagates());
+            assert_eq!(host.0.borrow().last().unwrap().open, Some(target));
+        }
+        assert_eq!(host.0.borrow().len(), 5);
     }
 
     #[test]
@@ -917,6 +995,7 @@ fn ToolFiles(paths: Vec<String>) -> Element {
 
 #[component]
 fn ToolFileLink(path: String, #[props(default)] read: bool) -> Element {
+    let placement = try_consume_context::<FilePlacement>();
     let binding =
         try_consume_context::<vmux_ui::hooks::UiStateBinding<crate::state::ChatUiState>>();
     let cwd = binding
@@ -945,7 +1024,9 @@ fn ToolFileLink(path: String, #[props(default)] read: bool) -> Element {
                     onclick: move |event: MouseEvent| {
                         event.prevent_default();
                         event.stop_propagation();
-                        PageNavigation::click(clicked_url.clone(), &event);
+                        let width = placement.map(|placement| *placement.0.peek()).unwrap_or(0.0);
+                        let target = FilePlacement::target(width, NavigationGesture::from_mouse(&event));
+                        let _ = vmux_ui::hooks::send(&OpenRequest { value: clicked_url.clone(), open: Some(target) });
                     },
                     "{label}"
                 }
@@ -960,6 +1041,37 @@ fn ToolFileLink(path: String, #[props(default)] read: bool) -> Element {
                 ToolFileOpenItem { index: 2usize, url, target: OpenTarget::InNewTab, label: "agent-tool-open-in-tab" }
             }
         }
+    }
+}
+
+#[derive(Clone, Copy)]
+pub(super) struct FilePlacement(Signal<f64>);
+
+impl FilePlacement {
+    pub(super) fn provide() -> Self {
+        let placement = Self(use_signal(|| 0.0));
+        use_context_provider(|| placement)
+    }
+
+    pub(super) fn resize(mut self, data: &ResizeData) {
+        if let Ok(size) = data.get_content_box_size() {
+            self.0.set(size.width);
+        }
+    }
+
+    fn target(width: f64, gesture: NavigationGesture) -> OpenTarget {
+        let requested = gesture.open_target();
+        if requested != OpenTarget::InPlace {
+            return requested;
+        }
+        if width.is_finite() && width >= 1280.0 {
+            return OpenTarget::InPane {
+                direction: PaneDirection::Right,
+                target: PaneTarget::Existing,
+                mode: PaneOpenMode::NewStack,
+            };
+        }
+        OpenTarget::InNewStack
     }
 }
 

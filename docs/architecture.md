@@ -1968,7 +1968,9 @@ Claude/Vibe name classification and summarize wrapped Codex command batches as R
 or Edited. Exploration exposes Read, Search, and List steps from the actual shell commands.
 Folded tool rows and batches retain their file references, including reads inside Codex wrappers.
 File links retain the tool's working directory when available and otherwise use the Session's.
-Shared navigation gestures and a context menu open the editor in a right pane, a new Stack, or a new tab.
+Default file clicks preserve the conversation: a pane at least 1280 CSS pixels wide opens the editor
+to its right, reusing a sibling when present; a narrower or unmeasured pane opens a new Stack.
+Modifier gestures and the context menu retain explicit Stack, pane, and tab destinations.
 
 Session page roots install typed state listeners once. Child components read
 `UiStateBinding<T>::use_context` and selectors, so replacing a manager or detail subtree preserves

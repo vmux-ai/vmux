@@ -49,6 +49,7 @@ pub fn Page() -> Element {
 #[component]
 fn SessionDetail(session_id: String, mut details_open: Signal<bool>) -> Element {
     let chat = use_chat(session_id.clone());
+    let file_placement = item::FilePlacement::provide();
     let detail =
         vmux_ui::hooks::UiStateBinding::<crate::state::SessionDetailUiState>::use_context();
     let keys = use_chat_keys(chat);
@@ -73,6 +74,7 @@ fn SessionDetail(session_id: String, mut details_open: Signal<bool>) -> Element 
     rsx! {
         main {
             class: "session-chat-page relative isolate flex h-dvh flex-col overflow-hidden bg-background text-foreground outline-none",
+            onresize: move |event: Event<ResizeData>| file_placement.resize(&event.data()),
             style: "--agent-accent:{accent.css};",
             tabindex: "-1",
             onkeydown: move |event| {
