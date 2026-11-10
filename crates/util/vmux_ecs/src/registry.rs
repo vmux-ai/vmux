@@ -14,7 +14,9 @@ impl Plugin for RegistryPlugin {
     }
 
     fn finish(&self, app: &mut App) {
-        let declarations = app.world_mut().remove_resource::<Declarations>().unwrap();
+        let Some(declarations) = app.world_mut().remove_resource::<Declarations>() else {
+            return;
+        };
         let registry = Registry::new(declarations.0)
             .unwrap_or_else(|error| panic!("invalid feature registry: {error}"));
         app.insert_resource(registry);
@@ -152,6 +154,7 @@ mod tests {
             FeaturePlugin::<Feature>::default(),
             FeaturePlugin::<Feature>::default(),
         ));
+        app.finish();
         app.finish();
         assert!(
             app.world()

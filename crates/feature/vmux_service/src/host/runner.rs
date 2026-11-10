@@ -37,6 +37,15 @@ impl WakeDrivenRunner {
     }
 
     fn run(&mut self, app: &mut App) -> AppExit {
+        while app.plugins_state() == bevy_app::PluginsState::Adding {
+            bevy::tasks::tick_global_task_pools_on_main_thread();
+        }
+        if app.plugins_state() == bevy_app::PluginsState::Ready {
+            app.finish();
+        }
+        if app.plugins_state() == bevy_app::PluginsState::Finished {
+            app.cleanup();
+        }
         loop {
             app.update();
             if let Some(exit) = app.should_exit() {
@@ -70,6 +79,45 @@ impl WakeDrivenRunner {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    struct Feature;
+
+    impl vmux_ecs::manifest::FeatureManifestSource for Feature {
+        const SOURCE: &'static str =
+            "(commands: [(id: \"runner.check\", label: \"Check\", group: \"File\")])";
+    }
+
+    #[derive(bevy_ecs::prelude::Resource)]
+    struct Frozen(std::sync::Arc<std::sync::atomic::AtomicBool>);
+
+    impl Frozen {
+        fn check(
+            registry: Option<bevy_ecs::prelude::Res<vmux_ecs::manifest::Registry>>,
+            frozen: bevy_ecs::prelude::Res<Self>,
+            mut exits: bevy_ecs::prelude::MessageWriter<AppExit>,
+        ) {
+            assert!(registry.is_some_and(|registry| registry.manifest::<Feature>().is_some()));
+            frozen.0.store(true, std::sync::atomic::Ordering::SeqCst);
+            exits.write(AppExit::Success);
+        }
+    }
+
+    #[test]
+    fn feature_registry_is_frozen_before_the_first_runner_update() {
+        let rt = runtime();
+        let (_wake_tx, wake_rx) = mpsc::unbounded_channel();
+        let (_signal_tx, signal_rx) = mpsc::channel(1);
+        let frozen = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let mut app = App::new();
+        app.add_plugins(vmux_ecs::manifest::FeaturePlugin::<Feature>::default())
+            .insert_resource(Frozen(frozen.clone()))
+            .add_systems(bevy_app::Update, Frozen::check)
+            .set_runner(
+                WakeDrivenRunner::new(rt.handle().clone(), wake_rx, signal_rx).into_runner(),
+            );
+        assert_eq!(app.run(), AppExit::Success);
+        assert!(frozen.load(std::sync::atomic::Ordering::SeqCst));
+    }
 
     fn runtime() -> tokio::runtime::Runtime {
         tokio::runtime::Builder::new_multi_thread()
