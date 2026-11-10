@@ -17,7 +17,7 @@ use vmux_command::{CommandInvocation, CommandRuntimePlugin};
 #[cfg(test)]
 use vmux_ecs::manifest::FeaturePlugin;
 use vmux_ecs::page::PageEmbedSet;
-use vmux_ecs::persistence::PersistenceAppExt;
+use vmux_ecs::store::StoreAppExt;
 use vmux_ecs::{
     Active, EffectiveStartupUrl, Order, PageOpenRequest, PageOpenSet, PageOpenTarget, PendingPrompt,
 };
@@ -44,7 +44,7 @@ impl Plugin for WindowLayoutPlugin {
                 Update,
                 vmux_command::ReadCommandRequests.after(WindowFocusSet),
             )
-            .register_persisted::<WindowGeometry>()
+            .register_stored::<WindowGeometry>()
             .register_type::<Option<IVec2>>()
             .register_type::<Option<Vec2>>()
             .add_systems(

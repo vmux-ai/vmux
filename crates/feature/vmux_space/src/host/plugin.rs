@@ -12,7 +12,7 @@ use vmux_ecs::{
     PageOpenTarget,
 };
 use vmux_ecs::{CommandBarContribution, CommandBarContributionActivated, CommandBarQueryChanged};
-use vmux_ecs::{UiStateWrite, persistence::WorkspaceRestore};
+use vmux_ecs::{UiStateWrite, store::WorkspaceRestore};
 use vmux_history::LastActivatedAt;
 use vmux_layout::hosted_page::HostedUiPlugin;
 use vmux_layout::projection::SpacesProjection;
@@ -62,7 +62,7 @@ impl Plugin for SpacePlugin {
         app.add_plugins((
             SpaceAgentPlugin,
             super::composer::SpaceComposerPlugin,
-            super::persistence::WorkspacePersistencePlugin,
+            super::store::WorkspaceStorePlugin,
         ))
         .add_plugins(super::SpaceToolPlugin)
         .add_plugins(LayoutContractPlugin)
@@ -99,7 +99,7 @@ impl Plugin for SpacePlugin {
             (ensure_bootstrap, ApplyDeferred, update_effective_startup)
                 .chain()
                 .after(SettingsLoadSet)
-                .after(LayoutStartupSet::Persistence)
+                .after(LayoutStartupSet::Store)
                 .before(LayoutStartupSet::DefaultTab),
         )
         .add_message::<SpacesPageSpawnRequest>()

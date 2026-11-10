@@ -2,7 +2,7 @@ use bevy::prelude::*;
 use vmux_ecs::PageOpenRequest;
 use vmux_ecs::agent::SwapStackSession;
 use vmux_ecs::notify::{AgentAttention, BellReceived, OsNotify};
-use vmux_ecs::persistence::PersistenceAppExt;
+use vmux_ecs::store::StoreAppExt;
 
 use crate::AcpSessionId;
 use crate::host::event::{AgentRequestInput, AgentToolCallRequest};
@@ -26,7 +26,7 @@ impl Plugin for AcpPlugin {
         super::navigation::add(app);
         super::tidy::add(app);
         super::toast::add(app);
-        app.register_persisted::<AcpSessionId>()
+        app.register_stored::<AcpSessionId>()
             .add_message::<AgentRequestInput>()
             .add_message::<AgentToolCallRequest>()
             .add_message::<SwapStackSession>()

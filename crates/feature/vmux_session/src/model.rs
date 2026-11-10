@@ -14,7 +14,7 @@ use vmux_api::session::SessionId;
 #[cfg(test)]
 use vmux_ecs::CreatedAt;
 #[cfg(host)]
-use vmux_ecs::persistence::PersistenceAppExt;
+use vmux_ecs::store::StoreAppExt;
 #[cfg(host)]
 use vmux_ecs::{ActivateRequest, EntityTarget, LastActivatedAt, Order, PageMetadata};
 use vmux_ecs::{ArchivedAt, Cwd, Description};
@@ -31,18 +31,18 @@ impl Plugin for EntityPlugin {
         if !app.is_plugin_added::<crate::mutation::MutationPlugin>() {
             app.add_plugins(crate::mutation::MutationPlugin);
         }
-        app.register_persisted::<Session>()
-            .register_persisted::<SessionId>()
-            .register_persisted::<AgentId>()
-            .register_persisted::<ProviderStage>()
-            .register_persisted::<ProviderArchive>()
-            .register_persisted::<ProviderSessionTombstone>()
-            .register_persisted::<SourceUpdatedAt>()
-            .register_persisted::<ProviderKind>()
-            .register_persisted::<ProviderSessionId>()
-            .register_persisted::<AgentConversationTitle>()
-            .register_persisted::<TitlePending>()
-            .register_persisted::<LocalTask>()
+        app.register_stored::<Session>()
+            .register_stored::<SessionId>()
+            .register_stored::<AgentId>()
+            .register_stored::<ProviderStage>()
+            .register_stored::<ProviderArchive>()
+            .register_stored::<ProviderSessionTombstone>()
+            .register_stored::<SourceUpdatedAt>()
+            .register_stored::<ProviderKind>()
+            .register_stored::<ProviderSessionId>()
+            .register_stored::<AgentConversationTitle>()
+            .register_stored::<TitlePending>()
+            .register_stored::<LocalTask>()
             .init_resource::<ProviderArchiveOperations>()
             .init_resource::<ProviderSessionTombstones>()
             .add_message::<CreateRequest>()
@@ -118,8 +118,8 @@ impl Plugin for StagePlugin {
             app.add_plugins(crate::mutation::MutationPlugin);
         }
         app.insert_resource(Configuration::load())
-            .register_persisted::<Stage>()
-            .register_persisted::<StageChangedAt>()
+            .register_stored::<Stage>()
+            .register_stored::<StageChangedAt>()
             .register_type::<StageId>()
             .register_type::<StageDefinition>()
             .add_message::<StageChangeRequest>()
@@ -1623,7 +1623,7 @@ mod tests {
         let mut app = App::new();
         app.add_plugins(crate::DomainPlugin);
         let registry = app.world().resource::<AppTypeRegistry>().read();
-        let filter = vmux_ecs::persistence::WorkspacePersisted::filter(&registry);
+        let filter = vmux_ecs::store::WorkspaceStored::filter(&registry);
 
         assert!(filter.is_allowed::<Session>());
         assert!(filter.is_allowed::<SessionId>());

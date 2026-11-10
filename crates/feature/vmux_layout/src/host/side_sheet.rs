@@ -4,7 +4,7 @@ use crate::settings::LayoutSettings;
 use bevy::prelude::*;
 #[cfg(target_os = "macos")]
 use bevy::{ecs::system::NonSendMarker, winit::WINIT_WINDOWS};
-use vmux_ecs::persistence::PersistenceAppExt;
+use vmux_ecs::store::StoreAppExt;
 use vmux_flex::prelude::*;
 
 #[cfg(target_os = "macos")]
@@ -14,7 +14,7 @@ use raw_window_handle::{HasWindowHandle, RawWindowHandle};
 
 impl Plugin for SideSheetLayoutPlugin {
     fn build(&self, app: &mut App) {
-        app.register_persisted::<SideSheetSectionsExpanded>()
+        app.register_stored::<SideSheetSectionsExpanded>()
             .register_type::<SideSheetPaneExpanded>()
             .add_systems(
                 PostUpdate,

@@ -13,21 +13,21 @@ use std::{
     hash::Hash,
 };
 
-pub struct PersistenceDomain<D>(PhantomData<fn() -> D>);
+pub struct StoreDomain<D>(PhantomData<fn() -> D>);
 
-impl<D> Clone for PersistenceDomain<D> {
+impl<D> Clone for StoreDomain<D> {
     fn clone(&self) -> Self {
         Self(PhantomData)
     }
 }
 
-impl<T, D: 'static> FromType<T> for PersistenceDomain<D> {
+impl<T, D: 'static> FromType<T> for StoreDomain<D> {
     fn from_type() -> Self {
         Self(PhantomData)
     }
 }
 
-impl<D: 'static> PersistenceDomain<D> {
+impl<D: 'static> StoreDomain<D> {
     pub fn filter(registry: &TypeRegistry) -> WorldFilter {
         let mut filter = WorldFilter::deny_all();
         for registration in registry.iter() {
@@ -39,12 +39,111 @@ impl<D: 'static> PersistenceDomain<D> {
     }
 }
 
-pub enum WorkspacePersistence {}
+pub enum WorkspaceStore {}
 
-pub type WorkspacePersisted = PersistenceDomain<WorkspacePersistence>;
+pub type WorkspaceStored = StoreDomain<WorkspaceStore>;
 
 #[derive(Event, Clone, Copy, Debug, Default)]
-pub struct PersistenceDirty;
+pub struct StoreDirty;
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum Phase {
+    Materialize,
+    Resolve,
+    #[default]
+    Ready,
+    Failed,
+}
+
+#[derive(Component, Clone, Debug, Default, PartialEq, Eq)]
+pub struct State {
+    phase: Phase,
+    loaded: Option<u64>,
+    dirty: Option<u64>,
+    saving: Option<u64>,
+    error: Option<String>,
+}
+
+impl State {
+    pub fn phase(&self) -> Phase {
+        self.phase
+    }
+
+    pub fn loaded(&self) -> Option<u64> {
+        self.loaded
+    }
+
+    pub fn dirty(&self) -> Option<u64> {
+        self.dirty
+    }
+
+    pub fn saving(&self) -> Option<u64> {
+        self.saving
+    }
+
+    pub fn error(&self) -> Option<&str> {
+        self.error.as_deref()
+    }
+
+    pub fn is_dirty(&self) -> bool {
+        self.dirty.is_some()
+    }
+
+    pub fn advance(&mut self) {
+        let revision = self
+            .loaded
+            .unwrap_or_default()
+            .max(self.dirty.unwrap_or_default())
+            .max(self.saving.unwrap_or_default());
+        self.dirty = Some(revision.saturating_add(1));
+    }
+
+    pub fn begin(&mut self) -> Option<u64> {
+        if self.phase != Phase::Ready || self.saving.is_some() {
+            return None;
+        }
+        let revision = self.dirty.take()?;
+        self.saving = Some(revision);
+        Some(revision)
+    }
+
+    pub fn succeed(&mut self, revision: u64) -> bool {
+        if self.saving != Some(revision) {
+            return false;
+        }
+        self.loaded = Some(revision);
+        self.saving = None;
+        self.error = None;
+        true
+    }
+
+    pub fn retry(&mut self, revision: u64, error: String) -> bool {
+        if self.saving != Some(revision) {
+            return false;
+        }
+        self.saving = None;
+        self.dirty = Some(self.dirty.unwrap_or_default().max(revision));
+        self.error = Some(error);
+        true
+    }
+
+    pub fn materialize(&mut self) {
+        self.phase = Phase::Materialize;
+    }
+
+    pub fn resolve(&mut self) {
+        self.phase = Phase::Resolve;
+    }
+
+    pub fn ready(&mut self) {
+        self.phase = Phase::Ready;
+    }
+
+    pub fn fail(&mut self, error: String) {
+        self.phase = Phase::Failed;
+        self.error = Some(error);
+    }
+}
 
 #[derive(Component, Clone, Copy, Debug, Default)]
 pub struct PageRestore;
@@ -184,40 +283,40 @@ impl WorkspaceStoreValidators<'_, '_> {
     }
 }
 
-pub trait PersistenceAppExt {
-    fn register_persistence_type<D, T>(&mut self) -> &mut Self
+pub trait StoreAppExt {
+    fn register_store_type<D, T>(&mut self) -> &mut Self
     where
         D: 'static,
         T: Reflect + TypePath + GetTypeRegistration;
 
-    fn register_persisted<T>(&mut self) -> &mut Self
+    fn register_stored<T>(&mut self) -> &mut Self
     where
         T: Component + Reflect + TypePath + GetTypeRegistration;
 
-    fn track_persistence<T>(&mut self) -> &mut Self
+    fn track_store<T>(&mut self) -> &mut Self
     where
         T: Component;
 }
 
-impl PersistenceAppExt for App {
-    fn register_persistence_type<D, T>(&mut self) -> &mut Self
+impl StoreAppExt for App {
+    fn register_store_type<D, T>(&mut self) -> &mut Self
     where
         D: 'static,
         T: Reflect + TypePath + GetTypeRegistration,
     {
         self.register_type::<T>()
-            .register_type_data::<T, PersistenceDomain<D>>()
+            .register_type_data::<T, StoreDomain<D>>()
     }
 
-    fn register_persisted<T>(&mut self) -> &mut Self
+    fn register_stored<T>(&mut self) -> &mut Self
     where
         T: Component + Reflect + TypePath + GetTypeRegistration,
     {
-        self.register_persistence_type::<WorkspacePersistence, T>()
-            .track_persistence::<T>()
+        self.register_store_type::<WorkspaceStore, T>()
+            .track_store::<T>()
     }
 
-    fn track_persistence<T>(&mut self) -> &mut Self
+    fn track_store<T>(&mut self) -> &mut Self
     where
         T: Component,
     {
@@ -241,13 +340,43 @@ fn detect_change<T: Component>(
         }
     }
     if dirty {
-        commands.trigger(PersistenceDirty);
+        commands.trigger(StoreDirty);
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn save_completion_preserves_newer_edits_and_refuses_stale_results() {
+        let mut state = State::default();
+        state.advance();
+        let first = state.begin().unwrap();
+        state.advance();
+        assert!(state.succeed(first));
+        assert!(state.is_dirty());
+        let second = state.begin().unwrap();
+        assert!(!state.succeed(first));
+        assert_eq!(state.saving(), Some(second));
+        assert!(state.retry(second, "disk full".into()));
+        assert_eq!(state.begin(), Some(second));
+        assert!(state.succeed(second));
+        assert_eq!(state.loaded(), Some(second));
+        assert!(!state.is_dirty());
+    }
+
+    #[test]
+    fn restoration_blocks_saves_until_runtime_resolution_commits() {
+        let mut state = State::default();
+        state.materialize();
+        state.advance();
+        assert_eq!(state.begin(), None);
+        state.resolve();
+        assert_eq!(state.begin(), None);
+        state.ready();
+        assert!(state.begin().is_some());
+    }
 
     #[derive(Component, Reflect)]
     #[reflect(Component)]
@@ -299,7 +428,7 @@ mod tests {
     struct DirtyCount(u32);
 
     impl DirtyCount {
-        fn record(_: On<PersistenceDirty>, mut count: ResMut<Self>) {
+        fn record(_: On<StoreDirty>, mut count: ResMut<Self>) {
             count.0 += 1;
         }
     }
@@ -307,8 +436,8 @@ mod tests {
     #[test]
     fn runtime_component_updates_do_not_request_workspace_saves() {
         let mut app = App::new();
-        app.register_persisted::<Saved>()
-            .track_persistence::<Save>()
+        app.register_stored::<Saved>()
+            .track_store::<Save>()
             .init_resource::<DirtyCount>()
             .add_observer(DirtyCount::record);
         let entity = app.world_mut().spawn(Saved).id();
@@ -333,17 +462,16 @@ mod tests {
         assert!(app.world().resource::<DirtyCount>().0 > 0);
     }
 
-    enum FeaturePersistence {}
+    enum FeatureStore {}
 
-    type FeaturePersisted = PersistenceDomain<FeaturePersistence>;
+    type FeaturePersisted = StoreDomain<FeatureStore>;
 
     #[test]
     fn feature_registration_builds_the_component_allowlist() {
         let mut app = App::new();
-        app.register_persisted::<Saved>()
-            .register_type::<Transient>();
+        app.register_stored::<Saved>().register_type::<Transient>();
         let registry = app.world().resource::<AppTypeRegistry>().read();
-        let filter = WorkspacePersisted::filter(&registry);
+        let filter = WorkspaceStored::filter(&registry);
 
         assert!(filter.is_allowed::<Saved>());
         assert!(!filter.is_allowed::<Transient>());
@@ -352,11 +480,11 @@ mod tests {
     #[test]
     fn named_persistence_domains_build_independent_allowlists() {
         let mut app = App::new();
-        app.register_persistence_type::<FeaturePersistence, Saved>()
-            .register_persisted::<Transient>();
+        app.register_store_type::<FeatureStore, Saved>()
+            .register_stored::<Transient>();
         let registry = app.world().resource::<AppTypeRegistry>().read();
         let feature = FeaturePersisted::filter(&registry);
-        let workspace = WorkspacePersisted::filter(&registry);
+        let workspace = WorkspaceStored::filter(&registry);
 
         assert!(feature.is_allowed::<Saved>());
         assert!(!feature.is_allowed::<Transient>());

@@ -2,7 +2,7 @@ use bevy::ecs::relationship::Relationship;
 use bevy::prelude::*;
 use bevy::window::PrimaryWindow;
 use bevy_cef::prelude::HostWindow;
-use vmux_ecs::persistence::{PageRestore, WorkspaceRestoreValidator, WorkspaceStoreValidator};
+use vmux_ecs::store::{PageRestore, WorkspaceRestoreValidator, WorkspaceStoreValidator};
 use vmux_ecs::{CreatedAt, Order, PageMetadata, PageNavigation, PageOpenId, PageOpenTask};
 use vmux_flex::prelude::*;
 
@@ -13,7 +13,7 @@ use crate::tab::Tab;
 use crate::window::Main;
 
 #[derive(SystemSet, Clone, Copy, Debug, PartialEq, Eq, Hash)]
-pub enum LayoutPersistenceSet {
+pub enum LayoutStoreSet {
     Restore,
 }
 
@@ -28,11 +28,11 @@ struct RestoreState {
     requested: bool,
 }
 
-pub(crate) struct LayoutPersistencePlugin;
+pub(crate) struct LayoutStorePlugin;
 
-impl Plugin for LayoutPersistencePlugin {
+impl Plugin for LayoutStorePlugin {
     fn build(&self, app: &mut App) {
-        app.add_systems(PreStartup, spawn_store_validator)
+        app.add_systems(PreStartup, register)
             .add_message::<LayoutRestoreRequest>()
             .add_message::<LayoutRestoreCommitted>()
             .init_resource::<RestoreState>()
@@ -40,12 +40,12 @@ impl Plugin for LayoutPersistencePlugin {
                 Update,
                 (request_restore, restore_views)
                     .chain()
-                    .in_set(LayoutPersistenceSet::Restore),
+                    .in_set(LayoutStoreSet::Restore),
             );
     }
 }
 
-fn spawn_store_validator(mut commands: Commands) {
+fn register(mut commands: Commands) {
     commands.spawn(WorkspaceRestoreValidator::unique::<crate::space::SpaceId>(
         "Space ID",
     ));

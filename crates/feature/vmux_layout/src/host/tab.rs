@@ -17,7 +17,7 @@ use vmux_ecs::Order;
 use vmux_ecs::launcher::LauncherDismissRequest;
 #[cfg(test)]
 use vmux_ecs::manifest::FeaturePlugin;
-use vmux_ecs::persistence::PersistenceAppExt;
+use vmux_ecs::store::StoreAppExt;
 pub use vmux_ecs::workspace::TabCommandSet;
 use vmux_flex::prelude::*;
 use vmux_history::LastActivatedAt;
@@ -29,11 +29,11 @@ pub struct TabPlugin;
 impl Plugin for TabPlugin {
     fn build(&self, app: &mut App) {
         app.add_plugins(TabCommandPlugin)
-            .register_persisted::<Tab>()
+            .register_stored::<Tab>()
             .register_type::<Option<String>>()
-            .register_persisted::<TabWorkspace>()
-            .register_persisted::<TabWorktree>()
-            .register_persisted::<TabDirDecided>()
+            .register_stored::<TabWorkspace>()
+            .register_stored::<TabWorktree>()
+            .register_stored::<TabDirDecided>()
             .add_message::<CloseTabRequest>()
             .add_message::<CreateFromPageRequest>()
             .add_message::<crate::NewTabRequest>()

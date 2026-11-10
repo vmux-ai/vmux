@@ -6,7 +6,7 @@ use vmux_command::{CommandBarProjectRoots, WriteCommandBarSnapshots};
 use vmux_ecs::event::space::{ProjectActivateRequest, ProjectPickerRequest};
 use vmux_ecs::event::{ProjectNavigation, ProjectRow, ProjectRowKind, ProjectTreeToggle};
 use vmux_ecs::page::PageReady;
-use vmux_ecs::persistence::PersistenceAppExt;
+use vmux_ecs::store::StoreAppExt;
 use vmux_ecs::{PageMetadata, UiStateWrite};
 use vmux_git::worktree::{CheckoutInfo, LinkedRepoRoot};
 #[cfg(test)]
@@ -27,7 +27,7 @@ impl Plugin for SpaceProjectPlugin {
             .init_resource::<vmux_git::GitRuntime>()
             .init_resource::<ActiveProjectRows>()
             .init_resource::<ActiveProjectScan>()
-            .register_persisted::<ExpandedProjectDirs>()
+            .register_stored::<ExpandedProjectDirs>()
             .add_observer(tree_toggle)
             .add_observer(pick)
             .add_systems(

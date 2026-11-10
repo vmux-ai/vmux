@@ -10,7 +10,7 @@ use vmux_ecs::manifest::FeaturePlugin;
 #[cfg(all(host, not(target_os = "android")))]
 use vmux_ecs::page::PrewarmPage;
 #[cfg(all(host, not(target_os = "android")))]
-use vmux_ecs::persistence::{WorkspaceRestoreValidator, WorkspaceStoreValidator};
+use vmux_ecs::store::{WorkspaceRestoreValidator, WorkspaceStoreValidator};
 
 #[cfg(host)]
 pub use catalog::{ScopeProjectionRequest, SessionCatalogView, SessionManagerView};

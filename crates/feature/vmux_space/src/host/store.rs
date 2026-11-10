@@ -17,35 +17,34 @@ use serde::de::DeserializeSeed;
 use std::path::{Path, PathBuf};
 use std::sync::{Mutex, mpsc};
 use vmux_ecs::CreatedAt;
+use vmux_ecs::store::State;
 
 use vmux_api::BuiltinIcon;
 #[cfg(test)]
-use vmux_ecs::persistence::PersistenceAppExt;
-use vmux_ecs::persistence::{
-    PersistenceDirty, WorkspacePersisted, WorkspaceRestore, WorkspaceRestoreValidator,
-    WorkspaceSaveRequest, WorkspaceStoreValidators,
-};
-#[cfg(test)]
 use vmux_ecs::profile::ProfilePaths;
 use vmux_ecs::profile::{CurrentProfile, SessionEnvironment};
+#[cfg(test)]
+use vmux_ecs::store::StoreAppExt;
+use vmux_ecs::store::{
+    StoreDirty, WorkspaceRestore, WorkspaceRestoreValidator, WorkspaceSaveRequest,
+    WorkspaceStoreValidators, WorkspaceStored,
+};
 #[cfg(test)]
 use vmux_ecs::{ArchivedPage, ArchivedPagePosition, ArchivedTabPage, PageMetadata};
 use vmux_layout::space::Space;
 #[cfg(test)]
 use vmux_layout::space::SpaceId;
 use vmux_layout::window::WindowHierarchy;
-use vmux_layout::{
-    LayoutPersistenceSet, LayoutRestoreCommitted, LayoutRestoreRequest, LayoutStartupSet,
-};
+use vmux_layout::{LayoutRestoreCommitted, LayoutRestoreRequest, LayoutStartupSet, LayoutStoreSet};
 #[cfg(test)]
 use vmux_layout::{
     pane::{Pane, PaneId},
     tab::{Tab, TabWorkspace, TabWorktree},
     window::WindowGeometry,
 };
-pub(crate) struct WorkspacePersistencePlugin;
+pub(crate) struct WorkspaceStorePlugin;
 
-impl Plugin for WorkspacePersistencePlugin {
+impl Plugin for WorkspaceStorePlugin {
     fn build(&self, app: &mut App) {
         app.add_message::<WorkspaceSaveRequest>()
             .add_message::<LayoutRestoreRequest>()
@@ -56,7 +55,7 @@ impl Plugin for WorkspacePersistencePlugin {
                 Startup,
                 (spawn, ApplyDeferred, load_on_startup)
                     .chain()
-                    .in_set(LayoutStartupSet::Persistence),
+                    .in_set(LayoutStartupSet::Store),
             )
             .add_observer(mark_restore_pending)
             .add_observer(prune_restored)
@@ -64,7 +63,7 @@ impl Plugin for WorkspacePersistencePlugin {
             .add_systems(
                 Update,
                 complete_restore
-                    .after(LayoutPersistenceSet::Restore)
+                    .after(LayoutStoreSet::Restore)
                     .run_if(any_with_component::<RestorePending>),
             )
             .add_systems(
@@ -77,7 +76,7 @@ impl Plugin for WorkspacePersistencePlugin {
 }
 
 fn spawn(registry: Res<AppTypeRegistry>, profile: CurrentProfile, mut commands: Commands) {
-    let components = WorkspacePersisted::filter(&registry.read())
+    let components = WorkspaceStored::filter(&registry.read())
         .allow::<Save>()
         .allow::<ChildOf>()
         .allow::<Children>()
@@ -96,11 +95,10 @@ fn spawn(registry: Res<AppTypeRegistry>, profile: CurrentProfile, mut commands: 
         }
     };
     commands.spawn((
-        Name::new("Space persistence"),
+        Name::new("Space store"),
         AutoSave {
             debounce: Timer::from_seconds(0.5, TimerMode::Once),
             periodic: Timer::from_seconds(60.0, TimerMode::Repeating),
-            dirty: false,
             components,
         },
         WorkspaceRestore::default(),
@@ -110,7 +108,7 @@ fn spawn(registry: Res<AppTypeRegistry>, profile: CurrentProfile, mut commands: 
 
 fn flush_on_exit(
     mut exits: MessageReader<AppExit>,
-    persistence: Single<(Entity, &AutoSave, &WorkspaceStorePath, &WorkspaceRestore)>,
+    store: Single<(Entity, &AutoSave, &WorkspaceStorePath, &WorkspaceRestore)>,
     save_entities: SpaceSaveEntities,
     spaces: Query<(), With<Space>>,
     mut saver: SpaceSaver,
@@ -118,7 +116,7 @@ fn flush_on_exit(
     if exits.read().count() == 0 || spaces.is_empty() {
         return;
     }
-    let (_, autosave, path, restore) = *persistence;
+    let (_, autosave, path, restore) = *store;
     if !restore.complete {
         return;
     }
@@ -133,14 +131,14 @@ fn flush_on_exit(
 fn handle_save_requests(
     mut requests: MessageReader<WorkspaceSaveRequest>,
     save_entities: SpaceSaveEntities,
-    persistence: Single<&AutoSave>,
+    store: Single<&AutoSave>,
     mut saver: SpaceSaver,
 ) {
     for request in requests.read() {
         saver.save(
             request.path.clone(),
             save_entities.excluded(),
-            persistence.components.clone(),
+            store.components.clone(),
             None,
         );
     }
@@ -222,39 +220,47 @@ impl Command for RestoredChildren {
         }
         if removed > 0 {
             info!("Removed {removed} empty restored session children");
-            world.trigger(PersistenceDirty);
+            world.trigger(StoreDirty);
         }
     }
 }
 
 fn mark_restore_pending(
     _trigger: On<Loaded>,
-    persistence: Single<Entity, With<AutoSave>>,
+    store: Single<Entity, With<AutoSave>>,
     mut restore_requests: MessageWriter<LayoutRestoreRequest>,
     mut commands: Commands,
 ) {
-    commands.entity(*persistence).insert(RestorePending);
+    commands.entity(*store).insert(RestorePending);
+    let entity = *store;
+    commands.queue(move |world: &mut World| {
+        if let Some(mut state) = world.get_mut::<State>(entity) {
+            state.resolve();
+        }
+    });
     restore_requests.write(LayoutRestoreRequest);
 }
 
 fn complete_restore(
     mut committed: MessageReader<LayoutRestoreCommitted>,
     mut restore: Single<&mut WorkspaceRestore>,
-    persistence: Single<Entity, With<RestorePending>>,
+    mut state: Single<&mut State, With<AutoSave>>,
+    store: Single<Entity, With<RestorePending>>,
     mut commands: Commands,
 ) {
     if committed.read().count() == 0 {
         return;
     }
     restore.complete = true;
-    commands.entity(*persistence).remove::<RestorePending>();
+    state.ready();
+    commands.entity(*store).remove::<RestorePending>();
 }
 
 #[derive(Component)]
+#[require(State)]
 struct AutoSave {
     debounce: Timer,
     periodic: Timer,
-    dirty: bool,
     components: WorldFilter,
 }
 
@@ -347,7 +353,7 @@ fn track_hierarchy(
         dirty = true;
     }
     if dirty {
-        commands.trigger(PersistenceDirty);
+        commands.trigger(StoreDirty);
     }
 }
 
@@ -434,6 +440,7 @@ struct Written;
 
 #[derive(Component)]
 struct PendingWrite {
+    revision: u64,
     path: PathBuf,
     result: Mutex<mpsc::Receiver<Result<(), String>>>,
 }
@@ -484,6 +491,12 @@ impl Command for WorkspaceWrite {
     type Out = ();
 
     fn apply(mut self, world: &mut World) {
+        let mut stores = world.query::<(&WorkspaceStorePath, &State)>();
+        for (path, state) in stores.iter(world) {
+            if path.0 == self.schema.0 && state.phase() != vmux_ecs::store::Phase::Ready {
+                return;
+            }
+        }
         let mut failures = world.query::<(&WorkspaceStorePath, &RestoreFailure)>();
         for (path, failure) in failures.iter(world) {
             if path.0 == self.schema.0 && failure.backup.is_none() {
@@ -505,12 +518,18 @@ impl Command for WorkspaceWrite {
                 let Some(pending) = world.entity_mut(entity).take::<PendingWrite>() else {
                     continue;
                 };
+                let revision = pending.revision;
                 match pending.finish() {
-                    Ok(()) => world.trigger(Written),
+                    Ok(()) => {
+                        if let Some(mut state) = world.get_mut::<State>(entity) {
+                            state.succeed(revision);
+                        }
+                        world.trigger(Written);
+                    }
                     Err(error) => {
                         warn!("Workspace save failed for {:?}: {error}", self.schema.0);
-                        if let Some(mut autosave) = world.get_mut::<AutoSave>(entity) {
-                            autosave.dirty = true;
+                        if let Some(mut state) = world.get_mut::<State>(entity) {
+                            state.retry(revision, error);
                         }
                     }
                 }
@@ -530,6 +549,12 @@ impl Command for WorkspaceWrite {
         if world.get::<AutoSave>(entity).is_none() || world.get::<PendingWrite>(entity).is_some() {
             return;
         }
+        let Some(revision) = world
+            .get_mut::<State>(entity)
+            .and_then(|mut state| state.begin())
+        else {
+            return;
+        };
         let mut entities = Vec::new();
         for entity in world.query_filtered::<Entity, With<Save>>().iter(world) {
             let included = match &self.save.entities {
@@ -557,7 +582,6 @@ impl Command for WorkspaceWrite {
         let Ok(saved) = captured else {
             return;
         };
-        world.get_mut::<AutoSave>(entity).unwrap().dirty = false;
         let path = self.schema.0.clone();
         let writer = SnapshotWriter {
             saved,
@@ -577,6 +601,7 @@ impl Command for WorkspaceWrite {
             })
             .detach();
         world.entity_mut(entity).insert(PendingWrite {
+            revision,
             path,
             result: Mutex::new(result),
         });
@@ -584,15 +609,16 @@ impl Command for WorkspaceWrite {
 }
 
 fn drain_writes(
-    mut writes: Query<(Entity, &mut PendingWrite, &mut AutoSave)>,
+    mut writes: Query<(Entity, &mut PendingWrite, &mut AutoSave, &mut State)>,
     mut commands: Commands,
 ) {
-    for (entity, mut pending, mut autosave) in &mut writes {
+    for (entity, mut pending, mut autosave, mut state) in &mut writes {
         let Some(result) = pending.poll() else {
             continue;
         };
         match result {
             Ok(()) => {
+                state.succeed(pending.revision);
                 autosave
                     .debounce
                     .set_duration(std::time::Duration::from_millis(500));
@@ -600,7 +626,7 @@ fn drain_writes(
             }
             Err(error) => {
                 warn!("Workspace save failed for {:?}: {error}", pending.path);
-                autosave.dirty = true;
+                state.retry(pending.revision, error);
                 autosave
                     .debounce
                     .set_duration(std::time::Duration::from_secs(60));
@@ -717,14 +743,15 @@ impl WorkspaceStorePath {
     }
 }
 
-fn mark_dirty(_trigger: On<PersistenceDirty>, mut auto_save: Single<&mut AutoSave>) {
-    auto_save.dirty = true;
+fn mark_dirty(_trigger: On<StoreDirty>, auto_save: Single<(&mut AutoSave, &mut State)>) {
+    let (mut auto_save, mut state) = auto_save.into_inner();
+    state.advance();
     auto_save.debounce.reset();
 }
 
 fn auto_save(
     time: Res<Time>,
-    auto_save: Single<(Entity, &mut AutoSave)>,
+    auto_save: Single<(Entity, &mut AutoSave, &State)>,
     path: Single<&WorkspaceStorePath>,
     spaces: Query<(), With<Space>>,
     save_entities: SpaceSaveEntities,
@@ -732,7 +759,7 @@ fn auto_save(
     failures: Query<&RestoreFailure>,
     mut saver: SpaceSaver,
 ) {
-    let (entity, mut auto_save) = auto_save.into_inner();
+    let (entity, mut auto_save, state) = auto_save.into_inner();
     if failures
         .get(entity)
         .is_ok_and(|failure| failure.backup.is_none())
@@ -748,7 +775,7 @@ fn auto_save(
         return;
     }
 
-    if !auto_save.dirty {
+    if !state.is_dirty() || state.phase() != vmux_ecs::store::Phase::Ready {
         return;
     }
     auto_save.debounce.tick(time.delta());
@@ -765,7 +792,7 @@ fn auto_save(
 
 #[cfg(test)]
 fn save_space_to_path(world: &mut World, path: PathBuf) {
-    let components = WorkspacePersisted::filter(&world.resource::<AppTypeRegistry>().read())
+    let components = WorkspaceStored::filter(&world.resource::<AppTypeRegistry>().read())
         .allow::<Save>()
         .allow::<ChildOf>()
         .allow::<Children>()
@@ -782,7 +809,7 @@ fn load_on_startup(
     validators: WorkspaceStoreValidators,
     mut restore: Single<&mut WorkspaceRestore>,
     path: Single<&WorkspaceStorePath>,
-    persistence: Single<Entity, With<AutoSave>>,
+    owner: Single<Entity, With<AutoSave>>,
     mut commands: Commands,
 ) {
     if SessionEnvironment::is_test() {
@@ -845,7 +872,7 @@ fn load_on_startup(
         };
         commands.queue(WorkspaceLoad {
             load,
-            persistence: *persistence,
+            store: *owner,
             path: path.clone(),
         });
     } else {
@@ -855,7 +882,7 @@ fn load_on_startup(
 
 struct WorkspaceLoad {
     load: LoadWorld,
-    persistence: Entity,
+    store: Entity,
     path: PathBuf,
 }
 
@@ -863,6 +890,9 @@ impl Command for WorkspaceLoad {
     type Out = ();
 
     fn apply(mut self, world: &mut World) {
+        if let Some(mut state) = world.get_mut::<State>(self.store) {
+            state.materialize();
+        }
         let snapshot = {
             let registry = world.resource::<AppTypeRegistry>().read();
             let mut assets = world.resource::<AssetServer>().clone();
@@ -872,7 +902,7 @@ impl Command for WorkspaceLoad {
             Ok(snapshot) => snapshot,
             Err(error) => {
                 WorkspaceRestoreFailed {
-                    persistence: self.persistence,
+                    store: self.store,
                     path: self.path,
                     error,
                 }
@@ -892,7 +922,7 @@ impl Command for WorkspaceLoad {
         }
         if let Some(error) = rejected {
             WorkspaceRestoreFailed {
-                persistence: self.persistence,
+                store: self.store,
                 path: self.path,
                 error,
             }
@@ -929,7 +959,7 @@ impl Command for WorkspaceLoad {
                 world.despawn(entity);
             }
             WorkspaceRestoreFailed {
-                persistence: self.persistence,
+                store: self.store,
                 path: self.path,
                 error: error.to_string(),
             }
@@ -969,7 +999,7 @@ impl WorkspaceLoad {
 }
 
 struct WorkspaceRestoreFailed {
-    persistence: Entity,
+    store: Entity,
     path: PathBuf,
     error: String,
 }
@@ -991,11 +1021,18 @@ impl Command for WorkspaceRestoreFailed {
                 WorkspaceFeedback::Refused(self.path.clone()).apply(world);
             }
         }
-        if let Some(mut restore) = world.get_mut::<WorkspaceRestore>(self.persistence) {
+        if let Some(mut restore) = world.get_mut::<WorkspaceRestore>(self.store) {
             restore.store_present = false;
             restore.complete = true;
         }
-        world.entity_mut(self.persistence).insert(failure);
+        if let Some(mut state) = world.get_mut::<State>(self.store) {
+            if failure.backup.is_some() {
+                state.ready();
+            } else {
+                state.fail(self.error);
+            }
+        }
+        world.entity_mut(self.store).insert(failure);
     }
 }
 
@@ -1166,6 +1203,39 @@ mod tests {
     };
     use vmux_setting::{AppSettings, BrowserSettings, ShortcutSettings};
 
+    #[test]
+    fn explicit_workspace_saves_wait_for_runtime_restore_commit() {
+        let mut fixture = WorkspaceSaveFixture::new("explicit-waits-for-restore");
+        fixture
+            .app
+            .world_mut()
+            .get_mut::<State>(fixture.store)
+            .unwrap()
+            .resolve();
+        fixture.app.world_mut().write_message(WorkspaceSaveRequest {
+            path: fixture.path.clone(),
+        });
+        fixture.app.update();
+        assert!(!fixture.path.exists());
+        assert!(
+            fixture
+                .app
+                .world()
+                .get::<PendingWrite>(fixture.store)
+                .is_none()
+        );
+        fixture
+            .app
+            .world_mut()
+            .get_mut::<State>(fixture.store)
+            .unwrap()
+            .ready();
+        fixture.app.world_mut().write_message(WorkspaceSaveRequest {
+            path: fixture.path.clone(),
+        });
+        fixture.app.update();
+        assert!(fixture.path.is_file());
+    }
     #[derive(Resource, Default)]
     struct SaveCount(u32);
 
@@ -1177,14 +1247,14 @@ mod tests {
 
     struct WorkspaceSaveFixture {
         app: App,
-        persistence: Entity,
+        store: Entity,
         path: PathBuf,
         _home: HomeEnvGuard,
     }
 
     struct WorkspaceRestoreFixture {
         app: App,
-        persistence: Entity,
+        store: Entity,
         path: PathBuf,
         _home: HomeEnvGuard,
     }
@@ -1198,10 +1268,10 @@ mod tests {
                 AssetPlugin::default(),
                 vmux_ecs::PrimitivesPlugin,
             ))
-            .register_persisted::<SpaceId>()
-            .register_persisted::<PaneId>()
-            .register_persisted::<vmux_session::SessionId>()
-            .add_plugins(WorkspacePersistencePlugin);
+            .register_stored::<SpaceId>()
+            .register_stored::<PaneId>()
+            .register_stored::<vmux_session::SessionId>()
+            .add_plugins(WorkspaceStorePlugin);
             app.world_mut()
                 .spawn(WorkspaceRestoreValidator::unique::<SpaceId>("Space ID"));
             app.world_mut()
@@ -1209,20 +1279,20 @@ mod tests {
             app.world_mut()
                 .spawn(WorkspaceRestoreValidator::unique::<vmux_session::SessionId>("Session ID"));
             app.update();
-            let persistence = app
+            let store = app
                 .world_mut()
                 .query_filtered::<Entity, With<AutoSave>>()
                 .single(app.world())
                 .unwrap();
             let path = app
                 .world()
-                .get::<WorkspaceStorePath>(persistence)
+                .get::<WorkspaceStorePath>(store)
                 .unwrap()
                 .0
                 .clone();
             Self {
                 app,
-                persistence,
+                store,
                 path,
                 _home: home,
             }
@@ -1238,7 +1308,7 @@ mod tests {
                 .unwrap();
             self.app.world_mut().commands().queue(WorkspaceLoad {
                 load: LoadWorld::default_from_file(self.path.clone()),
-                persistence: self.persistence,
+                store: self.store,
                 path: self.path.clone(),
             });
             self.app.update();
@@ -1248,7 +1318,7 @@ mod tests {
         fn preserved(&self) -> PathBuf {
             self.app
                 .world()
-                .get::<RestoreFailure>(self.persistence)
+                .get::<RestoreFailure>(self.store)
                 .unwrap()
                 .backup
                 .clone()
@@ -1310,7 +1380,7 @@ mod tests {
             fixture
                 .app
                 .world()
-                .get::<RestoreFailure>(fixture.persistence)
+                .get::<RestoreFailure>(fixture.store)
                 .is_none()
         );
         assert_eq!(
@@ -1371,7 +1441,7 @@ mod tests {
         let restore = fixture
             .app
             .world()
-            .get::<WorkspaceRestore>(fixture.persistence)
+            .get::<WorkspaceRestore>(fixture.store)
             .unwrap();
         assert!(restore.complete);
         assert!(!restore.store_present);
@@ -1380,12 +1450,7 @@ mod tests {
     impl WorkspaceSaveFixture {
         fn finish_write(&mut self) {
             let deadline = std::time::Instant::now() + std::time::Duration::from_secs(3);
-            while self
-                .app
-                .world()
-                .get::<PendingWrite>(self.persistence)
-                .is_some()
-            {
+            while self.app.world().get::<PendingWrite>(self.store).is_some() {
                 assert!(
                     std::time::Instant::now() < deadline,
                     "workspace writer did not finish"
@@ -1399,34 +1464,34 @@ mod tests {
             let home = HomeEnvGuard::use_temp_home(name);
             let mut app = App::new();
             app.add_plugins((MinimalPlugins, vmux_ecs::PrimitivesPlugin))
-                .register_persisted::<Space>()
+                .register_stored::<Space>()
                 .insert_resource(test_settings())
                 .insert_resource(bevy::time::TimeUpdateStrategy::ManualDuration(
                     std::time::Duration::from_secs(61),
                 ))
                 .init_resource::<SaveCount>()
                 .add_observer(SaveCount::record)
-                .add_plugins(WorkspacePersistencePlugin);
+                .add_plugins(WorkspaceStorePlugin);
             app.world_mut()
                 .resource_mut::<Time<bevy::time::Virtual>>()
                 .set_max_delta(std::time::Duration::from_secs(120));
             app.world_mut().spawn((Save, Space, Name::new("Workspace")));
             app.update();
-            let persistence = app
+            let store = app
                 .world_mut()
                 .query_filtered::<Entity, With<AutoSave>>()
                 .single(app.world())
                 .unwrap();
             let path = app
                 .world()
-                .get::<WorkspaceStorePath>(persistence)
+                .get::<WorkspaceStorePath>(store)
                 .unwrap()
                 .0
                 .clone();
             assert!(!path.exists());
             Self {
                 app,
-                persistence,
+                store,
                 path,
                 _home: home,
             }
@@ -1441,7 +1506,7 @@ mod tests {
             .insert_resource(bevy::time::TimeUpdateStrategy::ManualDuration(
                 std::time::Duration::ZERO,
             ));
-        fixture.app.world_mut().trigger(PersistenceDirty);
+        fixture.app.world_mut().trigger(StoreDirty);
         fixture.app.world_mut().write_message(AppExit::Success);
         fixture.app.update();
         assert!(fixture.path.exists());
@@ -1461,8 +1526,9 @@ mod tests {
         fixture
             .app
             .world_mut()
-            .entity_mut(fixture.persistence)
+            .entity_mut(fixture.store)
             .insert(PendingWrite {
+                revision: 1,
                 path: pending.clone(),
                 result: Mutex::new(result),
             });
@@ -1488,7 +1554,7 @@ mod tests {
             fixture
                 .app
                 .world()
-                .get::<PendingWrite>(fixture.persistence)
+                .get::<PendingWrite>(fixture.store)
                 .is_none()
         );
     }
@@ -1499,9 +1565,9 @@ mod tests {
         fixture
             .app
             .world_mut()
-            .get_mut::<AutoSave>(fixture.persistence)
+            .get_mut::<State>(fixture.store)
             .unwrap()
-            .dirty = false;
+            .clone_from(&State::default());
 
         fixture.app.update();
 
@@ -1516,14 +1582,14 @@ mod tests {
         fixture
             .app
             .world_mut()
-            .entity_mut(fixture.persistence)
+            .entity_mut(fixture.store)
             .insert(RestoreFailure { backup: None });
         fixture.app.update();
         assert!(
             fixture
                 .app
                 .world()
-                .get::<PendingWrite>(fixture.persistence)
+                .get::<PendingWrite>(fixture.store)
                 .is_none()
         );
         fixture.app.world_mut().write_message(WorkspaceSaveRequest {
@@ -1562,9 +1628,9 @@ mod tests {
             fixture
                 .app
                 .world()
-                .get::<AutoSave>(fixture.persistence)
+                .get::<State>(fixture.store)
                 .unwrap()
-                .dirty
+                .is_dirty()
         );
         assert_eq!(fixture.app.world().resource::<SaveCount>().0, 0);
         std::fs::remove_dir(&fixture.path).unwrap();
@@ -1577,9 +1643,9 @@ mod tests {
             !fixture
                 .app
                 .world()
-                .get::<AutoSave>(fixture.persistence)
+                .get::<State>(fixture.store)
                 .unwrap()
-                .dirty
+                .is_dirty()
         );
         assert_eq!(fixture.app.world().resource::<SaveCount>().0, 1);
     }
@@ -1724,12 +1790,12 @@ mod tests {
         let mut fixture = WorkspaceSaveFixture::new("background-save");
         std::fs::write(&fixture.path, "previous complete snapshot").unwrap();
         let gate = std::sync::Arc::new(SerializationGate::default());
-        fixture.app.register_persisted::<BlockingValue>();
+        fixture.app.register_stored::<BlockingValue>();
         {
             let mut autosave = fixture
                 .app
                 .world_mut()
-                .get_mut::<AutoSave>(fixture.persistence)
+                .get_mut::<AutoSave>(fixture.store)
                 .unwrap();
             autosave.components = autosave.components.clone().allow::<BlockingValue>();
         }
@@ -1739,7 +1805,7 @@ mod tests {
             fixture
                 .app
                 .world()
-                .get::<PendingWrite>(fixture.persistence)
+                .get::<PendingWrite>(fixture.store)
                 .is_some()
         );
         gate.wait_started();
@@ -1759,9 +1825,9 @@ mod tests {
             fixture
                 .app
                 .world()
-                .get::<AutoSave>(fixture.persistence)
+                .get::<State>(fixture.store)
                 .unwrap()
-                .dirty
+                .is_dirty()
         );
         assert_eq!(
             std::fs::read_to_string(&fixture.path).unwrap(),
@@ -1773,9 +1839,9 @@ mod tests {
             fixture
                 .app
                 .world()
-                .get::<AutoSave>(fixture.persistence)
+                .get::<State>(fixture.store)
                 .unwrap()
-                .dirty
+                .is_dirty()
         );
         assert!(
             !std::fs::read_to_string(&fixture.path)
@@ -1793,9 +1859,9 @@ mod tests {
             !fixture
                 .app
                 .world()
-                .get::<AutoSave>(fixture.persistence)
+                .get::<State>(fixture.store)
                 .unwrap()
-                .dirty
+                .is_dirty()
         );
     }
 
@@ -1807,20 +1873,19 @@ mod tests {
             .spawn(AutoSave {
                 debounce: Timer::from_seconds(0.5, TimerMode::Once),
                 periodic: Timer::from_seconds(60.0, TimerMode::Repeating),
-                dirty: false,
                 components: WorldFilter::allow_all(),
             })
             .id();
-        app.register_persisted::<ArchivedPage>()
+        app.register_stored::<ArchivedPage>()
             .add_observer(mark_dirty);
         app.update();
         app.world_mut()
-            .get_mut::<AutoSave>(auto_save)
+            .get_mut::<State>(auto_save)
             .unwrap()
-            .dirty = false;
+            .clone_from(&State::default());
         app.world_mut().spawn((Save, ArchivedPage::default()));
         app.update();
-        assert!(app.world().get::<AutoSave>(auto_save).unwrap().dirty);
+        assert!(app.world().get::<State>(auto_save).unwrap().is_dirty());
     }
 
     #[test]
@@ -1830,7 +1895,7 @@ mod tests {
         app.add_plugins(MinimalPlugins)
             .add_plugins(vmux_ecs::PrimitivesPlugin)
             .insert_resource(test_settings())
-            .add_plugins(WorkspacePersistencePlugin);
+            .add_plugins(WorkspaceStorePlugin);
         let entity = app.world_mut().spawn((Save, Name::new("unchanged"))).id();
         app.update();
         let store = app
@@ -1838,17 +1903,20 @@ mod tests {
             .query_filtered::<Entity, With<AutoSave>>()
             .single(app.world())
             .unwrap();
-        app.world_mut().get_mut::<AutoSave>(store).unwrap().dirty = false;
+        app.world_mut()
+            .get_mut::<State>(store)
+            .unwrap()
+            .clone_from(&State::default());
         app.world_mut()
             .entity_mut(entity)
             .insert(Name::new("unchanged"));
         app.update();
-        assert!(!app.world().get::<AutoSave>(store).unwrap().dirty);
+        assert!(!app.world().get::<State>(store).unwrap().is_dirty());
         app.world_mut()
             .entity_mut(entity)
             .insert(Name::new("renamed"));
         app.update();
-        assert!(app.world().get::<AutoSave>(store).unwrap().dirty);
+        assert!(app.world().get::<State>(store).unwrap().is_dirty());
     }
 
     #[test]
@@ -1859,20 +1927,19 @@ mod tests {
             .spawn(AutoSave {
                 debounce: Timer::from_seconds(0.5, TimerMode::Once),
                 periodic: Timer::from_seconds(60.0, TimerMode::Repeating),
-                dirty: false,
                 components: WorldFilter::allow_all(),
             })
             .id();
-        app.register_persisted::<vmux_history::Visit>()
+        app.register_stored::<vmux_history::Visit>()
             .add_observer(mark_dirty);
         app.update();
         app.world_mut()
-            .get_mut::<AutoSave>(auto_save)
+            .get_mut::<State>(auto_save)
             .unwrap()
-            .dirty = false;
+            .clone_from(&State::default());
         app.world_mut().spawn((Save, vmux_history::Visit));
         app.update();
-        assert!(app.world().get::<AutoSave>(auto_save).unwrap().dirty);
+        assert!(app.world().get::<State>(auto_save).unwrap().is_dirty());
     }
 
     #[test]
@@ -1883,17 +1950,16 @@ mod tests {
             .spawn(AutoSave {
                 debounce: Timer::from_seconds(0.5, TimerMode::Once),
                 periodic: Timer::from_seconds(60.0, TimerMode::Repeating),
-                dirty: false,
                 components: WorldFilter::allow_all(),
             })
             .id();
-        app.register_persisted::<Tab>().add_observer(mark_dirty);
+        app.register_stored::<Tab>().add_observer(mark_dirty);
         let tab = app.world_mut().spawn((Save, Tab::default())).id();
         app.update();
         app.world_mut()
-            .get_mut::<AutoSave>(auto_save)
+            .get_mut::<State>(auto_save)
             .unwrap()
-            .dirty = false;
+            .clone_from(&State::default());
         app.world_mut()
             .entity_mut(tab)
             .get_mut::<Tab>()
@@ -1902,7 +1968,7 @@ mod tests {
 
         app.update();
 
-        assert!(app.world().get::<AutoSave>(auto_save).unwrap().dirty);
+        assert!(app.world().get::<State>(auto_save).unwrap().is_dirty());
     }
 
     #[test]
@@ -1913,25 +1979,24 @@ mod tests {
             .spawn(AutoSave {
                 debounce: Timer::from_seconds(0.5, TimerMode::Once),
                 periodic: Timer::from_seconds(60.0, TimerMode::Repeating),
-                dirty: false,
                 components: WorldFilter::allow_all(),
             })
             .id();
-        app.register_persisted::<TabWorkspace>()
+        app.register_stored::<TabWorkspace>()
             .add_observer(mark_dirty);
         let tab = app.world_mut().spawn((Save, Tab::default())).id();
         app.update();
         app.world_mut()
-            .get_mut::<AutoSave>(auto_save)
+            .get_mut::<State>(auto_save)
             .unwrap()
-            .dirty = false;
+            .clone_from(&State::default());
         app.world_mut().entity_mut(tab).insert(TabWorkspace {
             project_dir: "/tmp/project".into(),
         });
 
         app.update();
 
-        assert!(app.world().get::<AutoSave>(auto_save).unwrap().dirty);
+        assert!(app.world().get::<State>(auto_save).unwrap().is_dirty());
     }
 
     #[test]
@@ -1942,12 +2007,11 @@ mod tests {
             .spawn(AutoSave {
                 debounce: Timer::from_seconds(0.5, TimerMode::Once),
                 periodic: Timer::from_seconds(60.0, TimerMode::Repeating),
-                dirty: false,
                 components: WorldFilter::allow_all(),
             })
             .id();
-        app.register_persisted::<Tab>()
-            .register_persisted::<TabWorktree>()
+        app.register_stored::<Tab>()
+            .register_stored::<TabWorktree>()
             .add_observer(mark_dirty);
         let tab = app
             .world_mut()
@@ -1964,14 +2028,14 @@ mod tests {
             .id();
         app.update();
         app.world_mut()
-            .get_mut::<AutoSave>(auto_save)
+            .get_mut::<State>(auto_save)
             .unwrap()
-            .dirty = false;
+            .clone_from(&State::default());
         app.world_mut().entity_mut(tab).remove::<TabWorktree>();
 
         app.update();
 
-        assert!(app.world().get::<AutoSave>(auto_save).unwrap().dirty);
+        assert!(app.world().get::<State>(auto_save).unwrap().is_dirty());
     }
 
     static ENV_LOCK: Mutex<()> = Mutex::new(());
@@ -2053,12 +2117,12 @@ mod tests {
         app_save
             .add_plugins(MinimalPlugins)
             .add_plugins(vmux_ecs::PrimitivesPlugin)
-            .register_persisted::<vmux_ecs::Visit>()
-            .register_persisted::<vmux_ecs::Url>()
-            .register_persisted::<vmux_ecs::VisitCount>()
-            .register_persisted::<vmux_ecs::LastVisitedAt>()
-            .register_persisted::<vmux_ecs::VisitedUrl>()
-            .register_persisted::<vmux_ecs::TransitionType>()
+            .register_stored::<vmux_ecs::Visit>()
+            .register_stored::<vmux_ecs::Url>()
+            .register_stored::<vmux_ecs::VisitCount>()
+            .register_stored::<vmux_ecs::LastVisitedAt>()
+            .register_stored::<vmux_ecs::VisitedUrl>()
+            .register_stored::<vmux_ecs::TransitionType>()
             .add_observer(save_on_default_event);
 
         let url_e = app_save
@@ -2095,12 +2159,12 @@ mod tests {
         app_load
             .add_plugins((MinimalPlugins, AssetPlugin::default()))
             .add_plugins(vmux_ecs::PrimitivesPlugin)
-            .register_persisted::<vmux_ecs::Visit>()
-            .register_persisted::<vmux_ecs::Url>()
-            .register_persisted::<vmux_ecs::VisitCount>()
-            .register_persisted::<vmux_ecs::LastVisitedAt>()
-            .register_persisted::<vmux_ecs::VisitedUrl>()
-            .register_persisted::<vmux_ecs::TransitionType>()
+            .register_stored::<vmux_ecs::Visit>()
+            .register_stored::<vmux_ecs::Url>()
+            .register_stored::<vmux_ecs::VisitCount>()
+            .register_stored::<vmux_ecs::LastVisitedAt>()
+            .register_stored::<vmux_ecs::VisitedUrl>()
+            .register_stored::<vmux_ecs::TransitionType>()
             .add_observer(load_on_default_event);
         app_load.update();
 
@@ -2249,7 +2313,7 @@ mod tests {
         app_save.add_plugins(MinimalPlugins);
         app_save.add_plugins(vmux_ecs::PrimitivesPlugin);
         app_save
-            .register_persisted::<WindowGeometry>()
+            .register_stored::<WindowGeometry>()
             .register_type::<Option<IVec2>>()
             .register_type::<Option<Vec2>>();
         app_save.add_observer(save_on_default_event);
@@ -2334,9 +2398,9 @@ mod tests {
         app_save
             .add_plugins(MinimalPlugins)
             .add_plugins(vmux_ecs::PrimitivesPlugin)
-            .register_persisted::<Space>()
-            .register_persisted::<SpaceId>()
-            .register_persisted::<WindowGeometry>()
+            .register_stored::<Space>()
+            .register_stored::<SpaceId>()
+            .register_stored::<WindowGeometry>()
             .add_observer(save_on_default_event);
         app_save.world_mut().spawn((
             Save,
@@ -2372,10 +2436,10 @@ mod tests {
         app_save.add_plugins(MinimalPlugins);
         app_save.add_plugins(vmux_ecs::PrimitivesPlugin);
         app_save
-            .register_persisted::<PaneId>()
-            .register_persisted::<ArchivedPage>()
-            .register_persisted::<ArchivedPagePosition>()
-            .register_persisted::<ArchivedTabPage>()
+            .register_stored::<PaneId>()
+            .register_stored::<ArchivedPage>()
+            .register_stored::<ArchivedPagePosition>()
+            .register_stored::<ArchivedTabPage>()
             .register_type::<vmux_ecs::PaneStep>()
             .register_type::<vmux_ecs::SplitAxis>()
             .register_type::<Vec<vmux_ecs::PaneStep>>();
@@ -2597,7 +2661,7 @@ mod tests {
             let mut app = App::new();
             app.add_plugins(MinimalPlugins)
                 .insert_resource(test_settings())
-                .add_plugins(WorkspacePersistencePlugin);
+                .add_plugins(WorkspaceStorePlugin);
             app.update();
             assert_eq!(std::fs::read_to_string(store.version()).unwrap(), newer);
             assert_eq!(std::fs::read(&store.0).unwrap(), body);
@@ -2616,9 +2680,9 @@ mod tests {
 
         let mut app = App::new();
         app.add_plugins((MinimalPlugins, vmux_ecs::PrimitivesPlugin))
-            .register_persisted::<Space>()
+            .register_stored::<Space>()
             .insert_resource(test_settings())
-            .add_plugins(WorkspacePersistencePlugin);
+            .add_plugins(WorkspaceStorePlugin);
         app.update();
 
         let backup = store
@@ -2654,7 +2718,7 @@ mod tests {
             let mut app = App::new();
             app.add_plugins(MinimalPlugins)
                 .insert_resource(test_settings())
-                .add_plugins(WorkspacePersistencePlugin);
+                .add_plugins(WorkspaceStorePlugin);
             app.update();
             let backup = store
                 .0
@@ -2699,7 +2763,7 @@ mod tests {
         let mut app = App::new();
         app.add_plugins(MinimalPlugins)
             .insert_resource(test_settings())
-            .add_plugins(WorkspacePersistencePlugin);
+            .add_plugins(WorkspaceStorePlugin);
         app.update();
         assert_eq!(std::fs::read_to_string(&store.0).unwrap(), original);
         assert_eq!(std::fs::read_to_string(store.version()).unwrap(), "3");
@@ -2719,7 +2783,7 @@ mod tests {
             app.add_plugins((MinimalPlugins, AssetPlugin::default()))
                 .register_type::<Name>()
                 .insert_resource(test_settings())
-                .add_plugins(WorkspacePersistencePlugin);
+                .add_plugins(WorkspaceStorePlugin);
             app.update();
             let failure = app
                 .world_mut()
@@ -2752,9 +2816,9 @@ mod tests {
             fixture
                 .app
                 .world()
-                .get::<AutoSave>(fixture.persistence)
+                .get::<State>(fixture.store)
                 .unwrap()
-                .dirty
+                .is_dirty()
         );
         assert_eq!(fixture.app.world().resource::<SaveCount>().0, 0);
         std::fs::remove_dir(version).unwrap();
@@ -2764,9 +2828,9 @@ mod tests {
             !fixture
                 .app
                 .world()
-                .get::<AutoSave>(fixture.persistence)
+                .get::<State>(fixture.store)
                 .unwrap()
-                .dirty
+                .is_dirty()
         );
         assert_eq!(fixture.app.world().resource::<SaveCount>().0, 1);
         assert_eq!(

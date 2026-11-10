@@ -11,7 +11,7 @@ use vmux_api::{
 
 use vmux_command::ReadCommandRequests;
 use vmux_ecs::page::{HostHistory, PageMetadataCatalog};
-use vmux_ecs::persistence::PageRestore;
+use vmux_ecs::store::PageRestore;
 use vmux_ecs::{
     CefPageAttachRequest, PageMetadata, PageNavigation, PageOpenDeferred, PageOpenError,
     PageOpenHandled, PageOpenId, PageOpenRequest, PageOpenSet, PageOpenTarget, PageOpenTask,

@@ -11,7 +11,7 @@ use vmux_command::{CommandDispatch, CommandRuntimePlugin};
 use vmux_ecs::Active;
 #[cfg(test)]
 use vmux_ecs::manifest::FeaturePlugin;
-use vmux_ecs::persistence::{PageRestore, PersistenceAppExt};
+use vmux_ecs::store::{PageRestore, StoreAppExt};
 use vmux_ecs::terminal::TerminalLaunch;
 use vmux_ecs::{
     ArchivedPage, ArchivedPagePosition, ArchivedTabPage, CreatedAt, PageArchiveRequest,
@@ -59,9 +59,9 @@ impl Plugin for ArchivePlugin {
         if !app.is_plugin_added::<CommandRuntimePlugin>() {
             app.add_plugins(CommandRuntimePlugin);
         }
-        app.register_persisted::<ArchivedPage>()
-            .register_persisted::<ArchivedPagePosition>()
-            .register_persisted::<ArchivedTabPage>()
+        app.register_stored::<ArchivedPage>()
+            .register_stored::<ArchivedPagePosition>()
+            .register_stored::<ArchivedTabPage>()
             .register_type::<PaneStep>()
             .register_type::<SplitAxis>()
             .register_type::<Vec<PaneStep>>()

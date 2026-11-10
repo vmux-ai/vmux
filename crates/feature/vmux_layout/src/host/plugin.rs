@@ -1,11 +1,11 @@
 use bevy::prelude::*;
-use vmux_ecs::persistence::PersistenceAppExt;
+use vmux_ecs::store::StoreAppExt;
 use vmux_flex::prelude::*;
 
 use super::agent::LayoutAgentPlugin;
 use super::command::LayoutRequestPlugin;
-use super::persistence::LayoutPersistencePlugin;
 use super::projection::LayoutUiProjectionPlugin;
+use super::store::LayoutStorePlugin;
 use crate::active_pane::ActivePanePlugin;
 use crate::archive::ArchivePlugin;
 use crate::bookmark::BookmarkPlugin;
@@ -44,8 +44,8 @@ impl Plugin for LayoutPlugin {
                 sync_header_visibility.before(LayoutSystems::Layout),
             )
             .add_plugins((LayoutContractPlugin, LayoutRequestPlugin, LayoutAgentPlugin))
-            .register_persisted::<Open>()
-            .register_persisted::<crate::profile::Profile>()
+            .register_stored::<Open>()
+            .register_stored::<crate::profile::Profile>()
             .init_resource::<settings::ConfirmCloseSettings>()
             .init_resource::<settings::ResolvedLocale>()
             .add_message::<TerminalLayoutSpawnRequest>()
@@ -54,7 +54,7 @@ impl Plugin for LayoutPlugin {
                 Startup,
                 (
                     LayoutStartupSet::Window,
-                    LayoutStartupSet::Persistence,
+                    LayoutStartupSet::Store,
                     LayoutStartupSet::DefaultTab,
                     LayoutStartupSet::Post,
                 )
@@ -77,7 +77,7 @@ impl Plugin for LayoutPlugin {
             .add_plugins((
                 Self::MANIFEST.plugin(),
                 ErrorPage::MANIFEST.plugin(),
-                LayoutPersistencePlugin,
+                LayoutStorePlugin,
                 PageContextPlugin,
                 crate::page_slot::PageSlotPlugin,
                 TogglePlugin,

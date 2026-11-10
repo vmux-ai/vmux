@@ -24,8 +24,8 @@ use vmux_ecs::PageOpenId;
 use vmux_ecs::UiStateWrite;
 use vmux_ecs::event::TerminalUiState;
 use vmux_ecs::page::{BindsEditingChords, HostsPage};
-use vmux_ecs::persistence::{PageRestore, PersistenceAppExt};
 use vmux_ecs::service::{ServiceConnected, ServiceRequest, ServiceUnavailable};
+use vmux_ecs::store::{PageRestore, StoreAppExt};
 use vmux_ecs::terminal::{TerminalSpawnRequest, TerminalSpawnTarget};
 use vmux_ecs::{
     CommandBarContribution, CommandBarContributionActivated, CommandBarQueryChanged, EntityTarget,
@@ -111,7 +111,7 @@ impl Plugin for TerminalPlugin {
         .add_observer(contribute)
         .add_observer(activate)
         .add_observer(queue_presentation)
-        .register_persisted::<TerminalLaunch>()
+        .register_stored::<TerminalLaunch>()
         .add_systems(Update, sync_launch_to_stack)
         .add_systems(PostUpdate, present)
         .add_message::<TerminalStackSpawnRequest>()

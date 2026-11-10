@@ -15,7 +15,7 @@ impl Plugin for BookmarkPlugin {
             .add_agent_message::<RemoveRequest>()
             .add_agent_message::<UnpinRequest>()
             .add_plugins((
-                crate::persistence::BookmarkPersistencePlugin,
+                crate::store::BookmarkStorePlugin,
                 crate::tool::BookmarkToolPlugin,
             ));
 

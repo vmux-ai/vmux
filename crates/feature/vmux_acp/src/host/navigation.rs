@@ -3,8 +3,8 @@ use std::path::{Path, PathBuf};
 use bevy::ecs::system::SystemParam;
 use bevy::prelude::*;
 use vmux_ecs::agent::SwapStackSession;
-use vmux_ecs::persistence::PageRestore;
 use vmux_ecs::profile::Projects;
+use vmux_ecs::store::PageRestore;
 use vmux_ecs::terminal::TerminalLaunch;
 use vmux_ecs::{
     Cwd, EntityTarget, PageMetadata, PageOpenDeferred, PageOpenError, PageOpenHandled, PageOpenSet,
