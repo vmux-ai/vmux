@@ -100,27 +100,27 @@ impl AcpInstallJob {
     }
 }
 
-pub(super) fn start_acp_install_job(
-    request: AcpInstallRequest,
-    wake: Option<bevy::winit::EventLoopProxy<bevy::winit::WinitUserEvent>>,
-    agents: PathBuf,
-) -> AcpInstallJob {
-    let (progress_sender, progress) = crossbeam_channel::unbounded();
-    let sink = AcpInstallProgressSink {
-        pending: progress_sender,
-        wake,
-    };
-    let thread = std::thread::spawn(move || {
-        let outcome =
-            resolve_acp_install(request, &sink, AgentInstaller::at(PackageStore::at(agents)));
-        sink.notify();
-        outcome
-    });
-    AcpInstallJob {
-        progress,
-        thread: Some(thread),
-        outcome: None,
-        package_reported: false,
+impl AcpInstallJob {
+    pub(super) fn start(
+        request: AcpInstallRequest,
+        wake: Option<bevy::winit::EventLoopProxy<bevy::winit::WinitUserEvent>>,
+        agents: PathBuf,
+        workers: &vmux_ecs::BlockingRuntime,
+    ) -> Option<Self> {
+        let (progress_sender, progress) = crossbeam_channel::unbounded();
+        let sink = AcpInstallProgressSink {
+            pending: progress_sender,
+            wake: wake.clone(),
+        };
+        let task = workers.spawn_process(wake, move || {
+            resolve_acp_install(request, &sink, AgentInstaller::at(PackageStore::at(agents)))
+        })?;
+        Some(Self {
+            progress,
+            task: Some(task),
+            outcome: None,
+            package_reported: false,
+        })
     }
 }
 

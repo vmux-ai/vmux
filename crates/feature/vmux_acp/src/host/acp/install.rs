@@ -1,7 +1,8 @@
 use super::*;
 
 pub(super) fn add(app: &mut App) {
-    app.add_message::<super::AcpPackageChanged>()
+    app.init_resource::<vmux_ecs::BlockingRuntime>()
+        .add_message::<super::AcpPackageChanged>()
         .add_observer(cancel)
         .add_systems(Update, (start, poll).chain());
 }
@@ -21,6 +22,7 @@ fn start(
     profile: CurrentProfile,
     focused: vmux_layout::stack::FocusedStack,
     settings: Option<Res<AppSettings>>,
+    workers: Res<vmux_ecs::BlockingRuntime>,
     proxy: Option<Res<bevy::winit::EventLoopProxyWrapper>>,
 ) {
     let Some(settings) = settings else {
@@ -66,13 +68,13 @@ fn start(
             Some(job) => job,
             None => {
                 let name = Name::new(format!("ACP install: {}", request.agent_id));
+                let Some(install) =
+                    AcpInstallJob::start(request, wake.clone(), agents.clone(), &workers)
+                else {
+                    continue;
+                };
                 let job = commands
-                    .spawn((
-                        name,
-                        key.clone(),
-                        InstallState::preparing(),
-                        start_acp_install_job(request, wake.clone(), agents.clone()),
-                    ))
+                    .spawn((name, key.clone(), InstallState::preparing(), install))
                     .id();
                 active_jobs.push((key, job));
                 job
@@ -144,9 +146,9 @@ fn poll(
         if let Some(progress) = job.take_progress() {
             *install_state = progress;
         }
-        if job.thread.as_ref().is_some_and(JoinHandle::is_finished) {
-            let thread = job.thread.take().unwrap();
-            job.outcome = Some(thread.join().unwrap_or_else(|_| AcpInstallOutcome {
+        if let Some(result) = job.task.as_mut().and_then(|task| task.poll()) {
+            job.task.take();
+            job.outcome = Some(result.unwrap_or_else(|_| AcpInstallOutcome {
                 package_added: false,
                 launch: Err("agent installation failed unexpectedly".to_string()),
             }));

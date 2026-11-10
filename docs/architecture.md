@@ -336,6 +336,13 @@ transport actor that exchanges typed inputs and outputs with ECS. Coroutine runt
 world access are not the default because they hide scheduling and lifecycle state from queries.
 Use one only for isolated sequential UI choreography where the sequence itself is the behavior,
 never for blocking work, transport ownership, or ordinary domain transitions.
+Finite blocking work shares `vmux_ecs::blocking`: bounded worker pools return entity-owned
+`BlockingTask` handles, isolate panics, and wake the reactive event loop after completion.
+Dropping a handle cancels queued work and discards late results; running adapters cooperate with
+the cancellation context. Git keeps separate interactive, background, and single-worker mutation
+pools and retains shared-read cancellation and rollback scopes. ACP catalog/history reads and
+agent installation use independent shared lanes, retaining requests when a queue is full.
+
 
 System names use their module as context. Prefer `open`, `refresh`, `bind`, `project`, or
 `request_definition` inside the owning module over names that repeat the feature, module,
