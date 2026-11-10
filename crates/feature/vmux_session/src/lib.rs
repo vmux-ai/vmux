@@ -22,7 +22,7 @@ pub use host::SessionPlugin;
 pub use model::ProviderSessionTombstones;
 pub use model::{
     AgentFamily, AgentId, ArchiveRequest, Cleanup, CleanupRequest, CleanupTarget, CreateRequest,
-    Created, DescriptionUpdateRequest, LocalTask, ProviderArchive, ProviderArchiveCompleted,
+    Created, DescriptionUpdateRequest, ProviderArchive, ProviderArchiveCompleted,
     ProviderArchiveRequest, ProviderArchiveWriteRequest, ProviderKind, ProviderSessionId,
     ProviderSessionKey, ProviderSessionRestoreRequest, ProviderSessionTombstone, ProviderStage,
     ProviderStageChangeRequest, RenameRequest, Session, SessionDuplicate, SourceUpdatedAt, Stage,

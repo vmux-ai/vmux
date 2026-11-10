@@ -1,0 +1,16 @@
+(
+    auth_providers: [
+        (
+            id: "github",
+            name: "GitHub",
+            flow: DeviceCode((
+                client_id: "",
+                client_id_env: "VMUX_GITHUB_CLIENT_ID",
+                device_authorization_endpoint: "https://github.com/login/device/code",
+                token_endpoint: "https://github.com/login/oauth/access_token",
+                scopes: [],
+                headers: {"Accept": "application/json"},
+            )),
+        ),
+    ],
+)

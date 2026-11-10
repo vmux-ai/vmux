@@ -256,9 +256,9 @@ impl BaseRef {
 
     pub fn resolve_for(root: &Path, reference: &str) -> Option<Self> {
         let default = Self::default(root);
-        let branch = Self::branch_name(reference);
+        let branch = Self::branch_name(root, reference);
         if !branch.is_empty() {
-            if let Some(configured) = Self::configured(root, branch)
+            if let Some(configured) = Self::configured(root, &branch)
                 && configured.exists(root)
             {
                 return Some(configured);
@@ -273,12 +273,18 @@ impl BaseRef {
         default
     }
 
-    fn branch_name(reference: &str) -> &str {
+    fn branch_name(root: &Path, reference: &str) -> String {
+        let reference = Self::canonical(root, reference);
+        if let Some(remote) = reference.strip_prefix("refs/remotes/") {
+            return remote
+                .split_once('/')
+                .map_or(remote, |(_, branch)| branch)
+                .to_string();
+        }
         reference
-            .strip_prefix("refs/remotes/origin/")
-            .or_else(|| reference.strip_prefix("refs/heads/"))
-            .or_else(|| reference.strip_prefix("origin/"))
-            .unwrap_or(reference)
+            .strip_prefix("refs/heads/")
+            .unwrap_or(&reference)
+            .to_string()
     }
 
     fn default(root: &Path) -> Option<Self> {
@@ -315,7 +321,28 @@ impl BaseRef {
             return None;
         };
         let reference = stdout.trim();
-        (!reference.is_empty()).then(|| Self(reference.to_string()))
+        (!reference.is_empty()).then(|| Self(Self::canonical(root, reference)))
+    }
+
+    fn canonical(root: &Path, reference: &str) -> String {
+        let Ok((stdout, _, true)) = GitCommand::run(
+            root,
+            &[
+                "rev-parse",
+                "--symbolic-full-name",
+                "--verify",
+                "--quiet",
+                reference,
+            ],
+        ) else {
+            return reference.to_string();
+        };
+        let canonical = stdout.trim();
+        if canonical.is_empty() {
+            reference.to_string()
+        } else {
+            canonical.to_string()
+        }
     }
 
     fn exists(&self, root: &Path) -> bool {
@@ -328,10 +355,10 @@ impl BaseRef {
     }
 
     pub fn branch(&self) -> &str {
-        self.0
-            .strip_prefix("refs/remotes/origin/")
-            .or_else(|| self.0.strip_prefix("refs/heads/"))
-            .unwrap_or(&self.0)
+        if let Some(remote) = self.0.strip_prefix("refs/remotes/") {
+            return remote.split_once('/').map_or(remote, |(_, branch)| branch);
+        }
+        self.0.strip_prefix("refs/heads/").unwrap_or(&self.0)
     }
 }
 
@@ -920,6 +947,7 @@ impl RepoInfo {
         (!name.is_empty()).then(|| name.to_string())
     }
 }
+
 pub struct RepoLabel {
     pub project: String,
     pub branch: String,
@@ -1292,6 +1320,22 @@ mod tests {
         let base = BaseRef::resolve(repo.path()).unwrap();
 
         assert_eq!(base.branch(), "main");
+    }
+
+    #[test]
+    fn base_ref_normalizes_short_remote_references() {
+        let repo = test_repo::init();
+        commit_initial(repo.path());
+        test_repo::run(
+            repo.path(),
+            &["update-ref", "refs/remotes/origin/main", "HEAD"],
+        );
+
+        assert_eq!(BaseRef::branch_name(repo.path(), "origin/main"), "main");
+        assert_eq!(
+            BaseRef::canonical(repo.path(), "origin/main"),
+            "refs/remotes/origin/main"
+        );
     }
 
     #[test]

@@ -5,7 +5,8 @@ use vmux_ui::scroll::{ScrollIntoView, ScrollRetention};
 use crate::event::GitRepositoryRequest;
 use crate::event::{GitDiffRow, GitDiffViewport};
 use crate::state::{
-    GitDiffAppend, GitPageControllerState, GitPageSnapshot, GitPanel, GitProjects, GitUiState,
+    GitDiffAppend, GitPageControllerState, GitPageSnapshot, GitPanel, GitProjects,
+    GitReviewUiState, GitUiState,
 };
 
 #[derive(Clone, Copy)]
@@ -13,6 +14,7 @@ pub(super) struct GitPageState {
     root: Signal<GitUiState>,
     pub(super) snapshot: Memo<GitPageSnapshot>,
     pub(super) controller: Memo<GitPageControllerState>,
+    pub(super) review: Signal<GitReviewUiState>,
     pub(super) projects: Memo<GitProjects>,
     pub(super) diff: GitDiffState,
     pub(super) location: Signal<vmux_api::page_location::PageLocationUiState>,
@@ -64,6 +66,7 @@ impl GitPageState {
                 }
                 GitPageControllerState::for_repository(request.request.branch.clone())
             }),
+            review: use_ui_state::<GitReviewUiState>().state,
             projects: use_memo(move || root.read().projects.clone()),
             diff: GitDiffState::new(root),
             location: use_ui_state::<vmux_api::page_location::PageLocationUiState>().state,

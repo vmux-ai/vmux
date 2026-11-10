@@ -2,12 +2,14 @@
 pub use archive::{
     ArchivedPage, ArchivedPagePosition, ArchivedTabPage, PageArchiveRequest, PaneStep, SplitAxis,
 };
+#[cfg(all(host, feature = "host"))]
+pub use blocking::{BlockingCancellation, BlockingRuntime, BlockingTask};
 pub use component::{
     ActivateRequest, Active, ArchivedAt, Bookmark, BookmarkOrder, Collapsed, CollectionView,
     CreatedAt, Cwd, Description, EffectiveStartupUrl, EntityTarget, Folder, HostShell,
     JsonArguments, KeyboardOwner, LastActivatedAt, LastVisitedAt, Order, PagePresented, Pin,
-    ProcessAnchor, Ready, RegistrationOrder, Terminal, TransitionType, UnixMillis, Url, Uuid,
-    Visit, VisitCount, VisitedUrl, WindowFullscreen, WindowFullscreenSet,
+    ProcessAnchor, Ready, RegistrationOrder, Revision, Terminal, TransitionType, UnixMillis, Url,
+    Uuid, Visit, VisitCount, VisitedUrl, WindowFullscreen, WindowFullscreenSet,
 };
 #[cfg(all(host, feature = "host"))]
 pub use file_ui_state::{FileUiStateUpdates, FileUiStateWrite};
@@ -52,6 +54,8 @@ pub mod address;
 pub mod agent;
 #[cfg(all(host, feature = "host"))]
 mod archive;
+#[cfg(all(host, feature = "host"))]
+mod blocking;
 #[cfg(all(host, feature = "host"))]
 pub mod browser;
 #[cfg(all(host, feature = "host"))]

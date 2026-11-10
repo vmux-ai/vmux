@@ -6,6 +6,8 @@ pub use host::{
 };
 #[cfg(host)]
 pub use project::ProjectRoute;
+#[cfg(host)]
+pub use project::{Project, ProjectIndexRefresh, ProjectUnavailable};
 
 #[cfg(host)]
 pub(crate) struct Feature;

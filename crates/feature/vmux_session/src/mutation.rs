@@ -7,7 +7,7 @@ use vmux_ecs::store::StoreAppExt;
 use vmux_ecs::{ArchivedAt, CreatedAt, Cwd, Description, LastActivatedAt, UnixMillis, Uuid};
 
 use crate::{
-    AgentConversationTitle, AgentId, Created, LocalTask, Session, SessionId, Stage, StageChangedAt,
+    AgentConversationTitle, AgentId, Created, Session, SessionId, Stage, StageChangedAt,
     StageDefinition, StageId, TitlePending,
 };
 
@@ -70,7 +70,6 @@ pub struct Creation {
     pub stage: StageId,
     pub created_at: i64,
     pub activated_at: i64,
-    pub local: bool,
 }
 
 #[derive(Component, Clone, Copy, Debug, Default, PartialEq, Eq, Reflect)]
@@ -207,9 +206,6 @@ fn commit(request: &Request, world: &mut World) -> Result<Committed, Rejection> 
                 Stage(created.stage.clone()),
                 StageChangedAt(created.activated_at),
             ));
-            if created.local {
-                entity.insert(LocalTask);
-            }
             if let Some(agent) = created.agent.clone() {
                 entity.insert(agent);
             }
@@ -363,7 +359,6 @@ mod tests {
                 stage: StageId("active".into()),
                 created_at: 100,
                 activated_at: 100,
-                local: true,
             }),
             Mutation::Rename("Final".into()),
             Mutation::Describe("Committed summary".into()),

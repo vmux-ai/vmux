@@ -42,7 +42,6 @@ impl Plugin for EntityPlugin {
             .register_stored::<ProviderSessionId>()
             .register_stored::<AgentConversationTitle>()
             .register_stored::<TitlePending>()
-            .register_stored::<LocalTask>()
             .init_resource::<ProviderArchiveOperations>()
             .init_resource::<ProviderSessionTombstones>()
             .add_message::<CreateRequest>()
@@ -205,12 +204,6 @@ impl StageChangedAt {
 
 #[derive(Component, Clone, Copy, Debug, Default, PartialEq, Eq, Reflect)]
 #[reflect(Component)]
-#[require(Save)]
-#[type_path = "vmux_session"]
-pub struct LocalTask;
-
-#[derive(Component, Clone, Copy, Debug, Default, PartialEq, Eq, Reflect)]
-#[reflect(Component)]
 #[require(Save, SourceUpdatedAt)]
 #[type_path = "vmux_session"]
 pub struct ProviderStage;
@@ -295,7 +288,6 @@ pub struct CreateRequest {
     pub agent: Option<AgentId>,
     created_at: Option<i64>,
     activated_at: Option<i64>,
-    local: bool,
 }
 
 impl CreateRequest {
@@ -313,7 +305,6 @@ impl CreateRequest {
             agent,
             created_at: None,
             activated_at: None,
-            local: true,
         }
     }
 
@@ -333,7 +324,6 @@ impl CreateRequest {
             agent: Some(agent),
             created_at: Some(created_at),
             activated_at: Some(activated_at),
-            local: false,
         }
     }
 
@@ -698,7 +688,6 @@ fn create(
                 stage: configuration.default_stage.clone(),
                 created_at: request.created_at.unwrap_or(now),
                 activated_at: request.activated_at.unwrap_or(now),
-                local: request.local,
             }),
         ));
     }
@@ -1267,7 +1256,7 @@ mod tests {
     }
 
     #[test]
-    fn provider_import_preserves_time_without_marking_a_local_task() {
+    fn provider_import_preserves_source_times() {
         let mut app = App::new();
         app.add_plugins((EntityPlugin, StagePlugin));
         let request = CreateRequest::imported(
@@ -1286,11 +1275,10 @@ mod tests {
 
         let mut sessions = app
             .world_mut()
-            .query_filtered::<(&CreatedAt, &LastActivatedAt, Has<LocalTask>), With<Session>>();
-        let (created, activated, local) = sessions.single(app.world()).unwrap();
+            .query_filtered::<(&CreatedAt, &LastActivatedAt), With<Session>>();
+        let (created, activated) = sessions.single(app.world()).unwrap();
         assert_eq!(created.0, 100);
         assert_eq!(activated.0, 200);
-        assert!(!local);
     }
 
     #[test]
@@ -1636,7 +1624,6 @@ mod tests {
         assert!(filter.is_allowed::<ProviderSessionId>());
         assert!(filter.is_allowed::<AgentConversationTitle>());
         assert!(filter.is_allowed::<TitlePending>());
-        assert!(filter.is_allowed::<LocalTask>());
         assert!(filter.is_allowed::<Stage>());
         assert!(filter.is_allowed::<StageChangedAt>());
     }

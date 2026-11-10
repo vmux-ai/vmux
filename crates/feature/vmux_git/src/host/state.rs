@@ -15,7 +15,8 @@ use crate::event::{
 use crate::state::GitCatalogProgress;
 use crate::state::{
     CheckedOutBranch, GitCommandLogEntry, GitDiffRowsPatch, GitPageControllerState,
-    GitPageSnapshot, GitRepositoryPatch, GitUiState, RepositoryName, RepositoryPath,
+    GitPageSnapshot, GitRepositoryPatch, GitReviewDraft, GitReviewUiState, GitUiState,
+    RepositoryName, RepositoryPath,
 };
 
 use super::controller::{GitCommitResultSequence, PendingBranchCheckout, SelectionRevealRevision};
@@ -30,7 +31,11 @@ pub(super) struct StatePlugin;
 
 impl Plugin for StatePlugin {
     fn build(&self, app: &mut App) {
-        app.add_plugins(vmux_ecs::UiStatePlugin::<GitUiState>::default())
+        app.init_resource::<super::review::GitReviewProviderRegistry>()
+            .add_plugins((
+                vmux_ecs::UiStatePlugin::<GitUiState>::default(),
+                vmux_ecs::UiStatePlugin::<GitReviewUiState>::default(),
+            ))
             .add_plugins(UiEventPlugin::<(GitRepositoryRequest,)>::default())
             .init_resource::<GitPageCache>()
             .add_observer(page_ready)
@@ -53,6 +58,10 @@ impl Plugin for StatePlugin {
 #[derive(Component, Default)]
 #[require(
     GitUiStateUpdates,
+    vmux_ecs::UiState<GitReviewUiState>,
+    GitReviewDraft,
+    super::review::GitReviewDeltas,
+    GitReviewProjectionState,
     GitPageControllerState,
     GitDirectoryNavigation,
     PendingBranchCheckout,
@@ -312,6 +321,23 @@ impl GitPageCache {
 
     fn remove_aliases(&mut self, root: &str) {
         self.aliases.retain(|_, candidate| candidate != root);
+    }
+}
+
+#[derive(Component, Default)]
+struct GitReviewProjectionState {
+    target: Option<crate::state::GitReviewTarget>,
+    generation: u64,
+}
+
+impl GitReviewProjectionState {
+    fn current(&self, target: Option<&crate::state::GitReviewTarget>, generation: u64) -> bool {
+        self.target.as_ref() == target && self.generation == generation
+    }
+
+    fn capture(&mut self, target: Option<crate::state::GitReviewTarget>, generation: u64) {
+        self.target = target;
+        self.generation = generation;
     }
 }
 
@@ -1056,12 +1082,21 @@ type GitStateQuery<'w, 's> = Query<
         Entity,
         Ref<'static, GitState>,
         Ref<'static, GitPageControllerState>,
+        Ref<'static, GitReviewDraft>,
+        &'static mut super::review::GitReviewDeltas,
+        &'static mut GitReviewProjectionState,
         Ref<'static, GitDirectoryNavigation>,
     ),
 >;
 
-fn publish(views: GitStateQuery, mut commands: Commands) {
-    for (entity, view, controller, directory) in &views {
+fn publish(
+    mut views: GitStateQuery,
+    providers: Res<super::review::GitReviewProviderRegistry>,
+    mut commands: Commands,
+) {
+    for (entity, view, controller, review, mut review_deltas, mut review_projection, directory) in
+        &mut views
+    {
         if view.is_changed() {
             commands.trigger(vmux_ecs::UiStateWrite::<GitUiState>::from_event(
                 entity,
@@ -1073,6 +1108,45 @@ fn publish(views: GitStateQuery, mut commands: Commands) {
                 entity,
                 &*controller,
             ));
+        }
+        let target = view.repository().map(|repository| {
+            crate::state::GitReviewTarget::current(repository, &view.snapshot, &controller)
+        });
+        let generation = view
+            .snapshot
+            .diff_viewport
+            .as_ref()
+            .map(|viewport| viewport.generation)
+            .unwrap_or_default();
+        let projection_changed =
+            providers.is_changed() || !review_projection.current(target.as_ref(), generation);
+        if projection_changed || (review.is_changed() && review_deltas.is_empty()) {
+            let reset = GitReviewUiState::reset(
+                &review,
+                target.clone(),
+                generation,
+                providers.names(target.as_ref()),
+            );
+            commands.trigger(vmux_ecs::UiStateWrite::<GitReviewUiState>::from_event(
+                entity, &reset,
+            ));
+            review_projection.capture(target, generation);
+            review_deltas.clear();
+        } else {
+            for delta in review_deltas.drain() {
+                match delta {
+                    super::review::GitReviewDelta::Upsert(note) => {
+                        commands.trigger(vmux_ecs::UiStateWrite::<GitReviewUiState>::from_event(
+                            entity, &*note,
+                        ));
+                    }
+                    super::review::GitReviewDelta::Removed(removed) => {
+                        commands.trigger(vmux_ecs::UiStateWrite::<GitReviewUiState>::from_event(
+                            entity, &removed,
+                        ));
+                    }
+                }
+            }
         }
         if directory.is_changed() {
             commands.trigger(vmux_ecs::UiStateWrite::<GitUiState>::from_event(

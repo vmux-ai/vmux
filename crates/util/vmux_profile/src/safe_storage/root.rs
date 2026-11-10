@@ -113,6 +113,7 @@ impl<'a> SafeStorageState<'a> {
         }
         for directory in [
             self.context.directory().join("mcp"),
+            self.context.directory().join("oauth"),
             self.context.directory().join("vault"),
         ] {
             if std::fs::read_dir(directory).is_ok_and(|mut entries| entries.next().is_some()) {

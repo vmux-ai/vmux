@@ -23,6 +23,7 @@ use vmux_ui::scroll::{ScrollIntoView, ScrollPreload, Target};
 
 use crate::event::GitDiffRow;
 use crate::event::*;
+use crate::state::{GitReviewAnchor, GitReviewLocation, GitReviewSide, GitReviewTarget};
 
 const LIST_PAGE_SIZE: usize = 40;
 
@@ -203,6 +204,7 @@ pub fn DiffView(
     rows_from: ReadSignal<Option<u32>>,
     loading: bool,
     visible: bool,
+    #[props(default)] review_target: Option<GitReviewTarget>,
 ) -> Element {
     let mut collapsed_files = use_signal(HashSet::<String>::new);
     let mut viewed_files = use_signal(ViewedFiles::default);
@@ -533,6 +535,7 @@ pub fn DiffView(
                 {
                     let file_path = section.file_path.clone();
                     let placeholder = section.placeholder;
+                    let section_file_path = file_path.clone();
                     let collapse_key = file_path
                         .as_ref()
                         .map(|file_path| format!("{identity}\0{file_path}"));
@@ -582,6 +585,10 @@ pub fn DiffView(
                             style: "overflow-anchor:none;",
                             "data-vmux-scroll-anchor": scroll_anchor_key,
                             if let Some(file_path) = file_path {
+                                {
+                                    let note_target = review_target.clone();
+                                    let note_path = file_path.clone();
+                                    rsx! {
                                 div {
                                     id: crate::GitUrl::file_hash(file_path.as_bytes()),
                                     class: "sticky left-0 top-0 z-10 flex h-9 w-full min-w-0 scroll-mt-2 items-center gap-2 rounded-t-lg bg-inherit px-3 font-sans text-[11px] font-semibold text-foreground backdrop-blur-xl",
@@ -594,6 +601,25 @@ pub fn DiffView(
                                             PageNavigation::stack(file_url.clone());
                                         },
                                         "{file_path}"
+                                    }
+                                    if let Some(note_target) = note_target {
+                                        button {
+                                            r#type: "button",
+                                            class: "flex size-6 shrink-0 items-center justify-center rounded-md font-normal text-muted-foreground hover:bg-foreground/10 hover:text-foreground",
+                                            title: translate("git-review-add-note"),
+                                            onclick: move |_| {
+                                                let _ = send(&GitReviewNoteAddRequest {
+                                                    anchor: GitReviewAnchor {
+                                                        target: note_target.clone(),
+                                                        path: note_path.clone(),
+                                                        location: GitReviewLocation::File,
+                                                        context: String::new(),
+                                                        generation,
+                                                    },
+                                                });
+                                            },
+                                            LineIconView { icon: LineIcon::Plus, class: "size-3.5" }
+                                        }
                                     }
                                     if !placeholder {
                                         label { class: "flex shrink-0 cursor-pointer items-center gap-1.5 font-sans font-normal text-muted-foreground",
@@ -653,6 +679,8 @@ pub fn DiffView(
                                         }
                                     }
                                 }
+                                    }
+                                }
                             }
                             div { "data-vmux-height-body": "",
                             if placeholder {
@@ -672,6 +700,25 @@ pub fn DiffView(
                                         GitDiffRow::Line(index) => {
                                             let index = index as usize;
                                             let line = &rows[index];
+                                            let note_path = section_file_path
+                                                .clone()
+                                                .unwrap_or_else(|| identity.clone());
+                                            let note_target = review_target.clone();
+                                            let note_location = match line.kind {
+                                                DiffKind::Remove => line.old_no.map(|line| GitReviewLocation::Line { side: GitReviewSide::Left, line }),
+                                                DiffKind::Add => line.new_no.map(|line| GitReviewLocation::Line { side: GitReviewSide::Right, line }),
+                                                DiffKind::Context | DiffKind::Staged => {
+                                                    if let Some(line) = line.new_no {
+                                                        Some(GitReviewLocation::Line { side: GitReviewSide::Right, line })
+                                                    } else {
+                                                        line.old_no.map(|line| GitReviewLocation::Line { side: GitReviewSide::Left, line })
+                                                    }
+                                                }
+                                                DiffKind::Hunk => None,
+                                            };
+                                            let reviewable = review_target.is_some()
+                                                && !note_path.is_empty()
+                                                && note_location.is_some();
                                             rsx! {
                                                 div { key: "line-{index}-{line.kind:?}-{line.old_no:?}-{line.new_no:?}",
                                                     div { class: "group flex min-w-max whitespace-pre transition-colors {DiffPresentation::from(line.kind).row_class()}",
@@ -688,7 +735,36 @@ pub fn DiffView(
                                                             }
                                                             span {
                                                                 class: "flex w-6 shrink-0 items-center justify-center font-semibold {DiffPresentation::from(line.kind).text_class()}",
-                                                                "{DiffPresentation::from(line.kind).sign()}"
+                                                                span { class: if reviewable { "group-hover:hidden" } else { "" },
+                                                                    "{DiffPresentation::from(line.kind).sign()}"
+                                                                }
+                                                                if reviewable {
+                                                                    button {
+                                                                        r#type: "button",
+                                                                        class: "hidden size-5 items-center justify-center rounded text-muted-foreground hover:bg-foreground/10 hover:text-foreground group-hover:flex",
+                                                                        title: translate("git-review-add-note"),
+                                                                        onclick: move |event| {
+                                                                            let Some(note_target) = note_target.as_ref() else {
+                                                                                return;
+                                                                            };
+                                                                            let Some(location) = note_location else {
+                                                                                return;
+                                                                            };
+                                                                            event.prevent_default();
+                                                                            event.stop_propagation();
+                                                                            let _ = send(&GitReviewNoteAddRequest {
+                                                                                anchor: GitReviewAnchor {
+                                                                                    target: note_target.clone(),
+                                                                                    path: note_path.clone(),
+                                                                                    location,
+                                                                                    context: String::new(),
+                                                                                    generation,
+                                                                                },
+                                                                            });
+                                                                        },
+                                                                        LineIconView { icon: LineIcon::Plus, class: "size-3" }
+                                                                    }
+                                                                }
                                                             }
                                                         }
                                                         span { class: "min-w-0 px-2 pr-8",
@@ -2029,6 +2105,7 @@ mod tests {
             }
             rows
         }
+
         fn viewport() -> Option<GitDiffViewport> {
             let mut lines = Vec::new();
             for number in 0..2_000 {

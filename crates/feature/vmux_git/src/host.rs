@@ -23,6 +23,10 @@ pub use repository::{GitError, GitRepository};
 pub use repository_provision::{
     RepositoryProvisionCompleted, RepositoryProvisionOperation, RepositoryProvisionRequest,
 };
+pub use review::{
+    GitReviewProviderCapability, GitReviewProviderRegistry, GitReviewPublished, GitReviewSnapshot,
+    GitReviewSubmission, GitReviewSubmissionFinished,
+};
 pub use runtime::{GitRuntime, GitTask};
 pub use status::FileGit;
 use vmux_ecs::manifest::FeaturePlugin;
@@ -39,6 +43,7 @@ mod job;
 mod job_runner;
 mod repository_picker;
 mod repository_provision;
+mod review;
 mod runtime;
 mod state;
 mod status;
@@ -99,6 +104,7 @@ impl Plugin for GitPlugin {
                 RepositoryPickerPlugin,
                 RepositoryProvisionPlugin,
                 repository_summary::SummaryPlugin,
+                review::ReviewPlugin,
             ))
             .add_plugins(
                 Self::MANIFEST

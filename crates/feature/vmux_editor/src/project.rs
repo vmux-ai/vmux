@@ -1,3 +1,25 @@
+#[cfg(host)]
+use bevy::prelude::*;
+#[cfg(host)]
+use bevy_reflect::{Reflect, std_traits::ReflectDefault};
+#[cfg(host)]
+use moonshine_save::prelude::Save;
+
+#[cfg(host)]
+#[derive(Component, Clone, Copy, Debug, Default, PartialEq, Eq, Reflect)]
+#[reflect(Component, Default)]
+#[require(Save)]
+#[type_path = "vmux_editor"]
+pub struct Project;
+
+#[cfg(host)]
+#[derive(Component, Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct ProjectUnavailable;
+
+#[cfg(host)]
+#[derive(Message, Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct ProjectIndexRefresh;
+
 #[vmux_api::contract(Default, Eq)]
 pub struct ProjectId(pub String);
 

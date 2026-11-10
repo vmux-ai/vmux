@@ -8,10 +8,12 @@ use super::branches::BranchesCard;
 use super::changes::ChangesCard;
 use super::diff::{BranchDiffCard, CommitDiffCard, DiffCard, StashDiffCard};
 use super::history::{HistoryCard, StashCard};
+use super::review::ReviewPanel;
 use super::shortcuts::GitShortcutHelp;
 use super::state::GitPageState;
 use super::status::RepositoryHeader;
 use crate::event::{GitBranchFileEntry, GitRepositorySnapshot};
+use crate::state::GitReviewTarget;
 use crate::state::{GitBranchCollection, GitCatalogProgress, GitOperationEligibility, GitPanel};
 
 #[component]
@@ -282,6 +284,9 @@ struct DiffState {
     selected_commit: String,
     selected_branch: String,
     selected_branch_base: String,
+    selected_branch_base_revision: String,
+    selected_branch_base_sha: String,
+    selected_branch_head_sha: String,
     selected_stash: String,
     branch_files: Vec<GitBranchFileEntry>,
     branch_diff_paths: Vec<String>,
@@ -307,6 +312,9 @@ fn GitDiffPane(navigation: SectionNavigation, viewed_count: Signal<usize>) -> El
             selected_commit: controller.selected_commit.clone(),
             selected_branch: controller.selected_branch.clone(),
             selected_branch_base: snapshot.branch_files_base_ref.clone(),
+            selected_branch_base_revision: snapshot.branch_files_base_revision.clone(),
+            selected_branch_base_sha: snapshot.branch_files_base_sha.clone(),
+            selected_branch_head_sha: snapshot.branch_files_head_sha.clone(),
             selected_stash: controller.selected_stash.clone(),
             branch_files: snapshot.branch_files.clone(),
             branch_diff_paths: snapshot.branch_diff_paths.clone(),
@@ -380,8 +388,36 @@ fn GitDiffPane(navigation: SectionNavigation, viewed_count: Signal<usize>) -> El
     let Some(repository) = selected_state.repository else {
         return rsx! {};
     };
+    let review_target = match selected_state.panel {
+        GitPanel::Files => GitReviewTarget::WorkingTree {
+            repository: repository.repo_root.clone(),
+            branch: repository.branch.clone(),
+        },
+        GitPanel::Branches => GitReviewTarget::Branch {
+            repository: repository.repo_root.clone(),
+            base: selected_state.selected_branch_base.clone(),
+            base_revision: selected_state.selected_branch_base_revision.clone(),
+            base_sha: selected_state.selected_branch_base_sha.clone(),
+            head: selected_state.selected_branch.clone(),
+            head_sha: selected_state.selected_branch_head_sha.clone(),
+        },
+        GitPanel::Commits => GitReviewTarget::Commit {
+            repository: repository.repo_root.clone(),
+            commit: selected_state.selected_commit.clone(),
+        },
+        GitPanel::Stash => GitReviewTarget::Stash {
+            repository: repository.repo_root.clone(),
+            reference: selected_state.selected_stash.clone(),
+        },
+    };
+    let generation = diff
+        .viewport
+        .read()
+        .as_ref()
+        .map(|viewport| viewport.generation)
+        .unwrap_or_default();
     rsx! {
-        section { class: "min-h-0 min-w-0 overflow-hidden bg-transparent pb-2.5 pr-2.5",
+        section { class: "relative min-h-0 min-w-0 overflow-hidden bg-transparent pb-2.5 pr-2.5",
             if selected_state.panel == GitPanel::Branches {
                 BranchDiffCard {
                     base_ref: selected_state.selected_branch_base,
@@ -402,6 +438,7 @@ fn GitDiffPane(navigation: SectionNavigation, viewed_count: Signal<usize>) -> El
                     rows_from: diff.rows_from,
                     loading: (diff.loading)() || selected_state.branch_loading,
                     error: selected_state.branch_files_error,
+                    review_target: review_target.clone(),
                     onviewedchange: Some(EventHandler::new(move |count| {
                         let mut viewed_count = viewed_count;
                         viewed_count.set(count);
@@ -416,6 +453,7 @@ fn GitDiffPane(navigation: SectionNavigation, viewed_count: Signal<usize>) -> El
                     diff_rows: diff.rows,
                     rows_from: diff.rows_from,
                     loading: (diff.loading)(),
+                    review_target: review_target.clone(),
                 }
             } else if selected_state.panel == GitPanel::Stash {
                 StashDiffCard {
@@ -426,6 +464,7 @@ fn GitDiffPane(navigation: SectionNavigation, viewed_count: Signal<usize>) -> El
                     diff_rows: diff.rows,
                     rows_from: diff.rows_from,
                     loading: (diff.loading)(),
+                    review_target: review_target.clone(),
                 }
             } else {
                 DiffCard {
@@ -437,7 +476,12 @@ fn GitDiffPane(navigation: SectionNavigation, viewed_count: Signal<usize>) -> El
                     diff_rows: diff.rows,
                     rows_from: diff.rows_from,
                     loading: (diff.loading)(),
+                    review_target: review_target.clone(),
                 }
+            }
+            ReviewPanel {
+                target: review_target,
+                generation,
             }
         }
     }

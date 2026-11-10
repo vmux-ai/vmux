@@ -1000,11 +1000,17 @@ fn deliver_branch_files_outputs(
         let patch = match &mut output.result {
             Ok(catalog) => {
                 let base_ref = catalog.base_ref().to_string();
+                let base_revision = catalog.base_revision().to_string();
+                let base_sha = catalog.base_sha().to_string();
+                let head_sha = catalog.head_sha().to_string();
                 let diff_paths = catalog.path_labels();
                 let page = query.replace(std::mem::take(catalog));
                 GitBranchFilesPatch {
                     reference: reference.clone(),
                     base_ref: Some(base_ref),
+                    base_revision: Some(base_revision),
+                    base_sha: Some(base_sha),
+                    head_sha: Some(head_sha),
                     diff_paths: Some(diff_paths),
                     page: Some(GitBranchFilesPagePatch {
                         offset: 0,
@@ -1020,6 +1026,9 @@ fn deliver_branch_files_outputs(
             Err(error) => GitBranchFilesPatch {
                 reference: reference.clone(),
                 base_ref: None,
+                base_revision: None,
+                base_sha: None,
+                head_sha: None,
                 diff_paths: None,
                 page: None,
                 diff_loading: (controller.focused_panel == crate::state::GitPanel::Branches

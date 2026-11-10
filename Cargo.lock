@@ -10298,6 +10298,7 @@ dependencies = [
  "tracing-appender",
  "tracing-subscriber",
  "vmux_acp",
+ "vmux_auth",
  "vmux_bookmark",
  "vmux_browser",
  "vmux_command",
@@ -10306,6 +10307,7 @@ dependencies = [
  "vmux_extension",
  "vmux_flex",
  "vmux_git",
+ "vmux_github",
  "vmux_history",
  "vmux_input",
  "vmux_knowledge",
@@ -10326,6 +10328,33 @@ dependencies = [
  "vmux_tool",
  "vmux_transport",
  "vmux_vault",
+]
+
+[[package]]
+name = "vmux_auth"
+version = "0.0.35"
+dependencies = [
+ "base64 0.22.1",
+ "bevy",
+ "bevy_app",
+ "bevy_ecs",
+ "bevy_reflect",
+ "chrono",
+ "futures-lite",
+ "parking_lot",
+ "reqwest",
+ "ring",
+ "ron 0.12.1",
+ "serde",
+ "serde_json",
+ "url",
+ "uuid",
+ "vmux_api",
+ "vmux_connector",
+ "vmux_ecs",
+ "vmux_path",
+ "vmux_profile",
+ "zeroize",
 ]
 
 [[package]]
@@ -10439,6 +10468,20 @@ dependencies = [
  "vmux_path",
  "vmux_tool",
  "vmux_ui",
+]
+
+[[package]]
+name = "vmux_connector"
+version = "0.0.35"
+dependencies = [
+ "bevy",
+ "bevy_app",
+ "bevy_ecs",
+ "bevy_reflect",
+ "moonshine-save",
+ "serde",
+ "vmux_api",
+ "vmux_ecs",
 ]
 
 [[package]]
@@ -10563,6 +10606,7 @@ dependencies = [
  "ignore",
  "image",
  "lsp-types",
+ "moonshine-save",
  "notify",
  "percent-encoding",
  "pulldown-cmark",
@@ -10664,12 +10708,39 @@ dependencies = [
  "tempfile",
  "two-face",
  "url",
+ "uuid",
  "vmux_api",
  "vmux_ecs",
  "vmux_page",
  "vmux_path",
  "vmux_syntax",
  "vmux_ui",
+]
+
+[[package]]
+name = "vmux_github"
+version = "0.0.35"
+dependencies = [
+ "bevy",
+ "bevy_app",
+ "bevy_ecs",
+ "bevy_reflect",
+ "futures-lite",
+ "moonshine-save",
+ "reqwest",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "url",
+ "uuid",
+ "vmux_api",
+ "vmux_auth",
+ "vmux_connector",
+ "vmux_ecs",
+ "vmux_editor",
+ "vmux_git",
+ "vmux_path",
+ "vmux_session",
 ]
 
 [[package]]

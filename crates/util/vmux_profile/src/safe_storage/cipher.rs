@@ -13,6 +13,7 @@ const ENVELOPE_HEADER: &[u8] = b"vmux-safe-storage-envelope-v1\0";
 const HKDF_SALT: &[u8] = b"vmux-safe-storage-hkdf-v1";
 const BROWSER_CONTEXT: &[u8] = b"vmux-safe-storage-browser-v1";
 const MCP_CONTEXT: &[u8] = b"vmux-safe-storage-mcp-v1";
+const OAUTH_CONTEXT: &[u8] = b"vmux-safe-storage-oauth-v1";
 const VAULT_CONTEXT: &[u8] = b"vmux-safe-storage-vault-wrap-v1";
 
 pub(super) struct SafeStorageCipher {
@@ -47,6 +48,24 @@ impl SafeStorageCipher {
         envelope: &[u8],
     ) -> Result<Zeroizing<Vec<u8>>, SafeStorageError> {
         let key = self.data_key(MCP_CONTEXT, &[])?;
+        self.open(key.as_bytes(), account.as_bytes(), envelope)
+    }
+
+    pub(super) fn seal_oauth(
+        &self,
+        account: &str,
+        plaintext: &[u8],
+    ) -> Result<Vec<u8>, SafeStorageError> {
+        let key = self.data_key(OAUTH_CONTEXT, &[])?;
+        self.seal(key.as_bytes(), account.as_bytes(), plaintext)
+    }
+
+    pub(super) fn open_oauth(
+        &self,
+        account: &str,
+        envelope: &[u8],
+    ) -> Result<Zeroizing<Vec<u8>>, SafeStorageError> {
+        let key = self.data_key(OAUTH_CONTEXT, &[])?;
         self.open(key.as_bytes(), account.as_bytes(), envelope)
     }
 
@@ -184,10 +203,13 @@ mod tests {
         let cipher = cipher();
         let browser = cipher.browser_key().unwrap();
         let mcp = cipher.data_key(MCP_CONTEXT, &[]).unwrap();
+        let oauth = cipher.data_key(OAUTH_CONTEXT, &[]).unwrap();
         let first_vault = cipher.vault_wrapping_key("first").unwrap();
         let second_vault = cipher.vault_wrapping_key("second").unwrap();
 
         assert_ne!(browser.as_bytes().as_slice(), mcp.as_bytes().as_slice());
+        assert_ne!(mcp.as_bytes(), oauth.as_bytes());
+        assert_ne!(oauth.as_bytes(), first_vault.as_bytes());
         assert_ne!(mcp.as_bytes(), first_vault.as_bytes());
         assert_ne!(first_vault.as_bytes(), second_vault.as_bytes());
     }
@@ -205,6 +227,7 @@ mod tests {
             b"secret"
         );
         assert!(cipher.open_mcp("personal:github", &encrypted).is_err());
+        assert!(cipher.open_oauth("personal:linear", &encrypted).is_err());
         assert!(
             cipher
                 .unwrap_vault_key("personal:linear", &encrypted)

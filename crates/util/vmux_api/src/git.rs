@@ -33,6 +33,10 @@ impl DiffLine {
         let text = self.spans.first()?.text.as_str();
         (!text.starts_with("@@")).then_some(text)
     }
+
+    pub fn text(&self) -> String {
+        self.spans.iter().map(|span| span.text.as_str()).collect()
+    }
 }
 
 #[vmux_api::contract(Copy, Eq, Default)]

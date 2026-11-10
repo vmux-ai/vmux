@@ -234,6 +234,65 @@ per-Vault wrapping key. Pre-Safe-Storage browser sessions, MCP credentials, and 
 treated as absent. The CLI asks the desktop for Vault status through the authenticated service
 connection and has no credential or Vault-key broker commands.
 
+### External services
+
+Features declare OAuth providers in `feature.ron`. `vmux_auth` owns device flow, PKCE, personal
+Connections, encrypted credentials, refresh serialization, revocation where declared, and
+revocation-aware credential leases. Restored credentials cannot be leased until provider identity
+validation matches the persisted account. `vmux_connector` owns shared scopes, links, indexes, and field authority. Provider crates own
+resource APIs and snapshots.
+Credentials never enter ECS.
+Disconnect invalidates leases immediately, but encrypted credentials remain until revocation
+succeeds or the provider declares revocation unsupported; failed cleanup is persisted and retried.
+Public OAuth client IDs may name a runtime environment source in the manifest; GitHub uses
+`VMUX_GITHUB_CLIENT_ID` until release configuration supplies its registered app ID.
+
+```text
+Profile
+└─ Id<Connection> + ProviderKey + CanAccess
+                         │
+                         ▼
+ExternalScope ── ExternalLink ── Project or Session
+```
+
+An ExternalLink is identified by provider, immutable provider-account scope, resource kind, and
+external ID. Mutable logins remain display metadata. Connection ID is not part of shared resource
+identity, so another authorized user can operate the same link. A Project owns its repository link.
+A Session owns at most one primary work-item link plus review links. Missing a primary work-item
+link means the Session is local-only; no `LocalTask` marker exists.
+
+GitHub issue association defaults to import-once. Reference-only never writes canonical fields.
+Bidirectional links name their synchronized fields, and a second authority for the same field is
+rejected. Provider refresh always updates its cached snapshot; it does not silently overwrite
+canonical Session fields.
+
+Git diff review drafts belong to `vmux_git` as page components, separate from navigation state and
+its UI stream. The UI receives only the active selection, followed by note-level patches. Notes retain repository identity, an
+explicit selection key, exact comparison revisions, typed file-or-line locations, content
+revisions, and an opt-in GitHub flag that defaults off. Submit captures one immutable snapshot for
+both the Session prompt and provider delivery. `vmux_github` revalidates local and remote base/head
+SHAs, then publishes current checked line anchors through the Connection selected by the Project
+repository scope. The shared link never persists a personal Connection ID. Provider capability is
+projected only when one Connection can authorize the repository, so unavailable or ambiguous
+providers cannot accept publication. Sessions below a Project root use that deepest containing
+Project. Receipts acknowledge only the published note revision; stale and file-level notes stay
+prompt-only.
+
+Connection metadata is profile-persisted. External links and provider snapshots use workspace
+persistence. Search results, leases, HTTP tasks, errors, and operation tasks are runtime-only.
+Blocking metadata work uses the short shared lane. Provider HTTP uses a long lane, while managed
+Git processes use an independently bounded process lane. OAuth has its own bounded, cancellable
+executor. Provider requests create typed task components; their owning plugin validates the bound
+Connection and destination before typed completion handling. Search and clone results carry
+requester, Connection, and generation identity. Completed operations expire after five minutes.
+Incompatible local stores use the current hard-reset migration policy. Safe Storage, repositories,
+worktrees, user files, accounts, and remote resources are never reset.
+
+Canonical Project entities are indexed after workspace restoration, independent of whether the
+Projects page has opened. The background catalog materializes these entities; page refreshes reconcile the same identities.
+A missing checkout marks its Project unavailable without deleting durable links; shared links retain their owner identity. Clone completion and Projects-page activation refresh the
+filesystem projection.
+
 The macOS CEF patch pinned by `cef/manifest.toml` exports an embedder-only OSCrypt setter. The
 desktop supplies the 128-bit browser-derived key in memory before CEF initialization. During
 initialization CEF receives only the derived key and new ciphertext uses a distinct `vm1` prefix.

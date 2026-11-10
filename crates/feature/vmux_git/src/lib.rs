@@ -1,11 +1,14 @@
-use sha2::Digest;
-
 #[cfg(host)]
 pub use host::{
     FileGit, GitCheckForUpdatesRequest, GitDiffSource, GitError, GitPlugin, GitRepository,
-    GitRuntime, GitTask, RepoInfoCache, RepositoryProvisionCompleted, RepositoryProvisionOperation,
-    RepositoryProvisionRequest, worktree,
+    GitReviewProviderCapability, GitReviewProviderRegistry, GitReviewPublished, GitReviewSnapshot,
+    GitReviewSubmission, GitReviewSubmissionFinished, GitRuntime, GitTask, RepoInfoCache,
+    RepositoryProvisionCompleted, RepositoryProvisionOperation, RepositoryProvisionRequest,
+    worktree,
 };
+#[cfg(host)]
+pub use process::GitProcess;
+use sha2::Digest;
 
 #[cfg(host)]
 pub(crate) struct Feature;
@@ -16,6 +19,9 @@ impl vmux_ecs::manifest::FeatureManifestSource for Feature {
 }
 
 pub mod event;
+#[cfg(host)]
+pub mod process;
+pub mod review;
 pub mod state;
 
 pub const FILES_HOST: &str = "files";

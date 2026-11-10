@@ -6,6 +6,8 @@ use vmux_macro::app_plugin;
 pub enum VmuxPlugin {
     #[plugin(feature = "ecs", desktop)]
     Ecs(VmuxEcsPlugin),
+    #[plugin(feature = "auth", desktop, requires(ecs))]
+    Auth(vmux_auth::AuthPlugin),
     #[plugin(feature = "command", desktop, requires(ecs))]
     Command(vmux_command::CommandPlugin),
     #[plugin(feature = "setting", desktop, requires(ecs))]
@@ -28,6 +30,8 @@ pub enum VmuxPlugin {
     Extension(vmux_extension::ExtensionPlugin),
     #[plugin(feature = "git", desktop, requires(layout))]
     Git(vmux_git::GitPlugin),
+    #[plugin(feature = "github", desktop, requires(auth, editor, git, session))]
+    Github(vmux_github::GithubPlugin),
     #[plugin(
         feature = "acp",
         desktop,
@@ -69,6 +73,7 @@ impl Plugin for VmuxEcsPlugin {
         app.add_plugins((
             vmux_flex::FlexPlugin,
             vmux_ecs::PrimitivesPlugin,
+            vmux_ecs::OperationPlugin,
             vmux_ecs::profile::ProfilePlugin,
             vmux_ecs::page::PagePlugin,
         ));

@@ -18,6 +18,7 @@ rkyv = { workspace = true }
 serde = { workspace = true }
 sha2 = "0.10"
 url = { workspace = true }
+uuid = { workspace = true }
 bevy_ecs = { workspace = true }
 vmux_ecs = { path = "../../util/vmux_ecs" }
 vmux_path = { path = "../../util/vmux_path" }

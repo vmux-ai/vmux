@@ -1,6 +1,12 @@
 use bevy_ecs::prelude::Component;
 use vmux_api::space::ProjectRow;
 
+pub use crate::review::{
+    GitReviewAnchor, GitReviewDraft, GitReviewLocation, GitReviewNote, GitReviewNoteIdentity,
+    GitReviewNoteReceipt, GitReviewNoteRemoved, GitReviewPrompt, GitReviewReset,
+    GitReviewSelectionKey, GitReviewSide, GitReviewTarget, GitReviewUiState, GitReviewUiStatePatch,
+};
+
 use crate::event::{
     DiffKind, DiffLine, GitBranchEntry, GitBranchFileEntry, GitCatalog, GitCommitEntry, GitDiffRow,
     GitDiffViewport, GitOperationResult, GitRepositorySnapshot, GitStashEntry, GitTagEntry,
@@ -364,6 +370,9 @@ pub struct GitPageSnapshot {
     pub branch_diff_paths: Vec<String>,
     pub branch_files_reference: String,
     pub branch_files_base_ref: String,
+    pub branch_files_base_revision: String,
+    pub branch_files_base_sha: String,
+    pub branch_files_head_sha: String,
     pub branch_files_total: u32,
     pub branch_files_loading: bool,
     pub branch_files_has_more: bool,
@@ -413,6 +422,9 @@ impl Default for GitPageSnapshot {
             branch_diff_paths: Vec::new(),
             branch_files_reference: String::new(),
             branch_files_base_ref: String::new(),
+            branch_files_base_revision: String::new(),
+            branch_files_base_sha: String::new(),
+            branch_files_head_sha: String::new(),
             branch_files_total: 0,
             branch_files_loading: false,
             branch_files_has_more: false,
@@ -518,6 +530,15 @@ impl GitPageSnapshot {
         }
         if let Some(base_ref) = patch.base_ref.as_ref() {
             self.branch_files_base_ref.clone_from(base_ref);
+        }
+        if let Some(value) = &patch.base_revision {
+            self.branch_files_base_revision.clone_from(value);
+        }
+        if let Some(value) = &patch.base_sha {
+            self.branch_files_base_sha.clone_from(value);
+        }
+        if let Some(value) = &patch.head_sha {
+            self.branch_files_head_sha.clone_from(value);
         }
         if let Some(paths) = patch.diff_paths.as_ref() {
             self.branch_diff_paths.clone_from(paths);
@@ -785,6 +806,9 @@ pub struct GitBranchFilesPagePatch {
 pub struct GitBranchFilesPatch {
     pub reference: String,
     pub base_ref: Option<String>,
+    pub base_revision: Option<String>,
+    pub base_sha: Option<String>,
+    pub head_sha: Option<String>,
     pub diff_paths: Option<Vec<String>>,
     pub page: Option<GitBranchFilesPagePatch>,
     pub diff_loading: Option<bool>,
@@ -809,7 +833,7 @@ pub struct GitUiStatePatch {
     pub selection_reveal: Option<GitSelectionReveal>,
 }
 
-#[vmux_api::ui_state(Default, patch = GitUiStatePatch, version = 16)]
+#[vmux_api::ui_state(Default, patch = GitUiStatePatch, version = 17)]
 pub struct GitUiState {
     pub context: Option<GitPageContext>,
     pub repository_picked: Option<GitRepositoryPicked>,
@@ -1040,6 +1064,9 @@ mod tests {
             GitBranchFilesPatch {
                 reference: "feature".to_string(),
                 base_ref: Some("main".to_string()),
+                base_revision: None,
+                base_sha: None,
+                head_sha: None,
                 diff_paths: Some(vec!["a.rs".to_string(), "b.rs".to_string()]),
                 page: Some(GitBranchFilesPagePatch {
                     offset: 0,
@@ -1054,6 +1081,9 @@ mod tests {
             GitBranchFilesPatch {
                 reference: "feature".to_string(),
                 base_ref: None,
+                base_revision: None,
+                base_sha: None,
+                head_sha: None,
                 diff_paths: None,
                 page: Some(GitBranchFilesPagePatch {
                     offset: 1,

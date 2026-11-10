@@ -9,6 +9,7 @@ use bevy_cef::prelude::{UiEventPlugin, UiInput};
 use serde::{Deserialize, Serialize};
 use vmux_api::avatar::IdenticonSpec;
 use vmux_ecs::page::PrewarmPage;
+use vmux_ecs::store::StoreAppExt;
 use vmux_git::worktree::RepoLabel;
 use vmux_git::{
     RepositoryProvisionCompleted, RepositoryProvisionOperation, RepositoryProvisionRequest,
@@ -17,16 +18,21 @@ use vmux_session::host::ScopeProjectionRequest;
 use vmux_session::{CatalogSnapshot, SessionSummaryProjection};
 
 use crate::project::{
-    ProjectArchiveRequest, ProjectCatalogView, ProjectCloneRequest, ProjectCollectionViewRequest,
-    ProjectCreateRequest, ProjectDeleteRequest, ProjectDetailView, ProjectEntry, ProjectId,
-    ProjectImportRequest, ProjectRoute, ProjectUiState, ProjectView,
+    Project, ProjectArchiveRequest, ProjectCatalogView, ProjectCloneRequest,
+    ProjectCollectionViewRequest, ProjectCreateRequest, ProjectDeleteRequest, ProjectDetailView,
+    ProjectEntry, ProjectId, ProjectImportRequest, ProjectIndexRefresh, ProjectRoute,
+    ProjectUiState, ProjectUnavailable, ProjectView,
 };
 
 pub(super) struct ProjectPagePlugin;
 
 impl Plugin for ProjectPagePlugin {
     fn build(&self, app: &mut App) {
-        app.add_plugins(vmux_ecs::UiStatePlugin::<ProjectUiState>::default())
+        app.register_stored::<Project>()
+            .register_stored::<vmux_api::Id<Project>>()
+            .add_message::<ProjectIndexRefresh>()
+            .init_resource::<ProjectIndex>()
+            .add_plugins(vmux_ecs::UiStatePlugin::<ProjectUiState>::default())
             .add_message::<vmux_layout::NewTabRequest>()
             .add_message::<vmux_layout::stack::OpenRequest>()
             .add_plugins(UiEventPlugin::<(
@@ -48,6 +54,9 @@ impl Plugin for ProjectPagePlugin {
             .add_systems(
                 Update,
                 (
+                    index,
+                    finish_index,
+                    refresh,
                     queue,
                     sync_icons,
                     finish_catalogs,
@@ -58,7 +67,12 @@ impl Plugin for ProjectPagePlugin {
             )
             .add_systems(
                 PostUpdate,
-                (finish_repository_operations, sync_session_counts).chain(),
+                (
+                    finish_repository_operations,
+                    sync_session_counts,
+                    sync_entities,
+                )
+                    .chain(),
             );
     }
 }
@@ -1738,5 +1752,139 @@ mod tests {
     #[test]
     fn github_repository_rejects_insecure_http() {
         assert!(GitHubRepository::parse("http://github.com/vmux-ai/vmux.git").is_err());
+    }
+}
+
+#[derive(SystemParam)]
+struct ProjectEntities<'w, 's> {
+    projects: Query<'w, 's, (Entity, &'static vmux_api::Id<Project>), With<Project>>,
+    commands: Commands<'w, 's>,
+}
+
+impl ProjectEntities<'_, '_> {
+    fn reconcile(&mut self, state: &ProjectUiState) {
+        let ProjectView::Catalog(catalog) = &state.view else {
+            return;
+        };
+        let mut known = std::collections::HashMap::new();
+        for (entity, id) in &self.projects {
+            known.insert(id.as_str().to_string(), entity);
+        }
+        let mut seen = BTreeSet::new();
+        for entry in &catalog.entries {
+            seen.insert(entry.url.clone());
+            let values = (
+                vmux_ecs::Cwd(PathBuf::from(&entry.path)),
+                Name::new(entry.name.clone()),
+            );
+            if let Some(entity) = known.get(&entry.url) {
+                self.commands
+                    .entity(*entity)
+                    .insert(values)
+                    .remove::<ProjectUnavailable>();
+            } else {
+                let entity = self
+                    .commands
+                    .spawn((Project, vmux_api::Id::<Project>::new(&entry.url), values))
+                    .id();
+                known.insert(entry.url.clone(), entity);
+            }
+        }
+        for (id, entity) in &known {
+            if !seen.contains(id) {
+                self.commands.entity(*entity).insert(ProjectUnavailable);
+            }
+        }
+    }
+}
+
+fn sync_entities(
+    states: Query<&vmux_ecs::UiState<ProjectUiState>, Changed<vmux_ecs::UiState<ProjectUiState>>>,
+    mut projects: ProjectEntities,
+) {
+    for state in &states {
+        if let Some(current) = state.current() {
+            projects.reconcile(current);
+        }
+    }
+}
+
+#[derive(Resource, Default)]
+struct ProjectIndex {
+    root: Option<PathBuf>,
+    generation: u64,
+}
+
+#[derive(Component)]
+struct ProjectIndexTask {
+    generation: u64,
+    task: Task<ProjectUiState>,
+}
+
+fn index(
+    mut requests: MessageReader<ProjectIndexRefresh>,
+    source: vmux_ecs::profile::Projects,
+    mut index: ResMut<ProjectIndex>,
+    proxy: Option<Res<EventLoopProxyWrapper>>,
+    mut commands: Commands,
+) {
+    let refresh = requests.read().count() > 0;
+    let Ok(root) = source.path() else {
+        return;
+    };
+    if index.root.as_deref() == Some(root) && !refresh {
+        return;
+    }
+    index.root = Some(root.to_path_buf());
+    index.generation = index.generation.wrapping_add(1).max(1);
+    let wake = proxy.as_deref().map(|proxy| (**proxy).clone());
+    let task = ProjectCatalogTask::spawn(root.to_path_buf(), index.generation, wake);
+    commands.spawn(ProjectIndexTask {
+        generation: index.generation,
+        task: task.task,
+    });
+}
+
+fn finish_index(
+    mut tasks: Query<(Entity, &mut ProjectIndexTask)>,
+    index: Res<ProjectIndex>,
+    mut projects: ProjectEntities,
+    mut commands: Commands,
+) {
+    for (entity, mut task) in &mut tasks {
+        if task.generation != index.generation {
+            commands.entity(entity).despawn();
+            continue;
+        }
+        let Some(state) = future::block_on(future::poll_once(&mut task.task)) else {
+            continue;
+        };
+        projects.reconcile(&state);
+        commands.entity(entity).despawn();
+    }
+}
+
+fn refresh(
+    mut requests: MessageReader<ProjectIndexRefresh>,
+    pages: Query<(Entity, &vmux_ecs::PageMetadata, &ProjectPageRevision)>,
+    source: vmux_ecs::profile::Projects,
+    proxy: Option<Res<EventLoopProxyWrapper>>,
+    mut commands: Commands,
+) {
+    if requests.read().count() == 0 {
+        return;
+    }
+    let Ok(root) = source.path() else {
+        return;
+    };
+    let wake = proxy.as_deref().map(|proxy| (**proxy).clone());
+    for (entity, page, revision) in &pages {
+        if ProjectRoute::is_page(&page.url) {
+            commands.entity(entity).insert(ProjectCatalogTask::spawn(
+                root.to_path_buf(),
+                revision.value,
+                wake.clone(),
+            ));
+        }
     }
 }

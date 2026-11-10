@@ -10,6 +10,7 @@ use vmux_ui::scroll::Target;
 
 use crate::event::GitDiffRow;
 use crate::event::{GitBranchFileEntry, GitDiffViewport, GitRepositorySnapshot};
+use crate::state::GitReviewTarget;
 use crate::ui::DiffView;
 
 #[component]
@@ -26,6 +27,7 @@ pub(super) fn BranchDiffCard(
     rows_from: ReadSignal<Option<u32>>,
     loading: bool,
     error: String,
+    review_target: GitReviewTarget,
     #[props(default)] onviewedchange: Option<EventHandler<usize>>,
 ) -> Element {
     let selected_branch_value = selected_branch();
@@ -60,6 +62,7 @@ pub(super) fn BranchDiffCard(
             onactivefile: Some(onactivefile),
             onviewedchange,
             expected_paths,
+            review_target,
         }
     }
 }
@@ -73,6 +76,7 @@ pub(super) fn CommitDiffCard(
     diff_rows: ReadSignal<Vec<GitDiffRow>>,
     rows_from: ReadSignal<Option<u32>>,
     loading: bool,
+    review_target: GitReviewTarget,
 ) -> Element {
     let selected_commit = selected_commit();
     let selected = repository
@@ -103,6 +107,7 @@ pub(super) fn CommitDiffCard(
             error: String::new(),
             show_header: true,
             reveal_path: None,
+            review_target,
         }
     }
 }
@@ -116,6 +121,7 @@ pub(super) fn StashDiffCard(
     diff_rows: ReadSignal<Vec<GitDiffRow>>,
     rows_from: ReadSignal<Option<u32>>,
     loading: bool,
+    review_target: GitReviewTarget,
 ) -> Element {
     let selected_stash = selected_stash();
     let selected = repository
@@ -142,6 +148,7 @@ pub(super) fn StashDiffCard(
             error: String::new(),
             show_header: true,
             reveal_path: None,
+            review_target,
         }
     }
 }
@@ -162,6 +169,7 @@ fn RevisionDiffCard(
     error: String,
     show_header: bool,
     reveal_path: Option<ReadSignal<Target>>,
+    review_target: GitReviewTarget,
     #[props(default)] onactivefile: Option<EventHandler<String>>,
     #[props(default)] onviewedchange: Option<EventHandler<usize>>,
     #[props(default)] expected_paths: Vec<String>,
@@ -210,6 +218,7 @@ fn RevisionDiffCard(
                     expected_paths,
                     loading,
                     visible: true,
+                    review_target: Some(review_target),
                 }
             } else {
                 div { class: "flex min-h-64 flex-1 items-center justify-center p-6 text-center text-sm text-muted-foreground", "{empty}" }
@@ -228,6 +237,7 @@ pub(super) fn DiffCard(
     diff_rows: ReadSignal<Vec<GitDiffRow>>,
     rows_from: ReadSignal<Option<u32>>,
     loading: bool,
+    review_target: GitReviewTarget,
 ) -> Element {
     rsx! {
         section { class: "flex h-full min-h-0 flex-col overflow-hidden rounded-lg bg-transparent",
@@ -242,7 +252,7 @@ pub(super) fn DiffCard(
                     {translate("git-select-file")}
                 }
             } else {
-                DiffView { repo_root, path: selected_abs_path, path_bytes: selected_path_bytes(), identity: selected_path(), viewport: diff_viewport, display_rows: diff_rows, rows_from, loading, visible: true, reveal_path: None }
+                DiffView { repo_root, path: selected_abs_path, path_bytes: selected_path_bytes(), identity: selected_path(), viewport: diff_viewport, display_rows: diff_rows, rows_from, loading, visible: true, reveal_path: None, review_target: Some(review_target) }
             }
         }
     }
@@ -265,6 +275,7 @@ mod tests {
         rsx! {
             BranchDiffCard {
                 base_ref: String::new(),
+                review_target: GitReviewTarget::WorkingTree { repository: String::from("/tmp/repository"), branch: String::from("feature") },
                 files: Vec::new(),
                 expected_paths: Vec::new(),
                 onactivefile: move |path: String| active_path.set(path),

@@ -1,4 +1,5 @@
 use std::any::TypeId;
+use std::collections::BTreeMap;
 use std::marker::PhantomData;
 
 use bevy::prelude::*;
@@ -21,6 +22,7 @@ pub struct FeatureManifest {
     pub tools: Vec<Tool>,
     pub cli: Option<CliManifest>,
     pub mcp_servers: Vec<McpServer>,
+    pub auth_providers: Vec<AuthProvider>,
     settings: Option<Box<RawValue>>,
     policy: Option<Box<RawValue>>,
     policies: Option<Box<RawValue>>,
@@ -73,6 +75,16 @@ impl FeatureManifest {
                 .validate()
                 .expect("embedded tool input schemas must be valid");
         }
+        let mut auth_provider_ids = std::collections::BTreeSet::new();
+        for provider in &self.auth_providers {
+            provider
+                .validate()
+                .expect("embedded auth providers must be valid");
+            assert!(
+                auth_provider_ids.insert(provider.id.as_str()),
+                "embedded auth provider IDs must be unique"
+            );
+        }
     }
 }
 
@@ -100,6 +112,8 @@ impl<'de> Deserialize<'de> for FeatureManifest {
             #[serde(default)]
             mcp_servers: Vec<McpServer>,
             #[serde(default)]
+            auth_providers: Vec<AuthProvider>,
+            #[serde(default)]
             settings: Option<Box<RawValue>>,
             #[serde(default)]
             policy: Option<Box<RawValue>>,
@@ -117,6 +131,7 @@ impl<'de> Deserialize<'de> for FeatureManifest {
             tools: manifest.tools,
             cli: manifest.cli,
             mcp_servers: manifest.mcp_servers,
+            auth_providers: manifest.auth_providers,
             settings: manifest.settings,
             policy: manifest.policy,
             policies: manifest.policies,
@@ -371,6 +386,104 @@ pub struct McpServer {
     pub scopes: Vec<String>,
 }
 
+#[derive(Clone, Debug, PartialEq, Eq, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct AuthProvider {
+    pub id: String,
+    pub name: String,
+    pub flow: AuthFlow,
+    #[serde(default)]
+    pub revocation_endpoint: Option<String>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Deserialize)]
+pub enum AuthFlow {
+    DeviceCode(DeviceCodeFlow),
+    AuthorizationCodePkce(AuthorizationCodePkceFlow),
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct DeviceCodeFlow {
+    pub client_id: String,
+    #[serde(default)]
+    pub client_id_env: String,
+    pub device_authorization_endpoint: String,
+    pub token_endpoint: String,
+    #[serde(default)]
+    pub scopes: Vec<String>,
+    #[serde(default)]
+    pub headers: BTreeMap<String, String>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct AuthorizationCodePkceFlow {
+    pub client_id: String,
+    #[serde(default)]
+    pub client_id_env: String,
+    pub authorization_endpoint: String,
+    pub token_endpoint: String,
+    #[serde(default)]
+    pub scopes: Vec<String>,
+    #[serde(default)]
+    pub headers: BTreeMap<String, String>,
+}
+
+impl AuthProvider {
+    pub fn configure_client_id(&mut self, lookup: impl Fn(&str) -> Option<String>) {
+        let (client_id, environment) = match &mut self.flow {
+            AuthFlow::DeviceCode(flow) => (&mut flow.client_id, &flow.client_id_env),
+            AuthFlow::AuthorizationCodePkce(flow) => (&mut flow.client_id, &flow.client_id_env),
+        };
+        if !client_id.trim().is_empty() || environment.trim().is_empty() {
+            return;
+        }
+        if let Some(value) = lookup(environment).filter(|value| !value.trim().is_empty()) {
+            *client_id = value;
+        }
+    }
+
+    pub fn configured(&self) -> bool {
+        match &self.flow {
+            AuthFlow::DeviceCode(flow) => !flow.client_id.trim().is_empty(),
+            AuthFlow::AuthorizationCodePkce(flow) => !flow.client_id.trim().is_empty(),
+        }
+    }
+
+    fn validate(&self) -> Result<(), String> {
+        if self.id.trim().is_empty() || self.name.trim().is_empty() {
+            return Err("auth provider ID and name are required".to_string());
+        }
+        match &self.flow {
+            AuthFlow::DeviceCode(flow) => {
+                Self::validate_https(
+                    &flow.device_authorization_endpoint,
+                    "device authorization endpoint",
+                )?;
+                Self::validate_https(&flow.token_endpoint, "token endpoint")?;
+            }
+            AuthFlow::AuthorizationCodePkce(flow) => {
+                Self::validate_https(&flow.authorization_endpoint, "authorization endpoint")?;
+                Self::validate_https(&flow.token_endpoint, "token endpoint")?;
+            }
+        }
+        if let Some(endpoint) = &self.revocation_endpoint {
+            Self::validate_https(endpoint, "revocation endpoint")?;
+        }
+        Ok(())
+    }
+
+    fn validate_https(value: &str, label: &str) -> Result<(), String> {
+        let url = url::Url::parse(value)
+            .map_err(|error| format!("invalid auth provider {label}: {error}"))?;
+        if url.scheme() != "https" {
+            return Err(format!("auth provider {label} must use https"));
+        }
+        Ok(())
+    }
+}
+
 pub trait FeatureManifestSource: Send + Sync + 'static {
     const SOURCE: &'static str;
 }
@@ -446,6 +559,17 @@ mod tests {
         )),
         policy: Some((enabled: true)),
         settings: Some((enabled: true)),
+        auth_providers: [(
+            id: "example",
+            name: "Example",
+            flow: DeviceCode((
+                client_id: "client-id",
+                device_authorization_endpoint: "https://example.com/device",
+                token_endpoint: "https://example.com/token",
+                scopes: ["read"],
+                headers: {"Accept": "application/json"},
+            )),
+        )],
     )"#;
 
     #[derive(Debug, Deserialize, PartialEq, Eq)]
@@ -507,6 +631,38 @@ mod tests {
             manifests[0].settings::<Policy>().unwrap(),
             Some(Policy { enabled: true })
         );
+        assert_eq!(manifests[0].auth_providers[0].id, "example");
+        assert!(matches!(
+            &manifests[0].auth_providers[0].flow,
+            AuthFlow::DeviceCode(flow) if flow.client_id == "client-id"
+        ));
+    }
+
+    #[test]
+    fn auth_provider_client_id_can_be_supplied_at_runtime() {
+        let mut manifest = FeatureManifest::parse(
+            r#"(
+                auth_providers: [(
+                    id: "example",
+                    name: "Example",
+                    flow: DeviceCode((
+                        client_id: "",
+                        client_id_env: "EXAMPLE_CLIENT_ID",
+                        device_authorization_endpoint: "https://example.com/device",
+                        token_endpoint: "https://example.com/token",
+                    )),
+                )],
+            )"#,
+        );
+        let provider = &mut manifest.auth_providers[0];
+
+        provider.configure_client_id(|name| (name == "EXAMPLE_CLIENT_ID").then(|| "client".into()));
+
+        assert!(provider.configured());
+        assert!(matches!(
+            &provider.flow,
+            AuthFlow::DeviceCode(flow) if flow.client_id == "client"
+        ));
     }
 
     #[test]

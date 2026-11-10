@@ -575,6 +575,9 @@ mod tests {
         let patch = crate::state::GitBranchFilesPatch {
             reference: "feature".to_string(),
             base_ref: Some("main".to_string()),
+            base_revision: None,
+            base_sha: None,
+            head_sha: None,
             diff_paths: Some(Vec::new()),
             page: None,
             diff_loading: Some(false),

@@ -740,6 +740,9 @@ fn sync_branch_files(
         let patch = GitBranchFilesPatch {
             reference: controller.selected_branch.clone(),
             base_ref: None,
+            base_revision: None,
+            base_sha: None,
+            head_sha: None,
             diff_paths: None,
             page: None,
             diff_loading: Some(true),
@@ -796,6 +799,9 @@ fn load_next_branch_files(
     let patch = GitBranchFilesPatch {
         reference: query.reference.clone(),
         base_ref: None,
+        base_revision: None,
+        base_sha: None,
+        head_sha: None,
         diff_paths: None,
         page: Some(GitBranchFilesPagePatch {
             offset: u32::try_from(offset).unwrap_or(u32::MAX),
@@ -830,6 +836,9 @@ fn retry_branch_files(
     let patch = GitBranchFilesPatch {
         reference: state.snapshot.branch_files_reference.clone(),
         base_ref: None,
+        base_revision: None,
+        base_sha: None,
+        head_sha: None,
         diff_paths: None,
         page: None,
         diff_loading: Some(true),

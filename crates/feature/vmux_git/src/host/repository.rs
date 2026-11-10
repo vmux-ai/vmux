@@ -37,6 +37,7 @@ struct BranchDiffContext {
 
 struct BranchBase {
     reference: String,
+    revision: String,
     merge_base: String,
 }
 
@@ -420,6 +421,9 @@ struct BranchFilesCatalogData {
     files: Vec<GitBranchFileEntry>,
     source: PathBuf,
     base_ref: String,
+    base_revision: String,
+    base_sha: String,
+    head_sha: String,
     merge_base: String,
 }
 
@@ -492,6 +496,18 @@ impl BranchFilesCatalog {
                 .collect(),
             ..Default::default()
         }))
+    }
+
+    pub(crate) fn base_sha(&self) -> &str {
+        &self.0.base_sha
+    }
+
+    pub(crate) fn base_revision(&self) -> &str {
+        &self.0.base_revision
+    }
+
+    pub(crate) fn head_sha(&self) -> &str {
+        &self.0.head_sha
     }
 }
 
@@ -986,6 +1002,8 @@ impl GitRepository {
             .branch_checkout(reference)
             .unwrap_or_else(|| self.clone());
         let base = repository.branch_base(reference)?;
+        let base_sha = repository.commit_id(&base.revision)?;
+        let head_sha = repository.commit_id(reference)?;
         let mut files =
             repository.branch_files_against(reference, Path::new(""), &base.merge_base)?;
         files.sort_by(|left, right| left.path_bytes.cmp(&right.path_bytes));
@@ -994,6 +1012,9 @@ impl GitRepository {
             files,
             source: repository.path().to_path_buf(),
             base_ref: base.reference,
+            base_revision: base.revision,
+            base_sha,
+            head_sha,
             merge_base: base.merge_base,
         })))
     }
@@ -1088,8 +1109,21 @@ impl GitRepository {
         }
         Ok(BranchBase {
             reference: base.branch().to_string(),
+            revision: base.as_str().to_string(),
             merge_base: merge_base.trim().to_string(),
         })
+    }
+
+    fn commit_id(&self, reference: &str) -> Result<String, GitError> {
+        let revision = format!("{reference}^{{commit}}");
+        let (commit, stderr, ok) = GitCommand::read(
+            &self.0,
+            &["rev-parse", "--verify", "--end-of-options", &revision],
+        )?;
+        if !ok {
+            return Err(GitCommand::error(&commit, &stderr));
+        }
+        Ok(commit.trim().to_string())
     }
 
     fn branch_diff_text(

@@ -9,6 +9,7 @@ use vmux_api::input::KeyModifiers;
 pub use vmux_api::page_location::PageLocationUiState;
 
 use crate::state::{GitBranchCollection, GitBranchPrompt, GitPanel};
+use crate::state::{GitReviewAnchor, GitReviewNoteIdentity};
 
 #[vmux_api::ui_event(Eq)]
 pub struct GitKeyRequest {
@@ -125,6 +126,31 @@ pub struct GitDiffSeekRequest {
 #[vmux_api::ui_event]
 pub struct GitDiffRetryRequest;
 
+#[vmux_api::ui_event(Eq)]
+pub struct GitReviewNoteAddRequest {
+    pub anchor: GitReviewAnchor,
+}
+
+#[vmux_api::ui_event(Eq)]
+pub struct GitReviewNoteEditRequest {
+    pub id: vmux_api::Id<GitReviewNoteIdentity>,
+    pub body: String,
+}
+
+#[vmux_api::ui_event(Eq)]
+pub struct GitReviewNoteDeleteRequest {
+    pub id: vmux_api::Id<GitReviewNoteIdentity>,
+}
+
+#[vmux_api::ui_event(Eq)]
+pub struct GitReviewNoteSyncRequest {
+    pub id: vmux_api::Id<GitReviewNoteIdentity>,
+    pub enabled: bool,
+}
+
+#[vmux_api::ui_event]
+pub struct GitReviewSubmitRequest;
+
 impl GitDiffRevealRequest {
     pub const CHUNK: u32 = 20;
 }
@@ -216,24 +242,29 @@ impl GitRepositoryRequest {
         self
     }
 }
+
 #[vmux_api::ui_event(Eq)]
 pub struct GitRepositoryPickerRequest {
     pub path: String,
 }
+
 #[vmux_api::ui_event(Eq)]
 pub struct GitConfigEditRequest {
     pub repo_root: String,
 }
+
 #[vmux_api::ui_event]
 pub struct GitUpdateCheckRequest;
 #[vmux_api::ui_event(Eq)]
 pub struct GitDirectoryOpenRequest {
     pub path: String,
 }
+
 #[vmux_api::ui_event(Eq)]
 pub struct GitDirectorySelectRequest {
     pub index: u32,
 }
+
 #[vmux_api::ui_event]
 pub struct GitDirectoryNextRequest;
 #[vmux_api::ui_event]
@@ -242,10 +273,12 @@ pub struct GitDirectoryPreviousRequest;
 pub struct GitDirectoryAscendRequest {
     pub target: String,
 }
+
 #[vmux_api::ui_event(Eq)]
 pub struct GitDirectoryDescendRequest {
     pub target: String,
 }
+
 #[vmux_api::ui_event]
 pub struct GitDirectoryActivateRequest;
 #[vmux_api::ui_event]
@@ -258,39 +291,47 @@ pub struct GitStageRequest {
     pub path: String,
     pub path_bytes: Vec<u8>,
 }
+
 #[vmux_api::ui_event(Eq)]
 pub struct GitUnstageRequest {
     pub repo_root: String,
     pub path: String,
     pub path_bytes: Vec<u8>,
 }
+
 #[vmux_api::ui_event(Eq)]
 pub struct GitDiscardRequest {
     pub repo_root: String,
     pub path: String,
     pub path_bytes: Vec<u8>,
 }
+
 #[vmux_api::ui_event(Eq)]
 pub struct GitCommitRequest {
     pub path: String,
     pub message: String,
 }
+
 #[vmux_api::ui_event(Eq)]
 pub struct GitFetchRequest {
     pub path: String,
 }
+
 #[vmux_api::ui_event(Eq)]
 pub struct GitPullRequest {
     pub path: String,
 }
+
 #[vmux_api::ui_event(Eq)]
 pub struct GitPushRequest {
     pub path: String,
 }
+
 #[vmux_api::ui_event(Eq)]
 pub struct GitStageAllRequest {
     pub path: String,
 }
+
 #[vmux_api::ui_event(Eq)]
 pub struct GitHunkRequest {
     pub repo_root: String,
