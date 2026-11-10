@@ -1966,6 +1966,10 @@ the initial scroll has settled. The latest tool batch stays expanded until every
 and subsequent assistant text arrives; earlier batches remain folded. Tool rows share native
 Claude/Vibe name classification and summarize wrapped Codex command batches as Ran, Explored,
 or Edited. Exploration exposes Read, Search, and List steps from the actual shell commands.
+Folded tool rows and batches retain their file references, including reads inside Codex wrappers.
+File links retain the tool's working directory when available and otherwise use the Session's.
+Shared navigation gestures and a context menu open the editor in a right pane, a new Stack, or a new tab.
+
 Session page roots install typed state listeners once. Child components read
 `UiStateBinding<T>::use_context` and selectors, so replacing a manager or detail subtree preserves
 the subscription and its retained state. Removing `SessionManagerView` immediately removes the

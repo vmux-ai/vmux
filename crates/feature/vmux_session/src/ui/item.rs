@@ -7,12 +7,18 @@ use vmux_api::chat::{
     ChatSubagentSummary, ChatToolArgument, ChatToolArgumentValue, ChatToolArguments, ChatToolCall,
     ChatToolChild, ChatToolChildCall, ChatTurn, ChatTurnRow, ExploreStep, WORKING_VERB_IDS,
 };
+use vmux_api::command_bar::OpenRequest;
+use vmux_api::open_target::{OpenTarget, PaneDirection, PaneOpenMode, PaneTarget};
 use vmux_api::prompt_media::ChatAttachment;
 use vmux_ui::components::avatar::{AgentThumbnail, Avatar};
 use vmux_ui::components::code::ShellCode;
+use vmux_ui::components::context_menu::{
+    ContextMenu, ContextMenuContent, ContextMenuItem, ContextMenuTrigger,
+};
 use vmux_ui::file_icon::{FilePath, TypeIcon};
 use vmux_ui::i18n::{TranslationValue, translate, translate_with};
 use vmux_ui::icon::{LineIcon, LineIconView};
+use vmux_ui::navigation::PageNavigation;
 
 use super::activity::{ActivityIconView, FileActivityIcon, ToolActivityIcon};
 use crate::activity::{ActivityIcon, ToolPresentation};
@@ -279,6 +285,208 @@ struct ToolDisclosure<'a> {
 #[cfg(test)]
 mod disclosure_tests {
     use super::*;
+    use dioxus::core::{AttributeValue, Mutation};
+    use dioxus::prelude::Event as UiEvent;
+    use dioxus_html::{
+        Code, EventData, Key, Location, Modifiers, SerializedHtmlEventConverter,
+        SerializedKeyboardData, SerializedMouseData,
+    };
+    use std::rc::Rc;
+    use vmux_api::BinEvent;
+    use vmux_ui::transport::{
+        BytesListener, HostBinding, PageHost, event_listener::EventListenerError,
+    };
+
+    #[derive(Default)]
+    struct FileHost(RefCell<Vec<OpenRequest>>);
+
+    impl PageHost for FileHost {
+        fn send(&self, id: &str, bytes: &[u8]) -> Result<(), EventListenerError> {
+            if id == OpenRequest::id() {
+                self.0
+                    .borrow_mut()
+                    .push(rkyv::from_bytes::<OpenRequest, rkyv::rancor::Error>(bytes).unwrap());
+            }
+            Ok(())
+        }
+
+        fn listen(&self, _: &str, _: BytesListener) -> Result<(), EventListenerError> {
+            Ok(())
+        }
+    }
+
+    #[test]
+    fn folded_reads_and_batches_keep_clickable_file_names() {
+        let path = "/work/skills/caveman/SKILL.md";
+        let call = ChatToolCall {
+            kind: vmux_api::chat::ChatToolKind::ReadFile,
+            arguments: ChatToolArguments::Raw(format!(
+                "text(await tools.exec_command({{cmd: \"cat {path}\"}}));"
+            )),
+            ..Default::default()
+        };
+        let mut row = VirtualDom::new_with_props(ToolCall, ToolCallProps { call: call.clone() });
+        row.rebuild_in_place();
+        let mut batch = VirtualDom::new_with_props(
+            FinishedToolCalls,
+            FinishedToolCallsProps {
+                calls: vec![call],
+                open: false,
+            },
+        );
+        batch.rebuild_in_place();
+        for dom in [&row, &batch] {
+            let html = dioxus_ssr::render(dom);
+            let summary = html
+                .split("<summary")
+                .nth(1)
+                .unwrap()
+                .split("</summary>")
+                .next()
+                .unwrap();
+            assert!(summary.contains("caveman/SKILL.md"));
+            assert!(summary.contains("href=\"file:///work/skills/caveman/SKILL.md\""));
+        }
+    }
+
+    #[test]
+    fn file_references_resolve_relative_paths_and_preserve_editor_locations() {
+        let file = FileReference::new("src/a #?.rs", "/work/p root");
+        assert_eq!(
+            file.url.as_deref(),
+            Some("file:///work/p%20root/src/a%20%23%3F.rs")
+        );
+        assert_eq!(file.label, "src/a #?.rs");
+        let file = FileReference::new("file:///work/src/main.rs#L9", "/work");
+        assert_eq!(file.url.as_deref(), Some("file:///work/src/main.rs#L9"));
+        assert_eq!(file.label, "src/main.rs");
+        assert!(FileReference::new("src/main.rs", "").url.is_none());
+        assert!(
+            FileReference::new("https://example.com/main.rs", "/work")
+                .url
+                .is_none()
+        );
+    }
+
+    #[test]
+    fn file_clicks_send_native_open_requests_without_toggling_the_disclosure() {
+        dioxus_html::set_event_converter(Box::new(SerializedHtmlEventConverter));
+        for (meta, shift, target) in [
+            (false, false, OpenTarget::InPlace),
+            (true, false, OpenTarget::InNewStack),
+            (true, true, OpenTarget::InNewTab),
+        ] {
+            let host = Rc::new(FileHost::default());
+            let mut dom = VirtualDom::new_with_props(
+                ToolFileLink,
+                ToolFileLinkProps {
+                    path: "/work/a #?.rs".into(),
+                    read: false,
+                },
+            );
+            dom.provide_root_context(HostBinding(host.clone()));
+            let edits = dom.rebuild_to_vec();
+            let link = edits
+                .edits
+                .iter()
+                .find_map(|edit| match edit {
+                    Mutation::SetAttribute {
+                        name: "href",
+                        value: AttributeValue::Text(url),
+                        id,
+                        ..
+                    } if url == "file:///work/a%20%23%3F.rs" => Some(*id),
+                    _ => None,
+                })
+                .unwrap();
+            let mut data = serde_json::to_value(SerializedMouseData::default()).unwrap();
+            data["meta_key"] = meta.into();
+            data["shift_key"] = shift.into();
+            let mouse = serde_json::from_value::<SerializedMouseData>(data).unwrap();
+            let event = UiEvent::new(EventData::Mouse(mouse).into_any(), true);
+            dom.runtime().handle_event("click", event.clone(), link);
+            assert!(!event.default_action_enabled());
+            assert!(!event.propagates());
+            let opened = host.0.borrow();
+            assert_eq!(opened.len(), 1);
+            assert_eq!(opened[0].value, "file:///work/a%20%23%3F.rs");
+            assert_eq!(opened[0].open, Some(target));
+        }
+    }
+
+    #[test]
+    fn file_context_menu_opens_the_editor_in_the_chosen_container() {
+        dioxus_html::set_event_converter(Box::new(SerializedHtmlEventConverter));
+        for (index, target) in [
+            OpenTarget::InPane {
+                direction: PaneDirection::Right,
+                target: PaneTarget::NewSplit,
+                mode: PaneOpenMode::NewStack,
+            },
+            OpenTarget::InNewStack,
+            OpenTarget::InNewTab,
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            let host = Rc::new(FileHost::default());
+            let mut dom = VirtualDom::new_with_props(
+                ToolFileLink,
+                ToolFileLinkProps {
+                    path: "/work/main.rs".into(),
+                    read: false,
+                },
+            );
+            dom.provide_root_context(HostBinding(host.clone()));
+            let edits = dom.rebuild_to_vec();
+            let trigger = edits
+                .edits
+                .iter()
+                .find_map(|edit| match edit {
+                    Mutation::NewEventListener { name, id } if name == "contextmenu" => Some(*id),
+                    _ => None,
+                })
+                .unwrap();
+            dom.runtime().handle_event(
+                "contextmenu",
+                UiEvent::new(
+                    EventData::Mouse(SerializedMouseData::default()).into_any(),
+                    true,
+                ),
+                trigger,
+            );
+            let opened = dom.render_immediate_to_vec();
+            let buttons = opened
+                .edits
+                .iter()
+                .filter_map(|edit| match edit {
+                    Mutation::NewEventListener { name, id } if name == "pointerenter" => Some(*id),
+                    _ => None,
+                })
+                .collect::<Vec<_>>();
+            assert_eq!(buttons.len(), 3);
+            dom.runtime().handle_event(
+                "keydown",
+                UiEvent::new(
+                    EventData::Keyboard(SerializedKeyboardData::new(
+                        Key::Enter,
+                        Code::Enter,
+                        Location::Standard,
+                        false,
+                        Modifiers::empty(),
+                        false,
+                    ))
+                    .into_any(),
+                    true,
+                ),
+                buttons[index],
+            );
+            let opened = host.0.borrow();
+            assert_eq!(opened.len(), 1);
+            assert_eq!(opened[0].value, "file:///work/main.rs");
+            assert_eq!(opened[0].open, Some(target));
+        }
+    }
 
     #[test]
     fn command_rows_show_exploration_steps_and_real_commands_instead_of_the_wrapper() {
@@ -670,12 +878,21 @@ fn ToolArguments(arguments: ChatToolArguments) -> Element {
 #[component]
 fn FinishedToolCalls(calls: Vec<ChatToolCall>, open: bool) -> Element {
     let count = calls.len() as i64;
+    let mut paths = Vec::new();
+    for call in &calls {
+        for path in call.file_paths() {
+            if !paths.contains(&path) {
+                paths.push(path);
+            }
+        }
+    }
     rsx! {
         details { class: "disclosure", open,
             summary { class: "flex cursor-pointer select-none items-center gap-2 rounded-xl px-2 py-1 text-xs text-muted-foreground list-none transition-colors hover:bg-foreground/[0.025] [&::-webkit-details-marker]:hidden",
                 span { class: "font-medium",
                     {translate_with("agent-tool-calls", &[("count", TranslationValue::Number(count))])}
                 }
+                ToolFiles { paths }
                 DisclosureIcon {}
             }
             div { class: "mt-1 flex flex-col gap-1",
@@ -688,20 +905,154 @@ fn FinishedToolCalls(calls: Vec<ChatToolCall>, open: bool) -> Element {
 }
 
 #[component]
+fn ToolFiles(paths: Vec<String>) -> Element {
+    rsx! {
+        span { class: "flex min-w-0 flex-wrap items-center gap-x-2 gap-y-0.5",
+            for path in paths {
+                span { class: "min-w-0 max-w-full", ToolFileLink { key: "{path}", path } }
+            }
+        }
+    }
+}
+
+#[component]
+fn ToolFileLink(path: String, #[props(default)] read: bool) -> Element {
+    let binding =
+        try_consume_context::<vmux_ui::hooks::UiStateBinding<crate::state::ChatUiState>>();
+    let cwd = binding
+        .map(|binding| binding.state.read().composer.cwd.clone())
+        .unwrap_or_default();
+    let file = FileReference::new(&path, &cwd);
+    let label = if read {
+        translate_with(
+            "agent-tool-explore-read",
+            &[("path", TranslationValue::String(&file.label))],
+        )
+    } else {
+        file.label.clone()
+    };
+    let Some(url) = file.url else {
+        return rsx! { span { class: "truncate font-mono text-[11px]", title: file.path, "{label}" } };
+    };
+    let clicked_url = url.clone();
+    rsx! {
+        ContextMenu { attributes: vec![],
+            ContextMenuTrigger { attributes: vec![],
+                a {
+                    href: url.clone(),
+                    title: file.path,
+                    class: "inline-block max-w-full truncate align-middle font-mono text-[11px] text-foreground/65 underline-offset-2 transition-colors hover:text-primary hover:underline",
+                    onclick: move |event: MouseEvent| {
+                        event.prevent_default();
+                        event.stop_propagation();
+                        PageNavigation::click(clicked_url.clone(), &event);
+                    },
+                    "{label}"
+                }
+            }
+            ContextMenuContent { attributes: vec![],
+                ToolFileOpenItem {
+                    index: 0usize, url: url.clone(),
+                    target: OpenTarget::InPane { direction: PaneDirection::Right, target: PaneTarget::NewSplit, mode: PaneOpenMode::NewStack },
+                    label: "agent-tool-open-in-pane-right",
+                }
+                ToolFileOpenItem { index: 1usize, url: url.clone(), target: OpenTarget::InNewStack, label: "agent-tool-open-in-stack" }
+                ToolFileOpenItem { index: 2usize, url, target: OpenTarget::InNewTab, label: "agent-tool-open-in-tab" }
+            }
+        }
+    }
+}
+
+#[component]
+fn ToolFileOpenItem(index: usize, url: String, target: OpenTarget, label: &'static str) -> Element {
+    let value = use_signal(|| label.to_string());
+    rsx! {
+        ContextMenuItem {
+            index,
+            value: Into::<ReadSignal<String>>::into(value),
+            attributes: vec![],
+            on_select: move |_: String| {
+                let _ = vmux_ui::hooks::send(&OpenRequest { value: url.clone(), open: Some(target) });
+            },
+            {translate(label)}
+        }
+    }
+}
+
+struct FileReference {
+    path: String,
+    label: String,
+    url: Option<String>,
+}
+
+impl FileReference {
+    fn new(path: &str, cwd: &str) -> Self {
+        let existing = url::Url::parse(path).ok();
+        let path = if let Some(url) = &existing {
+            let Ok(path) = url.to_file_path() else {
+                return Self {
+                    path: path.to_string(),
+                    label: path.to_string(),
+                    url: None,
+                };
+            };
+            path
+        } else {
+            let path = std::path::PathBuf::from(path);
+            if path.is_absolute() || cwd.is_empty() {
+                path
+            } else {
+                std::path::Path::new(cwd).join(path)
+            }
+        };
+        let displayed = if !cwd.is_empty() {
+            path.strip_prefix(cwd).unwrap_or(&path)
+        } else {
+            &path
+        };
+        let label = if displayed.components().count() > 2 {
+            let name = displayed.file_name().unwrap_or_default();
+            match displayed.parent().and_then(std::path::Path::file_name) {
+                Some(parent) => std::path::Path::new(parent)
+                    .join(name)
+                    .to_string_lossy()
+                    .into_owned(),
+                None => name.to_string_lossy().into_owned(),
+            }
+        } else {
+            displayed.to_string_lossy().into_owned()
+        };
+        let url = match existing {
+            Some(url) => Some(url.to_string()),
+            None => url::Url::from_file_path(&path)
+                .ok()
+                .map(|url| url.to_string()),
+        };
+        Self {
+            path: path.to_string_lossy().into_owned(),
+            label,
+            url,
+        }
+    }
+}
+
+#[component]
 fn ToolExploration(steps: Vec<ExploreStep>) -> Element {
     rsx! {
         div { class: "mt-1 flex min-w-0 flex-col gap-0.5 text-[11px] text-muted-foreground",
             for step in steps {
                 {
-                    let message = match step {
-                        ExploreStep::Read { path } => {
-                            let label = std::path::Path::new(&path).file_name().and_then(|name| name.to_str()).unwrap_or(&path);
-                            translate_with("agent-tool-explore-read", &[("path", TranslationValue::String(label))])
+                    match step {
+                        ExploreStep::Read { path } => rsx! { ToolFileLink { path, read: true } },
+                        ExploreStep::Search { query, path } => {
+                            let message = translate_with("agent-tool-explore-search", &[("query", TranslationValue::String(&query)), ("path", TranslationValue::String(&path))]);
+                            rsx! { div { class: "truncate", title: message.clone(), "{message}" } }
                         }
-                        ExploreStep::Search { query, path } => translate_with("agent-tool-explore-search", &[("query", TranslationValue::String(&query)), ("path", TranslationValue::String(&path))]),
-                        ExploreStep::List { path } => translate_with("agent-tool-explore-list", &[("path", TranslationValue::String(&path))]),
-                    };
-                    rsx! { div { class: "truncate", title: message.clone(), "{message}" } }
+                        ExploreStep::List { path } => {
+                            let message = translate_with("agent-tool-explore-list", &[("path", TranslationValue::String(&path))]);
+                            rsx! { div { class: "truncate", title: message.clone(), "{message}" } }
+                        }
+                    }
                 }
             }
         }
@@ -711,6 +1062,7 @@ fn ToolExploration(steps: Vec<ExploreStep>) -> Element {
 #[component]
 fn ToolCall(call: ChatToolCall) -> Element {
     let key = call.index;
+    let paths = call.file_paths();
     let edits = call.edited_paths();
     let command = if edits.is_empty() {
         call.command()
@@ -741,9 +1093,7 @@ fn ToolCall(call: ChatToolCall) -> Element {
                 details { open: false, class: "disclosure text-xs text-muted-foreground",
                     summary { class: ROW_SUMMARY,
                         span { class: "shrink-0 font-medium", "{label}" }
-                        if !edits.is_empty() {
-                            span { class: "truncate", {edits.join(", ")} }
-                        }
+                        ToolFiles { paths }
                         if exploration.is_none() && let Some(command) = &command {
                             div { class: "min-w-0 flex-1 overflow-hidden",
                                 ShellCode {
@@ -974,6 +1324,7 @@ fn ToolChild(child: ChatToolChild) -> Element {
 
 #[component]
 fn ToolChildCall(call: ChatToolChildCall) -> Element {
+    let paths = call.file_paths();
     let edits = call.edited_paths();
     let command = if edits.is_empty() {
         call.command()
@@ -996,6 +1347,7 @@ fn ToolChildCall(call: ChatToolChildCall) -> Element {
         details { class: "disclosure text-xs text-muted-foreground",
             summary { class: "flex cursor-pointer select-none items-center gap-2 py-0.5 list-none [&::-webkit-details-marker]:hidden",
                 span { class: "shrink-0 font-medium", "{label}" }
+                ToolFiles { paths }
                 if exploration.is_none() && let Some(command) = &command {
                     div { class: "min-w-0 flex-1 overflow-hidden",
                         ShellCode {
