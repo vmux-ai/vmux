@@ -468,6 +468,7 @@ impl Command for BookmarkWrite {
                 false
             }
             Err(error) => {
+                error!(%error, "bookmark write failed; retrying in 60 seconds");
                 state.retry(revision, error.to_string());
                 true
             }
