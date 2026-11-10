@@ -11,6 +11,9 @@ pub use component::{
 };
 #[cfg(all(host, feature = "host"))]
 pub use file_ui_state::{FileUiStateUpdates, FileUiStateWrite};
+pub use identity::{
+    IdentityIndex, IdentityIndexPlugin, IdentityIndexSet, IdentityIndexWriter, IdentityLookupError,
+};
 #[cfg(all(host, feature = "host"))]
 pub use launcher::{
     CommandBarContribution, CommandBarContributionActivated, CommandBarQueryChanged,
@@ -59,6 +62,7 @@ pub mod event;
 mod file_ui_state;
 #[cfg(all(host, feature = "host"))]
 pub mod host_spawn;
+mod identity;
 #[cfg(all(host, feature = "host"))]
 pub mod launcher;
 #[cfg(all(host, feature = "host"))]
