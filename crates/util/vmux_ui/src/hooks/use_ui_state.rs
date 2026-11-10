@@ -77,6 +77,10 @@ impl<T> UiStateBinding<T>
 where
     T: 'static,
 {
+    pub fn use_context() -> Self {
+        use_context::<Self>()
+    }
+
     pub fn use_selector<S>(self, select: impl Fn(&T) -> S + 'static) -> Memo<S>
     where
         S: Clone + PartialEq + 'static,

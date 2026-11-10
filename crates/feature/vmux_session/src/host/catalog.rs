@@ -69,6 +69,7 @@ impl Plugin for CatalogPlugin {
             .add_observer(restore_deleted)
             .add_observer(scope_projection)
             .add_observer(ready)
+            .add_observer(unpublish)
             .add_systems(
                 Update,
                 (sync_manager_views, cleanup_inactive_views)
@@ -92,6 +93,12 @@ impl Plugin for CatalogPlugin {
 #[derive(Component)]
 #[require(SessionCatalogView, SessionCatalogUiStateComponent)]
 pub struct SessionManagerView;
+
+fn unpublish(trigger: On<Remove, SessionManagerView>, mut commands: Commands) {
+    commands
+        .entity(trigger.event_target())
+        .try_remove::<SessionCatalogUiStateComponent>();
+}
 
 #[derive(Component, Clone)]
 struct SessionManagerFallback {
@@ -1192,6 +1199,29 @@ fn cleanup_inactive_views(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn removing_manager_authority_revokes_catalog_state_without_navigation() {
+        let mut app = App::new();
+        app.add_observer(unpublish);
+        let view = app
+            .world_mut()
+            .spawn((
+                SessionManagerView,
+                SessionScopeView(PathBuf::from("/tmp/project")),
+            ))
+            .id();
+        app.world_mut()
+            .entity_mut(view)
+            .remove::<SessionManagerView>();
+        app.world_mut().flush();
+        assert!(
+            app.world()
+                .get::<SessionCatalogUiStateComponent>(view)
+                .is_none()
+        );
+        assert!(app.world().get::<SessionScopeView>(view).is_some());
+    }
 
     #[test]
     fn selecting_another_session_requests_the_full_open_lifecycle_in_the_current_stack() {

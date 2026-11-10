@@ -15,7 +15,7 @@ use dioxus::prelude::*;
 use vmux_api::mcp::McpServersUiState;
 use vmux_ui::components::composer::{PROMPT_INPUT_ID, PromptComposerMode, PromptFocus};
 use vmux_ui::components::composer_bar::{ComposerChip, ComposerMenuKind};
-use vmux_ui::hooks::{send, use_selector, use_theme, use_ui_state};
+use vmux_ui::hooks::{UiStateBinding, send, use_selector, use_theme};
 use vmux_ui::i18n::{TranslationValue, translate, translate_with};
 
 #[derive(PartialEq)]
@@ -57,7 +57,7 @@ pub struct Chat {
 
 pub fn use_chat(session: String) -> Chat {
     use_theme();
-    let root = use_ui_state::<ChatUiState>().state;
+    let root = UiStateBinding::<ChatUiState>::use_context().state;
     let always_ready = use_memo(|| true);
     let snapshot = ChatValue {
         value: use_memo(move || root.read().snapshot.clone()),

@@ -1537,6 +1537,12 @@ the initial scroll has settled. The latest tool batch stays expanded until every
 and subsequent assistant text arrives; earlier batches remain folded. Tool rows share native
 Claude/Vibe name classification and summarize wrapped Codex command batches as Ran, Explored,
 or Edited. Exploration exposes Read, Search, and List steps from the actual shell commands.
+Session page roots install typed state listeners once. Child components read
+`UiStateBinding<T>::use_context` and selectors, so replacing a manager or detail subtree preserves
+the subscription and its retained state. Removing `SessionManagerView` immediately removes the
+full catalog projection, even when page metadata does not change. Scoped projections retain their
+own state.
+
 The Session manager publishes only to its active page and leases Git metadata for every displayed
 repository while that page remains active.
 Its first discovery reserves a skeleton in one persistent scroll surface until rows are available.
