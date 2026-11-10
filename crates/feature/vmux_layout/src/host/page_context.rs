@@ -7,7 +7,7 @@ use bevy_cef::prelude::{UiEventPlugin, UiInput};
 use vmux_ecs::event::space::ProjectActivateRequest;
 use vmux_ecs::page::PageReady;
 use vmux_ecs::{
-    Operation, OperationError, OperationKind, OperationPlugin, OperationState, OperationTarget,
+    Operation, OperationError, OperationPlugin, OperationState, OperationTarget,
     OperationTargetRevision, PageMetadata,
 };
 use vmux_git::state::{GitPageContext, GitWorkspaceChanged};
@@ -233,11 +233,7 @@ impl Command for ProjectActivationInstall {
                 .remove::<ProjectActivation>()
                 .insert(OperationState::Canceled);
         }
-        let operation = world.spawn((
-            Operation,
-            OperationKind::new("project.activate").unwrap(),
-            OperationTargetRevision(revision),
-        ));
+        let operation = world.spawn(Operation::bundle("project.activate", revision).unwrap());
         let entity = operation.id();
         if world.get::<Tab>(tab).is_none() {
             activation.cancel();
@@ -809,7 +805,7 @@ fn poll_project_activations(
             .get(tab)
             .ok()
             .map(PendingWorkspaceSelection::revision);
-        if current_revision != Some(revision.0) || !context.tabs.contains(tab) {
+        if !revision.accepts(current_revision) || !context.tabs.contains(tab) {
             activation.cancel();
             context
                 .commands

@@ -883,7 +883,10 @@ removals rebuild the index; duplicate IDs refuse lookup until the ambiguity is r
 conversation and composer lookup share one index, refreshed after deferred creation and service
 mutations before either consumes the Session. These indexes are runtime state, not stored identities.
 
-Accepted project selections own their Git tasks on transient `Operation` entities. Each operation
+Accepted project selections use `Operation::bundle` to give each operation a stable UUID,
+kind, captured revision, and initial state. The same identity survives cancellation and terminal
+retention. Operations own their Git tasks; `OperationTargetRevision::accepts` checks that a result
+still belongs to the current selection. Each operation
 references its Tab and captures the selection revision; replacement, retirement, or removal cancels
 the old work before it can apply. Cleanup guards dispose of discarded checkouts. Results remain
 inspectable as `Succeeded`, `Failed` with an error, or `Canceled` for five minutes before cleanup.

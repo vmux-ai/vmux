@@ -5,6 +5,8 @@ use bevy_ecs::prelude::*;
 use bevy_reflect::{Reflect, std_traits::ReflectDefault};
 use serde::{Deserialize, Serialize};
 
+use crate::Uuid;
+
 const RETENTION: Duration = Duration::from_secs(300);
 
 pub struct OperationPlugin;
@@ -25,6 +27,27 @@ impl Plugin for OperationPlugin {
 #[reflect(Component, Default)]
 #[type_path = "vmux_ecs"]
 pub struct Operation;
+
+impl Operation {
+    pub fn bundle(kind: impl Into<String>, revision: u64) -> Result<OperationBundle, String> {
+        Ok(OperationBundle {
+            operation: Self,
+            id: Uuid(uuid::Uuid::new_v4().to_string()),
+            kind: OperationKind::new(kind)?,
+            revision: OperationTargetRevision(revision),
+            state: OperationState::Pending,
+        })
+    }
+}
+
+#[derive(Bundle)]
+pub struct OperationBundle {
+    operation: Operation,
+    id: Uuid,
+    kind: OperationKind,
+    revision: OperationTargetRevision,
+    state: OperationState,
+}
 
 #[derive(Component, Clone, Debug, PartialEq, Eq, Reflect, Serialize, Deserialize)]
 #[reflect(Component)]
@@ -82,6 +105,12 @@ pub struct TargetedOperations(Vec<Entity>);
 #[reflect(Component)]
 #[type_path = "vmux_ecs"]
 pub struct OperationTargetRevision(pub u64);
+
+impl OperationTargetRevision {
+    pub fn accepts(&self, current: Option<u64>) -> bool {
+        current == Some(self.0)
+    }
+}
 
 #[derive(Component, Clone, Debug, PartialEq, Eq, Reflect)]
 #[reflect(Component)]
