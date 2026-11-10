@@ -454,6 +454,7 @@
             title: "Settings",
             title_message_id: "settings-title",
             keywords: ["preferences", "config"],
+            placement: Some((group: "settings", reuse: Group)),
             icon: "Settings",
             command_bar: true,
             bookmark: Some(150),

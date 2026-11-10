@@ -1,17 +1,13 @@
 use bevy::prelude::*;
 use bevy_cef::prelude::{UiEventPlugin, UiInput};
 use std::collections::BTreeMap;
-use vmux_command::{
-    CommandDispatch, CommandRuntimePlugin, ReadCommandRequests, WriteCommandRequests,
-};
+use vmux_command::{CommandDispatch, CommandRuntimePlugin};
 use vmux_ecs::UiState;
 #[cfg(test)]
 use vmux_ecs::manifest::FeaturePlugin;
-use vmux_ecs::{PageOpenRequest, PageOpenTarget};
 use vmux_layout::{
     hosted_page::HostedUiPlugin,
-    pane::{Pane, PaneSplit},
-    stack::FocusedStack,
+    stack::{OpenPolicy, OpenRequest},
 };
 
 use crate::event::{
@@ -33,7 +29,7 @@ impl Plugin for StatePlugin {
         if !app.is_plugin_added::<CommandRuntimePlugin>() {
             app.add_plugins(CommandRuntimePlugin);
         }
-        app.add_message::<OpenSettingsRequest>()
+        app.add_message::<OpenRequest>()
             .add_observer(issue_open_settings)
             .add_message::<CheckForUpdatesRequest>()
             .add_plugins((
@@ -48,13 +44,7 @@ impl Plugin for StatePlugin {
             .add_observer(settings_request)
             .add_observer(edit)
             .add_observer(filter)
-            .add_observer(check_for_updates)
-            .add_systems(
-                Update,
-                handle_open_settings_command
-                    .in_set(ReadCommandRequests)
-                    .after(WriteCommandRequests),
-            );
+            .add_observer(check_for_updates);
     }
 }
 
@@ -75,19 +65,19 @@ pub(super) struct SettingsViewState {
     pub(super) drafts: BTreeMap<String, String>,
 }
 
-#[derive(Message)]
-struct OpenSettingsRequest;
-
 #[vmux_command::command]
 struct OpenSettingsBinding;
 
 fn issue_open_settings(
     trigger: On<CommandDispatch>,
     registered: Query<(), With<OpenSettingsBinding>>,
-    mut requests: MessageWriter<OpenSettingsRequest>,
+    mut requests: MessageWriter<OpenRequest>,
 ) {
     if registered.contains(trigger.event().command()) {
-        requests.write(OpenSettingsRequest);
+        requests.write(OpenRequest {
+            url: Some(crate::SettingsPlugin::URL.to_string()),
+            policy: OpenPolicy::FocusReusable,
+        });
     }
 }
 
@@ -169,32 +159,145 @@ fn check_for_updates(
     requests.write(CheckForUpdatesRequest);
 }
 
-fn handle_open_settings_command(
-    mut reader: MessageReader<OpenSettingsRequest>,
-    focus: FocusedStack,
-    panes: Query<Entity, (With<Pane>, Without<PaneSplit>)>,
-    mut page_open: MessageWriter<PageOpenRequest>,
-) {
-    for _ in reader.read() {
-        let Some(focus) = focus.as_ref() else {
-            continue;
-        };
-        let Some(pane) = focus.pane.filter(|p| panes.contains(*p)) else {
-            continue;
-        };
-        page_open.write(PageOpenRequest {
-            target: PageOpenTarget::NewStackInPane(pane),
-            url: crate::SettingsPlugin::URL.to_string(),
-            request_id: None,
-        });
-    }
-}
-
 #[cfg(test)]
 mod page_open_tests {
     use super::*;
-    use vmux_ecs::{PageNavigation, PageOpenHandled, PageOpenId, PageOpenTask};
+    use vmux_ecs::{
+        Active, PageMetadata, PageNavigation, PageOpenHandled, PageOpenId, PageOpenRequest,
+        PageOpenTarget, PageOpenTask, StackCommandSet,
+    };
     use vmux_layout::hosted_page::{HostedPagePlugin, HostedUiPlugin};
+    use vmux_layout::pane::Pane;
+    use vmux_layout::space::{CurrentSpace, Space};
+    use vmux_layout::stack::{Stack, StackPlugin};
+    use vmux_layout::tab::{CloseTabRequest, Tab};
+
+    struct CommandFixture {
+        app: App,
+        existing: Option<Entity>,
+    }
+
+    impl CommandFixture {
+        fn new(existing_url: Option<&str>) -> Self {
+            let mut app = App::new();
+            app.add_plugins((MinimalPlugins, StatePlugin, StackPlugin))
+                .add_message::<vmux_ecs::LauncherDismissRequest>()
+                .add_message::<CloseTabRequest>()
+                .add_message::<SettingsSaveRequest>()
+                .init_resource::<AppSettings>()
+                .init_resource::<vmux_layout::settings::LayoutSettings>()
+                .configure_sets(
+                    Update,
+                    StackCommandSet.in_set(vmux_command::ReadCommandRequests),
+                );
+            let space = app.world_mut().spawn((Space, CurrentSpace, Active)).id();
+            let tab = app
+                .world_mut()
+                .spawn((Tab::default(), vmux_ecs::LastActivatedAt(2), ChildOf(space)))
+                .id();
+            let pane = app
+                .world_mut()
+                .spawn((Pane, vmux_ecs::LastActivatedAt(2), ChildOf(tab)))
+                .id();
+            app.world_mut().spawn((
+                Stack::default(),
+                vmux_ecs::LastActivatedAt(2),
+                PageMetadata {
+                    url: "https://example.com/".to_string(),
+                    ..Default::default()
+                },
+                ChildOf(pane),
+            ));
+            let mut existing = None;
+            if let Some(url) = existing_url {
+                existing = Some(
+                    app.world_mut()
+                        .spawn((
+                            Stack::default(),
+                            vmux_ecs::LastActivatedAt(1),
+                            PageMetadata {
+                                url: url.to_string(),
+                                ..Default::default()
+                            },
+                            ChildOf(pane),
+                        ))
+                        .id(),
+                );
+            }
+            app.update();
+            Self { app, existing }
+        }
+
+        fn open(&mut self, count: usize) -> Vec<PageOpenRequest> {
+            let caller = self.app.world_mut().spawn_empty().id();
+            for _ in 0..count {
+                self.app
+                    .world_mut()
+                    .write_message(vmux_command::CommandInvocation::new(
+                        caller,
+                        "open_settings",
+                    ));
+            }
+            self.app.update();
+            self.app
+                .world_mut()
+                .resource_mut::<Messages<PageOpenRequest>>()
+                .drain()
+                .collect()
+        }
+
+        fn settings(&mut self) -> Vec<(Entity, String)> {
+            let mut pages = Vec::new();
+            let mut query = self
+                .app
+                .world_mut()
+                .query_filtered::<(Entity, &PageMetadata), With<Stack>>();
+            for (entity, metadata) in query.iter(self.app.world()) {
+                if metadata.url.split('#').next() == Some(crate::SettingsPlugin::URL) {
+                    pages.push((entity, metadata.url.clone()));
+                }
+            }
+            pages
+        }
+    }
+
+    #[test]
+    fn repeated_settings_commands_reuse_the_page_and_preserve_its_section() {
+        for existing_url in [
+            None,
+            Some("vmux://settings/"),
+            Some("vmux://settings/#appearance"),
+        ] {
+            let mut fixture = CommandFixture::new(existing_url);
+            let opens = fixture.open(3);
+            let pages = fixture.settings();
+            assert_eq!(pages.len(), 1);
+            let (settings, url) = &pages[0];
+            if let Some(existing) = fixture.existing {
+                assert!(opens.is_empty());
+                assert_eq!(*settings, existing);
+                assert_eq!(url, existing_url.unwrap());
+            } else {
+                assert!(!opens.is_empty());
+                for request in opens {
+                    assert!(
+                        matches!(request.target, PageOpenTarget::Stack(target) if target == *settings)
+                    );
+                }
+            }
+            assert!(
+                fixture
+                    .app
+                    .world()
+                    .get::<vmux_ecs::LastActivatedAt>(*settings)
+                    .unwrap()
+                    .0
+                    > 2
+            );
+            assert!(fixture.open(1).is_empty());
+            assert_eq!(fixture.settings(), pages);
+        }
+    }
 
     #[test]
     fn settings_page_open_spawns_marker_and_handles() {
