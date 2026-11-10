@@ -10392,7 +10392,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "vmux_build"
+name = "vmux_builder"
 version = "0.0.35"
 
 [[package]]

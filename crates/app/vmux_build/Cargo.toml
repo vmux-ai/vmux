@@ -1,8 +1,0 @@
-[package]
-name = "vmux_build"
-version.workspace = true
-edition.workspace = true
-publish = false
-
-[lints]
-workspace = true

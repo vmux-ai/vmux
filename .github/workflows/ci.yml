@@ -84,8 +84,7 @@ jobs:
 
       - name: Test build-only and launch-only iteration
         run: |
-          ./scripts/build-storage.sh --test
-          bash scripts/test-build-storage.sh
+          cargo test -p vmux_builder
           bash scripts/test-dev-build.sh
           bash scripts/test-dev-bundle.sh --fixture
           bash scripts/test-dev-sign.sh

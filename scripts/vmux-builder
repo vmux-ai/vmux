@@ -1,0 +1,20 @@
+#!/usr/bin/env bash
+set -euo pipefail
+root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)"
+cd "$root"
+if [[ -n "${VMUX_BUILDER_BIN:-}" ]]; then
+    exec "$VMUX_BUILDER_BIN" --root "$root" "$@"
+fi
+cache="$root/.build-tools"
+[[ ! -L "$cache" ]] || { echo "Unsafe builder cache" >&2; exit 1; }
+mkdir -p "$cache"
+binary="$cache/vmux_builder"
+if [[ ! -x "$binary" ]]; then
+    compiler="${RUSTC:-rustc}"
+    temporary="$(mktemp "$cache/.bootstrap.XXXXXX")"
+    trap 'rm -f "$temporary"' EXIT
+    VMUX_BUILDER_COMPILER="$("$compiler" -vV)" "$compiler" --edition=2024 -C opt-level=1 -C debuginfo=0 \
+        "$root/crates/app/vmux_builder/src/main.rs" -o "$temporary"
+    mv -f "$temporary" "$binary"
+fi
+exec "$binary" --root "$root" --ensure "$@"

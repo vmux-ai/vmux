@@ -7,6 +7,7 @@ use crate::Result;
 use crate::policy::{GIB, Policy};
 use crate::processes::Processes;
 use crate::profile::{Directory, Profile};
+use crate::signals::Signals;
 
 pub struct Storage {
     root: PathBuf,
@@ -127,6 +128,7 @@ impl Storage {
         }
         let mut removed = false;
         for profile in self.profiles()? {
+            Signals::check()?;
             if processes.uses(profile.path()) {
                 println!(
                     "Build storage: keeping active profile {}",
@@ -152,13 +154,21 @@ impl Storage {
                 Err(TryLockError::Error(error)) => return Err(error.into()),
             }
             for path in profile.cache_paths()? {
+                Signals::check()?;
                 let operation = if apply { "removing" } else { "would remove" };
                 println!("Build storage: {operation} {}", path.display());
                 if !apply {
                     continue;
                 }
+                if !removed {
+                    if let Some(directory) = Directory::open(self.target.join(".vmux-seed"))? {
+                        self.remove(directory.path())?;
+                    }
+                    removed = true;
+                }
                 if path.file_name().is_some_and(|name| name == "deps") {
                     for entry in fs::read_dir(&path)? {
+                        Signals::check()?;
                         let entry = entry?;
                         let path = entry.path();
                         if path
@@ -172,12 +182,7 @@ impl Storage {
                 } else {
                     self.remove(&path)?;
                 }
-                removed = true;
             }
-        }
-        let marker = self.target.join(".vmux-seed");
-        if removed && let Some(directory) = Directory::open(marker)? {
-            self.remove(directory.path())?;
         }
         Ok(())
     }

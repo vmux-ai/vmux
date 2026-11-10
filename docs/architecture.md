@@ -1370,11 +1370,17 @@ next build. The thresholds are configurable with `VMUX_BUILD_STORAGE_*`; cache s
 allocated blocks, which can count shared APFS clones more than once. Storage cleanup stays
 inside the selected Cargo target and never walks sibling worktrees or application data.
 
-The storage helper is a dependency-free Rust command in `crates/app/vmux_build`.
-`scripts/build-storage.sh` compiles it directly with the host `rustc`, caches the binary
-under `.build-tools/`, and rebuilds only when its sources or compiler change. This keeps
-capacity checks independent of Cargo dependency resolution and the application target;
-Make integration, target locking, and signal forwarding use the existing shell scripts.
+The dependency-free `vmux_builder` Rust command owns build sequencing, storage policy,
+target locks, and local/release launch paths. `scripts/vmux-builder` only bootstraps a
+missing host binary; Rust checks the embedded source snapshot and compiler, rebuilds
+itself when needed, and caches binaries under `.build-tools/`. Capacity checks therefore
+do not resolve Cargo dependencies or compile into the application target.
+
+The builder preserves the existing lock protocol: PID files on macOS and file locks on
+Linux. Lock waits remain cancellable. Each build command gets a separate process group;
+minimal POSIX signal handlers record cancellation and forward it to that group without
+allocating. The builder waits for its child, skips successful-build cleanup on failure or
+cancellation, and releases its locks before returning the original exit code.
 
 Local and debug share the workspace store and a stable Chromium directory per named profile,
 not per worktree. On first use the most recently modified legacy local profile is reused

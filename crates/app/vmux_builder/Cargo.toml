@@ -1,0 +1,17 @@
+[package]
+name = "vmux_builder"
+version.workspace = true
+edition.workspace = true
+publish = false
+autotests = false
+
+[[test]]
+name = "lifecycle"
+path = "tests/lifecycle.rs"
+
+[[test]]
+name = "bootstrap"
+path = "tests/bootstrap.rs"
+
+[lints]
+workspace = true

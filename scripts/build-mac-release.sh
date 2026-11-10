@@ -16,11 +16,8 @@ if [[ "${VMUX_BUILD_STORAGE_ROOT:-}" != "$ROOT" && -f "$ROOT/.env" ]]; then
 fi
 
 source "$ROOT/scripts/cargo-target-paths.sh"
-if [[ "${VMUX_BUILD_STORAGE_ROOT:-}" != "$ROOT" \
-    || "${VMUX_BUILD_STORAGE_TARGET:-}" != "$(vmux_cargo_target_dir "$ROOT")" \
-    || ! "${VMUX_TARGET_LOCK_OWNER_PID:-}" =~ ^[1-9][0-9]*$ ]] \
-    || ! kill -0 "${VMUX_TARGET_LOCK_OWNER_PID:-0}" 2>/dev/null; then
-    exec "$ROOT/scripts/with-build-storage.sh" "$PROFILE" "$0" "$@"
+if ! "$ROOT/scripts/vmux-builder" inherited; then
+    exec "$ROOT/scripts/vmux-builder" "$PROFILE" "$0" "$@"
 fi
 
 if [[ "$PROFILE" == "local" ]]; then

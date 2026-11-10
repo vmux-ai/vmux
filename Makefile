@@ -22,7 +22,7 @@ CEF_DEBUG_RENDER := $(CEF_FRAMEWORK_DIR)/Libraries/bevy_cef_debug_render_process
 .PHONY: _build-dev _build-local _build-release build-storage-status clean-build-cache
 
 build-dev:
-	./scripts/with-build-storage.sh dev $(MAKE) _build-dev
+	./scripts/vmux-builder dev $(MAKE) _build-dev
 
 _build-dev: export CARGO_INCREMENTAL = 1
 _build-dev: ensure-native-deps ensure-codesign-deps install-debug-render-process
@@ -101,28 +101,28 @@ endif
 export
 
 build-local:
-	./scripts/with-build-storage.sh local $(MAKE) _build-local
+	./scripts/vmux-builder local $(MAKE) _build-local
 
 _build-local: ensure-mac-deps ensure-package-deps ensure-codesign-deps
 	./scripts/build-mac-release.sh local
 
 local: build-local
-	@bash -ec 'source ./scripts/cargo-target-paths.sh; sha="$$(git rev-parse --short=7 HEAD)"; exec open "$$(vmux_cargo_profile_dir "$$(pwd -P)" release)/Vmux ($$sha).app"'
+	./scripts/vmux-builder open-local
 
 build-release:
-	./scripts/with-build-storage.sh release $(MAKE) _build-release
+	./scripts/vmux-builder release $(MAKE) _build-release
 
 _build-release: ensure-mac-deps ensure-package-deps
 	./scripts/build-mac-release.sh release
 
 release: build-release
-	@bash -ec 'source ./scripts/cargo-target-paths.sh; exec open "$$(vmux_cargo_profile_dir "$$(pwd -P)" release)/Vmux.app"'
+	./scripts/vmux-builder open-release
 
 build-storage-status:
-	./scripts/with-build-storage.sh status
+	./scripts/vmux-builder status
 
 clean-build-cache:
-	./scripts/with-build-storage.sh clean
+	./scripts/vmux-builder clean
 
 setup-cef:
 	CARGO_BIN="$(CARGO_BIN)" EXPORT_CEF_BIN="$(EXPORT_CEF_BIN)" ./scripts/install-cef.sh "$$HOME/.local/share"
