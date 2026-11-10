@@ -17,6 +17,12 @@ impl ExploreStep {
             let Some(program) = words.first() else {
                 continue;
             };
+            if words
+                .iter()
+                .any(|word| word.starts_with('>') || word.starts_with('<'))
+            {
+                return None;
+            }
             let program_name = program.rsplit('/').next().unwrap_or(program);
             if matches!(program_name, "bash" | "sh" | "zsh") {
                 let argument = words.iter().position(|word| {
@@ -37,10 +43,8 @@ impl ExploreStep {
                 continue;
             }
             if words.iter().any(|word| {
-                (program.ends_with("sed")
-                    && (word.starts_with("-i") || word.starts_with("--in-place")))
-                    || word.starts_with('>')
-                    || word.starts_with('<')
+                program.ends_with("sed")
+                    && (word.starts_with("-i") || word.starts_with("--in-place"))
             }) {
                 return None;
             }
@@ -449,6 +453,9 @@ text(await tools.exec_command({cmd:'ls tests'}));"#;
             "sed -i '' 's/old/new/' src.rs",
             "cat $(secret_command)",
             "cat input > output",
+            "bash -c \"cat input\" > output",
+            "sh -c \"cat input\" < source",
+            "zsh -c \"cat input\" >> output",
         ] {
             assert!(ExploreStep::commands(source).is_none(), "{source}");
         }

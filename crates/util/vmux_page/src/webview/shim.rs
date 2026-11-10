@@ -1186,4 +1186,9 @@ mod tests {
     fn composer_handoff_preserves_final_layout_and_does_not_delay_navigation() {
         RuntimeProbe::verify(include_str!("composer_handoff_test.js"));
     }
+
+    #[test]
+    fn composer_handoff_uses_native_browser_layout_and_animation() {
+        RuntimeProbe::verify(include_str!("composer_handoff_browser_test.js"));
+    }
 }

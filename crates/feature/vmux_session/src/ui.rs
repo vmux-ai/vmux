@@ -72,6 +72,7 @@ fn SessionDetail(session_id: String, mut details_open: Signal<bool>) -> Element 
     let details_available = details.is_some();
 
     rsx! {
+        item::ToolFileMenu {
         main {
             class: "session-chat-page relative isolate flex h-dvh flex-col overflow-hidden bg-background text-foreground outline-none",
             onresize: move |event: Event<ResizeData>| file_placement.resize(&event.data()),
@@ -116,6 +117,7 @@ fn SessionDetail(session_id: String, mut details_open: Signal<bool>) -> Element 
                     }
                 }
             }
+        }
         }
     }
 }

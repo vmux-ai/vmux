@@ -601,20 +601,19 @@ mod disclosure_tests {
         .enumerate()
         {
             let host = Rc::new(FileHost::default());
-            let mut dom = VirtualDom::new_with_props(
-                ToolFileLink,
-                ToolFileLinkProps {
-                    path: "/work/main.rs".into(),
-                    read: false,
-                },
-            );
+            let mut dom = VirtualDom::new(MenuFileLink);
             dom.provide_root_context(HostBinding(host.clone()));
             let edits = dom.rebuild_to_vec();
             let trigger = edits
                 .edits
                 .iter()
                 .find_map(|edit| match edit {
-                    Mutation::NewEventListener { name, id } if name == "contextmenu" => Some(*id),
+                    Mutation::SetAttribute {
+                        name: "href",
+                        value: AttributeValue::Text(url),
+                        id,
+                        ..
+                    } if url == "file:///work/main.rs" => Some(*id),
                     _ => None,
                 })
                 .unwrap();
@@ -627,6 +626,10 @@ mod disclosure_tests {
                 trigger,
             );
             let opened = dom.render_immediate_to_vec();
+            let html = dioxus_ssr::render(&dom);
+            let (row, popup) = html.split_once("</details>").unwrap();
+            assert!(!row.contains("role=\"menu\""));
+            assert!(popup.contains("role=\"menu\""));
             let buttons = opened
                 .edits
                 .iter()
@@ -656,6 +659,15 @@ mod disclosure_tests {
             assert_eq!(opened.len(), 1);
             assert_eq!(opened[0].value, "file:///work/main.rs");
             assert_eq!(opened[0].open, Some(target));
+        }
+    }
+
+    #[component]
+    fn MenuFileLink() -> Element {
+        rsx! {
+            ToolFileMenu {
+                details { summary { ToolFileLink { path: "/work/main.rs" } } }
+            }
         }
     }
 
@@ -1089,6 +1101,7 @@ fn ToolFiles(paths: Vec<String>) -> Element {
 #[component]
 fn ToolFileLink(path: String, #[props(default)] read: bool) -> Element {
     let placement = try_consume_context::<FilePlacement>();
+    let menu = try_consume_context::<FileMenu>();
     let binding =
         try_consume_context::<vmux_ui::hooks::UiStateBinding<crate::state::ChatUiState>>();
     let cwd = binding
@@ -1107,10 +1120,8 @@ fn ToolFileLink(path: String, #[props(default)] read: bool) -> Element {
         return rsx! { span { class: "truncate font-mono text-[11px]", title: file.path, "{label}" } };
     };
     let clicked_url = url.clone();
-    rsx! {
-        ContextMenu { attributes: vec![],
-            ContextMenuTrigger { attributes: vec![],
-                a {
+    let link = rsx! {
+        a {
                     href: url.clone(),
                     title: file.path,
                     class: "inline-block max-w-full truncate align-middle font-mono text-[11px] text-foreground/65 underline-offset-2 transition-colors hover:text-primary hover:underline",
@@ -1121,10 +1132,31 @@ fn ToolFileLink(path: String, #[props(default)] read: bool) -> Element {
                         let target = FilePlacement::target(width, NavigationGesture::from_mouse(&event));
                         let _ = vmux_ui::hooks::send(&OpenRequest { value: clicked_url.clone(), open: Some(target) });
                     },
+                    oncontextmenu: move |_| {
+                        if let Some(menu) = menu {
+                            menu.select(url.clone());
+                        }
+                    },
                     "{label}"
-                }
-            }
+        }
+    };
+    if menu.is_some() {
+        rsx! { ContextMenuTrigger { attributes: vec![], {link} } }
+    } else {
+        link
+    }
+}
+
+#[component]
+pub(super) fn ToolFileMenu(children: Element) -> Element {
+    let menu = FileMenu(use_signal(String::new));
+    use_context_provider(|| menu);
+    let url = (menu.0)();
+    rsx! {
+        ContextMenu { attributes: vec![],
+            {children}
             ContextMenuContent { attributes: vec![],
+                if !url.is_empty() {
                 ToolFileOpenItem {
                     index: 0usize, url: url.clone(),
                     target: OpenTarget::InPane { direction: PaneDirection::Right, target: PaneTarget::NewSplit, mode: PaneOpenMode::NewStack },
@@ -1132,8 +1164,18 @@ fn ToolFileLink(path: String, #[props(default)] read: bool) -> Element {
                 }
                 ToolFileOpenItem { index: 1usize, url: url.clone(), target: OpenTarget::InNewStack, label: "agent-tool-open-in-stack" }
                 ToolFileOpenItem { index: 2usize, url, target: OpenTarget::InNewTab, label: "agent-tool-open-in-tab" }
+                }
             }
         }
+    }
+}
+
+#[derive(Clone, Copy)]
+struct FileMenu(Signal<String>);
+
+impl FileMenu {
+    fn select(mut self, url: String) {
+        self.0.set(url);
     }
 }
 

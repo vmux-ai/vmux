@@ -345,6 +345,12 @@ pub enum ChatToolKind {
 
 impl ChatToolKind {
     fn file_paths(self, arguments: &ChatToolArguments, hint: Option<&str>) -> Vec<String> {
+        if matches!(self, Self::ReadFile | Self::ReadSkill | Self::WriteFile)
+            && let ChatToolArguments::Value(ChatToolArgumentValue::Path(path)) = arguments
+            && !path.trim().is_empty()
+        {
+            return vec![path.clone()];
+        }
         let mut paths = arguments.file_paths();
         if paths.is_empty()
             && matches!(self, Self::ReadFile | Self::ReadSkill | Self::WriteFile)
@@ -422,21 +428,19 @@ impl ChatToolArguments {
                 }
             }
         }
-        if let Some(command) = ChatCommand::from_arguments(ChatToolKind::Command, self)
-            && let Some(steps) = command.exploration()
-        {
-            for mut step in steps {
-                if let Some(directory) = directory {
-                    step.in_directory(std::path::Path::new(directory));
-                }
-                if let ExploreStep::Read { path } = step
-                    && !paths.contains(&path)
-                {
-                    paths.push(path);
+        if let Some(command) = ChatCommand::from_arguments(ChatToolKind::Command, self) {
+            if let Some(steps) = command.exploration() {
+                for mut step in steps {
+                    if let Some(directory) = directory {
+                        step.in_directory(std::path::Path::new(directory));
+                    }
+                    if let ExploreStep::Read { path } = step
+                        && !paths.contains(&path)
+                    {
+                        paths.push(path);
+                    }
                 }
             }
-        }
-        if !paths.is_empty() {
             return paths;
         }
         match self {
@@ -791,6 +795,41 @@ text(await tools.exec_command({cmd:"cat src/two.rs",workdir:"/work/two"}));"#
             ..Default::default()
         };
         assert_eq!(call.file_paths(), ["/work/feature/src/main.rs"]);
+    }
+
+    #[test]
+    fn nonreading_commands_do_not_turn_path_shaped_arguments_into_file_links() {
+        for arguments in [
+            ChatToolArguments::Value(ChatToolArgumentValue::Path("/usr/bin/git status".into())),
+            ChatToolArguments::Fields(vec![
+                ChatToolArgument {
+                    name: "cmd".into(),
+                    label: String::new(),
+                    value: ChatToolArgumentValue::Code("git status".into()),
+                },
+                ChatToolArgument {
+                    name: "log".into(),
+                    label: String::new(),
+                    value: ChatToolArgumentValue::Path("/work/not-read.log".into()),
+                },
+            ]),
+        ] {
+            let call = ChatToolCall {
+                kind: ChatToolKind::Command,
+                arguments,
+                ..Default::default()
+            };
+            assert!(call.command().is_some());
+            assert!(call.file_paths().is_empty());
+        }
+        let read = ChatToolCall {
+            kind: ChatToolKind::ReadFile,
+            arguments: ChatToolArguments::Value(ChatToolArgumentValue::Path(
+                "/work/read.rs".into(),
+            )),
+            ..Default::default()
+        };
+        assert_eq!(read.file_paths(), ["/work/read.rs"]);
     }
 
     #[test]

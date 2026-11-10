@@ -976,6 +976,8 @@ pages share one native document surface; replacing their page root moves the sha
 its previous rectangle into its final dock position within the layout motion budget. The layout,
 input identity, and first frame commit immediately, with no interpolation for reduced motion.
 The composer handoff follows root replacement even when frame identity has already resynchronized.
+Its browser regression test requires Chrome or Chromium (selectable with `CHROME_BIN`) and checks
+native geometry and animation completion alongside the protocol probes.
 Submitting on Start immediately appends the initial user message to the local conversation and
 queues the same payload for agent delivery. Service snapshots reconcile that message by its stable
 conversation event identity. The first transcript update binds the Session viewport before page
@@ -1973,6 +1975,7 @@ File links retain the tool's working directory when available and otherwise use 
 Default file clicks preserve the conversation: a pane at least 1280 CSS pixels wide opens the editor
 to its right, reusing a sibling when present; a narrower or unmeasured pane opens a new Stack.
 Modifier gestures and the context menu retain explicit Stack, pane, and tab destinations.
+The file menu lives outside disclosure summaries, so selection cannot activate their click default.
 
 Session page roots install typed state listeners once. Child components read
 `UiStateBinding<T>::use_context` and selectors, so replacing a manager or detail subtree preserves
