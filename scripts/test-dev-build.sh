@@ -2,12 +2,13 @@
 set -euo pipefail
 
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+export VMUX_BUILD_STORAGE_BIN="$("$root/scripts/build-storage.sh")"
 tmp="$(mktemp -d)"
 tmp="$(cd "$tmp" && pwd -P)"
 trap 'rm -rf "$tmp"' EXIT
 mkdir -p "$tmp/client/scripts" "$tmp/target/debug/deps" "$tmp/bin"
 cp "$root/scripts/build-dev.sh" "$root/scripts/run-dev.sh" "$root/scripts/cargo-target-paths.sh" \
-    "$root/scripts/with-build-storage.sh" "$root/scripts/build-storage.py" \
+    "$root/scripts/with-build-storage.sh" "$root/scripts/build-storage.sh" \
     "$root/scripts/target-cache-common.sh" "$tmp/client/scripts/"
 
 cat > "$tmp/client/scripts/cargo-with-cef-cache.sh" <<'CARGO'

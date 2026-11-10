@@ -2,6 +2,7 @@
 set -euo pipefail
 
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)"
+export VMUX_BUILD_STORAGE_BIN="$("$root/scripts/build-storage.sh")"
 tmp="$(mktemp -d)"
 tmp="$(cd "$tmp" && pwd -P)"
 trap 'rm -rf "$tmp"' EXIT
@@ -9,7 +10,7 @@ fixture="$tmp/checkout with spaces"
 target="$tmp/target with spaces"
 mkdir -p "$fixture/scripts" "$target/debug/deps" "$target/release" "$tmp/bin"
 cp "$root/Makefile" "$root/tool-versions.env" "$root/Cargo.lock" "$fixture/"
-cp "$root/scripts/with-build-storage.sh" "$root/scripts/build-storage.py" \
+cp "$root/scripts/with-build-storage.sh" "$root/scripts/build-storage.sh" \
     "$root/scripts/target-cache-common.sh" "$root/scripts/cargo-target-paths.sh" \
     "$root/scripts/build-mac-release.sh" "$fixture/scripts/"
 printf 'Signature: 8a477f597d28d172789f06886806bc55\n' > "$target/CACHEDIR.TAG"
@@ -102,6 +103,21 @@ _build-release:
 	@./scripts/fixture-build.sh release
 MAKE
 chmod +x "$tmp/bin/"* "$fixture/scripts/"*.sh
+mkdir -p "$fixture/crates/app/vmux_build/src"
+cp "$root/crates/app/vmux_build/src/"*.rs "$fixture/crates/app/vmux_build/src/"
+cat > "$tmp/bin/rustc-bootstrap" <<'RUSTC'
+#!/usr/bin/env bash
+printf '%s\n' "$*" >> "$TEST_BOOTSTRAP_LOG"
+exec "$REAL_BOOTSTRAP_RUSTC" "$@"
+RUSTC
+chmod +x "$tmp/bin/rustc-bootstrap"
+export REAL_BOOTSTRAP_RUSTC="$(command -v "${RUSTC:-rustc}")"
+export TEST_BOOTSTRAP_LOG="$tmp/bootstrap.log"
+bootstrap=(env -u VMUX_BUILD_STORAGE_BIN "RUSTC=$tmp/bin/rustc-bootstrap" "$fixture/scripts/build-storage.sh")
+host_binary="$(CARGO_BUILD_TARGET=fixture-target "${bootstrap[@]}")"
+[[ "$("${bootstrap[@]}")" == "$host_binary" ]]
+[[ "$(grep -c -- '--edition=2024' "$TEST_BOOTSTRAP_LOG")" == 1 ]]
+"$host_binary" --root "$fixture" --target "$target" status
 export PATH="$tmp/bin:$PATH"
 export CARGO_TARGET_DIR="$target"
 export APPLE_SIGNING_IDENTITY='fixture identity'
@@ -138,12 +154,8 @@ make -C "$fixture" build-dev
 make -C "$fixture" build-local
 [[ -f "$target/release/Vmux (9999999).app/Contents/MacOS/vmux_desktop" ]]
 [[ ! -f "$target/release/deps/cache.o" ]]
-python3 - "$target" <<'CHECK'
-from pathlib import Path
-import sys
-target = Path(sys.argv[1])
-assert len(list((target / 'release').glob('Vmux (*).app'))) == 3
-CHECK
+apps=("$target/release/"Vmux\ \(*\).app)
+[[ "${#apps[@]}" == 3 ]]
 make -C "$fixture" build-release
 [[ -f "$target/release/Vmux.app/Contents/MacOS/vmux_desktop" ]]
 [[ "$(cat "$target/release/Vmux.dmg")" == 'distribution image' ]]

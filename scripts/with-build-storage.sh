@@ -13,7 +13,7 @@ esac
 target="$(vmux_cargo_target_dir "$root")"
 mkdir -p "$(dirname "$target")"
 target="$(cd "$(dirname "$target")" && pwd -P)/$(basename "$target")"
-storage=(python3 "$root/scripts/build-storage.py" --root "$root" --target "$target")
+storage=("$("$root/scripts/build-storage.sh")" --root "$root" --target "$target")
 
 if [[ "$profile" == status ]]; then
     exec "${storage[@]}" status

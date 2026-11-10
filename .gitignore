@@ -1,5 +1,5 @@
 /target
-__pycache__/
+.build-tools/
 patches/**/target/
 .DS_Store
 *.app

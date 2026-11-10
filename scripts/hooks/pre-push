@@ -5,7 +5,7 @@ root="$(git rev-parse --show-toplevel)"
 cd "$root"
 
 echo "pre-push: formatting, diff, and source conventions"
-python3 scripts/test-build-storage.py
+./scripts/build-storage.sh --test
 bash scripts/test-build-storage.sh
 cargo fmt --all -- --check
 git diff --check
