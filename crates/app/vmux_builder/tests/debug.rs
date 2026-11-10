@@ -44,6 +44,7 @@ test -f "$app/Contents/MacOS/vmux_desktop"
 "#,
     );
     let mut prepare = project.command(env!("CARGO_BIN_EXE_vmux_builder"));
+    prepare.env("CARGO_INCREMENTAL", "1");
     prepare.arg("--root").arg(project.root()).args([
         "prepare-dev",
         "--no-default-features",
