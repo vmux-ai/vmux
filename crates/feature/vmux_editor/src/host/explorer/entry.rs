@@ -3,13 +3,16 @@ use std::path::{Path, PathBuf};
 use bevy::prelude::*;
 use bevy::tasks::{IoTaskPool, Task, futures_lite::future};
 use bevy_cef::prelude::*;
-use vmux_ecs::FileUiStateWrite;
 use vmux_ecs::event::{
     ExplorerCreateDirectoryPromptRequest, ExplorerCreateFilePromptRequest,
     ExplorerDeletePromptRequest, ExplorerPromptDismissRequest, ExplorerPromptDraftRequest,
     ExplorerPromptState, ExplorerPromptSubmitRequest, ExplorerRenamePromptRequest,
 };
 use vmux_ecs::page::PageReady;
+use vmux_ecs::{
+    FileUiStateWrite, Operation, OperationCompleted, OperationPlugin, OperationState,
+    OperationTarget,
+};
 
 use super::fs::ExplorerFs;
 use super::{
@@ -23,6 +26,9 @@ pub(super) struct ExplorerEntryPlugin;
 
 impl Plugin for ExplorerEntryPlugin {
     fn build(&self, app: &mut App) {
+        if !app.is_plugin_added::<OperationPlugin>() {
+            app.add_plugins(OperationPlugin);
+        }
         app.add_plugins(UiEventPlugin::<(
             ExplorerCreateFilePromptRequest,
             ExplorerCreateDirectoryPromptRequest,
@@ -363,22 +369,13 @@ struct ExplorerDeleteOutcome {
 }
 
 #[derive(Component)]
-struct ExplorerCreateTask {
-    webview: Entity,
-    task: Task<Result<ExplorerCreateOutcome, String>>,
-}
+struct ExplorerCreateTask(Task<Result<ExplorerCreateOutcome, String>>);
 
 #[derive(Component)]
-struct ExplorerRenameTask {
-    webview: Entity,
-    task: Task<Result<ExplorerRenameOutcome, String>>,
-}
+struct ExplorerRenameTask(Task<Result<ExplorerRenameOutcome, String>>);
 
 #[derive(Component)]
-struct ExplorerDeleteTask {
-    webview: Entity,
-    task: Task<Result<ExplorerDeleteOutcome, String>>,
-}
+struct ExplorerDeleteTask(Task<Result<ExplorerDeleteOutcome, String>>);
 
 fn create(
     trigger: On<CreateEntry>,
@@ -405,10 +402,12 @@ fn create(
             is_dir,
         })
     });
-    commands.spawn(ExplorerCreateTask {
-        webview: entity,
-        task,
-    });
+    commands.spawn((
+        Operation::bundle("file.create").unwrap().running(),
+        OperationTarget::new(entity),
+        ChildOf(entity),
+        ExplorerCreateTask(task),
+    ));
 }
 
 fn rename(
@@ -458,10 +457,12 @@ fn rename(
             was_dir,
         })
     });
-    commands.spawn(ExplorerRenameTask {
-        webview: entity,
-        task,
-    });
+    commands.spawn((
+        Operation::bundle("file.rename").unwrap().running(),
+        OperationTarget::new(entity),
+        ChildOf(entity),
+        ExplorerRenameTask(task),
+    ));
 }
 
 fn delete(
@@ -487,24 +488,36 @@ fn delete(
             was_dir,
         })
     });
-    commands.spawn(ExplorerDeleteTask {
-        webview: entity,
-        task,
-    });
+    commands.spawn((
+        Operation::bundle("file.delete").unwrap().running(),
+        OperationTarget::new(entity),
+        ChildOf(entity),
+        ExplorerDeleteTask(task),
+    ));
 }
 
 fn drain_creates(
-    mut tasks: Query<(Entity, &mut ExplorerCreateTask)>,
+    mut tasks: Query<(
+        Entity,
+        &mut ExplorerCreateTask,
+        &OperationTarget,
+        &OperationState,
+    )>,
     views: Query<&UsesExplorerTree>,
     mut trees: Query<&mut ExplorerTree>,
     mut commands: Commands,
 ) {
-    for (task_entity, mut pending) in &mut tasks {
-        let Some(result) = future::block_on(future::poll_once(&mut pending.task)) else {
+    for (task_entity, mut pending, target, state) in &mut tasks {
+        if !matches!(state, OperationState::Pending | OperationState::Running) {
+            commands.entity(task_entity).remove::<ExplorerCreateTask>();
+            continue;
+        }
+        let Some(result) = future::block_on(future::poll_once(&mut pending.0)) else {
             continue;
         };
-        let webview = pending.webview;
-        commands.entity(task_entity).despawn();
+        let webview = target.entity();
+        commands.trigger(OperationCompleted::from_result(task_entity, &result));
+        commands.entity(task_entity).remove::<ExplorerCreateTask>();
         let Ok(tree_of) = views.get(webview) else {
             continue;
         };
@@ -547,17 +560,27 @@ fn drain_creates(
 }
 
 fn drain_renames(
-    mut tasks: Query<(Entity, &mut ExplorerRenameTask)>,
+    mut tasks: Query<(
+        Entity,
+        &mut ExplorerRenameTask,
+        &OperationTarget,
+        &OperationState,
+    )>,
     mut views: Query<(&FileView, &mut ExplorerState, &UsesExplorerTree)>,
     mut trees: Query<&mut ExplorerTree>,
     mut commands: Commands,
 ) {
-    for (task_entity, mut pending) in &mut tasks {
-        let Some(result) = future::block_on(future::poll_once(&mut pending.task)) else {
+    for (task_entity, mut pending, target, state) in &mut tasks {
+        if !matches!(state, OperationState::Pending | OperationState::Running) {
+            commands.entity(task_entity).remove::<ExplorerRenameTask>();
+            continue;
+        }
+        let Some(result) = future::block_on(future::poll_once(&mut pending.0)) else {
             continue;
         };
-        let webview = pending.webview;
-        commands.entity(task_entity).despawn();
+        let webview = target.entity();
+        commands.trigger(OperationCompleted::from_result(task_entity, &result));
+        commands.entity(task_entity).remove::<ExplorerRenameTask>();
         let Ok((file_view, mut state, tree_of)) = views.get_mut(webview) else {
             continue;
         };
@@ -611,17 +634,27 @@ fn drain_renames(
 }
 
 fn drain_deletes(
-    mut tasks: Query<(Entity, &mut ExplorerDeleteTask)>,
+    mut tasks: Query<(
+        Entity,
+        &mut ExplorerDeleteTask,
+        &OperationTarget,
+        &OperationState,
+    )>,
     mut views: Query<(&FileView, &mut ExplorerState, &UsesExplorerTree)>,
     mut trees: Query<&mut ExplorerTree>,
     mut commands: Commands,
 ) {
-    for (task_entity, mut pending) in &mut tasks {
-        let Some(result) = future::block_on(future::poll_once(&mut pending.task)) else {
+    for (task_entity, mut pending, target, state) in &mut tasks {
+        if !matches!(state, OperationState::Pending | OperationState::Running) {
+            commands.entity(task_entity).remove::<ExplorerDeleteTask>();
+            continue;
+        }
+        let Some(result) = future::block_on(future::poll_once(&mut pending.0)) else {
             continue;
         };
-        let webview = pending.webview;
-        commands.entity(task_entity).despawn();
+        let webview = target.entity();
+        commands.trigger(OperationCompleted::from_result(task_entity, &result));
+        commands.entity(task_entity).remove::<ExplorerDeleteTask>();
         let Ok((file_view, mut state, tree_of)) = views.get_mut(webview) else {
             continue;
         };

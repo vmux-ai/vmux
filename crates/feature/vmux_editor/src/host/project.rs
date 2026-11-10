@@ -9,6 +9,10 @@ use bevy_cef::prelude::{UiEventPlugin, UiInput};
 use serde::{Deserialize, Serialize};
 use vmux_api::avatar::IdenticonSpec;
 use vmux_ecs::page::PrewarmPage;
+use vmux_ecs::{
+    Operation, OperationCompleted, OperationPlugin, OperationState, OperationTarget,
+    OperationTargetRevision,
+};
 use vmux_git::worktree::RepoLabel;
 use vmux_git::{
     RepositoryProvisionCompleted, RepositoryProvisionOperation, RepositoryProvisionRequest,
@@ -26,6 +30,9 @@ pub(super) struct ProjectPagePlugin;
 
 impl Plugin for ProjectPagePlugin {
     fn build(&self, app: &mut App) {
+        if !app.is_plugin_added::<OperationPlugin>() {
+            app.add_plugins(OperationPlugin);
+        }
         app.add_plugins(vmux_ecs::UiStatePlugin::<ProjectUiState>::default())
             .add_message::<vmux_layout::NewTabRequest>()
             .add_message::<vmux_layout::stack::OpenRequest>()
@@ -227,9 +234,14 @@ struct ProjectPageQueries<'w, 's> {
 
 #[derive(Component)]
 struct PendingProjectOperation {
-    webview: Entity,
     root: PathBuf,
-    revision: u64,
+}
+
+#[derive(Bundle)]
+struct PendingBundle {
+    pending: PendingProjectOperation,
+    target: OperationTarget,
+    revision: OperationTargetRevision,
 }
 
 #[derive(SystemParam)]
@@ -242,16 +254,16 @@ struct ProjectOperationPages<'w, 's> {
             &'static ProjectPageRevision,
         ),
     >,
-    pending: Query<'w, 's, &'static PendingProjectOperation>,
+    pending: Query<'w, 's, &'static OperationTarget, With<PendingProjectOperation>>,
     states: Query<'w, 's, &'static vmux_ecs::UiState<ProjectUiState>>,
 }
 
 impl ProjectOperationPages<'_, '_> {
-    fn for_page(&self, webview: Entity, root: &Path) -> Option<PendingProjectOperation> {
+    fn for_page(&self, webview: Entity, root: &Path) -> Option<PendingBundle> {
         if self
             .pending
             .iter()
-            .any(|operation| operation.webview == webview)
+            .any(|operation| operation.entity() == webview)
         {
             return None;
         }
@@ -261,10 +273,12 @@ impl ProjectOperationPages<'_, '_> {
         if !ProjectRoute::is_root(&page.url) {
             return None;
         }
-        Some(PendingProjectOperation {
-            webview,
-            root: root.to_path_buf(),
-            revision: revision.value,
+        Some(PendingBundle {
+            pending: PendingProjectOperation {
+                root: root.to_path_buf(),
+            },
+            target: OperationTarget::new(webview),
+            revision: OperationTargetRevision(revision.value),
         })
     }
 
@@ -524,7 +538,13 @@ fn create(
     commands.trigger(vmux_ecs::UiStateWrite::<ProjectUiState>::from_event(
         webview, &state,
     ));
-    let requester = commands.spawn(pending).id();
+    let requester = commands
+        .spawn((
+            Operation::bundle("project.create").unwrap().running(),
+            ChildOf(webview),
+            pending,
+        ))
+        .id();
     requests.write(RepositoryProvisionRequest {
         requester,
         operation,
@@ -558,7 +578,12 @@ fn import(
         }
         result
     });
-    commands.spawn((pending, ProjectImportTask(task)));
+    commands.spawn((
+        Operation::bundle("project.import").unwrap().running(),
+        ChildOf(webview),
+        pending,
+        ProjectImportTask(task),
+    ));
 }
 
 fn clone(
@@ -594,7 +619,13 @@ fn clone(
     commands.trigger(vmux_ecs::UiStateWrite::<ProjectUiState>::from_event(
         webview, &state,
     ));
-    let requester = commands.spawn(pending).id();
+    let requester = commands
+        .spawn((
+            Operation::bundle("project.clone").unwrap().running(),
+            ChildOf(webview),
+            pending,
+        ))
+        .id();
     requests.write(RepositoryProvisionRequest {
         requester,
         operation,
@@ -698,7 +729,12 @@ fn delete(
         }
         result
     });
-    commands.spawn((pending, ProjectDeleteTask(task)));
+    commands.spawn((
+        Operation::bundle("project.delete").unwrap().running(),
+        ChildOf(webview),
+        pending,
+        ProjectDeleteTask(task),
+    ));
 }
 
 fn collection_view(
@@ -897,33 +933,59 @@ fn sync_icons(
 }
 
 fn finish_deletes(
-    mut pending: Query<(Entity, &PendingProjectOperation, &mut ProjectDeleteTask)>,
+    mut pending: Query<(
+        Entity,
+        &PendingProjectOperation,
+        &OperationTarget,
+        &OperationTargetRevision,
+        &mut ProjectDeleteTask,
+        &OperationState,
+    )>,
     pages: Query<(&vmux_ecs::PageMetadata, &ProjectPageRevision)>,
     proxy: Option<Res<EventLoopProxyWrapper>>,
     mut commands: Commands,
 ) {
-    for (entity, operation, mut task) in &mut pending {
+    for (entity, operation, target, captured, mut task, state) in &mut pending {
+        if !matches!(state, OperationState::Pending | OperationState::Running) {
+            commands
+                .entity(entity)
+                .remove::<(PendingProjectOperation, ProjectDeleteTask)>();
+            if pages.get(target.entity()).is_ok_and(|(page, revision)| {
+                ProjectRoute::is_root(&page.url) && captured.accepts(Some(revision.value))
+            }) {
+                let wake = proxy.as_deref().map(|proxy| (**proxy).clone());
+                commands
+                    .entity(target.entity())
+                    .insert(ProjectCatalogTask::spawn(
+                        operation.root.clone(),
+                        captured.0,
+                        wake,
+                    ));
+            }
+            continue;
+        }
         let Some(result) = future::block_on(future::poll_once(&mut task.0)) else {
             continue;
         };
-        let current = pages.get(operation.webview).is_ok_and(|(page, revision)| {
-            ProjectRoute::is_root(&page.url) && revision.value == operation.revision
+        commands.trigger(OperationCompleted::from_result(entity, &result));
+        let current = pages.get(target.entity()).is_ok_and(|(page, revision)| {
+            ProjectRoute::is_root(&page.url) && captured.accepts(Some(revision.value))
         });
         if current {
             match result {
                 Ok(()) => {
                     let wake = proxy.as_deref().map(|proxy| (**proxy).clone());
                     commands
-                        .entity(operation.webview)
+                        .entity(target.entity())
                         .insert(ProjectCatalogTask::spawn(
                             operation.root.clone(),
-                            operation.revision,
+                            captured.0,
                             wake,
                         ));
                 }
                 Err(error) => {
                     commands.trigger(vmux_ecs::UiStateWrite::<ProjectUiState>::from_event(
-                        operation.webview,
+                        target.entity(),
                         &ProjectUiState {
                             view: ProjectView::Error(error),
                             ..Default::default()
@@ -932,7 +994,9 @@ fn finish_deletes(
                 }
             }
         }
-        commands.entity(entity).despawn();
+        commands
+            .entity(entity)
+            .remove::<(PendingProjectOperation, ProjectDeleteTask)>();
     }
 }
 
@@ -1024,33 +1088,59 @@ fn sync_session_counts(
 }
 
 fn finish_imports(
-    mut pending: Query<(Entity, &PendingProjectOperation, &mut ProjectImportTask)>,
+    mut pending: Query<(
+        Entity,
+        &PendingProjectOperation,
+        &OperationTarget,
+        &OperationTargetRevision,
+        &mut ProjectImportTask,
+        &OperationState,
+    )>,
     pages: Query<(&vmux_ecs::PageMetadata, &ProjectPageRevision)>,
     proxy: Option<Res<EventLoopProxyWrapper>>,
     mut commands: Commands,
 ) {
-    for (entity, operation, mut task) in &mut pending {
+    for (entity, operation, target, captured, mut task, state) in &mut pending {
+        if !matches!(state, OperationState::Pending | OperationState::Running) {
+            commands
+                .entity(entity)
+                .remove::<(PendingProjectOperation, ProjectImportTask)>();
+            if pages.get(target.entity()).is_ok_and(|(page, revision)| {
+                ProjectRoute::is_root(&page.url) && captured.accepts(Some(revision.value))
+            }) {
+                let wake = proxy.as_deref().map(|proxy| (**proxy).clone());
+                commands
+                    .entity(target.entity())
+                    .insert(ProjectCatalogTask::spawn(
+                        operation.root.clone(),
+                        captured.0,
+                        wake,
+                    ));
+            }
+            continue;
+        }
         let Some(result) = future::block_on(future::poll_once(&mut task.0)) else {
             continue;
         };
-        let current = pages.get(operation.webview).is_ok_and(|(page, revision)| {
-            ProjectRoute::is_root(&page.url) && revision.value == operation.revision
+        commands.trigger(OperationCompleted::from_result(entity, &result));
+        let current = pages.get(target.entity()).is_ok_and(|(page, revision)| {
+            ProjectRoute::is_root(&page.url) && captured.accepts(Some(revision.value))
         });
         if current {
             match result {
                 Ok(()) => {
                     let wake = proxy.as_deref().map(|proxy| (**proxy).clone());
                     commands
-                        .entity(operation.webview)
+                        .entity(target.entity())
                         .insert(ProjectCatalogTask::spawn(
                             operation.root.clone(),
-                            operation.revision,
+                            captured.0,
                             wake,
                         ));
                 }
                 Err(error) => {
                     commands.trigger(vmux_ecs::UiStateWrite::<ProjectUiState>::from_event(
-                        operation.webview,
+                        target.entity(),
                         &ProjectUiState {
                             view: ProjectView::Error(error),
                             ..Default::default()
@@ -1059,39 +1149,68 @@ fn finish_imports(
                 }
             }
         }
-        commands.entity(entity).despawn();
+        commands
+            .entity(entity)
+            .remove::<(PendingProjectOperation, ProjectImportTask)>();
     }
 }
 
 fn finish_repository_operations(
     mut completed: MessageReader<RepositoryProvisionCompleted>,
-    pending: Query<&PendingProjectOperation>,
+    pending: Query<(
+        &PendingProjectOperation,
+        &OperationTarget,
+        &OperationTargetRevision,
+        &OperationState,
+    )>,
     pages: Query<(&vmux_ecs::PageMetadata, &ProjectPageRevision)>,
     proxy: Option<Res<EventLoopProxyWrapper>>,
     mut commands: Commands,
 ) {
     for completed in completed.read() {
-        let Ok(operation) = pending.get(completed.requester) else {
+        let Ok((operation, target, captured, state)) = pending.get(completed.requester) else {
             continue;
         };
-        let current = pages.get(operation.webview).is_ok_and(|(page, revision)| {
-            ProjectRoute::is_root(&page.url) && revision.value == operation.revision
+        if !matches!(state, OperationState::Pending | OperationState::Running) {
+            commands
+                .entity(completed.requester)
+                .remove::<PendingProjectOperation>();
+            if pages.get(target.entity()).is_ok_and(|(page, revision)| {
+                ProjectRoute::is_root(&page.url) && captured.accepts(Some(revision.value))
+            }) {
+                let wake = proxy.as_deref().map(|proxy| (**proxy).clone());
+                commands
+                    .entity(target.entity())
+                    .insert(ProjectCatalogTask::spawn(
+                        operation.root.clone(),
+                        captured.0,
+                        wake,
+                    ));
+            }
+            continue;
+        }
+        commands.trigger(OperationCompleted::from_result(
+            completed.requester,
+            &completed.result,
+        ));
+        let current = pages.get(target.entity()).is_ok_and(|(page, revision)| {
+            ProjectRoute::is_root(&page.url) && captured.accepts(Some(revision.value))
         });
         if current {
             match &completed.result {
                 Ok(()) => {
                     let wake = proxy.as_deref().map(|proxy| (**proxy).clone());
                     commands
-                        .entity(operation.webview)
+                        .entity(target.entity())
                         .insert(ProjectCatalogTask::spawn(
                             operation.root.clone(),
-                            operation.revision,
+                            captured.0,
                             wake,
                         ));
                 }
                 Err(error) => {
                     commands.trigger(vmux_ecs::UiStateWrite::<ProjectUiState>::from_event(
-                        operation.webview,
+                        target.entity(),
                         &ProjectUiState {
                             view: ProjectView::Error(error.clone()),
                             ..Default::default()
@@ -1100,7 +1219,9 @@ fn finish_repository_operations(
                 }
             }
         }
-        commands.entity(completed.requester).despawn();
+        commands
+            .entity(completed.requester)
+            .remove::<PendingProjectOperation>();
     }
 }
 
@@ -1253,6 +1374,115 @@ mod tests {
     use vmux_session::{SessionSummary, StageSummary};
 
     #[test]
+    fn project_failure_retains_the_operation_result_and_ignores_late_completion() {
+        let root = tempfile::tempdir().unwrap();
+        let mut page = ProjectPage::at(root.path(), ProjectRoute::ROOT);
+        page.wait_for_catalog();
+        page.app.world_mut().trigger(UiInput {
+            webview: page.view,
+            payload: ProjectCreateRequest {
+                name: "example".into(),
+            },
+        });
+        page.app.update();
+        let request = page
+            .app
+            .world_mut()
+            .resource_mut::<Messages<RepositoryProvisionRequest>>()
+            .drain()
+            .next()
+            .unwrap();
+        assert_eq!(
+            page.app.world().get::<OperationState>(request.requester),
+            Some(&OperationState::Running)
+        );
+        page.app
+            .world_mut()
+            .write_message(RepositoryProvisionCompleted {
+                requester: request.requester,
+                result: Err("creation failed".into()),
+            });
+        page.app.update();
+        assert_eq!(
+            page.app.world().get::<OperationState>(request.requester),
+            Some(&OperationState::Failed)
+        );
+        assert_eq!(
+            page.app
+                .world()
+                .get::<vmux_ecs::OperationError>(request.requester)
+                .unwrap()
+                .message(),
+            "creation failed"
+        );
+        assert!(
+            page.app
+                .world()
+                .get::<PendingProjectOperation>(request.requester)
+                .is_none()
+        );
+        let previous = page
+            .app
+            .world()
+            .get::<vmux_ecs::UiState<ProjectUiState>>(page.view)
+            .unwrap()
+            .current()
+            .cloned()
+            .unwrap();
+        page.app
+            .world_mut()
+            .write_message(RepositoryProvisionCompleted {
+                requester: request.requester,
+                result: Ok(()),
+            });
+        page.app.update();
+        let current = page
+            .app
+            .world()
+            .get::<vmux_ecs::UiState<ProjectUiState>>(page.view)
+            .unwrap()
+            .current()
+            .cloned()
+            .unwrap();
+        assert_eq!(current, previous);
+        assert_eq!(
+            page.app.world().get::<OperationState>(request.requester),
+            Some(&OperationState::Failed)
+        );
+    }
+
+    #[test]
+    fn closing_the_requesting_project_page_releases_its_operation_entity() {
+        let root = tempfile::tempdir().unwrap();
+        let mut page = ProjectPage::at(root.path(), ProjectRoute::ROOT);
+        page.wait_for_catalog();
+        page.app.world_mut().trigger(UiInput {
+            webview: page.view,
+            payload: ProjectCreateRequest {
+                name: "example".into(),
+            },
+        });
+        page.app.update();
+        let request = page
+            .app
+            .world_mut()
+            .resource_mut::<Messages<RepositoryProvisionRequest>>()
+            .drain()
+            .next()
+            .unwrap();
+        page.app.world_mut().entity_mut(page.view).despawn();
+        assert!(page.app.world().get_entity(request.requester).is_err());
+        page.app
+            .world_mut()
+            .write_message(RepositoryProvisionCompleted {
+                requester: request.requester,
+                result: Ok(()),
+            });
+        page.app.update();
+        assert!(page.app.world().get_entity(request.requester).is_err());
+    }
+
+    #[test]
     fn contextual_project_open_uses_the_owning_repository_and_preserves_new_stack_policy() {
         let root = tempfile::tempdir().unwrap();
         let project = root.path().join("repo");
@@ -1330,6 +1560,7 @@ mod tests {
                 .init_resource::<vmux_setting::AppSettings>()
                 .init_resource::<CatalogSnapshot>()
                 .add_message::<RepositoryProvisionCompleted>()
+                .add_message::<RepositoryProvisionRequest>()
                 .insert_non_send(bevy_cef::prelude::Browsers::default())
                 .add_observer(deliver_frame);
             app.world_mut().spawn(vmux_ecs::profile::ProjectsRoot(
@@ -1356,6 +1587,30 @@ mod tests {
                 permissions: &["ProjectUiState"],
             });
             Self { app, view }
+        }
+
+        fn wait_for_catalog(&mut self) {
+            let deadline = std::time::Instant::now() + std::time::Duration::from_secs(3);
+            loop {
+                self.app.update();
+                let ready = self
+                    .app
+                    .world()
+                    .get::<vmux_ecs::UiState<ProjectUiState>>(self.view)
+                    .and_then(vmux_ecs::UiState::current)
+                    .is_some_and(|state| matches!(state.view, ProjectView::Catalog(_)));
+                if ready
+                    && self
+                        .app
+                        .world()
+                        .get::<ProjectCatalogTask>(self.view)
+                        .is_none()
+                {
+                    return;
+                }
+                assert!(std::time::Instant::now() < deadline);
+                std::thread::sleep(std::time::Duration::from_millis(2));
+            }
         }
 
         fn wait_for_choices(&mut self) {
