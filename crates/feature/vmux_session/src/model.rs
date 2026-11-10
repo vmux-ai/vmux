@@ -16,7 +16,10 @@ use vmux_ecs::CreatedAt;
 #[cfg(host)]
 use vmux_ecs::store::StoreAppExt;
 #[cfg(host)]
-use vmux_ecs::{ActivateRequest, EntityTarget, LastActivatedAt, Order, PageMetadata};
+use vmux_ecs::{
+    ActivateRequest, EntityTarget, ExternalIdentityIndex, ExternalIdentityIndexPlugin,
+    ExternalIdentityIndexSet, LastActivatedAt, Order, PageMetadata,
+};
 use vmux_ecs::{ArchivedAt, Cwd, Description};
 
 #[cfg(host)]
@@ -31,7 +34,17 @@ impl Plugin for EntityPlugin {
         if !app.is_plugin_added::<crate::mutation::MutationPlugin>() {
             app.add_plugins(crate::mutation::MutationPlugin);
         }
-        app.register_stored::<Session>()
+        app.add_plugins(ExternalIdentityIndexPlugin::<
+            ProviderKind,
+            ProviderSessionId,
+            ProviderArchive,
+        >::default())
+            .configure_sets(
+                Update,
+                ExternalIdentityIndexSet::of::<ProviderKind, ProviderSessionId, ProviderArchive>()
+                    .before(crate::mutation::ReceiveSet),
+            )
+            .register_stored::<Session>()
             .register_stored::<SessionId>()
             .register_stored::<AgentId>()
             .register_stored::<ProviderStage>()
@@ -117,7 +130,17 @@ impl Plugin for StagePlugin {
         if !app.is_plugin_added::<crate::mutation::MutationPlugin>() {
             app.add_plugins(crate::mutation::MutationPlugin);
         }
-        app.insert_resource(Configuration::load())
+        app.add_plugins(ExternalIdentityIndexPlugin::<
+            ProviderKind,
+            ProviderSessionId,
+            ProviderStage,
+        >::default())
+            .configure_sets(
+                Update,
+                ExternalIdentityIndexSet::of::<ProviderKind, ProviderSessionId, ProviderStage>()
+                    .before(crate::mutation::ReceiveSet),
+            )
+            .insert_resource(Configuration::load())
             .register_stored::<Stage>()
             .register_stored::<StageChangedAt>()
             .register_type::<StageId>()
@@ -831,14 +854,9 @@ fn archive(
 fn archive_provider(
     mut requests: MessageReader<ProviderArchiveRequest>,
     mut operations: ResMut<ProviderArchiveOperations>,
+    index: Res<ExternalIdentityIndex<ProviderKind, ProviderSessionId, ProviderArchive>>,
     mut overrides: Query<
-        (
-            Entity,
-            &ProviderKind,
-            &ProviderSessionId,
-            &mut SourceUpdatedAt,
-            Option<&ArchivedAt>,
-        ),
+        (Entity, &mut SourceUpdatedAt, Option<&ArchivedAt>),
         With<ProviderArchive>,
     >,
     mut writes: MessageWriter<ProviderArchiveWriteRequest>,
@@ -853,21 +871,24 @@ fn archive_provider(
     }
     for request in latest.into_values() {
         let next_archived_at = request.source_updated_at.max(1);
-        let mut found = false;
-        for (entity, kind, id, mut source_updated_at, current_archived_at) in &mut overrides {
-            if kind != &request.kind || id != &request.id {
+        let entity = match index.entity(&request.kind, &request.id) {
+            Ok(entity) => entity,
+            Err(error) => {
+                bevy::log::warn!("provider archive refused: {error}");
                 continue;
             }
+        };
+        if let Some(entity) = entity {
+            let Ok((_, mut source_updated_at, current_archived_at)) = overrides.get_mut(entity)
+            else {
+                continue;
+            };
             source_updated_at.0 = request.source_updated_at;
             if request.archived && current_archived_at.is_none() {
                 commands.entity(entity).insert(ArchivedAt(next_archived_at));
             } else if !request.archived && current_archived_at.is_some() {
                 commands.entity(entity).remove::<ArchivedAt>();
             }
-            found = true;
-            break;
-        }
-        if found {
             if request.native
                 && let Some(write) = operations.request(&request)
             {
@@ -950,37 +971,40 @@ fn restore_tombstones(
 fn change_provider_stage(
     mut requests: MessageReader<ProviderStageChangeRequest>,
     definitions: Query<&StageId, With<StageDefinition>>,
-    mut stages: Query<
-        (
-            &ProviderKind,
-            &ProviderSessionId,
-            &mut Stage,
-            &mut StageChangedAt,
-            &mut SourceUpdatedAt,
-        ),
-        With<ProviderStage>,
-    >,
+    index: Res<ExternalIdentityIndex<ProviderKind, ProviderSessionId, ProviderStage>>,
+    mut stages: Query<(&mut Stage, &mut StageChangedAt, &mut SourceUpdatedAt), With<ProviderStage>>,
     mut commands: Commands,
 ) {
+    let mut latest = HashMap::<ProviderSessionKey, ProviderStageChangeRequest>::new();
     for request in requests.read() {
+        latest.insert(
+            ProviderSessionKey::from_components(&request.kind, &request.id),
+            request.clone(),
+        );
+    }
+    for request in latest.into_values() {
         if !definitions.iter().any(|id| id == &request.stage) {
             continue;
         }
         let now = vmux_ecs::UnixMillis::now().0;
-        let mut found = false;
-        for (kind, id, mut stage, mut changed_at, mut source_updated_at) in &mut stages {
-            if kind != &request.kind || id != &request.id {
+        let entity = match index.entity(&request.kind, &request.id) {
+            Ok(entity) => entity,
+            Err(error) => {
+                bevy::log::warn!("provider stage refused: {error}");
                 continue;
             }
-            found = true;
+        };
+        if let Some(entity) = entity {
+            let Ok((mut stage, mut changed_at, mut source_updated_at)) = stages.get_mut(entity)
+            else {
+                continue;
+            };
             if stage.0 != request.stage {
                 stage.0.clone_from(&request.stage);
             }
             changed_at.record_transition(now);
             source_updated_at.0 = request.source_updated_at;
-            break;
-        }
-        if !found {
+        } else {
             commands.spawn((
                 ProviderStage,
                 request.kind.clone(),
@@ -1444,6 +1468,29 @@ mod tests {
         app.update();
 
         assert!(app.world().get::<StageChangedAt>(entity).unwrap().0 > 1);
+    }
+
+    #[test]
+    fn provider_stage_requests_in_one_frame_keep_one_identity_and_the_latest_selection() {
+        let mut app = App::new();
+        app.add_plugins((EntityPlugin, StagePlugin));
+        app.update();
+        for (stage, updated_at) in [("done", 10), ("in_progress", 20)] {
+            app.world_mut().write_message(ProviderStageChangeRequest {
+                kind: ProviderKind("codex".into()),
+                id: ProviderSessionId("provider-session".into()),
+                stage: StageId(stage.into()),
+                source_updated_at: updated_at,
+            });
+        }
+        app.update();
+        let (stage, updated_at) = app
+            .world_mut()
+            .query_filtered::<(&Stage, &SourceUpdatedAt), With<ProviderStage>>()
+            .single(app.world())
+            .unwrap();
+        assert_eq!(stage.0.0, "in_progress");
+        assert_eq!(updated_at.0, 20);
     }
 
     #[test]

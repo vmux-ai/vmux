@@ -890,6 +890,11 @@ Identity indexes reuse existing ID components within a marker scope. ID or marke
 removals rebuild the index; duplicate IDs refuse lookup until the ambiguity is removed. Session
 conversation and composer lookup share one index, refreshed after deferred creation and service
 mutations before either consumes the Session. These indexes are runtime state, not stored identities.
+External identities index the existing provider and provider-ID components together within a
+marker scope. Provider stage and archive overrides share this lookup, reject ambiguous identities,
+and reconcile component changes and removals. IDs from different providers remain independent;
+stored provider components and canonical Session identity keep their existing representation.
+
 
 Finite product work uses `Operation::bundle` for a stable UUID, kind, and initial state. Project
 selection, tool operations, Git changes, and extension installation share the same lifecycle and
