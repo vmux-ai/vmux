@@ -316,6 +316,99 @@ mod disclosure_tests {
     }
 
     #[test]
+    fn read_only_exploration_stays_inside_the_expandable_call_details() {
+        let arguments = ChatToolArguments::Raw("cat /work/skills/caveman/SKILL.md".into());
+        let mut call = VirtualDom::new_with_props(
+            ToolCall,
+            ToolCallProps {
+                call: ChatToolCall {
+                    kind: vmux_api::chat::ChatToolKind::Command,
+                    arguments: arguments.clone(),
+                    ..Default::default()
+                },
+            },
+        );
+        call.rebuild_in_place();
+        let mut child = VirtualDom::new_with_props(
+            ToolChildCall,
+            ToolChildCallProps {
+                call: ChatToolChildCall {
+                    kind: vmux_api::chat::ChatToolKind::Command,
+                    arguments,
+                    ..Default::default()
+                },
+            },
+        );
+        child.rebuild_in_place();
+        for dom in [&call, &child] {
+            let html = dioxus_ssr::render(dom);
+            let summary = html
+                .split("<summary")
+                .nth(1)
+                .unwrap()
+                .split("</summary>")
+                .next()
+                .unwrap();
+            assert!(summary.contains(&translate("agent-tool-read-files")));
+            assert!(summary.contains("caveman/SKILL.md"));
+            let (details, following) = html.split_once("</details>").unwrap();
+            let read = translate_with(
+                "agent-tool-explore-read",
+                &[("path", TranslationValue::String("caveman/SKILL.md"))],
+            );
+            assert!(details.contains(&read));
+            assert!(!following.contains(&read));
+        }
+    }
+
+    #[test]
+    fn output_summaries_preview_one_line_and_keep_the_full_output_expandable() {
+        for error in [false, true] {
+            let content = "\nFirst result\nSecond result".to_string();
+            let mut nested = VirtualDom::new_with_props(
+                NestedToolResult,
+                NestedToolResultProps {
+                    result_key: 0,
+                    content: content.clone(),
+                    is_error: error,
+                },
+            );
+            nested.rebuild_in_place();
+            let mut standalone = VirtualDom::new_with_props(
+                StandaloneToolResult,
+                StandaloneToolResultProps {
+                    result_key: 0,
+                    content,
+                    is_error: error,
+                },
+            );
+            standalone.rebuild_in_place();
+            for dom in [&nested, &standalone] {
+                let html = dioxus_ssr::render(dom);
+                let summary = html
+                    .split("<summary")
+                    .nth(1)
+                    .unwrap()
+                    .split("</summary>")
+                    .next()
+                    .unwrap();
+                assert!(summary.contains("First result"));
+                assert!(!summary.contains("Second result"));
+                let full = html
+                    .split("<pre")
+                    .nth(1)
+                    .unwrap()
+                    .split("</pre>")
+                    .next()
+                    .unwrap();
+                assert!(full.contains("First result\nSecond result"));
+            }
+        }
+        let content = "Script completed\nWall time 0.2 seconds\nOutput:\n{\"exit_code\":0,\"output\":\"Actual output\\nRemaining output\"}";
+        assert_eq!(OutputPreview::new(content).0, "Actual output");
+    }
+
+    #[test]
     fn folded_reads_and_batches_keep_clickable_file_names() {
         let path = "/work/skills/caveman/SKILL.md";
         let call = ChatToolCall {
@@ -1188,8 +1281,8 @@ fn ToolCall(call: ChatToolCall) -> Element {
             &call.fallback_label,
         )
         .label
-    } else if exploration.is_some() {
-        translate("agent-tool-explored")
+    } else if let Some(steps) = &exploration {
+        ToolPresentation::for_exploration(steps).label
     } else {
         ToolPresentation::for_call(call.kind, &call.fallback_label).label
     };
@@ -1226,8 +1319,8 @@ fn ToolCall(call: ChatToolCall) -> Element {
                         div { class: "mt-1 text-[11px] font-medium text-foreground/45", "{call.name}" }
                         ToolArguments { arguments: call.arguments.clone() }
                     }
+                    if let Some(steps) = exploration { ToolExploration { steps } }
                 }
-                if let Some(steps) = exploration { ToolExploration { steps } }
                 if !children.is_empty() {
                     div { class: "mt-1.5 flex flex-col gap-1",
                         for child in children {
@@ -1450,8 +1543,8 @@ fn ToolChildCall(call: ChatToolChildCall) -> Element {
             &call.fallback_label,
         )
         .label
-    } else if exploration.is_some() {
-        translate("agent-tool-explored")
+    } else if let Some(steps) = &exploration {
+        ToolPresentation::for_exploration(steps).label
     } else {
         ToolPresentation::for_call(call.kind, &call.fallback_label).label
     };
@@ -1480,8 +1573,8 @@ fn ToolChildCall(call: ChatToolChildCall) -> Element {
                 div { class: "mt-1 text-[11px] font-medium text-foreground/45", "{call.name}" }
                 ToolArguments { arguments: call.arguments }
             }
+            if let Some(steps) = exploration { ToolExploration { steps } }
         }
-        if let Some(steps) = exploration { ToolExploration { steps } }
     }
 }
 
@@ -1536,6 +1629,7 @@ fn subagent_status_class(status: ChatSubagentStatus) -> &'static str {
 fn NestedToolResult(result_key: usize, content: String, is_error: bool) -> Element {
     let key = result_key;
     let content = content.as_str();
+    let preview = OutputPreview::new(content);
     let tone = if is_error {
         "text-red-500"
     } else {
@@ -1552,9 +1646,10 @@ fn NestedToolResult(result_key: usize, content: String, is_error: bool) -> Eleme
         translate("common-output")
     };
     rsx! {
-        details { key: "{key}", class: "disclosure rounded-lg px-2 py-1 text-xs {tone} {panel}",
+        details { key: "{key}", class: "disclosure group/output rounded-lg px-2 py-1 text-xs {tone} {panel}",
             summary { class: "flex cursor-pointer select-none items-center gap-2 list-none [&::-webkit-details-marker]:hidden",
                 span { class: "font-medium", "{label}" }
+                span { class: "min-w-0 flex-1 truncate font-mono text-[11px] text-muted-foreground group-open/output:hidden", "{preview.0}" }
                 DisclosureIcon {}
             }
             pre { class: "mt-1.5 max-h-72 overflow-auto whitespace-pre-wrap px-0.5 pb-1 font-mono text-[11px] leading-relaxed text-muted-foreground", "{content}" }
@@ -1566,6 +1661,7 @@ fn NestedToolResult(result_key: usize, content: String, is_error: bool) -> Eleme
 fn StandaloneToolResult(result_key: usize, content: String, is_error: bool) -> Element {
     let key = result_key;
     let content = content.as_str();
+    let preview = OutputPreview::new(content);
     let tone = if is_error {
         "text-red-500"
     } else {
@@ -1594,14 +1690,45 @@ fn StandaloneToolResult(result_key: usize, content: String, is_error: bool) -> E
     rsx! {
         div { key: "{key}", class: "grid grid-cols-[1.5rem_minmax(0,1fr)] items-start gap-2.5 rounded-xl px-2 py-1.5 transition-colors {row}",
             ActivityIconView { kind: icon }
-            details { class: "disclosure min-w-0 rounded-lg px-2 py-1 text-sm {tone} {panel}",
+            details { class: "disclosure group/output min-w-0 rounded-lg px-2 py-1 text-sm {tone} {panel}",
                 summary { class: "flex cursor-pointer select-none items-center gap-2 list-none [&::-webkit-details-marker]:hidden",
                     span { class: "font-medium", "{label}" }
+                    span { class: "min-w-0 flex-1 truncate font-mono text-[11px] text-muted-foreground group-open/output:hidden", "{preview.0}" }
                     DisclosureIcon {}
                 }
                 pre { class: "mt-1.5 max-h-72 overflow-auto whitespace-pre-wrap px-0.5 pb-1 font-mono text-[11px] leading-relaxed text-muted-foreground", "{content}" }
             }
         }
+    }
+}
+
+struct OutputPreview(String);
+
+impl OutputPreview {
+    fn new(content: &str) -> Self {
+        let mut body = content.trim();
+        if (body.starts_with("Script completed") || body.starts_with("Script running"))
+            && let Some((_, output)) = body.split_once("\nOutput:\n")
+        {
+            body = output.trim();
+        }
+        if let Ok(serde_json::Value::Object(value)) = serde_json::from_str(body)
+            && (value.contains_key("exit_code") || value.contains_key("chunk_id"))
+            && let Some(output) = value.get("output").and_then(serde_json::Value::as_str)
+        {
+            return Self::line(output);
+        }
+        Self::line(body)
+    }
+
+    fn line(content: &str) -> Self {
+        for line in content.lines() {
+            let line = line.trim();
+            if !line.is_empty() {
+                return Self(line.to_string());
+            }
+        }
+        Self(String::new())
     }
 }
 

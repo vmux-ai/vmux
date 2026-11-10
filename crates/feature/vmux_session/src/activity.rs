@@ -1,4 +1,4 @@
-use vmux_api::chat::{ChatActivityKind, ChatToolKind};
+use vmux_api::chat::{ChatActivityKind, ChatToolKind, ExploreStep};
 use vmux_ui::file_icon::{FileIcon, FilePath};
 use vmux_ui::i18n::translate;
 use vmux_ui::icon::LineIcon;
@@ -8,6 +8,17 @@ pub struct ToolPresentation {
 }
 
 impl ToolPresentation {
+    pub fn for_exploration(steps: &[ExploreStep]) -> Self {
+        let mut kind = ChatToolKind::ReadFile;
+        for step in steps {
+            if !matches!(step, ExploreStep::Read { .. }) {
+                kind = ChatToolKind::Search;
+                break;
+            }
+        }
+        Self::for_call(kind, "")
+    }
+
     pub fn for_call(kind: ChatToolKind, fallback: &str) -> Self {
         let label = match kind {
             ChatToolKind::Guardian => translate("agent-tool-guardian-review"),

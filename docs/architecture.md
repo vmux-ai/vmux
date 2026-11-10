@@ -1964,8 +1964,10 @@ Scrolling away from the bottom pauses following; input that leaves the viewport 
 keeps it pinned, and returning to the bottom resumes it. Older history is requested only after
 the initial scroll has settled. The latest tool batch stays expanded until every call has a result
 and subsequent assistant text arrives; earlier batches remain folded. Tool rows share native
-Claude/Vibe name classification and summarize wrapped Codex command batches as Ran, Explored,
-or Edited. Exploration exposes Read, Search, and List steps from the actual shell commands.
+Claude/Vibe name classification and summarize wrapped Codex command batches as Read, Ran,
+Explored, or Edited. Parsed exploration steps stay inside the call details. Output summaries show
+the first nonempty output line and retain the full text for expansion. Guardian rows report Codex's
+automatic action authorization checks.
 Folded tool rows and batches retain their file references, including reads inside Codex wrappers.
 File links retain the tool's working directory when available and otherwise use the Session's.
 Default file clicks preserve the conversation: a pane at least 1280 CSS pixels wide opens the editor
