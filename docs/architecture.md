@@ -1388,6 +1388,39 @@ without depending on cloud-specific files or changing the public client's build 
 Failed builds remove that link; real release bundles are never replaced. build-local remains
 the bundle/OS-integration gate.
 
+Dev, local, and release builds share a storage preflight and hold the target-cache lock
+through dependency preparation, compilation, signing, and cleanup. Builds warn below
+50 GiB free and refuse below 20 GiB after attempting to reclaim unused compile caches.
+Successful local builds retain three local app bundles plus running apps; all builds prune compile
+caches above a 50 GiB budget. Ready executables, runtime libraries, and release distribution
+artifacts survive cleanup; active profiles and raw Cargo locks prevent cache deletion.
+Removing compile caches invalidates their seed marker and requires recompilation on the
+next build. The thresholds are configurable with `VMUX_BUILD_STORAGE_*`; cache size uses
+allocated blocks, which can count shared APFS clones more than once. Storage cleanup stays
+inside the selected Cargo target and never walks sibling worktrees or application data.
+
+The dependency-free `vmux_builder` Rust command owns build sequencing, storage policy,
+target locks, and local/release launch paths. `scripts/vmux-builder` only bootstraps a
+missing host binary; Rust checks the embedded source snapshot and compiler, rebuilds
+itself when needed, and caches binaries under `.build-tools/`. Capacity checks therefore
+do not resolve Cargo dependencies or compile into the application target.
+
+The builder preserves the existing lock protocol: PID files on macOS and file locks on
+Linux. Lock waits remain cancellable. Each build command gets a separate process group;
+minimal POSIX signal handlers record cancellation and forward it to that group without
+allocating. The builder waits for its child, skips successful-build cleanup on failure or
+cancellation, and releases its locks before returning the original exit code.
+Preflight failures refuse the build. After the command succeeds, cleanup inspection or
+filesystem failures warn and preserve that success; cancellation still returns its signal code.
+
+Debug preparation and macOS package orchestration are Rust stages. Debug owns Cargo
+command order and the ready stamp/launch alias; macOS packaging owns env overrides,
+temporary signing keychains, restoration, and certificate verification. Environment
+overrides are attached to child commands without changing process-global env. Signing
+keychains and private certificate files live in scoped temporary directories and are
+removed on failure or cancellation. The legacy build scripts only delegate to these stages;
+platform tools and the existing bundle/sign adapters remain subprocesses.
+
 Local and debug share the workspace store and a stable Chromium directory per named profile,
 not per worktree. On first use the most recently modified legacy local profile is reused
 without merging or overwriting other profiles. Normal builds use the same Safe Storage key;

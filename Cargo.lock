@@ -10391,6 +10391,10 @@ dependencies = [
 ]
 
 [[package]]
+name = "vmux_builder"
+version = "0.0.35"
+
+[[package]]
 name = "vmux_cli"
 version = "0.0.35"
 dependencies = [
