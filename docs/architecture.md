@@ -1577,6 +1577,11 @@ Session page roots install typed state listeners once. Child components read
 the subscription and its retained state. Removing `SessionManagerView` immediately removes the
 full catalog projection, even when page metadata does not change. Scoped projections retain their
 own state.
+Editor and Git roots likewise own their shared file, address, location, and key bindings.
+Nested `use_ui_state<T>` calls reuse an inherited typed binding, selected once when their scope
+mounts, instead of registering another transport listener. Child replacement therefore retains
+the root snapshot and listener error state; selectors still subscribe only to the values they use.
+
 
 The Session manager publishes only to its active page and leases Git metadata for every displayed
 repository while that page remains active.

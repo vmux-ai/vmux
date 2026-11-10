@@ -1,7 +1,7 @@
 use dioxus::prelude::*;
 use vmux_api::page_location::PageLocationUiState;
 use vmux_ecs::event::{ExplorerGoto, NoteBlock, OutlineRow};
-use vmux_ui::hooks::{send, use_ui_state};
+use vmux_ui::hooks::{UiStateBinding, send};
 use vmux_ui::scroll::{ScrollIntoView, SectionNavigation};
 
 use super::SCROLL_ID;
@@ -36,7 +36,7 @@ impl OutlineNavigation {
             measuring: use_signal(|| false),
             pending: use_signal(|| false),
         };
-        let location = use_ui_state::<PageLocationUiState>().state;
+        let location = UiStateBinding::<PageLocationUiState>::use_context().state;
         let mut scope = use_signal(String::new);
         use_effect(move || {
             let path = path();
@@ -250,6 +250,7 @@ mod tests {
 
     #[component]
     fn OutlineNote() -> Element {
+        vmux_ui::hooks::use_ui_state::<PageLocationUiState>();
         let note = use_memo(|| true);
         let blocks = use_memo(|| {
             let mut blocks = Vec::new();
