@@ -230,9 +230,10 @@ impl PageOpener<'_, '_> {
                 };
                 if let Some(anchor) = active {
                     if cwd_missing {
-                        self.commands
-                            .entity(session_entity)
-                            .insert(Cwd(cwd.clone()));
+                        self.commands.queue(vmux_session::mutation::Request::local(
+                            id.clone(),
+                            vmux_session::mutation::Mutation::ChangeWorkspace(cwd.clone()),
+                        ));
                     }
                     self.bind_workspace(task.stack, &cwd);
                     self.commands

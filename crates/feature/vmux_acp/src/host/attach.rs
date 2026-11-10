@@ -1,7 +1,7 @@
 use bevy::prelude::*;
 use vmux_api::protocol::ProcessId;
 use vmux_ecs::{
-    Cwd, EntityTarget, PageMetadata, PageNavigation, PendingPrompt, PendingPromptAttachments,
+    EntityTarget, PageMetadata, PageNavigation, PendingPrompt, PendingPromptAttachments,
     ProcessAnchor,
 };
 use vmux_flex::Visibility;
@@ -148,13 +148,18 @@ fn attach(
             .remove::<super::navigation_driver::RetryRequested>();
         commands.entity(*session_entity).insert((
             vmux_ecs::agent::AgentSessionRoot,
-            vmux_session::AgentId(agent_id.to_string()),
-            Cwd(cwd.clone()),
             ProcessAnchor(anchor),
             vmux_session::RunState::default(),
             vmux_session::ApprovalPolicy::default(),
             vmux_ecs::team::Profile::registry(agent_name, agent_id).with_icon(profile_icon),
             vmux_ecs::team::Agent { sid: sid.clone() },
+        ));
+        commands.queue(vmux_session::mutation::Request::local(
+            SessionId(sid.clone()),
+            vmux_session::mutation::Mutation::BindAgent {
+                agent: vmux_session::AgentId(agent_id.to_string()),
+                cwd: cwd.clone(),
+            },
         ));
         commands
             .entity(*session_entity)

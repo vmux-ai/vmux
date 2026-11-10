@@ -1,11 +1,13 @@
 use bevy::prelude::*;
 use vmux_api::protocol::{AcpSessionConfig, ApprovalDecision, ClientMessage, SharedMessage};
 #[cfg(test)]
+use vmux_ecs::Cwd;
+#[cfg(test)]
 use vmux_ecs::ProcessId;
 use vmux_ecs::manifest::FeaturePlugin;
 use vmux_ecs::service::{ServiceMessageSet, ServiceRequest};
 use vmux_ecs::team::Profile;
-use vmux_ecs::{Cwd, EntityTarget, PageMetadata, ProcessAnchor, ProcessPresentationRequest};
+use vmux_ecs::{EntityTarget, PageMetadata, ProcessAnchor, ProcessPresentationRequest};
 use vmux_git::worktree::ValidatedLinkedWorkspace;
 use vmux_layout::tab::{Tab, TabDirDecided, TabWorkspace, TabWorktree, TabWorktreeUnavailable};
 use vmux_layout::worktree::TabWorktreeReady;
@@ -113,7 +115,7 @@ fn ancestor_tab(
 
 fn workspace(
     mut reader: MessageReader<AcpWorkspaceChanged>,
-    mut sessions: Query<(Entity, &SessionId, &mut Cwd), With<Session>>,
+    sessions: Query<(Entity, &SessionId), With<Session>>,
     session_views: Query<(Entity, &EntityTarget<Session>)>,
     child_of: Query<&ChildOf>,
     tab_entities: Query<(), With<Tab>>,
@@ -134,11 +136,14 @@ fn workspace(
         let cwd = validated.cwd;
         let workspace_cwd = validated.workspace_cwd;
         let checkout = validated.checkout;
-        for (session_entity, session_id, mut session_cwd) in &mut sessions {
+        for (session_entity, session_id) in &sessions {
             if session_id.0 != event.sid {
                 continue;
             }
-            session_cwd.0.clone_from(&cwd);
+            commands.queue(vmux_session::mutation::Request::local(
+                session_id.clone(),
+                vmux_session::mutation::Mutation::ChangeWorkspace(cwd.clone()),
+            ));
             let Some(stack) = session_views
                 .iter()
                 .find(|(_, target)| target.entity() == session_entity)

@@ -11,10 +11,12 @@ use serde::{Deserialize, Serialize};
 #[cfg(host)]
 use std::collections::{HashMap, HashSet};
 use vmux_api::session::SessionId;
+#[cfg(test)]
+use vmux_ecs::CreatedAt;
 #[cfg(host)]
 use vmux_ecs::persistence::PersistenceAppExt;
 #[cfg(host)]
-use vmux_ecs::{ActivateRequest, CreatedAt, EntityTarget, LastActivatedAt, Order, PageMetadata};
+use vmux_ecs::{ActivateRequest, EntityTarget, LastActivatedAt, Order, PageMetadata};
 use vmux_ecs::{ArchivedAt, Cwd, Description};
 
 #[cfg(host)]
@@ -26,6 +28,9 @@ pub(crate) struct EntityPlugin;
 #[cfg(host)]
 impl Plugin for EntityPlugin {
     fn build(&self, app: &mut App) {
+        if !app.is_plugin_added::<crate::mutation::MutationPlugin>() {
+            app.add_plugins(crate::mutation::MutationPlugin);
+        }
         app.register_persisted::<Session>()
             .register_persisted::<SessionId>()
             .register_persisted::<AgentId>()
@@ -60,7 +65,7 @@ impl Plugin for EntityPlugin {
                     cleanup,
                 )
                     .chain()
-                    .in_set(MutationSet),
+                    .in_set(crate::mutation::ReceiveSet),
             )
             .add_systems(
                 PostUpdate,
@@ -88,11 +93,16 @@ pub(crate) struct MetadataPlugin;
 #[cfg(host)]
 impl Plugin for MetadataPlugin {
     fn build(&self, app: &mut App) {
+        if !app.is_plugin_added::<crate::mutation::MutationPlugin>() {
+            app.add_plugins(crate::mutation::MutationPlugin);
+        }
         app.add_message::<RenameRequest>()
             .add_message::<DescriptionUpdateRequest>()
             .add_systems(
                 Update,
-                (rename, update_description, sync_conversation_title).in_set(MutationSet),
+                (sync_conversation_title, rename, update_description)
+                    .chain()
+                    .in_set(crate::mutation::ReceiveSet),
             )
             .add_systems(Update, project_views.after(MutationSet));
     }
@@ -104,6 +114,9 @@ pub(crate) struct StagePlugin;
 #[cfg(host)]
 impl Plugin for StagePlugin {
     fn build(&self, app: &mut App) {
+        if !app.is_plugin_added::<crate::mutation::MutationPlugin>() {
+            app.add_plugins(crate::mutation::MutationPlugin);
+        }
         app.insert_resource(Configuration::load())
             .register_persisted::<Stage>()
             .register_persisted::<StageChangedAt>()
@@ -113,7 +126,8 @@ impl Plugin for StagePlugin {
             .add_message::<ProviderStageChangeRequest>()
             .add_systems(
                 Update,
-                (ensure_stages, change_stage, change_provider_stage).in_set(MutationSet),
+                (ensure_stages, change_stage, change_provider_stage)
+                    .in_set(crate::mutation::ReceiveSet),
             );
     }
 }
@@ -670,44 +684,23 @@ fn ensure_stages(
 fn create(
     mut requests: MessageReader<CreateRequest>,
     configuration: Res<Configuration>,
-    existing: Query<&SessionId, With<Session>>,
-    mut commands: Commands,
+    mut mutations: MessageWriter<crate::mutation::Request>,
 ) {
-    if requests.is_empty() {
-        return;
-    }
-    let mut ids = existing.iter().cloned().collect::<HashSet<_>>();
     for request in requests.read() {
-        if !ids.insert(request.id.clone()) {
-            continue;
-        }
         let now = vmux_ecs::UnixMillis::now().0;
-        let created_at = request.created_at.unwrap_or(now);
-        let activated_at = request.activated_at.unwrap_or(now);
-        let entity = {
-            let mut session = commands.spawn((
-                Session,
-                request.id.clone(),
-                Name::new(request.name.clone()),
-                Description(request.description.clone()),
-                Cwd(request.cwd.clone()),
-                CreatedAt(created_at),
-                LastActivatedAt(activated_at),
-                Stage(configuration.default_stage.clone()),
-                StageChangedAt(activated_at),
-            ));
-            if request.local {
-                session.insert(LocalTask);
-            }
-            if let Some(agent) = request.agent.clone() {
-                session.insert(agent);
-            }
-            session.id()
-        };
-        commands.trigger(Created {
-            entity,
-            id: request.id.clone(),
-        });
+        mutations.write(crate::mutation::Request::local(
+            request.id.clone(),
+            crate::mutation::Mutation::Create(crate::mutation::Creation {
+                name: request.name.clone(),
+                description: request.description.clone(),
+                cwd: request.cwd.clone(),
+                agent: request.agent.clone(),
+                stage: configuration.default_stage.clone(),
+                created_at: request.created_at.unwrap_or(now),
+                activated_at: request.activated_at.unwrap_or(now),
+                local: request.local,
+            }),
+        ));
     }
 }
 
@@ -765,15 +758,19 @@ fn project_views(
 
 #[cfg(host)]
 fn sync_conversation_title(
-    mut sessions: Query<
-        (&AgentConversationTitle, &mut Name),
+    sessions: Query<
+        (&SessionId, &AgentConversationTitle, &Name),
         (With<Session>, Changed<AgentConversationTitle>),
     >,
+    mut mutations: MessageWriter<crate::mutation::Request>,
 ) {
-    for (title, mut name) in &mut sessions {
+    for (id, title, name) in &sessions {
         let title = title.0.trim();
         if !title.is_empty() && name.as_str() != title {
-            *name = Name::new(title.to_string());
+            mutations.write(crate::mutation::Request::local(
+                id.clone(),
+                crate::mutation::Mutation::Rename(title.to_string()),
+            ));
         }
     }
 }
@@ -781,86 +778,52 @@ fn sync_conversation_title(
 #[cfg(host)]
 fn rename(
     mut requests: MessageReader<RenameRequest>,
-    mut sessions: Query<
-        (
-            Entity,
-            &SessionId,
-            &mut Name,
-            Option<&mut AgentConversationTitle>,
-        ),
-        With<Session>,
-    >,
-    mut commands: Commands,
+    mut mutations: MessageWriter<crate::mutation::Request>,
 ) {
     for request in requests.read() {
-        for (entity, id, mut name, title) in &mut sessions {
-            if id == &request.id {
-                *name = Name::new(request.name.clone());
-                if let Some(mut title) = title {
-                    title.0.clone_from(&request.name);
-                } else {
-                    commands
-                        .entity(entity)
-                        .insert(AgentConversationTitle(request.name.clone()));
-                }
-                commands.entity(entity).remove::<TitlePending>();
-            }
-        }
+        mutations.write(crate::mutation::Request::local(
+            request.id.clone(),
+            crate::mutation::Mutation::Rename(request.name.clone()),
+        ));
     }
 }
 
 #[cfg(host)]
 fn update_description(
     mut requests: MessageReader<DescriptionUpdateRequest>,
-    mut sessions: Query<(&SessionId, &mut Description), With<Session>>,
+    mut mutations: MessageWriter<crate::mutation::Request>,
 ) {
     for request in requests.read() {
-        for (id, mut description) in &mut sessions {
-            if id == &request.id {
-                description.0.clone_from(&request.description);
-            }
-        }
+        mutations.write(crate::mutation::Request::local(
+            request.id.clone(),
+            crate::mutation::Mutation::Describe(request.description.clone()),
+        ));
     }
 }
 
 #[cfg(host)]
 fn change_stage(
     mut requests: MessageReader<StageChangeRequest>,
-    definitions: Query<&StageId, With<StageDefinition>>,
-    mut sessions: Query<(&SessionId, &mut Stage, &mut StageChangedAt), With<Session>>,
+    mut mutations: MessageWriter<crate::mutation::Request>,
 ) {
     for request in requests.read() {
-        if !definitions.iter().any(|id| id == &request.stage) {
-            continue;
-        }
-        for (id, mut stage, mut changed_at) in &mut sessions {
-            if id == &request.id && stage.0 != request.stage {
-                stage.0.clone_from(&request.stage);
-                changed_at.record_transition(vmux_ecs::UnixMillis::now().0);
-            }
-        }
+        mutations.write(crate::mutation::Request::local(
+            request.id.clone(),
+            crate::mutation::Mutation::ChangeStage(request.stage.clone()),
+        ));
     }
 }
 
 #[cfg(host)]
 fn archive(
     mut requests: MessageReader<ArchiveRequest>,
-    sessions: Query<(Entity, &SessionId, Option<&ArchivedAt>), With<Session>>,
-    mut commands: Commands,
+    mut mutations: MessageWriter<crate::mutation::Request>,
 ) {
     for request in requests.read() {
-        for (entity, id, current) in &sessions {
-            if id != &request.id {
-                continue;
-            }
-            if let Some(archived_at) = request.archived_at.map(|value| value.max(1)) {
-                if current.is_none_or(|current| current.0 != archived_at) {
-                    commands.entity(entity).insert(ArchivedAt(archived_at));
-                }
-            } else if current.is_some() {
-                commands.entity(entity).remove::<ArchivedAt>();
-            }
-        }
+        mutations.write(crate::mutation::Request::local(
+            request.id.clone(),
+            crate::mutation::Mutation::Archive(request.archived_at),
+        ));
     }
 }
 
