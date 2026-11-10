@@ -1,5 +1,5 @@
 use std::collections::{BTreeMap, BTreeSet};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use serde::Deserialize;
 use syn::visit::{self, Visit};
@@ -7,6 +7,20 @@ use syn::{
     Attribute, Block, Expr, ExprMethodCall, ExprPath, FnArg, ImplItem, ImplItemFn, Item, ItemFn,
     Stmt, TraitItemFn, Type, TypePath, UseTree, Visibility,
 };
+
+struct Workspace(PathBuf);
+
+impl Workspace {
+    fn current() -> Self {
+        let directory = std::env::current_dir().expect("current test directory");
+        for path in directory.ancestors() {
+            if path.join("Cargo.toml").is_file() && path.join("crates").is_dir() {
+                return Self(path.to_path_buf());
+            }
+        }
+        panic!("source audits must run inside the workspace");
+    }
+}
 
 const GENERIC_MODULES: &[&str] = &[
     "bin", "host", "lib", "main", "plugin", "runtime", "src", "test", "tests", "ui",
@@ -26,11 +40,7 @@ struct FeaturePage {
 
 #[test]
 fn ui_events_are_declared_in_the_owning_feature_page_manifest() {
-    let feature_dir = Path::new(env!("CARGO_MANIFEST_DIR"))
-        .ancestors()
-        .nth(2)
-        .expect("crates dir")
-        .join("feature");
+    let feature_dir = Workspace::current().0.join("crates").join("feature");
     let mut violations = Vec::new();
     let entries = std::fs::read_dir(&feature_dir).expect("feature crates");
 
@@ -127,13 +137,10 @@ fn sent_type(expression: &Expr) -> Option<String> {
 
 #[test]
 fn registered_systems_and_observers_use_short_names_from_their_module_context() {
-    let crates_dir = Path::new(env!("CARGO_MANIFEST_DIR"))
-        .ancestors()
-        .nth(2)
-        .expect("crates dir");
+    let crates_dir = Workspace::current().0.join("crates");
     let mut violations = Vec::new();
 
-    walk(crates_dir, &mut |path, source| {
+    walk(&crates_dir, &mut |path, source| {
         let Ok(file) = syn::parse_file(source) else {
             return;
         };
@@ -158,13 +165,10 @@ fn registered_systems_and_observers_use_short_names_from_their_module_context() 
 
 #[test]
 fn registered_systems_and_observers_are_private_to_their_plugin_module() {
-    let crates_dir = Path::new(env!("CARGO_MANIFEST_DIR"))
-        .ancestors()
-        .nth(2)
-        .expect("crates dir");
+    let crates_dir = Workspace::current().0.join("crates");
     let mut violations = Vec::new();
 
-    walk(crates_dir, &mut |path, source| {
+    walk(&crates_dir, &mut |path, source| {
         let Ok(file) = syn::parse_file(source) else {
             return;
         };
@@ -212,13 +216,10 @@ fn audit_private_systems(path: &Path, items: &[Item], scope: &str, violations: &
 
 #[test]
 fn private_plugins_are_not_single_system_wrappers() {
-    let crates_dir = Path::new(env!("CARGO_MANIFEST_DIR"))
-        .ancestors()
-        .nth(2)
-        .expect("crates dir");
+    let crates_dir = Workspace::current().0.join("crates");
     let mut violations = Vec::new();
 
-    walk(crates_dir, &mut |path, source| {
+    walk(&crates_dir, &mut |path, source| {
         let Ok(file) = syn::parse_file(source) else {
             return;
         };
@@ -312,12 +313,9 @@ impl<'ast> Visit<'ast> for PluginComposition {
 
 #[test]
 fn modules_follow_the_workspace_physical_layout() {
-    let crates_dir = Path::new(env!("CARGO_MANIFEST_DIR"))
-        .ancestors()
-        .nth(2)
-        .expect("crates dir");
+    let crates_dir = Workspace::current().0.join("crates");
     let mut violations = Vec::new();
-    audit_module_layout(crates_dir, &mut violations);
+    audit_module_layout(&crates_dir, &mut violations);
 
     assert!(
         violations.is_empty(),
@@ -562,10 +560,7 @@ fn system_name_policy_detects_framework_and_module_repetition() {
 
 #[test]
 fn files_do_not_mix_imported_and_qualified_paths_for_one_type() {
-    let workspace = Path::new(env!("CARGO_MANIFEST_DIR"))
-        .ancestors()
-        .nth(3)
-        .expect("workspace root");
+    let workspace = Workspace::current().0;
     let mut violations = Vec::new();
 
     for root in [workspace.join("crates"), workspace.join("website")] {
@@ -590,10 +585,7 @@ fn files_do_not_mix_imported_and_qualified_paths_for_one_type() {
 
 #[test]
 fn imports_are_declared_at_module_top() {
-    let workspace = Path::new(env!("CARGO_MANIFEST_DIR"))
-        .ancestors()
-        .nth(3)
-        .expect("workspace root");
+    let workspace = Workspace::current().0;
     let mut violations = Vec::new();
 
     for root in [workspace.join("crates"), workspace.join("website")] {
@@ -618,10 +610,7 @@ fn imports_are_declared_at_module_top() {
 
 #[test]
 fn functions_are_declared_at_module_scope() {
-    let workspace = Path::new(env!("CARGO_MANIFEST_DIR"))
-        .ancestors()
-        .nth(3)
-        .expect("workspace root");
+    let workspace = Workspace::current().0;
     let mut violations = Vec::new();
 
     for root in [workspace.join("crates"), workspace.join("website")] {
@@ -654,10 +643,7 @@ fn functions_are_declared_at_module_scope() {
 
 #[test]
 fn shared_contract_and_ecs_crates_do_not_export_loose_functions() {
-    let workspace = Path::new(env!("CARGO_MANIFEST_DIR"))
-        .ancestors()
-        .nth(3)
-        .expect("workspace root");
+    let workspace = Workspace::current().0;
     let mut violations = Vec::new();
 
     for root in [
@@ -768,10 +754,7 @@ impl<'ast> Visit<'ast> for NestedFunctions<'_> {
 
 #[test]
 fn inherent_methods_do_not_own_ecs_runtime_parameters() {
-    let workspace = Path::new(env!("CARGO_MANIFEST_DIR"))
-        .ancestors()
-        .nth(3)
-        .expect("workspace root");
+    let workspace = Workspace::current().0;
     let mut violations = Vec::new();
 
     for root in [workspace.join("crates"), workspace.join("website")] {
@@ -803,10 +786,7 @@ fn inherent_methods_do_not_own_ecs_runtime_parameters() {
 
 #[test]
 fn ecs_runtime_helpers_are_private_and_local() {
-    let workspace = Path::new(env!("CARGO_MANIFEST_DIR"))
-        .ancestors()
-        .nth(3)
-        .expect("workspace root");
+    let workspace = Workspace::current().0;
     let mut violations = Vec::new();
 
     for root in [workspace.join("crates"), workspace.join("website")] {

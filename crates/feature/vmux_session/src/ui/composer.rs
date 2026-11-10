@@ -158,7 +158,7 @@ mod tests {
 
     #[component]
     fn LockedComposer() -> Element {
-        vmux_ui::hooks::use_ui_state::<crate::state::ChatUiState>();
+        vmux_ui::hooks::use_ui_state::<ChatUiState>();
         let chat = use_chat("locked-session".into());
         let keys = use_chat_keys(chat);
         use_context_provider(|| keys);
