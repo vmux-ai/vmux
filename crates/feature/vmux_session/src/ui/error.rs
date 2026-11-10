@@ -142,6 +142,7 @@ mod tests {
 
     #[component]
     fn FeedbackPage() -> Element {
+        vmux_ui::hooks::use_ui_state::<ChatUiState>();
         let chat = super::super::state::use_chat("session".into());
         rsx! { ChatFeedback { chat } }
     }

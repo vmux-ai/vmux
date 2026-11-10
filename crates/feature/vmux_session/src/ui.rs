@@ -26,6 +26,9 @@ pub(crate) struct ChatPage;
 
 #[component]
 pub fn Page() -> Element {
+    vmux_ui::hooks::use_ui_state::<crate::state::ChatUiState>();
+    vmux_ui::hooks::use_ui_state::<crate::state::SessionCatalogUiState>();
+    vmux_ui::hooks::use_ui_state::<crate::state::SessionDetailUiState>();
     let details_open = use_signal(|| false);
     let route = try_consume_context::<vmux_ecs::PageMetadata>()
         .and_then(|metadata| vmux_session::Route::parse(&metadata.url));
@@ -45,7 +48,8 @@ pub fn Page() -> Element {
 #[component]
 fn SessionDetail(session_id: String, mut details_open: Signal<bool>) -> Element {
     let chat = use_chat(session_id.clone());
-    let detail = vmux_ui::hooks::use_ui_state::<crate::state::SessionDetailUiState>();
+    let detail =
+        vmux_ui::hooks::UiStateBinding::<crate::state::SessionDetailUiState>::use_context();
     let keys = use_chat_keys(chat);
     use_context_provider(|| keys);
     let accent = chat.accent();
