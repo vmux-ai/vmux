@@ -6,6 +6,7 @@ use bevy::tasks::{IoTaskPool, Task, futures_lite::future};
 use bevy::winit::{EventLoopProxyWrapper, WinitUserEvent};
 use crossbeam_channel::Receiver;
 use vmux_api::extension::{ExtInstallPhase, ExtInstallProgress, ExtensionsUiState};
+use vmux_ecs::{Operation, OperationCompleted, OperationPlugin, OperationState, OperationTarget};
 
 #[cfg(test)]
 use crate::crx::ChromeExtensionId;
@@ -19,6 +20,9 @@ pub(crate) struct InstallPlugin;
 
 impl Plugin for InstallPlugin {
     fn build(&self, app: &mut App) {
+        if !app.is_plugin_added::<OperationPlugin>() {
+            app.add_plugins(OperationPlugin);
+        }
         app.add_message::<ExtensionInstallRequest>()
             .add_message::<ExtensionInstallCompleted>()
             .add_systems(Update, (start, download, unpack, finish).chain());
@@ -256,11 +260,12 @@ impl PackageInstaller {
 
 fn start(
     mut requests: MessageReader<ExtensionInstallRequest>,
-    mut catalog: Single<&mut ExtensionCatalog>,
+    catalog: Single<(Entity, &mut ExtensionCatalog)>,
     profile: vmux_ecs::profile::CurrentProfile,
     proxy: Option<Res<EventLoopProxyWrapper>>,
     mut commands: Commands,
 ) {
+    let (catalog_entity, mut catalog) = catalog.into_inner();
     let Some((profile, paths)) = profile.profile().zip(profile.paths()) else {
         return;
     };
@@ -274,10 +279,13 @@ fn start(
             message: "resolving".to_string(),
         });
         let mut operation = commands.spawn((
+            Operation::bundle("extension.install").unwrap(),
+            OperationTarget::new(catalog_entity),
             Name::new("Extension install"),
             ExtensionInstallOperation,
             request.clone(),
         ));
+        operation.insert(OperationState::Running);
         let resolved =
             match ResolvedInstall::resolve(request.source.as_str(), profile.clone(), store.clone())
             {
@@ -408,7 +416,15 @@ fn finish(
                 success: true,
             });
         }
-        commands.entity(entity).despawn();
+        commands.trigger(OperationCompleted {
+            entity,
+            result: Ok(()),
+        });
+        commands.entity(entity).remove::<(
+            ExtensionInstallOperation,
+            ExtensionInstallRequest,
+            InstallSucceeded,
+        )>();
     }
     for (entity, request, failed) in &failed {
         catalog.update_progress(ExtInstallProgress {
@@ -424,7 +440,15 @@ fn finish(
                 success: false,
             });
         }
-        commands.entity(entity).despawn();
+        commands.trigger(OperationCompleted {
+            entity,
+            result: Err(failed.0.clone()),
+        });
+        commands.entity(entity).remove::<(
+            ExtensionInstallOperation,
+            ExtensionInstallRequest,
+            InstallFailed,
+        )>();
     }
 }
 

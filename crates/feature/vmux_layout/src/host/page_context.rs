@@ -25,8 +25,10 @@ pub struct PageContextPlugin;
 
 impl Plugin for PageContextPlugin {
     fn build(&self, app: &mut App) {
-        app.add_plugins(OperationPlugin)
-            .init_resource::<vmux_git::GitRuntime>()
+        if !app.is_plugin_added::<OperationPlugin>() {
+            app.add_plugins(OperationPlugin);
+        }
+        app.init_resource::<vmux_git::GitRuntime>()
             .init_resource::<ProjectActivations>()
             .add_plugins(UiEventPlugin::<(ProjectActivateRequest,)>::default())
             .add_observer(git_page_ready)
@@ -233,7 +235,10 @@ impl Command for ProjectActivationInstall {
                 .remove::<ProjectActivation>()
                 .insert(OperationState::Canceled);
         }
-        let operation = world.spawn(Operation::bundle("project.activate", revision).unwrap());
+        let operation = world.spawn((
+            Operation::bundle("project.activate").unwrap(),
+            OperationTargetRevision(revision),
+        ));
         let entity = operation.id();
         if world.get::<Tab>(tab).is_none() {
             activation.cancel();
