@@ -8,6 +8,8 @@ use serde::de::DeserializeOwned;
 use vmux_api::JsonSchema;
 
 use crate::cli::CliManifest;
+pub use crate::registry::Registry;
+use crate::registry::{Declarations, RegistryPlugin};
 
 #[derive(Component, Clone)]
 pub struct FeatureManifest {
@@ -395,14 +397,20 @@ impl<M> Default for FeaturePlugin<M> {
 
 impl<M: FeatureManifestSource> Plugin for FeaturePlugin<M> {
     fn build(&self, app: &mut App) {
-        if app
-            .world()
-            .iter_entities()
-            .any(|entity| entity.contains::<FeatureManifestOwner<M>>())
-        {
-            return;
+        assert!(
+            !app.world().contains_resource::<Registry>(),
+            "feature registry is frozen"
+        );
+        if !app.is_plugin_added::<RegistryPlugin>() {
+            app.add_plugins(RegistryPlugin);
         }
-        let manifest = FeatureManifest::of::<M>();
+        let Some(manifest) = app
+            .world_mut()
+            .resource_mut::<Declarations>()
+            .register::<M>()
+        else {
+            return;
+        };
         app.world_mut().spawn((
             Name::new(std::any::type_name::<M>()),
             FeatureId::of::<M>(),

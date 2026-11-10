@@ -403,6 +403,12 @@ subtrees. `state.rs` owns shared UI snapshots and patches; `event.rs` owns trans
 and host-to-UI operations. Generic `page.rs`, `page_state.rs`, `ui_state.rs`, and `view.rs` modules
 are not used because their ownership is ambiguous.
 
+Feature declarations are collected by their typed owner during `Plugin::build`. Repeated
+registration is idempotent. `RegistryPlugin::finish` rejects conflicting page, command, alias,
+tool, provider, search, CLI, and MCP identifiers, then replaces the declarations with an immutable
+`Registry`. Runtime catalogs consume the same feature-owned manifest projections. Registration
+after freeze is refused.
+
 Page manifests are static plugin registration data. Their registration entities exist during
 plugin construction so the browser can build the complete embedded-host allowlist before CEF
 initializes. Runtime page state and behavior still initialize through ECS schedules.
