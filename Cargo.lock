@@ -11018,6 +11018,7 @@ dependencies = [
  "bevy_cef",
  "bevy_ecs",
  "dioxus",
+ "dioxus-ssr",
  "notify",
  "rkyv",
  "ron 0.12.1",

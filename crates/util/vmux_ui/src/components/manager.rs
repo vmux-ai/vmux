@@ -1017,7 +1017,11 @@ mod tests {
         fn apply(&mut self, edits: Vec<Mutation>) {
             for edit in edits {
                 match edit {
-                    Mutation::SetAttribute { name, value, .. } if name == "inert" => {
+                    Mutation::SetAttribute {
+                        name: "inert",
+                        value,
+                        ..
+                    } => {
                         self.blocked = !matches!(value, AttributeValue::None);
                     }
                     Mutation::NewEventListener { name, id } if name == "click" => {

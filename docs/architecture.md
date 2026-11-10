@@ -639,6 +639,8 @@ Settings and manager pages share `WorkspaceLayout`: navigation opens by default 
 and its toggle animates the sidebar and icon. The content-column toolbar matches Editor and Note:
 the common `PageSidebarToggle` sits on the left and fills its left segment while open.
 Sidebar search uses the same top-left `ManagerSearchRow` and `ManagerSearch` as Editor and Git.
+Settings keeps that layout mounted while loading or showing no search results, so the query
+remains editable and clearing it restores the sections without replacing the search control.
 Settings section icons and the active viewport section update the address trail and URL fragment;
 command-bar search providers resolve their favicons through the common favicon source.
 Git's document, styles and UI transport share the `git://` origin. Code uses `file://` for

@@ -713,7 +713,7 @@ impl WorkspaceStorePath {
     }
 
     fn write_schema_version(&self) -> std::io::Result<()> {
-        std::fs::write(self.version(), STORE_SCHEMA_VERSION.to_string())
+        vmux_path::AtomicFile::write(self.version(), STORE_SCHEMA_VERSION.to_string().as_bytes())
     }
 }
 

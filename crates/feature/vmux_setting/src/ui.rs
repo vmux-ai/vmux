@@ -16,7 +16,8 @@ use vmux_api::page_location::PageLocationUiState;
 use vmux_ui::components::button::{Button, ButtonSize, ButtonVariant};
 use vmux_ui::components::input::Input;
 use vmux_ui::components::manager::{
-    ManagerSearch, ManagerSearchRow, ManagerSelect, ManagerSelectItem, WorkspaceLayout,
+    ManagerEmpty, ManagerSearch, ManagerSearchRow, ManagerSelect, ManagerSelectItem,
+    ManagerSkeleton, WorkspaceLayout,
 };
 use vmux_ui::components::page_address::PageBreadcrumbs;
 use vmux_ui::components::switch::{Switch, SwitchThumb};
@@ -62,14 +63,6 @@ pub fn Page() -> Element {
     } = state();
     let navigation = SettingsSectionNavigation::use_state(state);
     let active_section = navigation.navigation.active;
-
-    if sections.is_empty() {
-        return rsx! {
-            div { class: "flex h-full items-center justify-center bg-background",
-                div { class: "h-1.5 w-24 animate-pulse rounded-full bg-muted" }
-            }
-        };
-    }
 
     let catalog = SettingsRenderCatalog {
         fields: Rc::new(fields),
@@ -166,6 +159,16 @@ pub fn Page() -> Element {
                     onscroll: move |_| navigation.measure(),
                     onresize: move |_| navigation.measure(),
                     div { class: "mx-auto max-w-3xl px-6 py-6 lg:px-10",
+                        if sections.is_empty() {
+                            if query.is_empty() {
+                                ManagerSkeleton {}
+                            } else {
+                                ManagerEmpty {
+                                    title: translate("common-no-results"),
+                                    detail: String::new(),
+                                }
+                            }
+                        }
                         div { class: "mb-8 lg:hidden",
                             p { class: "text-sm text-muted-foreground",
                                 {translate("settings-stored")}
@@ -714,7 +717,7 @@ fn Kbd(text: String) -> Element {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use dioxus::core::{ElementId, Mutation, VirtualDom};
+    use dioxus::core::{Mutation, VirtualDom};
     use dioxus::html::{EventData, ScrollBehavior, SerializedScrollData};
     use std::cell::{Cell, RefCell};
     use std::future::Future;
@@ -762,6 +765,12 @@ mod tests {
     }
 
     impl SettingsHost {
+        fn publish(&self, state: SettingsUiState) {
+            let frame = UiStateFrame::<SettingsUiState, SettingsUiState>::Snapshot(state);
+            let bytes = rkyv::to_bytes::<rkyv::rancor::Error>(&frame).unwrap();
+            self.receive(SettingsUiState::id(), &bytes);
+        }
+
         fn receive(&self, id: &str, bytes: &[u8]) {
             let mut found = false;
             for (source, listener) in self.listeners.borrow_mut().iter_mut() {
@@ -773,20 +782,12 @@ mod tests {
             assert!(found, "the page must subscribe to {id}");
         }
 
-        fn settle(dom: &mut VirtualDom) -> Option<ElementId> {
-            let mut scroll = None;
+        fn settle(dom: &mut VirtualDom) {
             for _ in 0..8 {
                 let mut context = std::task::Context::from_waker(std::task::Waker::noop());
                 let _ = std::pin::pin!(dom.wait_for_work()).poll(&mut context);
-                for edit in dom.render_immediate_to_vec().edits {
-                    if let Mutation::NewEventListener { name, id } = edit
-                        && name == "scroll"
-                    {
-                        scroll = Some(id);
-                    }
-                }
+                dom.render_immediate_to_vec();
             }
-            scroll
         }
     }
 
@@ -796,7 +797,15 @@ mod tests {
         let host = Rc::new(SettingsHost::default());
         let _host = HostScope::enter(host.clone());
         let mut dom = VirtualDom::new(Page);
-        dom.rebuild_to_vec();
+        let scroll = dom
+            .rebuild_to_vec()
+            .edits
+            .into_iter()
+            .find_map(|edit| match edit {
+                Mutation::NewEventListener { name, id } if name == "scroll" => Some(id),
+                _ => None,
+            })
+            .unwrap();
         SettingsHost::settle(&mut dom);
         let mut state = SettingsUiState::default();
         for (id, title) in [
@@ -815,7 +824,7 @@ mod tests {
         let frame = UiStateFrame::<SettingsUiState, SettingsUiState>::Snapshot(state);
         let bytes = rkyv::to_bytes::<rkyv::rancor::Error>(&frame).unwrap();
         host.receive(SettingsUiState::id(), &bytes);
-        let scroll = SettingsHost::settle(&mut dom).unwrap();
+        SettingsHost::settle(&mut dom);
         host.locations.borrow_mut().clear();
         host.section.set(2);
         let event = EventData::Scroll(SerializedScrollData {
@@ -843,5 +852,39 @@ mod tests {
         host.receive(PageLocationUiState::id(), &bytes);
         SettingsHost::settle(&mut dom);
         assert!(host.scrolls.borrow().is_empty());
+    }
+
+    #[test]
+    fn unmatched_settings_search_keeps_the_input_and_recovers_when_cleared() {
+        let host = Rc::new(SettingsHost::default());
+        let _host = HostScope::enter(host.clone());
+        let mut dom = VirtualDom::new(Page);
+        dom.rebuild_to_vec();
+        SettingsHost::settle(&mut dom);
+        let mut populated = SettingsUiState::default();
+        populated.sections.push(SettingsSection {
+            id: "general".to_string(),
+            title: "General".to_string(),
+            description: None,
+            search_text: "General".to_string(),
+            fields: Vec::new(),
+        });
+        let unmatched = SettingsUiState {
+            query: "unmatched settings".to_string(),
+            ..Default::default()
+        };
+        for (state, visible) in [
+            (populated.clone(), "General".to_string()),
+            (unmatched, translate("common-no-results")),
+            (populated, "General".to_string()),
+        ] {
+            let query = state.query.clone();
+            host.publish(state);
+            SettingsHost::settle(&mut dom);
+            let html = dioxus_ssr::render(&dom);
+            assert_eq!(html.matches("type=\"search\"").count(), 1);
+            assert!(html.contains(&format!("value=\"{query}\"")));
+            assert!(html.contains(&visible));
+        }
     }
 }

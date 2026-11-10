@@ -38,6 +38,7 @@ vmux_tool = { path = "../vmux_tool" }
 dioxus = { workspace = true }
 
 [dev-dependencies]
+dioxus-ssr = "=0.7.9"
 tempfile = "3"
 
 [lints]
