@@ -20,6 +20,8 @@ use vmux_api::protocol::AgentCommandResult;
 use vmux_api::{PageIcon, ProcessId};
 use vmux_command::CommandBarDismiss;
 use vmux_command::{CommandBarWorkspaceSnapshot, ContributedPages};
+#[cfg(test)]
+use vmux_ecs::Description;
 use vmux_ecs::UiState;
 use vmux_ecs::agent::{
     AgentCommandResponse, AgentContinuationRequest, AgentRequestAppExt, AgentRequestMessage,
@@ -27,7 +29,7 @@ use vmux_ecs::agent::{
 };
 use vmux_ecs::launcher::{HostsLauncher, InlineTransitionRequested};
 use vmux_ecs::{
-    Description, EntityTarget, PageIdentity, PageOpenRequest, PageOpenTarget, PendingPrompt,
+    EntityTarget, PageIdentity, PageOpenRequest, PageOpenTarget, PendingPrompt,
     PendingPromptAttachments,
 };
 use vmux_session::{
@@ -374,7 +376,7 @@ fn request_user_choice(
 fn set_conversation_title(
     mut requests: MessageReader<AgentRequestMessage<AgentSetConversationTitle>>,
     targets: AgentChatTarget,
-    mut metadata: Query<(Option<&mut AgentConversationTitle>, &mut Description)>,
+    metadata: Query<&SessionId, With<Session>>,
     mut responses: MessageWriter<AgentCommandResponse>,
     mut commands: Commands,
 ) {
@@ -389,18 +391,14 @@ fn set_conversation_title(
                     let summary = request.payload.summary.trim();
                     if summary.is_empty() {
                         AgentCommandResult::Error("conversation summary is empty".to_string())
-                    } else if let Ok((current, mut description)) = metadata.get_mut(session) {
-                        if let Some(mut current) = current {
-                            current.0 = title.to_string();
-                        } else {
-                            commands
-                                .entity(session)
-                                .insert(AgentConversationTitle(title.to_string()));
-                        }
-                        description.0 = summary.to_string();
-                        commands
-                            .entity(session)
-                            .remove::<vmux_session::TitlePending>();
+                    } else if let Ok(id) = metadata.get(session) {
+                        commands.queue(crate::mutation::Request::local(
+                            id.clone(),
+                            crate::mutation::Mutation::Summarize {
+                                title: title.to_string(),
+                                description: summary.to_string(),
+                            },
+                        ));
                         AgentCommandResult::Ok
                     } else {
                         AgentCommandResult::Error("session metadata not found".to_string())
@@ -904,7 +902,12 @@ mod tests {
         let anchor = ProcessId::new();
         let session = app
             .world_mut()
-            .spawn((Session, AgentSessionRoot, vmux_session::TitlePending))
+            .spawn((
+                Session,
+                SessionId("session".into()),
+                AgentSessionRoot,
+                vmux_session::TitlePending,
+            ))
             .id();
         let stack = app
             .world_mut()

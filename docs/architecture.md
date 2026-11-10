@@ -1484,6 +1484,14 @@ request and emits a typed creation event before navigation. Layout Stacks refere
 entity and may close without deleting it. `vmux://sessions/` opens the manager;
 `vmux://sessions/{session_id}` opens a Session independently of its agent or provider conversation
 identity. Session IDs are encoded as one URL path segment.
+Session creation, metadata, stage, archive, workspace, and agent binding requests converge on one
+typed mutation commit path. It validates unique Session identity and the expected revision before
+changing state, then stores the operation UUID, payload, base revision, and committed revision on
+a Session-owned record. Repeating the same operation returns its original committed revision;
+a changed payload or stale revision is refused. UI messages, queued ACP commands, and atomic agent
+conversation summaries share this path. Provider synchronization and conversation events keep
+their own contracts.
+
 Conversation events persist their identities, contents, timestamps, and source markers with the
 Session. Restore displays that history before runtime attachment; provider replay reconciles the
 same event identities without duplicating cached messages.

@@ -67,6 +67,8 @@ mod catalog;
 #[cfg(host)]
 mod conversation;
 mod model;
+#[cfg(host)]
+pub mod mutation;
 mod route;
 mod title;
 
