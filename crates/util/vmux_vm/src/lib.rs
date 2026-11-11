@@ -1,9 +1,14 @@
 pub use client::{EngineClient, Status};
+pub use docker::{
+    Client as DockerClient, Container, Operation as DockerOperation, Port as DockerPort,
+};
 pub use engine::{Engine, EnginePlugin, Failure, Phase};
+pub use process::Executable;
 pub use settings::Settings;
 
 mod client;
 mod connection;
+mod docker;
 mod engine;
 mod http;
 mod image;

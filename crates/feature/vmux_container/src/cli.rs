@@ -97,6 +97,7 @@ fn finish(
             Ok(0)
         }
         Ok(Reply::Stopped(_)) => Ok(0),
+        Ok(Reply::Configured(_) | Reply::Changed) => Ok(0),
         Ok(Reply::Status(status)) => {
             println!(
                 "running={} docker_ready={} socket={} log={}",

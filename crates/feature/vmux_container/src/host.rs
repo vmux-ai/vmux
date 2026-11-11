@@ -12,10 +12,13 @@ use vmux_ecs::{PageMetadata, UiStatePlugin, UiStateWrite};
 use vmux_vm::{EngineClient, Phase, Settings, Status};
 
 use crate::ContainerPlugin;
-use crate::control::{Busy, Command, ControlPlugin, Finished, Reply, Request};
+use crate::compose::ComposeProject;
+use crate::control::{Busy, Command, ControlPlugin, ControlSet, Finished, Reply, Request};
 use crate::event::{
-    ContainerLogsRequest, ContainerStartRequest, ContainerStopRequest, ContainerUiState,
+    ContainerLogsRequest, ContainerProjectOpenRequest, ContainerSettingsRequest,
+    ContainerStartRequest, ContainerStopRequest, ContainerUiState,
 };
+use crate::inventory::{Catalog, Inventory, InventoryPlugin, Output};
 
 impl Plugin for ContainerPlugin {
     fn build(&self, app: &mut App) {
@@ -30,30 +33,60 @@ impl Plugin for ContainerPlugin {
                 ContainerStartRequest,
                 ContainerStopRequest,
                 ContainerLogsRequest,
+                ContainerSettingsRequest,
+                ContainerProjectOpenRequest,
             )>::default());
         if !app.is_plugin_added::<ControlPlugin>() {
             app.add_plugins(ControlPlugin);
         }
+        app.add_plugins(InventoryPlugin).configure_sets(
+            Update,
+            (
+                ControlSet::Complete,
+                ContainerSet::Inspect,
+                ContainerSet::Inventory,
+                ContainerSet::Project,
+            )
+                .chain(),
+        );
         #[cfg(ui)]
         app.add_plugins(crate::ui::ContainerPage::plugin());
         app.add_observer(page_ready)
             .add_observer(start)
+            .add_observer(configure)
+            .add_observer(open_project)
             .add_observer(stop)
             .add_observer(logs)
             .add_observer(finish)
             .add_systems(Startup, spawn)
-            .add_systems(Update, (inspect, project).chain());
+            .add_systems(
+                Update,
+                (finish_picks, inspect)
+                    .chain()
+                    .in_set(ContainerSet::Inspect),
+            )
+            .add_systems(Update, project.in_set(ContainerSet::Project));
     }
 }
 
 #[derive(Component)]
-struct EngineView;
+pub(crate) struct EngineView;
 
 #[derive(Component)]
-struct PageView;
+pub(crate) struct PageView;
 
 #[derive(Component)]
-struct Observed(Status);
+pub(crate) struct Observed(pub(crate) Status);
+
+#[derive(SystemSet, Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub(crate) enum ContainerSet {
+    Inspect,
+    Inventory,
+    Project,
+}
+
+#[derive(Component)]
+struct PickTask(Task<std::io::Result<Option<ComposeProject>>>);
 
 #[derive(Component)]
 struct NextInspection(Instant);
@@ -70,13 +103,16 @@ struct Logs(String);
 #[derive(Component, Default)]
 struct LastError(String);
 
+#[derive(Component, Default)]
+struct ConfigurationRevision(u64);
+
 fn spawn(mut commands: Commands) {
     let directory = vmux_profile::ProfilePaths::current()
         .shared_data()
         .join("containers");
     let settings = match Settings::load(&directory.join("settings.json")) {
         Ok(settings) => settings,
-        Err(_) => Settings::new(directory, PathBuf::new()),
+        Err(_) => Settings::new(directory, DefaultShare::path()),
     };
     let status = Status {
         running: false,
@@ -94,7 +130,19 @@ fn spawn(mut commands: Commands) {
         NextInspection(Instant::now()),
         Logs::default(),
         LastError::default(),
+        ConfigurationRevision::default(),
     ));
+}
+
+struct DefaultShare;
+
+impl DefaultShare {
+    fn path() -> PathBuf {
+        match std::env::var_os("HOME") {
+            Some(path) => PathBuf::from(path),
+            None => vmux_profile::ProfilePaths::current().projects(),
+        }
+    }
 }
 
 fn page_ready(
@@ -112,14 +160,13 @@ fn page_ready(
     commands.entity(entity).insert(PageView);
 }
 
-type StartingEngines<'w, 's> = Query<
+type ConfiguredEngines<'w, 's> = Query<
     'w,
     's,
     (
         Entity,
-        &'static mut Settings,
+        &'static Settings,
         &'static Observed,
-        &'static mut LastError,
         Option<&'static Busy>,
     ),
     With<EngineView>,
@@ -128,36 +175,118 @@ type StartingEngines<'w, 's> = Query<
 fn start(
     trigger: On<UiInput<ContainerStartRequest>>,
     pages: Query<(), With<PageView>>,
-    mut engines: StartingEngines,
+    engines: ConfiguredEngines,
     mut commands: Commands,
 ) {
     let event = trigger.event();
     if !pages.contains(event.webview) {
         return;
     }
-    let Ok((entity, mut settings, observed, mut error, busy)) = engines.single_mut() else {
+    let Ok((entity, settings, _, busy)) = engines.single() else {
         return;
     };
     if busy.is_some() {
         return;
     }
+    commands.trigger(Request {
+        entity,
+        reply: entity,
+        command: Command::Start,
+        settings: settings.clone(),
+    });
+}
+
+fn configure(
+    trigger: On<UiInput<ContainerSettingsRequest>>,
+    pages: Query<(), With<PageView>>,
+    engines: ConfiguredEngines,
+    mut commands: Commands,
+) {
+    let event = trigger.event();
+    if !pages.contains(event.webview) {
+        return;
+    }
+    let Ok((entity, settings, observed, busy)) = engines.single() else {
+        return;
+    };
+    if busy.is_some() || observed.0.running {
+        return;
+    }
     let mut requested = settings.clone();
-    requested.directory = PathBuf::from(&event.payload.data_directory);
     requested.shared_directory = PathBuf::from(&event.payload.shared_directory);
     requested.cpus = event.payload.cpus;
     requested.memory_mib = event.payload.memory_mib;
-    if observed.0.running && *settings != requested {
-        error.0 = "Stop the running VM before changing its configuration".into();
-        return;
-    }
-    *settings = requested.clone();
-    error.0.clear();
     commands.trigger(Request {
         entity,
-        reply: event.webview,
-        command: Command::Start,
+        reply: entity,
+        command: Command::Configure,
         settings: requested,
     });
+}
+
+type PickingEngines<'w, 's> = Query<
+    'w,
+    's,
+    (
+        Entity,
+        &'static Settings,
+        Option<&'static Busy>,
+        Option<&'static PickTask>,
+    ),
+    With<EngineView>,
+>;
+
+fn open_project(
+    trigger: On<UiInput<ContainerProjectOpenRequest>>,
+    pages: Query<(), With<PageView>>,
+    engines: PickingEngines,
+    proxy: Option<Res<EventLoopProxyWrapper>>,
+    mut commands: Commands,
+) {
+    if !pages.contains(trigger.event().webview) {
+        return;
+    }
+    let Ok((entity, settings, busy, pick)) = engines.single() else {
+        return;
+    };
+    if busy.is_some() || pick.is_some() {
+        return;
+    }
+    let directory = settings.shared_directory.clone();
+    let wake = Wake::beside(proxy.as_deref());
+    commands
+        .entity(entity)
+        .insert(PickTask(IoTaskPool::get().spawn(async move {
+            let result = ComposeProject::select(directory).await;
+            drop(wake);
+            result
+        })));
+}
+
+fn finish_picks(
+    mut engines: Query<(Entity, &Settings, &mut LastError, &mut PickTask), With<EngineView>>,
+    mut commands: Commands,
+) {
+    for (entity, settings, mut error, mut task) in &mut engines {
+        let Some(result) = future::block_on(future::poll_once(&mut task.0)) else {
+            continue;
+        };
+        commands.entity(entity).remove::<PickTask>();
+        match result {
+            Ok(Some(project)) => {
+                commands.trigger(Request {
+                    entity,
+                    reply: entity,
+                    command: Command::Project(project.directory()),
+                    settings: settings.clone(),
+                });
+            }
+            Ok(None) => {}
+            Err(value) => {
+                error.0 = value.to_string();
+            }
+        }
+    }
 }
 
 fn stop(
@@ -175,7 +304,7 @@ fn stop(
     };
     commands.trigger(Request {
         entity,
-        reply: page,
+        reply: entity,
         command: Command::Stop,
         settings: settings.clone(),
     });
@@ -196,7 +325,7 @@ fn logs(
     };
     commands.trigger(Request {
         entity,
-        reply: page,
+        reply: entity,
         command: Command::Logs,
         settings: settings.clone(),
     });
@@ -209,16 +338,17 @@ type CompletedEngines<'w, 's> = Query<
         &'static mut Observed,
         &'static mut Logs,
         &'static mut LastError,
+        &'static mut Settings,
+        &'static mut ConfigurationRevision,
     ),
     With<EngineView>,
 >;
 
-fn finish(trigger: On<Finished>, pages: Query<(), With<PageView>>, mut engines: CompletedEngines) {
+fn finish(trigger: On<Finished>, mut engines: CompletedEngines, mut commands: Commands) {
     let event = trigger.event();
-    if !pages.contains(event.entity) {
-        return;
-    }
-    let Ok((mut observed, mut logs, mut error)) = engines.single_mut() else {
+    let Ok((mut observed, mut logs, mut error, mut settings, mut revision)) =
+        engines.get_mut(event.entity)
+    else {
         return;
     };
     match &event.result {
@@ -227,8 +357,20 @@ fn finish(trigger: On<Finished>, pages: Query<(), With<PageView>>, mut engines: 
             error.0.clear();
         }
         Ok(Reply::Logs(value)) => logs.0 = value.clone(),
+        Ok(Reply::Configured(value)) => {
+            *settings = value.clone();
+            revision.0 += 1;
+            observed.0.socket = settings.socket();
+            observed.0.log = settings.log();
+            error.0.clear();
+        }
+        Ok(Reply::Changed) => error.0.clear(),
         Err(value) => error.0 = value.clone(),
     }
+    commands
+        .entity(event.entity)
+        .remove::<InspectTask>()
+        .insert(NextInspection(Instant::now()));
 }
 
 type InspectedEngines<'w, 's> = Query<
@@ -287,16 +429,23 @@ type ProjectedEngines<'w, 's> = Query<
         &'static Logs,
         &'static LastError,
         Option<&'static Busy>,
+        Entity,
+        Option<&'static Inventory>,
+        Option<&'static PickTask>,
+        &'static ConfigurationRevision,
     ),
     With<EngineView>,
 >;
 
 fn project(
-    pages: Query<Entity, With<PageView>>,
+    pages: Query<(Entity, Option<&Output>), With<PageView>>,
     engines: ProjectedEngines,
+    catalog: Catalog,
     mut commands: Commands,
 ) {
-    let Ok((settings, observed, logs, error, busy)) = engines.single() else {
+    let Ok((settings, observed, logs, error, busy, engine, inventory, picker, revision)) =
+        engines.single()
+    else {
         return;
     };
     let phase = match observed.0.phase {
@@ -312,7 +461,7 @@ fn project(
         supported: cfg!(all(target_os = "macos", target_arch = "aarch64")),
         running: observed.0.running,
         ready: observed.0.docker_ready,
-        busy: busy.is_some(),
+        busy: busy.is_some() || picker.is_some(),
         phase: phase.into(),
         data_directory: settings.directory.to_string_lossy().into_owned(),
         shared_directory: settings.shared_directory.to_string_lossy().into_owned(),
@@ -325,8 +474,28 @@ fn project(
             error.0.clone()
         },
         logs: logs.0.clone(),
+        inventory_ready: inventory.is_some_and(|inventory| inventory.ready),
+        inventory_error: inventory
+            .map(|inventory| inventory.error.clone())
+            .unwrap_or_default(),
+        containers: catalog.snapshot(engine),
+        log_id: String::new(),
+        container_logs: String::new(),
+        container_log_error: String::new(),
+        container_logs_ready: false,
+        configuration_revision: revision.0,
+        starting: busy.is_some_and(Busy::starting),
+        stopping: busy.is_some_and(Busy::stopping),
+        project_starting: busy.is_some_and(Busy::project),
     };
-    for page in &pages {
+    for (page, output) in &pages {
+        let mut snapshot = snapshot.clone();
+        if let Some(output) = output {
+            snapshot.log_id = output.id.clone();
+            snapshot.container_logs = output.text.clone();
+            snapshot.container_log_error = output.error.clone();
+            snapshot.container_logs_ready = output.ready;
+        }
         commands.trigger(UiStateWrite::<ContainerUiState>::from_event(
             page, &snapshot,
         ));
