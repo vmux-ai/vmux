@@ -117,8 +117,13 @@ Point Docker CLI at the same daemon, then use normal Docker commands:
 
 ```sh
 docker context create vmux --docker "host=unix://$HOME/Library/Application Support/Vmux/containers/docker.sock"
-docker --context vmux compose up -d --build
+docker --context vmux compose -f examples/containers/compose.yaml up -d --build
 ```
+
+The bundled [Dockerfile](examples/containers/Dockerfile) builds a small nginx demo.
+The `vmux-demo` group and its `web` container appear in Containers. Open
+`http://localhost:8080` from the published port link, then select Logs to see requests.
+Remove the demo with `docker --context vmux compose -f examples/containers/compose.yaml down`.
 
 `docker build` creates an image. `docker run` and `docker compose up` create the
 containers that appear in the list; no registration step is needed.
