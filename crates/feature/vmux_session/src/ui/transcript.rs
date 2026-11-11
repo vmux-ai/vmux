@@ -3,7 +3,6 @@ use super::state::Chat;
 use crate::event::{ChatCancelQueuedPrompt, ChatClearQueue, ChatResume};
 use dioxus::prelude::*;
 use vmux_api::prompt_media::ChatAttachment;
-use vmux_ui::agent_accent::AgentAccent;
 use vmux_ui::components::skeleton::Skeleton;
 use vmux_ui::hooks::send;
 use vmux_ui::i18n::{TranslationValue, translate, translate_with};
@@ -219,18 +218,13 @@ fn TranscriptSkeleton() -> Element {
 
 #[component]
 fn InstallIntro(chat: Chat, detail: String) -> Element {
-    let accent = AgentAccent::for_agent(&chat.agent());
+    let phase = if chat.installing() || chat.installing_splash() || chat.status() == "installing" {
+        super::setup::Phase::Installation
+    } else {
+        super::setup::Phase::Preparation
+    };
     rsx! {
-        super::setup::Turn {
-            p { class: "text-sm", {translate("agent-preparing")} }
-            div { class: "flex max-w-sm items-center gap-2 text-xs text-muted-foreground",
-                span { class: "h-1.5 w-1.5 shrink-0 rounded-full {accent.accent_bg}" }
-                span { class: "truncate", "{detail}" }
-            }
-            if let Some(percent) = chat.install_percent() {
-                progress { class: "h-1 w-48", value: percent, max: "100", aria_label: translate("onboarding-install") }
-            }
-        }
+        super::setup::ProgressTurn { phase, detail, percent: chat.install_percent() }
     }
 }
 

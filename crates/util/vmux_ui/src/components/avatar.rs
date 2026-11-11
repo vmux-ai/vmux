@@ -89,11 +89,16 @@ pub fn AgentThumbnail(
     background: String,
     #[props(default)] alt: String,
     #[props(default)] class: String,
+    #[props(default)] inverted: bool,
 ) -> Element {
     let src = AgentThumbnailSource::resolve(src, &seed);
     let background = AgentThumbnailBackground::resolve(&background, &seed, src.as_deref());
     let theme_class = if src.as_deref().is_some_and(FaviconSource::is_monochrome) {
-        "dark:[&_img]:invert"
+        if inverted {
+            "[&_img]:invert dark:[&_img]:invert-0"
+        } else {
+            "dark:[&_img]:invert"
+        }
     } else {
         ""
     };

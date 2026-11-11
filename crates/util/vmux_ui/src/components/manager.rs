@@ -302,6 +302,7 @@ pub fn ManagerSearch(
     value: String,
     placeholder: String,
     #[props(default)] disabled: bool,
+    #[props(default)] inherit_color: bool,
     #[props(default)] id: Option<String>,
     #[props(default)] autofocus: bool,
     #[props(default)] onsearch: Option<EventHandler<String>>,
@@ -326,13 +327,17 @@ pub fn ManagerSearch(
         }
     });
     let class = "group/manager-search relative z-30 flex h-7 min-w-0 flex-1 items-center gap-1.5 rounded-md px-1 transition-colors duration-100 hover:bg-foreground/[0.025] focus-within:bg-foreground/[0.045] motion-reduce:transition-none";
-    let input_class = "h-full w-full min-w-0 flex-1 bg-transparent text-ui text-foreground outline-none placeholder:text-muted-foreground/55";
+    let input_class = if inherit_color {
+        "h-full w-full min-w-0 flex-1 bg-transparent text-ui text-inherit outline-none placeholder:text-current placeholder:opacity-60"
+    } else {
+        "h-full w-full min-w-0 flex-1 bg-transparent text-ui text-foreground outline-none placeholder:text-muted-foreground/55"
+    };
     rsx! {
         div { class, "data-vmux-search-active": if draft().is_empty() { "false" } else { "true" },
             label { r#for: id.clone(), class: "flex h-full shrink-0 cursor-text items-center",
                 LineIconView {
                     icon: LineIcon::Search,
-                    class: "size-3.5 shrink-0 text-muted-foreground/70 transition-colors duration-100 group-focus-within/manager-search:text-foreground",
+                    class: if inherit_color { "size-3.5 shrink-0 opacity-70" } else { "size-3.5 shrink-0 text-muted-foreground/70 transition-colors duration-100 group-focus-within/manager-search:text-foreground" },
                 }
             }
             {prefix}

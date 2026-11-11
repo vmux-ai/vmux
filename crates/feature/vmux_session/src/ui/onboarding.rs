@@ -1,6 +1,6 @@
 use dioxus::prelude::*;
 use vmux_ui::components::avatar::AgentThumbnail;
-use vmux_ui::components::composer::PromptComposer;
+use vmux_ui::components::composer::{ComposerFrame, PromptComposer};
 use vmux_ui::components::manager::{ManagerSearch, ManagerSearchRow};
 use vmux_ui::components::skeleton::Skeleton;
 use vmux_ui::hooks::{UiStateBinding, send};
@@ -30,17 +30,18 @@ fn Conversation(state: OnboardingUiState) -> Element {
                     if state.failed {
                         p { class: "text-sm leading-relaxed", {translate("onboarding-setup-failed")} }
                     }
-                    AgentSelector { state }
                 }
             }
             super::surface::Dock {
+                ComposerFrame {
+                    notice: Some(rsx! { div { "data-slot": "composer-notice", class: "px-1 py-1", AgentSelector { state } } }),
                 PromptComposer {
                     value: String::new(),
                     placeholder: translate("onboarding-composer-wait"),
                     accent_color: Identity::COLOR.to_string(),
                     accent_gradient: "from-indigo-500 to-violet-600".to_string(),
                     footer: Some(rsx! {}),
-                    disabled: true,
+                    input_disabled: true,
                     show_add_button: false,
                     show_send_button: false,
                     action_title: translate("onboarding-setup"),
@@ -51,6 +52,7 @@ fn Conversation(state: OnboardingUiState) -> Element {
                     on_paste: move |_| {},
                     on_attach: move |_| {},
                     on_remove_attachment: move |_| {},
+                }
                 }
             }
         }
@@ -80,16 +82,17 @@ fn AgentSelector(state: OnboardingUiState) -> Element {
                 background: String::new(),
                 alt: agent.name.clone(),
                 class: "size-5 text-[7px]".to_string(),
+                inverted: true,
             }
         });
         details.push(rsx! {
             if agent.installed {
-                span { class: "text-[10px] text-muted-foreground", {translate("common-installed")} }
+                span { class: "text-[10px] opacity-60", {translate("common-installed")} }
             }
         });
     }
     rsx! {
-        div { class: "flex w-full max-w-md flex-col gap-2",
+        div { class: "flex w-full flex-col gap-2",
             if loading {
                 for index in 0..3 {
                     Skeleton { key: "{index}", class: "h-8 w-full rounded-lg" }
@@ -102,6 +105,7 @@ fn AgentSelector(state: OnboardingUiState) -> Element {
                     leading: icons,
                     trailing: details,
                     compact: true,
+                    framed: true,
                     show_numbers: false,
                     show_help: false,
                     selected: cursor,
@@ -116,6 +120,7 @@ fn AgentSelector(state: OnboardingUiState) -> Element {
                     value: query(),
                     placeholder: translate("onboarding-search-agents"),
                     disabled: pending || loading,
+                    inherit_color: true,
                     onsearch: move |value| { query.set(value); selected.set(0); },
                     onkeydown: Some(EventHandler::new(move |event| {
                         if !pending { searched.key(event, selected, false); }

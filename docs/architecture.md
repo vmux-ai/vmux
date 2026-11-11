@@ -1558,7 +1558,7 @@ wire messages enter ECS.
 
 ACP setup opens as a conversation on the first launcher entry without saved workspace history.
 An existing workspace keeps its launcher when no setup or usable Session remains. The guide asks which agent to
-install or connect; selecting its compact choice within the guide message starts only the required installation and
+install or connect; selecting its compact composer choice starts only the required installation and
 authentication. Work descriptions and project selection belong to the actual agent conversation.
 An installed agent reuses its package and compatible credentials. A live, usable preferred Session
 opens directly; a recorded setup Session resumes its unfinished step. Later launcher tabs keep
@@ -1572,12 +1572,15 @@ queue empty until the user sends a real message. Schema 2 setup records preserve
 while discarding the earlier task-first Session reference, without deleting conversation history.
 
 The bootstrap and live Session share their conversation surface, transcript, assistant/user turns,
-composer and choice controls. The guide embeds up to three compact choices from common agent
-families in its own assistant turn, preferring an installed option within each family.
-Shared choice controls, agent thumbnails and a compact search expose the remaining supported
-catalog only when requested. The host still owns setup state; selection and search remain local UI input.
-The normal composer is disabled during selection; setup controls replace it during installation and
-sign-in, and readiness makes it available. A minimal setup-guide icon accompanies guide messages.
+composer and choice controls. The guide offers up to three common agent families, preferring
+an installed option within each family. Selection and authentication choices sit in the shared
+composer's outer notice frame; search exposes the remaining supported catalog when requested.
+The host owns setup state; the cursor and search stay local to the UI. Normal text input is
+disabled until readiness, and supported masked key entry replaces that input when needed.
+Preparation and installation show the normal Stop control rather than management options.
+Stop, Ctrl+C and Escape route to setup cancellation without flushing queued work or discarding
+the Session. Shared loading/progress animations and phase icons accompany guide messages;
+installation progress is indeterminate until an actual percentage is available.
 ACP supplies its supported catalog, credential availability and managed installer.
 Agent logos use the official registry's 16×16, monochrome SVG icon metadata. Shared thumbnails
 and favicons adapt those icons to the current theme; supplied icons take precedence over legacy

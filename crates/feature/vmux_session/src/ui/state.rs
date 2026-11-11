@@ -300,8 +300,15 @@ impl Chat {
     }
 
     pub(super) fn setup_pending(&self) -> bool {
+        if !(self.identity.snapshot.ready)() {
+            return false;
+        }
         let status = self.status();
-        if matches!(status.as_str(), "authentication" | "preparing") || self.installing_splash() {
+        if matches!(
+            status.as_str(),
+            "authentication" | "preparing" | "installing"
+        ) || self.installing_splash()
+        {
             return true;
         }
         status == "errored"
@@ -311,6 +318,12 @@ impl Chat {
                 vmux_session::Failure(&self.run.error()).kind(),
                 crate::FailureKind::Busy | crate::FailureKind::MissingHistory
             )
+    }
+
+    pub(super) fn setup_busy(&self) -> bool {
+        matches!(self.status().as_str(), "preparing" | "installing")
+            || self.installing_splash()
+            || self.authentication_pending()
     }
 
     pub fn transcript_loading(&self) -> bool {
@@ -607,7 +620,7 @@ impl Chat {
 
 impl Chat {
     pub fn submit(&self) {
-        if self.in_use() {
+        if self.in_use() || self.setup_pending() {
             return;
         }
         let mut at_bottom = self.transcript.at_bottom;

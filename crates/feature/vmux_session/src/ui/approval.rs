@@ -139,6 +139,7 @@ pub(super) fn ChoiceOptions(
     #[props(default)] question: Option<String>,
     #[props(default)] disabled: bool,
     #[props(default)] compact: bool,
+    #[props(default)] framed: bool,
     #[props(default = true)] show_numbers: bool,
     #[props(default = true)] show_help: bool,
     #[props(default)] leading: Vec<Element>,
@@ -152,7 +153,7 @@ pub(super) fn ChoiceOptions(
         .clone()
         .unwrap_or_else(|| translate("agent-choose-option"));
     rsx! {
-        div { class: if compact { "" } else { "border-l-2 border-foreground/15 py-2 pl-3.5" },
+        div { class: if framed { "px-2 py-2" } else if compact { "" } else { "border-l-2 border-foreground/15 py-2 pl-3.5" },
             if let Some(question) = question {
                 div { class: "mb-3 text-sm font-medium text-foreground", "{question}" }
             }
@@ -169,7 +170,9 @@ pub(super) fn ChoiceOptions(
                         disabled: disabled || disabled_options.contains(&index),
                         onfocus: move |_| on_hover.call(index),
                         onmouseenter: move |_| on_hover.call(index),
-                        class: if compact {
+                        class: if framed {
+                            if index == selected { "flex min-h-8 shrink-0 items-center gap-2 rounded-lg bg-background/10 px-2 py-1.5 text-left text-sm text-inherit" } else { "flex min-h-8 shrink-0 items-center gap-2 rounded-lg px-2 py-1.5 text-left text-sm text-inherit hover:bg-background/[0.06]" }
+                        } else if compact {
                             if index == selected { "flex min-h-8 shrink-0 items-center gap-2 rounded-lg bg-foreground/[0.08] px-2 py-1.5 text-left text-sm text-foreground" } else { "flex min-h-8 shrink-0 items-center gap-2 rounded-lg px-2 py-1.5 text-left text-sm text-foreground hover:bg-foreground/[0.04]" }
                         } else if index == selected { "flex shrink-0 items-center gap-3 rounded-xl bg-foreground px-3 py-2 text-left text-sm text-background" } else { "flex shrink-0 items-center gap-3 rounded-xl bg-foreground/[0.045] px-3 py-2 text-left text-sm text-foreground hover:bg-foreground/[0.08]" },
                         onclick: move |_| on_select.call(index),
@@ -187,7 +190,7 @@ pub(super) fn ChoiceOptions(
                 }
             }
             if show_help {
-                div { class: "mt-2.5 text-[11px] text-muted-foreground", {translate("agent-choice-help")} }
+                div { class: if framed { "mt-2 px-2 text-[11px] opacity-60" } else { "mt-2.5 text-[11px] text-muted-foreground" }, {translate("agent-choice-help")} }
             }
         }
     }

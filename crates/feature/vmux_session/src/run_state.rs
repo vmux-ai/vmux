@@ -25,6 +25,13 @@ pub enum RunState {
 }
 
 impl RunState {
+    pub fn setup_in_progress(&self) -> bool {
+        matches!(
+            self,
+            Self::Preparing | Self::Installing { .. } | Self::AuthenticationRequired { .. }
+        )
+    }
+
     pub fn needs_credentials(&self) -> bool {
         match self {
             Self::AuthenticationRequired { .. } => true,

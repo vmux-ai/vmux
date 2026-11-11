@@ -31,6 +31,8 @@ pub fn PromptComposer(
     #[props(default)] footer: Option<Element>,
     #[props(default)] shared_transition: bool,
     #[props(default)] disabled: bool,
+    #[props(default)] input_disabled: bool,
+    #[props(default)] input: Option<Element>,
     #[props(default = true)] show_send_button: bool,
     #[props(default = true)] show_add_button: bool,
     #[props(default = true)] caret_visible: bool,
@@ -47,6 +49,7 @@ pub fn PromptComposer(
     on_remove_attachment: EventHandler<usize>,
     on_action: EventHandler<()>,
 ) -> Element {
+    let field_disabled = disabled || input_disabled;
     let mut add_menu_open = use_signal(|| false);
     Dismissal::use_listener(
         add_menu_open(),
@@ -204,6 +207,9 @@ pub fn PromptComposer(
                 }
                 div { class: "relative z-10 flex min-w-0 flex-1 flex-wrap items-center gap-1 px-1 sm:px-2",
                     div { class: "relative min-w-32 flex-1 overflow-hidden",
+                        if let Some(input) = input {
+                            {input}
+                        } else {
                         if value.is_empty() {
                             if !preview.is_empty() {
                                 div { class: "pointer-events-none absolute inset-0 flex items-center overflow-hidden px-1.5",
@@ -227,9 +233,9 @@ pub fn PromptComposer(
                         textarea {
                             id: "{input_id}",
                             class: textarea_class,
-                            autofocus: !disabled,
-                            disabled,
-                            aria_disabled: disabled,
+                            autofocus: !field_disabled,
+                            disabled: field_disabled,
+                            aria_disabled: field_disabled,
                             rows: "1",
                             spellcheck: "false",
                             autocapitalize: "off",
@@ -238,7 +244,7 @@ pub fn PromptComposer(
                             placeholder: if preview.is_empty() && !has_ghost && !overlaid { placeholder } else { String::new() },
                             value: "{value}",
                             oninput: move |event| {
-                                if disabled {
+                                if field_disabled {
                                     return;
                                 }
                                 if let Some(value) = ime.input(event.value()) {
@@ -246,7 +252,7 @@ pub fn PromptComposer(
                                 }
                             },
                             onpaste: move |event| {
-                                if disabled {
+                                if field_disabled {
                                     event.prevent_default();
                                     return;
                                 }
@@ -254,7 +260,7 @@ pub fn PromptComposer(
                             },
                             oncompositionstart: move |_| ime.start(),
                             oncompositionend: move |_| {
-                                if disabled {
+                                if field_disabled {
                                     return;
                                 }
                                 if let Some(value) = ime.commit_input() {
@@ -262,11 +268,12 @@ pub fn PromptComposer(
                                 }
                             },
                             onkeydown: move |event| {
-                                if disabled || ime.swallows(&event) {
+                                if field_disabled || ime.swallows(&event) {
                                     return;
                                 }
                                 on_keydown.call(event);
                             },
+                        }
                         }
                     }
                 }
@@ -277,6 +284,11 @@ pub fn PromptComposer(
                         disabled: disabled || !action_enabled,
                         title: "{action_title}",
                         onmousedown: move |event| event.prevent_default(),
+                        onkeydown: move |event| {
+                            if event.key() == Key::Enter || matches!(event.key(), Key::Character(key) if key == " ") {
+                                event.stop_propagation();
+                            }
+                        },
                         onclick: move |_| {
                             if !disabled && action_enabled {
                                 on_action.call(());
