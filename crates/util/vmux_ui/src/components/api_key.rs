@@ -22,6 +22,11 @@ pub fn ApiKeyEntry(
                     disabled: pending,
                     oninput: move |event| key.set(event.value()),
                     onkeydown: move |event| {
+                        if event.key() == Key::Escape
+                            || event.modifiers().ctrl() && event.key() == Key::Character("c".into())
+                        {
+                            return;
+                        }
                         event.stop_propagation();
                         if event.key() == Key::Enter {
                             event.prevent_default();
@@ -54,7 +59,8 @@ mod tests {
     use super::*;
     use dioxus::core::{AttributeValue, Mutation, VirtualDom};
     use dioxus_html::{
-        EventData, SerializedFormData, SerializedHtmlEventConverter, SerializedMouseData,
+        Code, EventData, Location, Modifiers, SerializedFormData, SerializedHtmlEventConverter,
+        SerializedKeyboardData, SerializedMouseData,
     };
     use std::{cell::RefCell, rc::Rc};
 
@@ -131,5 +137,62 @@ mod tests {
         assert_eq!(saved[0].expose(), "private-test-key");
         assert!(!format!("{:?}", saved[0]).contains("private-test-key"));
         assert!(!dioxus_ssr::render(&dom).contains("private-test-key"));
+    }
+
+    #[derive(Clone, Default)]
+    struct Interruptions(Rc<RefCell<Vec<Key>>>);
+
+    #[component]
+    fn InterruptibleKeyInput() -> Element {
+        let interruptions = use_context::<Interruptions>();
+        rsx! {
+            div { onkeydown: move |event| interruptions.0.borrow_mut().push(event.key()),
+                KeyInput {}
+            }
+        }
+    }
+
+    #[test]
+    fn interruption_keys_bubble_from_password_input_without_submitting_a_key() {
+        dioxus_html::set_event_converter(Box::new(SerializedHtmlEventConverter));
+        let keys = Keys::default();
+        let interruptions = Interruptions::default();
+        let mut dom = VirtualDom::new(InterruptibleKeyInput);
+        dom.provide_root_context(keys.clone());
+        dom.provide_root_context(interruptions.clone());
+        let initial = dom.rebuild_to_vec();
+        let label = translate("onboarding-api-key");
+        let input = initial
+            .edits
+            .iter()
+            .find_map(|edit| match edit {
+                Mutation::SetAttribute {
+                    name: "aria-label",
+                    value: AttributeValue::Text(value),
+                    id,
+                    ..
+                } if value == &label => Some(*id),
+                _ => None,
+            })
+            .expect("password input must render");
+        for (key, code, modifiers) in [
+            (Key::Enter, Code::Enter, Modifiers::empty()),
+            (Key::Escape, Code::Escape, Modifiers::empty()),
+            (Key::Character("c".into()), Code::KeyC, Modifiers::CONTROL),
+        ] {
+            let keyboard =
+                SerializedKeyboardData::new(key, code, Location::Standard, false, modifiers, false);
+            dom.runtime().handle_event(
+                "keydown",
+                Event::new(EventData::Keyboard(keyboard).into_any(), true),
+                input,
+            );
+            dom.render_immediate_to_vec();
+        }
+        assert_eq!(
+            *interruptions.0.borrow(),
+            [Key::Escape, Key::Character("c".into())]
+        );
+        assert!(keys.0.borrow().is_empty());
     }
 }
