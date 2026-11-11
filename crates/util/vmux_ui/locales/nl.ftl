@@ -1141,3 +1141,4 @@ project-directory-unavailable = De projectmap is niet beschikbaar
 
 session-turn-view-prompt = Invoer bekijken
 session-turn-view-response = Antwoord bekijken
+agent-incoming-message = Agentbericht

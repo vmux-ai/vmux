@@ -1141,3 +1141,4 @@ project-directory-unavailable = La directory del progetto non è disponibile
 
 session-turn-view-prompt = Mostra richiesta
 session-turn-view-response = Mostra risposta
+agent-incoming-message = Messaggio dell’agente

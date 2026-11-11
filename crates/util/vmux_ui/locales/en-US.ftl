@@ -1129,3 +1129,4 @@ project-directory-unavailable = The project directory is unavailable
 
 session-turn-view-prompt = View prompt
 session-turn-view-response = View response
+agent-incoming-message = Agent message

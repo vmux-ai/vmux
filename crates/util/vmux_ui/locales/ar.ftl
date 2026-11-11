@@ -1141,3 +1141,4 @@ project-directory-unavailable = مجلد المشروع غير متاح
 
 session-turn-view-prompt = عرض الطلب
 session-turn-view-response = عرض الرد
+agent-incoming-message = رسالة من الوكيل

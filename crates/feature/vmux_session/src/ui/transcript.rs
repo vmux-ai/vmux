@@ -62,7 +62,10 @@ fn QueuedAttachments(attachments: Vec<ChatAttachment>) -> Element {
 }
 
 #[component]
-pub(super) fn ChatTranscript(chat: Chat) -> Element {
+pub(super) fn ChatTranscript(
+    chat: Chat,
+    #[props(default)] reserve_details_toggle: bool,
+) -> Element {
     use_hook(vmux_ui::scroll::StickySections::install);
     let section_keys = use_hook(|| Rc::new(RefCell::new(Keys::default())));
     let mut scroll_container = chat.transcript.scroll_container;
@@ -79,6 +82,11 @@ pub(super) fn ChatTranscript(chat: Chat) -> Element {
     let latest_index = loaded_start as usize + items.len().saturating_sub(1);
     let mut turns = Turn::group(items, loaded_start as usize);
     let bottom_padding = if chat.in_use() { "pb-12" } else { "pb-20" };
+    let toggle_space = if reserve_details_toggle {
+        "[&_.chat-user-bubble]:pr-10"
+    } else {
+        ""
+    };
     section_keys.borrow_mut().assign(&mut turns);
     rsx! {
         div {
@@ -94,7 +102,7 @@ pub(super) fn ChatTranscript(chat: Chat) -> Element {
                     chat.transcript.follow();
                 }
             },
-            class: "relative z-10 flex-1 overflow-y-auto overscroll-contain scroll-pt-12 px-3 {bottom_padding} outline-none sm:px-4 md:px-6",
+            class: "relative z-10 flex-1 overflow-y-auto overscroll-contain scroll-pt-12 px-3 {bottom_padding} {toggle_space} outline-none sm:px-4 md:px-6",
             tabindex: "0",
             onwheel: move |_| chat.transcript.scroll_input(),
             ontouchmove: move |_| chat.transcript.scroll_input(),

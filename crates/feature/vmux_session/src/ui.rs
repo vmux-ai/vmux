@@ -119,14 +119,14 @@ fn SessionDetail(session_id: String, mut details_open: Signal<bool>) -> Element 
                 keys.on_root_keydown(event);
             },
             style { dangerous_inner_html: MD_CSS }
+            DetailsToggle {
+                details_available,
+                details_open: details_open(),
+                on_details_toggle: move |_| details_open.set(!details_open()),
+            }
             div { class: "flex min-h-0 flex-1 overflow-hidden",
                 section { class: "relative flex min-w-0 flex-1 flex-col",
-                    DetailsToggle {
-                        details_available,
-                        details_open: details_open(),
-                        on_details_toggle: move |_| details_open.set(!details_open()),
-                    }
-                    ChatTranscript { chat }
+                    ChatTranscript { chat, reserve_details_toggle: !details_open() }
                     div {
                         class: "relative isolate z-20 -mt-8 before:pointer-events-none before:absolute before:inset-x-0 before:-top-12 before:bottom-0 before:-z-10 before:bg-[linear-gradient(to_bottom,transparent,var(--background)_3rem)]",
                         ChatApprovalDock { chat }
@@ -135,9 +135,9 @@ fn SessionDetail(session_id: String, mut details_open: Signal<bool>) -> Element 
                 }
                 div {
                     class: if details_open() {
-                        "hidden h-full min-h-0 shrink-0 overflow-hidden opacity-100 transition-[width,opacity,transform] duration-200 ease-out motion-reduce:transition-none lg:flex lg:w-[19rem] lg:translate-x-0"
+                        "visible absolute inset-y-0 right-0 z-40 flex h-full min-h-0 w-[min(19rem,100%)] shrink-0 overflow-hidden bg-background opacity-100 transition-[width,opacity,transform,visibility] duration-200 ease-out motion-reduce:transition-none lg:static lg:w-[19rem] lg:translate-x-0"
                     } else {
-                        "pointer-events-none hidden h-full min-h-0 shrink-0 translate-x-3 overflow-hidden opacity-0 transition-[width,opacity,transform] duration-200 ease-out motion-reduce:transition-none lg:flex lg:w-0"
+                        "invisible pointer-events-none absolute inset-y-0 right-0 z-40 flex h-full min-h-0 w-[min(19rem,100%)] shrink-0 translate-x-full overflow-hidden bg-background opacity-0 transition-[width,opacity,transform,visibility] duration-200 ease-out motion-reduce:transition-none lg:static lg:w-0 lg:translate-x-3"
                     },
                     aria_hidden: (!details_open()).to_string(),
                     if let Some((session, repository, stages)) = details {

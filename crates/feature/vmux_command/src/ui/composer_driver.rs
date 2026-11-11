@@ -76,19 +76,26 @@ impl ComposerChips {
             )
         };
 
+        let project_seed =
+            match vmux_api::space::ProjectRow::for_directory(&composer.projects, &composer.project)
+            {
+                Some(project) => project.identity_seed(),
+                None => composer.project.as_str(),
+            };
         let project = ComposerChip::ready(
             composer.workspace_label.clone(),
             composer.workspace_title.clone(),
         )
+        .with_identity(project_seed)
         .opens(EventHandler::new(move |()| {
             let _ = send(&CommandPaletteProjectMenuToggleRequest { open_id });
         }));
         let branch = composer.is_git_repo.then(|| {
-            ComposerChip::ready(composer.branch_label.clone(), composer.branch_title.clone()).opens(
-                EventHandler::new(move |()| {
+            ComposerChip::ready(composer.branch_label.clone(), composer.branch_title.clone())
+                .with_identity(composer.branch_label.clone())
+                .opens(EventHandler::new(move |()| {
                     let _ = send(&CommandPaletteBranchMenuToggleRequest { open_id });
-                }),
-            )
+                }))
         });
 
         Self {

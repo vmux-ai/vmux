@@ -13,6 +13,7 @@ use vmux_api::chat::{
 use vmux_api::command_bar::OpenRequest;
 use vmux_api::open_target::{OpenTarget, PaneDirection, PaneOpenMode, PaneTarget};
 use vmux_api::prompt_media::ChatAttachment;
+use vmux_api::protocol::{AgentDelegationEnvelope, AgentPromptEnvelope};
 use vmux_ui::components::avatar::{AgentThumbnail, Avatar};
 use vmux_ui::components::code::ShellCode;
 use vmux_ui::components::context_menu::{
@@ -468,6 +469,32 @@ mod disclosure_tests {
             assert!(details.contains(&read));
             assert!(!following.contains(&read));
         }
+    }
+
+    #[test]
+    fn inter_agent_output_is_labelled_as_agent_message_and_keeps_its_input_expandable() {
+        let input = AgentPromptEnvelope::compose(
+            "Review the next PR\nKeep the existing branch.",
+            Some("private project instructions"),
+        );
+        let content = format!(
+            "<codex_delegation><source_thread_id>peer</source_thread_id><input>{input}</input></codex_delegation>"
+        );
+        let mut dom = VirtualDom::new_with_props(
+            StandaloneToolResult,
+            StandaloneToolResultProps {
+                result_key: 0,
+                content,
+                is_error: false,
+            },
+        );
+        dom.rebuild_in_place();
+        let html = dioxus_ssr::render(&dom);
+        assert!(html.contains(&translate("agent-incoming-message")));
+        assert!(html.contains("Review the next PR\nKeep the existing branch."));
+        assert!(!html.contains("codex_delegation"));
+        assert!(!html.contains("private project instructions"));
+        assert!(!html.contains("chat-user-bubble"));
     }
 
     #[test]
@@ -1966,6 +1993,15 @@ fn StandaloneToolResult(result_key: usize, content: String, is_error: bool) -> E
     let anchor = BlockIdentity::anchor(result_key as u32, "result");
     let disclosure = BlockIdentity::disclosure(result_key as u32, "result");
     let content = content.as_str();
+    let incoming = if is_error {
+        None
+    } else {
+        AgentDelegationEnvelope::new(content).input()
+    };
+    let content = match incoming {
+        Some(input) => AgentPromptEnvelope::new(input).display().unwrap_or(input),
+        None => content,
+    };
     let preview = OutputPreview::new(content);
     let tone = if is_error {
         "text-red-500"
@@ -1984,6 +2020,8 @@ fn StandaloneToolResult(result_key: usize, content: String, is_error: bool) -> E
     };
     let label = if is_error {
         translate("common-error")
+    } else if incoming.is_some() {
+        translate("agent-incoming-message")
     } else {
         translate("common-output")
     };
@@ -1994,7 +2032,13 @@ fn StandaloneToolResult(result_key: usize, content: String, is_error: bool) -> E
     };
     rsx! {
         div { key: "{key}", class: "grid grid-cols-[1.5rem_minmax(0,1fr)] items-start gap-2.5 rounded-xl px-2 py-1.5 transition-colors {row}",
-            ActivityIconView { kind: icon }
+            if incoming.is_some() {
+                span { class: "flex h-6 w-6 shrink-0 items-center justify-center text-muted-foreground/75", aria_hidden: "true",
+                    LineIconView { icon: LineIcon::MessagesRound, class: "h-4 w-4" }
+                }
+            } else {
+                ActivityIconView { kind: icon }
+            }
             details { class: "disclosure group/output min-w-0 rounded-lg px-0 py-1 text-sm {tone} {panel}", id: anchor, "data-vmux-scroll-anchor": "", "data-vmux-disclosure-key": disclosure,
                 summary { class: "flex cursor-pointer select-none items-center gap-2 list-none [&::-webkit-details-marker]:hidden",
                     DisclosureIcon {}

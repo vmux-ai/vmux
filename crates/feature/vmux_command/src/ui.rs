@@ -79,12 +79,8 @@ pub fn CommandPalette(props: PaletteProps) -> Element {
 
     use_effect(move || {
         let opened = state();
-        if input.refocus(opened.open_id) {
-            if is_start {
-                PromptFocus::end(PROMPT_INPUT_ID);
-            } else {
-                CommandBarField::focus(&opened);
-            }
+        if !is_start && input.refocus(opened.open_id) {
+            CommandBarField::focus(&opened);
         }
     });
 
@@ -720,4 +716,118 @@ pub struct PaletteProps {
     pub surface: CommandPaletteSurface,
     pub on_close: EventHandler<()>,
     pub on_activity: EventHandler<()>,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::{cell::RefCell, rc::Rc};
+    use vmux_api::command_bar::{CommandBarFocusEffect, CommandBarOpenEvent};
+    use vmux_api::{BinEvent, UiStateFrame};
+    use vmux_ui::transport::{
+        BytesListener, HostBinding, HostScope, PageHost, event_listener::EventListenerError,
+    };
+
+    #[component]
+    fn StartFocusFixture() -> Element {
+        let state = use_command_bar_ui();
+        rsx! { CommandPalette {
+            state,
+            surface: CommandPaletteSurface::Start,
+            on_close: move |_| {},
+            on_activity: move |_| {},
+        } }
+    }
+
+    #[derive(Default)]
+    struct FocusHost {
+        listeners: RefCell<Vec<BytesListener>>,
+        focused: RefCell<Vec<String>>,
+    }
+
+    impl PageHost for FocusHost {
+        fn send(&self, _: &str, _: &[u8]) -> Result<(), EventListenerError> {
+            Ok(())
+        }
+
+        fn listen(&self, id: &str, listener: BytesListener) -> Result<(), EventListenerError> {
+            if id == CommandBarUiState::id() {
+                self.listeners.borrow_mut().push(listener);
+            }
+            Ok(())
+        }
+
+        fn focus_element(&self, element_id: &str) {
+            self.focused.borrow_mut().push(element_id.to_string());
+        }
+    }
+
+    impl FocusHost {
+        fn publish(&self, open_id: u64, focus: u64) {
+            let frame = UiStateFrame::<
+                CommandBarUiState,
+                vmux_api::command_bar::CommandBarUiStatePatch,
+            >::Snapshot(CommandBarUiState {
+                snapshot: CommandBarOpenEvent {
+                    open_id: vmux_api::command_bar::OpenId(open_id),
+                    ..Default::default()
+                },
+                palette: CommandPaletteUiState {
+                    open_id: vmux_api::command_bar::OpenId(open_id),
+                    ..Default::default()
+                },
+                focus: CommandBarFocusEffect { revision: focus },
+                ..Default::default()
+            });
+            let bytes = rkyv::to_bytes::<rkyv::rancor::Error>(&frame).unwrap();
+            for listener in &mut *self.listeners.borrow_mut() {
+                listener(&bytes);
+            }
+        }
+    }
+
+    struct FocusPage {
+        host: Rc<FocusHost>,
+        dom: VirtualDom,
+    }
+
+    impl FocusPage {
+        fn new() -> Self {
+            let host = Rc::new(FocusHost::default());
+            let _scope = HostScope::enter(host.clone());
+            let mut dom = VirtualDom::new(StartFocusFixture);
+            dom.provide_root_context(HostBinding(host.clone()));
+            dom.rebuild_in_place();
+            dom.render_immediate_to_vec();
+            dom.render_immediate_to_vec();
+            Self { host, dom }
+        }
+
+        fn publish(&mut self, open_id: u64, focus: u64) {
+            let _scope = HostScope::enter(self.host.clone());
+            self.host.publish(open_id, focus);
+            self.dom.render_immediate_to_vec();
+            self.dom.render_immediate_to_vec();
+        }
+    }
+
+    #[test]
+    fn prewarmed_start_does_not_focus_without_a_host_focus_request() {
+        let mut selected = FocusPage::new();
+        let mut spare = FocusPage::new();
+        selected.publish(1, 0);
+        spare.publish(2, 0);
+        assert!(
+            spare.host.focused.borrow().is_empty(),
+            "prewarming cannot claim the composer caret"
+        );
+        assert!(selected.host.focused.borrow().is_empty());
+        selected.publish(1, 1);
+        assert_eq!(*selected.host.focused.borrow(), [PROMPT_INPUT_ID]);
+        spare.publish(3, 0);
+        assert!(
+            spare.host.focused.borrow().is_empty(),
+            "a new spare cannot take focus from the selected Start"
+        );
+    }
 }

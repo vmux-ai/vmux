@@ -13,7 +13,7 @@ pub(super) fn DetailsToggle(
     rsx! {
         button {
             r#type: "button",
-            class: "absolute right-3 top-2 z-30 flex size-7 items-center justify-center rounded-md bg-background/90 text-muted-foreground transition-colors hover:bg-card hover:text-foreground disabled:opacity-35",
+            class: "absolute right-3 top-2 z-50 flex size-7 items-center justify-center rounded-md bg-background/90 text-muted-foreground transition-colors hover:bg-card hover:text-foreground disabled:opacity-35",
             title: translate("agent-details"),
             aria_label: translate("agent-details"),
             aria_expanded: details_open,

@@ -1141,3 +1141,4 @@ project-directory-unavailable = Каталог проєкту недоступн
 
 session-turn-view-prompt = Переглянути запит
 session-turn-view-response = Переглянути відповідь
+agent-incoming-message = Повідомлення агента

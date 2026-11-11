@@ -818,7 +818,8 @@ stopping cancels browser loading and rolls an uncommitted handoff back to its re
 Inactive restored pages do not animate the selected page's controls. A selected Start page requests
 composer focus again when its document becomes ready, including a reused prewarmed page.
 Its first presented frame also requests composer focus for the selected launcher; hidden prewarmed
-pages and launchers transitioning into a Session cannot claim it.
+pages and launchers transitioning into a Session cannot claim it. Start does not claim opening focus
+from palette initialization; host focus effects assign it to the selected composer.
 Loading feedback includes the reload revision and page URL in its identity, so a completed delay
 cannot light up the next reload of the same stack. External-page address rows keep their origin
 pill and text; their favicon remains in the tab.
@@ -1030,8 +1031,9 @@ excluded from accessibility.
 Source event IDs also identify individual turn rows and tools. A prepend preserves those row
 anchors even inside the same turn; tool batches retain their existing key, and reader-selected
 disclosure states are restored before scroll correction when a tool is reparented.
-Codex delegation results project their explicit input as a prompt, retaining the original event
-identity and cached record. Ordinary tool output and internal instructions remain separate.
+Codex delegation results remain agent activity, retaining the original event identity and cached
+record. Their explicit input is an expandable agent message; it cannot become a user bubble or
+sticky prompt. Internal instructions remain hidden.
 `StickySections` shares one intersection observer per scroll
 surface, observes added history, and disconnects removed surfaces; it does not poll or rerender on scroll.
 The scroll surface has no top inset while pinned; initial spacing belongs to its content. Header
@@ -2146,6 +2148,10 @@ visible row immediately before DOM edits and restores its position before paint,
 replay an earlier scroll position over fresh input. A resize observer schedules following at browser
 frames instead of writing layout from its notification loop. Any upward reading movement stops
 following; only the actual bottom resumes it.
+
+Detail panels overlay narrow pages and sit beside wide transcripts, with their toggle kept clear
+of prompt avatars. Pane-divider dragging reads native cursor and button state in its owning window,
+and drag events wake layout updates even over hosted pages.
 
 Session failures with a useful remedy occupy a light notification strip in the composer's outer
 frame. The dark composer keeps its draft and metadata inside that frame. Busy sessions disable

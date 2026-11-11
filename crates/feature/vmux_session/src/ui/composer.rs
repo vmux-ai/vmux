@@ -107,18 +107,25 @@ fn ComposerFooter(chat: Chat) -> Element {
     let mut model = chat.model_chip();
     let mut effort = chat.effort_chip();
     let mut permission = chat.permission_chip();
+    let project_seed =
+        match vmux_api::space::ProjectRow::for_directory(&context.projects, &context.cwd) {
+            Some(project) => project.identity_seed(),
+            None => context.cwd.as_str(),
+        };
     let project = if !chat.projects.context_ready() {
         Some(ComposerChip::loading())
     } else if context.cwd.is_empty() {
         None
     } else {
-        Some(ComposerChip::ready(
-            context.workspace_name.clone(),
-            context.cwd.clone(),
-        ))
+        Some(
+            ComposerChip::ready(context.workspace_name.clone(), context.cwd.clone())
+                .with_identity(project_seed),
+        )
     };
-    let branch = (!context.branch.is_empty())
-        .then(|| ComposerChip::ready(context.branch.clone(), context.branch.clone()));
+    let branch = (!context.branch.is_empty()).then(|| {
+        ComposerChip::ready(context.branch.clone(), context.branch.clone())
+            .with_identity(context.branch.clone())
+    });
     if chat.in_use() {
         status.clear();
         model = model.map(|chip| chip.readonly());

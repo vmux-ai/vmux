@@ -1138,3 +1138,4 @@ project-directory-unavailable = 프로젝트 디렉터리를 사용할 수 없�
 
 session-turn-view-prompt = 프롬프트 보기
 session-turn-view-response = 응답 보기
+agent-incoming-message = 에이전트 메시지
