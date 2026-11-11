@@ -6,6 +6,8 @@ pub use vmux_macro::store;
 pub use archive::{
     ArchivedPage, ArchivedPagePosition, ArchivedTabPage, PageArchiveRequest, PaneStep, SplitAxis,
 };
+#[cfg(all(host, feature = "host"))]
+pub use blocking::{BlockingCancellation, BlockingPool, BlockingRuntime, BlockingTask};
 pub use component::{
     ActivateRequest, Active, ArchivedAt, Bookmark, BookmarkOrder, Collapsed, CollectionView,
     CreatedAt, Cwd, Description, EffectiveStartupUrl, EntityTarget, Folder, HostShell,
@@ -57,6 +59,8 @@ pub mod address;
 pub mod agent;
 #[cfg(all(host, feature = "host"))]
 mod archive;
+#[cfg(all(host, feature = "host"))]
+pub mod blocking;
 #[cfg(all(host, feature = "host"))]
 pub mod browser;
 #[cfg(all(host, feature = "host"))]

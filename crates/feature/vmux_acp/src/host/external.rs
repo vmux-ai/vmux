@@ -6,7 +6,6 @@ use std::time::{Duration, Instant};
 
 use bevy::ecs::system::SystemParam;
 use bevy::prelude::*;
-use bevy::tasks::{IoTaskPool, Task, futures_lite::future};
 use bevy::winit::{EventLoopProxyWrapper, WinitUserEvent};
 use bevy_cef::prelude::UiInput;
 use notify::{RecommendedWatcher, RecursiveMode, Watcher};
@@ -17,7 +16,9 @@ use vmux_ecs::page::{Activity, PageReady};
 use vmux_ecs::service::{
     ServiceConnected, ServiceMessageAppExt, ServiceMessageSet, ServiceRequest,
 };
-use vmux_ecs::{ArchivedAt, CreatedAt, PageOpenRequest, PageOpenTarget};
+use vmux_ecs::{
+    ArchivedAt, BlockingRuntime, BlockingTask, CreatedAt, PageOpenRequest, PageOpenTarget,
+};
 use vmux_layout::{TabLayoutSpawnContent, TabLayoutSpawnRequest};
 use vmux_session::host::{SessionManagerView, SessionView, SessionViews};
 use vmux_session::{
@@ -45,7 +46,7 @@ pub(super) struct Plugin;
 
 impl bevy::prelude::Plugin for Plugin {
     fn build(&self, app: &mut App) {
-        app.add_plugins(archive::Plugin)
+        app.add_plugins((archive::Plugin, HistoryReadPlugin))
             .init_resource::<SourceSnapshot>()
             .init_resource::<NativeReaders>()
             .init_resource::<AcpSnapshot>()
@@ -73,12 +74,31 @@ impl bevy::prelude::Plugin for Plugin {
                     project,
                     associate,
                     request_conversation_refreshes,
+                )
+                    .chain(),
+            );
+    }
+}
+
+struct HistoryReadPlugin;
+
+impl bevy::prelude::Plugin for HistoryReadPlugin {
+    fn build(&self, app: &mut App) {
+        app.init_resource::<BlockingRuntime>()
+            .init_resource::<SourceSnapshot>()
+            .add_message::<SnapshotReceived>()
+            .add_message::<ConversationAppendReceived>()
+            .add_message::<vmux_session::OperationReceived>()
+            .add_systems(
+                Update,
+                (
                     queue_initial_conversations,
                     queue_failed_conversations,
                     queue_conversation_refreshes,
                     finish_conversations,
                 )
-                    .chain(),
+                    .chain()
+                    .after(request_conversation_refreshes),
             );
     }
 }
@@ -737,7 +757,7 @@ struct ScanRequested(HashSet<SourceKind>);
 #[derive(Component)]
 struct ScanTask {
     started_at: Instant,
-    task: Task<Vec<SourceRead>>,
+    task: BlockingTask<Vec<SourceRead>>,
 }
 
 #[derive(Component)]
@@ -745,6 +765,9 @@ struct ConversationLoadPending;
 
 #[derive(Component)]
 struct FailedConversationRead;
+
+#[derive(Component)]
+struct FailedConversationReadRequested;
 
 #[derive(Component)]
 struct ConversationRefreshRequested(i64);
@@ -763,7 +786,7 @@ struct ConversationLoadTask {
     session: Entity,
     sid: SessionId,
     revision: i64,
-    task: Task<Result<ConversationRead, String>>,
+    task: BlockingTask<Result<ConversationRead, String>>,
 }
 
 struct ConversationRead {
@@ -1829,6 +1852,7 @@ fn scan(
         (With<Runtime>, Without<ScanTask>),
     >,
     snapshot: Res<SourceSnapshot>,
+    workers: Res<BlockingRuntime>,
     proxy: Option<Res<EventLoopProxyWrapper>>,
     mut commands: Commands,
 ) {
@@ -1845,13 +1869,9 @@ fn scan(
     let readers = paths.readers(&requested, &snapshot);
     let wake = proxy.as_deref().map(|proxy| (**proxy).clone());
     let started_at = Instant::now();
-    let task = IoTaskPool::get().spawn(async move {
-        let reads = readers.read();
-        if let Some(wake) = wake {
-            let _ = wake.send_event(WinitUserEvent::WakeUp);
-        }
-        reads
-    });
+    let Some(task) = workers.spawn(wake, move || readers.read()) else {
+        return;
+    };
     commands
         .entity(entity)
         .remove::<ScanRequested>()
@@ -1865,8 +1885,16 @@ fn finish(
     mut commands: Commands,
 ) {
     let (entity, mut task) = task.into_inner();
-    let Some(reads) = future::block_on(future::poll_once(&mut task.task)) else {
+    let Some(result) = task.task.poll() else {
         return;
+    };
+    let reads = match result {
+        Ok(reads) => reads,
+        Err(_) => {
+            bevy::log::warn!("provider catalog worker panicked");
+            commands.entity(entity).remove::<ScanTask>();
+            return;
+        }
     };
     let mut next = snapshot.0.clone();
     for read in reads {
@@ -2154,6 +2182,7 @@ fn queue_initial_conversations(
     transcripts: Transcripts,
     native: Option<Res<NativeReaders>>,
     files: Query<&ConversationFile>,
+    workers: Res<BlockingRuntime>,
     proxy: Option<Res<EventLoopProxyWrapper>>,
     mut commands: Commands,
 ) {
@@ -2189,23 +2218,24 @@ fn queue_initial_conversations(
         let hint = files.get(session).ok().map(|file| file.0.clone());
         let paths = paths.clone();
         let wake = proxy.as_deref().map(|proxy| (**proxy).clone());
-        let task = IoTaskPool::get().spawn(async move {
-            let result = source.read(&paths, cursor, Vec::new(), native, hint);
-            if let Some(wake) = wake {
-                let _ = wake.send_event(WinitUserEvent::WakeUp);
-            }
-            result
-        });
+        let Some(task) = workers.spawn_long(wake, move || {
+            source.read(&paths, cursor, Vec::new(), native, hint)
+        }) else {
+            continue;
+        };
         commands
             .entity(session)
             .insert(ConversationLoadPending)
             .remove::<ConversationRefreshRequested>();
-        commands.spawn(ConversationLoadTask {
-            session,
-            sid: sid.clone(),
-            revision,
-            task,
-        });
+        commands.spawn((
+            ChildOf(session),
+            ConversationLoadTask {
+                session,
+                sid: sid.clone(),
+                revision,
+                task,
+            },
+        ));
     }
 }
 
@@ -2223,7 +2253,7 @@ fn queue_failed_conversations(
         ),
         (
             With<Session>,
-            Changed<RunState>,
+            Or<(Changed<RunState>, With<FailedConversationReadRequested>)>,
             Without<ConversationLoadPending>,
             Without<SessionDuplicate>,
         ),
@@ -2231,6 +2261,7 @@ fn queue_failed_conversations(
     transcripts: Transcripts,
     native: Option<Res<NativeReaders>>,
     files: Query<&ConversationFile>,
+    workers: Res<BlockingRuntime>,
     proxy: Option<Res<EventLoopProxyWrapper>>,
     mut commands: Commands,
 ) {
@@ -2248,6 +2279,9 @@ fn queue_failed_conversations(
     };
     for (session, sid, kind, provider_sid, created_at, state, cursor) in &sessions {
         if !matches!(state, RunState::Errored(_)) {
+            commands
+                .entity(session)
+                .remove::<FailedConversationReadRequested>();
             continue;
         }
         let Some(source) = ConversationSource::for_failed(&kind.0, &provider_sid.0, created_at.0)
@@ -2263,16 +2297,21 @@ fn queue_failed_conversations(
         let cursor = cursor.map(|cursor| cursor.0);
         let known = KnownConversation::tail(&transcripts.get(session).messages);
         let wake = proxy.as_deref().map(|proxy| (**proxy).clone());
-        let task = IoTaskPool::get().spawn(async move {
-            let result = source.read(&paths, cursor, known, native, hint);
-            if let Some(wake) = wake {
-                let _ = wake.send_event(WinitUserEvent::WakeUp);
-            }
-            result
-        });
-        commands.entity(session).insert(ConversationLoadPending);
+        let Some(task) = workers.spawn_long(wake, move || {
+            source.read(&paths, cursor, known, native, hint)
+        }) else {
+            commands
+                .entity(session)
+                .insert(FailedConversationReadRequested);
+            continue;
+        };
+        commands
+            .entity(session)
+            .insert(ConversationLoadPending)
+            .remove::<FailedConversationReadRequested>();
         commands.spawn((
             FailedConversationRead,
+            ChildOf(session),
             ConversationLoadTask {
                 session,
                 sid: sid.clone(),
@@ -2305,6 +2344,7 @@ fn queue_conversation_refreshes(
     transcripts: Transcripts,
     native: Option<Res<NativeReaders>>,
     files: Query<&ConversationFile>,
+    workers: Res<BlockingRuntime>,
     proxy: Option<Res<EventLoopProxyWrapper>>,
     mut commands: Commands,
 ) {
@@ -2325,23 +2365,24 @@ fn queue_conversation_refreshes(
         let hint = files.get(session).ok().map(|file| file.0.clone());
         let paths = paths.clone();
         let wake = proxy.as_deref().map(|proxy| (**proxy).clone());
-        let task = IoTaskPool::get().spawn(async move {
-            let result = source.read(&paths, cursor, known, native, hint);
-            if let Some(wake) = wake {
-                let _ = wake.send_event(WinitUserEvent::WakeUp);
-            }
-            result
-        });
+        let Some(task) = workers.spawn_long(wake, move || {
+            source.read(&paths, cursor, known, native, hint)
+        }) else {
+            continue;
+        };
         commands
             .entity(session)
             .insert(ConversationLoadPending)
             .remove::<ConversationRefreshRequested>();
-        commands.spawn(ConversationLoadTask {
-            session,
-            sid: sid.clone(),
-            revision,
-            task,
-        });
+        commands.spawn((
+            ChildOf(session),
+            ConversationLoadTask {
+                session,
+                sid: sid.clone(),
+                revision,
+                task,
+            },
+        ));
     }
 }
 
@@ -2370,9 +2411,10 @@ fn finish_conversations(
     mut commands: Commands,
 ) {
     for (task_entity, mut task, failed_read) in &mut tasks {
-        let Some(result) = future::block_on(future::poll_once(&mut task.task)) else {
+        let Some(result) = task.task.poll() else {
             continue;
         };
+        let result = result.unwrap_or_else(|_| Err("provider history worker panicked".into()));
         if failed_read
             && (!states
                 .get(task.session)
@@ -2855,6 +2897,8 @@ mod tests {
         app: App,
         session: Entity,
         _directory: tempfile::TempDir,
+        release: Vec<mpsc::SyncSender<()>>,
+        _blockers: Vec<BlockingTask<()>>,
     }
 
     impl FailedReadFixture {
@@ -2875,12 +2919,27 @@ mod tests {
                 body.push_str("{\"type\":\"response_item\",\"payload\":{\"type\":\"message\",\"role\":\"user\",\"content\":[{\"type\":\"input_text\",\"text\":\"new message after cached history\"}]}}\n");
                 std::fs::write(&rollout, body).unwrap();
             }
+            let workers = BlockingRuntime::default();
+            let mut release = Vec::new();
+            let mut blockers = Vec::new();
+            for _ in 0..2 {
+                let (started_tx, started_rx) = mpsc::sync_channel(1);
+                let (release_tx, release_rx) = mpsc::sync_channel(1);
+                blockers.push(
+                    workers
+                        .spawn_long(None, move || {
+                            started_tx.send(()).unwrap();
+                            let _ = release_rx.recv_timeout(Duration::from_secs(5));
+                        })
+                        .unwrap(),
+                );
+                started_rx.recv_timeout(Duration::from_secs(2)).unwrap();
+                release.push(release_tx);
+            }
             let mut app = App::new();
             app.add_plugins(MinimalPlugins)
-                .add_message::<SnapshotReceived>()
-                .add_message::<ConversationAppendReceived>()
-                .add_message::<vmux_session::OperationReceived>()
-                .add_systems(Update, queue_failed_conversations);
+                .insert_resource(workers)
+                .add_plugins(HistoryReadPlugin);
             app.world_mut().spawn(SourcePaths {
                 codex: directory.path().to_path_buf(),
                 claude: directory.path().join("claude"),
@@ -2914,23 +2973,19 @@ mod tests {
                 ));
             }
             app.update();
-            assert!(
-                app.world()
-                    .get::<ConversationLoadPending>(session)
-                    .is_some()
-            );
             Self {
                 app,
                 session,
                 _directory: directory,
+                release,
+                _blockers: blockers,
             }
         }
 
         fn finish(&mut self) -> Vec<SnapshotReceived> {
-            self.app.add_systems(
-                Update,
-                finish_conversations.after(queue_failed_conversations),
-            );
+            for release in self.release.drain(..) {
+                release.send(()).unwrap();
+            }
             let deadline = Instant::now() + Duration::from_secs(3);
             while self
                 .app
@@ -2965,20 +3020,22 @@ mod tests {
                 session,
                 sid: SessionId::new("canonical"),
                 revision: 1,
-                task: IoTaskPool::get().spawn(async move {
-                    Ok(ConversationRead {
-                        path: None,
-                        watch_paths: Vec::new(),
-                        records: vec![conversation::Record {
-                            id: "stable".into(),
-                            message,
-                        }],
-                        messages: Vec::new(),
-                        cursor: 1,
-                        snapshot: false,
-                        complete: true,
+                task: vmux_ecs::BlockingPool::new("test-catalog", 1, 1)
+                    .spawn(None, move || {
+                        Ok(ConversationRead {
+                            path: None,
+                            watch_paths: Vec::new(),
+                            records: vec![conversation::Record {
+                                id: "stable".into(),
+                                message,
+                            }],
+                            messages: Vec::new(),
+                            cursor: 1,
+                            snapshot: false,
+                            complete: true,
+                        })
                     })
-                }),
+                    .unwrap(),
             });
             let deadline = Instant::now() + Duration::from_secs(3);
             while self

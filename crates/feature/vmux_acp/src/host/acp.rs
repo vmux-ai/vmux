@@ -1,7 +1,6 @@
 use std::collections::BTreeMap;
 #[cfg(test)]
 use std::path::PathBuf;
-use std::thread::JoinHandle;
 
 use crate::AcpSessionId;
 use bevy::prelude::*;
@@ -22,7 +21,7 @@ use vmux_tool::{
 };
 
 use self::environment_driver::AcpEnvironment;
-use self::installer_driver::{AgentInstaller, start_acp_install_job};
+use self::installer_driver::AgentInstaller;
 use self::registry::Registry;
 pub(super) use config::add as add_config;
 pub(super) use registry::add as add_registry;
@@ -173,7 +172,7 @@ pub(crate) struct AcpPackageChanged {
 #[derive(Component)]
 struct AcpInstallJob {
     progress: Receiver<InstallState>,
-    thread: Option<JoinHandle<AcpInstallOutcome>>,
+    task: Option<vmux_ecs::BlockingTask<AcpInstallOutcome>>,
     outcome: Option<AcpInstallOutcome>,
     package_reported: bool,
 }
@@ -321,7 +320,7 @@ mod tests {
         let (_progress_sender, progress) = crossbeam_channel::unbounded();
         AcpInstallJob {
             progress,
-            thread: None,
+            task: None,
             outcome: Some(AcpInstallOutcome {
                 package_added: false,
                 launch: Err(message.to_string()),
