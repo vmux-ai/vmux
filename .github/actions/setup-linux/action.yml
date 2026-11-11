@@ -32,10 +32,10 @@ runs:
       shell: bash
       run: |
         sudo tee /etc/apt/apt-mirrors.txt > /dev/null <<'MIRROR'
-        https://archive.ubuntu.com/ubuntu
+        https://mirrors.edge.kernel.org/ubuntu
         MIRROR
         sudo tee /etc/apt/apt-mirrors-security.txt > /dev/null <<'MIRROR'
-        https://security.ubuntu.com/ubuntu
+        https://mirrors.edge.kernel.org/ubuntu
         MIRROR
         timeout 180 sudo apt-get -o Acquire::Retries=1 \
           -o Acquire::http::Timeout=15 -o Acquire::https::Timeout=15 \
