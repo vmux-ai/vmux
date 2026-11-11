@@ -1763,13 +1763,19 @@ use the shared 120 ms motion timing, content changes fade in over 100 ms, and se
 startup/shutdown use the shared loading indicator. Reduced-motion preferences disable
 layout and content transitions; layout and selection never wait for them. While Docker
 is unavailable, the whole page offers one Start control or a startup/shutdown indicator;
-the idle surface contains only Start, with no stopped-state caption or decorative icon;
+the idle surface contains the VM illustration and Start, without a stopped-state caption;
 the side sheet and details appear when Docker is ready. One root UI-state subscription
 survives these transitions. A thin divider separates the side sheet and details.
 Details remain unselected until the user chooses an entry. The address reads
 `Docker → Containers → selected entry → Info/Logs`. VM shutdown and settings live in
 the Docker side-sheet header, while play/stop/restart controls in the details toolbar
 operate on the selected container or Compose group. Tooltips retain operation labels.
+Stopping uses a pause-shaped icon with an explicit stop tooltip. A native SVG monitor
+and container illustration accompanies the idle Start control. Local pending intents
+project starting/stopping states in the input frame and suppress duplicate requests.
+Per-page `Revision` and `LastError` components acknowledge mutating completions through
+`ContainerUiState.control_revision` and `control_error`; successful container intents
+remain visible until inventory converges, while failures restore authoritative state.
 Settings are read-only with one Close control while Docker runs,
 and offer Cancel/Save only when stopped.
 Startup uses persisted defaults and initially shares the home directory. Containers

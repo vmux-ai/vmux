@@ -12,7 +12,9 @@ use vmux_ecs::{PageMetadata, UiStatePlugin, UiStateWrite};
 use vmux_vm::{EngineClient, Phase, Settings, Status};
 
 use crate::ContainerPlugin;
-use crate::control::{Busy, Command, ControlPlugin, ControlSet, Finished, Reply, Request};
+use crate::control::{
+    Busy, Command, ControlPlugin, ControlSet, Finished, Reply, Request, Revision,
+};
 use crate::event::{
     ContainerLogsRequest, ContainerSettingsRequest, ContainerStartRequest, ContainerStopRequest,
     ContainerUiState,
@@ -136,17 +138,22 @@ impl DefaultShare {
 
 fn page_ready(
     trigger: On<UiInput<PageReady>>,
-    pages: Query<&PageMetadata>,
+    pages: Query<(&PageMetadata, Option<&Revision>)>,
     mut commands: Commands,
 ) {
     let entity = trigger.event().webview;
-    let Ok(page) = pages.get(entity) else {
+    let Ok((page, revision)) = pages.get(entity) else {
         return;
     };
     if !vmux_api::RoutePattern::new(ContainerPlugin::URL, false).matches(&page.url) {
         return;
     }
     commands.entity(entity).insert(PageView);
+    if revision.is_none() {
+        commands
+            .entity(entity)
+            .insert((Revision::default(), LastError::default()));
+    }
 }
 
 type ConfiguredEngines<'w, 's> = Query<
@@ -171,17 +178,15 @@ fn start(
     if !pages.contains(event.webview) {
         return;
     }
-    let Ok((entity, settings, _, busy)) = engines.single() else {
+    let Ok((entity, settings, _, _)) = engines.single() else {
         return;
     };
-    if busy.is_some() {
-        return;
-    }
     commands.trigger(Request {
         entity,
         reply: entity,
         command: Command::Start,
         settings: settings.clone(),
+        requester: event.webview,
     });
 }
 
@@ -210,6 +215,7 @@ fn configure(
         reply: entity,
         command: Command::Configure,
         settings: requested,
+        requester: event.webview,
     });
 }
 
@@ -231,6 +237,7 @@ fn stop(
         reply: entity,
         command: Command::Stop,
         settings: settings.clone(),
+        requester: page,
     });
 }
 
@@ -252,6 +259,7 @@ fn logs(
         reply: entity,
         command: Command::Logs,
         settings: settings.clone(),
+        requester: page,
     });
 }
 
@@ -268,13 +276,34 @@ type CompletedEngines<'w, 's> = Query<
     With<EngineView>,
 >;
 
-fn finish(trigger: On<Finished>, mut engines: CompletedEngines, mut commands: Commands) {
+type CompletedPages<'w, 's> = Query<
+    'w,
+    's,
+    (&'static mut Revision, &'static mut LastError),
+    (With<PageView>, Without<EngineView>),
+>;
+
+fn finish(
+    trigger: On<Finished>,
+    mut engines: CompletedEngines,
+    mut pages: CompletedPages,
+    mut commands: Commands,
+) {
     let event = trigger.event();
     let Ok((mut observed, mut logs, mut error, mut settings, mut revision)) =
         engines.get_mut(event.entity)
     else {
         return;
     };
+    if let Ok((mut completed, mut page_error)) = pages.get_mut(event.requester) {
+        if event.mutates {
+            completed.0 = completed.0.wrapping_add(1);
+        }
+        match &event.result {
+            Ok(_) => page_error.0.clear(),
+            Err(error) => page_error.0 = error.clone(),
+        }
+    }
     match &event.result {
         Ok(Reply::Started(status) | Reply::Stopped(status) | Reply::Status(status)) => {
             observed.0 = status.clone();
@@ -361,7 +390,7 @@ type ProjectedEngines<'w, 's> = Query<
 >;
 
 fn project(
-    pages: Query<(Entity, Option<&Output>), With<PageView>>,
+    pages: Query<(Entity, Option<&Output>, &Revision, &LastError), With<PageView>>,
     engines: ProjectedEngines,
     catalog: Catalog,
     mut commands: Commands,
@@ -408,9 +437,18 @@ fn project(
         configuration_revision: revision.0,
         starting: busy.is_some_and(Busy::starting),
         stopping: busy.is_some_and(Busy::stopping),
+        control_revision: 0,
+        control_error: String::new(),
     };
-    for (page, output) in &pages {
+    for (page, output, completed, page_error) in &pages {
         let mut snapshot = snapshot.clone();
+        snapshot.control_revision = completed.0;
+        snapshot.control_error = page_error.0.clone();
+        snapshot.error = if page_error.0.is_empty() {
+            observed.0.failure.clone().unwrap_or_default()
+        } else {
+            page_error.0.clone()
+        };
         if let Some(output) = output {
             snapshot.log_id = output.id.clone();
             snapshot.container_logs = output.text.clone();

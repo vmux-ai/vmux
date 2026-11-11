@@ -95,7 +95,7 @@ pub fn WorkspaceLayout(
     let duration = crate::motion::Motion::LAYOUT_MS;
     let sidebar_style = if sidebar_open() {
         format!(
-            "width:min(var(--vmux-sidebar-width),50vw);opacity:1;transition-duration:{duration}ms;"
+            "width:min(var(--vmux-sidebar-width),50vw);opacity:1;border-right-width:1px;transition-duration:{duration}ms;"
         )
     } else {
         format!("width:0px;opacity:0;border-right-width:0px;transition-duration:{duration}ms;")

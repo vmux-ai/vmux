@@ -39,6 +39,7 @@ fn request(
                 reply: entity,
                 command,
                 settings,
+                requester: entity,
             }),
             Err(error) => {
                 commands

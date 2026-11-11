@@ -10,7 +10,7 @@ use bevy_cef::prelude::{UiEventPlugin, UiInput};
 use vmux_ecs::wake::Wake;
 use vmux_vm::{Container as DockerContainer, DockerClient, DockerPort, Settings};
 
-use crate::control::{Busy, Command, Request};
+use crate::control::{Busy, Command, Finished, Request};
 use crate::event::{
     ContainerCommandRequest, ContainerEntry, ContainerInspectRequest, ContainerPort,
 };
@@ -276,14 +276,26 @@ fn control(
     if !pages.contains(event.webview) || event.payload.ids.is_empty() {
         return;
     }
-    let Ok((entity, settings, observed, busy)) = engines.single() else {
+    let Ok((entity, settings, observed, _)) = engines.single() else {
         return;
     };
-    if busy.is_some() || !observed.0.docker_ready {
+    if !observed.0.docker_ready {
+        commands.trigger(Finished {
+            entity,
+            result: Err("Docker is not ready".into()),
+            mutates: true,
+            requester: event.webview,
+        });
         return;
     }
     for id in &event.payload.ids {
         if !catalog.contains(entity, id) {
+            commands.trigger(Finished {
+                entity,
+                result: Err(format!("container {id} is no longer present")),
+                mutates: true,
+                requester: event.webview,
+            });
             return;
         }
     }
@@ -295,6 +307,7 @@ fn control(
             operation: event.payload.operation,
         },
         settings: settings.clone(),
+        requester: event.webview,
     });
 }
 

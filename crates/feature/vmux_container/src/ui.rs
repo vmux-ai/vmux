@@ -17,7 +17,7 @@ use vmux_ui::components::page_address::{PageBreadcrumbs, PageToolbar, ToolbarCon
 use vmux_ui::components::progress::LoadingIcon;
 use vmux_ui::components::sheet::SheetHeaderChevron;
 use vmux_ui::components::tree_row::TreeRowAccent;
-use vmux_ui::hooks::{UiStateBinding, send, use_theme, use_ui_state};
+use vmux_ui::hooks::{send, use_theme, use_ui_state};
 use vmux_ui::i18n::translate;
 use vmux_ui::icon::{LineIcon, LineIconView};
 
@@ -34,6 +34,9 @@ pub(crate) struct ContainerPage;
 pub fn Page() -> Element {
     use_theme();
     let state = use_ui_state::<ContainerUiState>().state;
+    let controls = Controls::use_state(state);
+    use_context_provider(|| controls);
+    use_effect(move || controls.reconcile());
     let mut selected = use_signal(String::new);
     let mut settings_open = use_signal(|| false);
     let mut deleting = use_signal(Vec::<String>::new);
@@ -57,7 +60,7 @@ pub fn Page() -> Element {
             logs: request.1,
         });
     });
-    let snapshot = state();
+    let snapshot = controls.snapshot();
     let catalog = Catalog(&snapshot.containers);
     let available = snapshot.available();
     let selection = if available {
@@ -116,8 +119,8 @@ pub fn Page() -> Element {
 
 #[component]
 fn Service() -> Element {
-    let state = UiStateBinding::<ContainerUiState>::use_context().state;
-    let snapshot = state();
+    let controls = Controls::current();
+    let snapshot = controls.snapshot();
     if snapshot.data_directory.is_empty() {
         return rsx! { Empty { title: translate("container-engine"), description: String::new(), pending: true } };
     }
@@ -138,16 +141,22 @@ fn Service() -> Element {
         "container-docker-stopped"
     };
     rsx! {
-        if starting || stopping {
-            Empty { title: translate(service), description: String::new(), pending: true }
-        } else {
-            div { class: "flex min-h-0 flex-1 items-center justify-center",
+        div { class: "flex min-h-0 flex-1 items-center justify-center", aria_busy: starting || stopping,
+            div { class: "flex flex-col items-center gap-6",
+                VmIllustration {}
+                if starting || stopping {
+                    div { class: "flex h-8 items-center gap-2 text-xs text-muted-foreground",
+                        LoadingIcon { class: "size-4" }
+                        span { {translate(service)} }
+                    }
+                } else {
                 Button {
                     size: ButtonSize::Sm, disabled: snapshot.busy,
                     title: translate("container-start"),
                     aria_label: translate("container-start"),
-                    onclick: move |_| { let _ = send(&ContainerStartRequest); },
+                    onclick: move |_| controls.request(Intent::Start),
                     {translate("container-start-container")}
+                }
                 }
             }
         }
@@ -160,8 +169,8 @@ fn ContainerSheet(
     onselect: EventHandler<String>,
     onsettings: EventHandler<()>,
 ) -> Element {
-    let state = UiStateBinding::<ContainerUiState>::use_context().state;
-    let snapshot = state();
+    let controls = Controls::current();
+    let snapshot = controls.snapshot();
     let running = snapshot
         .containers
         .iter()
@@ -209,8 +218,8 @@ fn Header(
     ondelete: EventHandler<Vec<String>>,
     onsettings: EventHandler<()>,
 ) -> Element {
-    let state = UiStateBinding::<ContainerUiState>::use_context().state;
-    let snapshot = state();
+    let controls = Controls::current();
+    let snapshot = controls.snapshot();
     let mut members = Vec::new();
     let project = selection.strip_prefix("project:");
     for entry in &snapshot.containers {
@@ -233,7 +242,7 @@ fn Header(
         },
         ..Default::default()
     });
-    let mut controls = Vec::new();
+    let mut toolbar = Vec::new();
     if let Some(first) = members.first() {
         address.fixed.push(AddressCrumb {
             entry: AddressOption {
@@ -285,31 +294,31 @@ fn Header(
             }
         }
         if !start_ids.is_empty() {
-            controls.push(
+            toolbar.push(
                 ToolbarControl::button(translate("container-start-container"), move |_| {
-                    ContainerCommandRequest::submit(start_ids.clone(), ContainerOperation::Start)
+                    controls.containers(start_ids.clone(), ContainerOperation::Start)
                 })
                 .icon(LineIcon::Play)
                 .disabled(snapshot.busy),
             );
         }
         if !stop_ids.is_empty() {
-            controls.push(
+            toolbar.push(
                 ToolbarControl::button(translate("container-stop-container"), move |_| {
-                    ContainerCommandRequest::submit(stop_ids.clone(), ContainerOperation::Stop)
+                    controls.containers(stop_ids.clone(), ContainerOperation::Stop)
                 })
-                .icon(LineIcon::Square)
+                .icon(LineIcon::Pause)
                 .disabled(snapshot.busy),
             );
-            controls.push(
+            toolbar.push(
                 ToolbarControl::button(translate("container-restart"), move |_| {
-                    ContainerCommandRequest::submit(all_ids.clone(), ContainerOperation::Restart)
+                    controls.containers(all_ids.clone(), ContainerOperation::Restart)
                 })
                 .icon(LineIcon::RotateCcw)
                 .disabled(snapshot.busy),
             );
         } else {
-            controls.push(
+            toolbar.push(
                 ToolbarControl::button(translate("container-delete"), move |_| {
                     ondelete.call(all_ids.clone())
                 })
@@ -323,7 +332,7 @@ fn Header(
             onintent: move |intent| { if let AddressIntent::Section { id } = intent && matches!(id.as_str(), "info" | "logs") { onpanel.call(id); } }
         }
         if snapshot.available() {
-            PageToolbar { controls }
+            PageToolbar { controls: toolbar }
         } else {
             EngineToolbar { onsettings }
         }
@@ -332,15 +341,15 @@ fn Header(
 
 #[component]
 fn EngineToolbar(#[props(default)] compact: bool, onsettings: EventHandler<()>) -> Element {
-    let state = UiStateBinding::<ContainerUiState>::use_context().state;
-    let snapshot = state();
+    let controls = Controls::current();
+    let snapshot = controls.snapshot();
     rsx! {
         div { class: if compact { "flex shrink-0 items-center gap-1" } else { "flex h-8 items-center justify-end gap-1 px-3" },
             if snapshot.running {
                 ManagerIconButton {
                     label: translate("container-stop"), disabled: snapshot.busy,
-                    onclick: move |_| { let _ = send(&ContainerStopRequest); },
-                    LineIconView { icon: LineIcon::Square, class: "size-3.5" }
+                    onclick: move |_| controls.request(Intent::Stop),
+                    LineIconView { icon: LineIcon::Pause, class: "size-3.5" }
                 }
             }
             ManagerIconButton {
@@ -396,6 +405,7 @@ fn ContainerRow(
     busy: bool,
     onselect: EventHandler<String>,
 ) -> Element {
+    let controls = Controls::current();
     let row_id = entry.id.clone();
     let keyboard_id = entry.id.clone();
     let operation_id = entry.id.clone();
@@ -420,8 +430,8 @@ fn ContainerRow(
             div { class: "opacity-0 transition-opacity group-hover:opacity-100 group-focus-within:opacity-100",
                 ManagerIconButton {
                     label: translate(if running { "container-stop-container" } else { "container-start-container" }), disabled: busy,
-                    onclick: move |event: MouseEvent| { event.stop_propagation(); ContainerCommandRequest::submit(vec![operation_id.clone()], if running { ContainerOperation::Stop } else { ContainerOperation::Start }); },
-                    LineIconView { icon: if running { LineIcon::Square } else { LineIcon::Play }, class: "size-3" }
+                    onclick: move |event: MouseEvent| { event.stop_propagation(); controls.containers(vec![operation_id.clone()], if running { ContainerOperation::Stop } else { ContainerOperation::Start }); },
+                    LineIconView { icon: if running { LineIcon::Pause } else { LineIcon::Play }, class: "size-3" }
                 }
             }
         }
@@ -435,8 +445,8 @@ fn Details(
     panel: String,
     onselect: EventHandler<String>,
 ) -> Element {
-    let state = UiStateBinding::<ContainerUiState>::use_context().state;
-    let snapshot = state();
+    let controls = Controls::current();
+    let snapshot = controls.snapshot();
     let group = selection.strip_prefix("project:").map(str::to_string);
     let mut members = Vec::new();
     for entry in entries {
@@ -503,7 +513,8 @@ fn Details(
 
 #[component]
 fn Preferences(onclose: EventHandler<()>) -> Element {
-    let state = UiStateBinding::<ContainerUiState>::use_context().state;
+    let controls = Controls::current();
+    let state = controls.state;
     let initial = state.peek();
     let mut cpus = use_signal(|| initial.cpus.to_string());
     let mut memory = use_signal(|| initial.memory_mib.to_string());
@@ -516,7 +527,7 @@ fn Preferences(onclose: EventHandler<()>) -> Element {
             onclose.call(());
         }
     });
-    let snapshot = state();
+    let snapshot = controls.snapshot();
     let locked = snapshot.running || snapshot.busy;
     let valid = cpus().parse::<u8>().is_ok_and(|value| value > 0)
         && memory().parse::<u32>().is_ok_and(|value| value >= 512)
@@ -567,6 +578,7 @@ fn Preferences(onclose: EventHandler<()>) -> Element {
 
 #[component]
 fn DeleteDialog(ids: Vec<String>, onclose: EventHandler<()>) -> Element {
+    let controls = Controls::current();
     rsx! {
         DialogRoot { open: true, on_open_change: move |next: bool| { if !next { onclose.call(()); } }, attributes: vec![],
             DialogContent { class: "max-w-[420px] p-5", attributes: vec![],
@@ -574,7 +586,7 @@ fn DeleteDialog(ids: Vec<String>, onclose: EventHandler<()>) -> Element {
                 DialogDescription { attributes: vec![], {translate("container-delete-description")} }
                 div { class: "flex justify-end gap-2",
                     Button { size: ButtonSize::Sm, variant: ButtonVariant::Secondary, onclick: move |_| onclose.call(()), {translate("container-cancel")} }
-                    Button { size: ButtonSize::Sm, variant: ButtonVariant::Destructive, onclick: move |_| { ContainerCommandRequest::submit(ids.clone(), ContainerOperation::Remove); onclose.call(()); }, {translate("container-delete")} }
+                    Button { size: ButtonSize::Sm, variant: ButtonVariant::Destructive, onclick: move |_| { controls.containers(ids.clone(), ContainerOperation::Remove); onclose.call(()); }, {translate("container-delete")} }
                 }
             }
         }
@@ -637,7 +649,7 @@ fn StateDot(state: String) -> Element {
     let class = match state.as_str() {
         "running" => "bg-success",
         "paused" => "bg-amber-400",
-        "restarting" => "animate-pulse bg-primary",
+        "starting" | "stopping" | "restarting" => "animate-pulse bg-primary",
         "dead" => "bg-destructive",
         _ => "bg-muted-foreground/35",
     };
@@ -647,6 +659,8 @@ fn StateDot(state: String) -> Element {
 #[component]
 fn StateLabel(state: String) -> Element {
     let key = match state.as_str() {
+        "starting" => "container-phase-created".to_string(),
+        "stopping" => "container-phase-stopping".to_string(),
         "running" | "paused" | "exited" | "created" | "restarting" | "dead" | "removing" => {
             format!("container-state-{state}")
         }
@@ -713,9 +727,180 @@ impl ContainerUiState {
     }
 }
 
-impl ContainerCommandRequest {
-    fn submit(ids: Vec<String>, operation: ContainerOperation) {
-        let _ = send(&Self { ids, operation });
+#[derive(Clone, Copy)]
+struct Controls {
+    state: Signal<ContainerUiState>,
+    pending: Signal<Option<Pending>>,
+    error: Signal<String>,
+}
+
+impl Controls {
+    fn use_state(state: Signal<ContainerUiState>) -> Self {
+        Self {
+            state,
+            pending: use_signal(|| None),
+            error: use_signal(String::new),
+        }
+    }
+
+    fn current() -> Self {
+        use_context()
+    }
+
+    fn snapshot(self) -> ContainerUiState {
+        let mut snapshot = (self.state)();
+        if let Some(pending) = (self.pending)()
+            && !pending.finished(&snapshot)
+        {
+            pending.intent.preview(&mut snapshot);
+        }
+        if !(self.error)().is_empty() {
+            snapshot.error = (self.error)();
+        }
+        snapshot
+    }
+
+    fn reconcile(mut self) {
+        let snapshot = (self.state)();
+        let done = self
+            .pending
+            .peek()
+            .as_ref()
+            .is_some_and(|pending| pending.finished(&snapshot));
+        if done {
+            self.pending.set(None);
+        }
+    }
+
+    fn request(mut self, intent: Intent) {
+        if self.pending.peek().is_some() || self.state.peek().busy {
+            return;
+        }
+        self.error.set(String::new());
+        self.pending.set(Some(Pending {
+            revision: self.state.peek().control_revision,
+            intent: intent.clone(),
+        }));
+        if let Err(error) = intent.send() {
+            self.pending.set(None);
+            self.error.set(error.to_string());
+        }
+    }
+
+    fn containers(self, ids: Vec<String>, operation: ContainerOperation) {
+        if ids.is_empty() {
+            return;
+        }
+        self.request(Intent::Containers { ids, operation });
+    }
+}
+
+#[derive(Clone)]
+struct Pending {
+    revision: u64,
+    intent: Intent,
+}
+
+impl Pending {
+    fn finished(&self, snapshot: &ContainerUiState) -> bool {
+        if snapshot.control_revision == self.revision {
+            return false;
+        }
+        if !snapshot.control_error.is_empty() {
+            return true;
+        }
+        match &self.intent {
+            Intent::Start => snapshot.ready,
+            Intent::Stop => !snapshot.running,
+            Intent::Containers { ids, operation } => {
+                if !snapshot.ready || !snapshot.inventory_error.is_empty() {
+                    return true;
+                }
+                for id in ids {
+                    let entry = snapshot.containers.iter().find(|entry| entry.id == *id);
+                    let matches = match (operation, entry) {
+                        (_, None) => true,
+                        (ContainerOperation::Start | ContainerOperation::Restart, Some(entry)) => {
+                            entry.running()
+                        }
+                        (ContainerOperation::Stop, Some(entry)) => !entry.running(),
+                        _ => false,
+                    };
+                    if !matches {
+                        return false;
+                    }
+                }
+                true
+            }
+        }
+    }
+}
+
+#[derive(Clone)]
+enum Intent {
+    Start,
+    Stop,
+    Containers {
+        ids: Vec<String>,
+        operation: ContainerOperation,
+    },
+}
+
+impl Intent {
+    fn send(&self) -> Result<(), vmux_ui::hooks::EventListenerError> {
+        match self {
+            Self::Start => send(&ContainerStartRequest),
+            Self::Stop => send(&ContainerStopRequest),
+            Self::Containers { ids, operation } => send(&ContainerCommandRequest {
+                ids: ids.clone(),
+                operation: *operation,
+            }),
+        }
+    }
+
+    fn preview(&self, snapshot: &mut ContainerUiState) {
+        snapshot.busy = true;
+        if snapshot.error == snapshot.control_error {
+            snapshot.error.clear();
+        }
+        match self {
+            Self::Start => snapshot.starting = true,
+            Self::Stop => snapshot.stopping = true,
+            Self::Containers { ids, operation } => {
+                if *operation == ContainerOperation::Remove {
+                    snapshot.containers.retain(|entry| !ids.contains(&entry.id));
+                    return;
+                }
+                for entry in &mut snapshot.containers {
+                    if !ids.contains(&entry.id) {
+                        continue;
+                    }
+                    entry.state = match operation {
+                        ContainerOperation::Start => "starting",
+                        ContainerOperation::Stop => "stopping",
+                        ContainerOperation::Restart => "restarting",
+                        ContainerOperation::Remove => unreachable!(),
+                    }
+                    .into();
+                    entry.status.clear();
+                }
+            }
+        }
+    }
+}
+
+#[component]
+fn VmIllustration() -> Element {
+    rsx! {
+        svg { class: "h-28 w-40 text-muted-foreground/50", view_box: "0 0 160 112", fill: "none",
+            role: "img", "aria-label": translate("container-description"),
+            rect { x: "15", y: "8", width: "130", height: "82", rx: "9", fill: "currentColor", fill_opacity: "0.035", stroke: "currentColor", stroke_width: "2" }
+            path { d: "M62 90v14m36-14v14m-48 0h60", stroke: "currentColor", stroke_width: "2", stroke_linecap: "round" }
+            g { class: "text-primary/80", stroke: "currentColor", stroke_width: "1.7", stroke_linejoin: "round",
+                path { d: "m80 24 24 14v28L80 80 56 66V38Z", fill: "currentColor", fill_opacity: "0.07" }
+                path { d: "m56 38 24 14 24-14M80 52v28M68 31l24 14" }
+            }
+        }
     }
 }
 
@@ -889,6 +1074,24 @@ mod tests {
         assert!(!html.contains(&translate("container-cpus")));
         preview.click(&start);
         assert_eq!(preview.host.starts.get(), 1);
+        let html = preview.render();
+        assert!(html.contains("aria-busy=true"));
+        assert!(html.contains(&translate("container-docker-starting")));
+        assert!(!html.contains(&format!("aria-label=\"{start}\"")));
+        let mut stale = ContainerUiState {
+            supported: true,
+            data_directory: "/fixtures/data".into(),
+            ..Default::default()
+        };
+        let html = preview.publish(stale.clone());
+        assert!(html.contains(&translate("container-docker-starting")));
+        stale.control_revision = 1;
+        stale.control_error = "fixture start refused".into();
+        stale.error = stale.control_error.clone();
+        let html = preview.publish(stale);
+        assert!(html.contains("fixture start refused"));
+        assert!(html.contains(&format!("aria-label=\"{start}\"")));
+        assert!(!html.contains(&translate("container-docker-starting")));
     }
 
     #[test]
@@ -916,7 +1119,8 @@ mod tests {
         assert!(!html.contains(&translate("container-cancel")));
         snapshot.running = false;
         snapshot.ready = false;
-        let html = preview.publish(snapshot);
+        snapshot.control_revision = 1;
+        let html = preview.publish(snapshot.clone());
         assert!(html.contains(&translate("container-save")));
         assert!(html.contains(&translate("container-cancel")));
         assert_eq!(preview.host.stops.get(), 1);
@@ -966,7 +1170,7 @@ mod tests {
         snapshot.container_logs_ready = true;
         snapshot.log_id = "eeeeeeeeeeee".into();
         snapshot.container_logs = "new log output".into();
-        let html = preview.publish(snapshot);
+        let html = preview.publish(snapshot.clone());
         assert!(html.contains("Up 2 seconds"));
         assert_eq!(preview.host.inspections.borrow().len(), requests);
         assert_eq!(
@@ -988,9 +1192,26 @@ mod tests {
         assert_eq!(commands[0].operation, ContainerOperation::Stop);
         drop(commands);
         assert_eq!(preview.host.stops.get(), 0);
+        let html = preview.render();
+        assert!(html.contains(&translate("container-phase-stopping")));
+        snapshot.control_revision = 1;
+        snapshot.containers[0].state = "exited".into();
+        let html = preview.publish(snapshot.clone());
+        assert!(!html.contains(&translate("container-phase-stopping")));
         preview.click(&translate("container-stop"));
         assert_eq!(preview.host.stops.get(), 1);
         assert_eq!(preview.host.commands.borrow().len(), 1);
+        assert!(
+            preview
+                .render()
+                .contains(&translate("container-service-stopping"))
+        );
+        snapshot.control_revision = 2;
+        snapshot.control_error = "fixture stop refused".into();
+        snapshot.error = snapshot.control_error.clone();
+        let html = preview.publish(snapshot);
+        assert!(html.contains("fixture stop refused"));
+        assert!(!html.contains(&translate("container-service-stopping")));
     }
 
     #[test]
