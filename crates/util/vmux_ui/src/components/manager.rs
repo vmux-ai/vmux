@@ -301,6 +301,7 @@ pub fn ManagerControls(children: Element, #[props(default)] class: String) -> El
 pub fn ManagerSearch(
     value: String,
     placeholder: String,
+    #[props(default)] disabled: bool,
     #[props(default)] id: Option<String>,
     #[props(default)] autofocus: bool,
     #[props(default)] onsearch: Option<EventHandler<String>>,
@@ -344,9 +345,11 @@ pub fn ManagerSearch(
                     placeholder,
                     value: draft(),
                     autofocus,
+                    disabled,
                     autocomplete: "off",
                     spellcheck: "false",
                     oninput: move |event: FormEvent| {
+                        if disabled { return; }
                         let query = event.value();
                         draft.set(query.clone());
                         if let Some(handler) = onsearch {
@@ -369,6 +372,7 @@ pub fn ManagerSearch(
                     },
                     onkeydown: move |event| {
                         event.stop_propagation();
+                        if disabled { return; }
                         if let Some(handler) = &onkeydown {
                             handler.call(event);
                         }
@@ -401,6 +405,11 @@ pub fn ManagerIconButton(
                 aria_label: label,
                 aria_pressed: active,
                 disabled,
+                onkeydown: move |event| {
+                    if event.key() == Key::Enter || matches!(event.key(), Key::Character(key) if key == " ") {
+                        event.stop_propagation();
+                    }
+                },
                 onclick: move |event| onclick.call(event),
                 {children}
             }
@@ -684,6 +693,8 @@ pub fn ManagerRow(
     #[props(default = true)] show_icon: bool,
     #[props(default = true)] icon_surface: bool,
     #[props(default)] selected: bool,
+    #[props(default)] disabled: bool,
+    #[props(default)] aria_label: Option<String>,
     #[props(default)] onselect: Option<EventHandler<NavigationGesture>>,
 ) -> Element {
     let interactive = onselect.is_some();
@@ -702,14 +713,18 @@ pub fn ManagerRow(
         div {
             class,
             role: if interactive { "button" } else { "group" },
-            tabindex: if interactive { "0" } else { "-1" },
+            tabindex: if interactive && !disabled { "0" } else { "-1" },
             aria_selected: selected,
+            aria_disabled: disabled,
+            aria_label,
             onclick: move |event| {
+                if disabled { return; }
                 if let Some(handler) = &onselect {
                     handler.call(NavigationGesture::from_mouse(&event));
                 }
             },
             onkeydown: move |event| {
+                if disabled { return; }
                 let activate = event.key() == Key::Enter
                     || matches!(event.key(), Key::Character(key) if key == " ");
                 if !activate {

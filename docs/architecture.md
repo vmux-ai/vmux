@@ -1570,8 +1570,10 @@ queue empty until the user sends a real message. Schema 2 setup records preserve
 while discarding the earlier task-first Session reference, without deleting conversation history.
 
 The bootstrap and live Session share their conversation surface, transcript, assistant/user turns,
-composer and choice controls. Agent selection reuses manager cards and agent thumbnails in the
-transcript, with a separate search field, curated featured agents and the complete supported catalog.
+composer and choice controls. Agent selection embeds Tools' search, counted sections, adaptive
+collection, grid/list toggle and entries in the transcript. Shared agent thumbnails and compact
+operation buttons display curated featured agents and the complete supported catalog;
+only an operation in progress highlights an entry.
 The normal composer is disabled during selection; setup controls replace it during installation and
 sign-in, and readiness makes it available. A minimal setup-guide icon accompanies guide messages.
 ACP supplies its supported catalog, credential availability and managed installer.
