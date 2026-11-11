@@ -25,6 +25,7 @@ vmux_ui = { path = "../../util/vmux_ui", default-features = false }
 vmux_api = { path = "../../util/vmux_api" }
 vmux_session = { path = "../vmux_session", default-features = false }
 vmux_git = { path = "../vmux_git" }
+vmux_pane = { path = "../vmux_pane", features = ["geometry", "contracts"] }
 
 [dev-dependencies]
 serde_json = { workspace = true }

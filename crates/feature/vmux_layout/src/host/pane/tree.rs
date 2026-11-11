@@ -1,126 +1,23 @@
 use bevy::ecs::system::SystemParam;
 use bevy::prelude::*;
 use moonshine_save::prelude::*;
-use vmux_api::open_target::PaneDirection;
 use vmux_ecs::store::StoreAppExt;
 use vmux_flex::prelude::*;
 use vmux_history::LastActivatedAt;
+pub use vmux_pane::{Hierarchy as PaneHierarchy, Pane, PaneSplit, PaneSplitDirection};
 
-use super::{identity::SpawnSeq, resize::PaneSize};
+use super::identity::SpawnSeq;
 
 pub(super) struct TreePlugin;
 
 impl Plugin for TreePlugin {
     fn build(&self, app: &mut App) {
-        app.register_stored::<Pane>()
+        app.register_required_components::<Pane, Save>()
+            .register_required_components::<PaneSplit, Save>()
+            .register_stored::<Pane>()
             .register_stored::<PaneSplit>()
             .register_type::<PaneSplitDirection>()
             .add_systems(PostUpdate, sync_direction);
-    }
-}
-
-#[derive(Component, Reflect, Default)]
-#[reflect(Component)]
-#[type_path = "vmux_desktop::layout::pane"]
-#[require(Save)]
-pub struct Pane;
-
-impl Pane {
-    pub fn bundle() -> impl Bundle {
-        (
-            Self,
-            PaneSize::default(),
-            Transform::default(),
-            Node {
-                flex_grow: 1.0,
-                flex_basis: Val::Px(0.0),
-                align_items: AlignItems::Stretch,
-                justify_content: JustifyContent::Stretch,
-                ..default()
-            },
-        )
-    }
-
-    pub fn split_bundle(direction: PaneSplitDirection) -> impl Bundle {
-        let gaps = direction.gaps(crate::event::PANE_GAP_PX);
-        (
-            Self,
-            PaneSplit { direction },
-            PaneSize::default(),
-            Transform::default(),
-            Visibility::default(),
-            Node {
-                flex_grow: 1.0,
-                flex_direction: direction.flex_direction(),
-                column_gap: gaps.column_gap,
-                row_gap: gaps.row_gap,
-                align_items: AlignItems::Stretch,
-                ..default()
-            },
-        )
-    }
-}
-
-#[derive(SystemParam)]
-pub(crate) struct PaneHierarchy<'w, 's> {
-    pub(crate) children: Query<'w, 's, &'static Children, With<Pane>>,
-    pub(crate) leaves: Query<'w, 's, Entity, (With<Pane>, Without<PaneSplit>)>,
-    parents: Query<'w, 's, &'static ChildOf>,
-    splits: Query<'w, 's, &'static PaneSplit>,
-}
-
-impl PaneHierarchy<'_, '_> {
-    pub(crate) fn first_leaf(&self, entity: Entity) -> Entity {
-        if self.leaves.contains(entity) {
-            return entity;
-        }
-        if let Ok(children) = self.children.get(entity) {
-            for child in children.iter() {
-                if self.leaves.contains(child) {
-                    return child;
-                }
-                let found = self.first_leaf(child);
-                if found != child || self.leaves.contains(found) {
-                    return found;
-                }
-            }
-        }
-        entity
-    }
-
-    pub(crate) fn sibling(&self, active: Entity, direction: PaneDirection) -> Option<Entity> {
-        let target_split = PaneSplitDirection::from(direction);
-        let after = matches!(direction, PaneDirection::Right | PaneDirection::Bottom);
-        let mut current = active;
-        for _ in 0..20 {
-            let parent = self.parents.get(current).ok()?.parent();
-            let Ok(split) = self.splits.get(parent) else {
-                current = parent;
-                continue;
-            };
-            if split.direction != target_split {
-                current = parent;
-                continue;
-            }
-            let Ok(children) = self.children.get(parent) else {
-                current = parent;
-                continue;
-            };
-            let siblings = children.iter().collect::<Vec<_>>();
-            let Some(index) = siblings.iter().position(|entity| *entity == current) else {
-                current = parent;
-                continue;
-            };
-            let sibling = if after {
-                siblings.get(index + 1).copied()
-            } else {
-                index
-                    .checked_sub(1)
-                    .and_then(|index| siblings.get(index).copied())
-            }?;
-            return Some(self.first_leaf(sibling));
-        }
-        None
     }
 }
 
@@ -197,46 +94,12 @@ impl PaneTree<'_, '_> {
     }
 }
 
-#[derive(Component, Reflect)]
-#[reflect(Component)]
-#[type_path = "vmux_desktop::layout::pane"]
-#[require(Save)]
-pub struct PaneSplit {
-    pub direction: PaneSplitDirection,
-}
-
-#[derive(Reflect, Clone, Copy, PartialEq, Eq, Default, Debug)]
-#[type_path = "vmux_desktop::layout::pane"]
-pub enum PaneSplitDirection {
-    #[default]
-    Row,
-    Column,
-}
-
-impl PaneSplitDirection {
-    pub(super) fn flex_direction(self) -> FlexDirection {
-        match self {
-            Self::Row => FlexDirection::Row,
-            Self::Column => FlexDirection::Column,
-        }
-    }
-}
-
 fn sync_direction(mut panes: Query<(&PaneSplit, &mut Node), Changed<PaneSplit>>) {
     for (split, mut node) in &mut panes {
         node.flex_direction = split.direction.flex_direction();
         let gaps = split.direction.gaps(crate::event::PANE_GAP_PX);
         node.column_gap = gaps.column_gap;
         node.row_gap = gaps.row_gap;
-    }
-}
-
-impl From<PaneDirection> for PaneSplitDirection {
-    fn from(direction: PaneDirection) -> Self {
-        match direction {
-            PaneDirection::Left | PaneDirection::Right => Self::Row,
-            PaneDirection::Top | PaneDirection::Bottom => Self::Column,
-        }
     }
 }
 

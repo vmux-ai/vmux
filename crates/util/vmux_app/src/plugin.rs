@@ -12,6 +12,8 @@ pub enum VmuxPlugin {
     Jobs(vmux_ecs::JobsPlugin),
     #[plugin(feature = "flex", desktop, requires(ecs))]
     Flex(vmux_flex::FlexPlugin),
+    #[plugin(feature = "pane", desktop, requires(ecs))]
+    Pane(vmux_pane::PanePlugin),
     #[plugin(feature = "runtime", desktop, requires(ecs, flex))]
     Runtime(VmuxRuntimePlugin),
     #[plugin(feature = "command", desktop, requires(runtime))]
@@ -20,7 +22,7 @@ pub enum VmuxPlugin {
     Setting(vmux_setting::SettingsPlugin),
     #[plugin(feature = "session", desktop, mobile)]
     Session(vmux_session::SessionPlugin),
-    #[plugin(feature = "layout", desktop, requires(command, setting))]
+    #[plugin(feature = "layout", desktop, requires(command, setting, pane))]
     Layout(vmux_layout::LayoutPlugin),
     #[plugin(feature = "bookmark", desktop, requires(layout))]
     Bookmark(vmux_bookmark::BookmarkPlugin),

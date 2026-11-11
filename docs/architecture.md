@@ -1038,6 +1038,18 @@ Position in the tree defines ownership. Each native window owns a complete tree.
 identify projects; tabs preserve arrangements; splits tile panes; stacks hold page history.
 Global actions resolve through the focused window and then through active descendants.
 
+`vmux_pane` owns the canonical Pane, split, size, identity, and spawn-sequence components without
+Window, renderer, or Profile dependencies. Existing reflected paths under
+`vmux_desktop::layout::pane` remain the persistence contract. Its read-only Hierarchy capability
+resolves leaves and neighbors within an explicit root; SelectRequest refuses split targets,
+missing targets, and stale ownership before shared activation and SelectionChanged publication.
+Native directional focus forwards its selected target into PaneSet::Select inside the existing
+layout request set, so focus projections observe the result in the same update.
+Geometry/bundle helpers and wire-direction conversion are optional capabilities. Pane components
+do not require Save by default; the optional pane StorePlugin declares its schema and the native
+Tree/Identity/Resize adapters explicitly retain Workspace save requirements. Native layout keeps
+ID allocation, sequencing, geometry synchronization, pointer/cursor behavior, and close policy.
+
 Only test a window's drag region with coordinates from that window. Never compare child-window
 coordinates with the owning window's region.
 
