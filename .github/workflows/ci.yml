@@ -44,6 +44,29 @@ jobs:
           echo "Resolved CEF version: $version"
           echo "version=$version" >> "$GITHUB_OUTPUT"
 
+  format-rust:
+    name: Format (rust)
+    runs-on: ubuntu-latest
+    needs: [changes]
+    if: needs.changes.outputs.code == 'true'
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+
+      - uses: ./.github/actions/setup-rust
+        with:
+          components: rustfmt
+
+      - name: Select Rust format scope
+        id: scope
+        env:
+          VMUX_CI_BASE: ${{ github.event_name == 'pull_request' && github.event.pull_request.base.sha || '' }}
+        run: ./scripts/vmux-builder ci-scope >> "$GITHUB_OUTPUT"
+
+      - name: Check formatting
+        run: cargo fmt ${{ steps.scope.outputs.lint_args }} -- --check
+
   lint-rust:
     name: Lint (rust)
     runs-on: ubuntu-latest
@@ -56,7 +79,7 @@ jobs:
 
       - uses: ./.github/actions/setup-linux
         with:
-          components: rustfmt, clippy
+          components: clippy
           cache-key: lint
           cef-version: ${{ needs.cef-version.outputs.version }}
 
@@ -66,15 +89,12 @@ jobs:
           VMUX_CI_BASE: ${{ github.event_name == 'pull_request' && github.event.pull_request.base.sha || '' }}
         run: ./scripts/vmux-builder ci-scope >> "$GITHUB_OUTPUT"
 
-      - name: Check formatting
-        run: cargo fmt ${{ steps.scope.outputs.lint_args }} -- --check
-
       - name: Clippy
-        run: env -u CEF_PATH VMUX_SKIP_DX_BUILD=1 cargo clippy ${{ steps.scope.outputs.lint_args }} --all-targets -- -D warnings
+        run: VMUX_SKIP_DX_BUILD=1 cargo clippy ${{ steps.scope.outputs.lint_args }} --all-targets -- -D warnings
 
       - name: Clippy lean desktop features
         if: steps.scope.outputs.lean == 'true'
-        run: env -u CEF_PATH VMUX_SKIP_DX_BUILD=1 cargo clippy -p vmux_desktop --lib --no-default-features -- -D warnings
+        run: VMUX_SKIP_DX_BUILD=1 cargo clippy -p vmux_desktop --lib --no-default-features -- -D warnings
 
   test-rust:
     name: Test (rust)
@@ -110,11 +130,11 @@ jobs:
         run: bash scripts/test-framework-consumer.sh
 
       - name: Run tests
-        run: env -u CEF_PATH VMUX_SKIP_DX_BUILD=1 cargo test --locked ${{ steps.scope.outputs.args }}
+        run: VMUX_SKIP_DX_BUILD=1 cargo test --locked ${{ steps.scope.outputs.args }}
 
       - name: Test lean desktop features
         if: steps.scope.outputs.lean == 'true'
-        run: env -u CEF_PATH VMUX_SKIP_DX_BUILD=1 cargo test -p vmux_desktop --lib --no-default-features disabled_features::tests
+        run: VMUX_SKIP_DX_BUILD=1 cargo test -p vmux_desktop --lib --no-default-features disabled_features::tests
 
   changes:
     name: Detect Changes
@@ -362,13 +382,14 @@ jobs:
   lint:
     name: Lint
     runs-on: ubuntu-latest
-    needs: [changes, lint-rust, deps-rust]
+    needs: [changes, format-rust, lint-rust, deps-rust]
     if: always()
     steps:
       - name: Gate
         env:
           CHANGES: ${{ needs.changes.result }}
           CODE: ${{ needs.changes.outputs.code }}
+          FORMAT: ${{ needs.format-rust.result }}
           RESULT: ${{ needs.lint-rust.result }}
           DEPS: ${{ needs.deps-rust.result }}
         run: |
@@ -380,11 +401,15 @@ jobs:
             echo "::error::Lint (rust) result: $RESULT"
             exit 1
           fi
+          if [ "$CODE" = "true" ] && [ "$FORMAT" != "success" ]; then
+            echo "::error::Format (rust) result: $FORMAT"
+            exit 1
+          fi
           if [ "$CODE" = "true" ] && [ "$DEPS" != "success" ]; then
             echo "::error::Deps (rust) result: $DEPS"
             exit 1
           fi
-          echo "Lint gate ok (code=$CODE rust=$RESULT deps=$DEPS)"
+          echo "Lint gate ok (code=$CODE format=$FORMAT rust=$RESULT deps=$DEPS)"
 
   test:
     name: Test

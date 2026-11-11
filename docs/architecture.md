@@ -1642,6 +1642,10 @@ notarization. New PR commits cancel superseded CI runs without canceling main bu
 `vmux_builder ci-scope` compares a PR with its merge base and selects changed workspace
 packages plus their transitive reverse dependencies, including optional, build, and test
 dependencies. Formatting and Clippy use the same selection while excluding vendored patches.
+Formatting runs before Linux SDK preparation in its own job. Linux Cargo checks share a
+version-validated CEF SDK cache through `CEF_PATH` rather than downloading copies into build
+directories. Pull requests restore Rust dependency caches, while only main saves them, keeping
+per-PR cache entries from evicting the shared baseline.
 Renames include both package owners. Manifests, lockfiles, build scripts,
 CI configuration, shared API/ECS/macros/composition, and unmapped changes require the full
 workspace. Scope discovery errors fail the test gate rather than skipping tests. Builder
