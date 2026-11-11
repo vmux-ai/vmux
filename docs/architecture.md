@@ -1416,6 +1416,8 @@ target locks, and local/release launch paths. `scripts/vmux-builder` only bootst
 missing host binary; Rust checks the embedded source snapshot and compiler, rebuilds
 itself when needed, and caches binaries under `.build-tools/`. Capacity checks therefore
 do not resolve Cargo dependencies or compile into the application target.
+The launcher refreshes through `--print-bin` before forwarding arguments, so an older
+binary can upgrade before parsing a newly added command.
 
 The builder preserves the existing lock protocol: PID files on macOS and file locks on
 Linux. Lock waits remain cancellable. Each build command gets a separate process group;
@@ -1725,3 +1727,22 @@ Repository tool versions live in `tool-versions.env`; CI loads the same values u
 scripts and the Makefile. Release asset names and URLs come from
 `scripts/release-artifacts.sh`, while the standalone installer selects the matching asset from
 the published release instead of reconstructing its name.
+
+Feature PRs run Linux lint and tests, iOS checks, and macOS type checks of the desktop, CLI,
+and daemon, including the lean desktop composition and generated UI asset validation.
+The required `Build macOS` gate requires full packaging and the startup smoke test for changes
+to native adapters, application composition,
+dependency manifests, lockfiles, toolchains, build scripts, and packaging. Other feature PRs
+require the macOS checks without a release build or DMG. Main pushes and manual CI runs retain
+full packaging and startup validation; nightly and release workflows retain signing and
+notarization. New PR commits cancel superseded CI runs without canceling main builds.
+
+`vmux_builder ci-scope` compares a PR with its merge base and selects changed workspace
+packages plus their transitive reverse dependencies, including optional, build, and test
+dependencies. Formatting and Clippy use the same selection while excluding vendored patches.
+Renames include both package owners. Manifests, lockfiles, build scripts,
+CI configuration, shared API/ECS/macros/composition, and unmapped changes require the full
+workspace. Scope discovery errors fail the test gate rather than skipping tests. Builder
+fixtures and repository source conventions always run. Lean desktop checks and tests run for
+direct desktop changes and full suites. Main code changes, manual CI, and the daily CI schedule
+run the full suite; the schedule leaves macOS packaging to the nightly workflow.

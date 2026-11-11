@@ -9,9 +9,15 @@ on:
       - 'Casks/**'
       - 'website/public/updates.json'
   workflow_dispatch:
+  schedule:
+    - cron: "0 1 * * *"
 
 permissions:
   contents: read
+
+concurrency:
+  group: ci-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 env:
   CARGO_TERM_COLOR: always
@@ -45,6 +51,8 @@ jobs:
     if: needs.changes.outputs.code == 'true'
     steps:
       - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
 
       - uses: ./.github/actions/setup-linux
         with:
@@ -52,21 +60,20 @@ jobs:
           cache-key: lint
           cef-version: ${{ needs.cef-version.outputs.version }}
 
-      - name: Compute workspace packages (excluding patches)
-        id: pkgs
-        run: |
-          ARGS=$(cargo metadata --no-deps --format-version 1 \
-            | jq -r '.packages[] | select(.manifest_path | test("patches") | not) | "-p " + .name' \
-            | tr '\n' ' ')
-          echo "args=$ARGS" >> "$GITHUB_OUTPUT"
+      - name: Select Rust check scope
+        id: scope
+        env:
+          VMUX_CI_BASE: ${{ github.event_name == 'pull_request' && github.event.pull_request.base.sha || '' }}
+        run: ./scripts/vmux-builder ci-scope >> "$GITHUB_OUTPUT"
 
       - name: Check formatting
-        run: cargo fmt ${{ steps.pkgs.outputs.args }} -- --check
+        run: cargo fmt ${{ steps.scope.outputs.lint_args }} -- --check
 
       - name: Clippy
-        run: env -u CEF_PATH VMUX_SKIP_DX_BUILD=1 cargo clippy ${{ steps.pkgs.outputs.args }} --all-targets -- -D warnings
+        run: env -u CEF_PATH VMUX_SKIP_DX_BUILD=1 cargo clippy ${{ steps.scope.outputs.lint_args }} --all-targets -- -D warnings
 
       - name: Clippy lean desktop features
+        if: steps.scope.outputs.lean == 'true'
         run: env -u CEF_PATH VMUX_SKIP_DX_BUILD=1 cargo clippy -p vmux_desktop --lib --no-default-features -- -D warnings
 
   test-rust:
@@ -76,11 +83,19 @@ jobs:
     if: needs.changes.outputs.code == 'true'
     steps:
       - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
 
       - uses: ./.github/actions/setup-linux
         with:
           cache-key: test
           cef-version: ${{ needs.cef-version.outputs.version }}
+
+      - name: Select Rust test scope
+        id: scope
+        env:
+          VMUX_CI_BASE: ${{ github.event_name == 'pull_request' && github.event.pull_request.base.sha || '' }}
+        run: ./scripts/vmux-builder ci-scope >> "$GITHUB_OUTPUT"
 
       - name: Test Rust build preparation and storage lifecycle
         run: |
@@ -88,10 +103,14 @@ jobs:
           bash scripts/test-dev-bundle.sh --fixture
           bash scripts/test-dev-sign.sh
 
+      - name: Test workspace source conventions
+        run: cargo test --locked -p vmux_macro --test source_conventions
+
       - name: Run tests
-        run: env -u CEF_PATH VMUX_SKIP_DX_BUILD=1 cargo test --workspace
+        run: env -u CEF_PATH VMUX_SKIP_DX_BUILD=1 cargo test --locked ${{ steps.scope.outputs.args }}
 
       - name: Test lean desktop features
+        if: steps.scope.outputs.lean == 'true'
         run: env -u CEF_PATH VMUX_SKIP_DX_BUILD=1 cargo test -p vmux_desktop --lib --no-default-features disabled_features::tests
 
   changes:
@@ -99,12 +118,14 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       website: ${{ steps.filter.outputs.website }}
-      macos: ${{ steps.filter.outputs.macos }}
-      ios: ${{ steps.filter.outputs.ios }}
-      code: ${{ steps.filter.outputs.code }}
+      macos: ${{ github.event_name != 'schedule' && (github.event_name == 'workflow_dispatch' || steps.filter.outputs.macos == 'true') }}
+      macos_package: ${{ steps.filter.outputs.macos_package }}
+      ios: ${{ github.event_name != 'schedule' && (github.event_name == 'workflow_dispatch' || steps.filter.outputs.ios == 'true') }}
+      code: ${{ github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' || steps.filter.outputs.code == 'true' }}
     steps:
       - uses: actions/checkout@v5
       - uses: dorny/paths-filter@v4
+        if: github.event_name != 'schedule'
         id: filter
         with:
           predicate-quantifier: 'some-with-excludes'
@@ -117,6 +138,7 @@ jobs:
               - 'Cargo.lock'
               - 'Makefile'
               - 'rust-toolchain.toml'
+              - 'tool-versions.env'
               - 'scripts/**'
               - '.github/actions/**'
               - '.github/workflows/ci.yml'
@@ -135,10 +157,41 @@ jobs:
               - 'Cargo.lock'
               - 'Makefile'
               - 'rust-toolchain.toml'
+              - 'tool-versions.env'
               - '.github/workflows/ci.yml'
               - '.github/workflows/nightly.yml'
               - '.github/workflows/build-cef.yml'
               - '.github/workflows/release.yml'
+              - '!crates/app/vmux_mobile/**'
+              - '!packaging/ios/**'
+              - '!scripts/*ios*'
+            macos_package:
+              - 'crates/app/vmux_desktop/**'
+              - 'crates/app/vmux_cli/**'
+              - 'crates/app/vmux_builder/**'
+              - 'crates/util/vmux_app/**'
+              - 'crates/util/vmux_browser/**'
+              - 'crates/util/vmux_clipboard/**'
+              - 'crates/util/vmux_native/**'
+              - 'crates/util/vmux_process/**'
+              - 'crates/feature/vmux_capture/**'
+              - 'crates/**/Cargo.toml'
+              - 'crates/**/build.rs'
+              - 'crates/build_*.rs'
+              - 'cef/**'
+              - 'patches/**'
+              - 'packaging/**'
+              - 'scripts/**'
+              - '.github/actions/**'
+              - '.github/workflows/ci.yml'
+              - '.github/workflows/nightly.yml'
+              - '.github/workflows/build-cef.yml'
+              - '.github/workflows/release.yml'
+              - 'Cargo.toml'
+              - 'Cargo.lock'
+              - 'Makefile'
+              - 'rust-toolchain.toml'
+              - 'tool-versions.env'
               - '!crates/app/vmux_mobile/**'
               - '!packaging/ios/**'
               - '!scripts/*ios*'
@@ -149,6 +202,7 @@ jobs:
               - 'Cargo.lock'
               - 'Makefile'
               - 'rust-toolchain.toml'
+              - 'tool-versions.env'
               - 'scripts/*ios*'
               - '.github/actions/**'
               - '.github/workflows/ci.yml'
@@ -353,24 +407,33 @@ jobs:
   build-macos:
     name: Build macOS
     runs-on: ubuntu-latest
-    needs: [changes, build-mac]
+    needs: [changes, check-mac, build-mac]
     if: always()
     steps:
       - name: Gate
         env:
           CHANGES: ${{ needs.changes.result }}
           MACOS: ${{ needs.changes.outputs.macos }}
+          PACKAGE: ${{ github.event_name != 'pull_request' || needs.changes.outputs.macos_package == 'true' }}
+          CHECK: ${{ needs.check-mac.result }}
           RESULT: ${{ needs.build-mac.result }}
         run: |
           if [ "$CHANGES" != "success" ]; then
             echo "::error::Detect Changes did not succeed ($CHANGES)"
             exit 1
           fi
-          if [ "$MACOS" = "true" ] && [ "$RESULT" != "success" ]; then
-            echo "::error::Build macOS App result: $RESULT"
-            exit 1
+          if [ "$MACOS" = "true" ]; then
+            if [ "$PACKAGE" = "true" ]; then
+              if [ "$RESULT" != "success" ]; then
+                echo "::error::Build macOS App result: $RESULT"
+                exit 1
+              fi
+            elif [ "$CHECK" != "success" ]; then
+              echo "::error::Check macOS result: $CHECK"
+              exit 1
+            fi
           fi
-          echo "Build macOS gate ok (macos=$MACOS build=$RESULT)"
+          echo "Build macOS gate ok (macos=$MACOS package=$PACKAGE check=$CHECK build=$RESULT)"
 
   build-ios:
     name: Build iOS
@@ -410,10 +473,35 @@ jobs:
         working-directory: website
         run: dx build --platform web --release
 
+  check-mac:
+    name: Check macOS
+    needs: [changes, cef-version]
+    if: needs.changes.outputs.macos == 'true' && github.event_name == 'pull_request' && needs.changes.outputs.macos_package != 'true'
+    runs-on: macos-latest
+    env:
+      VMUX_CEF_SDK_CACHE: ${{ github.workspace }}/.cache/cef-sdk
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: ./.github/actions/setup-macos
+        with:
+          cache-key: check-mac
+          cef-version: ${{ needs.cef-version.outputs.version }}
+          packaging: "false"
+
+      - name: Check desktop, CLI, and daemon
+        run: ./scripts/cargo-with-cef-cache.sh check --locked -p vmux_desktop -p vmux_cli -p vmux_app --all-targets --features vmux_desktop/package,vmux_app/service-daemon
+
+      - name: Verify generated UI assets
+        run: ./scripts/verify-web-bundle.sh
+
+      - name: Check lean macOS desktop features
+        run: ./scripts/cargo-with-cef-cache.sh check --locked -p vmux_desktop --no-default-features --features dev
+
   build-mac:
     name: Build macOS App
     needs: [changes, cef-version]
-    if: needs.changes.outputs.macos == 'true'
+    if: needs.changes.outputs.macos == 'true' && (github.event_name != 'pull_request' || needs.changes.outputs.macos_package == 'true')
     runs-on: macos-latest
     permissions:
       contents: write

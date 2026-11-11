@@ -21,5 +21,9 @@ path = "tests/debug.rs"
 name = "mac_package"
 path = "tests/mac_package.rs"
 
+[[test]]
+name = "ci_scope"
+path = "tests/ci_scope.rs"
+
 [lints]
 workspace = true
