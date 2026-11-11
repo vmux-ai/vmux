@@ -1,8 +1,9 @@
 use dioxus::prelude::*;
 use vmux_api::command_bar::{
-    CommandPaletteAgentMenuToggleRequest, CommandPaletteComposer,
-    CommandPaletteMenuActivateRequest, CommandPaletteMenus, CommandPaletteModelMenuToggleRequest,
-    CommandPalettePermissionMenuToggleRequest, OpenId,
+    CommandPaletteAgentMenuToggleRequest, CommandPaletteBranchMenuToggleRequest,
+    CommandPaletteComposer, CommandPaletteMenuActivateRequest, CommandPaletteMenus,
+    CommandPaletteModelMenuToggleRequest, CommandPalettePermissionMenuToggleRequest,
+    CommandPaletteProjectMenuToggleRequest, OpenId,
 };
 use vmux_ui::components::composer::{PROMPT_INPUT_ID, PromptFocus};
 use vmux_ui::components::composer_bar::{ComposerChip, ComposerMenuKind};
@@ -14,6 +15,8 @@ pub(super) struct ComposerChips {
     pub(super) agent: ComposerChip,
     pub(super) model: Option<ComposerChip>,
     pub(super) permission: Option<ComposerChip>,
+    pub(super) project: ComposerChip,
+    pub(super) branch: Option<ComposerChip>,
 }
 
 impl ComposerChips {
@@ -23,6 +26,8 @@ impl ComposerChips {
                 agent: ComposerChip::loading(),
                 model: Some(ComposerChip::loading()),
                 permission: None,
+                project: ComposerChip::loading(),
+                branch: None,
             };
         }
 
@@ -71,10 +76,27 @@ impl ComposerChips {
             )
         };
 
+        let project = ComposerChip::ready(
+            composer.workspace_label.clone(),
+            composer.workspace_title.clone(),
+        )
+        .opens(EventHandler::new(move |()| {
+            let _ = send(&CommandPaletteProjectMenuToggleRequest { open_id });
+        }));
+        let branch = composer.is_git_repo.then(|| {
+            ComposerChip::ready(composer.branch_label.clone(), composer.branch_title.clone()).opens(
+                EventHandler::new(move |()| {
+                    let _ = send(&CommandPaletteBranchMenuToggleRequest { open_id });
+                }),
+            )
+        });
+
         Self {
             agent,
             model,
             permission,
+            project,
+            branch,
         }
     }
 }

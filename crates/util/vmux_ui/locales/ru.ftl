@@ -1136,3 +1136,5 @@ command-toggle-url-bar = Layout > Макет > Переключить адрес
 project-rename = Переименовать проект
 
 agent-tool-slept = Подождал
+
+project-directory-unavailable = Каталог проекта недоступен

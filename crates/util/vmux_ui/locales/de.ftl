@@ -1136,3 +1136,5 @@ command-toggle-url-bar = Layout > Layout > URL-Leiste umschalten
 project-rename = Projekt umbenennen
 
 agent-tool-slept = Gewartet
+
+project-directory-unavailable = Das Projektverzeichnis ist nicht verfügbar

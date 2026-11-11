@@ -63,6 +63,18 @@ pub struct TabWorktreeActivation {
     pub ready: TabWorktreeReady,
 }
 
+pub struct BranchCheckout(TabWorktreeCheckout);
+
+impl BranchCheckout {
+    pub fn commit(self) -> TabWorktreeActivation {
+        let (activation, cleanup) = self.0.into_parts();
+        if let Some(mut cleanup) = cleanup {
+            cleanup.commit();
+        }
+        activation
+    }
+}
+
 pub(crate) struct TabWorktreeCheckout {
     activation: Option<TabWorktreeActivation>,
     cleanup: Option<ManagedCheckoutCleanup>,
@@ -498,6 +510,21 @@ impl TabWorktreeActivation {
             branch,
             &base_ref,
         )
+    }
+
+    pub fn select_branch(
+        base_dir: &Path,
+        branch: &str,
+        managed_root: &Path,
+        wake: Option<EventLoopProxy<WinitUserEvent>>,
+    ) -> Result<Option<BranchCheckout>, String> {
+        match Self::checkout_branch(base_dir, branch, managed_root)? {
+            TabWorktreeCheckoutResult::Ready(checkout) => Ok(Some(BranchCheckout(*checkout))),
+            TabWorktreeCheckoutResult::Retry(wait) => {
+                wait.subscribe(wake);
+                Ok(None)
+            }
+        }
     }
 
     pub(crate) fn checkout_branch(

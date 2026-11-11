@@ -9,7 +9,7 @@ use crate::event::{ChatPasteMedia, ChatPickFiles};
 use dioxus::prelude::*;
 use vmux_ui::agent_accent::AgentAccent;
 use vmux_ui::components::composer::PromptComposer;
-use vmux_ui::components::composer_bar::ComposerBar;
+use vmux_ui::components::composer_bar::{ComposerBar, ComposerChip};
 use vmux_ui::components::mcp_menu::McpMenu;
 use vmux_ui::hooks::send;
 use vmux_ui::i18n::translate;
@@ -107,6 +107,18 @@ fn ComposerFooter(chat: Chat) -> Element {
     let mut model = chat.model_chip();
     let mut effort = chat.effort_chip();
     let mut permission = chat.permission_chip();
+    let project = if !chat.projects.context_ready() {
+        Some(ComposerChip::loading())
+    } else if context.cwd.is_empty() {
+        None
+    } else {
+        Some(ComposerChip::ready(
+            context.workspace_name.clone(),
+            context.cwd.clone(),
+        ))
+    };
+    let branch = (!context.branch.is_empty())
+        .then(|| ComposerChip::ready(context.branch.clone(), context.branch.clone()));
     if chat.in_use() {
         status.clear();
         model = model.map(|chip| chip.readonly());
@@ -120,6 +132,8 @@ fn ComposerFooter(chat: Chat) -> Element {
             model,
             effort,
             permission,
+            project,
+            branch,
             is_git_repo: context.is_git_repo,
             workspace_known: context.workspace_selected,
             uncommitted: 0,
@@ -202,6 +216,8 @@ mod tests {
                 composer_draft: "Unsent draft".into(),
                 composer: ComposerContext {
                     cwd: "/tmp/current".into(),
+                    workspace_name: "Current project".into(),
+                    branch: "feature/current".into(),
                     workspace_selected: true,
                     can_manage_workspace: true,
                     projects: vec![
@@ -230,7 +246,7 @@ mod tests {
     }
 
     #[test]
-    fn busy_sessions_keep_drafts_without_repeating_space_project_controls() {
+    fn busy_sessions_keep_drafts_and_show_their_own_workspace_without_selectors() {
         let runtime = tokio::runtime::Builder::new_current_thread()
             .enable_time()
             .build()
@@ -249,6 +265,8 @@ mod tests {
         let html = dioxus_ssr::render(&dom);
         assert!(!html.contains(&title), "{html}");
         assert!(!html.contains("Another project"), "{html}");
+        assert!(html.contains("Current project"), "{html}");
+        assert!(html.contains("feature/current"), "{html}");
         assert!(host.menus.borrow().is_empty());
         assert!(html.contains("Unsent draft"));
         let textarea = html

@@ -1136,3 +1136,5 @@ command-toggle-url-bar = Layout > Indeling > Adresbalk schakelen
 project-rename = Project hernoemen
 
 agent-tool-slept = Gewacht
+
+project-directory-unavailable = De projectmap is niet beschikbaar

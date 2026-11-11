@@ -1133,3 +1133,5 @@ command-toggle-url-bar = Layout > 布局 > 切换地址栏
 project-rename = 重命名项目
 
 agent-tool-slept = 已等待
+
+project-directory-unavailable = 项目目录不可用

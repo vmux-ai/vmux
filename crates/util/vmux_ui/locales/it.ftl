@@ -1136,3 +1136,5 @@ command-toggle-url-bar = Layout > Layout > Mostra o nascondi barra degli indiriz
 project-rename = Rinomina progetto
 
 agent-tool-slept = Ha atteso
+
+project-directory-unavailable = La directory del progetto non è disponibile

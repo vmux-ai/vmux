@@ -1133,3 +1133,5 @@ command-toggle-url-bar = Layout > 레이아웃 > 주소 표시줄 전환
 project-rename = 프로젝트 이름 변경
 
 agent-tool-slept = 대기함
+
+project-directory-unavailable = 프로젝트 디렉터리를 사용할 수 없습니다

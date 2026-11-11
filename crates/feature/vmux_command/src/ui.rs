@@ -206,7 +206,10 @@ pub fn CommandPalette(props: PaletteProps) -> Element {
         .map(AgentAccent::for_agent);
     let start_accent = accent.unwrap_or_else(|| AgentAccent::for_agent(""));
     let start_prompt_attachments = palette_data.composer_attachments.clone();
-    let start_submission_enabled = !q.trim().is_empty() || !attachments.is_empty();
+    let workspace_selection = tree().workspace_selection;
+    let start_submission_enabled = (!q.trim().is_empty() || !attachments.is_empty())
+        && !workspace_selection.pending
+        && workspace_selection.error.is_empty();
     let chips = ComposerChips::build(&composer, state_val.open_id);
     let opened_menu = ComposerMenuView::kind(projection.menus);
 
@@ -216,6 +219,8 @@ pub fn CommandPalette(props: PaletteProps) -> Element {
             agent: Some(chips.agent),
             model: chips.model,
             permission: chips.permission,
+            project: Some(chips.project),
+            branch: chips.branch,
             is_git_repo: composer.is_git_repo,
             workspace_known: !composer.cwd.is_empty(),
             uncommitted: 0,
@@ -454,6 +459,11 @@ pub fn CommandPalette(props: PaletteProps) -> Element {
         div { class: "relative",
             if is_start {
                 {start_menus}
+                if !workspace_selection.error.is_empty() {
+                    div { role: "alert", class: "px-3 pb-2 text-xs text-destructive",
+                        "{workspace_selection.error}"
+                    }
+                }
                 PromptComposer {
                     shared_transition: true,
                     value: q.clone(),

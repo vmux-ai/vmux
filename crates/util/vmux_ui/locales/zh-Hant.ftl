@@ -1133,3 +1133,5 @@ command-toggle-url-bar = Layout > 版面配置 > 切換網址列
 project-rename = 重新命名專案
 
 agent-tool-slept = 已等待
+
+project-directory-unavailable = 專案目錄無法使用

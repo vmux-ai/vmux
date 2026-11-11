@@ -1136,3 +1136,5 @@ command-toggle-url-bar = Layout > التخطيط > تبديل شريط العن�
 project-rename = إعادة تسمية المشروع
 
 agent-tool-slept = انتظر
+
+project-directory-unavailable = مجلد المشروع غير متاح

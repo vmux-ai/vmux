@@ -209,6 +209,18 @@ struct PromptSubmission<'w, 's> {
 
 impl PromptSubmission<'_, '_> {
     fn submit(&mut self, webview: Entity, request: &PromptRequest, target: &PromptTarget) {
+        if target.launcher_hosts.contains(webview)
+            && target
+                .states
+                .get(webview)
+                .ok()
+                .and_then(UiState::current)
+                .is_some_and(|state| {
+                    state.workspace_selection.pending || !state.workspace_selection.error.is_empty()
+                })
+        {
+            return;
+        }
         let prompt = request.text.trim();
         let attachments = request
             .attachments
@@ -228,7 +240,7 @@ impl PromptSubmission<'_, '_> {
             .flatten();
         let mut opened = false;
         if (!prompt.is_empty() || !attachments.is_empty())
-            && let Some(stack) = target.workspace.stack
+            && let Some(stack) = inline_stack.or(target.workspace.stack)
             && let Some(url) = target
                 .contributed_pages
                 .prompt_url(request.target_url.as_deref())
@@ -237,7 +249,7 @@ impl PromptSubmission<'_, '_> {
             if let Some(agent) = Route::requested_agent(&url) {
                 self.session_starts.write(StartRequest::from_prompt(
                     prompt,
-                    target.cwd(stack),
+                    target.cwd(webview, stack),
                     agent,
                     PageOpenTarget::Stack(stack),
                     attachments.clone(),
@@ -286,11 +298,18 @@ struct PromptTarget<'w, 's> {
     child_of: Query<'w, 's, &'static ChildOf>,
     contributed_pages: ContributedPages<'w, 's>,
     work_directories: Query<'w, 's, &'static vmux_command::CommandBarWorkDirectory>,
+    directories: Query<'w, 's, &'static vmux_ecs::Cwd>,
+    states: Query<'w, 's, &'static UiState<vmux_api::command_bar::CommandBarUiState>>,
     workspace: Single<'w, 's, &'static CommandBarWorkspaceSnapshot>,
 }
 
 impl PromptTarget<'_, '_> {
-    fn cwd(&self, stack: Entity) -> std::path::PathBuf {
+    fn cwd(&self, webview: Entity, stack: Entity) -> std::path::PathBuf {
+        if self.launcher_hosts.contains(webview)
+            && let Ok(cwd) = self.directories.get(webview)
+        {
+            return cwd.0.clone();
+        }
         self.work_directories
             .get(stack)
             .map(|cwd| std::path::PathBuf::from(&cwd.0))
@@ -749,6 +768,43 @@ mod tests {
     use crate::event::ChatItem;
     use vmux_api::protocol::{AgentRequest, AgentRequestId};
     use vmux_ecs::agent::{AgentRequestInput, CommandOrigin};
+
+    #[test]
+    fn a_launcher_uses_its_selected_directory_when_another_pane_is_active() {
+        let mut app = App::new();
+        let active = app
+            .world_mut()
+            .spawn(vmux_command::CommandBarWorkDirectory("/other-pane".into()))
+            .id();
+        app.world_mut().spawn(CommandBarWorkspaceSnapshot {
+            stack: Some(active),
+            project_root: Some("/other-project".into()),
+            ..Default::default()
+        });
+        let stack = app
+            .world_mut()
+            .spawn(vmux_command::CommandBarWorkDirectory("/tab-default".into()))
+            .id();
+        let launcher = app
+            .world_mut()
+            .spawn((
+                HostsLauncher,
+                ChildOf(stack),
+                vmux_ecs::Cwd("/selected-project".into()),
+            ))
+            .id();
+        let modal = app.world_mut().spawn_empty().id();
+        let mut state = bevy::ecs::system::SystemState::<PromptTarget>::new(app.world_mut());
+        let target = state.get(app.world()).unwrap();
+        assert_eq!(
+            target.cwd(launcher, stack),
+            std::path::Path::new("/selected-project")
+        );
+        assert_eq!(
+            target.cwd(modal, active),
+            std::path::Path::new("/other-pane")
+        );
+    }
 
     #[derive(Resource, Default)]
     struct Published(ChatUiState);

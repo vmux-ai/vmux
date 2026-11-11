@@ -182,6 +182,26 @@ pub struct ProjectRow {
 }
 
 impl ProjectRow {
+    pub fn for_directory<'a>(projects: &'a [Self], directory: &str) -> Option<&'a Self> {
+        if directory.is_empty() {
+            return None;
+        }
+        let directory = std::path::Path::new(directory);
+        let mut selected: Option<&Self> = None;
+        for project in projects {
+            if project.depth != 0
+                || project.path.is_empty()
+                || !directory.starts_with(&project.path)
+            {
+                continue;
+            }
+            if selected.is_none_or(|current| project.path.len() > current.path.len()) {
+                selected = Some(project);
+            }
+        }
+        selected
+    }
+
     pub fn identity_seed(&self) -> &str {
         if self.identity.is_empty() {
             &self.path

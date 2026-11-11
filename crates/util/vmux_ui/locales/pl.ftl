@@ -1136,3 +1136,5 @@ command-toggle-url-bar = Layout > Układ > Przełącz pasek adresu
 project-rename = Zmień nazwę projektu
 
 agent-tool-slept = Odczekano
+
+project-directory-unavailable = Katalog projektu jest niedostępny

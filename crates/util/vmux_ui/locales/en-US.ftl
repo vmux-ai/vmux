@@ -1124,3 +1124,5 @@ command-toggle-url-bar = Layout > Layout > Toggle URL Bar
 project-rename = Rename project
 
 agent-tool-slept = Slept
+
+project-directory-unavailable = The project directory is unavailable

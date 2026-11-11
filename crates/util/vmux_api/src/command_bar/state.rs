@@ -12,6 +12,12 @@ pub struct CommandBarFocusEffect {
     pub revision: u64,
 }
 
+#[vmux_api::contract(Default, Eq)]
+pub struct CommandBarWorkspaceSelection {
+    pub pending: bool,
+    pub error: String,
+}
+
 #[vmux_api::ui_state_patch(Default)]
 pub struct CommandBarUiStatePatch {
     pub snapshot: Option<Box<CommandBarOpenEvent>>,
@@ -24,6 +30,7 @@ pub struct CommandBarUiStatePatch {
     pub media_entries: Option<Box<ChatMediaEntries>>,
     pub focus: Option<CommandBarFocusEffect>,
     pub palette: Option<Box<CommandPaletteUiState>>,
+    pub workspace_selection: Option<CommandBarWorkspaceSelection>,
 }
 
 #[vmux_api::ui_state(Default, patch = CommandBarUiStatePatch, version = 2)]
@@ -38,6 +45,7 @@ pub struct CommandBarUiState {
     pub media_entries: ChatMediaEntries,
     pub focus: CommandBarFocusEffect,
     pub palette: CommandPaletteUiState,
+    pub workspace_selection: CommandBarWorkspaceSelection,
 }
 
 #[vmux_api::ui_state(Default, version = 2)]
@@ -92,6 +100,9 @@ impl crate::UiStateProjection<CommandBarUiStatePatch> for CommandBarUiState {
         }
         if let Some(palette) = patch.palette {
             self.palette = *palette;
+        }
+        if let Some(selection) = patch.workspace_selection {
+            self.workspace_selection = selection;
         }
     }
 }

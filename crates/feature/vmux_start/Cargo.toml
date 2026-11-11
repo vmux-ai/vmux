@@ -39,3 +39,6 @@ vmux_space = { path = "../vmux_space" }
 
 [lints]
 workspace = true
+
+[dev-dependencies]
+tempfile = "3"
