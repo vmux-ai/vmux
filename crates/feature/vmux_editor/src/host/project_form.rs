@@ -16,8 +16,8 @@ use crate::project::{
 };
 
 use super::project::{GitHubRepository, ProjectImport, ProjectName};
-use super::project_persistence::{
-    Mutation, PersistenceSet, ProjectSaved, Registrations, WriteCompleted, WriteRequest,
+use super::project_store::{
+    ErrorMessage, Mutation, ProjectSaved, Registrations, StoreSet, WriteCompleted, WriteRequest,
 };
 
 pub(super) struct ProjectFormPlugin;
@@ -45,10 +45,10 @@ impl Plugin for ProjectFormPlugin {
                 finish_validations,
             )
                 .chain()
-                .after(PersistenceSet::Load)
-                .before(PersistenceSet::Write),
+                .after(StoreSet::Load)
+                .before(StoreSet::Write),
         )
-        .add_systems(Update, finish_commits.after(PersistenceSet::Write));
+        .add_systems(Update, finish_commits.after(StoreSet::Write));
     }
 }
 
@@ -615,7 +615,11 @@ fn finish_commits(
         feedback.finish(
             task.webview,
             &task.request_id,
-            completed.result.clone().map(|_| None),
+            completed
+                .result
+                .clone()
+                .map(|_| None)
+                .map_err(|error| ErrorMessage(error).localized()),
             saved,
         );
         commands
@@ -623,7 +627,11 @@ fn finish_commits(
             .remove::<PendingCommit>();
         commands.trigger(OperationCompleted {
             entity: completed.requester,
-            result: completed.result.clone().map(|_| ()),
+            result: completed
+                .result
+                .clone()
+                .map(|_| ())
+                .map_err(|error| ErrorMessage(error).localized()),
         });
     }
 }
@@ -641,11 +649,15 @@ mod tests {
     impl Form {
         fn at(root: &std::path::Path, url: &str) -> Self {
             let mut app = App::new();
-            app.add_plugins((MinimalPlugins, super::super::project::ProjectPagePlugin))
-                .init_resource::<vmux_setting::AppSettings>()
-                .init_resource::<vmux_session::CatalogSnapshot>()
-                .insert_non_send(bevy_cef::prelude::Browsers::default())
-                .add_observer(Self::deliver);
+            app.add_plugins((
+                MinimalPlugins,
+                vmux_project::ProjectPlugin,
+                super::super::project::ProjectPagePlugin,
+            ))
+            .init_resource::<vmux_setting::AppSettings>()
+            .init_resource::<vmux_session::CatalogSnapshot>()
+            .insert_non_send(bevy_cef::prelude::Browsers::default())
+            .add_observer(Self::deliver);
             app.world_mut().spawn(vmux_ecs::profile::ProjectsRoot(
                 vmux_ecs::profile::ProjectsDirectory::ensure_at(root.to_path_buf()).unwrap(),
             ));
@@ -676,10 +688,7 @@ mod tests {
             event.mark_delivered();
         }
 
-        fn snapshot(
-            &mut self,
-            root: &std::path::Path,
-        ) -> super::super::project_persistence::Snapshot {
+        fn snapshot(&mut self, root: &std::path::Path) -> super::super::project_store::Snapshot {
             let mut state =
                 bevy::ecs::system::SystemState::<Registrations>::new(self.app.world_mut());
             state.get(self.app.world()).unwrap().snapshot(root)

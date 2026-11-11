@@ -10313,6 +10313,7 @@ dependencies = [
  "vmux_macro",
  "vmux_mcp",
  "vmux_profile",
+ "vmux_project",
  "vmux_remote",
  "vmux_service",
  "vmux_session",
@@ -10380,6 +10381,7 @@ dependencies = [
  "vmux_layout",
  "vmux_page",
  "vmux_path",
+ "vmux_project",
  "vmux_setting",
  "vmux_space",
  "vmux_start",
@@ -10601,6 +10603,7 @@ dependencies = [
  "vmux_mcp",
  "vmux_page",
  "vmux_path",
+ "vmux_project",
  "vmux_session",
  "vmux_setting",
  "vmux_space",
@@ -10923,6 +10926,25 @@ dependencies = [
  "tempfile",
  "url",
  "zeroize",
+]
+
+[[package]]
+name = "vmux_project"
+version = "0.0.35"
+dependencies = [
+ "bevy_app",
+ "bevy_ecs",
+ "bevy_reflect",
+ "bevy_tasks",
+ "percent-encoding",
+ "rkyv",
+ "ron 0.12.1",
+ "serde",
+ "tempfile",
+ "url",
+ "vmux_api",
+ "vmux_ecs",
+ "vmux_path",
 ]
 
 [[package]]

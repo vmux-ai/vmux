@@ -1,0 +1,32 @@
+[package]
+name = "vmux_project"
+build = "../../build_cfg_git.rs"
+description = "Renderer-independent Project entities, operations, and adapters"
+version.workspace = true
+edition.workspace = true
+publish = false
+
+[features]
+default = []
+contracts = ["dep:vmux_api", "dep:rkyv", "vmux_ecs/contracts"]
+filesystem = ["dep:bevy_tasks", "dep:ron", "dep:vmux_path"]
+
+[dependencies]
+bevy_app.workspace = true
+bevy_ecs.workspace = true
+bevy_reflect.workspace = true
+serde.workspace = true
+percent-encoding = "2"
+url.workspace = true
+vmux_ecs = { path = "../../util/vmux_ecs" }
+vmux_api = { path = "../../util/vmux_api", features = ["bevy"], optional = true }
+rkyv = { workspace = true, optional = true }
+bevy_tasks = { workspace = true, features = ["multi_threaded"], optional = true }
+ron = { workspace = true, optional = true }
+vmux_path = { path = "../../util/vmux_path", optional = true }
+
+[dev-dependencies]
+tempfile = "3"
+
+[lints]
+workspace = true

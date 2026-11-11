@@ -9,6 +9,7 @@ consumer_target="$(vmux_cargo_target_dir "$root")/framework-consumer"
 
 cargo test --locked -p vmux_ecs --no-default-features --lib
 cargo test --locked -p vmux_ecs --no-default-features --features store --lib
+cargo test --locked -p vmux_project --no-default-features --features contracts,filesystem --lib
 cargo test --locked --manifest-path "$consumer_manifest" --target-dir "$consumer_target"
 
 python3 - "$consumer_manifest" <<'PY'
@@ -24,7 +25,7 @@ result = subprocess.run(
 )
 metadata = json.loads(result.stdout)
 packages = {package["name"] for package in metadata["packages"]}
-required = {"vmux_app", "vmux_ecs"}
+required = {"vmux_app", "vmux_ecs", "vmux_project"}
 if not required.issubset(packages):
     raise SystemExit("The consumer must exercise the public application and ECS packages")
 forbidden = {"bevy_cef", "bevy_cef_core", "bevy_winit", "vmux_profile", "vmux_ui", "vmux_layout", "wry"}
