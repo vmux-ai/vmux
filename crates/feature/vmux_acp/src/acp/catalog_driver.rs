@@ -9,10 +9,11 @@ use agent_client_protocol::Client;
 use agent_client_protocol::schema::ProtocolVersion;
 use agent_client_protocol::schema::v1::{InitializeRequest, ListSessionsRequest};
 use tokio::io::{AsyncRead, ReadBuf};
-use tokio::process::Child;
 use tokio::process::Command;
 use tokio_util::compat::{TokioAsyncReadCompatExt, TokioAsyncWriteCompatExt};
 use vmux_api::protocol::AcpProviderSession;
+
+use super::agent_process::AgentProcess;
 
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(30);
 const SHUTDOWN_TIMEOUT: Duration = Duration::from_secs(2);
@@ -35,8 +36,6 @@ pub(crate) struct CatalogResult {
 
 pub(crate) struct CatalogDriver;
 
-struct CatalogProcess(Child);
-
 struct BoundedLineReader<R> {
     inner: R,
     line_bytes: usize,
@@ -45,12 +44,6 @@ struct BoundedLineReader<R> {
 
 #[derive(Default)]
 struct CatalogBudget(usize);
-
-impl Drop for CatalogProcess {
-    fn drop(&mut self) {
-        let _ = self.0.start_kill();
-    }
-}
 
 impl CatalogBudget {
     fn accept(&mut self, session: &AcpProviderSession) -> bool {
@@ -126,39 +119,6 @@ impl<R: AsyncRead + Unpin> AsyncRead for BoundedLineReader<R> {
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use tokio::io::{AsyncReadExt, AsyncWriteExt};
-
-    use super::*;
-
-    #[tokio::test]
-    async fn bounded_reader_rejects_an_oversized_frame() {
-        let (mut writer, reader) = tokio::io::duplex(32);
-        writer.write_all(b"12345\n").await.unwrap();
-        drop(writer);
-        let mut reader = BoundedLineReader::with_limit(reader, 4);
-        let mut output = Vec::new();
-
-        let error = reader.read_to_end(&mut output).await.unwrap_err();
-
-        assert_eq!(error.kind(), io::ErrorKind::InvalidData);
-    }
-
-    #[test]
-    fn catalog_budget_rejects_entries_beyond_the_frame_budget() {
-        let mut budget = CatalogBudget(MAX_CATALOG_BYTES - 64);
-        let session = AcpProviderSession {
-            id: "x".into(),
-            cwd: String::new(),
-            title: String::new(),
-            updated_at: String::new(),
-        };
-
-        assert!(!budget.accept(&session));
-    }
-}
-
 impl CatalogDriver {
     pub(crate) async fn list(request: CatalogRequest) -> Result<CatalogResult, String> {
         if !request.cwd.is_dir() {
@@ -167,27 +127,26 @@ impl CatalogDriver {
                 request.cwd.display()
             ));
         }
-        let child = Command::new(&request.command)
+        let mut command = Command::new(&request.command);
+        command
             .args(&request.args)
             .env_clear()
             .envs(request.env)
             .current_dir(request.cwd)
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
-            .stderr(Stdio::null())
-            .kill_on_drop(true)
-            .spawn()
+            .stderr(Stdio::null());
+        let mut process = AgentProcess::spawn(&mut command)
             .map_err(|error| format!("ACP catalog spawn failed: {error}"))?;
-        let mut process = CatalogProcess(child);
         let stdin = process
-            .0
+            .child
             .stdin
             .take()
             .ok_or("ACP catalog stdin is unavailable")?
             .compat_write();
         let stdout = BoundedLineReader::new(
             process
-                .0
+                .child
                 .stdout
                 .take()
                 .ok_or("ACP catalog stdout is unavailable")?,
@@ -247,8 +206,37 @@ impl CatalogDriver {
         })
         .await
         .map_err(|_| "ACP session/list timed out".to_string())?;
-        let _ = process.0.start_kill();
-        let _ = tokio::time::timeout(SHUTDOWN_TIMEOUT, process.0.wait()).await;
+        let _ = tokio::time::timeout(SHUTDOWN_TIMEOUT, process.stop()).await;
         result
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+
+    use super::*;
+
+    #[tokio::test]
+    async fn bounded_reader_rejects_an_oversized_frame() {
+        let (mut writer, reader) = tokio::io::duplex(32);
+        writer.write_all(b"12345\n").await.unwrap();
+        drop(writer);
+        let mut reader = BoundedLineReader::with_limit(reader, 4);
+        let mut output = Vec::new();
+        let error = reader.read_to_end(&mut output).await.unwrap_err();
+        assert_eq!(error.kind(), io::ErrorKind::InvalidData);
+    }
+
+    #[test]
+    fn catalog_budget_rejects_entries_beyond_the_frame_budget() {
+        let mut budget = CatalogBudget(MAX_CATALOG_BYTES - 64);
+        let session = AcpProviderSession {
+            id: "x".into(),
+            cwd: String::new(),
+            title: String::new(),
+            updated_at: String::new(),
+        };
+        assert!(!budget.accept(&session));
     }
 }

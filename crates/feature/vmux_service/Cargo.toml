@@ -26,6 +26,7 @@ bevy = { workspace = true }
 bevy_app = { workspace = true }
 bevy_ecs = { workspace = true }
 libc = "0.2"
+socket2 = "0.6"
 tokio = { workspace = true, features = ["process", "io-util"] }
 quinn = { workspace = true }
 rustls-pemfile = { workspace = true }
@@ -40,6 +41,7 @@ vmux_ecs = { path = "../../util/vmux_ecs", features = ["host"] }
 vmux_path = { path = "../../util/vmux_path" }
 vmux_profile = { path = "../../util/vmux_profile" }
 vmux_process = { path = "../../util/vmux_process" }
+vmux_spawn = { path = "../../util/vmux_spawn" }
 tempfile = "3.27.0"
 uuid = { workspace = true }
 url = { workspace = true }

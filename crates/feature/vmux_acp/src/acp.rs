@@ -16,12 +16,14 @@ use tokio::runtime::Handle;
 use tokio::sync::{broadcast, mpsc, oneshot};
 use vmux_api::protocol::{AcpSessionConfig, AgentRunStatus, ServiceMessage, SharedEvent};
 use vmux_api::session::{Message, RemoteApproval, RemoteSession, RemoteStatus};
+use vmux_ecs::service::{AbortTask, Shutdown, ShutdownComplete, ShutdownPending};
 use vmux_ecs::{CreatedAt, ProcessId};
 use vmux_process::ProcessRuntime;
 use vmux_session::SessionId;
 
 use agent_client_protocol::schema::v1::McpServer;
 
+mod agent_process;
 mod catalog_driver;
 mod driver;
 mod projection;
@@ -53,7 +55,9 @@ pub(crate) fn add(app: &mut App) {
             reap,
         )
             .chain(),
-    );
+    )
+    .add_systems(Shutdown, begin_shutdown)
+    .add_systems(ShutdownComplete, shutdown);
 }
 
 #[derive(Component, Clone, Debug, Default, PartialEq, Eq)]
@@ -247,9 +251,6 @@ struct AcpHistoryReplay {
 struct AcpSessionAgent(String);
 
 #[derive(Component)]
-struct AcpSessionTask(tokio::task::JoinHandle<()>);
-
-#[derive(Component)]
 struct AcpSessionClosing;
 
 fn receive(mut inbox: Single<&mut AcpSessionInbox>, mut commands: Commands) {
@@ -350,7 +351,7 @@ fn spawn(
                 },
                 AcpSessionAgent(request.agent_id.clone()),
                 CreatedAt::now(),
-                AcpSessionTask(task),
+                AbortTask(task),
             ));
             session_ids.insert(request.sid.clone());
         }
@@ -831,7 +832,7 @@ fn close(
 }
 
 fn reap(
-    sessions: Query<(Entity, &AcpSessionTask), bevy::prelude::With<AcpSessionClosing>>,
+    sessions: Query<(Entity, &AbortTask), bevy::prelude::With<AcpSessionClosing>>,
     mut commands: Commands,
 ) {
     for (entity, task) in &sessions {
@@ -839,6 +840,35 @@ fn reap(
             commands.entity(entity).despawn();
         }
     }
+}
+
+fn begin_shutdown(
+    mut inbox: Single<&mut AcpSessionInbox>,
+    tasks: Query<(Entity, &AcpSessionInput), bevy::prelude::With<AcpSessionShared>>,
+    mut commands: Commands,
+) {
+    inbox.0.spawns.close();
+    inbox.0.inputs.close();
+    while inbox.0.spawns.try_recv().is_ok() {}
+    while inbox.0.inputs.try_recv().is_ok() {}
+    for (entity, input) in &tasks {
+        let _ = input.0.send(AcpInput::Close);
+        commands.entity(entity).insert(ShutdownPending);
+    }
+}
+
+fn shutdown(
+    runtime: Single<&AcpSessionRuntime>,
+    mut tasks: Query<(Entity, &mut AbortTask), bevy::prelude::With<AcpSessionShared>>,
+    mut commands: Commands,
+) {
+    runtime.0.block_on(async {
+        for (entity, mut task) in &mut tasks {
+            task.0.abort();
+            let _ = (&mut task.0).await;
+            commands.entity(entity).despawn();
+        }
+    });
 }
 
 #[cfg(test)]

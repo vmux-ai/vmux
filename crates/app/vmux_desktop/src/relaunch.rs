@@ -102,7 +102,11 @@ struct RelaunchApplication;
 #[derive(Message)]
 struct LaunchProfile(String);
 
-fn relaunch(mut requests: MessageReader<RelaunchApplication>, mut exit: MessageWriter<AppExit>) {
+fn relaunch(
+    mut requests: MessageReader<RelaunchApplication>,
+    mut exit: MessageWriter<AppExit>,
+    mut commands: Commands,
+) {
     if requests.read().count() == 0 {
         return;
     }
@@ -125,6 +129,7 @@ fn relaunch(mut requests: MessageReader<RelaunchApplication>, mut exit: MessageW
         return;
     }
     bevy::log::info!("relaunching");
+    commands.insert_resource(vmux_ecs::service::Restarting);
     exit.write(AppExit::Success);
 }
 

@@ -10264,6 +10264,7 @@ dependencies = [
  "vmux_session",
  "vmux_setting",
  "vmux_space",
+ "vmux_spawn",
  "vmux_start",
  "vmux_team",
  "vmux_tool",
@@ -10986,6 +10987,7 @@ dependencies = [
  "serde",
  "serde_json",
  "serial_test",
+ "socket2",
  "tempfile",
  "tokio",
  "tracing",
@@ -10998,6 +11000,7 @@ dependencies = [
  "vmux_path",
  "vmux_process",
  "vmux_profile",
+ "vmux_spawn",
  "vmux_transport",
 ]
 
@@ -11149,6 +11152,14 @@ dependencies = [
  "vmux_setting",
  "vmux_tool",
  "vmux_ui",
+]
+
+[[package]]
+name = "vmux_spawn"
+version = "0.0.35"
+dependencies = [
+ "libc",
+ "tempfile",
 ]
 
 [[package]]

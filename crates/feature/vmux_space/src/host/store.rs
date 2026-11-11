@@ -72,7 +72,7 @@ impl Plugin for WorkspaceStorePlugin {
                 (scope_pages, auto_save, handle_save_requests, drain_writes).chain(),
             )
             .add_systems(Update, track_hierarchy.before(auto_save))
-            .add_systems(Last, flush_on_exit);
+            .add_systems(Last, flush_on_exit.before(vmux_ecs::service::ShutdownSet));
     }
 }
 

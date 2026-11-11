@@ -2,7 +2,8 @@
 
 use std::io;
 use std::os::unix::process::CommandExt;
-use std::process::Command;
+use std::process::{Child, Command};
+use std::sync::{Arc, Mutex};
 
 pub struct Descriptors;
 
@@ -30,6 +31,31 @@ impl Descriptors {
 }
 
 pub struct ProcessGroup(libc::pid_t);
+
+pub struct Reaper;
+
+impl Reaper {
+    pub fn start(child: Child) -> io::Result<()> {
+        let child = Arc::new(Mutex::new(Some(child)));
+        let waiting = Arc::clone(&child);
+        match std::thread::Builder::new()
+            .name("owned-child-reaper".into())
+            .spawn(move || {
+                if let Some(mut child) = waiting.lock().ok().and_then(|mut child| child.take()) {
+                    let _ = child.wait();
+                }
+            }) {
+            Ok(_) => Ok(()),
+            Err(error) => {
+                if let Some(mut child) = child.lock().ok().and_then(|mut child| child.take()) {
+                    let _ = child.kill();
+                    let _ = child.wait();
+                }
+                Err(error)
+            }
+        }
+    }
+}
 
 impl ProcessGroup {
     pub fn of(pid: u32) -> io::Result<Self> {
@@ -87,6 +113,22 @@ mod tests {
         child.args(["-e", &path]);
         Descriptors::isolate(&mut child).unwrap();
         assert!(!child.status().unwrap().success());
+    }
+
+    #[test]
+    fn exited_child_is_reaped_instead_of_remaining_a_zombie() {
+        let child = Command::new("/bin/sh")
+            .args(["-c", "exit 0"])
+            .spawn()
+            .unwrap();
+        let pid = child.id() as libc::pid_t;
+        Reaper::start(child).unwrap();
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(2);
+        while unsafe { libc::kill(pid, 0) } == 0 {
+            assert!(std::time::Instant::now() < deadline, "child was not reaped");
+            std::thread::sleep(std::time::Duration::from_millis(5));
+        }
+        assert_eq!(io::Error::last_os_error().raw_os_error(), Some(libc::ESRCH));
     }
 
     #[test]

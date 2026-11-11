@@ -1,3 +1,5 @@
+#[cfg(unix)]
+use std::os::unix::fs::{FileTypeExt, OpenOptionsExt};
 use std::path::Path;
 use std::time::{Duration, Instant};
 
@@ -8,6 +10,43 @@ use vmux_transport::service::ServiceCodec;
 pub struct RuntimeHandoff;
 
 impl RuntimeHandoff {
+    pub(super) fn shutdown_runtime(
+        socket: &Path,
+        lock: &Path,
+        timeout: Duration,
+    ) -> std::io::Result<()> {
+        let deadline = Instant::now() + timeout;
+        let mut options = std::fs::OpenOptions::new();
+        options.read(true).write(true);
+        #[cfg(unix)]
+        options.custom_flags(libc::O_NOFOLLOW | libc::O_NONBLOCK);
+        let lock = match options.open(lock) {
+            Ok(lock) => lock,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+                return Self::shutdown(socket, deadline);
+            }
+            Err(error) => return Err(error),
+        };
+        if !lock.metadata()?.is_file() {
+            return Err(std::io::Error::other("invalid service lock"));
+        }
+        Self::shutdown(socket, deadline)?;
+        loop {
+            match lock.try_lock() {
+                Ok(()) => return lock.unlock(),
+                Err(std::fs::TryLockError::WouldBlock) => {}
+                Err(std::fs::TryLockError::Error(error)) => return Err(error),
+            }
+            if Instant::now() >= deadline {
+                return Err(std::io::Error::new(
+                    std::io::ErrorKind::TimedOut,
+                    "Vmux service did not finish shutdown",
+                ));
+            }
+            std::thread::sleep(Duration::from_millis(25));
+        }
+    }
+
     pub fn acquire() -> std::io::Result<DataLease> {
         let mut lease = DataLease::reserve_desktop()?;
         match lease.activate_runtime() {
@@ -63,18 +102,34 @@ impl RuntimeHandoff {
     }
 
     fn shutdown(socket: &Path, deadline: Instant) -> std::io::Result<()> {
-        let mut stream = match std::os::unix::net::UnixStream::connect(socket) {
-            Ok(stream) => stream,
-            Err(error)
-                if matches!(
-                    error.kind(),
-                    std::io::ErrorKind::NotFound | std::io::ErrorKind::ConnectionRefused
-                ) =>
-            {
-                return Ok(());
-            }
+        match std::fs::symlink_metadata(socket) {
+            Ok(metadata) if metadata.file_type().is_socket() => {}
+            Ok(_) => return Err(std::io::Error::other("invalid service socket")),
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(()),
             Err(error) => return Err(error),
-        };
+        }
+        let remaining = deadline.saturating_duration_since(Instant::now());
+        if remaining.is_zero() {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::TimedOut,
+                "Vmux service shutdown timed out",
+            ));
+        }
+        let connection = socket2::Socket::new(socket2::Domain::UNIX, socket2::Type::STREAM, None)?;
+        let address = socket2::SockAddr::unix(socket)?;
+        let mut stream: std::os::unix::net::UnixStream =
+            match connection.connect_timeout(&address, remaining.min(Duration::from_secs(1))) {
+                Ok(()) => connection.into(),
+                Err(error)
+                    if matches!(
+                        error.kind(),
+                        std::io::ErrorKind::NotFound | std::io::ErrorKind::ConnectionRefused
+                    ) =>
+                {
+                    return Ok(());
+                }
+                Err(error) => return Err(error),
+            };
         let remaining = deadline.saturating_duration_since(Instant::now());
         if remaining.is_zero() {
             return Err(std::io::Error::new(
@@ -106,6 +161,93 @@ impl RuntimeHandoff {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn application_shutdown_does_not_contact_a_socket_reached_through_a_symlink() {
+        let directory = tempfile::tempdir().unwrap();
+        let target = directory.path().join("unrelated.sock");
+        let listener = std::os::unix::net::UnixListener::bind(&target).unwrap();
+        listener.set_nonblocking(true).unwrap();
+        let socket = directory.path().join("copied.sock");
+        std::os::unix::fs::symlink(&target, &socket).unwrap();
+        let lock = directory.path().join("copied.lock");
+        std::fs::File::create(&lock).unwrap();
+        assert!(
+            RuntimeHandoff::shutdown_runtime(&socket, &lock, Duration::from_millis(50)).is_err()
+        );
+        assert!(
+            matches!(listener.accept(), Err(error) if error.kind() == std::io::ErrorKind::WouldBlock)
+        );
+    }
+
+    #[test]
+    fn application_shutdown_waits_for_the_daemon_lease_after_its_acknowledgement() {
+        let directory = tempfile::tempdir().unwrap();
+        let socket = directory.path().join("service.sock");
+        let lock = directory.path().join("service.lock");
+        let listener = std::os::unix::net::UnixListener::bind(&socket).unwrap();
+        let file = std::fs::File::create(&lock).unwrap();
+        file.lock().unwrap();
+        let (acknowledged, received) = std::sync::mpsc::channel();
+        let (release, released) = std::sync::mpsc::channel();
+        let server = std::thread::spawn(move || {
+            let (mut stream, _) = listener.accept().unwrap();
+            let payload = ServiceCodec::read_raw_blocking(&mut stream)
+                .unwrap()
+                .unwrap();
+            let message = rkyv::from_bytes::<ClientMessage, rkyv::rancor::Error>(&payload).unwrap();
+            assert!(matches!(message, ClientMessage::Shutdown));
+            let response = rkyv::to_bytes::<rkyv::rancor::Error>(
+                &vmux_api::protocol::ServiceMessage::ProcessList {
+                    processes: Vec::new(),
+                },
+            )
+            .unwrap();
+            ServiceCodec::write_raw_blocking(&mut stream, &response).unwrap();
+            acknowledged.send(()).unwrap();
+            released.recv_timeout(Duration::from_secs(2)).unwrap();
+            drop(file);
+        });
+        let (done, finished) = std::sync::mpsc::channel();
+        let shutdown = std::thread::spawn(move || {
+            done.send(RuntimeHandoff::shutdown_runtime(
+                &socket,
+                &lock,
+                Duration::from_secs(2),
+            ))
+            .unwrap()
+        });
+        received.recv_timeout(Duration::from_secs(2)).unwrap();
+        assert!(matches!(
+            finished.try_recv(),
+            Err(std::sync::mpsc::TryRecvError::Empty)
+        ));
+        release.send(()).unwrap();
+        finished
+            .recv_timeout(Duration::from_secs(2))
+            .unwrap()
+            .unwrap();
+        server.join().unwrap();
+        shutdown.join().unwrap();
+    }
+
+    #[test]
+    fn application_shutdown_does_not_follow_a_daemon_lock_symlink() {
+        let directory = tempfile::tempdir().unwrap();
+        let data = directory.path().join("data");
+        std::fs::write(&data, "preserved").unwrap();
+        let lock = directory.path().join("service.lock");
+        std::os::unix::fs::symlink(&data, &lock).unwrap();
+        assert!(
+            RuntimeHandoff::shutdown_runtime(
+                &directory.path().join("absent.sock"),
+                &lock,
+                Duration::from_millis(50)
+            )
+            .is_err()
+        );
+        assert_eq!(std::fs::read_to_string(data).unwrap(), "preserved");
+    }
 
     #[test]
     fn switching_builds_sends_shutdown_only_to_the_previous_runtime() {

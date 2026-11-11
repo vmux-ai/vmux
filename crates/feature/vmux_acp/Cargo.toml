@@ -9,6 +9,7 @@ publish = false
 [features]
 default = ["app"]
 service = [
+    "dep:vmux_spawn",
     "dep:agent-client-protocol",
     "dep:base64",
     "dep:bevy",
@@ -79,6 +80,7 @@ vmux_ui = { path = "../../util/vmux_ui", default-features = false, optional = tr
 [target.'cfg(not(target_os = "ios"))'.dependencies]
 vmux_command = { path = "../vmux_command", optional = true }
 agent-client-protocol = { version = "1.0.1", optional = true }
+vmux_spawn = { path = "../../util/vmux_spawn", optional = true }
 base64 = { version = "0.22", optional = true }
 bevy = { workspace = true, optional = true }
 bevy_cef = { workspace = true, optional = true }
