@@ -1126,6 +1126,7 @@ project-local-folder = Cartella locale
 project-github-repository = Repository GitHub
 project-edit-conflict = Il progetto è cambiato. Riapri il modulo per riprovare.
 
+onboarding-guide = Assistente alla configurazione
 onboarding-title = Cosa vorresti fare?
 onboarding-intro = Scegli un suggerimento o scrivi la tua richiesta. Ti aiuteremo a configurare il tuo agente qui.
 onboarding-prompt = Di’ al tuo agente cosa vuoi fare

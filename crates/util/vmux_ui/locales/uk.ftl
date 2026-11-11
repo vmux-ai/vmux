@@ -1126,6 +1126,7 @@ project-local-folder = Локальна папка
 project-github-repository = Репозиторій GitHub
 project-edit-conflict = Проєкт змінився. Відкрийте редактор знову.
 
+onboarding-guide = Помічник налаштування
 onboarding-title = Що ви хочете зробити?
 onboarding-intro = Виберіть готовий запит або напишіть свій. Ми допоможемо налаштувати агента тут.
 onboarding-prompt = Повідомте агенту, що ви хочете зробити

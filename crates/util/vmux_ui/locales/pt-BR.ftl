@@ -1126,6 +1126,7 @@ project-local-folder = Pasta local
 project-github-repository = Repositório do GitHub
 project-edit-conflict = Este projeto mudou. Abra o editor novamente.
 
+onboarding-guide = Assistente de configuração
 onboarding-title = O que você gostaria de fazer?
 onboarding-intro = Escolha uma sugestão ou escreva seu pedido. Vamos ajudar você a configurar seu agente aqui.
 onboarding-prompt = Diga ao seu agente o que você quer fazer

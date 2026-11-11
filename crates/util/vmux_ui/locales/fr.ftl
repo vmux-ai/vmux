@@ -1126,6 +1126,7 @@ project-local-folder = Dossier local
 project-github-repository = Dépôt GitHub
 project-edit-conflict = Ce projet a changé. Rouvrez le formulaire pour réessayer.
 
+onboarding-guide = Assistant de configuration
 onboarding-title = Que souhaitez-vous faire ?
 onboarding-intro = Choisissez une suggestion ou écrivez votre demande. Nous vous aiderons à configurer votre agent ici.
 onboarding-prompt = Dites à votre agent ce que vous souhaitez faire

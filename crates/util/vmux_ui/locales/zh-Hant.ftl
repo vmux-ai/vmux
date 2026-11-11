@@ -1123,6 +1123,7 @@ project-local-folder = 本機資料夾
 project-github-repository = GitHub 儲存庫
 project-edit-conflict = 專案已變更。請重新開啟編輯畫面。
 
+onboarding-guide = 設定助手
 onboarding-title = 你想做什麼？
 onboarding-intro = 選擇預設提示詞或自行輸入。我們會在這裡引導你設定代理。
 onboarding-prompt = 告訴代理你想做什麼

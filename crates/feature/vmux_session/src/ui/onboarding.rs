@@ -1,10 +1,14 @@
 use dioxus::prelude::*;
-use vmux_ui::components::composer::ComposerFrame;
+use vmux_ui::components::composer::PromptComposer;
 use vmux_ui::components::skeleton::Skeleton;
-use vmux_ui::components::starter_prompts::StarterPrompts;
+use vmux_ui::components::starter_prompts::StarterPrompt;
 use vmux_ui::hooks::{UiStateBinding, send};
 use vmux_ui::i18n::translate;
 
+use super::approval::{ChoiceKey, ChoiceOptions};
+use super::item::UserBubble;
+use super::setup::{Identity, Turn};
+use super::state::UserIdentity;
 use crate::onboarding::{
     OnboardingBack, OnboardingContinue, OnboardingDraftChanged, OnboardingStart, OnboardingUiState,
     Step,
@@ -17,186 +21,272 @@ pub(super) fn Onboarding() -> Element {
         .state
         .read()
         .clone();
-    rsx! { Conversation { state } }
+    let user = UserIdentity::use_state();
+    rsx! { Conversation { state, user: Some(user) } }
 }
 
 #[component]
-fn Conversation(state: OnboardingUiState) -> Element {
+fn Conversation(state: OnboardingUiState, #[props(default)] user: Option<UserIdentity>) -> Element {
     let reply = Reply(OnboardingDraftChanged {
         text: state.text.clone(),
         agent_id: state.agent_id.clone(),
         cwd: state.cwd.clone(),
     });
-    let prompts = reply.clone();
-    let workspace = reply.clone();
-    let submitted = reply.clone();
+    let user_name = user
+        .map(UserIdentity::name)
+        .unwrap_or_else(|| translate("team-you"));
+    let user_color = user
+        .map(UserIdentity::color)
+        .unwrap_or_else(|| "#3b82f6".to_string());
     let selected = state.agents.iter().find(|agent| agent.id == state.agent_id);
     let selected_name = selected.map(|agent| agent.name.clone()).unwrap_or_default();
-    let directory = state.cwd.clone();
+    let step_key = format!("{:?}", state.step);
     rsx! {
-        main { class: "session-chat-page relative flex h-dvh flex-col overflow-hidden bg-background text-foreground",
-            header { class: "mx-auto flex w-full max-w-3xl shrink-0 items-center px-4 py-4 text-sm font-medium", "vmux" }
-            div { class: "min-h-0 flex-1 overflow-y-auto overscroll-contain px-4 py-6",
-                div { class: "mx-auto flex w-full max-w-3xl flex-col gap-6", role: "log", aria_live: "polite",
-                    Message { text: translate("onboarding-title"),
-                        p { class: "text-sm text-muted-foreground", {translate("onboarding-intro")} }
-                        if state.step == Step::Prompt {
-                            StarterPrompts { on_choose: move |text| prompts.prompt(text) }
-                        }
+        super::surface::Page { accent: Identity::COLOR.to_string(),
+            super::surface::Transcript { id: "setup-scroll".to_string(),
+                Turn {
+                    p { class: "text-sm leading-relaxed", {translate("onboarding-title")} }
+                    p { class: "text-sm leading-relaxed", {translate("onboarding-intro")} }
+                }
+                if state.step != Step::Prompt {
+                    UserBubble { avatar_name: user_name.clone(), avatar_color: user_color.clone(), copy_text: state.text.clone(),
+                        p { class: "whitespace-pre-wrap", "{state.text}" }
                     }
-                    if state.step != Step::Prompt {
-                        Message { user: true, text: state.text.clone() }
-                        Message { text: translate("onboarding-agent-question"),
-                            if state.step == Step::Agent {
-                                if state.agents.is_empty() {
-                                    div { class: "flex gap-3",
-                                        Skeleton { class: "h-12 w-40" }
-                                        Skeleton { class: "h-12 w-40" }
-                                    }
-                                } else {
-                                    div { class: "flex flex-wrap gap-2",
-                                        for agent in state.agents.clone() {
-                                            {
-                                                let choice = reply.clone();
-                                                let agent_id = agent.id.clone();
-                                                rsx! {
-                                                    button {
-                                                        key: "{agent.id}",
-                                                        r#type: "button",
-                                                        class: "flex items-center gap-3 rounded-xl bg-muted/40 px-4 py-3 text-left hover:bg-muted/60",
-                                                        aria_label: agent.name.clone(),
-                                                        disabled: state.starting,
-                                                        onclick: move |_| choice.agent(agent_id.clone()),
-                                                        vmux_ui::components::avatar::AgentThumbnail {
-                                                            src: (!agent.icon.is_empty()).then_some(agent.icon),
-                                                            seed: agent.id,
-                                                            alt: agent.name.clone(),
-                                                            background: "#6366f1",
-                                                            class: "size-8",
-                                                        }
-                                                        div { class: "flex flex-col",
-                                                            span { class: "text-sm font-medium", "{agent.name}" }
-                                                            span { class: "text-xs text-muted-foreground",
-                                                                {translate(if agent.environment_key { "onboarding-key-available" } else if agent.installed { "onboarding-installed" } else { "onboarding-install" })}
-                                                            }
-                                                        }
-                                                    }
-                                                }
-                                            }
-                                        }
-                                    }
-                                }
-                            }
-                        }
+                    Turn {
+                        p { class: "text-sm leading-relaxed", {translate("onboarding-agent-question")} }
                     }
-                    if state.step == Step::Workspace {
-                        Message { user: true, text: selected_name }
-                        Message { text: translate("onboarding-workspace-question"),
-                            p { class: "text-sm text-muted-foreground", {translate("onboarding-workspace-hint")} }
-                            div { class: "flex flex-wrap gap-2",
-                                button {
-                                    r#type: "button",
-                                    class: "rounded-xl bg-muted/40 px-4 py-3 text-sm hover:bg-muted/60",
-                                    disabled: state.starting,
-                                    onclick: move |_| workspace.start(String::new()),
-                                    {translate("onboarding-default-workspace")}
-                                }
-                                button {
-                                    r#type: "button",
-                                    class: "rounded-xl bg-muted/40 px-4 py-3 text-sm hover:bg-muted/60",
-                                    disabled: state.starting,
-                                    onclick: move |_| { let _ = send(&crate::event::SessionsChooseDirectory { current_dir: directory.clone() }); },
-                                    {translate("agent-project-choose")}
-                                }
-                            }
-                        }
-                        if !state.cwd.is_empty() {
-                            Message { user: true, text: state.cwd.clone() }
-                            button {
-                                r#type: "button",
-                                class: "vmux-primary-action self-start rounded-xl px-4 py-3 text-sm",
-                                disabled: state.starting,
-                                onclick: move |_| submitted.start(submitted.0.cwd.clone()),
-                                {translate("onboarding-install")}
-                            }
-                        }
+                }
+                if state.step == Step::Workspace {
+                    UserBubble { avatar_name: user_name.clone(), avatar_color: user_color.clone(),
+                        p { "{selected_name}" }
                     }
-                    if state.step != Step::Prompt {
-                        button {
-                            r#type: "button",
-                            class: "self-start rounded-lg px-3 py-2 text-xs text-muted-foreground hover:bg-muted/40",
-                            disabled: state.starting,
-                            onclick: move |_| { let _ = send(&OnboardingBack { step: state.step }); },
-                            {translate("layout-back")}
+                    Turn {
+                        p { class: "text-sm leading-relaxed", {translate("onboarding-workspace-question")} }
+                        p { class: "text-sm leading-relaxed", {translate("onboarding-workspace-hint")} }
+                    }
+                    if !state.cwd.is_empty() {
+                        UserBubble { avatar_name: user_name.clone(), avatar_color: user_color.clone(),
+                            p { "{state.cwd}" }
                         }
                     }
                 }
             }
-            if state.step == Step::Prompt {
-                Prompt { reply, starting: state.starting }
-            }
+            {rsx! { SetupComposer { key: "{step_key}", state, reply } }}
         }
     }
 }
 
 #[component]
-fn Message(
-    text: String,
-    #[props(default)] user: bool,
-    #[props(default = rsx! {})] children: Element,
-) -> Element {
-    rsx! {
-        div { class: if user { "ml-auto max-w-[85%] rounded-2xl bg-muted/40 px-4 py-3" } else { "flex flex-col items-start gap-3" },
-            if !user {
-                span { class: "text-xs font-medium text-muted-foreground", "vmux" }
-            }
-            p { class: "whitespace-pre-wrap text-sm leading-relaxed", "{text}" }
-            {children}
+fn SetupComposer(state: OnboardingUiState, reply: Reply) -> Element {
+    let mut text = use_signal(|| {
+        if state.step == Step::Prompt {
+            state.text.clone()
+        } else {
+            String::new()
         }
-    }
-}
-
-#[component]
-fn Prompt(reply: Reply, starting: bool) -> Element {
-    let mut text = use_signal(|| reply.0.text.clone());
-    let ime = vmux_ui::ime::use_ime_guard();
-    let entered = reply.clone();
+    });
+    let mut selected = use_signal(|| 0_usize);
+    let choices = Choices::for_question(&state, &text());
+    let labels = choices.labels();
+    let loading = state.step == Step::Agent && state.agents.is_empty();
+    let current = selected().min(choices.entries.len().saturating_sub(1));
+    let clicked = choices.clone();
+    let clicked_reply = reply.clone();
+    let keyed = choices.clone();
+    let keyed_reply = reply.clone();
+    let submitted = choices.clone();
+    let submitted_reply = reply.clone();
     let typed = reply.clone();
+    let placeholder = match state.step {
+        Step::Prompt => translate("onboarding-prompt"),
+        Step::Agent => translate("composer-choose-agent"),
+        Step::Workspace => translate("onboarding-workspace-question"),
+    };
     rsx! {
-        div { class: "mx-auto w-full max-w-3xl shrink-0 px-4 pb-4",
-            ComposerFrame {
-                div { class: "flex items-end gap-2 rounded-2xl bg-muted/40 px-4 py-3",
-                    textarea {
-                        class: "max-h-40 min-h-10 flex-1 resize-none bg-transparent text-sm outline-none",
-                        aria_label: translate("onboarding-prompt"),
-                        placeholder: translate("onboarding-prompt"),
-                        value: text(),
-                        disabled: starting,
-                        oncompositionstart: move |_| ime.start(),
-                        oncompositionend: move |_| ime.commit(),
-                        oninput: move |event| {
-                            let value = event.value();
-                            text.set(value.clone());
-                            let _ = send(&OnboardingDraftChanged { text: value, ..typed.0.clone() });
-                        },
-                        onkeydown: move |event| {
-                            if !ime.swallows(&event) && event.key() == Key::Enter && !event.modifiers().shift() {
-                                event.prevent_default();
-                                if !starting && !text.peek().trim().is_empty() {
-                                    entered.prompt(text());
-                                }
-                            }
-                        },
+        super::surface::Dock {
+            if loading {
+                Skeleton { class: "h-10 w-full rounded-xl" }
+                Skeleton { class: "h-10 w-full rounded-xl" }
+            } else {
+            ChoiceOptions {
+                options: labels,
+                selected: current,
+                disabled: state.starting,
+                on_select: move |index| {
+                    if !state.starting { clicked.choose(index, &clicked_reply); }
+                },
+                on_hover: move |index| selected.set(index),
+                on_keydown: move |event| {
+                    if !state.starting { keyed.key(event, selected, &text(), &keyed_reply); }
+                },
+            }
+            }
+            PromptComposer {
+                value: text(),
+                placeholder,
+                accent_color: Identity::COLOR.to_string(),
+                accent_gradient: "from-indigo-500 to-violet-600".to_string(),
+                footer: Some(rsx! {}),
+                disabled: state.starting || loading,
+                show_add_button: false,
+                action_title: translate("command-send"),
+                action_enabled: !choices.entries.is_empty() || state.step != Step::Agent && !text().trim().is_empty(),
+                on_input: move |value: String| {
+                    text.set(value.clone());
+                    selected.set(0);
+                    if state.step == Step::Prompt {
+                        let _ = send(&OnboardingDraftChanged { text: value, ..typed.0.clone() });
                     }
-                    button {
-                        r#type: "button",
-                        class: "vmux-primary-action rounded-lg px-3 py-2 text-sm disabled:opacity-40",
-                        aria_label: translate("command-send"),
-                        disabled: starting || text().trim().is_empty(),
-                        onclick: move |_| reply.prompt(text()),
-                        {translate("command-send")}
-                    }
+                },
+                on_keydown: move |event| choices.key(event, selected, &text(), &reply),
+                on_action: move |_| submitted.submit(&text(), current, &submitted_reply),
+                on_paste: move |_| {},
+                on_attach: move |_| {},
+                on_remove_attachment: move |_| {},
+            }
+        }
+    }
+}
+
+#[derive(Clone)]
+struct Choices {
+    step: Step,
+    entries: Vec<Choice>,
+}
+
+impl Choices {
+    fn for_question(state: &OnboardingUiState, text: &str) -> Self {
+        let mut entries = Vec::new();
+        match state.step {
+            Step::Prompt => {
+                for prompt in StarterPrompt::all() {
+                    entries.push(Choice {
+                        label: prompt.text(),
+                        answer: Answer::Prompt(prompt.text()),
+                    });
                 }
+            }
+            Step::Agent => {
+                let query = text.trim().to_lowercase();
+                for agent in &state.agents {
+                    if !agent.name.to_lowercase().contains(&query)
+                        && !agent.id.to_lowercase().contains(&query)
+                    {
+                        continue;
+                    }
+                    let status = translate(if agent.environment_key {
+                        "onboarding-key-available"
+                    } else if agent.installed {
+                        "onboarding-installed"
+                    } else {
+                        "onboarding-install"
+                    });
+                    entries.push(Choice {
+                        label: format!("{} · {status}", agent.name),
+                        answer: Answer::Agent(agent.id.clone()),
+                    });
+                }
+            }
+            Step::Workspace => {
+                if !state.cwd.is_empty() {
+                    entries.push(Choice {
+                        label: format!("{} · {}", translate("onboarding-start"), state.cwd),
+                        answer: Answer::Workspace(state.cwd.clone()),
+                    });
+                }
+                entries.push(Choice {
+                    label: translate("onboarding-default-workspace"),
+                    answer: Answer::Workspace(String::new()),
+                });
+                entries.push(Choice {
+                    label: translate("agent-project-choose"),
+                    answer: Answer::Directory,
+                });
+            }
+        }
+        if state.step != Step::Prompt && (state.step != Step::Agent || text.trim().is_empty()) {
+            entries.push(Choice {
+                label: translate("layout-back"),
+                answer: Answer::Back(state.step),
+            });
+        }
+        Self {
+            step: state.step,
+            entries,
+        }
+    }
+
+    fn labels(&self) -> Vec<String> {
+        let mut labels = Vec::new();
+        for choice in &self.entries {
+            labels.push(choice.label.clone());
+        }
+        labels
+    }
+
+    fn choose(&self, index: usize, reply: &Reply) {
+        if let Some(choice) = self.entries.get(index) {
+            choice.answer.send(reply);
+        }
+    }
+
+    fn submit(&self, text: &str, selected: usize, reply: &Reply) {
+        if self.step == Step::Prompt && !text.trim().is_empty() {
+            reply.prompt(text.to_string());
+        } else if self.step == Step::Workspace && !text.trim().is_empty() {
+            reply.start(text.trim().to_string());
+        } else {
+            self.choose(selected, reply);
+        }
+    }
+
+    fn key(&self, event: KeyboardEvent, mut selected: Signal<usize>, text: &str, reply: &Reply) {
+        let Some(key) = ChoiceKey::of(&event, text.is_empty()) else {
+            return;
+        };
+        let current = selected().min(self.entries.len().saturating_sub(1));
+        match key {
+            ChoiceKey::Next => {
+                selected.set((current + 1).min(self.entries.len().saturating_sub(1)))
+            }
+            ChoiceKey::Previous => selected.set(current.saturating_sub(1)),
+            ChoiceKey::Submit => self.submit(text, current, reply),
+            ChoiceKey::Number(index) if index < self.entries.len() => self.choose(index, reply),
+            ChoiceKey::Number(_) => return,
+        }
+        event.prevent_default();
+        event.stop_propagation();
+    }
+}
+
+#[derive(Clone)]
+struct Choice {
+    label: String,
+    answer: Answer,
+}
+
+#[derive(Clone)]
+enum Answer {
+    Prompt(String),
+    Agent(String),
+    Workspace(String),
+    Directory,
+    Back(Step),
+}
+
+impl Answer {
+    fn send(&self, reply: &Reply) {
+        match self {
+            Self::Prompt(text) => reply.prompt(text.clone()),
+            Self::Agent(agent) => reply.agent(agent.clone()),
+            Self::Workspace(directory) => reply.start(directory.clone()),
+            Self::Directory => {
+                let _ = send(&crate::event::SessionsChooseDirectory {
+                    current_dir: reply.0.cwd.clone(),
+                });
+            }
+            Self::Back(step) => {
+                let _ = send(&OnboardingBack { step: *step });
             }
         }
     }
@@ -247,7 +337,10 @@ impl Reply {
 mod tests {
     use super::*;
     use dioxus::core::{AttributeValue, Mutation, VirtualDom};
-    use dioxus_html::{EventData, SerializedHtmlEventConverter, SerializedMouseData};
+    use dioxus_html::{
+        Code, EventData, Location, Modifiers, SerializedHtmlEventConverter, SerializedKeyboardData,
+        SerializedMouseData,
+    };
     use std::{cell::RefCell, rc::Rc};
     use vmux_api::BinEvent;
     use vmux_ui::hooks::EventListenerError;
@@ -256,17 +349,42 @@ mod tests {
     #[derive(Default)]
     struct Host {
         events: RefCell<Vec<(String, Vec<u8>)>>,
+        questions: RefCell<Vec<BytesListener>>,
     }
 
     impl PageHost for Host {
         fn send(&self, id: &str, bytes: &[u8]) -> Result<(), EventListenerError> {
-            self.events.borrow_mut().push((id.into(), bytes.into()));
+            if id != vmux_api::PageReady::id() {
+                self.events.borrow_mut().push((id.into(), bytes.into()));
+            }
             Ok(())
         }
 
-        fn listen(&self, _: &str, _: BytesListener) -> Result<(), EventListenerError> {
+        fn listen(&self, id: &str, listener: BytesListener) -> Result<(), EventListenerError> {
+            if id == OnboardingUiState::id() {
+                self.questions.borrow_mut().push(listener);
+            }
             Ok(())
         }
+    }
+
+    impl Host {
+        fn publish(&self, state: OnboardingUiState) {
+            let frame =
+                vmux_api::UiStateFrame::<OnboardingUiState, OnboardingUiState>::Snapshot(state);
+            let bytes = rkyv::to_bytes::<rkyv::rancor::Error>(&frame).unwrap();
+            assert!(!self.questions.borrow().is_empty());
+            for listener in &mut *self.questions.borrow_mut() {
+                listener(&bytes);
+            }
+        }
+    }
+
+    #[component]
+    fn LiveConversation() -> Element {
+        vmux_ui::hooks::use_ui_state::<crate::state::ChatUiState>();
+        vmux_ui::hooks::use_ui_state::<OnboardingUiState>();
+        rsx! { Onboarding {} }
     }
 
     #[test]
@@ -277,12 +395,16 @@ mod tests {
             Conversation,
             ConversationProps {
                 state: OnboardingUiState::default(),
+                user: None,
             },
         );
         dom.provide_root_context(HostBinding(host.clone()));
         let initial = dom.rebuild_to_vec();
         let html = dioxus_ssr::render(&dom);
         assert!(html.contains(&translate("onboarding-title")));
+        assert!(!html.contains("<header"));
+        assert!(html.contains(&format!("alt=\"{}\"", translate("onboarding-guide"))));
+        assert!(html.contains("data:image/svg+xml,"));
         assert!(!html.contains(&translate("onboarding-agent-question")));
         assert!(!html.contains(&translate("onboarding-workspace-question")));
         let label = translate("onboarding-build");
@@ -321,11 +443,106 @@ mod tests {
     }
 
     #[test]
+    fn composer_choices_accept_number_keys_and_arrow_then_enter() {
+        for navigation in [false, true] {
+            dioxus_html::set_event_converter(Box::new(SerializedHtmlEventConverter));
+            let host = Rc::new(Host::default());
+            let mut dom = VirtualDom::new_with_props(
+                Conversation,
+                ConversationProps {
+                    state: OnboardingUiState::default(),
+                    user: None,
+                },
+            );
+            dom.provide_root_context(HostBinding(host.clone()));
+            let initial = dom.rebuild_to_vec();
+            let input = initial
+                .edits
+                .iter()
+                .find_map(|mutation| match mutation {
+                    Mutation::SetAttribute {
+                        name: "id",
+                        value: AttributeValue::Text(value),
+                        id,
+                        ..
+                    } if value == vmux_ui::components::composer::PROMPT_INPUT_ID => Some(*id),
+                    _ => None,
+                })
+                .expect("setup uses the normal chat composer input");
+            let keys = if navigation {
+                vec![(Key::ArrowDown, Code::ArrowDown), (Key::Enter, Code::Enter)]
+            } else {
+                vec![(Key::Character("2".into()), Code::Digit2)]
+            };
+            for (key, code) in keys {
+                let data = SerializedKeyboardData::new(
+                    key,
+                    code,
+                    Location::Standard,
+                    false,
+                    Modifiers::empty(),
+                    false,
+                );
+                dom.runtime().handle_event(
+                    "keydown",
+                    Event::new(EventData::Keyboard(data).into_any(), true),
+                    input,
+                );
+                dom.render_immediate_to_vec();
+            }
+            let events = host.events.borrow();
+            assert_eq!(events.len(), 2);
+            let draft =
+                rkyv::from_bytes::<OnboardingDraftChanged, rkyv::rancor::Error>(&events[0].1)
+                    .unwrap();
+            assert_eq!(draft.text, translate("onboarding-fix"));
+            assert_eq!(events[1].0, OnboardingContinue::id());
+        }
+    }
+
+    #[test]
+    fn the_next_question_keeps_the_task_in_history_and_clears_the_composer_reply() {
+        let host = Rc::new(Host::default());
+        let mut dom = VirtualDom::new(LiveConversation);
+        dom.provide_root_context(HostBinding(host.clone()));
+        dom.rebuild_in_place();
+        dom.render_immediate_to_vec();
+        host.publish(OnboardingUiState {
+            text: "Build a clock".into(),
+            ..Default::default()
+        });
+        dom.render_immediate_to_vec();
+        host.publish(OnboardingUiState {
+            text: "Build a clock".into(),
+            step: Step::Agent,
+            agents: vec![crate::onboarding::AgentOption {
+                id: "test-agent".into(),
+                name: "Test agent".into(),
+                ..Default::default()
+            }],
+            ..Default::default()
+        });
+        dom.render_immediate_to_vec();
+        let html = dioxus_ssr::render(&dom);
+        assert!(html.contains("Build a clock"));
+        assert!(html.contains("Test agent"));
+        let input = html
+            .split("<textarea")
+            .nth(1)
+            .unwrap()
+            .split("</textarea>")
+            .next()
+            .unwrap();
+        assert!(!input.contains("Build a clock"));
+    }
+
+    #[test]
     fn later_questions_keep_earlier_replies_in_the_conversation() {
         for step in [Step::Agent, Step::Workspace] {
             let mut dom = VirtualDom::new_with_props(
                 Conversation,
                 ConversationProps {
+                    user: None,
                     state: OnboardingUiState {
                         text: "Help with my project".into(),
                         agent_id: "test-agent".into(),

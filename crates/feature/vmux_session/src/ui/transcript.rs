@@ -53,8 +53,7 @@ pub(super) fn ChatTranscript(chat: Chat) -> Element {
     let mut scroll_container = chat.transcript.scroll_container;
     let at_bottom = chat.transcript.at_bottom;
     let transcript = chat.transcript.current();
-    let setup = matches!(chat.status().as_str(), "authentication" | "preparing")
-        || chat.installing_splash();
+    let setup = chat.setup_pending();
     let transcript_loading = !setup
         && chat.status() != "errored"
         && (chat.transcript_loading() || !chat.transcript.ready());
@@ -75,23 +74,20 @@ pub(super) fn ChatTranscript(chat: Chat) -> Element {
     let user_color = chat.user.color();
     let setup_prompt = chat.setup_prompt();
     rsx! {
-        div {
-            id: "chat-scroll",
-            "data-vmux-initial-scroll": initial_scroll,
-            "data-vmux-presentation-pending": placement_pending.then_some(""),
-            "data-vmux-follow-scroll": at_bottom().to_string(),
-            "data-vmux-preserve-scroll": "auto",
-            onmounted: move |e| {
+        super::surface::Transcript {
+            initial_scroll,
+            placement_pending,
+            at_bottom: at_bottom(),
+            filled: transcript_loading,
+            on_mounted: move |e: MountedEvent| {
                 scroll_container.set(Some(e.data()));
                 if *at_bottom.peek() {
                     chat.transcript.follow();
                 }
             },
-            class: "relative z-10 flex-1 overflow-y-auto overscroll-contain px-3 pb-20 pt-3 outline-none sm:px-4 md:px-6",
-            tabindex: "0",
-            onwheel: move |_| chat.transcript.note_scroll_input(),
-            ontouchmove: move |_| chat.transcript.note_scroll_input(),
-            onscroll: move |e: Event<ScrollData>| {
+            on_wheel: move |_| chat.transcript.note_scroll_input(),
+            on_touchmove: move |_| chat.transcript.note_scroll_input(),
+            on_scroll: move |e: Event<ScrollData>| {
                 if e.client_height() <= 0 {
                     return;
                 }
@@ -102,14 +98,11 @@ pub(super) fn ChatTranscript(chat: Chat) -> Element {
                     chat.transcript.request_history();
                 }
             },
-            div {
-                class: "mx-auto flex min-h-full w-full max-w-3xl flex-col gap-5",
-                style: transcript_loading.then_some("height:100%;"),
-                onresize: move |_| {
+            on_resize: move |_| {
                     if *chat.transcript.initial_follow.peek() || *at_bottom.peek() {
                         chat.transcript.follow();
                     }
-                },
+            },
                 if transcript_loading {
                     TranscriptSkeleton {}
                 } else if loaded_start > 0 {
@@ -117,7 +110,7 @@ pub(super) fn ChatTranscript(chat: Chat) -> Element {
                 }
                 if !transcript_loading {
                     if let Some(prompt) = setup_prompt {
-                        div { class: "ml-auto max-w-[85%] rounded-2xl bg-muted/40 px-4 py-3 text-sm whitespace-pre-wrap",
+                        super::item::UserBubble { avatar_name: user_name.clone(), avatar_color: user_color.clone(), copy_text: prompt.text.clone(),
                             "{prompt.text}"
                             QueuedAttachments { attachments: prompt.attachments }
                         }
@@ -174,7 +167,6 @@ pub(super) fn ChatTranscript(chat: Chat) -> Element {
                         span { class: "h-px flex-1 bg-foreground/10" }
                     }
                 }
-            }
         }
     }
 }
@@ -228,8 +220,7 @@ fn TranscriptSkeleton() -> Element {
 fn InstallIntro(chat: Chat, detail: String) -> Element {
     let accent = AgentAccent::for_agent(&chat.agent());
     rsx! {
-        div { class: "flex flex-col items-start gap-3 py-3",
-            span { class: "text-xs font-medium text-muted-foreground", "vmux" }
+        super::setup::Turn {
             p { class: "text-sm", {translate("agent-preparing")} }
             div { class: "flex max-w-sm items-center gap-2 text-xs text-muted-foreground",
                 span { class: "h-1.5 w-1.5 shrink-0 rounded-full {accent.accent_bg}" }
@@ -237,12 +228,6 @@ fn InstallIntro(chat: Chat, detail: String) -> Element {
             }
             if let Some(percent) = chat.install_percent() {
                 progress { class: "h-1 w-48", value: percent, max: "100", aria_label: translate("onboarding-install") }
-            }
-            button {
-                r#type: "button",
-                class: "rounded-lg px-3 py-2 text-xs text-muted-foreground hover:bg-muted/40",
-                onclick: move |_| { let _ = send(&crate::onboarding::ChatCancelSetup); },
-                {translate("common-cancel")}
             }
         }
     }

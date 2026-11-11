@@ -293,13 +293,14 @@ impl Chat {
     }
 
     pub(super) fn setup_prompt(&self) -> Option<QueuedPromptSnapshot> {
-        if !(matches!(self.status().as_str(), "authentication" | "preparing")
-            || self.installing_splash())
-            || !self.transcript.current().items.is_empty()
-        {
+        if !self.setup_pending() || !self.transcript.current().items.is_empty() {
             return None;
         }
         self.queue.queued().first().cloned()
+    }
+
+    pub(super) fn setup_pending(&self) -> bool {
+        matches!(self.status().as_str(), "authentication" | "preparing") || self.installing_splash()
     }
 
     pub fn transcript_loading(&self) -> bool {
@@ -914,6 +915,16 @@ pub struct UserIdentity {
 }
 
 impl UserIdentity {
+    pub(super) fn use_state() -> Self {
+        let root = UiStateBinding::<ChatUiState>::use_context().state;
+        Self {
+            snapshot: ChatValue {
+                value: use_memo(move || root.read().snapshot.clone()),
+                ready: use_memo(move || root.read().snapshot_ready),
+            },
+        }
+    }
+
     pub fn name(self) -> String {
         let name = self.snapshot.value.read().user_name.clone();
         if name.is_empty() {

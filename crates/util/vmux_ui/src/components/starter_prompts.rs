@@ -5,16 +5,37 @@ use dioxus::prelude::*;
 pub fn StarterPrompts(on_choose: EventHandler<String>) -> Element {
     rsx! {
         div { class: "flex flex-wrap gap-2",
-            for message in ["onboarding-explain", "onboarding-fix", "onboarding-build"] {
+            for prompt in StarterPrompt::all() {
                 button {
                     r#type: "button",
-                    aria_label: translate(message),
+                    aria_label: prompt.text(),
                     class: "rounded-xl bg-muted/40 px-4 py-3 text-left text-sm transition-colors hover:bg-muted/70 focus-visible:outline-2 focus-visible:outline-primary",
-                    onclick: move |_| on_choose.call(translate(message)),
-                    {translate(message)}
+                    onclick: move |_| on_choose.call(prompt.text()),
+                    {prompt.text()}
                 }
             }
         }
+    }
+}
+
+#[derive(Clone, Copy)]
+pub enum StarterPrompt {
+    Explain,
+    Fix,
+    Build,
+}
+
+impl StarterPrompt {
+    pub fn all() -> [Self; 3] {
+        [Self::Explain, Self::Fix, Self::Build]
+    }
+
+    pub fn text(self) -> String {
+        translate(match self {
+            Self::Explain => "onboarding-explain",
+            Self::Fix => "onboarding-fix",
+            Self::Build => "onboarding-build",
+        })
     }
 }
 

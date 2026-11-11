@@ -122,16 +122,48 @@ pub(super) fn ChoiceList(chat: Chat) -> Element {
     }
     let question = chat.run.choice_question();
     rsx! {
+        ChoiceOptions {
+            question: Some(question),
+            options,
+            selected: chat.list_selection(),
+            on_select: move |index| chat.choose_list(index),
+            on_hover: move |index| chat.point_at_choice(index),
+        }
+    }
+}
+
+#[component]
+pub(super) fn ChoiceOptions(
+    options: Vec<String>,
+    selected: usize,
+    #[props(default)] question: Option<String>,
+    #[props(default)] disabled: bool,
+    #[props(default)] on_keydown: Option<EventHandler<KeyboardEvent>>,
+    on_select: EventHandler<usize>,
+    on_hover: EventHandler<usize>,
+) -> Element {
+    let label = question
+        .clone()
+        .unwrap_or_else(|| translate("agent-choose-option"));
+    rsx! {
         div { class: "border-l-2 border-foreground/15 py-2 pl-3.5",
-            div { class: "mb-3 text-sm font-medium text-foreground", "{question}" }
-            div { class: "flex flex-col gap-1.5",
+            if let Some(question) = question {
+                div { class: "mb-3 text-sm font-medium text-foreground", "{question}" }
+            }
+            div { class: "flex max-h-64 flex-col gap-1.5 overflow-y-auto overscroll-contain", role: "listbox", aria_label: label,
+                onkeydown: move |event| { if let Some(handler) = on_keydown { handler.call(event); } },
                 for (index , option) in options.into_iter().enumerate() {
                     button {
                         key: "choice-{index}",
                         id: "agent-choice-item-{index}",
-                        onmouseenter: move |_| chat.point_at_choice(index),
-                        class: if index == chat.list_selection() { "flex items-center gap-3 rounded-xl bg-foreground px-3 py-2 text-left text-sm text-background" } else { "flex items-center gap-3 rounded-xl bg-foreground/[0.045] px-3 py-2 text-left text-sm text-foreground hover:bg-foreground/[0.08]" },
-                        onclick: move |_| chat.choose_list(index),
+                        r#type: "button",
+                        role: "option",
+                        aria_label: option.clone(),
+                        aria_selected: index == selected,
+                        disabled,
+                        onmouseenter: move |_| on_hover.call(index),
+                        class: if index == selected { "flex shrink-0 items-center gap-3 rounded-xl bg-foreground px-3 py-2 text-left text-sm text-background" } else { "flex shrink-0 items-center gap-3 rounded-xl bg-foreground/[0.045] px-3 py-2 text-left text-sm text-foreground hover:bg-foreground/[0.08]" },
+                        onclick: move |_| on_select.call(index),
                         span { class: "flex h-5 w-5 shrink-0 items-center justify-center rounded-md border border-current/20 font-mono text-[10px]", "{index + 1}" }
                         span { class: "min-w-0 flex-1", "{option}" }
                     }
@@ -139,5 +171,42 @@ pub(super) fn ChoiceList(chat: Chat) -> Element {
             }
             div { class: "mt-2.5 text-[11px] text-muted-foreground", {translate("agent-choice-help")} }
         }
+    }
+}
+
+pub(super) enum ChoiceKey {
+    Next,
+    Previous,
+    Submit,
+    Number(usize),
+}
+
+impl ChoiceKey {
+    pub(super) fn of(event: &KeyboardEvent, numbers: bool) -> Option<Self> {
+        let modifiers = event.modifiers();
+        if event.data().is_composing() || modifiers.meta() || modifiers.alt() || modifiers.shift() {
+            return None;
+        }
+        let key = event.key();
+        if key == Key::ArrowDown || modifiers.ctrl() && key == Key::Character("n".into()) {
+            return Some(Self::Next);
+        }
+        if key == Key::ArrowUp || modifiers.ctrl() && key == Key::Character("p".into()) {
+            return Some(Self::Previous);
+        }
+        if key == Key::Enter && !modifiers.ctrl() {
+            return Some(Self::Submit);
+        }
+        if !numbers || modifiers.ctrl() {
+            return None;
+        }
+        let Key::Character(number) = key else {
+            return None;
+        };
+        let number = number.parse::<usize>().ok()?;
+        if !(1..=9).contains(&number) {
+            return None;
+        }
+        Some(Self::Number(number - 1))
     }
 }

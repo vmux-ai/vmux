@@ -1126,6 +1126,7 @@ project-local-folder = Lokale map
 project-github-repository = GitHub-repository
 project-edit-conflict = Dit project is gewijzigd. Open de editor opnieuw.
 
+onboarding-guide = Installatieassistent
 onboarding-title = Wat wilt u doen?
 onboarding-intro = Kies een voorbeeld of schrijf uw eigen verzoek. We helpen u hier uw agent in te stellen.
 onboarding-prompt = Vertel uw agent wat u wilt doen

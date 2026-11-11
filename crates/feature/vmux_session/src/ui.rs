@@ -3,7 +3,6 @@
 use self::agent::ChatHeader;
 use self::approval::ChatApprovalDock;
 use self::composer::ChatDock;
-use self::item::MD_CSS;
 use self::keys::use_chat_keys;
 use self::state::use_chat;
 use self::transcript::ChatTranscript;
@@ -81,17 +80,14 @@ fn SessionDetail(session_id: String, mut details_open: Signal<bool>) -> Element 
     let details_available = details.is_some();
 
     rsx! {
-        main {
-            class: "session-chat-page relative isolate flex h-dvh flex-col overflow-hidden bg-background text-foreground outline-none",
-            style: "--agent-accent:{accent.css};",
-            tabindex: "-1",
-            onkeydown: move |event| {
+        surface::Page {
+            accent: accent.css,
+            on_keydown: move |event: KeyboardEvent| {
                 if matches!(event.key(), Key::ArrowUp | Key::PageUp | Key::Home) {
                     chat.transcript.note_scroll_input();
                 }
                 keys.on_root_keydown(event);
             },
-            style { dangerous_inner_html: MD_CSS }
             div { class: "flex min-h-0 flex-1 overflow-hidden",
                 section { class: "flex min-w-0 flex-1 flex-col",
                     ChatHeader {
@@ -140,5 +136,7 @@ mod manager_controller;
 mod manager_model;
 mod onboarding;
 mod scroll;
+mod setup;
 mod state;
+mod surface;
 mod transcript;

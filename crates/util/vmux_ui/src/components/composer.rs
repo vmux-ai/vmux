@@ -32,6 +32,7 @@ pub fn PromptComposer(
     #[props(default)] shared_transition: bool,
     #[props(default)] disabled: bool,
     #[props(default = true)] show_send_button: bool,
+    #[props(default = true)] show_add_button: bool,
     #[props(default = true)] caret_visible: bool,
     #[props(default = PROMPT_INPUT_ID.to_string())] input_id: String,
     #[props(default = translate("composer-attach-files"))] attach_title: String,
@@ -98,6 +99,7 @@ pub fn PromptComposer(
             PromptBox {
                 class: prompt_box_class,
                 style: "--vmux-prompt-accent:{accent_color};",
+                if show_add_button {
                 button {
                     class: if disabled {
                         "relative z-10 ml-0.5 flex h-11 w-11 shrink-0 cursor-not-allowed self-center items-center justify-center rounded-xl text-muted-foreground/35 sm:h-8 sm:w-8 sm:rounded-lg"
@@ -147,6 +149,7 @@ pub fn PromptComposer(
                             span { {translate("editor-paste")} }
                         }
                     }
+                }
                 }
 
                 if !attachments.is_empty() {

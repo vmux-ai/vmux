@@ -1126,6 +1126,7 @@ project-local-folder = مجلد محلي
 project-github-repository = مستودع GitHub
 project-edit-conflict = تغيّر هذا المشروع. أعد فتح المحرر للمحاولة مرة أخرى.
 
+onboarding-guide = مرشد الإعداد
 onboarding-title = ماذا تريد أن تفعل؟
 onboarding-intro = اختر طلبًا جاهزًا أو اكتب طلبك. سنساعدك في إعداد وكيلك هنا.
 onboarding-prompt = أخبر وكيلك بما تريد فعله

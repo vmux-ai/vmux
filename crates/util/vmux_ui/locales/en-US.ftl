@@ -1115,6 +1115,7 @@ project-local-folder = Local folder
 project-github-repository = GitHub repository
 project-edit-conflict = This project changed. Reopen the editor to try again.
 
+onboarding-guide = Setup guide
 onboarding-title = What would you like to do?
 onboarding-intro = Choose a starting prompt or write your own. We will help you set up your agent here.
 onboarding-prompt = Tell your agent what you want to do

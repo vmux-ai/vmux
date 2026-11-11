@@ -1563,7 +1563,12 @@ also has an explicit setup prompt target. `vmux_session::host::onboarding::Plugi
 draft, attachments, current question and created Session reference. `OnboardingUiState` projects
 one question at a time: prompt, agent, then workspace. The first greeting and selectable replies
 work locally before any ACP process or credential exists. Typed replies preserve progress, reject
-duplicate advances and allow returning to earlier questions. Choosing a workspace starts the
+duplicate advances and allow returning to earlier questions.
+The bootstrap guide and live Session reuse the same conversation surface, transcript geometry,
+assistant and user turns, prompt composer and choice panel. Questions are messages; numbered replies
+stay in the composer. A dedicated setup-guide identity and bundled avatar also accompany installation
+and authentication, without adding a page title or pretending an ACP agent is already running.
+Choosing a workspace starts the
 selected ACP in the same conversation surface; the queued user prompt remains visible beside
 installation and sign-in messages, then enters the agent once authentication succeeds. Start
 requests reuse the same Session on retry. ACP contributes supported agents and credential availability as booleans.

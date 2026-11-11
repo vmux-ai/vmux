@@ -1106,6 +1106,7 @@ project-local-folder = ローカルフォルダ
 project-github-repository = GitHub リポジトリ
 project-edit-conflict = Project が更新されました。編集画面を開き直してください。
 
+onboarding-guide = セットアップガイド
 onboarding-title = 何をしたいですか？
 onboarding-intro = 定型プロンプトを選ぶか、自由に入力してください。ここでエージェントのセットアップを案内します。
 onboarding-prompt = エージェントに依頼したいことを入力
