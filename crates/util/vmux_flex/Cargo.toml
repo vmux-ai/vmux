@@ -1,12 +1,19 @@
 [package]
 name = "vmux_flex"
-description = "Flexbox layout for the desktop shell, over taffy"
+description = "Renderer-independent ECS layout over Taffy"
 version.workspace = true
 edition.workspace = true
 publish = false
 
+[features]
+default = []
+window = ["dep:bevy_window"]
+
 [dependencies]
-bevy = { workspace = true }
+bevy_app = { workspace = true }
+bevy_ecs = { workspace = true }
+bevy_math = { workspace = true }
+bevy_window = { workspace = true, optional = true }
 taffy = { version = "0.10", default-features = false, features = [
     "std",
     "block_layout",

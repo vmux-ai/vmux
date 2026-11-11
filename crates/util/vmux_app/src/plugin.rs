@@ -10,7 +10,9 @@ pub enum VmuxPlugin {
     Project(vmux_project::ProjectPlugin),
     #[plugin(feature = "jobs", desktop, requires(ecs))]
     Jobs(vmux_ecs::JobsPlugin),
-    #[plugin(feature = "runtime", desktop, requires(ecs))]
+    #[plugin(feature = "flex", desktop, requires(ecs))]
+    Flex(vmux_flex::FlexPlugin),
+    #[plugin(feature = "runtime", desktop, requires(ecs, flex))]
     Runtime(VmuxRuntimePlugin),
     #[plugin(feature = "command", desktop, requires(runtime))]
     Command(vmux_command::CommandPlugin),
@@ -83,7 +85,7 @@ pub struct VmuxRuntimePlugin;
 impl Plugin for VmuxRuntimePlugin {
     fn build(&self, app: &mut App) {
         app.add_plugins((
-            vmux_flex::FlexPlugin,
+            vmux_flex::WindowViewportPlugin,
             vmux_ecs::profile::ProfilePlugin,
             vmux_ecs::page::PagePlugin,
             vmux_ecs::wake::WakePlugin,

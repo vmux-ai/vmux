@@ -12,6 +12,8 @@ pub use vmux_ecs::{
 pub use vmux_editor::EditorPlugin;
 #[cfg(feature = "extension")]
 pub use vmux_extension::ExtensionPlugin;
+#[cfg(feature = "flex")]
+pub use vmux_flex::{ComputedNode, FlexPlugin, FlexViewport, LayoutContext, Node, PrimaryViewport};
 #[cfg(feature = "git")]
 pub use vmux_git::GitPlugin;
 #[cfg(feature = "layout")]

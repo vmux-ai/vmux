@@ -1,12 +1,13 @@
-use bevy::ecs::system::SystemParam;
-use bevy::prelude::*;
+use bevy_ecs::prelude::*;
+use bevy_ecs::system::SystemParam;
+use bevy_math::Vec2;
 
 use crate::computed::{ComputedNode, Insets};
 use crate::tree::FlexTree;
 
 #[derive(SystemParam)]
 pub(crate) struct GeometryWriter<'w, 's> {
-    pub(crate) children: Query<'w, 's, &'static Children>,
+    pub(crate) children: Query<'w, 's, Ref<'static, Children>>,
     out: Query<'w, 's, &'static mut ComputedNode>,
 }
 

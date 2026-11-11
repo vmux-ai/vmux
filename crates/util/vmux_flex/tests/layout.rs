@@ -1,7 +1,9 @@
-use bevy::prelude::*;
+use bevy_app::App;
+use bevy_ecs::prelude::*;
+use bevy_math::{UVec2, Vec2};
 use vmux_flex::{
     AlignItems, ComputedNode as FlexComputed, Display, FlexDirection, FlexPlugin, JustifyContent,
-    Node as FlexNode, PositionType, UiRect, Val,
+    LayoutContext, Node as FlexNode, PositionType, PrimaryViewport, UiRect, Val,
 };
 
 struct TreeSpec {
@@ -52,20 +54,14 @@ struct Harness {
 
 impl Harness {
     fn app(size: UVec2, scale_factor: f32) -> App {
-        let mut resolution = bevy::window::WindowResolution::default();
-        resolution.set_scale_factor_override(Some(scale_factor));
-        resolution.set_physical_resolution(size.x, size.y);
-
         let mut app = App::new();
-        app.add_plugins(MinimalPlugins)
-            .add_plugins(bevy::asset::AssetPlugin::default())
-            .add_plugins(FlexPlugin);
+        app.add_plugins(FlexPlugin);
         app.world_mut().spawn((
-            Window {
-                resolution,
-                ..default()
+            LayoutContext {
+                physical_size: size.as_vec2(),
+                scale_factor,
             },
-            bevy::window::PrimaryWindow,
+            PrimaryViewport,
         ));
 
         app
@@ -81,12 +77,10 @@ impl Harness {
 
     fn resize(&mut self, size: UVec2, scale_factor: f32) -> Step {
         let world = self.app.world_mut();
-        let mut windows = world.query_filtered::<&mut Window, With<bevy::window::PrimaryWindow>>();
-        let mut window = windows.single_mut(world).expect("primary window");
-        window.resolution.set_physical_resolution(size.x, size.y);
-        window
-            .resolution
-            .set_scale_factor_override(Some(scale_factor));
+        let mut viewports = world.query_filtered::<&mut LayoutContext, With<PrimaryViewport>>();
+        let mut viewport = viewports.single_mut(world).expect("primary viewport");
+        viewport.physical_size = size.as_vec2();
+        viewport.scale_factor = scale_factor;
 
         self.settle();
         self.step(&format!("resized to {}x{} @{scale_factor}", size.x, size.y))
@@ -122,7 +116,7 @@ fn fill() -> FlexNode {
     FlexNode {
         width: Val::Percent(100.0),
         height: Val::Percent(100.0),
-        ..default()
+        ..Default::default()
     }
 }
 
@@ -135,7 +129,7 @@ fn inset_zero() -> FlexNode {
         bottom: Val::ZERO,
         width: Val::Percent(100.0),
         height: Val::Percent(100.0),
-        ..default()
+        ..Default::default()
     }
 }
 
@@ -147,7 +141,7 @@ fn leaf(grow: f32) -> FlexNode {
         min_height: Val::ZERO,
         align_items: AlignItems::Stretch,
         justify_content: JustifyContent::Stretch,
-        ..default()
+        ..Default::default()
     }
 }
 
@@ -166,7 +160,7 @@ fn production_frame() -> TreeSpec {
                 bottom: Val::Px(8.0),
             },
             column_gap: Val::Px(6.0),
-            ..default()
+            ..Default::default()
         },
     )
     .with(TreeSpec::new(
@@ -177,7 +171,7 @@ fn production_frame() -> TreeSpec {
             min_height: Val::ZERO,
             flex_shrink: 0.0,
             flex_direction: FlexDirection::Column,
-            ..default()
+            ..Default::default()
         },
     ))
     .with(
@@ -189,7 +183,7 @@ fn production_frame() -> TreeSpec {
                 min_width: Val::ZERO,
                 flex_direction: FlexDirection::Column,
                 row_gap: Val::Px(6.0),
-                ..default()
+                ..Default::default()
             },
         )
         .with(TreeSpec::new(
@@ -198,7 +192,7 @@ fn production_frame() -> TreeSpec {
                 width: Val::Percent(100.0),
                 height: Val::Px(52.0),
                 flex_shrink: 0.0,
-                ..default()
+                ..Default::default()
             },
         ))
         .with(
@@ -207,7 +201,7 @@ fn production_frame() -> TreeSpec {
                 FlexNode {
                     flex_grow: 1.0,
                     min_height: Val::ZERO,
-                    ..default()
+                    ..Default::default()
                 },
             )
             .with(
@@ -231,7 +225,7 @@ fn production_frame() -> TreeSpec {
             bottom: Val::ZERO,
             width: Val::Px(320.0),
             display: Display::None,
-            ..default()
+            ..Default::default()
         },
     ))
     .with(TreeSpec::new(
@@ -242,7 +236,7 @@ fn production_frame() -> TreeSpec {
             top: Val::ZERO,
             width: Val::Percent(100.0),
             height: Val::Percent(100.0),
-            ..default()
+            ..Default::default()
         },
     ))
 }
@@ -337,7 +331,7 @@ fn edge_cases() -> Vec<(&'static str, TreeSpec, UVec2, f32)> {
                     top: Val::ZERO,
                     bottom: Val::ZERO,
                     width: Val::Px(321.0),
-                    ..default()
+                    ..Default::default()
                 },
             )),
             UVec2::new(1440, 900),
@@ -357,7 +351,7 @@ fn edge_cases() -> Vec<(&'static str, TreeSpec, UVec2, f32)> {
                 FlexNode {
                     flex_grow: 0.0,
                     width: Val::Px(137.0),
-                    ..default()
+                    ..Default::default()
                 },
             ))
             .with(TreeSpec::new("rest", leaf(1.0))),

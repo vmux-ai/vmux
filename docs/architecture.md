@@ -437,9 +437,25 @@ The `contracts` feature adds shared wire values; `store` adds schema registratio
 state; `jobs` adds owned blocking work. These capabilities do not require Profile or CEF.
 Blocking pools report unavailable on web targets until a web worker adapter exists.
 The native `host` bundle is explicit in Vmux consumers.
-`VmuxEcsPlugin` installs only primitives and operation lifecycle. `VmuxRuntimePlugin` separately
-installs the Vmux Profile, page runtime, and layout engine; desktop feature dependencies select
-that adapter through the application builder.
+`VmuxEcsPlugin` installs only primitives and operation lifecycle. The optional `flex` selection
+installs the renderer-independent `vmux_flex::FlexPlugin`; the product runtime explicitly requires
+that core. `VmuxRuntimePlugin` installs the Vmux Profile, page runtime, and optional
+`WindowViewportPlugin` adapter; desktop feature dependencies select that composition through
+the application builder.
+
+`vmux_flex` defaults to ECS, math, and Taffy without Window, Winit, or Profile. Existing `Node`,
+`ChildOf`, `ComputedNode`, and `Visibility` components remain the geometry contract.
+`LayoutContext` is the viewport input component: physical size and DPI. A root uses an explicit
+`FlexViewport` reference, its own context, or the unique `PrimaryViewport` fallback. Roots under
+non-layout lifecycle owners require explicit input; a missing, ambiguous, or invalid viewport
+pauses computation. Paused roots invalidate their cache so resuming adopts changes made while
+the viewport was unavailable. The optional `window` adapter projects Window resolution and primary state in
+`LayoutSystems::Viewport` before `LayoutSystems::Layout`; consumers run after Layout.
+Reparenting refreshes inherited DPI through the subtree and releases obsolete root viewports.
+Adding `Node` to a lifecycle owner also refreshes existing descendants as they join its
+layout context.
+Computed geometry remains physical, with `to_logical` applying inverse DPI. Pane, tab, workspace,
+and navigation behavior remains owned by the product layout feature until separately extracted.
 
 Core clocks use `web-time` so activation and operation retention also work on
 `wasm32-unknown-unknown` without a native runtime.
