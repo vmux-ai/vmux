@@ -1,324 +1,575 @@
-use std::fs::{File, OpenOptions};
-use std::io::{self, Read, Write};
-use std::os::fd::AsRawFd;
-use std::os::unix::fs::PermissionsExt;
-use std::os::unix::net::UnixStream;
-use std::os::unix::process::CommandExt;
-use std::path::{Path, PathBuf};
-use std::process::{Child, Command, Stdio};
+use std::io;
+use std::path::PathBuf;
+use std::process::Command;
+use std::sync::mpsc::{Sender, channel};
 use std::time::{Duration, Instant};
 
+use bevy_app::{App, AppExit, Plugin, PostUpdate, ScheduleRunnerPlugin, Update};
+use bevy_ecs::name::Name;
+use bevy_ecs::prelude::*;
+use serde::{Deserialize, Serialize};
+
 use crate::Settings;
-use crate::http::UnixHttp;
-use crate::image::GuestImage;
-use crate::ports::PortForwarder;
-use crate::ssh::Ssh;
+use crate::connection::{ConnectionIssue, ConnectionPlugin};
+use crate::process::{Lease, Process};
 
-pub struct Engine {
-    settings: Settings,
+pub struct EnginePlugin;
+
+impl Plugin for EnginePlugin {
+    fn build(&self, app: &mut App) {
+        app.add_plugins(ConnectionPlugin)
+            .configure_sets(
+                Update,
+                (
+                    EngineSet::Launch,
+                    EngineSet::Connect,
+                    EngineSet::Observe,
+                    EngineSet::Retire,
+                )
+                    .chain(),
+            )
+            .add_systems(PostUpdate, (publish, release).chain())
+            .add_systems(
+                Update,
+                (initialize, launch).chain().in_set(EngineSet::Launch),
+            )
+            .add_systems(Update, observe.in_set(EngineSet::Observe))
+            .add_systems(Update, (retire, finish).chain().in_set(EngineSet::Retire));
+    }
 }
 
-#[derive(Clone, Debug)]
-pub struct Status {
-    pub running: bool,
-    pub docker_ready: bool,
-    pub socket: PathBuf,
-    pub log: PathBuf,
-}
+#[derive(Component)]
+pub struct Engine;
 
 impl Engine {
-    pub fn new(settings: Settings) -> Self {
-        Self { settings }
+    pub fn bundle(settings: Settings, helper: PathBuf) -> impl Bundle {
+        (
+            Name::new("Container engine"),
+            Self,
+            settings,
+            Launch(helper),
+            Phase::Created,
+        )
     }
+}
 
-    pub fn prepare(&mut self) -> io::Result<()> {
-        self.settings.validate()?;
-        #[cfg(unix)]
-        {
-            std::fs::set_permissions(
-                &self.settings.directory,
-                std::fs::Permissions::from_mode(0o700),
-            )?;
-        }
-        let _lock = self.lock()?;
-        GuestImage::prepare(&self.settings)?;
-        Ssh::prepare(&self.settings)?;
-        self.settings.save()?;
-        Ok(())
+#[derive(Component, Clone, Copy, Debug, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Phase {
+    Created,
+    NetworkStarting,
+    DockerStarting,
+    Ready,
+    Stopping,
+    Stopped,
+    Failed,
+}
+
+impl Phase {
+    pub(crate) fn connecting(self) -> bool {
+        matches!(self, Self::DockerStarting | Self::Ready)
     }
+}
 
-    pub fn start(&mut self, helper: &Path) -> io::Result<Status> {
-        if !cfg!(all(target_os = "macos", target_arch = "aarch64")) {
-            return Err(io::Error::new(
-                io::ErrorKind::Unsupported,
-                "the native VM backend currently requires Apple Silicon macOS",
-            ));
-        }
-        self.settings.validate()?;
-        let _start = self.lock_named("start.lock")?;
-        if self.status().running {
-            let saved = Settings::load(&self.settings.directory.join("settings.json"))?;
-            if saved != self.settings {
-                return Err(io::Error::new(
-                    io::ErrorKind::InvalidInput,
-                    "stop the running VM before changing its resources or shared directory",
-                ));
-            }
-            return self.wait_ready(None);
-        }
-        self.prepare()?;
-        let log = OpenOptions::new()
-            .create(true)
-            .append(true)
-            .open(self.settings.log())?;
-        let mut command = Command::new(helper);
-        command
-            .arg("run")
-            .arg(self.settings.directory.join("settings.json"))
-            .stdin(Stdio::null())
-            .stdout(log.try_clone()?)
-            .stderr(log);
-        command.process_group(0);
-        let mut child = command.spawn()?;
-        self.wait_ready(Some(&mut child))
+#[derive(Component, Clone, Debug)]
+pub struct Failure(pub String);
+
+#[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
+pub(crate) struct State {
+    pub(crate) phase: Phase,
+    pub(crate) failure: Option<String>,
+}
+
+#[derive(Component)]
+struct Published(State);
+
+#[derive(SystemSet, Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub(crate) enum EngineSet {
+    Launch,
+    Connect,
+    Observe,
+    Retire,
+}
+
+#[derive(Component)]
+struct Launch(PathBuf);
+
+#[derive(Component)]
+pub(crate) struct Network;
+
+#[derive(Component)]
+pub(crate) struct Machine;
+
+#[derive(Component)]
+struct Terminating;
+
+#[derive(Component)]
+pub(crate) struct ForcedShutdown;
+
+#[derive(Component)]
+pub(crate) struct Deadline(pub(crate) Instant);
+
+#[derive(Component)]
+struct ResultSink(Sender<io::Result<()>>);
+
+pub(crate) struct Runtime;
+
+impl Runtime {
+    pub(crate) fn run(settings: Settings, helper: PathBuf) -> io::Result<()> {
+        let (sender, receiver) = channel();
+        let mut app = App::new();
+        app.add_plugins((
+            ScheduleRunnerPlugin::run_loop(Duration::from_millis(50)),
+            EnginePlugin,
+        ));
+        app.world_mut()
+            .spawn((Engine::bundle(settings, helper), ResultSink(sender)));
+        app.run();
+        receiver.recv().map_err(io::Error::other)?
     }
+}
 
-    pub fn foreground(&mut self, helper: &Path) -> io::Result<()> {
-        self.settings.validate()?;
-        let _lock = self.lock()?;
-        self.clean_sockets()?;
-        let settings_path = self.settings.save()?;
+impl Launch {
+    fn network(&self, settings: &Settings) -> io::Result<Process> {
         let ssh_port = std::net::TcpListener::bind("127.0.0.1:0")?
             .local_addr()?
             .port();
-        let mut network = Process::new(
+        Process::spawn(
             Command::new("gvproxy")
                 .arg("-ssh-port")
                 .arg(ssh_port.to_string())
                 .arg("-listen-vfkit")
                 .arg(format!(
                     "unixgram://{}",
-                    self.settings.network_socket().display()
+                    settings.network_socket().display()
                 ))
                 .arg("-services")
-                .arg(format!("unix://{}", self.settings.network_api().display()))
-                .stdin(Stdio::null())
-                .spawn()?,
-        );
-        let deadline = Instant::now() + Duration::from_secs(15);
-        while !self.settings.network_socket().exists() {
-            if let Some(status) = network.child.try_wait()? {
-                return Err(io::Error::other(format!("network helper exited: {status}")));
-            }
-            if Instant::now() >= deadline {
-                return Err(io::Error::new(
-                    io::ErrorKind::TimedOut,
-                    "network helper did not start",
-                ));
-            }
-            std::thread::sleep(Duration::from_millis(50));
-        }
+                .arg(format!("unix://{}", settings.network_api().display())),
+        )
+    }
+
+    fn machine(&self, settings: &Settings) -> io::Result<Process> {
+        let configuration = settings.directory.join("settings.json");
         #[cfg(target_os = "macos")]
-        let mut native = crate::sandbox::Sandbox::command(helper, &self.settings, &settings_path)?;
+        let mut command = crate::sandbox::Sandbox::command(&self.0, settings, &configuration)?;
         #[cfg(not(target_os = "macos"))]
-        let mut native = {
-            let mut command = Command::new(helper);
-            command.arg("native").arg(settings_path);
+        let mut command = {
+            let mut command = Command::new(&self.0);
+            command.arg("native").arg(configuration);
             command
         };
-        let mut machine = Process::new(native.stdin(Stdio::null()).spawn()?);
-        let mut ports = PortForwarder::new(&self.settings.socket(), &self.settings.network_api());
-        let mut last_error = None;
-        let mut forwarding = false;
-        let result = loop {
-            if let Some(status) = machine.child.try_wait()? {
-                break status;
+        Process::spawn(&mut command)
+    }
+}
+
+fn initialize(
+    mut engines: Query<(Entity, &mut Settings, &mut Phase, &Launch), With<Engine>>,
+    mut commands: Commands,
+) {
+    for (entity, mut settings, mut phase, launcher) in &mut engines {
+        if *phase != Phase::Created {
+            continue;
+        }
+        if let Err(error) = settings.validate() {
+            *phase = Phase::Failed;
+            commands.entity(entity).insert(Failure(error.to_string()));
+            continue;
+        }
+        let lease = match Lease::acquire(&settings.directory) {
+            Ok(lease) => lease,
+            Err(error) => {
+                *phase = Phase::Failed;
+                commands.entity(entity).insert(Failure(error.to_string()));
+                continue;
             }
-            if !forwarding && Self::ping(&self.settings.transport_socket()) {
-                match Ssh::forward(&self.settings) {
-                    Ok(()) => forwarding = true,
-                    Err(error) => {
-                        eprintln!("Docker SSH forwarding: {error}");
-                    }
-                }
-            }
-            if forwarding && Self::ping(&self.settings.socket()) {
-                match ports.refresh() {
-                    Ok(()) => last_error = None,
-                    Err(error) => {
-                        let error = error.to_string();
-                        if last_error.as_ref() != Some(&error) {
-                            eprintln!("container port forwarding: {error}");
-                            last_error = Some(error);
-                        }
-                    }
-                }
-            }
-            std::thread::sleep(Duration::from_secs(1));
         };
-        self.clean_sockets()?;
-        if result.success() {
-            return Ok(());
+        commands.entity(entity).insert(lease);
+        if let Err(error) = settings.clean_sockets() {
+            *phase = Phase::Failed;
+            commands.entity(entity).insert(Failure(error.to_string()));
+            continue;
         }
-        Err(io::Error::other(format!("VM exited: {result}")))
-    }
-
-    pub fn stop(&self) -> io::Result<()> {
-        if !self.status().running {
-            return Ok(());
+        if let Err(error) = settings.save() {
+            *phase = Phase::Failed;
+            commands.entity(entity).insert(Failure(error.to_string()));
+            continue;
         }
-        let mut control = UnixStream::connect(self.settings.control_socket())?;
-        control.set_read_timeout(Some(Duration::from_secs(2)))?;
-        control.write_all(b"STOP\n")?;
-        let mut reply = [0; 16];
-        let read = control.read(&mut reply)?;
-        if &reply[..read] != b"STOPPING\n" {
-            return Err(io::Error::other("VM refused shutdown"));
-        }
-        let deadline = Instant::now() + Duration::from_secs(60);
-        while self.status().running {
-            if Instant::now() >= deadline {
-                return Err(io::Error::new(
-                    io::ErrorKind::TimedOut,
-                    "VM did not finish shutdown",
-                ));
+        match launcher.network(&settings) {
+            Ok(process) => {
+                *phase = Phase::NetworkStarting;
+                commands
+                    .entity(entity)
+                    .insert(Deadline(Instant::now() + Duration::from_secs(15)));
+                commands.spawn((Name::new("VM network"), Network, ChildOf(entity), process));
             }
-            std::thread::sleep(Duration::from_millis(100));
-        }
-        Ok(())
-    }
-
-    pub fn status(&self) -> Status {
-        Status {
-            running: self.is_locked(),
-            docker_ready: Self::ping(&self.settings.socket()),
-            socket: self.settings.socket(),
-            log: self.settings.log(),
+            Err(error) => {
+                *phase = Phase::Failed;
+                commands.entity(entity).insert(Failure(error.to_string()));
+            }
         }
     }
+}
 
-    fn wait_ready(&self, mut child: Option<&mut Child>) -> io::Result<Status> {
-        let deadline = Instant::now() + Duration::from_secs(240);
-        loop {
-            let status = self.status();
-            if status.docker_ready {
-                match std::fs::remove_file(self.settings.directory.join("data.new")) {
-                    Ok(()) => {}
-                    Err(error) if error.kind() == io::ErrorKind::NotFound => {}
-                    Err(error) => return Err(error),
+fn launch(
+    mut engines: Query<(Entity, &Settings, &Launch, &mut Phase, &Deadline), With<Engine>>,
+    mut commands: Commands,
+) {
+    for (entity, settings, launcher, mut phase, deadline) in &mut engines {
+        if *phase != Phase::NetworkStarting {
+            continue;
+        }
+        if !settings.network_socket().exists() {
+            if Instant::now() >= deadline.0 {
+                *phase = Phase::Stopping;
+                commands
+                    .entity(entity)
+                    .insert(Failure("network helper did not start".into()));
+            }
+            continue;
+        }
+        match launcher.machine(settings) {
+            Ok(process) => {
+                *phase = Phase::DockerStarting;
+                commands
+                    .entity(entity)
+                    .insert(Deadline(Instant::now() + Duration::from_secs(240)));
+                commands.spawn((Name::new("Linux VM"), Machine, ChildOf(entity), process));
+            }
+            Err(error) => {
+                *phase = Phase::Stopping;
+                commands.entity(entity).insert(Failure(error.to_string()));
+            }
+        }
+    }
+}
+
+type ObservedProcesses<'w, 's> = Query<
+    'w,
+    's,
+    (
+        Entity,
+        &'static ChildOf,
+        &'static mut Process,
+        Option<&'static Machine>,
+        Option<&'static Network>,
+    ),
+>;
+
+fn observe(
+    mut processes: ObservedProcesses,
+    mut engines: Query<&mut Phase, With<Engine>>,
+    mut commands: Commands,
+) {
+    for (entity, owner, mut process, machine, network) in &mut processes {
+        let result = match process.poll() {
+            Ok(None) => continue,
+            Ok(Some(status)) => {
+                if machine.is_some() && status.success() {
+                    Ok(())
+                } else {
+                    Err(format!(
+                        "{} exited: {status}",
+                        if network.is_some() {
+                            "network helper"
+                        } else {
+                            "VM"
+                        }
+                    ))
                 }
-                return Ok(status);
             }
-            if let Some(child) = child.as_deref_mut()
-                && let Some(status) = child.try_wait()?
-            {
-                return Err(io::Error::other(format!(
-                    "container engine exited: {status}; see {}",
-                    self.settings.log().display()
-                )));
-            }
-            if Instant::now() >= deadline {
-                return Err(io::Error::new(
-                    io::ErrorKind::TimedOut,
-                    format!(
-                        "Docker did not become ready; see {}",
-                        self.settings.log().display()
-                    ),
-                ));
-            }
-            std::thread::sleep(Duration::from_millis(250));
+            Err(error) => Err(error.to_string()),
+        };
+        commands.entity(entity).despawn();
+        let Ok(mut phase) = engines.get_mut(owner.parent()) else {
+            continue;
+        };
+        if matches!(*phase, Phase::Stopping | Phase::Stopped | Phase::Failed) {
+            continue;
         }
-    }
-
-    fn ping(path: &Path) -> bool {
-        match UnixHttp::new(path).get("/_ping") {
-            Ok(response) => matches!(response.require_success(), Ok(body) if body == b"OK"),
-            Err(_) => false,
+        *phase = Phase::Stopping;
+        if let Err(error) = result {
+            commands.entity(owner.parent()).insert(Failure(error));
         }
-    }
-
-    fn lock(&self) -> io::Result<File> {
-        self.lock_named("engine.lock")
-    }
-
-    fn lock_named(&self, name: &str) -> io::Result<File> {
-        let file = OpenOptions::new()
-            .create(true)
-            .read(true)
-            .write(true)
-            .truncate(false)
-            .open(self.settings.directory.join(name))?;
-        let result = unsafe { libc::flock(file.as_raw_fd(), libc::LOCK_EX | libc::LOCK_NB) };
-        if result != 0 {
-            return Err(io::Error::last_os_error());
-        }
-        Ok(file)
-    }
-
-    fn is_locked(&self) -> bool {
-        match self.lock() {
-            Ok(_) => false,
-            Err(error) => error.kind() == io::ErrorKind::WouldBlock,
-        }
-    }
-
-    fn clean_sockets(&self) -> io::Result<()> {
-        for path in [
-            self.settings.socket(),
-            self.settings.transport_socket(),
-            self.settings.control_socket(),
-            self.settings.guest_control(),
-            self.settings.network_socket(),
-            self.settings.network_api(),
-        ] {
-            match std::fs::remove_file(path) {
-                Ok(()) => {}
-                Err(error) if error.kind() == io::ErrorKind::NotFound => {}
-                Err(error) => return Err(error),
-            }
-        }
-        Ok(())
     }
 }
 
-struct Process {
-    child: Child,
-}
-
-impl Process {
-    fn new(child: Child) -> Self {
-        Self { child }
+fn retire(
+    mut processes: Query<(Entity, &ChildOf, &mut Process, Option<&Machine>), Without<Terminating>>,
+    engines: Query<(&Phase, Option<&ForcedShutdown>), With<Engine>>,
+    machines: Query<&ChildOf, (With<Machine>, With<Process>)>,
+    mut commands: Commands,
+) {
+    for (entity, owner, mut process, machine) in &mut processes {
+        let Ok((phase, forced)) = engines.get(owner.parent()) else {
+            continue;
+        };
+        if !matches!(phase, Phase::Stopping | Phase::Failed) {
+            continue;
+        }
+        if forced.is_none()
+            && (machine.is_some()
+                || machines
+                    .iter()
+                    .any(|machine| machine.parent() == owner.parent()))
+        {
+            continue;
+        }
+        match process.terminate() {
+            Ok(()) => {
+                commands.entity(entity).insert(Terminating);
+            }
+            Err(error) => {
+                commands
+                    .entity(owner.parent())
+                    .insert(Failure(error.to_string()));
+            }
+        }
     }
 }
 
-impl Drop for Process {
-    fn drop(&mut self) {
-        if matches!(self.child.try_wait(), Ok(Some(_))) {
-            return;
+type CompletingEngines<'w, 's> = Query<
+    'w,
+    's,
+    (
+        Entity,
+        &'static Settings,
+        &'static mut Phase,
+        Option<&'static Lease>,
+        Option<&'static Failure>,
+        Option<&'static ResultSink>,
+    ),
+    With<Engine>,
+>;
+
+fn finish(
+    mut engines: CompletingEngines,
+    processes: Query<&ChildOf, With<Process>>,
+    mut exits: MessageWriter<AppExit>,
+    mut commands: Commands,
+) {
+    for (entity, settings, mut phase, lease, failure, sink) in &mut engines {
+        if !matches!(*phase, Phase::Stopping | Phase::Failed)
+            || processes.iter().any(|owner| owner.parent() == entity)
+            || (lease.is_none() && sink.is_none())
+        {
+            continue;
         }
-        let _ = self.child.kill();
-        let _ = self.child.wait();
+        let cleanup = if lease.is_some() {
+            settings.clean_sockets()
+        } else {
+            Ok(())
+        };
+        if let Err(error) = &cleanup {
+            commands.entity(entity).insert(Failure(error.to_string()));
+        }
+        let result = match failure {
+            Some(failure) => Err(io::Error::other(failure.0.clone())),
+            None => cleanup,
+        };
+        *phase = if result.is_ok() {
+            Phase::Stopped
+        } else {
+            Phase::Failed
+        };
+        commands.entity(entity).remove::<ConnectionIssue>();
+        if let Some(sink) = sink {
+            let exit = if result.is_ok() {
+                AppExit::Success
+            } else {
+                AppExit::error()
+            };
+            let _ = sink.0.send(result);
+            commands.entity(entity).remove::<ResultSink>();
+            exits.write(exit);
+        }
+    }
+}
+
+type PublishedEngines<'w, 's> = Query<
+    'w,
+    's,
+    (
+        Entity,
+        &'static Settings,
+        &'static Phase,
+        Option<&'static Failure>,
+        Option<&'static ConnectionIssue>,
+        Option<&'static Published>,
+    ),
+    (With<Engine>, With<Lease>),
+>;
+
+fn publish(engines: PublishedEngines, mut commands: Commands) {
+    for (entity, settings, phase, failure, issue, previous) in &engines {
+        let failure = match failure {
+            Some(failure) => Some(failure.0.clone()),
+            None => issue.map(|issue| issue.0.clone()),
+        };
+        let state = State {
+            phase: *phase,
+            failure,
+        };
+        if previous.is_some_and(|previous| previous.0 == state) {
+            continue;
+        }
+        let bytes = match serde_json::to_vec(&state) {
+            Ok(bytes) => bytes,
+            Err(_) => continue,
+        };
+        let file = match tempfile::NamedTempFile::new_in(&settings.directory) {
+            Ok(file) => file,
+            Err(_) => continue,
+        };
+        if std::fs::write(file.path(), bytes).is_err()
+            || file
+                .persist(settings.directory.join("engine-state.json"))
+                .is_err()
+        {
+            continue;
+        }
+        commands.entity(entity).insert(Published(state));
+    }
+}
+
+type LeasedEngines<'w, 's> = Query<'w, 's, (Entity, &'static Phase), (With<Engine>, With<Lease>)>;
+
+fn release(
+    engines: LeasedEngines,
+    processes: Query<&ChildOf, With<Process>>,
+    mut commands: Commands,
+) {
+    for (entity, phase) in &engines {
+        if matches!(phase, Phase::Stopped | Phase::Failed)
+            && !processes.iter().any(|owner| owner.parent() == entity)
+        {
+            commands.entity(entity).remove::<Lease>();
+        }
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::EngineClient;
+
+    struct Fixture {
+        app: App,
+        engine: Entity,
+        _directory: tempfile::TempDir,
+    }
+
+    impl Fixture {
+        fn new(phase: Phase, deadline: Instant) -> Self {
+            let directory = tempfile::tempdir().unwrap();
+            let mut settings = Settings::new(directory.path().join("engine"), directory.path());
+            settings.validate().unwrap();
+            let lease = Lease::acquire(&settings.directory).unwrap();
+            let mut app = App::new();
+            app.add_plugins(EnginePlugin);
+            let engine = app
+                .world_mut()
+                .spawn((
+                    Name::new("Test engine"),
+                    Engine,
+                    settings,
+                    Launch(PathBuf::from("unused")),
+                    phase,
+                    Deadline(deadline),
+                    lease,
+                ))
+                .id();
+            Self {
+                app,
+                engine,
+                _directory: directory,
+            }
+        }
+
+        fn network(&mut self, program: &str) {
+            let mut command = Command::new("sh");
+            command.args(["-c", program]);
+            self.app.world_mut().spawn((
+                Network,
+                Name::new("Test network"),
+                ChildOf(self.engine),
+                Process::spawn(&mut command).unwrap(),
+            ));
+        }
+
+        fn machine(&mut self, program: &str) {
+            let mut command = Command::new("sh");
+            command.args(["-c", program]);
+            self.app.world_mut().spawn((
+                Machine,
+                Name::new("Test machine"),
+                ChildOf(self.engine),
+                Process::spawn(&mut command).unwrap(),
+            ));
+        }
+
+        fn settle(&mut self) -> Phase {
+            let deadline = Instant::now() + Duration::from_secs(3);
+            loop {
+                self.app.update();
+                let phase = *self.app.world().get::<Phase>(self.engine).unwrap();
+                if matches!(phase, Phase::Stopped | Phase::Failed) {
+                    return phase;
+                }
+                assert!(Instant::now() < deadline, "engine lifecycle did not settle");
+                std::thread::sleep(Duration::from_millis(1));
+            }
+        }
+
+        fn retired(&mut self) -> bool {
+            let mut processes = self.app.world_mut().query::<&Process>();
+            processes.iter(self.app.world()).next().is_none()
+                && self.app.world().get::<Lease>(self.engine).is_none()
+        }
+    }
 
     #[test]
-    fn preparing_a_running_vm_does_not_change_its_guest_files() {
-        let temp = tempfile::tempdir().unwrap();
-        let mut settings = Settings::new(temp.path().join("engine"), temp.path());
-        settings.validate().unwrap();
-        std::fs::create_dir(settings.rootfs()).unwrap();
-        let marker = settings.rootfs().join("untouched");
-        std::fs::write(&marker, b"running").unwrap();
-        let mut engine = Engine::new(settings);
-        let _running = engine.lock().unwrap();
+    fn network_exit_fails_startup_and_releases_the_engine_lease() {
+        let mut fixture = Fixture::new(
+            Phase::NetworkStarting,
+            Instant::now() + Duration::from_secs(15),
+        );
+        fixture.network("exit 7");
+        assert_eq!(fixture.settle(), Phase::Failed);
+        assert!(fixture.retired());
+        assert!(fixture.app.world().get::<Failure>(fixture.engine).is_some());
+        let settings = fixture
+            .app
+            .world()
+            .get::<Settings>(fixture.engine)
+            .unwrap()
+            .clone();
+        let status = EngineClient::new(settings).status();
+        assert!(!status.running);
+        assert_eq!(status.phase, Phase::Failed);
+        assert!(status.failure.unwrap().contains("network helper exited"));
+    }
 
-        let error = engine.prepare().unwrap_err();
-        assert_eq!(error.kind(), io::ErrorKind::WouldBlock);
-        assert_eq!(std::fs::read(marker).unwrap(), b"running");
-        assert!(!temp.path().join("engine/data.raw").exists());
+    #[test]
+    fn network_timeout_reaps_the_owned_process_before_completion() {
+        let mut fixture = Fixture::new(
+            Phase::NetworkStarting,
+            Instant::now() - Duration::from_secs(1),
+        );
+        fixture.network("exec sleep 60");
+        assert_eq!(fixture.settle(), Phase::Failed);
+        assert!(fixture.retired());
+    }
+
+    #[test]
+    fn successful_machine_exit_retires_network_before_stopped() {
+        let mut fixture = Fixture::new(
+            Phase::DockerStarting,
+            Instant::now() + Duration::from_secs(240),
+        );
+        fixture.network("exec sleep 60");
+        fixture.machine("exit 0");
+        assert_eq!(fixture.settle(), Phase::Stopped);
+        assert!(fixture.retired());
+        assert!(fixture.app.world().get::<Failure>(fixture.engine).is_none());
     }
 }

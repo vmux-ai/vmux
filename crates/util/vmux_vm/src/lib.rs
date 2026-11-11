@@ -1,10 +1,14 @@
-pub use engine::{Engine, Status};
+pub use client::{EngineClient, Status};
+pub use engine::{Engine, EnginePlugin, Failure, Phase};
 pub use settings::Settings;
 
+mod client;
+mod connection;
 mod engine;
 mod http;
 mod image;
 mod ports;
+mod process;
 mod settings;
 mod ssh;
 

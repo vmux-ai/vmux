@@ -105,6 +105,11 @@ are forwarded to macOS localhost. Images and volumes survive VM restart on the
 dedicated data disk; the selected project directory is shared at the same path
 inside Linux. `container logs` reads the engine and guest logs.
 
+For the desktop workflow, build with `make build-dev`, then open the app with
+`make run-dev`. Open `vmux://containers/` from the command bar, select the shared
+project directory and press Start. The page shows the engine phase, Docker socket
+and logs; Stop shuts down Docker and the VM while retaining images and volumes.
+
 ## License
 
 Copyright (c) 2024-2026 Junichi Sugiura

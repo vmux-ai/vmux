@@ -10453,11 +10453,19 @@ dependencies = [
 name = "vmux_container"
 version = "0.0.35"
 dependencies = [
+ "bevy",
  "bevy_app",
+ "bevy_cef",
  "bevy_ecs",
- "crossbeam-channel",
+ "bevy_tasks",
+ "dioxus",
+ "rkyv",
+ "serde",
+ "vmux_api",
  "vmux_ecs",
+ "vmux_page",
  "vmux_profile",
+ "vmux_ui",
  "vmux_vm",
 ]
 
@@ -11409,6 +11417,9 @@ dependencies = [
 name = "vmux_vm"
 version = "0.0.35"
 dependencies = [
+ "bevy_app",
+ "bevy_ecs",
+ "bevy_tasks",
  "flate2",
  "libc",
  "libloading 0.8.9",

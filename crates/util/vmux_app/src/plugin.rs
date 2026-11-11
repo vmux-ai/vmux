@@ -63,6 +63,8 @@ pub enum VmuxPlugin {
     Knowledge(vmux_knowledge::KnowledgePlugin),
     #[plugin(feature = "history", desktop, requires(runtime))]
     History(vmux_history::HistoryPlugin),
+    #[plugin(feature = "container", desktop, requires(layout_runtime))]
+    Container(vmux_container::ContainerPlugin),
     #[plugin(feature = "simulator", desktop, requires(layout_runtime))]
     Simulator(vmux_simulator::SimulatorPlugin),
     #[plugin(feature = "shortcut", desktop, requires(runtime))]
