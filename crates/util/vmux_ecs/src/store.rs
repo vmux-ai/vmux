@@ -512,7 +512,6 @@ mod tests {
     fn tracked_schemas_preserve_workspace_membership_and_deduplicate_change_tracking() {
         let mut app = App::new();
         app.add_plugins(SchemaPlugin::<SharedStore>::default())
-            .register_stored::<Saved>()
             .register_type::<Transient>()
             .init_resource::<DirtyCount>()
             .add_observer(DirtyCount::record);
@@ -525,9 +524,13 @@ mod tests {
         let entity = app.world_mut().spawn((Save, Saved)).id();
         app.update();
         assert_eq!(app.world().resource::<DirtyCount>().0, 1);
-        app.world_mut().entity_mut(entity).remove::<Saved>();
+        app.register_stored::<Saved>();
+        app.world_mut().entity_mut(entity).insert(Saved);
         app.update();
         assert_eq!(app.world().resource::<DirtyCount>().0, 2);
+        app.world_mut().entity_mut(entity).remove::<Saved>();
+        app.update();
+        assert_eq!(app.world().resource::<DirtyCount>().0, 3);
     }
 
     #[test]
