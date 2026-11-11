@@ -1,5 +1,7 @@
 pub use components::{Favicon, GlobeIcon};
 
+use crate::agent_logo::Logo;
+
 pub struct FaviconSource;
 
 impl FaviconSource {
@@ -14,7 +16,11 @@ impl FaviconSource {
     }
 
     pub fn agent(agent_id: &str) -> Option<String> {
-        AgentBrand::from_id(agent_id).map(|brand| brand.icon_url().to_string())
+        Logo::of(agent_id).map(Logo::source)
+    }
+
+    pub fn registry(source: &str) -> Option<String> {
+        Logo::from_registry(source).map(Logo::source)
     }
 
     pub fn is_monochrome(source: &str) -> bool {
@@ -34,49 +40,13 @@ impl FaviconSource {
 
     pub fn resolve(favicon_url: &str, url: &str) -> Option<String> {
         if !favicon_url.is_empty() {
-            return Some(favicon_url.to_string());
+            return Self::registry(favicon_url).or_else(|| Some(favicon_url.to_string()));
         }
         if let Some(favicon) = Self::vmux(url) {
             return Some(favicon);
         }
         Self::host(url)
             .map(|host| format!("https://www.google.com/s2/favicons?domain={host}&sz=64"))
-    }
-}
-
-enum AgentBrand {
-    Claude,
-    Codex,
-    Gemini,
-    Mistral,
-}
-
-impl AgentBrand {
-    fn from_id(value: &str) -> Option<Self> {
-        for token in value
-            .to_ascii_lowercase()
-            .split(|character: char| !character.is_ascii_alphanumeric())
-        {
-            match token {
-                "claude" => return Some(Self::Claude),
-                "codex" => return Some(Self::Codex),
-                "gemini" => return Some(Self::Gemini),
-                "mistral" | "vibe" => return Some(Self::Mistral),
-                _ => {}
-            }
-        }
-        None
-    }
-
-    fn icon_url(&self) -> &'static str {
-        match self {
-            Self::Claude => "https://cdn.agentclientprotocol.com/registry/v1/latest/claude-acp.svg",
-            Self::Codex => "https://cdn.agentclientprotocol.com/registry/v1/latest/codex-acp.svg",
-            Self::Gemini => "https://cdn.agentclientprotocol.com/registry/v1/latest/gemini.svg",
-            Self::Mistral => {
-                "https://cdn.agentclientprotocol.com/registry/v1/latest/mistral-vibe.svg"
-            }
-        }
     }
 }
 
@@ -228,35 +198,28 @@ mod tests {
     }
 
     #[test]
-    fn agent_maps_vibe() {
-        assert_eq!(
-            FaviconSource::agent("mistral-vibe"),
-            Some(
-                "https://cdn.agentclientprotocol.com/registry/v1/latest/mistral-vibe.svg"
-                    .to_string()
-            )
-        );
-    }
-
-    #[test]
-    fn agent_maps_claude_and_codex() {
-        assert_eq!(
-            FaviconSource::agent("claude-acp"),
-            Some(
-                "https://cdn.agentclientprotocol.com/registry/v1/latest/claude-acp.svg".to_string()
-            )
-        );
-        assert_eq!(
-            FaviconSource::agent("codex-acp"),
-            Some(
-                "https://cdn.agentclientprotocol.com/registry/v1/latest/codex-acp.svg".to_string()
-            )
-        );
-    }
-
-    #[test]
     fn unknown_agent_returns_none() {
         assert_eq!(FaviconSource::agent("unknown"), None);
+    }
+
+    #[test]
+    fn official_icons_resolve_offline_and_explicit_external_icons_remain_authoritative() {
+        let official = "https://cdn.agentclientprotocol.com/registry/v1/latest/claude-acp.svg";
+        assert!(
+            FaviconSource::resolve(official, "vmux://sessions/")
+                .unwrap()
+                .starts_with("data:image/svg+xml;base64,")
+        );
+        let external = "https://provider.example/custom-logo.svg";
+        assert_eq!(
+            FaviconSource::resolve(external, "vmux://sessions/"),
+            Some(external.into())
+        );
+        let unknown = "https://cdn.agentclientprotocol.com/registry/v1/latest/new-agent.svg";
+        assert_eq!(
+            FaviconSource::resolve(unknown, "vmux://sessions/"),
+            Some(unknown.into())
+        );
     }
 
     #[test]
@@ -294,14 +257,6 @@ mod tests {
     #[test]
     fn favicon_src_none_for_an_empty_url() {
         assert_eq!(FaviconSource::resolve("", ""), None);
-    }
-
-    #[test]
-    fn agent_maps_gemini() {
-        assert_eq!(
-            FaviconSource::agent("gemini"),
-            Some("https://cdn.agentclientprotocol.com/registry/v1/latest/gemini.svg".to_string())
-        );
     }
 
     #[test]

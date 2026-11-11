@@ -30,7 +30,7 @@ pub(super) fn Controls(chat: Chat) -> Element {
         .read()
         .clone();
     if chat.setup_busy() && chat.status() != "authentication" {
-        return rsx! { ComposerFrame { SetupComposer { chat, keys } } };
+        return rsx! { ComposerFrame { muted: true, SetupComposer { chat, keys } } };
     }
     let notice = if chat.status() == "authentication" {
         if chat.key_input_requested() {
@@ -41,7 +41,7 @@ pub(super) fn Controls(chat: Chat) -> Element {
     } else {
         Some(rsx! { RecoveryControls { pending: keys.pending } })
     };
-    rsx! { ComposerFrame { notice, SetupComposer { chat, keys } } }
+    rsx! { ComposerFrame { muted: true, notice, SetupComposer { chat, keys } } }
 }
 
 #[component]
@@ -124,7 +124,7 @@ fn RecoveryControls(pending: bool) -> Element {
     rsx! {
         div { "data-slot": "composer-notice",
             ChoiceOptions {
-                options: labels, selected: selected(), compact: true, framed: true, disabled: pending,
+                options: labels, selected: selected(), compact: true, framed: true, muted: true, disabled: pending,
                 on_hover: move |index| selected.set(index),
                 on_select: move |index: usize| { if !pending && let Some(choice) = choices.get(index) { choice.choose(); } },
                 on_keydown: move |event| {

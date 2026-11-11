@@ -2,6 +2,7 @@ use super::state::Chat;
 use crate::event::{ApprovalDecision, ApprovalDetail};
 use dioxus::prelude::*;
 use vmux_ui::i18n::{TranslationValue, translate, translate_with};
+use vmux_ui::scroll::ScrollIntoView;
 
 pub(super) const APPROVAL_DECISIONS: [ApprovalDecision; 3] = [
     ApprovalDecision::Allow,
@@ -140,6 +141,8 @@ pub(super) fn ChoiceOptions(
     #[props(default)] disabled: bool,
     #[props(default)] compact: bool,
     #[props(default)] framed: bool,
+    #[props(default)] muted: bool,
+    #[props(default = "max-h-64".to_string())] viewport_class: String,
     #[props(default = true)] show_numbers: bool,
     #[props(default = true)] show_help: bool,
     #[props(default)] leading: Vec<Element>,
@@ -152,12 +155,15 @@ pub(super) fn ChoiceOptions(
     let label = question
         .clone()
         .unwrap_or_else(|| translate("agent-choose-option"));
+    use_effect(use_reactive!(|selected| {
+        ScrollIntoView::nearest(&format!("agent-choice-item-{selected}"));
+    }));
     rsx! {
         div { class: if framed { "px-2 py-2" } else if compact { "" } else { "border-l-2 border-foreground/15 py-2 pl-3.5" },
             if let Some(question) = question {
                 div { class: "mb-3 text-sm font-medium text-foreground", "{question}" }
             }
-            div { class: "flex max-h-64 flex-col gap-1.5 overflow-y-auto overscroll-contain", role: "listbox", aria_label: label,
+            div { class: "flex flex-col gap-1.5 overflow-y-auto overscroll-contain {viewport_class}", role: "listbox", aria_label: label,
                 onkeydown: move |event| { if let Some(handler) = on_keydown { handler.call(event); } },
                 for (index , option) in options.into_iter().enumerate() {
                     button {
@@ -170,7 +176,7 @@ pub(super) fn ChoiceOptions(
                         disabled: disabled || disabled_options.contains(&index),
                         onfocus: move |_| on_hover.call(index),
                         onmouseenter: move |_| on_hover.call(index),
-                        class: if framed {
+                        class: if framed && !muted {
                             if index == selected { "flex min-h-8 shrink-0 items-center gap-2 rounded-lg bg-background/10 px-2 py-1.5 text-left text-sm text-inherit" } else { "flex min-h-8 shrink-0 items-center gap-2 rounded-lg px-2 py-1.5 text-left text-sm text-inherit hover:bg-background/[0.06]" }
                         } else if compact {
                             if index == selected { "flex min-h-8 shrink-0 items-center gap-2 rounded-lg bg-foreground/[0.08] px-2 py-1.5 text-left text-sm text-foreground" } else { "flex min-h-8 shrink-0 items-center gap-2 rounded-lg px-2 py-1.5 text-left text-sm text-foreground hover:bg-foreground/[0.04]" }

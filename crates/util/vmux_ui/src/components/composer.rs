@@ -325,12 +325,16 @@ pub fn PromptComposer(
 }
 
 #[component]
-pub fn ComposerFrame(#[props(default)] notice: Option<Element>, children: Element) -> Element {
+pub fn ComposerFrame(
+    #[props(default)] notice: Option<Element>,
+    #[props(default)] muted: bool,
+    children: Element,
+) -> Element {
     let attached = notice.is_some();
     rsx! {
         div {
             "data-slot": "composer-frame",
-            class: if attached { "rounded-[14px] bg-foreground p-px text-background" } else { "relative" },
+            class: if attached && muted { "rounded-[14px] bg-foreground/[0.035] p-px text-foreground/85 ring-1 ring-inset ring-foreground/10" } else if attached { "rounded-[14px] bg-foreground p-px text-background" } else { "relative" },
             if let Some(notice) = notice {
                 {notice}
             }

@@ -34,6 +34,7 @@ fn Conversation(state: OnboardingUiState) -> Element {
             }
             super::surface::Dock {
                 ComposerFrame {
+                    muted: true,
                     notice: Some(rsx! { div { "data-slot": "composer-notice", class: "px-1 py-1", AgentSelector { state } } }),
                 PromptComposer {
                     value: String::new(),
@@ -82,7 +83,6 @@ fn AgentSelector(state: OnboardingUiState) -> Element {
                 background: String::new(),
                 alt: agent.name.clone(),
                 class: "size-5 text-[7px]".to_string(),
-                inverted: true,
             }
         });
         details.push(rsx! {
@@ -106,6 +106,8 @@ fn AgentSelector(state: OnboardingUiState) -> Element {
                     trailing: details,
                     compact: true,
                     framed: true,
+                    muted: true,
+                    viewport_class: "max-h-[min(10rem,35vh)]".to_string(),
                     show_numbers: false,
                     show_help: false,
                     selected: cursor,
@@ -191,6 +193,18 @@ impl Candidates {
             });
             agents.truncate(3);
         }
+        let mut remaining = Vec::new();
+        for agent in &state.agents {
+            if !agents.iter().any(|suggestion| suggestion.id == agent.id) {
+                remaining.push(agent.clone());
+            }
+        }
+        remaining.sort_by(|left, right| {
+            left.name
+                .cmp(&right.name)
+                .then_with(|| left.id.cmp(&right.id))
+        });
+        agents.extend(remaining);
         Self(agents)
     }
 
@@ -420,7 +434,7 @@ mod tests {
     }
 
     #[test]
-    fn initial_suggestions_are_three_common_families_with_installed_duplicates_preferred() {
+    fn common_families_lead_the_complete_catalog_without_dropping_entries() {
         let mut state = OnboardingUiState {
             agent_id: "bob".into(),
             ..Default::default()
@@ -448,7 +462,15 @@ mod tests {
                 .iter()
                 .map(|agent| agent.id.as_str())
                 .collect::<Vec<_>>(),
-            ["claude", "codex", "gemini"]
+            [
+                "claude",
+                "codex",
+                "gemini",
+                "bob",
+                "claude-acp",
+                "codex-acp",
+                "mistral-vibe"
+            ]
         );
         assert_eq!(
             Candidates::of(&state, "codex")
@@ -460,11 +482,11 @@ mod tests {
         );
         assert_eq!(Candidates::of(&state, "bob").0[0].id, "bob");
         assert_eq!(Candidates::of(&state, "vibe").0[0].id, "mistral-vibe");
-        assert_eq!(Candidates::of(&state, " ").0.len(), 3);
+        assert_eq!(Candidates::of(&state, " ").0.len(), state.agents.len());
     }
 
     #[test]
-    fn custom_only_catalog_is_capped_initially_but_all_agents_remain_searchable() {
+    fn custom_catalog_remains_complete_before_and_after_search() {
         let mut state = OnboardingUiState::default();
         for (id, name) in [
             ("a", "Agent A"),
@@ -478,7 +500,7 @@ mod tests {
                 ..Default::default()
             });
         }
-        assert_eq!(Candidates::of(&state, "").0.len(), 3);
+        assert_eq!(Candidates::of(&state, "").0.len(), 4);
         assert_eq!(Candidates::of(&state, "agent").0.len(), 4);
         assert_eq!(Candidates::of(&state, "D").0[0].id, "d");
         assert!(Candidates::of(&state, "missing").0.is_empty());

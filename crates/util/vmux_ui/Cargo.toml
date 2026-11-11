@@ -24,6 +24,7 @@ dioxus-primitives = { git = "https://github.com/DioxusLabs/components", package 
 fluent-bundle = { workspace = true }
 rkyv = { workspace = true }
 serde = { workspace = true }
+serde_json = { workspace = true }
 unic-langid = { workspace = true }
 vmux_api = { path = "../vmux_api" }
 
@@ -40,6 +41,5 @@ vmux_ecs = { path = "../vmux_ecs", features = ["host"] }
 workspace = true
 
 [dev-dependencies]
-serde_json = { workspace = true }
 dioxus-html = { version = "=0.7.9", features = ["serialize"] }
 dioxus-ssr = "=0.7.9"

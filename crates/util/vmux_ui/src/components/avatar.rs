@@ -119,7 +119,7 @@ impl AgentThumbnailSource {
             if source == "vmux://acp/assets/favicons/acp.svg" {
                 return FaviconSource::agent(seed).or(Some(source));
             }
-            return Some(source);
+            return FaviconSource::registry(&source).or(Some(source));
         }
         FaviconSource::agent(seed)
     }
@@ -293,13 +293,12 @@ mod tests {
 
     #[test]
     fn known_agent_brand_overrides_a_generic_profile_icon() {
-        assert_eq!(
-            AgentThumbnailSource::resolve(
-                Some("vmux://acp/assets/favicons/acp.svg".into()),
-                "codex"
-            ),
-            Some("https://cdn.agentclientprotocol.com/registry/v1/latest/codex-acp.svg".into())
-        );
+        let resolved = AgentThumbnailSource::resolve(
+            Some("vmux://acp/assets/favicons/acp.svg".into()),
+            "codex",
+        )
+        .unwrap();
+        assert!(resolved.starts_with("data:image/svg+xml;base64,"));
         assert_eq!(
             AgentThumbnailSource::resolve(Some("custom.svg".into()), "custom-agent"),
             Some("custom.svg".into())

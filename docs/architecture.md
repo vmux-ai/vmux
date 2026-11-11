@@ -1573,9 +1573,9 @@ queue empty until the user sends a real message. Schema 2 setup records preserve
 while discarding the earlier task-first Session reference, without deleting conversation history.
 
 The bootstrap and live Session share their conversation surface, transcript, assistant/user turns,
-composer and choice controls. The guide offers up to three common agent families, preferring
-an installed option within each family. Selection sits in the shared composer's outer notice frame;
-search exposes the remaining supported catalog when requested. Authentication uses one Connect
+composer and choice controls. The guide lists preferred candidates from three common agent families first,
+followed by the complete supported catalog in a scroll viewport capped at 160 px. Selection sits in the shared composer's outer notice frame;
+search filters the complete catalog. Setup uses a muted, theme-derived frame instead of an inverted notice surface. Authentication uses one Connect
 control for the provider's account/browser method. Compatible API keys are a secondary opt-in route.
 The host owns setup state; the cursor and search stay local to the UI. Normal text input is
 disabled until readiness. Explicit key entry uses the same composer with a password input and
@@ -1586,9 +1586,12 @@ Stop, Ctrl+C and Escape route to setup cancellation without flushing queued work
 the Session. Shared loading/progress animations and phase icons accompany guide messages;
 installation progress is indeterminate until an actual percentage is available.
 ACP supplies its supported catalog, credential availability and managed installer.
-Agent logos use the official registry's 16×16, monochrome SVG icon metadata. Shared thumbnails
-and favicons adapt those icons to the current theme; supplied icons take precedence over legacy
-alias fallbacks. The client does not maintain colored logo assets beside the registry.
+Agent thumbnails and favicons share a versioned, offline logo catalog. Matching MIT-licensed
+Lobe Icons assets keep their brand colors and gradients; unmatched agents retain their official
+Apache-2.0 registry SVGs. The catalog records provenance and license data and is refreshed with
+`python3 scripts/sync-acp-logos.py`. Explicit custom icons remain authoritative. Monochrome
+portions adapt to the inherited color scheme without per-agent color guesses. Setup surfaces
+use muted theme tokens, and the complete agent list scrolls inside a viewport capped at 160 px.
 Preparing and authentication states hold any genuinely submitted user messages until the provider
 establishes its Session. Advertised authentication methods run through ACP `authenticate`;
 cancellation detaches the waiter or runtime and keeps reusable package data. Provider sign-in
