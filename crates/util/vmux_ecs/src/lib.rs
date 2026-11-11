@@ -2,6 +2,9 @@ extern crate self as vmux_ecs;
 
 #[cfg(feature = "store")]
 pub use vmux_macro::store;
+pub use vmux_task::{
+    AsyncTask, TaskApply, TaskFailure, TaskPlugin, TaskResult, TaskSet, TaskToken, TaskWaker,
+};
 
 #[cfg(all(host, feature = "host"))]
 pub use archive::{

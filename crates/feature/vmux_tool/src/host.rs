@@ -15,14 +15,15 @@ use bevy_cef::prelude::{UiEventPlugin, UiInput};
 use vmux_ecs::manifest::{FeatureId, FeatureManifest};
 use vmux_ecs::page::PageReady;
 use vmux_ecs::{
-    PageMetadata, PageOpenRequest, PageOpenTarget, UiState, UiStatePlugin, UiStateWrite,
+    AsyncTask, OperationState, PageMetadata, PageOpenRequest, PageOpenTarget, TaskPlugin,
+    TaskResult, TaskSet, TaskWaker, UiState, UiStatePlugin, UiStateWrite,
 };
 
 use crate::{
     ExternalToolOperation, ToolApplier, ToolInventoryChanged, ToolOperationFailed,
     ToolOperationFinished, ToolOperationRequest, ToolOperationSucceeded, ToolOperator,
     ToolProviderBinding, ToolProviderId, ToolProviderTarget, ToolScanner, ToolStore,
-    ToolStoreTarget, ToolsManifest,
+    ToolStoreTarget, ToolTaskSet, ToolsManifest,
 };
 
 pub(crate) struct ToolHostPlugin;
@@ -32,6 +33,7 @@ impl Plugin for ToolHostPlugin {
         app.add_plugins((
             crate::catalog::Plugin,
             crate::McpConnectionPlugin,
+            TaskPlugin::<Result<String, String>>::default(),
             UiStatePlugin::<ToolsUiState>::default(),
         ))
         .add_plugins((
@@ -54,6 +56,11 @@ impl Plugin for ToolHostPlugin {
             )>::default(),
         ))
         .configure_sets(Update, ProjectionSet)
+        .configure_sets(
+            Update,
+            TaskSet::of::<Result<String, String>>().in_set(ToolTaskSet::Collect),
+        )
+        .add_systems(Update, wake.in_set(ToolTaskSet::Cancel))
         .add_observer(page_ready)
         .add_observer(refresh_request)
         .add_observer(operation_request::<ToolInstallRequest>)
@@ -77,10 +84,11 @@ impl Plugin for ToolHostPlugin {
                 request_scan,
                 finish_scans,
                 start_operation,
-                start_external_operations,
-                finish_external_operations,
+                start_external_operations.in_set(ToolTaskSet::Start),
+                finish_external_operations.in_set(ToolTaskSet::Apply),
                 drain_succeeded_operations,
                 drain_failed_operations,
+                drain_canceled_operations,
                 emit_tools_state.in_set(ProjectionSet),
             )
                 .chain(),
@@ -90,6 +98,17 @@ impl Plugin for ToolHostPlugin {
 
 #[derive(SystemSet, Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub(crate) struct ProjectionSet;
+
+fn wake(proxy: Option<Res<bevy::winit::EventLoopProxyWrapper>>, mut tasks: Query<&mut TaskWaker>) {
+    let Some(proxy) = proxy else {
+        return;
+    };
+    for mut waker in &mut tasks {
+        if !waker.is_bound() {
+            waker.bind(vmux_ecs::wake::Wake::waker(Some(&proxy)));
+        }
+    }
+}
 
 fn bind(
     providers: Query<(Entity, &ToolProviderBinding), Without<ToolProviderId>>,
@@ -256,6 +275,14 @@ impl ToolSubscriber {
         self.touch();
     }
 
+    fn cancel(&mut self, operation_id: u64) {
+        if self.pending.remove(&operation_id).is_none() {
+            return;
+        }
+        self.state.pending = self.pending.values().cloned().collect();
+        self.touch();
+    }
+
     fn synchronize(&mut self, revision: u64, snapshot: &ToolsSnapshot) {
         if self.snapshot_revision == revision {
             return;
@@ -382,8 +409,7 @@ struct ToolScanResult {
     manifest: ToolsManifest,
 }
 
-#[derive(Component)]
-struct ToolProviderOperationTask(Task<Result<String, String>>);
+type ToolProviderOperationTask = AsyncTask<Result<String, String>>;
 
 #[derive(Component, Default)]
 struct OperationRequestSequence(u64);
@@ -484,14 +510,21 @@ fn operation_request<R>(
 }
 
 fn start_operation(
-    pending: Query<(Entity, &ToolOperationContext), With<PendingToolOperation>>,
-    active: Query<(), With<ToolStoreTarget>>,
+    pending: Query<
+        (Entity, &ToolOperationContext),
+        (With<PendingToolOperation>, Without<ToolOperationFinished>),
+    >,
+    active: Query<&OperationState, With<ToolStoreTarget>>,
     scans: Query<(), With<ToolScanTask>>,
     stores: Query<Entity, (With<ToolStore>, With<ToolRegistry>)>,
     providers: Query<(Entity, &ToolProviderId)>,
     mut commands: Commands,
 ) {
-    if !active.is_empty() || !scans.is_empty() {
+    if active
+        .iter()
+        .any(|state| matches!(state, OperationState::Pending | OperationState::Running))
+        || !scans.is_empty()
+    {
         return;
     }
     let mut next = None;
@@ -530,7 +563,7 @@ fn request_scan(
     providers: Query<(&ToolProviderId, &ToolScanner)>,
     features: Query<&FeatureManifest>,
     scans: Query<(), With<ToolScanTask>>,
-    tool_operations: Query<(), With<ToolStoreTarget>>,
+    tool_operations: Query<&OperationState, With<ToolStoreTarget>>,
     pending_tool_operations: Query<(), With<PendingToolOperation>>,
     mut commands: Commands,
 ) {
@@ -539,7 +572,9 @@ fn request_scan(
     };
     if !state.dirty
         || !scans.is_empty()
-        || !tool_operations.is_empty()
+        || tool_operations
+            .iter()
+            .any(|state| matches!(state, OperationState::Pending | OperationState::Running))
         || !pending_tool_operations.is_empty()
     {
         return;
@@ -623,6 +658,7 @@ fn start_external_operations(
         (
             Added<ExternalToolOperation>,
             Without<ToolProviderOperationTask>,
+            Without<ToolOperationFinished>,
         ),
     >,
     providers: Query<(&ToolProviderId, &ToolOperator)>,
@@ -685,8 +721,8 @@ fn start_external_operations(
                 .entity(entity)
                 .remove::<ExternalToolOperation>()
                 .insert((
-                    ToolProviderOperationTask(task),
-                    vmux_ecs::OperationState::Running,
+                    ToolProviderOperationTask::new(task),
+                    OperationState::Running,
                 ));
             continue;
         }
@@ -711,8 +747,8 @@ fn start_external_operations(
             .entity(entity)
             .remove::<ExternalToolOperation>()
             .insert((
-                ToolProviderOperationTask(task),
-                vmux_ecs::OperationState::Running,
+                ToolProviderOperationTask::new(task),
+                OperationState::Running,
             ));
     }
 }
@@ -747,21 +783,54 @@ fn apply_tools(
 }
 
 fn finish_external_operations(
-    mut operations: Query<(Entity, &mut ToolProviderOperationTask)>,
+    mut operations: Query<(Entity, &mut TaskResult<Result<String, String>>)>,
     mut commands: Commands,
 ) {
-    for (entity, mut operation) in &mut operations {
-        let Some(result) = future::block_on(future::poll_once(&mut operation.0)) else {
+    for (entity, mut completion) in &mut operations {
+        let Some(result) = completion.take() else {
             continue;
         };
-        let mut entity = commands.entity(entity);
-        entity.remove::<ToolProviderOperationTask>();
-        match result {
+        let result = match result {
+            Ok(result) => result,
+            Err(error) => Err(error.to_string()),
+        };
+        commands.queue(completion.guard(entity, ProviderCompletion { entity, result }));
+    }
+}
+
+struct ProviderCompletion {
+    entity: Entity,
+    result: Result<String, String>,
+}
+
+impl Command for ProviderCompletion {
+    type Out = ();
+
+    fn apply(self, world: &mut World) {
+        if !world
+            .get::<OperationState>(self.entity)
+            .is_some_and(|state| matches!(state, OperationState::Pending | OperationState::Running))
+        {
+            return;
+        }
+        if let Some(target) = world.get::<ToolStoreTarget>(self.entity)
+            && world.get::<ToolStore>(target.entity()).is_none()
+        {
+            world
+                .entity_mut(self.entity)
+                .insert(OperationState::Canceled);
+            return;
+        }
+        match self.result {
             Ok(message) => {
-                entity.insert((ToolOperationFinished, ToolOperationSucceeded(message)));
+                world
+                    .entity_mut(self.entity)
+                    .insert((ToolOperationFinished, ToolOperationSucceeded(message)));
             }
-            Err(message) => {
-                entity.insert((ToolOperationFinished, ToolOperationFailed(message)));
+            Err(error) => {
+                world
+                    .entity_mut(self.entity)
+                    .insert((ToolOperationFinished, ToolOperationFailed(error)));
             }
         }
     }
@@ -876,6 +945,24 @@ fn drain_failed_operations(
     }
 }
 
+fn drain_canceled_operations(
+    operations: Query<(Entity, &ToolOperationContext, &OperationState)>,
+    mut subscribers: Query<&mut ToolSubscriber>,
+    mut commands: Commands,
+) {
+    for (entity, operation, state) in &operations {
+        if *state != OperationState::Canceled {
+            continue;
+        }
+        if let Ok(mut subscriber) = subscribers.get_mut(operation.target) {
+            subscriber.cancel(operation.operation_id);
+        }
+        commands
+            .entity(entity)
+            .remove::<(ToolOperationContext, PendingToolOperation)>();
+    }
+}
+
 fn emit_tools_state(
     registry: Query<(Entity, &Catalog), With<ToolRegistry>>,
     inventory: Inventory,
@@ -912,6 +999,15 @@ fn emit_tools_state(
 mod tests {
     use super::*;
     use crate::state::{ToolOperationKind, ToolProvider};
+
+    #[test]
+    fn native_tool_task_stages_form_a_valid_production_schedule() {
+        let mut app = App::new();
+        app.add_plugins((crate::ToolRuntimePlugin, ToolHostPlugin));
+        app.world_mut().schedule_scope(Update, |world, schedule| {
+            schedule.initialize(world).unwrap();
+        });
+    }
 
     #[test]
     fn tools_page_ready_registers_state_subscriber() {

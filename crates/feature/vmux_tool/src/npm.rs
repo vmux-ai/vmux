@@ -12,9 +12,9 @@ use crate::manifest::{ToolStore, ToolsManifest};
 use crate::process::ToolProcess;
 use crate::{
     ToolInventory, ToolInventoryItem, ToolOperationFailed, ToolOperationFinished,
-    ToolOperationRequest, ToolOperationRouteFlush, ToolOperationRouteSet, ToolOperationSucceeded,
-    ToolOperationTask, ToolOperator, ToolProviderBinding, ToolProviderSnapshot, ToolProviderTarget,
-    ToolScanner, ToolStoreOperation, ToolStoreTarget,
+    ToolOperationRequest, ToolOperationRouteSet, ToolOperationSucceeded, ToolOperationTask,
+    ToolOperator, ToolProviderBinding, ToolProviderSnapshot, ToolProviderTarget, ToolScanner,
+    ToolStoreOperation, ToolStoreTarget, ToolTaskSet,
 };
 
 pub(crate) struct NpmToolPlugin;
@@ -23,8 +23,8 @@ impl Plugin for NpmToolPlugin {
     fn build(&self, app: &mut App) {
         app.add_systems(Startup, spawn)
             .add_systems(Update, route.in_set(ToolOperationRouteSet))
-            .add_systems(Update, import.after(ToolOperationRouteFlush))
-            .add_systems(Update, finish);
+            .add_systems(Update, import.in_set(ToolTaskSet::Start))
+            .add_systems(Update, finish.after(ToolTaskSet::Apply));
     }
 }
 
@@ -249,6 +249,7 @@ fn import(
             Without<ToolOperationTask<ImportedNpmManifest>>,
             Without<ImportedNpmManifest>,
             Without<ToolOperationFailed>,
+            Without<ToolOperationFinished>,
         ),
     >,
     stores: Query<&ToolStore>,
@@ -265,10 +266,12 @@ fn import(
         let path = operation.path.clone();
         commands
             .entity(entity)
-            .insert(ToolOperationTask(IoTaskPool::get().spawn(async move {
-                let packages = store.import_npm_manifest(&path)?;
-                Ok(ImportedNpmManifest { packages })
-            })));
+            .insert(ToolOperationTask::new(IoTaskPool::get().spawn(
+                async move {
+                    let packages = store.import_npm_manifest(&path)?;
+                    Ok(ImportedNpmManifest { packages })
+                },
+            )));
     }
 }
 

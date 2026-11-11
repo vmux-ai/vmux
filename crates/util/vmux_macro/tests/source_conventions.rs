@@ -395,6 +395,29 @@ impl<'ast> Visit<'ast> for FunctionNames {
 struct RegisteredSystems(BTreeSet<String>);
 
 impl<'ast> Visit<'ast> for RegisteredSystems {
+    fn visit_attribute(&mut self, attribute: &'ast Attribute) {
+        if attribute.path().is_ident("component")
+            && let Ok(metadata) = attribute.parse_args_with(
+                syn::punctuated::Punctuated::<syn::Meta, syn::Token![,]>::parse_terminated,
+            )
+        {
+            for item in metadata {
+                let syn::Meta::NameValue(item) = item else {
+                    continue;
+                };
+                if item.path.get_ident().is_some_and(|name| {
+                    matches!(
+                        name.to_string().as_str(),
+                        "on_add" | "on_insert" | "on_replace" | "on_remove" | "on_despawn"
+                    )
+                }) {
+                    collect_paths(&item.value, &mut self.0);
+                }
+            }
+        }
+        visit::visit_attribute(self, attribute);
+    }
+
     fn visit_expr_method_call(&mut self, call: &'ast ExprMethodCall) {
         match call.method.to_string().as_str() {
             "add_systems" => {
@@ -411,6 +434,25 @@ impl<'ast> Visit<'ast> for RegisteredSystems {
         }
         visit::visit_expr_method_call(self, call);
     }
+}
+
+#[test]
+fn component_lifecycle_hooks_are_registered_framework_entries() {
+    let source = syn::parse_file(
+        r#"
+        #[component(on_insert = bind::<T>, on_remove = cleanup)]
+        struct Pending<T>(T);
+        #[unrelated(on_insert = ignored)]
+        struct Other;
+    "#,
+    )
+    .unwrap();
+    let mut registered = RegisteredSystems::default();
+    registered.visit_file(&source);
+    assert_eq!(
+        registered.0,
+        BTreeSet::from(["bind".to_string(), "cleanup".to_string()])
+    );
 }
 
 fn collect_paths(expression: &Expr, names: &mut BTreeSet<String>) {

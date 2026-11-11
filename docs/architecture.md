@@ -358,6 +358,16 @@ agent installation use independent shared lanes, retaining requests when a queue
 Process submissions distinguish a full queue from an unavailable pool; ACP reports an
 unavailable installer pool as an error instead of leaving launch pending.
 
+`vmux_task` supplies entity-owned `AsyncTask<T>` components over Bevy's existing `Task` and
+task pools. Inserting a task replaces its token and cancels its predecessor. `TaskPlugin<T>`
+collects completion and failure into `TaskResult<T>`; feature systems adopt results through a
+guarded command that verifies and claims the current token at application time. Cancellation,
+owner removal, replacement, and duplicate adoption therefore cannot apply an obsolete result.
+Tool operations retain their domain output and Operation lifecycle; Breadcrumb reads also verify
+the current document scope. Winit adapters register a task waker before polling, so completion
+wakes the reactive loop after the result is ready. Running synchronous side effects still require
+their adapter's own cancellation and timeout behavior; discarding a task does not roll them back.
+
 
 System names use their module as context. Prefer `open`, `refresh`, `bind`, `project`, or
 `request_definition` inside the owning module over names that repeat the feature, module,

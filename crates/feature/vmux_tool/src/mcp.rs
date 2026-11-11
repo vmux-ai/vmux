@@ -11,9 +11,9 @@ use serde::{Deserialize, Serialize};
 
 use crate::manifest::{ToolStore, ToolsManifest};
 use crate::{
-    ToolOperationFailed, ToolOperationFinished, ToolOperationRequest, ToolOperationRouteFlush,
-    ToolOperationRouteSet, ToolOperationSucceeded, ToolOperationTask, ToolProviderBinding,
-    ToolProviderSnapshot, ToolProviderTarget, ToolScanner, ToolStoreOperation, ToolStoreTarget,
+    ToolOperationFailed, ToolOperationFinished, ToolOperationRequest, ToolOperationRouteSet,
+    ToolOperationSucceeded, ToolOperationTask, ToolProviderBinding, ToolProviderSnapshot,
+    ToolProviderTarget, ToolScanner, ToolStoreOperation, ToolStoreTarget, ToolTaskSet,
 };
 
 pub(crate) struct McpToolPlugin;
@@ -25,8 +25,8 @@ impl Plugin for McpToolPlugin {
     fn build(&self, app: &mut App) {
         app.add_systems(Startup, spawn)
             .add_systems(Update, request_forget.in_set(ToolOperationRouteSet))
-            .add_systems(Update, forget.after(ToolOperationRouteFlush))
-            .add_systems(Update, finish_forget);
+            .add_systems(Update, forget.in_set(ToolTaskSet::Start))
+            .add_systems(Update, finish_forget.after(ToolTaskSet::Apply));
     }
 }
 
@@ -251,12 +251,14 @@ fn forget(
         let name = operation.name.clone();
         commands
             .entity(entity)
-            .insert(ToolOperationTask(IoTaskPool::get().spawn(async move {
-                let mut manifest = store.load()?;
-                manifest.mcp.servers.remove(&name);
-                store.save(&manifest)?;
-                Ok(ForgottenMcpServer { name })
-            })));
+            .insert(ToolOperationTask::new(IoTaskPool::get().spawn(
+                async move {
+                    let mut manifest = store.load()?;
+                    manifest.mcp.servers.remove(&name);
+                    store.save(&manifest)?;
+                    Ok(ForgottenMcpServer { name })
+                },
+            )));
     }
 }
 

@@ -1,0 +1,15 @@
+[package]
+name = "vmux_task"
+description = "Entity-owned asynchronous tasks and guarded result application"
+version.workspace = true
+edition.workspace = true
+publish = false
+
+[dependencies]
+bevy_app = { workspace = true }
+bevy_ecs = { workspace = true }
+bevy_tasks = { workspace = true, features = ["multi_threaded", "async_executor"] }
+uuid = { workspace = true }
+
+[lints]
+workspace = true

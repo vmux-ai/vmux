@@ -10545,6 +10545,7 @@ dependencies = [
  "vmux_macro",
  "vmux_path",
  "vmux_profile",
+ "vmux_task",
  "vmux_transport",
  "web-time",
  "zip",
@@ -11177,6 +11178,16 @@ name = "vmux_syntax"
 version = "0.0.35"
 dependencies = [
  "syntect",
+]
+
+[[package]]
+name = "vmux_task"
+version = "0.0.35"
+dependencies = [
+ "bevy_app",
+ "bevy_ecs",
+ "bevy_tasks",
+ "uuid",
 ]
 
 [[package]]
