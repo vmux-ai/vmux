@@ -37,6 +37,7 @@ rkyv = { workspace = true, optional = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 uuid = { workspace = true }
+web-time = "1.1"
 ron = { workspace = true, optional = true }
 vmux_profile = { path = "../vmux_profile", optional = true }
 vmux_path = { path = "../vmux_path", optional = true }

@@ -391,6 +391,9 @@ state without a Profile or CEF runtime. The native `host` bundle is explicit in 
 installs the Vmux Profile, page runtime, and layout engine; desktop feature dependencies select
 that adapter through the application builder.
 
+Core clocks use `web-time` so activation and operation retention also work on
+`wasm32-unknown-unknown` without a native runtime.
+
 Shared data components do not imply persistence. Feature-owned markers and store plugins choose
 what is saved: Workspace storage registers its shared fields and includes pages owned by Stacks,
 while History explicitly marks its URL and visit records. The same `Cwd`, timestamps, and ordering

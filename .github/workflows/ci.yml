@@ -135,6 +135,7 @@ jobs:
           filters: |
             code:
               - 'crates/**'
+              - 'examples/framework-consumer/**'
               - 'cef/**'
               - 'patches/**'
               - 'Cargo.toml'

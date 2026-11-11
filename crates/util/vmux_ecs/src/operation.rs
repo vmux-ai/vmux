@@ -1,9 +1,10 @@
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 use bevy_app::{App, Plugin, PostUpdate};
 use bevy_ecs::prelude::*;
 use bevy_reflect::{Reflect, std_traits::ReflectDefault};
 use serde::{Deserialize, Serialize};
+use web_time::Instant;
 
 use crate::Uuid;
 

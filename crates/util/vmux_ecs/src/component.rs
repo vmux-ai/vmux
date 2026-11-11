@@ -1,6 +1,7 @@
 use bevy_ecs::prelude::*;
 use bevy_reflect::{Reflect, std_traits::ReflectDefault};
 use std::path::PathBuf;
+use web_time::{SystemTime, UNIX_EPOCH};
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, PartialOrd, Ord)]
 pub struct UnixMillis(pub i64);
@@ -8,8 +9,8 @@ pub struct UnixMillis(pub i64);
 impl UnixMillis {
     pub fn now() -> Self {
         Self(
-            std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
                 .unwrap_or_default()
                 .as_millis() as i64,
         )

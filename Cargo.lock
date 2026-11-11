@@ -10544,6 +10544,7 @@ dependencies = [
  "vmux_path",
  "vmux_profile",
  "vmux_transport",
+ "web-time",
  "zip",
 ]
 

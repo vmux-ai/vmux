@@ -2,6 +2,7 @@ use bevy_app::{App, Plugin, Update};
 use bevy_ecs::prelude::*;
 use bevy_reflect::Reflect;
 use moonshine_save::prelude::*;
+use std::collections::HashSet;
 use vmux_app::VmuxEcsPlugin;
 use vmux_ecs::store::SchemaPlugin;
 use vmux_ecs::{
@@ -48,11 +49,15 @@ fn rename(
     mut documents: Query<(&mut Name, &mut Revision), With<Document>>,
     mut commands: Commands,
 ) {
+    let mut consumed = HashSet::new();
     for request in requests.read() {
         if !matches!(
             operations.get(request.operation),
             Ok(OperationState::Pending | OperationState::Running)
         ) {
+            continue;
+        }
+        if !consumed.insert(request.operation) {
             continue;
         }
         let entity = match identities.entity_in(request.owner, &request.id) {
@@ -156,6 +161,12 @@ mod tests {
             owner: first_root,
             id: id.clone(),
             name: "Renamed".into(),
+        });
+        app.world_mut().write_message(RenameRequest {
+            operation,
+            owner: second_root,
+            id: id.clone(),
+            name: "Same-frame replay".into(),
         });
         app.update();
         let index = app
