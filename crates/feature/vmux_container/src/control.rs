@@ -133,9 +133,6 @@ pub(crate) struct Finished {
     pub(crate) requester: Entity,
 }
 
-#[derive(Component, Default)]
-pub(crate) struct Revision(pub(crate) u64);
-
 pub(crate) enum Reply {
     Started(Status),
     Stopped(Status),
