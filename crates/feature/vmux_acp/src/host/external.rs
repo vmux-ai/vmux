@@ -1869,8 +1869,9 @@ fn scan(
     let readers = paths.readers(&requested, &snapshot);
     let wake = proxy.as_deref().map(|proxy| (**proxy).clone());
     let started_at = Instant::now();
-    let Some(task) = workers.spawn(vmux_ecs::wake::Wake::optional_waker(wake), move || readers.read())
-    else {
+    let Some(task) = workers.spawn(vmux_ecs::wake::Wake::optional_waker(wake), move || {
+        readers.read()
+    }) else {
         return;
     };
     commands
@@ -2219,9 +2220,11 @@ fn queue_initial_conversations(
         let hint = files.get(session).ok().map(|file| file.0.clone());
         let paths = paths.clone();
         let wake = proxy.as_deref().map(|proxy| (**proxy).clone());
-        let Some(task) = workers.spawn_long(vmux_ecs::wake::Wake::optional_waker(wake), move || {
-            source.read(&paths, cursor, Vec::new(), native, hint)
-        }) else {
+        let Some(task) = workers
+            .spawn_long(vmux_ecs::wake::Wake::optional_waker(wake), move || {
+                source.read(&paths, cursor, Vec::new(), native, hint)
+            })
+        else {
             continue;
         };
         commands
@@ -2298,9 +2301,11 @@ fn queue_failed_conversations(
         let cursor = cursor.map(|cursor| cursor.0);
         let known = KnownConversation::tail(&transcripts.get(session).messages);
         let wake = proxy.as_deref().map(|proxy| (**proxy).clone());
-        let Some(task) = workers.spawn_long(vmux_ecs::wake::Wake::optional_waker(wake), move || {
-            source.read(&paths, cursor, known, native, hint)
-        }) else {
+        let Some(task) = workers
+            .spawn_long(vmux_ecs::wake::Wake::optional_waker(wake), move || {
+                source.read(&paths, cursor, known, native, hint)
+            })
+        else {
             commands
                 .entity(session)
                 .insert(FailedConversationReadRequested);
@@ -2366,9 +2371,11 @@ fn queue_conversation_refreshes(
         let hint = files.get(session).ok().map(|file| file.0.clone());
         let paths = paths.clone();
         let wake = proxy.as_deref().map(|proxy| (**proxy).clone());
-        let Some(task) = workers.spawn_long(vmux_ecs::wake::Wake::optional_waker(wake), move || {
-            source.read(&paths, cursor, known, native, hint)
-        }) else {
+        let Some(task) = workers
+            .spawn_long(vmux_ecs::wake::Wake::optional_waker(wake), move || {
+                source.read(&paths, cursor, known, native, hint)
+            })
+        else {
             continue;
         };
         commands
