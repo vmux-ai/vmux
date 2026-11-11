@@ -55,6 +55,7 @@ version="$(sed -n 's/^version = "\(.*\)"/\1/p' "$root/Cargo.toml" | head -n 1)"
 copy_changed "$plist" "$contents/Info.plist"
 copy_changed "$root/packaging/macos/Vmux.icns" "$contents/Resources/Vmux.icns"
 copy_changed "$debug_dir/vmux" "$contents/MacOS/vmux"
+copy_changed "$debug_dir/vmux_vm" "$contents/MacOS/vmux_vm"
 
 service_app="$contents/Library/LoginItems/Vmux Service.app"
 service="$service_app/Contents"
@@ -79,7 +80,7 @@ fi
 link_binary="$contents/MacOS/vmux_desktop"
 stdlib="$(rustc --print target-libdir)"
 {
-    fingerprint "$debug_dir/vmux_desktop" "$contents/MacOS/vmux" "$contents/Info.plist" \
+    fingerprint "$debug_dir/vmux_desktop" "$contents/MacOS/vmux" "$contents/MacOS/vmux_vm" "$contents/Info.plist" \
         "$contents/Resources/Vmux.icns" "$service_stamp"
     printf '%s\n' "$debug_dir/deps" "$stdlib"
 } > "$temporary/desktop-inputs"

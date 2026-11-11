@@ -19,7 +19,14 @@ CEF_VERSION := $(shell awk -F'"' '/^name = "cef"$$/{getline; print $$2; exit}' C
 CEF_FRAMEWORK_DIR := $(HOME)/.local/share/Chromium Embedded Framework.framework
 CEF_DEBUG_RENDER := $(CEF_FRAMEWORK_DIR)/Libraries/bevy_cef_debug_render_process
 
-.PHONY: _build-dev _build-local _build-release build-storage-status clean-build-cache
+.PHONY: _build-dev _build-local _build-release build-storage-status clean-build-cache build-container-engine _build-container-engine
+
+build-container-engine:
+	./scripts/vmux-builder dev $(MAKE) _build-container-engine
+
+_build-container-engine:
+	$(CARGO_WITH_CEF_CACHE) build -p vmux_cli -p vmux_vm
+	./scripts/sign-container-engine.sh
 
 build-dev:
 	./scripts/vmux-builder dev $(MAKE) _build-dev
@@ -48,7 +55,7 @@ test-app:
 	$(MAKE) dev VMUX_PROFILE=gregor VMUX_TEST=1
 
 build: ensure-mac-deps
-	$(CARGO_WITH_CEF_CACHE) build -p vmux_desktop -p vmux_cli --release --features vmux_desktop/package
+	$(CARGO_WITH_CEF_CACHE) build -p vmux_desktop -p vmux_cli -p vmux_vm --release --features vmux_desktop/package
 	$(CARGO_WITH_CEF_CACHE) build -p vmux_app --bin vmux_service --release --features service-daemon
 
 ios: mobile-ios-run

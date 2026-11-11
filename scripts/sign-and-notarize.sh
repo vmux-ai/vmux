@@ -91,13 +91,17 @@ find "$APP_BUNDLE/Contents/MacOS" -type f -perm +111 | while read -r binary; do
     name="$(basename "$binary")"
     [ "$name" = "vmux_desktop" ] && continue
     ident="$(aux_identifier "$name")"
+    binary_entitlements="$ENTITLEMENTS"
+    if [[ "$name" == vmux_vm ]]; then
+        binary_entitlements="$ROOT/crates/util/vmux_vm/hypervisor.entitlements"
+    fi
     echo "  Signing: ${binary#$APP_BUNDLE/} (identifier=$ident)"
     codesign --force --verify --verbose \
         ${CODESIGN_KEYCHAIN_ARGS[@]+"${CODESIGN_KEYCHAIN_ARGS[@]}"} \
         --sign "$APPLE_SIGNING_IDENTITY" \
         --identifier "$ident" \
         --options runtime \
-        --entitlements "$ENTITLEMENTS" \
+        --entitlements "$binary_entitlements" \
         "$binary"
 done
 

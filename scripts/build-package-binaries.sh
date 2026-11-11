@@ -8,7 +8,7 @@ release_dir="$(vmux_cargo_profile_dir "$ROOT" release)"
 helper_dir="$(vmux_cargo_profile_dir "$ROOT" cef-helper)"
 
 cd "$ROOT"
-"$ROOT/scripts/cargo-with-cef-cache.sh" build -p vmux_cli --release
+"$ROOT/scripts/cargo-with-cef-cache.sh" build -p vmux_cli -p vmux_vm --release
 "$ROOT/scripts/cargo-with-cef-cache.sh" build -p vmux_desktop --release --features vmux_desktop/package
 "$ROOT/scripts/cargo-with-cef-cache.sh" build -p vmux_app --bin vmux_service --release --features service-daemon
 "$ROOT/scripts/verify-web-bundle.sh"

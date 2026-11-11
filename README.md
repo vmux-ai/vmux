@@ -83,6 +83,28 @@ The first build through `make` in a linked worktree seeds its build cache from t
 worktree. See [Makefile](Makefile) for all targets and [AGENTS.md](AGENTS.md) for repository
 rules.
 
+Native container development on Apple Silicon macOS 14+ requires libkrun 1.x,
+libkrunfw 5 and gvproxy. Declare the dependencies in your Homebrew Brewfile:
+
+```ruby
+tap "slp/krun"
+brew "slp/krun/libkrun"
+brew "slp/krun/gvproxy"
+```
+
+```sh
+make build-container-engine
+./target/debug/vmux container start --data /tmp/vmux-container --shared "$PWD"
+docker --host unix:///tmp/vmux-container/docker.sock compose up
+./target/debug/vmux container status --data /tmp/vmux-container
+./target/debug/vmux container stop --data /tmp/vmux-container
+```
+
+Vmux starts its own Linux VM and Docker daemon. Wildcard-published container ports
+are forwarded to macOS localhost. Images and volumes survive VM restart on the
+dedicated data disk; the selected project directory is shared at the same path
+inside Linux. `container logs` reads the engine and guest logs.
+
 ## License
 
 Copyright (c) 2024-2026 Junichi Sugiura

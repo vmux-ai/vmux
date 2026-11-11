@@ -10302,6 +10302,7 @@ dependencies = [
  "vmux_bookmark",
  "vmux_browser",
  "vmux_command",
+ "vmux_container",
  "vmux_ecs",
  "vmux_editor",
  "vmux_extension",
@@ -10446,6 +10447,18 @@ dependencies = [
  "vmux_path",
  "vmux_tool",
  "vmux_ui",
+]
+
+[[package]]
+name = "vmux_container"
+version = "0.0.35"
+dependencies = [
+ "bevy_app",
+ "bevy_ecs",
+ "crossbeam-channel",
+ "vmux_ecs",
+ "vmux_profile",
+ "vmux_vm",
 ]
 
 [[package]]
@@ -11389,6 +11402,21 @@ dependencies = [
  "vmux_tool",
  "vmux_ui",
  "zeroize",
+]
+
+[[package]]
+name = "vmux_vm"
+version = "0.0.35"
+dependencies = [
+ "flate2",
+ "libc",
+ "libloading 0.8.9",
+ "ring",
+ "serde",
+ "serde_json",
+ "tar",
+ "tempfile",
+ "url",
 ]
 
 [[package]]
