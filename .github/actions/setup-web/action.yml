@@ -19,6 +19,7 @@ runs:
       with:
         workspaces: website
         shared-key: ${{ inputs.cache-key }}
+        save-if: ${{ github.ref == 'refs/heads/main' }}
 
     - name: Cache binaryen
       uses: actions/cache@v5

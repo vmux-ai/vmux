@@ -50,19 +50,14 @@ runs:
     - uses: Swatinem/rust-cache@v2
       with:
         shared-key: ${{ inputs.cache-key }}
+        save-if: ${{ github.ref == 'refs/heads/main' }}
 
-    - name: Cache cargo binaries
-      uses: actions/cache@v5
-      with:
-        path: ~/.cargo/bin
-        key: cargo-bin-${{ runner.os }}-dx${{ env.DIOXUS_CLI_VERSION }}-cef${{ inputs.cef-version }}-v3
-
-    - name: Cache CEF framework
-      uses: actions/cache@v5
-      with:
-        path: ~/.local/share/Chromium Embedded Framework.framework
-        key: cef-${{ runner.os }}-${{ runner.arch }}-${{ inputs.cef-version }}-${{ hashFiles('cef/manifest.toml') }}
-
-    - name: Install CEF framework
+    - name: Use a shared Linux CEF SDK
       shell: bash
-      run: test -d "$HOME/.local/share/Chromium Embedded Framework.framework" || ./scripts/install-cef.sh
+      run: echo "CEF_PATH=$HOME/.cache/vmux/cef-sdk" >> "$GITHUB_ENV"
+
+    - name: Cache Linux CEF SDK
+      uses: actions/cache@v5
+      with:
+        path: ~/.cache/vmux/cef-sdk
+        key: cef-sdk-${{ runner.os }}-${{ runner.arch }}-${{ inputs.cef-version }}-v1
