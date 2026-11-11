@@ -184,8 +184,9 @@ These rules matter more than the current module tree.
 1. **A feature has one owner.** State, behavior, UI, commands, tools, persistence, and
    contracts live in the feature crate that gives them meaning.
 2. **The host is authoritative.** Bevy ECS owns product state and decisions. Dioxus renders
-   projections and keeps only immediate DOM state such as text entry, focus, scrolling, and
+   projections and keeps only immediate DOM state such as uncommitted text drafts, focus, scrolling, and
    pointer geometry.
+   Controlled-field edits cross `UiEvent`; rendered values come from `UiState`.
 3. **One contract crosses a boundary.** A Rust type may be an ECS message, UI event, IPC
    payload, QUIC payload, CLI operation, or MCP input. Do not create mirror DTOs for each hop.
 4. **Runtimes compose features.** Application crates choose plugins and add platform adapters.
@@ -456,10 +457,9 @@ selectors; the host derives and publishes only that selection, and multiple page
 underlying read. The transport carries the resulting projection, not the entire ECS world.
 Immediate presentation choices remain local to the client.
 
-Command palette queries are UI input, while filtered rows, completion text, prompt targets, and
-mode are a host-owned ECS projection on the page entity. Dioxus renders that projection; immediate
-text entry, selection, submission, focus, caret, and IME behavior remain local until the input and
-effect audit is complete.
+Command palette queries cross `UiEvent`, while filtered rows, completion text, prompt targets,
+and mode are a host-owned `UiState` projection on the page entity. Dioxus renders that projection;
+uncommitted drafts, focus, caret, and IME composition remain local to the DOM.
 
 A public framework harness, plugin viewer, and composition tooling are direction, not current
 API. When they ship, they should inspect and operate the same typed plugin graph rather than
@@ -935,6 +935,13 @@ clients enter through similarly narrow adapters. General browser content never r
 Bevy world or unrestricted native APIs.
 
 ## Layout ownership
+
+Position in the tree defines ownership. Each native window owns a complete tree. Spaces
+identify projects; tabs preserve arrangements; splits tile panes; stacks hold page history.
+Global actions resolve through the focused window and then through active descendants.
+
+Only test a window's drag region with coordinates from that window. Never compare child-window
+coordinates with the owning window's region.
 
 ---
 

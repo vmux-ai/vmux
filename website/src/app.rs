@@ -141,6 +141,10 @@ fn FrameworkPage() -> Element {
 #[component]
 fn DocsLayout() -> Element {
     let route = use_route::<Route>();
+    let canonical_url = match &route {
+        Route::DocPage { slug } => format!("{DOCS_URL}/{slug}"),
+        _ => DOCS_URL.to_string(),
+    };
     let active_slug = match route {
         Route::DocPage { slug } => slug,
         Route::DocsIndex {} => "architecture".to_string(),
@@ -158,7 +162,7 @@ fn DocsLayout() -> Element {
             title: DOCS_TITLE.to_string(),
             description: DOCS_DESCRIPTION.to_string(),
             keywords: "vmux architecture, Bevy ECS, feature plugins, typed contracts, ACP".to_string(),
-            url: DOCS_URL.to_string(),
+            url: canonical_url,
         }
         div { class: "h-screen flex flex-col overflow-hidden",
             header { class: "shrink-0 flex items-center gap-3 px-6 py-3 border-b border-border",
@@ -252,6 +256,7 @@ mod spy {
     use wasm_bindgen::prelude::Closure;
 
     pub fn setup(mut active: Signal<String>) {
+        super::scroll_doc_position();
         let Some(window) = web_sys::window() else {
             return;
         };
@@ -273,21 +278,20 @@ mod spy {
                 if let Some(element) = list
                     .item(index)
                     .and_then(|node| node.dyn_into::<web_sys::Element>().ok())
+                    && element.get_bounding_client_rect().top() <= line
                 {
-                    if element.get_bounding_client_rect().top() <= line {
-                        current = element.id();
-                    }
+                    current = element.id();
                 }
             }
             let at_bottom = f64::from(scope.scroll_top()) + f64::from(scope.client_height())
                 >= f64::from(scope.scroll_height()) - 8.0;
-            if at_bottom && list.length() > 0 {
-                if let Some(element) = list
+            if at_bottom
+                && list.length() > 0
+                && let Some(element) = list
                     .item(list.length() - 1)
                     .and_then(|node| node.dyn_into::<web_sys::Element>().ok())
-                {
-                    current = element.id();
-                }
+            {
+                current = element.id();
             }
             if current.is_empty() || *active.peek() == current {
                 return;
@@ -312,7 +316,7 @@ mod spy {
 fn DocsIndex() -> Element {
     use_effect(|| {
         #[cfg(target_arch = "wasm32")]
-        scroll_doc_top();
+        scroll_doc_position();
     });
     doc_body("architecture")
 }
@@ -323,19 +327,33 @@ fn DocPage(slug: String) -> Element {
     use_effect(use_reactive!(|reactive_slug| {
         let _ = &reactive_slug;
         #[cfg(target_arch = "wasm32")]
-        scroll_doc_top();
+        scroll_doc_position();
     }));
     doc_body(&slug)
 }
 
 #[cfg(target_arch = "wasm32")]
-fn scroll_doc_top() {
-    if let Some(element) = web_sys::window()
-        .and_then(|window| window.document())
-        .and_then(|document| document.get_element_by_id("doc-main"))
+fn scroll_doc_position() {
+    let Some(window) = web_sys::window() else {
+        return;
+    };
+    let Some(document) = window.document() else {
+        return;
+    };
+    let Some(main) = document.get_element_by_id("doc-main") else {
+        return;
+    };
+    let hash = window.location().hash().unwrap_or_default();
+    if let Some(id) = hash.strip_prefix('#')
+        && let Some(target) = document.get_element_by_id(id)
+        && main.contains(Some(&target))
     {
-        element.set_scroll_top(0);
+        let top = target.get_bounding_client_rect().top() - main.get_bounding_client_rect().top()
+            + f64::from(main.scroll_top());
+        main.set_scroll_top(top.round() as i32);
+        return;
     }
+    main.set_scroll_top(0);
 }
 
 fn doc_body(slug: &str) -> Element {

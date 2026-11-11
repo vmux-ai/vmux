@@ -115,9 +115,9 @@ fn UseCase(
 #[component]
 fn DemoPlaceholder(steps: Vec<String>) -> Element {
     rsx! {
-        div { class: "relative aspect-video overflow-hidden rounded-2xl border border-white/10 bg-black/50 p-6 sm:p-8",
+        div { class: "relative overflow-hidden rounded-2xl border border-white/10 bg-black/50 p-6 sm:p-8 xl:aspect-video",
             div { class: "absolute inset-0 bg-[radial-gradient(circle_at_top_right,rgba(124,138,255,0.18),transparent_55%)]" }
-            div { class: "relative flex h-full flex-col justify-between",
+            div { class: "relative flex h-full flex-col justify-between gap-6",
                 div { class: "flex items-center justify-between",
                     p { class: "text-xs font-semibold uppercase tracking-[0.16em] text-text-muted", "Demo coming soon" }
                     span { class: "rounded-full border border-white/10 px-3 py-1 font-mono text-xs text-text-muted", "30–45 sec" }

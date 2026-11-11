@@ -33,7 +33,7 @@ fn Hero() -> Element {
                     "The browser that gets sh*t done."
                 }
                 h1 { class: "text-5xl font-bold tracking-[-0.05em] sm:text-7xl lg:text-8xl",
-                    "One prompt."
+                    "Any prompt."
                     span { class: "block text-text-muted", "Anything, done." }
                 }
                 p { class: "mx-auto mt-7 max-w-2xl text-lg leading-relaxed text-text-muted sm:text-xl",
