@@ -51,7 +51,7 @@ pub(super) fn ChatFeedback(chat: Chat, #[props(default = rsx! {})] children: Ele
     if shown && kind == FailureKind::Busy {
         return rsx! {
             details { class: "disclosure rounded-[14px] bg-foreground p-px text-xs text-background",
-                summary { class: "flex min-h-9 cursor-pointer items-center gap-2 px-3 py-1.5",
+                summary { class: "flex min-h-9 cursor-pointer items-center gap-2 px-3 py-1.5 [&_button]:text-inherit",
                     span { class: "min-w-0 flex-1 truncate", role: "status", title: translate("sessions-busy-detail"), {translate("sessions-busy-detail")} }
                     Button { size: ButtonSize::Xs, variant: ButtonVariant::Ghost,
                         aria_label: translate("common-retry"),
