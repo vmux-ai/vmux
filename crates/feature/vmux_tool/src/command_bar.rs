@@ -129,7 +129,7 @@ mod tests {
             app.world_mut().spawn(FeatureManifest::parse(r#"(
                 tool_providers: [
                     (id: "agent", title: "Agents", route_title: "Agents", route: "acp", rank: 0),
-                    (id: "language", title: "Language servers", route_title: "Language servers", route: "lsp", rank: 10),
+                    (id: "language", title: "Language servers", route_title: "Language servers · Éditeurs", route: "lsp", rank: 10),
                 ],
             )"#));
             let view = app.world_mut().spawn_empty().id();
@@ -200,6 +200,8 @@ mod tests {
         );
         palette.query("vmux://tools/ls");
         assert_eq!(palette.urls(), BTreeSet::from(["vmux://tools/lsp".into()]));
+        palette.query("ÉDITEURS");
+        assert_eq!(palette.urls(), BTreeSet::from(["vmux://tools/lsp".into()]));
         palette.query("language");
         assert_eq!(palette.urls(), BTreeSet::from(["vmux://tools/lsp".into()]));
         palette.query("https://example.com");
@@ -263,7 +265,7 @@ impl RouteQuery {
     fn parse(query: &str) -> Option<Self> {
         let query = query.trim();
         let root = crate::ToolPlugin::URL.trim_end_matches('/');
-        let lower = query.to_ascii_lowercase();
+        let lower = query.to_lowercase();
         if let Some(rest) = lower.strip_prefix(root) {
             if !rest.is_empty() && !rest.starts_with('/') {
                 return None;
