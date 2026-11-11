@@ -765,7 +765,10 @@ impl McpConnection {
         Ok((registration, token))
     }
 
-    async fn disconnect(server: &McpCatalogServer, credentials: &McpCredentials) -> Result<(), String> {
+    async fn disconnect(
+        server: &McpCatalogServer,
+        credentials: &McpCredentials,
+    ) -> Result<(), String> {
         let store = ToolStore::current();
         let _lease = store.lease_async().await;
         credentials
