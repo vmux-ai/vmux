@@ -10,7 +10,6 @@ use vmux_ecs::wake::Wake;
 use vmux_ecs::{Operation, OperationCompleted, OperationPlugin, OperationState, OperationTarget};
 use vmux_vm::{DockerClient, DockerOperation, EngineClient, Settings, Status};
 
-use crate::compose::ComposeProject;
 use crate::event::ContainerOperation;
 
 pub(crate) struct ControlPlugin;
@@ -47,7 +46,6 @@ pub(crate) enum Command {
         ids: Vec<String>,
         operation: ContainerOperation,
     },
-    Project(std::path::PathBuf),
 }
 
 impl Command {
@@ -59,7 +57,6 @@ impl Command {
             Self::Logs => "container.logs",
             Self::Configure => "container.configure",
             Self::Containers { .. } => "container.control",
-            Self::Project(_) => "container.project",
         }
     }
 
@@ -96,9 +93,6 @@ impl Command {
                 }
                 Ok(Reply::Changed)
             }
-            Self::Project(directory) => Ok(Reply::Started(
-                ComposeProject::at(&directory)?.start(settings, helper)?,
-            )),
             Self::Logs => {
                 let mut logs = String::new();
                 for path in [settings.log(), settings.directory.join("guest.log")] {
@@ -149,11 +143,8 @@ pub(crate) enum Reply {
 pub(crate) struct Busy(Command);
 
 impl Busy {
-    pub(crate) fn project(&self) -> bool {
-        matches!(self.0, Command::Project(_))
-    }
     pub(crate) fn starting(&self) -> bool {
-        matches!(self.0, Command::Start | Command::Project(_))
+        matches!(self.0, Command::Start)
     }
     pub(crate) fn stopping(&self) -> bool {
         matches!(self.0, Command::Stop)

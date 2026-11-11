@@ -107,11 +107,21 @@ inside Linux. `container logs` reads the engine and guest logs.
 
 For the desktop workflow, build with `make build-dev`, then open the app with
 `make run-dev`. The default Containers bookmark opens `vmux://containers/`.
-Start Docker with the bundled defaults, or use Open project to select a folder
-containing a Compose file and start its services. Containers appear in Compose
-groups with start, stop, restart, port links and live logs. Docker resource and
-shared-folder settings live in the settings dialog; the initial share is the home
-directory. Stop Docker shuts down the VM while retaining images and volumes.
+When the service is stopped, the list pane offers one Start control. Containers
+created on this daemon appear automatically, including stopped containers and
+Compose groups. Selecting an entry opens its information and live logs. Resource
+settings and service shutdown live in the settings dialog; the initial share is
+the home directory.
+
+Point Docker CLI at the same daemon, then use normal Docker commands:
+
+```sh
+docker context create vmux --docker "host=unix://$HOME/Library/Application Support/Vmux/containers/docker.sock"
+docker --context vmux compose up -d --build
+```
+
+`docker build` creates an image. `docker run` and `docker compose up` create the
+containers that appear in the list; no registration step is needed.
 
 ## License
 
