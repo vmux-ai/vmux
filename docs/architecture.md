@@ -1347,7 +1347,9 @@ recognized native configs for read-only display, but never copies them into `too
 them back into ACP session creation. Agent launch injects only the internal `vmux` MCP anchored to
 the Session workspace.
 
-`vmux_tool` owns the Connectors page, its catalog, and Profile-owned OAuth. GitHub uses a registered
+`vmux_tool` owns Tools / Connectors, its catalog, and Profile-owned OAuth. The connection list lives
+inside the existing Tools sidebar, search, and breadcrumb layout at `vmux://tools/connectors`;
+`vmux://connectors/` remains a route alias. GitHub uses a registered
 public client and Device Flow; providers advertising dynamic registration use PKCE. Credentials
 and account labels remain in encrypted Profile storage. Pending authorization can be cancelled
 before credentials commit, and sign-in opens the system browser.

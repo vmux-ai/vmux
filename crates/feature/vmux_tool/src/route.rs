@@ -48,6 +48,10 @@ mod tests {
             ToolRoute::parse("vmux://tools/lsp").map(|route| route.url()),
             Some("vmux://tools/lsp".to_string())
         );
+        assert_eq!(
+            ToolRoute::parse("vmux://connectors/").map(|route| route.url()),
+            Some("vmux://tools/connectors".to_string())
+        );
         assert_eq!(ToolRoute::parse("vmux://settings/"), None);
     }
 }

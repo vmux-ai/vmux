@@ -12,6 +12,7 @@ use crate::state::{
 use dioxus::prelude::*;
 use vmux_api::address::{AddressCrumb, AddressIntent, AddressOption, PageAddress};
 use vmux_api::extension::ExtensionsUiState;
+use vmux_api::mcp::{McpServersRequest, McpServersUiState};
 use vmux_ui::components::avatar::AgentThumbnail;
 use vmux_ui::components::breadcrumb::{BreadcrumbOption, BreadcrumbOptionIcon};
 use vmux_ui::components::manager::{
@@ -29,7 +30,7 @@ use crate::route::ToolRoute;
 
 #[vmux_page::page(
     component = Page,
-    states = ["PageAddressUiState", "ThemeUiState", "ToolsUiState", "ExtensionsUiState"],
+    states = ["PageAddressUiState", "ThemeUiState", "ToolsUiState", "ExtensionsUiState", "McpServersUiState"],
     subtree
 )]
 pub struct ToolsPage;
@@ -40,8 +41,10 @@ pub fn Page() -> Element {
     let mut manager_view = use_signal(ManagerView::default);
     let tools = use_ui_state::<ToolsUiState>().state;
     let extensions = use_ui_state::<ExtensionsUiState>().state;
+    let connectors = use_ui_state::<McpServersUiState>().state;
     let state = tools();
     let extension_state = extensions();
+    let connector_state = connectors();
     let route = if state.view.route.is_empty() {
         try_consume_context::<vmux_ecs::PageMetadata>()
             .and_then(|metadata| ToolRoute::parse(&metadata.url))
@@ -52,8 +55,20 @@ pub fn Page() -> Element {
         state.view.route.clone()
     };
     let title = ToolRouteOption::selected_label(&route, state.snapshot.providers.clone());
+    use_effect(use_reactive!(|route| {
+        if route == "connectors" {
+            let _ = send(&McpServersRequest);
+        }
+    }));
     let mut toolbar = Vec::new();
-    if route != "extensions" {
+    if route == "connectors" {
+        toolbar.push(
+            ToolbarControl::button(translate("common-refresh"), move |_| {
+                let _ = send(&McpServersRequest);
+            })
+            .icon(LineIcon::RefreshCw),
+        );
+    } else if route != "extensions" {
         if state.snapshot.loaded && state.view.visible_count > 0 {
             toolbar.extend(ToolbarControl::view(
                 manager_view(),
@@ -87,10 +102,12 @@ pub fn Page() -> Element {
             ToolsHeader { active: route.clone(), providers: state.snapshot.providers.clone() }
             WorkspaceLayout {
                 search: rsx! { ToolsSearch { active: route.clone(), state: state.clone(), extensions: extension_state.clone() } },
-                sidebar: rsx! { ToolsSidebar { active: route.clone(), state: state.clone(), extensions: extension_state.clone() } },
+                sidebar: rsx! { ToolsSidebar { active: route.clone(), state: state.clone(), extensions: extension_state.clone(), connectors: connector_state.clone() } },
                 toolbar: rsx! { if !toolbar.is_empty() { PageToolbar { controls: toolbar } } },
                 if route == "extensions" {
                     ExtensionManager { state: extension_state }
+                } else if route == "connectors" {
+                    crate::connectors::Manager { state: connector_state, query: state.view.query.clone() }
                 } else {
                     ToolManager { state, manager_view }
                 }
@@ -183,6 +200,7 @@ impl ToolRouteOption {
             "mcp" => "tools-provider-mcp-servers",
             "dotfiles" => "tools-provider-dotfiles",
             "extensions" => "extensions-title",
+            "connectors" => "connectors-title",
             _ => "tools-title",
         };
         Self {
@@ -282,6 +300,9 @@ impl ToolRouteOption {
                 icon,
             });
         }
+        if seen.insert("connectors".to_string()) {
+            options.push(Self::fallback("connectors".to_string()));
+        }
         options.push(Self {
             id: "extensions".to_string(),
             label: translate("extensions-title"),
@@ -343,7 +364,12 @@ fn ToolsSearch(active: String, state: ToolsUiState, extensions: ExtensionsUiStat
 }
 
 #[component]
-fn ToolsSidebar(active: String, state: ToolsUiState, extensions: ExtensionsUiState) -> Element {
+fn ToolsSidebar(
+    active: String,
+    state: ToolsUiState,
+    extensions: ExtensionsUiState,
+    connectors: McpServersUiState,
+) -> Element {
     let options = ToolRouteOption::all(state.snapshot.providers.clone());
     rsx! {
         nav { class: "flex flex-col gap-0.5",
@@ -351,7 +377,11 @@ fn ToolsSidebar(active: String, state: ToolsUiState, extensions: ExtensionsUiSta
                 ManagerSidebarItem {
                     key: "{option.id}",
                     label: option.label.clone(), selected: option.id == active,
-                    count: if option.id == "extensions" { extensions.extensions.len() } else { option.count(&state.snapshot) },
+                    count: match option.id.as_str() {
+                        "extensions" => extensions.extensions.len(),
+                        "connectors" => connectors.servers.len(),
+                        _ => option.count(&state.snapshot),
+                    },
                     leading: rsx! { BreadcrumbOptionIcon {
                         option: BreadcrumbOption::from(option.clone()),
                         class: "size-4 shrink-0".to_string(),
@@ -874,6 +904,26 @@ mod tests {
             Some(AddressIntent::Navigate {
                 url: "vmux://tools/extensions".into()
             })
+        );
+        let connectors = ToolRouteOption::address("connectors", Vec::new());
+        assert_eq!(connectors.current.intent, address.current.intent);
+        assert_eq!(
+            connectors.fixed[0].entry.intent,
+            Some(AddressIntent::Navigate {
+                url: "vmux://tools/connectors".into()
+            })
+        );
+        assert_eq!(
+            connectors.fixed[0].entry.label,
+            translate("connectors-title")
+        );
+        let options = ToolRouteOption::all(Vec::new());
+        assert_eq!(
+            options
+                .iter()
+                .map(|option| option.id.as_str())
+                .collect::<BTreeSet<_>>(),
+            BTreeSet::from(["connectors", "extensions"])
         );
     }
 

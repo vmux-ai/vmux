@@ -155,7 +155,7 @@ fn page_ready(
     let Ok(page) = pages.get(webview) else {
         return;
     };
-    if !page.url.starts_with(crate::ToolPlugin::URL) {
+    if crate::route::ToolRoute::parse(&page.url).is_none() {
         return;
     }
     if let Ok(mut subscriber) = subscribers.get_mut(webview) {
