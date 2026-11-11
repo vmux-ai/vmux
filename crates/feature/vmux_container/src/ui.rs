@@ -3,14 +3,20 @@
 use std::collections::BTreeMap;
 
 use dioxus::prelude::*;
+use vmux_api::BuiltinIcon;
+use vmux_api::address::{AddressCrumb, AddressIntent, AddressOption, PageAddress};
 use vmux_api::command_bar::OpenRequest;
 use vmux_api::open_target::OpenTarget;
 use vmux_ui::components::button::{Button, ButtonSize, ButtonVariant};
 use vmux_ui::components::dialog::{DialogContent, DialogDescription, DialogRoot, DialogTitle};
 use vmux_ui::components::input::Input;
-use vmux_ui::components::manager::ManagerIconButton;
-use vmux_ui::components::page::{PageShell, PageToolbarRow};
-use vmux_ui::components::segmented_control::{SegmentedControl, SegmentedControlItem};
+use vmux_ui::components::manager::{ManagerIconButton, WorkspaceLayout};
+use vmux_ui::components::motion::{Collapsible, ContentTransition};
+use vmux_ui::components::page::PageShell;
+use vmux_ui::components::page_address::{PageBreadcrumbs, PageToolbar, ToolbarControl};
+use vmux_ui::components::progress::LoadingIcon;
+use vmux_ui::components::sheet::SheetHeaderChevron;
+use vmux_ui::components::tree_row::TreeRowAccent;
 use vmux_ui::hooks::{send, use_theme, use_ui_state};
 use vmux_ui::i18n::translate;
 use vmux_ui::icon::{LineIcon, LineIconView};
@@ -54,86 +60,36 @@ pub fn Page() -> Element {
     let snapshot = state();
     let catalog = Catalog(&snapshot.containers);
     let selection = catalog.selection(&selected());
-    let groups = catalog.groups();
-    let running = snapshot
-        .containers
-        .iter()
-        .filter(|entry| entry.running())
-        .count();
-    let initialized = !snapshot.data_directory.is_empty();
-    let starting = snapshot.starting
-        || (snapshot.running && !snapshot.stopping && snapshot.phase != "stopping");
-    let stopping = snapshot.stopping || snapshot.phase == "stopping";
-    let service_label = if stopping {
-        "container-service-stopping"
-    } else if starting {
-        "container-service-starting"
-    } else {
-        "container-service-not-running"
-    };
     rsx! {
         PageShell {
-            PageToolbarRow { class: "gap-2 px-3",
-                LineIconView { icon: LineIcon::Package, class: "size-3.5" }
-                span { class: "font-medium text-foreground", {translate("container-title")} }
-                if snapshot.ready && snapshot.inventory_ready {
-                    span { class: "text-[10px] text-muted-foreground/70", "{running} ", {translate("container-running")} }
-                }
-                div { class: "flex-1" }
-                ManagerIconButton {
-                    label: translate("container-settings"), disabled: !initialized,
-                    onclick: move |_| settings_open.set(true),
-                    LineIconView { icon: LineIcon::Wrench, class: "size-3.5" }
-                }
-            }
-            if !snapshot.error.is_empty() {
-                div { class: "mx-3 mb-2 rounded-md bg-destructive/10 px-3 py-2 text-xs text-destructive",
-                    ErrorText { message: snapshot.error.clone() }
-                }
-            }
-            div { class: "flex min-h-0 flex-1 overflow-hidden",
-                aside { class: "flex w-80 max-w-[40%] shrink-0 flex-col bg-foreground/[0.018]",
-                    if !initialized {
-                        ListSkeleton {}
-                    } else if !snapshot.supported {
-                        Empty { title: translate("container-unsupported"), description: String::new() }
-                    } else if !snapshot.ready {
-                        Empty { title: translate(service_label), description: String::new(),
-                            if !starting && !stopping {
-                                Button {
-                                    size: ButtonSize::Sm, disabled: snapshot.busy,
-                                    aria_label: translate("container-start-container"),
-                                    onclick: move |_| { let _ = send(&ContainerStartRequest); },
-                                    {translate("container-start-container")}
-                                }
-                            }
-                        }
-                    } else if !snapshot.inventory_error.is_empty() {
-                        Empty { title: translate("container-inventory-error"), description: snapshot.inventory_error.clone() }
-                    } else if !snapshot.inventory_ready {
-                        ListSkeleton {}
-                    } else if snapshot.containers.is_empty() {
-                        Empty { title: translate("container-empty-title"), description: String::new() }
-                    } else {
-                        div { class: "min-h-0 flex-1 space-y-2 overflow-auto p-2",
-                            for group in groups {
-                                ContainerGroup {
-                                    key: "{group.name}", group, selected: selection.clone(), busy: snapshot.busy,
-                                    onselect: move |id| selected.set(id),
-                                }
-                            }
-                        }
+            WorkspaceLayout {
+                resizable: true,
+                sidebar: rsx! {
+                    ContainerSheet { selected: selection.clone(), onselect: move |id| selected.set(id) }
+                },
+                toolbar: rsx! {
+                    Header {
+                        selection: selection.clone(), panel: panel(),
+                        onpanel: move |value| panel.set(value),
+                        ondelete: move |ids| deleting.set(ids),
+                        onsettings: move |_| settings_open.set(true),
+                    }
+                },
+                if !snapshot.error.is_empty() {
+                    div { class: "mx-3 mb-2 rounded-md bg-destructive/10 px-3 py-2 text-xs text-destructive",
+                        ErrorText { message: snapshot.error.clone() }
                     }
                 }
-                section { class: "flex min-w-0 flex-1 flex-col overflow-hidden",
-                    if snapshot.ready && !selection.is_empty() {
-                        Details {
-                            selection, entries: snapshot.containers.clone(), busy: snapshot.busy,
-                            panel: panel(), onpanel: move |value| panel.set(value),
-                            onselect: move |id| selected.set(id), ondelete: move |ids| deleting.set(ids),
+                div { class: "flex min-h-0 flex-1 flex-col overflow-hidden",
+                    ContentTransition { key: "{selection}:{panel}", class: "flex min-h-0 flex-1 flex-col overflow-hidden",
+                        if snapshot.ready && !selection.is_empty() {
+                            Details {
+                                selection, entries: snapshot.containers.clone(),
+                                panel: panel(), onselect: move |id| selected.set(id),
+                            }
+                        } else {
+                            Empty { title: translate("container-no-selection"), description: String::new() }
                         }
-                    } else {
-                        Empty { title: translate("container-no-selection"), description: String::new() }
                     }
                 }
             }
@@ -142,6 +98,206 @@ pub fn Page() -> Element {
                 DeleteDialog { ids: deleting(), onclose: move |_| deleting.set(Vec::new()) }
             }
         }
+    }
+}
+
+#[component]
+fn ContainerSheet(selected: String, onselect: EventHandler<String>) -> Element {
+    let state = use_ui_state::<ContainerUiState>().state;
+    let snapshot = state();
+    let initialized = !snapshot.data_directory.is_empty();
+    let starting = snapshot.starting
+        || (snapshot.running
+            && !snapshot.ready
+            && !snapshot.stopping
+            && snapshot.phase != "stopping");
+    let stopping = snapshot.stopping || snapshot.phase == "stopping";
+    let running = snapshot
+        .containers
+        .iter()
+        .filter(|entry| entry.running())
+        .count();
+    let service = if stopping {
+        "container-service-stopping"
+    } else if starting {
+        "container-service-starting"
+    } else {
+        "container-service-not-running"
+    };
+    let stage = if !initialized {
+        "initial"
+    } else if !snapshot.ready {
+        service
+    } else if !snapshot.inventory_ready {
+        "inventory"
+    } else {
+        "ready"
+    };
+    rsx! {
+        div { class: "flex h-full min-h-0 flex-col overflow-hidden bg-background font-sans text-xs text-foreground",
+            div { class: "flex h-8 shrink-0 items-center gap-2 px-2.5 text-[11px] font-medium text-foreground/70",
+                LineIconView { icon: LineIcon::Package, class: "size-3.5 shrink-0" }
+                span { class: "min-w-0 flex-1 truncate", {translate("container-title")} }
+                if snapshot.ready && snapshot.inventory_ready {
+                    span { class: "text-[10px] tabular-nums text-muted-foreground/60", "{running}", " ", {translate("container-running")} }
+                }
+            }
+            ContentTransition { key: "{stage}", class: "flex min-h-0 flex-1 flex-col",
+                if !initialized {
+                    ListSkeleton {}
+                } else if !snapshot.supported {
+                    Empty { title: translate("container-unsupported"), description: String::new() }
+                } else if !snapshot.ready {
+                    Empty { title: translate(service), description: String::new(), pending: starting || stopping,
+                        if !starting && !stopping {
+                            Button {
+                                size: ButtonSize::Sm, disabled: snapshot.busy,
+                                aria_label: translate("container-start-container"),
+                                onclick: move |_| { let _ = send(&ContainerStartRequest); },
+                                {translate("container-start-container")}
+                            }
+                        }
+                    }
+                } else if !snapshot.inventory_error.is_empty() {
+                    Empty { title: translate("container-inventory-error"), description: snapshot.inventory_error.clone() }
+                } else if !snapshot.inventory_ready {
+                    ListSkeleton {}
+                } else if snapshot.containers.is_empty() {
+                    Empty { title: translate("container-empty-title"), description: String::new() }
+                } else {
+                    div { class: "min-h-0 flex-1 space-y-1 overflow-auto px-1 pb-3",
+                        for group in Catalog(&snapshot.containers).groups() {
+                            ContainerGroup { key: "{group.name}", group, selected: selected.clone(), busy: snapshot.busy, onselect }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+#[component]
+fn Header(
+    selection: String,
+    panel: String,
+    onpanel: EventHandler<String>,
+    ondelete: EventHandler<Vec<String>>,
+    onsettings: EventHandler<()>,
+) -> Element {
+    let state = use_ui_state::<ContainerUiState>().state;
+    let snapshot = state();
+    let mut members = Vec::new();
+    let project = selection.strip_prefix("project:");
+    for entry in &snapshot.containers {
+        if project.is_some_and(|project| entry.project == project) || entry.id == selection {
+            members.push(entry.clone());
+        }
+    }
+    let mut address = PageAddress {
+        current: AddressOption {
+            label_key: "container-title".into(),
+            icon: Some(BuiltinIcon::Container),
+            ..Default::default()
+        },
+        ..Default::default()
+    };
+    let mut controls = Vec::new();
+    if let Some(first) = members.first() {
+        address.fixed.push(AddressCrumb {
+            entry: AddressOption {
+                label: project.unwrap_or(&first.name).to_string(),
+                icon: Some(if project.is_some() {
+                    BuiltinIcon::Layers
+                } else {
+                    BuiltinIcon::Container
+                }),
+                title: first.image.clone(),
+                ..Default::default()
+            },
+            ..Default::default()
+        });
+        let mut views = Vec::new();
+        for (id, label) in [
+            ("info", "container-info"),
+            ("logs", "container-service-logs"),
+        ] {
+            views.push(AddressOption {
+                label_key: label.into(),
+                identity: id.into(),
+                intent: Some(AddressIntent::Section { id: id.into() }),
+                ..Default::default()
+            });
+        }
+        address.fixed.push(AddressCrumb {
+            entry: AddressOption {
+                label_key: if panel == "logs" {
+                    "container-service-logs"
+                } else {
+                    "container-info"
+                }
+                .into(),
+                ..Default::default()
+            },
+            options: views,
+            ..Default::default()
+        });
+        let mut start_ids = Vec::new();
+        let mut stop_ids = Vec::new();
+        let mut all_ids = Vec::new();
+        for member in members {
+            all_ids.push(member.id.clone());
+            if member.running() {
+                stop_ids.push(member.id);
+            } else {
+                start_ids.push(member.id);
+            }
+        }
+        if !start_ids.is_empty() {
+            controls.push(
+                ToolbarControl::button(translate("container-start-container"), move |_| {
+                    ContainerCommandRequest::submit(start_ids.clone(), ContainerOperation::Start)
+                })
+                .text()
+                .disabled(snapshot.busy),
+            );
+        }
+        if !stop_ids.is_empty() {
+            controls.push(
+                ToolbarControl::button(translate("container-stop-container"), move |_| {
+                    ContainerCommandRequest::submit(stop_ids.clone(), ContainerOperation::Stop)
+                })
+                .text()
+                .disabled(snapshot.busy),
+            );
+            controls.push(
+                ToolbarControl::button(translate("container-restart"), move |_| {
+                    ContainerCommandRequest::submit(all_ids.clone(), ContainerOperation::Restart)
+                })
+                .icon(LineIcon::RotateCcw)
+                .disabled(snapshot.busy),
+            );
+        } else {
+            controls.push(
+                ToolbarControl::button(translate("container-delete"), move |_| {
+                    ondelete.call(all_ids.clone())
+                })
+                .icon(LineIcon::Trash)
+                .disabled(snapshot.busy),
+            );
+        }
+    }
+    controls.push(
+        ToolbarControl::button(translate("container-settings"), move |_| {
+            onsettings.call(())
+        })
+        .icon(LineIcon::Wrench)
+        .disabled(snapshot.data_directory.is_empty()),
+    );
+    rsx! {
+        PageBreadcrumbs { state: address,
+            onintent: move |intent| { if let AddressIntent::Section { id } = intent && matches!(id.as_str(), "info" | "logs") { onpanel.call(id); } }
+        }
+        PageToolbar { controls }
     }
 }
 
@@ -156,24 +312,23 @@ fn ContainerGroup(
     let group_id = format!("project:{}", group.name);
     let running = group.entries.iter().filter(|entry| entry.running()).count();
     let count = group.entries.len();
+    let accent = TreeRowAccent::resolve(selected == group_id, false).classes();
     rsx! {
         section { class: "space-y-0.5",
             if !group.name.is_empty() {
-                div { class: if selected == group_id { "flex items-center rounded-md bg-primary/10 text-foreground" } else { "flex items-center rounded-md text-muted-foreground hover:bg-foreground/[0.04]" },
-                    button { r#type: "button", class: "flex size-7 items-center justify-center", aria_label: group.name.clone(), aria_expanded: expanded(), onclick: move |_| expanded.set(!expanded()),
-                        LineIconView { icon: LineIcon::ChevronDown, class: if expanded() { "size-3" } else { "size-3 -rotate-90" } }
-                    }
-                    button { r#type: "button", class: "flex min-w-0 flex-1 items-center gap-2 py-2 pr-2 text-left text-xs", onclick: move |_| onselect.call(group_id.clone()),
+                div { class: "group flex h-8 items-center rounded-md px-1 {accent}",
+                    button { r#type: "button", class: "flex min-w-0 flex-1 items-center gap-2 px-1 text-left text-[11px]", onclick: move |_| onselect.call(group_id.clone()),
                         LineIconView { icon: LineIcon::Package, class: "size-3.5 shrink-0 text-primary/70" }
                         span { class: "min-w-0 flex-1 truncate font-medium", "{group.name}" }
                         span { class: "text-[10px] tabular-nums text-muted-foreground/60", "{running}/{count}" }
                     }
+                    SheetHeaderChevron { expanded: expanded(), label: group.name.clone(), subtle: true, onclick: move |_| expanded.set(!expanded()) }
                 }
             } else {
-                h2 { class: "px-2 py-1 text-[10px] text-muted-foreground/60", {translate("container-standalone")} }
+                h2 { class: "flex h-7 items-center px-2 text-[10px] font-medium text-muted-foreground/65", {translate("container-standalone")} }
             }
-            if expanded() {
-                div { class: if group.name.is_empty() { "space-y-0.5" } else { "space-y-0.5 pl-4" },
+            Collapsible { expanded: expanded(),
+                div { class: if group.name.is_empty() { "space-y-0.5" } else { "space-y-0.5 pl-3" }, aria_hidden: !expanded(), inert: (!expanded()).then_some(""),
                     for entry in group.entries {
                         ContainerRow { key: "{entry.id}", selected: selected == entry.id, entry, busy, onselect }
                     }
@@ -194,6 +349,7 @@ fn ContainerRow(
     let keyboard_id = entry.id.clone();
     let operation_id = entry.id.clone();
     let running = entry.running();
+    let accent = TreeRowAccent::resolve(selected, false).classes();
     let title = if entry.service.is_empty() {
         entry.name.clone()
     } else {
@@ -201,7 +357,7 @@ fn ContainerRow(
     };
     rsx! {
         div {
-            class: if selected { "group flex items-center gap-2 rounded-md bg-primary/10 px-2 py-2" } else { "group flex cursor-pointer items-center gap-2 rounded-md px-2 py-2 hover:bg-foreground/[0.04]" },
+            class: "group relative flex cursor-pointer items-center gap-2 rounded-md px-2 py-1.5 outline-none transition-colors duration-100 {accent}",
             role: "button", tabindex: "0", aria_selected: selected, aria_label: entry.name.clone(),
             onclick: move |_| onselect.call(row_id.clone()),
             onkeydown: move |event| { if event.key() == Key::Enter || event.key() == Key::Character(" ".into()) { event.prevent_default(); onselect.call(keyboard_id.clone()); } },
@@ -225,11 +381,8 @@ fn ContainerRow(
 fn Details(
     selection: String,
     entries: Vec<ContainerEntry>,
-    busy: bool,
     panel: String,
-    onpanel: EventHandler<String>,
     onselect: EventHandler<String>,
-    ondelete: EventHandler<Vec<String>>,
 ) -> Element {
     let state = use_ui_state::<ContainerUiState>().state;
     let snapshot = state();
@@ -243,59 +396,9 @@ fn Details(
     if members.is_empty() {
         return rsx! { Empty { title: translate("container-no-selection"), description: String::new() } };
     }
-    let title = match &group {
-        Some(group) => group.clone(),
-        None => members[0].name.clone(),
-    };
-    let subtitle = if group.is_some() {
-        translate("container-project")
-    } else {
-        members[0].image.clone()
-    };
-    let mut start_ids = Vec::new();
-    let mut stop_ids = Vec::new();
-    let mut all_ids = Vec::new();
-    for member in &members {
-        all_ids.push(member.id.clone());
-        if member.running() {
-            stop_ids.push(member.id.clone());
-        } else {
-            start_ids.push(member.id.clone());
-        }
-    }
-    let restart_ids = all_ids.clone();
-    let delete_ids = all_ids;
-    let stopped = stop_ids.is_empty();
-    let empty_start = start_ids.is_empty();
-    let tabs = vec![
-        SegmentedControlItem {
-            id: "info".into(),
-            label: translate("container-info"),
-        },
-        SegmentedControlItem {
-            id: "logs".into(),
-            label: translate("container-service-logs"),
-        },
-    ];
     rsx! {
-        div { class: "shrink-0 px-5 pb-3 pt-5",
-            div { class: "flex items-start gap-3",
-                LineIconView { icon: LineIcon::Package, class: "mt-1 size-5 text-primary/70" }
-                div { class: "min-w-0 flex-1",
-                    h1 { class: "truncate text-base font-semibold", "{title}" }
-                    p { class: "mt-1 truncate text-xs text-muted-foreground/65", "{subtitle}" }
-                }
-                Button { size: ButtonSize::Sm, variant: ButtonVariant::Secondary, disabled: busy || empty_start, onclick: move |_| ContainerCommandRequest::submit(start_ids.clone(), ContainerOperation::Start), {translate("container-start-container")} }
-                Button { size: ButtonSize::Sm, variant: ButtonVariant::Secondary, disabled: busy || stopped, onclick: move |_| ContainerCommandRequest::submit(stop_ids.clone(), ContainerOperation::Stop), {translate("container-stop-container")} }
-                ManagerIconButton { label: translate("container-restart"), disabled: busy, onclick: move |_| ContainerCommandRequest::submit(restart_ids.clone(), ContainerOperation::Restart), LineIconView { icon: LineIcon::RotateCcw, class: "size-3.5" } }
-                ManagerIconButton { label: translate("container-delete"), disabled: busy || !stopped, onclick: move |_| ondelete.call(delete_ids.clone()), LineIconView { icon: LineIcon::Trash, class: "size-3.5" } }
-            }
-            div { class: "mt-4",
-                SegmentedControl { active: panel.clone(), items: tabs, onselect: move |value| onpanel.call(value) }
-            }
-        }
         if panel == "logs" && group.is_none() {
-            div { class: "flex min-h-0 flex-1 flex-col px-5 pb-5",
+            div { class: "flex min-h-0 flex-1 flex-col px-4 py-3",
                 div { class: "mb-2 flex shrink-0 items-center gap-2 text-[10px] text-muted-foreground/65",
                     StateDot { state: "running" }
                     span { {translate("container-live")} }
@@ -316,7 +419,7 @@ fn Details(
                 }
             }
         } else if group.is_some() {
-            div { class: "min-h-0 flex-1 overflow-auto px-5 pb-5",
+            div { class: "min-h-0 flex-1 overflow-auto px-4 py-3",
                 if panel == "logs" { p { class: "mb-3 text-xs text-muted-foreground/65", {translate("container-group-logs")} } }
                 div { class: "space-y-1 rounded-lg bg-foreground/[0.025] p-2",
                     for member in members {
@@ -329,7 +432,7 @@ fn Details(
                 }
             }
         } else {
-            div { class: "min-h-0 flex-1 overflow-auto px-5 pb-5",
+            div { class: "min-h-0 flex-1 overflow-auto px-4 py-3",
                 dl { class: "space-y-5",
                     Info { label: translate("container-status"),
                         StateLabel { state: members[0].state.clone() }
@@ -451,11 +554,17 @@ fn Info(label: String, children: Element) -> Element {
 }
 
 #[component]
-fn Empty(title: String, description: String, #[props(default)] children: Element) -> Element {
+fn Empty(
+    title: String,
+    description: String,
+    #[props(default)] pending: bool,
+    #[props(default)] children: Element,
+) -> Element {
     rsx! {
-        div { class: "flex min-h-0 flex-1 items-center justify-center px-6 py-10",
+        div { class: "flex min-h-0 flex-1 items-center justify-center px-4 py-8", aria_busy: pending,
             div { class: "max-w-sm text-center",
-                LineIconView { icon: LineIcon::Package, class: "mx-auto mb-4 size-8 text-muted-foreground/35" }
+                if pending { LoadingIcon { class: "mx-auto mb-4 size-6 text-primary/65" } }
+                else { LineIconView { icon: LineIcon::Package, class: "mx-auto mb-4 size-6 text-muted-foreground/35" } }
                 h2 { class: "text-sm font-medium text-foreground/85", "{title}" }
                 if !description.is_empty() { p { class: "mt-2 text-xs leading-relaxed text-muted-foreground/65", "{description}" } }
                 div { class: "mt-5 flex justify-center gap-2", {children} }
@@ -570,6 +679,7 @@ mod tests {
     use std::future::Future;
     use std::rc::Rc;
     use std::task::{Context, Waker};
+    use vmux_api::address::PageAddressPublish;
     use vmux_api::{BinEvent, UiStateFrame};
     use vmux_ui::hooks::EventListenerError;
     use vmux_ui::transport::{BytesListener, HostBinding, HostScope, PageHost};
@@ -578,12 +688,17 @@ mod tests {
     struct Host {
         listeners: RefCell<Vec<(String, BytesListener)>>,
         starts: Cell<usize>,
+        addresses: RefCell<Vec<PageAddress>>,
         inspections: RefCell<Vec<ContainerInspectRequest>>,
     }
 
     impl PageHost for Host {
         fn send(&self, id: &str, bytes: &[u8]) -> Result<(), EventListenerError> {
-            if id == ContainerStartRequest::id() {
+            if id == PageAddressPublish::id() {
+                let request =
+                    rkyv::from_bytes::<PageAddressPublish, rkyv::rancor::Error>(bytes).unwrap();
+                self.addresses.borrow_mut().push(request.address);
+            } else if id == ContainerStartRequest::id() {
                 let _ =
                     rkyv::from_bytes::<ContainerStartRequest, rkyv::rancor::Error>(bytes).unwrap();
                 self.starts.set(self.starts.get() + 1);
@@ -606,6 +721,7 @@ mod tests {
         host: Rc<Host>,
         dom: VirtualDom,
         controls: HashMap<String, ElementId>,
+        sidebar_blocked: bool,
         _scope: HostScope,
     }
 
@@ -616,13 +732,15 @@ mod tests {
             let scope = HostScope::enter(host.clone());
             let mut dom = VirtualDom::new(Page);
             dom.provide_root_context(HostBinding(host.clone()));
-            dom.rebuild_to_vec();
+            let edits = dom.rebuild_to_vec();
             let mut preview = Self {
                 host,
                 dom,
                 controls: HashMap::new(),
+                sidebar_blocked: false,
                 _scope: scope,
             };
+            preview.apply(edits.edits);
             preview.render();
             preview
         }
@@ -641,22 +759,34 @@ mod tests {
             self.render()
         }
 
+        fn apply(&mut self, edits: Vec<Mutation>) {
+            for edit in edits {
+                if let Mutation::SetAttribute {
+                    name: "inert",
+                    value,
+                    ..
+                } = &edit
+                {
+                    self.sidebar_blocked = !matches!(value, AttributeValue::None);
+                }
+                if let Mutation::SetAttribute {
+                    name: "aria-label",
+                    value: AttributeValue::Text(label),
+                    id,
+                    ..
+                } = edit
+                {
+                    self.controls.insert(label, id);
+                }
+            }
+        }
+
         fn render(&mut self) -> String {
             for _ in 0..8 {
                 let mut context = Context::from_waker(Waker::noop());
                 let _ = std::pin::pin!(self.dom.wait_for_work()).poll(&mut context);
                 let edits = self.dom.render_immediate_to_vec();
-                for edit in edits.edits {
-                    if let Mutation::SetAttribute {
-                        name: "aria-label",
-                        value: AttributeValue::Text(label),
-                        id,
-                        ..
-                    } = edit
-                    {
-                        self.controls.insert(label, id);
-                    }
-                }
+                self.apply(edits.edits);
             }
             dioxus_ssr::render(&self.dom)
         }
@@ -720,6 +850,19 @@ mod tests {
         assert!(html.contains(&translate("container-no-selection")));
         preview.click("web");
         assert!(preview.render().contains("Up 1 second"));
+        let addresses = preview.host.addresses.borrow();
+        let address = addresses.last().unwrap();
+        assert_eq!(address.fixed[0].entry.label, "web");
+        assert_eq!(address.fixed[1].entry.label_key, "container-info");
+        assert_eq!(
+            address.fixed[1]
+                .options
+                .iter()
+                .map(|option| option.identity.as_str())
+                .collect::<Vec<_>>(),
+            ["info", "logs"]
+        );
+        drop(addresses);
         let requests = preview.host.inspections.borrow().len();
         snapshot.containers[0].status = "Up 2 seconds".into();
         snapshot.container_logs_ready = true;
@@ -732,5 +875,28 @@ mod tests {
             preview.host.inspections.borrow().last().unwrap().id,
             "eeeeeeeeeeee"
         );
+    }
+
+    #[test]
+    fn side_sheet_can_close_while_starting_and_busy_service_has_no_duplicate_start() {
+        let mut preview = Preview::new();
+        let html = preview.publish(ContainerUiState {
+            supported: true,
+            running: true,
+            starting: true,
+            busy: true,
+            data_directory: "/fixtures/data".into(),
+            ..Default::default()
+        });
+        assert!(html.contains("aria-busy=true"));
+        assert!(!html.contains(&format!(
+            "aria-label=\"{}\"",
+            translate("container-start-container")
+        )));
+        let toggle = translate("schema-side-sheet");
+        preview.click(&toggle);
+        assert!(preview.sidebar_blocked);
+        preview.click(&toggle);
+        assert!(!preview.sidebar_blocked);
     }
 }

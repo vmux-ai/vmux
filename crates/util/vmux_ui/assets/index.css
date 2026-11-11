@@ -121,6 +121,19 @@
   }
 }
 
+@keyframes vmux-content-enter {
+  from { opacity: 0; transform: translateY(3px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+.vmux-content-enter {
+  animation: vmux-content-enter var(--vmux-content-motion-ms, 100ms) ease-out both;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .vmux-content-enter { animation: none; }
+}
+
 .loading-icon {
   animation: loading-icon-turn 1.6s linear infinite;
 }
