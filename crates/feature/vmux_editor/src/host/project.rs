@@ -92,7 +92,9 @@ impl ProjectNames<'_> {
             ProjectView::Catalog(catalog) => &mut catalog.entries,
             ProjectView::Detail(detail) => {
                 if let Some(project) = self.0.project(&detail.path) {
-                    detail.name = project.display_label().to_string();
+                    if detail.revision == 0 {
+                        detail.name = project.display_label().to_string();
+                    }
                     detail.identity = project.identity().to_string();
                 }
                 &mut detail.choices
@@ -101,7 +103,9 @@ impl ProjectNames<'_> {
         };
         for entry in entries {
             if let Some(project) = self.0.project(&entry.path) {
-                entry.name = project.display_label().to_string();
+                if entry.revision == 0 {
+                    entry.name = project.display_label().to_string();
+                }
                 entry.identity = project.identity().to_string();
             }
         }
@@ -404,7 +408,10 @@ impl ProjectImport {
         if !selected.join(".git").exists() {
             return Err(vmux_ui::i18n::translate("project-import-not-repository"));
         }
-        ProjectRoute::attach(root, &selected)
+        let url = ProjectRoute::attach(root, &selected)
+            .map_err(|error| ErrorMessage(error).localized())?;
+        ProjectRoute::route_path(&url, root)
+            .ok_or_else(|| vmux_ui::i18n::translate("project-name-invalid"))?
     }
 }
 
@@ -1677,6 +1684,51 @@ fn saved(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn registered_project_names_take_precedence_over_legacy_settings() {
+        let mut configured = vmux_setting::SpaceProject::at("/project");
+        configured.label = Some("Legacy name".to_string());
+        let settings = vmux_setting::AppSettings {
+            projects: vec![configured],
+            ..Default::default()
+        };
+        for (revision, expected) in [(0, "Legacy name"), (1, "Saved name")] {
+            let entry = ProjectEntry {
+                name: "Saved name".to_string(),
+                path: "/project".to_string(),
+                revision,
+                ..Default::default()
+            };
+            let states = [
+                ProjectView::Catalog(ProjectCatalogView {
+                    entries: vec![entry.clone()],
+                    ..Default::default()
+                }),
+                ProjectView::Detail(ProjectDetailView {
+                    name: entry.name.clone(),
+                    path: entry.path.clone(),
+                    revision,
+                    choices: vec![entry],
+                    ..Default::default()
+                }),
+            ];
+            for view in states {
+                let state = ProjectNames(&settings).apply(ProjectUiState {
+                    view,
+                    ..Default::default()
+                });
+                match state.view {
+                    ProjectView::Catalog(catalog) => assert_eq!(catalog.entries[0].name, expected),
+                    ProjectView::Detail(detail) => {
+                        assert_eq!(detail.name, expected);
+                        assert_eq!(detail.choices[0].name, expected);
+                    }
+                    _ => panic!("expected project state"),
+                }
+            }
+        }
+    }
     use vmux_session::{SessionSummary, StageSummary};
 
     #[test]
