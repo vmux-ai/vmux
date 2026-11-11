@@ -104,6 +104,7 @@ pub struct AsyncTask<T: Send + Sync + 'static> {
 }
 
 #[derive(Component, Default)]
+#[component(on_insert = wake)]
 pub struct TaskWaker(Option<Waker>);
 
 impl TaskWaker {
@@ -117,11 +118,20 @@ impl TaskWaker {
 
     pub fn bind(&mut self, waker: Waker) {
         self.0 = Some(waker);
+        self.current().wake_by_ref();
     }
 
     fn current(&self) -> &Waker {
         self.0.as_ref().unwrap_or(Waker::noop())
     }
+}
+
+fn wake(world: DeferredWorld, context: HookContext) {
+    world
+        .get::<TaskWaker>(context.entity)
+        .unwrap()
+        .current()
+        .wake_by_ref();
 }
 
 impl<T: Send + Sync + 'static> AsyncTask<T> {
@@ -506,7 +516,7 @@ mod tests {
     }
 
     #[test]
-    fn completion_wakes_the_consumer_only_after_the_result_is_ready() {
+    fn registration_and_completion_wake_the_consumer_without_an_input_frame() {
         let mut fixture = Fixture::new();
         let (release_tx, release_rx) = std::sync::mpsc::sync_channel(1);
         let (wake_tx, wake_rx) = std::sync::mpsc::sync_channel(1);
@@ -521,6 +531,8 @@ mod tests {
                 TaskWaker::new(Waker::from(Arc::new(Notify(wake_tx)))),
             ))
             .id();
+        wake_rx.recv_timeout(Duration::from_secs(2)).unwrap();
+        assert!(fixture.app.world().get::<TaskResult<u32>>(entity).is_none());
         fixture.app.update();
         assert!(fixture.app.world().get::<TaskResult<u32>>(entity).is_none());
         release_tx.send(()).unwrap();
@@ -530,6 +542,25 @@ mod tests {
         fixture.app.world_mut().commands().queue(result);
         fixture.app.world_mut().flush();
         assert_eq!(fixture.app.world().resource::<Applied>().0, [4]);
+    }
+
+    #[test]
+    fn binding_a_waker_after_insertion_requests_the_first_collection_pass() {
+        let mut fixture = Fixture::new();
+        let entity = fixture.start(1);
+        let (wake_tx, wake_rx) = std::sync::mpsc::sync_channel(1);
+        fixture
+            .app
+            .world_mut()
+            .get_mut::<TaskWaker>(entity)
+            .unwrap()
+            .bind(Waker::from(Arc::new(Notify(wake_tx))));
+        wake_rx.recv_timeout(Duration::from_secs(2)).unwrap();
+        fixture.ready(entity);
+        let result = fixture.command(entity);
+        fixture.app.world_mut().commands().queue(result);
+        fixture.app.world_mut().flush();
+        assert_eq!(fixture.app.world().resource::<Applied>().0, [1]);
     }
 
     struct DropNotice(std::sync::mpsc::SyncSender<()>);

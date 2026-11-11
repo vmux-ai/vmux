@@ -1,5 +1,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 use crate::state::ToolProvider;
 use bevy_ecs::prelude::Component;
@@ -128,10 +130,27 @@ impl ToolsManifest {
     }
 }
 
-#[derive(Component, Clone, Debug, PartialEq, Eq)]
+#[derive(Component, Clone, Debug)]
 pub struct ToolStore {
     config_dir: PathBuf,
     home: PathBuf,
+    busy: Arc<AtomicBool>,
+}
+
+impl PartialEq for ToolStore {
+    fn eq(&self, other: &Self) -> bool {
+        self.config_dir == other.config_dir && self.home == other.home
+    }
+}
+
+impl Eq for ToolStore {}
+
+pub(crate) struct Lease(Arc<AtomicBool>);
+
+impl Drop for Lease {
+    fn drop(&mut self) {
+        self.0.store(false, Ordering::Release);
+    }
 }
 
 impl Default for ToolStore {
@@ -152,7 +171,19 @@ impl ToolStore {
         Self {
             config_dir: config_dir.into(),
             home: home.into(),
+            busy: Arc::new(AtomicBool::new(false)),
         }
+    }
+
+    pub(crate) fn is_busy(&self) -> bool {
+        self.busy.load(Ordering::Acquire)
+    }
+
+    pub(crate) fn lease(&self) -> Option<Lease> {
+        self.busy
+            .compare_exchange(false, true, Ordering::AcqRel, Ordering::Acquire)
+            .ok()?;
+        Some(Lease(Arc::clone(&self.busy)))
     }
 
     pub fn root(&self) -> PathBuf {

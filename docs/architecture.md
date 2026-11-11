@@ -364,8 +364,10 @@ collects completion and failure into `TaskResult<T>`; feature systems adopt resu
 guarded command that verifies and claims the current token at application time. Cancellation,
 owner removal, replacement, and duplicate adoption therefore cannot apply an obsolete result.
 Tool operations retain their domain output and Operation lifecycle; Breadcrumb reads also verify
-the current document scope. Winit adapters register a task waker before polling, so completion
-wakes the reactive loop after the result is ready. Running synchronous side effects still require
+the current document scope. Installing or binding a task waker requests the first collection pass;
+completion then wakes the reactive loop after the result is ready. Tool adapters and inventory
+scans hold a shared store lease until their synchronous worker returns, including after cancellation.
+Canceled work cannot start an adapter or revive its operation state. Running synchronous side effects still require
 their adapter's own cancellation and timeout behavior; discarding a task does not roll them back.
 
 

@@ -60,7 +60,7 @@ impl Plugin for ToolHostPlugin {
             Update,
             TaskSet::of::<Result<String, String>>().in_set(ToolTaskSet::Collect),
         )
-        .add_systems(Update, wake.in_set(ToolTaskSet::Cancel))
+        .add_systems(Update, wake.in_set(ToolTaskSet::Wake))
         .add_observer(page_ready)
         .add_observer(refresh_request)
         .add_observer(operation_request::<ToolInstallRequest>)
@@ -516,7 +516,7 @@ fn start_operation(
     >,
     active: Query<&OperationState, With<ToolStoreTarget>>,
     scans: Query<(), With<ToolScanTask>>,
-    stores: Query<Entity, (With<ToolStore>, With<ToolRegistry>)>,
+    stores: Query<(Entity, &ToolStore), With<ToolRegistry>>,
     providers: Query<(Entity, &ToolProviderId)>,
     mut commands: Commands,
 ) {
@@ -543,9 +543,12 @@ fn start_operation(
     let Some((entity, _, provider_id)) = next else {
         return;
     };
-    let Ok(store) = stores.single() else {
+    let Ok((store, storage)) = stores.single() else {
         return;
     };
+    if storage.is_busy() {
+        return;
+    }
     let mut operation_entity = commands.entity(entity);
     operation_entity
         .remove::<PendingToolOperation>()
@@ -571,6 +574,7 @@ fn request_scan(
         return;
     };
     if !state.dirty
+        || store.is_busy()
         || !scans.is_empty()
         || tool_operations
             .iter()
@@ -611,8 +615,13 @@ fn request_scan(
         catalog.providers = metadata.clone();
         catalog.revision = catalog.revision.wrapping_add(1);
     }
-    let task = IoTaskPool::get()
-        .spawn(async move { scan_tools(&store, &providers, metadata, refresh_catalogs) });
+    let Some(lease) = store.lease() else {
+        return;
+    };
+    let task = IoTaskPool::get().spawn(async move {
+        let _lease = lease;
+        scan_tools(&store, &providers, metadata, refresh_catalogs)
+    });
     commands.spawn((
         Name::new("Tool inventory scan"),
         ToolScanTask { generation, task },
@@ -654,9 +663,10 @@ fn start_external_operations(
             &ToolStoreTarget,
             Option<&ToolOperationRequest<ToolAdoptRequest>>,
             Option<&ToolOperationRequest<ToolImportRequest>>,
+            Option<&OperationState>,
         ),
         (
-            Added<ExternalToolOperation>,
+            With<ExternalToolOperation>,
             Without<ToolProviderOperationTask>,
             Without<ToolOperationFinished>,
         ),
@@ -668,7 +678,12 @@ fn start_external_operations(
     stores: Query<&ToolStore>,
     mut commands: Commands,
 ) {
-    for (entity, context, target, adopt, import) in &operations {
+    for (entity, context, target, adopt, import, state) in &operations {
+        if !state
+            .is_some_and(|state| matches!(state, OperationState::Pending | OperationState::Running))
+        {
+            continue;
+        }
         let value = match context.operation.kind {
             ToolOperationKind::Adopt => adopt
                 .map(|request| request.0.value.clone())
@@ -683,6 +698,9 @@ fn start_external_operations(
                 ToolOperationFinished,
                 ToolOperationFailed("tool store entity is unavailable".to_string()),
             ));
+            continue;
+        };
+        let Some(lease) = store.lease() else {
             continue;
         };
         if context.operation.kind == ToolOperationKind::Apply {
@@ -715,8 +733,10 @@ fn start_external_operations(
                 })
                 .collect::<Vec<_>>();
             let appliers = appliers.iter().copied().collect::<Vec<_>>();
-            let task = IoTaskPool::get()
-                .spawn(async move { apply_tools(&store, &installs, &operators, &appliers) });
+            let task = IoTaskPool::get().spawn(async move {
+                let _lease = lease;
+                apply_tools(&store, &installs, &operators, &appliers)
+            });
             commands
                 .entity(entity)
                 .remove::<ExternalToolOperation>()
@@ -741,8 +761,10 @@ fn start_external_operations(
         };
         let operation = context.operation.clone();
         let operator = *operator;
-        let task = IoTaskPool::get()
-            .spawn(async move { operator.run(&store, &operation, value.as_str()) });
+        let task = IoTaskPool::get().spawn(async move {
+            let _lease = lease;
+            operator.run(&store, &operation, value.as_str())
+        });
         commands
             .entity(entity)
             .remove::<ExternalToolOperation>()

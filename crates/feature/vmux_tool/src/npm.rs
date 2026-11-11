@@ -8,6 +8,8 @@ use bevy_app::{App, Plugin, Startup, Update};
 use bevy_ecs::prelude::*;
 use bevy_tasks::IoTaskPool;
 
+use vmux_ecs::OperationState;
+
 use crate::manifest::{ToolStore, ToolsManifest};
 use crate::process::ToolProcess;
 use crate::{
@@ -253,9 +255,16 @@ fn import(
         ),
     >,
     stores: Query<&ToolStore>,
+    states: Query<&OperationState>,
     mut commands: Commands,
 ) {
     for (entity, operation, target) in &operations {
+        if states
+            .get(entity)
+            .is_ok_and(|state| !matches!(state, OperationState::Pending | OperationState::Running))
+        {
+            continue;
+        }
         let Ok(store) = stores.get(target.entity()).cloned() else {
             commands.entity(entity).insert((
                 ToolOperationFinished,
@@ -263,11 +272,15 @@ fn import(
             ));
             continue;
         };
+        let Some(lease) = store.lease() else {
+            continue;
+        };
         let path = operation.path.clone();
         commands
             .entity(entity)
             .insert(ToolOperationTask::new(IoTaskPool::get().spawn(
                 async move {
+                    let _lease = lease;
                     let packages = store.import_npm_manifest(&path)?;
                     Ok(ImportedNpmManifest { packages })
                 },

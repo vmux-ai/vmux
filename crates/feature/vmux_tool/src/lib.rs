@@ -131,8 +131,9 @@ impl Plugin for ToolRuntimePlugin {
         .configure_sets(
             Update,
             (
-                ToolTaskSet::Start,
                 ToolTaskSet::Cancel,
+                ToolTaskSet::Start,
+                ToolTaskSet::Wake,
                 ToolTaskSet::Collect,
                 ToolTaskSet::Apply,
             )
@@ -249,6 +250,7 @@ pub(crate) type ToolOperationTask<T> = AsyncTask<Result<T, String>>;
 pub(crate) enum ToolTaskSet {
     Start,
     Cancel,
+    Wake,
     Collect,
     Apply,
 }
@@ -296,15 +298,24 @@ fn cancel(
 
 fn accept<R: Clone + Send + Sync + 'static>(
     trigger: On<Add, ToolOperationRequest<R>>,
-    requests: Query<(&ToolOperationRequest<R>, Option<&ToolStoreTarget>)>,
+    requests: Query<(
+        &ToolOperationRequest<R>,
+        Option<&ToolStoreTarget>,
+        Option<&OperationState>,
+    )>,
     mut commands: Commands,
 ) where
     state::ToolOperationKey: From<R>,
 {
     let entity = trigger.event_target();
-    let Ok((request, target)) = requests.get(entity) else {
+    let Ok((request, target, state)) = requests.get(entity) else {
         return;
     };
+    if state
+        .is_some_and(|state| !matches!(state, OperationState::Pending | OperationState::Running))
+    {
+        return;
+    }
     let operation = state::ToolOperationKey::from(request.0.clone());
     let mut entity = commands.entity(entity);
     entity.insert(Operation::bundle(operation.kind.operation_kind()).unwrap());
@@ -363,10 +374,12 @@ impl<T: Component> Command for StoreCompletion<T> {
     type Out = ();
 
     fn apply(self, world: &mut World) {
-        let Some(state) = world.get::<OperationState>(self.entity) else {
-            return;
-        };
-        if !matches!(state, OperationState::Pending | OperationState::Running) {
+        if world
+            .get::<OperationState>(self.entity)
+            .is_some_and(|state| {
+                !matches!(state, OperationState::Pending | OperationState::Running)
+            })
+        {
             return;
         }
         if let Some(target) = world.get::<ToolStoreTarget>(self.entity)
@@ -392,7 +405,7 @@ impl<T: Component> Command for StoreCompletion<T> {
 
 fn route_external_operation<R: Clone + Send + Sync + 'static>(
     requests: Query<
-        Entity,
+        (Entity, Option<&OperationState>),
         (
             Added<ToolStoreTarget>,
             With<ToolOperationRequest<R>>,
@@ -401,7 +414,12 @@ fn route_external_operation<R: Clone + Send + Sync + 'static>(
     >,
     mut commands: Commands,
 ) {
-    for entity in &requests {
+    for (entity, state) in &requests {
+        if state.is_some_and(|state| {
+            !matches!(state, OperationState::Pending | OperationState::Running)
+        }) {
+            continue;
+        }
         commands.entity(entity).insert(ExternalToolOperation);
     }
 }
@@ -421,7 +439,11 @@ mod tests {
         fn new() -> Self {
             let directory = tempfile::tempdir().unwrap();
             let mut app = App::new();
-            app.add_plugins(ToolRuntimePlugin);
+            app.add_plugins((
+                bevy_app::TaskPoolPlugin::default(),
+                ToolRuntimePlugin,
+                npm::NpmToolPlugin,
+            ));
             app.update();
             let store = app
                 .world_mut()
@@ -460,6 +482,169 @@ mod tests {
                 self.app.update();
             }
         }
+
+        fn import(&mut self, path: &std::path::Path, canceled: bool) -> Entity {
+            let provider = self
+                .app
+                .world_mut()
+                .query::<(Entity, &ToolProviderBinding)>()
+                .iter(self.app.world())
+                .find_map(|(entity, binding)| (binding.index() == 2).then_some(entity))
+                .unwrap();
+            let mut operation = self.app.world_mut().spawn((
+                ToolOperationRequest(ToolImportRequest {
+                    provider: ToolProvider::new("npm"),
+                    value: path.to_string_lossy().into_owned(),
+                }),
+                ToolStoreTarget::new(self.store),
+                ToolProviderTarget::new(provider),
+            ));
+            if canceled {
+                operation.insert(OperationState::Canceled);
+            }
+            let entity = operation.id();
+            self.app.world_mut().flush();
+            entity
+        }
+
+        fn writing(
+            &mut self,
+        ) -> (
+            Entity,
+            std::sync::mpsc::SyncSender<()>,
+            std::sync::mpsc::Receiver<()>,
+        ) {
+            let store = self
+                .app
+                .world()
+                .get::<ToolStore>(self.store)
+                .unwrap()
+                .clone();
+            let lease = store.lease().unwrap();
+            let (started_tx, started_rx) = std::sync::mpsc::sync_channel(1);
+            let (release_tx, release_rx) = std::sync::mpsc::sync_channel(1);
+            let task = self.pool.spawn(async move {
+                let _lease = lease;
+                started_tx.send(()).map_err(|error| error.to_string())?;
+                release_rx.recv().map_err(|error| error.to_string())?;
+                let mut manifest = store.load()?;
+                manifest.set_package("npm", "first", true);
+                store.save(&manifest)?;
+                Err::<ImportedNpmManifest, _>("canceled writer finished".to_string())
+            });
+            let entity = self
+                .app
+                .world_mut()
+                .spawn((
+                    ToolOperationRequest(ToolImportRequest {
+                        provider: ToolProvider::new("npm"),
+                        value: String::new(),
+                    }),
+                    ToolStoreTarget::new(self.store),
+                    ToolOperationTask::new(task),
+                ))
+                .id();
+            self.app.world_mut().flush();
+            (entity, release_tx, started_rx)
+        }
+
+        fn finish(&mut self, entity: Entity) {
+            let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+            loop {
+                self.app.update();
+                if self
+                    .app
+                    .world()
+                    .get::<ToolOperationSucceeded>(entity)
+                    .is_some()
+                {
+                    return;
+                }
+                assert!(std::time::Instant::now() < deadline);
+                std::thread::sleep(std::time::Duration::from_millis(1));
+            }
+        }
+    }
+
+    #[test]
+    fn canceled_requests_never_start_adapter_writes() {
+        let mut fixture = TaskFixture::new();
+        let path = fixture._directory.path().join("package.json");
+        std::fs::write(&path, r#"{"dependencies":{"typescript":"^5"}}"#).unwrap();
+        let entity = fixture.import(&path, true);
+        fixture.settle();
+        let store = fixture.app.world().get::<ToolStore>(fixture.store).unwrap();
+        assert!(!store.manifest_path().exists());
+        assert!(!store.is_busy());
+        assert_eq!(
+            fixture.app.world().get::<OperationState>(entity),
+            Some(&OperationState::Canceled)
+        );
+    }
+
+    #[test]
+    fn canceled_blocking_writers_keep_the_store_lease_until_they_finish() {
+        let mut fixture = TaskFixture::new();
+        let path = fixture._directory.path().join("package.json");
+        std::fs::write(&path, r#"{"dependencies":{"second":"^1"}}"#).unwrap();
+        let (first, release, started) = fixture.writing();
+        started
+            .recv_timeout(std::time::Duration::from_secs(2))
+            .unwrap();
+        fixture
+            .app
+            .world_mut()
+            .entity_mut(first)
+            .insert(OperationState::Canceled);
+        fixture.settle();
+        let second = fixture.import(&path, false);
+        fixture.settle();
+        assert!(
+            fixture
+                .app
+                .world()
+                .get::<ToolOperationTask<ImportedNpmManifest>>(second)
+                .is_none()
+        );
+        let store = fixture.app.world().get::<ToolStore>(fixture.store).unwrap();
+        assert!(store.is_busy());
+        assert!(!store.manifest_path().exists());
+        release.send(()).unwrap();
+        fixture.finish(second);
+        let store = fixture.app.world().get::<ToolStore>(fixture.store).unwrap();
+        assert_eq!(store.load().unwrap().packages["npm"], ["first", "second"]);
+        assert!(!store.is_busy());
+        assert_eq!(
+            fixture.app.world().get::<OperationState>(first),
+            Some(&OperationState::Canceled)
+        );
+        assert!(
+            fixture
+                .app
+                .world()
+                .get::<ToolOperationFailed>(first)
+                .is_none()
+        );
+    }
+
+    #[test]
+    fn helper_imports_complete_without_operation_state() {
+        let mut fixture = TaskFixture::new();
+        let path = fixture._directory.path().join("package.json");
+        std::fs::write(&path, r#"{"dependencies":{"typescript":"^5"}}"#).unwrap();
+        let entity = fixture
+            .app
+            .world_mut()
+            .spawn((
+                npm::ImportNpmManifest::new(path),
+                ToolStoreOperation,
+                ToolStoreTarget::new(fixture.store),
+            ))
+            .id();
+        fixture.finish(entity);
+        let store = fixture.app.world().get::<ToolStore>(fixture.store).unwrap();
+        assert_eq!(store.load().unwrap().packages["npm"], ["typescript"]);
+        assert!(fixture.app.world().get::<OperationState>(entity).is_none());
     }
 
     #[test]
