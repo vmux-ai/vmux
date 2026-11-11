@@ -68,12 +68,10 @@ service-daemon = [
 tool = ["dep:vmux_tool"]
 capture = ["tool", "dep:vmux_input"]
 bookmark = ["layout", "dep:vmux_bookmark"]
-ecs = [
-    "dep:vmux_ecs",
-    "dep:vmux_flex",
-]
-command = ["ecs", "dep:vmux_command"]
-setting = ["ecs", "dep:vmux_setting"]
+ecs = ["dep:vmux_ecs"]
+runtime = ["ecs", "dep:vmux_flex", "vmux_ecs/host"]
+command = ["runtime", "dep:vmux_command"]
+setting = ["runtime", "dep:vmux_setting"]
 session = ["dep:vmux_session"]
 layout = ["command", "setting", "dep:vmux_layout"]
 browser = ["command", "layout", "dep:vmux_browser"]
@@ -93,15 +91,15 @@ acp = [
     "dep:vmux_acp",
     "vmux_acp/app",
 ]
-knowledge = ["ecs", "dep:vmux_knowledge"]
-history = ["ecs", "dep:vmux_history"]
+knowledge = ["runtime", "dep:vmux_knowledge"]
+history = ["runtime", "dep:vmux_history"]
 simulator = ["layout", "dep:vmux_simulator"]
-shortcut = ["ecs", "dep:vmux_shortcut"]
-team = ["ecs", "dep:vmux_team"]
+shortcut = ["runtime", "dep:vmux_shortcut"]
+team = ["runtime", "dep:vmux_team"]
 space = ["layout", "dep:vmux_space"]
-service = ["ecs", "dep:vmux_service"]
+service = ["runtime", "dep:vmux_service"]
 remote = ["layout", "service", "dep:vmux_remote"]
-start = ["ecs", "dep:vmux_start"]
+start = ["runtime", "dep:vmux_start"]
 vault = ["layout", "dep:vmux_vault"]
 
 [dependencies]

@@ -19,7 +19,7 @@ serde = { workspace = true }
 sha2 = "0.10"
 url = { workspace = true }
 bevy_ecs = { workspace = true }
-vmux_ecs = { path = "../../util/vmux_ecs" }
+vmux_ecs = { path = "../../util/vmux_ecs", features = ["host"] }
 vmux_path = { path = "../../util/vmux_path" }
 vmux_api = { path = "../../util/vmux_api" }
 vmux_page = { path = "../../util/vmux_page" }

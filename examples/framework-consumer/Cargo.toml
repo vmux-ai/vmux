@@ -1,0 +1,19 @@
+[package]
+name = "framework-consumer"
+version = "0.1.0"
+edition = "2024"
+publish = false
+
+[workspace]
+
+[dependencies]
+bevy_app = { version = "0.19", default-features = false, features = ["bevy_reflect", "std"] }
+bevy_ecs = "0.19"
+bevy_asset = "0.19"
+bevy_reflect = "0.19"
+moonshine-save = "0.7"
+vmux_app = { path = "../../crates/util/vmux_app", features = ["ecs"] }
+vmux_ecs = { path = "../../crates/util/vmux_ecs", features = ["persistence"] }
+
+[dev-dependencies]
+tempfile = "3"

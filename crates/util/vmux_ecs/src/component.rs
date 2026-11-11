@@ -1,6 +1,5 @@
 use bevy_ecs::prelude::*;
 use bevy_reflect::{Reflect, std_traits::ReflectDefault};
-use moonshine_save::prelude::*;
 use std::path::PathBuf;
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, PartialOrd, Ord)]
@@ -25,9 +24,12 @@ pub struct PagePresented;
 
 #[derive(Component, Reflect)]
 #[reflect(Component, Default)]
-#[require(Save)]
 #[type_path = "vmux_ecs"]
-#[vmux_api::contract(Copy, Default, Eq)]
+#[cfg_attr(feature = "contracts", vmux_api::contract(Copy, Default, Eq))]
+#[cfg_attr(
+    not(feature = "contracts"),
+    derive(Clone, Copy, Debug, Default, PartialEq, Eq)
+)]
 pub enum CollectionView {
     #[default]
     List,
@@ -42,13 +44,11 @@ pub struct WindowFullscreenSet;
 
 #[derive(Component, Clone, Debug, Reflect, Default, PartialEq, Eq)]
 #[reflect(Component, Default)]
-#[require(Save)]
 #[type_path = "vmux_ecs"]
 pub struct Cwd(pub PathBuf);
 
 #[derive(Component, Clone, Debug, Reflect, Default, PartialEq, Eq)]
 #[reflect(Component, Default)]
-#[require(Save)]
 #[type_path = "vmux_ecs"]
 pub struct Description(pub String);
 
@@ -67,6 +67,7 @@ impl JsonArguments {
     }
 }
 
+#[cfg(feature = "contracts")]
 impl TryFrom<&vmux_api::json::JsonValue> for JsonArguments {
     type Error = String;
 
@@ -107,9 +108,11 @@ impl<T: Send + Sync + 'static> Clone for EntityTarget<T> {
 
 impl<T: Send + Sync + 'static> Copy for EntityTarget<T> {}
 
+#[cfg(feature = "contracts")]
 #[derive(Component, Clone, Copy, Debug, PartialEq, Eq)]
 pub struct ProcessAnchor(pub crate::ProcessId);
 
+#[cfg(feature = "contracts")]
 impl ProcessAnchor {
     pub fn required(value: Option<&Self>, name: &str) -> Result<crate::ProcessId, String> {
         value.map(|anchor| anchor.0).ok_or_else(|| {
@@ -126,7 +129,6 @@ pub struct RegistrationOrder(pub u32);
 
 #[derive(Component, Clone, Copy, Debug, Reflect, Default)]
 #[reflect(Component)]
-#[require(Save)]
 #[type_path = "vmux_history"]
 pub struct CreatedAt(pub i64);
 
@@ -138,7 +140,6 @@ impl CreatedAt {
 
 #[derive(Component, Clone, Copy, Debug, Reflect, Default)]
 #[reflect(Component)]
-#[require(Save)]
 #[type_path = "vmux_history"]
 pub struct LastActivatedAt(pub i64);
 
@@ -156,7 +157,6 @@ impl LastActivatedAt {
 
 #[derive(Component, Clone, Copy, Debug, Reflect, Default, PartialEq, Eq)]
 #[reflect(Component)]
-#[require(Save)]
 #[type_path = "vmux_ecs"]
 pub struct ArchivedAt(pub i64);
 
@@ -168,7 +168,6 @@ pub struct ActivateRequest {
 
 #[derive(Component, Clone, Copy, Debug, Reflect, Default)]
 #[reflect(Component)]
-#[require(Save)]
 #[type_path = "vmux_history"]
 pub struct Visit;
 
@@ -177,25 +176,21 @@ pub struct Ready;
 
 #[derive(Component, Clone, Copy, Debug, Reflect, Default)]
 #[reflect(Component, Default)]
-#[require(Save)]
 #[type_path = "vmux_history"]
 pub struct Url;
 
 #[derive(Component, Clone, Copy, Debug, Reflect, Default)]
 #[reflect(Component, Default)]
-#[require(Save)]
 #[type_path = "vmux_history"]
 pub struct VisitCount(pub u32);
 
 #[derive(Component, Clone, Copy, Debug, Reflect, Default)]
 #[reflect(Component, Default)]
-#[require(Save)]
 #[type_path = "vmux_history"]
 pub struct LastVisitedAt(pub i64);
 
 #[derive(Component, Clone, Copy, Debug, Reflect, Default, PartialEq, Eq)]
 #[reflect(Component, Default)]
-#[require(Save)]
 #[type_path = "vmux_ecs"]
 pub struct Order(pub u32);
 
@@ -236,7 +231,6 @@ pub struct Uuid(pub String);
 
 #[derive(Component, Clone, Copy, Debug, Reflect)]
 #[reflect(Component)]
-#[require(Save)]
 #[type_path = "vmux_history"]
 pub struct VisitedUrl(pub Entity);
 
@@ -248,7 +242,6 @@ impl Default for VisitedUrl {
 
 #[derive(Component, Clone, Copy, Debug, Reflect, Default, PartialEq, Eq)]
 #[reflect(Component, Default)]
-#[require(Save)]
 #[type_path = "vmux_history"]
 pub enum TransitionType {
     #[default]

@@ -101,7 +101,7 @@ toml = { workspace = true, optional = true }
 tempfile = { version = "3", optional = true }
 uuid = { workspace = true, optional = true }
 url = { workspace = true, optional = true }
-vmux_ecs = { path = "../../util/vmux_ecs", optional = true }
+vmux_ecs = { path = "../../util/vmux_ecs", optional = true, features = ["host"] }
 vmux_editor = { path = "../vmux_editor", optional = true }
 vmux_flex = { path = "../../util/vmux_flex", optional = true }
 vmux_git = { path = "../vmux_git", optional = true }

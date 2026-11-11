@@ -15,7 +15,13 @@ pub(crate) struct MutationPlugin;
 
 impl Plugin for MutationPlugin {
     fn build(&self, app: &mut App) {
-        app.register_stored::<Mutation>()
+        app.register_stored::<Cwd>()
+            .register_stored::<Description>()
+            .register_stored::<CreatedAt>()
+            .register_stored::<ArchivedAt>()
+            .register_stored::<LastActivatedAt>()
+            .register_stored::<vmux_ecs::Order>()
+            .register_stored::<Mutation>()
             .register_stored::<Record>()
             .register_stored::<Revision>()
             .register_stored::<BaseRevision>()

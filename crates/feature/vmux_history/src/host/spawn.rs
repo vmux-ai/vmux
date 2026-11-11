@@ -44,6 +44,7 @@ impl VisitWriter<'_, '_> {
                 .commands
                 .spawn((
                     Url,
+                    moonshine_save::prelude::Save,
                     PageMetadata {
                         url: url.to_string(),
                         title: title.to_string(),
@@ -57,8 +58,13 @@ impl VisitWriter<'_, '_> {
         };
 
         if transition != TransitionType::BackForward {
-            self.commands
-                .spawn((Visit, CreatedAt(now), VisitedUrl(url_entity), transition));
+            self.commands.spawn((
+                Visit,
+                moonshine_save::prelude::Save,
+                CreatedAt(now),
+                VisitedUrl(url_entity),
+                transition,
+            ));
         }
     }
 }

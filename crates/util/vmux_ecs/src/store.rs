@@ -345,6 +345,9 @@ pub trait StoreAppExt {
         T: Component;
 }
 
+#[derive(Resource, Default)]
+struct TrackedComponents(HashSet<std::any::TypeId>);
+
 impl StoreAppExt for App {
     fn register_stored<T>(&mut self) -> &mut Self
     where
@@ -359,6 +362,15 @@ impl StoreAppExt for App {
     where
         T: Component,
     {
+        let id = std::any::TypeId::of::<T>();
+        if !self
+            .world_mut()
+            .get_resource_or_init::<TrackedComponents>()
+            .0
+            .insert(id)
+        {
+            return self;
+        }
         self.add_systems(Update, detect_change::<T>)
     }
 }
@@ -470,6 +482,18 @@ mod tests {
         fn record(_: On<StoreDirty>, mut count: ResMut<Self>) {
             count.0 += 1;
         }
+    }
+
+    #[test]
+    fn shared_component_registration_does_not_duplicate_dirty_notifications() {
+        let mut app = App::new();
+        app.register_stored::<Saved>()
+            .register_stored::<Saved>()
+            .init_resource::<DirtyCount>()
+            .add_observer(DirtyCount::record);
+        app.world_mut().spawn((Save, Saved));
+        app.update();
+        assert_eq!(app.world().resource::<DirtyCount>().0, 1);
     }
 
     #[test]

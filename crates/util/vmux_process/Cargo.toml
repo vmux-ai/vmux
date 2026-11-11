@@ -17,7 +17,7 @@ rkyv = { workspace = true }
 serde = { workspace = true }
 tokio = { workspace = true, features = ["fs"] }
 vmux_api = { path = "../vmux_api" }
-vmux_ecs = { path = "../vmux_ecs" }
+vmux_ecs = { path = "../vmux_ecs", features = ["host"] }
 vmux_profile = { path = "../vmux_profile" }
 vmux_transport = { path = "../vmux_transport" }
 vte = "0.15"

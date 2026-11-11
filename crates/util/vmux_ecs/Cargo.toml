@@ -7,12 +7,19 @@ edition.workspace = true
 publish = false
 
 [features]
-default = ["host"]
+default = []
+contracts = ["dep:rkyv", "dep:vmux_api", "dep:vmux_macro"]
+persistence = ["dep:bevy_world_serialization", "dep:moonshine-save", "dep:ron", "dep:vmux_macro"]
 host = [
+    "contracts",
+    "persistence",
+    "dep:tokio",
+    "dep:vmux_path",
+    "dep:vmux_profile",
+    "dep:vmux_transport",
     "dep:bevy",
     "dep:bevy_cef",
     "dep:bevy_cef_core",
-    "dep:ron",
     "dep:sha2",
     "dep:toml",
     "dep:url",
@@ -24,16 +31,17 @@ host = [
 bevy_app = { workspace = true }
 bevy_ecs = { workspace = true }
 bevy_reflect = { workspace = true }
-bevy_world_serialization = { workspace = true }
-moonshine-save = { workspace = true }
-rkyv = { workspace = true }
+bevy_world_serialization = { workspace = true, optional = true }
+moonshine-save = { workspace = true, optional = true }
+rkyv = { workspace = true, optional = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 uuid = { workspace = true }
-vmux_profile = { path = "../vmux_profile" }
-vmux_path = { path = "../vmux_path" }
-vmux_macro = { path = "../vmux_macro" }
-vmux_api = { path = "../vmux_api", features = ["bevy"] }
+ron = { workspace = true, optional = true }
+vmux_profile = { path = "../vmux_profile", optional = true }
+vmux_path = { path = "../vmux_path", optional = true }
+vmux_macro = { path = "../vmux_macro", optional = true }
+vmux_api = { path = "../vmux_api", features = ["bevy"], optional = true }
 
 [dev-dependencies]
 serde_json = { workspace = true }
@@ -45,15 +53,12 @@ bevy_cef = { workspace = true, optional = true }
 bevy_cef_core = { workspace = true, optional = true }
 bevy_ecs = { workspace = true }
 bevy_reflect = { workspace = true }
-bevy_world_serialization = { workspace = true }
-moonshine-save = { workspace = true }
-ron = { workspace = true, optional = true }
 sha2 = { version = "0.10", optional = true }
-tokio = { workspace = true }
+tokio = { workspace = true, optional = true }
 toml = { workspace = true, optional = true }
 url = { workspace = true, optional = true }
 vmux_flex = { path = "../vmux_flex", optional = true }
-vmux_transport = { path = "../vmux_transport" }
+vmux_transport = { path = "../vmux_transport", optional = true }
 zip = { version = "2", default-features = false, features = ["deflate"], optional = true }
 
 [lints]

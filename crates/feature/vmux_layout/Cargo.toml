@@ -18,7 +18,7 @@ percent-encoding = "2"
 rkyv = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
-vmux_ecs = { path = "../../util/vmux_ecs" }
+vmux_ecs = { path = "../../util/vmux_ecs", features = ["host"] }
 vmux_page = { path = "../../util/vmux_page" }
 vmux_path = { path = "../../util/vmux_path" }
 vmux_ui = { path = "../../util/vmux_ui", default-features = false }

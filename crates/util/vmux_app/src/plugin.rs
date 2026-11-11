@@ -6,9 +6,11 @@ use vmux_macro::app_plugin;
 pub enum VmuxPlugin {
     #[plugin(feature = "ecs", desktop)]
     Ecs(VmuxEcsPlugin),
-    #[plugin(feature = "command", desktop, requires(ecs))]
+    #[plugin(feature = "runtime", desktop, requires(ecs))]
+    Runtime(VmuxRuntimePlugin),
+    #[plugin(feature = "command", desktop, requires(runtime))]
     Command(vmux_command::CommandPlugin),
-    #[plugin(feature = "setting", desktop, requires(ecs))]
+    #[plugin(feature = "setting", desktop, requires(runtime))]
     Setting(vmux_setting::SettingsPlugin),
     #[plugin(feature = "session", desktop, mobile)]
     Session(vmux_session::SessionPlugin),
@@ -34,23 +36,23 @@ pub enum VmuxPlugin {
         requires(command, editor, history, knowledge, service, session, space, terminal)
     )]
     Acp(vmux_acp::AcpPlugin),
-    #[plugin(feature = "knowledge", desktop, requires(ecs))]
+    #[plugin(feature = "knowledge", desktop, requires(runtime))]
     Knowledge(vmux_knowledge::KnowledgePlugin),
-    #[plugin(feature = "history", desktop, requires(ecs))]
+    #[plugin(feature = "history", desktop, requires(runtime))]
     History(vmux_history::HistoryPlugin),
     #[plugin(feature = "simulator", desktop, requires(layout))]
     Simulator(vmux_simulator::SimulatorPlugin),
-    #[plugin(feature = "shortcut", desktop, requires(ecs))]
+    #[plugin(feature = "shortcut", desktop, requires(runtime))]
     Shortcut(vmux_shortcut::ShortcutPlugin),
-    #[plugin(feature = "team", desktop, requires(ecs))]
+    #[plugin(feature = "team", desktop, requires(runtime))]
     Team(vmux_team::TeamPlugin),
     #[plugin(feature = "space", desktop, requires(layout))]
     Space(vmux_space::SpacePlugin),
-    #[plugin(feature = "service", desktop, requires(ecs))]
+    #[plugin(feature = "service", desktop, requires(runtime))]
     Service(vmux_service::plugin::ServicePlugin),
     #[plugin(feature = "remote", desktop, requires(layout, service))]
     Remote(vmux_remote::RemotePlugin),
-    #[plugin(feature = "start", desktop, requires(ecs))]
+    #[plugin(feature = "start", desktop, requires(runtime))]
     Start(vmux_start::StartPlugin),
     #[plugin(feature = "tool", desktop, requires(layout))]
     Tool(vmux_tool::ToolPlugin),
@@ -66,9 +68,18 @@ pub struct VmuxEcsPlugin;
 #[cfg(feature = "ecs")]
 impl Plugin for VmuxEcsPlugin {
     fn build(&self, app: &mut App) {
+        app.add_plugins((vmux_ecs::PrimitivesPlugin, vmux_ecs::OperationPlugin));
+    }
+}
+
+#[cfg(all(feature = "runtime", not(target_os = "ios")))]
+pub struct VmuxRuntimePlugin;
+
+#[cfg(all(feature = "runtime", not(target_os = "ios")))]
+impl Plugin for VmuxRuntimePlugin {
+    fn build(&self, app: &mut App) {
         app.add_plugins((
             vmux_flex::FlexPlugin,
-            vmux_ecs::PrimitivesPlugin,
             vmux_ecs::profile::ProfilePlugin,
             vmux_ecs::page::PagePlugin,
         ));

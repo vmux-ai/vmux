@@ -2,6 +2,8 @@
 pub use mobile::VmuxMobilePlugin;
 #[cfg(feature = "ecs")]
 pub use plugin::VmuxEcsPlugin;
+#[cfg(all(feature = "runtime", not(target_os = "ios")))]
+pub use plugin::VmuxRuntimePlugin;
 pub use plugin::{VmuxPlugin, VmuxPluginBuilder, VmuxPluginOptions};
 #[cfg(feature = "cli")]
 pub use tool::VmuxToolPlugin;

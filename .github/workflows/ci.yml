@@ -106,6 +106,9 @@ jobs:
       - name: Test workspace source conventions
         run: cargo test --locked -p vmux_macro --test source_conventions
 
+      - name: Test the public framework from an independent Cargo workspace
+        run: bash scripts/test-framework-consumer.sh
+
       - name: Run tests
         run: env -u CEF_PATH VMUX_SKIP_DX_BUILD=1 cargo test --locked ${{ steps.scope.outputs.args }}
 

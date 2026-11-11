@@ -1,38 +1,35 @@
-use bevy::prelude::*;
-use moonshine_save::prelude::Save;
+use bevy_app::{App, Plugin};
+use bevy_ecs::prelude::*;
+use bevy_ecs::relationship::Relationship;
 
-use super::store::StoreAppExt;
-use crate::PageMetadata;
-use crate::WorkspaceKind;
-use crate::component::{
+use crate::{
     ActivateRequest, Active, ArchivedAt, CollectionView, CreatedAt, Cwd, Description,
-    LastActivatedAt, Order,
+    LastActivatedAt, LastVisitedAt, Order, Uuid, WorkspaceKind,
 };
-use vmux_api::{BuiltinIcon, PageIcon};
-
-use bevy::ecs::relationship::Relationship;
 
 pub struct PrimitivesPlugin;
 
 impl Plugin for PrimitivesPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<ActivationClock>()
-            .register_stored::<PageMetadata>()
-            .register_stored::<WorkspaceKind>()
-            .register_type::<PageIcon>()
-            .register_type::<BuiltinIcon>()
-            .register_stored::<Cwd>()
-            .register_stored::<Description>()
-            .register_stored::<CollectionView>()
-            .register_stored::<CreatedAt>()
-            .register_stored::<LastActivatedAt>()
-            .register_stored::<ArchivedAt>()
-            .register_stored::<Order>()
+            .register_type::<Cwd>()
+            .register_type::<Description>()
+            .register_type::<CollectionView>()
+            .register_type::<CreatedAt>()
+            .register_type::<LastActivatedAt>()
+            .register_type::<LastVisitedAt>()
+            .register_type::<ArchivedAt>()
+            .register_type::<Order>()
             .register_type::<Active>()
+            .register_type::<Uuid>()
+            .register_type::<WorkspaceKind>()
             .register_type::<Children>()
             .register_type::<ChildOf>()
-            .track_store::<Save>()
             .add_observer(activate);
+        #[cfg(feature = "contracts")]
+        app.register_type::<crate::PageMetadata>()
+            .register_type::<vmux_api::PageIcon>()
+            .register_type::<vmux_api::BuiltinIcon>();
     }
 }
 
@@ -77,36 +74,6 @@ fn activate(
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn registers_shared_components() {
-        let mut app = App::new();
-        app.add_plugins(PrimitivesPlugin);
-
-        let registry = app.world().resource::<AppTypeRegistry>().read();
-        let filter = super::super::store::WorkspaceStored::filter(&registry);
-        assert!(
-            registry
-                .get(std::any::TypeId::of::<PageMetadata>())
-                .is_some()
-        );
-        assert!(registry.get(std::any::TypeId::of::<CreatedAt>()).is_some());
-        assert!(registry.get(std::any::TypeId::of::<ArchivedAt>()).is_some());
-        assert!(registry.get(std::any::TypeId::of::<Order>()).is_some());
-        assert!(filter.is_allowed::<Cwd>());
-        assert!(filter.is_allowed::<Description>());
-        assert!(filter.is_allowed::<CollectionView>());
-        assert!(filter.is_allowed::<WorkspaceKind>());
-    }
-
-    #[test]
-    fn active_marker_is_registered_and_reflectable() {
-        let mut app = App::new();
-        app.add_plugins(PrimitivesPlugin);
-
-        let registry = app.world().resource::<AppTypeRegistry>().read();
-        assert!(registry.get(std::any::TypeId::of::<Active>()).is_some());
-    }
 
     #[test]
     fn activation_propagates_through_ancestors() {

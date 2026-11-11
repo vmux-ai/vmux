@@ -384,6 +384,25 @@ cannot be bypassed by another module.
 override feature availability through one builder; individual feature plugins remain usable
 without the facade.
 
+`vmux_ecs` defaults to the renderer-free component, identity, operation, and activation core.
+The `contracts` feature adds shared wire values; `persistence` adds schema registration and store
+state without a Profile or CEF runtime. The native `host` bundle is explicit in Vmux consumers.
+`VmuxEcsPlugin` installs only primitives and operation lifecycle. `VmuxRuntimePlugin` separately
+installs the Vmux Profile, page runtime, and layout engine; desktop feature dependencies select
+that adapter through the application builder.
+
+Shared data components do not imply persistence. Feature-owned markers and store plugins choose
+what is saved: Workspace storage registers its shared fields and includes pages owned by Stacks,
+while History explicitly marks its URL and visit records. The same `Cwd`, timestamps, and ordering
+components can therefore participate in another store or remain transient without removing a
+framework-imposed marker. Identity indexes also expose owner-scoped lookup for direct children;
+the same ID in different roots remains valid, while a duplicate inside one root refuses lookup.
+
+`examples/framework-consumer` is an independent Cargo workspace using only public APIs and no
+repository patch configuration. Its tests exercise typed requests, scoped identity, operation
+completion, and optional persistence in a Bevy App without Profile or UI dependencies. CI runs
+the consumer and checks its resolved dependency graph along with the minimal core configurations.
+
 Every product feature appears exactly once in that graph and exposes one crate-level plugin.
 That root plugin installs only its own manifest, components, systems, and private subplugins. It
 never installs a sibling feature plugin. Cross-feature requirements belong to the `vmux_app`

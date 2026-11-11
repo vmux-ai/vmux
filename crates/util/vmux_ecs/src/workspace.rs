@@ -1,4 +1,6 @@
-use bevy_ecs::prelude::{Component, Event, ReflectComponent, SystemSet};
+#[cfg(feature = "contracts")]
+use bevy_ecs::prelude::Event;
+use bevy_ecs::prelude::{Component, ReflectComponent, SystemSet};
 use bevy_reflect::Reflect;
 
 #[derive(Component, Clone, Copy, Debug, Default, PartialEq, Eq, Reflect)]
@@ -19,6 +21,7 @@ pub struct StackCommandSet;
 #[derive(SystemSet, Debug, Clone, PartialEq, Eq, Hash)]
 pub struct ComputeFocusSet;
 
+#[cfg(feature = "contracts")]
 #[derive(Event, Clone, Copy)]
 pub struct ProjectContextOpenRequest {
     pub force_new: bool,

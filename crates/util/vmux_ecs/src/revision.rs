@@ -1,7 +1,9 @@
 use bevy_ecs::prelude::*;
 use bevy_reflect::Reflect;
+#[cfg(feature = "persistence")]
 use moonshine_save::prelude::Save;
 
+#[cfg(feature = "persistence")]
 use crate::{CreatedAt, Uuid};
 
 #[derive(Component, Clone, Copy, Debug, Default, PartialEq, Eq, PartialOrd, Ord, Reflect)]
@@ -27,11 +29,13 @@ impl Revision {
 #[type_path = "vmux_session"]
 pub struct BaseRevision(pub u64);
 
+#[cfg(feature = "persistence")]
 #[derive(Component, Reflect)]
 #[reflect(Component)]
 #[type_path = "vmux_session"]
 pub struct Record;
 
+#[cfg(feature = "persistence")]
 impl Record {
     pub fn bundle(
         owner: Entity,
@@ -55,6 +59,7 @@ impl Record {
     }
 }
 
+#[cfg(feature = "persistence")]
 #[derive(Bundle)]
 pub struct RecordBundle {
     record: Record,
@@ -66,7 +71,7 @@ pub struct RecordBundle {
     committed: Revision,
 }
 
-#[cfg(all(test, feature = "host"))]
+#[cfg(all(test, feature = "persistence"))]
 mod tests {
     use bevy_reflect::serde::ReflectDeserializer;
     use bevy_reflect::{FromReflect, TypeRegistry};
