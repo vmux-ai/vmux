@@ -1,4 +1,5 @@
 #[vmux_api::contract(Default, Eq)]
+#[cfg_attr(host, derive(bevy::prelude::Component))]
 pub struct ProjectId(pub String);
 
 #[vmux_api::contract(Default, Eq)]
@@ -16,6 +17,8 @@ pub struct ProjectEntry {
     pub ongoing_sessions: u32,
     pub stale_sessions: u32,
     pub archived: bool,
+    pub repository: Option<String>,
+    pub revision: u64,
 }
 
 impl ProjectEntry {
@@ -55,9 +58,11 @@ pub struct ProjectDetailView {
     pub path: String,
     pub choices: Vec<ProjectEntry>,
     pub choices_pending: bool,
+    pub repository: Option<String>,
+    pub revision: u64,
 }
 
-#[vmux_api::ui_state(Default, Eq, version = 4)]
+#[vmux_api::ui_state(Default, Eq, version = 5)]
 pub struct ProjectUiState {
     pub view: ProjectView,
     pub collection_view: vmux_ecs::CollectionView,
@@ -108,6 +113,37 @@ pub struct ProjectDeleteRequest {
 #[vmux_api::ui_event(Copy, Eq)]
 pub struct ProjectCollectionViewRequest {
     pub view: vmux_ecs::CollectionView,
+}
+
+#[vmux_api::contract(Eq)]
+pub enum ProjectSource {
+    New,
+    Local(String),
+    Github(String),
+}
+
+#[vmux_api::ui_event(Eq)]
+pub struct ProjectSaveRequest {
+    pub request_id: String,
+    pub project: Option<ProjectId>,
+    pub revision: u64,
+    pub name: String,
+    pub source: ProjectSource,
+}
+
+#[vmux_api::ui_event(Eq)]
+pub struct ProjectFolderPickRequest {
+    pub request_id: String,
+    pub directory: String,
+}
+
+#[vmux_api::ui_state(Default, Eq)]
+pub struct ProjectFormUiState {
+    pub request_id: String,
+    pub folder: Option<String>,
+    pub pending: bool,
+    pub error: Option<String>,
+    pub saved: Option<ProjectId>,
 }
 
 pub struct ProjectRoute;

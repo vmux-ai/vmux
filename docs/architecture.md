@@ -1672,6 +1672,22 @@ Project dashboards and resume suggestions use the same catalog stage and stalene
 Embedded Session groups show five entries at a time, with stale groups initially collapsed.
 Resume suggestions restrict host contributions to the visible entries, so keyboard selection
 cannot reach hidden sessions; each status has its own explicit expansion limit.
+Project creation and editing share one form for a display name and a local folder or GitHub
+repository. GitHub sources clone through the existing Git provisioning lifecycle before registration.
+Registered Projects are entities owned by `ProjectsRoot`, composed from `ProjectId`, `Name`,
+`Cwd`, repository and revision components. `ProjectPersistencePlugin` restores `.projects.ron`
+once and owns one write task per root. Save operations carry preparation, provisioning and
+commit state as components; systems enqueue immutable snapshots at the filesystem boundary.
+Writes check the current ECS revision and reject duplicate checkouts before dispatch. Only a
+successful atomic write updates Project entities and emits `ProjectSaved`; failed writes retain
+the previous registration. Stable Project URLs survive source edits. Removal persists hidden
+URL entities for the registration and its imported aliases while leaving checkout files intact.
+Alias resolution runs inside the root's write task, and committed hidden URLs are restored into ECS.
+Page routing and catalog projections read ECS registrations. Native folder selection authorizes
+a new external directory, and the form retains its draft on validation or clone failure.
+Accepted saves and registration removals finish after the requesting view closes.
+Project entities omit the workspace `Save` marker; `.projects.ron` is their only persistence owner.
+
 Project dashboards show related sessions, repository status and an entry point into Code,
 without reading or listing arbitrary directories in the overview. Repository status uses the Git
 feature's shared `RepositorySummaryRequest` subscription rather than loading a Git page. Reads

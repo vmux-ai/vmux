@@ -18,6 +18,7 @@ mod note;
 mod note_text;
 mod outline_navigation;
 mod project;
+mod project_form;
 mod project_manager;
 mod sidebar;
 mod state;
@@ -41,7 +42,7 @@ pub(crate) struct FilePage;
 #[vmux_page::page(
     page = "projects",
     component = Page,
-    states = ["PageAddressUiState", "ThemeUiState", "FileUiState", "ProjectUiState", "SessionScopeUiState", "RepositorySummaryUiState", "GitUiState", "KeyClaimsUiState", "PageLocationUiState"],
+    states = ["PageAddressUiState", "ThemeUiState", "FileUiState", "ProjectUiState", "ProjectFormUiState", "SessionScopeUiState", "RepositorySummaryUiState", "GitUiState", "KeyClaimsUiState", "PageLocationUiState"],
     dom_group = "editor",
     subtree,
     takes = vmux_ecs::PageMetadata

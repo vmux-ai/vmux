@@ -1118,3 +1118,10 @@ sessions-operation-failed = De bewerking kon niet worden voltooid.
 workspace-store-title = Werkruimtegegevens
 workspace-store-recovered = De eerdere gegevens zijn bewaard in { $path }. Er wordt een nieuwe werkruimte gemaakt.
 workspace-store-refused = Deze werkruimte kan niet veilig worden geopend. De gegevens in { $path } zijn ongewijzigd. Gebruik een nieuwere versie of een kopie van de gegevens.
+
+project-edit = Project bewerken
+project-source = Bron
+project-new-repository = Lege repository
+project-local-folder = Lokale map
+project-github-repository = GitHub-repository
+project-edit-conflict = Dit project is gewijzigd. Open de editor opnieuw.
