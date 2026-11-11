@@ -1,4 +1,5 @@
-use bevy::prelude::*;
+use bevy_ecs::prelude::*;
+use bevy_math::Vec2;
 
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub struct Insets {
@@ -101,7 +102,7 @@ mod tests {
             Self {
                 size,
                 center,
-                ..default()
+                ..Default::default()
             }
         }
     }

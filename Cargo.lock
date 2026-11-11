@@ -10649,7 +10649,10 @@ dependencies = [
 name = "vmux_flex"
 version = "0.0.35"
 dependencies = [
- "bevy",
+ "bevy_app",
+ "bevy_ecs",
+ "bevy_math",
+ "bevy_window",
  "taffy",
 ]
 

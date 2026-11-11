@@ -1,29 +1,26 @@
-use bevy::ecs::entity::EntityHashMap;
-use bevy::prelude::*;
+use bevy_ecs::entity::EntityHashMap;
+use bevy_ecs::prelude::*;
+use bevy_math::Vec2;
 use taffy::TaffyTree;
 use taffy::style_helpers;
 
 use crate::node::{AlignItems, Display, FlexDirection, JustifyContent, Node, PositionType, Val};
 
-#[derive(Clone, Copy, Debug, PartialEq)]
+#[derive(Component, Clone, Copy, Debug, PartialEq)]
 pub struct LayoutContext {
     pub scale_factor: f32,
     pub physical_size: Vec2,
 }
 
-impl From<&Window> for LayoutContext {
-    fn from(window: &Window) -> Self {
-        Self {
-            scale_factor: window.resolution.scale_factor(),
-            physical_size: Vec2::new(
-                window.resolution.physical_width() as f32,
-                window.resolution.physical_height() as f32,
-            ),
-        }
-    }
-}
-
 impl LayoutContext {
+    pub fn is_valid(&self) -> bool {
+        self.scale_factor.is_finite()
+            && self.scale_factor > 0.0
+            && self.physical_size.is_finite()
+            && self.physical_size.x > 0.0
+            && self.physical_size.y > 0.0
+    }
+
     pub fn style_for(&self, node: &Node) -> taffy::Style {
         taffy::Style {
             display: match node.display {
@@ -177,6 +174,7 @@ impl FlexTree {
     }
 
     pub fn detach_viewport(&mut self, entity: Entity) {
+        self.contexts.remove(&entity);
         let Some(node) = self.entities.get_mut(&entity) else {
             return;
         };
@@ -236,6 +234,10 @@ impl FlexTree {
 
     pub fn context(&self, root: Entity) -> Option<LayoutContext> {
         self.contexts.get(&root).copied()
+    }
+
+    pub(crate) fn invalidate(&mut self, root: Entity) {
+        self.contexts.remove(&root);
     }
 
     pub fn set_context(&mut self, root: Entity, context: LayoutContext) {
