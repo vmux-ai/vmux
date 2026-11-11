@@ -38,7 +38,7 @@ impl Debug {
         if fs::symlink_metadata(&alias).is_ok_and(|metadata| metadata.is_symlink()) {
             fs::remove_file(&alias)?;
         }
-        self.cargo(&["build", "-p", "vmux_cli"], &[])?;
+        self.cargo(&["build", "-p", "vmux_cli", "-p", "vmux_vm"], &[])?;
         self.cargo(
             &[
                 "build",
@@ -64,7 +64,7 @@ impl Debug {
             self.sign(&debug)?;
         }
         let mut hashes = format!("{}\n", self.root.display());
-        for binary in ["vmux", "vmux_service", "vmux_desktop"] {
+        for binary in ["vmux", "vmux_vm", "vmux_service", "vmux_desktop"] {
             let path = debug.join(binary);
             if fs::metadata(&path)?.permissions().mode() & 0o111 == 0 {
                 return Err(format!("Missing executable: {binary}").into());
@@ -125,6 +125,11 @@ impl Debug {
         let identity = String::from_utf8(Execution::new(command).output(None)?.stdout)?;
         self.environment
             .set("APPLE_SIGNING_IDENTITY", identity.trim());
+        let engine = self.environment.command(
+            self.root.join("scripts/sign-container-engine.sh"),
+            &self.root,
+        );
+        Execution::new(engine).run()?;
         let mut sign = self
             .environment
             .command(self.root.join("scripts/sign-dev-mac.sh"), &self.root);
