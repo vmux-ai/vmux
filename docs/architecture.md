@@ -1645,6 +1645,16 @@ and retirement run in ordered system sets. Blocking waits belong to `EngineClien
 CLI and GUI adapter. The worker enters the VMM in its own process because libkrun consumes
 that process's lifecycle. Closing the invoking CLI or page does not close the VM.
 
+The network entity runs `NetworkProxy`, which owns gvproxy behind a parent-held stdin
+channel. Closing that channel, including an unexpected supervisor exit, reaps gvproxy
+before releasing `network.lock`. The VM worker holds `machine.lock` and monitors its
+supervisor; parent loss requests guest shutdown, with a bounded forced exit if needed.
+Startup waits for both leases before changing guest files or sockets. Process retirement
+waits for supervised cleanup even after its channel has already closed.
+An engine in Ready keeps its page and inventory through a transient API probe failure;
+explicit stopping and process exit end that presentation. Inspection tasks carry the
+engine revision so results captured before a control completion cannot replace it.
+
 ```mermaid
 flowchart LR
     cli["vmux container"] --> control["ControlPlugin: operation entities"]
