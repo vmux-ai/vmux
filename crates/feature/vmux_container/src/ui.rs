@@ -17,8 +17,8 @@ use vmux_ui::icon::{LineIcon, LineIconView};
 
 use crate::event::{
     ContainerCommandRequest, ContainerEntry, ContainerInspectRequest, ContainerLogsRequest,
-    ContainerOperation, ContainerPort, ContainerProjectOpenRequest, ContainerSettingsRequest,
-    ContainerStartRequest, ContainerStopRequest, ContainerUiState,
+    ContainerOperation, ContainerPort, ContainerSettingsRequest, ContainerStartRequest,
+    ContainerStopRequest, ContainerUiState,
 };
 
 #[vmux_page::page(component = Page, states = ["PageAddressUiState", "ThemeUiState", "ContainerUiState"])]
@@ -28,7 +28,6 @@ pub(crate) struct ContainerPage;
 pub fn Page() -> Element {
     use_theme();
     let state = use_ui_state::<ContainerUiState>().state;
-    let mut search = use_signal(String::new);
     let mut selected = use_signal(String::new);
     let mut settings_open = use_signal(|| false);
     let mut deleting = use_signal(Vec::<String>::new);
@@ -55,23 +54,22 @@ pub fn Page() -> Element {
     let snapshot = state();
     let catalog = Catalog(&snapshot.containers);
     let selection = catalog.selection(&selected());
-    let groups = catalog.groups(&search());
+    let groups = catalog.groups();
     let running = snapshot
         .containers
         .iter()
         .filter(|entry| entry.running())
         .count();
     let initialized = !snapshot.data_directory.is_empty();
-    let phase_label = if snapshot.stopping {
-        translate("container-phase-stopping")
-    } else if snapshot.ready {
-        translate("container-docker-running")
-    } else if snapshot.starting || (snapshot.running && snapshot.phase != "stopping") {
-        translate("container-docker-starting")
-    } else if snapshot.phase == "stopping" {
-        translate("container-phase-stopping")
+    let starting = snapshot.starting
+        || (snapshot.running && !snapshot.stopping && snapshot.phase != "stopping");
+    let stopping = snapshot.stopping || snapshot.phase == "stopping";
+    let service_label = if stopping {
+        "container-service-stopping"
+    } else if starting {
+        "container-service-starting"
     } else {
-        translate("container-docker-stopped")
+        "container-service-not-running"
     };
     rsx! {
         PageShell {
@@ -82,26 +80,8 @@ pub fn Page() -> Element {
                     span { class: "text-[10px] text-muted-foreground/70", "{running} ", {translate("container-running")} }
                 }
                 div { class: "flex-1" }
-                StateDot { state: if snapshot.ready { "running" } else if snapshot.busy { "restarting" } else { "exited" } }
-                span { class: "mr-1 text-[11px]", "{phase_label}" }
-                Button {
-                    size: ButtonSize::Sm, variant: ButtonVariant::Ghost,
-                    aria_label: translate(if snapshot.running { "container-stop" } else { "container-start" }),
-                    disabled: !snapshot.supported || snapshot.busy || !initialized,
-                    onclick: move |_| {
-                        if state().running { let _ = send(&ContainerStopRequest); }
-                        else { let _ = send(&ContainerStartRequest); }
-                    },
-                    {translate(if snapshot.running { "container-stop" } else { "container-start" })}
-                }
-                Button {
-                    size: ButtonSize::Sm, disabled: !snapshot.supported || snapshot.busy || !initialized,
-                    onclick: move |_| { let _ = send(&ContainerProjectOpenRequest); },
-                    LineIconView { icon: LineIcon::Plus, class: "mr-1 size-3" }
-                    {translate(if snapshot.project_starting { "container-project-starting" } else { "container-open-project" })}
-                }
                 ManagerIconButton {
-                    label: translate("container-settings"),
+                    label: translate("container-settings"), disabled: !initialized,
                     onclick: move |_| settings_open.set(true),
                     LineIconView { icon: LineIcon::Wrench, class: "size-3.5" }
                 }
@@ -112,58 +92,48 @@ pub fn Page() -> Element {
                 }
             }
             div { class: "flex min-h-0 flex-1 overflow-hidden",
-                aside { class: "flex w-72 max-w-[40%] shrink-0 flex-col bg-foreground/[0.018]",
-                    div { class: "px-3 pb-2 pt-3",
-                        Input {
-                            r#type: "search", class: "w-full text-xs", value: search(),
-                            placeholder: translate("container-search"),
-                            oninput: move |event: FormEvent| search.set(event.value()),
+                aside { class: "flex w-80 max-w-[40%] shrink-0 flex-col bg-foreground/[0.018]",
+                    if !initialized {
+                        ListSkeleton {}
+                    } else if !snapshot.supported {
+                        Empty { title: translate("container-unsupported"), description: String::new() }
+                    } else if !snapshot.ready {
+                        Empty { title: translate(service_label), description: String::new(),
+                            if !starting && !stopping {
+                                Button {
+                                    size: ButtonSize::Sm, disabled: snapshot.busy,
+                                    aria_label: translate("container-start-container"),
+                                    onclick: move |_| { let _ = send(&ContainerStartRequest); },
+                                    {translate("container-start-container")}
+                                }
+                            }
                         }
-                    }
-                    div { class: "min-h-0 flex-1 space-y-2 overflow-auto px-2 pb-3",
-                        if initialized && snapshot.ready && snapshot.inventory_ready {
+                    } else if !snapshot.inventory_error.is_empty() {
+                        Empty { title: translate("container-inventory-error"), description: snapshot.inventory_error.clone() }
+                    } else if !snapshot.inventory_ready {
+                        ListSkeleton {}
+                    } else if snapshot.containers.is_empty() {
+                        Empty { title: translate("container-empty-title"), description: String::new() }
+                    } else {
+                        div { class: "min-h-0 flex-1 space-y-2 overflow-auto p-2",
                             for group in groups {
                                 ContainerGroup {
                                     key: "{group.name}", group, selected: selection.clone(), busy: snapshot.busy,
                                     onselect: move |id| selected.set(id),
                                 }
                             }
-                            if snapshot.containers.is_empty() {
-                                p { class: "px-2 py-3 text-xs text-muted-foreground/65", {translate("container-empty-title")} }
-                            } else if !search().is_empty() && Catalog(&snapshot.containers).groups(&search()).is_empty() {
-                                p { class: "px-2 py-3 text-xs text-muted-foreground/65", {translate("container-no-results")} }
-                                Button { size: ButtonSize::Sm, variant: ButtonVariant::Ghost, onclick: move |_| search.set(String::new()), {translate("container-clear-search")} }
-                            }
-                        } else if !initialized || snapshot.ready {
-                            ListSkeleton {}
                         }
                     }
                 }
                 section { class: "flex min-w-0 flex-1 flex-col overflow-hidden",
-                    if !snapshot.supported && initialized {
-                        Empty { title: translate("container-unsupported"), description: String::new() }
-                    } else if !initialized || (snapshot.ready && !snapshot.inventory_ready && snapshot.inventory_error.is_empty()) {
-                        div { class: "space-y-4 p-6",
-                            div { class: "h-5 w-40 animate-pulse rounded bg-muted/40" }
-                            div { class: "h-24 animate-pulse rounded bg-muted/25" }
-                        }
-                    } else if !snapshot.ready {
-                        Empty { title: translate(if snapshot.starting { "container-docker-starting" } else { "container-off-title" }), description: translate(if snapshot.starting { "container-starting-description" } else { "container-off-description" }),
-                            Button { size: ButtonSize::Sm, disabled: snapshot.busy, onclick: move |_| { let _ = send(&ContainerProjectOpenRequest); }, {translate("container-open-project")} }
-                            Button { size: ButtonSize::Sm, variant: ButtonVariant::Secondary, disabled: snapshot.busy, onclick: move |_| { let _ = send(&ContainerStartRequest); }, {translate("container-start")} }
-                        }
-                    } else if !snapshot.inventory_error.is_empty() {
-                        Empty { title: translate("container-inventory-error"), description: snapshot.inventory_error.clone() }
-                    } else if snapshot.containers.is_empty() {
-                        Empty { title: translate(if snapshot.project_starting { "container-project-starting" } else { "container-empty-title" }), description: translate(if snapshot.project_starting { "container-project-starting-description" } else { "container-empty-description" }),
-                            Button { size: ButtonSize::Sm, disabled: snapshot.busy, onclick: move |_| { let _ = send(&ContainerProjectOpenRequest); }, {translate("container-open-project")} }
-                        }
-                    } else {
+                    if snapshot.ready && !selection.is_empty() {
                         Details {
                             selection, entries: snapshot.containers.clone(), busy: snapshot.busy,
                             panel: panel(), onpanel: move |value| panel.set(value),
                             onselect: move |id| selected.set(id), ondelete: move |ids| deleting.set(ids),
                         }
+                    } else {
+                        Empty { title: translate("container-no-selection"), description: String::new() }
                     }
                 }
             }
@@ -232,7 +202,7 @@ fn ContainerRow(
     rsx! {
         div {
             class: if selected { "group flex items-center gap-2 rounded-md bg-primary/10 px-2 py-2" } else { "group flex cursor-pointer items-center gap-2 rounded-md px-2 py-2 hover:bg-foreground/[0.04]" },
-            role: "button", tabindex: "0", aria_selected: selected,
+            role: "button", tabindex: "0", aria_selected: selected, aria_label: entry.name.clone(),
             onclick: move |_| onselect.call(row_id.clone()),
             onkeydown: move |event| { if event.key() == Key::Enter || event.key() == Key::Character(" ".into()) { event.prevent_default(); onselect.call(keyboard_id.clone()); } },
             StateDot { state: entry.state.clone() }
@@ -271,7 +241,7 @@ fn Details(
         }
     }
     if members.is_empty() {
-        return rsx! { Empty { title: translate("container-select"), description: translate("container-select-description") } };
+        return rsx! { Empty { title: translate("container-no-selection"), description: String::new() } };
     }
     let title = match &group {
         Some(group) => group.clone(),
@@ -401,7 +371,12 @@ fn Preferences(onclose: EventHandler<()>) -> Element {
         DialogRoot { open: true, on_open_change: move |next: bool| { if !next { onclose.call(()); } }, attributes: vec![],
             DialogContent { class: "max-w-[480px] p-5", attributes: vec![],
                 DialogTitle { attributes: vec![], {translate("container-settings")} }
-                if snapshot.running { p { class: "text-xs text-muted-foreground/70", {translate("container-settings-running")} } }
+                if snapshot.running {
+                    div { class: "flex items-center gap-3",
+                        p { class: "min-w-0 flex-1 text-xs text-muted-foreground/70", {translate("container-settings-running")} }
+                        Button { size: ButtonSize::Sm, variant: ButtonVariant::Secondary, disabled: snapshot.busy, onclick: move |_| { let _ = send(&ContainerStopRequest); }, {translate("container-stop")} }
+                    }
+                }
                 div { class: "grid grid-cols-2 gap-4",
                     label { class: "space-y-1.5", span { class: "text-xs", {translate("container-cpus")} }
                         Input { r#type: "number", class: "w-full", min: "1", value: cpus(), disabled: locked, oninput: move |event: FormEvent| cpus.set(event.value()) }
@@ -530,9 +505,7 @@ fn RunIcon(running: bool) -> Element {
 #[component]
 fn ErrorText(message: String) -> Element {
     let text = match message.as_str() {
-        "container-project-invalid"
-        | "container-project-not-shared"
-        | "container-config-running" => translate(&message),
+        "container-config-running" => translate(&message),
         _ => message,
     };
     rsx! { span { "{text}" } }
@@ -547,15 +520,13 @@ struct Group {
 struct Catalog<'a>(&'a [ContainerEntry]);
 
 impl Catalog<'_> {
-    fn groups(&self, search: &str) -> Vec<Group> {
+    fn groups(&self) -> Vec<Group> {
         let mut grouped = BTreeMap::<String, Vec<ContainerEntry>>::new();
         for entry in self.0 {
-            if entry.matches(search) {
-                grouped
-                    .entry(entry.project.clone())
-                    .or_default()
-                    .push(entry.clone());
-            }
+            grouped
+                .entry(entry.project.clone())
+                .or_default()
+                .push(entry.clone());
         }
         let standalone = grouped.remove("");
         let mut groups = Vec::new();
@@ -579,11 +550,7 @@ impl Catalog<'_> {
         } else if self.0.iter().any(|entry| entry.id == selected) {
             return selected.to_string();
         }
-        match self.0.first() {
-            Some(entry) if !entry.project.is_empty() => format!("project:{}", entry.project),
-            Some(entry) => entry.id.clone(),
-            None => String::new(),
-        }
+        String::new()
     }
 }
 
@@ -599,6 +566,7 @@ mod tests {
     use dioxus::core::{AttributeValue, ElementId, Mutation, VirtualDom};
     use dioxus::html::{EventData, SerializedHtmlEventConverter, SerializedMouseData};
     use std::cell::{Cell, RefCell};
+    use std::collections::HashMap;
     use std::future::Future;
     use std::rc::Rc;
     use std::task::{Context, Waker};
@@ -637,7 +605,7 @@ mod tests {
     struct Preview {
         host: Rc<Host>,
         dom: VirtualDom,
-        start: ElementId,
+        controls: HashMap<String, ElementId>,
         _scope: HostScope,
     }
 
@@ -648,25 +616,11 @@ mod tests {
             let scope = HostScope::enter(host.clone());
             let mut dom = VirtualDom::new(Page);
             dom.provide_root_context(HostBinding(host.clone()));
-            let edits = dom.rebuild_to_vec();
-            let label = translate("container-start");
-            let start = edits
-                .edits
-                .iter()
-                .find_map(|edit| match edit {
-                    Mutation::SetAttribute {
-                        name: "aria-label",
-                        value: AttributeValue::Text(value),
-                        id,
-                        ..
-                    } if value == &label => Some(*id),
-                    _ => None,
-                })
-                .expect("start Docker button");
+            dom.rebuild_to_vec();
             let mut preview = Self {
                 host,
                 dom,
-                start,
+                controls: HashMap::new(),
                 _scope: scope,
             };
             preview.render();
@@ -691,26 +645,38 @@ mod tests {
             for _ in 0..8 {
                 let mut context = Context::from_waker(Waker::noop());
                 let _ = std::pin::pin!(self.dom.wait_for_work()).poll(&mut context);
-                self.dom.render_immediate_to_vec();
+                let edits = self.dom.render_immediate_to_vec();
+                for edit in edits.edits {
+                    if let Mutation::SetAttribute {
+                        name: "aria-label",
+                        value: AttributeValue::Text(label),
+                        id,
+                        ..
+                    } = edit
+                    {
+                        self.controls.insert(label, id);
+                    }
+                }
             }
             dioxus_ssr::render(&self.dom)
         }
 
-        fn click_start(&mut self) {
+        fn click(&mut self, label: &str) {
+            let target = *self.controls.get(label).expect("visible control");
             self.dom.runtime().handle_event(
                 "click",
                 Event::new(
                     EventData::Mouse(SerializedMouseData::default()).into_any(),
                     true,
                 ),
-                self.start,
+                target,
             );
             self.render();
         }
     }
 
     #[test]
-    fn stopped_dashboard_starts_docker_without_presenting_resource_fields() {
+    fn stopped_service_has_one_start_control_and_no_selection_or_setup_fields() {
         let mut preview = Preview::new();
         let html = preview.publish(ContainerUiState {
             supported: true,
@@ -720,11 +686,13 @@ mod tests {
             memory_mib: 2048,
             ..Default::default()
         });
-        assert_eq!(html.matches("type=\"search\"").count(), 1);
-        assert_eq!(html.matches("<input").count(), 1);
-        assert!(html.contains(&translate("container-open-project")));
+        assert_eq!(html.matches("<input").count(), 0);
+        assert!(html.contains(&translate("container-service-not-running")));
+        assert!(html.contains(&translate("container-no-selection")));
+        let start = translate("container-start-container");
+        assert_eq!(html.matches(&format!("aria-label=\"{start}\"")).count(), 1);
         assert!(!html.contains(&translate("container-cpus")));
-        preview.click_start();
+        preview.click(&start);
         assert_eq!(preview.host.starts.get(), 1);
     }
 
@@ -749,6 +717,9 @@ mod tests {
         };
         let html = preview.publish(snapshot.clone());
         assert!(html.contains("nginx:alpine"));
+        assert!(html.contains(&translate("container-no-selection")));
+        preview.click("web");
+        assert!(preview.render().contains("Up 1 second"));
         let requests = preview.host.inspections.borrow().len();
         snapshot.containers[0].status = "Up 2 seconds".into();
         snapshot.container_logs_ready = true;

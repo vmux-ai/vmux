@@ -22,7 +22,6 @@ pub struct ContainerUiState {
     pub configuration_revision: u64,
     pub starting: bool,
     pub stopping: bool,
-    pub project_starting: bool,
 }
 
 #[vmux_api::ui_event]
@@ -53,9 +52,6 @@ pub struct ContainerInspectRequest {
     pub logs: bool,
 }
 
-#[vmux_api::ui_event]
-pub struct ContainerProjectOpenRequest;
-
 #[vmux_api::contract(Copy, Eq)]
 pub enum ContainerOperation {
     Start,
@@ -79,16 +75,6 @@ pub struct ContainerEntry {
 impl ContainerEntry {
     pub fn running(&self) -> bool {
         matches!(self.state.as_str(), "running" | "restarting" | "paused")
-    }
-
-    pub fn matches(&self, search: &str) -> bool {
-        let search = search.trim().to_ascii_lowercase();
-        for value in [&self.name, &self.image, &self.project, &self.service] {
-            if value.to_ascii_lowercase().contains(&search) {
-                return true;
-            }
-        }
-        false
     }
 }
 

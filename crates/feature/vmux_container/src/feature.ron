@@ -10,7 +10,7 @@
         permissions: [
             "PageAddressPublish", "PageAddressRequest", "PageAddressUiState", "PageReady", "ThemeUiState", "OpenRequest",
             "ContainerUiState", "ContainerStartRequest", "ContainerStopRequest", "ContainerLogsRequest",
-            "ContainerSettingsRequest", "ContainerCommandRequest", "ContainerInspectRequest", "ContainerProjectOpenRequest",
+            "ContainerSettingsRequest", "ContainerCommandRequest", "ContainerInspectRequest",
         ],
     )],
     cli: Some((commands: [(
