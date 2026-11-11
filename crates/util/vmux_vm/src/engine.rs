@@ -11,7 +11,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::Settings;
 use crate::connection::{ConnectionIssue, ConnectionPlugin};
-use crate::process::{Executable, Lease, Process};
+use crate::process::{Lease, Process};
 
 pub struct EnginePlugin;
 
@@ -134,17 +134,11 @@ impl Launch {
         let ssh_port = std::net::TcpListener::bind("127.0.0.1:0")?
             .local_addr()?
             .port();
-        Process::spawn(
-            Command::new(Executable::find("gvproxy")?)
-                .arg("-ssh-port")
-                .arg(ssh_port.to_string())
-                .arg("-listen-vfkit")
-                .arg(format!(
-                    "unixgram://{}",
-                    settings.network_socket().display()
-                ))
-                .arg("-services")
-                .arg(format!("unix://{}", settings.network_api().display())),
+        Process::supervised(
+            Command::new(&self.0)
+                .arg("network")
+                .arg(settings.directory.join("settings.json"))
+                .arg(ssh_port.to_string()),
         )
     }
 
@@ -158,6 +152,7 @@ impl Launch {
             command.arg("native").arg(configuration);
             command
         };
+        command.env("VMUX_ENGINE_PARENT", std::process::id().to_string());
         Process::spawn(&mut command)
     }
 }
@@ -184,6 +179,11 @@ fn initialize(
             }
         };
         commands.entity(entity).insert(lease);
+        if let Err(error) = Lease::retired(&settings.directory) {
+            *phase = Phase::Failed;
+            commands.entity(entity).insert(Failure(error.to_string()));
+            continue;
+        }
         if let Err(error) = settings.clean_sockets() {
             *phase = Phase::Failed;
             commands.entity(entity).insert(Failure(error.to_string()));

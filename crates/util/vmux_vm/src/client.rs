@@ -43,6 +43,8 @@ impl EngineClient {
             )?;
         }
         let _lock = self.lock()?;
+        let _machine = self.lock_named("machine.lock")?;
+        let _network = self.lock_named("network.lock")?;
         GuestImage::prepare(&self.settings)?;
         Ssh::prepare(&self.settings)?;
         self.settings.save()?;
@@ -53,6 +55,8 @@ impl EngineClient {
         self.settings.validate()?;
         let _start = self.lock_named("start.lock")?;
         let _engine = self.lock()?;
+        let _machine = self.lock_named("machine.lock")?;
+        let _network = self.lock_named("network.lock")?;
         self.settings.save()?;
         Ok(self.settings.clone())
     }
@@ -76,6 +80,7 @@ impl EngineClient {
             }
             return self.wait_ready(None);
         }
+        self.wait_retired()?;
         self.prepare()?;
         let log = OpenOptions::new()
             .create(true)
@@ -199,6 +204,26 @@ impl EngineClient {
         self.lock_named("engine.lock")
     }
 
+    fn wait_retired(&self) -> io::Result<()> {
+        let deadline = Instant::now() + Duration::from_secs(65);
+        loop {
+            let result = crate::process::Lease::retired(&self.settings.directory);
+            match result {
+                Ok(()) => return Ok(()),
+                Err(error) if error.kind() == io::ErrorKind::WouldBlock => {
+                    if Instant::now() >= deadline {
+                        return Err(io::Error::new(
+                            io::ErrorKind::TimedOut,
+                            "previous VM did not finish cleanup",
+                        ));
+                    }
+                    std::thread::sleep(Duration::from_millis(100));
+                }
+                Err(error) => return Err(error),
+            }
+        }
+    }
+
     fn lock_named(&self, name: &str) -> io::Result<File> {
         let file = OpenOptions::new()
             .create(true)
@@ -224,6 +249,23 @@ impl EngineClient {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn orphaned_machine_lease_protects_guest_files_after_the_engine_exits() {
+        let temp = tempfile::tempdir().unwrap();
+        let mut settings = Settings::new(temp.path().join("engine"), temp.path());
+        settings.validate().unwrap();
+        std::fs::create_dir(settings.rootfs()).unwrap();
+        let marker = settings.rootfs().join("untouched");
+        std::fs::write(&marker, b"orphan still running").unwrap();
+        let mut engine = EngineClient::new(settings);
+        let _orphan = engine.lock_named("machine.lock").unwrap();
+        assert_eq!(
+            engine.prepare().unwrap_err().kind(),
+            io::ErrorKind::WouldBlock
+        );
+        assert_eq!(std::fs::read(marker).unwrap(), b"orphan still running");
+    }
 
     #[test]
     fn configuring_a_running_engine_preserves_its_saved_resources() {
