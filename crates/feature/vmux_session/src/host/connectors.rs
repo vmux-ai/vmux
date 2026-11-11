@@ -69,10 +69,13 @@ fn select(
     let Some(server) = state.servers.iter().find(|server| &server.id == id) else {
         return;
     };
-    if server.status == McpServerStatus::Configured {
+    let selected = selections
+        .get(session)
+        .is_ok_and(|selection| selection.0.iter().any(|selected| selected == id));
+    if server.status == McpServerStatus::Configured && !selected {
         return;
     }
-    if server.status == McpServerStatus::Connected {
+    if selected || server.status == McpServerStatus::Connected {
         let mut selection = selections.get(session).cloned().unwrap_or_default();
         selection.toggle(id);
         let mut snapshot = state.clone();
