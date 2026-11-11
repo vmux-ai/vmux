@@ -165,7 +165,8 @@ fn sync_nodes_recursively(
     let Ok((node, parent)) = nodes.get(entity) else {
         return;
     };
-    let context_changed = context_changed || parent.is_some_and(|parent| parent.is_changed());
+    let context_changed =
+        context_changed || node.is_added() || parent.is_some_and(|parent| parent.is_changed());
     if context_changed || node.is_changed() {
         tree.upsert(context, entity, &node);
     }
@@ -235,6 +236,43 @@ mod tests {
         fn rect(&self, entity: Entity) -> ComputedNode {
             *self.0.world().get::<ComputedNode>(entity).unwrap()
         }
+    }
+
+    #[test]
+    fn adding_layout_to_a_lifecycle_owner_refreshes_its_existing_subtree_dpi() {
+        let mut fixture = Harness::new();
+        let root = fixture.root(Vec2::new(800.0, 600.0), 1.0, Harness::fill());
+        let owner = fixture.0.world_mut().spawn(ChildOf(root)).id();
+        let child = fixture
+            .0
+            .world_mut()
+            .spawn((
+                Node {
+                    width: Val::Px(20.0),
+                    height: Val::Px(10.0),
+                    ..Default::default()
+                },
+                LayoutContext {
+                    physical_size: Vec2::new(400.0, 300.0),
+                    scale_factor: 2.0,
+                },
+                ChildOf(owner),
+            ))
+            .id();
+        fixture.0.update();
+        assert_eq!(fixture.rect(child).size, Vec2::new(40.0, 20.0));
+        fixture.0.world_mut().entity_mut(owner).insert(Node {
+            width: Val::Px(100.0),
+            height: Val::Px(100.0),
+            ..Default::default()
+        });
+        fixture.0.update();
+        assert_eq!(fixture.rect(child).size, Vec2::new(20.0, 10.0));
+        assert_eq!(fixture.rect(child).to_logical().size, Vec2::new(20.0, 10.0));
+        fixture.0.world_mut().entity_mut(owner).remove::<Node>();
+        fixture.0.update();
+        assert_eq!(fixture.rect(child).size, Vec2::new(40.0, 20.0));
+        assert_eq!(fixture.rect(child).to_logical().size, Vec2::new(20.0, 10.0));
     }
 
     #[test]

@@ -452,6 +452,8 @@ pauses computation. Paused roots invalidate their cache so resuming adopts chang
 the viewport was unavailable. The optional `window` adapter projects Window resolution and primary state in
 `LayoutSystems::Viewport` before `LayoutSystems::Layout`; consumers run after Layout.
 Reparenting refreshes inherited DPI through the subtree and releases obsolete root viewports.
+Adding `Node` to a lifecycle owner also refreshes existing descendants as they join its
+layout context.
 Computed geometry remains physical, with `to_logical` applying inverse DPI. Pane, tab, workspace,
 and navigation behavior remains owned by the product layout feature until separately extracted.
 
