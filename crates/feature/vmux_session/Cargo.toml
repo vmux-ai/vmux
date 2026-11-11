@@ -33,6 +33,7 @@ app = [
 path = "src/lib.rs"
 
 [dependencies]
+base64 = { version = "0.22", optional = true }
 bevy_app = { workspace = true }
 bevy_ecs = { workspace = true }
 bevy_reflect = { workspace = true }
@@ -65,7 +66,6 @@ vmux_ui = { path = "../../util/vmux_ui", optional = true }
 vmux_api = { path = "../../util/vmux_api", features = ["bevy"] }
 
 [target.'cfg(not(target_os = "ios"))'.dependencies]
-base64 = { version = "0.22", optional = true }
 bevy = { workspace = true, optional = true }
 bevy_cef = { workspace = true, optional = true }
 futures-lite = { version = "2", optional = true }
