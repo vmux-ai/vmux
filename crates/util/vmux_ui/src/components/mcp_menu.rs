@@ -79,7 +79,7 @@ pub fn McpMenu(
                     button { r#type: "button", class: "ml-2 text-muted-foreground", onclick: move |_| { let _ = crate::hooks::send(&vmux_api::mcp::McpServerCancelRequest); }, {translate("common-cancel")} }
                 }
             }
-            a { href: "vmux://connectors/", class: "block px-3.5 py-2 text-xs text-muted-foreground", {translate("connectors-manage")} }
+            a { href: "vmux://tools/connectors", class: "block px-3.5 py-2 text-xs text-muted-foreground", {translate("connectors-manage")} }
         }
     }
 }

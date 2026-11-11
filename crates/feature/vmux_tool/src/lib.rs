@@ -37,7 +37,7 @@ pub mod __private {
 
 extern crate self as vmux_tool;
 
-pub const CONNECTORS_URL: &str = "vmux://connectors/";
+pub const CONNECTORS_URL: &str = "vmux://tools/connectors";
 
 pub const EXTENSIONS_URL: &str = "vmux://tools/extensions";
 
@@ -86,10 +86,7 @@ impl Plugin for ToolPlugin {
     fn build(&self, app: &mut App) {
         app.add_plugins(FeaturePlugin::<Feature>::default());
         #[cfg(ui)]
-        app.add_plugins((
-            ui::ToolsPage::plugin(),
-            connectors::ConnectorsPage::plugin(),
-        ));
+        app.add_plugins(ui::ToolsPage::plugin());
 
         #[cfg(all(host, ui))]
         app.add_plugins(
@@ -100,11 +97,6 @@ impl Plugin for ToolPlugin {
                     ui::ToolsPage::page().title,
                 )),
         );
-
-        #[cfg(all(host, ui))]
-        app.add_plugins(connectors::ConnectorsPage::MANIFEST.plugin().hosted(
-            vmux_ecs::page::HostedPage::subtree(connectors::URL, "Connectors"),
-        ));
 
         app.add_plugins((
             ToolRuntimePlugin,
