@@ -237,7 +237,8 @@ impl ExplorerApp {
 }
 
 fn wait_for_children(app: &mut App, root: &Path, path: &Path) {
-    for _ in 0..1000 {
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+    while std::time::Instant::now() < deadline {
         app.update();
         let loaded = app
             .world()
@@ -248,7 +249,7 @@ fn wait_for_children(app: &mut App, root: &Path, path: &Path) {
         if loaded {
             return;
         }
-        std::thread::yield_now();
+        std::thread::sleep(std::time::Duration::from_millis(1));
     }
     panic!("directory load did not finish: {}", path.display());
 }
