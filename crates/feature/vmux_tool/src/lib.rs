@@ -39,6 +39,8 @@ impl vmux_ecs::manifest::FeatureManifestSource for Feature {
     const SOURCE: &'static str = include_str!("feature.ron");
 }
 
+#[cfg(all(host, ui))]
+mod catalog;
 #[cfg(host)]
 mod cli;
 #[cfg(all(host, not(target_os = "ios")))]
