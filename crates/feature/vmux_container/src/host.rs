@@ -8,13 +8,11 @@ use bevy_cef::prelude::{UiEventPlugin, UiInput};
 use vmux_ecs::manifest::FeaturePlugin;
 use vmux_ecs::page::{HostedPage, PageReady};
 use vmux_ecs::wake::Wake;
-use vmux_ecs::{PageMetadata, UiStatePlugin, UiStateWrite};
+use vmux_ecs::{PageMetadata, Revision, UiStatePlugin, UiStateWrite};
 use vmux_vm::{EngineClient, Phase, Settings, Status};
 
 use crate::ContainerPlugin;
-use crate::control::{
-    Busy, Command, ControlPlugin, ControlSet, Finished, Reply, Request, Revision,
-};
+use crate::control::{Busy, Command, ControlPlugin, ControlSet, Finished, Reply, Request};
 use crate::event::{
     ContainerLogsRequest, ContainerSettingsRequest, ContainerStartRequest, ContainerStopRequest,
     ContainerUiState,
