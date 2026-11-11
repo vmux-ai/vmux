@@ -149,7 +149,11 @@ Do not stack PRs by default. Stack only when the work genuinely depends on anoth
 
 ## PR Handoff
 
-Keep one user-designated integration agent responsible for reviewing and merging QA-complete PRs in this repository. Implementation agents finish implementation, local validation, the pre-push gate, PR creation, applicable manual QA, and task-owned cache cleanup before handing over the PR. The integration agent owns accepted PRs through review triage, CI fixes, current-head monitoring, squash merge, and worktree cleanup. Other agents return to implementation work and leave accepted PR branches to that owner.
+Keep one user-designated integration agent responsible for reviewing and merging QA-complete PRs in this repository. Implementation agents finish implementation, self-review, local validation, the pre-push gate, PR creation, applicable manual QA, and task-owned cache cleanup before handing over the PR. The integration agent owns accepted PRs through review triage, CI fixes, current-head monitoring, squash merge, and worktree cleanup. Other agents return to implementation work and leave accepted PR branches to that owner.
+
+Before manual QA, self-review the complete diff against the fetched target branch, including new files and the affected callers and tests. Verify scope and repository rules, then examine the changed behavior, failure and cancellation paths, state ownership, persistence, and relevant platform or security boundaries. Passing tests alone do not constitute self-review. Fix findings and rerun the affected checks before preparing the QA artifact; avoid repeating broad checks without a new change or unresolved concern.
+
+The integration agent verifies the reported head, checks, and QA result, reviews the current diff, and handles external review findings. Self-review findings and their disposition travel with the handoff.
 
 Manual QA is performed by the user; agents prepare the build and inspect its logs under the existing no-launch rule. Record the tested artifact and result. Infrastructure-only changes may record manual QA as not applicable with a concrete reason. Repeat QA when later changes invalidate the recorded result.
 
@@ -158,6 +162,7 @@ Each handoff includes:
 - PR number and URL, target branch, and head commit.
 - Feature branch and worktree path.
 - Local checks and results, including test count, Clippy, and pre-push status.
+- Self-review findings, fixes, and any remaining concerns, or an explicit report that no findings were identified.
 - Manual QA result and artifact, or why it is not applicable.
 - Cache cleanup status and any artifacts or active worktrees being retained.
 - Remaining CI or review work.
