@@ -1173,3 +1173,8 @@ connectors-use = 대화에서 사용
 connectors-selected = 선택됨 · 제거
 connectors-manage = 커넥터 관리
 connectors-manage-access = 저장소 접근 관리
+
+connectors-agent-configuration = 에이전트 설정
+connectors-configured = 설정됨
+connectors-open-in-app = Vmux에서 열기
+connectors-open-external = 외부 브라우저에서 열기

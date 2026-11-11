@@ -64,6 +64,12 @@ pub struct McpServerSelectionRequest {
 #[vmux_api::ui_event]
 pub struct McpServerCancelRequest;
 
+#[vmux_api::ui_event]
+pub struct McpLinkOpenRequest {
+    pub url: String,
+    pub external: bool,
+}
+
 #[vmux_api::contract(Default, Eq)]
 pub struct McpServerResult {
     pub id: String,

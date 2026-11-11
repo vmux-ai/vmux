@@ -149,6 +149,9 @@ impl VmuxRoute {
                 url.set_path("/acp");
             }
             ("tools", true) => url.set_path("/acp"),
+            ("tools", false) if url.path().trim_end_matches('/') == "/mcp" => {
+                url.set_path("/connectors");
+            }
             ("connectors", true) => {
                 url.set_host(Some("tools")).expect("static vmux route host");
                 url.set_path("/connectors");
@@ -249,6 +252,8 @@ mod tests {
             ("vmux://connectors/", "vmux://tools/connectors"),
             ("vmux://connectors", "vmux://tools/connectors"),
             ("vmux://tools/connectors", "vmux://tools/connectors"),
+            ("vmux://tools/mcp", "vmux://tools/connectors"),
+            ("vmux://tools/mcp/", "vmux://tools/connectors"),
             ("vmux://cheatsheet/", "vmux://shortcuts/"),
             ("vmux://cheetsheet", "vmux://shortcuts/"),
         ];

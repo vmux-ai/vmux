@@ -1176,3 +1176,8 @@ connectors-use = استخدام في المحادثة
 connectors-selected = محدد · إزالة
 connectors-manage = إدارة الموصلات
 connectors-manage-access = إدارة الوصول إلى المستودعات
+
+connectors-agent-configuration = إعدادات الوكيل
+connectors-configured = تم الإعداد
+connectors-open-in-app = فتح في Vmux
+connectors-open-external = فتح في متصفح خارجي

@@ -1,6 +1,7 @@
 use dioxus::prelude::*;
 use vmux_api::mcp::{McpServerEntry, McpServerStatus, McpServersUiState};
 
+use crate::components::connector_link::ConnectorLink;
 use crate::components::prompt_box::{PromptMenuRow, PromptPopup, PromptPopupPlacement};
 use crate::i18n::translate;
 
@@ -73,9 +74,9 @@ pub fn McpMenu(
                 }
             }
             if let Some(authorization) = state.authorization {
-                div { class: "px-3.5 py-2 text-sm",
+                div { class: "flex items-center gap-2 px-3.5 py-2 text-sm",
                     if let Some(code) = authorization.code { code { "{code}" } }
-                    a { href: authorization.url, target: "_blank", class: "ml-2 text-primary", {translate("connectors-open-sign-in")} }
+                    ConnectorLink { url: authorization.url, label: translate("connectors-open-sign-in"), class: "text-xs text-primary" }
                     button { r#type: "button", class: "ml-2 text-muted-foreground", onclick: move |_| { let _ = crate::hooks::send(&vmux_api::mcp::McpServerCancelRequest); }, {translate("common-cancel")} }
                 }
             }

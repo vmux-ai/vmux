@@ -74,6 +74,7 @@
                 "McpServerRequest",
                 "McpServerSelectionRequest",
                 "McpServerCancelRequest",
+                "McpLinkOpenRequest",
                 "McpServersUiState",
                 "ChatPickFiles",
                 "ChatPasteMedia",

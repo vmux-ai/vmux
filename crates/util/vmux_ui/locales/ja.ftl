@@ -1156,3 +1156,8 @@ connectors-use = 会話で使う
 connectors-selected = 選択済み・外す
 connectors-manage = コネクターを管理
 connectors-manage-access = リポジトリへのアクセスを管理
+
+connectors-agent-configuration = エージェントの設定
+connectors-configured = 設定済み
+connectors-open-in-app = Vmux 内で開く
+connectors-open-external = 外部ブラウザで開く

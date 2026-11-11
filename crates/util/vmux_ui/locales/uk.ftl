@@ -1176,3 +1176,8 @@ connectors-use = Використати в чаті
 connectors-selected = Вибрано · прибрати
 connectors-manage = Керування конекторами
 connectors-manage-access = Керування доступом до репозиторіїв
+
+connectors-agent-configuration = Налаштування агента
+connectors-configured = Налаштовано
+connectors-open-in-app = Відкрити у Vmux
+connectors-open-external = Відкрити в зовнішньому браузері

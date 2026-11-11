@@ -1173,3 +1173,8 @@ connectors-use = 在聊天中使用
 connectors-selected = 已選擇 · 移除
 connectors-manage = 管理連接器
 connectors-manage-access = 管理儲存庫存取權限
+
+connectors-agent-configuration = 代理程式設定
+connectors-configured = 已設定
+connectors-open-in-app = 在 Vmux 中開啟
+connectors-open-external = 在外部瀏覽器中開啟

@@ -8,7 +8,7 @@ use std::sync::{
 };
 use std::time::{Duration, Instant};
 
-use crate::{McpServerManifest, McpTransport, ToolStore};
+use crate::{McpServerManifest, ToolStore};
 use bevy::ecs::system::SystemParam;
 use bevy::prelude::*;
 use bevy::tasks::{IoTaskPool, Task, futures_lite::future};
@@ -19,12 +19,14 @@ use ring::digest::{SHA256, digest};
 use serde::{Deserialize, Serialize};
 use url::Url;
 use vmux_api::mcp::{
-    McpAuthorization, McpServerCancelRequest, McpServerEntry, McpServerOperation, McpServerPending,
-    McpServerRequest, McpServerResult, McpServerStatus, McpServersRequest, McpServersUiState,
+    McpAuthorization, McpLinkOpenRequest, McpServerCancelRequest, McpServerEntry,
+    McpServerOperation, McpServerPending, McpServerRequest, McpServerResult, McpServerStatus,
+    McpServersRequest, McpServersUiState,
 };
 use vmux_ecs::manifest::FeatureManifest;
 use vmux_ecs::profile::McpCredentials;
 use vmux_ecs::profile::mcp_credentials::McpOauthCredentials;
+use vmux_ecs::{PageOpenRequest, PageOpenTarget};
 use vmux_ecs::{UiStatePlugin, UiStateWrite};
 
 pub struct McpConnectionPlugin;
@@ -32,12 +34,18 @@ pub struct McpConnectionPlugin;
 impl Plugin for McpConnectionPlugin {
     fn build(&self, app: &mut App) {
         app.add_plugins((
-            UiEventPlugin::<(McpServersRequest, McpServerRequest, McpServerCancelRequest)>::default(
-            ),
+            UiEventPlugin::<(
+                McpServersRequest,
+                McpServerRequest,
+                McpServerCancelRequest,
+                McpLinkOpenRequest,
+            )>::default(),
             UiStatePlugin::<McpServersUiState>::default(),
         ))
         .add_systems(Startup, spawn_mcp_catalog)
         .add_observer(cancel)
+        .add_message::<PageOpenRequest>()
+        .add_observer(open_link)
         .add_observer(page_ready)
         .add_observer(request_mcp_connections)
         .add_observer(begin_mcp_snapshot)
@@ -50,9 +58,90 @@ impl Plugin for McpConnectionPlugin {
                 start_mcp_snapshots,
                 drain_mcp_snapshots,
                 publish_mcp_connections,
+                start_links,
+                finish_links,
             )
                 .chain(),
         );
+    }
+}
+
+#[derive(Component)]
+struct ExternalLink(String);
+
+#[derive(Component)]
+struct ExternalLinkTask(Task<Result<(), String>>);
+
+fn open_link(
+    trigger: On<UiInput<McpLinkOpenRequest>>,
+    states: Query<&McpPageState>,
+    catalog: McpCatalog,
+    mut opens: MessageWriter<PageOpenRequest>,
+    mut commands: Commands,
+) {
+    let event = trigger.event();
+    let url = &event.payload.url;
+    if McpConnection::https_url(url, "connector link").is_err() {
+        return;
+    }
+    let sign_in = states.get(event.webview).is_ok_and(|state| {
+        state
+            .snapshot
+            .authorization
+            .as_ref()
+            .is_some_and(|authorization| &authorization.url == url)
+    });
+    let setup = catalog
+        .servers
+        .iter()
+        .any(|(_, server)| server.setup_url.as_ref() == Some(url));
+    if !sign_in && !setup {
+        return;
+    }
+    if event.payload.external {
+        commands.spawn((
+            Name::new("Open connector link externally"),
+            ExternalLink(url.clone()),
+            ChildOf(event.webview),
+        ));
+    } else {
+        opens.write(PageOpenRequest {
+            target: PageOpenTarget::NewStack,
+            url: url.clone(),
+            request_id: None,
+        });
+    }
+}
+
+fn start_links(
+    requests: Query<(Entity, &ExternalLink), Without<ExternalLinkTask>>,
+    proxy: Option<Res<bevy::winit::EventLoopProxyWrapper>>,
+    mut commands: Commands,
+) {
+    for (entity, link) in &requests {
+        let url = link.0.clone();
+        let wake = proxy.as_deref().map(|proxy| (**proxy).clone());
+        commands
+            .entity(entity)
+            .insert(ExternalLinkTask(IoTaskPool::get().spawn(async move {
+                let result = SystemBrowser::open(&url);
+                if let Some(wake) = wake {
+                    let _ = wake.send_event(bevy::winit::WinitUserEvent::WakeUp);
+                }
+                result
+            })));
+    }
+}
+
+fn finish_links(mut tasks: Query<(Entity, &mut ExternalLinkTask)>, mut commands: Commands) {
+    for (entity, mut task) in &mut tasks {
+        let Some(result) = future::block_on(future::poll_once(&mut task.0)) else {
+            continue;
+        };
+        if let Err(error) = result {
+            warn!("Failed to open external connector link: {error}");
+        }
+        commands.entity(entity).despawn();
     }
 }
 
@@ -223,14 +312,10 @@ fn start_mcp_operation(
             let result = match (operation, server.as_ref()) {
                 (McpServerOperation::Connect, Some(server)) => {
                     McpConnection::connect(server, &credentials, &operation_cancellation, |url| {
-                        let sign_in_url = url.url.clone();
                         if progress_sender.send(url).is_ok()
                             && let Some(wake) = &progress_wake
                         {
                             let _ = wake.send_event(bevy::winit::WinitUserEvent::WakeUp);
-                        }
-                        if let Err(error) = SystemBrowser::open(&sign_in_url) {
-                            warn!("Failed to open connector sign-in: {error}");
                         }
                     })
                     .await
@@ -262,10 +347,16 @@ fn start_mcp_operation(
 fn drain_mcp_operations(
     mut tasks: Query<(Entity, &mut McpOperationTask)>,
     mut states: Query<&mut McpPageState>,
+    mut opens: MessageWriter<PageOpenRequest>,
     mut commands: Commands,
 ) {
     for (entity, mut task) in &mut tasks {
         while let Ok(authorization) = task.progress.get_mut().try_recv() {
+            opens.write(PageOpenRequest {
+                target: PageOpenTarget::NewStack,
+                url: authorization.url.clone(),
+                request_id: None,
+            });
             if let Ok(mut state) = states.get_mut(entity) {
                 state.snapshot.authorization = Some(authorization);
             }
@@ -408,17 +499,7 @@ struct McpCatalogServer {
 
 impl McpCatalogServer {
     fn manifest(&self) -> McpServerManifest {
-        McpServerManifest {
-            transport: McpTransport::Http,
-            command: None,
-            args: Vec::new(),
-            env: Default::default(),
-            cwd: None,
-            url: Some(self.url.clone()),
-            headers: Default::default(),
-            header_env: Default::default(),
-            bearer_token_env_var: None,
-        }
+        McpServerManifest::http(&self.url)
     }
 
     fn owns(&self, server: &McpServerManifest) -> bool {
@@ -477,9 +558,7 @@ impl McpSnapshotSource {
     ) -> McpServersUiState {
         let manifest = ToolStore::current().load().unwrap_or_default();
         let mut servers = Vec::new();
-        let mut catalog_ids = BTreeSet::new();
         for (name, server) in self.0 {
-            catalog_ids.insert(server.id.clone());
             let configured = manifest
                 .mcp
                 .servers
@@ -505,23 +584,6 @@ impl McpSnapshotSource {
                 name,
                 description: String::new(),
                 status,
-            });
-        }
-        for (id, server) in manifest.mcp.servers {
-            if catalog_ids.contains(id.as_str()) || id == "vmux" {
-                continue;
-            }
-            let description = server
-                .url
-                .or(server.command)
-                .unwrap_or_else(|| format!("{:?}", server.transport).to_ascii_lowercase());
-            servers.push(McpServerEntry {
-                setup_url: None,
-                account: None,
-                name: id.clone(),
-                id,
-                description,
-                status: McpServerStatus::Configured,
             });
         }
         McpServersUiState {
@@ -1117,6 +1179,131 @@ mod tests {
     };
 
     #[test]
+    fn connector_links_open_in_app_and_queue_external_opening_only_on_request() {
+        let mut app = App::new();
+        app.add_plugins(super::McpConnectionPlugin);
+        let url = "https://github.com/login/device";
+        let target = app
+            .world_mut()
+            .spawn(McpPageState {
+                generation: 1,
+                snapshot: McpServersUiState {
+                    authorization: Some(vmux_api::mcp::McpAuthorization {
+                        url: url.into(),
+                        code: Some("ABCD-1234".into()),
+                    }),
+                    ..Default::default()
+                },
+            })
+            .id();
+        app.world_mut().trigger(UiInput {
+            webview: target,
+            payload: vmux_api::mcp::McpLinkOpenRequest {
+                url: url.into(),
+                external: false,
+            },
+        });
+        app.world_mut().flush();
+        let opens = app
+            .world_mut()
+            .resource_mut::<Messages<super::PageOpenRequest>>()
+            .drain()
+            .collect::<Vec<_>>();
+        assert_eq!(opens.len(), 1);
+        assert_eq!(opens[0].url, url);
+        assert!(matches!(opens[0].target, super::PageOpenTarget::NewStack));
+        app.world_mut().trigger(UiInput {
+            webview: target,
+            payload: vmux_api::mcp::McpLinkOpenRequest {
+                url: url.into(),
+                external: true,
+            },
+        });
+        app.world_mut().flush();
+        let mut links = app.world_mut().query::<(&super::ExternalLink, &ChildOf)>();
+        let requested = links.iter(app.world()).collect::<Vec<_>>();
+        assert_eq!(requested.len(), 1);
+        assert_eq!(requested[0].0.0, url);
+        assert_eq!(requested[0].1.parent(), target);
+        assert!(
+            app.world()
+                .resource::<Messages<super::PageOpenRequest>>()
+                .is_empty()
+        );
+    }
+
+    #[test]
+    fn connector_links_reject_unpublished_urls_and_non_https_schemes() {
+        let mut app = App::new();
+        app.add_plugins(super::McpConnectionPlugin);
+        let target = app.world_mut().spawn(McpPageState::default()).id();
+        for url in [
+            "https://example.com",
+            "file:///tmp/private",
+            "javascript:alert(1)",
+        ] {
+            app.world_mut().trigger(UiInput {
+                webview: target,
+                payload: vmux_api::mcp::McpLinkOpenRequest {
+                    url: url.into(),
+                    external: false,
+                },
+            });
+        }
+        app.world_mut().flush();
+        assert!(
+            app.world()
+                .resource::<Messages<super::PageOpenRequest>>()
+                .is_empty()
+        );
+        let mut links = app.world_mut().query::<&super::ExternalLink>();
+        assert_eq!(links.iter(app.world()).count(), 0);
+    }
+
+    #[test]
+    fn sign_in_progress_opens_an_in_app_stack_and_keeps_the_verification_code() {
+        let pool = bevy::tasks::IoTaskPool::get_or_init(bevy::tasks::TaskPool::new);
+        let mut app = App::new();
+        app.add_plugins(super::McpConnectionPlugin);
+        let (send, receive) = std::sync::mpsc::channel();
+        let authorization = vmux_api::mcp::McpAuthorization {
+            url: "https://github.com/login/device".into(),
+            code: Some("ABCD-1234".into()),
+        };
+        send.send(authorization.clone()).unwrap();
+        let target = app
+            .world_mut()
+            .spawn((
+                McpPageState::default(),
+                super::McpOperationTask {
+                    generation: 1,
+                    id: "github".into(),
+                    operation: McpServerOperation::Connect,
+                    task: pool.spawn(std::future::pending()),
+                    progress: super::Mutex::new(receive),
+                },
+            ))
+            .id();
+        app.update();
+        let opens = app
+            .world_mut()
+            .resource_mut::<Messages<super::PageOpenRequest>>()
+            .drain()
+            .collect::<Vec<_>>();
+        assert_eq!(opens.len(), 1);
+        assert_eq!(opens[0].url, authorization.url);
+        assert!(matches!(opens[0].target, super::PageOpenTarget::NewStack));
+        assert_eq!(
+            app.world()
+                .get::<McpPageState>(target)
+                .unwrap()
+                .snapshot
+                .authorization,
+            Some(authorization)
+        );
+    }
+
+    #[test]
     fn pkce_uses_unpadded_url_safe_base64() {
         assert_eq!(base64_url(&[0xfb, 0xff]), "-_8");
     }
@@ -1218,7 +1405,7 @@ mod tests {
         for (url, should_load) in [
             ("vmux://tools/connectors", true),
             ("vmux://connectors/", true),
-            ("vmux://tools/mcp", false),
+            ("vmux://tools/mcp", true),
             ("vmux://tools/acp", false),
         ] {
             let target = app
