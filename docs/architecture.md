@@ -1542,6 +1542,8 @@ executable and retain the configured no-sandbox mode. Prewarmed terminal pages h
 identity and do not count as running terminals in quit confirmation.
 Both host and helper signing caches include identity and entitlements; a valid linker signature
 alone does not satisfy the development signing contract.
+Interpreter event URLs use the document's scheme and authority, with reserved endpoints
+at the origin root. Nested page paths remain navigation paths rather than IPC prefixes.
 Quit flushes pending layout changes, shuts down that profile's service, and waits for its daemon
 lease and child process to retire. Closing a page or hiding the window preserves background work;
 a successful restart within the same profile preserves the service too. Switching named profiles
@@ -1611,6 +1613,7 @@ use the shared 120 ms motion timing, content changes fade in over 100 ms, and se
 startup/shutdown use the shared loading indicator. Reduced-motion preferences disable
 layout and content transitions; layout and selection never wait for them. While Docker
 is unavailable, the whole page offers one Start control or a startup/shutdown indicator;
+the idle surface contains only Start, with no stopped-state caption or decorative icon;
 the side sheet and details appear when Docker is ready. One root UI-state subscription
 survives these transitions. A thin divider separates the side sheet and details.
 Details remain unselected until the user chooses an entry. The address reads

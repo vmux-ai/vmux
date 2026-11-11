@@ -138,8 +138,10 @@ fn Service() -> Element {
         "container-docker-stopped"
     };
     rsx! {
-        Empty { title: translate(service), description: String::new(), pending: starting || stopping,
-            if !starting && !stopping {
+        if starting || stopping {
+            Empty { title: translate(service), description: String::new(), pending: true }
+        } else {
+            div { class: "flex min-h-0 flex-1 items-center justify-center",
                 Button {
                     size: ButtonSize::Sm, disabled: snapshot.busy,
                     title: translate("container-start"),
@@ -876,7 +878,7 @@ mod tests {
             ..Default::default()
         });
         assert_eq!(html.matches("<input").count(), 0);
-        assert!(html.contains(&translate("container-docker-stopped")));
+        assert!(!html.contains(&translate("container-docker-stopped")));
         assert!(!html.contains(&translate("container-no-selection")));
         assert!(!html.contains(&format!(
             "aria-label=\"{}\"",
