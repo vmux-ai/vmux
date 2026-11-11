@@ -106,12 +106,14 @@ dedicated data disk; the selected project directory is shared at the same path
 inside Linux. `container logs` reads the engine and guest logs.
 
 For the desktop workflow, build with `make build-dev`, then open the app with
-`make run-dev`. The default Containers bookmark opens `vmux://containers/`.
+`make run-dev`. The default Docker bookmark opens `vmux://docker/containers`.
+`vmux://docker/` and the older `vmux://containers/` open the same page.
 When the service is stopped, the page offers one Start control. Startup and shutdown
 show a full-page progress indicator; the side sheet appears when Docker is ready. Containers
 created on this daemon appear automatically, including stopped containers and
-Compose groups. Selecting an entry opens its information and live logs. Resource
-settings and service shutdown live in the settings dialog; the initial share is
+Compose groups. Selecting an entry opens its information and live logs. VM shutdown
+and settings belong to the Docker side-sheet header; selected-container controls belong
+to the details toolbar. The initial share is
 the home directory.
 
 Point Docker CLI at the same daemon, then use normal Docker commands:

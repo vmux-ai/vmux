@@ -84,6 +84,7 @@ pub enum LineIcon {
     Notebook,
     Package,
     Planet,
+    Play,
     Pencil,
     Plus,
     RefreshCw,
@@ -91,6 +92,7 @@ pub enum LineIcon {
     Search,
     Shield,
     ShieldCheck,
+    Square,
     Tag,
     Terminal,
     Trash,
@@ -238,6 +240,7 @@ impl LineIcon {
                 "M12 4a8 8 0 1 0 0 16 8 8 0 0 0 0-16Z",
                 "M2.5 15.5c2.8 2.3 8.8.9 13.8-2.5s7.7-7.7 5.2-10.2",
             ],
+            Self::Play => &["m6 3 14 9-14 9V3Z"],
             Self::Pencil => &["M12 20h9", "M16.5 3.5a2.12 2.12 0 0 1 3 3L8 18l-4 1 1-4Z"],
             Self::Plus => &["M12 5v14", "M5 12h14"],
             Self::RefreshCw => &[
@@ -278,6 +281,9 @@ impl LineIcon {
                 "M8.53 16.11a6 6 0 0 1 6.95 0",
                 "M12 20h.01",
             ],
+            Self::Square => {
+                &["M5 3h14a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2Z"]
+            }
             Self::Wrench => &[
                 "M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76Z",
             ],
