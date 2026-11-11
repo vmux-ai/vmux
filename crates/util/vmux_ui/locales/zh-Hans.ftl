@@ -1420,3 +1420,14 @@ common-resume = 继续
 onboarding-connection-choice = 您想如何连接？
 onboarding-connect-description = 在打开的页面上登录。
 onboarding-use-key-description = 或者输入 API 密钥。
+connectors-title = 连接器
+connectors-description = 管理已登录账号，并在对话中选择要使用的连接器。
+connectors-empty = 没有可用的连接器
+connectors-sign-in-required = 需要登录
+connectors-open-sign-in = 打开登录
+
+connectors-command-description = 选择此对话使用的连接器
+connectors-use = 在聊天中使用
+connectors-selected = 已选择 · 移除
+connectors-manage = 管理连接器
+connectors-manage-access = 管理仓库访问权限

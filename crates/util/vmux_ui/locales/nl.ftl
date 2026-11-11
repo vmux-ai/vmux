@@ -1423,3 +1423,14 @@ common-resume = Hervatten
 onboarding-connection-choice = Hoe wilt u verbinding maken?
 onboarding-connect-description = Meld u aan op de pagina die wordt geopend.
 onboarding-use-key-description = Voer in plaats daarvan een API-sleutel in.
+connectors-title = Connectors
+connectors-description = Beheer aangemelde accounts en kies connectors vanuit een gesprek.
+connectors-empty = Geen connectors beschikbaar
+connectors-sign-in-required = Aanmelding vereist
+connectors-open-sign-in = Aanmelding openen
+
+connectors-command-description = Kies connectors voor dit gesprek
+connectors-use = Gebruiken in chat
+connectors-selected = Geselecteerd · verwijderen
+connectors-manage = Connectors beheren
+connectors-manage-access = Repositorytoegang beheren

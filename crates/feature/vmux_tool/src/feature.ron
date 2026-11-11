@@ -6,6 +6,10 @@
         (id: "mcp", title: "MCP Servers", title_message_id: "tools-provider-mcp-servers", route_title: "MCP", route_title_message_id: "tools-provider-mcp-servers", short_label: "mcp", route: "mcp", rank: 40),
         (id: "dotfiles", title: "Dotfiles", title_message_id: "tools-provider-dotfiles", route_title: "Dotfiles", route_title_message_id: "tools-provider-dotfiles", short_label: "dotfiles", route: "dotfiles", rank: 50, apply: true),
     ],
+    mcp_servers: [
+        (id: "github", name: "GitHub", url: "https://api.githubcopilot.com/mcp/", scopes: [], client_id: Some("Iv23liMdkfVrI8t43v4f"), client_id_env: Some("VMUX_GITHUB_CLIENT_ID"), account_endpoint: Some("https://api.github.com/user"), setup_url: Some("https://github.com/apps/vmux-ai/installations/new")),
+        (id: "linear", name: "Linear", url: "https://mcp.linear.app/mcp", scopes: []),
+    ],
     pages: [
         (
             url: "vmux://tools/",
@@ -60,6 +64,38 @@
                 "ToolApplyRequest",
                 "ToolImportRequest",
             ],
+        ),
+        (
+            name: "connectors",
+            manifest: true,
+            url: "vmux://connectors/",
+            title: "Connectors",
+            title_message_id: "connectors-title",
+            icon: "Toolbox",
+            command_bar: true,
+            keywords: ["connectors", "integrations", "github", "linear", "connect"],
+            placement: Some((group: "connectors", reuse: Group)),
+            permissions: ["PageAddressPublish", "PageAddressRequest", "PageAddressUiState", "PageReady", "ThemeUiState", "McpServersRequest", "McpServerRequest", "McpServerCancelRequest", "McpServersUiState"],
+        ),
+    ],
+    tools: [
+        (
+            name: "connector_tools",
+            description: "List connectors selected in this conversation. Pass a connector ID to discover its available tools and their input schemas. If none are selected, ask the user to select a connection with /connectors. Never ask for tokens or passwords.",
+            input_schema: (type: Object, properties: {"connector": (type: String)}),
+        ),
+        (
+            name: "connector_call",
+            description: "Call a tool on a connector selected in this conversation. Discover the tool and its schema with connector_tools first. Connector credentials stay in the active Vmux profile. Confirm external writes with the user when the requested task does not already authorize them.",
+            input_schema: (
+                type: Object,
+                required: ["connector", "name", "arguments"],
+                properties: {
+                    "connector": (type: String),
+                    "name": (type: String),
+                    "arguments": (type: Object),
+                },
+            ),
         ),
     ],
     cli: Some((

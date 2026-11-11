@@ -15,7 +15,7 @@ use bevy_app::{App, Plugin, Update};
 use bevy_cef::prelude::UiInput;
 use bevy_ecs::prelude::*;
 use bevy_ecs::system::SystemParam;
-use vmux_api::mcp::{McpServerEntry, McpServerRequest, McpServersUiState};
+use vmux_api::mcp::{McpServerEntry, McpServerSelectionRequest, McpServersUiState};
 use vmux_api::prompt_media::InlineMediaQuery;
 use vmux_command::{CommandBinding, CommandDispatch, CommandRuntimePlugin};
 use vmux_ecs::UiState;
@@ -755,7 +755,7 @@ fn choose(
             };
             commands.trigger(UiInput {
                 webview: caller,
-                payload: McpServerRequest {
+                payload: McpServerSelectionRequest {
                     id: server.id.clone(),
                 },
             });

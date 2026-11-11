@@ -1191,7 +1191,7 @@ impl SlashCommand {
         match self {
             Self::Upload => "upload",
             Self::Resume => "resume",
-            Self::Mcp => "mcp",
+            Self::Mcp => "connectors",
             Self::Model => "model",
         }
     }

@@ -11,6 +11,8 @@ use bevy_ecs::system::Commands;
 pub use cli::ToolCliPlugin;
 #[cfg(not(target_os = "ios"))]
 pub use connection::McpConnectionPlugin;
+#[cfg(all(host, not(target_os = "ios")))]
+pub use connector_tools::{ConnectorAccess, ConnectorToolPlugin};
 pub use dotfiles::*;
 pub use homebrew::*;
 pub use manifest::*;
@@ -35,6 +37,8 @@ pub mod __private {
 
 extern crate self as vmux_tool;
 
+pub const CONNECTORS_URL: &str = "vmux://connectors/";
+
 pub const EXTENSIONS_URL: &str = "vmux://tools/extensions";
 
 pub(crate) struct Feature;
@@ -51,6 +55,10 @@ mod cli;
 mod command_bar;
 #[cfg(not(target_os = "ios"))]
 mod connection;
+#[cfg(all(host, not(target_os = "ios")))]
+mod connector_tools;
+#[cfg(ui)]
+mod connectors;
 mod dotfiles;
 #[cfg(ui)]
 mod extension;
@@ -78,7 +86,10 @@ impl Plugin for ToolPlugin {
     fn build(&self, app: &mut App) {
         app.add_plugins(FeaturePlugin::<Feature>::default());
         #[cfg(ui)]
-        app.add_plugins(ui::ToolsPage::plugin());
+        app.add_plugins((
+            ui::ToolsPage::plugin(),
+            connectors::ConnectorsPage::plugin(),
+        ));
 
         #[cfg(all(host, ui))]
         app.add_plugins(
@@ -89,6 +100,11 @@ impl Plugin for ToolPlugin {
                     ui::ToolsPage::page().title,
                 )),
         );
+
+        #[cfg(all(host, ui))]
+        app.add_plugins(connectors::ConnectorsPage::MANIFEST.plugin().hosted(
+            vmux_ecs::page::HostedPage::subtree(connectors::URL, "Connectors"),
+        ));
 
         app.add_plugins((
             ToolRuntimePlugin,
@@ -103,6 +119,8 @@ impl Plugin for ToolPlugin {
 
         #[cfg(all(host, ui))]
         app.add_plugins(host::ToolHostPlugin);
+        #[cfg(all(host, not(target_os = "ios")))]
+        app.add_plugins(ConnectorToolPlugin);
     }
 }
 

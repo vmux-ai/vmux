@@ -1423,3 +1423,14 @@ common-resume = Reanudar
 onboarding-connection-choice = ¿Cómo quieres conectarte?
 onboarding-connect-description = Inicia sesión en la página que se abre.
 onboarding-use-key-description = Introduce una clave API en su lugar.
+connectors-title = Conectores
+connectors-description = Gestiona las cuentas conectadas y elige conectores desde una conversación.
+connectors-empty = No hay conectores disponibles
+connectors-sign-in-required = Se requiere iniciar sesión
+connectors-open-sign-in = Abrir inicio de sesión
+
+connectors-command-description = Elegir conectores para esta conversación
+connectors-use = Usar en el chat
+connectors-selected = Seleccionado · quitar
+connectors-manage = Gestionar conectores
+connectors-manage-access = Gestionar acceso a repositorios
