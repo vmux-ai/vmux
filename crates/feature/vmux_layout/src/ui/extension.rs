@@ -68,7 +68,7 @@ pub(crate) fn ExtensionPopupModal(
         ExtensionPopupSizeEvent {
             id: current.id.clone(),
             width: 360.0,
-            height: 360.0,
+            height: 600.0,
         }
     };
     let reporter = ExtensionPopupBoundsReporter {
@@ -76,6 +76,17 @@ pub(crate) fn ExtensionPopupModal(
     };
     let mounted = reporter;
     let resized = reporter;
+    let bounds_key = (
+        current.id.clone(),
+        placement.right,
+        placement.top,
+        size.width,
+        size.height,
+    );
+    use_effect(use_reactive!(|(bounds_key)| {
+        let _ = &bounds_key;
+        reporter.publish();
+    }));
     use_effect(move || {
         let _ = send(&LayoutOverlayEvent {
             id: "extension-popup".to_string(),
@@ -143,7 +154,7 @@ impl ExtensionPopupPlacement {
             self.right,
             self.top,
             size.width.clamp(200.0, 360.0),
-            size.height.clamp(80.0, 480.0),
+            size.height.max(80.0),
             self.top + 8
         )
     }

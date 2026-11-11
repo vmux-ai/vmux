@@ -246,7 +246,7 @@ impl PopupHost<'_, '_> {
                     &ExtensionPopupSizeEvent {
                         id: entry.id.clone(),
                         width: 360.0,
-                        height: 360.0,
+                        height: 600.0,
                     },
                 ));
         }
@@ -602,7 +602,7 @@ fn size(
         &ExtensionPopupSizeEvent {
             id: popup.extension_id.clone(),
             width: request.width.clamp(200.0, 360.0),
-            height: request.height.clamp(80.0, 480.0),
+            height: request.height.max(80.0),
         },
     ));
 }

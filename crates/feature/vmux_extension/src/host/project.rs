@@ -13,8 +13,8 @@ use vmux_layout::tab::Tab;
 
 use super::bridge_page::ExtensionBridgeWebview;
 use super::model::{
-    ExtensionIdSequence, ExtensionModel, ExtensionModelEvent, ExtensionTabId, ExtensionTabSnapshot,
-    ExtensionWindowId, ExtensionWindowSnapshot,
+    ExtensionIdSequence, ExtensionModel, ExtensionModelEvent, ExtensionPopup, ExtensionTabId,
+    ExtensionTabSnapshot, ExtensionWindowId, ExtensionWindowSnapshot,
 };
 
 pub(crate) struct ExtensionProjectPlugin;
@@ -76,6 +76,16 @@ struct ProjectionData<'w, 's> {
     spaces: Query<'w, 's, (Entity, Option<&'static Order>), With<Space>>,
     hierarchy: Query<'w, 's, HierarchyData>,
     pages: Query<'w, 's, PageData>,
+    popups: Query<
+        'w,
+        's,
+        (
+            &'static PageMetadata,
+            &'static ExtensionTabId,
+            &'static ExtensionWindowId,
+        ),
+        With<ExtensionPopup>,
+    >,
 }
 
 struct WindowCandidate {
@@ -111,7 +121,14 @@ fn spawn_model(mut commands: Commands) {
 
 fn assign_ids(
     windows: Query<Entity, (With<Window>, Without<ExtensionWindowId>)>,
-    tabs: Query<Entity, (With<Stack>, With<PageMetadata>, Without<ExtensionTabId>)>,
+    tabs: Query<
+        Entity,
+        (
+            Or<(With<Stack>, With<ExtensionPopup>)>,
+            With<PageMetadata>,
+            Without<ExtensionTabId>,
+        ),
+    >,
     mut sequence: Single<&mut ExtensionIdSequence>,
     mut commands: Commands,
 ) {
@@ -192,9 +209,26 @@ fn rebuild_model(
     };
 
     ProjectedTab::select_active(&previous, focused_stack, &mut projected_tabs);
+    let mut tabs = projected_tabs
+        .into_iter()
+        .map(|item| item.tab)
+        .collect::<Vec<_>>();
+    for (metadata, id, window_id) in &projection.popups {
+        tabs.push(ExtensionTabSnapshot {
+            id: id.0,
+            window_id: window_id.0,
+            index: 0,
+            active: false,
+            highlighted: false,
+            pinned: false,
+            url: metadata.url.clone(),
+            title: metadata.title.clone(),
+            status: "complete".into(),
+        });
+    }
     let model = ExtensionModel {
         windows: projected_windows,
-        tabs: projected_tabs.into_iter().map(|item| item.tab).collect(),
+        tabs,
     };
     for event in previous.events(&model) {
         events.write(event);
@@ -497,7 +531,150 @@ impl ExtensionModel {
 
 #[cfg(test)]
 mod tests {
-    use super::PageCandidate;
+    use super::*;
+    use crate::host::bridge::BridgeAuthorization;
+    use crate::host::tabs::ExtensionTabs;
+    use crate::host::windows::{ExtensionWindows, WindowDispatch};
+    use crate::protocol::{ApiRequest, ExtensionCallerContext};
+    use serde_json::json;
+    use vmux_layout::active_pane::ActiveStack;
+
+    #[test]
+    fn authentication_popup_is_searchable_for_close_without_becoming_the_active_content_tab() {
+        let id = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+        let url =
+            format!("chrome-extension://{id}/popup/index.html?singleActionPopout=fido#/fido2");
+        let mut app = App::new();
+        app.add_plugins(ExtensionProjectPlugin);
+        let window = app
+            .world_mut()
+            .spawn((
+                Window {
+                    focused: true,
+                    ..default()
+                },
+                PrimaryWindow,
+            ))
+            .id();
+        let space = app.world_mut().spawn(Space).id();
+        let tab = app.world_mut().spawn((Tab::default(), ChildOf(space))).id();
+        let stack = app
+            .world_mut()
+            .spawn((
+                Stack::default(),
+                PageMetadata {
+                    url: "https://accounts.google.com/".into(),
+                    ..default()
+                },
+                HostWindow(window),
+                ChildOf(tab),
+            ))
+            .id();
+        app.world_mut().spawn(
+            ActiveStack {
+                stack: Some(stack),
+                ..default()
+            }
+            .local_bundle(),
+        );
+        app.update();
+        let mut model = app
+            .world_mut()
+            .query::<&ExtensionModel>()
+            .single(app.world())
+            .unwrap()
+            .clone();
+        let caller = ExtensionCallerContext::ServiceWorker {
+            extension_id: id.into(),
+            context_id: "worker".into(),
+            url: None,
+        };
+        let authorization = BridgeAuthorization {
+            permissions: ["tabs".to_string()].into(),
+            ..default()
+        };
+        let mut windows = ExtensionWindows::default();
+        let created = WindowDispatch::from_request(
+            &ApiRequest {
+                request_id: "create".into(),
+                namespace: "windows".into(),
+                method: "create".into(),
+                arguments: json!([{ "type": "popup", "url": url }]),
+                caller_context: caller.clone(),
+            },
+            &model,
+            &mut windows,
+            &authorization,
+        )
+        .unwrap();
+        let window_id = created.result["id"].as_i64().unwrap() as i32;
+        let popup = app
+            .world_mut()
+            .spawn((
+                ExtensionPopup {
+                    owner: window,
+                    extension_id: id.into(),
+                },
+                ExtensionWindowId(window_id),
+                PageMetadata {
+                    url: url.clone(),
+                    ..default()
+                },
+            ))
+            .id();
+        app.update();
+        model = app
+            .world_mut()
+            .query::<&ExtensionModel>()
+            .single(app.world())
+            .unwrap()
+            .clone();
+        let tabs = ExtensionTabs::from(&model);
+        let active = tabs
+            .dispatch(
+                &ApiRequest {
+                    request_id: "active".into(),
+                    namespace: "tabs".into(),
+                    method: "query".into(),
+                    arguments: json!([{ "active": true, "currentWindow": true }]),
+                    caller_context: caller.clone(),
+                },
+                &authorization,
+            )
+            .unwrap();
+        assert_eq!(active.as_array().unwrap().len(), 1);
+        assert_eq!(active[0]["url"], "https://accounts.google.com/");
+        let popouts = tabs.dispatch(&ApiRequest {
+            request_id: "popouts".into(), namespace: "tabs".into(), method: "query".into(),
+            arguments: json!([{ "url": format!("chrome-extension://{id}/popup/index.html*") }]), caller_context: caller.clone(),
+        }, &authorization).unwrap();
+        assert_eq!(popouts.as_array().unwrap().len(), 1);
+        assert_eq!(popouts[0]["windowId"], window_id);
+        let removed = WindowDispatch::from_request(
+            &ApiRequest {
+                request_id: "close".into(),
+                namespace: "windows".into(),
+                method: "remove".into(),
+                arguments: json!([popouts[0]["windowId"]]),
+                caller_context: caller,
+            },
+            &model,
+            &mut windows,
+            &authorization,
+        )
+        .unwrap();
+        assert_eq!(removed.close_window.unwrap().window_id, Some(window_id));
+        app.world_mut().despawn(popup);
+        app.update();
+        let model = app
+            .world_mut()
+            .query::<&ExtensionModel>()
+            .single(app.world())
+            .unwrap()
+            .clone();
+        assert_eq!(model.tabs.len(), 1);
+        assert!(model.tabs[0].active);
+    }
 
     #[test]
     fn filters_extension_visible_urls() {
