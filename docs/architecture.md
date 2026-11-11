@@ -1482,6 +1482,8 @@ compilation. Build and launch are separate: plain run-dev verifies the completed
 and never compiles or kills an existing app. The cloud launcher requests build-if-needed,
 which builds only when the completion stamp is missing or invalid. Unchanged signed inputs
 reuse their bundled executables so a no-op build does not replace the daemon identity.
+Changed bundle files are copied to new files and atomically renamed into place, preserving
+the old executable for running processes rather than invalidating their mapped code signatures.
 After a successful build, a launch link under `target/release/` lets the existing vmux-cloud
 `make <worktree>` launcher find the debug app
 without depending on cloud-specific files or changing the public client's build prerequisites.
@@ -1602,8 +1604,10 @@ toggle and width bounds, and Git's breadcrumb header and toolbar. The list can b
 and collapsed; selection and Info/Logs choices update the page address. Sidebar/group layout transitions
 use the shared 120 ms motion timing, content changes fade in over 100 ms, and service
 startup/shutdown use the shared loading indicator. Reduced-motion preferences disable
-layout and content transitions; layout and selection never wait for them. A stopped
-service offers one Start control in the list pane, while details remain unselected.
+layout and content transitions; layout and selection never wait for them. While Docker
+is unavailable, the whole page offers one Start control or a startup/shutdown indicator;
+the side sheet and details appear when Docker is ready. One root UI-state subscription
+survives these transitions. Details remain unselected until the user chooses an entry.
 Startup uses persisted defaults and initially shares the home directory. Containers
 created through Docker CLI or Compose appear automatically from the daemon's inventory;
 the UI does not import or register projects. Resource/share settings, service shutdown
