@@ -882,6 +882,8 @@ impl CodexImageTag {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[cfg(unix)]
+    use std::os::unix::fs::symlink;
 
     #[test]
     fn bounded_initial_tail_backfills_every_message_through_the_first_prompt() {
@@ -955,9 +957,6 @@ mod tests {
         }
         assert_eq!(found, vec![Message::user("First request")]);
     }
-    #[cfg(unix)]
-    use std::os::unix::fs::symlink;
-
     struct Fixture {
         root: tempfile::TempDir,
     }
