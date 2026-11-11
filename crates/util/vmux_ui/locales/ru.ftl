@@ -1170,11 +1170,12 @@ team-profiles-unavailable = Профили недоступны. Попробу�
 team-profile-conflict = Сохранено другое изменение. Сохраните снова, чтобы применить своё.
 team-profile-save-failed = Не удалось сохранить профиль. Попробуйте снова.
 
+container-engine = Docker
 container-title = Контейнеры
 container-description = Запускайте локальные контейнеры в Linux VM под управлением Vmux.
 container-unsupported = Нативному движку требуются Apple Silicon и macOS 14 или новее.
-container-start = Запустить Docker
-container-stop = Остановить Docker
+container-start = Запустить виртуальную машину Docker
+container-stop = Остановить виртуальную машину Docker
 container-data-directory = Каталог данных движка
 container-shared-directory = Общая папка
 container-cpus = Процессоры

@@ -25,7 +25,7 @@ impl Plugin for ContainerPlugin {
             .add_plugins(
                 Self::MANIFEST
                     .plugin()
-                    .hosted(HostedPage::page(Self::URL, "Containers")),
+                    .hosted(HostedPage::page(Self::URL, "Docker")),
             )
             .add_plugins(UiStatePlugin::<ContainerUiState>::default())
             .add_plugins(UiEventPlugin::<(
@@ -143,7 +143,7 @@ fn page_ready(
     let Ok(page) = pages.get(entity) else {
         return;
     };
-    if !page.url.starts_with(ContainerPlugin::URL) {
+    if !vmux_api::RoutePattern::new(ContainerPlugin::URL, false).matches(&page.url) {
         return;
     }
     commands.entity(entity).insert(PageView);

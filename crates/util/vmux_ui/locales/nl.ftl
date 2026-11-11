@@ -1170,11 +1170,12 @@ team-profiles-unavailable = Profielen zijn niet beschikbaar. Probeer ze opnieuw 
 team-profile-conflict = Er is een andere wijziging opgeslagen. Sla opnieuw op om jouw wijziging toe te passen.
 team-profile-save-failed = Het profiel kon niet worden opgeslagen. Probeer het opnieuw.
 
+container-engine = Docker
 container-title = Containers
 container-description = Voer lokale containers uit in een door Vmux beheerde Linux-VM.
 container-unsupported = De native engine vereist momenteel Apple Silicon en macOS 14 of nieuwer.
-container-start = Docker starten
-container-stop = Docker stoppen
+container-start = Docker-VM starten
+container-stop = Docker-VM stoppen
 container-data-directory = Gegevensmap van de engine
 container-shared-directory = Gedeelde map
 container-cpus = CPU’s

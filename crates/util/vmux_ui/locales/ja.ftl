@@ -1150,11 +1150,12 @@ team-profiles-unavailable = プロファイルを利用できません。読み�
 team-profile-conflict = 別の更新が保存されました。変更を適用するには、もう一度保存してください。
 team-profile-save-failed = プロファイルを保存できませんでした。もう一度お試しください。
 
+container-engine = Docker
 container-title = コンテナー
 container-description = Vmux が管理する Linux VM でローカルコンテナーを実行します。
 container-unsupported = 現在のネイティブエンジンには Apple Silicon と macOS 14 以降が必要です。
-container-start = Docker を起動
-container-stop = Docker を停止
+container-start = Docker VM を起動
+container-stop = Docker VM を停止
 container-data-directory = エンジンのデータディレクトリ
 container-shared-directory = 共有フォルダー
 container-cpus = CPU 数

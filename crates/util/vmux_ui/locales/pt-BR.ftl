@@ -1170,11 +1170,12 @@ team-profiles-unavailable = Os perfis estão indisponíveis. Tente carregá-los 
 team-profile-conflict = Outra alteração foi salva. Salve novamente para aplicar a sua alteração.
 team-profile-save-failed = Não foi possível salvar o perfil. Tente novamente.
 
+container-engine = Docker
 container-title = Contêineres
 container-description = Execute contêineres locais em uma VM Linux gerenciada pelo Vmux.
 container-unsupported = O mecanismo nativo exige Apple Silicon e macOS 14 ou posterior.
-container-start = Iniciar Docker
-container-stop = Parar Docker
+container-start = Iniciar a VM do Docker
+container-stop = Parar a VM do Docker
 container-data-directory = Diretório de dados do mecanismo
 container-shared-directory = Pasta compartilhada
 container-cpus = CPUs

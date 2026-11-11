@@ -1167,11 +1167,12 @@ team-profiles-unavailable = 프로필을 사용할 수 없습니다. 다시 불�
 team-profile-conflict = 다른 변경 사항이 저장되었습니다. 변경 사항을 적용하려면 다시 저장하세요.
 team-profile-save-failed = 프로필을 저장할 수 없습니다. 다시 시도하세요.
 
+container-engine = Docker
 container-title = 컨테이너
 container-description = Vmux가 관리하는 Linux VM에서 로컬 컨테이너를 실행합니다.
 container-unsupported = 현재 네이티브 엔진에는 Apple Silicon과 macOS 14 이상이 필요합니다.
-container-start = Docker 시작
-container-stop = Docker 중지
+container-start = Docker VM 시작
+container-stop = Docker VM 중지
 container-data-directory = 엔진 데이터 디렉터리
 container-shared-directory = 공유 폴더
 container-cpus = CPU 수

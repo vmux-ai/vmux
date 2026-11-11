@@ -1167,11 +1167,12 @@ team-profiles-unavailable = 個人資料目前無法使用。請重新載入。
 team-profile-conflict = 另一個更新已儲存。請再次儲存以套用你的變更。
 team-profile-save-failed = 無法儲存個人資料。請重試。
 
+container-engine = Docker
 container-title = 容器
 container-description = 在 Vmux 管理的 Linux 虛擬機中執行本機容器。
 container-unsupported = 目前原生引擎需要 Apple Silicon 和 macOS 14 或更新版本。
-container-start = 啟動 Docker
-container-stop = 停止 Docker
+container-start = 啟動 Docker 虛擬機器
+container-stop = 停止 Docker 虛擬機器
 container-data-directory = 引擎資料目錄
 container-shared-directory = 共用資料夾
 container-cpus = CPU 數量

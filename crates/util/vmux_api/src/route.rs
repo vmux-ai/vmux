@@ -144,6 +144,12 @@ impl VmuxRoute {
             return Self(url);
         }
         match (host.as_str(), root) {
+            ("containers", true) => {
+                url.set_host(Some("docker"))
+                    .expect("static vmux route host");
+                url.set_path("/containers");
+            }
+            ("docker", true) => url.set_path("/containers"),
             ("agents", true) => {
                 url.set_host(Some("tools")).expect("static vmux route host");
                 url.set_path("/acp");
@@ -244,6 +250,9 @@ mod tests {
             ("vmux://tools/extensions", "vmux://tools/extensions"),
             ("vmux://cheatsheet/", "vmux://shortcuts/"),
             ("vmux://cheetsheet", "vmux://shortcuts/"),
+            ("vmux://containers/", "vmux://docker/containers"),
+            ("vmux://docker", "vmux://docker/containers"),
+            ("vmux://docker/containers", "vmux://docker/containers"),
         ];
         for (input, expected) in cases {
             assert_eq!(VmuxRoute::canonical(input).as_deref(), Some(expected));
@@ -255,6 +264,10 @@ mod tests {
         assert_eq!(
             VmuxRoute::canonical("vmux://lsp/?source=menu#catalog").as_deref(),
             Some("vmux://tools/lsp?source=menu#catalog")
+        );
+        assert_eq!(
+            VmuxRoute::canonical("vmux://containers/?source=bookmark#logs").as_deref(),
+            Some("vmux://docker/containers?source=bookmark#logs")
         );
     }
 
@@ -314,6 +327,12 @@ mod tests {
         let exact = RoutePattern::new("vmux://projects/", false);
         assert!(exact.matches("vmux://projects?view=grid#active"));
         assert!(!exact.matches("vmux://projects/one"));
+
+        let containers = RoutePattern::new("vmux://docker/containers", false);
+        assert!(containers.matches("vmux://containers/?source=bookmark"));
+        assert!(containers.matches("vmux://docker/"));
+        assert!(!containers.matches("vmux://docker/images"));
+        assert!(!containers.matches("vmux://kubernetes/pods"));
 
         let subtree = RoutePattern::new("https://example.com/tools/", true);
         assert!(subtree.matches("https://example.com/tools/git?branch=main"));

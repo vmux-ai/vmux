@@ -1158,11 +1158,12 @@ team-profiles-unavailable = Profiles are unavailable. Retry loading them.
 team-profile-conflict = Another update was saved. Save again to apply your change.
 team-profile-save-failed = Could not save the profile. Try again.
 
+container-engine = Docker
 container-title = Containers
 container-description = Run local containers in a Vmux-managed Linux VM.
 container-unsupported = The native engine currently requires Apple Silicon macOS 14 or later.
-container-start = Start Docker
-container-stop = Stop Docker
+container-start = Start Docker VM
+container-stop = Stop Docker VM
 container-data-directory = Engine data directory
 container-shared-directory = Shared folder
 container-cpus = CPUs

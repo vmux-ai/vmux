@@ -1170,11 +1170,12 @@ team-profiles-unavailable = الملفات الشخصية غير متاحة. أ�
 team-profile-conflict = تم حفظ تعديل آخر. احفظ مرة أخرى لتطبيق تعديلك.
 team-profile-save-failed = تعذّر حفظ الملف الشخصي. حاول مرة أخرى.
 
+container-engine = Docker
 container-title = الحاويات
 container-description = شغّل حاويات محلية في آلة Linux افتراضية يديرها Vmux.
 container-unsupported = يتطلب المحرك الأصلي Apple Silicon وmacOS 14 أو أحدث.
-container-start = تشغيل Docker
-container-stop = إيقاف Docker
+container-start = تشغيل آلة Docker الافتراضية
+container-stop = إيقاف آلة Docker الافتراضية
 container-data-directory = مجلد بيانات المحرك
 container-shared-directory = المجلد المشترك
 container-cpus = المعالجات
