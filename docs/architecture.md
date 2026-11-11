@@ -510,6 +510,12 @@ Command palette queries cross `UiEvent`, while filtered rows, completion text, p
 and mode are a host-owned `UiState` projection on the page entity. Dioxus renders that projection;
 uncommitted drafts, focus, caret, and IME composition remain local to the DOM.
 
+Tools contributes category navigation rows from registered `tool_providers` metadata through
+`CommandBarContribution` children of the querying palette. Shared routes appear once, registered
+default-page rows are retained, and activation uses the ordinary `OpenRequest` with its open
+target. Category discovery does not register another hosted page or duplicate the sidebar's
+provider definitions in the command feature.
+
 A public framework harness, plugin viewer, and composition tooling are direction, not current
 API. When they ship, they should inspect and operate the same typed plugin graph rather than
 introducing another model beside it.
