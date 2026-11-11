@@ -1,6 +1,6 @@
 use vmux_api::chat::{ChatBlock, ChatItem, ChatPlanStep, ChatSubagent, ChatTurn};
 use vmux_api::prompt_media::ChatAttachment;
-use vmux_api::protocol::{AgentAttachment, AgentPromptEnvelope};
+use vmux_api::protocol::{AgentAttachment, AgentDelegationEnvelope, AgentPromptEnvelope};
 use vmux_api::session::{AssistantBlock, Message, PlanStep, SubagentBlock};
 
 pub(super) struct ChatItemPage {
@@ -46,19 +46,15 @@ impl<'a> ChatMessages<'a> {
         let mut count = 0usize;
         let mut current_turn = false;
         for message in self.imported.iter().chain(self.live) {
-            match message {
-                Message::User { text, attachments } => {
-                    if current_turn {
-                        count += 1;
-                    }
-                    let text = AgentPromptEnvelope::new(text).display().unwrap_or(text);
-                    if !text.trim().is_empty() || !attachments.is_empty() {
-                        count += 1;
-                    }
-                    current_turn = true;
+            if let Some(prompt) = Prompt::of(message) {
+                if current_turn {
+                    count += 1;
                 }
-                Message::Assistant { .. } | Message::ToolResult { .. } => current_turn = true,
+                if !prompt.text.trim().is_empty() || !prompt.attachments.is_empty() {
+                    count += 1;
+                }
             }
+            current_turn = true;
         }
         if current_turn {
             count += 1;
@@ -155,18 +151,22 @@ impl PageRange {
 
 impl PageBuilder<'_> {
     fn push(&mut self, message: &Message, created_at_ms: u64, event_id: &str) {
-        match message {
-            Message::User { text, attachments } => {
-                self.flush_turn();
-                let (context, text) = AgentPromptEnvelope::new(text)
-                    .split()
-                    .map(|(context, display)| (Some(context), display))
-                    .unwrap_or((None, text));
-                if !text.trim().is_empty() || !attachments.is_empty() {
-                    self.push_user(text, context, attachments, created_at_ms, event_id);
-                }
-                self.start_turn(created_at_ms);
+        if let Some(prompt) = Prompt::of(message) {
+            self.flush_turn();
+            if !prompt.text.trim().is_empty() || !prompt.attachments.is_empty() {
+                self.push_user(
+                    prompt.text,
+                    prompt.context,
+                    prompt.attachments,
+                    created_at_ms,
+                    event_id,
+                );
             }
+            self.start_turn(created_at_ms);
+            return;
+        }
+        match message {
+            Message::User { .. } => {}
             Message::Assistant { blocks } => {
                 self.start_agent_turn(created_at_ms);
                 if let Some(turn) = self.current.as_mut() {
@@ -189,6 +189,37 @@ impl PageBuilder<'_> {
                 }
             }
         }
+    }
+}
+
+struct Prompt<'a> {
+    text: &'a str,
+    context: Option<&'a str>,
+    attachments: &'a [AgentAttachment],
+}
+
+impl<'a> Prompt<'a> {
+    fn of(message: &'a Message) -> Option<Self> {
+        let (text, attachments) = match message {
+            Message::User { text, attachments } => (text.as_str(), attachments.as_slice()),
+            Message::ToolResult {
+                call_id,
+                content,
+                is_error: false,
+            } if call_id.starts_with("fco_") => {
+                (AgentDelegationEnvelope::new(content).input()?, &[][..])
+            }
+            _ => return None,
+        };
+        let (context, text) = AgentPromptEnvelope::new(text)
+            .split()
+            .map(|(context, display)| (Some(context), display))
+            .unwrap_or((None, text));
+        Some(Self {
+            text,
+            context,
+            attachments,
+        })
     }
 }
 
@@ -447,6 +478,60 @@ mod tests {
             reasoning_effort: None,
             raw_input: "{}".into(),
         }))
+    }
+
+    #[test]
+    fn cached_delegation_outputs_form_prompt_sections_with_stable_identity() {
+        let messages = vec![
+            Message::ToolResult {
+                call_id: "fco_create_thread".into(),
+                content: "<codex_delegation>\n<source_thread_id>parent</source_thread_id>\n<input>Merge the reviewed PR</input>\n</codex_delegation>".into(),
+                is_error: false,
+            },
+            assistant(vec![AssistantBlock::Text("Reviewing checks".into())]),
+        ];
+        let ids = vec![
+            vmux_api::session::EventId::new("delegated-task"),
+            vmux_api::session::EventId::new("response"),
+        ];
+        let history = ChatMessages::new(&[], &messages, &[42, 43], &[], false).with_event_ids(&ids);
+        let page = history.tail_with_prompt(1);
+        assert_eq!((page.start, page.end, page.total), (0, 2, 2));
+        assert!(
+            matches!(&page.items[0], ChatItem::User { text, event_id, created_at_ms, .. }
+            if text == "Merge the reviewed PR" && event_id == "delegated-task" && *created_at_ms == 42)
+        );
+        let ChatItem::Turn(turn) = &page.items[1] else {
+            panic!("delegated task must retain its response");
+        };
+        assert_eq!(turn.blocks.len(), 1);
+        assert!(matches!(&turn.blocks[0], ChatBlock::Text(text) if text == "Reviewing checks"));
+        assert_eq!(history.before(1, 1).items, page.items[..1]);
+    }
+
+    #[test]
+    fn ordinary_tool_outputs_do_not_become_delegated_prompts() {
+        let output = "<codex_delegation><source_thread_id>parent</source_thread_id><input>Task</input></codex_delegation>";
+        for (call_id, is_error, content) in [
+            ("call_read", false, output),
+            ("fco_create_thread", true, output),
+            ("fco_create_thread", false, "ordinary output"),
+        ] {
+            let messages = vec![Message::ToolResult {
+                call_id: call_id.into(),
+                content: content.into(),
+                is_error,
+            }];
+            let history = ChatMessages::new(&[], &messages, &[], &[], false);
+            let items = history.all();
+            assert_eq!(history.item_count(), 1);
+            let ChatItem::Turn(turn) = &items[0] else {
+                panic!("ordinary output must remain tool activity");
+            };
+            assert!(
+                matches!(&turn.blocks[0], ChatBlock::ToolResult { content: actual, .. } if actual == content)
+            );
+        }
     }
 
     #[test]

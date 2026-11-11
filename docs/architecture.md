@@ -1028,6 +1028,8 @@ excluded from accessibility.
 Source event IDs also identify individual turn rows and tools. A prepend preserves those row
 anchors even inside the same turn; tool batches retain their existing key, and reader-selected
 disclosure states are restored before scroll correction when a tool is reparented.
+Codex delegation results project their explicit input as a prompt, retaining the original event
+identity and cached record. Ordinary tool output and internal instructions remain separate.
 `StickySections` shares one intersection observer per scroll
 surface, observes added history, and disconnects removed surfaces; it does not poll or rerender on scroll.
 The scroll surface has no top inset while pinned; initial spacing belongs to its content. Header
@@ -2064,6 +2066,8 @@ the root snapshot and listener error state; selectors still subscribe only to th
 
 The Session manager publishes only to its active page and leases Git metadata for every displayed
 repository while that page remains active.
+Focused pages retain those leases while their surface is being presented; losing both focus and
+presentation releases the watches without repeatedly restarting the filesystem watcher.
 Its first discovery reserves a skeleton in one persistent scroll surface until rows are available.
 Each provider publishes its completed catalog without waiting for other providers. Partial updates
 keep existing rows and append new identities; a completed discovery can remove

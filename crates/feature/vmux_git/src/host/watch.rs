@@ -168,8 +168,16 @@ fn page_subscriptions_changed(
         || watch.is_some_and(|watch| watch.retry_due(Instant::now()))
 }
 
-fn repo_info_maintenance_needed(repo_info: Single<&RepoInfoCache>) -> bool {
+fn repo_info_maintenance_needed(
+    repo_info: Single<&RepoInfoCache>,
+    active: Query<(), ActivatedOwner>,
+    mut removed_presented: RemovedComponents<PagePresented>,
+    mut removed_focused: RemovedComponents<vmux_ecs::KeyboardOwner>,
+) -> bool {
     repo_info.maintenance_needed(Instant::now())
+        || !active.is_empty()
+        || removed_presented.read().next().is_some()
+        || removed_focused.read().next().is_some()
 }
 
 fn initialize(world: &mut World) {
@@ -489,6 +497,9 @@ struct RepoInfoLease {
     paths: HashSet<PathBuf>,
     active_only: bool,
 }
+
+type ActiveOwner = Or<(With<PagePresented>, With<vmux_ecs::KeyboardOwner>)>;
+type ActivatedOwner = Or<(Added<PagePresented>, Added<vmux_ecs::KeyboardOwner>)>;
 
 const REPO_INFO_IDLE_TTL: Duration = Duration::from_secs(300);
 const WATCH_RETRY_DELAY: Duration = Duration::from_secs(1);
@@ -1751,7 +1762,7 @@ fn info(
     watch: Option<NonSendMut<GitWatch>>,
     mut repo_info: Single<&mut RepoInfoCache>,
     entities: Query<(), ()>,
-    presented_owners: Query<(), With<PagePresented>>,
+    active_owners: Query<(), ActiveOwner>,
     deadline: Option<Res<GitWatchDeadline>>,
     proxy: Option<Res<EventLoopProxyWrapper>>,
     mut watch_cursor: Local<usize>,
@@ -1759,7 +1770,7 @@ fn info(
     let repo_info = repo_info.bypass_change_detection();
     let now = Instant::now();
     repo_info.leases.retain(|owner, lease| {
-        entities.contains(*owner) && (!lease.active_only || presented_owners.contains(*owner))
+        entities.contains(*owner) && (!lease.active_only || active_owners.contains(*owner))
     });
     let active = repo_info
         .leases
@@ -2199,6 +2210,69 @@ mod tests {
 
         assert_eq!(receiver.recv().unwrap(), vec![PathBuf::from("/tmp/first")]);
         assert!(overflow.load(Ordering::Acquire));
+    }
+
+    #[test]
+    fn focused_pages_retain_repo_watches_until_they_lose_focus_and_presentation() {
+        let repository = test_repo::init();
+        let path = PathIdentity::resolve(repository.path()).into_path_buf();
+        let loaded = super::super::worktree::RepoInfo::read(&path).unwrap();
+        let mut app = App::new();
+        app.add_plugins((MinimalPlugins, WatchPlugin));
+        app.update();
+        app.insert_non_send(GitWatch::test());
+        let owner = app.world_mut().spawn(vmux_ecs::KeyboardOwner).id();
+        let cache = app
+            .world_mut()
+            .query_filtered::<Entity, With<RepoInfoCache>>()
+            .single(app.world())
+            .unwrap();
+        app.world_mut()
+            .get_mut::<RepoInfoCache>(cache)
+            .unwrap()
+            .entries
+            .insert(
+                path.clone(),
+                RepoInfoCacheEntry {
+                    info: Some(loaded),
+                    loaded: true,
+                    dirty: false,
+                    branches_dirty: false,
+                    watch_attempted: false,
+                    last_accessed: Instant::now(),
+                    pending: None,
+                },
+            );
+        for _ in 0..3 {
+            app.world_mut()
+                .get_mut::<RepoInfoCache>(cache)
+                .unwrap()
+                .observe_active(owner, &path);
+            app.update();
+            assert!(
+                app.world()
+                    .non_send::<GitWatch>()
+                    .repo_info_subscriptions
+                    .contains_key(&path)
+            );
+            assert!(
+                app.world()
+                    .get::<RepoInfoCache>(cache)
+                    .unwrap()
+                    .leases
+                    .contains_key(&owner)
+            );
+        }
+        app.world_mut()
+            .entity_mut(owner)
+            .remove::<vmux_ecs::KeyboardOwner>();
+        app.update();
+        assert!(
+            !app.world()
+                .non_send::<GitWatch>()
+                .repo_info_subscriptions
+                .contains_key(&path)
+        );
     }
 
     #[test]

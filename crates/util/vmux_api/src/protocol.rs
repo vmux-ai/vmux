@@ -22,6 +22,27 @@ mod terminal;
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn delegation_input_preserves_prompt_markup_and_rejects_partial_envelopes() {
+        let prompt = "Review <input>nested</input> markup\nKeep the diff narrow.";
+        let envelope = format!(
+            "<codex_delegation>\n  <source_thread_id>source</source_thread_id>\n  <input>{prompt}</input>\n</codex_delegation>"
+        );
+        assert_eq!(
+            AgentDelegationEnvelope::new(&envelope).input(),
+            Some(prompt)
+        );
+        for malformed in [
+            format!("tool output\n{envelope}"),
+            envelope.replace("source</source_thread_id>", "</source_thread_id>"),
+            envelope.replace("</codex_delegation>", ""),
+            envelope.replace(prompt, " "),
+        ] {
+            assert!(AgentDelegationEnvelope::new(&malformed).input().is_none());
+        }
+    }
+
     #[test]
     fn composed_agent_prompt_preserves_marker_literals_in_display_text() {
         let display = "before\n\nCurrent user prompt:\nafter".to_string();
