@@ -147,12 +147,29 @@ Deliver user-facing work as an end-to-end vertical slice. A core-only PR is inco
 
 Do not stack PRs by default. Stack only when the work genuinely depends on another unmerged PR and cannot be based on `main`; state that dependency in the PR. Keep the dependent PR as one coherent end-to-end change rather than splitting it into implementation-layer PRs.
 
+## PR Handoff
+
+Keep one user-designated integration agent responsible for reviewing and merging QA-complete PRs in this repository. Implementation agents finish implementation, local validation, the pre-push gate, PR creation, applicable manual QA, and task-owned cache cleanup before handing over the PR. The integration agent owns accepted PRs through review triage, CI fixes, current-head monitoring, squash merge, and worktree cleanup. Other agents return to implementation work and leave accepted PR branches to that owner.
+
+Manual QA is performed by the user; agents prepare the build and inspect its logs under the existing no-launch rule. Record the tested artifact and result. Infrastructure-only changes may record manual QA as not applicable with a concrete reason. Repeat QA when later changes invalidate the recorded result.
+
+Each handoff includes:
+
+- PR number and URL, target branch, and head commit.
+- Feature branch and worktree path.
+- Local checks and results, including test count, Clippy, and pre-push status.
+- Manual QA result and artifact, or why it is not applicable.
+- Cache cleanup status and any artifacts or active worktrees being retained.
+- Remaining CI or review work.
+
+A user handoff of a QA-complete PR to the designated integration agent authorizes review and CI fixes, normal feature-branch pushes, and squash merge into the stated target after review findings are addressed or triaged and all applicable checks pass on the latest head. Carry it through without asking for approval again for each PR. Follow explicit holds, scope changes, and runtime approvals. Keep this ownership with the same agent across successive handoffs.
+
 ## Merging
 
 Before merging any PR:
 
-1. **Check review comments.** Read all review feedback — CodeRabbit and human reviewers — and address or explicitly triage every item. A green status check is not enough; unresolved review comments must be handled first. **Reply to every CodeRabbit thread** — either reflect the fix in code (cite the commit) or comment a triage reason — so no thread is left dangling, then resolve them (e.g. `@coderabbitai resolve`).
-2. **Check CI.** Confirm all required checks are green on the PR's head commit.
+1. **Check review comments.** Read all review feedback — CodeRabbit and human reviewers — and address or explicitly triage every item. Report triage in chat. Post replies or resolve threads only when the user explicitly requests it.
+2. **Check CI.** Confirm all applicable checks have passed on the PR's latest head commit.
 
 After merging, clean up: remove the worktree (`git worktree remove .worktrees/<name>`) and delete the branch (`gh pr merge --delete-branch` for the remote; delete the local branch too if it lingers).
 
