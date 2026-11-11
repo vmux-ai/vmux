@@ -34,6 +34,7 @@ pub enum BuiltinIcon {
     Archive,
     GitCommit,
     Branch,
+    Container,
 }
 
 impl BuiltinIcon {

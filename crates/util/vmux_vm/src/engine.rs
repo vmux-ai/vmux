@@ -11,7 +11,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::Settings;
 use crate::connection::{ConnectionIssue, ConnectionPlugin};
-use crate::process::{Lease, Process};
+use crate::process::{Executable, Lease, Process};
 
 pub struct EnginePlugin;
 
@@ -135,7 +135,7 @@ impl Launch {
             .local_addr()?
             .port();
         Process::spawn(
-            Command::new("gvproxy")
+            Command::new(Executable::find("gvproxy")?)
                 .arg("-ssh-port")
                 .arg(ssh_port.to_string())
                 .arg("-listen-vfkit")
