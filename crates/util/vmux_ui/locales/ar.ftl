@@ -1138,3 +1138,6 @@ project-rename = إعادة تسمية المشروع
 agent-tool-slept = انتظر
 
 project-directory-unavailable = مجلد المشروع غير متاح
+
+session-turn-view-prompt = عرض الطلب
+session-turn-view-response = عرض الرد

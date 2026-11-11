@@ -1138,3 +1138,6 @@ project-rename = Renombrar proyecto
 agent-tool-slept = Esperó
 
 project-directory-unavailable = El directorio del proyecto no está disponible
+
+session-turn-view-prompt = Ver solicitud
+session-turn-view-response = Ver respuesta

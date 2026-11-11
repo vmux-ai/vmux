@@ -12,6 +12,7 @@ use dioxus::prelude::*;
 pub use manager::SessionCollection;
 
 mod activity;
+mod conversation;
 mod format;
 
 #[vmux_page::page(

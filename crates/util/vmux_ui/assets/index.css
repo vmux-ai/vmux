@@ -188,6 +188,23 @@
 }
 
 @layer components {
+  [data-vmux-sticky-content] {
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 100ms ease-out;
+  }
+
+  [data-vmux-sticky-active="true"] > [data-vmux-sticky-content] {
+    opacity: 1;
+    pointer-events: auto;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    [data-vmux-sticky-content] {
+      transition: none;
+    }
+  }
+
   .file-mode-note-enter {
     animation: file-mode-note-enter 180ms cubic-bezier(0.22, 1, 0.36, 1) both;
     transform-origin: top center;

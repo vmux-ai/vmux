@@ -654,6 +654,15 @@ impl Transcript {
         }
     }
 
+    pub(super) fn reveal(self, target: &str) {
+        self.stop_following();
+        vmux_ui::scroll::ScrollIntoView::section(
+            "chat-scroll",
+            target,
+            dioxus::html::ScrollBehavior::Smooth,
+        );
+    }
+
     pub(super) fn observe_scroll(self, top: i32, distance: i32, height: i32) {
         if height <= 0
             || self.initial_scroll().is_empty()

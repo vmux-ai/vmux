@@ -996,6 +996,13 @@ and its geometry remains reserved while the selected session loads.
 Session viewports remember their scroll position and loaded-history start on the owning Session.
 A floating composer overlaps the transcript's lower edge, with an input-inert surface gradient.
 Transcript end padding keeps the latest message clear of the composer and its fade.
+Each prompt and its assistant turns share a section in that scroll surface. A compact sticky header
+shows that section's prompt and latest response after its start scrolls out of view; the next section
+replaces it. Preview links pause automatic following and return to the original prompt or exact response
+block. Existing item IDs remain scroll anchors; section keys survive earlier history so disclosure scopes
+stay mounted. Header visibility changes opacity without moving messages. Hidden previews are inert and
+excluded from accessibility. `StickySections` shares one intersection observer per scroll
+surface, observes added history, and disconnects removed surfaces; it does not poll or rerender on scroll.
 A revisit restores that history window and reader position; the first visit follows the tail.
 Initial tail following remains active until user scroll input. Placeholder and zero-height scroll
 events neither finish placement nor replace the remembered reader position.

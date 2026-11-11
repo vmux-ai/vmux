@@ -1126,3 +1126,6 @@ project-rename = Rename project
 agent-tool-slept = Slept
 
 project-directory-unavailable = The project directory is unavailable
+
+session-turn-view-prompt = View prompt
+session-turn-view-response = View response

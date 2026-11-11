@@ -790,7 +790,8 @@ pub(crate) const WRY_HOST_SHIM: &str = r#"
           const container = document.getElementById(request.container);
           const element = document.getElementById(request.element);
           if (!container || !element || !container.contains(element)) return;
-          const top = element.getBoundingClientRect().top - container.getBoundingClientRect().top + container.scrollTop - 16;
+          const padding = Math.max(16, parseFloat(getComputedStyle(container).scrollPaddingTop) || 0);
+          const top = element.getBoundingClientRect().top - container.getBoundingClientRect().top + container.scrollTop - padding;
           container.scrollTo({ top: Math.max(0, top), behavior: window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 'instant' : request.behavior });
         });
         return;
@@ -1187,6 +1188,11 @@ mod tests {
     #[test]
     fn scroll_notifications_do_not_wait_for_native_replies_and_coalesce_per_frame() {
         RuntimeProbe::verify(include_str!("scroll_events_test.js"));
+    }
+
+    #[test]
+    fn sticky_reference_navigation_respects_the_containers_scroll_padding() {
+        RuntimeProbe::verify(include_str!("scroll_section_test.js"));
     }
 
     #[test]

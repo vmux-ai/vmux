@@ -1118,3 +1118,6 @@ project-rename = プロジェクト名を変更
 agent-tool-slept = 待機した
 
 project-directory-unavailable = プロジェクトのディレクトリにアクセスできません
+
+session-turn-view-prompt = プロンプトを表示
+session-turn-view-response = 応答を表示

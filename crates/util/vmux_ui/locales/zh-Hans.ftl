@@ -1135,3 +1135,6 @@ project-rename = 重命名项目
 agent-tool-slept = 已等待
 
 project-directory-unavailable = 项目目录不可用
+
+session-turn-view-prompt = 查看提示
+session-turn-view-response = 查看回复

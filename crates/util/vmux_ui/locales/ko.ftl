@@ -1135,3 +1135,6 @@ project-rename = 프로젝트 이름 변경
 agent-tool-slept = 대기함
 
 project-directory-unavailable = 프로젝트 디렉터리를 사용할 수 없습니다
+
+session-turn-view-prompt = 프롬프트 보기
+session-turn-view-response = 응답 보기

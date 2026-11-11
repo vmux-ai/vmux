@@ -1,8 +1,10 @@
 use super::agent::AgentBanner;
-use super::item::{ChatItemRow, UserAttachment};
+use super::conversation::{Keys, Section, Turn};
+use super::item::UserAttachment;
 use super::state::Chat;
 use crate::event::{ChatCancelQueuedPrompt, ChatClearQueue, ChatResume};
 use dioxus::prelude::*;
+use std::{cell::RefCell, rc::Rc};
 use vmux_api::prompt_media::ChatAttachment;
 use vmux_ui::agent_accent::AgentAccent;
 use vmux_ui::components::skeleton::Skeleton;
@@ -62,6 +64,8 @@ fn QueuedAttachments(attachments: Vec<ChatAttachment>) -> Element {
 
 #[component]
 pub(super) fn ChatTranscript(chat: Chat) -> Element {
+    use_hook(vmux_ui::scroll::StickySections::install);
+    let section_keys = use_hook(|| Rc::new(RefCell::new(Keys::default())));
     let mut scroll_container = chat.transcript.scroll_container;
     let at_bottom = chat.transcript.at_bottom;
     let transcript = chat.transcript.current();
@@ -70,21 +74,15 @@ pub(super) fn ChatTranscript(chat: Chat) -> Element {
     let loaded_start = transcript.loaded_start;
     let history_loading = transcript.loading;
     let items = transcript.items;
-    let item_count = items.len();
     let initial_scroll = chat.transcript.initial_scroll();
     let placement_pending = !transcript_loading && !items.is_empty() && initial_scroll.is_empty();
-    let handoff_source = chat.handoff.source();
-    let handoff_truncated = chat.handoff.truncated();
-    let agent = chat.agent();
-    let agent_name = chat.header_name();
-    let icon = chat.identity.icon();
-    let agent_avatar = (!icon.is_empty()).then_some(icon);
-    let agent_color = chat.accent().css;
-    let user_name = chat.user.name();
-    let user_color = chat.user.color();
+    let latest_index = loaded_start as usize + items.len().saturating_sub(1);
+    let mut turns = Turn::group(items, loaded_start as usize);
+    section_keys.borrow_mut().assign(&mut turns);
     rsx! {
         div {
             id: "chat-scroll",
+            "data-vmux-sticky-container": "",
             "data-vmux-initial-scroll": initial_scroll,
             "data-vmux-presentation-pending": placement_pending.then_some(""),
             "data-vmux-follow-scroll": at_bottom().to_string(),
@@ -95,7 +93,7 @@ pub(super) fn ChatTranscript(chat: Chat) -> Element {
                     chat.transcript.follow();
                 }
             },
-            class: "relative z-10 flex-1 overflow-y-auto overscroll-contain px-3 pb-20 pt-3 outline-none sm:px-4 md:px-6",
+            class: "relative z-10 flex-1 overflow-y-auto overscroll-contain scroll-pt-16 px-3 pb-20 pt-3 outline-none sm:px-4 md:px-6",
             tabindex: "0",
             onwheel: move |_| chat.transcript.note_scroll_input(),
             ontouchmove: move |_| chat.transcript.note_scroll_input(),
@@ -125,35 +123,12 @@ pub(super) fn ChatTranscript(chat: Chat) -> Element {
                 }
                 if !transcript_loading && chat.installing_splash() {
                     InstallIntro { chat, detail: chat.install_detail() }
-                } else if !transcript_loading && items.is_empty() && chat.status() == "idle" {
+                } else if !transcript_loading && turns.is_empty() && chat.status() == "idle" {
                     ReadyIntro { chat }
                 }
                 if !transcript_loading {
-                    for (i , item) in items.iter().cloned().enumerate() {
-                        div {
-                            key: "{loaded_start as usize + i}",
-                            id: "chat-item-{loaded_start as usize + i}",
-                            "data-vmux-scroll-anchor": "",
-                            ChatItemRow {
-                                absolute_index: loaded_start as usize + i,
-                                item,
-                                agent_id: agent.clone(),
-                                agent_name: agent_name.clone(),
-                                agent_avatar: agent_avatar.clone(),
-                                agent_color: agent_color.clone(),
-                                user_name: user_name.clone(),
-                                user_color: user_color.clone(),
-                                latest: i + 1 == item_count,
-                                on_media_load: move |_| {
-                                    if *at_bottom.peek() {
-                                        chat.transcript.follow();
-                                    }
-                                },
-                            }
-                        }
-                        if !handoff_source.is_empty() && chat.handoff.boundary(loaded_start as usize + i) {
-                            HandoffDivider { source: handoff_source.clone(), truncated: handoff_truncated }
-                        }
+                    for turn in turns {
+                        Section { key: "{turn.key()}", turn, latest_index, chat }
                     }
                 }
                 div {
@@ -247,7 +222,7 @@ fn ReadyIntro(chat: Chat) -> Element {
 }
 
 #[component]
-fn HandoffDivider(source: String, truncated: bool) -> Element {
+pub(super) fn HandoffDivider(source: String, truncated: bool) -> Element {
     rsx! {
         div { class: "flex items-center gap-2 py-1 text-xs text-muted-foreground",
             span { class: "h-px flex-1 bg-foreground/10" }

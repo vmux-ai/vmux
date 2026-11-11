@@ -200,9 +200,54 @@ impl ScrollRetention {
     }
 }
 
+pub struct StickySections;
+
+impl StickySections {
+    pub fn install() {
+        crate::transport::Host::run_script(Self::runtime().to_string());
+    }
+
+    pub fn runtime() -> &'static str {
+        include_str!("sticky_sections.js")
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::io::Write;
+    use std::process::{Command, Stdio};
+
+    struct StickyProbe;
+
+    impl StickyProbe {
+        fn run() {
+            let mut child = Command::new("node")
+                .args(["-e", include_str!("sticky_sections_test.js")])
+                .stdin(Stdio::piped())
+                .stdout(Stdio::piped())
+                .stderr(Stdio::piped())
+                .spawn()
+                .expect("Node is required for sticky header behavior tests");
+            child
+                .stdin
+                .take()
+                .unwrap()
+                .write_all(StickySections::runtime().as_bytes())
+                .unwrap();
+            let result = child.wait_with_output().unwrap();
+            assert!(
+                result.status.success(),
+                "{}",
+                String::from_utf8_lossy(&result.stderr)
+            );
+        }
+    }
+
+    #[test]
+    fn sticky_headers_follow_section_boundaries_and_release_detached_observers() {
+        StickyProbe::run();
+    }
 
     #[test]
     fn local_scroll_updates_do_not_replay_as_navigation_when_the_host_echoes_them() {

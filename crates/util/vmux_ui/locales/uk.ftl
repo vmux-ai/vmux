@@ -1138,3 +1138,6 @@ project-rename = Перейменувати проєкт
 agent-tool-slept = Зачекав
 
 project-directory-unavailable = Каталог проєкту недоступний
+
+session-turn-view-prompt = Переглянути запит
+session-turn-view-response = Переглянути відповідь

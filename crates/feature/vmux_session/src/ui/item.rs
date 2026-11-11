@@ -980,6 +980,7 @@ pub fn TurnView(
                     for row in turn.rows.iter().cloned() {
                         TurnBlock {
                             key: "{row.index()}",
+                            turn_index: key,
                             streaming: live_text_index == Some(row.index()),
                             expanded: tools.expanded(&row),
                             row,
@@ -1555,6 +1556,7 @@ fn SubagentRow(subagent: ChatSubagentState) -> Element {
 #[component]
 pub fn TurnBlock(
     row: ChatTurnRow,
+    #[props(default)] turn_index: usize,
     #[props(default)] streaming: bool,
     #[props(default)] expanded: bool,
 ) -> Element {
@@ -1562,7 +1564,9 @@ pub fn TurnBlock(
     match row {
         ChatTurnRow::Text { text, .. } => {
             rsx! {
-                StreamingMarkdown { key: "{key}", text, streaming }
+                div { key: "{key}", id: "chat-response-{turn_index}-{key}",
+                    StreamingMarkdown { text, streaming }
+                }
             }
         }
         ChatTurnRow::Thinking { text, .. } => rsx! {
