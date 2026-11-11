@@ -605,6 +605,8 @@ entities plus the accepted changes; serialized Record values have no mutation or
 Removal first obtains ticket-bound root-relative path and imported-symlink facts. Project systems stage Hidden
 intents for unregistered aliases on the accepted proposal; the filesystem adapter never decides
 registration membership or mutates that snapshot. Alias lookup failure leaves committed state intact.
+The core routes attach selected external directories through managed aliases. Editor enriches
+Project display identity from Profile settings while preserving names at saved revisions.
 Filesystem jobs queue by canonical directory. Unstarted jobs are discarded when their owner
 changes; started atomic IO finishes before a replacement root reads that directory. Backend IO
 tasks therefore own their finite lifetime rather than being despawned with a requesting root.

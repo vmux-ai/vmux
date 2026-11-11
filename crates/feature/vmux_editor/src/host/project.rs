@@ -84,9 +84,9 @@ impl Plugin for ProjectPagePlugin {
     }
 }
 
-struct ProjectNames<'a>(&'a vmux_setting::AppSettings);
+struct Names<'a>(&'a vmux_setting::AppSettings);
 
-impl ProjectNames<'_> {
+impl Names<'_> {
     fn apply(&self, mut state: ProjectUiState) -> ProjectUiState {
         let entries = match &mut state.view {
             ProjectView::Catalog(catalog) => &mut catalog.entries,
@@ -957,7 +957,7 @@ fn queue(
                 ),
                 None => continue,
             };
-            let state = ProjectNames(&settings).apply(state);
+            let state = Names(&settings).apply(state);
             if let ProjectView::Detail(detail) = &state.view {
                 page.title.clone_from(&detail.name);
             }
@@ -1040,7 +1040,7 @@ fn sync_icons(
         let Some(current) = state.current() else {
             continue;
         };
-        let next = ProjectNames(&settings).apply(current.clone());
+        let next = Names(&settings).apply(current.clone());
         if let ProjectView::Detail(detail) = &next.view {
             page.title.clone_from(&detail.name);
             let seed = if detail.identity.is_empty() {
@@ -1252,7 +1252,7 @@ fn finish_catalogs(
         {
             state.collection_view = current.collection_view;
         }
-        let state = ProjectNames(&settings).apply(state);
+        let state = Names(&settings).apply(state);
         commands.trigger(vmux_ecs::UiStateWrite::<ProjectUiState>::from_event(
             entity, &state,
         ));
@@ -1714,7 +1714,7 @@ mod tests {
                 }),
             ];
             for view in states {
-                let state = ProjectNames(&settings).apply(ProjectUiState {
+                let state = Names(&settings).apply(ProjectUiState {
                     view,
                     ..Default::default()
                 });

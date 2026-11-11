@@ -2,7 +2,10 @@ pub struct ProjectRoute;
 
 impl ProjectRoute {
     #[cfg(feature = "filesystem")]
-    pub fn attach(root: &std::path::Path, directory: &std::path::Path) -> Result<String, crate::Error> {
+    pub fn attach(
+        root: &std::path::Path,
+        directory: &std::path::Path,
+    ) -> Result<String, crate::Error> {
         std::fs::create_dir_all(root)
             .map_err(|error| crate::Error::Unavailable(error.to_string()))?;
         let root = root
@@ -71,7 +74,11 @@ mod tests {
         std::fs::create_dir(&managed).unwrap();
         let worktree = external.path().join("worktree");
         std::fs::create_dir(&worktree).unwrap();
-        std::fs::write(worktree.join(".git"), "gitdir: /tmp/repository/worktrees/test").unwrap();
+        std::fs::write(
+            worktree.join(".git"),
+            "gitdir: /tmp/repository/worktrees/test",
+        )
+        .unwrap();
         for path in [&managed, &worktree, &external.path().to_path_buf()] {
             let url = ProjectRoute::attach(root.path(), path).unwrap();
             assert_eq!(
@@ -80,7 +87,12 @@ mod tests {
             );
             assert_eq!(ProjectRoute::attach(root.path(), path).unwrap(), url);
         }
-        assert_eq!(std::fs::read_dir(root.path().join("imported")).unwrap().count(), 2);
+        assert_eq!(
+            std::fs::read_dir(root.path().join("imported"))
+                .unwrap()
+                .count(),
+            2
+        );
     }
 
     #[test]
