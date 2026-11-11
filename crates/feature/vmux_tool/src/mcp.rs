@@ -53,22 +53,26 @@ impl McpProvider {
             .map(|error| format!("MCP Servers: {error}"))
             .collect();
         let mut names = discovered.keys().cloned().collect::<BTreeSet<_>>();
-        names.extend(manifest.mcp.servers.keys().cloned());
+        let catalog = vmux_ecs::manifest::FeatureManifest::parse(
+            <crate::Feature as vmux_ecs::manifest::FeatureManifestSource>::SOURCE,
+        );
+        for name in manifest.mcp.servers.keys() {
+            if Self::legacy_definition(name, manifest, &catalog.mcp_servers).is_some() {
+                names.insert(name.clone());
+            }
+        }
         let items = names
             .into_iter()
             .map(|name| {
-                let managed = manifest.mcp.servers.contains_key(&name);
+                let legacy = Self::legacy_definition(&name, manifest, &catalog.mcp_servers);
+                let managed = legacy.is_some();
                 let external = discovered.get(&name);
                 let status = if external.is_some_and(|server| server.conflict) {
                     ToolStatus::Conflict
                 } else {
                     ToolStatus::Installed
                 };
-                let definition = manifest
-                    .mcp
-                    .servers
-                    .get(&name)
-                    .or_else(|| external.map(|server| &server.definition));
+                let definition = legacy.or_else(|| external.map(|server| &server.definition));
                 let transport = definition
                     .map(|server| format!("{:?}", server.transport).to_ascii_lowercase())
                     .unwrap_or_else(|| "unknown".to_string());
@@ -116,6 +120,20 @@ impl McpProvider {
             },
             errors,
         })
+    }
+
+    fn legacy_definition<'a>(
+        name: &str,
+        manifest: &'a ToolsManifest,
+        catalog: &[vmux_ecs::manifest::McpServer],
+    ) -> Option<&'a McpServerManifest> {
+        let definition = manifest.mcp.servers.get(name)?;
+        for server in catalog {
+            if server.id == name && definition == &McpServerManifest::http(&server.url) {
+                return None;
+            }
+        }
+        Some(definition)
     }
 }
 
@@ -306,6 +324,22 @@ pub struct McpServerManifest {
     pub header_env: BTreeMap<String, String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub bearer_token_env_var: Option<String>,
+}
+
+impl McpServerManifest {
+    pub(crate) fn http(url: &str) -> Self {
+        Self {
+            transport: McpTransport::Http,
+            command: None,
+            args: Vec::new(),
+            env: BTreeMap::new(),
+            cwd: None,
+            url: Some(url.to_string()),
+            headers: BTreeMap::new(),
+            header_env: BTreeMap::new(),
+            bearer_token_env_var: None,
+        }
+    }
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -507,6 +541,60 @@ impl McpConfigDocument {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn service_registrations_are_not_duplicated_as_agent_configuration() {
+        let temp = tempfile::tempdir().unwrap();
+        let home = temp.path().join("home");
+        let store = ToolStore::new(temp.path().join("config"), &home);
+        let mut manifest = ToolsManifest::default();
+        manifest.mcp.servers.insert(
+            "github".into(),
+            McpServerManifest::http("https://api.githubcopilot.com/mcp/"),
+        );
+        manifest.mcp.servers.insert(
+            "custom".into(),
+            McpServerManifest::http("https://example.com/mcp"),
+        );
+        let original = manifest.clone();
+        let provider = ToolProvider::new("mcp");
+        let snapshot = McpProvider::scan(&provider, &store, &mut manifest, false).unwrap();
+        assert_eq!(
+            snapshot
+                .category
+                .items
+                .iter()
+                .map(|item| item.id.as_str())
+                .collect::<Vec<_>>(),
+            ["custom"]
+        );
+        assert_eq!(manifest, original);
+        std::fs::create_dir_all(home.join(".codex")).unwrap();
+        std::fs::write(
+            home.join(".codex/config.toml"),
+            "[mcp_servers.github]\nurl = 'https://api.githubcopilot.com/mcp/'\n",
+        )
+        .unwrap();
+        let snapshot = McpProvider::scan(&provider, &store, &mut manifest, false).unwrap();
+        assert_eq!(
+            snapshot
+                .category
+                .items
+                .iter()
+                .map(|item| item.id.as_str())
+                .collect::<Vec<_>>(),
+            ["custom", "github"]
+        );
+        let github = snapshot
+            .category
+            .items
+            .iter()
+            .find(|item| item.id == "github")
+            .unwrap();
+        assert!(!github.managed);
+        assert!(github.operations.is_empty());
+        assert_eq!(manifest, original);
+    }
 
     #[test]
     fn discovery_reads_agent_config_without_mutating_tools_manifest() {

@@ -13,6 +13,7 @@ pub mod choice;
 pub mod code;
 pub mod composer;
 pub mod composer_bar;
+pub mod connector_link;
 pub mod context_menu;
 pub mod dialog;
 pub mod dropdown;
