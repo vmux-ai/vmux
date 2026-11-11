@@ -1684,6 +1684,7 @@ fn saved(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use vmux_session::{SessionSummary, StageSummary};
 
     #[test]
     fn registered_project_names_take_precedence_over_legacy_settings() {
@@ -1729,7 +1730,6 @@ mod tests {
             }
         }
     }
-    use vmux_session::{SessionSummary, StageSummary};
 
     #[test]
     fn managed_checkout_delete_completes_the_operation_and_refreshes_the_catalog() {
