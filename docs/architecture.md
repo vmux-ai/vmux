@@ -1590,17 +1590,28 @@ out, because dependency resolution happens before any build script runs.
 
 ## Native containers
 
-`vmux_container` owns the container CLI declarations and asynchronous command outcomes.
-`vmux_vm` provides the platform runtime without linking the desktop shell. Its supervisor
-holds an exclusive engine lease and owns a separate libkrun worker and gvproxy process.
-The worker enters the VMM in its own process because libkrun consumes that process's
-lifecycle. Closing the invoking CLI does not close the VM.
+`vmux_container` owns the `vmux://containers/` page and container CLI. Both submit typed
+requests to `ControlPlugin`; shared operation entities own asynchronous work, its target,
+and completion. The page publishes configuration, phase, Docker socket, errors and bounded
+log output through `ContainerUiState`. Start and stop events carry intent; status polling
+does not block the desktop schedule.
+
+`vmux_vm` provides the platform runtime without linking the desktop shell. `EnginePlugin`
+owns an engine entity with settings, phase, deadline, failure and an exclusive lease.
+The libkrun worker and gvproxy are child process entities; `ConnectionPlugin` owns staged
+transport, SSH, Docker readiness and port-refresh tasks. Launch, connection, observation
+and retirement run in ordered system sets. Blocking waits belong to `EngineClient`, the
+CLI and GUI adapter. The worker enters the VMM in its own process because libkrun consumes
+that process's lifecycle. Closing the invoking CLI or page does not close the VM.
 
 ```mermaid
 flowchart LR
-    cli["vmux container"] --> supervisor["VM supervisor + engine lease"]
-    supervisor --> worker["libkrun worker"]
-    supervisor --> network["gvproxy"]
+    cli["vmux container"] --> control["ControlPlugin: operation entities"]
+    page["vmux://containers/"] --> control
+    control --> client["EngineClient"]
+    client --> engine["EnginePlugin: engine entity + lease"]
+    engine --> worker["libkrun worker entity"]
+    engine --> network["gvproxy entity"]
     worker --> guest["Linux: Docker + guest control"]
 ```
 
@@ -1622,9 +1633,10 @@ refused while the engine lease is held.
 
 Shutdown travels over a separate guest control channel on vsock port 2376. Guest init
 terminates Docker, waits for daemon exit and syncs before ending its workload. The
-supervisor acknowledges completion only when the worker exits, its network process is
-reaped and the engine lease is released. Correlation and ownership use that lease and
-the control socket rather than an unchecked persisted PID.
+engine acknowledges completion only when the worker exits and its network process is
+reaped. It writes the final phase before releasing its lease, so the previous runtime
+cannot overwrite a newly started engine's state. Correlation and ownership use that
+lease and the control socket rather than an unchecked persisted PID.
 
 ## Where a crate lives
 
