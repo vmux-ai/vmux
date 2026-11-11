@@ -1,11 +1,13 @@
-use bevy_app::{App, Plugin, Update};
+pub use bevy_app::App;
+use bevy_app::{Plugin, Update};
 use bevy_ecs::prelude::*;
 use bevy_ecs::query::QueryFilter;
 use bevy_ecs::reflect::AppTypeRegistry;
 use bevy_ecs::system::SystemParam;
 pub use bevy_reflect::TypeRegistry;
 use bevy_reflect::{FromReflect, FromType, GetTypeRegistration, Reflect, TypePath};
-use bevy_world_serialization::{DynamicEntity, DynamicWorld, WorldFilter};
+pub use bevy_world_serialization::WorldFilter;
+use bevy_world_serialization::{DynamicEntity, DynamicWorld};
 use moonshine_save::prelude::{Save, SaveWorld};
 use std::marker::PhantomData;
 use std::path::PathBuf;
@@ -28,8 +30,9 @@ impl<S: Schema> Plugin for SchemaPlugin<S> {
         let filter = {
             let mut registry = app.world().resource::<AppTypeRegistry>().write();
             S::register(&mut registry);
-            StoreDomain::<S>::filter(&registry)
+            S::filter(&registry)
         };
+        S::track(app);
         app.insert_resource(Types::<S> {
             filter,
             schema: PhantomData,
@@ -37,8 +40,14 @@ impl<S: Schema> Plugin for SchemaPlugin<S> {
     }
 }
 
-pub trait Schema: Send + Sync + 'static {
+pub trait Schema: Send + Sync + Sized + 'static {
     fn register(registry: &mut TypeRegistry);
+
+    fn filter(registry: &TypeRegistry) -> WorldFilter {
+        StoreDomain::<Self>::filter(registry)
+    }
+
+    fn track(_app: &mut App) {}
 }
 
 #[derive(Resource)]
@@ -494,6 +503,31 @@ mod tests {
         app.world_mut().spawn((Save, Saved));
         app.update();
         assert_eq!(app.world().resource::<DirtyCount>().0, 1);
+    }
+
+    #[crate::store(domain = WorkspaceStore, track; Saved)]
+    struct SharedStore;
+
+    #[test]
+    fn tracked_schemas_preserve_workspace_membership_and_deduplicate_change_tracking() {
+        let mut app = App::new();
+        app.add_plugins(SchemaPlugin::<SharedStore>::default())
+            .register_stored::<Saved>()
+            .register_type::<Transient>()
+            .init_resource::<DirtyCount>()
+            .add_observer(DirtyCount::record);
+        let registry = app.world().resource::<AppTypeRegistry>().read();
+        let workspace = WorkspaceStored::filter(&registry);
+        assert!(workspace.is_allowed::<Saved>());
+        assert!(!workspace.is_allowed::<Transient>());
+        assert!(!StoreDomain::<SharedStore>::filter(&registry).is_allowed::<Saved>());
+        drop(registry);
+        let entity = app.world_mut().spawn((Save, Saved)).id();
+        app.update();
+        assert_eq!(app.world().resource::<DirtyCount>().0, 1);
+        app.world_mut().entity_mut(entity).remove::<Saved>();
+        app.update();
+        assert_eq!(app.world().resource::<DirtyCount>().0, 2);
     }
 
     #[test]

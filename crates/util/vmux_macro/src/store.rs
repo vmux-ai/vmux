@@ -1,12 +1,12 @@
 use proc_macro2::TokenStream;
 use quote::quote;
-use syn::parse::Parser;
+use syn::parse::{Parse, ParseStream};
 use syn::punctuated::Punctuated;
-use syn::{Data, DeriveInput, Fields, Token, Type};
+use syn::{Data, DeriveInput, Fields, Ident, Token, Type};
 
 pub(crate) struct Declaration {
     item: DeriveInput,
-    types: Vec<Type>,
+    args: Arguments,
 }
 
 impl Declaration {
@@ -23,24 +23,34 @@ impl Declaration {
                 "a store schema cannot have generic parameters",
             ));
         }
-        let declared = Punctuated::<Type, Token![,]>::parse_terminated.parse2(args)?;
-        if declared.is_empty() {
+        let args = syn::parse2::<Arguments>(args)?;
+        if args.types.is_empty() {
             return Err(syn::Error::new_spanned(
                 &item,
                 "a store schema must declare at least one type",
             ));
         }
-        let mut types = Vec::new();
-        for ty in declared {
-            types.push(ty);
-        }
-        Ok(Self { item, types })
+        Ok(Self { item, args })
     }
 
     pub(crate) fn expand(&self) -> TokenStream {
         let item = &self.item;
         let name = &item.ident;
-        let types = &self.types;
+        let types = &self.args.types;
+        let domain = match &self.args.domain {
+            Some(domain) => quote!(#domain),
+            None => quote!(Self),
+        };
+        let tracking = if self.args.track {
+            quote! {
+                fn track(app: &mut ::vmux_ecs::store::App) {
+                    use ::vmux_ecs::store::StoreAppExt;
+                    #(app.track_store::<#types>();)*
+                }
+            }
+        } else {
+            TokenStream::new()
+        };
         let clause = &item.generics.where_clause;
         quote! {
             #item
@@ -51,12 +61,58 @@ impl Declaration {
                         registry.register::<#types>();
                         registry.register_type_data::<
                             #types,
-                            ::vmux_ecs::store::StoreDomain<Self>,
+                            ::vmux_ecs::store::StoreDomain<#domain>,
                         >();
                     )*
                 }
+
+                fn filter(registry: &::vmux_ecs::store::TypeRegistry) -> ::vmux_ecs::store::WorldFilter {
+                    ::vmux_ecs::store::StoreDomain::<#domain>::filter(registry)
+                }
+
+                #tracking
             }
         }
+    }
+}
+
+struct Arguments {
+    domain: Option<Type>,
+    track: bool,
+    types: Vec<Type>,
+}
+
+impl Parse for Arguments {
+    fn parse(input: ParseStream) -> syn::Result<Self> {
+        let mut domain = None;
+        let mut track = false;
+        if input.peek(Ident) && input.peek2(Token![=]) {
+            let option: Ident = input.parse()?;
+            if option != "domain" {
+                return Err(syn::Error::new_spanned(option, "expected domain"));
+            }
+            input.parse::<Token![=]>()?;
+            domain = Some(input.parse()?);
+            if input.peek(Token![,]) {
+                input.parse::<Token![,]>()?;
+                let option: Ident = input.parse()?;
+                if option != "track" {
+                    return Err(syn::Error::new_spanned(option, "expected track"));
+                }
+                track = true;
+            }
+            input.parse::<Token![;]>()?;
+        }
+        let declared = Punctuated::<Type, Token![,]>::parse_terminated(input)?;
+        let mut types = Vec::new();
+        for ty in declared {
+            types.push(ty);
+        }
+        Ok(Self {
+            domain,
+            track,
+            types,
+        })
     }
 }
 
@@ -78,6 +134,24 @@ mod tests {
                 quote!(Name),
                 parse_quote!(
                     struct Store<T>;
+                ),
+            ),
+            (
+                quote!(domain = WorkspaceStore, changed; Name),
+                parse_quote!(
+                    struct Store;
+                ),
+            ),
+            (
+                quote!(scope = WorkspaceStore; Name),
+                parse_quote!(
+                    struct Store;
+                ),
+            ),
+            (
+                quote!(domain = WorkspaceStore, track;),
+                parse_quote!(
+                    struct Store;
                 ),
             ),
             (

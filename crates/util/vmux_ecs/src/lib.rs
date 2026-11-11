@@ -1,6 +1,6 @@
 extern crate self as vmux_ecs;
 
-#[cfg(feature = "persistence")]
+#[cfg(feature = "store")]
 pub use vmux_macro::store;
 
 #[cfg(all(host, feature = "host"))]
@@ -113,7 +113,7 @@ pub mod scroll;
 pub mod search;
 #[cfg(all(host, feature = "host"))]
 pub mod service;
-#[cfg(feature = "persistence")]
+#[cfg(feature = "store")]
 pub mod store;
 #[cfg(feature = "contracts")]
 pub mod team;

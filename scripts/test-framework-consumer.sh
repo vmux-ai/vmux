@@ -8,7 +8,7 @@ consumer_manifest="$root/examples/framework-consumer/Cargo.toml"
 consumer_target="$(vmux_cargo_target_dir "$root")/framework-consumer"
 
 cargo test --locked -p vmux_ecs --no-default-features --lib
-cargo test --locked -p vmux_ecs --no-default-features --features persistence --lib
+cargo test --locked -p vmux_ecs --no-default-features --features store --lib
 cargo test --locked --manifest-path "$consumer_manifest" --target-dir "$consumer_target"
 
 python3 - "$consumer_manifest" <<'PY'

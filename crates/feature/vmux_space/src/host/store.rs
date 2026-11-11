@@ -80,18 +80,23 @@ struct SchemaPlugin;
 
 impl Plugin for SchemaPlugin {
     fn build(&self, app: &mut App) {
-        app.register_stored::<PageMetadata>()
-            .register_stored::<vmux_ecs::WorkspaceKind>()
-            .register_stored::<vmux_ecs::Cwd>()
-            .register_stored::<vmux_ecs::Description>()
-            .register_stored::<vmux_ecs::CollectionView>()
-            .register_stored::<CreatedAt>()
-            .register_stored::<vmux_ecs::LastActivatedAt>()
-            .register_stored::<vmux_ecs::ArchivedAt>()
-            .register_stored::<vmux_ecs::Order>()
+        app.add_plugins(vmux_ecs::store::SchemaPlugin::<PageStore>::default())
             .track_store::<Save>();
     }
 }
+
+#[vmux_ecs::store(domain = vmux_ecs::store::WorkspaceStore, track;
+    PageMetadata,
+    vmux_ecs::WorkspaceKind,
+    vmux_ecs::Cwd,
+    vmux_ecs::Description,
+    vmux_ecs::CollectionView,
+    CreatedAt,
+    vmux_ecs::LastActivatedAt,
+    vmux_ecs::ArchivedAt,
+    vmux_ecs::Order,
+)]
+struct PageStore;
 
 #[derive(Component)]
 struct ScopedPage;

@@ -64,9 +64,11 @@ impl<I: Component + Clone + Eq + Hash, M: Component> IdentityIndex<I, M> {
         owner: Entity,
         id: &I,
     ) -> Result<Option<Entity>, IdentityLookupError<I>> {
-        self.scoped.entity(&(owner, id.clone())).map_err(|error| match error {
-            IdentityLookupError::Duplicate((_, id)) => IdentityLookupError::Duplicate(id),
-        })
+        self.scoped
+            .entity(&(owner, id.clone()))
+            .map_err(|error| match error {
+                IdentityLookupError::Duplicate((_, id)) => IdentityLookupError::Duplicate(id),
+            })
     }
 
     fn include(&mut self, id: I, entity: Entity, owner: Option<Entity>) {

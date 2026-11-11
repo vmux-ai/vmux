@@ -3,7 +3,7 @@ use bevy_ecs::message::MessageCursor;
 use bevy_ecs::prelude::*;
 use bevy_reflect::Reflect;
 pub use vmux_ecs::revision::{BaseRevision, Record, Revision};
-use vmux_ecs::store::StoreAppExt;
+use vmux_ecs::store::SchemaPlugin;
 use vmux_ecs::{ArchivedAt, CreatedAt, Cwd, Description, LastActivatedAt, UnixMillis, Uuid};
 
 use crate::{
@@ -15,17 +15,7 @@ pub(crate) struct MutationPlugin;
 
 impl Plugin for MutationPlugin {
     fn build(&self, app: &mut App) {
-        app.register_stored::<Cwd>()
-            .register_stored::<Description>()
-            .register_stored::<CreatedAt>()
-            .register_stored::<ArchivedAt>()
-            .register_stored::<LastActivatedAt>()
-            .register_stored::<vmux_ecs::Order>()
-            .register_stored::<Mutation>()
-            .register_stored::<Record>()
-            .register_stored::<Revision>()
-            .register_stored::<BaseRevision>()
-            .register_stored::<Uuid>()
+        app.add_plugins(SchemaPlugin::<MutationStore>::default())
             .register_type::<Creation>()
             .add_message::<Request>()
             .add_message::<Committed>()
@@ -39,6 +29,21 @@ impl Plugin for MutationPlugin {
             .add_systems(Update, (ApplyDeferred, receive).chain().in_set(CommitSet));
     }
 }
+
+#[vmux_ecs::store(domain = vmux_ecs::store::WorkspaceStore, track;
+    Cwd,
+    Description,
+    CreatedAt,
+    ArchivedAt,
+    LastActivatedAt,
+    vmux_ecs::Order,
+    Mutation,
+    Record,
+    Revision,
+    BaseRevision,
+    Uuid,
+)]
+struct MutationStore;
 
 #[derive(SystemSet, Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub(crate) struct ReceiveSet;

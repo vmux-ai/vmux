@@ -16,6 +16,7 @@ repository = "https://github.com/vmux-ai/vmux"
 let_underscore_future = "deny"
 
 [workspace.dependencies]
+web-time = "1.1"
 bytes = "1"
 webpki-roots = "1"
 bevy = { version = "0.19.0", default-features = false, features = [

@@ -385,7 +385,7 @@ override feature availability through one builder; individual feature plugins re
 without the facade.
 
 `vmux_ecs` defaults to the renderer-free component, identity, operation, and activation core.
-The `contracts` feature adds shared wire values; `persistence` adds schema registration and store
+The `contracts` feature adds shared wire values; `store` adds schema registration and store
 state without a Profile or CEF runtime. The native `host` bundle is explicit in Vmux consumers.
 `VmuxEcsPlugin` installs only primitives and operation lifecycle. `VmuxRuntimePlugin` separately
 installs the Vmux Profile, page runtime, and layout engine; desktop feature dependencies select
@@ -403,7 +403,7 @@ the same ID in different roots remains valid, while a duplicate inside one root 
 
 `examples/framework-consumer` is an independent Cargo workspace using only public APIs and no
 repository patch configuration. Its tests exercise typed requests, scoped identity, operation
-completion, and optional persistence in a Bevy App without Profile or UI dependencies. CI runs
+completion, and optional storage in a Bevy App without Profile or UI dependencies. CI runs
 the consumer and checks its resolved dependency graph along with the minimal core configurations.
 
 Every product feature appears exactly once in that graph and exposes one crate-level plugin.
@@ -906,6 +906,9 @@ successful writes. Restored session children containing only a timestamp and par
 discarded after backing up the store; conversation content and live children remain intact.
 `vmux_ecs::store` shares type-registry domains and entity-owned `State` across workspace and
 bookmark stores. A store schema declares its component and resource types with `#[vmux_ecs::store(...)]`;
+`domain = WorkspaceStore, track; ...` contributes to the existing workspace domain and installs
+deduplicated component change tracking. Other schemas keep their own domains and opt into tracking
+explicitly.
 `SchemaPlugin` registers the declared types and provides a shared, cached save filter. Loaded, dirty,
 and saving revisions stay distinct: a completion acknowledges only its captured revision, and failure
 returns that revision to the dirty set. Restore progresses

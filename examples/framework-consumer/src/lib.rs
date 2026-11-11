@@ -93,9 +93,9 @@ fn rename(
     }
 }
 
-pub struct DocumentPersistencePlugin;
+pub struct DocumentStorePlugin;
 
-impl Plugin for DocumentPersistencePlugin {
+impl Plugin for DocumentStorePlugin {
     fn build(&self, app: &mut App) {
         app.register_required_components::<Document, Save>()
             .add_plugins((
@@ -195,11 +195,11 @@ mod tests {
     }
 
     #[test]
-    fn persistence_is_selected_by_the_feature_instead_of_the_shared_data() {
+    fn store_scope_is_selected_by_the_feature_instead_of_the_shared_data() {
         let directory = tempfile::tempdir().unwrap();
         let path = directory.path().join("documents.ron");
         let mut app = App::new();
-        app.add_plugins((DocumentsPlugin, DocumentPersistencePlugin));
+        app.add_plugins((DocumentsPlugin, DocumentStorePlugin));
         let transient = app
             .world_mut()
             .spawn((
@@ -223,7 +223,7 @@ mod tests {
         app.world_mut().trigger_save(save);
         app.update();
         let mut restored = App::new();
-        restored.add_plugins((DocumentsPlugin, DocumentPersistencePlugin));
+        restored.add_plugins((DocumentsPlugin, DocumentStorePlugin));
         restored
             .world_mut()
             .trigger_load(LoadWorld::default_from_file(path));
