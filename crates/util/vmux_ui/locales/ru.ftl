@@ -1165,3 +1165,14 @@ onboarding-key-failed = Не удалось сохранить ключ. Пов�
 onboarding-workspace-question = Где будем работать?
 agent-starting = Запуск агента…
 browser-open-external = Открыть во внешнем браузере
+connectors-title = Коннекторы
+connectors-description = Управляйте аккаунтами и выбирайте коннекторы в разговоре.
+connectors-empty = Нет доступных коннекторов
+connectors-sign-in-required = Требуется вход
+connectors-open-sign-in = Открыть вход
+
+connectors-command-description = Выберите коннекторы для этого разговора
+connectors-use = Использовать в чате
+connectors-selected = Выбран · убрать
+connectors-manage = Управление коннекторами
+connectors-manage-access = Управление доступом к репозиториям

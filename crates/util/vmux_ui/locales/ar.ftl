@@ -1165,3 +1165,14 @@ onboarding-key-failed = تعذّر حفظ المفتاح. أعد المحاول�
 onboarding-workspace-question = أين نعمل؟
 agent-starting = جارٍ بدء تشغيل الوكيل…
 browser-open-external = فتح في متصفح خارجي
+connectors-title = الموصلات
+connectors-description = أدر الحسابات المتصلة واختر الموصلات من المحادثة.
+connectors-empty = لا توجد موصلات متاحة
+connectors-sign-in-required = يلزم تسجيل الدخول
+connectors-open-sign-in = فتح تسجيل الدخول
+
+connectors-command-description = اختر الموصلات لهذه المحادثة
+connectors-use = استخدام في المحادثة
+connectors-selected = محدد · إزالة
+connectors-manage = إدارة الموصلات
+connectors-manage-access = إدارة الوصول إلى المستودعات

@@ -45,7 +45,7 @@ impl ComposerState {
     fn slash_effect(&mut self, command: SlashCommand) -> ChatComposerEffect {
         let draft = match command {
             SlashCommand::Resume => "/resume ",
-            SlashCommand::Mcp => "/mcp ",
+            SlashCommand::Mcp => "/connectors ",
             SlashCommand::Model => "/model ",
             SlashCommand::Upload => "",
         };

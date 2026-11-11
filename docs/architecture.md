@@ -1345,8 +1345,20 @@ anchor, so a background agent cannot read or disrupt the space you are looking a
 Each ACP agent's default config file is authoritative for its native MCP servers. Vmux may discover
 recognized native configs for read-only display, but never copies them into `tools.toml` or injects
 them back into ACP session creation. Agent launch injects only the internal `vmux` MCP anchored to
-the Session workspace. Profile-owned integrations and OAuth are a separate future feature rather
-than another representation of agent-native MCP config.
+the Session workspace.
+
+`vmux_tool` owns the Connectors page, its catalog, and Profile-owned OAuth. GitHub uses a registered
+public client and Device Flow; providers advertising dynamic registration use PKCE. Credentials
+and account labels remain in encrypted Profile storage. Pending authorization can be cancelled
+before credentials commit, and sign-in opens the system browser.
+
+`vmux_session` owns each conversation's persisted connector selection. `/connectors` reuses the
+composer selector; selecting an unconnected provider signs in before attaching it. Removing a
+selection leaves the Profile connection available to other conversations. `connector_tools` and
+`connector_call` travel through the existing anchored tool-query boundary to `vmux_tool`, which
+checks the conversation's selection and the credential's exact resource before making an HTTP MCP
+request. Streamed responses complete at the matching JSON-RPC event; credentials never enter the
+agent prompt or its MCP configuration. Native agent MCP configurations remain independent.
 
 `read_layout` / `update_layout` are the interesting pair: fetch the pane tree with stable
 ids, mutate it, commit it back. Vmux diffs against the live graph and reconciles

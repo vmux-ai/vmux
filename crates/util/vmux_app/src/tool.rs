@@ -7,6 +7,7 @@ impl Plugin for VmuxToolPlugin {
         app.add_plugins((
             vmux_service::ServiceCliPlugin,
             vmux_tool::ToolCliPlugin,
+            vmux_tool::ConnectorToolPlugin,
             vmux_mcp::McpCliPlugin,
         ))
         .add_plugins((

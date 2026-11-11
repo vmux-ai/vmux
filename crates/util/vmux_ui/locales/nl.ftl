@@ -1165,3 +1165,14 @@ onboarding-key-failed = De sleutel kon niet worden opgeslagen. Probeer het opnie
 onboarding-workspace-question = Waar zullen we werken?
 agent-starting = Agent starten…
 browser-open-external = Openen in externe browser
+connectors-title = Connectors
+connectors-description = Beheer aangemelde accounts en kies connectors vanuit een gesprek.
+connectors-empty = Geen connectors beschikbaar
+connectors-sign-in-required = Aanmelding vereist
+connectors-open-sign-in = Aanmelding openen
+
+connectors-command-description = Kies connectors voor dit gesprek
+connectors-use = Gebruiken in chat
+connectors-selected = Geselecteerd · verwijderen
+connectors-manage = Connectors beheren
+connectors-manage-access = Repositorytoegang beheren

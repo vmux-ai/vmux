@@ -386,7 +386,10 @@ struct McpQuery;
 
 impl McpQuery {
     fn parse(query: &str) -> Option<&str> {
-        let rest = query.trim().strip_prefix("/mcp")?;
+        let query = query.trim();
+        let rest = query
+            .strip_prefix("/connectors")
+            .or_else(|| query.strip_prefix("/mcp"))?;
         if rest.is_empty() {
             return Some("");
         }

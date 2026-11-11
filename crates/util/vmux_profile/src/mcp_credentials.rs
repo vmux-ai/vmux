@@ -10,6 +10,8 @@ const DEFAULT_TOKEN_LIFETIME_SECS: u64 = 3600;
 
 #[derive(Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct McpOauthCredentials {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub account: Option<String>,
     pub token_endpoint: String,
     pub client_id: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]

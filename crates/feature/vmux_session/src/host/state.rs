@@ -91,15 +91,15 @@ fn publish_composer_effects(
 fn project_mcp(
     trigger: On<UiStateWrite<vmux_api::mcp::McpServersUiState>>,
     views: Query<(), With<super::session::SessionView>>,
-    mut runtimes: Query<&mut ChatUiStateProjection, With<ChatRuntime>>,
+    mut commands: Commands,
 ) {
     if !views.contains(trigger.event().webview()) {
         return;
     }
-    let Ok(mut projection) = runtimes.single_mut() else {
-        return;
-    };
-    projection.write(trigger.event().update());
+    commands.trigger(UiStateWrite::<ChatUiState>::from_event(
+        trigger.event().webview(),
+        trigger.event().update(),
+    ));
 }
 
 #[cfg(not(host))]

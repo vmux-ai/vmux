@@ -1162,3 +1162,14 @@ onboarding-key-failed = 無法儲存金鑰。請重試或使用登入。
 onboarding-workspace-question = 我們在哪裡工作？
 agent-starting = 正在啟動 agent…
 browser-open-external = 在外部瀏覽器中開啟
+connectors-title = 連接器
+connectors-description = 管理已登入帳號，並在對話中選擇要使用的連接器。
+connectors-empty = 沒有可用的連接器
+connectors-sign-in-required = 需要登入
+connectors-open-sign-in = 開啟登入
+
+connectors-command-description = 選擇此對話使用的連接器
+connectors-use = 在聊天中使用
+connectors-selected = 已選擇 · 移除
+connectors-manage = 管理連接器
+connectors-manage-access = 管理儲存庫存取權限

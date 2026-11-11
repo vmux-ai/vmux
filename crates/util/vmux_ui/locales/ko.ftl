@@ -1162,3 +1162,14 @@ onboarding-key-failed = 키를 저장하지 못했습니다. 다시 시도하거
 onboarding-workspace-question = 어디에서 작업할까요?
 agent-starting = 에이전트 시작 중…
 browser-open-external = 외부 브라우저에서 열기
+connectors-title = 커넥터
+connectors-description = 연결된 계정을 관리하고 대화에서 사용할 커넥터를 선택하세요.
+connectors-empty = 사용 가능한 커넥터가 없습니다
+connectors-sign-in-required = 로그인이 필요합니다
+connectors-open-sign-in = 로그인 열기
+
+connectors-command-description = 이 대화에서 사용할 커넥터 선택
+connectors-use = 대화에서 사용
+connectors-selected = 선택됨 · 제거
+connectors-manage = 커넥터 관리
+connectors-manage-access = 저장소 접근 관리

@@ -2,26 +2,29 @@ use std::collections::BTreeSet;
 use std::io::{BufRead, BufReader, Read, Write};
 use std::net::{TcpListener, TcpStream};
 use std::sync::mpsc;
+use std::sync::{
+    Arc,
+    atomic::{AtomicBool, Ordering},
+};
 use std::time::{Duration, Instant};
 
 use crate::{McpServerManifest, McpTransport, ToolStore};
 use bevy::ecs::system::SystemParam;
 use bevy::prelude::*;
 use bevy::tasks::{IoTaskPool, Task, futures_lite::future};
-use bevy_cef::prelude::{Browsers, UiEventPlugin, UiInput};
+use bevy_cef::prelude::{UiEventPlugin, UiInput};
 use parking_lot::Mutex;
 use reqwest::blocking::{Client, Response};
 use ring::digest::{SHA256, digest};
 use serde::{Deserialize, Serialize};
 use url::Url;
 use vmux_api::mcp::{
-    McpServerEntry, McpServerOperation, McpServerPending, McpServerRequest, McpServerResult,
-    McpServerStatus, McpServersRequest, McpServersUiState,
+    McpAuthorization, McpServerCancelRequest, McpServerEntry, McpServerOperation, McpServerPending,
+    McpServerRequest, McpServerResult, McpServerStatus, McpServersRequest, McpServersUiState,
 };
 use vmux_ecs::manifest::FeatureManifest;
 use vmux_ecs::profile::McpCredentials;
 use vmux_ecs::profile::mcp_credentials::McpOauthCredentials;
-use vmux_ecs::{PageOpenRequest, PageOpenTarget};
 use vmux_ecs::{UiStatePlugin, UiStateWrite};
 
 pub struct McpConnectionPlugin;
@@ -29,11 +32,13 @@ pub struct McpConnectionPlugin;
 impl Plugin for McpConnectionPlugin {
     fn build(&self, app: &mut App) {
         app.add_plugins((
-            UiEventPlugin::<(McpServersRequest, McpServerRequest)>::default(),
+            UiEventPlugin::<(McpServersRequest, McpServerRequest, McpServerCancelRequest)>::default(
+            ),
             UiStatePlugin::<McpServersUiState>::default(),
         ))
         .add_systems(Startup, spawn_mcp_catalog)
-        .add_message::<PageOpenRequest>()
+        .add_observer(cancel)
+        .add_observer(page_ready)
         .add_observer(request_mcp_connections)
         .add_observer(begin_mcp_snapshot)
         .add_observer(request_mcp_server)
@@ -51,6 +56,70 @@ impl Plugin for McpConnectionPlugin {
     }
 }
 
+#[derive(Component, Clone, Default)]
+struct Cancellation(Arc<AtomicBool>);
+
+impl Cancellation {
+    fn cancel(&self) {
+        self.0.store(true, Ordering::Release);
+    }
+
+    fn check(&self) -> Result<(), String> {
+        if self.0.load(Ordering::Acquire) {
+            return Err("Authentication cancelled".to_string());
+        }
+        Ok(())
+    }
+
+    fn wait(&self, duration: Duration) -> Result<(), String> {
+        let deadline = Instant::now() + duration;
+        loop {
+            self.check()?;
+            let remaining = deadline.saturating_duration_since(Instant::now());
+            if remaining.is_zero() {
+                return Ok(());
+            }
+            std::thread::sleep(remaining.min(Duration::from_millis(50)));
+        }
+    }
+}
+
+fn cancel(
+    trigger: On<UiInput<McpServerCancelRequest>>,
+    cancellations: Query<&Cancellation>,
+    mut states: Query<&mut McpPageState>,
+    mut commands: Commands,
+) {
+    let target = trigger.event().webview;
+    let Ok(cancellation) = cancellations.get(target) else {
+        return;
+    };
+    cancellation.cancel();
+    commands
+        .entity(target)
+        .remove::<(McpOperationTask, PendingMcpOperation, Cancellation)>();
+    if let Ok(mut state) = states.get_mut(target) {
+        state.snapshot.pending = None;
+        state.snapshot.authorization = None;
+        state.snapshot.result = None;
+    }
+    commands.trigger(McpSnapshotRequest { target });
+}
+
+fn page_ready(
+    trigger: On<UiInput<vmux_api::PageReady>>,
+    pages: Query<&vmux_ecs::PageMetadata>,
+    mut commands: Commands,
+) {
+    let target = trigger.event().webview;
+    if pages
+        .get(target)
+        .is_ok_and(|page| page.url.starts_with(crate::CONNECTORS_URL))
+    {
+        commands.trigger(McpSnapshotRequest { target });
+    }
+}
+
 fn request_mcp_connections(trigger: On<UiInput<McpServersRequest>>, mut commands: Commands) {
     commands.trigger(McpSnapshotRequest {
         target: trigger.event().webview,
@@ -59,14 +128,10 @@ fn request_mcp_connections(trigger: On<UiInput<McpServersRequest>>, mut commands
 
 fn begin_mcp_snapshot(
     trigger: On<McpSnapshotRequest>,
-    browsers: NonSend<Browsers>,
     mut states: Query<&mut McpPageState>,
     mut commands: Commands,
 ) {
     let target = trigger.event().target;
-    if !browsers.can_emit_to(&target) {
-        return;
-    }
     let generation = match states.get_mut(target) {
         Ok(mut state) => {
             if state.snapshot.loading || state.snapshot.pending.is_some() {
@@ -153,14 +218,20 @@ fn start_mcp_operation(
         let completion_wake = proxy.as_deref().map(|proxy| (**proxy).clone());
         let progress_wake = completion_wake.clone();
         let (progress_sender, progress_receiver) = mpsc::channel();
+        let cancellation = Cancellation::default();
+        let operation_cancellation = cancellation.clone();
         let task = IoTaskPool::get().spawn(async move {
             let result = match (operation, server.as_ref()) {
                 (McpServerOperation::Connect, Some(server)) => {
-                    McpConnection::connect(server, &credentials, |url| {
+                    McpConnection::connect(server, &credentials, &operation_cancellation, |url| {
+                        let sign_in_url = url.url.clone();
                         if progress_sender.send(url).is_ok()
                             && let Some(wake) = &progress_wake
                         {
                             let _ = wake.send_event(bevy::winit::WinitUserEvent::WakeUp);
+                        }
+                        if let Err(error) = SystemBrowser::open(&sign_in_url) {
+                            warn!("Failed to open connector sign-in: {error}");
                         }
                     })
                     .await
@@ -178,6 +249,7 @@ fn start_mcp_operation(
         commands
             .entity(entity)
             .remove::<PendingMcpOperation>()
+            .insert(cancellation)
             .insert(McpOperationTask {
                 generation,
                 id,
@@ -190,31 +262,25 @@ fn start_mcp_operation(
 
 fn drain_mcp_operations(
     mut tasks: Query<(Entity, &mut McpOperationTask)>,
-    browsers: NonSend<Browsers>,
-    mut page_open_requests: MessageWriter<PageOpenRequest>,
+    mut states: Query<&mut McpPageState>,
     mut commands: Commands,
 ) {
     for (entity, mut task) in &mut tasks {
-        while let Ok(url) = task.progress.get_mut().try_recv() {
-            if browsers.can_emit_to(&entity) {
-                page_open_requests.write(PageOpenRequest {
-                    target: PageOpenTarget::NewStack,
-                    url,
-                    request_id: None,
-                });
+        while let Ok(authorization) = task.progress.get_mut().try_recv() {
+            if let Ok(mut state) = states.get_mut(entity) {
+                state.snapshot.authorization = Some(authorization);
             }
         }
         let Some(result) = future::block_on(future::poll_once(&mut task.task)) else {
             continue;
         };
-        commands.entity(entity).remove::<McpOperationTask>();
+        commands
+            .entity(entity)
+            .remove::<(McpOperationTask, Cancellation)>();
         let (success, message) = match result {
             Ok(()) => (true, String::new()),
             Err(message) => (false, message),
         };
-        if !browsers.can_emit_to(&entity) {
-            continue;
-        }
         commands.entity(entity).insert(PendingMcpSnapshot {
             generation: task.generation,
             result: Some(McpServerResult {
@@ -280,16 +346,13 @@ fn drain_mcp_snapshots(
 
 fn publish_mcp_connections(
     states: Query<(Entity, &McpPageState), Changed<McpPageState>>,
-    browsers: NonSend<Browsers>,
     mut commands: Commands,
 ) {
     for (target, state) in &states {
-        if browsers.can_emit_to(&target) {
-            commands.trigger(UiStateWrite::<McpServersUiState>::from_event(
-                target,
-                &state.snapshot,
-            ));
-        }
+        commands.trigger(UiStateWrite::<McpServersUiState>::from_event(
+            target,
+            &state.snapshot,
+        ));
     }
 }
 
@@ -324,7 +387,7 @@ struct McpOperationTask {
     id: String,
     operation: McpServerOperation,
     task: Task<Result<(), String>>,
-    progress: Mutex<mpsc::Receiver<String>>,
+    progress: Mutex<mpsc::Receiver<McpAuthorization>>,
 }
 
 #[derive(Component)]
@@ -335,6 +398,10 @@ struct McpSnapshotTask {
 
 #[derive(Component, Clone)]
 struct McpCatalogServer {
+    setup_url: Option<String>,
+    client_id: Option<String>,
+    client_id_env: Option<String>,
+    account_endpoint: Option<String>,
     id: String,
     url: String,
     scopes: Vec<String>,
@@ -367,6 +434,10 @@ fn spawn_mcp_catalog(features: Query<&FeatureManifest>, mut commands: Commands) 
         commands.spawn((
             Name::new(server.name.clone()),
             McpCatalogServer {
+                setup_url: server.setup_url.clone(),
+                client_id: server.client_id.clone(),
+                client_id_env: server.client_id_env.clone(),
+                account_endpoint: server.account_endpoint.clone(),
                 id: server.id.clone(),
                 url: server.url.clone(),
                 scopes: server.scopes.clone(),
@@ -416,20 +487,21 @@ impl McpSnapshotSource {
                 .get(&server.id)
                 .is_some_and(|manifest| server.owns(manifest));
             let occupied = manifest.mcp.servers.contains_key(&server.id);
+            let stored = credentials.storage.load(&server.id).ok().flatten();
             let authenticated = configured
-                && credentials
-                    .storage
-                    .load(&server.id)
-                    .ok()
-                    .flatten()
-                    .is_some_and(|credentials| credentials.authorizes(&server.url));
+                && stored.as_ref().is_some_and(|credentials| {
+                    credentials.authorizes(&server.url) && !credentials.expires_soon()
+                });
             let status = match (configured, authenticated, occupied) {
                 (false, _, true) => McpServerStatus::Configured,
                 (true, true, _) => McpServerStatus::Connected,
                 (true, false, _) => McpServerStatus::AuthenticationRequired,
                 (false, _, false) => McpServerStatus::Available,
             };
+            let account = stored.and_then(|credentials| credentials.account);
             servers.push(McpServerEntry {
+                setup_url: server.setup_url,
+                account,
                 id: server.id,
                 name,
                 description: String::new(),
@@ -445,6 +517,8 @@ impl McpSnapshotSource {
                 .or(server.command)
                 .unwrap_or_else(|| format!("{:?}", server.transport).to_ascii_lowercase());
             servers.push(McpServerEntry {
+                setup_url: None,
+                account: None,
                 name: id.clone(),
                 id,
                 description,
@@ -452,22 +526,44 @@ impl McpSnapshotSource {
             });
         }
         McpServersUiState {
+            selected: Vec::new(),
             loaded: true,
             loading: false,
             servers,
             pending: None,
             result,
+            authorization: None,
         }
     }
 }
 
 struct McpConnection;
 
+struct SystemBrowser;
+
+impl SystemBrowser {
+    fn open(url: &str) -> Result<(), String> {
+        #[cfg(target_os = "macos")]
+        let program = "open";
+        #[cfg(not(target_os = "macos"))]
+        let program = "xdg-open";
+        let status = std::process::Command::new(program)
+            .arg(url)
+            .status()
+            .map_err(|error| error.to_string())?;
+        if !status.success() {
+            return Err(format!("System browser failed ({status})"));
+        }
+        Ok(())
+    }
+}
+
 impl McpConnection {
     async fn connect(
         server: &McpCatalogServer,
         credentials: &McpCredentials,
-        progress: impl FnOnce(String),
+        cancellation: &Cancellation,
+        progress: impl FnMut(McpAuthorization),
     ) -> Result<(), String> {
         {
             let store = ToolStore::current();
@@ -482,6 +578,7 @@ impl McpConnection {
         let redirect_uri = format!("http://127.0.0.1:{}/callback", address.port());
         let client = Client::builder()
             .timeout(Duration::from_secs(30))
+            .user_agent("Vmux")
             .redirect(reqwest::redirect::Policy::none())
             .build()
             .map_err(|error| error.to_string())?;
@@ -491,39 +588,35 @@ impl McpConnection {
             .first()
             .ok_or_else(|| "MCP server did not advertise an authorization server".to_string())?;
         let authorization = Self::authorization_metadata(&client, issuer)?;
-        let registration = Self::register(&client, &authorization, &redirect_uri)?;
-        let verifier = format!(
-            "{}{}",
-            uuid::Uuid::new_v4().simple(),
-            uuid::Uuid::new_v4().simple()
-        );
-        let challenge = base64_url(digest(&SHA256, verifier.as_bytes()).as_ref());
-        let state = uuid::Uuid::new_v4().simple().to_string();
-        let mut url = Self::https_url(
-            &authorization.authorization_endpoint,
-            "OAuth authorization endpoint",
-        )?;
-        url.query_pairs_mut()
-            .append_pair("response_type", "code")
-            .append_pair("client_id", &registration.client_id)
-            .append_pair("redirect_uri", &redirect_uri)
-            .append_pair("code_challenge", &challenge)
-            .append_pair("code_challenge_method", "S256")
-            .append_pair("state", &state)
-            .append_pair("resource", &server.url)
-            .append_pair("scope", &server.scopes.join(" "));
-        progress(url.to_string());
-        let code = McpCallback::receive(listener, &state)?;
-        let token = Self::exchange(
-            &client,
-            &authorization.token_endpoint,
-            &registration,
-            &code,
-            &verifier,
-            &redirect_uri,
-            &server.url,
-        )?;
+        let (registration, token) = if authorization.registration_endpoint.is_some() {
+            Self::authorization_code(
+                &client,
+                &authorization,
+                &redirect_uri,
+                listener,
+                server,
+                cancellation,
+                progress,
+            )?
+        } else {
+            DeviceFlow::authorize(&client, &authorization, server, cancellation, progress)?
+        };
+        let account = match &server.account_endpoint {
+            Some(endpoint) => {
+                let endpoint = Self::https_url(endpoint, "account endpoint")?;
+                let value: serde_json::Value =
+                    Self::json(client.get(endpoint).bearer_auth(&token.access_token).send())?;
+                value
+                    .get("preferred_username")
+                    .or_else(|| value.get("login"))
+                    .or_else(|| value.get("name"))
+                    .and_then(serde_json::Value::as_str)
+                    .map(str::to_string)
+            }
+            None => None,
+        };
         let oauth = McpOauthCredentials {
+            account,
             token_endpoint: authorization.token_endpoint,
             client_id: registration.client_id,
             client_secret: registration.client_secret,
@@ -537,6 +630,7 @@ impl McpConnection {
         let store = ToolStore::current();
         let _lease = store.lease_async().await;
         credentials.access.write(|| {
+            cancellation.check()?;
             Self::ensure_catalog_slot(&store, server)?;
             let original_credentials = credentials.storage.load(id)?;
             credentials.storage.store(id, &oauth)?;
@@ -551,43 +645,59 @@ impl McpConnection {
         })
     }
 
-    async fn disconnect(
+    fn authorization_code(
+        client: &Client,
+        authorization: &AuthorizationServer,
+        redirect_uri: &str,
+        listener: TcpListener,
         server: &McpCatalogServer,
-        credentials: &McpCredentials,
-    ) -> Result<(), String> {
-        let id = &server.id;
+        cancellation: &Cancellation,
+        mut progress: impl FnMut(McpAuthorization),
+    ) -> Result<(ClientRegistration, TokenResponse), String> {
+        let registration = Self::register(client, authorization, redirect_uri)?;
+        let verifier = format!(
+            "{}{}",
+            uuid::Uuid::new_v4().simple(),
+            uuid::Uuid::new_v4().simple()
+        );
+        let challenge = base64_url(digest(&SHA256, verifier.as_bytes()).as_ref());
+        let state = uuid::Uuid::new_v4().simple().to_string();
+        let mut url = Self::https_url(
+            &authorization.authorization_endpoint,
+            "OAuth authorization endpoint",
+        )?;
+        url.query_pairs_mut()
+            .append_pair("response_type", "code")
+            .append_pair("client_id", &registration.client_id)
+            .append_pair("redirect_uri", redirect_uri)
+            .append_pair("code_challenge", &challenge)
+            .append_pair("code_challenge_method", "S256")
+            .append_pair("state", &state)
+            .append_pair("resource", &server.url)
+            .append_pair("scope", &server.scopes.join(" "));
+        progress(McpAuthorization {
+            url: url.to_string(),
+            code: None,
+        });
+        let code = McpCallback::receive(listener, &state, cancellation)?;
+        let token = Self::exchange(
+            client,
+            &authorization.token_endpoint,
+            &registration,
+            &code,
+            &verifier,
+            redirect_uri,
+            &server.url,
+        )?;
+        Ok((registration, token))
+    }
+
+    async fn disconnect(server: &McpCatalogServer, credentials: &McpCredentials) -> Result<(), String> {
         let store = ToolStore::current();
         let _lease = store.lease_async().await;
-        credentials.access.write(|| {
-            let stored = credentials.storage.load(id)?;
-            let original = store.load()?;
-            let configured = original
-                .mcp
-                .servers
-                .get(id)
-                .ok_or_else(|| format!("MCP server is not configured: {id}"))?;
-            if !server.owns(configured) {
-                return Err(format!(
-                    "MCP server ID is already managed by tools.toml: {id}"
-                ));
-            }
-            let mut updated = original.clone();
-            updated.mcp.servers.remove(id);
-            store.save(&updated)?;
-            if let Err(error) = credentials.storage.remove(id) {
-                let manifest_rollback = store.save(&original);
-                let credentials_rollback = stored
-                    .as_ref()
-                    .map(|stored| credentials.storage.store(id, stored))
-                    .unwrap_or(Ok(()));
-                return Err(Self::rollback_error(
-                    error,
-                    manifest_rollback,
-                    credentials_rollback,
-                ));
-            }
-            Ok(())
-        })
+        credentials
+            .access
+            .write(|| credentials.storage.remove(&server.id))
     }
 
     fn protected_metadata(client: &Client, resource: &str) -> Result<ProtectedResource, String> {
@@ -738,12 +848,17 @@ impl McpConnection {
 struct McpCallback;
 
 impl McpCallback {
-    fn receive(listener: TcpListener, expected_state: &str) -> Result<String, String> {
+    fn receive(
+        listener: TcpListener,
+        expected_state: &str,
+        cancellation: &Cancellation,
+    ) -> Result<String, String> {
         listener
             .set_nonblocking(true)
             .map_err(|error| error.to_string())?;
         let deadline = Instant::now() + Duration::from_secs(300);
         loop {
+            cancellation.check()?;
             match listener.accept() {
                 Ok((mut stream, _)) => return Self::read(&mut stream, expected_state),
                 Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
@@ -819,6 +934,8 @@ struct ProtectedResource {
 
 #[derive(Deserialize)]
 struct AuthorizationServer {
+    #[serde(default)]
+    device_authorization_endpoint: Option<String>,
     authorization_endpoint: String,
     token_endpoint: String,
     registration_endpoint: Option<String>,
@@ -845,6 +962,128 @@ struct TokenResponse {
     refresh_token: Option<String>,
     expires_in: Option<u64>,
     scope: Option<String>,
+}
+
+struct DeviceFlow;
+
+impl DeviceFlow {
+    fn authorize(
+        client: &Client,
+        authorization: &AuthorizationServer,
+        server: &McpCatalogServer,
+        cancellation: &Cancellation,
+        mut progress: impl FnMut(McpAuthorization),
+    ) -> Result<(ClientRegistration, TokenResponse), String> {
+        let client_id = server
+            .client_id_env
+            .as_deref()
+            .and_then(|key| std::env::var(key).ok())
+            .or_else(|| server.client_id.clone())
+            .filter(|id| !id.trim().is_empty())
+            .ok_or_else(|| {
+                "This connector has no registered OAuth client ID in this build".to_string()
+            })?;
+        let endpoint = authorization
+            .device_authorization_endpoint
+            .as_deref()
+            .ok_or_else(|| "Authorization server does not support device flow".to_string())?;
+        let endpoint = McpConnection::https_url(endpoint, "device authorization endpoint")?;
+        let response: DeviceAuthorization = McpConnection::json(
+            client
+                .post(endpoint)
+                .header("Accept", "application/json")
+                .form(&[
+                    ("client_id", client_id.as_str()),
+                    ("scope", server.scopes.join(" ").as_str()),
+                ])
+                .send(),
+        )?;
+        let url =
+            McpConnection::https_url(&response.verification_uri, "verification URI")?.to_string();
+        progress(McpAuthorization {
+            url,
+            code: Some(response.user_code),
+        });
+        let deadline = Instant::now() + Duration::from_secs(response.expires_in.min(900));
+        let mut interval = response.interval.unwrap_or(5).max(1);
+        let endpoint = McpConnection::https_url(&authorization.token_endpoint, "token endpoint")?;
+        loop {
+            if Instant::now() >= deadline {
+                return Err("Authentication timed out".to_string());
+            }
+            cancellation.wait(
+                Duration::from_secs(interval)
+                    .min(deadline.saturating_duration_since(Instant::now())),
+            )?;
+            if Instant::now() >= deadline {
+                return Err("Authentication timed out".to_string());
+            }
+            let response = client
+                .post(endpoint.clone())
+                .header("Accept", "application/json")
+                .form(&[
+                    ("client_id", client_id.as_str()),
+                    ("device_code", response.device_code.as_str()),
+                    ("grant_type", "urn:ietf:params:oauth:grant-type:device_code"),
+                ])
+                .send()
+                .map_err(|error| error.to_string())?;
+            let result: DeviceToken = response.json().map_err(|error| error.to_string())?;
+            if let Some(token) = result.poll(&mut interval)? {
+                return Ok((
+                    ClientRegistration {
+                        client_id,
+                        client_secret: None,
+                    },
+                    token,
+                ));
+            }
+        }
+    }
+}
+
+#[derive(Deserialize)]
+struct DeviceAuthorization {
+    device_code: String,
+    user_code: String,
+    verification_uri: String,
+    expires_in: u64,
+    interval: Option<u64>,
+}
+
+#[derive(Deserialize)]
+struct DeviceToken {
+    access_token: Option<String>,
+    refresh_token: Option<String>,
+    expires_in: Option<u64>,
+    scope: Option<String>,
+    error: Option<String>,
+}
+
+impl DeviceToken {
+    fn poll(self, interval: &mut u64) -> Result<Option<TokenResponse>, String> {
+        if let Some(access_token) = self.access_token {
+            if access_token.is_empty() {
+                return Err("Authentication returned an empty token".to_string());
+            }
+            return Ok(Some(TokenResponse {
+                access_token,
+                refresh_token: self.refresh_token,
+                expires_in: self.expires_in,
+                scope: self.scope,
+            }));
+        }
+        match self.error.as_deref() {
+            Some("authorization_pending") => Ok(None),
+            Some("slow_down") => {
+                *interval = interval.saturating_add(5);
+                Ok(None)
+            }
+            Some("access_denied") => Err("Authentication was denied".to_string()),
+            Some("expired_token") => Err("Authentication timed out".to_string()),
+            _ => Err("Authentication failed".to_string()),
+        }
+    }
 }
 
 fn base64_url(bytes: &[u8]) -> String {
@@ -913,6 +1152,67 @@ mod tests {
     }
 
     #[test]
+    fn device_authorization_waits_slows_down_and_stops_on_denial_or_expiry() {
+        let mut interval = 5;
+        for error in ["authorization_pending", "slow_down"] {
+            let response: super::DeviceToken =
+                serde_json::from_value(serde_json::json!({"error": error})).unwrap();
+            assert!(response.poll(&mut interval).unwrap().is_none());
+        }
+        assert_eq!(interval, 10);
+        for (error, message) in [
+            ("access_denied", "Authentication was denied"),
+            ("expired_token", "Authentication timed out"),
+        ] {
+            let response: super::DeviceToken =
+                serde_json::from_value(serde_json::json!({"error": error})).unwrap();
+            assert_eq!(response.poll(&mut interval).err().as_deref(), Some(message));
+        }
+        let response: super::DeviceToken = serde_json::from_value(
+            serde_json::json!({"access_token": "approved", "expires_in": 28800}),
+        )
+        .unwrap();
+        let token = response.poll(&mut interval).unwrap().unwrap();
+        assert_eq!(token.access_token, "approved");
+        assert_eq!(token.expires_in, Some(28800));
+    }
+
+    #[test]
+    fn cancelling_device_sign_in_interrupts_the_polling_wait() {
+        let cancellation = super::Cancellation::default();
+        cancellation.cancel();
+        let started = std::time::Instant::now();
+        assert!(
+            cancellation
+                .wait(std::time::Duration::from_secs(30))
+                .is_err()
+        );
+        assert!(started.elapsed() < std::time::Duration::from_secs(1));
+    }
+
+    #[test]
+    fn snapshot_requests_are_retained_before_the_browser_is_ready() {
+        let mut app = App::new();
+        app.add_plugins(super::McpConnectionPlugin);
+        let target = app.world_mut().spawn_empty().id();
+        app.world_mut()
+            .trigger(super::McpSnapshotRequest { target });
+        app.update();
+        assert!(
+            app.world()
+                .get::<McpPageState>(target)
+                .unwrap()
+                .snapshot
+                .loading
+        );
+        assert!(
+            app.world()
+                .get::<super::PendingMcpSnapshot>(target)
+                .is_some()
+        );
+    }
+
+    #[test]
     fn server_request_queues_one_operation_on_the_page_entity() {
         let mut app = App::new();
         app.add_observer(request_mcp_server);
@@ -923,6 +1223,8 @@ mod tests {
                 snapshot: McpServersUiState {
                     loaded: true,
                     servers: vec![vmux_api::mcp::McpServerEntry {
+                        setup_url: None,
+                        account: None,
                         id: "linear".to_string(),
                         name: "Linear".to_string(),
                         description: String::new(),

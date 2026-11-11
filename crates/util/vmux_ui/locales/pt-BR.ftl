@@ -1165,3 +1165,14 @@ onboarding-key-failed = Não foi possível salvar a chave. Tente novamente ou fa
 onboarding-workspace-question = Onde vamos trabalhar?
 agent-starting = Iniciando agente…
 browser-open-external = Abrir no navegador externo
+connectors-title = Conectores
+connectors-description = Gerencie contas conectadas e escolha conectores em uma conversa.
+connectors-empty = Nenhum conector disponível
+connectors-sign-in-required = Login necessário
+connectors-open-sign-in = Abrir login
+
+connectors-command-description = Escolher conectores para esta conversa
+connectors-use = Usar no chat
+connectors-selected = Selecionado · remover
+connectors-manage = Gerenciar conectores
+connectors-manage-access = Gerenciar acesso aos repositórios

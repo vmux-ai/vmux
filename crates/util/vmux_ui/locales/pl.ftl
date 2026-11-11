@@ -1165,3 +1165,14 @@ onboarding-key-failed = Nie udało się zapisać klucza. Spróbuj ponownie lub z
 onboarding-workspace-question = Gdzie będziemy pracować?
 agent-starting = Uruchamianie agenta…
 browser-open-external = Otwórz w zewnętrznej przeglądarce
+connectors-title = Konektory
+connectors-description = Zarządzaj kontami i wybieraj konektory w rozmowie.
+connectors-empty = Brak dostępnych konektorów
+connectors-sign-in-required = Wymagane logowanie
+connectors-open-sign-in = Otwórz logowanie
+
+connectors-command-description = Wybierz konektory dla tej rozmowy
+connectors-use = Użyj w czacie
+connectors-selected = Wybrany · usuń
+connectors-manage = Zarządzaj konektorami
+connectors-manage-access = Zarządzaj dostępem do repozytoriów

@@ -1154,3 +1154,14 @@ onboarding-key-failed = The key could not be saved. Retry or use sign-in instead
 onboarding-workspace-question = Where should we work?
 agent-starting = Starting agent…
 browser-open-external = Open in external browser
+connectors-title = Connectors
+connectors-description = Manage signed-in accounts here and choose which connectors to use from a conversation.
+connectors-empty = No connectors available
+connectors-sign-in-required = Sign-in required
+connectors-open-sign-in = Open sign-in
+
+connectors-command-description = Choose connectors for this conversation
+connectors-use = Use in chat
+connectors-selected = Selected · remove
+connectors-manage = Manage connectors
+connectors-manage-access = Manage repository access

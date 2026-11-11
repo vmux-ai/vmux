@@ -28,7 +28,7 @@ pub fn McpMenu(
     rsx! {
         PromptPopup {
             placement,
-            heading: Some(translate("tools-provider-mcp-servers")),
+            heading: Some(translate("connectors-title")),
             on_dismiss: move |()| on_dismiss.call(()),
             if !error.is_empty() {
                 div { class: "mx-3 mb-2 whitespace-pre-wrap rounded-lg bg-ansi-1/10 px-3 py-2 text-xs text-ansi-1 ring-1 ring-inset ring-ansi-1/20",
@@ -36,15 +36,16 @@ pub fn McpMenu(
                 }
             }
             if state.loading && !state.loaded {
-                div { class: "px-3.5 py-2 text-sm text-muted-foreground", {translate("common-loading")} }
+                div { class: "mx-3 my-2 h-8 animate-pulse rounded bg-muted" }
             } else if entries.is_empty() {
-                div { class: "px-3.5 py-2 text-sm text-muted-foreground", {translate("tools-empty")} }
+                div { class: "px-3.5 py-2 text-sm text-muted-foreground", {translate("connectors-empty")} }
             } else {
                 for (index, server) in entries.into_iter().enumerate() {
                     {
                         let server_pending = pending == server.id;
                         let status = McpServerText::status(server.status, server_pending);
-                        let description = McpServerText::description(&server);
+                        let description = server.account.clone().unwrap_or_else(|| McpServerText::description(&server));
+                        let attached = state.selected.contains(&server.id);
                         rsx! {
                             button {
                                 key: "mcp-{server.id}",
@@ -61,9 +62,7 @@ pub fn McpMenu(
                                 span { class: McpServerText::status_class(server.status, server_pending),
                                     if server.status == McpServerStatus::Connected && !server_pending {
                                         span { class: "size-1.5 rounded-full bg-success" }
-                                        span { {translate("services-connected")} }
-                                        span { class: "text-muted-foreground/50", "·" }
-                                        span { {translate("mobile-pair-disconnect")} }
+                                        span { {translate(if attached { "connectors-selected" } else { "connectors-use" })} }
                                     } else {
                                         "{status}"
                                     }
@@ -73,6 +72,14 @@ pub fn McpMenu(
                     }
                 }
             }
+            if let Some(authorization) = state.authorization {
+                div { class: "px-3.5 py-2 text-sm",
+                    if let Some(code) = authorization.code { code { "{code}" } }
+                    a { href: authorization.url, target: "_blank", class: "ml-2 text-primary", {translate("connectors-open-sign-in")} }
+                    button { r#type: "button", class: "ml-2 text-muted-foreground", onclick: move |_| { let _ = crate::hooks::send(&vmux_api::mcp::McpServerCancelRequest); }, {translate("common-cancel")} }
+                }
+            }
+            a { href: "vmux://connectors/", class: "block px-3.5 py-2 text-xs text-muted-foreground", {translate("connectors-manage")} }
         }
     }
 }

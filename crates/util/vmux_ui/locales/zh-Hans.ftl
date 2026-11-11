@@ -1162,3 +1162,14 @@ onboarding-key-failed = 无法保存密钥。请重试或使用登录。
 onboarding-workspace-question = 我们在哪里工作？
 agent-starting = 正在启动智能体…
 browser-open-external = 在外部浏览器中打开
+connectors-title = 连接器
+connectors-description = 管理已登录账号，并在对话中选择要使用的连接器。
+connectors-empty = 没有可用的连接器
+connectors-sign-in-required = 需要登录
+connectors-open-sign-in = 打开登录
+
+connectors-command-description = 选择此对话使用的连接器
+connectors-use = 在聊天中使用
+connectors-selected = 已选择 · 移除
+connectors-manage = 管理连接器
+connectors-manage-access = 管理仓库访问权限
