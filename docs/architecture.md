@@ -361,6 +361,10 @@ ownership changes during the apply frame. The consumer applies the result in `Jo
 Reparenting discards accepted work and uncommitted results; removing an owner drops its children.
 Terminal operations release job payloads while retaining their shared identity and outcome.
 Full lanes retain requests for retry; unavailable lanes and panics publish typed failures.
+SDK `try_spawn` registers the host Waker when a queue is full and wakes it when dequeueing frees
+capacity, including when existing work has no completion Waker. Full detection and registration
+are synchronized with capacity notification. Hosts reuse a stable Waker across retries so waits
+coalesce; native `spawn*` adapters retain their completion-only notification behavior.
 Low-level adapters can use `vmux_ecs::blocking` directly: bounded worker pools return entity-owned
 `BlockingTask` handles, isolate panics, and invoke a standard `Waker` after publishing the result.
 Notification panics are isolated from the worker and its queued work. Pools require positive
