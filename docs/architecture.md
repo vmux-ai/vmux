@@ -1065,6 +1065,8 @@ Extension API requests cross from CEF to Bevy on socket threads while the app's 
 is reactive. Enqueuing one wakes winit so a `tabs` or `windows` response never waits for the
 next mouse or keyboard event. Web-page tab IDs are learned from content-script senders and
 translated at the shim boundary; extension pages keep the model IDs the bridge owns.
+The prepared extension catalog and bridge server belong to separate entities. Bridge-page
+reconciliation reads them independently to create the hidden transport pages used by extensions.
 
 ---
 
