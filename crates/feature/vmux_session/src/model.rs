@@ -874,7 +874,7 @@ fn archive_provider(
         let entity = match index.entity(&request.kind, &request.id) {
             Ok(entity) => entity,
             Err(error) => {
-                bevy::log::warn!("provider archive refused: {error}");
+                tracing::warn!("provider archive refused: {error}");
                 continue;
             }
         };
@@ -990,7 +990,7 @@ fn change_provider_stage(
         let entity = match index.entity(&request.kind, &request.id) {
             Ok(entity) => entity,
             Err(error) => {
-                bevy::log::warn!("provider stage refused: {error}");
+                tracing::warn!("provider stage refused: {error}");
                 continue;
             }
         };
