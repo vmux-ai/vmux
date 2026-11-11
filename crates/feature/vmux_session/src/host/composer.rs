@@ -127,6 +127,7 @@ impl Plugin for ChatComposerPlugin {
 fn draft_changed(
     trigger: On<UiInput<ChatDraftChanged>>,
     mut composers: Query<&mut ComposerState, With<SessionView>>,
+    targets: super::session::SessionViews,
     mut commands: Commands,
 ) {
     let webview = trigger.event().webview;
@@ -134,6 +135,11 @@ fn draft_changed(
         return;
     };
     composer.update(trigger.event().payload.text.clone());
+    if let Some(session) = targets.session(webview) {
+        commands
+            .entity(session)
+            .remove::<super::prompt::RecoveredDraft>();
+    }
     commands.trigger(ComposerChanged::new(webview));
 }
 

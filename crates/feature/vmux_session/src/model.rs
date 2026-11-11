@@ -45,6 +45,7 @@ impl Plugin for EntityPlugin {
                     .before(crate::mutation::ReceiveSet),
             )
             .register_stored::<Session>()
+            .register_stored::<SetupPending>()
             .register_stored::<SessionId>()
             .register_stored::<AgentId>()
             .register_stored::<ProviderStage>()
@@ -160,6 +161,11 @@ impl Plugin for StagePlugin {
 #[require(Save, Cwd, Description)]
 #[type_path = "vmux_session"]
 pub struct Session;
+
+#[derive(Component, Clone, Copy, Debug, Default, PartialEq, Eq, Reflect)]
+#[reflect(Component)]
+#[type_path = "vmux_session"]
+pub struct SetupPending;
 
 #[derive(Component, Clone, Copy, Debug, PartialEq, Eq)]
 pub struct SessionDuplicate(pub Entity);
@@ -1904,6 +1910,7 @@ mod tests {
         let filter = vmux_ecs::store::WorkspaceStored::filter(&registry);
 
         assert!(filter.is_allowed::<Session>());
+        assert!(filter.is_allowed::<SetupPending>());
         assert!(filter.is_allowed::<SessionId>());
         assert!(filter.is_allowed::<AgentId>());
         assert!(filter.is_allowed::<ProviderStage>());

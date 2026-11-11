@@ -3,7 +3,6 @@
 use self::agent::DetailsToggle;
 use self::approval::ChatApprovalDock;
 use self::composer::ChatDock;
-use self::item::MD_CSS;
 use self::keys::use_chat_keys;
 use self::state::use_chat;
 use self::transcript::ChatTranscript;
@@ -17,8 +16,9 @@ mod format;
 
 #[vmux_page::page(
     component = Page,
-    states = ["PageAddressUiState", "ThemeUiState", "ChatUiState", "SessionCatalogUiState", "SessionDetailUiState", "KeyClaimsUiState"],
+    states = ["PageAddressUiState", "ThemeUiState", "ChatUiState", "SessionCatalogUiState", "SessionDetailUiState", "OnboardingUiState", "KeyEntryUiState", "KeyClaimsUiState"],
     subtree,
+    dom_group = "agent-conversation",
     preserve_title,
     no_favicon,
     document_url = "vmux://start/",
@@ -26,26 +26,48 @@ mod format;
 )]
 pub(crate) struct ChatPage;
 
+#[vmux_page::page(
+    file = "src/feature.ron",
+    page = "agent-onboarding",
+    component = Page,
+    states = ["PageAddressUiState", "ThemeUiState", "ChatUiState", "SessionCatalogUiState", "SessionDetailUiState", "OnboardingUiState", "KeyEntryUiState", "KeyClaimsUiState"],
+    document_url = vmux_api::VmuxRoute::SESSIONS_ROOT,
+    dom_group = "agent-conversation",
+    preserve_title,
+    no_favicon,
+    takes = vmux_ecs::PageMetadata
+)]
+pub(crate) struct AgentOnboardingPage;
+
 #[component]
 pub fn Page() -> Element {
     vmux_ui::hooks::use_theme();
     vmux_ui::hooks::use_ui_state::<crate::state::ChatUiState>();
     vmux_ui::hooks::use_ui_state::<crate::state::SessionCatalogUiState>();
     vmux_ui::hooks::use_ui_state::<crate::state::SessionDetailUiState>();
+    vmux_ui::hooks::use_ui_state::<crate::onboarding::OnboardingUiState>();
+    vmux_ui::hooks::use_ui_state::<crate::onboarding::KeyEntryUiState>();
     let details_open = use_signal(|| false);
+    let onboarding =
+        vmux_ui::hooks::UiStateBinding::<crate::onboarding::OnboardingUiState>::use_context();
     let route = try_consume_context::<vmux_ecs::PageMetadata>()
         .and_then(|metadata| vmux_session::Route::parse(&metadata.url));
     match route {
         Some(vmux_session::Route::Manager) => rsx! { manager::SessionsManager {} },
+        Some(vmux_session::Route::Provider { kind, sid }) => rsx! { PendingSession { kind, sid } },
+        Some(vmux_session::Route::Setup) => {
+            let session_id = onboarding.state.read().session_id.clone();
+            if session_id.is_empty() {
+                rsx! { onboarding::Onboarding {} }
+            } else {
+                rsx! { SessionDetail { key: "{session_id}", session_id, details_open } }
+            }
+        }
         Some(vmux_session::Route::Session(id)) => {
             let session_id = id.0;
             rsx! { SessionDetail { key: "{session_id}", session_id, details_open } }
         }
-        Some(vmux_session::Route::Provider { kind, sid }) => rsx! { PendingSession { kind, sid } },
-        None => {
-            let session_id = String::new();
-            rsx! { SessionDetail { key: "{session_id}", session_id, details_open } }
-        }
+        None => rsx! { SessionDetail { session_id: String::new(), details_open } },
     }
 }
 
@@ -81,9 +103,7 @@ fn PendingSession(kind: String, sid: String) -> Element {
 
 #[component]
 fn SessionDetail(session_id: String, mut details_open: Signal<bool>) -> Element {
-    use_hook(vmux_ui::components::motion::Disclosure::install);
     let chat = use_chat(session_id.clone());
-    let file_placement = FilePlacement::provide();
     let detail =
         vmux_ui::hooks::UiStateBinding::<crate::state::SessionDetailUiState>::use_context();
     let keys = use_chat_keys(chat);
@@ -106,24 +126,20 @@ fn SessionDetail(session_id: String, mut details_open: Signal<bool>) -> Element 
     let details_available = details.is_some();
 
     rsx! {
-        item::ToolFileMenu {
-        main {
-            class: "session-chat-page relative isolate flex h-dvh flex-col overflow-hidden bg-background text-foreground outline-none",
-            onresize: move |event: Event<ResizeData>| file_placement.resize(&event.data()),
-            style: "--agent-accent:{accent.css};",
-            tabindex: "-1",
-            onkeydown: move |event| {
+        surface::Page {
+            accent: accent.css,
+            setup: chat.setup_pending(),
+            on_keydown: move |event: KeyboardEvent| {
                 if matches!(event.key(), Key::ArrowUp | Key::PageUp | Key::Home) {
                     chat.transcript.note_scroll_input();
                 }
                 keys.on_root_keydown(event);
             },
-            style { dangerous_inner_html: MD_CSS }
-            DetailsToggle {
+            if !chat.setup_pending() { DetailsToggle {
                 details_available,
                 details_open: details_open(),
                 on_details_toggle: move |_| details_open.set(!details_open()),
-            }
+            } }
             div { class: "flex min-h-0 flex-1 overflow-hidden",
                 section { class: "relative flex min-w-0 flex-1 flex-col",
                     ChatTranscript { chat, reserve_details_toggle: !details_open() }
@@ -152,12 +168,12 @@ fn SessionDetail(session_id: String, mut details_open: Signal<bool>) -> Element 
                 }
             }
         }
-        }
     }
 }
 
 pub mod agent;
 pub mod approval;
+mod authentication;
 pub mod composer;
 mod error;
 mod item;
@@ -165,8 +181,11 @@ mod keys;
 mod manager;
 mod manager_controller;
 mod manager_model;
+mod onboarding;
 mod scroll;
+mod setup;
 mod state;
+mod surface;
 mod transcript;
 
 #[derive(Clone, Copy)]

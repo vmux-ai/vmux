@@ -1,4 +1,7 @@
-use bevy::{ecs::message::MessageReader, prelude::*};
+use bevy::{
+    ecs::{message::MessageReader, system::Commands},
+    prelude::*,
+};
 use bevy_cef::prelude::*;
 #[cfg(test)]
 use vmux_command::CommandManifest;
@@ -27,8 +30,8 @@ use vmux_layout::state::LayoutUiState;
 use vmux_layout::tab::Tab;
 use vmux_layout::window::{FocusedWindow, Main, WindowHierarchy};
 use vmux_layout::{
-    LayoutCef, LayoutContractPlugin, LayoutStartupSet, LayoutUiStateUpdates, TabLayoutSpawnContent,
-    TabLayoutSpawnRequest,
+    LayoutCef, LayoutContractPlugin, LayoutRestoreRequest, LayoutStartupSet, LayoutUiStateUpdates,
+    TabLayoutSpawnContent, TabLayoutSpawnRequest,
 };
 #[cfg(test)]
 use vmux_setting::{AgentSettings, SpaceOverrides, SpaceProject, TerminalSettings};
@@ -151,12 +154,14 @@ fn ensure_bootstrap(
     spaces: Query<(), With<Space>>,
     restore: Query<&WorkspaceRestore>,
     profile: vmux_ecs::profile::CurrentProfile,
+    mut layout: MessageWriter<LayoutRestoreRequest>,
     mut commands: Commands,
 ) {
     if !spaces.is_empty() || restore.single().is_ok_and(|restore| restore.store_present) {
         return;
     }
     commands.spawn(SpaceRecord::bootstrap_for(profile.label().unwrap_or("Personal")).bundle());
+    layout.write(LayoutRestoreRequest);
 }
 
 #[vmux_command::command(message)]

@@ -621,7 +621,16 @@ markers cannot retain fields, including zero-sized values and callback pointers.
 Registered exclusive systems prove typed `SystemState` use; used query capabilities propagate
 usage through their nested parameters. Conditional production derives and imported contract
 attributes keep their actual bindings. Foreign framework names cannot borrow an unrelated owned
-declaration. Owned plain values may be referenced by the canonical type's scoped methods as well
+declaration. Command binding attributes follow the actual macro export and automatic Component
+mode; manual registration markers do not imply a Component. Known module exports preserve foreign
+framework bindings while local shadows, opaque modules and ambiguous exports remain rejected.
+Known module exports also preserve actual Dioxus macro bindings for mounted parent/child links.
+Absolute standard-library fixture paths preserve their compiler binding through local module
+imports; non-unit locks, production globals and explicit extern-crate rebinding remain rejected.
+Unit plugin markers require the actual Bevy Plugin/App binding; stateful fields and unrelated
+methods remain separately gated. Immutable request-contract fields can own concrete values,
+including zeroizing key strings, without making projected UiState a business owner.
+Owned plain values may be referenced by the canonical type's scoped methods as well
 as fields; qualified paths identify the declaration, not only its last name. Plugin boundary
 endpoints follow actual production composition. A bounded IO helper may name an exact parent
 adapter record only when current code references that helper and the parent proves its canonical
@@ -1004,8 +1013,9 @@ The favicon loader rotates a growing and shrinking arc. Diff loading surfaces re
 geometry while showing a short, sparse preview with thinner bars and blank rows; known file headers
 remain visible while their bodies load.
 Native pages keep the committed surface until the incoming layout has painted and native placement
-is ready, then commit immediately without a timed fade. Content pages use the same presentation
-lifecycle. Feature page-open handlers create or retarget the incoming surface;
+is ready. Native surface opacity commits directly, so page replacement never exposes the desktop
+through a fading webview. Route and selection intent remain immediate. Content pages use the
+same presentation lifecycle. Feature page-open handlers create or retarget the incoming surface;
 they never despawn the committed surface themselves. Only the page reducer retires it after
 presentation commits.
 
@@ -1178,6 +1188,7 @@ Submitting on Start immediately appends the initial user message to the local co
 queues the same payload for agent delivery. Service snapshots reconcile that message by its stable
 conversation event identity. The first transcript update binds the Session viewport before page
 readiness, so agent startup and response latency never hide an accepted prompt behind a skeleton.
+Onboarding owns its guide and composer docking animation in Dioxus and CSS; its composer opts out of the shared document handoff.
 Shared sidebar rows stay in place when page selection changes. Session detail-panel visibility belongs to the page shell,
 and its geometry remains reserved while the selected session loads.
 Session viewports remember their scroll position and loaded-history start on the owning Session.
@@ -1371,6 +1382,8 @@ explicitly.
 and saving revisions stay distinct: a completion acknowledges only its captured revision, and failure
 returns that revision to the dirty set. Restore progresses
 through materialization and resolution; workspace saves wait for `LayoutRestoreCommitted`.
+Cold startup sends its bootstrap Space through the same layout materialization lifecycle,
+including isolated launches without a persisted store, so its pages inherit window geometry.
 Store paths, snapshot formats, schema sidecars, validation, and recovery remain feature-owned.
 `vmux_ecs::revision` owns the revision value and committed-record metadata shared by Session
 mutations and store state. Session payloads remain feature-owned; record bundles compose their
@@ -1642,17 +1655,22 @@ Other platforms retain Stack routing until their native popup adapter supports t
 
 ---
 
-## The daemon's registries
+## The daemon's process and session ownership
 
-Two maps, and "registering" is inserting into one of them.
+Runtime ingress materializes creation, count, and shutdown requests as short-lived ECS entities.
+Registered process systems consume those owned requests and address canonical ProcessId entities.
+The Process component owns terminal state directly; its foreign PTY master uses a mutex to provide
+the synchronization required by ECS. There is no production ProcessManager map or ProcessDriver
+wrapper. The compatibility manager is limited to tests and the explicit test-support feature.
 
 ```mermaid
 flowchart LR
-    pm["ProcessManager"] -->|ProcessId| proc["Process<br/>PTY + child + cell grid"]
+    inbox["ProcessRuntime inboxes"] --> systems["registered process systems"]
+    systems --> proc["ProcessId entity<br/>Process · PTY · child · cell grid"]
     am["AgentSessionManager"] -->|sid| sess["SessionHandle<br/>provider stream + history"]
 ```
 
-Each exposes the same two surfaces: a **broadcast channel** of updates, and a point-in-time
+Both expose the same two surfaces: a **broadcast channel** of updates, and a point-in-time
 **snapshot**. Clients hold no state — they subscribe.
 
 **Terminal.** `portable_pty` opens the PTY and spawns the shell; a reader thread pumps its
@@ -2164,6 +2182,117 @@ publication boundary for Session catalog and mutation UI events; Session detail 
 their bound Session state. The service carries serialized agent protocol messages and runs
 persistent daemon sessions; `vmux_acp` owns the client-host Bevy messages produced when those
 wire messages enter ECS.
+
+Start is an empty conversation when no agent is selected: the setup guide and disabled composer
+share a centered layout, and a Setup Agent choice above the input begins setup. The guide moves to the transcript's top
+while the composer docks at the bottom, opening room for the conversation. Agent selection,
+installation, sign-in, and recovery then use the same conversation controls. Work descriptions
+and project selection belong to the actual agent conversation. Installed agents reuse their
+package and compatible credentials. A live, usable preferred Session opens directly; a saved,
+unpaused setup Session resumes its unfinished step. Later launcher tabs retain normal navigation.
+
+`vmux_session::host::onboarding::Plugin` owns profile-local setup progress, agent selection, and the Session reference.
+Explicit agent selection starts the persisted setup record, so an interrupted connection can resume.
+`OnboardingConnect` creates or reopens setup through `StartRequest::for_setup`, which carries no user
+content. Session creation enqueues only explicit user text or attachments; setup leaves the prompt
+queue empty until the user sends a real message. Schema 2 setup records preserve the selected agent
+while discarding the earlier task-first Session reference, without deleting conversation history.
+Every started Session has a prompt queue, including promptless setup, so status and cancellation
+use the same runtime path. A persisted `SetupPending` component identifies unfinished setup;
+the first ready or streaming ACP status removes it. Chat snapshots project this marker, so an
+ordinary conversation with an empty transcript and a resume failure never becomes setup.
+
+The agent setup conversation owns `vmux://start/onboarding/agent`. The legacy
+`vmux://sessions/setup` URI resolves to that canonical topic. Its explicit page registration,
+prewarm entry, permissions, and host-spawn route are separate from the Session collection.
+Selection, installation, authentication, and recovery retain the topic URL and one underlying
+Session. A verified profile setup target binds the Stack before ACP attachment; the UI receives
+its Session ID only when the conversation view is attached. Unbound views cannot act on an old
+Stack Session. Stop pauses automatic launcher resume but preserves the active conversation and
+Retry controls. Choosing another agent cancels that setup before clearing its binding.
+
+When the bound Session becomes usable, its existing view receives the ordinary Session URL.
+Topic and Session registrations share a document, DOM group, and root component, so this URL
+change retains the same SessionDetail scope. Setup views never receive collection mutation
+authority. Browser sign-in resolves its source by the Stack's Session target rather than its URL.
+
+Dioxus renders the transition in CSS against reserved welcome geometry: the existing visual guide
+moves up and the composer moves down, while the choice area opens above its input. The native
+page surface stays opaque. Host input gating and tiny viewport media queries pause the transition
+during prewarming. Reduced motion removes interpolation; neither routing nor input waits for the
+animation. Notices retain inert outgoing content during their grid collapse, preserving the
+composer through installation, authentication, and recovery. Expanded notices remove `inert`
+entirely; an HTML boolean attribute containing the false string would still block scrolling,
+pointer input, and focus.
+Start, setup, and ordinary conversation turns reuse MessageFrame, ChoiceOptions, ComposerNotice,
+and DisabledComposer from `vmux_ui`. WelcomeLayout supplies the same centered and docked geometry.
+The setup instruction appears inside the existing guide message rather than repeating its header;
+guide and composer docking share one curve while details and choices enter with a small delayed fade.
+Inline handoff capture copies only the mounted page's projections and presentation markers once.
+Registered navigation systems choose the target and own completion or rollback; the capture
+capability never selects a Session or owns a transition lifecycle. ACP install IO belongs to the
+installer type, while job spawning, coalescing, cancellation and result application remain visible
+in their owning ECS paths. Server-start IO retains its accepted LaunchServer ticket through execution.
+The bootstrap and live Session share their conversation surface, transcript, assistant/user turns,
+composer and choice controls. The guide lists Claude, Codex, and Vibe candidates first,
+followed by the complete supported catalog in a scroll viewport capped at 160 px. Selection sits in the shared composer's outer notice frame;
+search filters the complete catalog. Setup uses a muted, theme-derived frame instead of an inverted notice surface. Authentication uses one Connect
+control for the provider's account/browser method. Compatible API keys are a secondary opt-in route.
+The shared `vmux open` entry point sends a typed browser request over the existing service bridge.
+ACP launches expose it through the provider's standard `BROWSER` setting with the source Session ID.
+The source conversation pane chooses an adjacent browser pane when its logical width can fit both
+surfaces, or a new browser Stack otherwise. Provider URLs remain intact, and normal browser metadata
+supplies the title and favicon. Header and Stack context menus can open the same HTTP(S) URL in
+the external default browser. Connectors can reuse the same URL-opening entry point.
+The service routes browser requests to one desktop attached to the source Session, using live
+connection handles instead of broadcasting to unrelated desktops. Unscoped opens likewise choose
+one subscriber. Missing sources return a service error; the CLI preserves that cause. Session
+URLs encode source IDs as path segments, matching the Session route contract.
+The host owns setup state; the cursor and search stay local to the UI. Normal text input is
+disabled until readiness. Explicit key entry uses the same composer with a password input and
+ordinary Send/Enter submission; private input never enters the normal draft. There is no separate
+key form or persistence control. The uncommitted key-entry mode resets outside authentication.
+Preparation and installation show the normal Stop control rather than management options.
+Stop, Ctrl+C and Escape route to setup cancellation without flushing queued work or discarding
+the Session. Preparation, authentication, and API-key composer footers show the shared Escape
+cancellation hint. Shared loading/progress animations and phase icons accompany guide messages;
+installation progress is indeterminate until an actual percentage is available.
+ACP supplies its supported catalog, credential availability and managed installer.
+Agent thumbnails and favicons share a versioned, offline logo catalog. Matching MIT-licensed
+Lobe Icons assets keep their brand colors and gradients; unmatched agents retain their official
+Apache-2.0 registry SVGs. The catalog records provenance and license data and is refreshed with
+`python3 scripts/sync-acp-logos.py`. Explicit custom icons remain authoritative. Monochrome
+portions adapt to the inherited color scheme without per-agent color guesses. Setup surfaces
+use muted theme tokens, and the complete agent list scrolls inside a viewport capped at 160 px.
+Preparing and authentication states hold any genuinely submitted user messages until the provider
+establishes its Session. Advertised authentication methods run through ACP `authenticate`;
+cancellation detaches the waiter or runtime and keeps reusable package data. Provider sign-in
+remains in its adapter, with shared connector authentication infrastructure reused where compatible.
+
+New transport variants append to existing enums. Authentication lists use boxed archive storage to
+preserve the deployed run-state layout while remaining ordinary arrays in JSON.
+Credential discovery runs after the settings Startup load; initial app composition cannot read an
+unregistered settings resource.
+
+macOS API-key entry uses a redacted, zeroizing input contract and an asynchronous Safe Storage write.
+`vmux_profile::CredentialStore` binds the encrypted envelope to the profile, credential namespace
+and key name. Only availability and save status reach UI state; neither the draft nor settings hold
+keys. A pending write holds conversation startup, and replacing a key retries only the same Session
+while it still needs authentication. Launch reads the saved key from the installer's data root, so
+fixture installers cannot read the personal credential store. The default projects directory remains
+unbound context: the agent asks for a project when the selected task needs one.
+
+`VMUX_ONBOARDING_FRESH=1 vmux run -b onboarding` opens a prepared debug app with a new data
+directory and the Fresh profile. DX clears the flag before launching and retains that directory
+for the app and its logs. Short `/tmp` paths keep local service sockets within the platform limit.
+Explicit `VMUX_DATA_DIR`, `VMUX_PROFILE=fresh-env` and `VMUX_TEST_ENV_KEYS=1` settings reuse an
+isolated fixture while allowing the current process's supported API keys. An isolated
+data directory owns Vmux configuration, projects, managed ACP/LSP downloads, browser state and
+an external-tool home per profile; agent and LSP subprocesses receive that home without unrelated inherited
+credentials or login dotfiles. Normal profiles retain their shared package store and existing home.
+Knowledge configuration and memory synchronization resolve the same isolated agent directories,
+including when the host environment points to personal agent configuration.
+System package managers and macOS permission grants remain machine resources.
 
 External session integration is a lifecycle-owned child plugin of `AcpPlugin`. It registers its
 catalog, history and archive state, observers, and ordered systems through `Plugin::build`;

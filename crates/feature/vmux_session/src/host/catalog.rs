@@ -92,7 +92,11 @@ impl Plugin for CatalogPlugin {
 }
 
 #[derive(Component)]
-#[require(SessionCatalogView, SessionCatalogUiStateComponent)]
+#[require(
+    SessionCatalogView,
+    SessionCatalogUiStateComponent,
+    crate::onboarding::KeyPending
+)]
 pub struct SessionManagerView;
 
 fn unpublish(trigger: On<Remove, SessionManagerView>, mut commands: Commands) {
@@ -827,7 +831,9 @@ impl SessionDetailUiState {
     ) -> Self {
         let id = match Route::parse(&page.url) {
             Some(Route::Session(id)) => id.0,
-            Some(Route::Manager | Route::Provider { .. }) | None => return Self::default(),
+            Some(Route::Manager | Route::Provider { .. } | Route::Setup) | None => {
+                return Self::default();
+            }
         };
         let session = catalog
             .sessions

@@ -1016,12 +1016,21 @@ fn submit(
     trigger: On<CommandDispatch>,
     bindings: Query<(), With<ChatSubmitBinding>>,
     composers: Query<&ComposerState, With<SessionView>>,
+    targets: super::session::SessionViews,
+    sessions: Query<&crate::RunState>,
     mut commands: Commands,
 ) {
     if !bindings.contains(trigger.event().command()) {
         return;
     }
     let caller = trigger.event().invocation().caller;
+    if let Some(session) = targets.session(caller)
+        && sessions
+            .get(session)
+            .is_ok_and(crate::RunState::setup_in_progress)
+    {
+        return;
+    }
     let Ok(composer) = composers.get(caller) else {
         return;
     };

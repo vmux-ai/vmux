@@ -26,6 +26,7 @@ app = [
     "dep:vmux_command",
     "dep:vmux_git",
     "dep:vmux_page",
+    "dep:vmux_path",
     "dep:vmux_tool",
     "dep:vmux_ui",
     "vmux_ecs/host",

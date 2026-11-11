@@ -22,6 +22,8 @@ tokio = { workspace = true, optional = true }
 vmux_app = { path = "../../util/vmux_app", features = ["cli"], optional = true }
 vmux_ecs = { path = "../../util/vmux_ecs", features = ["cli"] }
 vmux_dx = { path = "../../feature/vmux_dx", optional = true }
+vmux_api = { path = "../../util/vmux_api" }
+vmux_transport = { path = "../../util/vmux_transport" }
 
 [dev-dependencies]
 plist = "1"

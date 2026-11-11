@@ -1,6 +1,7 @@
 use super::state::Chat;
 use crate::event::{ApprovalDecision, ApprovalDetail};
 use dioxus::prelude::*;
+use vmux_ui::components::choice::ChoiceOptions;
 use vmux_ui::i18n::{TranslationValue, translate, translate_with};
 
 pub(super) const APPROVAL_DECISIONS: [ApprovalDecision; 3] = [
@@ -122,22 +123,13 @@ pub(super) fn ChoiceList(chat: Chat) -> Element {
     }
     let question = chat.run.choice_question();
     rsx! {
-        div { class: "border-l-2 border-foreground/15 py-2 pl-3.5",
-            div { class: "mb-3 text-sm font-medium text-foreground", "{question}" }
-            div { class: "flex flex-col gap-1.5",
-                for (index , option) in options.into_iter().enumerate() {
-                    button {
-                        key: "choice-{index}",
-                        id: "agent-choice-item-{index}",
-                        onmouseenter: move |_| chat.point_at_choice(index),
-                        class: if index == chat.list_selection() { "flex items-center gap-3 rounded-xl bg-foreground px-3 py-2 text-left text-sm text-background" } else { "flex items-center gap-3 rounded-xl bg-foreground/[0.045] px-3 py-2 text-left text-sm text-foreground hover:bg-foreground/[0.08]" },
-                        onclick: move |_| chat.choose_list(index),
-                        span { class: "flex h-5 w-5 shrink-0 items-center justify-center rounded-md border border-current/20 font-mono text-[10px]", "{index + 1}" }
-                        span { class: "min-w-0 flex-1", "{option}" }
-                    }
-                }
-            }
-            div { class: "mt-2.5 text-[11px] text-muted-foreground", {translate("agent-choice-help")} }
+        ChoiceOptions {
+            id_prefix: Some("agent-choice-item".to_string()),
+            question: Some(question),
+            options,
+            selected: chat.list_selection(),
+            on_select: move |index| chat.choose_list(index),
+            on_hover: move |index| chat.point_at_choice(index),
         }
     }
 }

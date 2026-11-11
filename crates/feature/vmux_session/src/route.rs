@@ -4,13 +4,27 @@ use percent_encoding::percent_decode_str;
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Route {
     Manager,
+    Setup,
     Session(SessionId),
     Provider { kind: String, sid: String },
 }
 
 impl Route {
+    pub const SETUP_URL: &'static str = "vmux://start/onboarding/agent";
+
     pub fn parse(url: &str) -> Option<Self> {
         let route = vmux_api::VmuxRoute::parse(url)?;
+        if route.is_host("start") {
+            let segments = route.path_segments().collect::<Vec<_>>();
+            return match segments.as_slice() {
+                ["onboarding", "agent"]
+                    if route.query().is_none() && route.fragment().is_none() =>
+                {
+                    Some(Self::Setup)
+                }
+                _ => None,
+            };
+        }
         if !route.is_host("sessions") {
             return None;
         }
@@ -18,6 +32,7 @@ impl Route {
         match segments.as_slice() {
             [] => Some(Self::Manager),
             ["inbox"] => Some(Self::Manager),
+            ["setup"] if route.query().is_none() && route.fragment().is_none() => Some(Self::Setup),
             [id] if route.query().is_none() && route.fragment().is_none() => {
                 let id = percent_decode_str(id).decode_utf8().ok()?;
                 if let Some(source) = id.strip_prefix("resume/") {
@@ -43,6 +58,7 @@ impl Route {
     pub fn url(&self) -> String {
         match self {
             Self::Manager => "vmux://sessions/inbox".to_string(),
+            Self::Setup => Self::SETUP_URL.to_string(),
             Self::Session(id) => {
                 let mut url = url::Url::parse("vmux://sessions/")
                     .expect("static Session route must be valid");
@@ -64,6 +80,27 @@ impl Route {
                 url.into()
             }
         }
+    }
+
+    #[cfg(all(host, feature = "app"))]
+    pub fn page_metadata(url: &str) -> Option<vmux_ecs::PageMetadata> {
+        let route = Self::parse(url)?;
+        let title = match &route {
+            Self::Manager => vmux_ui::i18n::translate("sessions-title"),
+            Self::Setup => return None,
+            Self::Session(id) => id.0.clone(),
+            Self::Provider { .. } => vmux_ui::i18n::translate("sessions-title"),
+        };
+        let url = match &route {
+            Self::Manager => Self::manager_url(url).unwrap_or_else(|| route.url()),
+            Self::Session(_) | Self::Provider { .. } => route.url(),
+            Self::Setup => return None,
+        };
+        Some(vmux_ecs::PageMetadata {
+            url,
+            title,
+            ..Default::default()
+        })
     }
 
     pub fn manager_for_agent(agent: &AgentId) -> String {
@@ -151,6 +188,16 @@ mod tests {
     use super::*;
 
     #[test]
+    fn setup_is_a_dedicated_route_without_collection_filters() {
+        let url = Route::Setup.url();
+        assert_eq!(Route::parse(&url), Some(Route::Setup));
+        assert_eq!(Route::manager_url(&url), None);
+        assert_eq!(Route::requested_agent(&url), None);
+        assert_eq!(Route::parse("vmux://sessions/setup?agent=codex"), None);
+        assert_eq!(Route::parse("vmux://sessions/setup#agent"), None);
+    }
+
+    #[test]
     fn inbox_is_a_collection_and_canonicalization_preserves_filter_context() {
         assert_eq!(Route::parse("vmux://sessions/inbox"), Some(Route::Manager));
         let url = Route::manager_url("vmux://sessions/?project=%2Fwork%2Fa&agent=codex").unwrap();
@@ -190,6 +237,26 @@ mod tests {
                 "01a0fc43-68f9-7121-a388-59e1891fdc41".into()
             )))
         );
+    }
+
+    #[test]
+    fn agent_onboarding_is_a_topic_route_with_a_canonical_legacy_alias() {
+        for url in ["vmux://start/onboarding/agent", "vmux://sessions/setup"] {
+            let route = Route::parse(url).expect("agent setup route");
+            assert_eq!(route, Route::Setup);
+            assert_eq!(route.url(), "vmux://start/onboarding/agent");
+            assert_eq!(Route::requested_agent(url), None);
+        }
+        for url in [
+            "vmux://start/",
+            "vmux://start/onboarding",
+            "vmux://start/onboarding/project",
+            "vmux://start/onboarding/agent/extra",
+            "vmux://start/onboarding/agent?session=other",
+            "vmux://start/onboarding/agent#step",
+        ] {
+            assert_eq!(Route::parse(url), None, "{url}");
+        }
     }
 
     #[test]

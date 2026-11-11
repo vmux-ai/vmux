@@ -104,6 +104,7 @@ impl InstallCommand {
 
     fn run(&self) -> Result<(), String> {
         let mut command = std::process::Command::new(&self.program);
+        vmux_process::LoginShellEnvironment::apply_isolation(&mut command);
         command.args(&self.arguments);
         for (key, value) in &self.environment {
             command.env(key, value);
