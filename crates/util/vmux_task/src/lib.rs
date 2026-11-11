@@ -160,6 +160,9 @@ fn bind<T: Send + Sync + 'static>(mut world: DeferredWorld, context: HookContext
     let mut current = world.get_mut::<TaskToken>(context.entity).unwrap();
     current.cancel();
     *current = token;
+    if let Some(waker) = world.get::<TaskWaker>(context.entity) {
+        waker.current().wake_by_ref();
+    }
 }
 
 #[derive(Component)]
@@ -564,6 +567,31 @@ mod tests {
     }
 
     struct DropNotice(std::sync::mpsc::SyncSender<()>);
+
+    #[test]
+    fn replacing_a_task_with_a_bound_waker_requests_collection_before_polling() {
+        let mut fixture = Fixture::new();
+        let entity = fixture.start(1);
+        fixture.ready(entity);
+        let (wake_tx, wake_rx) = std::sync::mpsc::sync_channel(1);
+        fixture
+            .app
+            .world_mut()
+            .entity_mut(entity)
+            .insert(TaskWaker::new(Waker::from(Arc::new(Notify(wake_tx)))));
+        wake_rx.recv_timeout(Duration::from_secs(2)).unwrap();
+        fixture
+            .app
+            .world_mut()
+            .entity_mut(entity)
+            .insert(AsyncTask::new(fixture.pool.spawn(async { 2u32 })));
+        wake_rx.recv_timeout(Duration::from_secs(2)).unwrap();
+        fixture.ready(entity);
+        let result = fixture.command(entity);
+        fixture.app.world_mut().commands().queue(result);
+        fixture.app.world_mut().flush();
+        assert_eq!(fixture.app.world().resource::<Applied>().0, [2]);
+    }
 
     impl Drop for DropNotice {
         fn drop(&mut self) {

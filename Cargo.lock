@@ -11256,6 +11256,7 @@ dependencies = [
 name = "vmux_tool"
 version = "0.0.35"
 dependencies = [
+ "async-lock",
  "bevy",
  "bevy_app",
  "bevy_cef",

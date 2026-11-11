@@ -367,6 +367,9 @@ Tool operations retain their domain output and Operation lifecycle; Breadcrumb r
 the current document scope. Installing or binding a task waker requests the first collection pass;
 completion then wakes the reactive loop after the result is ready. Tool adapters and inventory
 scans hold a shared store lease until their synchronous worker returns, including after cancellation.
+Stores for the same canonical path share the lease. MCP manifest transactions and rollback await
+that lease without blocking the task pool; OAuth interaction does not hold it. Releasing the lease
+wakes its registered event loop, and inserting a replacement task wakes an already-bound consumer.
 Canceled work cannot start an adapter or revive its operation state. Running synchronous side effects still require
 their adapter's own cancellation and timeout behavior; discarding a task does not roll them back.
 

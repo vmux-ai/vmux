@@ -163,9 +163,10 @@ fn start_mcp_operation(
                             let _ = wake.send_event(bevy::winit::WinitUserEvent::WakeUp);
                         }
                     })
+                    .await
                 }
                 (McpServerOperation::Disconnect, Some(server)) => {
-                    McpConnection::disconnect(server, &credentials)
+                    McpConnection::disconnect(server, &credentials).await
                 }
                 (_, None) => Err(format!("Unknown MCP server: {task_id}")),
             };
@@ -463,12 +464,16 @@ impl McpSnapshotSource {
 struct McpConnection;
 
 impl McpConnection {
-    fn connect(
+    async fn connect(
         server: &McpCatalogServer,
         credentials: &McpCredentials,
         progress: impl FnOnce(String),
     ) -> Result<(), String> {
-        Self::ensure_catalog_slot(server)?;
+        {
+            let store = ToolStore::current();
+            let _lease = store.lease_async().await;
+            Self::ensure_catalog_slot(&store, server)?;
+        }
         let listener = TcpListener::bind("127.0.0.1:0")
             .map_err(|error| format!("failed to open OAuth callback: {error}"))?;
         let address = listener
@@ -529,11 +534,13 @@ impl McpConnection {
             resource: server.url.clone(),
         };
         let id = &server.id;
+        let store = ToolStore::current();
+        let _lease = store.lease_async().await;
         credentials.access.write(|| {
-            Self::ensure_catalog_slot(server)?;
+            Self::ensure_catalog_slot(&store, server)?;
             let original_credentials = credentials.storage.load(id)?;
             credentials.storage.store(id, &oauth)?;
-            if let Err(error) = Self::write_manifest(server) {
+            if let Err(error) = Self::write_manifest(&store, server) {
                 let credentials_rollback = original_credentials
                     .as_ref()
                     .map(|original| credentials.storage.store(id, original))
@@ -544,11 +551,15 @@ impl McpConnection {
         })
     }
 
-    fn disconnect(server: &McpCatalogServer, credentials: &McpCredentials) -> Result<(), String> {
+    async fn disconnect(
+        server: &McpCatalogServer,
+        credentials: &McpCredentials,
+    ) -> Result<(), String> {
         let id = &server.id;
+        let store = ToolStore::current();
+        let _lease = store.lease_async().await;
         credentials.access.write(|| {
             let stored = credentials.storage.load(id)?;
-            let store = ToolStore::current();
             let original = store.load()?;
             let configured = original
                 .mcp
@@ -692,8 +703,7 @@ impl McpConnection {
         format!("{error}; {}", failures.join("; "))
     }
 
-    fn write_manifest(server: &McpCatalogServer) -> Result<(), String> {
-        let store = ToolStore::current();
+    fn write_manifest(store: &ToolStore, server: &McpCatalogServer) -> Result<(), String> {
         let mut manifest = store.load()?;
         if let Some(manifest_server) = manifest.mcp.servers.get(&server.id)
             && !server.owns(manifest_server)
@@ -710,8 +720,8 @@ impl McpConnection {
         store.save(&manifest)
     }
 
-    fn ensure_catalog_slot(server: &McpCatalogServer) -> Result<(), String> {
-        let manifest = ToolStore::current().load()?;
+    fn ensure_catalog_slot(store: &ToolStore, server: &McpCatalogServer) -> Result<(), String> {
+        let manifest = store.load()?;
         let Some(manifest_server) = manifest.mcp.servers.get(&server.id) else {
             return Ok(());
         };

@@ -597,6 +597,8 @@ mod tests {
             .entity_mut(first)
             .insert(OperationState::Canceled);
         fixture.settle();
+        let fresh_store = ToolStore::new(fixture._directory.path(), fixture._directory.path());
+        fixture.store = fixture.app.world_mut().spawn(fresh_store).id();
         let second = fixture.import(&path, false);
         fixture.settle();
         assert!(

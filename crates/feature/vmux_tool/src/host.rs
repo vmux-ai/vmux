@@ -1,5 +1,6 @@
 use std::collections::BTreeMap;
 use std::path::Path;
+use std::task::Waker;
 
 use crate::catalog::{Catalog, Inventory, Received};
 use crate::state::{
@@ -99,13 +100,25 @@ impl Plugin for ToolHostPlugin {
 #[derive(SystemSet, Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub(crate) struct ProjectionSet;
 
-fn wake(proxy: Option<Res<bevy::winit::EventLoopProxyWrapper>>, mut tasks: Query<&mut TaskWaker>) {
+fn wake(
+    proxy: Option<Res<bevy::winit::EventLoopProxyWrapper>>,
+    mut tasks: Query<&mut TaskWaker>,
+    stores: Query<&ToolStore>,
+    mut notification: Local<Option<Waker>>,
+) {
     let Some(proxy) = proxy else {
         return;
     };
+    if notification.is_none() || proxy.is_changed() {
+        *notification = Some(vmux_ecs::wake::Wake::waker(Some(&proxy)));
+    }
+    let notification = notification.as_ref().unwrap();
+    for store in &stores {
+        store.bind_waker(notification.clone());
+    }
     for mut waker in &mut tasks {
         if !waker.is_bound() {
-            waker.bind(vmux_ecs::wake::Wake::waker(Some(&proxy)));
+            waker.bind(notification.clone());
         }
     }
 }
@@ -805,7 +818,10 @@ fn apply_tools(
 }
 
 fn finish_external_operations(
-    mut operations: Query<(Entity, &mut TaskResult<Result<String, String>>)>,
+    mut operations: Query<
+        (Entity, &mut TaskResult<Result<String, String>>),
+        With<ToolOperationContext>,
+    >,
     mut commands: Commands,
 ) {
     for (entity, mut completion) in &mut operations {

@@ -32,16 +32,24 @@ runs:
       shell: bash
       run: |
         sudo tee /etc/apt/apt-mirrors.txt > /dev/null <<'MIRROR'
-        https://mirrors.edge.kernel.org/ubuntu
+        https://mirrors.edge.kernel.org/ubuntu	priority:1
+        https://archive.ubuntu.com/ubuntu	priority:2
+        https://azure.archive.ubuntu.com/ubuntu	priority:3
         MIRROR
         sudo tee /etc/apt/apt-mirrors-security.txt > /dev/null <<'MIRROR'
-        https://mirrors.edge.kernel.org/ubuntu
+        https://mirrors.edge.kernel.org/ubuntu	priority:1
+        https://security.ubuntu.com/ubuntu	priority:2
+        https://azure.archive.ubuntu.com/ubuntu	priority:3
         MIRROR
         timeout 180 sudo apt-get -o Acquire::Retries=1 \
           -o Acquire::http::Timeout=15 -o Acquire::https::Timeout=15 \
+          -o Dir::Etc::sourcelist=/etc/apt/sources.list.d/ubuntu.sources \
+          -o Dir::Etc::sourceparts=- \
           -o APT::Update::Error-Mode=any update
         timeout 300 sudo apt-get -o Acquire::Retries=1 \
           -o Acquire::http::Timeout=15 -o Acquire::https::Timeout=15 \
+          -o Dir::Etc::sourcelist=/etc/apt/sources.list.d/ubuntu.sources \
+          -o Dir::Etc::sourceparts=- \
           install -y --no-install-recommends \
           pkg-config \
           libssl-dev \
