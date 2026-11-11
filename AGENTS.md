@@ -8,7 +8,7 @@ Use caveman mode. Terse, direct, no filler. Execute first, talk second. No meta-
 
 CI runs fmt, clippy, and tests for PRs.
 
-Run targeted tests during the edit loop when they clarify non-trivial behavior, reproduce a regression, or verify a risky change. TDD is useful but not mandatory; do not add tests mechanically for every edit. Run workspace-wide local checks manually only when the user asks; the pre-push hook remains the required final fmt, clippy, and test gate.
+Run targeted tests during the edit loop when they clarify non-trivial behavior, reproduce a regression, or verify a risky change. TDD is useful but not mandatory; do not add tests mechanically for every edit. Run workspace-wide local checks manually only when the user asks. The required pre-push hook runs builder tests, formatting, diff validation, and source conventions. Run targeted Clippy separately for Rust changes that warrant it; report Clippy as not run unless a separate invocation passed, and include the command and result in the handoff.
 
 **Install that hook in every new worktree — `./scripts/setup-hooks.sh`.** Hooks live under `.git/`, which a fresh worktree does not inherit, so the gate this file leans on is simply absent until you run it. Nothing announces that; the first sign is a push that should have been stopped and wasn't. The reverse failure is worse and quieter: believing there is no gate, you hand-run `clippy --workspace` and `test --workspace` on every change, which costs half an hour each and — because cargo takes one lock per target directory — starves anything else building beside you.
 
@@ -147,12 +147,34 @@ Deliver user-facing work as an end-to-end vertical slice. A core-only PR is inco
 
 Do not stack PRs by default. Stack only when the work genuinely depends on another unmerged PR and cannot be based on `main`; state that dependency in the PR. Keep the dependent PR as one coherent end-to-end change rather than splitting it into implementation-layer PRs.
 
+## PR Handoff
+
+Keep one user-designated integration agent responsible for reviewing and merging QA-complete PRs in this repository. Implementation agents finish implementation, self-review, local validation, the pre-push gate, PR creation, applicable manual QA, and task-owned cache cleanup before handing over the PR. The integration agent owns accepted PRs through review triage, CI fixes, current-head monitoring, squash merge, and worktree cleanup. Other agents return to implementation work and leave accepted PR branches to that owner.
+
+Before manual QA, self-review the complete diff against the fetched target branch, including new files and the affected callers and tests. Verify scope and repository rules, then examine the changed behavior, failure and cancellation paths, state ownership, persistence, and relevant platform or security boundaries. Passing tests alone do not constitute self-review. Fix findings and rerun the affected checks before preparing the QA artifact; avoid repeating broad checks without a new change or unresolved concern.
+
+The integration agent verifies the reported head, checks, and QA result, reviews the current diff, and handles external review findings. Self-review findings and their disposition travel with the handoff.
+
+Manual QA is performed by the user; agents prepare the build and inspect its logs under the existing no-launch rule. Record the tested artifact and result. Infrastructure-only changes may record manual QA as not applicable with a concrete reason. Repeat QA when later changes invalidate the recorded result.
+
+Each handoff includes:
+
+- PR number and URL, target branch, and head commit.
+- Feature branch and worktree path.
+- Local checks and results, including test count, Clippy, and pre-push status.
+- Self-review findings, fixes, and any remaining concerns, or an explicit report that no findings were identified.
+- Manual QA result and artifact, or why it is not applicable.
+- Cache cleanup status and any artifacts or active worktrees being retained.
+- Remaining CI or review work.
+
+A user handoff of a QA-complete PR to the designated integration agent authorizes review and CI fixes, normal feature-branch pushes, and squash merge into the stated target after review findings are addressed or triaged and all applicable checks pass on the latest head. Carry it through without asking for approval again for each PR. Follow explicit holds, scope changes, and runtime approvals. Keep this ownership with the same agent across successive handoffs.
+
 ## Merging
 
 Before merging any PR:
 
-1. **Check review comments.** Read all review feedback — CodeRabbit and human reviewers — and address or explicitly triage every item. A green status check is not enough; unresolved review comments must be handled first. **Reply to every CodeRabbit thread** — either reflect the fix in code (cite the commit) or comment a triage reason — so no thread is left dangling, then resolve them (e.g. `@coderabbitai resolve`).
-2. **Check CI.** Confirm all required checks are green on the PR's head commit.
+1. **Check review comments.** Read all review feedback — CodeRabbit and human reviewers — and address or explicitly triage every item. Report triage in chat. Post replies or resolve threads only when the user explicitly requests it.
+2. **Check CI.** Confirm all applicable checks have passed on the PR's latest head commit.
 
 After merging, clean up: remove the worktree (`git worktree remove .worktrees/<name>`) and delete the branch (`gh pr merge --delete-branch` for the remote; delete the local branch too if it lingers).
 
