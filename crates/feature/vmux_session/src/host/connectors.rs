@@ -75,7 +75,15 @@ fn select(
     if server.status == McpServerStatus::Connected {
         let mut selection = selections.get(session).cloned().unwrap_or_default();
         selection.toggle(id);
+        let mut snapshot = state.clone();
+        snapshot.selected = selection.0.clone();
+        commands
+            .entity(webview)
+            .insert(ConnectorAccess(selection.0.clone()));
         commands.entity(session).insert(selection);
+        commands.trigger(UiStateWrite::<McpServersUiState>::from_event(
+            webview, &snapshot,
+        ));
         return;
     }
     commands.entity(webview).insert(PendingSelection {
@@ -119,7 +127,15 @@ fn connected(
         if !selection.0.contains(&pending.id) {
             selection.0.push(pending.id.clone());
         }
+        let mut snapshot = state.clone();
+        snapshot.selected = selection.0.clone();
+        commands
+            .entity(webview)
+            .insert(ConnectorAccess(selection.0.clone()));
         commands.entity(pending.session).insert(selection);
+        commands.trigger(UiStateWrite::<McpServersUiState>::from_event(
+            webview, &snapshot,
+        ));
     }
 }
 
@@ -164,6 +180,15 @@ mod tests {
     use super::*;
     use vmux_api::mcp::{McpServerEntry, McpServerResult};
     use vmux_ecs::EntityTarget;
+
+    #[derive(Component)]
+    struct Published(Vec<String>);
+
+    fn record(trigger: On<UiStateWrite<McpServersUiState>>, mut commands: Commands) {
+        commands
+            .entity(trigger.event().webview())
+            .insert(Published(trigger.event().update().selected.clone()));
+    }
 
     struct Conversation {
         session: Entity,
@@ -233,12 +258,31 @@ mod tests {
         app.add_plugins((
             vmux_ecs::UiStatePlugin::<McpServersUiState>::default(),
             Plugin,
-        ));
+        ))
+        .add_observer(record);
         let first = Conversation::create(&mut app);
         let second = Conversation::create(&mut app);
         first.publish(&mut app, McpServerStatus::Connected, None);
         second.publish(&mut app, McpServerStatus::Connected, None);
-        first.select(&mut app);
+        app.world_mut().trigger(UiInput {
+            webview: first.view,
+            payload: McpServerSelectionRequest {
+                id: "github".into(),
+            },
+        });
+        app.world_mut().flush();
+        assert_eq!(
+            app.world().get::<Published>(first.view).unwrap().0,
+            ["github"]
+        );
+        assert!(
+            app.world()
+                .get::<Published>(second.view)
+                .unwrap()
+                .0
+                .is_empty()
+        );
+        app.update();
         assert_eq!(first.selected(&app), ["github"]);
         assert!(second.selected(&app).is_empty());
         first.select(&mut app);
