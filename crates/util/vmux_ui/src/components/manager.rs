@@ -753,6 +753,8 @@ pub fn ManagerCard(
     #[props(default = true)] show_icon: bool,
     #[props(default = true)] icon_surface: bool,
     #[props(default)] selected: bool,
+    #[props(default)] disabled: bool,
+    #[props(default)] aria_label: Option<String>,
     onselect: EventHandler<NavigationGesture>,
 ) -> Element {
     let keyboard_select = onselect;
@@ -764,10 +766,13 @@ pub fn ManagerCard(
                 "group flex min-h-28 min-w-0 cursor-pointer flex-col rounded-xl bg-foreground/[0.03] p-3 transition-colors hover:bg-foreground/[0.06]"
             },
             role: "button",
-            tabindex: "0",
+            tabindex: if disabled { "-1" } else { "0" },
             aria_selected: selected,
-            onclick: move |event| onselect.call(NavigationGesture::from_mouse(&event)),
+            aria_disabled: disabled,
+            aria_label,
+            onclick: move |event| { if !disabled { onselect.call(NavigationGesture::from_mouse(&event)); } },
             onkeydown: move |event| {
+                if disabled { return; }
                 let activate = event.key() == Key::Enter
                     || matches!(event.key(), Key::Character(key) if key == " ");
                 if !activate {

@@ -1,10 +1,12 @@
 use dioxus::prelude::*;
+use vmux_ui::components::avatar::AgentThumbnail;
 use vmux_ui::components::composer::PromptComposer;
+use vmux_ui::components::input::Input;
+use vmux_ui::components::manager::ManagerCard;
 use vmux_ui::components::skeleton::Skeleton;
 use vmux_ui::hooks::{UiStateBinding, send};
 use vmux_ui::i18n::{TranslationValue, translate, translate_with};
 
-use super::approval::{ChoiceKey, ChoiceOptions};
 use super::setup::{Identity, Turn};
 use crate::onboarding::{AgentOption, OnboardingConnect, OnboardingUiState};
 
@@ -29,117 +31,200 @@ fn Conversation(state: OnboardingUiState) -> Element {
                 if state.failed {
                     Turn { p { class: "text-sm leading-relaxed", {translate("onboarding-setup-failed")} } }
                 }
+                AgentGallery { state }
             }
-            AgentComposer { state }
+            super::surface::Dock {
+                PromptComposer {
+                    value: String::new(),
+                    placeholder: translate("onboarding-composer-wait"),
+                    accent_color: Identity::COLOR.to_string(),
+                    accent_gradient: "from-indigo-500 to-violet-600".to_string(),
+                    footer: Some(rsx! {}),
+                    disabled: true,
+                    show_add_button: false,
+                    show_send_button: false,
+                    action_title: translate("onboarding-setup"),
+                    action_enabled: false,
+                    on_input: move |_| {},
+                    on_keydown: move |_| {},
+                    on_action: move |_| {},
+                    on_paste: move |_| {},
+                    on_attach: move |_| {},
+                    on_remove_attachment: move |_| {},
+                }
+            }
         }
     }
 }
 
 #[component]
-fn AgentComposer(state: OnboardingUiState) -> Element {
+fn AgentGallery(state: OnboardingUiState) -> Element {
     let mut query = use_signal(String::new);
-    let mut selected = use_signal(|| {
-        state
-            .agents
-            .iter()
-            .position(|agent| agent.id == state.agent_id)
-            .unwrap_or_default()
-    });
-    let mut choices = Vec::new();
-    let needle = query().trim().to_lowercase();
-    for agent in &state.agents {
-        if agent.name.to_lowercase().contains(&needle) || agent.id.to_lowercase().contains(&needle)
-        {
-            choices.push(agent.clone());
-        }
-    }
-    let mut labels = Vec::new();
-    for agent in &choices {
-        let label = translate_with(
-            if agent.installed {
-                "onboarding-connect-agent"
-            } else {
-                "onboarding-install-agent"
-            },
-            &[("agent", TranslationValue::String(&agent.name))],
-        );
-        if agent.environment_key {
-            labels.push(format!(
-                "{label} · {}",
-                translate("onboarding-key-available")
-            ));
-        } else {
-            labels.push(label);
-        }
-    }
+    let gallery = Gallery::of(&state, &query());
     let loading = state.agents.is_empty();
-    let cursor = selected().min(choices.len().saturating_sub(1));
-    let picker = Picker(choices);
-    let clicked = picker.clone();
-    let typed = picker.clone();
-    let submitted = picker.clone();
     rsx! {
-        super::surface::Dock {
-            if loading {
-                Skeleton { class: "h-10 w-full rounded-xl" }
-                Skeleton { class: "h-10 w-full rounded-xl" }
-            } else {
-                ChoiceOptions {
-                    options: labels,
-                    selected: cursor,
-                    disabled: state.starting,
-                    on_select: move |index| { if !state.starting { clicked.choose(index); } },
-                    on_hover: move |index| selected.set(index),
-                    on_keydown: move |event| { if !state.starting { typed.key(event, selected, query().is_empty()); } },
-                }
-            }
-            PromptComposer {
+        section { class: "flex flex-col gap-4",
+            Input {
+                r#type: "search",
+                class: "h-10 w-full sm:max-w-sm",
                 value: query(),
-                placeholder: translate("composer-choose-agent"),
-                accent_color: Identity::COLOR.to_string(),
-                accent_gradient: "from-indigo-500 to-violet-600".to_string(),
-                footer: Some(rsx! {}),
+                placeholder: translate("onboarding-search-agents"),
+                aria_label: translate("onboarding-search-agents"),
                 disabled: state.starting || loading,
-                show_add_button: false,
-                action_title: translate("onboarding-setup"),
-                action_enabled: !picker.0.is_empty(),
-                on_input: move |value| { query.set(value); selected.set(0); },
-                on_keydown: move |event| picker.key(event, selected, query().is_empty()),
-                on_action: move |_| submitted.choose(cursor),
-                on_paste: move |_| {},
-                on_attach: move |_| {},
-                on_remove_attachment: move |_| {},
+                oninput: move |event: FormEvent| query.set(event.value()),
+            }
+            if loading {
+                div { class: "grid grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-3",
+                    for index in 0..6 {
+                        Skeleton { key: "{index}", class: "h-28 w-full rounded-xl" }
+                    }
+                }
+            } else {
+                if !gallery.featured.is_empty() {
+                    AgentGrid {
+                        title: translate("onboarding-featured-agents"),
+                        agents: gallery.featured,
+                        current: state.agent_id.clone(),
+                        pending: state.starting,
+                    }
+                }
+                if !gallery.other.is_empty() {
+                    AgentGrid {
+                        title: translate(if query().trim().is_empty() && gallery.has_featured { "onboarding-more-agents" } else { "onboarding-all-agents" }),
+                        agents: gallery.other,
+                        current: state.agent_id,
+                        pending: state.starting,
+                    }
+                } else if gallery.empty {
+                    p { role: "status", class: "py-4 text-sm text-muted-foreground", {translate("common-no-results")} }
+                }
             }
         }
     }
 }
 
-#[derive(Clone)]
-struct Picker(Vec<AgentOption>);
+#[component]
+fn AgentGrid(title: String, agents: Vec<AgentOption>, current: String, pending: bool) -> Element {
+    rsx! {
+        section { class: "flex flex-col gap-2", aria_label: title.clone(),
+            h2 { class: "text-xs font-medium text-muted-foreground", "{title}" }
+            div { class: "grid grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-3",
+                for agent in agents {
+                    AgentCard { key: "{agent.id}", selected: agent.id == current, agent, pending }
+                }
+            }
+        }
+    }
+}
 
-impl Picker {
-    fn choose(&self, index: usize) {
-        if let Some(agent) = self.0.get(index) {
-            let _ = send(&OnboardingConnect {
-                agent_id: agent.id.clone(),
-            });
+#[component]
+fn AgentCard(agent: AgentOption, selected: bool, pending: bool) -> Element {
+    let id = agent.id.clone();
+    let label = translate_with(
+        if agent.installed {
+            "onboarding-connect-agent"
+        } else {
+            "onboarding-install-agent"
+        },
+        &[("agent", TranslationValue::String(&agent.name))],
+    );
+    rsx! {
+        ManagerCard {
+            selected,
+            disabled: pending,
+            aria_label: Some(label.clone()),
+            icon_surface: false,
+            icon: rsx! {
+                AgentThumbnail {
+                    src: (!agent.icon.is_empty()).then_some(agent.icon),
+                    seed: agent.id,
+                    background: String::new(),
+                    alt: agent.name.clone(),
+                    class: "size-10 text-[10px]".to_string(),
+                }
+            },
+            title: agent.name,
+            subtitle: if agent.installed { translate("onboarding-installed") } else { String::new() },
+            actions: rsx! {},
+            meta: rsx! {
+                span { class: "text-xs font-medium text-primary", "{label}" }
+                if agent.environment_key {
+                    span { class: "text-xs text-muted-foreground", {translate("onboarding-key-available")} }
+                }
+            },
+            onselect: move |_| { let _ = send(&OnboardingConnect { agent_id: id.clone() }); },
+        }
+    }
+}
+
+struct Gallery {
+    featured: Vec<AgentOption>,
+    other: Vec<AgentOption>,
+    has_featured: bool,
+    empty: bool,
+}
+
+impl Gallery {
+    fn of(state: &OnboardingUiState, query: &str) -> Self {
+        let needle = query.trim().to_lowercase();
+        let mut featured = Vec::new();
+        let mut other = Vec::new();
+        for agent in &state.agents {
+            if !agent.name.to_lowercase().contains(&needle)
+                && !agent.id.to_lowercase().contains(&needle)
+            {
+                continue;
+            }
+            if needle.is_empty()
+                && (agent.id == state.agent_id
+                    || agent.installed
+                    || agent.environment_key
+                    || Self::rank(&agent.id).is_some())
+            {
+                featured.push(agent.clone());
+            } else {
+                other.push(agent.clone());
+            }
+        }
+        featured.sort_by(|left, right| {
+            (
+                right.id == state.agent_id,
+                right.installed,
+                right.environment_key,
+            )
+                .cmp(&(
+                    left.id == state.agent_id,
+                    left.installed,
+                    left.environment_key,
+                ))
+                .then_with(|| {
+                    Self::rank(&left.id)
+                        .unwrap_or(usize::MAX)
+                        .cmp(&Self::rank(&right.id).unwrap_or(usize::MAX))
+                })
+                .then_with(|| left.name.cmp(&right.name))
+        });
+        other.sort_by(|left, right| left.name.cmp(&right.name));
+        let has_featured = !featured.is_empty();
+        let empty = featured.is_empty() && other.is_empty();
+        Self {
+            featured,
+            other,
+            has_featured,
+            empty,
         }
     }
 
-    fn key(&self, event: KeyboardEvent, mut selected: Signal<usize>, numbers: bool) {
-        let Some(key) = ChoiceKey::of(&event, numbers) else {
-            return;
-        };
-        let current = selected().min(self.0.len().saturating_sub(1));
-        match key {
-            ChoiceKey::Next => selected.set((current + 1).min(self.0.len().saturating_sub(1))),
-            ChoiceKey::Previous => selected.set(current.saturating_sub(1)),
-            ChoiceKey::Submit => self.choose(current),
-            ChoiceKey::Number(index) if index < self.0.len() => self.choose(index),
-            ChoiceKey::Number(_) => return,
+    fn rank(id: &str) -> Option<usize> {
+        match id {
+            "claude" | "claude-acp" => Some(0),
+            "codex" | "codex-acp" => Some(1),
+            "gemini" | "gemini-cli" => Some(2),
+            "mistral-vibe" | "vibe" | "vibe-acp" => Some(3),
+            "opencode" | "opencode-acp" => Some(4),
+            "goose" | "goose-acp" => Some(5),
+            _ => None,
         }
-        event.prevent_default();
-        event.stop_propagation();
     }
 }
 
@@ -176,10 +261,11 @@ mod tests {
     }
 
     impl Fixture {
-        fn new() -> Self {
+        fn new(starting: bool) -> Self {
             dioxus_html::set_event_converter(Box::new(SerializedHtmlEventConverter));
             let host = Rc::new(Host::default());
             let state = OnboardingUiState {
+                starting,
                 agents: vec![
                     AgentOption {
                         id: "a".into(),
@@ -225,11 +311,28 @@ mod tests {
                 .unwrap()
                 .agent_id
         }
+
+        fn press(&mut self, element: dioxus::core::ElementId, key: Key, code: Code) {
+            let keyboard = SerializedKeyboardData::new(
+                key,
+                code,
+                Location::Standard,
+                false,
+                Modifiers::empty(),
+                false,
+            );
+            self.dom.runtime().handle_event(
+                "keydown",
+                Event::new(EventData::Keyboard(keyboard).into_any(), true),
+                element,
+            );
+            self.dom.render_immediate_to_vec();
+        }
     }
 
     #[test]
     fn setup_asks_only_for_an_agent_and_installation_starts_from_its_choice() {
-        let mut fixture = Fixture::new();
+        let mut fixture = Fixture::new(false);
         let html = dioxus_ssr::render(&fixture.dom);
         let intro = translate("onboarding-setup-intro");
         assert!(
@@ -260,32 +363,106 @@ mod tests {
     }
 
     #[test]
-    fn number_and_arrow_keys_connect_the_selected_agent_without_a_task() {
-        for navigation in [false, true] {
-            let mut fixture = Fixture::new();
-            let input = fixture.element("id", vmux_ui::components::composer::PROMPT_INPUT_ID);
-            let keys = if navigation {
-                vec![(Key::ArrowDown, Code::ArrowDown), (Key::Enter, Code::Enter)]
-            } else {
-                vec![(Key::Character("2".into()), Code::Digit2)]
-            };
-            for (key, code) in keys {
-                let data = SerializedKeyboardData::new(
-                    key,
-                    code,
-                    Location::Standard,
-                    false,
-                    Modifiers::empty(),
-                    false,
-                );
-                fixture.dom.runtime().handle_event(
-                    "keydown",
-                    Event::new(EventData::Keyboard(data).into_any(), true),
-                    input,
-                );
-                fixture.dom.render_immediate_to_vec();
-            }
-            assert_eq!(fixture.selected(), "b");
-        }
+    fn grid_cards_support_keyboard_activation_and_the_composer_is_disabled() {
+        let mut fixture = Fixture::new(false);
+        let html = dioxus_ssr::render(&fixture.dom);
+        let input = html
+            .split("<textarea")
+            .nth(1)
+            .unwrap()
+            .split('>')
+            .next()
+            .unwrap();
+        assert!(input.contains("disabled"));
+        let composer = fixture.element("id", vmux_ui::components::composer::PROMPT_INPUT_ID);
+        fixture.press(composer, Key::Enter, Code::Enter);
+        assert!(fixture.host.0.borrow().is_empty());
+        let label = translate_with(
+            "onboarding-connect-agent",
+            &[("agent", TranslationValue::String("Agent B"))],
+        );
+        let card = fixture.element("aria-label", &label);
+        fixture.press(card, Key::Enter, Code::Enter);
+        assert_eq!(fixture.selected(), "b");
+    }
+
+    #[test]
+    fn pending_agent_selection_refuses_mouse_and_keyboard_activation() {
+        let mut fixture = Fixture::new(true);
+        let label = translate_with(
+            "onboarding-install-agent",
+            &[("agent", TranslationValue::String("Agent A"))],
+        );
+        let card = fixture.element("aria-label", &label);
+        fixture.dom.runtime().handle_event(
+            "click",
+            Event::new(
+                EventData::Mouse(SerializedMouseData::default()).into_any(),
+                true,
+            ),
+            card,
+        );
+        fixture.dom.render_immediate_to_vec();
+        fixture.press(card, Key::Enter, Code::Enter);
+        fixture.press(card, Key::Character(" ".into()), Code::Space);
+        assert!(fixture.host.0.borrow().is_empty());
+    }
+
+    #[test]
+    fn featured_partition_and_search_keep_the_complete_catalog_without_duplicates() {
+        let state = OnboardingUiState {
+            agents: vec![
+                AgentOption {
+                    id: "uncommon".into(),
+                    name: "Uncommon".into(),
+                    ..Default::default()
+                },
+                AgentOption {
+                    id: "codex-acp".into(),
+                    name: "Codex".into(),
+                    ..Default::default()
+                },
+                AgentOption {
+                    id: "custom".into(),
+                    name: "Custom".into(),
+                    installed: true,
+                    ..Default::default()
+                },
+                AgentOption {
+                    id: "claude-acp".into(),
+                    name: "Claude".into(),
+                    ..Default::default()
+                },
+            ],
+            ..Default::default()
+        };
+        let gallery = Gallery::of(&state, "");
+        assert_eq!(
+            gallery
+                .featured
+                .iter()
+                .map(|agent| agent.id.as_str())
+                .collect::<Vec<_>>(),
+            ["custom", "claude-acp", "codex-acp"]
+        );
+        assert_eq!(
+            gallery
+                .other
+                .iter()
+                .map(|agent| agent.id.as_str())
+                .collect::<Vec<_>>(),
+            ["uncommon"]
+        );
+        let filtered = Gallery::of(&state, "Co");
+        assert!(filtered.featured.is_empty());
+        assert_eq!(
+            filtered
+                .other
+                .iter()
+                .map(|agent| agent.id.as_str())
+                .collect::<Vec<_>>(),
+            ["codex-acp", "uncommon"]
+        );
+        assert!(Gallery::of(&state, "missing").empty);
     }
 }
