@@ -16,8 +16,8 @@ use moonshine_save::save::{EntityFilter, SaveCommand, SaveEvent};
 use serde::de::DeserializeSeed;
 use std::path::{Path, PathBuf};
 use std::sync::{Mutex, mpsc};
-use vmux_ecs::CreatedAt;
 use vmux_ecs::store::{State, StoreAppExt};
+use vmux_ecs::{CreatedAt, PageMetadata};
 
 use vmux_api::BuiltinIcon;
 #[cfg(test)]
@@ -28,7 +28,7 @@ use vmux_ecs::store::{
     WorkspaceStoreValidators, WorkspaceStored,
 };
 #[cfg(test)]
-use vmux_ecs::{ArchivedPage, ArchivedPagePosition, ArchivedTabPage, PageMetadata};
+use vmux_ecs::{ArchivedPage, ArchivedPagePosition, ArchivedTabPage};
 use vmux_layout::space::Space;
 #[cfg(test)]
 use vmux_layout::space::SpaceId;
@@ -80,12 +80,12 @@ struct SchemaPlugin;
 
 impl Plugin for SchemaPlugin {
     fn build(&self, app: &mut App) {
-        app.register_stored::<vmux_ecs::PageMetadata>()
+        app.register_stored::<PageMetadata>()
             .register_stored::<vmux_ecs::WorkspaceKind>()
             .register_stored::<vmux_ecs::Cwd>()
             .register_stored::<vmux_ecs::Description>()
             .register_stored::<vmux_ecs::CollectionView>()
-            .register_stored::<vmux_ecs::CreatedAt>()
+            .register_stored::<CreatedAt>()
             .register_stored::<vmux_ecs::LastActivatedAt>()
             .register_stored::<vmux_ecs::ArchivedAt>()
             .register_stored::<vmux_ecs::Order>()
@@ -100,12 +100,12 @@ type WorkspacePages<'w, 's> = Query<
     'w,
     's,
     (Entity, Option<&'static ChildOf>, Has<ScopedPage>, Has<Save>),
-    With<vmux_ecs::PageMetadata>,
+    With<PageMetadata>,
 >;
 
 fn scope_pages(
     pages: WorkspacePages,
-    retired: Query<Entity, (With<ScopedPage>, Without<vmux_ecs::PageMetadata>)>,
+    retired: Query<Entity, (With<ScopedPage>, Without<PageMetadata>)>,
     stacks: Query<(), With<vmux_layout::stack::Stack>>,
     mut commands: Commands,
 ) {
@@ -1579,7 +1579,7 @@ mod tests {
             .app
             .world_mut()
             .spawn((
-                vmux_ecs::PageMetadata {
+                PageMetadata {
                     url: "file:///workspace".into(),
                     ..Default::default()
                 },
@@ -1592,7 +1592,7 @@ mod tests {
             .world_mut()
             .spawn((
                 Save,
-                vmux_ecs::PageMetadata {
+                PageMetadata {
                     url: "file:///restored".into(),
                     ..Default::default()
                 },
@@ -1610,7 +1610,7 @@ mod tests {
             .spawn((
                 Name::new("Independent project"),
                 vmux_ecs::Cwd("/project".into()),
-                vmux_ecs::CreatedAt(1),
+                CreatedAt(1),
                 vmux_ecs::Order(0),
                 ChildOf(other_root),
             ))
@@ -2257,7 +2257,7 @@ mod tests {
                 },
                 vmux_ecs::VisitCount(3),
                 vmux_ecs::LastVisitedAt(1000),
-                vmux_ecs::CreatedAt(500),
+                CreatedAt(500),
             ))
             .id();
 
@@ -2265,7 +2265,7 @@ mod tests {
             Save,
             vmux_ecs::Visit,
             vmux_ecs::VisitedUrl(url_e),
-            vmux_ecs::CreatedAt(900),
+            CreatedAt(900),
             vmux_ecs::TransitionType::Typed,
         ));
 
@@ -2662,7 +2662,7 @@ mod tests {
     fn store_with_registered_component_types_is_compatible() {
         let app = registry_app();
         let registry = app.world().resource::<AppTypeRegistry>().read();
-        let key = <vmux_ecs::PageMetadata as bevy::reflect::TypePath>::type_path();
+        let key = <PageMetadata as bevy::reflect::TypePath>::type_path();
         let body = store_body_with_key(key);
         assert!(!space_has_unregistered_types(&body, &registry));
     }
@@ -2678,7 +2678,7 @@ mod tests {
   entities: {
     1: (
       components: {
-        "vmux_ecs::PageMetadata": (),
+        "PageMetadata": (),
       },
     ),
   },
@@ -2690,7 +2690,7 @@ mod tests {
             .expect("legacy resources");
 
         assert!(normalized.contains("resources: {}"));
-        assert!(normalized.contains("vmux_ecs::PageMetadata"));
+        assert!(normalized.contains("PageMetadata"));
         assert!(!normalized.contains("OfferedBookmarkDefaults"));
     }
 
