@@ -13,11 +13,20 @@ mkdir -p "$contents/MacOS" "$contents/Resources" "$contents/Frameworks"
 temporary="$(mktemp -d "$debug_dir/.vmux-dev-bundle.XXXXXX")"
 trap 'rm -r "$temporary"' EXIT
 
+replace_file() {
+    local source="$1"
+    local destination="$2"
+    local staged
+    staged="$(mktemp "$destination.vmux-copy.XXXXXX")"
+    cp -p "$source" "$staged"
+    mv -f "$staged" "$destination"
+}
+
 copy_changed() {
     local source="$1"
     local destination="$2"
     if [[ ! -f "$destination" ]] || ! cmp -s "$source" "$destination"; then
-        cp "$source" "$destination"
+        replace_file "$source" "$destination"
     fi
 }
 
@@ -72,7 +81,7 @@ service_stamp="$debug_dir/.vmux-dev-service-signed"
 service_binary="$service/MacOS/Vmux Service"
 if ! bundle_current "$temporary/service-inputs" "$service_stamp" "$service_binary" \
     || ! codesign --verify --strict "$service_app" >/dev/null 2>&1; then
-    cp "$debug_dir/vmux_service" "$service_binary"
+    replace_file "$debug_dir/vmux_service" "$service_binary"
     codesign --force --sign "$identity" --options runtime --entitlements "$entitlements" "$service_app"
     record_bundle "$temporary/service-inputs" "$service_stamp" "$service_binary"
 fi
@@ -87,7 +96,7 @@ stdlib="$(rustc --print target-libdir)"
 desktop_stamp="$debug_dir/.vmux-dev-desktop-signed"
 if ! bundle_current "$temporary/desktop-inputs" "$desktop_stamp" "$link_binary" \
     || ! codesign --verify --strict "$app" >/dev/null 2>&1; then
-    cp "$debug_dir/vmux_desktop" "$link_binary"
+    replace_file "$debug_dir/vmux_desktop" "$link_binary"
     for library_dir in "$debug_dir/deps" "$stdlib"; do
         if ! otool -l "$link_binary" | grep -Fq "path $library_dir ("; then
             install_name_tool -add_rpath "$library_dir" "$link_binary"
