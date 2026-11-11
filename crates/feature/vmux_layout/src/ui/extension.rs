@@ -16,6 +16,34 @@ use vmux_ui::i18n::translate;
 
 use crate::event::LayoutOverlayEvent;
 
+#[derive(Clone, Copy)]
+pub(super) struct ToolbarAnchor {
+    node: Signal<Option<Rc<MountedData>>>,
+}
+
+impl ToolbarAnchor {
+    pub(super) fn provide() {
+        let node = use_signal(|| None);
+        use_context_provider(|| Self { node });
+    }
+
+    fn mount(mut self, node: Rc<MountedData>) {
+        self.node.set(Some(node));
+    }
+
+    async fn measure(self) -> Option<ExtensionPopupAnchor> {
+        let node = self.node.peek().clone()?;
+        let rect = node.get_client_rect().await.ok()?;
+        if rect.size.width <= 0.0 || rect.size.height <= 0.0 {
+            return None;
+        }
+        Some(ExtensionPopupAnchor {
+            right: (rect.origin.x + rect.size.width).round() as i32,
+            bottom: (rect.origin.y + rect.size.height).round() as i32,
+        })
+    }
+}
+
 #[component]
 pub(crate) fn ExtensionPopupModal(
     popup: ExtensionPopupEvent,
@@ -23,14 +51,24 @@ pub(crate) fn ExtensionPopupModal(
 ) -> Element {
     let current = popup;
     let state = ExtensionPopupState;
-    let placement = ExtensionPopupPlacement::from(current.anchor);
+    let toolbar = use_context::<ToolbarAnchor>();
+    let mut anchor = use_signal(|| current.anchor);
+    let popup_id = current.id.clone();
+    let fallback_anchor = current.anchor;
+    use_effect(use_reactive!(|(popup_id, fallback_anchor)| {
+        let _ = &popup_id;
+        spawn(async move {
+            anchor.set(toolbar.measure().await.unwrap_or(fallback_anchor));
+        });
+    }));
+    let placement = ExtensionPopupPlacement::from(anchor());
     let size = if preferred_size.id == current.id {
         preferred_size
     } else {
         ExtensionPopupSizeEvent {
             id: current.id.clone(),
             width: 360.0,
-            height: 600.0,
+            height: 360.0,
         }
     };
     let reporter = ExtensionPopupBoundsReporter {
@@ -93,7 +131,7 @@ impl From<ExtensionPopupAnchor> for ExtensionPopupPlacement {
     fn from(anchor: ExtensionPopupAnchor) -> Self {
         Self {
             right: anchor.right.max(48),
-            top: anchor.bottom.max(40) + 14,
+            top: anchor.bottom.max(40) + 8,
         }
     }
 }
@@ -105,7 +143,7 @@ impl ExtensionPopupPlacement {
             self.right,
             self.top,
             size.width.clamp(200.0, 360.0),
-            size.height.clamp(80.0, 600.0),
+            size.height.clamp(80.0, 480.0),
             self.top + 8
         )
     }
@@ -156,6 +194,7 @@ impl ExtensionPopupBoundsReporter {
 
 #[component]
 pub(crate) fn ExtensionBar(extensions: Vec<ExtRow>) -> Element {
+    let toolbar = use_context::<ToolbarAnchor>();
     let open = use_signal(|| false);
     let mut trigger = use_signal(|| None::<Rc<MountedData>>);
     let menu = ExtensionMenuState { open, trigger };
@@ -176,7 +215,10 @@ pub(crate) fn ExtensionBar(extensions: Vec<ExtRow>) -> Element {
                 title: translate("layout-manage-extensions"),
                 aria_label: translate("extensions-title"),
                 aria_expanded: open(),
-                onmounted: move |event| trigger.set(Some(event.data())),
+                onmounted: move |event| {
+                    trigger.set(Some(event.data()));
+                    toolbar.mount(event.data());
+                },
                 onclick: move |_| menu.toggle(),
                 Icon { class: "h-4 w-4",
                     path { d: "M20.5 11H19V7c0-1.1-.9-2-2-2h-4V3.5C13 2.12 11.88 1 10.5 1S8 2.12 8 3.5V5H4c-1.1 0-1.99.9-1.99 2v3.8H3.5c1.49 0 2.7 1.21 2.7 2.7s-1.21 2.7-2.7 2.7H2V20c0 1.1.9 2 2 2h3.8v-1.5c0-1.49 1.21-2.7 2.7-2.7 1.49 0 2.7 1.21 2.7 2.7V22H17c1.1 0 2-.9 2-2v-4h1.5c1.38 0 2.5-1.12 2.5-2.5S21.88 11 20.5 11z" }

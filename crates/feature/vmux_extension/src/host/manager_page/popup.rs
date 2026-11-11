@@ -240,6 +240,15 @@ impl PopupHost<'_, '_> {
             if let Some(host) = host {
                 entity.insert(HostWindow(host.0));
             }
+            self.commands
+                .trigger(UiStateWrite::<LayoutUiState>::from_event(
+                    owner,
+                    &ExtensionPopupSizeEvent {
+                        id: entry.id.clone(),
+                        width: 360.0,
+                        height: 360.0,
+                    },
+                ));
         }
         self.commands
             .trigger(UiStateWrite::<LayoutUiState>::from_event(
@@ -437,6 +446,7 @@ fn inject_sizing(
             &event.webview,
             r#"
 (() => {
+  globalThis.__vmuxHostedPopup = true;
   if (globalThis.__vmuxPopupSizer) return;
   document.addEventListener("keydown", (event) => {
     if (event.key !== "Escape") return;
@@ -592,7 +602,7 @@ fn size(
         &ExtensionPopupSizeEvent {
             id: popup.extension_id.clone(),
             width: request.width.clamp(200.0, 360.0),
-            height: request.height.clamp(80.0, 600.0),
+            height: request.height.clamp(80.0, 480.0),
         },
     ));
 }

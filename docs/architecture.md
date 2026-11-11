@@ -1118,6 +1118,8 @@ virtual window IDs remain stable for extension APIs while the underlying browser
 for matching and autofill. Reopening from the toolbar reuses the current authentication document;
 Escape and window removal retire the matching popup. Native popup input stays in its native window
 instead of publishing popup-local coordinates to the workspace.
+The modal measures its toolbar anchor, starts with compact bounds, and routes an extension's close
+request directly to its owning popup entity.
 Other platforms retain Stack routing until their native popup adapter supports the modal.
 
 ---

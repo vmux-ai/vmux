@@ -1,6 +1,6 @@
 #![allow(non_snake_case)]
 
-use self::extension::ExtensionPopupModal;
+use self::extension::{ExtensionPopupModal, ToolbarAnchor};
 use self::header::HeaderView;
 use self::side_sheet::SideSheetView;
 use self::state::LayoutUi;
@@ -44,6 +44,7 @@ pub struct LayoutPage;
 #[component]
 pub fn Page() -> Element {
     use_theme();
+    ToolbarAnchor::provide();
     let layout_ui = LayoutUi::use_state();
     layout_ui.provide();
     let layout = layout_ui.use_selector(|state| state.layout.unwrap_or_default());
