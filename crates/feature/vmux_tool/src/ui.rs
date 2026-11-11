@@ -107,7 +107,7 @@ pub fn Page() -> Element {
                 if route == "extensions" {
                     ExtensionManager { state: extension_state }
                 } else if route == "connectors" {
-                    crate::connectors::Manager { state: connector_state, query: state.view.query.clone() }
+                    ToolManager { state, manager_view, accounts: Some(connector_state) }
                 } else {
                     ToolManager { state, manager_view }
                 }
@@ -197,7 +197,7 @@ impl ToolRouteOption {
             "lsp" => "tools-provider-lsp-servers",
             "homebrew" => "tools-homebrew",
             "npm" => "tools-provider-npm",
-            "mcp" => "tools-provider-mcp-servers",
+            "mcp" => "connectors-title",
             "dotfiles" => "tools-provider-dotfiles",
             "extensions" => "extensions-title",
             "connectors" => "connectors-title",
@@ -379,7 +379,7 @@ fn ToolsSidebar(
                     label: option.label.clone(), selected: option.id == active,
                     count: match option.id.as_str() {
                         "extensions" => extensions.extensions.len(),
-                        "connectors" => connectors.servers.len(),
+                        "connectors" => connectors.servers.len() + option.count(&state.snapshot),
                         _ => option.count(&state.snapshot),
                     },
                     leading: rsx! { BreadcrumbOptionIcon {
@@ -412,13 +412,18 @@ fn ToolThumbnail(item: ToolItem, provider: ToolProviderMetadata, class: String) 
 }
 
 #[component]
-fn ToolManager(state: ToolsUiState, manager_view: Signal<ManagerView>) -> Element {
+fn ToolManager(
+    state: ToolsUiState,
+    manager_view: Signal<ManagerView>,
+    #[props(default)] accounts: Option<McpServersUiState>,
+) -> Element {
     let mut selected = use_signal(|| None::<ToolSelection>);
     let current = state;
     let pending = current.pending.into_iter().collect::<BTreeSet<_>>();
     let notice = current.notice;
     let snapshot = &current.snapshot;
     let view = &current.view;
+    let has_accounts = accounts.is_some();
     let active_route = view.route.clone();
     use_effect(use_reactive!(|active_route| {
         let _ = active_route;
@@ -443,6 +448,9 @@ fn ToolManager(state: ToolsUiState, manager_view: Signal<ManagerView>) -> Elemen
             }
         }
     }
+    if has_accounts {
+        installed.append(&mut available);
+    }
     let selected_tool = selection.as_ref().and_then(|selection| {
         view.categories.iter().find_map(|category| {
             let item = category.items.iter().find(|item| selection.matches(item))?;
@@ -453,6 +461,9 @@ fn ToolManager(state: ToolsUiState, manager_view: Signal<ManagerView>) -> Elemen
     rsx! {
         div { class: "flex min-h-0 flex-1 overflow-hidden bg-background",
             ManagerList {
+                    if let Some(accounts) = accounts {
+                        crate::connectors::Accounts { state: accounts, query: view.query.clone() }
+                    }
                     if view.show_brewfile {
                         HomebrewSourceCard {
                             root: snapshot.root.clone(),
@@ -481,15 +492,28 @@ fn ToolManager(state: ToolsUiState, manager_view: Signal<ManagerView>) -> Elemen
                             "{snapshot.error}"
                         }
                     }
-                    if !snapshot.loaded {
+                    if !snapshot.loaded && !has_accounts {
                         ManagerSpinner { detail: translate("tools-scanning") }
-                    } else if view.visible_count == 0 {
+                    } else if snapshot.loaded && view.visible_count == 0 && !has_accounts {
                         ManagerEmpty {
                             title: translate("tools-empty"),
                             detail: translate("tools-empty-detail"),
                         }
-                    } else {
+                    } else if snapshot.loaded {
                         if !installed.is_empty() {
+                            if has_accounts {
+                                details { class: "mt-3",
+                                    summary { class: "cursor-pointer py-2 text-xs text-muted-foreground", {translate("connectors-agent-configuration")} }
+                                    ToolSection {
+                                        label: translate("connectors-configured"),
+                                        entries: installed,
+                                        view: manager_view(),
+                                        selection: selection.clone(),
+                                        pending: pending.clone(),
+                                        onselect: move |selection| selected.set(Some(selection)),
+                                    }
+                                }
+                            } else {
                             ToolSection {
                                 label: translate("common-installed"),
                                 entries: installed,
@@ -497,6 +521,7 @@ fn ToolManager(state: ToolsUiState, manager_view: Signal<ManagerView>) -> Elemen
                                 selection: selection.clone(),
                                 pending: pending.clone(),
                                 onselect: move |selection| selected.set(Some(selection)),
+                            }
                             }
                         }
                         if !available.is_empty() {
