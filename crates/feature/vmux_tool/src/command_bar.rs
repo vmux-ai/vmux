@@ -190,7 +190,7 @@ mod tests {
                 "lsp",
                 "homebrew",
                 "npm",
-                "mcp",
+                "connectors",
                 "dotfiles",
                 "extensions"
             ]
