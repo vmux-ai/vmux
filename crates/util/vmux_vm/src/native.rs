@@ -7,6 +7,7 @@ use std::path::{Path, PathBuf};
 use libloading::Library;
 
 use crate::Settings;
+use crate::process::{Lease, ParentWatch};
 
 pub(crate) struct Context {
     library: Library,
@@ -17,9 +18,11 @@ pub(crate) struct Context {
 
 impl Context {
     pub(crate) fn run(settings: Settings) -> io::Result<()> {
+        let _lease = Lease::named(&settings.directory, "machine.lock")?;
         let mut context = Self::new()?;
         context.configure(&settings)?;
         context.listen(&settings)?;
+        ParentWatch::monitor(settings.clone())?;
         let enter = context.function::<unsafe extern "C" fn(u32) -> i32>(b"krun_start_enter\0")?;
         context.consumed = true;
         Self::check(unsafe { enter(context.id) }, "start VM")

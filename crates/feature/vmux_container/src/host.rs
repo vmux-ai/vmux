@@ -83,6 +83,7 @@ struct NextInspection(Instant);
 #[derive(Component)]
 struct InspectTask {
     settings: Settings,
+    revision: Revision,
     task: Task<Status>,
 }
 
@@ -120,6 +121,7 @@ fn spawn(mut commands: Commands) {
         Logs::default(),
         LastError::default(),
         ConfigurationRevision::default(),
+        Revision::default(),
     ));
 }
 
@@ -270,6 +272,7 @@ type CompletedEngines<'w, 's> = Query<
         &'static mut LastError,
         &'static mut Settings,
         &'static mut ConfigurationRevision,
+        &'static mut Revision,
     ),
     With<EngineView>,
 >;
@@ -288,11 +291,14 @@ fn finish(
     mut commands: Commands,
 ) {
     let event = trigger.event();
-    let Ok((mut observed, mut logs, mut error, mut settings, mut revision)) =
+    let Ok((mut observed, mut logs, mut error, mut settings, mut revision, mut engine_revision)) =
         engines.get_mut(event.entity)
     else {
         return;
     };
+    if event.mutates {
+        *engine_revision = engine_revision.saturating_next();
+    }
     if let Ok((mut completed, mut page_error)) = pages.get_mut(event.requester) {
         if event.mutates {
             completed.0 = completed.0.wrapping_add(1);
@@ -332,6 +338,7 @@ type InspectedEngines<'w, 's> = Query<
         &'static Settings,
         &'static mut Observed,
         &'static mut NextInspection,
+        &'static Revision,
         Option<&'static mut InspectTask>,
     ),
     With<EngineView>,
@@ -342,12 +349,12 @@ fn inspect(
     proxy: Option<Res<EventLoopProxyWrapper>>,
     mut commands: Commands,
 ) {
-    for (entity, settings, mut observed, mut next, task) in &mut engines {
+    for (entity, settings, mut observed, mut next, revision, task) in &mut engines {
         if let Some(mut task) = task {
             let Some(status) = future::block_on(future::poll_once(&mut task.task)) else {
                 continue;
             };
-            if *settings == task.settings {
+            if *settings == task.settings && *revision == task.revision {
                 observed.0 = status;
             }
             commands.entity(entity).remove::<InspectTask>();
@@ -362,6 +369,7 @@ fn inspect(
         let wake = Wake::beside(proxy.as_deref());
         commands.entity(entity).insert(InspectTask {
             settings: requested,
+            revision: *revision,
             task: IoTaskPool::get().spawn(async move {
                 let status = EngineClient::new(settings).status();
                 drop(wake);

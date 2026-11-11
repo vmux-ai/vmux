@@ -3,7 +3,7 @@ pub use docker::{
     Client as DockerClient, Container, Operation as DockerOperation, Port as DockerPort,
 };
 pub use engine::{Engine, EnginePlugin, Failure, Phase};
-pub use process::Executable;
+pub use process::{Executable, NetworkProxy};
 pub use settings::Settings;
 
 mod client;

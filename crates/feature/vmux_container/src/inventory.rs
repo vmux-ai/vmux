@@ -182,6 +182,9 @@ fn begin(
             continue;
         };
         if !observed.0.docker_ready {
+            if observed.0.running && observed.0.phase == vmux_vm::Phase::Ready {
+                continue;
+            }
             inventory.ready = false;
             inventory.error.clear();
             commands.entity(entity).remove::<SnapshotTask>();
@@ -279,7 +282,9 @@ fn control(
     let Ok((entity, settings, observed, _)) = engines.single() else {
         return;
     };
-    if !observed.0.docker_ready {
+    if !(observed.0.docker_ready
+        || (observed.0.running && observed.0.phase == vmux_vm::Phase::Ready))
+    {
         commands.trigger(Finished {
             entity,
             result: Err("Docker is not ready".into()),

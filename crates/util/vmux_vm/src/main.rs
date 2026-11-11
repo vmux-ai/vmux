@@ -1,7 +1,7 @@
 use std::io;
 use std::path::PathBuf;
 
-use vmux_vm::{EngineClient, NativeVm, Settings};
+use vmux_vm::{EngineClient, NativeVm, NetworkProxy, Settings};
 
 fn main() -> std::process::ExitCode {
     match Invocation::read().and_then(Invocation::run) {
@@ -47,6 +47,14 @@ impl Invocation {
     }
 
     fn run(self) -> io::Result<()> {
+        if self.command == "network" {
+            let port = self
+                .shared
+                .to_string_lossy()
+                .parse::<u16>()
+                .map_err(io::Error::other)?;
+            return NetworkProxy::run(Settings::load(&self.path)?, port);
+        }
         if self.command == "native" || self.command == "run" {
             let settings = Settings::load(&self.path)?;
             if self.command == "native" {

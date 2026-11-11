@@ -723,7 +723,9 @@ impl Catalog<'_> {
 
 impl ContainerUiState {
     fn available(&self) -> bool {
-        self.ready && !self.stopping && self.phase != "stopping"
+        (self.ready || (self.running && self.phase == "ready"))
+            && !self.stopping
+            && self.phase != "stopping"
     }
 }
 
@@ -813,7 +815,7 @@ impl Pending {
             Intent::Start => snapshot.ready,
             Intent::Stop => !snapshot.running,
             Intent::Containers { ids, operation } => {
-                if !snapshot.ready || !snapshot.inventory_error.is_empty() {
+                if !snapshot.available() || !snapshot.inventory_error.is_empty() {
                     return true;
                 }
                 for id in ids {
@@ -1240,6 +1242,13 @@ mod tests {
         let html = preview.publish(ready.clone());
         assert!(html.contains(&format!("aria-label=\"{toggle}\"")));
         assert!(html.contains(&translate("container-no-selection")));
+        ready.phase = "ready".into();
+        ready.ready = false;
+        let html = preview.publish(ready.clone());
+        assert!(html.contains(&format!("aria-label=\"{toggle}\"")));
+        assert!(html.contains(&translate("container-no-selection")));
+        assert!(!html.contains(&format!("aria-label=\"{}\"", translate("container-start"))));
+        ready.ready = true;
         preview.click(&toggle);
         assert!(preview.sidebar_blocked);
         preview.click(&toggle);
