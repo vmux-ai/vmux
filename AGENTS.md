@@ -4,6 +4,10 @@
 
 Use caveman mode. Terse, direct, no filler. Execute first, talk second. No meta-commentary, no preamble, no postamble. Code speaks.
 
+## Architecture
+
+Before designing a feature or changing ownership, plugin composition, ECS state, system boundaries, UI state flow, runtime adapters, agents, commands, tools, or persistence, read `docs/architecture.md` and use its change-routing questions. It is the design map; code, tests, typed contracts, and `feature.ron` remain the source of truth. Update it in the same PR when a durable boundary changes.
+
 ## Pre-commit Checks
 
 CI runs fmt, clippy, and tests for PRs.
