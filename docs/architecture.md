@@ -1568,6 +1568,8 @@ This delegates provider sign-in rather than duplicating an OAuth implementation 
 tokens. Completed downloads may remain cached after a setup is cancelled.
 New transport variants append to existing enums. Authentication lists use boxed archive storage to
 preserve the deployed run-state layout while remaining ordinary arrays in JSON.
+Credential discovery runs after the settings Startup load; initial app composition cannot read an
+unregistered settings resource.
 
 macOS API-key entry uses a redacted, zeroizing input contract and an asynchronous Safe Storage write.
 `vmux_profile::CredentialStore` binds the encrypted envelope to the profile, credential namespace
@@ -1583,6 +1585,8 @@ keys. A supplied absolute second argument reuses a fixture for interruption test
 data directory owns Vmux configuration, projects, managed ACP/LSP downloads, browser state and
 an external-tool home per profile; agent and LSP subprocesses receive that home without unrelated inherited
 credentials or login dotfiles. Normal profiles retain their shared package store and existing home.
+Knowledge configuration and memory synchronization resolve the same isolated agent directories,
+including when the host environment points to personal agent configuration.
 System package managers and macOS permission grants remain machine resources.
 
 External session integration is a lifecycle-owned child plugin of `AcpPlugin`. It registers its

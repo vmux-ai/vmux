@@ -206,6 +206,15 @@ impl ProfilePaths {
         self.test
     }
 
+    pub fn agent_config_directory(&self, configured: Option<PathBuf>, name: &str) -> PathBuf {
+        if !self.isolated()
+            && let Some(directory) = configured
+        {
+            return directory;
+        }
+        self.tool_home().join(name)
+    }
+
     pub fn projects(&self) -> PathBuf {
         self.config().join("projects")
     }
@@ -408,6 +417,10 @@ mod tests {
         let settings = config.join("settings.ron");
         std::fs::write(&settings, "(appearance: (locale: \"ja\"))").unwrap();
         assert_eq!(paths.settings(), settings);
+        let configured = PathBuf::from("/real-user/.codex");
+        let agent = paths.agent_config_directory(Some(configured.clone()), ".codex");
+        assert!(agent.starts_with(fixture.path()));
+        assert_ne!(agent, configured);
         for path in [
             paths.projects(),
             paths.agents(),

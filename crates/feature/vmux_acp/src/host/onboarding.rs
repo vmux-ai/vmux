@@ -16,7 +16,7 @@ pub(super) fn add(app: &mut App) {
         .add_plugins(UiEventPlugin::<(ChatAuthenticate, ChatCancelSetup)>::default())
         .add_observer(authenticate)
         .add_observer(cancel)
-        .add_systems(Startup, capture)
+        .add_systems(Startup, capture.after(vmux_setting::SettingsLoadSet))
         .add_systems(
             Update,
             (
@@ -304,5 +304,40 @@ impl AgentCredential {
             "vibe" | "vibe-acp" | "mistral-vibe" => self.mistral,
             _ => false,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    struct DeferredSettings;
+
+    impl DeferredSettings {
+        fn load(mut commands: Commands) {
+            commands.insert_resource(AppSettings::default());
+        }
+    }
+
+    #[test]
+    fn credential_discovery_waits_for_startup_settings() {
+        let mut app = App::new();
+        app.add_plugins(bevy::app::TaskPoolPlugin::default())
+            .add_plugins(vmux_ecs::UiStatePlugin::<
+                vmux_session::onboarding::KeyEntryUiState,
+            >::default())
+            .add_systems(
+                Startup,
+                DeferredSettings::load.in_set(vmux_setting::SettingsLoadSet),
+            );
+        add(&mut app);
+
+        app.update();
+
+        assert!(app.world().contains_resource::<AppSettings>());
+        let mut discovery = app
+            .world_mut()
+            .query_filtered::<Entity, Or<(With<CredentialScan>, With<AgentCredential>)>>();
+        assert_eq!(discovery.iter(app.world()).count(), 1);
     }
 }
