@@ -817,6 +817,8 @@ brief flashes on fast local reloads without delaying the page. Reload then becom
 stopping cancels browser loading and rolls an uncommitted handoff back to its retained page.
 Inactive restored pages do not animate the selected page's controls. A selected Start page requests
 composer focus again when its document becomes ready, including a reused prewarmed page.
+Its first presented frame also requests composer focus for the selected launcher; hidden prewarmed
+pages and launchers transitioning into a Session cannot claim it.
 Loading feedback includes the reload revision and page URL in its identity, so a completed delay
 cannot light up the next reload of the same stack. External-page address rows keep their origin
 pill and text; their favicon remains in the tab.
@@ -1017,7 +1019,7 @@ remain intact. Source requests stay pending until the conversation confirms the 
 and already-cached chunks advance the cursor without producing duplicate messages.
 A floating composer overlaps the transcript's lower edge, with an input-inert surface gradient.
 Transcript end padding keeps the latest message clear of the composer and its fade. Sessions owned
-by another client collapse the disabled composer into a themed retry disclosure, retaining its draft.
+by another client keep the disabled composer visible beneath its ownership notice, retaining its draft.
 Each prompt and its assistant turns share a section in that scroll surface. A compact sticky header
 shows that section's saved prompt after its start scrolls out of view; the next section replaces it.
 The preview reuses the normal user bubble and avatar over a fading surface background. Assistant

@@ -48,23 +48,20 @@ pub(super) fn ChatFeedback(chat: Chat, #[props(default = rsx! {})] children: Ele
         }
     }));
     let shown = status == "errored" && !message.is_empty() && visible();
-    if shown && kind == FailureKind::Busy {
-        return rsx! {
-            details { class: "disclosure rounded-[14px] bg-foreground p-px text-xs text-background",
-                summary { class: "flex min-h-9 cursor-pointer items-center gap-2 px-3 py-1.5 [&_button]:text-inherit",
-                    span { class: "min-w-0 flex-1 truncate", role: "status", title: translate("sessions-busy-detail"), {translate("sessions-busy-detail")} }
+    let feedback = match kind {
+        FailureKind::Busy => rsx! {
+            Notice {
+                attached: true,
+                message: translate("sessions-busy-detail"),
+                actions: rsx! {
                     Button { size: ButtonSize::Xs, variant: ButtonVariant::Ghost,
                         aria_label: translate("common-retry"),
-                        onclick: move |event: MouseEvent| { event.prevent_default(); event.stop_propagation(); let _ = send(&ChatRetrySession); },
+                        onclick: move |_| { let _ = send(&ChatRetrySession); },
                         {translate("common-retry")}
                     }
-                }
-                div { class: "rounded-[13px] bg-background text-foreground [&_.vmux-prompt-box]:rounded-[13px] [&_.vmux-prompt-box]:ring-0", {children} }
+                },
             }
-        };
-    }
-    let feedback = match kind {
-        FailureKind::Busy => rsx! {},
+        },
         FailureKind::MissingHistory => rsx! {
             Notice {
                 attached: true,

@@ -12,9 +12,9 @@ use vmux_command::{
     ContributedPage,
 };
 use vmux_command::{CommandBarOpenProjection, CommandBarProjector};
-use vmux_ecs::KeyboardOwner;
 use vmux_ecs::PageMetadata;
 use vmux_ecs::manifest::FeaturePlugin;
+use vmux_ecs::{KeyboardOwner, PagePresented};
 use vmux_ui::i18n::Locale;
 
 use vmux_ecs::launcher::{HostsLauncher, InlineTransitionRequested};
@@ -49,7 +49,8 @@ impl Plugin for StartPlugin {
         );
         app.add_plugins((crate::workspace::Plugin, crate::branches::Plugin))
             .add_observer(focus_command_bar)
-            .add_observer(focus_ready);
+            .add_observer(focus_ready)
+            .add_systems(PostUpdate, focus_presented);
     }
 }
 
@@ -398,6 +399,25 @@ fn focus_ready(
     }
 }
 
+type PresentedLauncher = (
+    With<HostsLauncher>,
+    With<KeyboardOwner>,
+    With<PagePresented>,
+    Without<crate::StartInlineTransitionView>,
+    Or<(Added<KeyboardOwner>, Added<PagePresented>)>,
+);
+
+fn focus_presented(
+    starts: Query<(Entity, &PageMetadata), PresentedLauncher>,
+    mut commands: Commands,
+) {
+    for (webview, metadata) in &starts {
+        if metadata.url.starts_with(StartPlugin::URL) {
+            commands.trigger(CommandBarFocusRequested { webview });
+        }
+    }
+}
+
 fn focus_command_bar(
     trigger: On<CommandBarFocusRequested>,
     mut revisions: Query<&mut CommandBarFocusRevision>,
@@ -587,6 +607,37 @@ mod tests {
                 .is_some(),
             "the surviving half of the transition still applies"
         );
+    }
+
+    #[test]
+    fn presented_start_reclaims_prompt_focus_once_without_focusing_prewarmed_pages() {
+        let mut app = App::new();
+        app.add_plugins((MinimalPlugins, StartPlugin))
+            .insert_non_send(bevy_cef::prelude::Browsers::default())
+            .init_resource::<EmittedIds>()
+            .add_observer(capture_state);
+        let metadata = PageMetadata {
+            url: StartPlugin::URL.to_string(),
+            ..Default::default()
+        };
+        let selected = app
+            .world_mut()
+            .spawn((
+                HostsLauncher,
+                StartWorkSynced,
+                KeyboardOwner,
+                metadata.clone(),
+            ))
+            .id();
+        app.world_mut()
+            .spawn((HostsLauncher, PagePresented, metadata));
+        app.update();
+        app.world_mut().resource_mut::<EmittedIds>().0.clear();
+        app.world_mut().entity_mut(selected).insert(PagePresented);
+        app.update();
+        assert_eq!(app.world().resource::<EmittedIds>().0, [("focus", 1)]);
+        app.update();
+        assert_eq!(app.world().resource::<EmittedIds>().0, [("focus", 1)]);
     }
 
     #[test]
