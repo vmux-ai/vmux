@@ -300,7 +300,17 @@ impl Chat {
     }
 
     pub(super) fn setup_pending(&self) -> bool {
-        matches!(self.status().as_str(), "authentication" | "preparing") || self.installing_splash()
+        let status = self.status();
+        if matches!(status.as_str(), "authentication" | "preparing") || self.installing_splash() {
+            return true;
+        }
+        status == "errored"
+            && self.transcript.current().items.is_empty()
+            && self.queue.queued().is_empty()
+            && !matches!(
+                vmux_session::Failure(&self.run.error()).kind(),
+                crate::FailureKind::Busy | crate::FailureKind::MissingHistory
+            )
     }
 
     pub fn transcript_loading(&self) -> bool {
@@ -903,10 +913,6 @@ impl AgentIdentity {
     pub fn icon(self) -> String {
         self.snapshot.value.read().agent_icon.clone()
     }
-
-    pub fn accent(self) -> String {
-        self.snapshot.value.read().accent_color.clone()
-    }
 }
 
 #[derive(Clone, Copy, PartialEq)]
@@ -915,16 +921,6 @@ pub struct UserIdentity {
 }
 
 impl UserIdentity {
-    pub(super) fn use_state() -> Self {
-        let root = UiStateBinding::<ChatUiState>::use_context().state;
-        Self {
-            snapshot: ChatValue {
-                value: use_memo(move || root.read().snapshot.clone()),
-                ready: use_memo(move || root.read().snapshot_ready),
-            },
-        }
-    }
-
     pub fn name(self) -> String {
         let name = self.snapshot.value.read().user_name.clone();
         if name.is_empty() {

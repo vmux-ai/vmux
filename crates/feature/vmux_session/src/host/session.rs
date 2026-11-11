@@ -100,6 +100,10 @@ pub struct StartRequest {
 }
 
 impl StartRequest {
+    pub fn for_setup(cwd: std::path::PathBuf, agent: AgentId, target: PageOpenTarget) -> Self {
+        Self::from_prompt(String::new(), cwd, agent, target, Vec::new())
+    }
+
     pub fn from_prompt(
         prompt: impl Into<String>,
         cwd: std::path::PathBuf,
@@ -160,9 +164,11 @@ fn open_started(
     let Some(created) = pending.0.remove(&trigger.event().id) else {
         return;
     };
-    let mut queue = PromptQueue::default();
-    queue.enqueue_with_attachments(created.prompt.clone(), created.attachments);
-    commands.entity(trigger.event().entity).insert(queue);
+    if !created.prompt.trim().is_empty() || !created.attachments.is_empty() {
+        let mut queue = PromptQueue::default();
+        queue.enqueue_with_attachments(created.prompt.clone(), created.attachments);
+        commands.entity(trigger.event().entity).insert(queue);
+    }
     if let Some(title) = AgentConversationTitle::from_prompt(&created.prompt) {
         commands
             .entity(trigger.event().entity)
@@ -796,6 +802,51 @@ mod tests {
         assert_eq!(requests.len(), 1);
         assert_eq!(requests[0].url, Route::Session(id).url());
         assert!(matches!(requests[0].target, PageOpenTarget::Stack(target) if target == stack));
+    }
+
+    #[test]
+    fn setup_opens_a_session_without_creating_user_content() {
+        let mut app = App::new();
+        app.init_resource::<PendingSessionStarts>()
+            .add_message::<StartRequest>()
+            .add_message::<CreateRequest>()
+            .add_message::<PageOpenRequest>()
+            .add_observer(open_started)
+            .add_systems(Update, start);
+        let stack = app.world_mut().spawn_empty().id();
+        app.world_mut().write_message(StartRequest::for_setup(
+            std::path::PathBuf::new(),
+            AgentId("mock".into()),
+            PageOpenTarget::Stack(stack),
+        ));
+        app.update();
+        let create = app
+            .world_mut()
+            .resource_mut::<Messages<CreateRequest>>()
+            .drain()
+            .next()
+            .unwrap();
+        let id = create.id().clone();
+        let session = app.world_mut().spawn_empty().id();
+        app.world_mut().trigger(Created {
+            entity: session,
+            id: id.clone(),
+        });
+        app.update();
+        assert!(app.world().get::<PromptQueue>(session).is_none());
+        assert!(app.world().get::<AgentConversationTitle>(session).is_none());
+        assert!(
+            !app.world()
+                .entity(session)
+                .contains::<vmux_session::TitlePending>()
+        );
+        let opens: Vec<_> = app
+            .world_mut()
+            .resource_mut::<Messages<PageOpenRequest>>()
+            .drain()
+            .collect();
+        assert_eq!(opens.len(), 1);
+        assert_eq!(opens[0].url, Route::Session(id).url());
     }
 
     struct Conversation {

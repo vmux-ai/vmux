@@ -1556,27 +1556,28 @@ their bound Session state. The service carries serialized agent protocol message
 persistent daemon sessions; `vmux_acp` owns the client-host Bevy messages produced when those
 wire messages enter ECS.
 
-Conversation setup starts automatically inside the Sessions conversation page when a new profile
-opens its launcher. It waits for workspace restoration before deciding whether an existing Session
-already owns the entry, and never redirects prewarmed pages or ordinary navigation. The launcher
-also has an explicit setup prompt target. `vmux_session::host::onboarding::Plugin` owns the profile's
-draft, attachments, current question and created Session reference. `OnboardingUiState` projects
-one question at a time: prompt, agent, then workspace. The first greeting and selectable replies
-work locally before any ACP process or credential exists. Typed replies preserve progress, reject
-duplicate advances and allow returning to earlier questions.
-The bootstrap guide and live Session reuse the same conversation surface, transcript geometry,
-assistant and user turns, prompt composer and choice panel. Questions are messages; numbered replies
-stay in the composer. A dedicated setup-guide identity and bundled avatar also accompany installation
-and authentication, without adding a page title or pretending an ACP agent is already running.
-Choosing a workspace starts the
-selected ACP in the same conversation surface; the queued user prompt remains visible beside
-installation and sign-in messages, then enters the agent once authentication succeeds. Start
-requests reuse the same Session on retry. ACP contributes supported agents and credential availability as booleans.
-Its existing installer reports progress to that Session. Preparing and authentication states hold
-the prompt queue until the provider establishes a session. Advertised ACP authentication methods
-run through `authenticate`; cancellation detaches the waiter or runtime while preserving the prompt.
-This delegates provider sign-in rather than duplicating an OAuth implementation or sharing GitHub
-tokens. Completed downloads may remain cached after a setup is cancelled.
+ACP setup opens as a conversation on the first launcher entry. The guide asks which agent to
+install or connect; selecting its composer choice starts only the required installation and
+authentication. Work descriptions and project selection belong to the actual agent conversation.
+An installed agent reuses its package and compatible credentials. A live, usable preferred Session
+opens directly; a recorded setup Session resumes its unfinished step. Later launcher tabs keep
+their ordinary navigation behavior.
+
+`vmux_session::host::onboarding::Plugin` owns profile-local agent selection and the Session reference.
+`OnboardingConnect` creates or reopens setup through `StartRequest::for_setup`, which carries no user
+content. Session creation enqueues only explicit user text or attachments; setup leaves the prompt
+queue empty until the user sends a real message. Schema 2 setup records preserve the selected agent
+while discarding the earlier task-first Session reference, without deleting conversation history.
+
+The bootstrap and live Session share their conversation surface, transcript, assistant/user turns,
+composer and choice panel. A minimal setup-guide icon accompanies the guide messages. Installation
+and sign-in responses remain on the composer side; readiness leaves the normal agent composer
+available. ACP supplies its supported catalog, credential availability and managed installer.
+Preparing and authentication states hold any genuinely submitted user messages until the provider
+establishes its Session. Advertised authentication methods run through ACP `authenticate`;
+cancellation detaches the waiter or runtime and keeps reusable package data. Provider sign-in
+remains in its adapter, with shared connector authentication infrastructure reused where compatible.
+
 New transport variants append to existing enums. Authentication lists use boxed archive storage to
 preserve the deployed run-state layout while remaining ordinary arrays in JSON.
 Credential discovery runs after the settings Startup load; initial app composition cannot read an

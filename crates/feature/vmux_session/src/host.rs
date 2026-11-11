@@ -21,7 +21,7 @@ pub use handoff::ImportedConversation;
 pub use media::ChatAttachmentHydrationRequest;
 pub use model::{ChatModeStateChanged, ChatModelStateChanged, Models};
 #[cfg(host)]
-pub use onboarding::{ProvidersChanged, SetupPrompt};
+pub use onboarding::ProvidersChanged;
 #[cfg(host)]
 pub use prompt::RecoverPrompt;
 pub use prompt::{Attach, Attachments, Browsed, RemoveAttachment};

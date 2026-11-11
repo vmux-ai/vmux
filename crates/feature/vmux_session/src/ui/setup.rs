@@ -28,6 +28,9 @@ pub(super) fn Controls(chat: Chat) -> Element {
         .clone();
     let authentication = chat.status() == "authentication";
     let mut choices = Vec::new();
+    if chat.status() == "errored" {
+        choices.push(Choice::Retry);
+    }
     if authentication && !chat.authentication_pending() {
         for method in chat.authentication_methods() {
             choices.push(Choice::Authenticate(method.id, method.name));
@@ -76,6 +79,7 @@ pub(super) fn Controls(chat: Chat) -> Element {
 
 #[derive(Clone)]
 enum Choice {
+    Retry,
     Authenticate(String, String),
     Cancel,
     ChangeAgent,
@@ -84,6 +88,7 @@ enum Choice {
 impl Choice {
     fn label(&self) -> String {
         match self {
+            Self::Retry => translate("common-retry"),
             Self::Authenticate(_, name) => name.clone(),
             Self::Cancel => translate("common-cancel"),
             Self::ChangeAgent => translate("composer-choose-agent"),
@@ -92,15 +97,15 @@ impl Choice {
 
     fn choose(&self) {
         match self {
+            Self::Retry => {
+                let _ = send(&crate::event::ChatRetrySession);
+            }
             Self::Authenticate(method_id, _) => {
                 let _ = send(&ChatAuthenticate {
                     method_id: method_id.clone(),
                 });
             }
-            Self::Cancel => {
-                let _ = send(&ChatCancelSetup);
-            }
-            Self::ChangeAgent => {
+            Self::Cancel | Self::ChangeAgent => {
                 if send(&ChatCancelSetup).is_ok() {
                     vmux_ui::navigation::PageNavigation::replace("vmux://sessions/inbox?setup=1");
                 }
@@ -149,6 +154,8 @@ mod tests {
                 let request =
                     rkyv::from_bytes::<ChatAuthenticate, rkyv::rancor::Error>(bytes).unwrap();
                 self.0.borrow_mut().push(request.method_id);
+            } else if id == crate::event::ChatRetrySession::id() {
+                self.0.borrow_mut().push("retry".into());
             }
             Ok(())
         }
@@ -223,5 +230,59 @@ mod tests {
         );
         composer.render_immediate_to_vec();
         assert_eq!(*host.0.borrow(), ["browser-login"]);
+    }
+
+    #[component]
+    fn FailedSetup() -> Element {
+        let mut state = vmux_ui::hooks::use_ui_state::<ChatUiState>().state;
+        use_hook(move || {
+            state.set(ChatUiState {
+                snapshot: ChatSnapshot {
+                    status: "errored".into(),
+                    error: "ACP installation failed".into(),
+                    ..Default::default()
+                },
+                snapshot_ready: true,
+                ..Default::default()
+            })
+        });
+        vmux_ui::hooks::use_ui_state::<KeyEntryUiState>();
+        let chat = super::super::state::use_chat("failed-setup".into());
+        rsx! { super::super::composer::ChatDock { chat } }
+    }
+
+    #[test]
+    fn setup_failure_offers_retry_instead_of_an_unrelated_work_composer() {
+        dioxus_html::set_event_converter(Box::new(SerializedHtmlEventConverter));
+        let host = Rc::new(Host::default());
+        let mut dom = VirtualDom::new(FailedSetup);
+        dom.provide_root_context(HostBinding(host.clone()));
+        let initial = dom.rebuild_to_vec();
+        let html = dioxus_ssr::render(&dom);
+        assert!(!html.contains("<textarea"));
+        let label = translate("common-retry");
+        let retry = initial
+            .edits
+            .iter()
+            .find_map(|edit| match edit {
+                Mutation::SetAttribute {
+                    name: "aria-label",
+                    value: AttributeValue::Text(value),
+                    id,
+                    ..
+                } if value == &label => Some(*id),
+                _ => None,
+            })
+            .expect("failed setup must offer retry");
+        dom.runtime().handle_event(
+            "click",
+            Event::new(
+                EventData::Mouse(SerializedMouseData::default()).into_any(),
+                true,
+            ),
+            retry,
+        );
+        dom.render_immediate_to_vec();
+        assert_eq!(*host.0.borrow(), ["retry"]);
     }
 }

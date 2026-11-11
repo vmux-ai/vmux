@@ -1123,6 +1123,11 @@ project-local-folder = 本地文件夹
 project-github-repository = GitHub 仓库
 project-edit-conflict = 项目已更改。请重新打开编辑界面。
 
+onboarding-setup = 设置代理
+onboarding-setup-intro = 我们来设置你的代理。你想使用哪个 ACP 代理？
+onboarding-install-agent = 安装 { $agent }
+onboarding-connect-agent = 连接 { $agent }
+onboarding-ready = { $agent } 已准备就绪。现在可以开始对话。
 onboarding-guide = 设置助手
 onboarding-title = 你想做什么？
 onboarding-intro = 选择预设提示词或自行输入。我们会在这里引导你设置代理。

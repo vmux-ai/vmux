@@ -1126,6 +1126,11 @@ project-local-folder = Lokale map
 project-github-repository = GitHub-repository
 project-edit-conflict = Dit project is gewijzigd. Open de editor opnieuw.
 
+onboarding-setup = Agent instellen
+onboarding-setup-intro = Laten we je agent instellen. Welke ACP-agent wil je gebruiken?
+onboarding-install-agent = { $agent } installeren
+onboarding-connect-agent = { $agent } verbinden
+onboarding-ready = { $agent } is klaar. Je kunt nu chatten.
 onboarding-guide = Installatieassistent
 onboarding-title = Wat wilt u doen?
 onboarding-intro = Kies een voorbeeld of schrijf uw eigen verzoek. We helpen u hier uw agent in te stellen.

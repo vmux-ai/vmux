@@ -1126,6 +1126,11 @@ project-local-folder = Cartella locale
 project-github-repository = Repository GitHub
 project-edit-conflict = Il progetto è cambiato. Riapri il modulo per riprovare.
 
+onboarding-setup = Configura un agente
+onboarding-setup-intro = Configuriamo il tuo agente. Quale agente ACP vuoi usare?
+onboarding-install-agent = Installa { $agent }
+onboarding-connect-agent = Connetti { $agent }
+onboarding-ready = { $agent } è pronto. Puoi iniziare a conversare.
 onboarding-guide = Assistente alla configurazione
 onboarding-title = Cosa vorresti fare?
 onboarding-intro = Scegli un suggerimento o scrivi la tua richiesta. Ti aiuteremo a configurare il tuo agente qui.

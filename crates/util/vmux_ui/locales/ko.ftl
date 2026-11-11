@@ -1123,6 +1123,11 @@ project-local-folder = 로컬 폴더
 project-github-repository = GitHub 저장소
 project-edit-conflict = 프로젝트가 변경되었습니다. 편집 화면을 다시 열어 주세요.
 
+onboarding-setup = 에이전트 설정
+onboarding-setup-intro = 에이전트를 설정해 봅시다. 어떤 ACP 에이전트를 사용할까요?
+onboarding-install-agent = { $agent } 설치
+onboarding-connect-agent = { $agent } 연결
+onboarding-ready = { $agent } 준비가 완료되었습니다. 이제 대화할 수 있습니다.
 onboarding-guide = 설정 도우미
 onboarding-title = 무엇을 하고 싶으신가요?
 onboarding-intro = 시작 프롬프트를 선택하거나 직접 작성하세요. 여기서 에이전트 설정을 안내합니다.

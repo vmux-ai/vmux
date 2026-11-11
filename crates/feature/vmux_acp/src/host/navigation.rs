@@ -41,7 +41,6 @@ type ReadyPageOpen = (
 
 pub(super) fn add(app: &mut App) {
     app.init_resource::<vmux_git::GitRuntime>()
-        .add_message::<vmux_session::host::SetupPrompt>()
         .add_observer(cleanup)
         .add_plugins(UiEventPlugin::<(ChatRetrySession,)>::default())
         .add_observer(retry)
@@ -1070,7 +1069,6 @@ mod tests {
         let mut world = World::new();
         world.insert_resource(AppSettings::default());
         world.insert_resource(Time::<()>::default());
-        world.init_resource::<Messages<vmux_session::host::SetupPrompt>>();
         let tab = world
             .spawn((
                 Tab {

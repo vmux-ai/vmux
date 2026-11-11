@@ -62,7 +62,6 @@ pub(super) struct PageOpener<'w, 's> {
     pub(super) settings: Res<'w, AppSettings>,
     time: Res<'w, Time>,
     catalog: AcpCatalog<'w, 's>,
-    setup: MessageWriter<'w, vmux_session::host::SetupPrompt>,
 }
 
 pub(super) enum PageOpenCompletion {
@@ -147,17 +146,6 @@ impl PageOpener<'_, '_> {
         match target {
             Route::Manager => {
                 let url = Route::manager_url(&task.url).unwrap_or_else(|| Route::Manager.url());
-                if Route::manager_filter(&url, "setup").as_deref() == Some("1")
-                    && (initial_prompt.is_some() || !initial_attachments.is_empty())
-                {
-                    self.setup.write(vmux_session::host::SetupPrompt {
-                        text: initial_prompt.unwrap_or_default(),
-                        attachments: initial_attachments,
-                    });
-                    self.commands
-                        .entity(task.stack)
-                        .remove::<(PendingPrompt, PendingPromptAttachments)>();
-                }
                 self.open_manager(task, transition_webview, &url);
                 Ok(PageOpenCompletion::Complete)
             }
@@ -488,7 +476,6 @@ mod tests {
         let mut world = World::new();
         world.insert_resource(AppSettings::default());
         world.insert_resource(Time::<()>::default());
-        world.init_resource::<Messages<vmux_session::host::SetupPrompt>>();
         let attachment = AgentAttachment {
             path: "/tmp/image.png".into(),
             name: "image.png".into(),
@@ -520,7 +507,6 @@ mod tests {
         let mut world = World::new();
         world.insert_resource(AppSettings::default());
         world.insert_resource(Time::<()>::default());
-        world.init_resource::<Messages<vmux_session::host::SetupPrompt>>();
         let navigation = vmux_ecs::PageOpenId::new();
 
         let handoff = world

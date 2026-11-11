@@ -1,4 +1,3 @@
-use super::agent::AgentBanner;
 use super::item::ChatItemRow;
 use super::state::Chat;
 use crate::event::{ChatCancelQueuedPrompt, ChatClearQueue, ChatResume};
@@ -118,6 +117,8 @@ pub(super) fn ChatTranscript(chat: Chat) -> Element {
                 }
                 if !transcript_loading && chat.status() == "authentication" {
                     super::authentication::Authentication { chat }
+                } else if !transcript_loading && chat.status() == "errored" && setup {
+                    super::setup::Turn { p { class: "text-sm leading-relaxed", {translate("onboarding-setup-failed")} } }
                 } else if !transcript_loading && (chat.installing_splash() || chat.status() == "preparing") {
                     InstallIntro { chat, detail: chat.install_detail() }
                 } else if !transcript_loading && items.is_empty() && chat.status() == "idle" {
@@ -236,10 +237,10 @@ fn InstallIntro(chat: Chat, detail: String) -> Element {
 #[component]
 fn ReadyIntro(chat: Chat) -> Element {
     rsx! {
-        div { class: "flex flex-col items-center gap-3 py-16 text-center",
-            AgentBanner { chat }
-            p { class: "text-sm text-muted-foreground", {translate("agent-ready")} }
-            vmux_ui::components::starter_prompts::StarterPrompts { on_choose: move |text| chat.edit_draft(text) }
+        super::setup::Turn {
+            p { class: "text-sm leading-relaxed",
+                {translate_with("onboarding-ready", &[("agent", TranslationValue::String(&chat.header_name()))])}
+            }
         }
     }
 }
