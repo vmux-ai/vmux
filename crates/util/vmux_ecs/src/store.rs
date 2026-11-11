@@ -108,9 +108,9 @@ pub enum Phase {
 #[derive(Component, Clone, Debug, Default, PartialEq, Eq)]
 pub struct State {
     phase: Phase,
-    loaded: Option<u64>,
-    dirty: Option<u64>,
-    saving: Option<u64>,
+    loaded: Option<crate::Revision>,
+    dirty: Option<crate::Revision>,
+    saving: Option<crate::Revision>,
     error: Option<String>,
 }
 
@@ -120,15 +120,15 @@ impl State {
     }
 
     pub fn loaded(&self) -> Option<u64> {
-        self.loaded
+        self.loaded.map(|revision| revision.0)
     }
 
     pub fn dirty(&self) -> Option<u64> {
-        self.dirty
+        self.dirty.map(|revision| revision.0)
     }
 
     pub fn saving(&self) -> Option<u64> {
-        self.saving
+        self.saving.map(|revision| revision.0)
     }
 
     pub fn error(&self) -> Option<&str> {
@@ -145,7 +145,7 @@ impl State {
             .unwrap_or_default()
             .max(self.dirty.unwrap_or_default())
             .max(self.saving.unwrap_or_default());
-        self.dirty = Some(revision.saturating_add(1));
+        self.dirty = Some(revision.saturating_next());
     }
 
     pub fn begin(&mut self) -> Option<u64> {
@@ -154,10 +154,11 @@ impl State {
         }
         let revision = self.dirty.take()?;
         self.saving = Some(revision);
-        Some(revision)
+        Some(revision.0)
     }
 
     pub fn succeed(&mut self, revision: u64) -> bool {
+        let revision = crate::Revision(revision);
         if self.saving != Some(revision) {
             return false;
         }
@@ -168,6 +169,7 @@ impl State {
     }
 
     pub fn retry(&mut self, revision: u64, error: String) -> bool {
+        let revision = crate::Revision(revision);
         if self.saving != Some(revision) {
             return false;
         }
