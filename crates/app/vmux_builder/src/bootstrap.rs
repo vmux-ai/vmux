@@ -14,6 +14,7 @@ const COMPILER: Option<&str> = option_env!("VMUX_BUILDER_COMPILER");
 const SOURCES: &[(&str, &[u8])] = &[
     ("main.rs", include_bytes!("main.rs")),
     ("bootstrap.rs", include_bytes!("bootstrap.rs")),
+    ("ci_scope.rs", include_bytes!("ci_scope.rs")),
     ("debug.rs", include_bytes!("debug.rs")),
     ("environment.rs", include_bytes!("environment.rs")),
     ("execution.rs", include_bytes!("execution.rs")),

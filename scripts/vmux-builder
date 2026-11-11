@@ -17,4 +17,5 @@ if [[ ! -x "$binary" ]]; then
         "$root/crates/app/vmux_builder/src/main.rs" -o "$temporary"
     mv -f "$temporary" "$binary"
 fi
-exec "$binary" --root "$root" --ensure "$@"
+binary="$("$binary" --root "$root" --ensure --print-bin)"
+exec "$binary" --root "$root" "$@"

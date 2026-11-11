@@ -4,6 +4,8 @@ use std::path::PathBuf;
 #[cfg(unix)]
 use bootstrap::Bootstrap;
 #[cfg(unix)]
+use ci_scope::Scope;
+#[cfg(unix)]
 use execution::Failure;
 use policy::Policy;
 #[cfg(unix)]
@@ -14,6 +16,8 @@ use storage::Storage;
 
 #[cfg(unix)]
 mod bootstrap;
+#[cfg(unix)]
+mod ci_scope;
 #[cfg(unix)]
 mod debug;
 mod environment;
@@ -90,7 +94,9 @@ impl Arguments {
                     }
                     break;
                 }
-                Some(value @ ("prepare-dev" | "prepare-local" | "prepare-release")) => {
+                Some(
+                    value @ ("prepare-dev" | "prepare-local" | "prepare-release" | "ci-scope"),
+                ) => {
                     mode = Some(value.to_owned());
                     command.extend(args);
                     break;
@@ -133,6 +139,10 @@ impl Arguments {
         }
         if self.mode == "--test" {
             Bootstrap::new(self.root)?.tests()?;
+            return Ok(0);
+        }
+        if self.mode == "ci-scope" {
+            Scope::new(self.root)?.run(&self.command)?;
             return Ok(0);
         }
         let runner = Runner::new(self.root, self.target)?;

@@ -9,6 +9,8 @@ on:
       - 'Casks/**'
       - 'website/public/updates.json'
   workflow_dispatch:
+  schedule:
+    - cron: "0 1 * * *"
 
 permissions:
   contents: read
@@ -49,6 +51,8 @@ jobs:
     if: needs.changes.outputs.code == 'true'
     steps:
       - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
 
       - uses: ./.github/actions/setup-linux
         with:
@@ -56,21 +60,20 @@ jobs:
           cache-key: lint
           cef-version: ${{ needs.cef-version.outputs.version }}
 
-      - name: Compute workspace packages (excluding patches)
-        id: pkgs
-        run: |
-          ARGS=$(cargo metadata --no-deps --format-version 1 \
-            | jq -r '.packages[] | select(.manifest_path | test("patches") | not) | "-p " + .name' \
-            | tr '\n' ' ')
-          echo "args=$ARGS" >> "$GITHUB_OUTPUT"
+      - name: Select Rust check scope
+        id: scope
+        env:
+          VMUX_CI_BASE: ${{ github.event_name == 'pull_request' && github.event.pull_request.base.sha || '' }}
+        run: ./scripts/vmux-builder ci-scope >> "$GITHUB_OUTPUT"
 
       - name: Check formatting
-        run: cargo fmt ${{ steps.pkgs.outputs.args }} -- --check
+        run: cargo fmt ${{ steps.scope.outputs.lint_args }} -- --check
 
       - name: Clippy
-        run: env -u CEF_PATH VMUX_SKIP_DX_BUILD=1 cargo clippy ${{ steps.pkgs.outputs.args }} --all-targets -- -D warnings
+        run: env -u CEF_PATH VMUX_SKIP_DX_BUILD=1 cargo clippy ${{ steps.scope.outputs.lint_args }} --all-targets -- -D warnings
 
       - name: Clippy lean desktop features
+        if: steps.scope.outputs.lean == 'true'
         run: env -u CEF_PATH VMUX_SKIP_DX_BUILD=1 cargo clippy -p vmux_desktop --lib --no-default-features -- -D warnings
 
   test-rust:
@@ -80,11 +83,19 @@ jobs:
     if: needs.changes.outputs.code == 'true'
     steps:
       - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
 
       - uses: ./.github/actions/setup-linux
         with:
           cache-key: test
           cef-version: ${{ needs.cef-version.outputs.version }}
+
+      - name: Select Rust test scope
+        id: scope
+        env:
+          VMUX_CI_BASE: ${{ github.event_name == 'pull_request' && github.event.pull_request.base.sha || '' }}
+        run: ./scripts/vmux-builder ci-scope >> "$GITHUB_OUTPUT"
 
       - name: Test Rust build preparation and storage lifecycle
         run: |
@@ -92,10 +103,14 @@ jobs:
           bash scripts/test-dev-bundle.sh --fixture
           bash scripts/test-dev-sign.sh
 
+      - name: Test workspace source conventions
+        run: cargo test --locked -p vmux_macro --test source_conventions
+
       - name: Run tests
-        run: env -u CEF_PATH VMUX_SKIP_DX_BUILD=1 cargo test --workspace
+        run: env -u CEF_PATH VMUX_SKIP_DX_BUILD=1 cargo test --locked ${{ steps.scope.outputs.args }}
 
       - name: Test lean desktop features
+        if: steps.scope.outputs.lean == 'true'
         run: env -u CEF_PATH VMUX_SKIP_DX_BUILD=1 cargo test -p vmux_desktop --lib --no-default-features disabled_features::tests
 
   changes:
@@ -103,13 +118,14 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       website: ${{ steps.filter.outputs.website }}
-      macos: ${{ steps.filter.outputs.macos }}
+      macos: ${{ github.event_name != 'schedule' && (github.event_name == 'workflow_dispatch' || steps.filter.outputs.macos == 'true') }}
       macos_package: ${{ steps.filter.outputs.macos_package }}
-      ios: ${{ steps.filter.outputs.ios }}
-      code: ${{ steps.filter.outputs.code }}
+      ios: ${{ github.event_name != 'schedule' && (github.event_name == 'workflow_dispatch' || steps.filter.outputs.ios == 'true') }}
+      code: ${{ github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' || steps.filter.outputs.code == 'true' }}
     steps:
       - uses: actions/checkout@v5
       - uses: dorny/paths-filter@v4
+        if: github.event_name != 'schedule'
         id: filter
         with:
           predicate-quantifier: 'some-with-excludes'
