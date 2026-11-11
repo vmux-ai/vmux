@@ -13,10 +13,11 @@ bevy_math = { version = "0.19", default-features = false, features = ["std"] }
 bevy_asset = "0.19"
 bevy_reflect = "0.19"
 moonshine-save = "0.7"
-vmux_app = { path = "../../crates/util/vmux_app", features = ["project", "jobs", "flex"] }
+vmux_app = { path = "../../crates/util/vmux_app", features = ["project", "jobs", "flex", "fold"] }
 vmux_ecs = { path = "../../crates/util/vmux_ecs", features = ["store", "jobs"] }
 vmux_project = { path = "../../crates/feature/vmux_project" }
 vmux_flex = { path = "../../crates/util/vmux_flex" }
+vmux_fold = { path = "../../crates/feature/vmux_fold" }
 
 [dev-dependencies]
 tempfile = "3"

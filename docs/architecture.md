@@ -484,6 +484,17 @@ Filesystem jobs queue by canonical directory. Unstarted jobs are discarded when 
 changes; started atomic IO finishes before a replacement root reads that directory. Backend IO
 tasks therefore own their finite lifetime rather than being despawned with a requesting root.
 
+`vmux_fold` owns durable collapsed-line preferences as FileId, Collapsed and Revision components
+on records under an explicit store root. Its default plugin has no Profile or renderer dependency;
+filesystem IO is optional. Views share a record within their root, and their own fold regions,
+caret, viewport and rendering stay local. Native Editor forwards changed line sets and projects
+canonical preferences back into each view, so simultaneous view changes compose without replacing
+unrelated preferences. Root store::State and observable save Operations retain dirty revisions
+on failure and require a retry; completion checks owner, path, generation and revision. The
+filesystem adapter preserves the historical folds.ron files map, queues IO by canonical store
+path, and publishes the result before waking the host. Started IO has an independent finite
+lifetime, so a replacement owner reads only after an older atomic commit finishes.
+
 Every product feature appears exactly once in that graph and exposes one crate-level plugin.
 That root plugin installs only its own manifest, components, systems, and private subplugins. It
 never installs a sibling feature plugin. Cross-feature requirements belong to the `vmux_app`

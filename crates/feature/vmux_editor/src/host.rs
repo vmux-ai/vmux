@@ -32,6 +32,7 @@ impl Plugin for EditorPlugin {
             page_open::PageOpenPlugin,
             project::ProjectPagePlugin,
             file_lifecycle::FileLifecyclePlugin,
+            fold_store::Plugin,
             workspace_edit::WorkspaceEditPlugin,
             feedback::Plugin,
             status::StatusPlugin,
@@ -71,7 +72,7 @@ pub mod contract;
 pub mod edit;
 pub mod encoding;
 pub mod fold;
-pub mod fold_store;
+mod fold_store;
 pub(crate) mod highlight;
 pub mod keymap;
 pub mod lsp;

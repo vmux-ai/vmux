@@ -71,6 +71,7 @@ bookmark = ["layout", "dep:vmux_bookmark"]
 ecs = ["dep:vmux_ecs"]
 jobs = ["ecs", "vmux_ecs/jobs"]
 flex = ["ecs", "dep:vmux_flex"]
+fold = ["ecs", "dep:vmux_fold"]
 runtime = ["flex", "vmux_flex/window", "vmux_ecs/host"]
 command = ["runtime", "dep:vmux_command"]
 setting = ["runtime", "dep:vmux_setting"]
@@ -80,7 +81,7 @@ browser = ["command", "layout", "dep:vmux_browser"]
 extension = ["browser", "dep:vmux_extension"]
 terminal = ["layout", "service", "dep:vmux_terminal"]
 project = ["ecs", "dep:vmux_project"]
-editor = ["layout", "project", "dep:vmux_editor"]
+editor = ["fold", "layout", "project", "dep:vmux_editor"]
 git = ["layout", "dep:vmux_git"]
 acp = [
     "command",
@@ -141,6 +142,7 @@ tracing-appender = { version = "0.2", optional = true }
 tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"], optional = true }
 vmux_profile = { path = "../vmux_profile", optional = true }
 vmux_project = { path = "../../feature/vmux_project", optional = true }
+vmux_fold = { path = "../../feature/vmux_fold", optional = true }
 vmux_transport = { path = "../vmux_transport", optional = true }
 
 [[bin]]
