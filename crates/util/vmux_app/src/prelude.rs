@@ -4,6 +4,10 @@ pub use crate::{VmuxPlugin, VmuxPluginBuilder, VmuxPluginOptions};
 pub use vmux_acp::AcpPlugin;
 #[cfg(feature = "browser")]
 pub use vmux_browser::BrowserPlugin;
+#[cfg(feature = "jobs")]
+pub use vmux_ecs::{
+    Job, JobOwner, JobPlugin, JobReady, JobRequest, JobResult, JobSet, JobWake, JobsPlugin,
+};
 #[cfg(feature = "editor")]
 pub use vmux_editor::EditorPlugin;
 #[cfg(feature = "extension")]

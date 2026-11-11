@@ -8,9 +8,11 @@ publish = false
 
 [features]
 default = []
+jobs = []
 contracts = ["dep:rkyv", "dep:vmux_api", "dep:vmux_macro"]
 store = ["dep:bevy_world_serialization", "dep:moonshine-save", "dep:ron", "dep:vmux_macro"]
 host = [
+    "jobs",
     "contracts",
     "store",
     "dep:tokio",

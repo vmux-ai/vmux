@@ -10,7 +10,7 @@ pub use vmux_task::{
 pub use archive::{
     ArchivedPage, ArchivedPagePosition, ArchivedTabPage, PageArchiveRequest, PaneStep, SplitAxis,
 };
-#[cfg(all(host, feature = "host"))]
+#[cfg(feature = "jobs")]
 pub use blocking::{BlockingCancellation, BlockingPool, BlockingRuntime, BlockingTask};
 #[cfg(feature = "contracts")]
 pub use component::ProcessAnchor;
@@ -28,6 +28,10 @@ pub use external_identity::{
 pub use file_ui_state::{FileUiStateUpdates, FileUiStateWrite};
 pub use identity::{
     IdentityIndex, IdentityIndexPlugin, IdentityIndexSet, IdentityIndexWriter, IdentityLookupError,
+};
+#[cfg(feature = "jobs")]
+pub use jobs::{
+    Job, JobOwner, JobPlugin, JobReady, JobRequest, JobResult, JobSet, JobWake, JobsPlugin,
 };
 #[cfg(all(host, feature = "host"))]
 pub use launcher::{
@@ -69,7 +73,7 @@ pub mod address;
 pub mod agent;
 #[cfg(all(host, feature = "host"))]
 mod archive;
-#[cfg(all(host, feature = "host"))]
+#[cfg(feature = "jobs")]
 pub mod blocking;
 #[cfg(all(host, feature = "host"))]
 pub mod browser;
@@ -84,6 +88,8 @@ mod file_ui_state;
 #[cfg(all(host, feature = "host"))]
 pub mod host_spawn;
 mod identity;
+#[cfg(feature = "jobs")]
+pub mod jobs;
 #[cfg(all(host, feature = "host"))]
 pub mod launcher;
 #[cfg(all(host, feature = "host"))]

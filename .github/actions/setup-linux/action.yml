@@ -77,7 +77,21 @@ runs:
 
     - name: Use a shared Linux CEF SDK
       shell: bash
-      run: echo "CEF_PATH=$HOME/.cache/vmux/cef-sdk" >> "$GITHUB_ENV"
+      env:
+        CEF_CRATE_VERSION: ${{ inputs.cef-version }}
+      run: |
+        cef_cache="$HOME/.cache/vmux/cef-sdk"
+        cef_version="${CEF_CRATE_VERSION#*+}"
+        case "$RUNNER_ARCH" in
+          X64) cef_arch=x86_64 ;;
+          ARM64) cef_arch=aarch64 ;;
+          *) echo "::error::Unsupported Linux CEF runner architecture"; exit 1 ;;
+        esac
+        cef_runtime="$cef_cache/$cef_version/cef_linux_$cef_arch"
+        {
+          echo "CEF_PATH=$cef_cache"
+          echo "LD_LIBRARY_PATH=$cef_runtime${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
+        } >> "$GITHUB_ENV"
 
     - name: Cache Linux CEF SDK
       uses: actions/cache@v5

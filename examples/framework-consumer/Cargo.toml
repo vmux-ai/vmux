@@ -12,8 +12,8 @@ bevy_ecs = "0.19"
 bevy_asset = "0.19"
 bevy_reflect = "0.19"
 moonshine-save = "0.7"
-vmux_app = { path = "../../crates/util/vmux_app", features = ["project"] }
-vmux_ecs = { path = "../../crates/util/vmux_ecs", features = ["store"] }
+vmux_app = { path = "../../crates/util/vmux_app", features = ["project", "jobs"] }
+vmux_ecs = { path = "../../crates/util/vmux_ecs", features = ["store", "jobs"] }
 vmux_project = { path = "../../crates/feature/vmux_project" }
 
 [dev-dependencies]
