@@ -10,7 +10,6 @@ use vmux_ecs::store::{SchemaPlugin, Types};
 use vmux_ecs::{Bookmark, BookmarkOrder, Collapsed, Folder, PageMetadata, Pin, Uuid};
 use vmux_layout::LayoutStartupSet;
 use vmux_setting::AppSettings;
-use vmux_shortcut::ShortcutUrl;
 
 use crate::store_driver::{BookmarkFilter, BookmarkStorePath};
 
@@ -37,7 +36,8 @@ impl Plugin for BookmarkStorePlugin {
     }
 }
 
-const BOOKMARK_PIN_ORDER_REVISION: u32 = 4;
+const BOOKMARK_PIN_ORDER_REVISION: u32 = 5;
+const LEGACY_PIN_ORDER_REVISION: u32 = 4;
 const RETIRED_DEFAULT_BOOKMARKS: [&str; 2] = ["vmux://spaces/", "vmux://team/"];
 
 #[vmux_ecs::store(
@@ -142,10 +142,56 @@ pub(super) struct OfferedBookmarkDefaults {
 
 impl BookmarkSeed<'_, '_> {
     fn key(url: &str) -> String {
-        if let Some(canonical) = ShortcutUrl::canonical(url) {
+        if let Some(canonical) = vmux_api::VmuxRoute::canonical(url) {
             return canonical.trim_end_matches('/').to_ascii_lowercase();
         }
         url.trim().trim_end_matches('/').to_ascii_lowercase()
+    }
+
+    fn place_container(
+        &mut self,
+        existing: &[(Entity, String, u32)],
+        claimed: &[String],
+        next_order: u32,
+        claimed_orders: &mut HashMap<String, u32>,
+    ) {
+        let mut pins = existing.to_vec();
+        let mut order = next_order;
+        for url in claimed {
+            let key = Self::key(url);
+            if pins.iter().any(|(_, existing, _)| *existing == key) {
+                continue;
+            }
+            pins.push((Entity::PLACEHOLDER, key, order));
+            order = order.saturating_add(1);
+        }
+        pins.sort_by_key(|(entity, _, order)| (*order, entity.to_bits()));
+        let container_key = Self::key("vmux://docker/containers");
+        let simulator_key = Self::key("vmux://simulator/");
+        let Some(container) = pins.iter().position(|(_, key, _)| *key == container_key) else {
+            return;
+        };
+        let Some(simulator) = pins.iter().position(|(_, key, _)| *key == simulator_key) else {
+            return;
+        };
+        if container == simulator + 1 {
+            return;
+        }
+        let pin = pins.remove(container);
+        let simulator = if container < simulator {
+            simulator - 1
+        } else {
+            simulator
+        };
+        pins.insert(simulator + 1, pin);
+        for (order, (entity, key, previous)) in pins.into_iter().enumerate() {
+            let order = order as u32;
+            if entity == Entity::PLACEHOLDER {
+                claimed_orders.insert(key, order);
+            } else if previous != order {
+                self.commands.entity(entity).insert(BookmarkOrder(order));
+            }
+        }
     }
 }
 
@@ -167,6 +213,7 @@ fn insert_defaults(
 ) {
     let urls = &settings.browser.bookmarks;
     let folders = &settings.browser.bookmark_folders;
+    let pin_revision = seed.offered.pin_order_revision;
     let retired_keys = RETIRED_DEFAULT_BOOKMARKS
         .iter()
         .map(|url| BookmarkSeed::key(url))
@@ -178,7 +225,7 @@ fn insert_defaults(
         .map(|url| BookmarkSeed::key(url))
         .collect::<HashSet<_>>();
     let mut retired_entities = HashSet::new();
-    if seed.offered.pin_order_revision < BOOKMARK_PIN_ORDER_REVISION {
+    if pin_revision < LEGACY_PIN_ORDER_REVISION {
         for (entity, metadata, _) in &seed.pins {
             let key = BookmarkSeed::key(&metadata.url);
             if retired_keys.contains(&key) && offered_before.contains(&key) {
@@ -243,7 +290,7 @@ fn insert_defaults(
         .max()
         .map_or(0, |order| order.saturating_add(1));
     let mut claimed_orders = HashMap::new();
-    if seed.offered.pin_order_revision < BOOKMARK_PIN_ORDER_REVISION {
+    if pin_revision < LEGACY_PIN_ORDER_REVISION {
         let claimed = claimed_urls
             .iter()
             .map(|url| BookmarkSeed::key(url))
@@ -281,6 +328,17 @@ fn insert_defaults(
         for (entity, _, _) in custom_pins {
             seed.commands.entity(*entity).insert(BookmarkOrder(order));
             order = order.saturating_add(1);
+        }
+        changed = true;
+    }
+    if pin_revision < BOOKMARK_PIN_ORDER_REVISION {
+        if pin_revision >= LEGACY_PIN_ORDER_REVISION {
+            seed.place_container(
+                &existing_pins,
+                &claimed_urls,
+                next_order,
+                &mut claimed_orders,
+            );
         }
         seed.offered.pin_order_revision = BOOKMARK_PIN_ORDER_REVISION;
         changed = true;
@@ -629,7 +687,7 @@ mod tests {
                     "vmux_header::system::PageMetadata": (
                         title: "Legacy",
                         url: "vmux://vm/docker/containers",
-                        icon: Builtin(Container),
+                        icon: Builtin(UnavailableIcon),
                         bg_color: None,
                     ),
                 }),
@@ -674,6 +732,97 @@ mod tests {
             PageIcon::Builtin(vmux_api::BuiltinIcon::Terminal)
         );
         assert_eq!(std::fs::read_to_string(path).unwrap(), body);
+    }
+
+    #[test]
+    fn legacy_container_pin_moves_after_simulator_without_reordering_other_pins() {
+        let mut settings = AppSettings::default();
+        settings.browser.bookmarks = vec![
+            "vmux://simulator/".into(),
+            "vmux://docker/containers".into(),
+        ];
+        let mut app = App::new();
+        app.add_plugins((
+            MinimalPlugins,
+            bevy::asset::AssetPlugin::default(),
+            vmux_ecs::PrimitivesPlugin,
+        ))
+        .add_plugins(SchemaPlugin::<BookmarkStore>::default())
+        .insert_resource(settings)
+        .insert_resource(OfferedBookmarkDefaults {
+            urls: vec!["vmux://simulator/".into(), "vmux://containers/".into()],
+            pin_order_revision: 4,
+            ..default()
+        })
+        .add_observer(insert_defaults);
+        app.world_mut().spawn(BookmarkAutoSave);
+        let mut container = Entity::PLACEHOLDER;
+        for (order, url) in [
+            "https://first.example/",
+            "vmux://simulator/",
+            "https://second.example/",
+            "vmux://containers/",
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            let entity = app
+                .world_mut()
+                .spawn((
+                    Pin,
+                    Uuid(url.into()),
+                    BookmarkOrder(order as u32),
+                    PageMetadata {
+                        url: url.into(),
+                        ..default()
+                    },
+                ))
+                .id();
+            if url == "vmux://containers/" {
+                container = entity;
+            }
+        }
+        app.world_mut().trigger(SeedBookmarkDefaults);
+        app.update();
+        let mut pins = app
+            .world_mut()
+            .query_filtered::<(&PageMetadata, &BookmarkOrder), With<Pin>>()
+            .iter(app.world())
+            .map(|(metadata, order)| (order.0, metadata.url.clone()))
+            .collect::<Vec<_>>();
+        pins.sort();
+        assert_eq!(
+            pins.into_iter().map(|(_, url)| url).collect::<Vec<_>>(),
+            [
+                "https://first.example/",
+                "vmux://simulator/",
+                "vmux://containers/",
+                "https://second.example/",
+            ]
+        );
+        assert_eq!(
+            app.world().get::<Uuid>(container).unwrap().0,
+            "vmux://containers/"
+        );
+        app.world_mut()
+            .entity_mut(container)
+            .insert(BookmarkOrder(10));
+        app.world_mut().trigger(SeedBookmarkDefaults);
+        app.update();
+        assert_eq!(app.world().get::<BookmarkOrder>(container).unwrap().0, 10);
+        app.world_mut().despawn(container);
+        app.world_mut()
+            .resource_mut::<OfferedBookmarkDefaults>()
+            .pin_order_revision = 4;
+        app.world_mut().trigger(SeedBookmarkDefaults);
+        app.update();
+        assert_eq!(
+            app.world_mut()
+                .query_filtered::<Entity, With<Pin>>()
+                .iter(app.world())
+                .count(),
+            3
+        );
     }
 
     #[test]

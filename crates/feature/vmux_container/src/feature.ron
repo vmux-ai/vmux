@@ -1,9 +1,9 @@
 (
     pages: [(
-        url: "vmux://containers/",
-        title: "Containers",
-        title_message_id: "container-title",
-        bookmark: Some(145),
+        url: "vmux://docker/containers",
+        title: "Docker",
+        title_message_id: "container-engine",
+        bookmark: Some(135),
         icon: "Container",
         keywords: ["containers", "docker", "linux", "vm", "engine"],
         command_bar: true,

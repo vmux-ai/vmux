@@ -1742,14 +1742,19 @@ out, because dependency resolution happens before any build script runs.
 
 ## Native containers
 
-`vmux_container` owns the `vmux://containers/` page and container CLI. Both submit typed
+`vmux_container` owns the `vmux://docker/containers` page and container CLI. Both submit typed
 requests to `ControlPlugin`; shared operation entities own asynchronous work, its target,
 and completion. `InventoryPlugin` reconciles Docker containers into child entities with
 stable IDs, shared names, image/state, Compose labels and published ports. Its ordered
 snapshot tasks preserve existing entity identity and retire removed containers. Per-page
 selection owns bounded log tasks and retains displayed output during refresh.
 
-The default Containers bookmark uses `WorkspaceLayout` with the editor's side-sheet
+The default Docker bookmark opens `vmux://docker/containers` beside Simulator.
+`vmux://docker/` and the legacy `vmux://containers/` canonicalize to that route;
+only the implemented Containers page is registered. Canonical bookmark keys reuse old
+pins, and a one-time placement migration moves the Docker pin after Simulator while
+preserving the order of other pins and later user rearrangements.
+The page uses `WorkspaceLayout` with the editor's side-sheet
 toggle and width bounds, and Git's breadcrumb header and toolbar. The list can be resized
 and collapsed; selection and Info/Logs choices update the page address. Sidebar/group layout transitions
 use the shared 120 ms motion timing, content changes fade in over 100 ms, and service
@@ -1758,8 +1763,11 @@ layout and content transitions; layout and selection never wait for them. While 
 is unavailable, the whole page offers one Start control or a startup/shutdown indicator;
 the side sheet and details appear when Docker is ready. One root UI-state subscription
 survives these transitions. A thin divider separates the side sheet and details.
-Details remain unselected until the user chooses an entry. Service shutdown lives in
-the page toolbar; settings are read-only with one Close control while Docker runs,
+Details remain unselected until the user chooses an entry. The address reads
+`Docker → Containers → selected entry → Info/Logs`. VM shutdown and settings live in
+the Docker side-sheet header, while play/stop/restart controls in the details toolbar
+operate on the selected container or Compose group. Tooltips retain operation labels.
+Settings are read-only with one Close control while Docker runs,
 and offer Cancel/Save only when stopped.
 Startup uses persisted defaults and initially shares the home directory. Containers
 created through Docker CLI or Compose appear automatically from the daemon's inventory;
@@ -1781,7 +1789,7 @@ that process's lifecycle. Closing the invoking CLI or page does not close the VM
 ```mermaid
 flowchart LR
     cli["vmux container"] --> control["ControlPlugin: operation entities"]
-    page["vmux://containers/"] --> control
+    page["vmux://docker/containers"] --> control
     control --> client["EngineClient"]
     client --> engine["EnginePlugin: engine entity + lease"]
     engine --> worker["libkrun worker entity"]
