@@ -49,6 +49,11 @@ pub struct SessionViews<'w, 's> {
 impl SessionViews<'_, '_> {
     pub fn session(&self, webview: Entity) -> Option<Entity> {
         if let Ok(page) = self.pages.get(webview)
+            && matches!(Route::parse(&page.url), Some(Route::Provider { .. }))
+        {
+            return None;
+        }
+        if let Ok(page) = self.pages.get(webview)
             && let Some(Route::Session(id)) = Route::parse(&page.url)
         {
             return self

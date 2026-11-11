@@ -156,6 +156,10 @@ impl AgentChatTarget {
                 url: Route::Session(id.clone()).url(),
                 title: id.0,
             }),
+            Route::Provider { .. } => Some(Self {
+                url: url.to_string(),
+                title: translate("sessions-title"),
+            }),
         }
     }
 }
@@ -230,7 +234,7 @@ fn prepare(
         };
         let transition = transitions.get(task.stack).ok();
         let transition_view = transition.map(|transition| transition.webview).or_else(|| {
-            matches!(route, Route::Session(_))
+            matches!(route, Route::Session(_) | Route::Provider { .. })
                 .then(|| manager_by_stack.get(&task.stack).copied())
                 .flatten()
         });
@@ -314,7 +318,7 @@ fn prepare(
                 .insert((PageOpenDeferred, AwaitingAgentTransitionPaint));
             continue;
         }
-        if matches!(route, Route::Manager) {
+        if matches!(route, Route::Manager | Route::Provider { .. }) {
             continue;
         }
         if workspace_checks.contains(task_entity) {
@@ -498,7 +502,7 @@ fn open(
         let Some(route) = Route::parse(&task.url) else {
             continue;
         };
-        let default_cwd = if matches!(route, Route::Manager) {
+        let default_cwd = if matches!(route, Route::Manager | Route::Provider { .. }) {
             PathBuf::new()
         } else {
             let tab = opener.tab(task.stack);

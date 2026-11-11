@@ -48,7 +48,25 @@ const DISCLOSURE_RUNTIME: &str = r#"
 (() => {
   if (window.__vmuxDisclosures) return;
   const states = new WeakMap();
-  window.__vmuxDisclosures = { states };
+  const choices = new Map();
+  const restore = node => {
+    if (!(node instanceof Element)) return;
+    const details = node.matches('details[data-vmux-disclosure-key]') ? [node] : [];
+    details.push(...node.querySelectorAll('details[data-vmux-disclosure-key]'));
+    for (const element of details) {
+      const key = element.dataset.vmuxDisclosureKey;
+      if (key && choices.has(key)) element.open = choices.get(key);
+    }
+  };
+  const apply = records => {
+    for (const record of records) {
+      if (record.type === 'attributes') restore(record.target);
+      for (const node of record.addedNodes ?? []) restore(node);
+    }
+  };
+  const observer = new MutationObserver(apply);
+  observer.observe(document, { childList: true, subtree: true, attributes: true, attributeFilter: ['data-vmux-disclosure-key'] });
+  window.__vmuxDisclosures = { states, choices, flush: () => apply(observer.takeRecords()) };
   document.addEventListener('click', event => {
     if (event.defaultPrevented || event.button !== 0 || !(event.target instanceof Element)) return;
     const summary = event.target.closest('summary');
@@ -58,6 +76,7 @@ const DISCLOSURE_RUNTIME: &str = r#"
     event.preventDefault();
     const previous = states.get(details);
     const expanded = !(previous?.expanded ?? details.open);
+    if (details.dataset.vmuxDisclosureKey) choices.set(details.dataset.vmuxDisclosureKey, expanded);
     const from = details.getBoundingClientRect().height;
     const opacities = new Map([...details.children].map(child => [child, Number(getComputedStyle(child).opacity)]));
     const original = previous?.original ?? { height: details.style.height, overflow: details.style.overflow };

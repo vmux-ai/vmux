@@ -1172,6 +1172,7 @@ mod tests {
         let original = r"inspect /tmp/Screen\ Recording.mov";
         let mut transcript = ChatTranscriptState {
             items: vec![ChatItem::User {
+                event_id: String::new(),
                 text: original.into(),
                 context: None,
                 attachments: Vec::new(),
@@ -1286,6 +1287,7 @@ mod tests {
         }));
         let mut transcript = ChatTranscriptState {
             items: vec![ChatItem::User {
+                event_id: String::new(),
                 text: "inspect".into(),
                 context: None,
                 attachments: vec![image.clone()],

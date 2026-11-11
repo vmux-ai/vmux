@@ -806,7 +806,8 @@ Layout projections observe `Current` changes even when the requested metadata st
 committing a presented surface clears the side sheet's pending-page indication immediately.
 Scroll and scroll-end events use asynchronous native delivery, coalesced to the latest position per
 element and event kind within one animation frame. Session wheel, touch, and scroll notifications
-share a 100 ms cadence; native scrolling and sticky previews remain independent of host updates.
+share a 200 ms cadence; continuous input needs one host notification per gesture except at the
+upper history boundary. Native scrolling and sticky previews remain independent of host updates.
 Scroll-end flushes immediately, and a following keyboard or pointer event synchronously flushes
 the pending viewport position before navigation. These events retain synchronous
 replies for cancellation; queued scroll events are discarded when their document or interpreter
@@ -1004,21 +1005,37 @@ Session viewports remember their scroll position and loaded-history start on the
 History requests resolve that Session from the page URL before a runtime attaches. Input at the
 top boundary requests another history page even when no scroll event can fire. Initial tails retain
 any saved prompt preceding their first assistant turn, giving its sticky preview that context.
+Selecting a provider row navigates immediately to a pending Session page. Its source identity is
+encoded inside one URL segment, so it survives workspace restoration. That page keeps discovery
+active and resolves native and installed-agent aliases by family before importing the canonical
+Session. Metadata failure leaves a themed route back to the collection; navigating away cancels
+the pending activation.
+Readonly provider histories retain a backward cursor separately from the forward append cursor.
+The host requests bounded earlier pages even when the current messages form only one assistant
+turn. Prefix events use the common `Order` component while existing event IDs and server sequences
+remain intact. Source requests stay pending until the conversation confirms the prepend. Empty
+and already-cached chunks advance the cursor without producing duplicate messages.
 A floating composer overlaps the transcript's lower edge, with an input-inert surface gradient.
 Transcript end padding keeps the latest message clear of the composer and its fade. Sessions owned
 by another client collapse the disabled composer into a themed retry disclosure, retaining its draft.
 Each prompt and its assistant turns share a section in that scroll surface. A compact sticky header
-shows that section's prompt and latest response after its start scrolls out of view; the next section
-replaces it. Previews reuse compact versions of the normal user bubble and assistant row, preserving
-their alignment and avatars over a fading surface background. A single preview uses half the
-height of a prompt-response pair. Preview links pause automatic following and return to the original prompt or exact response
-block. Existing item IDs remain scroll anchors; section keys survive earlier history so disclosure scopes
+shows that section's saved prompt after its start scrolls out of view; the next section replaces it.
+The preview reuses the normal user bubble and avatar over a fading surface background. Assistant
+responses stay in the transcript. The preview link pauses automatic following and returns to the
+original prompt. Existing item IDs remain scroll anchors; section keys survive earlier history so disclosure scopes
 stay mounted. Header visibility changes opacity without moving messages. Hidden previews are inert and
-excluded from accessibility. `StickySections` shares one intersection observer per scroll
+excluded from accessibility.
+Source event IDs also identify individual turn rows and tools. A prepend preserves those row
+anchors even inside the same turn; tool batches retain their existing key, and reader-selected
+disclosure states are restored before scroll correction when a tool is reparented.
+`StickySections` shares one intersection observer per scroll
 surface, observes added history, and disconnects removed surfaces; it does not poll or rerender on scroll.
 The scroll surface has no top inset while pinned; initial spacing belongs to its content. Header
 projections rebuild only when their inputs, active surface, catalog, or ownership change. Completed
 Session transitions release the hidden launcher and its palette rather than rebuilding it on scroll.
+macOS input routing hit-tests the actual native view before consulting cached layout pointer flags.
+Scrolls delivered to a `WKWebView` do not request Bevy frames or start a CEF interaction burst;
+the page's bounded viewport notifications provide the host updates it needs.
 Closed command panels skip palette projection; reopening them resumes the normal composer projection.
 Transcript projection indexes tool call IDs and parent relationships once per turn rather than
 rescanning its blocks for every tool and result. Space, Session, project, branch, and Stack rows share one icon column;

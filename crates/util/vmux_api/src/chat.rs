@@ -1034,6 +1034,8 @@ text(await tools.exec_command({cmd:"cat src/two.rs",workdir:"/work/two"}));"#
 #[vmux_api::contract(Eq)]
 pub enum ChatItem {
     User {
+        #[serde(default, skip_serializing_if = "String::is_empty")]
+        event_id: String,
         text: String,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         context: Option<String>,
@@ -1046,8 +1048,25 @@ pub enum ChatItem {
 }
 
 impl ChatItem {
+    pub fn identity_keys(&self) -> Vec<String> {
+        match self {
+            Self::User { event_id, .. } if !event_id.is_empty() => vec![event_id.clone()],
+            Self::Turn(turn) => {
+                let mut ids = Vec::new();
+                for id in &turn.block_ids {
+                    if !id.is_empty() {
+                        ids.push(id.clone());
+                    }
+                }
+                ids
+            }
+            _ => Vec::new(),
+        }
+    }
+
     pub fn user(text: impl Into<String>) -> Self {
         Self::User {
+            event_id: String::new(),
             text: text.into(),
             context: None,
             attachments: Vec::new(),
@@ -1059,6 +1078,8 @@ impl ChatItem {
 #[vmux_api::contract(Default, Eq)]
 pub struct ChatTurn {
     pub blocks: Vec<ChatBlock>,
+    #[serde(default)]
+    pub block_ids: Vec<String>,
     #[serde(default)]
     pub rows: Vec<ChatTurnRow>,
     #[serde(default)]

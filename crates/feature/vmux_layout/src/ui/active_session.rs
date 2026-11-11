@@ -138,7 +138,7 @@ impl ActiveWorkspaceProject {
 fn CurrentPagePath(url: String) -> Element {
     if matches!(
         vmux_session::Route::parse(&url),
-        Some(vmux_session::Route::Session(_))
+        Some(vmux_session::Route::Session(_) | vmux_session::Route::Provider { .. })
     ) {
         return rsx! {};
     }

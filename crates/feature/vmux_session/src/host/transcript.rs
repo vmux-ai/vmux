@@ -44,6 +44,7 @@ impl bevy::prelude::Plugin for Plugin {
                     resolve_queries,
                     bevy::ecs::schedule::ApplyDeferred,
                     apply_results,
+                    sync_history,
                 )
                     .chain()
                     .after(ServiceMessageSet)
@@ -289,6 +290,7 @@ fn push_to_page(
                 transcript_loading,
                 choice,
                 viewport,
+                &conversation.event_ids,
             )
         });
         let Ok((mut transcript, mut snapshot, attachments)) = world.chat_views.get_mut(webview)
@@ -357,6 +359,7 @@ impl ChatProjection {
         transcript_loading: bool,
         choice: Option<&PendingAgentChoice>,
         viewport: Option<&ChatViewport>,
+        event_ids: &[vmux_api::session::EventId],
     ) -> Self {
         let durations: &[u32] = turn_meta.map(|m| m.durations.as_slice()).unwrap_or(&[]);
         let running = matches!(state, RunState::Streaming);
@@ -369,7 +372,8 @@ impl ChatProjection {
             message_times,
             durations,
             running,
-        );
+        )
+        .with_event_ids(event_ids);
         let limit = viewport.map_or(CHAT_INITIAL_ITEM_LIMIT as usize, |viewport| {
             viewport.item_limit(messages.item_count())
         });
@@ -527,6 +531,7 @@ fn sync_ready_views(
                 transcript_loading,
                 choice,
                 viewport,
+                &conversation.event_ids,
             )
         });
         transcript.merge_tail(projection.transcript);
@@ -623,6 +628,8 @@ fn request_more(
     trigger: On<UiInput<ChatHistoryMoreRequest>>,
     targets: super::session::SessionViews,
     mut views: Query<&mut ChatTranscriptProjection, With<SessionView>>,
+    sources: Query<(&SessionId, &vmux_session::ConversationHistory)>,
+    mut history_requests: MessageWriter<vmux_session::ConversationHistoryMoreRequest>,
     mut commands: Commands,
 ) {
     let webview = trigger.event().webview;
@@ -632,6 +639,19 @@ fn request_more(
     let Ok(mut transcript) = views.get_mut(webview) else {
         return;
     };
+    if transcript.state.loaded_start == 0 {
+        if let Ok((id, history)) = sources.get(session)
+            && history.has_older
+            && !history.loading
+            && !transcript.state.loading
+        {
+            history_requests.write(vmux_session::ConversationHistoryMoreRequest {
+                session: id.clone(),
+                generation: history.generation,
+            });
+        }
+        return;
+    }
     let Some(query) = transcript.start_history_query(webview, session) else {
         return;
     };
@@ -639,6 +659,48 @@ fn request_more(
     commands.trigger(
         vmux_ecs::UiStateWrite::<crate::state::ChatUiState>::from_event(webview, &transcript.state),
     );
+}
+
+fn sync_history(
+    targets: super::session::SessionViews,
+    sources: Query<(&SessionId, &vmux_session::ConversationHistory)>,
+    mut views: Query<
+        (Entity, &mut ChatTranscriptProjection),
+        (With<SessionView>, With<vmux_ecs::page::PageReady>),
+    >,
+    mut commands: Commands,
+) {
+    for (view, mut transcript) in &mut views {
+        let Some(session) = targets.session(view) else {
+            continue;
+        };
+        let Ok((id, history)) = sources.get(session) else {
+            continue;
+        };
+        let loading = if transcript.state.loaded_start == 0 {
+            history.loading
+        } else {
+            transcript.state.loading
+        };
+        if transcript.state.has_older == history.has_older && transcript.state.loading == loading {
+            continue;
+        }
+        transcript.state.has_older = history.has_older;
+        transcript.state.loading = loading;
+        commands.trigger(
+            vmux_ecs::UiStateWrite::<crate::state::ChatUiState>::from_event(
+                view,
+                &crate::state::ChatUiStatePatch {
+                    history_status: Some(crate::event::ChatHistoryStatus {
+                        session: id.0.clone(),
+                        has_older: history.has_older,
+                        loading,
+                    }),
+                    ..Default::default()
+                },
+            ),
+        );
+    }
 }
 
 fn resolve_queries(
@@ -666,6 +728,7 @@ fn resolve_queries(
                         durations,
                         matches!(state, RunState::Streaming),
                     )
+                    .with_event_ids(&transcript.event_ids)
                     .before(query.before as usize, query.limit as usize)
                 });
                 TranscriptPage {
@@ -1105,6 +1168,7 @@ mod tests {
             false,
             None,
             None,
+            &[],
         )
         .snapshot;
 
@@ -1134,6 +1198,7 @@ mod tests {
             false,
             None,
             None,
+            &[],
         )
         .snapshot;
 
@@ -1165,6 +1230,7 @@ mod tests {
             false,
             None,
             None,
+            &[],
         )
         .snapshot;
 
@@ -1193,6 +1259,7 @@ mod tests {
             false,
             None,
             None,
+            &[],
         )
         .snapshot;
 
@@ -1219,6 +1286,7 @@ mod tests {
             false,
             None,
             None,
+            &[],
         )
         .snapshot;
 

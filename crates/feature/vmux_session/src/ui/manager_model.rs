@@ -2,7 +2,8 @@ use std::collections::{HashMap, HashSet};
 
 use chrono::{Duration, Local, NaiveDate, TimeZone};
 use vmux_session::{
-    CatalogSnapshot, SessionAge, SessionSummary, SessionSummaryProjection, StageSummary,
+    AgentFamily, CatalogSnapshot, SessionAge, SessionSummary, SessionSummaryProjection,
+    StageSummary,
 };
 use vmux_ui::i18n::{TranslationValue, translate, translate_humanized, translate_with};
 
@@ -10,17 +11,23 @@ use crate::event::{ProviderSessionTarget, SessionRepositories, SessionRepository
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub(super) enum RowIdentity {
-    Provider(String, String),
+    Provider(AgentFamily, String),
     Local(String),
 }
 
 impl RowIdentity {
     pub(super) fn of(session: &SessionSummary) -> Self {
         if !session.provider_kind.is_empty() && !session.provider_sid.is_empty() {
-            return Self::Provider(session.provider_kind.clone(), session.provider_sid.clone());
+            return Self::Provider(
+                AgentFamily::of(session.provider_kind.trim_start_matches("acp:")),
+                session.provider_sid.clone(),
+            );
         }
         if !session.managed && !session.kind.is_empty() && !session.sid.is_empty() {
-            return Self::Provider(session.kind.clone(), session.sid.clone());
+            return Self::Provider(
+                AgentFamily::of(session.kind.trim_start_matches("acp:")),
+                session.sid.clone(),
+            );
         }
         Self::Local(session.id.clone())
     }

@@ -56,6 +56,7 @@ impl Reader {
                 watch_paths: Vec::new(),
                 cursor: cursor.unwrap_or_default(),
                 complete: true,
+                before: None,
             });
         };
         Self::conversation_file(&path, cursor, known, FileConversation::TAIL_BYTES)
@@ -68,6 +69,13 @@ impl Reader {
         tail_bytes: u64,
     ) -> Result<ReadResult, String> {
         FileConversation::read(path, cursor, known, tail_bytes, CodexConversationDecoder)
+    }
+
+    pub(super) fn before(
+        path: &Path,
+        boundary: super::conversation::HistoryBoundary,
+    ) -> Result<super::conversation::HistoryPage, String> {
+        FileConversation::before(path, boundary, CodexConversationDecoder)
     }
 
     pub(super) fn archives(&self) -> Result<Option<HashMap<String, ArchiveState>>, String> {
@@ -874,6 +882,79 @@ impl CodexImageTag {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn bounded_initial_tail_backfills_every_message_through_the_first_prompt() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("history.jsonl");
+        let mut body = String::new();
+        let mut expected = Vec::new();
+        for index in 0..1230 {
+            let (role, text) = if index == 0 {
+                ("user", "First request".to_string())
+            } else {
+                ("assistant", format!("Answer {index}"))
+            };
+            let content_kind = if role == "user" {
+                "input_text"
+            } else {
+                "output_text"
+            };
+            body.push_str(&serde_json::json!({"type":"response_item", "payload":{"type":"message", "role":role, "content":[{"type":content_kind, "text":text}]}}).to_string());
+            body.push('\n');
+            expected.push(if index == 0 {
+                Message::user(text)
+            } else {
+                Message::Assistant {
+                    blocks: vec![vmux_api::session::AssistantBlock::Text(text)],
+                }
+            });
+        }
+        std::fs::write(&path, body).unwrap();
+        let tail = Reader::conversation_file(&path, None, FileConversation::TAIL_BYTES).unwrap();
+        assert_eq!(tail.messages.len(), 512);
+        let mut actual = tail.messages;
+        let mut before = tail.before;
+        let mut pages = 0;
+        while let Some(boundary) = before {
+            let page = Reader::before(&path, boundary).unwrap();
+            assert!(page.before.is_none_or(|next| next < boundary));
+            let mut prefix = page
+                .records
+                .into_iter()
+                .map(|(_, message)| message)
+                .collect::<Vec<_>>();
+            prefix.append(&mut actual);
+            actual = prefix;
+            before = page.before;
+            pages += 1;
+        }
+        assert_eq!(pages, 2);
+        assert_eq!(actual, expected);
+    }
+
+    #[test]
+    fn oversized_middle_record_does_not_hide_an_older_prompt() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("history.jsonl");
+        let mut body = serde_json::json!({"type":"response_item", "payload":{"type":"message", "role":"user", "content":[{"type":"input_text", "text":"First request"}]}}).to_string();
+        body.push('\n');
+        body.push_str(&"x".repeat((FileConversation::TAIL_BYTES + 1024) as usize));
+        body.push('\n');
+        body.push_str(&serde_json::json!({"type":"response_item", "payload":{"type":"message", "role":"assistant", "content":[{"type":"output_text", "text":"Latest answer"}]}}).to_string());
+        body.push('\n');
+        std::fs::write(&path, body).unwrap();
+        let tail = Reader::conversation_file(&path, None, FileConversation::TAIL_BYTES).unwrap();
+        let mut before = tail.before;
+        let mut found = Vec::new();
+        while let Some(boundary) = before {
+            let page = Reader::before(&path, boundary).unwrap();
+            assert!(page.before.is_none_or(|next| next < boundary));
+            found.extend(page.records.into_iter().map(|(_, message)| message));
+            before = page.before;
+        }
+        assert_eq!(found, vec![Message::user("First request")]);
+    }
     #[cfg(unix)]
     use std::os::unix::fs::symlink;
 

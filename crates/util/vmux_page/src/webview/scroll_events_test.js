@@ -116,7 +116,8 @@ class ScrollHost {
     return id;
   };
   chat.scope.clearTimeout = id => timers.delete(id);
-  chat.scope.interpreter.getNode = id => ({ closest: selector => id === 4 && selector === '#chat-scroll' ? {} : null });
+  const chatContainer = { scrollTop: 100 };
+  chat.scope.interpreter.getNode = id => ({ closest: selector => id === 4 && selector === '#chat-scroll' ? chatContainer : null });
   const advance = amount => {
     now += amount;
     for (const [id, timer] of [...timers]) {
@@ -132,13 +133,21 @@ class ScrollHost {
   assert.deepEqual(chat.requests.map(request => request.body.name), ['wheel', 'scroll']);
   assert.ok(chat.requests.every(request => request.async), 'chat input must leave native scrolling independent of host replies');
   for (let frame = 0; frame < 30; frame++) {
+    chat.send('wheel', 4, frame);
     chat.send('scroll', 4, frame);
     advance(16);
   }
-  assert.ok(chat.requests.filter(request => request.body.name === 'scroll').length <= 6, 'continuous scrolling must not wake the host once per display frame');
+  assert.equal(chat.requests.filter(request => request.body.name === 'wheel').length, 1, 'continued input does not need repeated host notifications while scrolling away from the upper boundary');
+  assert.ok(chat.requests.filter(request => request.body.name === 'scroll').length <= 4, 'continuous scrolling must not wake the host once per display frame');
   chat.send('scrollend', 4, 30);
   assert.equal(chat.requests.at(-1).body.name, 'scrollend');
   assert.equal(chat.requests.at(-1).body.data.scroll_top, 30);
+  chatContainer.scrollTop = 0;
+  chat.send('wheel', 4, 0);
+  advance(200);
+  chat.send('wheel', 4, 0);
+  advance(200);
+  assert.equal(chat.requests.filter(request => request.body.name === 'wheel').length, 3, 'input at an immovable upper boundary must still request earlier history');
   chat.send('scroll', 4, 40);
   chat.send('click', 4, 0);
   assert.deepEqual(chat.requests.slice(-2).map(request => [request.body.name, request.async]), [['scroll', false], ['click', false]], 'navigation must observe the last viewport position before replacing the page');

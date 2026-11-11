@@ -5,6 +5,7 @@ use percent_encoding::percent_decode_str;
 pub enum Route {
     Manager,
     Session(SessionId),
+    Provider { kind: String, sid: String },
 }
 
 impl Route {
@@ -19,6 +20,20 @@ impl Route {
             ["inbox"] => Some(Self::Manager),
             [id] if route.query().is_none() && route.fragment().is_none() => {
                 let id = percent_decode_str(id).decode_utf8().ok()?;
+                if let Some(source) = id.strip_prefix("resume/") {
+                    let (kind, sid) = source.split_once('/')?;
+                    let kind = percent_decode_str(kind).decode_utf8().ok()?.into_owned();
+                    let sid = percent_decode_str(sid).decode_utf8().ok()?.into_owned();
+                    if !kind.starts_with("acp:")
+                        || kind.len() <= 4
+                        || sid.is_empty()
+                        || sid.len() > 256
+                        || sid.chars().any(char::is_control)
+                    {
+                        return None;
+                    }
+                    return Some(Self::Provider { kind, sid });
+                }
                 (!id.is_empty()).then(|| Self::Session(SessionId(id.into_owned())))
             }
             _ => None,
@@ -34,6 +49,18 @@ impl Route {
                 url.path_segments_mut()
                     .expect("Session route must support path segments")
                     .push(&id.0);
+                url.into()
+            }
+            Self::Provider { kind, sid } => {
+                let kind =
+                    percent_encoding::utf8_percent_encode(kind, percent_encoding::NON_ALPHANUMERIC);
+                let sid =
+                    percent_encoding::utf8_percent_encode(sid, percent_encoding::NON_ALPHANUMERIC);
+                let mut url = url::Url::parse("vmux://sessions/")
+                    .expect("static provider route must be valid");
+                url.path_segments_mut()
+                    .expect("provider route must support path segments")
+                    .push(&format!("resume/{kind}/{sid}"));
                 url.into()
             }
         }
@@ -163,6 +190,18 @@ mod tests {
                 "01a0fc43-68f9-7121-a388-59e1891fdc41".into()
             )))
         );
+    }
+
+    #[test]
+    fn pending_provider_routes_preserve_encoded_identity_and_reject_missing_source() {
+        let route = Route::Provider {
+            kind: "acp:codex test".into(),
+            sid: "thread/name?part#one".into(),
+        };
+        assert_eq!(Route::parse(&route.url()), Some(route));
+        assert_eq!(Route::parse("vmux://sessions/resume/acp:/thread"), None);
+        assert_eq!(Route::parse("vmux://sessions/resume/codex/thread"), None);
+        assert_eq!(Route::parse("vmux://sessions/resume/acp:codex/"), None);
     }
 
     #[test]

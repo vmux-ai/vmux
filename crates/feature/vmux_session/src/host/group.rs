@@ -16,6 +16,7 @@ pub(super) struct ChatMessages<'a> {
     message_times: &'a [u64],
     durations: &'a [u32],
     running: bool,
+    event_ids: &'a [vmux_api::session::EventId],
 }
 
 impl<'a> ChatMessages<'a> {
@@ -32,7 +33,13 @@ impl<'a> ChatMessages<'a> {
             message_times,
             durations,
             running,
+            event_ids: &[],
         }
+    }
+
+    pub(super) fn with_event_ids(mut self, event_ids: &'a [vmux_api::session::EventId]) -> Self {
+        self.event_ids = event_ids;
+        self
     }
 
     pub(super) fn item_count(&self) -> usize {
@@ -103,7 +110,16 @@ impl<'a> ChatMessages<'a> {
                 .and_then(|index| self.message_times.get(index))
                 .copied()
                 .unwrap_or_default();
-            builder.push(message, created_at_ms);
+            let event_id = index
+                .checked_sub(self.imported.len())
+                .and_then(|index| self.event_ids.get(index));
+            builder.push(
+                message,
+                created_at_ms,
+                event_id
+                    .map(vmux_api::session::EventId::as_str)
+                    .unwrap_or_default(),
+            );
         }
         builder.flush_turn();
         if self.running
@@ -138,7 +154,7 @@ impl PageRange {
 }
 
 impl PageBuilder<'_> {
-    fn push(&mut self, message: &Message, created_at_ms: u64) {
+    fn push(&mut self, message: &Message, created_at_ms: u64, event_id: &str) {
         match message {
             Message::User { text, attachments } => {
                 self.flush_turn();
@@ -147,14 +163,14 @@ impl PageBuilder<'_> {
                     .map(|(context, display)| (Some(context), display))
                     .unwrap_or((None, text));
                 if !text.trim().is_empty() || !attachments.is_empty() {
-                    self.push_user(text, context, attachments, created_at_ms);
+                    self.push_user(text, context, attachments, created_at_ms, event_id);
                 }
                 self.start_turn(created_at_ms);
             }
             Message::Assistant { blocks } => {
                 self.start_agent_turn(created_at_ms);
                 if let Some(turn) = self.current.as_mut() {
-                    Self::push_assistant_blocks(turn, blocks);
+                    Self::push_assistant_blocks(turn, blocks, event_id);
                 }
             }
             Message::ToolResult {
@@ -169,6 +185,7 @@ impl PageBuilder<'_> {
                         content: content.clone(),
                         is_error: *is_error,
                     });
+                    turn.block_ids.push(event_id.to_string());
                 }
             }
         }
@@ -236,9 +253,11 @@ impl<'a> PageBuilder<'a> {
         context: Option<&str>,
         attachments: &[AgentAttachment],
         created_at_ms: u64,
+        event_id: &str,
     ) {
         if self.captures() {
             self.items.push(ChatItem::User {
+                event_id: event_id.to_string(),
                 text: text.to_string(),
                 context: context.map(str::to_string),
                 attachments: attachments
@@ -275,8 +294,9 @@ impl<'a> PageBuilder<'a> {
 }
 
 impl PageBuilder<'_> {
-    fn push_assistant_blocks(turn: &mut ChatTurn, blocks: &[AssistantBlock]) {
-        for block in blocks {
+    fn push_assistant_blocks(turn: &mut ChatTurn, blocks: &[AssistantBlock], event_id: &str) {
+        for (ordinal, block) in blocks.iter().enumerate() {
+            let start = turn.blocks.len();
             match block {
                 AssistantBlock::Text(text) => Self::push_assistant_text(turn, text),
                 AssistantBlock::Thinking(text) => {
@@ -313,6 +333,14 @@ impl PageBuilder<'_> {
                 AssistantBlock::Plan { steps } => turn.blocks.push(ChatBlock::Plan {
                     steps: steps.iter().map(Self::map_plan_step).collect(),
                 }),
+            }
+            for part in 0..turn.blocks.len().saturating_sub(start) {
+                let id = if event_id.is_empty() {
+                    String::new()
+                } else {
+                    format!("{event_id}:{ordinal}:{part}")
+                };
+                turn.block_ids.push(id);
             }
         }
     }

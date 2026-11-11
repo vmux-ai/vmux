@@ -72,6 +72,7 @@ pub(super) fn ChatTranscript(chat: Chat) -> Element {
         chat.status() != "errored" && (chat.transcript_loading() || !chat.transcript.ready());
     let loaded_start = transcript.loaded_start;
     let history_loading = transcript.loading;
+    let has_older = transcript.has_older;
     let items = transcript.items;
     let initial_scroll = chat.transcript.initial_scroll();
     let placement_pending = !transcript_loading && !items.is_empty() && initial_scroll.is_empty();
@@ -93,7 +94,7 @@ pub(super) fn ChatTranscript(chat: Chat) -> Element {
                     chat.transcript.follow();
                 }
             },
-            class: "relative z-10 flex-1 overflow-y-auto overscroll-contain scroll-pt-24 px-3 {bottom_padding} outline-none sm:px-4 md:px-6",
+            class: "relative z-10 flex-1 overflow-y-auto overscroll-contain scroll-pt-12 px-3 {bottom_padding} outline-none sm:px-4 md:px-6",
             tabindex: "0",
             onwheel: move |_| chat.transcript.scroll_input(),
             ontouchmove: move |_| chat.transcript.scroll_input(),
@@ -109,7 +110,7 @@ pub(super) fn ChatTranscript(chat: Chat) -> Element {
                 },
                 if transcript_loading {
                     TranscriptSkeleton {}
-                } else if loaded_start > 0 {
+                } else if loaded_start > 0 || has_older {
                     HistorySentinel { loading: history_loading }
                 }
                 if !transcript_loading && chat.installing_splash() {
@@ -158,7 +159,7 @@ fn HistorySentinel(loading: bool) -> Element {
 }
 
 #[component]
-fn TranscriptSkeleton() -> Element {
+pub(super) fn TranscriptSkeleton() -> Element {
     rsx! {
         div { class: "flex min-h-full shrink-0 flex-col justify-end gap-5 px-1 py-1", "data-vmux-loading-surface": "",
             div { class: "ml-auto flex w-2/3 items-start justify-end gap-3",

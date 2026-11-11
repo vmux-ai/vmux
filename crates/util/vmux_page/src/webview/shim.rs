@@ -134,7 +134,9 @@ pub(crate) const WRY_HOST_SHIM: &str = r#"
       let scheduled = false;
       const chatPending = new Map();
       let chatTimer = null;
-      let lastChat = -100;
+      let lastChat = -200;
+      let lastInput = -200;
+      let inputSeen = false;
       const send = (event, sync) => {
         if (window.interpreter !== interpreter || !requestMatchesDocument(event)) return;
         if (sync) { synchronous(event.body); return; }
@@ -157,6 +159,13 @@ pub(crate) const WRY_HOST_SHIM: &str = r#"
         const scrolling = ['wheel', 'touchmove', 'scroll', 'scrollend'].includes(body.name);
         const chat = scrolling && interpreter.getNode?.(body.element)?.closest?.('#chat-scroll');
         if (chat) {
+          if (body.name === 'wheel' || body.name === 'touchmove') {
+            const now = Date.now();
+            const notify = !inputSeen || now - lastInput >= 200 || chat.scrollTop <= 0;
+            lastInput = now;
+            inputSeen = true;
+            if (!notify) return { preventDefault: false, stopPropagation: false };
+          }
           const key = body.name + ':' + body.element;
           chatPending.delete(key);
           chatPending.set(key, {
@@ -164,8 +173,8 @@ pub(crate) const WRY_HOST_SHIM: &str = r#"
             revision: applyingRevision ?? navigationRevision,
             epoch: applyingEpoch ?? globalThis.__vmuxIpcEpoch,
           });
-          if (body.name === 'scrollend') flushChat();
-          else if (chatTimer === null) chatTimer = setTimeout(() => flushChat(), Math.max(0, 100 - (Date.now() - lastChat)));
+          if (body.name === 'scrollend') { inputSeen = false; flushChat(); }
+          else if (chatTimer === null) chatTimer = setTimeout(() => flushChat(), Math.max(0, 200 - (Date.now() - lastChat)));
           return { preventDefault: false, stopPropagation: false };
         }
         if (!scrolling && chatPending.size) flushChat(true);
@@ -1030,6 +1039,7 @@ pub(crate) const WRY_HOST_SHIM: &str = r#"
         } else if (edits.byteLength) {
           window.interpreter.run_from_bytes(edits);
         }
+        window.__vmuxDisclosures?.flush?.();
         globalThis.__vmuxPopupPresentation.apply(popupCaptures);
         HeightAnimation.apply(heightAnimations);
         LayoutMovement.apply(layoutMovements);

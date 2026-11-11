@@ -1,21 +1,18 @@
+use base64::Engine;
 use dioxus::prelude::*;
 use pulldown_cmark::{Event, Parser};
 use std::collections::HashMap;
-use vmux_api::chat::{ChatItem, ChatTurnRow};
+use vmux_api::chat::ChatItem;
 use vmux_ui::i18n::translate;
 
-use super::item::{AssistantTurn, ChatItemRow, UserBubble};
+use super::item::{ChatItemRow, UserBubble};
 use super::state::Chat;
 use super::transcript::HandoffDivider;
 
 #[component]
 pub(super) fn Section(turn: Turn, latest_index: usize, chat: Chat) -> Element {
     let prompt = turn.prompt();
-    let response = turn.response();
-    let has_header = prompt.is_some() || response.is_some();
-    let both = prompt.is_some() && response.is_some();
-    let header_height = if both { "h-24" } else { "h-12" };
-    let overlap = if both { "-mt-24" } else { "-mt-12" };
+    let has_header = prompt.is_some();
     let start = turn.start;
     let handoff_source = chat.handoff.source();
     let handoff_truncated = chat.handoff.truncated();
@@ -30,8 +27,8 @@ pub(super) fn Section(turn: Turn, latest_index: usize, chat: Chat) -> Element {
         section { class: "relative", "data-vmux-sticky-section": "",
             div { class: "pointer-events-none absolute inset-x-0 top-0 h-px", "data-vmux-sticky-sentinel": "", aria_hidden: true }
             if has_header {
-                header { class: "pointer-events-none sticky top-0 z-30 {header_height}", "data-vmux-sticky-header": "", inert: true, aria_hidden: true,
-                    div { class: "flex {header_height} flex-col justify-center gap-1 bg-[linear-gradient(to_bottom,var(--background)_0%,color-mix(in_srgb,var(--background)_90%,transparent)_75%,transparent_100%)] pb-3 pt-1", "data-vmux-sticky-content": "",
+                header { class: "pointer-events-none sticky top-0 z-30 h-12", "data-vmux-sticky-header": "", inert: true, aria_hidden: true,
+                    div { class: "flex h-12 flex-col justify-center bg-[linear-gradient(to_bottom,var(--background)_0%,color-mix(in_srgb,var(--background)_90%,transparent)_75%,transparent_100%)] pb-3 pt-1", "data-vmux-sticky-content": "",
                         if let Some(excerpt) = prompt {
                             PinnedMessage {
                                 excerpt,
@@ -39,32 +36,23 @@ pub(super) fn Section(turn: Turn, latest_index: usize, chat: Chat) -> Element {
                                 label: translate("session-turn-view-prompt"),
                                 name: user_name.clone(),
                                 color: user_color.clone(),
-                                right: true,
-                            }
-                        }
-                        if let Some(excerpt) = response {
-                            PinnedMessage {
-                                excerpt,
-                                chat,
-                                label: translate("session-turn-view-response"),
-                                name: agent_name.clone(),
-                                color: agent_color.clone(),
-                                agent_id: Some(agent.clone()),
-                                avatar: agent_avatar.clone(),
                             }
                         }
                     }
                 }
             }
-            div { class: if has_header { format!("{overlap} flex flex-col gap-5") } else { "flex flex-col gap-5".to_string() },
+            div { class: if has_header { "-mt-12 flex flex-col gap-5" } else { "flex flex-col gap-5" },
                 for (offset, item) in turn.items.into_iter().enumerate() {
                     {
                         let index = start + offset;
+                        let item_key = turn.item_keys.get(offset).cloned().unwrap_or_else(|| index.to_string());
+                        let item_id = Turn::anchor(&item_key);
+                        let user_anchor = matches!(&item, ChatItem::User { .. });
                         rsx! {
                             div {
-                                key: "{index}",
-                                id: "chat-item-{index}",
-                                "data-vmux-scroll-anchor": "",
+                                key: "{item_key}",
+                                id: "{item_id}",
+                                "data-vmux-scroll-anchor": user_anchor.then_some(""),
                                 ChatItemRow {
                                     absolute_index: index,
                                     item,
@@ -100,34 +88,18 @@ fn PinnedMessage(
     label: String,
     name: String,
     color: String,
-    #[props(default)] right: bool,
-    #[props(default)] agent_id: Option<String>,
-    #[props(default)] avatar: Option<String>,
 ) -> Element {
     let text = excerpt.label();
     let target = excerpt.target;
     rsx! {
-        if right {
-            UserBubble { avatar_name: name, avatar_color: color, compact: true,
-                button {
-                    r#type: "button",
-                    class: "block min-w-0 truncate text-left text-sm leading-5 text-foreground/90",
-                    aria_label: label,
-                    title: excerpt.text,
-                    onclick: move |_| chat.transcript.reveal(&target),
-                    "{text}"
-                }
-            }
-        } else {
-            AssistantTurn { agent_id: agent_id.unwrap_or_default(), name, avatar_src: avatar, avatar_background: color, compact: true,
-                button {
-                    r#type: "button",
-                    class: "block w-full min-w-0 truncate text-left text-sm leading-6 text-foreground/80",
-                    aria_label: label,
-                    title: excerpt.text,
-                    onclick: move |_| chat.transcript.reveal(&target),
-                    "{text}"
-                }
+        UserBubble { avatar_name: name, avatar_color: color, compact: true,
+            button {
+                r#type: "button",
+                class: "block min-w-0 truncate text-left text-sm leading-5 text-foreground/90",
+                aria_label: label,
+                title: excerpt.text,
+                onclick: move |_| chat.transcript.reveal(&target),
+                "{text}"
             }
         }
     }
@@ -135,9 +107,10 @@ fn PinnedMessage(
 
 #[derive(Clone, PartialEq)]
 pub(super) struct Turn {
-    key: usize,
+    key: String,
     start: usize,
     items: Vec<ChatItem>,
+    item_keys: Vec<String>,
 }
 
 impl Turn {
@@ -146,9 +119,10 @@ impl Turn {
         for (offset, item) in items.into_iter().enumerate() {
             if matches!(item, ChatItem::User { .. }) || turns.is_empty() {
                 turns.push(Self {
-                    key: loaded_start + offset,
+                    key: (loaded_start + offset).to_string(),
                     start: loaded_start + offset,
                     items: Vec::new(),
+                    item_keys: Vec::new(),
                 });
             }
             turns.last_mut().unwrap().items.push(item);
@@ -156,8 +130,17 @@ impl Turn {
         turns
     }
 
-    pub(super) fn key(&self) -> usize {
-        self.key
+    pub(super) fn key(&self) -> String {
+        self.key.clone()
+    }
+
+    fn anchor(key: &str) -> String {
+        let key = if key.parse::<usize>().is_ok() {
+            key.to_string()
+        } else {
+            base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(key)
+        };
+        format!("chat-item-{key}")
     }
 
     fn prompt(&self) -> Option<Excerpt> {
@@ -179,28 +162,15 @@ impl Turn {
             };
             if !text.is_empty() {
                 return Some(Excerpt {
-                    target: format!("chat-item-{}", self.start + offset),
+                    target: Self::anchor(
+                        &self
+                            .item_keys
+                            .get(offset)
+                            .cloned()
+                            .unwrap_or_else(|| (self.start + offset).to_string()),
+                    ),
                     text,
                 });
-            }
-        }
-        None
-    }
-
-    fn response(&self) -> Option<Excerpt> {
-        for (offset, item) in self.items.iter().enumerate().rev() {
-            let ChatItem::Turn(turn) = item else {
-                continue;
-            };
-            for row in turn.rows.iter().rev() {
-                if let ChatTurnRow::Text { index, text } = row
-                    && !text.trim().is_empty()
-                {
-                    return Some(Excerpt {
-                        target: format!("chat-response-{}-{index}", self.start + offset),
-                        text: text.clone(),
-                    });
-                }
             }
         }
         None
@@ -209,24 +179,44 @@ impl Turn {
 
 #[derive(Default)]
 pub(super) struct Keys {
-    items: HashMap<usize, usize>,
+    sections: HashMap<String, String>,
+    items: HashMap<String, String>,
 }
 
 impl Keys {
     pub(super) fn assign(&mut self, turns: &mut [Turn]) {
-        let mut next = HashMap::new();
+        let mut next_sections = HashMap::new();
+        let mut next_items = HashMap::new();
         for turn in turns {
-            for offset in 0..turn.items.len() {
-                if let Some(key) = self.items.get(&(turn.start + offset)) {
-                    turn.key = *key;
-                    break;
+            let mut section_ids = Vec::new();
+            turn.item_keys.clear();
+            for (offset, item) in turn.items.iter().enumerate() {
+                let mut ids = item.identity_keys();
+                if ids.is_empty() {
+                    ids.push((turn.start + offset).to_string());
                 }
+                let key = ids
+                    .iter()
+                    .find_map(|id| self.items.get(id))
+                    .cloned()
+                    .unwrap_or_else(|| ids[0].clone());
+                for id in &ids {
+                    next_items.insert(id.clone(), key.clone());
+                }
+                turn.item_keys.push(key);
+                section_ids.extend(ids);
             }
-            for offset in 0..turn.items.len() {
-                next.insert(turn.start + offset, turn.key);
+            turn.key = section_ids
+                .iter()
+                .find_map(|id| self.sections.get(id))
+                .cloned()
+                .unwrap_or_else(|| section_ids[0].clone());
+            for id in section_ids {
+                next_sections.insert(id, turn.key.clone());
             }
         }
-        self.items = next;
+        self.sections = next_sections;
+        self.items = next_items;
     }
 }
 
@@ -259,11 +249,50 @@ impl Excerpt {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use vmux_api::chat::ChatTurn;
+    use vmux_api::chat::{ChatTurn, ChatTurnRow};
     use vmux_api::prompt_media::ChatAttachment;
 
     #[test]
-    fn sticky_previews_pair_each_prompt_with_that_turns_latest_response() {
+    fn same_turn_prefix_preserves_existing_section_and_message_keys() {
+        let mut keys = Keys::default();
+        let mut initial = Turn::group(
+            vec![ChatItem::Turn(ChatTurn {
+                block_ids: vec!["existing-response".into()],
+                ..Default::default()
+            })],
+            0,
+        );
+        keys.assign(&mut initial);
+        let section = initial[0].key();
+        let item = initial[0].item_keys[0].clone();
+        let mut expanded = Turn::group(
+            vec![
+                ChatItem::User {
+                    event_id: "first-prompt".into(),
+                    text: "First prompt".into(),
+                    context: None,
+                    attachments: Vec::new(),
+                    created_at_ms: 0,
+                },
+                ChatItem::Turn(ChatTurn {
+                    block_ids: vec!["older-response".into(), "existing-response".into()],
+                    ..Default::default()
+                }),
+            ],
+            0,
+        );
+        keys.assign(&mut expanded);
+        assert_eq!(expanded[0].key(), section);
+        assert_eq!(expanded[0].item_keys[1], item);
+        assert_ne!(expanded[0].item_keys[0], item);
+        assert_eq!(
+            expanded[0].prompt().unwrap().target,
+            Turn::anchor("first-prompt")
+        );
+    }
+
+    #[test]
+    fn sticky_prompts_keep_their_own_message_targets_across_turns() {
         let turns = Turn::group(
             vec![
                 ChatItem::user("First request"),
@@ -293,11 +322,9 @@ mod tests {
         );
         assert_eq!(turns.len(), 2);
         assert_eq!(turns[0].prompt().unwrap().label(), "First request");
-        let first = turns[0].response().unwrap();
-        assert_eq!(first.label(), "Final answer");
-        assert_eq!(first.target, "chat-response-9-4");
+        assert_eq!(turns[0].prompt().unwrap().target, "chat-item-8");
         assert_eq!(turns[1].prompt().unwrap().target, "chat-item-10");
-        assert_eq!(turns[1].response().unwrap().label(), "Another answer");
+        assert_eq!(turns[1].prompt().unwrap().label(), "Second request");
     }
 
     #[test]
@@ -323,7 +350,6 @@ mod tests {
             24,
         );
         assert!(turns[0].prompt().is_none());
-        assert_eq!(turns[0].response().unwrap().target, "chat-response-24-3");
         assert_eq!(turns[1].prompt().unwrap().target, "chat-item-25");
     }
 
@@ -331,6 +357,7 @@ mod tests {
     fn sticky_prompts_show_attachment_names_when_the_message_has_no_text() {
         let turns = Turn::group(
             vec![ChatItem::User {
+                event_id: String::new(),
                 text: String::new(),
                 context: None,
                 created_at_ms: 0,
@@ -342,7 +369,6 @@ mod tests {
             0,
         );
         assert_eq!(turns[0].prompt().unwrap().label(), "recording.mov");
-        assert!(turns[0].response().is_none());
     }
 
     #[test]
@@ -362,6 +388,5 @@ mod tests {
         keys.assign(&mut expanded);
         assert_eq!(expanded[0].key(), key);
         assert_eq!(expanded[0].prompt().unwrap().target, "chat-item-23");
-        assert_eq!(expanded[0].response().unwrap().target, "chat-response-24-0");
     }
 }

@@ -15,7 +15,11 @@ impl WindowPointerPolicy {
     pub(super) fn scroll_should_wake(
         layout_pointer_inside: bool,
         sampled_over_windowed_page: bool,
+        native_webview: bool,
     ) -> bool {
+        if native_webview {
+            return false;
+        }
         layout_pointer_inside || !sampled_over_windowed_page
     }
 }
@@ -289,10 +293,22 @@ mod tests {
     }
 
     #[test]
-    fn scroll_wakes_bevy_only_for_layout_or_non_windowed_content() {
-        assert!(!WindowPointerPolicy::scroll_should_wake(false, true));
-        assert!(WindowPointerPolicy::scroll_should_wake(true, true));
-        assert!(WindowPointerPolicy::scroll_should_wake(false, false));
+    fn native_webview_scroll_does_not_wake_layout_when_its_pointer_cache_is_stale() {
+        for (layout, windowed, native, wake) in [
+            (false, false, false, true),
+            (false, true, false, false),
+            (true, false, false, true),
+            (true, true, false, true),
+            (false, false, true, false),
+            (false, true, true, false),
+            (true, false, true, false),
+            (true, true, true, false),
+        ] {
+            assert_eq!(
+                WindowPointerPolicy::scroll_should_wake(layout, windowed, native),
+                wake
+            );
+        }
     }
 
     #[test]

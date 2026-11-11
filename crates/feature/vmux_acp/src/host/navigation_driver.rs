@@ -149,6 +149,10 @@ impl PageOpener<'_, '_> {
                 self.open_manager(task, transition_webview, &url);
                 Ok(PageOpenCompletion::Complete)
             }
+            Route::Provider { .. } => {
+                self.open_provider(task, transition_webview);
+                Ok(PageOpenCompletion::Complete)
+            }
             Route::Session(id) => {
                 let Some((
                     session_entity,
@@ -334,6 +338,40 @@ impl PageOpener<'_, '_> {
             },
             SessionManagerView,
         ));
+    }
+
+    fn open_provider(&mut self, task: &PageOpenTask, transition_webview: Option<Entity>) {
+        let title = translate("sessions-title");
+        self.retarget_handoff(transition_webview, task.id);
+        let view = transition_webview.unwrap_or_else(|| {
+            let previous = self.previous_surfaces(task.stack, None);
+            for surface in &previous {
+                self.commands
+                    .entity(*surface)
+                    .try_insert(vmux_layout::hosted_page::SurfaceBlocked);
+            }
+            self.commands
+                .spawn((
+                    vmux_layout::Browser::hosted_page(&task.url, &title),
+                    self.new_handoff(previous, task.id),
+                    SessionView,
+                    ChildOf(task.stack),
+                ))
+                .insert(Visibility::Hidden)
+                .id()
+        });
+        self.commands
+            .entity(view)
+            .remove::<SessionManagerView>()
+            .insert((
+                PageMetadata {
+                    url: task.url.clone(),
+                    title,
+                    bg_color: None,
+                    icon: default(),
+                },
+                SessionView,
+            ));
     }
 
     fn open_session_view(

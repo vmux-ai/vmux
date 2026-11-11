@@ -656,7 +656,10 @@ impl Transcript {
 
     pub(super) fn scroll_input(self) {
         self.note_scroll_input();
-        if *self.last_top.peek() <= 0 && self.root.peek().transcript.loaded_start > 0 {
+        if *self.last_top.peek() <= 0
+            && (self.root.peek().transcript.loaded_start > 0
+                || self.root.peek().transcript.has_older)
+        {
             self.stop_following();
             self.request_history();
         }
@@ -772,7 +775,8 @@ impl Transcript {
         }
         let unavailable = {
             let root = self.root.peek();
-            root.transcript.loading || root.transcript.loaded_start == 0
+            root.transcript.loading
+                || root.transcript.loaded_start == 0 && !root.transcript.has_older
         };
         if unavailable {
             return;

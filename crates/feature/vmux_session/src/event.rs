@@ -307,9 +307,18 @@ pub struct ChatTranscriptState {
     pub total: u32,
     pub loading: bool,
     #[serde(default)]
+    pub has_older: bool,
+    #[serde(default)]
     pub active_subagents: u32,
     #[serde(default)]
     pub active_tasks: u32,
+}
+
+#[vmux_api::contract(Default, Eq)]
+pub struct ChatHistoryStatus {
+    pub session: String,
+    pub has_older: bool,
+    pub loading: bool,
 }
 
 #[vmux_api::ui_event(Default)]
@@ -598,6 +607,7 @@ mod tests {
             loaded_start: 4,
             total: 92,
             loading: true,
+            has_older: true,
             active_subagents: 2,
             active_tasks: 3,
         };
@@ -679,6 +689,7 @@ mod tests {
     fn chat_item_turn_roundtrip() {
         let items = vec![
             ChatItem::User {
+                event_id: String::new(),
                 text: "hi".into(),
                 context: Some("project policy".into()),
                 attachments: vec![ChatAttachment {

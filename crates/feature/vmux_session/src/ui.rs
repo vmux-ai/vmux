@@ -41,9 +41,40 @@ pub fn Page() -> Element {
             let session_id = id.0;
             rsx! { SessionDetail { key: "{session_id}", session_id, details_open } }
         }
+        Some(vmux_session::Route::Provider { kind, sid }) => rsx! { PendingSession { kind, sid } },
         None => {
             let session_id = String::new();
             rsx! { SessionDetail { key: "{session_id}", session_id, details_open } }
+        }
+    }
+}
+
+#[component]
+fn PendingSession(kind: String, sid: String) -> Element {
+    let detail =
+        vmux_ui::hooks::UiStateBinding::<crate::state::SessionDetailUiState>::use_context();
+    let failed = detail
+        .state
+        .read()
+        .pending_provider
+        .as_ref()
+        .is_some_and(|provider| provider.kind == kind && provider.sid == sid && provider.failed);
+    rsx! {
+        main { class: "session-chat-page flex h-dvh flex-col overflow-hidden bg-background text-foreground",
+            div { class: "mx-auto w-full max-w-3xl px-3 pt-3 sm:px-4 md:px-6",
+                if failed {
+                    vmux_ui::components::notice::Notice {
+                        message: vmux_ui::i18n::translate("sessions-history-unavailable"),
+                        kind: vmux_ui::components::notice::NoticeKind::Warning,
+                        actions: rsx! { vmux_ui::components::button::Button {
+                            onclick: move |_| vmux_ui::navigation::PageNavigation::replace(vmux_session::Route::Manager.url()),
+                            {vmux_ui::i18n::translate("sessions-title")}
+                        } },
+                    }
+                } else {
+                    transcript::TranscriptSkeleton {}
+                }
+            }
         }
     }
 }

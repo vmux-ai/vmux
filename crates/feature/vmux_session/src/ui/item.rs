@@ -1,5 +1,8 @@
+use base64::Engine;
 use std::cell::RefCell;
+use std::collections::HashMap;
 use std::collections::HashSet;
+use std::rc::Rc;
 
 use dioxus::prelude::*;
 use vmux_api::chat::{
@@ -203,12 +206,12 @@ pub fn ChatItemRow(
             context,
             attachments,
             created_at_ms,
+            ..
         } => {
             let mut attachments = attachments.clone();
             vmux_api::prompt_media::PromptMediaPaths::append_videos(text, &mut attachments);
             rsx! {
             UserBubble {
-                key: "{key}",
                 avatar_name: user_name,
                 avatar_color: user_color,
                 copy_text: text.clone(),
@@ -386,7 +389,7 @@ mod disclosure_tests {
     fn PastedVideoFixture() -> Element {
         rsx! { ChatItemRow {
             absolute_index: 0,
-            item: ChatItem::User { text: r"inspect /tmp/Screen\ Recording.mov".into(), context: None, attachments: Vec::new(), created_at_ms: 0 },
+            item: ChatItem::User { event_id: String::new(), text: r"inspect /tmp/Screen\ Recording.mov".into(), context: None, attachments: Vec::new(), created_at_ms: 0 },
             agent_id: String::new(), agent_name: String::new(), agent_avatar: None, agent_color: String::new(),
             user_name: "Junichi".to_string(), user_color: "#888888".to_string(),
             on_media_load: move |_| {},
@@ -540,6 +543,7 @@ mod disclosure_tests {
             FinishedToolCallsProps {
                 calls: vec![call],
                 open: false,
+                identity: String::new(),
             },
         );
         batch.rebuild_in_place();
@@ -937,6 +941,13 @@ pub fn TurnView(
     agent_color: String,
     #[props(default)] latest: bool,
 ) -> Element {
+    let row_keys = use_hook(|| Rc::new(RefCell::new(RowKeys::default())));
+    let mut ids = use_signal(|| Rc::<[String]>::from(turn.block_ids.clone()));
+    if ids.peek().as_ref() != turn.block_ids.as_slice() {
+        ids.set(Rc::from(turn.block_ids.clone()));
+    }
+    use_context_provider(|| BlockIdentity(ids));
+    let stable_keys = row_keys.borrow_mut().assign(&turn.rows, &turn.block_ids);
     let key = turn_index;
     let turn = &turn;
     let tools = ToolDisclosure::new(turn, latest);
@@ -979,7 +990,6 @@ pub fn TurnView(
     });
     rsx! {
         div {
-            key: "{key}",
             class: "flex w-full flex-col gap-2 [contain-intrinsic-size:auto_180px] [content-visibility:auto]",
             "data-vmux-scroll-layout": "",
             if !turn.rows.is_empty() || turn.running || duration_label.is_some() {
@@ -990,9 +1000,10 @@ pub fn TurnView(
                     avatar_background: agent_color,
                     copy_text: turn.copy_text.clone(),
                     created_at_ms: turn.created_at_ms,
-                    for row in turn.rows.iter().cloned() {
-                        TurnBlock {
-                            key: "{row.index()}",
+                    for (row, identity) in turn.rows.iter().cloned().zip(stable_keys) {
+                        TurnRow {
+                            key: "{identity}",
+                            identity,
                             turn_index: key,
                             streaming: live_text_index == Some(row.index()),
                             expanded: tools.expanded(&row),
@@ -1009,6 +1020,96 @@ pub fn TurnView(
                     }
                 }
             }
+        }
+    }
+}
+
+#[derive(Clone, Copy)]
+struct BlockIdentity(Signal<Rc<[String]>>);
+
+impl BlockIdentity {
+    fn source(index: u32) -> Option<String> {
+        let identity = try_consume_context::<Self>()?;
+        identity
+            .0
+            .read()
+            .get(index as usize)
+            .filter(|id| !id.is_empty())
+            .cloned()
+    }
+
+    fn key(index: u32) -> String {
+        Self::source(index).unwrap_or_else(|| index.to_string())
+    }
+
+    fn anchor(index: u32, kind: &str) -> String {
+        let id = Self::key(index);
+        let encoded = base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(id);
+        format!("chat-{kind}-{encoded}")
+    }
+
+    fn disclosure(index: u32, kind: &str) -> String {
+        Self::source(index)
+            .map(|id| format!("{id}:{kind}"))
+            .unwrap_or_default()
+    }
+}
+
+#[derive(Default)]
+struct RowKeys(HashMap<String, String>);
+
+impl RowKeys {
+    fn assign(&mut self, rows: &[ChatTurnRow], ids: &[String]) -> Vec<String> {
+        let mut next = HashMap::new();
+        let mut keys = Vec::new();
+        for row in rows {
+            let indices = match row {
+                ChatTurnRow::FinishedTools { calls, .. } => {
+                    calls.iter().map(|call| call.index).collect::<Vec<_>>()
+                }
+                _ => vec![row.index()],
+            };
+            let mut members = Vec::new();
+            for index in indices {
+                let id = ids
+                    .get(index as usize)
+                    .filter(|id| !id.is_empty())
+                    .cloned()
+                    .unwrap_or_else(|| index.to_string());
+                members.push(id);
+            }
+            let key = members
+                .iter()
+                .find_map(|id| self.0.get(id))
+                .cloned()
+                .unwrap_or_else(|| members[0].clone());
+            for id in members {
+                next.insert(id, key.clone());
+            }
+            keys.push(key);
+        }
+        self.0 = next;
+        keys
+    }
+}
+
+#[component]
+fn TurnRow(
+    identity: String,
+    row: ChatTurnRow,
+    turn_index: usize,
+    streaming: bool,
+    expanded: bool,
+) -> Element {
+    let encoded = base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(&identity);
+    let id = if identity.parse::<usize>().is_ok() {
+        format!("chat-row-{turn_index}-{encoded}")
+    } else {
+        format!("chat-row-{encoded}")
+    };
+    rsx! {
+        div { id, "data-vmux-scroll-anchor": "",
+            TurnBlock { identity, row, turn_index, streaming, expanded }
         }
     }
 }
@@ -1174,7 +1275,20 @@ fn ToolArguments(arguments: ChatToolArguments) -> Element {
 }
 
 #[component]
-fn FinishedToolCalls(calls: Vec<ChatToolCall>, open: bool) -> Element {
+fn FinishedToolCalls(
+    calls: Vec<ChatToolCall>,
+    open: bool,
+    #[props(default)] identity: String,
+) -> Element {
+    let disclosure = if !identity.is_empty()
+        && calls
+            .first()
+            .is_some_and(|call| BlockIdentity::source(call.index).is_some())
+    {
+        format!("{identity}:finished")
+    } else {
+        String::new()
+    };
     let count = calls.len() as i64;
     let mut paths = Vec::new();
     for call in &calls {
@@ -1185,7 +1299,7 @@ fn FinishedToolCalls(calls: Vec<ChatToolCall>, open: bool) -> Element {
         }
     }
     rsx! {
-        details { class: "disclosure", open,
+        details { class: "disclosure", open, "data-vmux-disclosure-key": disclosure,
             summary { class: "flex cursor-pointer select-none items-center gap-2 rounded-xl px-2 py-1 text-xs text-muted-foreground list-none transition-colors hover:bg-foreground/[0.025] [&::-webkit-details-marker]:hidden",
                 DisclosureIcon {}
                 span { class: "font-medium",
@@ -1195,7 +1309,7 @@ fn FinishedToolCalls(calls: Vec<ChatToolCall>, open: bool) -> Element {
             }
             div { class: "mt-1 flex flex-col gap-1",
                 for call in calls {
-                    ToolCall { call }
+                    ToolCall { key: "{BlockIdentity::key(call.index)}", call }
                 }
             }
         }
@@ -1423,7 +1537,9 @@ fn ToolExploration(steps: Vec<ExploreStep>) -> Element {
 
 #[component]
 fn ToolCall(call: ChatToolCall) -> Element {
-    let key = call.index;
+    let key = BlockIdentity::key(call.index);
+    let anchor = BlockIdentity::anchor(call.index, "tool");
+    let disclosure = BlockIdentity::disclosure(call.index, "tool");
     let paths = call.file_paths();
     let edits = call.edited_paths();
     let command = if edits.is_empty() {
@@ -1461,7 +1577,7 @@ fn ToolCall(call: ChatToolCall) -> Element {
     let icon_path = paths.first().cloned();
     let shell = command.as_ref().and_then(|command| command.shell_icon());
     rsx! {
-        div { key: "{key}", class: "grid grid-cols-[1.5rem_minmax(0,1fr)] items-start gap-2.5 rounded-lg px-2 py-1.5 transition-colors hover:bg-foreground/[0.025]",
+        div { key: "{key}", id: anchor, "data-vmux-scroll-anchor": "", class: "grid grid-cols-[1.5rem_minmax(0,1fr)] items-start gap-2.5 rounded-lg px-2 py-1.5 transition-colors hover:bg-foreground/[0.025]",
             ToolActivityIcon {
                 name: call.name.clone(),
                 file_path: icon_path,
@@ -1470,7 +1586,7 @@ fn ToolCall(call: ChatToolCall) -> Element {
                 activity: if !edits.is_empty() { vmux_api::chat::ChatActivityKind::WriteFile } else if exploration.is_some() { vmux_api::chat::ChatActivityKind::Search } else { call.activity },
             }
             div { class: "min-w-0",
-                details { open: false, class: "disclosure text-xs text-muted-foreground",
+                details { open: false, class: "disclosure text-xs text-muted-foreground", "data-vmux-disclosure-key": disclosure,
                     summary { class: ROW_SUMMARY,
                         DisclosureIcon {}
                         span { class: "shrink-0 font-medium", "{label}" }
@@ -1499,7 +1615,7 @@ fn ToolCall(call: ChatToolCall) -> Element {
                 if !children.is_empty() {
                     div { class: "mt-1.5 flex flex-col gap-1",
                         for child in children {
-                            ToolChild { key: "{child.index()}", child }
+                            ToolChild { key: "{BlockIdentity::key(child.index())}", child }
                         }
                     }
                 }
@@ -1510,7 +1626,8 @@ fn ToolCall(call: ChatToolCall) -> Element {
 
 #[component]
 fn SubagentRow(subagent: ChatSubagentState) -> Element {
-    let key = subagent.index;
+    let key = BlockIdentity::key(subagent.index);
+    let disclosure = BlockIdentity::disclosure(subagent.index, "subagent");
     let status_label = subagent_status_label(subagent.status);
     let status_class = subagent_status_class(subagent.status);
     let title = if subagent.title.is_empty() {
@@ -1523,7 +1640,7 @@ fn SubagentRow(subagent: ChatSubagentState) -> Element {
         div { key: "{key}", class: "grid grid-cols-[1.5rem_minmax(0,1fr)] items-start gap-2.5 rounded-xl bg-violet-500/[0.025] px-2 py-1.5 ring-1 ring-inset ring-violet-500/10 transition-colors hover:bg-violet-500/[0.05]",
             ActivityIconView { kind: ActivityIcon::Subagent }
             div { class: "min-w-0",
-                details { open: subagent.status == ChatSubagentStatus::Running, class: "disclosure text-sm text-muted-foreground",
+                details { open: subagent.status == ChatSubagentStatus::Running, class: "disclosure text-sm text-muted-foreground", "data-vmux-disclosure-key": disclosure,
                     summary { class: "{ROW_SUMMARY} flex-wrap",
                         DisclosureIcon {}
                         span { class: "font-medium text-foreground/85", "{title}" }
@@ -1575,7 +1692,7 @@ fn SubagentRow(subagent: ChatSubagentState) -> Element {
                 if !children.is_empty() {
                     div { class: "mt-2 flex flex-col gap-1 rounded-lg bg-foreground/[0.025] px-2 py-1",
                         for child in children {
-                            ToolChild { key: "{child.index()}", child }
+                            ToolChild { key: "{BlockIdentity::key(child.index())}", child }
                         }
                     }
                 }
@@ -1587,15 +1704,17 @@ fn SubagentRow(subagent: ChatSubagentState) -> Element {
 #[component]
 pub fn TurnBlock(
     row: ChatTurnRow,
+    #[props(default)] identity: String,
     #[props(default)] turn_index: usize,
     #[props(default)] streaming: bool,
     #[props(default)] expanded: bool,
 ) -> Element {
     let key = row.index();
+    let stable = BlockIdentity::key(key);
     match row {
         ChatTurnRow::Text { text, .. } => {
             rsx! {
-                div { key: "{key}", id: "chat-response-{turn_index}-{key}",
+                div { key: "{stable}", id: "chat-response-{turn_index}-{key}",
                     StreamingMarkdown { text, streaming }
                 }
             }
@@ -1603,7 +1722,7 @@ pub fn TurnBlock(
         ChatTurnRow::Thinking { text, .. } => rsx! {
             div { key: "{key}", class: "agent-row-hover grid grid-cols-[1.5rem_minmax(0,1fr)] items-start gap-2.5 rounded-xl px-2 py-1.5 transition-colors",
                 ActivityIconView { kind: ActivityIcon::Thinking }
-                details { open: false, class: "disclosure min-w-0 text-xs text-muted-foreground",
+                details { open: false, class: "disclosure min-w-0 text-xs text-muted-foreground", "data-vmux-disclosure-key": BlockIdentity::disclosure(key, "thinking"),
                     summary { class: ROW_SUMMARY,
                         DisclosureIcon {}
                         span { class: "font-medium", {translate("agent-thinking")} }
@@ -1614,7 +1733,7 @@ pub fn TurnBlock(
         },
         ChatTurnRow::Tool(call) => rsx! { ToolCall { call } },
         ChatTurnRow::FinishedTools { calls, .. } => {
-            rsx! { FinishedToolCalls { calls, open: expanded } }
+            rsx! { FinishedToolCalls { calls, open: expanded, identity } }
         }
         ChatTurnRow::Subagent(subagent) => rsx! { SubagentRow { subagent } },
         ChatTurnRow::Plan { steps, .. } => {
@@ -1622,7 +1741,7 @@ pub fn TurnBlock(
             rsx! {
                 div { key: "{key}", class: "grid grid-cols-[1.5rem_minmax(0,1fr)] items-start gap-2.5 rounded-xl px-2 py-1.5 transition-colors hover:bg-indigo-500/[0.035]",
                     ActivityIconView { kind: ActivityIcon::Plan }
-                    details { open: true, class: "disclosure min-w-0 text-sm",
+                    details { open: true, class: "disclosure min-w-0 text-sm", "data-vmux-disclosure-key": BlockIdentity::disclosure(key, "plan"),
                         summary { class: ROW_SUMMARY,
                             DisclosureIcon {}
                             span { class: "font-medium text-foreground/80", {translate("agent-plan")} }
@@ -1650,7 +1769,7 @@ pub fn TurnBlock(
             rsx! {
                 div { key: "{key}", class: "grid grid-cols-[1.5rem_minmax(0,1fr)] items-start gap-2.5 rounded-xl px-2 py-1.5 transition-colors hover:bg-success/[0.035]",
                     FileActivityIcon { path: diff.path.clone(), write: true }
-                    details { class: "disclosure min-w-0 text-sm text-muted-foreground",
+                    details { class: "disclosure min-w-0 text-sm text-muted-foreground", "data-vmux-disclosure-key": BlockIdentity::disclosure(key, "diff"),
                         summary { class: ROW_SUMMARY,
                             DisclosureIcon {}
                             span { class: "font-medium", {format!("{} ", translate("agent-edited"))} }
@@ -1692,7 +1811,8 @@ pub fn TurnBlock(
 
 #[component]
 fn ToolChild(child: ChatToolChild) -> Element {
-    match child {
+    let anchor = BlockIdentity::anchor(child.index(), "child");
+    rsx! { div { id: anchor, "data-vmux-scroll-anchor": "", {match child {
         ChatToolChild::Tool(call) => rsx! { ToolChildCall { call } },
         ChatToolChild::Subagent(subagent) => rsx! { SubagentChild { subagent } },
         ChatToolChild::Result {
@@ -1702,11 +1822,13 @@ fn ToolChild(child: ChatToolChild) -> Element {
         } => rsx! {
             NestedToolResult { result_key: index as usize, content, is_error }
         },
-    }
+    }} } }
 }
 
 #[component]
 fn ToolChildCall(call: ChatToolChildCall) -> Element {
+    let anchor = BlockIdentity::anchor(call.index, "tool");
+    let disclosure = BlockIdentity::disclosure(call.index, "tool");
     let paths = call.file_paths();
     let edits = call.edited_paths();
     let command = if edits.is_empty() {
@@ -1727,7 +1849,7 @@ fn ToolChildCall(call: ChatToolChildCall) -> Element {
         ToolPresentation::for_call(call.kind, &call.fallback_label).label
     };
     rsx! {
-        details { class: "disclosure text-xs text-muted-foreground",
+        details { class: "disclosure text-xs text-muted-foreground", id: anchor, "data-vmux-scroll-anchor": "", "data-vmux-disclosure-key": disclosure,
             summary { class: "flex cursor-pointer select-none items-center gap-2 py-0.5 list-none [&::-webkit-details-marker]:hidden",
                 DisclosureIcon {}
                 span { class: "shrink-0 font-medium", "{label}" }
@@ -1758,6 +1880,7 @@ fn ToolChildCall(call: ChatToolChildCall) -> Element {
 
 #[component]
 fn SubagentChild(subagent: ChatSubagentSummary) -> Element {
+    let disclosure = BlockIdentity::disclosure(subagent.index, "subagent");
     let status_label = subagent_status_label(subagent.status);
     let status_class = subagent_status_class(subagent.status);
     let title = if subagent.title.is_empty() {
@@ -1766,7 +1889,7 @@ fn SubagentChild(subagent: ChatSubagentSummary) -> Element {
         subagent.title.clone()
     };
     rsx! {
-        details { class: "disclosure text-xs text-muted-foreground",
+        details { class: "disclosure text-xs text-muted-foreground", "data-vmux-disclosure-key": disclosure,
             summary { class: "flex cursor-pointer select-none flex-wrap items-center gap-2 py-0.5 list-none [&::-webkit-details-marker]:hidden",
                 DisclosureIcon {}
                 span { class: "font-medium", "{title}" }
@@ -1805,7 +1928,9 @@ fn subagent_status_class(status: ChatSubagentStatus) -> &'static str {
 
 #[component]
 fn NestedToolResult(result_key: usize, content: String, is_error: bool) -> Element {
-    let key = result_key;
+    let key = BlockIdentity::key(result_key as u32);
+    let anchor = BlockIdentity::anchor(result_key as u32, "result");
+    let disclosure = BlockIdentity::disclosure(result_key as u32, "result");
     let content = content.as_str();
     let preview = OutputPreview::new(content);
     let tone = if is_error {
@@ -1824,7 +1949,7 @@ fn NestedToolResult(result_key: usize, content: String, is_error: bool) -> Eleme
         translate("common-output")
     };
     rsx! {
-        details { key: "{key}", class: "disclosure group/output rounded-lg px-0 py-1 text-xs {tone} {panel}",
+        details { key: "{key}", id: anchor, "data-vmux-scroll-anchor": "", "data-vmux-disclosure-key": disclosure, class: "disclosure group/output rounded-lg px-0 py-1 text-xs {tone} {panel}",
             summary { class: "flex cursor-pointer select-none items-center gap-2 list-none [&::-webkit-details-marker]:hidden",
                 DisclosureIcon {}
                 span { class: "font-medium", "{label}" }
@@ -1837,7 +1962,9 @@ fn NestedToolResult(result_key: usize, content: String, is_error: bool) -> Eleme
 
 #[component]
 fn StandaloneToolResult(result_key: usize, content: String, is_error: bool) -> Element {
-    let key = result_key;
+    let key = BlockIdentity::key(result_key as u32);
+    let anchor = BlockIdentity::anchor(result_key as u32, "result");
+    let disclosure = BlockIdentity::disclosure(result_key as u32, "result");
     let content = content.as_str();
     let preview = OutputPreview::new(content);
     let tone = if is_error {
@@ -1868,7 +1995,7 @@ fn StandaloneToolResult(result_key: usize, content: String, is_error: bool) -> E
     rsx! {
         div { key: "{key}", class: "grid grid-cols-[1.5rem_minmax(0,1fr)] items-start gap-2.5 rounded-xl px-2 py-1.5 transition-colors {row}",
             ActivityIconView { kind: icon }
-            details { class: "disclosure group/output min-w-0 rounded-lg px-0 py-1 text-sm {tone} {panel}",
+            details { class: "disclosure group/output min-w-0 rounded-lg px-0 py-1 text-sm {tone} {panel}", id: anchor, "data-vmux-scroll-anchor": "", "data-vmux-disclosure-key": disclosure,
                 summary { class: "flex cursor-pointer select-none items-center gap-2 list-none [&::-webkit-details-marker]:hidden",
                     DisclosureIcon {}
                     span { class: "font-medium", "{label}" }
