@@ -195,7 +195,7 @@ pub struct ChatUiStatePatch {
     pub mcp: Option<Box<McpServersUiState>>,
 }
 
-#[vmux_api::ui_state(Default, patch = ChatUiStatePatch, version = 8)]
+#[vmux_api::ui_state(Default, patch = ChatUiStatePatch, version = 9)]
 pub struct ChatUiState {
     pub session_directory: Option<SessionDirectorySelection>,
     pub snapshot: ChatSnapshot,

@@ -557,7 +557,14 @@ impl Process {
                 .rev()
                 .find(|(name, _)| name == "HOME")
                 .map(|(_, value)| value.clone())
-                .or_else(|| std::env::var("HOME").ok());
+                .or_else(|| {
+                    let paths = vmux_profile::ProfilePaths::current();
+                    if paths.isolated() {
+                        Some(paths.tool_home().to_string_lossy().into_owned())
+                    } else {
+                        std::env::var("HOME").ok()
+                    }
+                });
             let mut cmd = CommandBuilder::new("/bin/sh");
             cmd.arg("-c");
             cmd.arg(
@@ -2243,6 +2250,65 @@ mod tests {
         assert!(text.contains(&cwd));
         assert!(text.contains(&format!("HOME={home}")));
         assert!(!text.contains(&format!("cd {cwd}")));
+    }
+
+    #[test]
+    fn isolated_process_restores_profile_home_when_starting_in_a_workspace() {
+        let fixture_key = "VMUX_PROCESS_HOME_FIXTURE";
+        if std::env::var_os(fixture_key).is_none() {
+            let fixture = std::env::temp_dir().join(format!(
+                "vmux-process-home-{}-{}",
+                std::process::id(),
+                ProcessId::new()
+            ));
+            std::fs::create_dir_all(&fixture).unwrap();
+            let status = std::process::Command::new(std::env::current_exe().unwrap())
+                .args([
+                    "--exact",
+                    "driver::tests::isolated_process_restores_profile_home_when_starting_in_a_workspace",
+                    "--nocapture",
+                ])
+                .env(fixture_key, &fixture)
+                .env("VMUX_DATA_DIR", &fixture)
+                .env("VMUX_PROFILE", "process-home")
+                .env("VMUX_TEST", "0")
+                .env("VMUX_TEST_ENV_KEYS", "0")
+                .status()
+                .unwrap();
+            let verified = fixture.join("verified").is_file();
+            std::fs::remove_dir_all(&fixture).unwrap();
+            assert!(status.success());
+            assert!(verified, "isolated child test must run to completion");
+            return;
+        }
+        let fixture = std::path::PathBuf::from(std::env::var_os(fixture_key).unwrap());
+        let workspace = fixture.join("workspace");
+        std::fs::create_dir_all(&workspace).unwrap();
+        let paths = vmux_profile::ProfilePaths::current();
+        let home = paths.tool_home();
+        std::fs::create_dir_all(&home).unwrap();
+        let cwd = workspace.to_string_lossy().into_owned();
+        let expected_home = format!("HOME={}", home.display());
+        let (wake_tx, _) = mpsc::unbounded_channel();
+        let mut process = Process::new_with_wake(
+            ProcessId::new(),
+            "/bin/sh".into(),
+            Vec::new(),
+            cwd.clone(),
+            Vec::new(),
+            240,
+            24,
+            wake_tx,
+        )
+        .expect("isolated process should spawn");
+        drain_process_output(&mut process, Duration::from_millis(300));
+        process.write_input(b"printf 'HOME=%s\\n' \"$HOME\"; pwd\r");
+        let text = wait_for_snapshot_text(&mut process, &expected_home);
+        process.kill();
+        assert!(text.contains(&expected_home));
+        assert!(text.contains(&cwd));
+        assert_ne!(home, workspace);
+        std::fs::write(fixture.join("verified"), b"ok").unwrap();
     }
 
     #[test]

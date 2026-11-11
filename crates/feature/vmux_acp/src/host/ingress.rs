@@ -206,8 +206,18 @@ fn project_statuses(
             }
             match &inbound.status {
                 AgentRunStatus::Starting => *state = RunState::Preparing,
-                AgentRunStatus::Idle => *state = RunState::Idle,
-                AgentRunStatus::Streaming => *state = RunState::Streaming,
+                AgentRunStatus::Idle => {
+                    *state = RunState::Idle;
+                    commands
+                        .entity(session)
+                        .remove::<vmux_session::SetupPending>();
+                }
+                AgentRunStatus::Streaming => {
+                    *state = RunState::Streaming;
+                    commands
+                        .entity(session)
+                        .remove::<vmux_session::SetupPending>();
+                }
                 AgentRunStatus::AuthenticationRequired { methods, pending } => {
                     *state = RunState::AuthenticationRequired {
                         methods: methods.as_ref().clone(),
@@ -262,6 +272,67 @@ mod tests {
     use vmux_api::protocol::{AgentRequest, AgentRequestId, ServiceMessage};
     use vmux_ecs::service::ServiceInbound;
     use vmux_team::AgentRenameProfile;
+
+    #[test]
+    fn promptless_setup_retains_recovery_until_the_agent_is_ready() {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins);
+        add(&mut app);
+        let session = app
+            .world_mut()
+            .spawn((
+                Session,
+                SessionId("setup".into()),
+                RunState::Idle,
+                PromptQueue::default(),
+                vmux_session::SetupPending,
+            ))
+            .id();
+        for status in [
+            AgentRunStatus::Starting,
+            AgentRunStatus::AuthenticationRequired {
+                methods: Box::new(Vec::new()),
+                pending: false,
+            },
+            AgentRunStatus::Errored("setup failed".into()),
+        ] {
+            app.world_mut().write_message(AgentRunStatusChanged {
+                sid: "setup".into(),
+                status,
+            });
+            app.update();
+            assert!(
+                app.world()
+                    .get::<vmux_session::SetupPending>(session)
+                    .is_some()
+            );
+        }
+        assert!(matches!(
+            app.world().get::<RunState>(session),
+            Some(RunState::Errored(error)) if error == "setup failed"
+        ));
+        app.world_mut().write_message(AgentRunStatusChanged {
+            sid: "setup".into(),
+            status: AgentRunStatus::Idle,
+        });
+        app.update();
+        assert!(matches!(
+            app.world().get::<RunState>(session),
+            Some(RunState::Idle)
+        ));
+        assert!(
+            app.world()
+                .get::<vmux_session::SetupPending>(session)
+                .is_none()
+        );
+        assert!(
+            app.world()
+                .get::<PromptQueue>(session)
+                .unwrap()
+                .items
+                .is_empty()
+        );
+    }
 
     #[test]
     fn cancelled_setup_rejects_late_status_until_explicit_reattachment() {

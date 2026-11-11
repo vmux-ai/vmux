@@ -111,6 +111,9 @@ struct PushWorld<'w, 's> {
     changed_events: ChangedConversationEvents<'w, 's>,
     loading_started: Query<'w, 's, Entity, Added<vmux_session::TranscriptLoading>>,
     loading_finished: RemovedComponents<'w, 's, vmux_session::TranscriptLoading>,
+    setup: Query<'w, 's, (), With<vmux_session::SetupPending>>,
+    setup_started: Query<'w, 's, Entity, Added<vmux_session::SetupPending>>,
+    setup_finished: RemovedComponents<'w, 's, vmux_session::SetupPending>,
 }
 
 type ReadyView = (
@@ -128,6 +131,7 @@ type ReadyViewFilter = (
 
 #[derive(SystemParam)]
 struct ReadyWorld<'w, 's> {
+    setup: Query<'w, 's, (), With<vmux_session::SetupPending>>,
     targets: super::session::SessionViews<'w, 's>,
     child_of: Query<'w, 's, &'static ChildOf>,
     metadata: Query<'w, 's, &'static PageMetadata>,
@@ -204,6 +208,12 @@ fn push_to_page(
     for session in world.loading_finished.read() {
         loading_changes.insert(session);
     }
+    for session in &world.setup_started {
+        loading_changes.insert(session);
+    }
+    for session in world.setup_finished.read() {
+        loading_changes.insert(session);
+    }
     last_push.retain(|session, _| world.sessions.contains(*session));
     owed.retain(|session| world.sessions.contains(*session));
     for (
@@ -276,6 +286,7 @@ fn push_to_page(
                 None,
             )
         });
+        projection.snapshot.setup_pending = world.setup.contains(session);
         let Ok((mut transcript, mut snapshot, attachments)) = world.chat_views.get_mut(webview)
         else {
             owed.insert(session);
@@ -513,6 +524,7 @@ fn sync_ready_views(
                 viewport,
             )
         });
+        projection.snapshot.setup_pending = world.setup.contains(session_entity);
         transcript.merge_tail(projection.transcript);
         attachments.hydrate_transcript(&mut transcript.state);
         attachments.hydrate_snapshot(&mut projection.snapshot);
@@ -724,6 +736,46 @@ mod tests {
         ) {
             vmux_api::UiStateProjection::apply(&mut published.0, trigger.event().update().clone());
         }
+    }
+
+    #[test]
+    fn setup_lifecycle_reaches_a_synced_page_without_messages_or_status_changes() {
+        let mut app = App::new();
+        app.add_plugins((MinimalPlugins, Plugin))
+            .init_resource::<Published>()
+            .add_observer(Published::record);
+        let session = app
+            .world_mut()
+            .spawn((
+                Session,
+                AgentId("codex".into()),
+                Name::new("Setup"),
+                RunState::Errored("connection failed".into()),
+                PromptQueue::default(),
+                vmux_session::SetupPending,
+            ))
+            .id();
+        app.world_mut().spawn(ChildOf(session));
+        let stack = app
+            .world_mut()
+            .spawn(EntityTarget::<Session>::new(session))
+            .id();
+        let view = app
+            .world_mut()
+            .spawn((SessionView, PageReady {}, ChildOf(stack)))
+            .id();
+        app.update();
+        app.update();
+        assert!(app.world().get::<ChatSynced>(view).is_some());
+        assert!(app.world().resource::<Published>().0.snapshot.setup_pending);
+        app.world_mut()
+            .entity_mut(session)
+            .remove::<vmux_session::SetupPending>();
+        app.update();
+        let state = &app.world().resource::<Published>().0;
+        assert!(!state.snapshot.setup_pending);
+        assert_eq!(state.snapshot.status, "errored");
+        assert!(state.transcript.items.is_empty());
     }
 
     #[test]

@@ -251,7 +251,11 @@ impl Choice {
             }
             Self::Cancel | Self::ChangeAgent => {
                 if send(&ChatCancelSetup).is_ok() {
-                    vmux_ui::navigation::PageNavigation::replace("vmux://sessions/inbox?setup=1");
+                    let url = match self {
+                        Self::Cancel => "vmux://start/",
+                        _ => "vmux://sessions/inbox?setup=1",
+                    };
+                    vmux_ui::navigation::PageNavigation::replace(url);
                 }
             }
         }
@@ -315,6 +319,13 @@ mod tests {
                 self.0.borrow_mut().push("stop".into());
             } else if id == ChatCancelSetup::id() {
                 self.0.borrow_mut().push("cancel".into());
+            } else if id == vmux_api::command_bar::OpenRequest::id() {
+                let request = rkyv::from_bytes::<
+                    vmux_api::command_bar::OpenRequest,
+                    rkyv::rancor::Error,
+                >(bytes)
+                .unwrap();
+                self.0.borrow_mut().push(request.value);
             }
             Ok(())
         }
@@ -649,13 +660,14 @@ mod tests {
     }
 
     #[component]
-    fn FailedSetup() -> Element {
+    fn FailedSetup(#[props(default = true)] setup: bool) -> Element {
         let mut state = vmux_ui::hooks::use_ui_state::<ChatUiState>().state;
         use_hook(move || {
             state.set(ChatUiState {
                 snapshot: ChatSnapshot {
                     status: "errored".into(),
-                    error: "ACP installation failed".into(),
+                    error: "session/load timed out".into(),
+                    setup_pending: setup,
                     ..Default::default()
                 },
                 snapshot_ready: true,
@@ -664,6 +676,8 @@ mod tests {
         });
         vmux_ui::hooks::use_ui_state::<KeyEntryUiState>();
         let chat = super::super::state::use_chat("failed-setup".into());
+        let keys = super::super::keys::use_chat_keys(chat);
+        use_context_provider(|| keys);
         rsx! { super::super::composer::ChatDock { chat } }
     }
 
@@ -671,7 +685,7 @@ mod tests {
     fn setup_failure_offers_retry_instead_of_an_unrelated_work_composer() {
         dioxus_html::set_event_converter(Box::new(SerializedHtmlEventConverter));
         let host = Rc::new(Host::default());
-        let mut dom = VirtualDom::new(FailedSetup);
+        let mut dom = VirtualDom::new_with_props(FailedSetup, FailedSetupProps { setup: true });
         dom.provide_root_context(HostBinding(host.clone()));
         let initial = dom.rebuild_to_vec();
         let html = dioxus_ssr::render(&dom);
@@ -682,7 +696,7 @@ mod tests {
             .split('>')
             .next()
             .unwrap();
-        assert!(textarea.contains("disabled"));
+        assert!(textarea.contains(" disabled="));
         assert!(
             html.find("data-slot=\"composer-notice\"").unwrap() < html.find("<fieldset").unwrap()
         );
@@ -710,5 +724,61 @@ mod tests {
         );
         dom.render_immediate_to_vec();
         assert_eq!(*host.0.borrow(), ["retry"]);
+    }
+
+    #[test]
+    fn ordinary_resume_failure_keeps_the_work_composer() {
+        let host = Rc::new(Host::default());
+        let mut dom = VirtualDom::new_with_props(FailedSetup, FailedSetupProps { setup: false });
+        dom.provide_root_context(HostBinding(host));
+        dom.rebuild_in_place();
+        let html = dioxus_ssr::render(&dom);
+        let textarea = html
+            .split("<textarea")
+            .nth(1)
+            .unwrap()
+            .split('>')
+            .next()
+            .unwrap();
+        assert!(!textarea.contains(" disabled="));
+        assert!(!html.contains(&translate("composer-choose-agent")));
+    }
+
+    #[test]
+    fn recovery_cancel_leaves_setup_and_change_agent_reopens_selection() {
+        dioxus_html::set_event_converter(Box::new(SerializedHtmlEventConverter));
+        for (label, destination) in [
+            ("common-cancel", "vmux://start/"),
+            ("composer-choose-agent", "vmux://sessions/inbox?setup=1"),
+        ] {
+            let host = Rc::new(Host::default());
+            let mut dom = VirtualDom::new_with_props(FailedSetup, FailedSetupProps { setup: true });
+            dom.provide_root_context(HostBinding(host.clone()));
+            let initial = dom.rebuild_to_vec();
+            let label = translate(label);
+            let button = initial
+                .edits
+                .iter()
+                .find_map(|edit| match edit {
+                    Mutation::SetAttribute {
+                        name: "aria-label",
+                        value: AttributeValue::Text(value),
+                        id,
+                        ..
+                    } if value == &label => Some(*id),
+                    _ => None,
+                })
+                .expect("recovery choice must be present");
+            dom.runtime().handle_event(
+                "click",
+                Event::new(
+                    EventData::Mouse(SerializedMouseData::default()).into_any(),
+                    true,
+                ),
+                button,
+            );
+            dom.render_immediate_to_vec();
+            assert_eq!(*host.0.borrow(), ["cancel", destination]);
+        }
     }
 }

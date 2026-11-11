@@ -329,8 +329,7 @@ impl Chat {
             return true;
         }
         status == "errored"
-            && self.transcript.current().items.is_empty()
-            && self.queue.queued().is_empty()
+            && self.identity.snapshot.value.read().setup_pending
             && !matches!(
                 vmux_session::Failure(&self.run.error()).kind(),
                 crate::FailureKind::Busy | crate::FailureKind::MissingHistory

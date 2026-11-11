@@ -97,11 +97,14 @@ pub struct StartRequest {
     target: PageOpenTarget,
     prompt: String,
     attachments: Vec<vmux_api::protocol::AgentAttachment>,
+    setup: bool,
 }
 
 impl StartRequest {
     pub fn for_setup(cwd: std::path::PathBuf, agent: AgentId, target: PageOpenTarget) -> Self {
-        Self::from_prompt(String::new(), cwd, agent, target, Vec::new())
+        let mut request = Self::from_prompt(String::new(), cwd, agent, target, Vec::new());
+        request.setup = true;
+        request
     }
 
     pub fn from_prompt(
@@ -120,6 +123,7 @@ impl StartRequest {
             target,
             prompt,
             attachments,
+            setup: false,
         }
     }
 
@@ -135,6 +139,7 @@ struct PendingSessionStart {
     target: PageOpenTarget,
     prompt: String,
     attachments: Vec<vmux_api::protocol::AgentAttachment>,
+    setup: bool,
 }
 
 fn start(
@@ -149,6 +154,7 @@ fn start(
                 target: request.target.clone(),
                 prompt: request.prompt.clone(),
                 attachments: request.attachments.clone(),
+                setup: request.setup,
             },
         );
         creates.write(request.create.clone());
@@ -164,10 +170,15 @@ fn open_started(
     let Some(created) = pending.0.remove(&trigger.event().id) else {
         return;
     };
+    let mut queue = PromptQueue::default();
     if !created.prompt.trim().is_empty() || !created.attachments.is_empty() {
-        let mut queue = PromptQueue::default();
         queue.enqueue_with_attachments(created.prompt.clone(), created.attachments);
-        commands.entity(trigger.event().entity).insert(queue);
+    }
+    commands.entity(trigger.event().entity).insert(queue);
+    if created.setup {
+        commands
+            .entity(trigger.event().entity)
+            .insert(vmux_session::SetupPending);
     }
     if let Some(title) = AgentConversationTitle::from_prompt(&created.prompt) {
         commands
@@ -833,7 +844,18 @@ mod tests {
             id: id.clone(),
         });
         app.update();
-        assert!(app.world().get::<PromptQueue>(session).is_none());
+        assert!(
+            app.world()
+                .get::<PromptQueue>(session)
+                .unwrap()
+                .items
+                .is_empty()
+        );
+        assert!(
+            app.world()
+                .get::<vmux_session::SetupPending>(session)
+                .is_some()
+        );
         assert!(app.world().get::<AgentConversationTitle>(session).is_none());
         assert!(
             !app.world()

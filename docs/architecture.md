@@ -1571,6 +1571,10 @@ Explicit agent selection starts the persisted setup record, so an interrupted co
 content. Session creation enqueues only explicit user text or attachments; setup leaves the prompt
 queue empty until the user sends a real message. Schema 2 setup records preserve the selected agent
 while discarding the earlier task-first Session reference, without deleting conversation history.
+Every started Session has a prompt queue, including promptless setup, so status and cancellation
+use the same runtime path. A persisted `SetupPending` component identifies unfinished setup;
+the first ready or streaming ACP status removes it. Chat snapshots project this marker, so an
+ordinary conversation with an empty transcript and a resume failure never becomes setup.
 
 The bootstrap and live Session share their conversation surface, transcript, assistant/user turns,
 composer and choice controls. The guide lists preferred candidates from three common agent families first,

@@ -226,7 +226,7 @@ fn SessionsManagerActions(
     let delete_confirm = use_memo(move || Some(delete_confirm_open()));
     let mut toolbar = Vec::new();
     toolbar.push(
-        ToolbarControl::button(translate("onboarding-start"), move |_| {
+        ToolbarControl::button(translate("onboarding-setup"), move |_| {
             PageNavigation::replace("vmux://sessions/inbox?setup=1");
         })
         .icon(LineIcon::Plus),

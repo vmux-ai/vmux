@@ -25,8 +25,8 @@ pub use model::{
     Created, DescriptionUpdateRequest, LocalTask, ProviderArchive, ProviderArchiveCompleted,
     ProviderArchiveRequest, ProviderArchiveWriteRequest, ProviderKind, ProviderSessionId,
     ProviderSessionKey, ProviderSessionRestoreRequest, ProviderSessionTombstone, ProviderStage,
-    ProviderStageChangeRequest, RenameRequest, Session, SessionDuplicate, SourceUpdatedAt, Stage,
-    StageChangeRequest, StageChangedAt, StageDefinition, StageId,
+    ProviderStageChangeRequest, RenameRequest, Session, SessionDuplicate, SetupPending,
+    SourceUpdatedAt, Stage, StageChangeRequest, StageChangedAt, StageDefinition, StageId,
 };
 pub use route::Route;
 pub use run_state::{AgentTurnMeta, Failure, FailureKind, RunState};

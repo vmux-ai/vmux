@@ -23,7 +23,7 @@ impl FaviconSource {
         Logo::from_registry(source).map(Logo::source)
     }
 
-    pub fn is_monochrome(source: &str) -> bool {
+    pub fn is_theme_icon(source: &str) -> bool {
         source.starts_with("https://cdn.agentclientprotocol.com/registry/")
             && source.ends_with(".svg")
     }
@@ -70,7 +70,7 @@ mod components {
         let img_class = class.unwrap_or_else(|| DEFAULT_FAVICON_CLASS.to_string());
         let globe_class = globe_class.unwrap_or_else(|| DEFAULT_GLOBE_CLASS.to_string());
         let src = FaviconSource::resolve(&favicon_url, &url);
-        let img_class = if src.as_deref().is_some_and(FaviconSource::is_monochrome) {
+        let img_class = if src.as_deref().is_some_and(FaviconSource::is_theme_icon) {
             format!("{img_class} dark:invert")
         } else {
             img_class
