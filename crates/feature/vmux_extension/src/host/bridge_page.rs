@@ -67,12 +67,12 @@ fn stop_bridge_pages(
 
 fn spawn_bridge_pages(
     mut commands: Commands,
-    runtime: Single<(Ref<PreparedExtensions>, &ExtensionBridgeServer)>,
+    prepared: Single<Ref<PreparedExtensions>>,
+    server: Single<&ExtensionBridgeServer>,
     mut world: BridgePages,
     shutdown: Option<Res<CefShutdownState>>,
     mut initialized: Local<bool>,
 ) {
-    let (prepared, server) = runtime.into_inner();
     let page_removed = world.removed_pages.read().count() > 0;
     let should_reconcile = !*initialized
         || prepared.is_changed()
@@ -145,7 +145,7 @@ fn spawn_bridge_pages(
                             runtime.extension_id
                         )),
                         PrivatePreloadScripts::from([bridge_config_source(
-                            server,
+                            &server,
                             identity,
                             conformance,
                         )]),
@@ -181,7 +181,9 @@ fn bridge_config_source(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::host::bridge::ExtensionBridgeServer;
+    use crate::host::bridge::{
+        BridgeAuthorization, BridgeRegistration, ExtensionBridgePlugin, ExtensionBridgeServer,
+    };
     use crate::host::load::PreparedExtensions;
     use crate::host::runtime::PreparedRuntime;
     use bevy::window::PrimaryWindow;
@@ -192,7 +194,7 @@ mod tests {
     const EXTENSION_ID: &str = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
 
     #[test]
-    fn spawns_hidden_non_layout_bridge_webview() {
+    fn spawns_bridge_for_separately_owned_runtime_and_server() {
         let mut app = App::new();
         let runtime = PreparedRuntime {
             extension_id: EXTENSION_ID.into(),
@@ -206,15 +208,26 @@ mod tests {
             granted_permissions: Vec::new(),
             granted_host_permissions: Vec::new(),
         };
-        let bridge = ExtensionBridgeServer::start("personal", [EXTENSION_ID]).unwrap();
-        let identity = bridge.identity(EXTENSION_ID).unwrap().clone();
-        let endpoint = bridge.endpoint().to_string();
-        app.world_mut()
-            .spawn((PreparedExtensions(vec![runtime]), bridge));
-        app.add_message::<AppExit>()
-            .add_systems(Update, (stop_bridge_pages, spawn_bridge_pages).chain());
+        app.world_mut().spawn(PreparedExtensions(vec![runtime]));
+        app.add_message::<AppExit>().add_plugins((
+            ExtensionBridgePlugin::new(
+                "personal".into(),
+                vec![BridgeRegistration {
+                    extension_id: EXTENSION_ID.into(),
+                    authorization: BridgeAuthorization::default(),
+                }],
+            ),
+            ExtensionBridgePagePlugin,
+        ));
 
         app.update();
+        let bridge = app
+            .world_mut()
+            .query::<&ExtensionBridgeServer>()
+            .single(app.world())
+            .unwrap();
+        let identity = bridge.identity(EXTENSION_ID).unwrap().clone();
+        let endpoint = bridge.endpoint().to_string();
         assert!(
             app.world_mut()
                 .query::<&ExtensionBridgeWebview>()
