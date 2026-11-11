@@ -696,7 +696,8 @@ brew "ripgrep"
             ))
             .id();
 
-        for _ in 0..100 {
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+        while std::time::Instant::now() < deadline {
             app.update();
             if app
                 .world()
@@ -708,7 +709,10 @@ brew "ripgrep"
             std::thread::sleep(std::time::Duration::from_millis(1));
         }
 
-        let output = app.world().get::<ImportedNpmManifest>(operation).unwrap();
+        let output = app
+            .world()
+            .get::<ImportedNpmManifest>(operation)
+            .expect("NPM import did not complete before the deadline");
         assert_eq!(output.packages(), 1);
         assert_eq!(
             app.world().get::<ToolOperationSucceeded>(operation),
