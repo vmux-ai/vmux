@@ -1146,3 +1146,4 @@ onboarding-setup-failed = Nie udało się skonfigurować agenta. Spróbuj ponown
 onboarding-api-key = Klucz API (opcjonalnie)
 onboarding-save-key = Zapisz klucz w tym profilu
 onboarding-key-failed = Nie udało się zapisać klucza. Spróbuj ponownie lub zaloguj się.
+onboarding-workspace-question = Gdzie będziemy pracować?

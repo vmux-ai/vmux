@@ -1146,3 +1146,4 @@ onboarding-setup-failed = تعذّر إكمال إعداد الوكيل. أعد 
 onboarding-api-key = مفتاح API (اختياري)
 onboarding-save-key = حفظ المفتاح في هذا الملف الشخصي
 onboarding-key-failed = تعذّر حفظ المفتاح. أعد المحاولة أو استخدم تسجيل الدخول.
+onboarding-workspace-question = أين نعمل؟

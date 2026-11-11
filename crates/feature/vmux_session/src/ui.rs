@@ -40,7 +40,7 @@ pub fn Page() -> Element {
                 crate::Route::manager_filter(&metadata.url, "setup").as_deref() == Some("1")
             });
             if setup {
-                rsx! { main { class: "h-dvh overflow-auto bg-background text-foreground", onboarding::Onboarding {} } }
+                rsx! { onboarding::Onboarding {} }
             } else {
                 rsx! { manager::SessionsManager {} }
             }

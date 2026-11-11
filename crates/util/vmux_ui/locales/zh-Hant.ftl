@@ -1143,3 +1143,4 @@ onboarding-setup-failed = 無法完成代理設定。請重試或選擇其他代
 onboarding-api-key = API 金鑰（選填）
 onboarding-save-key = 將金鑰儲存至此設定檔
 onboarding-key-failed = 無法儲存金鑰。請重試或使用登入。
+onboarding-workspace-question = 我們在哪裡工作？

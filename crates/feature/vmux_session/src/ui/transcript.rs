@@ -73,6 +73,7 @@ pub(super) fn ChatTranscript(chat: Chat) -> Element {
     let agent_color = chat.accent().css;
     let user_name = chat.user.name();
     let user_color = chat.user.color();
+    let setup_prompt = chat.setup_prompt();
     rsx! {
         div {
             id: "chat-scroll",
@@ -113,6 +114,14 @@ pub(super) fn ChatTranscript(chat: Chat) -> Element {
                     TranscriptSkeleton {}
                 } else if loaded_start > 0 {
                     HistorySentinel { loading: history_loading }
+                }
+                if !transcript_loading {
+                    if let Some(prompt) = setup_prompt {
+                        div { class: "ml-auto max-w-[85%] rounded-2xl bg-muted/40 px-4 py-3 text-sm whitespace-pre-wrap",
+                            "{prompt.text}"
+                            QueuedAttachments { attachments: prompt.attachments }
+                        }
+                    }
                 }
                 if !transcript_loading && chat.status() == "authentication" {
                     super::authentication::Authentication { chat }
@@ -219,8 +228,9 @@ fn TranscriptSkeleton() -> Element {
 fn InstallIntro(chat: Chat, detail: String) -> Element {
     let accent = AgentAccent::for_agent(&chat.agent());
     rsx! {
-        div { class: "my-auto flex flex-col items-center gap-3 py-12 text-center",
-            AgentBanner { chat }
+        div { class: "flex flex-col items-start gap-3 py-3",
+            span { class: "text-xs font-medium text-muted-foreground", "vmux" }
+            p { class: "text-sm", {translate("agent-preparing")} }
             div { class: "flex max-w-sm items-center gap-2 text-xs text-muted-foreground",
                 span { class: "h-1.5 w-1.5 shrink-0 rounded-full {accent.accent_bg}" }
                 span { class: "truncate", "{detail}" }
@@ -270,7 +280,10 @@ fn HandoffDivider(source: String, truncated: bool) -> Element {
 
 #[component]
 pub(super) fn QueuedPrompts(chat: Chat) -> Element {
-    let queued = chat.queue.queued();
+    let mut queued = chat.queue.queued();
+    if chat.setup_prompt().is_some() {
+        queued.remove(0);
+    }
     if queued.is_empty() {
         return rsx! {};
     }

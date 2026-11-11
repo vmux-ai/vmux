@@ -292,6 +292,16 @@ impl Chat {
         self.identity.snapshot.value.read().installing_splash
     }
 
+    pub(super) fn setup_prompt(&self) -> Option<QueuedPromptSnapshot> {
+        if !(matches!(self.status().as_str(), "authentication" | "preparing")
+            || self.installing_splash())
+            || !self.transcript.current().items.is_empty()
+        {
+            return None;
+        }
+        self.queue.queued().first().cloned()
+    }
+
     pub fn transcript_loading(&self) -> bool {
         self.identity.snapshot.value.read().transcript_loading
     }

@@ -26,6 +26,8 @@
                 "OnboardingUiState",
                 "OnboardingDraftChanged",
                 "OnboardingStart",
+                "OnboardingContinue",
+                "OnboardingBack",
                 "ChatAuthenticate",
                 "ChatCancelSetup",
                 "KeyEntryUiState",

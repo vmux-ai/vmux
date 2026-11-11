@@ -1146,3 +1146,4 @@ onboarding-setup-failed = Não foi possível concluir a configuração do agente
 onboarding-api-key = Chave de API (opcional)
 onboarding-save-key = Salvar a chave neste perfil
 onboarding-key-failed = Não foi possível salvar a chave. Tente novamente ou faça login.
+onboarding-workspace-question = Onde vamos trabalhar?

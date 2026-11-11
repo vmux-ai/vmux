@@ -15,8 +15,8 @@ pub(super) fn Authentication(chat: Chat) -> Element {
             .read()
             .clone();
     rsx! {
-        section { class: "my-auto flex flex-col gap-4 py-12",
-            super::agent::AgentBanner { chat }
+        section { class: "flex flex-col items-start gap-4 py-3",
+            span { class: "text-xs font-medium text-muted-foreground", "vmux" }
             p { class: "text-sm text-muted-foreground", {translate("onboarding-auth-question")} }
             if pending {
                 p { class: "text-sm text-muted-foreground", {translate("onboarding-auth-pending")} }

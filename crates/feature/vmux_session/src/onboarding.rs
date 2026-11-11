@@ -1,3 +1,11 @@
+#[vmux_api::contract(Default, Copy, Eq)]
+pub enum Step {
+    #[default]
+    Prompt,
+    Agent,
+    Workspace,
+}
+
 #[vmux_api::contract(Default, Eq)]
 pub struct AgentOption {
     pub id: String,
@@ -16,6 +24,7 @@ pub struct OnboardingUiState {
     pub cwd: String,
     pub starting: bool,
     pub session_id: String,
+    pub step: Step,
 }
 
 #[vmux_api::ui_event]
@@ -27,6 +36,16 @@ pub struct OnboardingDraftChanged {
 
 #[vmux_api::ui_event]
 pub struct OnboardingStart;
+
+#[vmux_api::ui_event]
+pub struct OnboardingContinue {
+    pub step: Step,
+}
+
+#[vmux_api::ui_event]
+pub struct OnboardingBack {
+    pub step: Step,
+}
 
 #[vmux_api::ui_event]
 pub struct ChatAuthenticate {

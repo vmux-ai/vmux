@@ -1556,11 +1556,17 @@ their bound Session state. The service carries serialized agent protocol message
 persistent daemon sessions; `vmux_acp` owns the client-host Bevy messages produced when those
 wire messages enter ECS.
 
-Conversation setup lives inside the Sessions page, including its empty state. The launcher has a
-setup prompt target even when no ACP is installed. `vmux_session::host::onboarding::Plugin` owns
-the profile's draft, attachments and created Session reference; `OnboardingUiState` projects its
-starter choices and the ACP catalog. Typed edits and start requests preserve the draft and reuse
-the same Session on retry. ACP contributes supported agents and credential availability as booleans.
+Conversation setup starts automatically inside the Sessions conversation page when a new profile
+opens its launcher. It waits for workspace restoration before deciding whether an existing Session
+already owns the entry, and never redirects prewarmed pages or ordinary navigation. The launcher
+also has an explicit setup prompt target. `vmux_session::host::onboarding::Plugin` owns the profile's
+draft, attachments, current question and created Session reference. `OnboardingUiState` projects
+one question at a time: prompt, agent, then workspace. The first greeting and selectable replies
+work locally before any ACP process or credential exists. Typed replies preserve progress, reject
+duplicate advances and allow returning to earlier questions. Choosing a workspace starts the
+selected ACP in the same conversation surface; the queued user prompt remains visible beside
+installation and sign-in messages, then enters the agent once authentication succeeds. Start
+requests reuse the same Session on retry. ACP contributes supported agents and credential availability as booleans.
 Its existing installer reports progress to that Session. Preparing and authentication states hold
 the prompt queue until the provider establishes a session. Advertised ACP authentication methods
 run through `authenticate`; cancellation detaches the waiter or runtime while preserving the prompt.

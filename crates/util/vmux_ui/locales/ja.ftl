@@ -1126,3 +1126,4 @@ onboarding-setup-failed = エージェントのセットアップを完了でき
 onboarding-api-key = API キー（任意）
 onboarding-save-key = このプロファイルにキーを保存
 onboarding-key-failed = キーを保存できませんでした。再試行するか、ログインを使ってください。
+onboarding-workspace-question = どこで作業しましょうか？
