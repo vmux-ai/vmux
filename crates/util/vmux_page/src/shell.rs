@@ -13,9 +13,17 @@ pub struct InterpreterShell {
 
 impl InterpreterShell {
     pub fn new(root_id: &'static str, base_uri: impl Into<String>) -> Self {
+        let base_uri = base_uri.into();
+        let base_uri = match base_uri.split_once("://") {
+            Some((scheme, remainder)) => {
+                let authority = remainder.split(['/', '?', '#']).next().unwrap_or_default();
+                format!("{scheme}://{authority}")
+            }
+            None => base_uri.trim_end_matches('/').to_string(),
+        };
         Self {
             root_id,
-            base_uri: base_uri.into().trim_end_matches('/').to_string(),
+            base_uri,
             head: String::new(),
             html_attributes: String::new(),
             body_class: String::new(),
@@ -93,6 +101,25 @@ if (vmuxRoot != null) {{
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn nested_documents_send_events_to_the_origin_endpoint() {
+        for (document, endpoint) in [
+            ("vmux://docker/containers", "vmux://docker/__events"),
+            (
+                "vmux://docker/containers/?view=logs#top",
+                "vmux://docker/__events",
+            ),
+            ("git://git/commit/abc", "git://git/__events"),
+            (
+                "http://localhost:8787/page",
+                "http://localhost:8787/__events",
+            ),
+        ] {
+            let shell = InterpreterShell::new("main", document);
+            assert_eq!(format!("{}/__events", shell.base_uri), endpoint);
+        }
+    }
 
     #[test]
     fn the_events_path_the_interpreter_builds_has_one_slash() {
