@@ -1411,3 +1411,14 @@ common-resume = Resume
 onboarding-connection-choice = How would you like to connect?
 onboarding-connect-description = Sign in on the page that opens.
 onboarding-use-key-description = Enter an API key instead.
+connectors-title = Connectors
+connectors-description = Manage signed-in accounts here and choose which connectors to use from a conversation.
+connectors-empty = No connectors available
+connectors-sign-in-required = Sign-in required
+connectors-open-sign-in = Open sign-in
+
+connectors-command-description = Choose connectors for this conversation
+connectors-use = Use in chat
+connectors-selected = Selected · remove
+connectors-manage = Manage connectors
+connectors-manage-access = Manage repository access

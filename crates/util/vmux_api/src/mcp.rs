@@ -14,15 +14,25 @@ pub struct McpServerEntry {
     pub name: String,
     pub description: String,
     pub status: McpServerStatus,
+    pub account: Option<String>,
+    pub setup_url: Option<String>,
 }
 
-#[vmux_api::ui_state(Default, Eq)]
+#[vmux_api::ui_state(Default, Eq, version = 2)]
 pub struct McpServersUiState {
     pub loaded: bool,
     pub loading: bool,
     pub servers: Vec<McpServerEntry>,
     pub pending: Option<McpServerPending>,
     pub result: Option<McpServerResult>,
+    pub authorization: Option<McpAuthorization>,
+    pub selected: Vec<String>,
+}
+
+#[vmux_api::contract(Default, Eq)]
+pub struct McpAuthorization {
+    pub url: String,
+    pub code: Option<String>,
 }
 
 #[vmux_api::ui_event]
@@ -46,6 +56,14 @@ pub struct McpServerRequest {
     pub id: String,
 }
 
+#[vmux_api::ui_event(Default, Eq)]
+pub struct McpServerSelectionRequest {
+    pub id: String,
+}
+
+#[vmux_api::ui_event]
+pub struct McpServerCancelRequest;
+
 #[vmux_api::contract(Default, Eq)]
 pub struct McpServerResult {
     pub id: String,
@@ -61,6 +79,8 @@ mod tests {
     #[test]
     fn server_result_round_trips_inside_state() {
         let state = McpServersUiState {
+            selected: Vec::new(),
+            authorization: None,
             loaded: true,
             loading: false,
             servers: Vec::new(),
