@@ -491,10 +491,10 @@ mod tests {
             MinimalPlugins,
             bevy::asset::AssetPlugin::default(),
             vmux_ecs::PrimitivesPlugin,
-        ));
-        app.add_plugins(SchemaPlugin::<BookmarkStore>::default())
-            .insert_resource(OfferedBookmarkDefaults::default());
-        app.add_observer(load_on::<LoadWorld<BookmarkFilter>>);
+        ))
+        .add_plugins(SchemaPlugin::<BookmarkStore>::default())
+        .insert_resource(OfferedBookmarkDefaults::default())
+        .add_observer(load_on::<LoadWorld<BookmarkFilter>>);
         let load = BookmarkStorePath(path.clone()).load().unwrap();
         app.world_mut().commands().trigger_load(load);
         app.update();
