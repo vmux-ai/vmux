@@ -10567,6 +10567,7 @@ dependencies = [
  "ignore",
  "image",
  "lsp-types",
+ "moonshine-save",
  "notify",
  "percent-encoding",
  "pulldown-cmark",

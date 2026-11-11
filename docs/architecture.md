@@ -1660,11 +1660,17 @@ Resume suggestions restrict host contributions to the visible entries, so keyboa
 cannot reach hidden sessions; each status has its own explicit expansion limit.
 Project creation and editing share one form for a display name and a local folder or GitHub
 repository. GitHub sources clone through the existing Git provisioning lifecycle before registration.
-The Projects root stores registrations in `.projects.ron`, with a stable Project URL as a key
-independent of the current checkout. Source edits preserve existing repository files and use
-revision checks to reject stale saves. Registered Project removal detaches its registration; it does
-not delete the checkout. Native folder selection authorizes a new external directory, and the form
-retains its draft on validation or clone failure.
+Registered Projects are entities owned by `ProjectsRoot`, composed from `ProjectId`, `Name`,
+`Cwd`, repository and revision components. `ProjectPersistencePlugin` restores `.projects.ron`
+once and owns one write task per root. Save operations carry preparation, provisioning and
+commit state as components; systems enqueue immutable snapshots at the filesystem boundary.
+Writes check the current ECS revision and reject duplicate checkouts before dispatch. Only a
+successful atomic write updates Project entities and emits `ProjectSaved`; failed writes retain
+the previous registration. Stable Project URLs survive source edits, and removal persists hidden
+URL entities while leaving checkout files intact. Page routing and catalog projections read ECS
+registrations. Native folder selection authorizes a new external directory, and the form retains
+its draft on validation or clone failure. Accepted operations survive closing their form.
+Project entities omit the workspace `Save` marker; `.projects.ron` is their only persistence owner.
 
 Project dashboards show related sessions, repository status and an entry point into Code,
 without reading or listing arbitrary directories in the overview. Repository status uses the Git

@@ -16,7 +16,9 @@ use crate::project::{
 };
 
 use super::project::{GitHubRepository, ProjectImport, ProjectName};
-use super::project_registry::ProjectRegistry;
+use super::project_persistence::{
+    Mutation, PersistenceSet, ProjectSaved, Registrations, WriteCompleted, WriteRequest,
+};
 
 pub(super) struct ProjectFormPlugin;
 
@@ -29,7 +31,6 @@ impl Plugin for ProjectFormPlugin {
             vmux_ecs::UiStatePlugin::<ProjectFormUiState>::default(),
             UiEventPlugin::<(ProjectSaveRequest, ProjectFolderPickRequest)>::default(),
         ))
-        .add_message::<ProjectSaved>()
         .add_message::<RepositoryProvisionRequest>()
         .add_message::<RepositoryProvisionCompleted>()
         .add_observer(pick)
@@ -37,13 +38,17 @@ impl Plugin for ProjectFormPlugin {
         .add_systems(
             Update,
             (
+                prepare,
                 finish_picks,
                 finish_preparations,
                 finish_provisions,
-                finish_commits,
+                finish_validations,
             )
-                .chain(),
-        );
+                .chain()
+                .after(PersistenceSet::Load)
+                .before(PersistenceSet::Write),
+        )
+        .add_systems(Update, finish_commits.after(PersistenceSet::Write));
     }
 }
 
@@ -61,6 +66,14 @@ struct FolderTask {
 }
 
 #[derive(Component)]
+struct SaveDraft {
+    root: PathBuf,
+    webview: Entity,
+    request: ProjectSaveRequest,
+    selected: Option<PathBuf>,
+}
+
+#[derive(Component)]
 struct PreparationTask {
     webview: Entity,
     request_id: String,
@@ -74,20 +87,16 @@ struct PreparedSave {
 }
 
 #[derive(Component)]
-struct CommitTask {
+struct ValidationTask {
     webview: Entity,
     request_id: String,
-    task: Task<Result<ProjectSaved, String>>,
+    task: Task<Result<SavePlan, String>>,
 }
 
-#[derive(Message, Clone)]
-pub(super) struct ProjectSaved {
-    pub(super) root: PathBuf,
-    pub(super) id: ProjectId,
-    pub(super) directory: PathBuf,
-    pub(super) name: String,
-    pub(super) repository: Option<String>,
-    pub(super) revision: u64,
+#[derive(Component)]
+struct PendingCommit {
+    webview: Entity,
+    request_id: String,
 }
 
 #[derive(Clone)]
@@ -105,26 +114,13 @@ impl SavePlan {
         root: PathBuf,
         request: ProjectSaveRequest,
         selected: Option<PathBuf>,
+        current: Option<PathBuf>,
     ) -> Result<Self, String> {
         let name = request.name.trim();
         if name.is_empty() || name.len() > 256 || name.contains(['\0', '\n', '\r']) {
             return Err(vmux_ui::i18n::translate("project-name-invalid"));
         }
         let root = root.canonicalize().map_err(|error| error.to_string())?;
-        let registry = ProjectRegistry::load(&root)?;
-        let current = if let Some(id) = &request.project {
-            let directory = match registry.get(&id.0) {
-                Some(record) => record.directory().to_path_buf(),
-                None => ProjectRoute::resolve(&id.0, &root)
-                    .ok_or_else(|| vmux_ui::i18n::translate("error-page-not-found"))??,
-            };
-            if registry.get(&id.0).map_or(0, |record| record.revision()) != request.revision {
-                return Err(vmux_ui::i18n::translate("project-edit-conflict"));
-            }
-            Some(directory)
-        } else {
-            None
-        };
         let (directory, repository, provision) = match &request.source {
             ProjectSource::New => {
                 if current.is_some() {
@@ -175,28 +171,15 @@ impl SavePlan {
         })
     }
 
-    fn commit(self) -> Result<ProjectSaved, String> {
-        let directory = self
+    fn validate(mut self) -> Result<Self, String> {
+        self.directory = self
             .directory
             .canonicalize()
             .map_err(|error| error.to_string())?;
-        let name = self.request.name.trim().to_string();
-        let mut registry = ProjectRegistry::load(&self.root)?;
-        let revision = registry.save(
-            &self.id.0,
-            self.request.revision,
-            name.clone(),
-            directory.clone(),
-            self.repository.clone(),
-        )?;
-        Ok(ProjectSaved {
-            root: self.root,
-            id: self.id,
-            directory,
-            name,
-            repository: self.repository,
-            revision,
-        })
+        if !self.directory.join(".git").exists() {
+            return Err(vmux_ui::i18n::translate("project-import-not-repository"));
+        }
+        Ok(self)
     }
 }
 
@@ -329,7 +312,6 @@ fn save(
     projects: vmux_ecs::profile::Projects,
     selection: SourceSelection,
     mut feedback: Feedback,
-    proxy: Option<Res<EventLoopProxyWrapper>>,
     mut commands: Commands,
 ) {
     let event = trigger.event();
@@ -354,25 +336,107 @@ fn save(
         .ok()
         .filter(|selected| selected.request_id == event.payload.request_id)
         .map(|selected| selected.directory.clone());
-    let request = event.payload.clone();
-    let wake = proxy.as_deref().map(|proxy| (**proxy).clone());
-    let task = IoTaskPool::get().spawn(async move {
-        let result = SavePlan::prepare(root, request, chosen);
-        if let Some(wake) = wake {
-            let _ = wake.send_event(WinitUserEvent::WakeUp);
-        }
-        result
-    });
     commands
         .spawn(Operation::bundle("project.save").unwrap())
         .insert((
             OperationTarget::new(event.webview),
-            PreparationTask {
+            SaveDraft {
+                root,
                 webview: event.webview,
-                request_id: event.payload.request_id.clone(),
+                request: event.payload.clone(),
+                selected: chosen,
+            },
+        ));
+}
+
+fn prepare(
+    drafts: Query<(Entity, &SaveDraft)>,
+    registrations: Registrations,
+    mut feedback: Feedback,
+    proxy: Option<Res<EventLoopProxyWrapper>>,
+    mut commands: Commands,
+) {
+    for (entity, draft) in &drafts {
+        match registrations.ready(&draft.root) {
+            Ok(false) => continue,
+            Ok(true) => {}
+            Err(error) => {
+                feedback.finish(
+                    draft.webview,
+                    &draft.request.request_id,
+                    Err(error.clone()),
+                    None,
+                );
+                commands.entity(entity).remove::<SaveDraft>();
+                commands.trigger(OperationCompleted {
+                    entity,
+                    result: Err(error),
+                });
+                continue;
+            }
+        }
+        let current = if let Some(id) = &draft.request.project {
+            let revision = registrations
+                .get(&draft.root, &id.0)
+                .map_or(0, |(_, _, _, revision)| revision.0);
+            if revision != draft.request.revision {
+                let error = vmux_ui::i18n::translate("project-edit-conflict");
+                feedback.finish(
+                    draft.webview,
+                    &draft.request.request_id,
+                    Err(error.clone()),
+                    None,
+                );
+                commands.entity(entity).remove::<SaveDraft>();
+                commands.trigger(OperationCompleted {
+                    entity,
+                    result: Err(error),
+                });
+                continue;
+            }
+            match registrations.resolve(&id.0, &draft.root) {
+                Some(Ok(directory)) => Some(directory),
+                result => {
+                    let error = result
+                        .and_then(Result::err)
+                        .unwrap_or_else(|| vmux_ui::i18n::translate("error-page-not-found"));
+                    feedback.finish(
+                        draft.webview,
+                        &draft.request.request_id,
+                        Err(error.clone()),
+                        None,
+                    );
+                    commands.entity(entity).remove::<SaveDraft>();
+                    commands.trigger(OperationCompleted {
+                        entity,
+                        result: Err(error),
+                    });
+                    continue;
+                }
+            }
+        } else {
+            None
+        };
+        let root = draft.root.clone();
+        let request = draft.request.clone();
+        let chosen = draft.selected.clone();
+        let wake = proxy.as_deref().map(|proxy| (**proxy).clone());
+        let task = IoTaskPool::get().spawn(async move {
+            let result = SavePlan::prepare(root, request, chosen, current);
+            if let Some(wake) = wake {
+                let _ = wake.send_event(WinitUserEvent::WakeUp);
+            }
+            result
+        });
+        commands.entity(entity).remove::<SaveDraft>().insert((
+            vmux_ecs::OperationState::Running,
+            PreparationTask {
+                webview: draft.webview,
+                request_id: draft.request.request_id.clone(),
                 task,
             },
         ));
+    }
 }
 
 fn finish_picks(
@@ -425,13 +489,13 @@ fn finish_preparations(
                 } else {
                     let wake = proxy.as_deref().map(|proxy| (**proxy).clone());
                     let work = IoTaskPool::get().spawn(async move {
-                        let result = plan.commit();
+                        let result = plan.validate();
                         if let Some(wake) = wake {
                             let _ = wake.send_event(WinitUserEvent::WakeUp);
                         }
                         result
                     });
-                    commands.entity(entity).insert(CommitTask {
+                    commands.entity(entity).insert(ValidationTask {
                         webview: task.webview,
                         request_id: task.request_id.clone(),
                         task: work,
@@ -476,7 +540,7 @@ fn finish_provisions(
         let plan = prepared.plan.clone();
         let wake = proxy.as_deref().map(|proxy| (**proxy).clone());
         let task = IoTaskPool::get().spawn(async move {
-            let result = plan.commit();
+            let result = plan.validate();
             if let Some(wake) = wake {
                 let _ = wake.send_event(WinitUserEvent::WakeUp);
             }
@@ -485,7 +549,7 @@ fn finish_provisions(
         commands
             .entity(completed.requester)
             .remove::<PreparedSave>()
-            .insert(CommitTask {
+            .insert(ValidationTask {
                 webview,
                 request_id,
                 task,
@@ -493,9 +557,8 @@ fn finish_provisions(
     }
 }
 
-fn finish_commits(
-    mut tasks: Query<(Entity, &mut CommitTask)>,
-    mut saved: MessageWriter<ProjectSaved>,
+fn finish_validations(
+    mut tasks: Query<(Entity, &mut ValidationTask)>,
     mut feedback: Feedback,
     mut commands: Commands,
 ) {
@@ -503,20 +566,29 @@ fn finish_commits(
         let Some(result) = future::block_on(future::poll_once(&mut task.task)) else {
             continue;
         };
-        commands.entity(entity).remove::<CommitTask>();
+        commands.entity(entity).remove::<ValidationTask>();
         match result {
-            Ok(project) => {
-                feedback.finish(
-                    task.webview,
-                    &task.request_id,
-                    Ok(None),
-                    Some(project.id.clone()),
-                );
-                saved.write(project);
-                commands.trigger(OperationCompleted {
-                    entity,
-                    result: Ok(()),
-                });
+            Ok(plan) => {
+                commands.entity(entity).insert((
+                    WriteRequest {
+                        root: plan.root.clone(),
+                        mutation: Mutation::Save {
+                            expected: plan.request.revision,
+                            project: ProjectSaved {
+                                root: plan.root,
+                                id: plan.id,
+                                directory: plan.directory,
+                                name: plan.request.name.trim().to_string(),
+                                repository: plan.repository,
+                                revision: 0,
+                            },
+                        },
+                    },
+                    PendingCommit {
+                        webview: task.webview,
+                        request_id: task.request_id.clone(),
+                    },
+                ));
             }
             Err(error) => {
                 feedback.finish(task.webview, &task.request_id, Err(error.clone()), None);
@@ -526,6 +598,33 @@ fn finish_commits(
                 });
             }
         }
+    }
+}
+
+fn finish_commits(
+    mut completed: MessageReader<WriteCompleted>,
+    pending: Query<&PendingCommit>,
+    mut feedback: Feedback,
+    mut commands: Commands,
+) {
+    for completed in completed.read() {
+        let Ok(task) = pending.get(completed.requester) else {
+            continue;
+        };
+        let saved = completed.result.as_ref().ok().cloned().flatten();
+        feedback.finish(
+            task.webview,
+            &task.request_id,
+            completed.result.clone().map(|_| None),
+            saved,
+        );
+        commands
+            .entity(completed.requester)
+            .remove::<PendingCommit>();
+        commands.trigger(OperationCompleted {
+            entity: completed.requester,
+            result: completed.result.clone().map(|_| ()),
+        });
     }
 }
 
@@ -575,6 +674,26 @@ mod tests {
 
         fn deliver(event: On<bevy_cef::prelude::BinHostEmitEvent>) {
             event.mark_delivered();
+        }
+
+        fn snapshot(
+            &mut self,
+            root: &std::path::Path,
+        ) -> super::super::project_persistence::Snapshot {
+            let mut state =
+                bevy::ecs::system::SystemState::<Registrations>::new(self.app.world_mut());
+            state.get(self.app.world()).unwrap().snapshot(root)
+        }
+
+        fn resolve(&mut self, root: &std::path::Path, url: &str) -> std::path::PathBuf {
+            let mut state =
+                bevy::ecs::system::SystemState::<Registrations>::new(self.app.world_mut());
+            state
+                .get(self.app.world())
+                .unwrap()
+                .resolve(url, root)
+                .unwrap()
+                .unwrap()
         }
 
         fn submit(&mut self, project: Option<ProjectId>, source: ProjectSource) {
@@ -642,6 +761,42 @@ mod tests {
     }
 
     #[test]
+    fn accepted_save_completes_after_its_webview_is_removed() {
+        let root = tempfile::tempdir().unwrap();
+        let mut form = Form::at(root.path(), ProjectRoute::ROOT);
+        form.submit(None, ProjectSource::Github("example/repository".into()));
+        let request = form.next_provision();
+        let operation = request.requester;
+        let RepositoryProvisionOperation::Clone { destination, .. } = &request.operation else {
+            panic!("expected clone");
+        };
+        std::fs::create_dir_all(destination.join(".git")).unwrap();
+        form.app.world_mut().despawn(form.view);
+        form.complete(request, Ok(()));
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(3);
+        loop {
+            form.app.update();
+            if form.app.world().get::<vmux_ecs::OperationState>(operation)
+                == Some(&vmux_ecs::OperationState::Succeeded)
+            {
+                break;
+            }
+            assert!(
+                std::time::Instant::now() < deadline,
+                "accepted save did not finish"
+            );
+            std::thread::yield_now();
+        }
+        let snapshot = form.snapshot(root.path());
+        assert_eq!(snapshot.projects.len(), 1);
+        assert_eq!(
+            snapshot.projects.values().next().unwrap().name,
+            "Chosen name"
+        );
+        assert!(root.path().join(".projects.ron").is_file());
+    }
+
+    #[test]
     fn github_clone_registers_only_after_provisioning_succeeds() {
         let root = tempfile::tempdir().unwrap();
         let mut form = Form::at(root.path(), ProjectRoute::ROOT);
@@ -655,26 +810,20 @@ mod tests {
             panic!("expected clone");
         };
         assert_eq!(remote, "https://github.com/example/repository.git");
-        assert!(
-            ProjectRegistry::load(root.path())
-                .unwrap()
-                .entries()
-                .next()
-                .is_none()
-        );
+        assert!(form.snapshot(root.path()).projects.is_empty());
         std::fs::create_dir_all(destination.join(".git")).unwrap();
         form.complete(request, Ok(()));
         let outcome = form.outcome();
         let id = outcome.saved.unwrap();
-        let registry = ProjectRegistry::load(root.path()).unwrap();
-        let record = registry.get(&id.0).unwrap();
-        assert_eq!(record.name(), "Chosen name");
+        let registry = form.snapshot(root.path());
+        let record = registry.projects.get(&id.0).unwrap();
+        assert_eq!(record.name.as_str(), "Chosen name");
         assert_eq!(
-            record.repository(),
+            record.repository.as_deref(),
             Some("https://github.com/example/repository.git")
         );
         assert_eq!(
-            ProjectRoute::resolve(&id.0, root.path()).unwrap().unwrap(),
+            form.resolve(root.path(), &id.0),
             root.path()
                 .join("github.com/example/repository")
                 .canonicalize()
@@ -699,14 +848,9 @@ mod tests {
         let outcome = form.outcome();
         assert_eq!(outcome.error.as_deref(), Some("clone refused"));
         assert!(outcome.saved.is_none());
-        assert!(
-            ProjectRegistry::load(root.path())
-                .unwrap()
-                .get(&id.0)
-                .is_none()
-        );
+        assert!(!form.snapshot(root.path()).projects.contains_key(&id.0));
         assert_eq!(
-            ProjectRoute::resolve(&id.0, root.path()).unwrap().unwrap(),
+            form.resolve(root.path(), &id.0),
             old.canonicalize().unwrap()
         );
         assert_eq!(
@@ -739,7 +883,7 @@ mod tests {
         let outcome = form.outcome();
         assert_eq!(outcome.saved, Some(id.clone()));
         assert_eq!(
-            ProjectRoute::resolve(&id.0, root.path()).unwrap().unwrap(),
+            form.resolve(root.path(), &id.0),
             next.path().canonicalize().unwrap()
         );
         assert_eq!(

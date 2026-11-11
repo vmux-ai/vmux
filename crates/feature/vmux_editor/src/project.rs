@@ -1,4 +1,5 @@
 #[vmux_api::contract(Default, Eq)]
+#[cfg_attr(host, derive(bevy::prelude::Component))]
 pub struct ProjectId(pub String);
 
 #[vmux_api::contract(Default, Eq)]
@@ -252,27 +253,6 @@ impl ProjectRoute {
             Ok(path) => path,
             Err(error) => return Some(Err(error)),
         };
-        let registry = match crate::host::project_registry::ProjectRegistry::load(&root) {
-            Ok(registry) => registry,
-            Err(error) => return Some(Err(error)),
-        };
-        if registry.hidden(value) {
-            return Some(Err("project is unavailable".to_string()));
-        }
-        if let Some(directory) = registry.directory(value) {
-            return Some(
-                directory
-                    .canonicalize()
-                    .map_err(|error| error.to_string())
-                    .and_then(|path| {
-                        if path.is_dir() {
-                            Ok(path)
-                        } else {
-                            Err("project is unavailable".to_string())
-                        }
-                    }),
-            );
-        }
         let canonical = match path.canonicalize() {
             Ok(path) => path,
             Err(error) => {

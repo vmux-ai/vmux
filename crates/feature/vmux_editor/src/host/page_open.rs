@@ -14,6 +14,7 @@ use crate::project::ProjectRoute;
 use super::editor::{FileNavigateRequest, FileView};
 use super::explorer::ExplorerState;
 use super::navigation::PendingGoto;
+use super::project_persistence::{PersistenceSet, Registrations};
 use super::viewport::FileViewport;
 
 pub(super) struct PageOpenPlugin;
@@ -27,6 +28,7 @@ impl Plugin for PageOpenPlugin {
                 Update,
                 handle_file
                     .in_set(PageOpenSet::HandleKnownPages)
+                    .after(PersistenceSet::Load)
                     .after(vmux_layout::warm_page::PrewarmPageOpenSet),
             );
     }
@@ -82,6 +84,7 @@ struct FileOpenContext<'w, 's> {
     stack_workspaces: Query<'w, 's, (Option<&'static vmux_ecs::WorkspaceKind>, Has<PageRestore>)>,
     visits: RecentVisits<'w, 's>,
     projects: Projects<'w, 's>,
+    registrations: Registrations<'w, 's>,
     time: Res<'w, Time>,
     commands: Commands<'w, 's>,
     record_writer: MessageWriter<'w, vmux_ecs::event::RecordVisitRequest>,
@@ -204,13 +207,37 @@ fn handle_file(
         } else {
             None
         };
-        let Some(target) = FilePageTarget::resolve(
-            &task.url,
-            context.projects.path(),
-            &knowledge_root,
-            knowledge_landing.as_deref(),
-            file_landing.as_deref(),
-        ) else {
+        let project = if ProjectRoute::is_page(&task.url) {
+            match context.projects.path() {
+                Ok(root) => {
+                    if matches!(context.registrations.ready(root), Ok(false)) {
+                        continue;
+                    }
+                    context.registrations.resolve(&task.url, root)
+                }
+                Err(error) => Some(Err(error)),
+            }
+        } else {
+            None
+        };
+        let target = if let Some(project) = project {
+            Some(match project {
+                Ok(path) => FilePageTarget {
+                    path: Some(path),
+                    error: String::new(),
+                },
+                Err(error) => FilePageTarget { path: None, error },
+            })
+        } else {
+            FilePageTarget::resolve(
+                &task.url,
+                context.projects.path(),
+                &knowledge_root,
+                knowledge_landing.as_deref(),
+                file_landing.as_deref(),
+            )
+        };
+        let Some(target) = target else {
             continue;
         };
         let Some(path) = target.path else {
