@@ -145,11 +145,32 @@ pub(crate) struct Source;
 #[derive(Default)]
 struct ScriptCalls {
     commands: Vec<String>,
+    shells: Vec<Option<String>>,
     edits: Vec<String>,
     files: Vec<String>,
 }
 
 impl Source {
+    pub(crate) fn shell(raw: &str) -> Option<String> {
+        let raw = raw.trim();
+        if raw.starts_with('{') {
+            return Self::string_property(raw, &["shell"]);
+        }
+        if !Self::is_script(raw) {
+            return None;
+        }
+        let calls = Self::script(raw);
+        let shell = calls.shells.first()?.as_ref()?;
+        if calls
+            .shells
+            .iter()
+            .all(|value| value.as_ref() == Some(shell))
+        {
+            return Some(shell.clone());
+        }
+        None
+    }
+
     pub(crate) fn from_raw(raw: &str) -> Option<String> {
         let raw = raw.trim();
         if raw.is_empty() {
@@ -258,6 +279,9 @@ impl Source {
                 if arguments.starts_with('{') {
                     let length = Self::value_length(arguments);
                     if let Some(command) = Self::object(&arguments[..length]) {
+                        calls
+                            .shells
+                            .push(Self::string_property(&arguments[..length], &["shell"]));
                         let directory =
                             Self::string_property(&arguments[..length], &["workdir", "cwd"]);
                         calls

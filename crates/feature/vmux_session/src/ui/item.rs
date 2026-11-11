@@ -33,11 +33,18 @@ pub fn UserBubble(
     avatar_color: String,
     #[props(default)] copy_text: String,
     #[props(default)] created_at_ms: u64,
+    #[props(default)] compact: bool,
     #[props(extends = GlobalAttributes)] attributes: Vec<Attribute>,
     children: Element,
 ) -> Element {
+    let presentation = if compact {
+        ""
+    } else {
+        "chat-message-enter [contain-intrinsic-size:auto_160px] [contain:layout_paint_style] [content-visibility:auto]"
+    };
+    let padding = if compact { "py-2" } else { "py-3" };
     rsx! {
-        div { class: "chat-message-enter chat-user-bubble group flex w-full flex-row-reverse items-start justify-start gap-3 px-1 py-1 text-sm [contain-intrinsic-size:auto_160px] [contain:layout_paint_style] [content-visibility:auto]", "data-vmux-scroll-layout": "", ..attributes,
+        div { class: "{presentation} chat-user-bubble group flex w-full flex-row-reverse items-start justify-start gap-3 px-1 py-1 text-sm", "data-vmux-scroll-layout": (!compact).then_some(""), ..attributes,
             Avatar {
                 src: None,
                 seed: avatar_name.clone(),
@@ -46,8 +53,8 @@ pub fn UserBubble(
                 class: "mt-1 h-6 w-6 text-[8px]".to_string(),
             }
             div { class: "relative min-w-0 max-w-[80%] flex-none",
-                div { class: "flex min-w-0 flex-col gap-2 rounded-2xl bg-foreground/[0.045] px-4 py-3 text-left", {children} }
-                MessageMeta { text: copy_text, created_at_ms, right: true }
+                div { class: "flex min-w-0 flex-col gap-2 rounded-2xl bg-foreground/[0.045] px-4 {padding} text-left", {children} }
+                if !compact { MessageMeta { text: copy_text, created_at_ms, right: true } }
             }
         }
     }
@@ -61,11 +68,17 @@ pub fn AssistantTurn(
     avatar_background: String,
     #[props(default)] copy_text: String,
     #[props(default)] created_at_ms: u64,
+    #[props(default)] compact: bool,
     #[props(extends = GlobalAttributes)] attributes: Vec<Attribute>,
     children: Element,
 ) -> Element {
+    let presentation = if compact {
+        ""
+    } else {
+        "chat-message-enter [contain-intrinsic-size:auto_160px] [contain:layout_paint_style] [content-visibility:auto]"
+    };
     rsx! {
-        div { class: "chat-message-enter chat-assistant-turn group flex w-full gap-3 px-1 py-1 [contain-intrinsic-size:auto_160px] [contain:layout_paint_style] [content-visibility:auto]", "data-vmux-scroll-layout": "", ..attributes,
+        div { class: "{presentation} chat-assistant-turn group flex w-full gap-3 px-1 py-1", "data-vmux-scroll-layout": (!compact).then_some(""), ..attributes,
             AgentThumbnail {
                 src: avatar_src,
                 seed: agent_id,
@@ -74,9 +87,9 @@ pub fn AssistantTurn(
                 class: "mt-0.5 h-6 w-6 text-[8px]".to_string(),
             }
             div { class: "relative min-w-0 flex-1",
-                div { class: "mb-1 text-xs font-medium text-muted-foreground", "{name}" }
+                if !compact { div { class: "mb-1 text-xs font-medium text-muted-foreground", "{name}" } }
                 div { class: "flex min-w-0 flex-col gap-2.5", {children} }
-                MessageMeta { text: copy_text, created_at_ms }
+                if !compact { MessageMeta { text: copy_text, created_at_ms } }
             }
         }
     }
@@ -1431,11 +1444,29 @@ fn ToolCall(call: ChatToolCall) -> Element {
         ToolPresentation::for_call(call.kind, &call.fallback_label).label
     };
     let children = call.children.clone();
+    let icon_kind = if !edits.is_empty() {
+        vmux_api::chat::ChatToolKind::WriteFile
+    } else if let Some(steps) = &exploration {
+        if steps
+            .iter()
+            .all(|step| matches!(step, ExploreStep::Read { .. }))
+        {
+            vmux_api::chat::ChatToolKind::ReadFile
+        } else {
+            vmux_api::chat::ChatToolKind::Search
+        }
+    } else {
+        call.kind
+    };
+    let icon_path = paths.first().cloned();
+    let shell = command.as_ref().and_then(|command| command.shell_icon());
     rsx! {
         div { key: "{key}", class: "grid grid-cols-[1.5rem_minmax(0,1fr)] items-start gap-2.5 rounded-lg px-2 py-1.5 transition-colors hover:bg-foreground/[0.025]",
             ToolActivityIcon {
                 name: call.name.clone(),
-                file_path: call.file_path.clone(),
+                file_path: icon_path,
+                kind: icon_kind,
+                shell,
                 activity: if !edits.is_empty() { vmux_api::chat::ChatActivityKind::WriteFile } else if exploration.is_some() { vmux_api::chat::ChatActivityKind::Search } else { call.activity },
             }
             div { class: "min-w-0",

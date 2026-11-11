@@ -783,6 +783,8 @@ Space IDs are global identities. Every window may attach its own `Space` view fo
 selecting a space that is not attached creates a fresh local tab and pane tree. Names, project
 settings, and history are shared by ID, while tabs, panes, focus, expansion, side sheets, and
 other layout state remain local to each window. Only the primary window's views persist.
+Bookmark cards start expanded. Their explicit open or closed choice is stored on the Space view,
+shared across its panes and tabs, and restored with the primary window's workspace.
 
 Each feature has one `feature.ron`. It is the static source of truth for the interfaces that
 feature publishes:
@@ -998,7 +1000,8 @@ A floating composer overlaps the transcript's lower edge, with an input-inert su
 Transcript end padding keeps the latest message clear of the composer and its fade.
 Each prompt and its assistant turns share a section in that scroll surface. A compact sticky header
 shows that section's prompt and latest response after its start scrolls out of view; the next section
-replaces it. Preview links pause automatic following and return to the original prompt or exact response
+replaces it. Previews reuse compact versions of the normal user bubble and assistant row, preserving
+their alignment and avatars. Preview links pause automatic following and return to the original prompt or exact response
 block. Existing item IDs remain scroll anchors; section keys survive earlier history so disclosure scopes
 stay mounted. Header visibility changes opacity without moving messages. Hidden previews are inert and
 excluded from accessibility. `StickySections` shares one intersection observer per scroll
@@ -1509,7 +1512,11 @@ ACP enqueue work and only project completed results. Their repository discovery,
 aggregation, directory reads and path resolution use one bounded worker runtime with separate
 interactive and mutating-operation lanes. Repository refreshes are single-flight per checkout,
 inactive views release their watches and tasks, and watcher bursts coalesce into invalidations; the
-watcher never runs a Git command or filters paths synchronously. Each Git child process drains
+watcher never runs a Git command or filters paths synchronously.
+Git watch paths are registered in batches, with four repository subscriptions per maintenance pass,
+so an initial catalog cannot register every watch before returning to input. Session repository
+projection resolves each distinct working directory once per update.
+Each Git child process drains
 stdin, stdout and stderr concurrently, has bounded output and a timeout, and is terminated when its
 operation entity is discarded. Short metadata commands avoid a fixed wait; process polling backs
 off only while a command remains running. Catalogs and diffs page at their source, so opening a page cannot

@@ -266,9 +266,43 @@ enum GitFileWatcher {
 }
 
 impl GitFileWatcher {
-    fn watch(&mut self, path: &Path, mode: RecursiveMode) -> notify::Result<()> {
+    fn watch_targets(
+        &mut self,
+        targets: &[GitWatchTarget],
+        previous: &[GitWatchTarget],
+    ) -> notify::Result<()> {
+        if targets.is_empty() {
+            return Ok(());
+        }
         match self {
-            Self::Recommended(watcher) => watcher.watch(path, mode),
+            Self::Recommended(watcher) => {
+                let mut paths = watcher.paths_mut();
+                let mut added: Vec<&Path> = Vec::new();
+                for target in targets {
+                    let mode = if target.recursive {
+                        RecursiveMode::Recursive
+                    } else {
+                        RecursiveMode::NonRecursive
+                    };
+                    if let Err(error) = paths.add(&target.path, mode) {
+                        for path in &added {
+                            let _ = paths.remove(path);
+                        }
+                        for target in previous {
+                            let mode = if target.recursive {
+                                RecursiveMode::Recursive
+                            } else {
+                                RecursiveMode::NonRecursive
+                            };
+                            let _ = paths.add(&target.path, mode);
+                        }
+                        let _ = paths.commit();
+                        return Err(error);
+                    }
+                    added.push(target.path.as_path());
+                }
+                paths.commit()
+            }
             #[cfg(test)]
             Self::Test => Ok(()),
         }
@@ -461,6 +495,7 @@ const WATCH_RETRY_DELAY: Duration = Duration::from_secs(1);
 const REPO_INFO_OWNER_PATH_LIMIT: usize = 256;
 const REPO_INFO_CACHE_CAPACITY: usize = 1024;
 const REPO_INFO_LOAD_BUDGET: usize = 16;
+const REPO_INFO_WATCH_BUDGET: usize = 4;
 
 #[derive(Component)]
 pub struct RepoInfoCache {
@@ -1181,24 +1216,21 @@ impl GitWatch {
             );
             return false;
         }
-        let mut acquired = Vec::new();
+        let missing = targets
+            .iter()
+            .filter(|target| !self.watch_references.contains_key(*target))
+            .cloned()
+            .collect::<Vec<_>>();
+        let previous = self.watch_references.keys().cloned().collect::<Vec<_>>();
+        if self.watcher.watch_targets(&missing, &previous).is_err() {
+            return false;
+        }
         for target in targets {
             if let Some(references) = self.watch_references.get_mut(target) {
                 *references += 1;
-                acquired.push(target.clone());
                 continue;
             }
-            let mode = if target.recursive {
-                RecursiveMode::Recursive
-            } else {
-                RecursiveMode::NonRecursive
-            };
-            if self.watcher.watch(&target.path, mode).is_err() {
-                self.release_targets(&acquired);
-                return false;
-            }
             self.watch_references.insert(target.clone(), 1);
-            acquired.push(target.clone());
         }
         true
     }
@@ -1722,6 +1754,7 @@ fn info(
     presented_owners: Query<(), With<PagePresented>>,
     deadline: Option<Res<GitWatchDeadline>>,
     proxy: Option<Res<EventLoopProxyWrapper>>,
+    mut watch_cursor: Local<usize>,
 ) {
     let repo_info = repo_info.bypass_change_detection();
     let now = Instant::now();
@@ -1744,7 +1777,7 @@ fn info(
     };
     watch.release_inactive_repo_info(repo_info, &active);
     watch.evict_inactive_repo_info(repo_info, &active);
-    let paths: Vec<PathBuf> = repo_info
+    let mut paths: Vec<PathBuf> = repo_info
         .entries
         .iter()
         .filter_map(|(path, entry)| {
@@ -1753,7 +1786,13 @@ fn info(
         })
         .collect();
     let mut retry_watch = false;
-    for path in paths {
+    let pending_watch = paths.len() > REPO_INFO_WATCH_BUDGET;
+    if !paths.is_empty() {
+        let start = *watch_cursor % paths.len();
+        paths.rotate_left(start);
+        *watch_cursor = start + REPO_INFO_WATCH_BUDGET;
+    }
+    for path in paths.into_iter().take(REPO_INFO_WATCH_BUDGET) {
         let info = repo_info
             .entries
             .get(&path)
@@ -1767,6 +1806,9 @@ fn info(
     repo_info.schedule_next_gc(&active, now);
     if retry_watch {
         repo_info.next_gc = repo_info.next_gc.min(now + WATCH_RETRY_DELAY);
+    }
+    if pending_watch && !retry_watch {
+        repo_info.next_gc = repo_info.next_gc.min(now + Duration::from_millis(16));
     }
     repo_info.maintenance_dirty = false;
     schedule_repo_info_deadline(deadline.as_deref(), proxy.as_deref(), repo_info);
@@ -1794,6 +1836,51 @@ mod tests {
 
     use super::*;
     use crate::host::repository::test_repo;
+
+    #[test]
+    fn failed_watch_batches_preserve_previously_registered_files() {
+        let retained = tempfile::tempdir().unwrap();
+        let added = tempfile::tempdir().unwrap();
+        let (sender, receiver) = mpsc::channel();
+        let watcher = notify::recommended_watcher(move |event: notify::Result<notify::Event>| {
+            if let Ok(event) = event {
+                let _ = sender.send(event.paths);
+            }
+        })
+        .unwrap();
+        let mut watcher = GitFileWatcher::Recommended(watcher);
+        let previous = GitWatchTarget {
+            path: retained.path().to_path_buf(),
+            recursive: true,
+            kind: GitWatchKind::Worktree,
+        };
+        watcher
+            .watch_targets(std::slice::from_ref(&previous), &[])
+            .unwrap();
+        let targets = [
+            GitWatchTarget {
+                path: added.path().to_path_buf(),
+                recursive: true,
+                kind: GitWatchKind::Worktree,
+            },
+            GitWatchTarget {
+                path: added.path().join("missing"),
+                recursive: true,
+                kind: GitWatchKind::Worktree,
+            },
+        ];
+        assert!(watcher.watch_targets(&targets, &[previous]).is_err());
+        std::fs::write(retained.path().join("retained.txt"), "changed").unwrap();
+        let deadline = Instant::now() + Duration::from_secs(3);
+        loop {
+            let paths = receiver
+                .recv_timeout(deadline.saturating_duration_since(Instant::now()))
+                .expect("the original file watch must survive a failed batch");
+            if paths.iter().any(|path| path.ends_with("retained.txt")) {
+                break;
+            }
+        }
+    }
 
     #[test]
     fn git_watch_targets_cover_index_and_refs() {

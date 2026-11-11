@@ -1,7 +1,8 @@
 use dioxus::prelude::*;
-use vmux_api::chat::ChatActivityKind;
+use vmux_api::BuiltinIcon;
+use vmux_api::chat::{ChatActivityKind, ChatToolKind};
 use vmux_ui::file_icon::{FileIcon, FilePath, TypeIcon};
-use vmux_ui::icon::LineIconView;
+use vmux_ui::icon::{BuiltinIconView, LineIconView};
 
 use crate::activity::{ActivityIcon, ToolPresentation};
 
@@ -44,17 +45,30 @@ pub(super) fn ToolActivityIcon(
     name: String,
     file_path: Option<String>,
     activity: ChatActivityKind,
+    kind: ChatToolKind,
+    shell: Option<BuiltinIcon>,
 ) -> Element {
     if ToolPresentation::is_sleep(&name) {
         return rsx! { ActivityIconView { kind: ActivityIcon::Awaiting } };
     }
-    if matches!(
-        &activity,
-        ChatActivityKind::ReadFile | ChatActivityKind::WriteFile | ChatActivityKind::Tool
-    ) && let Some(path) = file_path
+    if kind == ChatToolKind::Command {
+        if let Some(shell) = shell {
+            return rsx! {
+                span { class: "flex h-6 w-6 shrink-0 items-center justify-center opacity-75", aria_hidden: "true",
+                    BuiltinIconView { icon: shell, class: "h-4 w-4" }
+                }
+            };
+        }
+        return rsx! { ActivityIconView { kind: ActivityIcon::Command } };
+    }
+    if matches!(kind, ChatToolKind::ReadFile | ChatToolKind::WriteFile)
+        && let Some(path) = file_path
     {
-        let write = activity == ChatActivityKind::WriteFile;
+        let write = kind == ChatToolKind::WriteFile;
         return rsx! { FileActivityIcon { path, write } };
+    }
+    if kind == ChatToolKind::Search {
+        return rsx! { ActivityIconView { kind: ActivityIcon::Search } };
     }
     if matches!(FilePath(&name).icon(false), FileIcon::Logo(_)) {
         return rsx! { FileActivityIcon { path: name, write: false } };

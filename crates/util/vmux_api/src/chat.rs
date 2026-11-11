@@ -149,6 +149,25 @@ pub struct ChatCommand {
 }
 
 impl ChatCommand {
+    pub fn shell_icon(&self) -> Option<crate::BuiltinIcon> {
+        let program = self
+            .source
+            .split_whitespace()
+            .next()?
+            .trim_matches(['\'', '"']);
+        if let Some(icon) = crate::BuiltinIcon::for_shell(program) {
+            return Some(icon);
+        }
+        if let ChatToolArguments::Fields(arguments) = &self.metadata {
+            for argument in arguments {
+                if argument.name == "shell" {
+                    return crate::BuiltinIcon::for_shell(argument.value.text()?);
+                }
+            }
+        }
+        None
+    }
+
     pub fn exploration(&self) -> Option<Vec<ExploreStep>> {
         let mut steps = ExploreStep::commands(&self.source)?;
         for step in &mut steps {
@@ -192,7 +211,17 @@ impl ChatCommand {
                 (source, metadata)
             }
             ChatToolArguments::Value(value) => (value.text()?.to_string(), ChatToolArguments::None),
-            ChatToolArguments::Raw(raw) => (Source::from_raw(raw)?, ChatToolArguments::None),
+            ChatToolArguments::Raw(raw) => {
+                let metadata = match Source::shell(raw) {
+                    Some(shell) => ChatToolArguments::Fields(vec![ChatToolArgument {
+                        name: "shell".into(),
+                        label: "shell".into(),
+                        value: ChatToolArgumentValue::Text(shell),
+                    }]),
+                    None => ChatToolArguments::None,
+                };
+                (Source::from_raw(raw)?, metadata)
+            }
         };
         let preview = CommandPreview::from(&source)?;
         Some(Self {
@@ -830,6 +859,39 @@ text(await tools.exec_command({cmd:"cat src/two.rs",workdir:"/work/two"}));"#
             ..Default::default()
         };
         assert_eq!(read.file_paths(), ["/work/read.rs"]);
+    }
+
+    #[test]
+    fn command_shell_icons_follow_the_execution_shell_instead_of_file_arguments() {
+        for (shell, expected) in [
+            ("/bin/bash", Some(crate::BuiltinIcon::Bash)),
+            ("/bin/zsh", Some(crate::BuiltinIcon::Zsh)),
+            ("/opt/homebrew/bin/nu", Some(crate::BuiltinIcon::Nushell)),
+            ("/usr/bin/fish", None),
+        ] {
+            let arguments = ChatToolArguments::Raw(format!(
+                "{{\"cmd\":\"tail -10 /tmp/build.log\",\"shell\":\"{shell}\"}}"
+            ));
+            let command = ChatCommand::from_arguments(ChatToolKind::Command, &arguments).unwrap();
+            assert_eq!(command.shell_icon(), expected);
+        }
+        let arguments = ChatToolArguments::Raw(
+            r#"text(await tools.exec_command({cmd:"tail -10 /tmp/build.log",shell:"/bin/bash"}));"#
+                .into(),
+        );
+        assert_eq!(
+            ChatCommand::from_arguments(ChatToolKind::Command, &arguments)
+                .unwrap()
+                .shell_icon(),
+            Some(crate::BuiltinIcon::Bash)
+        );
+        let arguments = ChatToolArguments::Raw("bash -c 'cargo test'".into());
+        assert_eq!(
+            ChatCommand::from_arguments(ChatToolKind::Command, &arguments)
+                .unwrap()
+                .shell_icon(),
+            Some(crate::BuiltinIcon::Bash)
+        );
     }
 
     #[test]

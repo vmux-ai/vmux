@@ -31,7 +31,7 @@ pub(crate) struct SideSheetLayoutPlugin;
 #[derive(Component)]
 pub struct SideSheet;
 
-#[derive(Component, Reflect, Default, Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Component, Reflect, Clone, Copy, Debug, PartialEq, Eq)]
 #[reflect(Component)]
 #[type_path = "vmux_desktop::layout::side_sheet"]
 #[require(moonshine_save::prelude::Save)]
@@ -40,6 +40,17 @@ pub struct SideSheetSectionsExpanded {
     pub bookmarks: bool,
     pub knowledge: bool,
     pub tools: bool,
+}
+
+impl Default for SideSheetSectionsExpanded {
+    fn default() -> Self {
+        Self {
+            projects: false,
+            bookmarks: true,
+            knowledge: false,
+            tools: false,
+        }
+    }
 }
 
 impl SideSheetSectionsExpanded {
@@ -53,10 +64,6 @@ impl SideSheetSectionsExpanded {
         };
         *value = expanded;
         true
-    }
-
-    pub fn is_empty(self) -> bool {
-        !self.projects && !self.bookmarks && !self.knowledge && !self.tools
     }
 }
 

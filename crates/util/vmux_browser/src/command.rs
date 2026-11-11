@@ -1082,7 +1082,7 @@ fn side_sheet_section(
     if !state.set(&request.path, request.expanded) {
         return;
     }
-    if state.is_empty() {
+    if state == SideSheetSectionsExpanded::default() {
         commands.entity(space).remove::<SideSheetSectionsExpanded>();
     } else {
         commands.entity(space).insert(state);
@@ -1789,7 +1789,7 @@ mod tests {
 
             let space = app
                 .world_mut()
-                .spawn((Space, SpaceId("work".to_string())))
+                .spawn((Space, SpaceId("work".to_string()), vmux_ecs::Active))
                 .id();
             let first_tab = app.world_mut().spawn((Tab::default(), ChildOf(space))).id();
             let pane_in_first_tab = app.world_mut().spawn((Pane, ChildOf(first_tab))).id();
@@ -1813,7 +1813,7 @@ mod tests {
             }
         }
 
-        fn expand(&mut self, section: &str) {
+        fn set(&mut self, section: &str, expanded: bool) {
             self.app
                 .world_mut()
                 .trigger(UiInput::<SideSheetSectionRequest> {
@@ -1821,7 +1821,7 @@ mod tests {
                     payload: SideSheetSectionRequest {
                         pane_id: self.pane_in_first_tab.to_bits(),
                         path: section.to_string(),
-                        expanded: true,
+                        expanded,
                     },
                 });
             self.app.world_mut().flush();
@@ -1844,7 +1844,7 @@ mod tests {
         let mut spaces = SideSheetSpaces::start();
         let first_pane = spaces.pane_in_first_tab;
         assert!(!spaces.sections_under(first_pane).projects);
-        spaces.expand("projects");
+        spaces.set("projects", true);
 
         let second_tab = spaces.second_tab;
         assert!(
@@ -1856,9 +1856,23 @@ mod tests {
     #[test]
     fn expanding_a_card_leaves_the_other_spaces_alone() {
         let mut spaces = SideSheetSpaces::start();
-        spaces.expand("bookmarks");
+        spaces.set("projects", true);
 
         let elsewhere = spaces.tab_in_other_space;
-        assert!(!spaces.sections_under(elsewhere).bookmarks);
+        assert!(!spaces.sections_under(elsewhere).projects);
+    }
+
+    #[test]
+    fn bookmarks_start_open_and_keep_the_closed_choice_across_tabs() {
+        let mut spaces = SideSheetSpaces::start();
+        let first_pane = spaces.pane_in_first_tab;
+        assert!(spaces.sections_under(first_pane).bookmarks);
+        spaces.set("bookmarks", false);
+        let second_tab = spaces.second_tab;
+        assert!(!spaces.sections_under(second_tab).bookmarks);
+        let elsewhere = spaces.tab_in_other_space;
+        assert!(spaces.sections_under(elsewhere).bookmarks);
+        spaces.set("bookmarks", true);
+        assert!(spaces.sections_under(second_tab).bookmarks);
     }
 }

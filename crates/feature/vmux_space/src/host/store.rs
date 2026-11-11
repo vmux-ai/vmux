@@ -2352,6 +2352,51 @@ mod tests {
     }
 
     #[test]
+    fn bookmark_card_choices_survive_workspace_save_and_load() {
+        for expanded in [false, true] {
+            let directory = tempfile::tempdir().unwrap();
+            let path = directory.path().join("store.ron");
+            let mut saved = App::new();
+            saved
+                .add_plugins(MinimalPlugins)
+                .add_plugins(vmux_ecs::PrimitivesPlugin)
+                .register_stored::<Space>()
+                .register_stored::<vmux_layout::side_sheet::SideSheetSectionsExpanded>()
+                .add_observer(save_on_default_event);
+            saved.world_mut().spawn((
+                Space,
+                vmux_layout::side_sheet::SideSheetSectionsExpanded {
+                    bookmarks: expanded,
+                    ..Default::default()
+                },
+            ));
+            save_space_to_path(saved.world_mut(), path.clone());
+            saved.update();
+
+            let mut restored = App::new();
+            restored
+                .add_plugins((MinimalPlugins, AssetPlugin::default()))
+                .add_plugins(vmux_ecs::PrimitivesPlugin)
+                .register_stored::<Space>()
+                .register_stored::<vmux_layout::side_sheet::SideSheetSectionsExpanded>()
+                .add_observer(load_on_default_event);
+            restored.update();
+            restored
+                .world_mut()
+                .commands()
+                .trigger_load(LoadWorld::default_from_file(path));
+            restored.update();
+            let sections = restored
+                .world_mut()
+                .query_filtered::<&vmux_layout::side_sheet::SideSheetSectionsExpanded, With<Space>>(
+                )
+                .single(restored.world())
+                .unwrap();
+            assert_eq!(sections.bookmarks, expanded);
+        }
+    }
+
+    #[test]
     fn legacy_side_sheet_sections_load_through_store() {
         let dir = tempfile::tempdir().expect("tempdir");
         let path = dir.path().join("store.ron");
