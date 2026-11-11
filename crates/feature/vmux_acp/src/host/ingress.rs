@@ -190,7 +190,13 @@ fn project_deltas(
 
 fn project_statuses(
     mut inbound: MessageReader<AgentRunStatusChanged>,
-    mut sessions: Query<(Entity, &SessionId, &mut RunState, &mut PromptQueue), With<Session>>,
+    mut sessions: Query<
+        (Entity, &SessionId, &mut RunState, &mut PromptQueue),
+        (
+            With<Session>,
+            Without<super::navigation_driver::RetryRequested>,
+        ),
+    >,
     mut commands: Commands,
 ) {
     for inbound in inbound.read() {
@@ -256,6 +262,52 @@ mod tests {
     use vmux_api::protocol::{AgentRequest, AgentRequestId, ServiceMessage};
     use vmux_ecs::service::ServiceInbound;
     use vmux_team::AgentRenameProfile;
+
+    #[test]
+    fn cancelled_setup_rejects_late_status_until_explicit_reattachment() {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins);
+        add(&mut app);
+        let session = app
+            .world_mut()
+            .spawn((
+                Session,
+                SessionId("cancelled".into()),
+                RunState::Errored("ACP setup cancelled".into()),
+                PromptQueue::default(),
+                super::super::navigation_driver::RetryRequested,
+            ))
+            .id();
+        for status in [
+            AgentRunStatus::Starting,
+            AgentRunStatus::Idle,
+            AgentRunStatus::AuthenticationRequired {
+                methods: Box::new(Vec::new()),
+                pending: false,
+            },
+        ] {
+            app.world_mut().write_message(AgentRunStatusChanged {
+                sid: "cancelled".into(),
+                status,
+            });
+            app.update();
+            assert!(
+                matches!(app.world().get::<RunState>(session), Some(RunState::Errored(error)) if error == "ACP setup cancelled")
+            );
+        }
+        app.world_mut()
+            .entity_mut(session)
+            .remove::<super::super::navigation_driver::RetryRequested>();
+        app.world_mut().write_message(AgentRunStatusChanged {
+            sid: "cancelled".into(),
+            status: AgentRunStatus::Starting,
+        });
+        app.update();
+        assert!(matches!(
+            app.world().get::<RunState>(session),
+            Some(RunState::Preparing)
+        ));
+    }
 
     #[test]
     fn routes_agent_requests_without_terminal_ownership() {

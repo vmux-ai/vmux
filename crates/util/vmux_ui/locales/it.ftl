@@ -1158,3 +1158,4 @@ onboarding-api-key = Chiave API (facoltativa)
 onboarding-save-key = Salva la chiave in questo profilo
 onboarding-key-failed = Impossibile salvare la chiave. Riprova o accedi.
 onboarding-workspace-question = Dove lavoriamo?
+agent-starting = Avvio dell’agente…

@@ -1155,3 +1155,4 @@ onboarding-api-key = API 密钥（可选）
 onboarding-save-key = 将密钥保存到此配置文件
 onboarding-key-failed = 无法保存密钥。请重试或使用登录。
 onboarding-workspace-question = 我们在哪里工作？
+agent-starting = 正在启动智能体…

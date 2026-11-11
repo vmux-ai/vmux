@@ -1155,3 +1155,4 @@ onboarding-api-key = API 키 (선택 사항)
 onboarding-save-key = 이 프로필에 키 저장
 onboarding-key-failed = 키를 저장하지 못했습니다. 다시 시도하거나 로그인하세요.
 onboarding-workspace-question = 어디에서 작업할까요?
+agent-starting = 에이전트 시작 중…

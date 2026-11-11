@@ -143,6 +143,7 @@ pub(super) fn ChoiceOptions(
     #[props(default = true)] show_help: bool,
     #[props(default)] leading: Vec<Element>,
     #[props(default)] trailing: Vec<Element>,
+    #[props(default)] disabled_options: Vec<usize>,
     #[props(default)] on_keydown: Option<EventHandler<KeyboardEvent>>,
     on_select: EventHandler<usize>,
     on_hover: EventHandler<usize>,
@@ -165,7 +166,8 @@ pub(super) fn ChoiceOptions(
                         role: "option",
                         aria_label: option.clone(),
                         aria_selected: index == selected,
-                        disabled,
+                        disabled: disabled || disabled_options.contains(&index),
+                        onfocus: move |_| on_hover.call(index),
                         onmouseenter: move |_| on_hover.call(index),
                         class: if compact {
                             if index == selected { "flex min-h-8 shrink-0 items-center gap-2 rounded-lg bg-foreground/[0.08] px-2 py-1.5 text-left text-sm text-foreground" } else { "flex min-h-8 shrink-0 items-center gap-2 rounded-lg px-2 py-1.5 text-left text-sm text-foreground hover:bg-foreground/[0.04]" }

@@ -1158,3 +1158,4 @@ onboarding-api-key = Ключ API (необов’язково)
 onboarding-save-key = Зберегти ключ у цьому профілі
 onboarding-key-failed = Не вдалося зберегти ключ. Спробуйте ще раз або увійдіть в обліковий запис.
 onboarding-workspace-question = Де будемо працювати?
+agent-starting = Запуск агента…

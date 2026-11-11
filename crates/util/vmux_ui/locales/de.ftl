@@ -1158,3 +1158,4 @@ onboarding-api-key = API-Schlüssel (optional)
 onboarding-save-key = Schlüssel in diesem Profil speichern
 onboarding-key-failed = Der Schlüssel konnte nicht gespeichert werden. Versuchen Sie es erneut oder melden Sie sich an.
 onboarding-workspace-question = Wo sollen wir arbeiten?
+agent-starting = Agent wird gestartet…

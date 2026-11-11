@@ -1147,3 +1147,4 @@ onboarding-api-key = API key (optional)
 onboarding-save-key = Save key to this profile
 onboarding-key-failed = The key could not be saved. Retry or use sign-in instead.
 onboarding-workspace-question = Where should we work?
+agent-starting = Starting agent…

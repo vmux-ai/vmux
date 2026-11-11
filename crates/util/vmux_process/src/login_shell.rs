@@ -46,6 +46,20 @@ impl LoginShellEnvironment {
         }
     }
 
+    pub fn apply_pty_isolation(command: &mut CommandBuilder) {
+        if vmux_profile::ProfilePaths::current().isolated() {
+            let shell = std::env::var("SHELL").unwrap_or_else(|_| "/bin/sh".into());
+            Self::isolate_pty(command, Self::get(&shell));
+        }
+    }
+
+    fn isolate_pty(command: &mut CommandBuilder, environment: &[(String, String)]) {
+        command.env_clear();
+        for (key, value) in environment {
+            command.env(key, value);
+        }
+    }
+
     fn capture(shell: &str) -> Vec<(String, String)> {
         let paths = vmux_profile::ProfilePaths::current();
         if paths.isolated() {
@@ -60,7 +74,17 @@ impl LoginShellEnvironment {
     ) -> Vec<(String, String)> {
         let keys = std::env::var("VMUX_TEST_ENV_KEYS").ok().as_deref() == Some("1");
         let mut environment = Vec::new();
+        let mut original_home = None;
+        let mut rustup_home = None;
         for (key, value) in inherited {
+            if key == "HOME" {
+                original_home = Some(std::path::PathBuf::from(value));
+                continue;
+            }
+            if key == "RUSTUP_HOME" {
+                rustup_home = Some(value);
+                continue;
+            }
             if matches!(
                 key.as_str(),
                 "PATH"
@@ -82,6 +106,18 @@ impl LoginShellEnvironment {
                 environment.push((key, value));
             }
         }
+        if let Some(rustup_home) = rustup_home {
+            environment.push(("RUSTUP_HOME".into(), rustup_home));
+        } else if let Some(original_home) = original_home {
+            environment.push((
+                "RUSTUP_HOME".into(),
+                original_home.join(".rustup").to_string_lossy().into_owned(),
+            ));
+        }
+        environment.push((
+            "CARGO_HOME".into(),
+            home.join(".cargo").to_string_lossy().into_owned(),
+        ));
         environment.push(("HOME".into(), home.to_string_lossy().into_owned()));
         environment.push((
             "XDG_CONFIG_HOME".into(),
@@ -264,6 +300,7 @@ mod tests {
             [
                 ("HOME".into(), "/real/home".into()),
                 ("XDG_CONFIG_HOME".into(), "/real/config".into()),
+                ("CARGO_HOME".into(), "/real/cargo".into()),
                 ("PATH".into(), "/usr/bin:/bin".into()),
                 ("VMUX_DATA_DIR".into(), "/fixture/data".into()),
                 ("VMUX_PROFILE".into(), "onboarding".into()),
@@ -274,16 +311,66 @@ mod tests {
             ],
         );
         let mut command = Command::new("/usr/bin/printenv");
-        command.env_clear().envs(environment);
+        command.env_clear().envs(environment.clone());
         let output = command.output().unwrap();
         assert!(output.status.success());
-        let environment = String::from_utf8(output.stdout).unwrap();
-        assert!(environment.contains(&format!("HOME={}\n", fixture.display())));
-        assert!(!environment.contains("/real/"));
-        assert!(!environment.contains("AWS_SECRET_ACCESS_KEY"));
-        assert!(environment.contains("PATH=/usr/bin:/bin\n"));
-        assert!(environment.contains("VMUX_DATA_DIR=/fixture/data\n"));
-        assert!(environment.contains("VMUX_PROFILE=onboarding\n"));
+        let output = String::from_utf8(output.stdout).unwrap();
+        assert!(output.contains(&format!("HOME={}\n", fixture.display())));
+        assert!(!output.contains("/real/config"));
+        assert!(!output.contains("/real/cargo"));
+        assert!(!output.contains("AWS_SECRET_ACCESS_KEY"));
+        assert!(output.contains("PATH=/usr/bin:/bin\n"));
+        assert!(output.contains("VMUX_DATA_DIR=/fixture/data\n"));
+        assert!(output.contains("VMUX_PROFILE=onboarding\n"));
+        assert!(output.contains("RUSTUP_HOME=/real/home/.rustup\n"));
+        assert!(output.contains("CARGO_HOME=/fixture/home/.cargo\n"));
+        let mut pty = CommandBuilder::new("/usr/bin/printenv");
+        pty.cwd(std::env::temp_dir());
+        pty.env("AWS_SECRET_ACCESS_KEY", "must-not-be-inherited");
+        LoginShellEnvironment::isolate_pty(&mut pty, &environment);
+        let pair = NativePtySystem::default()
+            .openpty(PtySize::default())
+            .unwrap();
+        let mut reader = pair.master.try_clone_reader().unwrap();
+        let mut child = pair.slave.spawn_command(pty).unwrap();
+        drop(pair.slave);
+        let mut output = String::new();
+        reader.read_to_string(&mut output).unwrap();
+        assert!(child.wait().unwrap().success());
+        assert!(output.contains("HOME=/fixture/home"));
+        assert!(!output.contains("AWS_SECRET_ACCESS_KEY"));
+    }
+
+    #[test]
+    fn isolated_installation_can_use_the_installed_toolchain_without_host_cargo_configuration() {
+        let active = Command::new("rustup")
+            .args(["show", "active-toolchain"])
+            .output()
+            .unwrap();
+        assert!(active.status.success());
+        let output = String::from_utf8(active.stdout).unwrap();
+        let toolchain = output.split_whitespace().next().unwrap();
+        let home = std::env::temp_dir().join(format!("vmux-rustup-fixture-{}", std::process::id()));
+        std::fs::create_dir_all(&home).unwrap();
+        let environment = LoginShellEnvironment::isolated(&home, std::env::vars());
+        let output = Command::new("rustup")
+            .args(["run", toolchain, "rustc", "--version"])
+            .current_dir(&home)
+            .env_clear()
+            .envs(environment)
+            .output()
+            .unwrap();
+        std::fs::remove_dir_all(home).unwrap();
+        assert!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        assert!(
+            String::from_utf8(output.stdout)
+                .unwrap()
+                .starts_with("rustc ")
+        );
     }
 
     #[test]

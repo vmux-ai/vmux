@@ -584,6 +584,7 @@ impl Process {
             }
             cmd
         };
+        crate::LoginShellEnvironment::apply_pty_isolation(&mut cmd);
         cmd.env("TERM", "xterm-256color");
         cmd.env("COLORTERM", "truecolor");
         cmd.env("LANG", "en_US.UTF-8");

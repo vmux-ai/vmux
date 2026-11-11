@@ -322,6 +322,7 @@ fn escape(
         return;
     };
     if !running && queue.items.is_empty() && !composer.draft().is_empty() {
+        commands.entity(session_entity).remove::<RecoveredDraft>();
         let effect = composer.effect(String::new(), true);
         commands.trigger(
             vmux_ecs::UiStateWrite::<crate::state::ChatUiState>::from_event(webview, &effect),
@@ -956,6 +957,7 @@ mod tests {
                 TestSession::bundle(),
                 PromptQueue::default(),
                 RunState::Idle,
+                RecoveredDraft("draft".into()),
             ))
             .id();
         let stack = app
@@ -980,6 +982,7 @@ mod tests {
             app.world().get::<ComposerState>(webview).unwrap().draft(),
             ""
         );
+        assert!(app.world().get::<RecoveredDraft>(session).is_none());
     }
 
     #[cfg(host)]

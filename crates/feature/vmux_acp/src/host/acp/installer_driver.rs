@@ -252,7 +252,7 @@ impl InstallState {
         if matches!(phase, InstallPhase::Done) {
             Self {
                 pct: None,
-                message: "Starting agent…".to_string(),
+                message: vmux_ui::i18n::translate("agent-starting"),
             }
         } else {
             Self {
@@ -265,7 +265,7 @@ impl InstallState {
     pub(super) fn preparing() -> Self {
         Self {
             pct: None,
-            message: "Preparing agent…".to_string(),
+            message: vmux_ui::i18n::translate("agent-preparing"),
         }
     }
 }

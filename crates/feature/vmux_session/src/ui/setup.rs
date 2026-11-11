@@ -27,11 +27,12 @@ pub(super) fn Controls(chat: Chat) -> Element {
         .read()
         .clone();
     let authentication = chat.status() == "authentication";
+    let pending = chat.authentication_pending();
     let mut choices = Vec::new();
     if chat.status() == "errored" {
         choices.push(Choice::Retry);
     }
-    if authentication && !chat.authentication_pending() {
+    if authentication {
         for method in chat.authentication_methods() {
             choices.push(Choice::Authenticate(method.id, method.name));
         }
@@ -39,8 +40,12 @@ pub(super) fn Controls(chat: Chat) -> Element {
     choices.push(Choice::Cancel);
     choices.push(Choice::ChangeAgent);
     let mut labels = Vec::new();
-    for choice in &choices {
+    let mut disabled_options = Vec::new();
+    for (index, choice) in choices.iter().enumerate() {
         labels.push(choice.label());
+        if !choice.available(pending) {
+            disabled_options.push(index);
+        }
     }
     let count = choices.len();
     let keyboard = choices.clone();
@@ -49,9 +54,10 @@ pub(super) fn Controls(chat: Chat) -> Element {
             options: labels,
             selected: selected().min(count.saturating_sub(1)),
             disabled: keys.pending,
+            disabled_options,
             on_hover: move |index| selected.set(index),
             on_select: move |index: usize| {
-                if !keys.pending && let Some(choice) = choices.get(index) { choice.choose(); }
+                if !keys.pending && let Some(choice) = choices.get(index) && choice.available(pending) { choice.choose(); }
             },
             on_keydown: move |event| {
                 if keys.pending { return; }
@@ -60,8 +66,8 @@ pub(super) fn Controls(chat: Chat) -> Element {
                 match key {
                     ChoiceKey::Next => selected.set((current + 1).min(count.saturating_sub(1))),
                     ChoiceKey::Previous => selected.set(current.saturating_sub(1)),
-                    ChoiceKey::Submit => keyboard[current].choose(),
-                    ChoiceKey::Number(index) => { if let Some(choice) = keyboard.get(index) { choice.choose(); } },
+                    ChoiceKey::Submit => { if keyboard[current].available(pending) { keyboard[current].choose(); } },
+                    ChoiceKey::Number(index) => { if let Some(choice) = keyboard.get(index) && choice.available(pending) { choice.choose(); } },
                 }
                 event.prevent_default();
                 event.stop_propagation();
@@ -86,6 +92,10 @@ enum Choice {
 }
 
 impl Choice {
+    fn available(&self, pending: bool) -> bool {
+        !pending || !matches!(self, Self::Authenticate(..))
+    }
+
     fn label(&self) -> String {
         match self {
             Self::Retry => translate("common-retry"),
@@ -139,7 +149,10 @@ mod tests {
     use crate::event::ChatSnapshot;
     use crate::state::ChatUiState;
     use dioxus::core::{AttributeValue, Mutation, VirtualDom};
-    use dioxus_html::{EventData, SerializedHtmlEventConverter, SerializedMouseData};
+    use dioxus_html::{
+        Code, EventData, Location, Modifiers, SerializedHtmlEventConverter, SerializedKeyboardData,
+        SerializedMouseData,
+    };
     use std::{cell::RefCell, rc::Rc};
     use vmux_api::BinEvent;
     use vmux_ui::hooks::EventListenerError;
@@ -156,6 +169,8 @@ mod tests {
                 self.0.borrow_mut().push(request.method_id);
             } else if id == crate::event::ChatRetrySession::id() {
                 self.0.borrow_mut().push("retry".into());
+            } else if id == ChatCancelSetup::id() {
+                self.0.borrow_mut().push("cancel".into());
             }
             Ok(())
         }
@@ -166,12 +181,13 @@ mod tests {
     }
 
     #[component]
-    fn Login(controls: bool) -> Element {
+    fn Login(controls: bool, #[props(default)] pending: bool) -> Element {
         let mut state = vmux_ui::hooks::use_ui_state::<ChatUiState>().state;
         use_hook(move || {
             state.set(ChatUiState {
                 snapshot: ChatSnapshot {
                     status: "authentication".into(),
+                    authentication_pending: pending,
                     authentication_methods: vec![vmux_api::protocol::AuthenticationMethod {
                         id: "browser-login".into(),
                         name: "Sign in with browser".into(),
@@ -196,14 +212,26 @@ mod tests {
     fn authentication_is_a_guide_message_and_sign_in_is_a_composer_reply() {
         dioxus_html::set_event_converter(Box::new(SerializedHtmlEventConverter));
         let host = Rc::new(Host::default());
-        let mut message = VirtualDom::new_with_props(Login, LoginProps { controls: false });
+        let mut message = VirtualDom::new_with_props(
+            Login,
+            LoginProps {
+                controls: false,
+                pending: false,
+            },
+        );
         message.provide_root_context(HostBinding(host.clone()));
         message.rebuild_in_place();
         let html = dioxus_ssr::render(&message);
         assert!(html.contains(&translate("onboarding-auth-question")));
         assert!(!html.contains("role=\"listbox\""));
         assert!(!html.contains("Sign in with browser"));
-        let mut composer = VirtualDom::new_with_props(Login, LoginProps { controls: true });
+        let mut composer = VirtualDom::new_with_props(
+            Login,
+            LoginProps {
+                controls: true,
+                pending: false,
+            },
+        );
         composer.provide_root_context(HostBinding(host.clone()));
         let initial = composer.rebuild_to_vec();
         assert!(dioxus_ssr::render(&composer).contains("role=\"listbox\""));
@@ -230,6 +258,77 @@ mod tests {
         );
         composer.render_immediate_to_vec();
         assert_eq!(*host.0.borrow(), ["browser-login"]);
+    }
+
+    #[test]
+    fn pending_authentication_keeps_choices_and_focused_keyboard_cancel_available() {
+        dioxus_html::set_event_converter(Box::new(SerializedHtmlEventConverter));
+        let host = Rc::new(Host::default());
+        let mut dom = VirtualDom::new_with_props(
+            Login,
+            LoginProps {
+                controls: true,
+                pending: true,
+            },
+        );
+        dom.provide_root_context(HostBinding(host.clone()));
+        let initial = dom.rebuild_to_vec();
+        let mut authentication = None;
+        let mut cancel = None;
+        let label = translate("common-cancel");
+        for edit in &initial.edits {
+            if let Mutation::SetAttribute {
+                name: "aria-label",
+                value: AttributeValue::Text(value),
+                id,
+                ..
+            } = edit
+            {
+                if value == "Sign in with browser" {
+                    authentication = Some(*id);
+                }
+                if value == &label {
+                    cancel = Some(*id);
+                }
+            }
+        }
+        let authentication = authentication.expect("pending sign-in keeps its option visible");
+        let cancel = cancel.expect("pending sign-in keeps cancellation available");
+        assert!(initial.edits.iter().any(|edit| matches!(edit,
+            Mutation::SetAttribute { name: "disabled", value: AttributeValue::Bool(true), id, .. } if *id == authentication)));
+        assert!(!initial.edits.iter().any(|edit| matches!(edit,
+            Mutation::SetAttribute { name: "disabled", value: AttributeValue::Bool(true), id, .. } if *id == cancel)));
+        dom.runtime().handle_event(
+            "click",
+            Event::new(
+                EventData::Mouse(SerializedMouseData::default()).into_any(),
+                true,
+            ),
+            authentication,
+        );
+        dom.render_immediate_to_vec();
+        assert!(host.0.borrow().is_empty());
+        dom.runtime().handle_event(
+            "focus",
+            Event::new(EventData::Focus(Default::default()).into_any(), true),
+            cancel,
+        );
+        dom.render_immediate_to_vec();
+        let keyboard = SerializedKeyboardData::new(
+            Key::Enter,
+            Code::Enter,
+            Location::Standard,
+            false,
+            Modifiers::empty(),
+            false,
+        );
+        dom.runtime().handle_event(
+            "keydown",
+            Event::new(EventData::Keyboard(keyboard).into_any(), true),
+            cancel,
+        );
+        dom.render_immediate_to_vec();
+        assert_eq!(*host.0.borrow(), ["cancel"]);
     }
 
     #[component]

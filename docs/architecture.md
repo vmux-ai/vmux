@@ -1556,14 +1556,16 @@ their bound Session state. The service carries serialized agent protocol message
 persistent daemon sessions; `vmux_acp` owns the client-host Bevy messages produced when those
 wire messages enter ECS.
 
-ACP setup opens as a conversation on the first launcher entry. The guide asks which agent to
+ACP setup opens as a conversation on the first launcher entry without saved workspace history.
+An existing workspace keeps its launcher when no setup or usable Session remains. The guide asks which agent to
 install or connect; selecting its compact choice within the guide message starts only the required installation and
 authentication. Work descriptions and project selection belong to the actual agent conversation.
 An installed agent reuses its package and compatible credentials. A live, usable preferred Session
 opens directly; a recorded setup Session resumes its unfinished step. Later launcher tabs keep
 their ordinary navigation behavior.
 
-`vmux_session::host::onboarding::Plugin` owns profile-local agent selection and the Session reference.
+`vmux_session::host::onboarding::Plugin` owns profile-local setup progress, agent selection, and the Session reference.
+Initial selection is saved before choosing an agent, so an interrupted first entry can resume.
 `OnboardingConnect` creates or reopens setup through `StartRequest::for_setup`, which carries no user
 content. Session creation enqueues only explicit user text or attachments; setup leaves the prompt
 queue empty until the user sends a real message. Schema 2 setup records preserve the selected agent

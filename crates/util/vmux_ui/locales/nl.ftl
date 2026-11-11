@@ -1158,3 +1158,4 @@ onboarding-api-key = API-sleutel (optioneel)
 onboarding-save-key = Sleutel in dit profiel opslaan
 onboarding-key-failed = De sleutel kon niet worden opgeslagen. Probeer het opnieuw of meld u aan.
 onboarding-workspace-question = Waar zullen we werken?
+agent-starting = Agent starten…

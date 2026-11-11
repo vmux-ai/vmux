@@ -878,11 +878,13 @@ impl StartupSession {
                 .transcript(AcpTranscriptInput::BeginHistoryReplay);
         }
         loop {
-            let response = tokio::time::timeout(ACP_STARTUP_TIMEOUT, async {
+            let connection = self.connection.clone();
+            let shared = self.shared.clone();
+            let operation = tokio::time::timeout(ACP_STARTUP_TIMEOUT, async {
                 if let Some(id) = &resume {
-                    let mut request = LoadSessionRequest::new(id.clone(), self.shared.cwd());
+                    let mut request = LoadSessionRequest::new(id.clone(), shared.cwd());
                     request.mcp_servers = servers.to_vec();
-                    let response = self.connection.send_request(request).block_task().await?;
+                    let response = connection.send_request(request).block_task().await?;
                     Ok((
                         SessionId::new(id.clone()),
                         AcpConfigStateInput {
@@ -891,9 +893,9 @@ impl StartupSession {
                         },
                     ))
                 } else {
-                    let mut request = NewSessionRequest::new(self.shared.cwd());
+                    let mut request = NewSessionRequest::new(shared.cwd());
                     request.mcp_servers = servers.to_vec();
-                    let response = self.connection.send_request(request).block_task().await?;
+                    let response = connection.send_request(request).block_task().await?;
                     Ok::<_, agent_client_protocol::Error>((
                         response.session_id,
                         AcpConfigStateInput {
@@ -902,8 +904,23 @@ impl StartupSession {
                         },
                     ))
                 }
-            })
-            .await;
+            });
+            tokio::pin!(operation);
+            let response = loop {
+                tokio::select! {
+                    biased;
+                    request = input.recv() => match request {
+                        Some(AcpInput::Cancel | AcpInput::Close) | None => {
+                            self.shared.projection.transcript(
+                                AcpTranscriptInput::FinishHistoryReplay(false),
+                            );
+                            return Err("ACP session startup cancelled".into());
+                        }
+                        Some(request) => self.pending.push_back(request),
+                    },
+                    response = &mut operation => break response,
+                }
+            };
             match response {
                 Ok(Ok((id, config))) => {
                     self.shared.projection.config_state(config);
@@ -969,7 +986,12 @@ impl StartupSession {
         input: &mut mpsc::UnboundedReceiver<AcpInput>,
     ) -> Result<(), String> {
         self.status(false);
-        while let Some(request) = input.recv().await {
+        let mut queued = std::mem::take(&mut self.pending);
+        while let Some(request) = if let Some(request) = queued.pop_front() {
+            Some(request)
+        } else {
+            input.recv().await
+        } {
             match request {
                 AcpInput::Authenticate { method_id } => {
                     if !self
@@ -1002,6 +1024,7 @@ impl StartupSession {
                     };
                     match result {
                         Ok(Ok(_)) => {
+                            self.pending.extend(queued);
                             self.shared.projection.status(AgentRunStatus::Starting);
                             return Ok(());
                         }
@@ -1713,7 +1736,7 @@ mod tests {
 
     struct AuthenticationAgent {
         calls: Arc<Mutex<Vec<String>>>,
-        blocked: bool,
+        blocked: Option<&'static str>,
         notified: Option<mpsc::UnboundedSender<()>>,
     }
 
@@ -1736,16 +1759,16 @@ mod tests {
                     let request: serde_json::Value = serde_json::from_str(&line).unwrap();
                     let method = request["method"].as_str().unwrap().to_string();
                     calls.lock().unwrap().push(method.clone());
+                    if blocked == Some(method.as_str()) {
+                        if let Some(notified) = &notified {
+                            let _ = notified.send(());
+                        }
+                        continue;
+                    }
                     let authenticated = attempts >= 2;
                     let result = match method.as_str() {
                         "authenticate" => {
                             assert_eq!(request["params"]["methodId"], "browser");
-                            if blocked {
-                                if let Some(notified) = &notified {
-                                    let _ = notified.send(());
-                                }
-                                continue;
-                            }
                             attempts += 1;
                             if attempts == 1 {
                                 None
@@ -1779,10 +1802,63 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn setup_cancellation_interrupts_unanswered_session_creation_and_load() {
+        for method in ["session/new", "session/load"] {
+            let (notified, mut requests) = mpsc::unbounded_channel();
+            let agent = AuthenticationAgent {
+                calls: Arc::new(Mutex::new(Vec::new())),
+                blocked: Some(method),
+                notified: Some(notified),
+            };
+            let (client, server) = agent.start();
+            let (reader, writer) = tokio::io::split(client);
+            let transport =
+                agent_client_protocol::ByteStreams::new(writer.compat_write(), reader.compat());
+            let (stream, mut events) = broadcast::channel(8);
+            let shared = Arc::new(AcpShared::new(
+                "canonical-session".into(),
+                PathBuf::from("/tmp"),
+                ProcessId::new(),
+                stream,
+                Arc::new(tokio::sync::Mutex::new(ProcessManager::default())),
+            ));
+            let (sender, mut input) = mpsc::unbounded_channel();
+            let close = tokio::spawn(async move {
+                requests.recv().await.unwrap();
+                sender.send(AcpInput::Close).unwrap();
+            });
+            let connection = Client
+                .builder()
+                .connect_with(transport, async move |connection| {
+                    let mut startup = StartupSession::new(shared, connection, Vec::new());
+                    let resume = if method == "session/load" {
+                        Some("saved-session".into())
+                    } else {
+                        None
+                    };
+                    let error = startup
+                        .establish(resume, true, &[], &mut input)
+                        .await
+                        .unwrap_err();
+                    assert_eq!(error, "ACP session startup cancelled");
+                    Ok(())
+                });
+            tokio::time::timeout(std::time::Duration::from_secs(2), connection)
+                .await
+                .unwrap()
+                .unwrap();
+            close.await.unwrap();
+            server.await.unwrap();
+            assert_eq!(*agent.calls.lock().unwrap(), [method]);
+            assert!(events.try_recv().is_err());
+        }
+    }
+
+    #[tokio::test]
     async fn authentication_retries_without_creating_or_publishing_duplicate_sessions() {
         let agent = AuthenticationAgent {
             calls: Arc::new(Mutex::new(Vec::new())),
-            blocked: false,
+            blocked: None,
             notified: None,
         };
         let (client, server) = agent.start();
@@ -1856,7 +1932,7 @@ mod tests {
         let (notified, mut requests) = mpsc::unbounded_channel();
         let agent = AuthenticationAgent {
             calls: Arc::new(Mutex::new(Vec::new())),
-            blocked: true,
+            blocked: Some("authenticate"),
             notified: Some(notified),
         };
         let (client, server) = agent.start();

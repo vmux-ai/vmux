@@ -41,6 +41,8 @@ struct Draft {
     session_id: String,
     #[serde(default)]
     paused: bool,
+    #[serde(default)]
+    setup_started: bool,
     #[serde(skip)]
     starting: bool,
     #[serde(skip)]
@@ -56,6 +58,7 @@ impl Default for Draft {
             agent_id: String::new(),
             session_id: String::new(),
             paused: false,
+            setup_started: false,
             starting: false,
             failed: false,
             dirty: false,
@@ -129,14 +132,14 @@ type SetupSessions<'w, 's> = Query<
 >;
 
 fn begin(
-    drafts: Query<(Entity, &Draft), Without<Entered>>,
+    mut drafts: Query<(Entity, &mut Draft), Without<Entered>>,
     sessions: SetupSessions,
     restore: Query<&vmux_ecs::store::WorkspaceRestore>,
     pages: Query<(&vmux_ecs::PageMetadata, &ChildOf), With<vmux_ecs::page::HostsPage>>,
     stacks: Query<(&vmux_ecs::PageMetadata, Has<vmux_ecs::Active>), With<vmux_ecs::PageNavigation>>,
     mut commands: Commands,
 ) {
-    let Ok((owner, draft)) = drafts.single() else {
+    let Ok((owner, mut draft)) = drafts.single_mut() else {
         return;
     };
     if restore.iter().any(|restore| !restore.complete) {
@@ -200,6 +203,17 @@ fn begin(
         }
     }
     let selected = recorded.or_else(|| ready.map(|(_, id)| id));
+    if selected.is_none() {
+        if restore.iter().any(|restore| restore.store_present)
+            && !draft.setup_started
+            && draft.agent_id.is_empty()
+            && draft.session_id.is_empty()
+        {
+            return;
+        }
+        draft.setup_started = true;
+        draft.dirty = true;
+    }
     let url = selected
         .map(|id| crate::Route::Session(id).url())
         .unwrap_or_else(|| "vmux://sessions/inbox?setup=1".to_string());
@@ -371,6 +385,65 @@ fn save(profile: CurrentProfile, mut drafts: Query<&mut Draft>) {
 mod tests {
     use super::*;
     use vmux_ecs::profile::{ProjectsDirectory, ProjectsRoot};
+
+    #[test]
+    fn existing_workspace_preserves_launcher_and_unfinished_setup_resumes_after_restart() {
+        for (store_present, resume, expected) in
+            [(true, false, 0), (true, true, 1), (false, false, 1)]
+        {
+            let mut app = App::new();
+            app.add_plugins(Plugin);
+            app.update();
+            if resume {
+                let directory = tempfile::tempdir().unwrap();
+                let path = directory.path().join("onboarding.json");
+                Draft {
+                    setup_started: true,
+                    ..Default::default()
+                }
+                .save(&path)
+                .unwrap();
+                let owner = app
+                    .world_mut()
+                    .query_filtered::<Entity, With<Draft>>()
+                    .single(app.world())
+                    .unwrap();
+                app.world_mut().entity_mut(owner).insert(Draft::load(&path));
+            }
+            app.world_mut().spawn(vmux_ecs::store::WorkspaceRestore {
+                complete: true,
+                store_present,
+            });
+            let stack = app
+                .world_mut()
+                .spawn((
+                    vmux_ecs::PageNavigation::new(vmux_ecs::PageOpenId::new()),
+                    vmux_ecs::PageMetadata {
+                        url: "vmux://start/".into(),
+                        ..Default::default()
+                    },
+                ))
+                .id();
+            app.world_mut().spawn((
+                vmux_ecs::page::HostsPage,
+                vmux_ecs::PageMetadata {
+                    url: "vmux://start/".into(),
+                    ..Default::default()
+                },
+                ChildOf(stack),
+            ));
+            app.update();
+            let opens: Vec<_> = app
+                .world_mut()
+                .resource_mut::<Messages<vmux_ecs::PageOpenRequest>>()
+                .drain()
+                .collect();
+            assert_eq!(opens.len(), expected);
+            if let Some(open) = opens.first() {
+                assert_eq!(open.url, "vmux://sessions/inbox?setup=1");
+            }
+        }
+    }
 
     #[test]
     fn first_launch_enters_setup_after_restore_and_later_tabs_keep_the_launcher() {
