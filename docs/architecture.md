@@ -1669,7 +1669,8 @@ successful atomic write updates Project entities and emits `ProjectSaved`; faile
 the previous registration. Stable Project URLs survive source edits, and removal persists hidden
 URL entities while leaving checkout files intact. Page routing and catalog projections read ECS
 registrations. Native folder selection authorizes a new external directory, and the form retains
-its draft on validation or clone failure. Accepted operations survive closing their form.
+its draft on validation or clone failure. Accepted saves and registration removals finish
+after the requesting view closes.
 Project entities omit the workspace `Save` marker; `.projects.ron` is their only persistence owner.
 
 Project dashboards show related sessions, repository status and an entry point into Code,

@@ -331,6 +331,9 @@ struct ProjectImportTask(Task<Result<(), String>>);
 struct ProjectDeleteTask(Task<Result<(), String>>);
 
 #[derive(Component)]
+struct Deletion;
+
+#[derive(Component)]
 struct DeletionResult(Result<(), String>);
 
 #[derive(Default, Serialize, Deserialize)]
@@ -761,6 +764,7 @@ fn delete(
         ));
         commands.spawn((
             Operation::bundle("project.delete").unwrap().running(),
+            Deletion,
             pending,
             WriteRequest {
                 root: root.to_path_buf(),
@@ -801,6 +805,7 @@ fn delete(
     });
     commands.spawn((
         Operation::bundle("project.delete").unwrap().running(),
+        Deletion,
         ChildOf(webview),
         pending,
         ProjectDeleteTask(task),
@@ -1062,11 +1067,12 @@ type Deletions<'w, 's> = Query<
     (
         Entity,
         &'static PendingProjectOperation,
-        &'static OperationTarget,
+        Option<&'static OperationTarget>,
         &'static OperationTargetRevision,
         &'static OperationState,
         Option<&'static DeletionResult>,
     ),
+    With<Deletion>,
 >;
 
 fn finish_deletes(
@@ -1077,26 +1083,30 @@ fn finish_deletes(
     mut commands: Commands,
 ) {
     for (entity, operation, target, captured, state, result) in &pending {
-        let current = pages.get(target.entity()).is_ok_and(|(page, revision)| {
-            ProjectRoute::is_root(&page.url) && captured.accepts(Some(revision.value))
-        });
+        let current = if let Some(target) = target
+            && pages.get(target.entity()).is_ok_and(|(page, revision)| {
+                ProjectRoute::is_root(&page.url) && captured.accepts(Some(revision.value))
+            }) {
+            Some(target.entity())
+        } else {
+            None
+        };
         if !matches!(state, OperationState::Pending | OperationState::Running) {
             commands.entity(entity).remove::<(
                 PendingProjectOperation,
+                Deletion,
                 ProjectDeleteTask,
                 DeletionResult,
                 WriteRequest,
             )>();
-            if current {
+            if let Some(webview) = current {
                 let wake = proxy.as_deref().map(|proxy| (**proxy).clone());
-                commands
-                    .entity(target.entity())
-                    .insert(ProjectCatalogTask::spawn(
-                        operation.root.clone(),
-                        captured.0,
-                        wake,
-                        registrations.snapshot(&operation.root),
-                    ));
+                commands.entity(webview).insert(ProjectCatalogTask::spawn(
+                    operation.root.clone(),
+                    captured.0,
+                    wake,
+                    registrations.snapshot(&operation.root),
+                ));
             }
             continue;
         }
@@ -1104,22 +1114,20 @@ fn finish_deletes(
             continue;
         };
         commands.trigger(OperationCompleted::from_result(entity, &result.0));
-        if current {
+        if let Some(webview) = current {
             match &result.0 {
                 Ok(()) => {
                     let wake = proxy.as_deref().map(|proxy| (**proxy).clone());
-                    commands
-                        .entity(target.entity())
-                        .insert(ProjectCatalogTask::spawn(
-                            operation.root.clone(),
-                            captured.0,
-                            wake,
-                            registrations.snapshot(&operation.root),
-                        ));
+                    commands.entity(webview).insert(ProjectCatalogTask::spawn(
+                        operation.root.clone(),
+                        captured.0,
+                        wake,
+                        registrations.snapshot(&operation.root),
+                    ));
                 }
                 Err(error) => {
                     commands.trigger(vmux_ecs::UiStateWrite::<ProjectUiState>::from_event(
-                        target.entity(),
+                        webview,
                         &ProjectUiState {
                             view: ProjectView::Error(error.clone()),
                             ..Default::default()
@@ -1128,9 +1136,12 @@ fn finish_deletes(
                 }
             }
         }
-        commands
-            .entity(entity)
-            .remove::<(PendingProjectOperation, ProjectDeleteTask, DeletionResult)>();
+        commands.entity(entity).remove::<(
+            PendingProjectOperation,
+            Deletion,
+            ProjectDeleteTask,
+            DeletionResult,
+        )>();
     }
 }
 
@@ -1609,8 +1620,39 @@ mod tests {
     use vmux_session::{SessionSummary, StageSummary};
 
     #[test]
+    fn managed_checkout_delete_completes_the_operation_and_refreshes_the_catalog() {
+        let root = tempfile::tempdir().unwrap();
+        let checkout = root.path().join("checkout");
+        std::fs::create_dir_all(checkout.join(".git")).unwrap();
+        let url = ProjectRoute::from_path(root.path(), &checkout).unwrap();
+        let mut page = ProjectPage::at(root.path(), ProjectRoute::ROOT);
+        page.wait_for_catalog();
+        let operation = page.remove(&url);
+        page.wait_for_operation(operation);
+        assert!(!checkout.exists());
+        assert_eq!(
+            page.app.world().get::<OperationState>(operation),
+            Some(&OperationState::Succeeded)
+        );
+        page.wait_for_catalog();
+        let state = page
+            .app
+            .world()
+            .get::<vmux_ecs::UiState<ProjectUiState>>(page.view)
+            .unwrap()
+            .current()
+            .unwrap();
+        let ProjectView::Catalog(catalog) = &state.view else {
+            panic!("expected catalog after deletion");
+        };
+        assert!(catalog.entries.is_empty());
+        assert!(!catalog.operation_pending);
+    }
+
+    #[test]
     fn registered_removal_preserves_checkout_and_records_write_outcome() {
-        for fail_write in [false, true] {
+        for (fail_write, close_page) in [(false, false), (true, false), (false, true), (true, true)]
+        {
             let root = tempfile::tempdir().unwrap();
             let checkout = root.path().join("checkout");
             std::fs::create_dir_all(checkout.join(".git")).unwrap();
@@ -1634,33 +1676,11 @@ mod tests {
                 std::fs::remove_file(&path).unwrap();
                 std::fs::create_dir(&path).unwrap();
             }
-            page.app.world_mut().trigger(UiInput {
-                webview: page.view,
-                payload: ProjectDeleteRequest {
-                    url: url.to_string(),
-                },
-            });
-            page.app.update();
-            let operation = page
-                .app
-                .world_mut()
-                .query_filtered::<Entity, With<PendingProjectOperation>>()
-                .single(page.app.world())
-                .unwrap();
-            let deadline = std::time::Instant::now() + std::time::Duration::from_secs(3);
-            loop {
-                page.app.update();
-                if page
-                    .app
-                    .world()
-                    .get::<PendingProjectOperation>(operation)
-                    .is_none()
-                {
-                    break;
-                }
-                assert!(std::time::Instant::now() < deadline);
-                std::thread::sleep(std::time::Duration::from_millis(1));
+            let operation = page.remove(url);
+            if close_page {
+                page.app.world_mut().despawn(page.view);
             }
+            page.wait_for_operation(operation);
             assert!(checkout.join(".git").is_dir());
             if fail_write {
                 assert_eq!(
@@ -1691,6 +1711,9 @@ mod tests {
                     ron::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
                 assert!(persisted.projects.is_empty());
                 assert!(persisted.hidden.contains(url));
+                if close_page {
+                    continue;
+                }
                 page.wait_for_catalog();
                 let state = page
                     .app
@@ -1900,6 +1923,19 @@ mod tests {
             app.world_mut().spawn(vmux_ecs::profile::ProjectsRoot(
                 vmux_ecs::profile::ProjectsDirectory::ensure_at(root.to_path_buf()).unwrap(),
             ));
+            let mut registrations =
+                bevy::ecs::system::SystemState::<Registrations>::new(app.world_mut());
+            let deadline = std::time::Instant::now() + std::time::Duration::from_secs(3);
+            loop {
+                app.update();
+                match registrations.get(app.world()).unwrap().ready(root) {
+                    Ok(true) => break,
+                    Ok(false) => {}
+                    Err(error) => panic!("project registrations must load: {error}"),
+                }
+                assert!(std::time::Instant::now() < deadline);
+                std::thread::sleep(std::time::Duration::from_millis(1));
+            }
             let view = app
                 .world_mut()
                 .spawn((
@@ -1921,6 +1957,38 @@ mod tests {
                 permissions: &["ProjectUiState"],
             });
             Self { app, view }
+        }
+
+        fn remove(&mut self, url: &str) -> Entity {
+            self.app.world_mut().trigger(UiInput {
+                webview: self.view,
+                payload: ProjectDeleteRequest {
+                    url: url.to_string(),
+                },
+            });
+            self.app.world_mut().flush();
+            let mut pending = self
+                .app
+                .world_mut()
+                .query_filtered::<Entity, With<PendingProjectOperation>>();
+            pending.single(self.app.world()).unwrap()
+        }
+
+        fn wait_for_operation(&mut self, operation: Entity) {
+            let deadline = std::time::Instant::now() + std::time::Duration::from_secs(3);
+            loop {
+                self.app.update();
+                if self
+                    .app
+                    .world()
+                    .get::<PendingProjectOperation>(operation)
+                    .is_none()
+                {
+                    return;
+                }
+                assert!(std::time::Instant::now() < deadline);
+                std::thread::sleep(std::time::Duration::from_millis(1));
+            }
         }
 
         fn wait_for_catalog(&mut self) {
