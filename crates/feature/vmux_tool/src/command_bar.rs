@@ -406,9 +406,9 @@ impl McpServerRow<'_> {
             || self.0.description.to_ascii_lowercase().contains(&filter)
     }
 
-    fn project(&self, state: &McpServersUiState) -> vmux_api::command_bar::CommandBarResultItem {
+    fn project(&self, state: &McpServersUiState) -> CommandBarResultItem {
         let server = self.0;
-        vmux_api::command_bar::CommandBarResultItem {
+        CommandBarResultItem {
             key: server.id.clone(),
             title: server.name.clone(),
             subtitle: server.description.clone(),
