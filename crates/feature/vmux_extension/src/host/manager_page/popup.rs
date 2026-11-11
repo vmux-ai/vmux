@@ -4,8 +4,8 @@ use bevy_cef::prelude::{
     Browsers, HostWindow, JsEmitEventPlugin, Receive, UiEventPlugin, UiInput, WebviewWindowed,
 };
 use vmux_api::extension::{
-    ExtensionPopupBoundsRequest, ExtensionPopupCloseRequest, ExtensionPopupEvent,
-    ExtensionPopupOpenRequest, ExtensionPopupSizeEvent,
+    ExtRow, ExtensionPopupAnchor, ExtensionPopupBoundsRequest, ExtensionPopupCloseRequest,
+    ExtensionPopupEvent, ExtensionPopupOpenRequest, ExtensionPopupSizeEvent,
 };
 use vmux_ecs::overlay::WindowOverlay;
 use vmux_ecs::{KeyboardOwner, UiStateWrite};
@@ -13,21 +13,32 @@ use vmux_flex::prelude::{LayoutSystems, Visibility};
 use vmux_layout::{Browser, LayoutCef, state::LayoutUiState};
 
 use super::super::model::ExtensionPopup;
+use super::super::model::{ExtensionModel, ExtensionModelEvent, ExtensionWindowId};
+use super::super::windows::{ExtensionWindows, WindowRequestSet};
+use crate::catalog::ExtensionCatalog;
 
 pub(super) struct PopupPlugin;
 
 impl Plugin for PopupPlugin {
     fn build(&self, app: &mut App) {
-        app.add_plugins(UiEventPlugin::<(
-            ExtensionPopupOpenRequest,
-            ExtensionPopupBoundsRequest,
-            ExtensionPopupCloseRequest,
-        )>::default())
+        app.add_message::<OpenRequest>()
+            .add_message::<CloseRequest>()
+            .add_plugins(UiEventPlugin::<(
+                ExtensionPopupOpenRequest,
+                ExtensionPopupBoundsRequest,
+                ExtensionPopupCloseRequest,
+            )>::default())
             .add_plugins(JsEmitEventPlugin::<ExtensionPopupSizeRequest>::default())
+            .add_plugins(JsEmitEventPlugin::<DismissRequest>::default())
             .add_observer(open_request)
             .add_observer(bounds_request)
             .add_observer(close_request)
             .add_observer(size)
+            .add_observer(dismiss)
+            .add_systems(
+                Update,
+                (open, close, dispose).chain().after(WindowRequestSet),
+            )
             .add_systems(Update, inject_sizing.after(vmux_browser::BrowserLoadSet))
             .add_systems(
                 PostUpdate,
@@ -38,31 +49,289 @@ impl Plugin for PopupPlugin {
     }
 }
 
+#[derive(Message, Clone, Debug, PartialEq, Eq)]
+pub(crate) struct OpenRequest {
+    pub(crate) extension_id: String,
+    pub(crate) url: String,
+    pub(crate) window_id: i32,
+    pub(crate) host_window_id: Option<i32>,
+}
+
+impl OpenRequest {
+    pub(crate) fn owns_url(extension_id: &str, url: &str) -> bool {
+        let Ok(url) = url::Url::parse(url) else {
+            return false;
+        };
+        url.scheme() == "chrome-extension" && url.host_str() == Some(extension_id)
+    }
+}
+
+#[derive(Message, Clone, Copy, Debug)]
+pub(crate) struct CloseRequest {
+    pub(crate) window_id: i32,
+}
+
 #[derive(bevy::ecs::system::SystemParam)]
-struct PopupActions<'w, 's> {
-    popups: Query<'w, 's, (Entity, &'static ExtensionPopup)>,
+struct PopupHost<'w, 's> {
+    popups: Query<
+        'w,
+        's,
+        (
+            Entity,
+            &'static ExtensionPopup,
+            &'static vmux_ecs::PageMetadata,
+            Option<&'static ExtensionWindowId>,
+        ),
+    >,
+    layouts: Query<'w, 's, (Entity, Option<&'static HostWindow>), With<LayoutCef>>,
+    host_windows: Query<'w, 's, &'static HostWindow>,
+    native_windows: Query<'w, 's, (Entity, &'static Window, &'static ExtensionWindowId)>,
+    catalog: Query<'w, 's, &'static ExtensionCatalog>,
+    profile: vmux_ecs::profile::CurrentProfile<'w, 's>,
+    model: Single<'w, 's, &'static ExtensionModel>,
+    virtual_windows: Single<'w, 's, &'static mut ExtensionWindows>,
+    events: MessageWriter<'w, ExtensionModelEvent>,
     browsers: NonSend<'w, Browsers>,
     commands: Commands<'w, 's>,
 }
 
-impl PopupActions<'_, '_> {
-    fn close(&mut self, owner: Entity) {
-        let mut closed = false;
-        for (entity, popup) in &self.popups {
-            if popup.owner != owner {
-                continue;
-            }
-            self.browsers.hide_child_window(&entity);
-            self.commands.entity(entity).try_despawn();
-            closed = true;
+impl PopupHost<'_, '_> {
+    fn entry(&self, id: &str) -> Option<ExtRow> {
+        if let Some(catalog) = self.catalog.iter().next()
+            && catalog.loaded()
+        {
+            return catalog.enabled(id).cloned();
         }
-        if closed {
+        let (profile, paths) = self.profile.profile().zip(self.profile.paths())?;
+        let snapshot = store::ExtensionStore::at(paths.extensions())
+            .snapshot(profile.id())
+            .ok()?;
+        snapshot
+            .extensions
+            .into_iter()
+            .find(|entry| entry.id == id && entry.enabled && !entry.needs_approval)
+    }
+
+    fn owner_for_surface(&self, source: Entity) -> Option<Entity> {
+        if self.layouts.contains(source) {
+            return Some(source);
+        }
+        let source_window = self.host_windows.get(source).ok()?.0;
+        self.layouts.iter().find_map(|(layout, host)| {
+            host.is_some_and(|host| host.0 == source_window)
+                .then_some(layout)
+        })
+    }
+
+    fn owner_for_window(&self, window_id: Option<i32>) -> Option<Entity> {
+        let id = window_id.or_else(|| {
+            self.model
+                .windows
+                .iter()
+                .find(|window| window.focused)
+                .or_else(|| self.model.windows.first())
+                .map(|window| window.id)
+        })?;
+        let entity = self
+            .native_windows
+            .iter()
+            .find_map(|(entity, _, window_id)| (window_id.0 == id).then_some(entity))?;
+        self.layouts
+            .iter()
+            .find_map(|(layout, host)| host.is_some_and(|host| host.0 == entity).then_some(layout))
+    }
+
+    fn anchor(&self, owner: Entity) -> Option<ExtensionPopupAnchor> {
+        let (_, host) = self.layouts.get(owner).ok()?;
+        let (_, window, _) = self.native_windows.get(host?.0).ok()?;
+        Some(ExtensionPopupAnchor {
+            right: (window.resolution.width().round() as i32 - 12).max(48),
+            bottom: 40,
+        })
+    }
+
+    fn show(
+        &mut self,
+        owner: Entity,
+        entry: ExtRow,
+        url: String,
+        anchor: ExtensionPopupAnchor,
+        window_id: Option<i32>,
+    ) {
+        if !OpenRequest::owns_url(&entry.id, &url) {
+            return;
+        }
+        if let Some(id) = window_id
+            && !self.virtual_windows.has_popup(id, &url)
+        {
+            return;
+        }
+        let existing = self
+            .popups
+            .iter()
+            .find_map(|(entity, popup, metadata, id)| {
+                (popup.owner == owner && popup.extension_id == entry.id).then_some((
+                    entity,
+                    metadata.url.clone(),
+                    id.map(|id| id.0),
+                ))
+            });
+        let existing_id = existing
+            .as_ref()
+            .and_then(|(_, url, id)| id.filter(|id| self.virtual_windows.has_popup(*id, url)));
+        let id = match window_id.or(existing_id) {
+            Some(id) => id,
+            None => {
+                let Some((_, Some(host))) = self.layouts.get(owner).ok() else {
+                    return;
+                };
+                let Ok((_, _, id)) = self.native_windows.get(host.0) else {
+                    return;
+                };
+                let Some(window) = self.model.windows.iter().find(|window| window.id == id.0)
+                else {
+                    return;
+                };
+                let popup = self.virtual_windows.register_popup(url.clone(), window);
+                let id = popup.id;
+                self.events.write(ExtensionModelEvent::WindowCreated(popup));
+                id
+            }
+        };
+        if let Some(event) = self.virtual_windows.focus_popup(id) {
+            self.events.write(event);
+        }
+        if let Some((entity, previous_url, previous_id)) = existing {
+            if previous_id != Some(id)
+                && let Some(previous_id) = previous_id
+            {
+                for event in self.virtual_windows.dismiss_popup(previous_id, &self.model) {
+                    self.events.write(event);
+                }
+            }
+            self.commands
+                .entity(entity)
+                .insert((ExtensionWindowId(id), KeyboardOwner));
+            if window_id.is_some() && previous_url != url {
+                self.commands.trigger(bevy_cef::prelude::RequestNavigate {
+                    webview: entity,
+                    url,
+                });
+            }
+        } else {
+            self.close(owner);
+            let Ok((_, host)) = self.layouts.get(owner) else {
+                return;
+            };
+            let mut entity = self
+                .commands
+                .spawn(Browser::new_with_title(&url, &entry.name));
+            entity.insert((
+                Name::new(format!("Extension popup: {}", entry.name)),
+                WindowOverlay,
+                ExtensionPopup {
+                    owner,
+                    extension_id: entry.id.clone(),
+                },
+                ExtensionWindowId(id),
+                vmux_browser::PopupWebview,
+                Visibility::Hidden,
+            ));
+            if let Some(host) = host {
+                entity.insert(HostWindow(host.0));
+            }
+        }
+        self.commands
+            .trigger(UiStateWrite::<LayoutUiState>::from_event(
+                owner,
+                &ExtensionPopupEvent {
+                    id: entry.id,
+                    name: entry.name,
+                    icon: entry.icon,
+                    anchor,
+                },
+            ));
+    }
+
+    fn retire(&mut self, entity: Entity, id: Option<i32>) {
+        self.browsers.hide_child_window(&entity);
+        self.commands.entity(entity).try_despawn();
+        if let Some(id) = id {
+            for event in self.virtual_windows.dismiss_popup(id, &self.model) {
+                self.events.write(event);
+            }
+        }
+    }
+
+    fn close(&mut self, owner: Entity) {
+        let mut targets = Vec::new();
+        for (entity, popup, _, id) in &self.popups {
+            if popup.owner == owner {
+                targets.push((entity, id.map(|id| id.0)));
+            }
+        }
+        for (entity, id) in &targets {
+            self.retire(*entity, *id);
+        }
+        if !targets.is_empty() {
             self.commands
                 .trigger(UiStateWrite::<LayoutUiState>::from_event(
                     owner,
                     &ExtensionPopupEvent::default(),
                 ));
         }
+    }
+}
+
+fn open(mut requests: MessageReader<OpenRequest>, mut host: PopupHost) {
+    for request in requests.read() {
+        let Some(entry) = host.entry(&request.extension_id) else {
+            continue;
+        };
+        let Some(owner) = host.owner_for_window(request.host_window_id) else {
+            continue;
+        };
+        let Some(anchor) = host.anchor(owner) else {
+            continue;
+        };
+        host.show(
+            owner,
+            entry,
+            request.url.clone(),
+            anchor,
+            Some(request.window_id),
+        );
+    }
+}
+
+fn close(mut requests: MessageReader<CloseRequest>, mut host: PopupHost) {
+    for request in requests.read() {
+        let mut targets = Vec::new();
+        for (entity, popup, _, id) in &host.popups {
+            if id.is_some_and(|id| id.0 == request.window_id) {
+                targets.push((entity, popup.owner));
+            }
+        }
+        for (entity, owner) in targets {
+            host.retire(entity, Some(request.window_id));
+            host.commands
+                .trigger(UiStateWrite::<LayoutUiState>::from_event(
+                    owner,
+                    &ExtensionPopupEvent::default(),
+                ));
+        }
+    }
+}
+
+fn dispose(mut host: PopupHost) {
+    let mut targets = Vec::new();
+    for (entity, popup, _, id) in &host.popups {
+        if !host.layouts.contains(popup.owner) {
+            targets.push((entity, id.map(|id| id.0)));
+        }
+    }
+    for (entity, id) in targets {
+        host.retire(entity, id);
     }
 }
 
@@ -104,66 +373,34 @@ struct ExtensionPopupSizeRequest {
     height: f32,
 }
 
-const POPUP_SIZE_CHANNEL: &str = "vmux-extension-popup-size";
+#[derive(serde::Deserialize)]
+struct DismissRequest {
+    channel: String,
+}
 
-fn open_request(
-    trigger: On<UiInput<ExtensionPopupOpenRequest>>,
-    layouts: Query<(Entity, Option<&HostWindow>), With<LayoutCef>>,
-    host_windows: Query<&HostWindow>,
-    profile: vmux_ecs::profile::CurrentProfile,
-    mut actions: PopupActions,
-) {
-    let Some((profile, paths)) = profile.profile().zip(profile.paths()) else {
-        return;
-    };
-    let id = trigger.event().payload.id.clone();
-    let index = store::ExtensionStore::at(paths.extensions())
-        .load_index()
-        .unwrap_or_default();
-    let Some(entry) = index.entries.into_iter().find(|entry| entry.id == id) else {
-        return;
-    };
-    if !entry.enabled_for(profile.id()) {
+fn dismiss(trigger: On<Receive<DismissRequest>>, mut host: PopupHost) {
+    if trigger.payload.channel != "vmux-extension-popup-close" {
         return;
     }
-    let Some(popup) = entry.popup else {
+    let Ok((_, popup, _, _)) = host.popups.get(trigger.webview) else {
         return;
     };
-    let url = format!("chrome-extension://{id}/{popup}");
-    let source = trigger.event().webview;
-    let source_window = host_windows.get(source).ok().map(|host| host.0);
-    let owner = layouts.iter().find_map(|(layout, host)| {
-        (layout == source || source_window.is_none_or(|window| host.is_some_and(|h| h.0 == window)))
-            .then_some(layout)
-    });
-    let Some(owner) = owner else {
+    let owner = popup.owner;
+    host.close(owner);
+}
+
+const POPUP_SIZE_CHANNEL: &str = "vmux-extension-popup-size";
+
+fn open_request(trigger: On<UiInput<ExtensionPopupOpenRequest>>, mut host: PopupHost) {
+    let Some(entry) = host.entry(&trigger.event().payload.id) else {
         return;
     };
-    actions.close(owner);
-    actions
-        .commands
-        .spawn(Browser::new_with_title(&url, &entry.name))
-        .insert((
-            Name::new(format!("Extension popup: {}", entry.name)),
-            WindowOverlay,
-            ExtensionPopup {
-                owner,
-                extension_id: id.clone(),
-            },
-            vmux_browser::PopupWebview,
-            Visibility::Hidden,
-        ));
-    actions
-        .commands
-        .trigger(UiStateWrite::<LayoutUiState>::from_event(
-            owner,
-            &ExtensionPopupEvent {
-                id,
-                name: entry.name,
-                icon: entry.icon,
-                anchor: trigger.event().payload.anchor,
-            },
-        ));
+    let Some(owner) = host.owner_for_surface(trigger.event().webview) else {
+        return;
+    };
+    let Some(popup) = &entry.popup else { return };
+    let url = format!("chrome-extension://{}/{popup}", entry.id);
+    host.show(owner, entry, url, trigger.event().payload.anchor, None);
 }
 
 fn bounds_request(
@@ -183,8 +420,8 @@ fn bounds_request(
     }
 }
 
-fn close_request(trigger: On<UiInput<ExtensionPopupCloseRequest>>, mut actions: PopupActions) {
-    actions.close(trigger.event().webview);
+fn close_request(trigger: On<UiInput<ExtensionPopupCloseRequest>>, mut host: PopupHost) {
+    host.close(trigger.event().webview);
 }
 
 fn inject_sizing(
@@ -201,6 +438,11 @@ fn inject_sizing(
             r#"
 (() => {
   if (globalThis.__vmuxPopupSizer) return;
+  document.addEventListener("keydown", (event) => {
+    if (event.key !== "Escape") return;
+    event.preventDefault();
+    cef.emit({ channel: "vmux-extension-popup-close" });
+  });
   let scheduled = false;
   let lastWidth = 0;
   let lastHeight = 0;
@@ -271,6 +513,7 @@ fn present(
             Entity,
             &ExtensionPopupBounds,
             Option<&HostWindow>,
+            Option<&ExtensionWindowId>,
             Has<ExtensionPopupPresented>,
         ),
         (
@@ -284,14 +527,19 @@ fn present(
     mut resized: MessageReader<WindowResized>,
     mut commands: Commands,
 ) {
-    if resized.read().count() > 0 {
-        for (entity, ..) in &popups {
-            browsers.hide_child_window(&entity);
-            commands.entity(entity).try_despawn();
+    let resized_windows = resized.read().map(|event| event.window).collect::<Vec<_>>();
+    if !resized_windows.is_empty() {
+        for (entity, _, host, id, _) in &popups {
+            if host.is_some_and(|host| resized_windows.contains(&host.0))
+                && let Some(id) = id
+            {
+                commands.write_message(CloseRequest { window_id: id.0 });
+                browsers.hide_child_window(&entity);
+            }
         }
         return;
     }
-    for (entity, bounds, host_window, presented) in &popups {
+    for (entity, bounds, host_window, _, presented) in &popups {
         let window_entity = host_window.map(|host| host.0).or(focused_window.entity());
         let Some(window_entity) = window_entity else {
             continue;
@@ -347,4 +595,498 @@ fn size(
             height: request.height.clamp(80.0, 600.0),
         },
     ));
+}
+
+#[cfg(all(test, target_os = "macos"))]
+mod tests {
+    use super::*;
+    use crate::host::bridge::BridgeAuthorization;
+    use crate::host::model::{ExtensionTabSnapshot, ExtensionWindowSnapshot};
+    use crate::host::windows::{ExtensionWindowsPlugin, WindowDispatch};
+    use crate::protocol::{ApiRequest, ExtensionCallerContext};
+    use serde_json::{Value, json};
+    use vmux_api::extension::{ExtStatus, ExtensionsUiState};
+    use vmux_layout::stack::{CloseStackRequest, Stack};
+
+    const ID: &str = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+
+    #[derive(Resource, Default)]
+    struct Navigations(Vec<(Entity, String)>);
+
+    fn navigate(
+        request: On<bevy_cef::prelude::RequestNavigate>,
+        mut navigations: ResMut<Navigations>,
+    ) {
+        navigations.0.push((request.webview, request.url.clone()));
+    }
+
+    struct Fixture {
+        app: App,
+        layout: Entity,
+        stack: Entity,
+        window: Entity,
+    }
+
+    impl Fixture {
+        fn new() -> Self {
+            let mut app = App::new();
+            app.add_plugins(MinimalPlugins)
+                .add_message::<WindowResized>()
+                .add_message::<vmux_browser::WebviewLoadCompleted>()
+                .add_message::<ExtensionModelEvent>()
+                .add_message::<vmux_layout::stack::OpenRequest>()
+                .add_message::<CloseStackRequest>()
+                .insert_non_send(Browsers::default())
+                .init_resource::<bevy_cef::prelude::IpcEventRawBuffer>()
+                .init_resource::<Navigations>()
+                .add_observer(navigate)
+                .add_plugins((ExtensionWindowsPlugin, PopupPlugin));
+            let window = app
+                .world_mut()
+                .spawn((
+                    Window {
+                        resolution: (1280, 800).into(),
+                        ..default()
+                    },
+                    ExtensionWindowId(1),
+                ))
+                .id();
+            let layout = app.world_mut().spawn((LayoutCef, HostWindow(window))).id();
+            let stack = app
+                .world_mut()
+                .spawn((
+                    Stack::default(),
+                    vmux_ecs::PageMetadata {
+                        url: "https://accounts.google.com/".into(),
+                        ..default()
+                    },
+                ))
+                .id();
+            app.world_mut().spawn(ExtensionModel {
+                windows: vec![ExtensionWindowSnapshot {
+                    id: 1,
+                    focused: true,
+                    left: 0,
+                    top: 0,
+                    width: 1280,
+                    height: 800,
+                    incognito: false,
+                    window_type: "normal".into(),
+                    state: "normal".into(),
+                    always_on_top: false,
+                }],
+                tabs: vec![ExtensionTabSnapshot {
+                    id: 7,
+                    window_id: 1,
+                    index: 0,
+                    active: true,
+                    highlighted: true,
+                    pinned: false,
+                    url: "https://accounts.google.com/".into(),
+                    title: "Google".into(),
+                    status: "complete".into(),
+                }],
+            });
+            let mut catalog = ExtensionCatalog::default();
+            catalog.replace(ExtensionsUiState {
+                extensions: vec![ExtRow {
+                    id: ID.into(),
+                    name: "Extension".into(),
+                    version: "1".into(),
+                    icon: None,
+                    popup: Some("popup/index.html".into()),
+                    enabled: true,
+                    pinned: true,
+                    needs_approval: false,
+                    required_permissions: Vec::new(),
+                    required_host_permissions: Vec::new(),
+                    status: ExtStatus::Installed,
+                }],
+                ..default()
+            });
+            app.world_mut().spawn(catalog);
+            app.update();
+            Self {
+                app,
+                layout,
+                stack,
+                window,
+            }
+        }
+
+        fn dispatch(&mut self, method: &str, arguments: Value) -> WindowDispatch {
+            let model = self
+                .app
+                .world_mut()
+                .query::<&ExtensionModel>()
+                .single(self.app.world())
+                .unwrap()
+                .clone();
+            let world = self.app.world_mut();
+            let mut query = world.query::<&mut ExtensionWindows>();
+            let mut windows = query.single_mut(world).unwrap();
+            WindowDispatch::from_request(
+                &ApiRequest {
+                    request_id: "request".into(),
+                    namespace: "windows".into(),
+                    method: method.into(),
+                    arguments,
+                    caller_context: ExtensionCallerContext::ServiceWorker {
+                        extension_id: ID.into(),
+                        context_id: "worker".into(),
+                        url: None,
+                    },
+                },
+                &model,
+                &mut windows,
+                &BridgeAuthorization {
+                    permissions: ["tabs".to_string()].into(),
+                    ..Default::default()
+                },
+            )
+            .unwrap()
+        }
+
+        fn open(&mut self, url: &str) -> i32 {
+            let dispatch = self.dispatch("create", json!([{ "type": "popup", "url": url }]));
+            let id = dispatch.result["id"].as_i64().unwrap() as i32;
+            self.app
+                .world_mut()
+                .write_message(dispatch.open_window.unwrap());
+            self.app.update();
+            id
+        }
+
+        fn popup(&mut self) -> Entity {
+            self.app
+                .world_mut()
+                .query_filtered::<Entity, With<ExtensionPopup>>()
+                .single(self.app.world())
+                .unwrap()
+        }
+
+        fn reopen(&mut self) {
+            self.app.world_mut().trigger(UiInput {
+                webview: self.layout,
+                payload: ExtensionPopupOpenRequest {
+                    id: ID.into(),
+                    anchor: ExtensionPopupAnchor {
+                        right: 1200,
+                        bottom: 40,
+                    },
+                },
+            });
+            self.app.update();
+        }
+    }
+
+    #[test]
+    fn authentication_opens_in_the_modal_without_replacing_the_browser_stack() {
+        let mut fixture = Fixture::new();
+        let url =
+            format!("chrome-extension://{ID}/popup/index.html?singleActionPopout=fido#/fido2");
+        let id = fixture.open(&url);
+        let popup = fixture.popup();
+        assert_eq!(
+            fixture.app.world().get::<HostWindow>(popup).unwrap().0,
+            fixture.window
+        );
+        assert_eq!(
+            fixture
+                .app
+                .world()
+                .get::<ExtensionWindowId>(popup)
+                .unwrap()
+                .0,
+            id
+        );
+        assert_eq!(
+            fixture
+                .app
+                .world()
+                .get::<vmux_ecs::PageMetadata>(popup)
+                .unwrap()
+                .url,
+            url
+        );
+        assert!(fixture.app.world().get::<Stack>(popup).is_none());
+        assert!(fixture.app.world().get::<Stack>(fixture.stack).is_some());
+        assert!(
+            fixture
+                .app
+                .world()
+                .resource::<Messages<vmux_layout::stack::OpenRequest>>()
+                .is_empty()
+        );
+    }
+
+    #[test]
+    fn toolbar_reopening_preserves_the_authentication_document_and_window_identity() {
+        let mut fixture = Fixture::new();
+        let url =
+            format!("chrome-extension://{ID}/popup/index.html?singleActionPopout=fido#/fido2");
+        let id = fixture.open(&url);
+        let popup = fixture.popup();
+        fixture.reopen();
+        assert_eq!(fixture.popup(), popup);
+        assert_eq!(
+            fixture
+                .app
+                .world()
+                .get::<ExtensionWindowId>(popup)
+                .unwrap()
+                .0,
+            id
+        );
+        assert_eq!(
+            fixture
+                .app
+                .world()
+                .get::<vmux_ecs::PageMetadata>(popup)
+                .unwrap()
+                .url,
+            url
+        );
+        assert!(fixture.app.world().resource::<Navigations>().0.is_empty());
+        assert_eq!(
+            fixture
+                .dispatch("getAll", json!([{}]))
+                .result
+                .as_array()
+                .unwrap()
+                .len(),
+            2
+        );
+    }
+
+    #[test]
+    fn modal_keeps_the_browser_window_available_for_current_tab_queries() {
+        let mut fixture = Fixture::new();
+        fixture.open(&format!("chrome-extension://{ID}/popup/index.html#/unlock"));
+        let world = fixture.app.world_mut();
+        let mut query = world.query::<&mut ExtensionModel>();
+        query.single_mut(world).unwrap().windows[0].focused = false;
+        let all = fixture.dispatch("getAll", json!([{ "populate": true }]));
+        let browser = all
+            .result
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|window| window["type"] == "normal")
+            .unwrap();
+        assert_eq!(browser["focused"], true);
+        assert_eq!(browser["tabs"][0]["url"], "https://accounts.google.com/");
+    }
+
+    #[test]
+    fn extension_without_a_toolbar_document_can_open_an_authentication_modal() {
+        let mut fixture = Fixture::new();
+        let world = fixture.app.world_mut();
+        let mut query = world.query::<&mut ExtensionCatalog>();
+        let mut catalog = query.single_mut(world).unwrap();
+        let mut entry = catalog.enabled(ID).unwrap().clone();
+        entry.popup = None;
+        catalog.replace(ExtensionsUiState {
+            extensions: vec![entry],
+            ..default()
+        });
+        fixture.open(&format!(
+            "chrome-extension://{ID}/authentication.html#/unlock"
+        ));
+        let popup = fixture.popup();
+        assert!(
+            fixture
+                .app
+                .world()
+                .get::<vmux_browser::PopupWebview>(popup)
+                .is_some()
+        );
+        assert!(
+            fixture
+                .app
+                .world()
+                .resource::<Messages<vmux_layout::stack::OpenRequest>>()
+                .is_empty()
+        );
+    }
+
+    #[test]
+    fn native_escape_dismisses_the_modal_and_its_virtual_window() {
+        let mut fixture = Fixture::new();
+        fixture.open(&format!("chrome-extension://{ID}/popup/index.html#/unlock"));
+        let popup = fixture.popup();
+        fixture.app.world_mut().trigger(Receive {
+            webview: popup,
+            payload: DismissRequest {
+                channel: "vmux-extension-popup-close".into(),
+            },
+        });
+        fixture.app.update();
+        assert!(fixture.app.world().get_entity(popup).is_err());
+        assert!(fixture.app.world().get::<Stack>(fixture.stack).is_some());
+        assert_eq!(
+            fixture
+                .dispatch("getAll", json!([{}]))
+                .result
+                .as_array()
+                .unwrap()
+                .len(),
+            1
+        );
+    }
+
+    #[test]
+    fn toolbar_popup_publishes_its_window_lifecycle() {
+        let mut fixture = Fixture::new();
+        let mut cursor = fixture
+            .app
+            .world()
+            .resource::<Messages<ExtensionModelEvent>>()
+            .get_cursor();
+        fixture.reopen();
+        let popup = fixture.popup();
+        let id = fixture
+            .app
+            .world()
+            .get::<ExtensionWindowId>(popup)
+            .unwrap()
+            .0;
+        let messages = fixture
+            .app
+            .world()
+            .resource::<Messages<ExtensionModelEvent>>();
+        assert!(cursor.read(messages).any(
+            |event| matches!(event, ExtensionModelEvent::WindowCreated(window) if window.id == id)
+        ));
+        fixture.app.world_mut().trigger(UiInput {
+            webview: fixture.layout,
+            payload: ExtensionPopupCloseRequest,
+        });
+        fixture.app.update();
+        let messages = fixture
+            .app
+            .world()
+            .resource::<Messages<ExtensionModelEvent>>();
+        assert!(cursor.read(messages).any(|event| matches!(event, ExtensionModelEvent::WindowRemoved { window_id } if *window_id == id)));
+    }
+
+    #[test]
+    fn disposing_the_layout_retires_its_modal_and_virtual_window() {
+        let mut fixture = Fixture::new();
+        fixture.open(&format!("chrome-extension://{ID}/popup/index.html#/unlock"));
+        let popup = fixture.popup();
+        fixture.app.world_mut().despawn(fixture.layout);
+        fixture.app.update();
+        assert!(fixture.app.world().get_entity(popup).is_err());
+        assert_eq!(
+            fixture
+                .dispatch("getAll", json!([{}]))
+                .result
+                .as_array()
+                .unwrap()
+                .len(),
+            1
+        );
+    }
+
+    #[test]
+    fn closing_the_parent_returns_window_focus_to_an_existing_window() {
+        let mut fixture = Fixture::new();
+        fixture.open(&format!("chrome-extension://{ID}/popup/index.html#/unlock"));
+        let world = fixture.app.world_mut();
+        let mut query = world.query::<&mut ExtensionModel>();
+        let mut model = query.single_mut(world).unwrap();
+        model.windows[0].id = 2;
+        let mut cursor = fixture
+            .app
+            .world()
+            .resource::<Messages<ExtensionModelEvent>>()
+            .get_cursor();
+        fixture.app.world_mut().despawn(fixture.layout);
+        fixture.app.update();
+        let messages = fixture
+            .app
+            .world()
+            .resource::<Messages<ExtensionModelEvent>>();
+        let focused = cursor.read(messages).find_map(|event| match event {
+            ExtensionModelEvent::WindowFocusChanged { window_id } => Some(*window_id),
+            _ => None,
+        });
+        assert_eq!(focused, Some(2));
+    }
+
+    #[test]
+    fn late_close_of_replaced_authentication_cannot_dismiss_the_current_popup() {
+        let mut fixture = Fixture::new();
+        let first = fixture.open(&format!("chrome-extension://{ID}/popup/index.html#/unlock"));
+        let popup = fixture.popup();
+        let next_url =
+            format!("chrome-extension://{ID}/popup/index.html?singleActionPopout=fido#/fido2");
+        let next = fixture.open(&next_url);
+        assert_eq!(fixture.popup(), popup);
+        assert_eq!(
+            fixture.app.world().resource::<Navigations>().0,
+            vec![(popup, next_url)]
+        );
+        fixture
+            .app
+            .world_mut()
+            .write_message(CloseRequest { window_id: first });
+        fixture.app.update();
+        assert_eq!(fixture.popup(), popup);
+        let removed = fixture.dispatch("remove", json!([next]));
+        fixture
+            .app
+            .world_mut()
+            .write_message(removed.close_window.unwrap());
+        fixture.app.update();
+        assert!(fixture.app.world().get_entity(popup).is_err());
+        assert!(
+            fixture
+                .app
+                .world()
+                .resource::<Messages<CloseStackRequest>>()
+                .is_empty()
+        );
+        assert_eq!(
+            fixture
+                .dispatch("getAll", json!([{}]))
+                .result
+                .as_array()
+                .unwrap()
+                .len(),
+            1
+        );
+    }
+
+    #[test]
+    fn popup_cannot_navigate_to_another_extension_or_a_web_origin() {
+        let mut fixture = Fixture::new();
+        let url = format!("chrome-extension://{ID}/popup/index.html#/unlock");
+        let id = fixture.open(&url);
+        let popup = fixture.popup();
+        for target in [
+            "chrome-extension://bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb/popup.html",
+            "https://example.com/",
+        ] {
+            fixture.app.world_mut().write_message(OpenRequest {
+                extension_id: ID.into(),
+                url: target.into(),
+                window_id: id,
+                host_window_id: Some(1),
+            });
+            fixture.app.update();
+            assert_eq!(fixture.popup(), popup);
+            assert_eq!(
+                fixture
+                    .app
+                    .world()
+                    .get::<vmux_ecs::PageMetadata>(popup)
+                    .unwrap()
+                    .url,
+                url
+            );
+            assert!(fixture.app.world().resource::<Navigations>().0.is_empty());
+        }
+    }
 }

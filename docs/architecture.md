@@ -1113,6 +1113,12 @@ next mouse or keyboard event. Web-page tab IDs are learned from content-script s
 translated at the shim boundary; extension pages keep the model IDs the bridge owns.
 The prepared extension catalog and bridge server belong to separate entities. Bridge-page
 reconciliation reads them independently to create the hidden transport pages used by extensions.
+On macOS, extension-owned authentication popups use the owning Layout's existing extension modal. Their
+virtual window IDs remain stable for extension APIs while the underlying browser tab stays selected
+for matching and autofill. Reopening from the toolbar reuses the current authentication document;
+Escape and window removal retire the matching popup. Native popup input stays in its native window
+instead of publishing popup-local coordinates to the workspace.
+Other platforms retain Stack routing until their native popup adapter supports the modal.
 
 ---
 

@@ -51,6 +51,17 @@ pub(crate) struct ExtensionCatalog {
 }
 
 impl ExtensionCatalog {
+    pub(crate) fn enabled(&self, id: &str) -> Option<&vmux_api::extension::ExtRow> {
+        self.snapshot
+            .extensions
+            .iter()
+            .find(|entry| entry.id == id && entry.enabled && !entry.needs_approval)
+    }
+
+    pub(crate) fn loaded(&self) -> bool {
+        self.snapshot.loaded
+    }
+
     pub(crate) fn replace(&mut self, mut snapshot: ExtensionsUiState) {
         snapshot.loaded = true;
         snapshot.installing = std::mem::take(&mut self.snapshot.installing);

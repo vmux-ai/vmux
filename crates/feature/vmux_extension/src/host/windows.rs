@@ -1,7 +1,6 @@
 use crate::protocol::{ApiRequest, ExtensionApiError, ExtensionCallerContext};
 use bevy::prelude::*;
 use bevy::window::{MonitorSelection, WindowMode, WindowPosition};
-use bevy_cef::prelude::RequestNavigate;
 use serde::Deserialize;
 use serde_json::{Map, Value, json};
 use std::collections::{BTreeMap, HashSet};
@@ -10,7 +9,7 @@ use vmux_history::LastActivatedAt;
 use vmux_layout::stack::{CloseStackRequest, Stack};
 
 use super::bridge::BridgeAuthorization;
-use super::model::ExtensionPopup;
+use super::manager_page::popup;
 use super::model::{
     ExtensionModel, ExtensionModelEvent, ExtensionTabId, ExtensionTabSnapshot, ExtensionWindowId,
     ExtensionWindowSnapshot,
@@ -31,10 +30,15 @@ impl Plugin for ExtensionWindowsPlugin {
             )
             .add_systems(
                 Update,
-                (open, route_close, host_update).after(super::ExtensionSystemSet::DrainBridge),
+                (open, route_close, host_update)
+                    .in_set(WindowRequestSet)
+                    .after(super::ExtensionSystemSet::DrainBridge),
             );
     }
 }
+
+#[derive(SystemSet, Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub(super) struct WindowRequestSet;
 
 fn spawn(mut commands: Commands) {
     commands.spawn((Name::new("Extension windows"), ExtensionWindows::default()));
@@ -48,6 +52,7 @@ const FALLBACK_HOST_WINDOW_ID: i32 = 1;
 #[derive(Clone, Debug)]
 struct ExtensionWindow {
     window: ExtensionWindowSnapshot,
+    host_window_id: Option<i32>,
     urls: Vec<String>,
     tab_ids: Vec<i32>,
 }
@@ -70,6 +75,70 @@ impl Default for ExtensionWindows {
 }
 
 impl ExtensionWindows {
+    pub(super) fn focus_popup(&mut self, id: i32) -> Option<ExtensionModelEvent> {
+        if !self.windows.contains_key(&id) {
+            return None;
+        }
+        let changed = self.last_focused != Some(id) || !self.windows[&id].window.focused;
+        for window in self.windows.values_mut() {
+            window.window.focused = window.window.id == id;
+        }
+        self.last_focused = Some(id);
+        changed.then_some(ExtensionModelEvent::WindowFocusChanged { window_id: id })
+    }
+
+    pub(super) fn register_popup(
+        &mut self,
+        url: String,
+        host: &ExtensionWindowSnapshot,
+    ) -> ExtensionWindowSnapshot {
+        let id = self.next_id;
+        self.next_id = self.next_id.saturating_add(1);
+        let mut window = host.clone();
+        window.id = id;
+        window.window_type = "popup".into();
+        window.focused = true;
+        self.windows.insert(
+            id,
+            ExtensionWindow {
+                window: window.clone(),
+                host_window_id: Some(host.id),
+                urls: vec![url],
+                tab_ids: Vec::new(),
+            },
+        );
+        window
+    }
+
+    pub(super) fn dismiss_popup(
+        &mut self,
+        id: i32,
+        model: &ExtensionModel,
+    ) -> Vec<ExtensionModelEvent> {
+        let Some(entry) = self.windows.remove(&id) else {
+            return Vec::new();
+        };
+        let mut events = vec![ExtensionModelEvent::WindowRemoved { window_id: id }];
+        if entry.window.focused {
+            let fallback = entry.focus_fallback(model);
+            self.last_focused = (fallback >= 0).then_some(fallback);
+            events.push(ExtensionModelEvent::WindowFocusChanged {
+                window_id: fallback,
+            });
+        }
+        events
+    }
+
+    pub(super) fn has_popup(&self, id: i32, url: &str) -> bool {
+        self.windows.get(&id).is_some_and(|window| {
+            window.window.window_type == "popup"
+                && window
+                    .urls
+                    .iter()
+                    .any(|expected| ExtensionWindow::page_matches(expected, url))
+        })
+    }
+
     fn contains_id(&self, id: i32, model: &ExtensionModel) -> bool {
         self.windows.contains_key(&id) || model.windows.iter().any(|window| window.id == id)
     }
@@ -137,6 +206,18 @@ impl ExtensionWindows {
 }
 
 impl ExtensionWindow {
+    fn focus_fallback(&self, model: &ExtensionModel) -> i32 {
+        if let Some(id) = self.host_window_id
+            && model.windows.iter().any(|window| window.id == id)
+        {
+            return id;
+        }
+        model
+            .focused_window_id()
+            .or_else(|| model.windows.first().map(|window| window.id))
+            .unwrap_or(WINDOW_ID_NONE)
+    }
+
     fn same_document(expected: &str, actual: &str) -> bool {
         let (Ok(mut expected), Ok(mut actual)) =
             (url::Url::parse(expected), url::Url::parse(actual))
@@ -487,6 +568,8 @@ pub struct WindowDispatch {
 
 #[derive(Message, Clone, Debug, PartialEq, Eq)]
 pub struct OpenExtensionWindowRequest {
+    pub window_id: i32,
+    pub host_window_id: Option<i32>,
     pub extension_id: String,
     pub urls: Vec<Option<String>>,
     pub window_type: String,
@@ -494,6 +577,7 @@ pub struct OpenExtensionWindowRequest {
 
 #[derive(Message, Clone, Debug, PartialEq, Eq)]
 pub struct CloseExtensionWindowRequest {
+    pub window_id: Option<i32>,
     pub tab_ids: Vec<i32>,
     pub urls: Vec<String>,
 }
@@ -520,26 +604,35 @@ pub struct UpdateHostWindowRequest {
 
 fn open(
     mut requests: MessageReader<OpenExtensionWindowRequest>,
-    popups: Query<(Entity, &ExtensionPopup)>,
-    mut commands: Commands,
+    mut popup_requests: MessageWriter<popup::OpenRequest>,
     mut stack_requests: MessageWriter<vmux_layout::stack::OpenRequest>,
 ) {
     for request in requests.read() {
-        let popup = if request.window_type == "popup" {
-            popups.iter().find_map(|(entity, popup)| {
-                (popup.extension_id == request.extension_id).then_some(entity)
-            })
-        } else {
-            None
-        };
         let mut urls = request.urls.iter().cloned();
-        if let Some(popup) = popup
-            && let Some(Some(url)) = urls.next()
+        if cfg!(target_os = "macos")
+            && request.window_type == "popup"
+            && let Some(url) = urls.next()
         {
-            commands.trigger(RequestNavigate {
-                webview: popup,
-                url,
-            });
+            if let Some(url) = url {
+                if popup::OpenRequest::owns_url(&request.extension_id, &url) {
+                    popup_requests.write(popup::OpenRequest {
+                        extension_id: request.extension_id.clone(),
+                        url,
+                        window_id: request.window_id,
+                        host_window_id: request.host_window_id,
+                    });
+                } else {
+                    stack_requests.write(vmux_layout::stack::OpenRequest {
+                        url: Some(url),
+                        policy: vmux_layout::stack::OpenPolicy::ReplaceStartup,
+                    });
+                }
+            } else {
+                stack_requests.write(vmux_layout::stack::OpenRequest {
+                    url: None,
+                    policy: vmux_layout::stack::OpenPolicy::ReplaceStartup,
+                });
+            }
         }
         for url in urls {
             stack_requests.write(vmux_layout::stack::OpenRequest {
@@ -588,8 +681,12 @@ fn route_close(
     tab_ids: Query<(Entity, &ExtensionTabId)>,
     stacks: Query<(Entity, &PageMetadata, Option<&LastActivatedAt>), With<Stack>>,
     mut close_requests: MessageWriter<CloseStackRequest>,
+    mut popup_requests: MessageWriter<popup::CloseRequest>,
 ) {
     for request in requests.read() {
+        if let Some(window_id) = request.window_id {
+            popup_requests.write(popup::CloseRequest { window_id });
+        }
         let mut targets = HashSet::new();
         for tab_id in &request.tab_ids {
             if let Some(entity) = tab_ids
@@ -752,24 +849,27 @@ fn get_all(
             ));
         }
     }
-    let mut values = model
-        .windows
-        .iter()
-        .filter(|window| window.matches_type(options))
-        .map(|window| {
-            window.disclosed_value(
-                model
-                    .tabs
-                    .iter()
-                    .filter(|tab| tab.window_id == window.id && !claimed.contains(&tab.id))
-                    .cloned()
-                    .collect(),
-                populate,
-                request,
-                authorization,
-            )
-        })
-        .collect::<Vec<_>>();
+    let mut values = Vec::new();
+    for window in &model.windows {
+        if !window.matches_type(options) {
+            continue;
+        }
+        let mut window = window.clone();
+        if windows
+            .windows
+            .values()
+            .any(|popup| popup.window.focused && popup.host_window_id == Some(window.id))
+        {
+            window.focused = true;
+        }
+        let mut tabs = Vec::new();
+        for tab in &model.tabs {
+            if tab.window_id == window.id && !claimed.contains(&tab.id) {
+                tabs.push(tab.clone());
+            }
+        }
+        values.push(window.disclosed_value(tabs, populate, request, authorization));
+    }
     values.extend(virtual_values);
     Ok(WindowDispatch::success(Value::Array(values)))
 }
@@ -830,6 +930,11 @@ fn create(
     };
     let extension_window = ExtensionWindow {
         window: window.clone(),
+        host_window_id: if cfg!(target_os = "macos") && window_type == "popup" {
+            base.map(|window| window.id)
+        } else {
+            None
+        },
         urls: urls.clone(),
         tab_ids: Vec::new(),
     };
@@ -847,6 +952,8 @@ fn create(
     Ok(WindowDispatch {
         result,
         open_window: Some(OpenExtensionWindowRequest {
+            window_id: id,
+            host_window_id: base.map(|window| window.id),
             extension_id: request.caller_context.extension_id().to_string(),
             urls: open,
             window_type: window_type.into(),
@@ -958,7 +1065,7 @@ fn remove(
     entry.refresh_tabs(model, &mut HashSet::new());
     let mut events = vec![ExtensionModelEvent::WindowRemoved { window_id: id }];
     if entry.window.focused {
-        let fallback = model.focused_window_id().unwrap_or(WINDOW_ID_NONE);
+        let fallback = entry.focus_fallback(model);
         windows.last_focused = (fallback >= 0).then_some(fallback);
         events.push(ExtensionModelEvent::WindowFocusChanged {
             window_id: fallback,
@@ -968,6 +1075,7 @@ fn remove(
         result: Value::Null,
         open_window: None,
         close_window: Some(CloseExtensionWindowRequest {
+            window_id: Some(id),
             tab_ids: entry.tab_ids,
             urls: entry.urls,
         }),
@@ -1328,6 +1436,7 @@ mod tests {
         let mut app = App::new();
         app.add_message::<CloseExtensionWindowRequest>()
             .add_message::<CloseStackRequest>()
+            .add_message::<popup::CloseRequest>()
             .add_systems(Update, route_close);
         let older = app
             .world_mut()
@@ -1356,6 +1465,7 @@ mod tests {
             .resource::<Messages<CloseStackRequest>>()
             .get_cursor();
         app.world_mut().write_message(CloseExtensionWindowRequest {
+            window_id: None,
             tab_ids: Vec::new(),
             urls: vec![format!(
                 "chrome-extension://{EXTENSION_ID}/popup/index.html?singleActionPopout=fido#/fido2"
