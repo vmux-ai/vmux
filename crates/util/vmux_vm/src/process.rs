@@ -1,12 +1,37 @@
 use std::fs::{File, OpenOptions};
 use std::io;
 use std::os::fd::AsRawFd;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::process::{Child, Command, ExitStatus, Stdio};
 
 use bevy_ecs::prelude::Component;
 
 use crate::Settings;
+
+pub struct Executable;
+
+impl Executable {
+    pub fn find(name: &str) -> io::Result<PathBuf> {
+        if let Some(path) = std::env::var_os("PATH") {
+            for directory in std::env::split_paths(&path) {
+                let candidate = directory.join(name);
+                if candidate.is_file() {
+                    return Ok(candidate);
+                }
+            }
+        }
+        for directory in ["/opt/homebrew/bin", "/usr/local/bin", "/usr/bin", "/bin"] {
+            let candidate = Path::new(directory).join(name);
+            if candidate.is_file() {
+                return Ok(candidate);
+            }
+        }
+        Err(io::Error::new(
+            io::ErrorKind::NotFound,
+            format!("{name} is not installed"),
+        ))
+    }
+}
 
 #[derive(Component)]
 pub(crate) struct Process(Child);

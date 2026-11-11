@@ -49,6 +49,14 @@ impl EngineClient {
         Ok(())
     }
 
+    pub fn configure(&mut self) -> io::Result<Settings> {
+        self.settings.validate()?;
+        let _start = self.lock_named("start.lock")?;
+        let _engine = self.lock()?;
+        self.settings.save()?;
+        Ok(self.settings.clone())
+    }
+
     pub fn start(&mut self, helper: &Path) -> io::Result<Status> {
         if !cfg!(all(target_os = "macos", target_arch = "aarch64")) {
             return Err(io::Error::new(
@@ -216,6 +224,23 @@ impl EngineClient {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn configuring_a_running_engine_preserves_its_saved_resources() {
+        let temp = tempfile::tempdir().unwrap();
+        let mut settings = Settings::new(temp.path().join("engine"), temp.path());
+        settings.validate().unwrap();
+        let path = settings.save().unwrap();
+        let previous = std::fs::read(&path).unwrap();
+        let mut engine = EngineClient::new(settings);
+        let _running = engine.lock().unwrap();
+        engine.settings.cpus = 4;
+        assert_eq!(
+            engine.configure().unwrap_err().kind(),
+            io::ErrorKind::WouldBlock
+        );
+        assert_eq!(std::fs::read(path).unwrap(), previous);
+    }
 
     #[test]
     fn preparing_a_running_vm_does_not_change_its_guest_files() {

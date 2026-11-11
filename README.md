@@ -106,9 +106,12 @@ dedicated data disk; the selected project directory is shared at the same path
 inside Linux. `container logs` reads the engine and guest logs.
 
 For the desktop workflow, build with `make build-dev`, then open the app with
-`make run-dev`. Open `vmux://containers/` from the command bar, select the shared
-project directory and press Start. The page shows the engine phase, Docker socket
-and logs; Stop shuts down Docker and the VM while retaining images and volumes.
+`make run-dev`. The default Containers bookmark opens `vmux://containers/`.
+Start Docker with the bundled defaults, or use Open project to select a folder
+containing a Compose file and start its services. Containers appear in Compose
+groups with start, stop, restart, port links and live logs. Docker resource and
+shared-folder settings live in the settings dialog; the initial share is the home
+directory. Stop Docker shuts down the VM while retaining images and volumes.
 
 ## License
 

@@ -8,7 +8,10 @@ use bevy_ecs::prelude::*;
 use bevy_tasks::{IoTaskPool, Task, TaskPoolBuilder, futures_lite::future};
 use vmux_ecs::wake::Wake;
 use vmux_ecs::{Operation, OperationCompleted, OperationPlugin, OperationState, OperationTarget};
-use vmux_vm::{EngineClient, Settings, Status};
+use vmux_vm::{DockerClient, DockerOperation, EngineClient, Settings, Status};
+
+use crate::compose::ComposeProject;
+use crate::event::ContainerOperation;
 
 pub(crate) struct ControlPlugin;
 
@@ -23,30 +26,45 @@ impl Plugin for ControlPlugin {
         if !app.is_plugin_added::<OperationPlugin>() {
             app.add_plugins(OperationPlugin);
         }
-        app.add_observer(request).add_systems(Update, poll);
+        app.add_observer(request)
+            .add_systems(Update, poll.in_set(ControlSet::Complete));
     }
 }
 
-#[derive(Clone, Copy)]
+#[derive(SystemSet, Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub(crate) enum ControlSet {
+    Complete,
+}
+
+#[derive(Clone)]
 pub(crate) enum Command {
     Start,
     Stop,
     Status,
     Logs,
+    Configure,
+    Containers {
+        ids: Vec<String>,
+        operation: ContainerOperation,
+    },
+    Project(std::path::PathBuf),
 }
 
 impl Command {
-    fn name(self) -> &'static str {
+    fn name(&self) -> &'static str {
         match self {
             Self::Start => "container.start",
             Self::Stop => "container.stop",
             Self::Status => "container.status",
             Self::Logs => "container.logs",
+            Self::Configure => "container.configure",
+            Self::Containers { .. } => "container.control",
+            Self::Project(_) => "container.project",
         }
     }
 
-    fn mutates(self) -> bool {
-        matches!(self, Self::Start | Self::Stop)
+    fn mutates(&self) -> bool {
+        !matches!(self, Self::Status | Self::Logs)
     }
 
     fn execute(self, settings: Settings, helper: &Path) -> io::Result<Reply> {
@@ -58,6 +76,29 @@ impl Command {
                 Ok(Reply::Stopped(client.status()))
             }
             Self::Status => Ok(Reply::Status(client.status())),
+            Self::Configure => Ok(Reply::Configured(client.configure()?)),
+            Self::Containers { ids, operation } => {
+                let docker = DockerClient::new(&settings.socket());
+                let operation = match operation {
+                    ContainerOperation::Start => DockerOperation::Start,
+                    ContainerOperation::Stop => DockerOperation::Stop,
+                    ContainerOperation::Restart => DockerOperation::Restart,
+                    ContainerOperation::Remove => DockerOperation::Remove,
+                };
+                let mut errors = Vec::new();
+                for id in ids {
+                    if let Err(error) = docker.change(&id, operation) {
+                        errors.push(format!("{id}: {error}"));
+                    }
+                }
+                if !errors.is_empty() {
+                    return Err(io::Error::other(errors.join("\n")));
+                }
+                Ok(Reply::Changed)
+            }
+            Self::Project(directory) => Ok(Reply::Started(
+                ComposeProject::at(&directory)?.start(settings, helper)?,
+            )),
             Self::Logs => {
                 let mut logs = String::new();
                 for path in [settings.log(), settings.directory.join("guest.log")] {
@@ -100,10 +141,24 @@ pub(crate) enum Reply {
     Stopped(Status),
     Status(Status),
     Logs(String),
+    Configured(Settings),
+    Changed,
 }
 
 #[derive(Component)]
-pub(crate) struct Busy;
+pub(crate) struct Busy(Command);
+
+impl Busy {
+    pub(crate) fn project(&self) -> bool {
+        matches!(self.0, Command::Project(_))
+    }
+    pub(crate) fn starting(&self) -> bool {
+        matches!(self.0, Command::Start | Command::Project(_))
+    }
+    pub(crate) fn stopping(&self) -> bool {
+        matches!(self.0, Command::Stop)
+    }
+}
 
 #[derive(Component)]
 struct ReplyTarget(Entity);
@@ -149,9 +204,12 @@ fn request(
         }
     };
     if request.command.mutates() {
-        commands.entity(request.entity).insert(Busy);
+        commands
+            .entity(request.entity)
+            .insert(Busy(request.command.clone()));
     }
-    let kind = request.command;
+    let kind = request.command.clone();
+    let work = kind.clone();
     let settings = request.settings.clone();
     let wake = Wake::beside(proxy.as_deref());
     commands
@@ -162,7 +220,7 @@ fn request(
             ReplyTarget(request.reply),
             RequestKind(kind),
             ControlTask(IoTaskPool::get().spawn(async move {
-                let result = kind.execute(settings, &helper);
+                let result = work.execute(settings, &helper);
                 drop(wake);
                 result
             })),

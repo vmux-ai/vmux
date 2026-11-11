@@ -1592,9 +1592,19 @@ out, because dependency resolution happens before any build script runs.
 
 `vmux_container` owns the `vmux://containers/` page and container CLI. Both submit typed
 requests to `ControlPlugin`; shared operation entities own asynchronous work, its target,
-and completion. The page publishes configuration, phase, Docker socket, errors and bounded
-log output through `ContainerUiState`. Start and stop events carry intent; status polling
-does not block the desktop schedule.
+and completion. `InventoryPlugin` reconciles Docker containers into child entities with
+stable IDs, shared names, image/state, Compose labels and published ports. Its ordered
+snapshot tasks preserve existing entity identity and retire removed containers. Per-page
+selection owns bounded log tasks and retains displayed output during refresh.
+
+The default Containers bookmark opens a grouped list and Info/Logs details. Start Docker
+uses persisted defaults and initially shares the home directory; Open project selects a
+Compose folder and starts its services through Docker CLI with the engine's explicit
+socket. Resource/share settings and connection diagnostics live in a settings dialog.
+`ContainerUiState` projects engine, inventory, configuration acknowledgements and per-page
+logs. Typed events carry lifecycle, container, selection and project intent. Async task
+completion wakes the event loop; polling never blocks the desktop schedule. Container
+operations validate daemon IDs, and deletion keeps volumes and refuses forced removal.
 
 `vmux_vm` provides the platform runtime without linking the desktop shell. `EnginePlugin`
 owns an engine entity with settings, phase, deadline, failure and an exclusive lease.

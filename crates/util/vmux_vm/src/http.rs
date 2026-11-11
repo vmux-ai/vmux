@@ -3,11 +3,23 @@ use std::os::unix::net::UnixStream;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
-pub(crate) struct UnixHttp(PathBuf);
+#[derive(Clone)]
+pub(crate) struct UnixHttp {
+    socket: PathBuf,
+    timeout: Duration,
+}
 
 impl UnixHttp {
     pub(crate) fn new(path: &Path) -> Self {
-        Self(path.to_path_buf())
+        Self {
+            socket: path.to_path_buf(),
+            timeout: Duration::from_secs(2),
+        }
+    }
+
+    pub(crate) fn timeout(mut self, timeout: Duration) -> Self {
+        self.timeout = timeout;
+        self
     }
 
     pub(crate) fn get(&self, path: &str) -> io::Result<Response> {
@@ -18,10 +30,14 @@ impl UnixHttp {
         self.request("POST", path, body)
     }
 
+    pub(crate) fn delete(&self, path: &str) -> io::Result<Response> {
+        self.request("DELETE", path, &[])
+    }
+
     fn request(&self, method: &str, path: &str, body: &[u8]) -> io::Result<Response> {
-        let mut stream = UnixStream::connect(&self.0)?;
-        stream.set_read_timeout(Some(Duration::from_secs(2)))?;
-        stream.set_write_timeout(Some(Duration::from_secs(2)))?;
+        let mut stream = UnixStream::connect(&self.socket)?;
+        stream.set_read_timeout(Some(self.timeout))?;
+        stream.set_write_timeout(Some(self.timeout))?;
         write!(
             stream,
             "{method} {path} HTTP/1.0\r\nHost: localhost\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",

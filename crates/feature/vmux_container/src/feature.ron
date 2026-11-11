@@ -4,12 +4,13 @@
         title: "Containers",
         title_message_id: "container-title",
         bookmark: Some(145),
-        icon: "Terminal",
+        icon: "Container",
         keywords: ["containers", "docker", "linux", "vm", "engine"],
         command_bar: true,
         permissions: [
             "PageAddressPublish", "PageAddressRequest", "PageAddressUiState", "PageReady", "ThemeUiState", "OpenRequest",
             "ContainerUiState", "ContainerStartRequest", "ContainerStopRequest", "ContainerLogsRequest",
+            "ContainerSettingsRequest", "ContainerCommandRequest", "ContainerInspectRequest", "ContainerProjectOpenRequest",
         ],
     )],
     cli: Some((commands: [(
