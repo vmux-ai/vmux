@@ -351,7 +351,8 @@ Use one only for isolated sequential UI choreography where the sequence itself i
 never for blocking work, transport ownership, or ordinary domain transitions.
 The optional `jobs` capability exposes finite blocking work without Profile or a renderer.
 `JobsPlugin` installs bounded `BlockingRuntime` lanes; `JobPlugin<J>` schedules typed immutable
-`JobRequest<J>` components on operation entities. Accepted work captures its `ChildOf` owner,
+`JobRequest<J>` components on operation entities. Submission captures the `ChildOf` owner even
+when a full lane delays execution; retries keep that original ownership. Accepted work
 publishes `JobResult<J>` and a payload-free `JobReady<J>` message, and leaves the operation
 running. The immutable `JobOwner<J>` snapshot survives publication. Consumers check its `accepts`
 guard against the current `ChildOf` alongside operation state and domain revisions, including

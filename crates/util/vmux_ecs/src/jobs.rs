@@ -43,7 +43,10 @@ impl<J: Job> Plugin for JobPlugin<J> {
                 (cancel::<J>, submit::<J>).chain().in_set(JobSet::Submit),
             )
             .add_systems(Update, collect::<J>.in_set(JobSet::Collect))
-            .add_systems(PostUpdate, cleanup::<J>.in_set(JobSet::Cleanup));
+            .add_systems(
+                PostUpdate,
+                (cancel::<J>, cleanup::<J>).chain().in_set(JobSet::Cleanup),
+            );
     }
 }
 
@@ -123,6 +126,7 @@ type PendingJobs<'w, 's, J> = Query<
         &'static JobRequest<J>,
         Option<&'static ChildOf>,
         &'static OperationState,
+        Option<&'static JobOwner<J>>,
     ),
     (
         With<Operation>,
@@ -173,27 +177,33 @@ fn submit<J: Job>(
     mut ready: MessageWriter<JobReady<J>>,
     mut commands: Commands,
 ) {
-    for (entity, request, parent, state) in &requests {
+    for (entity, request, parent, state, owner) in &requests {
         if !matches!(state, OperationState::Pending | OperationState::Running) {
             continue;
+        }
+        if let Some(owner) = owner {
+            if !owner.accepts(parent) {
+                continue;
+            }
+        } else {
+            commands.entity(entity).insert(JobOwner::<J>::of(parent));
         }
         let job = request.0.clone();
         let lane = job.lane();
         let wake = wake.as_deref().map(|wake| wake.0.clone());
         match runtime.try_spawn(lane, wake, move || job.run()) {
             Ok(task) => {
-                commands.entity(entity).remove::<JobRequest<J>>().insert((
-                    OperationState::Running,
-                    JobRunning::<J> { task },
-                    JobOwner::<J>::of(parent),
-                ));
+                commands
+                    .entity(entity)
+                    .remove::<JobRequest<J>>()
+                    .insert((OperationState::Running, JobRunning::<J> { task }));
             }
             Err(SpawnError::Full) => {}
             Err(error) => {
-                commands.entity(entity).remove::<JobRequest<J>>().insert((
-                    JobResult::<J>(Err(error.to_string())),
-                    JobOwner::<J>::of(parent),
-                ));
+                commands
+                    .entity(entity)
+                    .remove::<JobRequest<J>>()
+                    .insert(JobResult::<J>(Err(error.to_string())));
                 ready.write(JobReady::of(entity));
             }
         }

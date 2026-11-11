@@ -210,50 +210,95 @@ fn a_domain_failure_does_not_become_success_when_the_worker_returns() {
 }
 
 #[test]
-fn full_lanes_retain_requests_until_work_can_be_accepted() {
-    let mut consumer = Consumer::new();
-    let runtime = BlockingRuntime::new(
-        BlockingPool::new("bounded", 1, 1),
-        BlockingPool::new("long", 1, 1),
-        BlockingPool::new("process", 1, 1),
-    );
-    let (started_tx, started_rx) = mpsc::sync_channel(1);
-    let (release_tx, release_rx) = mpsc::sync_channel(1);
-    let running = runtime
-        .spawn(None, move || {
-            started_tx.send(()).unwrap();
-            release_rx.recv_timeout(Duration::from_secs(3)).unwrap();
-        })
-        .unwrap();
-    started_rx.recv_timeout(Duration::from_secs(3)).unwrap();
-    let queued = runtime.spawn(None, || ()).unwrap();
-    consumer.app.insert_resource(runtime);
-    let operation = consumer.submit("After backpressure");
-    consumer.app.update();
-    assert_eq!(
-        consumer.app.world().get::<OperationState>(operation),
-        Some(&OperationState::Pending)
-    );
-    assert!(
-        consumer
-            .app
-            .world()
-            .get::<JobRequest<Rename>>(operation)
-            .is_some()
-    );
-    release_tx.send(()).unwrap();
-    consumer.result(operation);
-    consumer.commit(operation);
-    assert_eq!(
-        consumer
-            .app
-            .world()
-            .get::<Name>(consumer.owner)
-            .unwrap()
-            .as_str(),
-        "After backpressure"
-    );
-    drop((running, queued));
+fn full_lanes_retry_only_requests_with_unchanged_owners() {
+    for reparent in [false, true] {
+        let mut consumer = Consumer::new();
+        let runtime = BlockingRuntime::new(
+            BlockingPool::new("bounded", 1, 1),
+            BlockingPool::new("long", 1, 1),
+            BlockingPool::new("process", 1, 1),
+        );
+        let (started_tx, started_rx) = mpsc::sync_channel(1);
+        let (release_tx, release_rx) = mpsc::sync_channel(1);
+        let running = runtime
+            .spawn(None, move || {
+                started_tx.send(()).unwrap();
+                release_rx.recv_timeout(Duration::from_secs(3)).unwrap();
+            })
+            .unwrap();
+        started_rx.recv_timeout(Duration::from_secs(3)).unwrap();
+        let queued = runtime.spawn(None, || ()).unwrap();
+        consumer.app.insert_resource(runtime);
+        let operation = consumer.submit("After backpressure");
+        consumer.app.update();
+        assert_eq!(
+            consumer.app.world().get::<OperationState>(operation),
+            Some(&OperationState::Pending)
+        );
+        assert!(
+            consumer
+                .app
+                .world()
+                .get::<JobRequest<Rename>>(operation)
+                .is_some()
+        );
+        if reparent {
+            let replacement = consumer
+                .app
+                .world_mut()
+                .spawn(Name::new("Replacement"))
+                .id();
+            consumer
+                .app
+                .world_mut()
+                .entity_mut(operation)
+                .insert(ChildOf(replacement));
+            consumer.app.update();
+            assert_eq!(
+                consumer.app.world().get::<OperationState>(operation),
+                Some(&OperationState::Canceled)
+            );
+            assert!(
+                consumer
+                    .app
+                    .world()
+                    .get::<JobRequest<Rename>>(operation)
+                    .is_none()
+            );
+            release_tx.send(()).unwrap();
+            consumer.app.update();
+            assert!(
+                consumer
+                    .app
+                    .world()
+                    .get::<JobResult<Rename>>(operation)
+                    .is_none()
+            );
+            assert_eq!(
+                consumer
+                    .app
+                    .world()
+                    .get::<Name>(replacement)
+                    .unwrap()
+                    .as_str(),
+                "Replacement"
+            );
+        } else {
+            release_tx.send(()).unwrap();
+            consumer.result(operation);
+            consumer.commit(operation);
+            assert_eq!(
+                consumer
+                    .app
+                    .world()
+                    .get::<Name>(consumer.owner)
+                    .unwrap()
+                    .as_str(),
+                "After backpressure"
+            );
+        }
+        drop((running, queued));
+    }
 }
 
 #[derive(Clone)]
@@ -515,7 +560,6 @@ fn application_checks_captured_ownership_when_reparenting_happens_in_the_apply_f
             .as_str(),
         "Original"
     );
-    consumer.app.update();
     assert_eq!(
         consumer.app.world().get::<OperationState>(operation),
         Some(&OperationState::Canceled)
