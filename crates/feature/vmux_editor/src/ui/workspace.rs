@@ -31,7 +31,7 @@ use vmux_setting::EXPLORER_DEFAULT_WIDTH;
 use vmux_ui::components::page::PageToolbarRow;
 use vmux_ui::directory::{DirectoryKeys, DirectoryNavigator};
 use vmux_ui::focus::FocusClaim;
-use vmux_ui::hooks::{PressedKey, send, use_theme};
+use vmux_ui::hooks::{PressedKey, send, use_theme, use_ui_state};
 use vmux_ui::i18n::{TranslationValue, translate, translate_with};
 use vmux_ui::ime::use_ime_guard;
 use vmux_ui::platform::Platform;
@@ -40,6 +40,9 @@ use vmux_ui::scroll::ScrollIntoView;
 #[component]
 pub fn Page() -> Element {
     use_theme();
+    use_ui_state::<vmux_api::address::PageAddressUiState>();
+    use_ui_state::<vmux_api::page_location::PageLocationUiState>();
+    use_ui_state::<vmux_api::input::KeyClaimsUiState>();
     FileUi::use_root();
     let project_url = try_consume_context::<vmux_ecs::PageMetadata>()
         .map(|metadata| metadata.url)

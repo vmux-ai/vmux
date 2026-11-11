@@ -1,22 +1,23 @@
 use dioxus::prelude::*;
 use vmux_ecs::event::FileUiState;
-use vmux_ui::hooks::use_ui_state;
+use vmux_ui::hooks::{UiStateBinding, use_ui_state};
 
 #[derive(Clone, Copy)]
 pub(crate) struct FileUi {
-    state: Signal<FileUiState>,
+    binding: UiStateBinding<FileUiState>,
 }
 
 impl FileUi {
     pub(crate) fn use_root() -> Self {
-        let state = use_ui_state::<FileUiState>().state;
-        let ui = Self { state };
-        use_context_provider(|| ui);
-        ui
+        Self {
+            binding: use_ui_state::<FileUiState>(),
+        }
     }
 
     pub(crate) fn current() -> Self {
-        use_context::<Self>()
+        Self {
+            binding: UiStateBinding::use_context(),
+        }
     }
 
     pub(crate) fn use_field<T>(self, select: fn(&FileUiState) -> Option<&T>) -> FileUiField<T>
@@ -33,7 +34,8 @@ impl FileUi {
     where
         T: Clone + PartialEq + 'static,
     {
-        use_memo(move || select(&self.state.read()).cloned())
+        self.binding
+            .use_selector(move |state| select(state).cloned())
     }
 }
 

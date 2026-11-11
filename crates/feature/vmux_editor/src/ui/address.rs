@@ -1,11 +1,11 @@
 use dioxus::prelude::*;
 use vmux_api::address::PageAddressUiState;
 use vmux_ui::components::address::AddressControls;
-use vmux_ui::hooks::use_ui_state;
+use vmux_ui::hooks::UiStateBinding;
 
 #[component]
 pub(super) fn EditorAddress(show_search: bool) -> Element {
-    let source = use_ui_state::<PageAddressUiState>().state;
+    let source = UiStateBinding::<PageAddressUiState>::use_context().state;
     let Some(mut state) = source.read().address.clone() else {
         return rsx! {};
     };

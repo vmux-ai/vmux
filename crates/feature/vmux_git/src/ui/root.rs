@@ -2,7 +2,7 @@
 
 use dioxus::prelude::*;
 use vmux_api::input::KeyModifiers;
-use vmux_ui::hooks::{send, use_theme};
+use vmux_ui::hooks::{send, use_theme, use_ui_state};
 use vmux_ui::i18n::translate;
 
 use super::branches::BranchPromptDialog;
@@ -14,6 +14,9 @@ use crate::event::{GitKeyRequest, GitShortcutHelpRequest};
 #[component]
 pub fn Page() -> Element {
     use_theme();
+    use_ui_state::<crate::state::GitUiState>();
+    use_ui_state::<vmux_api::page_location::PageLocationUiState>();
+    use_ui_state::<vmux_api::address::PageAddressUiState>();
     let state = GitPageState::use_state();
     use_context_provider(|| state);
     let snapshot = state.snapshot;

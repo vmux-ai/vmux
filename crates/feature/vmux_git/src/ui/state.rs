@@ -1,5 +1,5 @@
 use dioxus::prelude::*;
-use vmux_ui::hooks::{send, use_ui_state};
+use vmux_ui::hooks::{UiStateBinding, send};
 use vmux_ui::scroll::{ScrollIntoView, ScrollRetention};
 
 use crate::event::GitRepositoryRequest;
@@ -35,7 +35,8 @@ impl PendingRepository {
 
 impl GitPageState {
     pub(super) fn use_state() -> Self {
-        let root = use_ui_state::<GitUiState>().state;
+        let binding = UiStateBinding::<GitUiState>::use_context();
+        let root = binding.state;
         let pending_repository = use_signal(|| None::<PendingRepository>);
         let state = Self {
             root,
@@ -64,9 +65,10 @@ impl GitPageState {
                 }
                 GitPageControllerState::for_repository(request.request.branch.clone())
             }),
-            projects: use_memo(move || root.read().projects.clone()),
+            projects: binding.use_selector(|state| state.projects.clone()),
             diff: GitDiffState::new(root),
-            location: use_ui_state::<vmux_api::page_location::PageLocationUiState>().state,
+            location: UiStateBinding::<vmux_api::page_location::PageLocationUiState>::use_context()
+                .state,
             active_branch_file: use_signal(String::new),
             pending_repository,
             repository_request_sequence: use_signal(|| 0),
@@ -422,6 +424,8 @@ mod tests {
 
     #[component]
     fn CachedDiffPreview() -> Element {
+        vmux_ui::hooks::use_ui_state::<GitUiState>();
+        vmux_ui::hooks::use_ui_state::<vmux_api::page_location::PageLocationUiState>();
         let state = GitPageState::use_state();
         let viewport = (state.diff.viewport)();
         let rows = (state.diff.rows)();

@@ -159,6 +159,10 @@ where
             rkyv::api::high::HighDeserializer<rkyv::rancor::Error>,
         > + for<'a> rkyv::bytecheck::CheckBytes<rkyv::api::high::HighValidator<'a, rkyv::rancor::Error>>,
 {
+    let inherited = use_hook(try_consume_context::<UiStateBinding<T>>);
+    if let Some(binding) = inherited {
+        return binding;
+    }
     let snapshots = try_consume_context::<UiStateSnapshots>();
     let initial = snapshots.clone();
     let mut state = use_signal(move || match initial {
@@ -182,4 +186,120 @@ where
     };
     use_context_provider(|| binding);
     binding
+}
+
+#[cfg(test)]
+mod tests {
+    use std::future::Future;
+    use std::task::{Context, Waker};
+
+    use super::*;
+    use crate::hooks::EventListenerError;
+    use crate::transport::{BytesListener, HostBinding, HostScope, PageHost};
+    use vmux_api::BinEvent;
+
+    #[vmux_api::ui_state(Default, Eq)]
+    struct SharedState {
+        value: u32,
+    }
+
+    #[derive(Default)]
+    struct PreviewHost {
+        listeners: RefCell<Vec<BytesListener>>,
+    }
+
+    impl PageHost for PreviewHost {
+        fn send(&self, _: &str, _: &[u8]) -> Result<(), EventListenerError> {
+            Ok(())
+        }
+
+        fn listen(&self, id: &str, listener: BytesListener) -> Result<(), EventListenerError> {
+            if id == SharedState::id() {
+                self.listeners.borrow_mut().push(listener);
+            }
+            Ok(())
+        }
+    }
+
+    #[derive(Clone, Default)]
+    struct Visibility(Rc<RefCell<Option<Signal<bool>>>>);
+
+    struct Preview {
+        host: Rc<PreviewHost>,
+        dom: VirtualDom,
+        visible: Visibility,
+        _scope: HostScope,
+    }
+
+    impl Preview {
+        fn new() -> Self {
+            let host = Rc::new(PreviewHost::default());
+            let scope = HostScope::enter(host.clone());
+            let visible = Visibility::default();
+            let mut dom = VirtualDom::new(Root);
+            dom.provide_root_context(HostBinding(host.clone()));
+            dom.provide_root_context(visible.clone());
+            dom.rebuild_to_vec();
+            let mut preview = Self {
+                host,
+                dom,
+                visible,
+                _scope: scope,
+            };
+            preview.render();
+            preview
+        }
+
+        fn publish(&mut self, value: u32) -> String {
+            let frame = UiStateFrame::<SharedState, <SharedState as UiState>::Update>::Snapshot(
+                SharedState { value },
+            );
+            let bytes = rkyv::to_bytes::<rkyv::rancor::Error>(&frame).unwrap();
+            for listener in self.host.listeners.borrow_mut().iter_mut() {
+                listener(&bytes);
+            }
+            self.render()
+        }
+
+        fn show(&mut self, visible: bool) -> String {
+            self.visible.0.borrow().unwrap().set(visible);
+            self.render()
+        }
+
+        fn render(&mut self) -> String {
+            for _ in 0..4 {
+                let mut context = Context::from_waker(Waker::noop());
+                let _ = std::pin::pin!(self.dom.wait_for_work()).poll(&mut context);
+                self.dom.render_immediate_to_vec();
+            }
+            dioxus_ssr::render(&self.dom)
+        }
+    }
+
+    #[component]
+    fn Root() -> Element {
+        use_ui_state::<SharedState>();
+        let visible = use_signal(|| true);
+        let control = use_context::<Visibility>();
+        use_hook(move || *control.0.borrow_mut() = Some(visible));
+        rsx! { div { if visible() { Child {} } } }
+    }
+
+    #[component]
+    fn Child() -> Element {
+        let binding = use_ui_state::<SharedState>();
+        let value = binding.use_selector(|state| state.value);
+        rsx! { span { "value={value}" } }
+    }
+
+    #[test]
+    fn child_replacement_reuses_one_listener_and_receives_the_latest_root_snapshot() {
+        let mut preview = Preview::new();
+        assert_eq!(preview.host.listeners.borrow().len(), 1);
+        assert!(preview.publish(7).contains("value=7"));
+        assert!(!preview.show(false).contains("value="));
+        preview.publish(9);
+        assert!(preview.show(true).contains("value=9"));
+        assert_eq!(preview.host.listeners.borrow().len(), 1);
+    }
 }
