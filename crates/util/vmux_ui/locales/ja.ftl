@@ -1145,9 +1145,9 @@ onboarding-key-failed = キーを保存できませんでした。再試行す�
 onboarding-workspace-question = どこで作業しましょうか？
 agent-starting = エージェントを起動中…
 browser-open-external = 外部ブラウザで開く
-connectors-title = Connectors
-connectors-description = 接続済みアカウントを管理し、会話から利用する connector を選択します。
-connectors-empty = 利用できる connector がありません
+connectors-title = コネクター
+connectors-description = 接続済みアカウントを管理し、会話で使うコネクターを選択します。
+connectors-empty = 利用できるコネクターがありません
 connectors-sign-in-required = サインインが必要です
 connectors-open-sign-in = サインインを開く
 

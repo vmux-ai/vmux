@@ -155,14 +155,15 @@ fn page_ready(
     let Ok(page) = pages.get(webview) else {
         return;
     };
-    if crate::route::ToolRoute::parse(&page.url).is_none() {
+    let url = page.url.split(['?', '#']).next().unwrap_or_default();
+    if crate::route::ToolRoute::parse(url).is_none() {
         return;
     }
     if let Ok(mut subscriber) = subscribers.get_mut(webview) {
-        subscriber.navigate(&page.url);
+        subscriber.navigate(url);
     } else {
         let mut subscriber = ToolSubscriber::default();
-        subscriber.navigate(&page.url);
+        subscriber.navigate(url);
         commands.entity(webview).insert(subscriber);
     }
 }

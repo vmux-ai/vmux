@@ -568,7 +568,12 @@ impl McpSnapshotSource {
             let stored = credentials.storage.load(&server.id).ok().flatten();
             let authenticated = configured
                 && stored.as_ref().is_some_and(|credentials| {
-                    credentials.authorizes(&server.url) && !credentials.expires_soon()
+                    credentials.authorizes(&server.url)
+                        && (!credentials.expires_soon()
+                            || credentials
+                                .refresh_token
+                                .as_ref()
+                                .is_some_and(|token| !token.is_empty()))
                 });
             let status = match (configured, authenticated, occupied) {
                 (false, _, true) => McpServerStatus::Configured,
@@ -664,15 +669,22 @@ impl McpConnection {
         };
         let account = match &server.account_endpoint {
             Some(endpoint) => {
-                let endpoint = Self::https_url(endpoint, "account endpoint")?;
-                let value: serde_json::Value =
-                    Self::json(client.get(endpoint).bearer_auth(&token.access_token).send())?;
-                value
-                    .get("preferred_username")
-                    .or_else(|| value.get("login"))
-                    .or_else(|| value.get("name"))
-                    .and_then(serde_json::Value::as_str)
-                    .map(str::to_string)
+                let response: Result<serde_json::Value, String> =
+                    Self::https_url(endpoint, "account endpoint").and_then(|endpoint| {
+                        Self::json(client.get(endpoint).bearer_auth(&token.access_token).send())
+                    });
+                match response {
+                    Ok(value) => value
+                        .get("preferred_username")
+                        .or_else(|| value.get("login"))
+                        .or_else(|| value.get("name"))
+                        .and_then(serde_json::Value::as_str)
+                        .map(str::to_string),
+                    Err(error) => {
+                        warn!("Connector account lookup failed: {error}");
+                        None
+                    }
+                }
             }
             None => None,
         };

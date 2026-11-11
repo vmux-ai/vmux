@@ -52,7 +52,7 @@ pub fn McpMenu(
                                 key: "mcp-{server.id}",
                                 r#type: "button",
                                 class: PromptMenuRow::class(index == selected),
-                                disabled: server.status == McpServerStatus::Configured
+                                disabled: server.status == McpServerStatus::Configured && !attached
                                     || !pending.is_empty() && !server_pending,
                                 onclick: move |_| on_select.call(index),
                                 onmouseenter: move |_| on_hover.call(index),
@@ -61,7 +61,7 @@ pub fn McpMenu(
                                     span { class: "truncate text-xs text-muted-foreground", "{description}" }
                                 }
                                 span { class: McpServerText::status_class(server.status, server_pending),
-                                    if server.status == McpServerStatus::Connected && !server_pending {
+                                    if (attached || server.status == McpServerStatus::Connected) && !server_pending {
                                         span { class: "size-1.5 rounded-full bg-success" }
                                         span { {translate(if attached { "connectors-selected" } else { "connectors-use" })} }
                                     } else {
@@ -80,7 +80,15 @@ pub fn McpMenu(
                     button { r#type: "button", class: "ml-2 text-muted-foreground", onclick: move |_| { let _ = crate::hooks::send(&vmux_api::mcp::McpServerCancelRequest); }, {translate("common-cancel")} }
                 }
             }
-            a { href: "vmux://tools/connectors", class: "block px-3.5 py-2 text-xs text-muted-foreground", {translate("connectors-manage")} }
+            button {
+                r#type: "button",
+                class: "block px-3.5 py-2 text-xs text-muted-foreground",
+                onclick: move |event| {
+                    crate::navigation::PageNavigation::click("vmux://tools/connectors", &event);
+                    on_dismiss.call(());
+                },
+                {translate("connectors-manage")}
+            }
         }
     }
 }

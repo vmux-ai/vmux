@@ -1067,19 +1067,19 @@ mod tests {
             .collect::<Vec<_>>();
 
         assert_eq!(palette.mode, PaletteMode::Slash);
-        assert_eq!(names, ["upload", "resume", "mcp"]);
+        assert_eq!(names, ["upload", "resume", "connectors"]);
 
-        let mcp = PaletteState::start(&state, PaletteDraft::typed("/m"));
+        let mcp = PaletteState::start(&state, PaletteDraft::typed("/c"));
         assert!(matches!(
             mcp.rows.as_slice(),
-            [CommandBarResultItem::Slash { name, .. }] if name == "mcp"
+            [CommandBarResultItem::Slash { name, .. }] if name == "connectors"
         ));
         assert_eq!(
             mcp.submit_start(&[]),
-            PaletteDecision::Retype("/mcp ".to_string())
+            PaletteDecision::Retype("/connectors ".to_string())
         );
 
-        let delegated = PaletteState::start(&state, PaletteDraft::typed("/mcp"));
+        let delegated = PaletteState::start(&state, PaletteDraft::typed("/connectors"));
         assert!(delegated.rows.is_empty());
     }
 
