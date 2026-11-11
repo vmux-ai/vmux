@@ -6,6 +6,7 @@ use bevy_cef::prelude::{UiEventPlugin, UiInput};
 use vmux_api::command_bar::{
     CommandBarUiState, CommandBarWorkspaceSelection, StartGoToBranch, StartSelectWorkspace,
 };
+use vmux_command::CommandBarWorkDirectory;
 use vmux_ecs::launcher::HostsLauncher;
 use vmux_ecs::{Cwd, PageMetadata, UiStateWrite};
 use vmux_git::{GitRuntime, GitTask};
@@ -60,12 +61,16 @@ fn pin(
     pages: Query<(Entity, &PageMetadata), (With<HostsLauncher>, Without<Pinned>)>,
     parents: Query<&ChildOf>,
     directories: Query<&Cwd>,
-    work_directories: Query<&vmux_command::CommandBarWorkDirectory>,
+    work_directories: Query<&CommandBarWorkDirectory>,
     tabs: Query<(&Tab, Option<&TabWorkspace>)>,
+    layout: vmux_layout::stack::LayoutFocus,
     mut commands: Commands,
 ) {
     for (webview, metadata) in &pages {
         if !metadata.url.starts_with(crate::StartPlugin::URL) {
+            continue;
+        }
+        if layout.tab_of(webview).is_none() {
             continue;
         }
         let Ok(parent) = parents.get(webview) else {
@@ -96,7 +101,10 @@ fn pin(
             };
             current = parent.parent();
         }
-        commands.entity(webview).insert((Pinned, Cwd(dir)));
+        commands.entity(webview).insert((
+            Pinned,
+            CommandBarWorkDirectory(dir.to_string_lossy().into_owned()),
+        ));
     }
 }
 
@@ -105,7 +113,7 @@ fn release(pages: Query<(Entity, &PageMetadata), With<Pinned>>, mut commands: Co
         if !metadata.url.starts_with(crate::StartPlugin::URL) {
             commands
                 .entity(webview)
-                .remove::<(Pinned, Cwd, Selection)>();
+                .remove::<(Pinned, CommandBarWorkDirectory, Selection)>();
             commands.trigger(UiStateWrite::<CommandBarUiState>::from_event(
                 webview,
                 &CommandBarWorkspaceSelection::default(),
@@ -168,7 +176,10 @@ fn apply(
         Ok(path) if path.is_dir() => {
             commands
                 .entity(request.webview)
-                .insert((Pinned, Cwd(path)))
+                .insert((
+                    Pinned,
+                    CommandBarWorkDirectory(path.to_string_lossy().into_owned()),
+                ))
                 .remove::<Selection>();
             commands.trigger(UiStateWrite::<CommandBarUiState>::from_event(
                 request.webview,
@@ -414,7 +425,14 @@ mod tests {
         }
 
         fn cwd(&self, page: Entity) -> &Path {
-            &self.app.world().get::<Cwd>(page).unwrap().0
+            Path::new(
+                &self
+                    .app
+                    .world()
+                    .get::<CommandBarWorkDirectory>(page)
+                    .unwrap()
+                    .0,
+            )
         }
 
         fn git(&self, args: &[&str]) {
@@ -483,11 +501,21 @@ mod tests {
             .unwrap()
             .url = "vmux://sessions/existing".into();
         composers.app.update();
-        assert!(composers.app.world().get::<Cwd>(composers.first).is_none());
-        let other = composers.other.path().to_path_buf();
-        composers.app.world_mut().entity_mut(composers.tab).insert(
-            vmux_command::CommandBarWorkDirectory(other.to_string_lossy().into_owned()),
+        assert!(
+            composers
+                .app
+                .world()
+                .get::<CommandBarWorkDirectory>(composers.first)
+                .is_none()
         );
+        let other = composers.other.path().to_path_buf();
+        composers
+            .app
+            .world_mut()
+            .entity_mut(composers.tab)
+            .insert(CommandBarWorkDirectory(
+                other.to_string_lossy().into_owned(),
+            ));
         composers
             .app
             .world_mut()
@@ -535,5 +563,76 @@ mod tests {
         assert_eq!(selected.common_dir, original.common_dir);
         assert_eq!(original.head_ref().unwrap(), "main");
         assert_eq!(composers.cwd(composers.second), composers.original.path());
+    }
+
+    #[test]
+    fn composer_directories_never_make_transient_pages_persistent() {
+        let mut composers = Composers::new();
+        let selected = composers.other.path().to_path_buf();
+        composers.choose(composers.first, &selected);
+        for page in [composers.first, composers.second] {
+            assert!(
+                composers
+                    .app
+                    .world()
+                    .get::<CommandBarWorkDirectory>(page)
+                    .is_some()
+            );
+            assert!(
+                !composers
+                    .app
+                    .world()
+                    .entity(page)
+                    .contains::<moonshine_save::prelude::Save>()
+            );
+            assert!(composers.app.world().get::<Cwd>(page).is_none());
+        }
+    }
+
+    #[test]
+    fn prewarmed_pages_bind_only_after_they_are_attached_to_a_tab() {
+        let mut composers = Composers::new();
+        let pool = composers.app.world_mut().spawn_empty().id();
+        let page = composers
+            .app
+            .world_mut()
+            .spawn((
+                HostsLauncher,
+                ChildOf(pool),
+                PageMetadata {
+                    url: crate::StartPlugin::URL.into(),
+                    ..Default::default()
+                },
+            ))
+            .id();
+        composers.app.update();
+        assert!(
+            composers
+                .app
+                .world()
+                .get::<CommandBarWorkDirectory>(page)
+                .is_none()
+        );
+        assert!(
+            !composers
+                .app
+                .world()
+                .entity(page)
+                .contains::<moonshine_save::prelude::Save>()
+        );
+        composers
+            .app
+            .world_mut()
+            .entity_mut(page)
+            .insert(ChildOf(composers.tab));
+        composers.app.update();
+        assert_eq!(composers.cwd(page), composers.original.path());
+        assert!(
+            !composers
+                .app
+                .world()
+                .entity(page)
+                .contains::<moonshine_save::prelude::Save>()
+        );
     }
 }

@@ -915,7 +915,7 @@ fn load_on_startup(
         info!("Loading space from {:?}", path);
         let load = match std::fs::read_to_string(path)
             .ok()
-            .and_then(|body| normalized_store_icons(&body))
+            .and_then(|body| vmux_api::PageIcon::normalize_persisted(&body))
         {
             Some((body, unknown)) => {
                 warn!(?unknown, "Replacing unavailable persisted page icons");
@@ -1029,7 +1029,9 @@ impl WorkspaceLoad {
     ) -> Result<bevy_world_serialization::DynamicWorld, String> {
         let mut bytes = Vec::new();
         match self.load.input.consume() {
-            Some(LoadInput::World(snapshot)) => return Ok(snapshot),
+            Some(LoadInput::World(snapshot)) => {
+                return super::restored::Snapshot(snapshot).recover();
+            }
             Some(LoadInput::File(path)) => {
                 bytes = std::fs::read(path).map_err(|error| error.to_string())?;
             }
@@ -1042,12 +1044,13 @@ impl WorkspaceLoad {
         }
         let mut deserializer =
             ron::Deserializer::from_bytes(&bytes).map_err(|error| error.to_string())?;
-        bevy_world_serialization::serde::WorldDeserializer {
+        let snapshot = bevy_world_serialization::serde::WorldDeserializer {
             type_registry: registry,
             load_from_path: assets,
         }
         .deserialize(&mut deserializer)
-        .map_err(|error| error.to_string())
+        .map_err(|error| error.to_string())?;
+        super::restored::Snapshot(snapshot).recover()
     }
 }
 
@@ -1194,10 +1197,6 @@ impl WorkspaceStoreSource<'_> {
         }
         None
     }
-}
-
-fn normalized_store_icons(body: &str) -> Option<(String, Vec<String>)> {
-    vmux_api::icon::StoredPageIcons(body).normalize()
 }
 
 fn space_has_unregistered_types(body: &str, registry: &bevy::reflect::TypeRegistry) -> bool {
@@ -2683,7 +2682,8 @@ mod tests {
         icon: Builtin(LegacyProject),
         icon: Builtin(LegacyKeyboard),
 "#;
-        let (normalized, unknown) = normalized_store_icons(body).expect("unknown icons");
+        let (normalized, unknown) =
+            vmux_api::PageIcon::normalize_persisted(body).expect("unknown icons");
 
         assert_eq!(unknown, ["LegacyProject", "LegacyKeyboard"]);
         assert_eq!(
@@ -2699,7 +2699,7 @@ mod tests {
     #[test]
     fn available_persisted_icons_need_no_migration() {
         let body = "        icon: Builtin(GitBranch),\n";
-        assert_eq!(normalized_store_icons(body), None);
+        assert_eq!(vmux_api::PageIcon::normalize_persisted(body), None);
     }
 
     #[test]
@@ -2720,7 +2720,7 @@ mod tests {
   },
 )
 "#;
-        let (normalized, _) = normalized_store_icons(body).expect("unknown icon");
+        let (normalized, _) = vmux_api::PageIcon::normalize_persisted(body).expect("unknown icon");
         let mut app = App::new();
         app.add_plugins((MinimalPlugins, AssetPlugin::default()))
             .add_plugins((vmux_ecs::PrimitivesPlugin, SchemaPlugin))

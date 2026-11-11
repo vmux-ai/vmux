@@ -2043,8 +2043,10 @@ Failed conversations release their transcript skeleton.
 Composer workspace context resolves the Session named by the page URL even before runtime attachment
 has bound the Stack. Its compact project / branch chip shows that Session's working directory and
 uses the stored project name. Existing Sessions expose this context without changing their workspace.
-Start's `workspace::Plugin` pins `Cwd` on each launcher page from its pane or Tab default. Project and
-branch choices update that page, preserving other composers and the Tab default. `Binding` orders
+Start's `workspace::Plugin` pins the transient `CommandBarWorkDirectory` on each attached launcher page
+from its pane or Tab default. It never adds the persisted `Cwd` component or `Save` to a page, and
+prewarmed pages wait for a Tab before binding. Project and branch choices update that page, preserving
+other composers and the Tab default. `Binding` orders
 directory selection before Start's payload projection; `CommandBarWorkspaceSelection` carries pending
 work and failures through `CommandBarUiState`. Branch preparation reuses the layout feature's managed
 checkout lifecycle and discards abandoned results. Failed choices retain the previous directory;
@@ -2052,6 +2054,9 @@ pending or failed selections refuse submission. Submission uses the launcher's o
 directory, even when another pane is active. Leaving Start releases the pin. Unpublished context is retried after
 the first ready frame. Branch menus enqueue their checkout reads
 through `vmux_git::GitRuntime` and finish empty results rather than leaving a loading request open.
+Stored orphan pages containing only directory, route metadata, and a parent link are discarded before
+ownership validation; other malformed records still refuse restoration. Unknown persisted builtin
+icons fall back in memory without discarding Bookmark or workspace records.
 Project dashboards and resume suggestions use the same catalog stage and staleness projection.
 Embedded Session groups show five entries at a time, with stale groups initially collapsed.
 Resume suggestions restrict host contributions to the visible entries, so keyboard selection

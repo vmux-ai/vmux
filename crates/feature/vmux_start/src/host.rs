@@ -83,7 +83,7 @@ struct CommandBarFocusRequested {
 
 #[derive(SystemParam)]
 struct StartPromptContext<'w, 's> {
-    directories: Query<'w, 's, Ref<'static, vmux_ecs::Cwd>>,
+    directories: Query<'w, 's, Ref<'static, vmux_command::CommandBarWorkDirectory>>,
     parents: Query<'w, 's, &'static ChildOf>,
     tabs: Query<
         'w,
@@ -159,7 +159,7 @@ impl StartPromptContext<'_, '_> {
 
     fn cwd(&self, webview: Entity, tab: Option<Entity>) -> String {
         if let Ok(cwd) = self.directories.get(webview) {
-            return cwd.0.to_string_lossy().into_owned();
+            return cwd.0.clone();
         }
         let Some(tab) = tab else {
             return String::new();

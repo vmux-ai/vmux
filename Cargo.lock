@@ -11194,6 +11194,7 @@ dependencies = [
  "bevy_ecs",
  "dioxus",
  "dioxus-primitives",
+ "moonshine-save",
  "rfd 0.15.4",
  "rkyv",
  "serde",

@@ -298,7 +298,6 @@ struct PromptTarget<'w, 's> {
     child_of: Query<'w, 's, &'static ChildOf>,
     contributed_pages: ContributedPages<'w, 's>,
     work_directories: Query<'w, 's, &'static vmux_command::CommandBarWorkDirectory>,
-    directories: Query<'w, 's, &'static vmux_ecs::Cwd>,
     states: Query<'w, 's, &'static UiState<vmux_api::command_bar::CommandBarUiState>>,
     workspace: Single<'w, 's, &'static CommandBarWorkspaceSnapshot>,
 }
@@ -306,9 +305,9 @@ struct PromptTarget<'w, 's> {
 impl PromptTarget<'_, '_> {
     fn cwd(&self, webview: Entity, stack: Entity) -> std::path::PathBuf {
         if self.launcher_hosts.contains(webview)
-            && let Ok(cwd) = self.directories.get(webview)
+            && let Ok(cwd) = self.work_directories.get(webview)
         {
-            return cwd.0.clone();
+            return std::path::PathBuf::from(&cwd.0);
         }
         self.work_directories
             .get(stack)
@@ -790,7 +789,7 @@ mod tests {
             .spawn((
                 HostsLauncher,
                 ChildOf(stack),
-                vmux_ecs::Cwd("/selected-project".into()),
+                vmux_command::CommandBarWorkDirectory("/selected-project".into()),
             ))
             .id();
         let modal = app.world_mut().spawn_empty().id();
