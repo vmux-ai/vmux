@@ -309,7 +309,7 @@ fn ProjectActions(entry: ProjectEntry) -> Element {
                         danger: false,
                         onclick: move |_| {
                             open.set(false);
-                            ProjectEntry::open(resume_url.clone(), NavigationGesture::default());
+                            PageNavigation::gesture(resume_url.clone(), NavigationGesture::default());
                         },
                     }
                     ProjectActionMenuItem {
@@ -400,12 +400,6 @@ fn ProjectActionMenuItem(
             LineIconView { icon, class: "size-3.5 shrink-0".to_string() }
             span { class: "truncate", "{label}" }
         }
-    }
-}
-
-impl ProjectEntry {
-    fn open(url: String, gesture: NavigationGesture) {
-        PageNavigation::gesture(url, gesture);
     }
 }
 

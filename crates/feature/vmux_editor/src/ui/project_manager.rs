@@ -40,16 +40,6 @@ impl ProjectPresentation {
     }
 }
 
-impl ProjectEntry {
-    fn matches(&self, needle: &str) -> bool {
-        needle.is_empty()
-            || self.name.to_ascii_lowercase().contains(needle)
-            || self.source.to_ascii_lowercase().contains(needle)
-            || self.path.to_ascii_lowercase().contains(needle)
-            || self.branch.to_ascii_lowercase().contains(needle)
-    }
-}
-
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(super) enum ProjectFilter {
     Archived,

@@ -1036,7 +1036,8 @@ fn side_sheet_project_page_open(
     let Ok(root) = projects.path() else {
         return;
     };
-    let Some(url) = vmux_editor::ProjectRoute::from_path(root, std::path::Path::new(&request.path))
+    let Some(url) =
+        vmux_project::ProjectRoute::from_path(root, std::path::Path::new(&request.path))
     else {
         return;
     };

@@ -416,8 +416,20 @@ the same ID in different roots remains valid, while a duplicate inside one root 
 
 `examples/framework-consumer` is an independent Cargo workspace using only public APIs and no
 repository patch configuration. Its tests exercise typed requests, scoped identity, operation
-completion, and optional storage in a Bevy App without Profile or UI dependencies. CI runs
+completion, optional storage, and Project mutations in a Bevy App without Profile or UI dependencies. CI runs
 the consumer and checks its resolved dependency graph along with the minimal core configurations.
+
+`vmux_project` owns renderer-independent Project entities and mutation lifecycles. Its default
+plugin consumes typed load/write completion messages and uses shared `Name`, `Cwd`, `Revision`,
+identity indexing, and operation lifecycle. The optional `filesystem` plugin implements atomic
+snapshot IO; another application can supply its own adapter. The optional `contracts` feature
+provides the Project page's read and input contracts without an Editor dependency. The application
+builder selects Project explicitly, and Editor requires that core in the composition. Editor owns
+the Profile-root binding, folder selection, UI feedback, Git provisioning, filesystem discovery,
+and Session contributions. Store tickets bind every result to its root, directory, and generation.
+Filesystem jobs queue by canonical directory. Unstarted jobs are discarded when their owner
+changes; started atomic IO finishes before a replacement root reads that directory. Backend IO
+tasks therefore own their finite lifetime rather than being despawned with a requesting root.
 
 Every product feature appears exactly once in that graph and exposes one crate-level plugin.
 That root plugin installs only its own manifest, components, systems, and private subplugins. It
@@ -1526,9 +1538,10 @@ Resume suggestions restrict host contributions to the visible entries, so keyboa
 cannot reach hidden sessions; each status has its own explicit expansion limit.
 Project creation and editing share one form for a display name and a local folder or GitHub
 repository. GitHub sources clone through the existing Git provisioning lifecycle before registration.
-Registered Projects are entities owned by `ProjectsRoot`, composed from `ProjectId`, `Name`,
-`Cwd`, repository and revision components. `ProjectPersistencePlugin` restores `.projects.ron`
-once and owns one write task per root. Save operations carry preparation, provisioning and
+Registered Projects are entities owned by a Project `Root`, composed from `ProjectId`, `Name`,
+`Cwd`, repository and shared revision components. The Editor adapter binds Profile `ProjectsRoot`
+entities to that core root. `ProjectPlugin` loads once and serializes accepted writes per root;
+`FilesystemPlugin` owns atomic IO tasks. Save operations carry preparation, provisioning and
 commit state as components; systems enqueue immutable snapshots at the filesystem boundary.
 Writes check the current ECS revision and reject duplicate checkouts before dispatch. Only a
 successful atomic write updates Project entities and emits `ProjectSaved`; failed writes retain
@@ -1539,6 +1552,11 @@ Page routing and catalog projections read ECS registrations. Native folder selec
 a new external directory, and the form retains its draft on validation or clone failure.
 Accepted saves and registration removals finish after the requesting view closes.
 Project entities omit the workspace `Save` marker; `.projects.ron` is their only persistence owner.
+Archive membership is also a Project-owned component and mutation. The filesystem adapter imports
+legacy `.archive.ron` state until the first successful versioned `.projects.ron` write; later
+restores use that committed snapshot, so an unarchive cannot be undone by the old archive file.
+Root removal or replacement cancels domain work and stale completion messages cannot commit
+into a replacement root. Removing the requester alone does not cancel an accepted save.
 
 Project dashboards show related sessions, repository status and an entry point into Code,
 without reading or listing arbitrary directories in the overview. Repository status uses the Git

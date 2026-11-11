@@ -12,6 +12,8 @@ pub use vmux_extension::ExtensionPlugin;
 pub use vmux_git::GitPlugin;
 #[cfg(feature = "layout")]
 pub use vmux_layout::LayoutPlugin;
+#[cfg(feature = "project")]
+pub use vmux_project::ProjectPlugin;
 #[cfg(feature = "service")]
 pub use vmux_service::plugin::ServicePlugin;
 #[cfg(feature = "terminal")]

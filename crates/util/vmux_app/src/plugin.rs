@@ -6,6 +6,8 @@ use vmux_macro::app_plugin;
 pub enum VmuxPlugin {
     #[plugin(feature = "ecs", desktop)]
     Ecs(VmuxEcsPlugin),
+    #[plugin(feature = "project", desktop, requires(ecs))]
+    Project(vmux_project::ProjectPlugin),
     #[plugin(feature = "runtime", desktop, requires(ecs))]
     Runtime(VmuxRuntimePlugin),
     #[plugin(feature = "command", desktop, requires(runtime))]
@@ -24,7 +26,7 @@ pub enum VmuxPlugin {
     Vault(vmux_vault::VaultPlugin),
     #[plugin(feature = "terminal", desktop, requires(layout, service))]
     Terminal(vmux_terminal::TerminalPlugin),
-    #[plugin(feature = "editor", desktop, requires(layout))]
+    #[plugin(feature = "editor", desktop, requires(layout, project))]
     Editor(vmux_editor::EditorPlugin),
     #[plugin(feature = "extension", desktop, requires(browser))]
     Extension(vmux_extension::ExtensionPlugin),

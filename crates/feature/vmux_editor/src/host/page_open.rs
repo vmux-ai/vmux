@@ -14,7 +14,7 @@ use crate::project::ProjectRoute;
 use super::editor::{FileNavigateRequest, FileView};
 use super::explorer::ExplorerState;
 use super::navigation::PendingGoto;
-use super::project_persistence::{PersistenceSet, Registrations};
+use super::project_store::{Registrations, StoreSet};
 use super::viewport::FileViewport;
 
 pub(super) struct PageOpenPlugin;
@@ -28,7 +28,7 @@ impl Plugin for PageOpenPlugin {
                 Update,
                 handle_file
                     .in_set(PageOpenSet::HandleKnownPages)
-                    .after(PersistenceSet::Load)
+                    .after(StoreSet::Load)
                     .after(vmux_layout::warm_page::PrewarmPageOpenSet),
             );
     }
