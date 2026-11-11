@@ -15,6 +15,9 @@ pub use component::{
     ProcessAnchor, Ready, RegistrationOrder, Terminal, TransitionType, UnixMillis, Url, Uuid,
     Visit, VisitCount, VisitedUrl, WindowFullscreen, WindowFullscreenSet,
 };
+pub use external_identity::{
+    ExternalIdentity, ExternalIdentityIndex, ExternalIdentityIndexPlugin, ExternalIdentityIndexSet,
+};
 #[cfg(all(host, feature = "host"))]
 pub use file_ui_state::{FileUiStateUpdates, FileUiStateWrite};
 pub use identity::{
@@ -67,6 +70,7 @@ pub mod browser;
 pub mod cli;
 mod component;
 pub mod event;
+mod external_identity;
 #[cfg(all(host, feature = "host"))]
 mod file_ui_state;
 #[cfg(all(host, feature = "host"))]

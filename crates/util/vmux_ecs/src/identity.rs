@@ -39,16 +39,14 @@ impl IdentityIndexSet {
 
 #[derive(Resource)]
 pub struct IdentityIndex<I: Component, M: Component = I> {
-    entities: HashMap<I, Entity>,
-    duplicates: HashSet<I>,
+    identities: IdentityMap<I>,
     marker: PhantomData<fn() -> M>,
 }
 
 impl<I: Component, M: Component> Default for IdentityIndex<I, M> {
     fn default() -> Self {
         Self {
-            entities: HashMap::new(),
-            duplicates: HashSet::new(),
+            identities: IdentityMap::default(),
             marker: PhantomData,
         }
     }
@@ -56,13 +54,37 @@ impl<I: Component, M: Component> Default for IdentityIndex<I, M> {
 
 impl<I: Component + Clone + Eq + Hash, M: Component> IdentityIndex<I, M> {
     pub fn entity(&self, id: &I) -> Result<Option<Entity>, IdentityLookupError<I>> {
+        self.identities.entity(id)
+    }
+
+    fn include(&mut self, id: I, entity: Entity) {
+        self.identities.include(id, entity);
+    }
+}
+
+pub(crate) struct IdentityMap<I> {
+    entities: HashMap<I, Entity>,
+    duplicates: HashSet<I>,
+}
+
+impl<I> Default for IdentityMap<I> {
+    fn default() -> Self {
+        Self {
+            entities: HashMap::new(),
+            duplicates: HashSet::new(),
+        }
+    }
+}
+
+impl<I: Clone + Eq + Hash> IdentityMap<I> {
+    pub(crate) fn entity(&self, id: &I) -> Result<Option<Entity>, IdentityLookupError<I>> {
         if self.duplicates.contains(id) {
             return Err(IdentityLookupError::Duplicate(id.clone()));
         }
         Ok(self.entities.get(id).copied())
     }
 
-    fn include(&mut self, id: I, entity: Entity) {
+    pub(crate) fn include(&mut self, id: I, entity: Entity) {
         if self.entities.insert(id.clone(), entity).is_some() {
             self.duplicates.insert(id);
         }

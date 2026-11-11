@@ -11001,6 +11001,7 @@ dependencies = [
  "similar",
  "tempfile",
  "tokio",
+ "tracing",
  "unicode-segmentation",
  "url",
  "uuid",
