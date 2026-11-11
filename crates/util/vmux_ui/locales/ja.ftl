@@ -1403,9 +1403,9 @@ common-resume = 再開
 onboarding-connection-choice = 接続方法を選んでください。
 onboarding-connect-description = 開いたページでログインします。
 onboarding-use-key-description = 代わりに API キーを入力します。
-connectors-title = Connectors
-connectors-description = 接続済みアカウントを管理し、会話から利用する connector を選択します。
-connectors-empty = 利用できる connector がありません
+connectors-title = コネクター
+connectors-description = 接続済みアカウントを管理し、会話で使うコネクターを選択します。
+connectors-empty = 利用できるコネクターがありません
 connectors-sign-in-required = サインインが必要です
 connectors-open-sign-in = サインインを開く
 
