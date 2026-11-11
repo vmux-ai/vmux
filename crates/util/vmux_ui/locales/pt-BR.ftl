@@ -1134,3 +1134,5 @@ agent-video-play = Reproduzir vídeo
 command-toggle-url-bar = Layout > Layout > Alternar barra de endereço
 
 project-rename = Renomear projeto
+
+agent-tool-slept = Aguardou

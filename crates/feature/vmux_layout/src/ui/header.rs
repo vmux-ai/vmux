@@ -583,7 +583,7 @@ fn TabTitle(text: String, class: String) -> Element {
 fn NewTabButton() -> Element {
     let mut pressed = use_signal(|| false);
     rsx! {
-        div { class: "relative h-7 w-7 shrink-0",
+        div { class: "relative h-6 w-6 shrink-0",
             "data-vmux-motion-item": "new-tab-button",
             WindowDragRegion {
                 id: "new-tab",
@@ -596,7 +596,7 @@ fn NewTabButton() -> Element {
                 r#type: "button",
                 aria_label: translate("layout-new-tab"),
                 title: translate("layout-new-tab"),
-                class: "absolute inset-0 flex appearance-none cursor-pointer items-center justify-center rounded-md border-0 bg-card/80 text-foreground shadow-none outline-none transition-[background-color,transform] hover:bg-card active:scale-95 focus-visible:bg-card",
+                class: "absolute inset-0 flex appearance-none cursor-pointer items-center justify-center rounded-md border-0 bg-foreground/[0.07] text-foreground/80 shadow-none outline-none transition-[background-color,transform] hover:bg-foreground/[0.12] hover:text-foreground active:scale-95 focus-visible:bg-foreground/[0.12]",
                 onpointerdown: move |event: Event<PointerData>| {
                     if event.trigger_button() == Some(dioxus::html::input_data::MouseButton::Primary) {
                         pressed.set(true);

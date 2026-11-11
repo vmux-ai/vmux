@@ -1131,3 +1131,5 @@ agent-video-play = 播放视频
 command-toggle-url-bar = Layout > 布局 > 切换地址栏
 
 project-rename = 重命名项目
+
+agent-tool-slept = 已等待

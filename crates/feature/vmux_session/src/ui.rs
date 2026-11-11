@@ -48,6 +48,7 @@ pub fn Page() -> Element {
 
 #[component]
 fn SessionDetail(session_id: String, mut details_open: Signal<bool>) -> Element {
+    use_hook(vmux_ui::components::motion::Disclosure::install);
     let chat = use_chat(session_id.clone());
     let file_placement = item::FilePlacement::provide();
     let detail =

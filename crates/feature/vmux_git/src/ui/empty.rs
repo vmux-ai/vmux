@@ -277,19 +277,9 @@ fn GitLoadingSkeleton() -> Element {
                         Skeleton { class: "h-7 w-16 rounded-md bg-foreground/[0.055]" }
                     }
                     section { class: "min-h-0 min-w-0 flex-1 overflow-hidden bg-transparent pb-2.5 pr-2.5",
-                    div { class: "flex h-full min-h-0 flex-col gap-3 overflow-hidden",
-                        for (path_width, rows) in [("w-52", 8usize), ("w-44", 5usize)] {
-                            div { class: "flex min-h-44 flex-col overflow-hidden rounded-lg bg-foreground/[0.025]",
-                                div { class: "flex h-9 shrink-0 items-center gap-2 px-3",
-                                    LineIconView { icon: LineIcon::File, class: "size-3.5 shrink-0 text-muted-foreground" }
-                                    Skeleton { class: "h-3 {path_width} bg-foreground/[0.06]" }
-                                }
-                                div { class: "flex flex-col gap-2 px-3 py-3",
-                                    for index in 0..rows {
-                                        Skeleton { class: if index % 3 == 1 { "h-3 w-9/12 bg-foreground/[0.045]" } else { "h-3 w-full bg-foreground/[0.045]" } }
-                                    }
-                                }
-                            }
+                    div { class: "flex flex-col gap-1.5 px-3 py-3", aria_busy: true,
+                        for width in ["w-3/5", "w-[54%]", "w-[57%]", "w-3/4"] {
+                            Skeleton { class: "h-2.5 {width} rounded-sm bg-foreground/[0.055]" }
                         }
                     }
                     }

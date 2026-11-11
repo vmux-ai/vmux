@@ -3,7 +3,7 @@ use vmux_api::chat::ChatActivityKind;
 use vmux_ui::file_icon::{FileIcon, FilePath, TypeIcon};
 use vmux_ui::icon::LineIconView;
 
-use crate::activity::ActivityIcon;
+use crate::activity::{ActivityIcon, ToolPresentation};
 
 #[component]
 pub(super) fn ActivityIconView(kind: ActivityIcon) -> Element {
@@ -45,6 +45,9 @@ pub(super) fn ToolActivityIcon(
     file_path: Option<String>,
     activity: ChatActivityKind,
 ) -> Element {
+    if ToolPresentation::is_sleep(&name) {
+        return rsx! { ActivityIconView { kind: ActivityIcon::Awaiting } };
+    }
     if matches!(
         &activity,
         ChatActivityKind::ReadFile | ChatActivityKind::WriteFile | ChatActivityKind::Tool

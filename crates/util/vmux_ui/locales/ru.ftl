@@ -1134,3 +1134,5 @@ agent-video-play = Воспроизвести видео
 command-toggle-url-bar = Layout > Макет > Переключить адресную строку
 
 project-rename = Переименовать проект
+
+agent-tool-slept = Подождал

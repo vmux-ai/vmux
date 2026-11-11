@@ -1134,3 +1134,5 @@ agent-video-play = Video abspielen
 command-toggle-url-bar = Layout > Layout > URL-Leiste umschalten
 
 project-rename = Projekt umbenennen
+
+agent-tool-slept = Gewartet

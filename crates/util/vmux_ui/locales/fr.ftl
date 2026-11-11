@@ -1134,3 +1134,5 @@ agent-video-play = Lire la vidéo
 command-toggle-url-bar = Layout > Disposition > Afficher ou masquer la barre d’adresse
 
 project-rename = Renommer le projet
+
+agent-tool-slept = A attendu

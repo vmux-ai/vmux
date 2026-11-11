@@ -1114,3 +1114,5 @@ agent-video-play = 動画を再生
 command-toggle-url-bar = Layout > レイアウト > URLバーを切り替え
 
 project-rename = プロジェクト名を変更
+
+agent-tool-slept = 待機した

@@ -203,6 +203,7 @@ pub fn ChatItemRow(
                 if let Some(context) = context {
                     details { class: "disclosure user-context-panel rounded-xl border",
                         summary { class: "flex cursor-pointer select-none items-center gap-2 px-2.5 py-2 text-xs list-none [&::-webkit-details-marker]:hidden",
+                            DisclosureIcon {}
                             span { class: "flex h-5 w-5 shrink-0 items-center justify-center text-muted-foreground/75",
                                 LineIconView { icon: LineIcon::Shield, class: "h-3 w-3" }
                             }
@@ -214,7 +215,6 @@ pub fn ChatItemRow(
                                     &[("count", TranslationValue::Number(context.len() as i64))],
                                 )}
                             }
-                            DisclosureIcon {}
                         }
                         pre { class: "user-context-content max-h-72 overflow-auto whitespace-pre-wrap rounded-lg px-3 py-2.5 font-mono text-[11px] leading-relaxed text-muted-foreground", "{context}" }
                     }
@@ -1004,9 +1004,8 @@ const ROW_SUMMARY: &str = "flex min-h-6 cursor-pointer select-none items-center 
 #[component]
 fn DisclosureIcon() -> Element {
     rsx! {
-        span {
-            class: "disclosure-icon relative inline-block h-3 w-3 shrink-0 text-muted-foreground",
-            aria_hidden: "true",
+        span { class: "disclosure-icon flex size-3 shrink-0 items-center justify-center text-muted-foreground", aria_hidden: "true",
+            LineIconView { icon: LineIcon::ChevronDown, class: "size-3" }
         }
     }
 }
@@ -1174,11 +1173,11 @@ fn FinishedToolCalls(calls: Vec<ChatToolCall>, open: bool) -> Element {
     rsx! {
         details { class: "disclosure", open,
             summary { class: "flex cursor-pointer select-none items-center gap-2 rounded-xl px-2 py-1 text-xs text-muted-foreground list-none transition-colors hover:bg-foreground/[0.025] [&::-webkit-details-marker]:hidden",
+                DisclosureIcon {}
                 span { class: "font-medium",
                     {translate_with("agent-tool-calls", &[("count", TranslationValue::Number(count))])}
                 }
                 ToolFiles { paths }
-                DisclosureIcon {}
             }
             div { class: "mt-1 flex flex-col gap-1",
                 for call in calls {
@@ -1441,6 +1440,7 @@ fn ToolCall(call: ChatToolCall) -> Element {
             div { class: "min-w-0",
                 details { open: false, class: "disclosure text-xs text-muted-foreground",
                     summary { class: ROW_SUMMARY,
+                        DisclosureIcon {}
                         span { class: "shrink-0 font-medium", "{label}" }
                         ToolFiles { paths }
                         if exploration.is_none() && let Some(command) = &command {
@@ -1452,7 +1452,6 @@ fn ToolCall(call: ChatToolCall) -> Element {
                                 }
                             }
                         }
-                        DisclosureIcon {}
                     }
                     if let Some(command) = command {
                         div { class: "mt-1.5 max-h-56 overflow-auto rounded-lg bg-foreground/[0.035] px-2.5 py-2",
@@ -1494,9 +1493,9 @@ fn SubagentRow(subagent: ChatSubagentState) -> Element {
             div { class: "min-w-0",
                 details { open: subagent.status == ChatSubagentStatus::Running, class: "disclosure text-sm text-muted-foreground",
                     summary { class: "{ROW_SUMMARY} flex-wrap",
+                        DisclosureIcon {}
                         span { class: "font-medium text-foreground/85", "{title}" }
                         span { class: "rounded-full px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide {status_class}", "{status_label}" }
-                        DisclosureIcon {}
                     }
                     div { class: "mt-2 flex flex-wrap gap-1.5 text-[10px]",
                         span { class: "rounded-full bg-violet-500/10 px-2 py-0.5 font-semibold text-violet-700 dark:text-violet-300", "{subagent.provider}" }
@@ -1534,8 +1533,8 @@ fn SubagentRow(subagent: ChatSubagentState) -> Element {
                     if !subagent.raw_input.is_empty() && subagent.raw_input != "{}" {
                         details { class: "disclosure mt-2 text-[11px] text-muted-foreground",
                             summary { class: ROW_SUMMARY,
-                                span { class: "font-medium", {translate("agent-raw-event")} }
                                 DisclosureIcon {}
+                                span { class: "font-medium", {translate("agent-raw-event")} }
                             }
                             pre { class: "agent-code-panel mt-1.5 max-h-56 overflow-auto whitespace-pre-wrap rounded-lg p-2 font-mono text-[11px] text-muted-foreground", "{subagent.raw_input}" }
                         }
@@ -1571,8 +1570,8 @@ pub fn TurnBlock(
                 ActivityIconView { kind: ActivityIcon::Thinking }
                 details { open: false, class: "disclosure min-w-0 text-xs text-muted-foreground",
                     summary { class: ROW_SUMMARY,
-                        span { class: "font-medium", {translate("agent-thinking")} }
                         DisclosureIcon {}
+                        span { class: "font-medium", {translate("agent-thinking")} }
                     }
                     div { class: "mt-2 whitespace-pre-wrap border-l border-foreground/15 pl-3 text-xs leading-relaxed", "{text}" }
                 }
@@ -1590,6 +1589,7 @@ pub fn TurnBlock(
                     ActivityIconView { kind: ActivityIcon::Plan }
                     details { open: true, class: "disclosure min-w-0 text-sm",
                         summary { class: ROW_SUMMARY,
+                            DisclosureIcon {}
                             span { class: "font-medium text-foreground/80", {translate("agent-plan")} }
                             span {
                                 class: "text-xs text-muted-foreground",
@@ -1598,7 +1598,6 @@ pub fn TurnBlock(
                                     &[("count", TranslationValue::Number(n as i64))],
                                 )}
                             }
-                            DisclosureIcon {}
                         }
                         ul { class: "mt-2 flex flex-col gap-1.5 border-l border-indigo-500/20 pl-3",
                             for (i , step) in steps.iter().enumerate() {
@@ -1618,9 +1617,9 @@ pub fn TurnBlock(
                     FileActivityIcon { path: diff.path.clone(), write: true }
                     details { class: "disclosure min-w-0 text-sm text-muted-foreground",
                         summary { class: ROW_SUMMARY,
+                            DisclosureIcon {}
                             span { class: "font-medium", {format!("{} ", translate("agent-edited"))} }
                             code { class: "truncate font-mono text-xs text-foreground/70", "{diff.name}" }
-                            DisclosureIcon {}
                         }
                         div { class: "mt-2 overflow-hidden rounded-lg ring-1 ring-inset ring-foreground/10",
                             div { class: "overflow-x-auto bg-foreground/[0.02] py-1 font-mono text-[11px] leading-relaxed",
@@ -1695,6 +1694,7 @@ fn ToolChildCall(call: ChatToolChildCall) -> Element {
     rsx! {
         details { class: "disclosure text-xs text-muted-foreground",
             summary { class: "flex cursor-pointer select-none items-center gap-2 py-0.5 list-none [&::-webkit-details-marker]:hidden",
+                DisclosureIcon {}
                 span { class: "shrink-0 font-medium", "{label}" }
                 ToolFiles { paths }
                 if exploration.is_none() && let Some(command) = &command {
@@ -1706,7 +1706,6 @@ fn ToolChildCall(call: ChatToolChildCall) -> Element {
                         }
                     }
                 }
-                DisclosureIcon {}
             }
             if let Some(command) = command {
                 div { class: "mt-1.5 max-h-56 overflow-auto rounded-lg bg-foreground/[0.035] px-2.5 py-2",
@@ -1734,9 +1733,9 @@ fn SubagentChild(subagent: ChatSubagentSummary) -> Element {
     rsx! {
         details { class: "disclosure text-xs text-muted-foreground",
             summary { class: "flex cursor-pointer select-none flex-wrap items-center gap-2 py-0.5 list-none [&::-webkit-details-marker]:hidden",
+                DisclosureIcon {}
                 span { class: "font-medium", "{title}" }
                 span { class: "rounded-full px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-wide {status_class}", "{status_label}" }
-                DisclosureIcon {}
             }
             div { class: "mt-1 flex flex-wrap gap-1 text-[10px]",
                 span { class: "rounded-full bg-violet-500/10 px-1.5 py-0.5 text-violet-700 dark:text-violet-300", "{subagent.provider}" }
@@ -1790,11 +1789,11 @@ fn NestedToolResult(result_key: usize, content: String, is_error: bool) -> Eleme
         translate("common-output")
     };
     rsx! {
-        details { key: "{key}", class: "disclosure group/output rounded-lg px-2 py-1 text-xs {tone} {panel}",
+        details { key: "{key}", class: "disclosure group/output rounded-lg px-0 py-1 text-xs {tone} {panel}",
             summary { class: "flex cursor-pointer select-none items-center gap-2 list-none [&::-webkit-details-marker]:hidden",
+                DisclosureIcon {}
                 span { class: "font-medium", "{label}" }
                 span { class: "min-w-0 flex-1 truncate font-mono text-[11px] text-muted-foreground group-open/output:hidden", "{preview.0}" }
-                DisclosureIcon {}
             }
             pre { class: "mt-1.5 max-h-72 overflow-auto whitespace-pre-wrap px-0.5 pb-1 font-mono text-[11px] leading-relaxed text-muted-foreground", "{content}" }
         }
@@ -1834,11 +1833,11 @@ fn StandaloneToolResult(result_key: usize, content: String, is_error: bool) -> E
     rsx! {
         div { key: "{key}", class: "grid grid-cols-[1.5rem_minmax(0,1fr)] items-start gap-2.5 rounded-xl px-2 py-1.5 transition-colors {row}",
             ActivityIconView { kind: icon }
-            details { class: "disclosure group/output min-w-0 rounded-lg px-2 py-1 text-sm {tone} {panel}",
+            details { class: "disclosure group/output min-w-0 rounded-lg px-0 py-1 text-sm {tone} {panel}",
                 summary { class: "flex cursor-pointer select-none items-center gap-2 list-none [&::-webkit-details-marker]:hidden",
+                    DisclosureIcon {}
                     span { class: "font-medium", "{label}" }
                     span { class: "min-w-0 flex-1 truncate font-mono text-[11px] text-muted-foreground group-open/output:hidden", "{preview.0}" }
-                    DisclosureIcon {}
                 }
                 pre { class: "mt-1.5 max-h-72 overflow-auto whitespace-pre-wrap px-0.5 pb-1 font-mono text-[11px] leading-relaxed text-muted-foreground", "{content}" }
             }

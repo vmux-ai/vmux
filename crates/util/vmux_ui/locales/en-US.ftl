@@ -1122,3 +1122,5 @@ project-edit-conflict = This project changed. Reopen the editor to try again.
 command-toggle-url-bar = Layout > Layout > Toggle URL Bar
 
 project-rename = Rename project
+
+agent-tool-slept = Slept

@@ -1134,3 +1134,5 @@ agent-video-play = تشغيل الفيديو
 command-toggle-url-bar = Layout > التخطيط > تبديل شريط العنوان
 
 project-rename = إعادة تسمية المشروع
+
+agent-tool-slept = انتظر

@@ -1995,6 +1995,10 @@ Default file clicks preserve the conversation: a pane at least 1280 CSS pixels w
 to its right, reusing a sibling when present; a narrower or unmeasured pane opens a new Stack.
 Modifier gestures and the context menu retain explicit Stack, pane, and tab destinations.
 The file menu lives outside disclosure summaries, so selection cannot activate their click default.
+Disclosure toggles share a leading chevron and a 100 ms content transition, including closure and
+interrupted motion. SVG strokes share one path with each segment's origin reset, preserving relative
+move commands without overlapping opacity. Git body placeholders retain file headers and use four
+short bars. Workspace selection remains available when the current page has no assigned project.
 
 Session page roots install typed state listeners once. Child components read
 `UiStateBinding<T>::use_context` and selectors, so replacing a manager or detail subtree preserves

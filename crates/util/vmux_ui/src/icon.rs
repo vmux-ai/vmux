@@ -103,6 +103,16 @@ pub enum LineIcon {
 }
 
 impl LineIcon {
+    fn compound_path(self) -> String {
+        let mut combined = String::new();
+        for path in self.paths() {
+            combined.push_str("M0 0 ");
+            combined.push_str(path);
+            combined.push(' ');
+        }
+        combined
+    }
+
     pub fn parse(name: &str) -> Option<Self> {
         serde::Deserialize::deserialize(
             serde::de::value::StrDeserializer::<serde::de::value::Error>::new(name),
@@ -305,7 +315,7 @@ mod wasm {
         if let Some(symbol) = GitSymbol::for_line(icon) {
             return rsx! { GitSymbolView { symbol, class } };
         }
-        let d = icon.paths().join(" ");
+        let d = icon.compound_path();
         rsx! {
             Icon { class: "{class}", stroke_width: 1.8,
                 path { d }

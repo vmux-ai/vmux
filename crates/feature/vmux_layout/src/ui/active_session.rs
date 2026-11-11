@@ -1,14 +1,13 @@
 #![allow(non_snake_case)]
 
 use dioxus::prelude::*;
-use vmux_ecs::event::{ProjectPickerRequest, ProjectRow};
+use vmux_ecs::event::{ProjectPickerRequest, ProjectRow, ProjectRowKind};
 use vmux_ui::components::avatar::IdentityOrb;
 use vmux_ui::components::dropdown::{DropdownPlacement, DropdownPopup};
 use vmux_ui::components::project_picker::ProjectSelectPopup;
 use vmux_ui::components::sheet::SheetSelectorRow;
 use vmux_ui::hooks::{send, use_optimistic_map};
 use vmux_ui::i18n::translate;
-use vmux_ui::icon::{GitSymbol, GitSymbolView};
 
 use crate::event::{
     ActiveSession, ActiveWorkspaceProject, SideSheetProjectPageOpenRequest, TabBoundary,
@@ -17,6 +16,7 @@ use crate::event::{
 
 use super::LayoutDropdown;
 use super::stack::StackIcon;
+use super::state::LayoutUi;
 
 #[component]
 pub(crate) fn ActiveSessionPanel(session: ActiveSession) -> Element {
@@ -28,6 +28,9 @@ pub(crate) fn ActiveSessionPanel(session: ActiveSession) -> Element {
         pane_id,
         ..
     } = session;
+    let projects = LayoutUi::current().use_selector(|state| state.projects.clone())();
+    let project =
+        project.unwrap_or_else(|| ActiveWorkspaceProject::available(projects, boundary.as_ref()));
     let title = if task
         .as_ref()
         .is_some_and(|task| !task.name.trim().is_empty())
@@ -62,15 +65,9 @@ pub(crate) fn ActiveSessionPanel(session: ActiveSession) -> Element {
                 }
             }
             div { class: "mt-2 min-w-0 flex flex-col gap-1",
-                if let Some(project) = project {
-                    ActiveWorkspaceProjectTree {
-                        project,
-                        pane_id,
-                    }
-                } else if let Some(boundary) = boundary.clone() {
-                    if boundary.is_git_repo {
-                        ActiveSessionGit { boundary }
-                    }
+                ActiveWorkspaceProjectTree {
+                    project,
+                    pane_id,
                 }
             }
             if let Some(boundary) = boundary {
@@ -81,6 +78,58 @@ pub(crate) fn ActiveSessionPanel(session: ActiveSession) -> Element {
                     }
                 }
             }
+        }
+    }
+}
+
+impl ActiveWorkspaceProject {
+    fn available(state: crate::event::TabBoundaryState, boundary: Option<&TabBoundary>) -> Self {
+        let mut choices: Vec<ProjectRow> = Vec::new();
+        for row in state.projects {
+            if row.depth != 0 || row.missing || row.kind != ProjectRowKind::Project {
+                continue;
+            }
+            if choices
+                .iter()
+                .any(|held| held.identity_seed() == row.identity_seed())
+            {
+                continue;
+            }
+            choices.push(row);
+        }
+        let root = if let Some(boundary) = boundary {
+            choices
+                .iter()
+                .find(|row| row.path == boundary.effective_dir)
+                .cloned()
+                .unwrap_or_else(|| ProjectRow {
+                    path: boundary.effective_dir.clone(),
+                    label: if boundary.repository.is_empty() {
+                        translate("agent-project-select")
+                    } else {
+                        boundary.repository.clone()
+                    },
+                    display_path: boundary.project_dir.clone(),
+                    ..Default::default()
+                })
+        } else {
+            ProjectRow {
+                label: translate("agent-project-select"),
+                ..Default::default()
+            }
+        };
+        Self {
+            root,
+            choices,
+            children: Vec::new(),
+            project_dir: boundary
+                .map(|value| value.project_dir.clone())
+                .unwrap_or_default(),
+            branch: boundary
+                .map(|value| value.branch.clone())
+                .unwrap_or_default(),
+            branches: state.branches,
+            expanded: false,
         }
     }
 }
@@ -97,27 +146,6 @@ fn CurrentPagePath(url: String) -> Element {
             span { class: "min-w-0 truncate font-mono", dir: "ltr",
                 "{label}"
             }
-        }
-    }
-}
-
-#[component]
-fn ActiveSessionGit(boundary: TabBoundary) -> Element {
-    let repository = if boundary.repository.is_empty() {
-        translate("composer-git-repository")
-    } else {
-        boundary.repository.clone()
-    };
-    rsx! {
-        div { class: "flex h-8 min-w-0 items-center gap-1 rounded-md bg-foreground/[0.035] px-2 text-[10px] @max-[12rem]:px-1",
-            GitSymbolView {
-                symbol: GitSymbol::Repository,
-                class: "size-3.5 shrink-0 text-muted-foreground".to_string(),
-            }
-            span { class: "truncate-fade min-w-0 font-medium text-foreground", title: "{repository}", "{repository}" }
-            span { class: "shrink-0 text-xs text-muted-foreground/45", "›" }
-            IdentityOrb { seed: boundary.branch.clone(), alt: boundary.branch.clone(), class: "size-3.5".to_string() }
-            span { class: "truncate-fade min-w-0 font-mono text-foreground/85", title: "{boundary.branch}", "{boundary.branch}" }
         }
     }
 }
@@ -358,6 +386,54 @@ fn ActiveWorkspaceBranchChoice(
             if selected {
                 vmux_ui::icon::LineIconView { icon: vmux_ui::icon::LineIcon::Check, class: "ml-auto size-3.5 shrink-0" }
             }
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::rc::Rc;
+    use vmux_ui::transport::{
+        BytesListener, HostBinding, PageHost, event_listener::EventListenerError,
+    };
+
+    struct Host;
+
+    impl PageHost for Host {
+        fn send(&self, _: &str, _: &[u8]) -> Result<(), EventListenerError> {
+            Ok(())
+        }
+
+        fn listen(&self, _: &str, _: BytesListener) -> Result<(), EventListenerError> {
+            Ok(())
+        }
+    }
+
+    #[component]
+    fn Controls(url: String) -> Element {
+        let layout = LayoutUi::use_state();
+        layout.provide();
+        rsx! { ActiveSessionPanel {
+            session: ActiveSession {
+                page: crate::event::StackNode { id: 1, agent_id: None, title: "Page".into(), url, icon: Default::default(), is_active: true, is_loading: false, is_dirty: false, bg_color: None },
+                task: None, agent: None, project: None, boundary: None, pane_id: 10,
+            }
+        } }
+    }
+
+    #[test]
+    fn pages_without_an_assigned_workspace_keep_the_project_selector() {
+        for url in [
+            "vmux://projects/github.com/vmux-ai/vmux-cloud",
+            "vmux://start/",
+            "vmux://error/",
+        ] {
+            let mut dom = VirtualDom::new_with_props(Controls, ControlsProps { url: url.into() });
+            dom.provide_root_context(HostBinding(Rc::new(Host)));
+            dom.rebuild_in_place();
+            let html = dioxus_ssr::render(&dom);
+            assert!(html.contains(&translate("agent-project-select")), "{url}");
         }
     }
 }

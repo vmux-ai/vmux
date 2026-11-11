@@ -20,6 +20,11 @@ impl ToolPresentation {
     }
 
     pub fn for_call(kind: ChatToolKind, fallback: &str) -> Self {
+        if Self::is_sleep(fallback) {
+            return Self {
+                label: translate("agent-tool-slept"),
+            };
+        }
         let label = match kind {
             ChatToolKind::Guardian => translate("agent-tool-guardian-review"),
             ChatToolKind::ReadSkill => "Read skill".into(),
@@ -32,7 +37,7 @@ impl ToolPresentation {
             ChatToolKind::OpenPage | ChatToolKind::Browser => translate("agent-tool-used-browser"),
             ChatToolKind::Search => translate("agent-tool-explored"),
             ChatToolKind::Command => translate("agent-tool-ran-commands"),
-            ChatToolKind::Other => fallback.to_string(),
+            ChatToolKind::Other => Self::capitalized(fallback),
         };
         if label.trim().is_empty() {
             return Self {
@@ -40,6 +45,22 @@ impl ToolPresentation {
             };
         }
         Self { label }
+    }
+
+    pub(super) fn is_sleep(name: &str) -> bool {
+        name.rsplit(['.', ':', '_', ' '])
+            .next()
+            .is_some_and(|name| name.eq_ignore_ascii_case("sleep"))
+    }
+
+    fn capitalized(label: &str) -> String {
+        let mut characters = label.trim().chars();
+        let Some(first) = characters.next() else {
+            return String::new();
+        };
+        let mut result = first.to_uppercase().to_string();
+        result.push_str(characters.as_str());
+        result
     }
 }
 
@@ -202,7 +223,13 @@ mod tests {
         );
         assert_eq!(
             ToolPresentation::for_call(ChatToolKind::Other, "custom tool").label,
-            "custom tool"
+            "Custom tool"
         );
+        for name in ["sleep", "clock.sleep", "mcp__clock__sleep"] {
+            assert_eq!(
+                ToolPresentation::for_call(ChatToolKind::Other, name).label,
+                translate("agent-tool-slept")
+            );
+        }
     }
 }

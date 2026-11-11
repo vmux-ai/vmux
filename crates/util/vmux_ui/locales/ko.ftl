@@ -1131,3 +1131,5 @@ agent-video-play = 동영상 재생
 command-toggle-url-bar = Layout > 레이아웃 > 주소 표시줄 전환
 
 project-rename = 프로젝트 이름 변경
+
+agent-tool-slept = 대기함
