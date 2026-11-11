@@ -1,7 +1,7 @@
 use std::path::{Path, PathBuf};
 
 use bevy::prelude::*;
-use bevy::tasks::{IoTaskPool, Task, futures_lite::future};
+use bevy::tasks::IoTaskPool;
 use bevy_cef::prelude::{Browsers, UiEventPlugin, UiInput};
 use vmux_ecs::event::{
     FileBreadcrumbRequest, FileBreadcrumbState, FileDirEntry, FileDirectoryActivateRequest,
@@ -10,6 +10,7 @@ use vmux_ecs::event::{
     FileDirectoryPreviousRequest, FileDirectorySelectRequest, FileDirectoryState,
     FileDirectoryToggleHiddenRequest, FilePreviewRequest,
 };
+use vmux_ecs::{AsyncTask, TaskPlugin, TaskResult, TaskSet, TaskToken, TaskWaker};
 
 use crate::host::editor::{FileNavigateRequest, FileView};
 use crate::host::file_lifecycle::{EditorFileLoadedSet, FileDir};
@@ -21,25 +22,27 @@ pub(crate) struct DirectoryPlugin;
 
 impl Plugin for DirectoryPlugin {
     fn build(&self, app: &mut App) {
-        app.add_plugins(UiEventPlugin::<(
-            FileDirectorySelectRequest,
-            FileDirectoryNextRequest,
-            FileDirectoryPreviousRequest,
-            FileDirectoryAscendRequest,
-            FileDirectoryDescendRequest,
-            FileDirectoryActivateRequest,
-            FileDirectoryParentRequest,
-            FileDirectoryOpenRequest,
-            FileDirectoryBackRequest,
-            FileDirectoryToggleHiddenRequest,
-            FileBreadcrumbRequest,
-        )>::default())
+        app.add_plugins(TaskPlugin::<FileBreadcrumbState>::default())
+            .add_plugins(UiEventPlugin::<(
+                FileDirectorySelectRequest,
+                FileDirectoryNextRequest,
+                FileDirectoryPreviousRequest,
+                FileDirectoryAscendRequest,
+                FileDirectoryDescendRequest,
+                FileDirectoryActivateRequest,
+                FileDirectoryParentRequest,
+                FileDirectoryOpenRequest,
+                FileDirectoryBackRequest,
+                FileDirectoryToggleHiddenRequest,
+                FileBreadcrumbRequest,
+            )>::default())
             .add_systems(
                 Update,
                 (
                     initialize.after(EditorFileLoadedSet),
                     publish.after(initialize),
-                    finish_breadcrumb,
+                    cancel_breadcrumbs.before(TaskSet::of::<FileBreadcrumbState>()),
+                    finish_breadcrumb.after(TaskSet::of::<FileBreadcrumbState>()),
                 ),
             )
             .add_observer(select)
@@ -127,7 +130,7 @@ struct FileBackDirectory {
 struct DirectorySelectionTarget(String);
 
 #[derive(Component)]
-struct BreadcrumbTask(Task<FileBreadcrumbState>);
+struct BreadcrumbPath(String);
 
 type ReadyDirectory = (
     Without<FileInitialMetaSent>,
@@ -217,6 +220,7 @@ fn publish(directories: DirectoryProjection, browsers: NonSend<Browsers>, mut co
 fn breadcrumb(
     trigger: On<UiInput<FileBreadcrumbRequest>>,
     views: Query<&FileView>,
+    proxy: Option<Res<bevy::winit::EventLoopProxyWrapper>>,
     mut commands: Commands,
 ) {
     let entity = trigger.event().webview;
@@ -236,6 +240,7 @@ fn breadcrumb(
             pending: true,
         },
     ));
+    let request_path = path_text.clone();
     let task = IoTaskPool::get().spawn(async move {
         FileBreadcrumbState {
             path: path_text,
@@ -243,21 +248,65 @@ fn breadcrumb(
             pending: false,
         }
     });
-    commands.entity(entity).insert(BreadcrumbTask(task));
+    commands.entity(entity).insert((
+        AsyncTask::new(task),
+        TaskWaker::new(vmux_ecs::wake::Wake::waker(proxy.as_deref())),
+        BreadcrumbPath(request_path),
+    ));
+}
+
+fn cancel_breadcrumbs(tasks: Query<(&FileView, &BreadcrumbPath, &TaskToken)>) {
+    for (view, requested, token) in &tasks {
+        if !view.path.starts_with(&requested.0) {
+            token.cancel();
+        }
+    }
 }
 
 fn finish_breadcrumb(
-    mut tasks: Query<(Entity, &mut BreadcrumbTask)>,
-    browsers: NonSend<Browsers>,
+    mut tasks: Query<(
+        Entity,
+        &mut TaskResult<FileBreadcrumbState>,
+        &BreadcrumbPath,
+    )>,
     mut commands: Commands,
 ) {
-    for (entity, mut task) in &mut tasks {
-        let Some(state) = future::block_on(future::poll_once(&mut task.0)) else {
+    for (entity, mut completion, requested) in &mut tasks {
+        let Some(result) = completion.take() else {
             continue;
         };
-        commands.entity(entity).remove::<BreadcrumbTask>();
-        if browsers.can_emit_to(&entity) {
-            commands.trigger(vmux_ecs::FileUiStateWrite::from_event(entity, &state));
+        let state = match result {
+            Ok(state) => state,
+            Err(_) => FileBreadcrumbState {
+                path: requested.0.clone(),
+                entries: Vec::new(),
+                pending: false,
+            },
+        };
+        commands.queue(completion.guard(entity, BreadcrumbReady { entity, state }));
+    }
+}
+
+struct BreadcrumbReady {
+    entity: Entity,
+    state: FileBreadcrumbState,
+}
+
+impl Command for BreadcrumbReady {
+    type Out = ();
+
+    fn apply(self, world: &mut World) {
+        let Some(view) = world.get::<FileView>(self.entity) else {
+            return;
+        };
+        if !view.path.starts_with(&self.state.path) {
+            return;
+        }
+        if world.non_send::<Browsers>().can_emit_to(&self.entity) {
+            world.trigger(vmux_ecs::FileUiStateWrite::from_event(
+                self.entity,
+                &self.state,
+            ));
         }
     }
 }
@@ -548,6 +597,153 @@ impl FileDir {
 mod tests {
     use super::*;
     use std::fs;
+
+    struct BreadcrumbFixture {
+        app: App,
+        entity: Entity,
+        root: tempfile::TempDir,
+    }
+
+    impl BreadcrumbFixture {
+        fn new() -> Self {
+            let root = tempfile::tempdir().unwrap();
+            fs::create_dir(root.path().join("child")).unwrap();
+            fs::write(root.path().join("child/file.rs"), "").unwrap();
+            let mut app = App::new();
+            app.add_plugins((
+                MinimalPlugins,
+                DirectoryPlugin,
+                vmux_ecs::UiStatePlugin::<vmux_ecs::event::FileUiState>::default(),
+            ))
+            .insert_non_send(Browsers::default())
+            .add_observer(deliver);
+            let entity = app
+                .world_mut()
+                .spawn((
+                    vmux_ecs::PageMetadata {
+                        url: "file:///fixture/child/file.rs".into(),
+                        ..Default::default()
+                    },
+                    FileView {
+                        path: root.path().join("child/file.rs"),
+                    },
+                    bevy_cef::prelude::BinIpcSurfaceGeneration(1),
+                    bevy_cef::prelude::BinIpcNavigationRevision(1),
+                    bevy_cef::prelude::BinIpcEpoch(1),
+                ))
+                .id();
+            app.world_mut()
+                .non_send_mut::<Browsers>()
+                .set_externally_hosted(entity);
+            app.world_mut().spawn(vmux_api::UiEventPermissions {
+                url: "file://",
+                owns_subtree: true,
+                permissions: &["FileUiState"],
+            });
+            Self { app, entity, root }
+        }
+
+        fn request(&mut self, path: &Path) -> TaskToken {
+            self.app.world_mut().trigger(UiInput {
+                webview: self.entity,
+                payload: FileBreadcrumbRequest {
+                    path: path.to_string_lossy().into_owned(),
+                },
+            });
+            self.app.world_mut().flush();
+            self.app
+                .world()
+                .get::<TaskToken>(self.entity)
+                .unwrap()
+                .clone()
+        }
+
+        fn wait(&mut self, path: &Path) -> FileBreadcrumbState {
+            let deadline = std::time::Instant::now() + std::time::Duration::from_secs(3);
+            loop {
+                self.app.update();
+                if let Some(state) = self
+                    .app
+                    .world()
+                    .get::<vmux_ecs::UiState<vmux_ecs::event::FileUiState>>(self.entity)
+                    .and_then(vmux_ecs::UiState::current)
+                {
+                    let state = &state.document.breadcrumb;
+                    if state.path == path.to_string_lossy() && !state.pending {
+                        return state.clone();
+                    }
+                }
+                assert!(std::time::Instant::now() < deadline);
+                std::thread::sleep(std::time::Duration::from_millis(1));
+            }
+        }
+    }
+
+    fn deliver(event: On<bevy_cef::prelude::BinHostEmitEvent>) {
+        event.mark_delivered();
+    }
+
+    #[test]
+    fn successive_breadcrumb_requests_publish_only_the_latest_directory() {
+        let mut fixture = BreadcrumbFixture::new();
+        let first = fixture.root.path().to_path_buf();
+        let latest = first.join("child");
+        let previous = fixture.request(&first);
+        fixture.request(&latest);
+        let state = fixture.wait(&latest);
+        assert!(previous.is_canceled());
+        let names = state
+            .entries
+            .iter()
+            .map(|entry| entry.name.as_str())
+            .collect::<Vec<_>>();
+        assert_eq!(names, ["file.rs"]);
+        assert!(
+            fixture
+                .app
+                .world()
+                .get::<AsyncTask<FileBreadcrumbState>>(fixture.entity)
+                .is_none()
+        );
+    }
+
+    #[test]
+    fn leaving_the_document_scope_cancels_its_breadcrumb_read() {
+        let mut fixture = BreadcrumbFixture::new();
+        let path = fixture.root.path().to_path_buf();
+        let token = fixture.request(&path);
+        fixture
+            .app
+            .world_mut()
+            .get_mut::<FileView>(fixture.entity)
+            .unwrap()
+            .path = PathBuf::from("/different/file.rs");
+        for _ in 0..3 {
+            fixture.app.update();
+        }
+        assert!(token.is_canceled());
+        assert!(
+            fixture
+                .app
+                .world()
+                .get::<AsyncTask<FileBreadcrumbState>>(fixture.entity)
+                .is_none()
+        );
+        assert!(
+            fixture
+                .app
+                .world()
+                .get::<TaskResult<FileBreadcrumbState>>(fixture.entity)
+                .is_none()
+        );
+        let state = fixture
+            .app
+            .world()
+            .get::<vmux_ecs::UiState<vmux_ecs::event::FileUiState>>(fixture.entity)
+            .and_then(vmux_ecs::UiState::current)
+            .unwrap();
+        assert!(state.document.breadcrumb.entries.is_empty());
+    }
 
     fn entry(name: &str, is_dir: bool) -> FileDirEntry {
         FileDirEntry {

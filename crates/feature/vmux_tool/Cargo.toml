@@ -7,6 +7,7 @@ edition.workspace = true
 publish = false
 
 [dependencies]
+async-lock = "3"
 bevy_app = { workspace = true }
 bevy_ecs = { workspace = true }
 bevy_tasks = { workspace = true }

@@ -6,7 +6,6 @@ use crate::state::{
 };
 use bevy_app::{App, Plugin, Update};
 use bevy_ecs::prelude::*;
-use bevy_tasks::{Task, futures_lite::future};
 #[cfg(host)]
 pub use cli::ToolCliPlugin;
 #[cfg(not(target_os = "ios"))]
@@ -21,7 +20,10 @@ pub use provider::*;
 pub use query::*;
 pub use registry::*;
 use vmux_ecs::manifest::FeaturePlugin;
-use vmux_ecs::{Operation, OperationCompleted, OperationPlugin, OperationState, OperationTarget};
+use vmux_ecs::{
+    AsyncTask, Operation, OperationCompleted, OperationPlugin, OperationState, OperationTarget,
+    TaskPlugin, TaskResult, TaskSet, TaskToken,
+};
 pub use vmux_macro::input;
 
 #[doc(hidden)]
@@ -112,58 +114,103 @@ impl Plugin for ToolRuntimePlugin {
         if !app.is_plugin_added::<ToolRegistryPlugin>() {
             app.add_plugins(ToolRegistryPlugin);
         }
-        app.add_observer(accept::<ToolInstallRequest>)
-            .add_observer(accept::<ToolUpdateRequest>)
-            .add_observer(accept::<ToolUninstallRequest>)
-            .add_observer(accept::<ToolForgetRequest>)
-            .add_observer(accept::<ToolAdoptRequest>)
-            .add_observer(accept::<ToolLinkRequest>)
-            .add_observer(accept::<ToolUnlinkRequest>)
-            .add_observer(accept::<ToolApplyRequest>)
-            .add_observer(accept::<ToolImportRequest>)
-            .add_observer(completed)
-            .add_message::<ToolInventoryChanged>()
-            .configure_sets(
-                Update,
-                (ToolOperationRouteSet, ToolOperationRouteFlush).chain(),
+        app.add_plugins((
+            TaskPlugin::<Result<mcp::ForgottenMcpServer, String>>::default(),
+            TaskPlugin::<Result<dotfiles::DiscoveredDotfilePackages, String>>::default(),
+            TaskPlugin::<Result<dotfiles::DotfilePlan, String>>::default(),
+            TaskPlugin::<Result<dotfiles::ImportedDotfiles, String>>::default(),
+            TaskPlugin::<Result<dotfiles::ImportedAvailableDotfiles, String>>::default(),
+            TaskPlugin::<Result<dotfiles::LinkedDotfilePackage, String>>::default(),
+            TaskPlugin::<Result<dotfiles::DisabledDotfilePackage, String>>::default(),
+            TaskPlugin::<Result<dotfiles::UnlinkedDotfilePackage, String>>::default(),
+            TaskPlugin::<Result<dotfiles::AppliedEnabledDotfiles, String>>::default(),
+            TaskPlugin::<Result<dotfiles::AdoptedDotfile, String>>::default(),
+            TaskPlugin::<Result<homebrew::ImportedBrewfile, String>>::default(),
+            TaskPlugin::<Result<npm::ImportedNpmManifest, String>>::default(),
+        ))
+        .configure_sets(
+            Update,
+            (
+                ToolTaskSet::Cancel,
+                ToolTaskSet::Start,
+                ToolTaskSet::Wake,
+                ToolTaskSet::Collect,
+                ToolTaskSet::Apply,
             )
-            .add_systems(
-                Update,
-                bevy_ecs::schedule::ApplyDeferred.in_set(ToolOperationRouteFlush),
+                .chain()
+                .after(ToolOperationRouteFlush),
+        )
+        .add_systems(Update, cancel.in_set(ToolTaskSet::Cancel))
+        .configure_sets(
+            Update,
+            (
+                TaskSet::of::<Result<mcp::ForgottenMcpServer, String>>(),
+                TaskSet::of::<Result<dotfiles::DiscoveredDotfilePackages, String>>(),
+                TaskSet::of::<Result<dotfiles::DotfilePlan, String>>(),
+                TaskSet::of::<Result<dotfiles::ImportedDotfiles, String>>(),
+                TaskSet::of::<Result<dotfiles::ImportedAvailableDotfiles, String>>(),
+                TaskSet::of::<Result<dotfiles::LinkedDotfilePackage, String>>(),
+                TaskSet::of::<Result<dotfiles::DisabledDotfilePackage, String>>(),
+                TaskSet::of::<Result<dotfiles::UnlinkedDotfilePackage, String>>(),
+                TaskSet::of::<Result<dotfiles::AppliedEnabledDotfiles, String>>(),
+                TaskSet::of::<Result<dotfiles::AdoptedDotfile, String>>(),
+                TaskSet::of::<Result<homebrew::ImportedBrewfile, String>>(),
+                TaskSet::of::<Result<npm::ImportedNpmManifest, String>>(),
             )
-            .add_systems(
-                Update,
-                (
-                    route_external_operation::<ToolInstallRequest>,
-                    route_external_operation::<ToolUpdateRequest>,
-                    route_external_operation::<ToolUninstallRequest>,
-                    route_external_operation::<ToolForgetRequest>,
-                    route_external_operation::<ToolAdoptRequest>,
-                    route_external_operation::<ToolLinkRequest>,
-                    route_external_operation::<ToolUnlinkRequest>,
-                    route_external_operation::<ToolApplyRequest>,
-                    route_external_operation::<ToolImportRequest>,
-                )
-                    .after(ToolOperationRouteFlush),
+                .in_set(ToolTaskSet::Collect),
+        )
+        .add_observer(accept::<ToolInstallRequest>)
+        .add_observer(accept::<ToolUpdateRequest>)
+        .add_observer(accept::<ToolUninstallRequest>)
+        .add_observer(accept::<ToolForgetRequest>)
+        .add_observer(accept::<ToolAdoptRequest>)
+        .add_observer(accept::<ToolLinkRequest>)
+        .add_observer(accept::<ToolUnlinkRequest>)
+        .add_observer(accept::<ToolApplyRequest>)
+        .add_observer(accept::<ToolImportRequest>)
+        .add_observer(completed)
+        .add_message::<ToolInventoryChanged>()
+        .configure_sets(
+            Update,
+            (ToolOperationRouteSet, ToolOperationRouteFlush).chain(),
+        )
+        .add_systems(
+            Update,
+            bevy_ecs::schedule::ApplyDeferred.in_set(ToolOperationRouteFlush),
+        )
+        .add_systems(
+            Update,
+            (
+                route_external_operation::<ToolInstallRequest>,
+                route_external_operation::<ToolUpdateRequest>,
+                route_external_operation::<ToolUninstallRequest>,
+                route_external_operation::<ToolForgetRequest>,
+                route_external_operation::<ToolAdoptRequest>,
+                route_external_operation::<ToolLinkRequest>,
+                route_external_operation::<ToolUnlinkRequest>,
+                route_external_operation::<ToolApplyRequest>,
+                route_external_operation::<ToolImportRequest>,
             )
-            .add_systems(
-                Update,
-                (
-                    finish_operation::<mcp::ForgottenMcpServer>,
-                    finish_operation::<dotfiles::DiscoveredDotfilePackages>,
-                    finish_operation::<dotfiles::DotfilePlan>,
-                    finish_operation::<dotfiles::ImportedDotfiles>,
-                    finish_operation::<dotfiles::ImportedAvailableDotfiles>,
-                    finish_operation::<dotfiles::LinkedDotfilePackage>,
-                    finish_operation::<dotfiles::DisabledDotfilePackage>,
-                    finish_operation::<dotfiles::UnlinkedDotfilePackage>,
-                    finish_operation::<dotfiles::AppliedEnabledDotfiles>,
-                    finish_operation::<dotfiles::AdoptedDotfile>,
-                    finish_operation::<homebrew::ImportedBrewfile>,
-                    finish_operation::<npm::ImportedNpmManifest>,
-                )
-                    .after(ToolOperationRouteFlush),
-            );
+                .after(ToolOperationRouteFlush),
+        )
+        .add_systems(
+            Update,
+            (
+                finish_operation::<mcp::ForgottenMcpServer>,
+                finish_operation::<dotfiles::DiscoveredDotfilePackages>,
+                finish_operation::<dotfiles::DotfilePlan>,
+                finish_operation::<dotfiles::ImportedDotfiles>,
+                finish_operation::<dotfiles::ImportedAvailableDotfiles>,
+                finish_operation::<dotfiles::LinkedDotfilePackage>,
+                finish_operation::<dotfiles::DisabledDotfilePackage>,
+                finish_operation::<dotfiles::UnlinkedDotfilePackage>,
+                finish_operation::<dotfiles::AppliedEnabledDotfiles>,
+                finish_operation::<dotfiles::AdoptedDotfile>,
+                finish_operation::<homebrew::ImportedBrewfile>,
+                finish_operation::<npm::ImportedNpmManifest>,
+            )
+                .in_set(ToolTaskSet::Apply),
+        );
     }
 }
 
@@ -197,20 +244,78 @@ pub type ToolProviderTarget = vmux_ecs::EntityTarget<ToolProviderId>;
 #[derive(Component, Clone, Debug, PartialEq, Eq)]
 pub struct ToolOperationFailed(pub String);
 
-#[derive(Component)]
-pub(crate) struct ToolOperationTask<T: Component>(Task<Result<T, String>>);
+pub(crate) type ToolOperationTask<T> = AsyncTask<Result<T, String>>;
+
+#[derive(SystemSet, Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub(crate) enum ToolTaskSet {
+    Start,
+    Cancel,
+    Wake,
+    Collect,
+    Apply,
+}
+
+fn cancel(
+    mut operations: Query<
+        (
+            Entity,
+            &mut OperationState,
+            Option<&TaskToken>,
+            Option<&ToolStoreTarget>,
+        ),
+        With<Operation>,
+    >,
+    stores: Query<(), With<ToolStore>>,
+    mut commands: Commands,
+) {
+    for (entity, mut state, token, target) in &mut operations {
+        let active = matches!(*state, OperationState::Pending | OperationState::Running);
+        if active
+            && (token.is_some_and(TaskToken::is_canceled)
+                || target.is_some_and(|target| !stores.contains(target.entity())))
+        {
+            *state = OperationState::Canceled;
+        }
+        if *state == OperationState::Canceled {
+            if let Some(token) = token {
+                token.cancel();
+            }
+            commands
+                .entity(entity)
+                .insert(ToolOperationFinished)
+                .remove::<(
+                    ToolStoreTarget,
+                    ToolProviderTarget,
+                    ExternalToolOperation,
+                    ToolOperationSucceeded,
+                    ToolOperationFailed,
+                )>();
+        } else if *state == OperationState::Pending && token.is_some_and(TaskToken::is_active) {
+            *state = OperationState::Running;
+        }
+    }
+}
 
 fn accept<R: Clone + Send + Sync + 'static>(
     trigger: On<Add, ToolOperationRequest<R>>,
-    requests: Query<(&ToolOperationRequest<R>, Option<&ToolStoreTarget>)>,
+    requests: Query<(
+        &ToolOperationRequest<R>,
+        Option<&ToolStoreTarget>,
+        Option<&OperationState>,
+    )>,
     mut commands: Commands,
 ) where
     state::ToolOperationKey: From<R>,
 {
     let entity = trigger.event_target();
-    let Ok((request, target)) = requests.get(entity) else {
+    let Ok((request, target, state)) = requests.get(entity) else {
         return;
     };
+    if state
+        .is_some_and(|state| !matches!(state, OperationState::Pending | OperationState::Running))
+    {
+        return;
+    }
     let operation = state::ToolOperationKey::from(request.0.clone());
     let mut entity = commands.entity(entity);
     entity.insert(Operation::bundle(operation.kind.operation_kind()).unwrap());
@@ -221,13 +326,22 @@ fn accept<R: Clone + Send + Sync + 'static>(
 
 fn completed(
     trigger: On<Add, ToolOperationFinished>,
-    outcomes: Query<Option<&ToolOperationFailed>>,
+    outcomes: Query<(Option<&ToolOperationFailed>, Option<&OperationState>)>,
     mut commands: Commands,
 ) {
     let entity = trigger.event_target();
-    let Ok(failure) = outcomes.get(entity) else {
+    let Ok((failure, state)) = outcomes.get(entity) else {
         return;
     };
+    commands
+        .entity(entity)
+        .remove::<(ToolStoreTarget, ToolProviderTarget)>();
+    if state == Some(&OperationState::Canceled) {
+        commands
+            .entity(entity)
+            .remove::<(ToolOperationSucceeded, ToolOperationFailed)>();
+        return;
+    }
     let result = match failure {
         Some(failure) => Err(failure.0.clone()),
         None => Ok(()),
@@ -236,24 +350,54 @@ fn completed(
 }
 
 fn finish_operation<T: Component>(
-    mut operations: Query<(Entity, &mut ToolOperationTask<T>, Option<&OperationState>)>,
+    mut operations: Query<(Entity, &mut TaskResult<Result<T, String>>)>,
     mut commands: Commands,
 ) {
-    for (entity, mut operation, state) in &mut operations {
-        if state == Some(&OperationState::Pending) {
-            commands.entity(entity).insert(OperationState::Running);
-        }
-        let Some(result) = future::block_on(future::poll_once(&mut operation.0)) else {
+    for (entity, mut completion) in &mut operations {
+        let Some(result) = completion.take() else {
             continue;
         };
-        let mut entity = commands.entity(entity);
-        entity.remove::<ToolOperationTask<T>>();
-        match result {
+        let result = match result {
+            Ok(result) => result,
+            Err(error) => Err(error.to_string()),
+        };
+        commands.queue(completion.guard(entity, StoreCompletion { entity, result }));
+    }
+}
+
+struct StoreCompletion<T: Component> {
+    entity: Entity,
+    result: Result<T, String>,
+}
+
+impl<T: Component> Command for StoreCompletion<T> {
+    type Out = ();
+
+    fn apply(self, world: &mut World) {
+        if world
+            .get::<OperationState>(self.entity)
+            .is_some_and(|state| {
+                !matches!(state, OperationState::Pending | OperationState::Running)
+            })
+        {
+            return;
+        }
+        if let Some(target) = world.get::<ToolStoreTarget>(self.entity)
+            && world.get::<ToolStore>(target.entity()).is_none()
+        {
+            world
+                .entity_mut(self.entity)
+                .insert(OperationState::Canceled);
+            return;
+        }
+        match self.result {
             Ok(output) => {
-                entity.insert(output);
+                world.entity_mut(self.entity).insert(output);
             }
             Err(error) => {
-                entity.insert((ToolOperationFinished, ToolOperationFailed(error)));
+                world
+                    .entity_mut(self.entity)
+                    .insert((ToolOperationFinished, ToolOperationFailed(error)));
             }
         }
     }
@@ -261,7 +405,7 @@ fn finish_operation<T: Component>(
 
 fn route_external_operation<R: Clone + Send + Sync + 'static>(
     requests: Query<
-        Entity,
+        (Entity, Option<&OperationState>),
         (
             Added<ToolStoreTarget>,
             With<ToolOperationRequest<R>>,
@@ -270,7 +414,12 @@ fn route_external_operation<R: Clone + Send + Sync + 'static>(
     >,
     mut commands: Commands,
 ) {
-    for entity in &requests {
+    for (entity, state) in &requests {
+        if state.is_some_and(|state| {
+            !matches!(state, OperationState::Pending | OperationState::Running)
+        }) {
+            continue;
+        }
         commands.entity(entity).insert(ExternalToolOperation);
     }
 }
@@ -278,6 +427,299 @@ fn route_external_operation<R: Clone + Send + Sync + 'static>(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    struct TaskFixture {
+        app: App,
+        pool: bevy_tasks::TaskPool,
+        store: Entity,
+        _directory: tempfile::TempDir,
+    }
+
+    impl TaskFixture {
+        fn new() -> Self {
+            let directory = tempfile::tempdir().unwrap();
+            let mut app = App::new();
+            app.add_plugins((
+                bevy_app::TaskPoolPlugin::default(),
+                ToolRuntimePlugin,
+                npm::NpmToolPlugin,
+            ));
+            app.update();
+            let store = app
+                .world_mut()
+                .spawn(ToolStore::new(directory.path(), directory.path()))
+                .id();
+            Self {
+                app,
+                pool: bevy_tasks::TaskPoolBuilder::new().num_threads(1).build(),
+                store,
+                _directory: directory,
+            }
+        }
+
+        fn failing(&mut self) -> Entity {
+            let task = self
+                .pool
+                .spawn(async { Err::<ImportedNpmManifest, _>("late failure".to_string()) });
+            let entity = self
+                .app
+                .world_mut()
+                .spawn((
+                    ToolOperationRequest(ToolImportRequest {
+                        provider: ToolProvider::new("npm"),
+                        value: String::new(),
+                    }),
+                    ToolStoreTarget::new(self.store),
+                    ToolOperationTask::new(task),
+                ))
+                .id();
+            self.app.world_mut().flush();
+            entity
+        }
+
+        fn settle(&mut self) {
+            for _ in 0..4 {
+                self.app.update();
+            }
+        }
+
+        fn import(&mut self, path: &std::path::Path, canceled: bool) -> Entity {
+            let provider = self
+                .app
+                .world_mut()
+                .query::<(Entity, &ToolProviderBinding)>()
+                .iter(self.app.world())
+                .find_map(|(entity, binding)| (binding.index() == 2).then_some(entity))
+                .unwrap();
+            let mut operation = self.app.world_mut().spawn((
+                ToolOperationRequest(ToolImportRequest {
+                    provider: ToolProvider::new("npm"),
+                    value: path.to_string_lossy().into_owned(),
+                }),
+                ToolStoreTarget::new(self.store),
+                ToolProviderTarget::new(provider),
+            ));
+            if canceled {
+                operation.insert(OperationState::Canceled);
+            }
+            let entity = operation.id();
+            self.app.world_mut().flush();
+            entity
+        }
+
+        fn writing(
+            &mut self,
+        ) -> (
+            Entity,
+            std::sync::mpsc::SyncSender<()>,
+            std::sync::mpsc::Receiver<()>,
+        ) {
+            let store = self
+                .app
+                .world()
+                .get::<ToolStore>(self.store)
+                .unwrap()
+                .clone();
+            let lease = store.lease().unwrap();
+            let (started_tx, started_rx) = std::sync::mpsc::sync_channel(1);
+            let (release_tx, release_rx) = std::sync::mpsc::sync_channel(1);
+            let task = self.pool.spawn(async move {
+                let _lease = lease;
+                started_tx.send(()).map_err(|error| error.to_string())?;
+                release_rx.recv().map_err(|error| error.to_string())?;
+                let mut manifest = store.load()?;
+                manifest.set_package("npm", "first", true);
+                store.save(&manifest)?;
+                Err::<ImportedNpmManifest, _>("canceled writer finished".to_string())
+            });
+            let entity = self
+                .app
+                .world_mut()
+                .spawn((
+                    ToolOperationRequest(ToolImportRequest {
+                        provider: ToolProvider::new("npm"),
+                        value: String::new(),
+                    }),
+                    ToolStoreTarget::new(self.store),
+                    ToolOperationTask::new(task),
+                ))
+                .id();
+            self.app.world_mut().flush();
+            (entity, release_tx, started_rx)
+        }
+
+        fn finish(&mut self, entity: Entity) {
+            let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+            loop {
+                self.app.update();
+                if self
+                    .app
+                    .world()
+                    .get::<ToolOperationSucceeded>(entity)
+                    .is_some()
+                {
+                    return;
+                }
+                assert!(std::time::Instant::now() < deadline);
+                std::thread::sleep(std::time::Duration::from_millis(1));
+            }
+        }
+    }
+
+    #[test]
+    fn canceled_requests_never_start_adapter_writes() {
+        let mut fixture = TaskFixture::new();
+        let path = fixture._directory.path().join("package.json");
+        std::fs::write(&path, r#"{"dependencies":{"typescript":"^5"}}"#).unwrap();
+        let entity = fixture.import(&path, true);
+        fixture.settle();
+        let store = fixture.app.world().get::<ToolStore>(fixture.store).unwrap();
+        assert!(!store.manifest_path().exists());
+        assert!(!store.is_busy());
+        assert_eq!(
+            fixture.app.world().get::<OperationState>(entity),
+            Some(&OperationState::Canceled)
+        );
+    }
+
+    #[test]
+    fn canceled_blocking_writers_keep_the_store_lease_until_they_finish() {
+        let mut fixture = TaskFixture::new();
+        let path = fixture._directory.path().join("package.json");
+        std::fs::write(&path, r#"{"dependencies":{"second":"^1"}}"#).unwrap();
+        let (first, release, started) = fixture.writing();
+        started
+            .recv_timeout(std::time::Duration::from_secs(2))
+            .unwrap();
+        fixture
+            .app
+            .world_mut()
+            .entity_mut(first)
+            .insert(OperationState::Canceled);
+        fixture.settle();
+        let fresh_store = ToolStore::new(fixture._directory.path(), fixture._directory.path());
+        fixture.store = fixture.app.world_mut().spawn(fresh_store).id();
+        let second = fixture.import(&path, false);
+        fixture.settle();
+        assert!(
+            fixture
+                .app
+                .world()
+                .get::<ToolOperationTask<ImportedNpmManifest>>(second)
+                .is_none()
+        );
+        let store = fixture.app.world().get::<ToolStore>(fixture.store).unwrap();
+        assert!(store.is_busy());
+        assert!(!store.manifest_path().exists());
+        release.send(()).unwrap();
+        fixture.finish(second);
+        let store = fixture.app.world().get::<ToolStore>(fixture.store).unwrap();
+        assert_eq!(store.load().unwrap().packages["npm"], ["first", "second"]);
+        assert!(!store.is_busy());
+        assert_eq!(
+            fixture.app.world().get::<OperationState>(first),
+            Some(&OperationState::Canceled)
+        );
+        assert!(
+            fixture
+                .app
+                .world()
+                .get::<ToolOperationFailed>(first)
+                .is_none()
+        );
+    }
+
+    #[test]
+    fn helper_imports_complete_without_operation_state() {
+        let mut fixture = TaskFixture::new();
+        let path = fixture._directory.path().join("package.json");
+        std::fs::write(&path, r#"{"dependencies":{"typescript":"^5"}}"#).unwrap();
+        let entity = fixture
+            .app
+            .world_mut()
+            .spawn((
+                npm::ImportNpmManifest::new(path),
+                ToolStoreOperation,
+                ToolStoreTarget::new(fixture.store),
+            ))
+            .id();
+        fixture.finish(entity);
+        let store = fixture.app.world().get::<ToolStore>(fixture.store).unwrap();
+        assert_eq!(store.load().unwrap().packages["npm"], ["typescript"]);
+        assert!(fixture.app.world().get::<OperationState>(entity).is_none());
+    }
+
+    #[test]
+    fn canceled_tool_work_cannot_publish_a_late_failure_or_hold_the_store_slot() {
+        let mut fixture = TaskFixture::new();
+        let entity = fixture.failing();
+        fixture
+            .app
+            .world_mut()
+            .entity_mut(entity)
+            .insert(OperationState::Canceled);
+        fixture.settle();
+        assert_eq!(
+            fixture.app.world().get::<OperationState>(entity),
+            Some(&OperationState::Canceled)
+        );
+        assert!(
+            fixture
+                .app
+                .world()
+                .get::<ToolOperationFailed>(entity)
+                .is_none()
+        );
+        assert!(
+            fixture
+                .app
+                .world()
+                .get::<ToolOperationSucceeded>(entity)
+                .is_none()
+        );
+        assert!(fixture.app.world().get::<ToolStoreTarget>(entity).is_none());
+        assert!(
+            fixture
+                .app
+                .world()
+                .get::<ToolOperationTask<ImportedNpmManifest>>(entity)
+                .is_none()
+        );
+        assert!(
+            fixture
+                .app
+                .world()
+                .get::<TaskResult<Result<ImportedNpmManifest, String>>>(entity)
+                .is_none()
+        );
+    }
+
+    #[test]
+    fn losing_the_target_store_cancels_work_before_its_result_is_adopted() {
+        let mut fixture = TaskFixture::new();
+        let entity = fixture.failing();
+        fixture.app.world_mut().entity_mut(fixture.store).despawn();
+        fixture.settle();
+        assert_eq!(
+            fixture.app.world().get::<OperationState>(entity),
+            Some(&OperationState::Canceled)
+        );
+        assert!(
+            fixture
+                .app
+                .world()
+                .get::<ToolOperationFailed>(entity)
+                .is_none()
+        );
+        assert!(fixture.app.world().get::<ToolStoreTarget>(entity).is_none());
+        assert!(
+            fixture
+                .app
+                .world()
+                .get::<ToolOperationTask<ImportedNpmManifest>>(entity)
+                .is_none()
+        );
+    }
 
     #[test]
     fn manifest_roundtrip_normalizes_packages() {
@@ -441,7 +883,8 @@ brew "ripgrep"
             ))
             .id();
 
-        for _ in 0..100 {
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+        while std::time::Instant::now() < deadline {
             app.update();
             if app
                 .world()
@@ -453,7 +896,10 @@ brew "ripgrep"
             std::thread::sleep(std::time::Duration::from_millis(1));
         }
 
-        let output = app.world().get::<ImportedNpmManifest>(operation).unwrap();
+        let output = app
+            .world()
+            .get::<ImportedNpmManifest>(operation)
+            .expect("NPM import did not complete before the deadline");
         assert_eq!(output.packages(), 1);
         assert_eq!(
             app.world().get::<ToolOperationSucceeded>(operation),

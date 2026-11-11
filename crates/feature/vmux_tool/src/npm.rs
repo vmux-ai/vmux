@@ -8,13 +8,15 @@ use bevy_app::{App, Plugin, Startup, Update};
 use bevy_ecs::prelude::*;
 use bevy_tasks::IoTaskPool;
 
+use vmux_ecs::OperationState;
+
 use crate::manifest::{ToolStore, ToolsManifest};
 use crate::process::ToolProcess;
 use crate::{
     ToolInventory, ToolInventoryItem, ToolOperationFailed, ToolOperationFinished,
-    ToolOperationRequest, ToolOperationRouteFlush, ToolOperationRouteSet, ToolOperationSucceeded,
-    ToolOperationTask, ToolOperator, ToolProviderBinding, ToolProviderSnapshot, ToolProviderTarget,
-    ToolScanner, ToolStoreOperation, ToolStoreTarget,
+    ToolOperationRequest, ToolOperationRouteSet, ToolOperationSucceeded, ToolOperationTask,
+    ToolOperator, ToolProviderBinding, ToolProviderSnapshot, ToolProviderTarget, ToolScanner,
+    ToolStoreOperation, ToolStoreTarget, ToolTaskSet,
 };
 
 pub(crate) struct NpmToolPlugin;
@@ -23,8 +25,8 @@ impl Plugin for NpmToolPlugin {
     fn build(&self, app: &mut App) {
         app.add_systems(Startup, spawn)
             .add_systems(Update, route.in_set(ToolOperationRouteSet))
-            .add_systems(Update, import.after(ToolOperationRouteFlush))
-            .add_systems(Update, finish);
+            .add_systems(Update, import.in_set(ToolTaskSet::Start))
+            .add_systems(Update, finish.after(ToolTaskSet::Apply));
     }
 }
 
@@ -249,12 +251,20 @@ fn import(
             Without<ToolOperationTask<ImportedNpmManifest>>,
             Without<ImportedNpmManifest>,
             Without<ToolOperationFailed>,
+            Without<ToolOperationFinished>,
         ),
     >,
     stores: Query<&ToolStore>,
+    states: Query<&OperationState>,
     mut commands: Commands,
 ) {
     for (entity, operation, target) in &operations {
+        if states
+            .get(entity)
+            .is_ok_and(|state| !matches!(state, OperationState::Pending | OperationState::Running))
+        {
+            continue;
+        }
         let Ok(store) = stores.get(target.entity()).cloned() else {
             commands.entity(entity).insert((
                 ToolOperationFinished,
@@ -262,13 +272,19 @@ fn import(
             ));
             continue;
         };
+        let Some(lease) = store.lease() else {
+            continue;
+        };
         let path = operation.path.clone();
         commands
             .entity(entity)
-            .insert(ToolOperationTask(IoTaskPool::get().spawn(async move {
-                let packages = store.import_npm_manifest(&path)?;
-                Ok(ImportedNpmManifest { packages })
-            })));
+            .insert(ToolOperationTask::new(IoTaskPool::get().spawn(
+                async move {
+                    let _lease = lease;
+                    let packages = store.import_npm_manifest(&path)?;
+                    Ok(ImportedNpmManifest { packages })
+                },
+            )));
     }
 }
 

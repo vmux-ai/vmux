@@ -10545,6 +10545,7 @@ dependencies = [
  "vmux_macro",
  "vmux_path",
  "vmux_profile",
+ "vmux_task",
  "vmux_transport",
  "web-time",
  "zip",
@@ -11180,6 +11181,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "vmux_task"
+version = "0.0.35"
+dependencies = [
+ "bevy_app",
+ "bevy_ecs",
+ "bevy_tasks",
+ "uuid",
+]
+
+[[package]]
 name = "vmux_team"
 version = "0.0.35"
 dependencies = [
@@ -11245,6 +11256,7 @@ dependencies = [
 name = "vmux_tool"
 version = "0.0.35"
 dependencies = [
+ "async-lock",
  "bevy",
  "bevy_app",
  "bevy_cef",

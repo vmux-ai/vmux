@@ -13,12 +13,14 @@ use bevy_ecs::schedule::IntoScheduleConfigs;
 use bevy_tasks::IoTaskPool;
 use serde::{Deserialize, Serialize};
 
+use vmux_ecs::OperationState;
+
 use crate::manifest::{ToolStore, ToolsManifest};
 use crate::{
     ToolApplier, ToolOperationFailed, ToolOperationFinished, ToolOperationRequest,
-    ToolOperationRouteFlush, ToolOperationRouteSet, ToolOperationSucceeded, ToolOperationTask,
-    ToolProviderBinding, ToolProviderSnapshot, ToolProviderTarget, ToolScanner, ToolStoreOperation,
-    ToolStoreTarget,
+    ToolOperationRouteSet, ToolOperationSucceeded, ToolOperationTask, ToolProviderBinding,
+    ToolProviderSnapshot, ToolProviderTarget, ToolScanner, ToolStoreOperation, ToolStoreTarget,
+    ToolTaskSet,
 };
 
 pub(crate) struct DotfileToolPlugin;
@@ -55,7 +57,7 @@ impl Plugin for DotfileToolPlugin {
                     apply_enabled,
                     adopt,
                 )
-                    .after(ToolOperationRouteFlush),
+                    .in_set(ToolTaskSet::Start),
             )
             .add_systems(
                 Update,
@@ -65,7 +67,8 @@ impl Plugin for DotfileToolPlugin {
                     complete_link,
                     complete_disable,
                     complete_adoption,
-                ),
+                )
+                    .after(ToolTaskSet::Apply),
             );
     }
 }
@@ -432,9 +435,16 @@ fn discover_packages(
         ),
     >,
     stores: Query<&ToolStore>,
+    states: Query<&OperationState>,
     mut commands: Commands,
 ) {
     for (entity, target) in &operations {
+        if states
+            .get(entity)
+            .is_ok_and(|state| !matches!(state, OperationState::Pending | OperationState::Running))
+        {
+            continue;
+        }
         let Ok(store) = stores.get(target.entity()).cloned() else {
             commands.entity(entity).insert((
                 ToolOperationFinished,
@@ -442,14 +452,20 @@ fn discover_packages(
             ));
             continue;
         };
+        let Some(lease) = store.lease() else {
+            continue;
+        };
         commands
             .entity(entity)
-            .insert(ToolOperationTask(IoTaskPool::get().spawn(async move {
-                store.migrate_legacy_storage()?;
-                Ok(DiscoveredDotfilePackages {
-                    packages: store.dotfile_packages()?,
-                })
-            })));
+            .insert(ToolOperationTask::new(IoTaskPool::get().spawn(
+                async move {
+                    let _lease = lease;
+                    store.migrate_legacy_storage()?;
+                    Ok(DiscoveredDotfilePackages {
+                        packages: store.dotfile_packages()?,
+                    })
+                },
+            )));
     }
 }
 
@@ -476,9 +492,16 @@ fn plan_package(
         ),
     >,
     stores: Query<&ToolStore>,
+    states: Query<&OperationState>,
     mut commands: Commands,
 ) {
     for (entity, operation, target) in &operations {
+        if states
+            .get(entity)
+            .is_ok_and(|state| !matches!(state, OperationState::Pending | OperationState::Running))
+        {
+            continue;
+        }
         let Ok(store) = stores.get(target.entity()).cloned() else {
             commands.entity(entity).insert((
                 ToolOperationFinished,
@@ -486,13 +509,19 @@ fn plan_package(
             ));
             continue;
         };
+        let Some(lease) = store.lease() else {
+            continue;
+        };
         let package = operation.package.clone();
         commands
             .entity(entity)
-            .insert(ToolOperationTask(IoTaskPool::get().spawn(async move {
-                store.migrate_legacy_storage()?;
-                store.plan_dotfile_package(&package)
-            })));
+            .insert(ToolOperationTask::new(IoTaskPool::get().spawn(
+                async move {
+                    let _lease = lease;
+                    store.migrate_legacy_storage()?;
+                    store.plan_dotfile_package(&package)
+                },
+            )));
     }
 }
 
@@ -522,9 +551,16 @@ fn import(
         ),
     >,
     stores: Query<&ToolStore>,
+    states: Query<&OperationState>,
     mut commands: Commands,
 ) {
     for (entity, operation, target) in &operations {
+        if states
+            .get(entity)
+            .is_ok_and(|state| !matches!(state, OperationState::Pending | OperationState::Running))
+        {
+            continue;
+        }
         let Ok(store) = stores.get(target.entity()).cloned() else {
             commands.entity(entity).insert((
                 ToolOperationFinished,
@@ -532,15 +568,21 @@ fn import(
             ));
             continue;
         };
+        let Some(lease) = store.lease() else {
+            continue;
+        };
         let path = operation.path.clone();
         commands
             .entity(entity)
-            .insert(ToolOperationTask(IoTaskPool::get().spawn(async move {
-                store.migrate_legacy_storage()?;
-                let path = store.expand_user_path(&path)?;
-                let packages = store.import_dotfiles(&path)?;
-                Ok(ImportedDotfiles { packages })
-            })));
+            .insert(ToolOperationTask::new(IoTaskPool::get().spawn(
+                async move {
+                    let _lease = lease;
+                    store.migrate_legacy_storage()?;
+                    let path = store.expand_user_path(&path)?;
+                    let packages = store.import_dotfiles(&path)?;
+                    Ok(ImportedDotfiles { packages })
+                },
+            )));
     }
 }
 
@@ -563,9 +605,16 @@ fn import_available(
         ),
     >,
     stores: Query<&ToolStore>,
+    states: Query<&OperationState>,
     mut commands: Commands,
 ) {
     for (entity, target) in &operations {
+        if states
+            .get(entity)
+            .is_ok_and(|state| !matches!(state, OperationState::Pending | OperationState::Running))
+        {
+            continue;
+        }
         let Ok(store) = stores.get(target.entity()).cloned() else {
             commands.entity(entity).insert((
                 ToolOperationFinished,
@@ -573,20 +622,26 @@ fn import_available(
             ));
             continue;
         };
+        let Some(lease) = store.lease() else {
+            continue;
+        };
         commands
             .entity(entity)
-            .insert(ToolOperationTask(IoTaskPool::get().spawn(async move {
-                store.migrate_legacy_storage()?;
-                let packages = store.dotfile_packages()?;
-                let mut manifest = store.load()?;
-                let mut imported = 0;
-                for package in packages {
-                    imported += usize::from(!manifest.dotfiles.packages.contains(&package));
-                    manifest.set_dotfile_package(&package, true);
-                }
-                store.save(&manifest)?;
-                Ok(ImportedAvailableDotfiles { packages: imported })
-            })));
+            .insert(ToolOperationTask::new(IoTaskPool::get().spawn(
+                async move {
+                    let _lease = lease;
+                    store.migrate_legacy_storage()?;
+                    let packages = store.dotfile_packages()?;
+                    let mut manifest = store.load()?;
+                    let mut imported = 0;
+                    for package in packages {
+                        imported += usize::from(!manifest.dotfiles.packages.contains(&package));
+                        manifest.set_dotfile_package(&package, true);
+                    }
+                    store.save(&manifest)?;
+                    Ok(ImportedAvailableDotfiles { packages: imported })
+                },
+            )));
     }
 }
 
@@ -618,9 +673,16 @@ fn link_package(
         ),
     >,
     stores: Query<&ToolStore>,
+    states: Query<&OperationState>,
     mut commands: Commands,
 ) {
     for (entity, operation, target) in &operations {
+        if states
+            .get(entity)
+            .is_ok_and(|state| !matches!(state, OperationState::Pending | OperationState::Running))
+        {
+            continue;
+        }
         let Ok(store) = stores.get(target.entity()).cloned() else {
             commands.entity(entity).insert((
                 ToolOperationFinished,
@@ -628,16 +690,22 @@ fn link_package(
             ));
             continue;
         };
+        let Some(lease) = store.lease() else {
+            continue;
+        };
         let package = operation.package.clone();
         commands
             .entity(entity)
-            .insert(ToolOperationTask(IoTaskPool::get().spawn(async move {
-                let mut manifest = store.load()?;
-                manifest.set_dotfile_package(&package, true);
-                store.save(&manifest)?;
-                let files = store.apply_dotfile_package(&package)?;
-                Ok(LinkedDotfilePackage { files })
-            })));
+            .insert(ToolOperationTask::new(IoTaskPool::get().spawn(
+                async move {
+                    let _lease = lease;
+                    let mut manifest = store.load()?;
+                    manifest.set_dotfile_package(&package, true);
+                    store.save(&manifest)?;
+                    let files = store.apply_dotfile_package(&package)?;
+                    Ok(LinkedDotfilePackage { files })
+                },
+            )));
     }
 }
 
@@ -669,9 +737,16 @@ fn disable_package(
         ),
     >,
     stores: Query<&ToolStore>,
+    states: Query<&OperationState>,
     mut commands: Commands,
 ) {
     for (entity, operation, target) in &operations {
+        if states
+            .get(entity)
+            .is_ok_and(|state| !matches!(state, OperationState::Pending | OperationState::Running))
+        {
+            continue;
+        }
         let Ok(store) = stores.get(target.entity()).cloned() else {
             commands.entity(entity).insert((
                 ToolOperationFinished,
@@ -679,14 +754,20 @@ fn disable_package(
             ));
             continue;
         };
+        let Some(lease) = store.lease() else {
+            continue;
+        };
         let package = operation.package.clone();
         commands
             .entity(entity)
-            .insert(ToolOperationTask(IoTaskPool::get().spawn(async move {
-                store.migrate_legacy_storage()?;
-                let files = store.disable_and_unlink_dotfile_package(&package)?;
-                Ok(DisabledDotfilePackage { files })
-            })));
+            .insert(ToolOperationTask::new(IoTaskPool::get().spawn(
+                async move {
+                    let _lease = lease;
+                    store.migrate_legacy_storage()?;
+                    let files = store.disable_and_unlink_dotfile_package(&package)?;
+                    Ok(DisabledDotfilePackage { files })
+                },
+            )));
     }
 }
 
@@ -718,9 +799,16 @@ fn unlink_package(
         ),
     >,
     stores: Query<&ToolStore>,
+    states: Query<&OperationState>,
     mut commands: Commands,
 ) {
     for (entity, operation, target) in &operations {
+        if states
+            .get(entity)
+            .is_ok_and(|state| !matches!(state, OperationState::Pending | OperationState::Running))
+        {
+            continue;
+        }
         let Ok(store) = stores.get(target.entity()).cloned() else {
             commands.entity(entity).insert((
                 ToolOperationFinished,
@@ -728,14 +816,20 @@ fn unlink_package(
             ));
             continue;
         };
+        let Some(lease) = store.lease() else {
+            continue;
+        };
         let package = operation.package.clone();
         commands
             .entity(entity)
-            .insert(ToolOperationTask(IoTaskPool::get().spawn(async move {
-                store.migrate_legacy_storage()?;
-                let files = store.unlink_dotfile_package(&package)?;
-                Ok(UnlinkedDotfilePackage { files })
-            })));
+            .insert(ToolOperationTask::new(IoTaskPool::get().spawn(
+                async move {
+                    let _lease = lease;
+                    store.migrate_legacy_storage()?;
+                    let files = store.unlink_dotfile_package(&package)?;
+                    Ok(UnlinkedDotfilePackage { files })
+                },
+            )));
     }
 }
 
@@ -758,9 +852,16 @@ fn apply_enabled(
         ),
     >,
     stores: Query<&ToolStore>,
+    states: Query<&OperationState>,
     mut commands: Commands,
 ) {
     for (entity, target) in &operations {
+        if states
+            .get(entity)
+            .is_ok_and(|state| !matches!(state, OperationState::Pending | OperationState::Running))
+        {
+            continue;
+        }
         let Ok(store) = stores.get(target.entity()).cloned() else {
             commands.entity(entity).insert((
                 ToolOperationFinished,
@@ -768,13 +869,19 @@ fn apply_enabled(
             ));
             continue;
         };
+        let Some(lease) = store.lease() else {
+            continue;
+        };
         commands
             .entity(entity)
-            .insert(ToolOperationTask(IoTaskPool::get().spawn(async move {
-                let manifest = store.load()?;
-                let files = store.apply_enabled_dotfiles(&manifest)?;
-                Ok(AppliedEnabledDotfiles { files })
-            })));
+            .insert(ToolOperationTask::new(IoTaskPool::get().spawn(
+                async move {
+                    let _lease = lease;
+                    let manifest = store.load()?;
+                    let files = store.apply_enabled_dotfiles(&manifest)?;
+                    Ok(AppliedEnabledDotfiles { files })
+                },
+            )));
     }
 }
 
@@ -808,9 +915,16 @@ fn adopt(
         ),
     >,
     stores: Query<&ToolStore>,
+    states: Query<&OperationState>,
     mut commands: Commands,
 ) {
     for (entity, operation, target) in &operations {
+        if states
+            .get(entity)
+            .is_ok_and(|state| !matches!(state, OperationState::Pending | OperationState::Running))
+        {
+            continue;
+        }
         let Ok(store) = stores.get(target.entity()).cloned() else {
             commands.entity(entity).insert((
                 ToolOperationFinished,
@@ -818,15 +932,21 @@ fn adopt(
             ));
             continue;
         };
+        let Some(lease) = store.lease() else {
+            continue;
+        };
         let path = operation.path.clone();
         let package = operation.package.clone();
         commands
             .entity(entity)
-            .insert(ToolOperationTask(IoTaskPool::get().spawn(async move {
-                store.migrate_legacy_storage()?;
-                let path = store.adopt_dotfile(&path, &package)?;
-                Ok(AdoptedDotfile { path })
-            })));
+            .insert(ToolOperationTask::new(IoTaskPool::get().spawn(
+                async move {
+                    let _lease = lease;
+                    store.migrate_legacy_storage()?;
+                    let path = store.adopt_dotfile(&path, &package)?;
+                    Ok(AdoptedDotfile { path })
+                },
+            )));
     }
 }
 

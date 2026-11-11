@@ -1,7 +1,10 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
+use std::sync::{Arc, Mutex, OnceLock, Weak};
+use std::task::Waker;
 
 use crate::state::ToolProvider;
+use async_lock::{Semaphore, SemaphoreGuardArc};
 use bevy_ecs::prelude::Component;
 use serde::{Deserialize, Serialize};
 
@@ -128,10 +131,63 @@ impl ToolsManifest {
     }
 }
 
-#[derive(Component, Clone, Debug, PartialEq, Eq)]
+#[derive(Component, Clone, Debug)]
 pub struct ToolStore {
     config_dir: PathBuf,
     home: PathBuf,
+    execution: Arc<Execution>,
+}
+
+impl PartialEq for ToolStore {
+    fn eq(&self, other: &Self) -> bool {
+        self.config_dir == other.config_dir && self.home == other.home
+    }
+}
+
+impl Eq for ToolStore {}
+
+pub(crate) struct Lease {
+    execution: Arc<Execution>,
+    guard: Option<SemaphoreGuardArc>,
+}
+
+impl Drop for Lease {
+    fn drop(&mut self) {
+        self.guard.take();
+        let waker = self.execution.waker.lock().unwrap().clone();
+        if let Some(waker) = waker {
+            waker.wake();
+        }
+    }
+}
+
+#[derive(Debug)]
+struct Execution {
+    permit: Arc<Semaphore>,
+    waker: Mutex<Option<Waker>>,
+}
+
+type Executions = Mutex<BTreeMap<PathBuf, Weak<Execution>>>;
+
+static EXECUTIONS: OnceLock<Executions> = OnceLock::new();
+
+impl Execution {
+    fn for_root(root: &Path) -> Arc<Self> {
+        let root = vmux_path::PathIdentity::resolve(root)
+            .as_path()
+            .to_path_buf();
+        let mut executions = EXECUTIONS.get_or_init(Mutex::default).lock().unwrap();
+        executions.retain(|_, execution| execution.strong_count() > 0);
+        if let Some(execution) = executions.get(&root).and_then(Weak::upgrade) {
+            return execution;
+        }
+        let execution = Arc::new(Self {
+            permit: Arc::new(Semaphore::new(1)),
+            waker: Mutex::new(None),
+        });
+        executions.insert(root, Arc::downgrade(&execution));
+        execution
+    }
 }
 
 impl Default for ToolStore {
@@ -149,9 +205,48 @@ impl ToolStore {
     }
 
     pub fn new(config_dir: impl Into<PathBuf>, home: impl Into<PathBuf>) -> Self {
+        let config_dir = config_dir.into();
+        let execution = Execution::for_root(&config_dir.join("tools"));
         Self {
-            config_dir: config_dir.into(),
+            config_dir,
             home: home.into(),
+            execution,
+        }
+    }
+
+    #[cfg(any(all(host, ui), test))]
+    pub(crate) fn is_busy(&self) -> bool {
+        self.execution.permit.try_acquire().is_none()
+    }
+
+    pub(crate) fn lease(&self) -> Option<Lease> {
+        Some(Lease {
+            execution: Arc::clone(&self.execution),
+            guard: Some(self.execution.permit.try_acquire_arc()?),
+        })
+    }
+
+    #[cfg(any(not(target_os = "ios"), test))]
+    pub(crate) async fn lease_async(&self) -> Lease {
+        Lease {
+            execution: Arc::clone(&self.execution),
+            guard: Some(self.execution.permit.acquire_arc().await),
+        }
+    }
+
+    #[cfg(any(all(host, ui), test))]
+    pub(crate) fn bind_waker(&self, waker: Waker) {
+        let mut current = self.execution.waker.lock().unwrap();
+        if current
+            .as_ref()
+            .is_some_and(|current| current.will_wake(&waker))
+        {
+            return;
+        }
+        *current = Some(waker.clone());
+        drop(current);
+        if !self.is_busy() {
+            waker.wake();
         }
     }
 
@@ -260,4 +355,96 @@ impl ToolStore {
 
 fn manifest_version() -> u32 {
     MANIFEST_VERSION
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    struct Notify {
+        execution: Weak<Execution>,
+        sender: std::sync::mpsc::SyncSender<bool>,
+    }
+
+    impl std::task::Wake for Notify {
+        fn wake(self: Arc<Self>) {
+            let available = self
+                .execution
+                .upgrade()
+                .is_some_and(|execution| execution.permit.try_acquire().is_some());
+            let _ = self.sender.try_send(available);
+        }
+    }
+
+    #[test]
+    fn releasing_a_store_lease_notifies_after_the_store_is_available() {
+        let root = tempfile::tempdir().unwrap();
+        let store = ToolStore::new(root.path(), root.path());
+        let other = ToolStore::new(root.path(), root.path());
+        let lease = store.lease().unwrap();
+        let (sender, receiver) = std::sync::mpsc::sync_channel(8);
+        let waker = Waker::from(Arc::new(Notify {
+            execution: Arc::downgrade(&other.execution),
+            sender,
+        }));
+        other.bind_waker(waker.clone());
+        assert!(receiver.try_recv().is_err());
+        drop(lease);
+        assert!(
+            receiver
+                .recv_timeout(std::time::Duration::from_secs(2))
+                .unwrap()
+        );
+        other.bind_waker(waker);
+        assert!(receiver.try_recv().is_err());
+    }
+
+    #[test]
+    fn registering_after_lease_release_does_not_lose_the_available_notification() {
+        let root = tempfile::tempdir().unwrap();
+        let store = ToolStore::new(root.path(), root.path());
+        drop(store.lease().unwrap());
+        let (sender, receiver) = std::sync::mpsc::sync_channel(1);
+        store.bind_waker(Waker::from(Arc::new(Notify {
+            execution: Arc::downgrade(&store.execution),
+            sender,
+        })));
+        assert!(
+            receiver
+                .recv_timeout(std::time::Duration::from_secs(2))
+                .unwrap()
+        );
+    }
+
+    #[test]
+    fn waiting_for_the_same_store_from_a_fresh_instance_does_not_block_the_worker_pool() {
+        let root = tempfile::tempdir().unwrap();
+        let store = ToolStore::new(root.path(), root.path());
+        let other = ToolStore::new(root.path(), root.path());
+        let held = store.lease().unwrap();
+        let pool = bevy_tasks::TaskPoolBuilder::new().num_threads(1).build();
+        let (started_tx, started_rx) = std::sync::mpsc::sync_channel(1);
+        let (ready_tx, ready_rx) = std::sync::mpsc::sync_channel(1);
+        let waiting = pool.spawn(async move {
+            started_tx.send(()).unwrap();
+            let _lease = other.lease_async().await;
+            ready_tx.send(()).unwrap();
+        });
+        started_rx
+            .recv_timeout(std::time::Duration::from_secs(2))
+            .unwrap();
+        let (progress_tx, progress_rx) = std::sync::mpsc::sync_channel(1);
+        let progress = pool.spawn(async move {
+            progress_tx.send(()).unwrap();
+        });
+        progress_rx
+            .recv_timeout(std::time::Duration::from_secs(2))
+            .unwrap();
+        assert!(ready_rx.try_recv().is_err());
+        drop(held);
+        ready_rx
+            .recv_timeout(std::time::Duration::from_secs(2))
+            .unwrap();
+        drop((waiting, progress));
+    }
 }
