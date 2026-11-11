@@ -1757,10 +1757,13 @@ startup/shutdown use the shared loading indicator. Reduced-motion preferences di
 layout and content transitions; layout and selection never wait for them. While Docker
 is unavailable, the whole page offers one Start control or a startup/shutdown indicator;
 the side sheet and details appear when Docker is ready. One root UI-state subscription
-survives these transitions. Details remain unselected until the user chooses an entry.
+survives these transitions. A thin divider separates the side sheet and details.
+Details remain unselected until the user chooses an entry. Service shutdown lives in
+the page toolbar; settings are read-only with one Close control while Docker runs,
+and offer Cancel/Save only when stopped.
 Startup uses persisted defaults and initially shares the home directory. Containers
 created through Docker CLI or Compose appear automatically from the daemon's inventory;
-the UI does not import or register projects. Resource/share settings, service shutdown
+the UI does not import or register projects. Resource/share settings
 and connection diagnostics live in a settings dialog.
 `ContainerUiState` projects engine, inventory, configuration acknowledgements and per-page
 logs. Typed events carry lifecycle, container and selection intent. Async task
