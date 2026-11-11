@@ -121,6 +121,7 @@ pub(crate) struct Request {
     pub(crate) reply: Entity,
     pub(crate) command: Command,
     pub(crate) settings: Settings,
+    pub(crate) requester: Entity,
 }
 
 #[derive(EntityEvent)]
@@ -128,7 +129,12 @@ pub(crate) struct Finished {
     #[event_target]
     pub(crate) entity: Entity,
     pub(crate) result: Result<Reply, String>,
+    pub(crate) mutates: bool,
+    pub(crate) requester: Entity,
 }
+
+#[derive(Component, Default)]
+pub(crate) struct Revision(pub(crate) u64);
 
 pub(crate) enum Reply {
     Started(Status),
@@ -155,6 +161,9 @@ impl Busy {
 struct ReplyTarget(Entity);
 
 #[derive(Component)]
+struct RequestedBy(Entity);
+
+#[derive(Component)]
 struct RequestKind(Command);
 
 #[derive(Component)]
@@ -171,6 +180,8 @@ fn request(
         commands.trigger(Finished {
             entity: request.reply,
             result: Err("An engine operation is already running".into()),
+            mutates: true,
+            requester: request.requester,
         });
         return;
     }
@@ -180,6 +191,8 @@ fn request(
             commands.trigger(Finished {
                 entity: request.reply,
                 result: Err(error.to_string()),
+                mutates: request.command.mutates(),
+                requester: request.requester,
             });
             return;
         }
@@ -190,6 +203,8 @@ fn request(
             commands.trigger(Finished {
                 entity: request.reply,
                 result: Err(error),
+                mutates: request.command.mutates(),
+                requester: request.requester,
             });
             return;
         }
@@ -209,6 +224,7 @@ fn request(
             operation,
             OperationTarget::new(request.entity),
             ReplyTarget(request.reply),
+            RequestedBy(request.requester),
             RequestKind(kind),
             ControlTask(IoTaskPool::get().spawn(async move {
                 let result = work.execute(settings, &helper);
@@ -227,12 +243,13 @@ type RunningOperations<'w, 's> = Query<
         &'static OperationTarget,
         &'static ReplyTarget,
         &'static RequestKind,
+        &'static RequestedBy,
         &'static mut ControlTask,
     ),
 >;
 
 fn poll(mut operations: RunningOperations, mut commands: Commands) {
-    for (entity, target, reply, kind, mut task) in &mut operations {
+    for (entity, target, reply, kind, requester, mut task) in &mut operations {
         let Some(result) = future::block_on(future::poll_once(&mut task.0)) else {
             continue;
         };
@@ -252,6 +269,8 @@ fn poll(mut operations: RunningOperations, mut commands: Commands) {
         commands.trigger(Finished {
             entity: reply.0,
             result,
+            mutates: kind.0.mutates(),
+            requester: requester.0,
         });
     }
 }

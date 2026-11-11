@@ -83,6 +83,7 @@ pub enum LineIcon {
     Minus,
     Notebook,
     Package,
+    Pause,
     Planet,
     Play,
     Pencil,
@@ -246,6 +247,7 @@ impl LineIcon {
                 "M3.3 7 12 12l8.7-5",
                 "M12 22V12",
             ],
+            Self::Pause => &["M6 4h4v16H6Z", "M14 4h4v16h-4Z"],
             Self::Planet => &[
                 "M12 4a8 8 0 1 0 0 16 8 8 0 0 0 0-16Z",
                 "M2.5 15.5c2.8 2.3 8.8.9 13.8-2.5s7.7-7.7 5.2-10.2",
@@ -324,7 +326,7 @@ mod wasm {
         let d = icon.compound_path();
         rsx! {
             Icon { class: "{class}", stroke_width: 1.8,
-                path { d }
+                path { d, fill: if icon == LineIcon::Pause { "currentColor" } else { "none" } }
             }
         }
     }

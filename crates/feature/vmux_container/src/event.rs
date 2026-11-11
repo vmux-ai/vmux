@@ -22,6 +22,8 @@ pub struct ContainerUiState {
     pub configuration_revision: u64,
     pub starting: bool,
     pub stopping: bool,
+    pub control_revision: u64,
+    pub control_error: String,
 }
 
 #[vmux_api::ui_event]
