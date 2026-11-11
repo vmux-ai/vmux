@@ -1122,6 +1122,9 @@ The modal measures its toolbar anchor and adapts its bounds to the content withi
 It remains discoverable as an inactive extension tab in its own virtual window, so authentication
 completion can locate and remove that window without changing the active content tab. Direct close
 requests also target the owning popup entity.
+Popup identity follows its extension across document navigation. Batched opens apply each
+transition before the next request, and close messages carry the current virtual window ID.
+Native popup documents are excluded from Stack ownership; genuinely routed extra tabs remain owned.
 Other platforms retain Stack routing until their native popup adapter supports the modal.
 
 ---

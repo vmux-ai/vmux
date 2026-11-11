@@ -9,7 +9,7 @@ const patch = fs.readFileSync(path.join(__dirname, "../src/host/shim.js"), "utf8
   .replaceAll("__VMUX_KEEPALIVE_CHANNEL__", JSON.stringify("keepalive"));
 
 class Popup {
-  constructor({ hosted, id = 1000000001, bridge = true, reject = false }) {
+  constructor({ hosted, id = 1000000001, popupId = 1000000001, bridge = true, reject = false }) {
     this.calls = [];
     this.emitted = [];
     this.nativeCloses = 0;
@@ -17,6 +17,7 @@ class Popup {
       URL,
       chrome: { runtime: { getURL: (file) => `chrome-extension://extension/${file}` }, windows: {} },
       __vmuxHostedPopup: hosted,
+      __vmuxPopupWindowId: popupId,
       __vmuxExtensionRuntime: {
         request: (namespace, method, args) => {
           this.calls.push([namespace, method, args]);
@@ -45,6 +46,7 @@ test("hosted popup closes through its owning entity even with a browser window I
   assert.equal(popup.nativeCloses, 0);
   assert.equal(popup.emitted.length, 1);
   assert.equal(popup.emitted[0].channel, "vmux-extension-popup-close");
+  assert.equal(popup.emitted[0].window_id, 1000000001);
 });
 
 test("standalone extension window retains window API close", async () => {

@@ -650,6 +650,21 @@ mod tests {
         }, &authorization).unwrap();
         assert_eq!(popouts.as_array().unwrap().len(), 1);
         assert_eq!(popouts[0]["windowId"], window_id);
+        let populated = WindowDispatch::from_request(
+            &ApiRequest {
+                request_id: "populated".into(),
+                namespace: "windows".into(),
+                method: "get".into(),
+                arguments: json!([window_id, { "populate": true }]),
+                caller_context: caller.clone(),
+            },
+            &model,
+            &mut windows,
+            &authorization,
+        )
+        .unwrap();
+        assert_eq!(populated.result["tabs"].as_array().unwrap().len(), 1);
+        assert_eq!(populated.result["tabs"][0]["id"], popouts[0]["id"]);
         let removed = WindowDispatch::from_request(
             &ApiRequest {
                 request_id: "close".into(),

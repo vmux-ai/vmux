@@ -88,6 +88,10 @@ pub(crate) fn ExtensionPopupModal(
         reporter.publish();
     }));
     use_effect(move || {
+        let _ = anchor();
+        reporter.publish();
+    });
+    use_effect(move || {
         let _ = send(&LayoutOverlayEvent {
             id: "extension-popup".to_string(),
             active: true,

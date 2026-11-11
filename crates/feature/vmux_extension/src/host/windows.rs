@@ -54,6 +54,7 @@ struct ExtensionWindow {
     window: ExtensionWindowSnapshot,
     host_window_id: Option<i32>,
     urls: Vec<String>,
+    popup_url: Option<String>,
     tab_ids: Vec<i32>,
 }
 
@@ -103,6 +104,7 @@ impl ExtensionWindows {
             ExtensionWindow {
                 window: window.clone(),
                 host_window_id: Some(host.id),
+                popup_url: Some(url.clone()),
                 urls: vec![url],
                 tab_ids: Vec::new(),
             },
@@ -129,13 +131,13 @@ impl ExtensionWindows {
         events
     }
 
-    pub(super) fn has_popup(&self, id: i32, url: &str) -> bool {
+    pub(super) fn has_popup(&self, id: i32, extension_id: &str) -> bool {
         self.windows.get(&id).is_some_and(|window| {
             window.window.window_type == "popup"
                 && window
-                    .urls
-                    .iter()
-                    .any(|expected| ExtensionWindow::page_matches(expected, url))
+                    .popup_url
+                    .as_ref()
+                    .is_some_and(|url| popup::OpenRequest::owns_url(extension_id, url))
         })
     }
 
@@ -254,7 +256,13 @@ impl ExtensionWindow {
         self.tab_ids
             .retain(|id| model.tabs.iter().any(|tab| tab.id == *id));
         claimed.extend(self.tab_ids.iter().copied());
-        for url in &self.urls {
+        for tab in &model.tabs {
+            if tab.window_id == self.window.id && !claimed.contains(&tab.id) {
+                self.tab_ids.push(tab.id);
+                claimed.insert(tab.id);
+            }
+        }
+        for url in self.urls.iter().skip(usize::from(self.popup_url.is_some())) {
             let exact = model
                 .tabs
                 .iter()
@@ -936,6 +944,15 @@ fn create(
             None
         },
         urls: urls.clone(),
+        popup_url: if cfg!(target_os = "macos") && window_type == "popup" {
+            urls.first()
+                .filter(|url| {
+                    popup::OpenRequest::owns_url(request.caller_context.extension_id(), url)
+                })
+                .cloned()
+        } else {
+            None
+        },
         tab_ids: Vec::new(),
     };
     let result = window.disclosed_value(Vec::new(), true, request, authorization);
@@ -1077,7 +1094,11 @@ fn remove(
         close_window: Some(CloseExtensionWindowRequest {
             window_id: Some(id),
             tab_ids: entry.tab_ids,
-            urls: entry.urls,
+            urls: entry
+                .urls
+                .into_iter()
+                .skip(usize::from(entry.popup_url.is_some()))
+                .collect(),
         }),
         update_host_window: None,
         events,
@@ -1230,9 +1251,9 @@ mod tests {
         assert!(created.open_window.is_some());
         model.tabs.push(ExtensionTabSnapshot {
             id: 8,
-            window_id: 1,
+            window_id: if cfg!(target_os = "macos") { id } else { 1 },
             index: 1,
-            active: true,
+            active: !cfg!(target_os = "macos"),
             highlighted: true,
             pinned: false,
             url: format!("chrome-extension://{EXTENSION_ID}/popup/index.html?x=1#/vault"),

@@ -1,4 +1,5 @@
 use crate::store;
+use bevy::ecs::system::SystemState;
 use bevy::{prelude::*, window::WindowResized};
 use bevy_cef::prelude::{
     Browsers, HostWindow, JsEmitEventPlugin, Receive, UiEventPlugin, UiInput, WebviewWindowed,
@@ -162,7 +163,7 @@ impl PopupHost<'_, '_> {
             return;
         }
         if let Some(id) = window_id
-            && !self.virtual_windows.has_popup(id, &url)
+            && !self.virtual_windows.has_popup(id, &entry.id)
         {
             return;
         }
@@ -178,7 +179,7 @@ impl PopupHost<'_, '_> {
             });
         let existing_id = existing
             .as_ref()
-            .and_then(|(_, url, id)| id.filter(|id| self.virtual_windows.has_popup(*id, url)));
+            .and_then(|(_, _, id)| id.filter(|id| self.virtual_windows.has_popup(*id, &entry.id)));
         let id = match window_id.or(existing_id) {
             Some(id) => id,
             None => {
@@ -217,6 +218,9 @@ impl PopupHost<'_, '_> {
                     webview: entity,
                     url,
                 });
+            } else if previous_id != Some(id) {
+                self.browsers
+                    .execute_js(&entity, &format!("globalThis.__vmuxPopupWindowId = {id};"));
             }
         } else {
             self.close(owner);
@@ -292,24 +296,36 @@ impl PopupHost<'_, '_> {
     }
 }
 
-fn open(mut requests: MessageReader<OpenRequest>, mut host: PopupHost) {
-    for request in requests.read() {
-        let Some(entry) = host.entry(&request.extension_id) else {
-            continue;
+fn open(world: &mut World, state: &mut SystemState<(MessageReader<OpenRequest>, PopupHost)>) {
+    let requests: Vec<_> = {
+        let Ok((mut requests, _)) = state.get_mut(world) else {
+            return;
         };
-        let Some(owner) = host.owner_for_window(request.host_window_id) else {
-            continue;
-        };
-        let Some(anchor) = host.anchor(owner) else {
-            continue;
-        };
-        host.show(
-            owner,
-            entry,
-            request.url.clone(),
-            anchor,
-            Some(request.window_id),
-        );
+        requests.read().cloned().collect()
+    };
+    for request in requests {
+        {
+            let Ok((_, mut host)) = state.get_mut(world) else {
+                continue;
+            };
+            let Some(entry) = host.entry(&request.extension_id) else {
+                continue;
+            };
+            let Some(owner) = host.owner_for_window(request.host_window_id) else {
+                continue;
+            };
+            let Some(anchor) = host.anchor(owner) else {
+                continue;
+            };
+            host.show(
+                owner,
+                entry,
+                request.url.clone(),
+                anchor,
+                Some(request.window_id),
+            );
+        }
+        state.apply(world);
     }
 }
 
@@ -385,15 +401,19 @@ struct ExtensionPopupSizeRequest {
 #[derive(serde::Deserialize)]
 struct DismissRequest {
     channel: String,
+    window_id: i32,
 }
 
 fn dismiss(trigger: On<Receive<DismissRequest>>, mut host: PopupHost) {
     if trigger.payload.channel != "vmux-extension-popup-close" {
         return;
     }
-    let Ok((_, popup, _, _)) = host.popups.get(trigger.webview) else {
+    let Ok((_, popup, _, id)) = host.popups.get(trigger.webview) else {
         return;
     };
+    if id.is_none_or(|id| id.0 != trigger.payload.window_id) {
+        return;
+    }
     let owner = popup.owner;
     host.close(owner);
 }
@@ -435,23 +455,22 @@ fn close_request(trigger: On<UiInput<ExtensionPopupCloseRequest>>, mut host: Pop
 
 fn inject_sizing(
     mut events: MessageReader<vmux_browser::WebviewLoadCompleted>,
-    popups: Query<(), With<ExtensionPopup>>,
+    popups: Query<&ExtensionWindowId, With<ExtensionPopup>>,
     browsers: NonSend<Browsers>,
 ) {
     for event in events.read() {
-        if !popups.contains(event.webview) {
+        let Ok(id) = popups.get(event.webview) else {
             continue;
-        }
-        browsers.execute_js(
-            &event.webview,
-            r#"
+        };
+        let mut script = format!("globalThis.__vmuxPopupWindowId = {};\n", id.0);
+        script.push_str(r#"
 (() => {
   globalThis.__vmuxHostedPopup = true;
   if (globalThis.__vmuxPopupSizer) return;
   document.addEventListener("keydown", (event) => {
     if (event.key !== "Escape") return;
     event.preventDefault();
-    cef.emit({ channel: "vmux-extension-popup-close" });
+    cef.emit({ channel: "vmux-extension-popup-close", window_id: globalThis.__vmuxPopupWindowId });
   });
   let scheduled = false;
   let lastWidth = 0;
@@ -513,6 +532,7 @@ fn inject_sizing(
 })();
 "#,
         );
+        browsers.execute_js(&event.webview, &script);
     }
 }
 
@@ -837,6 +857,13 @@ mod tests {
             format!("chrome-extension://{ID}/popup/index.html?singleActionPopout=fido#/fido2");
         let id = fixture.open(&url);
         let popup = fixture.popup();
+        let url = format!("chrome-extension://{ID}/authentication/confirm.html?challenge=active");
+        fixture
+            .app
+            .world_mut()
+            .get_mut::<vmux_ecs::PageMetadata>(popup)
+            .unwrap()
+            .url = url.clone();
         fixture.reopen();
         assert_eq!(fixture.popup(), popup);
         assert_eq!(
@@ -923,12 +950,13 @@ mod tests {
     #[test]
     fn native_escape_dismisses_the_modal_and_its_virtual_window() {
         let mut fixture = Fixture::new();
-        fixture.open(&format!("chrome-extension://{ID}/popup/index.html#/unlock"));
+        let id = fixture.open(&format!("chrome-extension://{ID}/popup/index.html#/unlock"));
         let popup = fixture.popup();
         fixture.app.world_mut().trigger(Receive {
             webview: popup,
             payload: DismissRequest {
                 channel: "vmux-extension-popup-close".into(),
+                window_id: id,
             },
         });
         fixture.app.update();
@@ -1026,6 +1054,110 @@ mod tests {
     }
 
     #[test]
+    fn requests_in_one_frame_keep_one_popup_entity_and_the_latest_window() {
+        let mut fixture = Fixture::new();
+        let mut latest = 0;
+        for path in ["popup/index.html#/unlock", "authentication/confirm.html"] {
+            let dispatch = fixture.dispatch(
+                "create",
+                json!([{ "type": "popup", "url": format!("chrome-extension://{ID}/{path}") }]),
+            );
+            latest = dispatch.result["id"].as_i64().unwrap() as i32;
+            fixture
+                .app
+                .world_mut()
+                .write_message(dispatch.open_window.unwrap());
+        }
+        fixture.app.update();
+        let popup = fixture.popup();
+        assert_eq!(
+            fixture
+                .app
+                .world()
+                .get::<ExtensionWindowId>(popup)
+                .unwrap()
+                .0,
+            latest
+        );
+        assert_eq!(
+            fixture
+                .dispatch("getAll", json!([{}]))
+                .result
+                .as_array()
+                .unwrap()
+                .len(),
+            2
+        );
+    }
+
+    #[test]
+    fn removing_native_popup_preserves_matching_stack_and_closes_only_its_extra_tab() {
+        let mut fixture = Fixture::new();
+        let popup_url = format!("chrome-extension://{ID}/popup/index.html");
+        fixture
+            .app
+            .world_mut()
+            .get_mut::<vmux_ecs::PageMetadata>(fixture.stack)
+            .unwrap()
+            .url = popup_url.clone();
+        fixture
+            .app
+            .world_mut()
+            .entity_mut(fixture.stack)
+            .insert(crate::host::model::ExtensionTabId(7));
+        let extra_url = "https://example.com/confirmation";
+        let extra = fixture
+            .app
+            .world_mut()
+            .spawn((
+                Stack::default(),
+                vmux_ecs::PageMetadata {
+                    url: extra_url.into(),
+                    ..Default::default()
+                },
+                crate::host::model::ExtensionTabId(8),
+            ))
+            .id();
+        {
+            let world = fixture.app.world_mut();
+            let mut model = world
+                .query::<&mut ExtensionModel>()
+                .single_mut(world)
+                .unwrap();
+            model.tabs[0].url = popup_url.clone();
+            let mut tab = model.tabs[0].clone();
+            tab.id = 8;
+            tab.url = extra_url.into();
+            model.tabs.push(tab);
+        }
+        let dispatch = fixture.dispatch(
+            "create",
+            json!([{ "type": "popup", "url": [popup_url, extra_url] }]),
+        );
+        let id = dispatch.result["id"].as_i64().unwrap();
+        fixture
+            .app
+            .world_mut()
+            .write_message(dispatch.open_window.unwrap());
+        fixture.app.update();
+        let removed = fixture.dispatch("remove", json!([id]));
+        fixture
+            .app
+            .world_mut()
+            .write_message(removed.close_window.unwrap());
+        fixture.app.update();
+        let closed: Vec<_> = fixture
+            .app
+            .world_mut()
+            .resource_mut::<Messages<CloseStackRequest>>()
+            .drain()
+            .map(|request| request.stack)
+            .collect();
+        assert_eq!(closed, [extra]);
+        assert!(fixture.app.world().get_entity(fixture.stack).is_ok());
+    }
+
+    #[test]
     fn late_close_of_replaced_authentication_cannot_dismiss_the_current_popup() {
         let mut fixture = Fixture::new();
         let first = fixture.open(&format!("chrome-extension://{ID}/popup/index.html#/unlock"));
@@ -1042,6 +1174,15 @@ mod tests {
             .app
             .world_mut()
             .write_message(CloseRequest { window_id: first });
+        fixture.app.update();
+        assert_eq!(fixture.popup(), popup);
+        fixture.app.world_mut().trigger(Receive {
+            webview: popup,
+            payload: DismissRequest {
+                channel: "vmux-extension-popup-close".into(),
+                window_id: first,
+            },
+        });
         fixture.app.update();
         assert_eq!(fixture.popup(), popup);
         let removed = fixture.dispatch("remove", json!([next]));

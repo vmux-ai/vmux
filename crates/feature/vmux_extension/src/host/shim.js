@@ -439,7 +439,7 @@
     var firstExtensionWindowId = 1000000000;
     globalThis.close = function () {
       if (globalThis.__vmuxHostedPopup && globalThis.cef && typeof globalThis.cef.emit === "function") {
-        globalThis.cef.emit({ channel: "vmux-extension-popup-close" });
+        globalThis.cef.emit({ channel: "vmux-extension-popup-close", window_id: globalThis.__vmuxPopupWindowId });
         return;
       }
       if (!bridgeRuntime || typeof bridgeRuntime.request !== "function") {
