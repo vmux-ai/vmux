@@ -3,9 +3,9 @@ use std::fmt;
 use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, Weak, mpsc};
+use std::task::Waker;
 
-use bevy::prelude::Resource;
-use bevy::winit::{EventLoopProxy, WinitUserEvent};
+use bevy_ecs::prelude::Resource;
 
 type Work = Box<dyn FnOnce() + Send + 'static>;
 
@@ -32,9 +32,30 @@ impl Default for BlockingRuntime {
 }
 
 impl BlockingRuntime {
+    pub fn new(short: BlockingPool, long: BlockingPool, process: BlockingPool) -> Self {
+        Self {
+            short,
+            long,
+            process,
+        }
+    }
+
+    pub fn try_spawn<T: Send + 'static>(
+        &self,
+        lane: Lane,
+        wake: Option<Waker>,
+        run: impl FnOnce() -> T + Send + 'static,
+    ) -> Result<BlockingTask<T>, SpawnError> {
+        match lane {
+            Lane::Short => self.short.try_spawn(wake, run),
+            Lane::Long => self.long.try_spawn(wake, run),
+            Lane::Process => self.process.try_spawn(wake, run),
+        }
+    }
+
     pub fn spawn<T: Send + 'static>(
         &self,
-        wake: Option<EventLoopProxy<WinitUserEvent>>,
+        wake: Option<Waker>,
         run: impl FnOnce() -> T + Send + 'static,
     ) -> Option<BlockingTask<T>> {
         self.short.spawn(wake, run)
@@ -42,7 +63,7 @@ impl BlockingRuntime {
 
     pub fn spawn_long<T: Send + 'static>(
         &self,
-        wake: Option<EventLoopProxy<WinitUserEvent>>,
+        wake: Option<Waker>,
         run: impl FnOnce() -> T + Send + 'static,
     ) -> Option<BlockingTask<T>> {
         self.long.spawn(wake, run)
@@ -50,11 +71,19 @@ impl BlockingRuntime {
 
     pub fn spawn_process<T: Send + 'static>(
         &self,
-        wake: Option<EventLoopProxy<WinitUserEvent>>,
+        wake: Option<Waker>,
         run: impl FnOnce() -> T + Send + 'static,
     ) -> Result<BlockingTask<T>, SpawnError> {
-        self.process.enqueue(wake, run)
+        self.process.try_spawn(wake, run)
     }
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum Lane {
+    #[default]
+    Short,
+    Long,
+    Process,
 }
 
 pub struct BlockingPool {
@@ -63,6 +92,9 @@ pub struct BlockingPool {
 
 impl BlockingPool {
     pub fn new(name: &str, workers: usize, capacity: usize) -> Self {
+        if cfg!(target_family = "wasm") {
+            return Self { sender: None };
+        }
         let (sender, receiver) = mpsc::sync_channel::<Work>(capacity);
         let receiver = Arc::new(Mutex::new(receiver));
         let mut running = 0;
@@ -97,15 +129,15 @@ impl BlockingPool {
 
     pub fn spawn<T: Send + 'static>(
         &self,
-        wake: Option<EventLoopProxy<WinitUserEvent>>,
+        wake: Option<Waker>,
         run: impl FnOnce() -> T + Send + 'static,
     ) -> Option<BlockingTask<T>> {
-        self.enqueue(wake, run).ok()
+        self.try_spawn(wake, run).ok()
     }
 
-    fn enqueue<T: Send + 'static>(
+    pub fn try_spawn<T: Send + 'static>(
         &self,
-        wake: Option<EventLoopProxy<WinitUserEvent>>,
+        wake: Option<Waker>,
         run: impl FnOnce() -> T + Send + 'static,
     ) -> Result<BlockingTask<T>, SpawnError> {
         let sender = self.sender.as_ref().ok_or(SpawnError::Unavailable)?;
@@ -156,12 +188,12 @@ impl fmt::Display for SpawnError {
 
 impl std::error::Error for SpawnError {}
 
-struct CompletionWake(Option<EventLoopProxy<WinitUserEvent>>);
+struct CompletionWake(Option<Waker>);
 
 impl Drop for CompletionWake {
     fn drop(&mut self) {
         if let Some(wake) = &self.0 {
-            let _ = wake.send_event(WinitUserEvent::WakeUp);
+            wake.wake_by_ref();
         }
     }
 }
@@ -308,6 +340,48 @@ mod tests {
 
     use super::*;
 
+    struct PublicationWake {
+        task: Mutex<Option<BlockingTask<u32>>>,
+        observed: mpsc::SyncSender<Option<u32>>,
+    }
+
+    impl std::task::Wake for PublicationWake {
+        fn wake(self: Arc<Self>) {
+            let result = self
+                .task
+                .lock()
+                .unwrap()
+                .as_mut()
+                .unwrap()
+                .poll()
+                .map(Result::unwrap);
+            self.observed.send(result).unwrap();
+        }
+    }
+
+    #[test]
+    fn completion_publishes_the_result_before_invoking_the_host_waker() {
+        let pool = BlockingPool::new("test-publication", 1, 1);
+        let (observed_tx, observed_rx) = mpsc::sync_channel(1);
+        let wake = Arc::new(PublicationWake {
+            task: Mutex::new(None),
+            observed: observed_tx,
+        });
+        let (release_tx, release_rx) = mpsc::sync_channel(1);
+        let task = pool
+            .try_spawn(Some(Arc::clone(&wake).into()), move || {
+                release_rx.recv_timeout(Duration::from_secs(2)).unwrap();
+                17
+            })
+            .unwrap();
+        *wake.task.lock().unwrap() = Some(task);
+        release_tx.send(()).unwrap();
+        assert_eq!(
+            observed_rx.recv_timeout(Duration::from_secs(2)).unwrap(),
+            Some(17)
+        );
+    }
+
     #[test]
     fn a_full_queue_rejects_work_and_canceled_queued_work_never_runs() {
         let pool = BlockingPool::new("test-queue", 1, 1);
@@ -324,7 +398,7 @@ mod tests {
         let canceled = pool
             .spawn(None, move || executed_tx.send(()).unwrap())
             .unwrap();
-        assert!(matches!(pool.enqueue(None, || ()), Err(SpawnError::Full)));
+        assert!(matches!(pool.try_spawn(None, || ()), Err(SpawnError::Full)));
         drop(canceled);
         release_tx.send(()).unwrap();
         let deadline = Instant::now() + Duration::from_secs(2);
@@ -381,7 +455,7 @@ mod tests {
     fn a_pool_without_workers_reports_unavailable_instead_of_queue_backpressure() {
         let pool = BlockingPool::new("test-unavailable", 0, 1);
         assert!(matches!(
-            pool.enqueue(None, || panic!("unavailable work must not run")),
+            pool.try_spawn(None, || panic!("unavailable work must not run")),
             Err(SpawnError::Unavailable)
         ));
     }

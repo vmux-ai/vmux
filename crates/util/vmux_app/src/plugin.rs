@@ -8,6 +8,8 @@ pub enum VmuxPlugin {
     Ecs(VmuxEcsPlugin),
     #[plugin(feature = "project", desktop, requires(ecs))]
     Project(vmux_project::ProjectPlugin),
+    #[plugin(feature = "jobs", desktop, requires(ecs))]
+    Jobs(vmux_ecs::JobsPlugin),
     #[plugin(feature = "runtime", desktop, requires(ecs))]
     Runtime(VmuxRuntimePlugin),
     #[plugin(feature = "command", desktop, requires(runtime))]
@@ -84,6 +86,7 @@ impl Plugin for VmuxRuntimePlugin {
             vmux_flex::FlexPlugin,
             vmux_ecs::profile::ProfilePlugin,
             vmux_ecs::page::PagePlugin,
+            vmux_ecs::wake::WakePlugin,
         ));
     }
 }

@@ -349,8 +349,21 @@ transport actor that exchanges typed inputs and outputs with ECS. Coroutine runt
 world access are not the default because they hide scheduling and lifecycle state from queries.
 Use one only for isolated sequential UI choreography where the sequence itself is the behavior,
 never for blocking work, transport ownership, or ordinary domain transitions.
-Finite blocking work shares `vmux_ecs::blocking`: bounded worker pools return entity-owned
-`BlockingTask` handles, isolate panics, and wake the reactive event loop after completion.
+The optional `jobs` capability exposes finite blocking work without Profile or a renderer.
+`JobsPlugin` installs bounded `BlockingRuntime` lanes; `JobPlugin<J>` schedules typed immutable
+`JobRequest<J>` components on operation entities. Accepted work captures its `ChildOf` owner,
+publishes `JobResult<J>` and a payload-free `JobReady<J>` message, and leaves the operation
+running. The immutable `JobOwner<J>` snapshot survives publication. Consumers check its `accepts`
+guard against the current `ChildOf` alongside operation state and domain revisions, including
+ownership changes during the apply frame. The consumer applies the result in `JobSet::Apply`, then triggers
+`OperationCompleted` after its domain commit. A worker return alone never means domain success.
+Reparenting discards accepted work and uncommitted results; removing an owner drops its children.
+Terminal operations release job payloads while retaining their shared identity and outcome.
+Full lanes retain requests for retry; unavailable lanes and panics publish typed failures.
+Low-level adapters can use `vmux_ecs::blocking` directly: bounded worker pools return entity-owned
+`BlockingTask` handles, isolate panics, and invoke a standard `Waker` after publishing the result.
+The optional native `WakePlugin` binds the event-loop proxy to `JobWake`; another host can supply
+its own waker without linking Winit. Short, long, and process lanes remain independently configurable.
 Dropping a handle cancels queued work and discards late results; running adapters cooperate with
 the cancellation context. Git keeps separate interactive, background, and single-worker mutation
 pools and retains shared-read cancellation and rollback scopes. ACP catalog/history reads and
@@ -414,7 +427,9 @@ without the facade.
 
 `vmux_ecs` defaults to the renderer-free component, identity, operation, and activation core.
 The `contracts` feature adds shared wire values; `store` adds schema registration and store
-state without a Profile or CEF runtime. The native `host` bundle is explicit in Vmux consumers.
+state; `jobs` adds owned blocking work. These capabilities do not require Profile or CEF.
+Blocking pools report unavailable on web targets until a web worker adapter exists.
+The native `host` bundle is explicit in Vmux consumers.
 `VmuxEcsPlugin` installs only primitives and operation lifecycle. `VmuxRuntimePlugin` separately
 installs the Vmux Profile, page runtime, and layout engine; desktop feature dependencies select
 that adapter through the application builder.
@@ -431,7 +446,7 @@ the same ID in different roots remains valid, while a duplicate inside one root 
 
 `examples/framework-consumer` is an independent Cargo workspace using only public APIs and no
 repository patch configuration. Its tests exercise typed requests, scoped identity, operation
-completion, optional storage, and Project mutations in a Bevy App without Profile or UI dependencies. CI runs
+completion, optional storage, owned jobs, and Project mutations in a Bevy App without Profile or UI dependencies. CI runs
 the consumer and checks its resolved dependency graph along with the minimal core configurations.
 
 `vmux_project` owns renderer-independent Project entities and mutation lifecycles. Its default

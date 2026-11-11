@@ -112,7 +112,7 @@ impl AcpInstallJob {
             pending: progress_sender,
             wake: wake.clone(),
         };
-        let task = workers.spawn_process(wake, move || {
+        let task = workers.spawn_process(vmux_ecs::wake::Wake::optional_waker(wake), move || {
             resolve_acp_install(request, &sink, AgentInstaller::at(PackageStore::at(agents)))
         })?;
         Ok(Self {

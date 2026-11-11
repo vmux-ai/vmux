@@ -50,7 +50,8 @@ impl GitRuntime {
         wake: Option<EventLoopProxy<WinitUserEvent>>,
         run: impl FnOnce() -> T + Send + 'static,
     ) -> Option<GitTask<T>> {
-        self.interactive.spawn(wake, run)
+        self.interactive
+            .spawn(vmux_ecs::wake::Wake::optional_waker(wake), run)
     }
 
     pub fn spawn_operation<T: Send + 'static>(
@@ -58,7 +59,8 @@ impl GitRuntime {
         wake: Option<EventLoopProxy<WinitUserEvent>>,
         run: impl FnOnce() -> T + Send + 'static,
     ) -> Option<GitTask<T>> {
-        self.operations.spawn(wake, run)
+        self.operations
+            .spawn(vmux_ecs::wake::Wake::optional_waker(wake), run)
     }
 
     pub fn spawn_background<T: Send + 'static>(
@@ -66,7 +68,8 @@ impl GitRuntime {
         wake: Option<EventLoopProxy<WinitUserEvent>>,
         run: impl FnOnce() -> T + Send + 'static,
     ) -> Option<GitTask<T>> {
-        self.background.spawn(wake, run)
+        self.background
+            .spawn(vmux_ecs::wake::Wake::optional_waker(wake), run)
     }
 
     pub(super) fn canceled() -> bool {
