@@ -39,3 +39,7 @@ vmux_space = { path = "../vmux_space" }
 
 [lints]
 workspace = true
+
+[dev-dependencies]
+dioxus-html = { version = "=0.7.9", features = ["serialize"] }
+dioxus-ssr = "=0.7.9"

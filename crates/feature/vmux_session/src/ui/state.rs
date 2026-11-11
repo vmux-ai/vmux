@@ -53,6 +53,7 @@ pub struct Chat {
     pub selector: ChatValue<ChatSelectorState>,
     selection: Memo<Option<ChatListSelectionState>>,
     pub menu: ChatMenu,
+    key_input_requested: Signal<bool>,
 }
 
 pub fn use_chat(session: String) -> Chat {
@@ -100,6 +101,7 @@ pub fn use_chat(session: String) -> Chat {
         ready: always_ready,
     };
     let chat = Chat {
+        key_input_requested: use_signal(|| false),
         root,
         transcript: use_transcript(root, session),
         run: RunState { snapshot },
@@ -165,6 +167,12 @@ impl Chat {
 
     fn watch(&self) {
         let chat = *self;
+        use_effect(move || {
+            if chat.status() != "authentication" && *chat.key_input_requested.peek() {
+                let mut requested = chat.key_input_requested;
+                requested.set(false);
+            }
+        });
         use_effect(move || PromptFocus::end(PROMPT_INPUT_ID));
         use_effect(move || {
             let _ = chat.transcript.revision();
@@ -261,6 +269,15 @@ impl Chat {
 
     pub fn status(&self) -> String {
         self.run.status()
+    }
+
+    pub(super) fn key_input_requested(&self) -> bool {
+        (self.key_input_requested)()
+    }
+
+    pub(super) fn request_key_input(&self, requested: bool) {
+        let mut input = self.key_input_requested;
+        input.set(requested);
     }
 
     pub fn authentication_methods(&self) -> Vec<vmux_api::protocol::AuthenticationMethod> {

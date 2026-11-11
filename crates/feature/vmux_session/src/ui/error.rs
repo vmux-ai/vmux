@@ -134,10 +134,12 @@ pub(super) fn ChatFeedback(chat: Chat, #[props(default = rsx! {})] children: Ele
                 vmux_ui::components::api_key::ApiKeyEntry {
                     pending: key_state.pending,
                     failed: key_state.failed,
+                    accent_color: chat.accent().css,
                     on_submit: move |key| { let _ = send(&crate::onboarding::ChatSaveKey { key }); },
                 }
+            } else {
+                {children}
             }
-            {children}
         }
         if shown && kind == FailureKind::Other {
             {feedback}

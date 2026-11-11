@@ -3,6 +3,7 @@ use super::state::Chat;
 use crate::onboarding::{ChatAuthenticate, ChatCancelSetup, ChatSaveKey, KeyEntryUiState};
 use dioxus::prelude::*;
 use percent_encoding::{NON_ALPHANUMERIC, utf8_percent_encode};
+use vmux_ui::components::button::{Button, ButtonSize, ButtonVariant};
 use vmux_ui::components::composer::{ComposerFrame, PromptComposer, PromptComposerMode};
 use vmux_ui::components::progress::{LoadingIcon, Progress, ProgressIndicator};
 use vmux_ui::hooks::{UiStateBinding, send};
@@ -24,103 +25,151 @@ pub(super) fn Turn(children: Element) -> Element {
 
 #[component]
 pub(super) fn Controls(chat: Chat) -> Element {
-    let mut selected = use_signal(|| 0_usize);
     let keys = UiStateBinding::<KeyEntryUiState>::use_context()
         .state
         .read()
         .clone();
-    let authentication = chat.status() == "authentication";
-    let pending = chat.authentication_pending();
-    if chat.setup_busy() && !authentication {
+    if chat.setup_busy() && chat.status() != "authentication" {
         return rsx! { ComposerFrame { SetupComposer { chat, keys } } };
     }
-    let mut choices = Vec::new();
-    if chat.status() == "errored" {
-        choices.push(Choice::Retry);
-    }
-    if authentication {
-        for method in chat.authentication_methods() {
-            choices.push(Choice::Authenticate(method.id, method.name));
+    let notice = if chat.status() == "authentication" {
+        if chat.key_input_requested() {
+            None
+        } else {
+            Some(rsx! { ConnectionControls { chat, keys: keys.clone() } })
+        }
+    } else {
+        Some(rsx! { RecoveryControls { pending: keys.pending } })
+    };
+    rsx! { ComposerFrame { notice, SetupComposer { chat, keys } } }
+}
+
+#[component]
+fn ConnectionControls(chat: Chat, keys: KeyEntryUiState) -> Element {
+    let connection = Connection::of(chat, !keys.key_variable.is_empty());
+    let available = connection.method.is_some() || connection.key;
+    let pending = chat.authentication_pending() || keys.pending;
+    let clicked = connection.clone();
+    rsx! {
+        div { "data-slot": "composer-notice", class: "flex flex-wrap items-center gap-2 px-3 py-3",
+            Button {
+                size: ButtonSize::Sm,
+                aria_label: translate("onboarding-connect"),
+                disabled: pending || !available,
+                onclick: move |_| clicked.connect(chat),
+                {translate("onboarding-connect")}
+            }
+            if connection.method.is_some() && connection.key && !chat.key_input_requested() && !pending {
+                Button {
+                    size: ButtonSize::Xs,
+                    variant: ButtonVariant::Ghost,
+                    class: "text-inherit opacity-60",
+                    aria_label: translate("onboarding-use-key"),
+                    onclick: move |_| chat.request_key_input(true),
+                    {translate("onboarding-use-key")}
+                }
+            }
         }
     }
-    if !pending {
-        choices.push(Choice::Cancel);
-        choices.push(Choice::ChangeAgent);
-    }
-    let mut labels = Vec::new();
-    let mut disabled_options = Vec::new();
-    for (index, choice) in choices.iter().enumerate() {
-        labels.push(choice.label());
-        if !choice.available(pending) {
-            disabled_options.push(index);
+}
+
+#[derive(Clone)]
+struct Connection {
+    method: Option<vmux_api::protocol::AuthenticationMethod>,
+    key: bool,
+}
+
+impl Connection {
+    fn of(chat: Chat, key: bool) -> Self {
+        let methods = chat.authentication_methods();
+        let mut chosen = None;
+        for method in &methods {
+            if method.id == "api-key" {
+                continue;
+            }
+            if chosen.is_none() || method.id == "chat-gpt" {
+                chosen = Some(method.clone());
+            }
+            if method.id == "chat-gpt" {
+                break;
+            }
+        }
+        if chosen.is_none() && !key {
+            chosen = methods.first().cloned();
+        }
+        Self {
+            method: chosen,
+            key,
         }
     }
-    let count = choices.len();
+
+    fn connect(&self, chat: Chat) {
+        if let Some(method) = &self.method {
+            chat.request_key_input(false);
+            let _ = send(&ChatAuthenticate {
+                method_id: method.id.clone(),
+            });
+        } else if self.key {
+            chat.request_key_input(true);
+        }
+    }
+}
+
+#[component]
+fn RecoveryControls(pending: bool) -> Element {
+    let mut selected = use_signal(|| 0_usize);
+    let choices = [Choice::Retry, Choice::Cancel, Choice::ChangeAgent];
+    let labels = choices.iter().map(Choice::label).collect();
     let keyboard = choices.clone();
-    let notice = rsx! {
+    rsx! {
         div { "data-slot": "composer-notice",
             ChoiceOptions {
-                options: labels,
-                selected: selected().min(count.saturating_sub(1)),
-                compact: true,
-                framed: true,
-                disabled: keys.pending,
-                disabled_options,
+                options: labels, selected: selected(), compact: true, framed: true, disabled: pending,
                 on_hover: move |index| selected.set(index),
-                on_select: move |index: usize| {
-                    if !keys.pending && let Some(choice) = choices.get(index) && choice.available(pending) { choice.choose(); }
-                },
+                on_select: move |index: usize| { if !pending && let Some(choice) = choices.get(index) { choice.choose(); } },
                 on_keydown: move |event| {
-                    if keys.pending { return; }
+                    if pending { return; }
                     let Some(key) = ChoiceKey::of(&event, true) else { return; };
-                    let current = selected().min(count.saturating_sub(1));
                     match key {
-                        ChoiceKey::Next => selected.set((current + 1).min(count.saturating_sub(1))),
-                        ChoiceKey::Previous => selected.set(current.saturating_sub(1)),
-                        ChoiceKey::Submit => { if let Some(choice) = keyboard.get(current) && choice.available(pending) { choice.choose(); } },
-                        ChoiceKey::Number(index) => { if let Some(choice) = keyboard.get(index) && choice.available(pending) { choice.choose(); } },
+                        ChoiceKey::Next => selected.set((selected() + 1).min(2)),
+                        ChoiceKey::Previous => selected.set(selected().saturating_sub(1)),
+                        ChoiceKey::Submit => keyboard[selected()].choose(),
+                        ChoiceKey::Number(index) => { if let Some(choice) = keyboard.get(index) { choice.choose(); } },
                     }
-                    event.prevent_default();
-                    event.stop_propagation();
+                    event.prevent_default(); event.stop_propagation();
                 },
             }
         }
-    };
-    rsx! { ComposerFrame { notice: Some(notice), SetupComposer { chat, keys } } }
+    }
 }
 
 #[component]
 fn SetupComposer(chat: Chat, keys: KeyEntryUiState) -> Element {
-    let input = if chat.status() == "authentication" && !keys.key_variable.is_empty() {
-        Some(rsx! {
+    if chat.status() == "authentication"
+        && chat.key_input_requested()
+        && !keys.key_variable.is_empty()
+    {
+        return rsx! {
             vmux_ui::components::api_key::ApiKeyEntry {
                 pending: keys.pending,
                 failed: keys.failed,
+                accent_color: chat.accent().css,
+                on_stop: Some(EventHandler::new(move |_| chat.stop_or_flush())),
                 on_submit: move |key| { let _ = send(&ChatSaveKey { key }); },
             }
-        })
-    } else {
-        None
-    };
+        };
+    }
+    let busy = chat.setup_busy() || keys.pending;
     rsx! {
         PromptComposer {
-            value: chat.draft(),
-            input,
-            input_disabled: true,
-            placeholder: translate("onboarding-composer-wait"),
-            accent_color: chat.accent().css,
-            accent_gradient: "from-indigo-500 to-violet-600".to_string(),
-            footer: Some(rsx! {}),
-            show_add_button: false,
-            mode: PromptComposerMode::Stop,
-            action_title: translate("common-stop"),
-            action_enabled: chat.status() != "errored",
-            on_input: move |_| {},
-            on_keydown: move |_| {},
-            on_paste: move |_| {},
-            on_attach: move |_| {},
-            on_remove_attachment: move |_| {},
-            on_action: move |_| chat.stop_or_flush(),
+            value: chat.draft(), input_disabled: true,
+            placeholder: translate("onboarding-composer-wait"), accent_color: chat.accent().css,
+            accent_gradient: "from-indigo-500 to-violet-600".to_string(), footer: Some(rsx! {}),
+            show_add_button: false, show_send_button: false,
+            mode: if busy { PromptComposerMode::Stop } else { PromptComposerMode::Send },
+            action_title: translate("common-stop"), action_enabled: busy,
+            on_input: move |_| {}, on_keydown: move |_| {}, on_paste: move |_| {}, on_attach: move |_| {},
+            on_remove_attachment: move |_| {}, on_action: move |_| chat.stop_or_flush(),
         }
     }
 }
@@ -182,20 +231,14 @@ impl Phase {
 #[derive(Clone)]
 enum Choice {
     Retry,
-    Authenticate(String, String),
     Cancel,
     ChangeAgent,
 }
 
 impl Choice {
-    fn available(&self, pending: bool) -> bool {
-        !pending || !matches!(self, Self::Authenticate(..))
-    }
-
     fn label(&self) -> String {
         match self {
             Self::Retry => translate("common-retry"),
-            Self::Authenticate(_, name) => name.clone(),
             Self::Cancel => translate("common-cancel"),
             Self::ChangeAgent => translate("composer-choose-agent"),
         }
@@ -205,11 +248,6 @@ impl Choice {
         match self {
             Self::Retry => {
                 let _ = send(&crate::event::ChatRetrySession);
-            }
-            Self::Authenticate(method_id, _) => {
-                let _ = send(&ChatAuthenticate {
-                    method_id: method_id.clone(),
-                });
             }
             Self::Cancel | Self::ChangeAgent => {
                 if send(&ChatCancelSetup).is_ok() {
@@ -246,8 +284,8 @@ mod tests {
     use crate::state::ChatUiState;
     use dioxus::core::{AttributeValue, Mutation, VirtualDom};
     use dioxus_html::{
-        Code, EventData, Location, Modifiers, SerializedHtmlEventConverter, SerializedKeyboardData,
-        SerializedMouseData,
+        Code, EventData, Location, Modifiers, SerializedFormData, SerializedHtmlEventConverter,
+        SerializedKeyboardData, SerializedMouseData,
     };
     use std::{cell::RefCell, rc::Rc};
     use vmux_api::BinEvent;
@@ -263,6 +301,14 @@ mod tests {
                 let request =
                     rkyv::from_bytes::<ChatAuthenticate, rkyv::rancor::Error>(bytes).unwrap();
                 self.0.borrow_mut().push(request.method_id);
+            } else if id == ChatSaveKey::id() {
+                let request = rkyv::from_bytes::<ChatSaveKey, rkyv::rancor::Error>(bytes).unwrap();
+                assert_eq!(request.key.expose(), "private-test-api-key");
+                self.0.borrow_mut().push("key".into());
+            } else if id == crate::event::ChatSubmit::id()
+                || id == crate::event::ChatDraftChanged::id()
+            {
+                panic!("credential input must not enter the chat draft or prompt path");
             } else if id == crate::event::ChatRetrySession::id() {
                 self.0.borrow_mut().push("retry".into());
             } else if id == crate::event::ChatStop::id() {
@@ -291,11 +337,18 @@ mod tests {
                 snapshot: ChatSnapshot {
                     status,
                     authentication_pending: pending,
-                    authentication_methods: vec![vmux_api::protocol::AuthenticationMethod {
-                        id: "browser-login".into(),
-                        name: "Sign in with browser".into(),
-                        description: String::new(),
-                    }],
+                    authentication_methods: vec![
+                        vmux_api::protocol::AuthenticationMethod {
+                            id: "api-key".into(),
+                            name: "API Key".into(),
+                            description: String::new(),
+                        },
+                        vmux_api::protocol::AuthenticationMethod {
+                            id: "chat-gpt".into(),
+                            name: "ChatGPT".into(),
+                            description: String::new(),
+                        },
+                    ],
                     ..Default::default()
                 },
                 snapshot_ready: true,
@@ -349,7 +402,10 @@ mod tests {
         );
         composer.provide_root_context(HostBinding(host.clone()));
         let initial = composer.rebuild_to_vec();
-        assert!(dioxus_ssr::render(&composer).contains("role=\"listbox\""));
+        let html = dioxus_ssr::render(&composer);
+        assert!(!html.contains("role=\"listbox\""));
+        assert!(!html.contains("ChatGPT"));
+        assert!(!html.contains("API Key"));
         let option = initial
             .edits
             .iter()
@@ -359,7 +415,7 @@ mod tests {
                     value: AttributeValue::Text(value),
                     id,
                     ..
-                } if value == "Sign in with browser" => Some(*id),
+                } if value == &translate("onboarding-connect") => Some(*id),
                 _ => None,
             })
             .expect("the provider sign-in method is selectable in the composer");
@@ -372,7 +428,7 @@ mod tests {
             option,
         );
         composer.render_immediate_to_vec();
-        assert_eq!(*host.0.borrow(), ["browser-login"]);
+        assert_eq!(*host.0.borrow(), ["chat-gpt"]);
     }
 
     #[test]
@@ -402,10 +458,8 @@ mod tests {
             if status != "authentication" {
                 assert!(!html.contains("role=\"listbox\""));
             }
-            if key_available {
-                assert!(!html.contains("<textarea"));
-                assert!(html.contains("type=\"password\""));
-            } else {
+            assert!(!html.contains("type=\"password\""));
+            {
                 let textarea = html
                     .split("<textarea")
                     .nth(1)
@@ -456,6 +510,99 @@ mod tests {
             dom.render_immediate_to_vec();
             assert_eq!(*host.0.borrow(), ["stop"]);
         }
+    }
+
+    #[test]
+    fn api_key_is_an_optional_choice_with_normal_composer_submission() {
+        dioxus_html::set_event_converter(Box::new(SerializedHtmlEventConverter));
+        let host = Rc::new(Host::default());
+        let mut dom = VirtualDom::new_with_props(
+            Login,
+            LoginProps {
+                controls: true,
+                pending: false,
+                status: "authentication".into(),
+                key_available: true,
+            },
+        );
+        dom.provide_root_context(HostBinding(host.clone()));
+        let initial = dom.rebuild_to_vec();
+        let html = dioxus_ssr::render(&dom);
+        assert!(!html.contains("type=\"password\""));
+        assert!(!html.contains(&translate("onboarding-save-key")));
+        let label = translate("onboarding-use-key");
+        let choose = initial
+            .edits
+            .iter()
+            .find_map(|edit| match edit {
+                Mutation::SetAttribute {
+                    name: "aria-label",
+                    value: AttributeValue::Text(value),
+                    id,
+                    ..
+                } if value == &label => Some(*id),
+                _ => None,
+            })
+            .expect("supported API key option must be available");
+        dom.runtime().handle_event(
+            "click",
+            Event::new(
+                EventData::Mouse(SerializedMouseData::default()).into_any(),
+                true,
+            ),
+            choose,
+        );
+        let fields = dom.render_immediate_to_vec();
+        let html = dioxus_ssr::render(&dom);
+        assert!(html.contains("type=\"password\""));
+        assert!(!html.contains("<textarea"));
+        assert!(!html.contains("data-slot=\"composer-notice\""));
+        assert!(!html.contains(&translate("onboarding-save-key")));
+        assert!(host.0.borrow().is_empty());
+        let label = translate("onboarding-api-key");
+        let input = fields
+            .edits
+            .iter()
+            .find_map(|edit| match edit {
+                Mutation::SetAttribute {
+                    name: "aria-label",
+                    value: AttributeValue::Text(value),
+                    id,
+                    ..
+                } if value == &label => Some(*id),
+                _ => None,
+            })
+            .expect("selected key mode must expose the password input");
+        dom.runtime().handle_event(
+            "input",
+            Event::new(
+                EventData::Form(SerializedFormData {
+                    value: "private-test-api-key".into(),
+                    values: Vec::new(),
+                    valid: true,
+                })
+                .into_any(),
+                true,
+            ),
+            input,
+        );
+        dom.render_immediate_to_vec();
+        let keyboard = SerializedKeyboardData::new(
+            Key::Enter,
+            Code::Enter,
+            Location::Standard,
+            false,
+            Modifiers::empty(),
+            false,
+        );
+        dom.runtime().handle_event(
+            "keydown",
+            Event::new(EventData::Keyboard(keyboard).into_any(), true),
+            input,
+        );
+        dom.render_immediate_to_vec();
+        assert_eq!(*host.0.borrow(), ["key"]);
+        assert!(!dioxus_ssr::render(&dom).contains("private-test-api-key"));
     }
 
     #[test]

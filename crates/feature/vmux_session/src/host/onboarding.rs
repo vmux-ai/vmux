@@ -132,14 +132,14 @@ type SetupSessions<'w, 's> = Query<
 >;
 
 fn begin(
-    mut drafts: Query<(Entity, &mut Draft), Without<Entered>>,
+    drafts: Query<(Entity, &Draft), Without<Entered>>,
     sessions: SetupSessions,
     restore: Query<&vmux_ecs::store::WorkspaceRestore>,
     pages: Query<(&vmux_ecs::PageMetadata, &ChildOf), With<vmux_ecs::page::HostsPage>>,
     stacks: Query<(&vmux_ecs::PageMetadata, Has<vmux_ecs::Active>), With<vmux_ecs::PageNavigation>>,
     mut commands: Commands,
 ) {
-    let Ok((owner, mut draft)) = drafts.single_mut() else {
+    let Ok((owner, draft)) = drafts.single() else {
         return;
     };
     if restore.iter().any(|restore| !restore.complete) {
@@ -203,20 +203,10 @@ fn begin(
         }
     }
     let selected = recorded.or_else(|| ready.map(|(_, id)| id));
-    if selected.is_none() {
-        if restore.iter().any(|restore| restore.store_present)
-            && !draft.setup_started
-            && draft.agent_id.is_empty()
-            && draft.session_id.is_empty()
-        {
-            return;
-        }
-        draft.setup_started = true;
-        draft.dirty = true;
-    }
-    let url = selected
-        .map(|id| crate::Route::Session(id).url())
-        .unwrap_or_else(|| "vmux://sessions/inbox?setup=1".to_string());
+    let Some(selected) = selected else {
+        return;
+    };
+    let url = crate::Route::Session(selected).url();
     commands.write_message(vmux_ecs::PageOpenRequest {
         target: PageOpenTarget::Stack(stack),
         url,
@@ -260,6 +250,7 @@ fn connect(
     let previous = sessions.iter().find(|(id, agent)| {
         id.0 == draft.session_id && agent.is_some_and(|agent| agent.0 == *agent_id)
     });
+    draft.setup_started = true;
     draft.agent_id.clone_from(agent_id);
     draft.paused = false;
     draft.failed = false;
@@ -389,7 +380,7 @@ mod tests {
     #[test]
     fn existing_workspace_preserves_launcher_and_unfinished_setup_resumes_after_restart() {
         for (store_present, resume, expected) in
-            [(true, false, 0), (true, true, 1), (false, false, 1)]
+            [(true, false, 0), (true, true, 0), (false, false, 0)]
         {
             let mut app = App::new();
             app.add_plugins(Plugin);
@@ -446,7 +437,7 @@ mod tests {
     }
 
     #[test]
-    fn first_launch_enters_setup_after_restore_and_later_tabs_keep_the_launcher() {
+    fn first_launch_stays_on_start_until_explicit_setup_and_later_tabs_keep_the_launcher() {
         let mut app = App::new();
         app.add_plugins(Plugin);
         let restore = app
@@ -491,9 +482,7 @@ mod tests {
             .resource_mut::<Messages<vmux_ecs::PageOpenRequest>>()
             .drain()
             .collect();
-        assert_eq!(opens.len(), 1);
-        assert_eq!(opens[0].url, "vmux://sessions/inbox?setup=1");
-        assert!(matches!(opens[0].target, PageOpenTarget::Stack(target) if target == stack));
+        assert!(opens.is_empty());
         let later = app
             .world_mut()
             .spawn((
@@ -564,15 +553,12 @@ mod tests {
                 .resource_mut::<Messages<vmux_ecs::PageOpenRequest>>()
                 .drain()
                 .collect();
-            assert_eq!(opens.len(), 1);
-            assert_eq!(
-                opens[0].url,
-                if attached {
-                    "vmux://sessions/existing"
-                } else {
-                    "vmux://sessions/inbox?setup=1"
-                }
-            );
+            if attached {
+                assert_eq!(opens.len(), 1);
+                assert_eq!(opens[0].url, "vmux://sessions/existing");
+            } else {
+                assert!(opens.is_empty());
+            }
         }
     }
 
@@ -717,7 +703,7 @@ mod tests {
     }
 
     #[test]
-    fn cancellation_returns_to_selection_and_preserves_the_session_for_explicit_retry() {
+    fn cancellation_keeps_start_and_preserves_the_session_for_explicit_retry() {
         let mut app = App::new();
         app.add_plugins(Plugin);
         app.update();
@@ -776,8 +762,7 @@ mod tests {
             .resource_mut::<Messages<vmux_ecs::PageOpenRequest>>()
             .drain()
             .collect();
-        assert_eq!(opens.len(), 1);
-        assert_eq!(opens[0].url, "vmux://sessions/inbox?setup=1");
+        assert!(opens.is_empty());
         app.world_mut().entity_mut(view).insert(SessionManagerView);
         app.world_mut().trigger(UiInput {
             webview: view,

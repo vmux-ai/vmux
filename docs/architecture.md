@@ -1556,8 +1556,9 @@ their bound Session state. The service carries serialized agent protocol message
 persistent daemon sessions; `vmux_acp` owns the client-host Bevy messages produced when those
 wire messages enter ECS.
 
-ACP setup opens as a conversation on the first launcher entry without saved workspace history.
-An existing workspace keeps its launcher when no setup or usable Session remains. The guide asks which agent to
+The Start page offers a welcome and Start control when no agent is selected. Start opens the
+setup conversation explicitly; launcher entry only redirects to a recorded or usable Session.
+The guide asks which agent to
 install or connect; selecting its compact composer choice starts only the required installation and
 authentication. Work descriptions and project selection belong to the actual agent conversation.
 An installed agent reuses its package and compatible credentials. A live, usable preferred Session
@@ -1565,7 +1566,7 @@ opens directly; a recorded setup Session resumes its unfinished step. Later laun
 their ordinary navigation behavior.
 
 `vmux_session::host::onboarding::Plugin` owns profile-local setup progress, agent selection, and the Session reference.
-Initial selection is saved before choosing an agent, so an interrupted first entry can resume.
+Explicit agent selection starts the persisted setup record, so an interrupted connection can resume.
 `OnboardingConnect` creates or reopens setup through `StartRequest::for_setup`, which carries no user
 content. Session creation enqueues only explicit user text or attachments; setup leaves the prompt
 queue empty until the user sends a real message. Schema 2 setup records preserve the selected agent
@@ -1573,10 +1574,13 @@ while discarding the earlier task-first Session reference, without deleting conv
 
 The bootstrap and live Session share their conversation surface, transcript, assistant/user turns,
 composer and choice controls. The guide offers up to three common agent families, preferring
-an installed option within each family. Selection and authentication choices sit in the shared
-composer's outer notice frame; search exposes the remaining supported catalog when requested.
+an installed option within each family. Selection sits in the shared composer's outer notice frame;
+search exposes the remaining supported catalog when requested. Authentication uses one Connect
+control for the provider's account/browser method. Compatible API keys are a secondary opt-in route.
 The host owns setup state; the cursor and search stay local to the UI. Normal text input is
-disabled until readiness, and supported masked key entry replaces that input when needed.
+disabled until readiness. Explicit key entry uses the same composer with a password input and
+ordinary Send/Enter submission; private input never enters the normal draft. There is no separate
+key form or persistence control. The uncommitted key-entry mode resets outside authentication.
 Preparation and installation show the normal Stop control rather than management options.
 Stop, Ctrl+C and Escape route to setup cancellation without flushing queued work or discarding
 the Session. Shared loading/progress animations and phase icons accompany guide messages;

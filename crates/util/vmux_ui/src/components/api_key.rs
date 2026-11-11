@@ -1,3 +1,4 @@
+use crate::components::composer::{PromptComposer, PromptComposerMode};
 use crate::i18n::translate;
 use dioxus::prelude::*;
 
@@ -5,52 +6,63 @@ use dioxus::prelude::*;
 pub fn ApiKeyEntry(
     pending: bool,
     failed: bool,
+    #[props(default = "var(--primary)".to_string())] accent_color: String,
+    #[props(default)] on_stop: Option<EventHandler<()>>,
     on_submit: EventHandler<vmux_api::Secret>,
 ) -> Element {
     let mut key = use_signal(String::new);
-    let value = key();
+    let stoppable = pending && on_stop.is_some();
+    let keyboard_submit = on_submit;
+    let button_submit = on_submit;
     rsx! {
-        div { class: "flex flex-col gap-2",
-            label { class: "text-xs text-muted-foreground", {translate("onboarding-api-key")} }
-            div { class: "flex flex-wrap gap-2",
+        PromptComposer {
+            value: String::new(),
+            accent_color,
+            accent_gradient: "from-indigo-500 to-violet-600".to_string(),
+            placeholder: translate("onboarding-api-key"),
+            footer: Some(rsx! {}),
+            show_add_button: false,
+            disabled: pending && !stoppable,
+            mode: if stoppable { PromptComposerMode::Stop } else { PromptComposerMode::Send },
+            action_title: translate(if stoppable { "common-stop" } else { "command-send" }),
+            action_enabled: stoppable || !key.peek().trim().is_empty(),
+            input: Some(rsx! {
                 input {
                     r#type: "password",
                     autocomplete: "off",
                     aria_label: translate("onboarding-api-key"),
-                    class: "min-w-0 flex-1 rounded-lg bg-muted/40 px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-primary/30",
-                    value,
+                    placeholder: translate("onboarding-api-key"),
+                    class: "min-h-11 w-full bg-transparent px-1.5 py-2.5 text-base outline-none placeholder:text-muted-foreground/50 disabled:cursor-not-allowed sm:min-h-10 sm:py-2 sm:text-[15px]",
+                    value: key(),
                     disabled: pending,
-                    oninput: move |event| key.set(event.value()),
+                    oninput: move |event| { if !pending { key.set(event.value()); } },
+                    onpaste: move |event| event.stop_propagation(),
                     onkeydown: move |event| {
-                        if event.key() == Key::Escape
-                            || event.modifiers().ctrl() && event.key() == Key::Character("c".into())
-                        {
-                            return;
-                        }
+                        if event.key() == Key::Escape || event.modifiers().ctrl() && event.key() == Key::Character("c".into()) { return; }
                         event.stop_propagation();
                         if event.key() == Key::Enter {
                             event.prevent_default();
                             if !pending && !key.peek().trim().is_empty() {
-                                on_submit.call(vmux_api::Secret::new(std::mem::take(&mut *key.write())));
+                                keyboard_submit.call(vmux_api::Secret::new(std::mem::take(&mut *key.write())));
                             }
                         }
                     },
                 }
-                button {
-                    r#type: "button",
-                    aria_label: translate("onboarding-save-key"),
-                    class: "rounded-lg bg-muted/50 px-3 py-2 text-sm hover:bg-muted/70 disabled:opacity-40",
-                    disabled: pending || key.peek().trim().is_empty(),
-                    onclick: move |_| {
-                        on_submit.call(vmux_api::Secret::new(std::mem::take(&mut *key.write())));
-                    },
-                    {translate("onboarding-save-key")}
+            }),
+            on_input: move |_| {},
+            on_keydown: move |_| {},
+            on_paste: move |_| {},
+            on_attach: move |_| {},
+            on_remove_attachment: move |_| {},
+            on_action: move |_| {
+                if stoppable {
+                    if let Some(stop) = on_stop { stop.call(()); }
+                } else if !pending && !key.peek().trim().is_empty() {
+                    button_submit.call(vmux_api::Secret::new(std::mem::take(&mut *key.write())));
                 }
-            }
-            if failed {
-                p { class: "text-xs text-destructive", {translate("onboarding-key-failed")} }
-            }
+            },
         }
+        if failed { p { role: "status", class: "px-2 text-xs text-destructive", {translate("onboarding-key-failed")} } }
     }
 }
 
@@ -95,13 +107,13 @@ mod tests {
                 _ => None,
             })
             .expect("API keys must be entered through a password input");
-        let label = translate("onboarding-save-key");
+        let label = translate("command-send");
         let save = initial
             .edits
             .iter()
             .find_map(|edit| match edit {
                 Mutation::SetAttribute {
-                    name: "aria-label",
+                    name: "title",
                     value: AttributeValue::Text(value),
                     id,
                     ..
