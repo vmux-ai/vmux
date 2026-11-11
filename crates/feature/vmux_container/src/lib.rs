@@ -17,8 +17,6 @@ pub mod event;
 #[cfg(host)]
 mod cli;
 #[cfg(host)]
-mod compose;
-#[cfg(host)]
 mod control;
 #[cfg(host)]
 mod host;

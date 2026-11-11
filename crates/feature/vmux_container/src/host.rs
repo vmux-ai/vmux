@@ -12,11 +12,10 @@ use vmux_ecs::{PageMetadata, UiStatePlugin, UiStateWrite};
 use vmux_vm::{EngineClient, Phase, Settings, Status};
 
 use crate::ContainerPlugin;
-use crate::compose::ComposeProject;
 use crate::control::{Busy, Command, ControlPlugin, ControlSet, Finished, Reply, Request};
 use crate::event::{
-    ContainerLogsRequest, ContainerProjectOpenRequest, ContainerSettingsRequest,
-    ContainerStartRequest, ContainerStopRequest, ContainerUiState,
+    ContainerLogsRequest, ContainerSettingsRequest, ContainerStartRequest, ContainerStopRequest,
+    ContainerUiState,
 };
 use crate::inventory::{Catalog, Inventory, InventoryPlugin, Output};
 
@@ -34,7 +33,6 @@ impl Plugin for ContainerPlugin {
                 ContainerStopRequest,
                 ContainerLogsRequest,
                 ContainerSettingsRequest,
-                ContainerProjectOpenRequest,
             )>::default());
         if !app.is_plugin_added::<ControlPlugin>() {
             app.add_plugins(ControlPlugin);
@@ -54,17 +52,11 @@ impl Plugin for ContainerPlugin {
         app.add_observer(page_ready)
             .add_observer(start)
             .add_observer(configure)
-            .add_observer(open_project)
             .add_observer(stop)
             .add_observer(logs)
             .add_observer(finish)
             .add_systems(Startup, spawn)
-            .add_systems(
-                Update,
-                (finish_picks, inspect)
-                    .chain()
-                    .in_set(ContainerSet::Inspect),
-            )
+            .add_systems(Update, inspect.in_set(ContainerSet::Inspect))
             .add_systems(Update, project.in_set(ContainerSet::Project));
     }
 }
@@ -84,9 +76,6 @@ pub(crate) enum ContainerSet {
     Inventory,
     Project,
 }
-
-#[derive(Component)]
-struct PickTask(Task<std::io::Result<Option<ComposeProject>>>);
 
 #[derive(Component)]
 struct NextInspection(Instant);
@@ -222,71 +211,6 @@ fn configure(
         command: Command::Configure,
         settings: requested,
     });
-}
-
-type PickingEngines<'w, 's> = Query<
-    'w,
-    's,
-    (
-        Entity,
-        &'static Settings,
-        Option<&'static Busy>,
-        Option<&'static PickTask>,
-    ),
-    With<EngineView>,
->;
-
-fn open_project(
-    trigger: On<UiInput<ContainerProjectOpenRequest>>,
-    pages: Query<(), With<PageView>>,
-    engines: PickingEngines,
-    proxy: Option<Res<EventLoopProxyWrapper>>,
-    mut commands: Commands,
-) {
-    if !pages.contains(trigger.event().webview) {
-        return;
-    }
-    let Ok((entity, settings, busy, pick)) = engines.single() else {
-        return;
-    };
-    if busy.is_some() || pick.is_some() {
-        return;
-    }
-    let directory = settings.shared_directory.clone();
-    let wake = Wake::beside(proxy.as_deref());
-    commands
-        .entity(entity)
-        .insert(PickTask(IoTaskPool::get().spawn(async move {
-            let result = ComposeProject::select(directory).await;
-            drop(wake);
-            result
-        })));
-}
-
-fn finish_picks(
-    mut engines: Query<(Entity, &Settings, &mut LastError, &mut PickTask), With<EngineView>>,
-    mut commands: Commands,
-) {
-    for (entity, settings, mut error, mut task) in &mut engines {
-        let Some(result) = future::block_on(future::poll_once(&mut task.0)) else {
-            continue;
-        };
-        commands.entity(entity).remove::<PickTask>();
-        match result {
-            Ok(Some(project)) => {
-                commands.trigger(Request {
-                    entity,
-                    reply: entity,
-                    command: Command::Project(project.directory()),
-                    settings: settings.clone(),
-                });
-            }
-            Ok(None) => {}
-            Err(value) => {
-                error.0 = value.to_string();
-            }
-        }
-    }
 }
 
 fn stop(
@@ -431,7 +355,6 @@ type ProjectedEngines<'w, 's> = Query<
         Option<&'static Busy>,
         Entity,
         Option<&'static Inventory>,
-        Option<&'static PickTask>,
         &'static ConfigurationRevision,
     ),
     With<EngineView>,
@@ -443,8 +366,7 @@ fn project(
     catalog: Catalog,
     mut commands: Commands,
 ) {
-    let Ok((settings, observed, logs, error, busy, engine, inventory, picker, revision)) =
-        engines.single()
+    let Ok((settings, observed, logs, error, busy, engine, inventory, revision)) = engines.single()
     else {
         return;
     };
@@ -461,7 +383,7 @@ fn project(
         supported: cfg!(all(target_os = "macos", target_arch = "aarch64")),
         running: observed.0.running,
         ready: observed.0.docker_ready,
-        busy: busy.is_some() || picker.is_some(),
+        busy: busy.is_some(),
         phase: phase.into(),
         data_directory: settings.directory.to_string_lossy().into_owned(),
         shared_directory: settings.shared_directory.to_string_lossy().into_owned(),
@@ -486,7 +408,6 @@ fn project(
         configuration_revision: revision.0,
         starting: busy.is_some_and(Busy::starting),
         stopping: busy.is_some_and(Busy::stopping),
-        project_starting: busy.is_some_and(Busy::project),
     };
     for (page, output) in &pages {
         let mut snapshot = snapshot.clone();
