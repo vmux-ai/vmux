@@ -899,6 +899,12 @@ feature payloads are released without removing the operation identity, and late 
 revive canceled work. Reads and long-lived transport actors keep their own task lifecycles.
 Project selections additionally reference their Tab and capture `OperationTargetRevision`;
 `accepts` rejects a result after selection changes. Cleanup guards dispose of discarded checkouts.
+Project creation, cloning, import, and deletion and Explorer file mutations use the same lifecycle.
+Their task entities carry `OperationTarget` and belong to the requesting page. Feature systems
+apply results and remove task state, while `OperationCompleted` retains success or failure for
+inspection. Canceled work cannot apply a late result; project publication still checks its captured
+page revision before replacing the current view.
+
 
 ---
 

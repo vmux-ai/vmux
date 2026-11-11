@@ -48,11 +48,28 @@ pub struct OperationBundle {
     state: OperationState,
 }
 
+impl OperationBundle {
+    pub fn running(mut self) -> Self {
+        self.state = OperationState::Running;
+        self
+    }
+}
+
 #[derive(EntityEvent)]
 pub struct OperationCompleted {
     #[event_target]
     pub entity: Entity,
     pub result: Result<(), String>,
+}
+
+impl OperationCompleted {
+    pub fn from_result<T>(entity: Entity, result: &Result<T, String>) -> Self {
+        let result = match result {
+            Ok(_) => Ok(()),
+            Err(error) => Err(error.clone()),
+        };
+        Self { entity, result }
+    }
 }
 
 fn complete(
