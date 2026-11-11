@@ -1124,7 +1124,7 @@ project-github-repository = GitHub 仓库
 project-edit-conflict = 项目已更改。请重新打开编辑界面。
 
 onboarding-setup = 设置代理
-onboarding-setup-intro = 我们来设置你的代理。你想使用哪个 ACP 代理？
+onboarding-setup-intro = 这里有几个常用的代理。请选择一个，或搜索其他代理。我会引导你完成安装和登录。
 onboarding-install-agent = 安装 { $agent }
 onboarding-connect-agent = 连接 { $agent }
 onboarding-ready = { $agent } 已准备就绪。现在可以开始对话。

@@ -1124,7 +1124,7 @@ project-github-repository = GitHub 저장소
 project-edit-conflict = 프로젝트가 변경되었습니다. 편집 화면을 다시 열어 주세요.
 
 onboarding-setup = 에이전트 설정
-onboarding-setup-intro = 에이전트를 설정해 봅시다. 어떤 ACP 에이전트를 사용할까요?
+onboarding-setup-intro = 자주 사용하는 에이전트 몇 가지를 골랐어요. 하나를 선택하거나 다른 에이전트를 검색하세요. 설치와 로그인은 제가 안내할게요.
 onboarding-install-agent = { $agent } 설치
 onboarding-connect-agent = { $agent } 연결
 onboarding-ready = { $agent } 준비가 완료되었습니다. 이제 대화할 수 있습니다.

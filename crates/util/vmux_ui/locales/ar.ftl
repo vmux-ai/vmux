@@ -1127,7 +1127,7 @@ project-github-repository = مستودع GitHub
 project-edit-conflict = تغيّر هذا المشروع. أعد فتح المحرر للمحاولة مرة أخرى.
 
 onboarding-setup = إعداد وكيل
-onboarding-setup-intro = لنقم بإعداد وكيلك. أي وكيل ACP تريد استخدامه؟
+onboarding-setup-intro = إليك بعض الوكلاء الشائعين. اختر أحدهم أو ابحث عن وكيل آخر. سأرشدك خلال التثبيت وتسجيل الدخول.
 onboarding-install-agent = تثبيت { $agent }
 onboarding-connect-agent = الاتصال بـ { $agent }
 onboarding-ready = أصبح { $agent } جاهزًا. يمكنك بدء المحادثة.

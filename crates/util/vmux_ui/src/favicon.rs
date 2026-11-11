@@ -17,6 +17,11 @@ impl FaviconSource {
         AgentBrand::from_id(agent_id).map(|brand| brand.icon_url().to_string())
     }
 
+    pub fn is_monochrome(source: &str) -> bool {
+        source.starts_with("https://cdn.agentclientprotocol.com/registry/")
+            && source.ends_with(".svg")
+    }
+
     pub fn vmux(url: &str) -> Option<String> {
         let host = url
             .trim()
@@ -65,10 +70,12 @@ impl AgentBrand {
 
     fn icon_url(&self) -> &'static str {
         match self {
-            Self::Claude => "assets/agent-logos/claude.png",
-            Self::Codex => "assets/agent-logos/codex.png",
+            Self::Claude => "https://cdn.agentclientprotocol.com/registry/v1/latest/claude-acp.svg",
+            Self::Codex => "https://cdn.agentclientprotocol.com/registry/v1/latest/codex-acp.svg",
             Self::Gemini => "https://cdn.agentclientprotocol.com/registry/v1/latest/gemini.svg",
-            Self::Mistral => "assets/agent-logos/vibe.png",
+            Self::Mistral => {
+                "https://cdn.agentclientprotocol.com/registry/v1/latest/mistral-vibe.svg"
+            }
         }
     }
 }
@@ -93,6 +100,11 @@ mod components {
         let img_class = class.unwrap_or_else(|| DEFAULT_FAVICON_CLASS.to_string());
         let globe_class = globe_class.unwrap_or_else(|| DEFAULT_GLOBE_CLASS.to_string());
         let src = FaviconSource::resolve(&favicon_url, &url);
+        let img_class = if src.as_deref().is_some_and(FaviconSource::is_monochrome) {
+            format!("{img_class} dark:invert")
+        } else {
+            img_class
+        };
         let source_key = src.clone().unwrap_or_default();
         let mut fallback_for = use_signal(|| None::<String>);
         let mut failed_for = use_signal(|| None::<String>);
@@ -219,7 +231,10 @@ mod tests {
     fn agent_maps_vibe() {
         assert_eq!(
             FaviconSource::agent("mistral-vibe"),
-            Some("assets/agent-logos/vibe.png".to_string())
+            Some(
+                "https://cdn.agentclientprotocol.com/registry/v1/latest/mistral-vibe.svg"
+                    .to_string()
+            )
         );
     }
 
@@ -227,11 +242,15 @@ mod tests {
     fn agent_maps_claude_and_codex() {
         assert_eq!(
             FaviconSource::agent("claude-acp"),
-            Some("assets/agent-logos/claude.png".to_string())
+            Some(
+                "https://cdn.agentclientprotocol.com/registry/v1/latest/claude-acp.svg".to_string()
+            )
         );
         assert_eq!(
             FaviconSource::agent("codex-acp"),
-            Some("assets/agent-logos/codex.png".to_string())
+            Some(
+                "https://cdn.agentclientprotocol.com/registry/v1/latest/codex-acp.svg".to_string()
+            )
         );
     }
 

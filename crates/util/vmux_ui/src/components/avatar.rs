@@ -92,7 +92,12 @@ pub fn AgentThumbnail(
 ) -> Element {
     let src = AgentThumbnailSource::resolve(src, &seed);
     let background = AgentThumbnailBackground::resolve(&background, &seed, src.as_deref());
-    let class = cn([AGENT_THUMBNAIL, class.as_str()]);
+    let theme_class = if src.as_deref().is_some_and(FaviconSource::is_monochrome) {
+        "dark:[&_img]:invert"
+    } else {
+        ""
+    };
+    let class = cn([AGENT_THUMBNAIL, theme_class, class.as_str()]);
     rsx! {
         Avatar { src, seed, background, alt, class }
     }
@@ -102,7 +107,16 @@ struct AgentThumbnailSource;
 
 impl AgentThumbnailSource {
     fn resolve(src: Option<String>, seed: &str) -> Option<String> {
-        FaviconSource::agent(seed).or(src)
+        if let Some(source) = src {
+            if source.trim().is_empty() {
+                return FaviconSource::agent(seed);
+            }
+            if source == "vmux://acp/assets/favicons/acp.svg" {
+                return FaviconSource::agent(seed).or(Some(source));
+            }
+            return Some(source);
+        }
+        FaviconSource::agent(seed)
     }
 }
 
@@ -279,11 +293,18 @@ mod tests {
                 Some("vmux://acp/assets/favicons/acp.svg".into()),
                 "codex"
             ),
-            Some("assets/agent-logos/codex.png".into())
+            Some("https://cdn.agentclientprotocol.com/registry/v1/latest/codex-acp.svg".into())
         );
         assert_eq!(
             AgentThumbnailSource::resolve(Some("custom.svg".into()), "custom-agent"),
             Some("custom.svg".into())
+        );
+        assert_eq!(
+            AgentThumbnailSource::resolve(
+                Some("https://provider.example/claude.svg".into()),
+                "claude-acp"
+            ),
+            Some("https://provider.example/claude.svg".into())
         );
     }
 

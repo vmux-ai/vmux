@@ -1557,7 +1557,7 @@ persistent daemon sessions; `vmux_acp` owns the client-host Bevy messages produc
 wire messages enter ECS.
 
 ACP setup opens as a conversation on the first launcher entry. The guide asks which agent to
-install or connect; selecting its card beneath the question starts only the required installation and
+install or connect; selecting its compact choice within the guide message starts only the required installation and
 authentication. Work descriptions and project selection belong to the actual agent conversation.
 An installed agent reuses its package and compatible credentials. A live, usable preferred Session
 opens directly; a recorded setup Session resumes its unfinished step. Later launcher tabs keep
@@ -1570,13 +1570,16 @@ queue empty until the user sends a real message. Schema 2 setup records preserve
 while discarding the earlier task-first Session reference, without deleting conversation history.
 
 The bootstrap and live Session share their conversation surface, transcript, assistant/user turns,
-composer and choice controls. Agent selection embeds Tools' search, counted sections, adaptive
-collection, grid/list toggle and entries in the transcript. Shared agent thumbnails and compact
-operation buttons display curated featured agents and the complete supported catalog;
-only an operation in progress highlights an entry.
+composer and choice controls. The guide embeds up to three compact choices from common agent
+families in its own assistant turn, preferring an installed option within each family.
+Shared choice controls, agent thumbnails and a compact search expose the remaining supported
+catalog only when requested. The host still owns setup state; selection and search remain local UI input.
 The normal composer is disabled during selection; setup controls replace it during installation and
 sign-in, and readiness makes it available. A minimal setup-guide icon accompanies guide messages.
 ACP supplies its supported catalog, credential availability and managed installer.
+Agent logos use the official registry's 16×16, monochrome SVG icon metadata. Shared thumbnails
+and favicons adapt those icons to the current theme; supplied icons take precedence over legacy
+alias fallbacks. The client does not maintain colored logo assets beside the registry.
 Preparing and authentication states hold any genuinely submitted user messages until the provider
 establishes its Session. Advertised authentication methods run through ACP `authenticate`;
 cancellation detaches the waiter or runtime and keeps reusable package data. Provider sign-in

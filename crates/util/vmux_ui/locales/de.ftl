@@ -1127,7 +1127,7 @@ project-github-repository = GitHub-Repository
 project-edit-conflict = Dieses Projekt wurde geändert. Öffnen Sie den Editor erneut.
 
 onboarding-setup = Agent einrichten
-onboarding-setup-intro = Richten wir deinen Agenten ein. Welchen ACP-Agenten möchtest du verwenden?
+onboarding-setup-intro = Hier sind einige gängige Agenten. Wähle einen aus oder suche nach einem anderen. Ich begleite dich bei Installation und Anmeldung.
 onboarding-install-agent = { $agent } installieren
 onboarding-connect-agent = Mit { $agent } verbinden
 onboarding-ready = { $agent } ist bereit. Du kannst jetzt chatten.
