@@ -1,4 +1,4 @@
-pub use client::{EngineClient, Status};
+pub use client::{EngineClient, Owner, Status};
 pub use docker::{
     Client as DockerClient, Condition as DockerCondition, Container,
     Dependency as DockerDependency, Operation as DockerOperation, Port as DockerPort,

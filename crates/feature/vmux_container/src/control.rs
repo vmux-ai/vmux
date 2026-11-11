@@ -2,12 +2,14 @@ use std::io::{self, Read, Seek, SeekFrom};
 use std::path::Path;
 
 use bevy::winit::EventLoopProxyWrapper;
-use bevy_app::{App, Plugin, Update};
+use bevy_app::{App, AppExit, Last, Plugin, Update};
 use bevy_ecs::name::Name;
 use bevy_ecs::prelude::*;
 use bevy_tasks::{IoTaskPool, Task, TaskPoolBuilder, futures_lite::future};
+use vmux_ecs::service::{Restarting, ShutdownSet};
 use vmux_ecs::wake::Wake;
 use vmux_ecs::{Operation, OperationCompleted, OperationPlugin, OperationState, OperationTarget};
+use vmux_vm::Owner;
 use vmux_vm::{DockerClient, DockerOperation, EngineClient, Settings, Status};
 
 use crate::event::ContainerOperation;
@@ -26,6 +28,8 @@ impl Plugin for ControlPlugin {
             app.add_plugins(OperationPlugin);
         }
         app.add_observer(request)
+            .init_resource::<Lifetime>()
+            .add_systems(Last, shutdown.before(ShutdownSet))
             .add_systems(Update, poll.in_set(ControlSet::Complete));
     }
 }
@@ -33,6 +37,36 @@ impl Plugin for ControlPlugin {
 #[derive(SystemSet, Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub(crate) enum ControlSet {
     Complete,
+}
+
+#[derive(Resource)]
+struct Lifetime {
+    owner: Owner,
+}
+
+impl Default for Lifetime {
+    fn default() -> Self {
+        Self {
+            owner: Owner::new(vmux_profile::ProfilePaths::current().profile()),
+        }
+    }
+}
+
+fn shutdown(
+    mut exits: MessageReader<AppExit>,
+    restarting: Option<Res<Restarting>>,
+    lifetime: Res<Lifetime>,
+    configured: Query<&Settings, With<crate::host::EngineView>>,
+) {
+    if exits.read().count() == 0 || restarting.is_some() {
+        return;
+    }
+    lifetime.owner.cancel();
+    for settings in &configured {
+        if let Err(error) = EngineClient::new(settings.clone()).stop_owned(&lifetime.owner) {
+            bevy::log::error!(%error, "application-owned VM shutdown failed");
+        }
+    }
 }
 
 #[derive(Clone)]
@@ -64,10 +98,10 @@ impl Command {
         !matches!(self, Self::Status | Self::Logs)
     }
 
-    fn execute(self, settings: Settings, helper: &Path) -> io::Result<Reply> {
+    fn execute(self, settings: Settings, helper: &Path, owner: &Owner) -> io::Result<Reply> {
         let mut client = EngineClient::new(settings.clone());
         match self {
-            Self::Start => Ok(Reply::Started(client.start(helper)?)),
+            Self::Start => Ok(Reply::Started(client.start_owned(helper, owner)?)),
             Self::Stop => {
                 client.stop()?;
                 Ok(Reply::Stopped(client.status()))
@@ -76,7 +110,7 @@ impl Command {
             Self::Configure => Ok(Reply::Configured(client.configure()?)),
             Self::Containers { ids, operation } => {
                 if operation == ContainerOperation::Start && !client.status().docker_ready {
-                    client.start(helper)?;
+                    client.start_owned(helper, owner)?;
                 }
                 let docker = DockerClient::new(&settings.socket());
                 let operation = match operation {
@@ -184,6 +218,7 @@ fn request(
     trigger: On<Request>,
     busy: Query<(), With<Busy>>,
     proxy: Option<Res<EventLoopProxyWrapper>>,
+    lifetime: Res<Lifetime>,
     mut commands: Commands,
 ) {
     let request = trigger.event();
@@ -228,6 +263,7 @@ fn request(
     let kind = request.command.clone();
     let work = kind.clone();
     let settings = request.settings.clone();
+    let owner = lifetime.owner.clone();
     let wake = Wake::beside(proxy.as_deref());
     commands
         .spawn((
@@ -238,7 +274,7 @@ fn request(
             RequestedBy(request.requester),
             RequestKind(kind),
             ControlTask(IoTaskPool::get().spawn(async move {
-                let result = work.execute(settings, &helper);
+                let result = work.execute(settings, &helper, &owner);
                 drop(wake);
                 result
             })),
@@ -283,5 +319,81 @@ fn poll(mut operations: RunningOperations, mut commands: Commands) {
             mutates: kind.0.mutates(),
             requester: requester.0,
         });
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::io::Write;
+    use std::time::Duration;
+
+    #[test]
+    fn quitting_a_restarted_gui_stops_configured_owned_engines_without_a_new_start() {
+        for restarting in [false, true] {
+            let temp = tempfile::tempdir().unwrap();
+            let profile = temp.path().join("profile");
+            std::fs::create_dir(&profile).unwrap();
+            let profile = profile.canonicalize().unwrap();
+            let mut settings = Settings::new(temp.path().join("engine"), temp.path());
+            settings.validate().unwrap();
+            let lease = std::fs::File::create(settings.directory.join("engine.lock")).unwrap();
+            lease.lock().unwrap();
+            std::fs::write(
+                settings.directory.join("engine-state.json"),
+                serde_json::to_vec(
+                    &serde_json::json!({"phase":"ready", "failure":null, "owner":profile}),
+                )
+                .unwrap(),
+            )
+            .unwrap();
+            let listener =
+                std::os::unix::net::UnixListener::bind(settings.control_socket()).unwrap();
+            listener.set_nonblocking(true).unwrap();
+            let server = std::thread::spawn(move || {
+                if restarting {
+                    std::thread::sleep(Duration::from_millis(50));
+                    assert!(
+                        matches!(listener.accept(), Err(error) if error.kind() == io::ErrorKind::WouldBlock)
+                    );
+                } else {
+                    let deadline = std::time::Instant::now() + Duration::from_secs(2);
+                    let mut stream = loop {
+                        match listener.accept() {
+                            Ok((stream, _)) => break stream,
+                            Err(error) if error.kind() == io::ErrorKind::WouldBlock => {
+                                assert!(
+                                    std::time::Instant::now() < deadline,
+                                    "Quit did not stop its configured VM"
+                                );
+                                std::thread::sleep(Duration::from_millis(10));
+                            }
+                            Err(error) => panic!("accept shutdown: {error}"),
+                        }
+                    };
+                    stream
+                        .set_read_timeout(Some(Duration::from_secs(2)))
+                        .unwrap();
+                    let mut request = [0; 5];
+                    stream.read_exact(&mut request).unwrap();
+                    assert_eq!(&request, b"STOP\n");
+                    stream.write_all(b"STOPPING\n").unwrap();
+                }
+                drop(lease);
+            });
+            let mut app = App::new();
+            app.insert_resource(Lifetime {
+                owner: Owner::new(profile),
+            })
+            .add_plugins(ControlPlugin)
+            .add_message::<AppExit>();
+            app.world_mut().spawn((crate::host::EngineView, settings));
+            if restarting {
+                app.insert_resource(Restarting);
+            }
+            app.world_mut().write_message(AppExit::Success);
+            app.world_mut().run_schedule(Last);
+            server.join().unwrap();
+        }
     }
 }
