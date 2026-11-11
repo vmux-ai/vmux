@@ -85,10 +85,13 @@ pub fn WorkspaceLayout(
     #[props(default = rsx! {})] sidebar: Element,
     #[props(default)] search: Option<Element>,
     #[props(default = true)] show_sidebar: bool,
+    #[props(default)] resizable: bool,
     children: Element,
 ) -> Element {
-    let sidebar_width = vmux_api::editor::TreeWidth::DEFAULT;
+    let mut sidebar_width = use_signal(|| vmux_api::editor::TreeWidth::DEFAULT);
     let mut sidebar_open = use_signal(|| !cfg!(any(target_os = "ios", target_os = "android")));
+    let mut resizing = use_signal(|| false);
+    let mut resize_origin = use_signal(|| None::<(f64, u32)>);
     let duration = crate::motion::Motion::LAYOUT_MS;
     let sidebar_style = if sidebar_open() {
         format!(
@@ -98,37 +101,66 @@ pub fn WorkspaceLayout(
         format!("width:0px;opacity:0;transition-duration:{duration}ms;")
     };
     rsx! {
-        div { class: "flex min-h-0 flex-1 overflow-hidden", style: "--vmux-sidebar-width:{sidebar_width}px;",
-                if show_sidebar {
-                    aside {
-                        class: "flex min-h-0 shrink-0 flex-col overflow-hidden transition-[width,opacity] ease-out motion-reduce:transition-none",
-                        style: sidebar_style,
-                        aria_hidden: !sidebar_open(),
-                        inert: (!sidebar_open()).then_some(""),
-                        if let Some(search) = &search {
-                            div { class: "w-[min(var(--vmux-sidebar-width),50vw)] shrink-0", {search.clone()} }
+        div { class: "relative flex min-h-0 flex-1 overflow-hidden", style: "--vmux-sidebar-width:{sidebar_width}px;",
+            if show_sidebar {
+                aside {
+                    class: if resizing() {
+                        "relative flex min-h-0 shrink-0 flex-col overflow-hidden transition-none"
+                    } else {
+                        "relative flex min-h-0 shrink-0 flex-col overflow-hidden transition-[width,opacity] ease-out motion-reduce:transition-none"
+                    },
+                    style: sidebar_style,
+                    aria_hidden: !sidebar_open(),
+                    inert: (!sidebar_open()).then_some(""),
+                    if let Some(search) = &search {
+                        div { class: "w-[min(var(--vmux-sidebar-width),50vw)] shrink-0", {search.clone()} }
+                    }
+                    div { class: "min-h-0 w-[min(var(--vmux-sidebar-width),50vw)] flex-1 overflow-y-auto px-1 pb-2", {sidebar} }
+                    if resizable && sidebar_open() {
+                        div {
+                            class: "group absolute inset-y-0 right-0 z-30 flex w-1.5 cursor-col-resize items-center justify-center",
+                            onpointerdown: move |event: PointerEvent| {
+                                if event.trigger_button() != Some(dioxus::html::input_data::MouseButton::Primary) { return; }
+                                event.prevent_default();
+                                resize_origin.set(Some((event.client_coordinates().x, sidebar_width())));
+                                resizing.set(true);
+                            },
+                            span { class: "pointer-events-none h-9 w-1 rounded-full bg-foreground/20 opacity-0 transition-opacity group-hover:opacity-100" }
                         }
-                        div { class: "min-h-0 w-[min(var(--vmux-sidebar-width),50vw)] flex-1 overflow-y-auto px-1 pb-2", {sidebar} }
                     }
                 }
-                div { class: "flex min-w-0 flex-1 flex-col overflow-hidden",
-                    PageToolbarRow {
-                        if show_sidebar {
-                            PageSidebarToggle {
-                                open: sidebar_open(),
-                                label: translate("schema-side-sheet"),
-                                ontoggle: move |_| sidebar_open.set(!sidebar_open()),
-                            }
+            }
+            div { class: "flex min-w-0 flex-1 flex-col overflow-hidden",
+                PageToolbarRow {
+                    if show_sidebar {
+                        PageSidebarToggle {
+                            open: sidebar_open(), label: translate("schema-side-sheet"),
+                            ontoggle: move |_| sidebar_open.set(!sidebar_open()),
                         }
-                        if !show_sidebar {
-                            if let Some(search) = search {
-                                div { class: "w-[min(var(--vmux-sidebar-width),50vw)] min-w-0 shrink-0", {search} }
-                            }
-                        }
-                        div { class: "min-w-0 flex-1", {toolbar} }
                     }
-                    {children}
+                    if !show_sidebar {
+                        if let Some(search) = search {
+                            div { class: "w-[min(var(--vmux-sidebar-width),50vw)] min-w-0 shrink-0", {search} }
+                        }
+                    }
+                    div { class: "min-w-0 flex-1", {toolbar} }
                 }
+                {children}
+            }
+            if resizing() {
+                div {
+                    class: "fixed inset-0 z-[900] cursor-col-resize select-none touch-none",
+                    onpointermove: move |event: PointerEvent| {
+                        let Some((start, width)) = resize_origin() else { return; };
+                        if !event.held_buttons().contains(dioxus::html::input_data::MouseButton::Primary) {
+                            resize_origin.set(None); resizing.set(false); return;
+                        }
+                        sidebar_width.set((f64::from(width) + event.client_coordinates().x - start).clamp(f64::from(vmux_api::editor::TreeWidth::MIN), f64::from(vmux_api::editor::TreeWidth::MAX)) as u32);
+                    },
+                    onpointerup: move |_| { resize_origin.set(None); resizing.set(false); },
+                    onpointercancel: move |_| { resize_origin.set(None); resizing.set(false); },
+                }
+            }
         }
     }
 }

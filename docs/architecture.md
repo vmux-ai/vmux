@@ -1597,7 +1597,12 @@ stable IDs, shared names, image/state, Compose labels and published ports. Its o
 snapshot tasks preserve existing entity identity and retire removed containers. Per-page
 selection owns bounded log tasks and retains displayed output during refresh.
 
-The default Containers bookmark opens a grouped list and Info/Logs details. A stopped
+The default Containers bookmark uses `WorkspaceLayout` with the editor's side-sheet
+toggle and width bounds, and Git's breadcrumb header and toolbar. The list can be resized
+and collapsed; selection and Info/Logs choices update the page address. Sidebar/group layout transitions
+use the shared 120 ms motion timing, content changes fade in over 100 ms, and service
+startup/shutdown use the shared loading indicator. Reduced-motion preferences disable
+layout and content transitions; layout and selection never wait for them. A stopped
 service offers one Start control in the list pane, while details remain unselected.
 Startup uses persisted defaults and initially shares the home directory. Containers
 created through Docker CLI or Compose appear automatically from the daemon's inventory;
