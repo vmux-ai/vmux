@@ -1666,11 +1666,12 @@ once and owns one write task per root. Save operations carry preparation, provis
 commit state as components; systems enqueue immutable snapshots at the filesystem boundary.
 Writes check the current ECS revision and reject duplicate checkouts before dispatch. Only a
 successful atomic write updates Project entities and emits `ProjectSaved`; failed writes retain
-the previous registration. Stable Project URLs survive source edits, and removal persists hidden
-URL entities while leaving checkout files intact. Page routing and catalog projections read ECS
-registrations. Native folder selection authorizes a new external directory, and the form retains
-its draft on validation or clone failure. Accepted saves and registration removals finish
-after the requesting view closes.
+the previous registration. Stable Project URLs survive source edits. Removal persists hidden
+URL entities for the registration and its imported aliases while leaving checkout files intact.
+Alias resolution runs inside the root's write task, and committed hidden URLs are restored into ECS.
+Page routing and catalog projections read ECS registrations. Native folder selection authorizes
+a new external directory, and the form retains its draft on validation or clone failure.
+Accepted saves and registration removals finish after the requesting view closes.
 Project entities omit the workspace `Save` marker; `.projects.ron` is their only persistence owner.
 
 Project dashboards show related sessions, repository status and an entry point into Code,

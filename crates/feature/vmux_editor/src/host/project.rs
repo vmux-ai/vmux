@@ -1651,12 +1651,38 @@ mod tests {
 
     #[test]
     fn registered_removal_preserves_checkout_and_records_write_outcome() {
-        for (fail_write, close_page) in [(false, false), (true, false), (false, true), (true, true)]
-        {
+        for (fail_write, close_page, imported) in [
+            (false, false, false),
+            (true, false, false),
+            (false, true, false),
+            (true, true, false),
+            (false, false, true),
+            (false, true, true),
+        ] {
             let root = tempfile::tempdir().unwrap();
-            let checkout = root.path().join("checkout");
+            let outside = tempfile::tempdir().unwrap();
+            let checkout_root = if imported {
+                outside.path()
+            } else {
+                root.path()
+            };
+            let checkout = checkout_root.join("checkout");
             std::fs::create_dir_all(checkout.join(".git")).unwrap();
             let checkout = checkout.canonicalize().unwrap();
+            if imported {
+                std::fs::create_dir(root.path().join("imported")).unwrap();
+                std::os::unix::fs::symlink(&checkout, root.path().join("imported/checkout"))
+                    .unwrap();
+                let relative = PathBuf::from("../..")
+                    .join(outside.path().file_name().unwrap())
+                    .join("checkout");
+                std::os::unix::fs::symlink(relative, root.path().join("imported/duplicate"))
+                    .unwrap();
+                let unrelated = outside.path().join("unrelated");
+                std::fs::create_dir_all(unrelated.join(".git")).unwrap();
+                std::os::unix::fs::symlink(&unrelated, root.path().join("imported/unrelated"))
+                    .unwrap();
+            }
             let url = "vmux://projects/registered";
             let mut snapshot = Snapshot::default();
             snapshot.projects.insert(
@@ -1710,7 +1736,16 @@ mod tests {
                 let persisted: Snapshot =
                     ron::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
                 assert!(persisted.projects.is_empty());
-                assert!(persisted.hidden.contains(url));
+                let expected_hidden = if imported {
+                    BTreeSet::from([
+                        url.to_string(),
+                        "vmux://projects/imported/checkout".to_string(),
+                        "vmux://projects/imported/duplicate".to_string(),
+                    ])
+                } else {
+                    BTreeSet::from([url.to_string(), "vmux://projects/checkout".to_string()])
+                };
+                assert_eq!(persisted.hidden, expected_hidden);
                 if close_page {
                     continue;
                 }
@@ -1725,7 +1760,16 @@ mod tests {
                 let ProjectView::Catalog(catalog) = &state.view else {
                     panic!("expected catalog after removal");
                 };
-                assert!(catalog.entries.is_empty());
+                let urls: Vec<_> = catalog
+                    .entries
+                    .iter()
+                    .map(|entry| entry.url.as_str())
+                    .collect();
+                if imported {
+                    assert_eq!(urls, ["vmux://projects/imported/unrelated"]);
+                } else {
+                    assert!(urls.is_empty());
+                }
             }
         }
     }

@@ -79,7 +79,7 @@ pub(super) enum Mutation {
 struct WriteTask {
     requester: Entity,
     mutation: Mutation,
-    task: Task<Result<(), String>>,
+    task: Task<Result<BTreeSet<String>, String>>,
 }
 
 #[derive(Message, Clone)]
@@ -249,10 +249,62 @@ impl Snapshot {
         }
     }
 
-    fn write(&self, root: &Path) -> Result<(), String> {
-        let source = ron::ser::to_string(self).map_err(|error| error.to_string())?;
+    fn write(
+        mut self,
+        root: &Path,
+        removed_directory: Option<&Path>,
+    ) -> Result<BTreeSet<String>, String> {
+        if let Some(directory) = removed_directory {
+            self.hide_directory(root, directory)?;
+        }
+        let source = ron::ser::to_string(&self).map_err(|error| error.to_string())?;
         vmux_path::AtomicFile::write(root.join(".projects.ron"), source.as_bytes())
-            .map_err(|error| error.to_string())
+            .map_err(|error| error.to_string())?;
+        Ok(self.hidden)
+    }
+
+    fn hide_directory(&mut self, root: &Path, directory: &Path) -> Result<(), String> {
+        let directory = vmux_path::PathIdentity::resolve(directory);
+        if let Some(url) = ProjectRoute::from_path(root, directory.as_path())
+            && !self.projects.contains_key(&url)
+        {
+            self.hidden.insert(url);
+        }
+        let imports = root.join("imported");
+        let entries = match std::fs::read_dir(&imports) {
+            Ok(entries) => entries,
+            Err(error)
+                if matches!(
+                    error.kind(),
+                    std::io::ErrorKind::NotFound | std::io::ErrorKind::NotADirectory
+                ) =>
+            {
+                return Ok(());
+            }
+            Err(error) => return Err(error.to_string()),
+        };
+        for entry in entries {
+            let entry = entry.map_err(|error| error.to_string())?;
+            let path = entry.path();
+            let Ok(target) = std::fs::read_link(&path) else {
+                continue;
+            };
+            let target = if target.is_absolute() {
+                target
+            } else {
+                imports.join(target)
+            };
+            if vmux_path::PathIdentity::resolve(&target) != directory {
+                continue;
+            }
+            let Some(url) = ProjectRoute::from_path(root, &path) else {
+                continue;
+            };
+            if !self.projects.contains_key(&url) {
+                self.hidden.insert(url);
+            }
+        }
+        Ok(())
     }
 }
 
@@ -332,6 +384,7 @@ fn write(
             }
             let mut snapshot = registrations.snapshot(root);
             let mut mutation = request.mutation.clone();
+            let mut removed_directory = None;
             commands.entity(requester).remove::<WriteRequest>();
             match &mut mutation {
                 Mutation::Save { project, expected } => {
@@ -372,11 +425,7 @@ fn write(
                 }
                 Mutation::Remove(url) => {
                     if let Some(record) = snapshot.projects.remove(url) {
-                        if let Some(source) = ProjectRoute::from_path(root, &record.directory)
-                            && !snapshot.projects.contains_key(&source)
-                        {
-                            snapshot.hidden.insert(source);
-                        }
+                        removed_directory = Some(record.directory);
                         snapshot.hidden.insert(url.clone());
                     }
                 }
@@ -384,7 +433,7 @@ fn write(
             let root = root.to_path_buf();
             let wake = proxy.as_deref().map(|proxy| (**proxy).clone());
             let task = IoTaskPool::get().spawn(async move {
-                let result = snapshot.write(&root);
+                let result = snapshot.write(&root, removed_directory.as_deref());
                 if let Some(wake) = wake {
                     let _ = wake.send_event(WinitUserEvent::WakeUp);
                 }
@@ -408,12 +457,12 @@ fn finish(
     mut saved: MessageWriter<ProjectSaved>,
     mut commands: Commands,
 ) {
-    for (entity, root, mut task) in &mut tasks {
+    for (entity, _, mut task) in &mut tasks {
         let Some(result) = future::block_on(future::poll_once(&mut task.task)) else {
             continue;
         };
         commands.entity(entity).remove::<WriteTask>();
-        if result.is_ok() {
+        if let Ok(hidden_urls) = &result {
             match &task.mutation {
                 Mutation::Save { project, .. } => {
                     let existing = records.iter().find(|(_, parent, id, ..)| {
@@ -444,18 +493,10 @@ fn finish(
                     let existing = records
                         .iter()
                         .find(|(_, parent, id, ..)| parent.parent() == entity && &id.0 == url);
-                    if let Some((record, _, _, _, directory, _, _)) = existing {
-                        if let Some(source) = ProjectRoute::from_path(root.0.path(), &directory.0)
-                            && !records.iter().any(|(_, parent, id, ..)| {
-                                parent.parent() == entity && id.0 == source && &id.0 != url
-                            })
-                            && !hidden
-                                .iter()
-                                .any(|(_, parent, id)| parent.parent() == entity && id.0 == source)
-                        {
-                            commands.spawn((Hidden, ProjectId(source), ChildOf(entity)));
-                        }
+                    if let Some((record, ..)) = existing {
                         commands.entity(record).despawn();
+                    }
+                    for url in hidden_urls {
                         if !hidden
                             .iter()
                             .any(|(_, parent, id)| parent.parent() == entity && &id.0 == url)
