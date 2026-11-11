@@ -118,7 +118,7 @@ pub(super) fn ChatTranscript(chat: Chat) -> Element {
                     super::authentication::Authentication { chat }
                 } else if !transcript_loading && chat.status() == "errored" && setup {
                     super::setup::Turn { p { class: "text-sm leading-relaxed", {translate("onboarding-setup-failed")} } }
-                } else if !transcript_loading && (chat.installing_splash() || chat.status() == "preparing") {
+                } else if !transcript_loading && chat.setup_busy() {
                     InstallIntro { chat, detail: chat.install_detail() }
                 } else if !transcript_loading && items.is_empty() && chat.status() == "idle" {
                     ReadyIntro { chat }
