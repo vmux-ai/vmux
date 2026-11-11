@@ -98,16 +98,16 @@ pub fn WorkspaceLayout(
             "width:min(var(--vmux-sidebar-width),50vw);opacity:1;transition-duration:{duration}ms;"
         )
     } else {
-        format!("width:0px;opacity:0;transition-duration:{duration}ms;")
+        format!("width:0px;opacity:0;border-right-width:0px;transition-duration:{duration}ms;")
     };
     rsx! {
         div { class: "relative flex min-h-0 flex-1 overflow-hidden", style: "--vmux-sidebar-width:{sidebar_width}px;",
             if show_sidebar {
                 aside {
                     class: if resizing() {
-                        "relative flex min-h-0 shrink-0 flex-col overflow-hidden transition-none"
+                        "relative flex min-h-0 shrink-0 flex-col overflow-hidden border-r border-foreground/10 transition-none"
                     } else {
-                        "relative flex min-h-0 shrink-0 flex-col overflow-hidden transition-[width,opacity] ease-out motion-reduce:transition-none"
+                        "relative flex min-h-0 shrink-0 flex-col overflow-hidden border-r border-foreground/10 transition-[width,opacity] ease-out motion-reduce:transition-none"
                     },
                     style: sidebar_style,
                     aria_hidden: !sidebar_open(),

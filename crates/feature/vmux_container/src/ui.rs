@@ -303,6 +303,15 @@ fn Header(
             );
         }
     }
+    if snapshot.running {
+        controls.push(
+            ToolbarControl::button(translate("container-stop"), move |_| {
+                let _ = send(&ContainerStopRequest);
+            })
+            .text()
+            .disabled(snapshot.busy),
+        );
+    }
     controls.push(
         ToolbarControl::button(translate("container-settings"), move |_| {
             onsettings.call(())
@@ -492,10 +501,7 @@ fn Preferences(onclose: EventHandler<()>) -> Element {
             DialogContent { class: "max-w-[480px] p-5", attributes: vec![],
                 DialogTitle { attributes: vec![], {translate("container-settings")} }
                 if snapshot.running {
-                    div { class: "flex items-center gap-3",
-                        p { class: "min-w-0 flex-1 text-xs text-muted-foreground/70", {translate("container-settings-running")} }
-                        Button { size: ButtonSize::Sm, variant: ButtonVariant::Secondary, disabled: snapshot.busy, onclick: move |_| { let _ = send(&ContainerStopRequest); }, {translate("container-stop")} }
-                    }
+                    p { class: "text-xs text-muted-foreground/70", {translate("container-settings-running")} }
                 }
                 div { class: "grid grid-cols-2 gap-4",
                     label { class: "space-y-1.5", span { class: "text-xs", {translate("container-cpus")} }
@@ -516,13 +522,17 @@ fn Preferences(onclose: EventHandler<()>) -> Element {
                     if !snapshot.logs.is_empty() { pre { class: "mt-2 max-h-40 overflow-auto whitespace-pre-wrap text-[10px]", "{snapshot.logs}" } }
                 }
                 div { class: "flex justify-end gap-2",
-                    Button { size: ButtonSize::Sm, variant: ButtonVariant::Secondary, onclick: move |_| onclose.call(()), {translate("container-cancel")} }
-                    Button { size: ButtonSize::Sm, disabled: locked || !valid,
-                        onclick: move |_| {
-                            submitted.set(Some(state().configuration_revision + 1));
-                            let _ = send(&ContainerSettingsRequest { shared_directory: shared(), cpus: cpus().parse().unwrap_or(0), memory_mib: memory().parse().unwrap_or(0) });
-                        },
-                        {translate("container-save")}
+                    if locked {
+                        Button { size: ButtonSize::Sm, variant: ButtonVariant::Secondary, onclick: move |_| onclose.call(()), {translate("common-close")} }
+                    } else {
+                        Button { size: ButtonSize::Sm, variant: ButtonVariant::Secondary, onclick: move |_| onclose.call(()), {translate("container-cancel")} }
+                        Button { size: ButtonSize::Sm, disabled: !valid,
+                            onclick: move |_| {
+                                submitted.set(Some(state().configuration_revision + 1));
+                                let _ = send(&ContainerSettingsRequest { shared_directory: shared(), cpus: cpus().parse().unwrap_or(0), memory_mib: memory().parse().unwrap_or(0) });
+                            },
+                            {translate("container-save")}
+                        }
                     }
                 }
             }
@@ -705,6 +715,7 @@ mod tests {
     struct Host {
         listeners: RefCell<Vec<(String, BytesListener)>>,
         starts: Cell<usize>,
+        stops: Cell<usize>,
         addresses: RefCell<Vec<PageAddress>>,
         inspections: RefCell<Vec<ContainerInspectRequest>>,
     }
@@ -719,6 +730,10 @@ mod tests {
                 let _ =
                     rkyv::from_bytes::<ContainerStartRequest, rkyv::rancor::Error>(bytes).unwrap();
                 self.starts.set(self.starts.get() + 1);
+            } else if id == ContainerStopRequest::id() {
+                let _ =
+                    rkyv::from_bytes::<ContainerStopRequest, rkyv::rancor::Error>(bytes).unwrap();
+                self.stops.set(self.stops.get() + 1);
             } else if id == ContainerInspectRequest::id() {
                 self.inspections.borrow_mut().push(
                     rkyv::from_bytes::<ContainerInspectRequest, rkyv::rancor::Error>(bytes)
@@ -845,6 +860,37 @@ mod tests {
         assert!(!html.contains(&translate("container-cpus")));
         preview.click(&start);
         assert_eq!(preview.host.starts.get(), 1);
+    }
+
+    #[test]
+    fn service_shutdown_is_a_page_control_and_running_settings_are_read_only() {
+        let mut preview = Preview::new();
+        let mut snapshot = ContainerUiState {
+            supported: true,
+            running: true,
+            ready: true,
+            inventory_ready: true,
+            data_directory: "/fixtures/data".into(),
+            shared_directory: "/fixtures/projects".into(),
+            cpus: 2,
+            memory_mib: 2048,
+            ..Default::default()
+        };
+        preview.publish(snapshot.clone());
+        preview.click(&translate("container-stop"));
+        assert_eq!(preview.host.stops.get(), 1);
+        preview.click(&translate("container-settings"));
+        let html = preview.render();
+        assert!(html.contains(&translate("container-settings-running")));
+        assert!(html.contains(&translate("common-close")));
+        assert!(!html.contains(&translate("container-save")));
+        assert!(!html.contains(&translate("container-cancel")));
+        snapshot.running = false;
+        snapshot.ready = false;
+        let html = preview.publish(snapshot);
+        assert!(html.contains(&translate("container-save")));
+        assert!(html.contains(&translate("container-cancel")));
+        assert_eq!(preview.host.stops.get(), 1);
     }
 
     #[test]
