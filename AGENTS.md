@@ -8,7 +8,7 @@ Use caveman mode. Terse, direct, no filler. Execute first, talk second. No meta-
 
 CI runs fmt, clippy, and tests for PRs.
 
-Run targeted tests during the edit loop when they clarify non-trivial behavior, reproduce a regression, or verify a risky change. TDD is useful but not mandatory; do not add tests mechanically for every edit. Run workspace-wide local checks manually only when the user asks; the pre-push hook remains the required final fmt, clippy, and test gate.
+Run targeted tests during the edit loop when they clarify non-trivial behavior, reproduce a regression, or verify a risky change. TDD is useful but not mandatory; do not add tests mechanically for every edit. Run workspace-wide local checks manually only when the user asks. The required pre-push hook runs builder tests, formatting, diff validation, and source conventions. Run targeted Clippy separately for Rust changes that warrant it; report Clippy as not run unless a separate invocation passed, and include the command and result in the handoff.
 
 **Install that hook in every new worktree — `./scripts/setup-hooks.sh`.** Hooks live under `.git/`, which a fresh worktree does not inherit, so the gate this file leans on is simply absent until you run it. Nothing announces that; the first sign is a push that should have been stopped and wasn't. The reverse failure is worse and quieter: believing there is no gate, you hand-run `clippy --workspace` and `test --workspace` on every change, which costs half an hour each and — because cargo takes one lock per target directory — starves anything else building beside you.
 
