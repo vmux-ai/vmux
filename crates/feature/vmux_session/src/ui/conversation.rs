@@ -13,6 +13,9 @@ pub(super) fn Section(turn: Turn, latest_index: usize, chat: Chat) -> Element {
     let prompt = turn.prompt();
     let response = turn.response();
     let has_header = prompt.is_some() || response.is_some();
+    let both = prompt.is_some() && response.is_some();
+    let header_height = if both { "h-24" } else { "h-12" };
+    let overlap = if both { "-mt-24" } else { "-mt-12" };
     let start = turn.start;
     let handoff_source = chat.handoff.source();
     let handoff_truncated = chat.handoff.truncated();
@@ -27,8 +30,8 @@ pub(super) fn Section(turn: Turn, latest_index: usize, chat: Chat) -> Element {
         section { class: "relative", "data-vmux-sticky-section": "",
             div { class: "pointer-events-none absolute inset-x-0 top-0 h-px", "data-vmux-sticky-sentinel": "", aria_hidden: true }
             if has_header {
-                header { class: "pointer-events-none sticky top-0 z-30 h-24", "data-vmux-sticky-header": "", inert: true, aria_hidden: true,
-                    div { class: "flex h-24 flex-col justify-center gap-1 bg-background py-1", "data-vmux-sticky-content": "",
+                header { class: "pointer-events-none sticky top-0 z-30 {header_height}", "data-vmux-sticky-header": "", inert: true, aria_hidden: true,
+                    div { class: "flex {header_height} flex-col justify-center gap-1 bg-[linear-gradient(to_bottom,var(--background)_0%,color-mix(in_srgb,var(--background)_90%,transparent)_75%,transparent_100%)] pb-3 pt-1", "data-vmux-sticky-content": "",
                         if let Some(excerpt) = prompt {
                             PinnedMessage {
                                 excerpt,
@@ -53,7 +56,7 @@ pub(super) fn Section(turn: Turn, latest_index: usize, chat: Chat) -> Element {
                     }
                 }
             }
-            div { class: if has_header { "-mt-24 flex flex-col gap-5" } else { "flex flex-col gap-5" },
+            div { class: if has_header { format!("{overlap} flex flex-col gap-5") } else { "flex flex-col gap-5".to_string() },
                 for (offset, item) in turn.items.into_iter().enumerate() {
                     {
                         let index = start + offset;

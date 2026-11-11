@@ -132,7 +132,43 @@ pub(crate) const WRY_HOST_SHIM: &str = r#"
       const synchronous = interpreter.sendSerializedEvent.bind(interpreter);
       const pending = new Map();
       let scheduled = false;
+      const chatPending = new Map();
+      let chatTimer = null;
+      let lastChat = -100;
+      const send = (event, sync) => {
+        if (window.interpreter !== interpreter || !requestMatchesDocument(event)) return;
+        if (sync) { synchronous(event.body); return; }
+        const xhr = new XMLHttpRequest();
+        xhr.open('POST', interpreter.eventsPath, true);
+        xhr.setRequestHeader('Content-Type', 'application/json');
+        xhr.setRequestHeader('dioxus-data', toBase64(encoder.encode(JSON.stringify(event.body))));
+        xhr.send();
+      };
+      const flushChat = (sync = false) => {
+        if (chatTimer !== null) clearTimeout(chatTimer);
+        chatTimer = null;
+        const events = [...chatPending.values()];
+        chatPending.clear();
+        lastChat = Date.now();
+        events.sort((a, b) => Number(a.body.name === 'scroll' || a.body.name === 'scrollend') - Number(b.body.name === 'scroll' || b.body.name === 'scrollend'));
+        for (const event of events) send(event, sync);
+      };
       interpreter.sendSerializedEvent = (body) => {
+        const scrolling = ['wheel', 'touchmove', 'scroll', 'scrollend'].includes(body.name);
+        const chat = scrolling && interpreter.getNode?.(body.element)?.closest?.('#chat-scroll');
+        if (chat) {
+          const key = body.name + ':' + body.element;
+          chatPending.delete(key);
+          chatPending.set(key, {
+            body,
+            revision: applyingRevision ?? navigationRevision,
+            epoch: applyingEpoch ?? globalThis.__vmuxIpcEpoch,
+          });
+          if (body.name === 'scrollend') flushChat();
+          else if (chatTimer === null) chatTimer = setTimeout(() => flushChat(), Math.max(0, 100 - (Date.now() - lastChat)));
+          return { preventDefault: false, stopPropagation: false };
+        }
+        if (!scrolling && chatPending.size) flushChat(true);
         if (body.name !== 'scroll' && body.name !== 'scrollend') return synchronous(body);
         const key = body.name + ':' + body.element;
         pending.delete(key);
@@ -149,12 +185,7 @@ pub(crate) const WRY_HOST_SHIM: &str = r#"
             pending.clear();
             if (window.interpreter !== interpreter) return;
             for (const event of events) {
-              if (!requestMatchesDocument(event)) continue;
-              const xhr = new XMLHttpRequest();
-              xhr.open('POST', interpreter.eventsPath, true);
-              xhr.setRequestHeader('Content-Type', 'application/json');
-              xhr.setRequestHeader('dioxus-data', toBase64(encoder.encode(JSON.stringify(event.body))));
-              xhr.send();
+              send(event, false);
             }
           });
         }

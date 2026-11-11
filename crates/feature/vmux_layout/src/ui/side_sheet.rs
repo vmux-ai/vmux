@@ -278,7 +278,7 @@ fn SideSheetSpaceRow(
             LayoutContextMenu {
                 ContextMenuTrigger { attributes: vec![],
                     div {
-                        class: "group relative flex w-full cursor-pointer items-center rounded-md px-2 py-1.5 text-foreground",
+                        class: "group relative flex w-full cursor-pointer items-center rounded-md px-2 py-1.5 text-foreground @max-[12rem]:px-1",
                         button {
                             r#type: "button",
                             class: if editing {

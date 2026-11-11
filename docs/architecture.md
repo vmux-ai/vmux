@@ -803,7 +803,10 @@ surface and leaves `Current` untouched. Request IDs reject acknowledgements from
 Layout projections observe `Current` changes even when the requested metadata stays the same, so
 committing a presented surface clears the side sheet's pending-page indication immediately.
 Scroll and scroll-end events use asynchronous native delivery, coalesced to the latest position per
-element and event kind within one animation frame. Keyboard and pointer events retain synchronous
+element and event kind within one animation frame. Session wheel, touch, and scroll notifications
+share a 100 ms cadence; native scrolling and sticky previews remain independent of host updates.
+Scroll-end flushes immediately, and a following keyboard or pointer event synchronously flushes
+the pending viewport position before navigation. These events retain synchronous
 replies for cancellation; queued scroll events are discarded when their document or interpreter
 changes, so native round trips cannot pause scrolling or affect a replaced page.
 The selected tab's favicon spinner follows the page after 150 ms of continued loading, avoiding
@@ -998,13 +1001,15 @@ and its geometry remains reserved while the selected session loads.
 Session viewports remember their scroll position and loaded-history start on the owning Session.
 History requests resolve that Session from the page URL before a runtime attaches. Input at the
 top boundary requests another history page even when no scroll event can fire. Initial tails retain
-the prompt preceding their first assistant turn, so its sticky preview always has that context.
+any saved prompt preceding their first assistant turn, giving its sticky preview that context.
 A floating composer overlaps the transcript's lower edge, with an input-inert surface gradient.
-Transcript end padding keeps the latest message clear of the composer and its fade.
+Transcript end padding keeps the latest message clear of the composer and its fade. Sessions owned
+by another client collapse the disabled composer into a themed retry disclosure, retaining its draft.
 Each prompt and its assistant turns share a section in that scroll surface. A compact sticky header
 shows that section's prompt and latest response after its start scrolls out of view; the next section
 replaces it. Previews reuse compact versions of the normal user bubble and assistant row, preserving
-their alignment and avatars. Preview links pause automatic following and return to the original prompt or exact response
+their alignment and avatars over a fading surface background. A single preview uses half the
+height of a prompt-response pair. Preview links pause automatic following and return to the original prompt or exact response
 block. Existing item IDs remain scroll anchors; section keys survive earlier history so disclosure scopes
 stay mounted. Header visibility changes opacity without moving messages. Hidden previews are inert and
 excluded from accessibility. `StickySections` shares one intersection observer per scroll
@@ -1013,6 +1018,9 @@ The scroll surface has no top inset while pinned; initial spacing belongs to its
 projections rebuild only when their inputs, active surface, catalog, or ownership change. Completed
 Session transitions release the hidden launcher and its palette rather than rebuilding it on scroll.
 Closed command panels skip palette projection; reopening them resumes the normal composer projection.
+Transcript projection indexes tool call IDs and parent relationships once per turn rather than
+rescanning its blocks for every tool and result. Space, Session, project, branch, and Stack rows share one icon column;
+the internal Session UUID does not consume another sidebar line.
 A revisit restores that history window and reader position; the first visit follows the tail.
 Initial tail following remains active until user scroll input. Placeholder and zero-height scroll
 events neither finish placement nor replace the remembered reader position.

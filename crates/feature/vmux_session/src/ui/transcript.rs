@@ -10,7 +10,6 @@ use vmux_ui::agent_accent::AgentAccent;
 use vmux_ui::components::skeleton::Skeleton;
 use vmux_ui::hooks::send;
 use vmux_ui::i18n::{TranslationValue, translate, translate_with};
-use vmux_ui::scroll::ScrollPreload;
 
 #[component]
 fn QueuedAttachments(attachments: Vec<ChatAttachment>) -> Element {
@@ -78,6 +77,7 @@ pub(super) fn ChatTranscript(chat: Chat) -> Element {
     let placement_pending = !transcript_loading && !items.is_empty() && initial_scroll.is_empty();
     let latest_index = loaded_start as usize + items.len().saturating_sub(1);
     let mut turns = Turn::group(items, loaded_start as usize);
+    let bottom_padding = if chat.in_use() { "pb-12" } else { "pb-20" };
     section_keys.borrow_mut().assign(&mut turns);
     rsx! {
         div {
@@ -93,21 +93,12 @@ pub(super) fn ChatTranscript(chat: Chat) -> Element {
                     chat.transcript.follow();
                 }
             },
-            class: "relative z-10 flex-1 overflow-y-auto overscroll-contain scroll-pt-24 px-3 pb-20 outline-none sm:px-4 md:px-6",
+            class: "relative z-10 flex-1 overflow-y-auto overscroll-contain scroll-pt-24 px-3 {bottom_padding} outline-none sm:px-4 md:px-6",
             tabindex: "0",
             onwheel: move |_| chat.transcript.scroll_input(),
             ontouchmove: move |_| chat.transcript.scroll_input(),
-            onscroll: move |e: Event<ScrollData>| {
-                if e.client_height() <= 0 {
-                    return;
-                }
-                let top = e.scroll_top() as i32;
-                let dist = e.scroll_height() - top - e.client_height();
-                chat.transcript.observe_scroll(top, dist, e.client_height());
-                if ScrollPreload::HISTORY.reached_start(&e) {
-                    chat.transcript.request_history();
-                }
-            },
+            onscroll: move |event: Event<ScrollData>| chat.transcript.scrolled(&event),
+            onscrollend: move |event: Event<ScrollData>| chat.transcript.scrolled(&event),
             div {
                 class: "mx-auto flex min-h-full w-full max-w-3xl flex-col gap-5 pt-3",
                 style: transcript_loading.then_some("height:100%;"),

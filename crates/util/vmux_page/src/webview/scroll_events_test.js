@@ -103,4 +103,48 @@ class ScrollHost {
   host.scope.interpreter = {};
   host.paint();
   assert.equal(host.requests.length, 4, 'a replaced interpreter must discard queued scrolls');
+
+  const chat = new ScrollHost();
+  await new Promise(resolve => setImmediate(resolve));
+  let now = 0;
+  let nextTimer = 0;
+  const timers = new Map();
+  chat.scope.Date = { now: () => now };
+  chat.scope.setTimeout = (callback, delay) => {
+    const id = ++nextTimer;
+    timers.set(id, { callback, at: now + delay });
+    return id;
+  };
+  chat.scope.clearTimeout = id => timers.delete(id);
+  chat.scope.interpreter.getNode = id => ({ closest: selector => id === 4 && selector === '#chat-scroll' ? {} : null });
+  const advance = amount => {
+    now += amount;
+    for (const [id, timer] of [...timers]) {
+      if (timer.at <= now) {
+        timers.delete(id);
+        timer.callback();
+      }
+    }
+  };
+  chat.send('wheel', 4, 0);
+  chat.send('scroll', 4, 1);
+  advance(0);
+  assert.deepEqual(chat.requests.map(request => request.body.name), ['wheel', 'scroll']);
+  assert.ok(chat.requests.every(request => request.async), 'chat input must leave native scrolling independent of host replies');
+  for (let frame = 0; frame < 30; frame++) {
+    chat.send('scroll', 4, frame);
+    advance(16);
+  }
+  assert.ok(chat.requests.filter(request => request.body.name === 'scroll').length <= 6, 'continuous scrolling must not wake the host once per display frame');
+  chat.send('scrollend', 4, 30);
+  assert.equal(chat.requests.at(-1).body.name, 'scrollend');
+  assert.equal(chat.requests.at(-1).body.data.scroll_top, 30);
+  chat.send('scroll', 4, 40);
+  chat.send('click', 4, 0);
+  assert.deepEqual(chat.requests.slice(-2).map(request => [request.body.name, request.async]), [['scroll', false], ['click', false]], 'navigation must observe the last viewport position before replacing the page');
+  chat.send('scroll', 4, 50);
+  const sent = chat.requests.length;
+  chat.scope.__vmuxIpcEpoch = 2;
+  advance(200);
+  assert.equal(chat.requests.length, sent, 'a delayed chat scroll cannot reach a new document');
 })().catch(error => { console.error(error); process.exitCode = 1; });

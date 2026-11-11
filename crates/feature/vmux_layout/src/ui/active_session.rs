@@ -44,7 +44,7 @@ pub(crate) fn ActiveSessionPanel(session: ActiveSession) -> Element {
     rsx! {
         div { class: "relative w-full max-w-full min-w-0 overflow-visible py-2 pr-2 @max-[12rem]:py-1.5 @max-[12rem]:pr-1",
             div { class: "flex w-full min-w-0 items-center gap-2.5 overflow-hidden px-2 @max-[12rem]:gap-1.5 @max-[12rem]:px-1",
-                div { class: "flex size-4 shrink-0 items-center justify-center",
+                div { class: "flex size-6 shrink-0 items-center justify-center",
                     StackIcon {
                         icon: page.icon.clone(),
                         url: page.url.clone(),
@@ -52,7 +52,7 @@ pub(crate) fn ActiveSessionPanel(session: ActiveSession) -> Element {
                     }
                 }
                 div { class: "w-0 min-w-0 flex-1 overflow-hidden",
-                    div { class: "truncate-fade block max-w-full text-ui font-semibold text-foreground", title: "{title}", "{title}" }
+                    div { class: "line-clamp-2 block max-w-full text-ui font-semibold leading-snug text-foreground", title: "{title}", "{title}" }
                     if let Some(task) = task.as_ref() {
                         if !task.description.trim().is_empty() {
                             div { class: "truncate-fade text-[10px] text-muted-foreground", title: "{task.description}", "{task.description}" }
@@ -136,6 +136,12 @@ impl ActiveWorkspaceProject {
 
 #[component]
 fn CurrentPagePath(url: String) -> Element {
+    if matches!(
+        vmux_session::Route::parse(&url),
+        Some(vmux_session::Route::Session(_))
+    ) {
+        return rsx! {};
+    }
     let label = vmux_path::FileUrl::parse(&url)
         .and_then(|file| file.path())
         .or_else(|| vmux_git::GitUrl::parse(&url))
@@ -235,11 +241,11 @@ fn ActiveWorkspaceProjectTree(project: ActiveWorkspaceProject, pane_id: u64) -> 
                         label: selected_label.clone(),
                         title: selected_display_path.clone(),
                         open: choosing(),
-                        leading: rsx! { IdentityOrb {
+                        leading: rsx! { div { class: "flex size-6 shrink-0 items-center justify-center", IdentityOrb {
                             seed: selected_identity,
                             alt: selected_label.clone(),
                             class: "size-4".to_string(),
-                        } },
+                        } } },
                         on_hover_open: move |_| {
                             choosing_branch.set(false);
                             choosing.set(true);
@@ -307,9 +313,9 @@ fn ActiveWorkspaceProjectTree(project: ActiveWorkspaceProject, pane_id: u64) -> 
                                 title: current_branch_label.clone(),
                                 open: choosing_branch(),
                                 label_class: "font-mono font-normal".to_string(),
-                                leading: rsx! { IdentityOrb {
-                                    seed: selected_branch.clone(), alt: selected_branch.clone(), class: "size-3.5".to_string(),
-                                } },
+                                leading: rsx! { div { class: "flex size-6 shrink-0 items-center justify-center", IdentityOrb {
+                                    seed: selected_branch.clone(), alt: selected_branch.clone(), class: "size-4".to_string(),
+                                } } },
                                 on_hover_open: move |_| {
                                     choosing.set(false);
                                     choosing_branch.set(true);

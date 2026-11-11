@@ -719,6 +719,18 @@ impl Transcript {
         }
     }
 
+    pub(super) fn scrolled(self, event: &dioxus::html::ScrollData) {
+        if event.client_height() <= 0 {
+            return;
+        }
+        let top = event.scroll_top() as i32;
+        let distance = event.scroll_height() - top - event.client_height();
+        self.observe_scroll(top, distance, event.client_height());
+        if vmux_ui::scroll::ScrollPreload::HISTORY.reached_start(event) {
+            self.request_history();
+        }
+    }
+
     pub(super) fn follow(self) {
         if !self.ready() || self.scroll_container.peek().is_none() {
             return;

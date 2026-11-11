@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use vmux_api::chat::{
     ChatActivityKind, ChatBlock, ChatDiff, ChatDiffLine, ChatDiffLineKind, ChatItem, ChatPlanItem,
     ChatPlanStatus, ChatSubagent, ChatSubagentState, ChatSubagentStatus, ChatSubagentSummary,
@@ -41,19 +42,39 @@ impl ChatTurnProjection {
             ChatActivityKind::None
         };
 
-        let latest_tool = turn
-            .running
-            .then(|| ChatTurnProjection::latest_top_level_tool_index(turn))
-            .flatten();
+        let parents = ToolParents::new(&turn.blocks);
+        turn.step_count = 0;
+        for (index, block) in turn.blocks.iter().enumerate() {
+            if !matches!(block, ChatBlock::Text(_)) && parents.roots[index].is_none() {
+                turn.step_count = turn.step_count.saturating_add(1);
+            }
+        }
+        let latest_tool = if turn.running {
+            turn.blocks
+                .iter()
+                .enumerate()
+                .rev()
+                .find(|(index, block)| {
+                    matches!(block, ChatBlock::ToolUse { .. }) && parents.roots[*index].is_none()
+                })
+                .map(|(index, _)| index)
+        } else {
+            None
+        };
         let block_count = turn.blocks.len();
         let mut rows = Vec::new();
         for (index, block) in turn.blocks.iter().enumerate() {
-            if ChatTurnProjection::parent_tool_index(turn, index).is_some() {
+            if parents.roots[index].is_some() {
                 continue;
             }
-            let Some(row) =
-                ChatTurnProjection::project_row(turn, index, block, block_count, latest_tool)
-            else {
+            let Some(row) = ChatTurnProjection::project_row(
+                turn,
+                index,
+                block,
+                block_count,
+                latest_tool,
+                &parents.children[index],
+            ) else {
                 continue;
             };
             let ChatTurnRow::Tool(call) = row else {
@@ -94,6 +115,7 @@ impl ChatTurnProjection {
         block: &ChatBlock,
         block_count: usize,
         latest_tool: Option<usize>,
+        children: &[usize],
     ) -> Option<ChatTurnRow> {
         let index = u32::try_from(index).unwrap_or(u32::MAX);
         match block {
@@ -115,9 +137,10 @@ impl ChatTurnProjection {
                 args,
                 *kind,
                 latest_tool == Some(index as usize),
+                children,
             ))),
             ChatBlock::Subagent(subagent) => Some(ChatTurnRow::Subagent(
-                ChatTurnProjection::project_subagent(turn, index, subagent),
+                ChatTurnProjection::project_subagent(turn, index, subagent, children),
             )),
             ChatBlock::Diff {
                 path,
@@ -162,6 +185,7 @@ impl ChatTurnProjection {
         args: &str,
         kind: Option<vmux_api::session::ToolKind>,
         live: bool,
+        children: &[usize],
     ) -> ChatToolCall {
         ChatToolCall {
             index,
@@ -173,7 +197,7 @@ impl ChatTurnProjection {
             fallback_label: ChatTurnProjection::fallback_tool_label(name),
             file_path: ChatTurnProjection::tool_file_path(args),
             arguments: ChatTurnProjection::tool_arguments(args),
-            children: ChatTurnProjection::tool_children(turn, index as usize),
+            children: ChatTurnProjection::tool_children(turn, children),
             live,
         }
     }
@@ -197,12 +221,10 @@ impl ChatTurnProjection {
         }
     }
 
-    fn tool_children(turn: &ChatTurn, parent: usize) -> Vec<ChatToolChild> {
+    fn tool_children(turn: &ChatTurn, indices: &[usize]) -> Vec<ChatToolChild> {
         let mut children = Vec::new();
-        for (index, block) in turn.blocks.iter().enumerate() {
-            if ChatTurnProjection::parent_tool_index(turn, index) != Some(parent) {
-                continue;
-            }
+        for &index in indices {
+            let block = &turn.blocks[index];
             match block {
                 ChatBlock::ToolUse {
                     name, args, kind, ..
@@ -229,7 +251,12 @@ impl ChatTurnProjection {
         children
     }
 
-    fn project_subagent(turn: &ChatTurn, index: u32, subagent: &ChatSubagent) -> ChatSubagentState {
+    fn project_subagent(
+        turn: &ChatTurn,
+        index: u32,
+        subagent: &ChatSubagent,
+        children: &[usize],
+    ) -> ChatSubagentState {
         ChatSubagentState {
             index,
             call_id: subagent.call_id.clone(),
@@ -245,7 +272,7 @@ impl ChatTurnProjection {
             model: subagent.model.clone(),
             reasoning_effort: subagent.reasoning_effort.clone(),
             raw_input: subagent.raw_input.clone(),
-            children: ChatTurnProjection::tool_children(turn, index as usize),
+            children: ChatTurnProjection::tool_children(turn, children),
         }
     }
 
@@ -651,73 +678,6 @@ impl ChatTurnProjection {
             .map(ToOwned::to_owned)
     }
 
-    pub(super) fn parent_tool_index(turn: &ChatTurn, index: usize) -> Option<usize> {
-        let mut parent = ChatTurnProjection::direct_parent_index(turn, index)?;
-        for _ in 0..turn.blocks.len() {
-            let Some(next) = ChatTurnProjection::direct_parent_index(turn, parent) else {
-                break;
-            };
-            if next == parent {
-                break;
-            }
-            parent = next;
-        }
-        Some(parent)
-    }
-
-    fn latest_top_level_tool_index(turn: &ChatTurn) -> Option<usize> {
-        for (index, block) in turn.blocks.iter().enumerate().rev() {
-            if matches!(block, ChatBlock::ToolUse { .. })
-                && ChatTurnProjection::parent_tool_index(turn, index).is_none()
-            {
-                return Some(index);
-            }
-        }
-        None
-    }
-
-    fn direct_parent_index(turn: &ChatTurn, index: usize) -> Option<usize> {
-        match turn.blocks.get(index)? {
-            ChatBlock::ToolUse {
-                parent_call_id: Some(parent_call_id),
-                ..
-            } => ChatTurnProjection::call_index(turn, parent_call_id),
-            ChatBlock::Subagent(subagent) => subagent
-                .parent_call_id
-                .as_deref()
-                .and_then(|parent_call_id| ChatTurnProjection::call_index(turn, parent_call_id)),
-            ChatBlock::ToolUse { name, .. } if ChatTurnProjection::is_guardian(name) => {
-                ChatTurnProjection::guardian_parent_index(turn, index)
-            }
-            ChatBlock::ToolResult { call_id, .. } if !call_id.is_empty() => {
-                ChatTurnProjection::call_index(turn, call_id)
-            }
-            _ => None,
-        }
-    }
-
-    fn call_index(turn: &ChatTurn, call_id: &str) -> Option<usize> {
-        turn.blocks.iter().position(|block| match block {
-            ChatBlock::ToolUse {
-                call_id: block_call_id,
-                ..
-            } => block_call_id == call_id,
-            ChatBlock::Subagent(subagent) => subagent.call_id == call_id,
-            _ => false,
-        })
-    }
-
-    fn guardian_parent_index(turn: &ChatTurn, index: usize) -> Option<usize> {
-        for (candidate, block) in turn.blocks[..index].iter().enumerate().rev() {
-            match block {
-                ChatBlock::ToolUse { name, .. } if ChatTurnProjection::is_guardian(name) => {}
-                ChatBlock::ToolUse { .. } | ChatBlock::Subagent(_) => return Some(candidate),
-                _ => return None,
-            }
-        }
-        None
-    }
-
     fn is_guardian(name: &str) -> bool {
         let lower = name.to_ascii_lowercase();
         lower.contains("guardian")
@@ -726,6 +686,72 @@ impl ChatTurnProjection {
             || lower.ends_with("_review")
             || lower.ends_with(".review")
             || lower.ends_with(":review")
+    }
+}
+
+struct ToolParents {
+    roots: Vec<Option<usize>>,
+    children: Vec<Vec<usize>>,
+}
+
+impl ToolParents {
+    fn new(blocks: &[ChatBlock]) -> Self {
+        let mut calls = HashMap::new();
+        for (index, block) in blocks.iter().enumerate() {
+            let call_id = match block {
+                ChatBlock::ToolUse { call_id, .. } => Some(call_id.as_str()),
+                ChatBlock::Subagent(subagent) => Some(subagent.call_id.as_str()),
+                _ => None,
+            };
+            if let Some(call_id) = call_id {
+                calls.entry(call_id).or_insert(index);
+            }
+        }
+        let mut direct = Vec::with_capacity(blocks.len());
+        let mut adjacent = None;
+        for (index, block) in blocks.iter().enumerate() {
+            let guardian = matches!(block, ChatBlock::ToolUse { name, .. } if ChatTurnProjection::is_guardian(name));
+            let parent = match block {
+                ChatBlock::ToolUse {
+                    parent_call_id: Some(parent),
+                    ..
+                } => calls.get(parent.as_str()).copied(),
+                ChatBlock::Subagent(subagent) => subagent
+                    .parent_call_id
+                    .as_deref()
+                    .and_then(|parent| calls.get(parent).copied()),
+                ChatBlock::ToolUse { .. } if guardian => adjacent,
+                ChatBlock::ToolResult { call_id, .. } if !call_id.is_empty() => {
+                    calls.get(call_id.as_str()).copied()
+                }
+                _ => None,
+            };
+            direct.push(parent);
+            match block {
+                ChatBlock::ToolUse { .. } if guardian => {}
+                ChatBlock::ToolUse { .. } | ChatBlock::Subagent(_) => adjacent = Some(index),
+                _ => adjacent = None,
+            }
+        }
+        let mut roots = vec![None; blocks.len()];
+        let mut children = vec![Vec::new(); blocks.len()];
+        for index in 0..blocks.len() {
+            let Some(mut parent) = direct[index] else {
+                continue;
+            };
+            for _ in 0..blocks.len() {
+                let Some(next) = direct[parent] else {
+                    break;
+                };
+                if next == parent {
+                    break;
+                }
+                parent = next;
+            }
+            roots[index] = Some(parent);
+            children[parent].push(index);
+        }
+        Self { roots, children }
     }
 }
 
@@ -925,7 +951,7 @@ mod tests {
 
     #[test]
     fn hierarchy_is_owned_by_host_projection() {
-        let turn = ChatTurn {
+        let mut turn = ChatTurn {
             blocks: vec![
                 ChatBlock::ToolUse {
                     call_id: "read".into(),
@@ -962,17 +988,28 @@ mod tests {
                     kind: None,
                 },
             ],
+            running: true,
             ..Default::default()
         };
 
-        assert_eq!(ChatTurnProjection::parent_tool_index(&turn, 0), None);
-        assert_eq!(ChatTurnProjection::parent_tool_index(&turn, 1), Some(0));
-        assert_eq!(ChatTurnProjection::parent_tool_index(&turn, 2), Some(0));
-        assert_eq!(ChatTurnProjection::parent_tool_index(&turn, 3), None);
-        assert_eq!(
-            ChatTurnProjection::latest_top_level_tool_index(&turn),
-            Some(4)
-        );
+        ChatTurnProjection::apply(&mut turn);
+        let ChatTurnRow::FinishedTools { calls, .. } = &turn.rows[0] else {
+            panic!("expected read tool");
+        };
+        let read = &calls[0];
+        assert_eq!(read.children.len(), 2);
+        assert!(matches!(&read.children[0], ChatToolChild::Tool(call) if call.index == 1));
+        assert!(matches!(
+            &read.children[1],
+            ChatToolChild::Result { index: 2, .. }
+        ));
+        assert!(!read.live);
+        assert_eq!(turn.step_count, 3);
+        assert!(matches!(
+            &turn.rows[1],
+            ChatTurnRow::ToolResult { index: 3, .. }
+        ));
+        assert!(matches!(&turn.rows[2], ChatTurnRow::Tool(call) if call.index == 4 && call.live));
     }
 
     #[test]

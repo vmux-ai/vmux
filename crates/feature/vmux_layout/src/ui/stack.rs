@@ -79,7 +79,9 @@ pub(super) fn SideSheetStackRow(stack: StackNode, pane_id: u64) -> Element {
                         }
                         layout.select_stack(pane_id, stack_id);
                     },
-                    StackIcon { icon: stack.icon.clone(), url: stack.url.clone(), title: stack.title.clone(), loading: stack.is_loading }
+                    div { class: "flex size-6 shrink-0 items-center justify-center",
+                        StackIcon { icon: stack.icon.clone(), url: stack.url.clone(), title: stack.title.clone(), loading: stack.is_loading }
+                    }
                     span { class: "{title_class}", title: "{display_title}", "{display_title}" }
                     button {
                         r#type: "button",

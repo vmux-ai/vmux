@@ -263,16 +263,6 @@ impl<'a> PageBuilder<'a> {
             return;
         }
         if let Some(mut turn) = self.current.take() {
-            turn.step_count = turn
-                .blocks
-                .iter()
-                .enumerate()
-                .filter(|(index, block)| {
-                    !matches!(block, ChatBlock::Text(_))
-                        && super::projection::ChatTurnProjection::parent_tool_index(&turn, *index)
-                            .is_none()
-                })
-                .count() as u32;
             turn.duration_secs = self.durations.get(self.turn_ordinal).copied();
             super::projection::ChatTurnProjection::apply(&mut turn);
             self.items.push(ChatItem::Turn(turn));
@@ -395,7 +385,7 @@ impl PageBuilder<'_> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::host::projection::ChatTurnProjection;
+    use vmux_api::chat::{ChatToolChild, ChatTurnRow};
 
     fn assistant(blocks: Vec<AssistantBlock>) -> Message {
         Message::Assistant { blocks }
@@ -798,9 +788,12 @@ mod tests {
         };
         assert_eq!(turn.step_count, 1);
         assert!(matches!(&turn.blocks[0], ChatBlock::Subagent(_)));
-        assert_eq!(ChatTurnProjection::parent_tool_index(turn, 1), Some(0));
-        assert_eq!(ChatTurnProjection::parent_tool_index(turn, 2), Some(0));
-        assert_eq!(ChatTurnProjection::parent_tool_index(turn, 3), Some(0));
+        let [ChatTurnRow::Subagent(subagent)] = turn.rows.as_slice() else {
+            panic!("expected one visible subagent");
+        };
+        assert!(
+            matches!(subagent.children.as_slice(), [ChatToolChild::Tool(call), ChatToolChild::Result { index: 2, content, .. }, ChatToolChild::Result { index: 3, .. }] if call.index == 1 && content == "file contents")
+        );
     }
 
     #[test]
