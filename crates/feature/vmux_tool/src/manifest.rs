@@ -175,6 +175,7 @@ impl ToolStore {
         }
     }
 
+    #[cfg(any(all(host, ui), test))]
     pub(crate) fn is_busy(&self) -> bool {
         self.busy.load(Ordering::Acquire)
     }
