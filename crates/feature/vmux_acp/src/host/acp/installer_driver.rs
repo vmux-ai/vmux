@@ -106,7 +106,7 @@ impl AcpInstallJob {
         wake: Option<bevy::winit::EventLoopProxy<bevy::winit::WinitUserEvent>>,
         agents: PathBuf,
         workers: &vmux_ecs::BlockingRuntime,
-    ) -> Option<Self> {
+    ) -> Result<Self, vmux_ecs::blocking::SpawnError> {
         let (progress_sender, progress) = crossbeam_channel::unbounded();
         let sink = AcpInstallProgressSink {
             pending: progress_sender,
@@ -115,7 +115,7 @@ impl AcpInstallJob {
         let task = workers.spawn_process(wake, move || {
             resolve_acp_install(request, &sink, AgentInstaller::at(PackageStore::at(agents)))
         })?;
-        Some(Self {
+        Ok(Self {
             progress,
             task: Some(task),
             outcome: None,

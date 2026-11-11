@@ -1,4 +1,5 @@
 use std::cell::RefCell;
+use std::fmt;
 use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, Weak, mpsc};
@@ -51,8 +52,8 @@ impl BlockingRuntime {
         &self,
         wake: Option<EventLoopProxy<WinitUserEvent>>,
         run: impl FnOnce() -> T + Send + 'static,
-    ) -> Option<BlockingTask<T>> {
-        self.process.spawn(wake, run)
+    ) -> Result<BlockingTask<T>, SpawnError> {
+        self.process.enqueue(wake, run)
     }
 }
 
@@ -99,7 +100,15 @@ impl BlockingPool {
         wake: Option<EventLoopProxy<WinitUserEvent>>,
         run: impl FnOnce() -> T + Send + 'static,
     ) -> Option<BlockingTask<T>> {
-        let sender = self.sender.as_ref()?;
+        self.enqueue(wake, run).ok()
+    }
+
+    fn enqueue<T: Send + 'static>(
+        &self,
+        wake: Option<EventLoopProxy<WinitUserEvent>>,
+        run: impl FnOnce() -> T + Send + 'static,
+    ) -> Result<BlockingTask<T>, SpawnError> {
+        let sender = self.sender.as_ref().ok_or(SpawnError::Unavailable)?;
         let state = Arc::new(Mutex::new(None));
         let output = Arc::clone(&state);
         let canceled = Arc::new(AtomicBool::new(false));
@@ -114,19 +123,38 @@ impl BlockingPool {
             let scope = CancellationScope { previous };
             let result = catch_unwind(AssertUnwindSafe(run));
             drop(scope);
-            if !worker_canceled.load(Ordering::Acquire)
-                && let Ok(mut output) = output.lock()
+            if let Ok(mut output) = output.lock()
+                && !worker_canceled.load(Ordering::Acquire)
             {
                 *output = Some(result);
             }
             drop(wake);
         });
-        if sender.try_send(work).is_err() {
-            return None;
+        match sender.try_send(work) {
+            Ok(()) => {}
+            Err(mpsc::TrySendError::Full(_)) => return Err(SpawnError::Full),
+            Err(mpsc::TrySendError::Disconnected(_)) => return Err(SpawnError::Unavailable),
         }
-        Some(BlockingTask { state, canceled })
+        Ok(BlockingTask { state, canceled })
     }
 }
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SpawnError {
+    Full,
+    Unavailable,
+}
+
+impl fmt::Display for SpawnError {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter.write_str(match self {
+            Self::Full => "blocking worker queue is full",
+            Self::Unavailable => "blocking worker pool is unavailable",
+        })
+    }
+}
+
+impl std::error::Error for SpawnError {}
 
 struct CompletionWake(Option<EventLoopProxy<WinitUserEvent>>);
 
@@ -296,7 +324,7 @@ mod tests {
         let canceled = pool
             .spawn(None, move || executed_tx.send(()).unwrap())
             .unwrap();
-        assert!(pool.spawn(None, || ()).is_none());
+        assert!(matches!(pool.enqueue(None, || ()), Err(SpawnError::Full)));
         drop(canceled);
         release_tx.send(()).unwrap();
         let deadline = Instant::now() + Duration::from_secs(2);
@@ -347,5 +375,28 @@ mod tests {
             assert!(Instant::now() < deadline);
             std::thread::yield_now();
         }
+    }
+
+    #[test]
+    fn a_pool_without_workers_reports_unavailable_instead_of_queue_backpressure() {
+        let pool = BlockingPool::new("test-unavailable", 0, 1);
+        assert!(matches!(
+            pool.enqueue(None, || panic!("unavailable work must not run")),
+            Err(SpawnError::Unavailable)
+        ));
+    }
+
+    #[test]
+    fn cancel_discards_an_unpolled_result_after_the_worker_finishes() {
+        let pool = BlockingPool::new("test-finished-cancel", 1, 2);
+        let mut canceled = pool.spawn(None, || 7).unwrap();
+        let mut following = pool.spawn(None, || ()).unwrap();
+        let deadline = Instant::now() + Duration::from_secs(2);
+        while following.poll().is_none() {
+            assert!(Instant::now() < deadline);
+            std::thread::yield_now();
+        }
+        canceled.cancel();
+        assert!(canceled.poll().is_none());
     }
 }

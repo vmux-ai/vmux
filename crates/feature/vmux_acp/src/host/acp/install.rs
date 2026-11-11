@@ -68,11 +68,17 @@ fn start(
             Some(job) => job,
             None => {
                 let name = Name::new(format!("ACP install: {}", request.agent_id));
-                let Some(install) =
-                    AcpInstallJob::start(request, wake.clone(), agents.clone(), &workers)
-                else {
-                    continue;
-                };
+                let install =
+                    match AcpInstallJob::start(request, wake.clone(), agents.clone(), &workers) {
+                        Ok(install) => install,
+                        Err(vmux_ecs::blocking::SpawnError::Full) => continue,
+                        Err(error) => {
+                            commands
+                                .entity(entity)
+                                .insert((AcpLaunchStarted, RunState::Errored(error.to_string())));
+                            continue;
+                        }
+                    };
                 let job = commands
                     .spawn((name, key.clone(), InstallState::preparing(), install))
                     .id();

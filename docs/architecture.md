@@ -342,6 +342,8 @@ Dropping a handle cancels queued work and discards late results; running adapter
 the cancellation context. Git keeps separate interactive, background, and single-worker mutation
 pools and retains shared-read cancellation and rollback scopes. ACP catalog/history reads and
 agent installation use independent shared lanes, retaining requests when a queue is full.
+Process submissions distinguish a full queue from an unavailable pool; ACP reports an
+unavailable installer pool as an error instead of leaving launch pending.
 
 
 System names use their module as context. Prefer `open`, `refresh`, `bind`, `project`, or
