@@ -191,9 +191,6 @@ pub fn ComposerBar(props: ComposerBarProps) -> Element {
                         open: opened == Some(ComposerMenuKind::Agent),
                     }
                 }
-                if let Some(project) = project {
-                    ComposerWorkspace { project, branch, opened }
-                }
                 if let Some(chip) = model {
                     ComposerChipSlot {
                         kind: ComposerMenuKind::Model,
@@ -207,6 +204,12 @@ pub fn ComposerBar(props: ComposerBarProps) -> Element {
                         chip,
                         open: opened == Some(ComposerMenuKind::Effort),
                     }
+                }
+                if let Some(chip) = project {
+                    ComposerChipSlot { kind: ComposerMenuKind::Project, chip, open: opened == Some(ComposerMenuKind::Project) }
+                }
+                if let Some(chip) = branch {
+                    ComposerChipSlot { kind: ComposerMenuKind::Branch, chip, open: opened == Some(ComposerMenuKind::Branch) }
                 }
                 WorkspaceBadges {
                     is_git_repo,
@@ -224,51 +227,6 @@ pub fn ComposerBar(props: ComposerBarProps) -> Element {
                     }
                 }
                 ComposerStatus { status, active_subagents, active_tasks, queued_count }
-            }
-        }
-    }
-}
-
-#[component]
-fn ComposerWorkspace(
-    project: ComposerChip,
-    branch: Option<ComposerChip>,
-    opened: Option<ComposerMenuKind>,
-) -> Element {
-    rsx! {
-        div { class: "flex h-7 min-w-0 max-w-64 shrink-0 items-center gap-0.5 rounded-lg px-1 text-[11px] text-muted-foreground",
-            ComposerChipIcon { kind: ComposerMenuKind::Project }
-            WorkspacePart { chip: project, open: opened == Some(ComposerMenuKind::Project) }
-            if let Some(chip) = branch {
-                span { class: "shrink-0 opacity-40", aria_hidden: true, "/" }
-                WorkspacePart { chip, open: opened == Some(ComposerMenuKind::Branch) }
-            }
-        }
-    }
-}
-
-#[component]
-fn WorkspacePart(chip: ComposerChip, open: bool) -> Element {
-    if chip.loading {
-        return rsx! { Skeleton { class: "mx-1 h-2.5 w-16 bg-muted-foreground/15" } };
-    }
-    let label = rsx! { span { class: "min-w-0 truncate", "{chip.label}" } };
-    let class = "flex h-7 min-w-0 items-center gap-0.5 rounded-lg px-1";
-    let Some(on_open) = chip.on_open.filter(|_| !chip.disabled) else {
-        return rsx! { span { class, title: "{chip.title}", {label} } };
-    };
-    rsx! {
-        button {
-            class: cn([class, if open { COMPOSER_CHIP_OPEN } else { COMPOSER_CHIP_INTERACTIVE }]),
-            title: "{chip.title}",
-            aria_expanded: open,
-            onmousedown: move |event| event.prevent_default(),
-            onclick: move |_| on_open.call(()),
-            {label}
-            svg {
-                class: if open { "size-3 shrink-0 rotate-180 opacity-70 transition-transform duration-200 ease-out" } else { "size-3 shrink-0 opacity-50 transition-transform duration-200 ease-out" },
-                view_box: "0 0 24 24", fill: "none", stroke: "currentColor", stroke_width: "2",
-                path { d: "m8 10 4 4 4-4" }
             }
         }
     }

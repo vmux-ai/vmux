@@ -1062,7 +1062,7 @@ fn SessionGroupContents(
             div { class: "{items_class}",
                 for session in sessions.into_iter().take(visible) {
                     SessionItem {
-                        key: "{session.id}",
+                        key: "{RowIdentity::of(&session).key()}",
                         view,
                         repository: repository_index.read().get(&session.id).cloned(),
                         repository_ready,

@@ -101,7 +101,7 @@ fn ChatComposer(chat: Chat) -> Element {
 #[component]
 fn ComposerFooter(chat: Chat) -> Element {
     let context = chat.slash.context();
-    let transcript = chat.transcript.current();
+    let (active_subagents, active_tasks) = chat.transcript.activity_counts();
     let queued = chat.queue.queued();
     let mut status = chat.status();
     let mut model = chat.model_chip();
@@ -139,8 +139,8 @@ fn ComposerFooter(chat: Chat) -> Element {
             uncommitted: 0,
             ahead: 0,
             status,
-            active_subagents: transcript.active_subagents as usize,
-            active_tasks: transcript.active_tasks as usize,
+            active_subagents: active_subagents as usize,
+            active_tasks: active_tasks as usize,
             queued_count: queued.len(),
         }
     }

@@ -95,8 +95,8 @@ pub(super) fn ChatTranscript(chat: Chat) -> Element {
             },
             class: "relative z-10 flex-1 overflow-y-auto overscroll-contain scroll-pt-24 px-3 pb-20 outline-none sm:px-4 md:px-6",
             tabindex: "0",
-            onwheel: move |_| chat.transcript.note_scroll_input(),
-            ontouchmove: move |_| chat.transcript.note_scroll_input(),
+            onwheel: move |_| chat.transcript.scroll_input(),
+            ontouchmove: move |_| chat.transcript.scroll_input(),
             onscroll: move |e: Event<ScrollData>| {
                 if e.client_height() <= 0 {
                     return;

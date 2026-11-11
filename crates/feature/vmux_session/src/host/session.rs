@@ -29,7 +29,7 @@ use vmux_ecs::agent::{
 };
 use vmux_ecs::launcher::{HostsLauncher, InlineTransitionRequested};
 use vmux_ecs::{
-    EntityTarget, PageIdentity, PageOpenRequest, PageOpenTarget, PendingPrompt,
+    EntityTarget, PageIdentity, PageMetadata, PageOpenRequest, PageOpenTarget, PendingPrompt,
     PendingPromptAttachments,
 };
 use vmux_session::{
@@ -42,10 +42,21 @@ type ChatUiStateUpdates = UiState<ChatUiState>;
 pub struct SessionViews<'w, 's> {
     child_of: Query<'w, 's, &'static ChildOf>,
     targets: Query<'w, 's, &'static EntityTarget<Session>>,
+    pages: Query<'w, 's, &'static PageMetadata, With<SessionView>>,
+    sessions: Query<'w, 's, (Entity, &'static SessionId), With<Session>>,
 }
 
 impl SessionViews<'_, '_> {
     pub fn session(&self, webview: Entity) -> Option<Entity> {
+        if let Ok(page) = self.pages.get(webview)
+            && let Some(Route::Session(id)) = Route::parse(&page.url)
+        {
+            return self
+                .sessions
+                .iter()
+                .find(|(_, candidate)| **candidate == id)
+                .map(|(entity, _)| entity);
+        }
         let stack = self.child_of.get(webview).ok()?.parent();
         self.targets.get(stack).ok().map(EntityTarget::entity)
     }
@@ -767,6 +778,28 @@ mod tests {
     use crate::event::ChatItem;
     use vmux_api::protocol::{AgentRequest, AgentRequestId};
     use vmux_ecs::agent::{AgentRequestInput, CommandOrigin};
+
+    #[test]
+    fn session_views_resolve_the_page_before_runtime_attachment_and_ignore_stale_targets() {
+        let mut world = World::new();
+        let actual = world.spawn((Session, SessionId::new("actual"))).id();
+        let stale = world.spawn((Session, SessionId::new("stale"))).id();
+        let stack = world.spawn(EntityTarget::<Session>::new(stale)).id();
+        let view = world
+            .spawn((
+                SessionView,
+                ChildOf(stack),
+                PageMetadata {
+                    url: Route::Session(SessionId::new("actual")).url(),
+                    ..Default::default()
+                },
+            ))
+            .id();
+        let mut lookup = bevy_ecs::system::SystemState::<SessionViews>::new(&mut world);
+        assert_eq!(lookup.get(&world).unwrap().session(view), Some(actual));
+        world.entity_mut(stack).remove::<EntityTarget<Session>>();
+        assert_eq!(lookup.get(&world).unwrap().session(view), Some(actual));
+    }
 
     #[test]
     fn a_launcher_uses_its_selected_directory_when_another_pane_is_active() {

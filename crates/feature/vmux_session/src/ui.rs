@@ -28,6 +28,7 @@ pub(crate) struct ChatPage;
 
 #[component]
 pub fn Page() -> Element {
+    vmux_ui::hooks::use_theme();
     vmux_ui::hooks::use_ui_state::<crate::state::ChatUiState>();
     vmux_ui::hooks::use_ui_state::<crate::state::SessionCatalogUiState>();
     vmux_ui::hooks::use_ui_state::<crate::state::SessionDetailUiState>();

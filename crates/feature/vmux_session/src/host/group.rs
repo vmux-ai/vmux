@@ -64,6 +64,19 @@ impl<'a> ChatMessages<'a> {
         self.page(PageRange::new(total.saturating_sub(limit), total, total))
     }
 
+    pub(super) fn tail_with_prompt(&self, limit: usize) -> ChatItemPage {
+        let mut page = self.tail(limit);
+        if page.start == 0 || !matches!(page.items.first(), Some(ChatItem::Turn(_))) {
+            return page;
+        }
+        let previous = self.before(page.start, 1);
+        if matches!(previous.items.first(), Some(ChatItem::User { .. })) {
+            page.start = previous.start;
+            page.items.splice(0..0, previous.items);
+        }
+        page
+    }
+
     pub(super) fn before(&self, before: usize, limit: usize) -> ChatItemPage {
         let total = self.item_count();
         let end = before.min(total);
@@ -486,6 +499,25 @@ mod tests {
         };
         assert_eq!(t0.duration_secs, Some(5));
         assert_eq!(t1.duration_secs, Some(9));
+    }
+
+    #[test]
+    fn recent_window_retains_the_prompt_for_its_leading_assistant_turn() {
+        let messages = vec![
+            Message::user("a"),
+            assistant(vec![AssistantBlock::Text("one".into())]),
+            Message::user("b"),
+            assistant(vec![AssistantBlock::Text("two".into())]),
+            Message::user("c"),
+            assistant(vec![AssistantBlock::Text("three".into())]),
+        ];
+        let page = ChatMessages::new(&[], &messages, &[], &[], false).tail_with_prompt(3);
+        assert_eq!((page.start, page.end, page.total), (2, 6, 6));
+        assert!(matches!(&page.items[0], ChatItem::User { text, .. } if text == "b"));
+        assert!(matches!(&page.items[1], ChatItem::Turn(turn) if turn.copy_text == "two"));
+        let page = ChatMessages::new(&[], &messages, &[], &[], false).tail_with_prompt(2);
+        assert_eq!((page.start, page.end, page.total), (4, 6, 6));
+        assert!(matches!(&page.items[0], ChatItem::User { text, .. } if text == "c"));
     }
 
     #[test]

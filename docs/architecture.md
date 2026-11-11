@@ -996,6 +996,9 @@ readiness, so agent startup and response latency never hide an accepted prompt b
 Shared sidebar rows stay in place when page selection changes. Session detail-panel visibility belongs to the page shell,
 and its geometry remains reserved while the selected session loads.
 Session viewports remember their scroll position and loaded-history start on the owning Session.
+History requests resolve that Session from the page URL before a runtime attaches. Input at the
+top boundary requests another history page even when no scroll event can fire. Initial tails retain
+the prompt preceding their first assistant turn, so its sticky preview always has that context.
 A floating composer overlaps the transcript's lower edge, with an input-inert surface gradient.
 Transcript end padding keeps the latest message clear of the composer and its fade.
 Each prompt and its assistant turns share a section in that scroll surface. A compact sticky header
@@ -1908,7 +1911,10 @@ ACP `session/list` is the primary provider catalog. The Sessions page starts eac
 long enough to enumerate its paginated catalog, then stops it; transport failure does not switch data
 sources. A bounded provider-store adapter is used only when no installed ACP owns that agent family
 or the ACP explicitly omits `session/list`. Browsing an external entry does not copy it into durable
-Vmux state. Resuming it creates the canonical Session entity, records its `AcpSessionId`, and lets
+Vmux state. Resume resolves an existing canonical Session before consulting the external catalog,
+so a retained row stays clickable during discovery. Provider identity keeps its row position and
+DOM scope when it becomes managed. Resuming a new entry creates the canonical Session entity,
+records its `AcpSessionId`, and lets
 the provider replay the conversation through `session/load`. Compatibility watches exist only while
 the Sessions page or one of their imported Sessions is present, debounce into one wake, rescan only
 the changed provider, and bound untrusted history traversal.
@@ -2048,8 +2054,9 @@ the refusal; a successful retry or an already-populated transcript discards a la
 Retry preserves its provider identity and replaces only the failed local runtime.
 Failed conversations release their transcript skeleton.
 Composer workspace context resolves the Session named by the page URL even before runtime attachment
-has bound the Stack. Its compact project / branch chip shows that Session's working directory and
-uses the stored project name. Existing Sessions expose this context without changing their workspace.
+has bound the Stack. Its compact project and branch chips show that Session's working directory and
+uses the stored project name. Project and branch retain the standard separate composer chips.
+Existing Sessions expose this context without changing their workspace.
 Start's `workspace::Plugin` pins the transient `CommandBarWorkDirectory` on each attached launcher page
 from its pane or Tab default. It never adds the persisted `Cwd` component or `Save` to a page, and
 prewarmed pages wait for a Tab before binding. Project and branch choices update that page, preserving

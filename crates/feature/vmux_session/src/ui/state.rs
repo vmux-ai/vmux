@@ -616,6 +616,14 @@ impl Transcript {
         self.root.read().transcript.clone()
     }
 
+    pub fn activity_counts(self) -> (u32, u32) {
+        let root = self.root.read();
+        (
+            root.transcript.active_subagents,
+            root.transcript.active_tasks,
+        )
+    }
+
     pub fn ready(self) -> bool {
         let root = self.root.read();
         root.transcript_revision > 0
@@ -643,6 +651,14 @@ impl Transcript {
         if *self.initial_follow.peek() {
             let mut initial_follow = self.initial_follow;
             initial_follow.set(false);
+        }
+    }
+
+    pub(super) fn scroll_input(self) {
+        self.note_scroll_input();
+        if *self.last_top.peek() <= 0 && self.root.peek().transcript.loaded_start > 0 {
+            self.stop_following();
+            self.request_history();
         }
     }
 

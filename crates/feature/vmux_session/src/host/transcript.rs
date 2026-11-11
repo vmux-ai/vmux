@@ -373,7 +373,7 @@ impl ChatProjection {
         let limit = viewport.map_or(CHAT_INITIAL_ITEM_LIMIT as usize, |viewport| {
             viewport.item_limit(messages.item_count())
         });
-        let page = messages.tail(limit);
+        let page = messages.tail_with_prompt(limit);
         let error = match state {
             RunState::Errored(message) => message.clone(),
             _ => String::new(),
@@ -821,6 +821,93 @@ mod tests {
         assert_eq!(state.viewport.position, Some(viewport));
         assert_eq!(state.transcript.loaded_start, viewport.loaded_start);
         assert!(app.world().get::<PageReady>(view).is_none());
+    }
+
+    #[test]
+    fn retained_history_pages_load_without_a_runtime_stack_binding() {
+        let mut app = App::new();
+        app.add_plugins((MinimalPlugins, Plugin))
+            .init_resource::<Published>()
+            .add_observer(Published::record);
+        let mut messages = Vec::new();
+        for index in 0..80 {
+            messages.push(vmux_api::session::Message::user(format!("message {index}")));
+            messages.push(vmux_api::session::Message::Assistant {
+                blocks: vec![vmux_api::session::AssistantBlock::Text(format!(
+                    "response {index}"
+                ))],
+            });
+        }
+        app.world_mut().spawn((
+            Session,
+            SessionId("saved".into()),
+            AgentId("codex".into()),
+            Name::new("Saved conversation"),
+            RunState::Idle,
+            PromptQueue::default(),
+            ImportedConversation {
+                source_agent: "Codex".into(),
+                source_sid: "original".into(),
+                messages,
+                truncated: false,
+                first_prompt: None,
+            },
+        ));
+        let stack = app.world_mut().spawn_empty().id();
+        let view = app
+            .world_mut()
+            .spawn((
+                SessionView,
+                PageReady,
+                ChildOf(stack),
+                PageMetadata {
+                    url: Route::Session(SessionId("saved".into())).url(),
+                    ..Default::default()
+                },
+            ))
+            .id();
+        app.update();
+        app.update();
+        assert!(
+            app.world()
+                .resource::<Published>()
+                .0
+                .transcript
+                .loaded_start
+                > 0
+        );
+        while app
+            .world()
+            .resource::<Published>()
+            .0
+            .transcript
+            .loaded_start
+            > 0
+        {
+            let before = app
+                .world()
+                .resource::<Published>()
+                .0
+                .transcript
+                .loaded_start;
+            app.world_mut().trigger(UiInput {
+                webview: view,
+                payload: ChatHistoryMoreRequest,
+            });
+            app.update();
+            app.update();
+            let transcript = &app.world().resource::<Published>().0.transcript;
+            assert!(
+                transcript.loaded_start < before,
+                "history must advance toward the first prompt"
+            );
+            assert!(!transcript.loading);
+        }
+        let transcript = &app.world().resource::<Published>().0.transcript;
+        assert_eq!(transcript.loaded_start, 0);
+        assert_eq!(transcript.total, 160);
+        assert!(matches!(&transcript.items[0], ChatItem::User { text, .. } if text == "message 0"));
+        assert!(!transcript.loading);
     }
 
     #[test]

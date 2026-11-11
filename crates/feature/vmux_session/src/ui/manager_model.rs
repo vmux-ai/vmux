@@ -8,6 +8,28 @@ use vmux_ui::i18n::{TranslationValue, translate, translate_humanized, translate_
 
 use crate::event::{ProviderSessionTarget, SessionRepositories, SessionRepository};
 
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+pub(super) enum RowIdentity {
+    Provider(String, String),
+    Local(String),
+}
+
+impl RowIdentity {
+    pub(super) fn of(session: &SessionSummary) -> Self {
+        if !session.provider_kind.is_empty() && !session.provider_sid.is_empty() {
+            return Self::Provider(session.provider_kind.clone(), session.provider_sid.clone());
+        }
+        if !session.managed && !session.kind.is_empty() && !session.sid.is_empty() {
+            return Self::Provider(session.kind.clone(), session.sid.clone());
+        }
+        Self::Local(session.id.clone())
+    }
+
+    pub(super) fn key(&self) -> String {
+        format!("{self:?}")
+    }
+}
+
 #[derive(Default)]
 pub(super) struct CatalogDisplay {
     settled: Option<CatalogSnapshot>,
@@ -26,12 +48,13 @@ impl CatalogDisplay {
             let mut rows = HashMap::new();
             let mut order = Vec::new();
             for session in incoming.sessions {
-                order.push(session.id.clone());
-                rows.insert(session.id.clone(), session);
+                let key = RowIdentity::of(&session);
+                order.push(key.clone());
+                rows.insert(key, session);
             }
             incoming.sessions = Vec::new();
             for session in &previous.sessions {
-                if let Some(updated) = rows.remove(&session.id) {
+                if let Some(updated) = rows.remove(&RowIdentity::of(session)) {
                     incoming.sessions.push(updated);
                 } else if loading {
                     incoming.sessions.push(session.clone());
@@ -892,6 +915,61 @@ mod tests {
             url.query_pairs()
                 .any(|(key, value)| key == "vmux-entry" && value == "1")
         );
+    }
+
+    #[test]
+    fn discovery_replaces_a_provider_row_in_place_when_it_becomes_managed() {
+        let before = SessionSummary {
+            id: "before".into(),
+            managed: true,
+            ..Default::default()
+        };
+        let after = SessionSummary {
+            id: "after".into(),
+            managed: true,
+            ..Default::default()
+        };
+        let provider = SessionSummary {
+            id: "provider-row".into(),
+            kind: "acp:codex".into(),
+            sid: "provider-session".into(),
+            ..Default::default()
+        };
+        let managed = SessionSummary {
+            id: "canonical".into(),
+            managed: true,
+            provider_kind: "acp:codex".into(),
+            provider_sid: "provider-session".into(),
+            ..Default::default()
+        };
+        let mut display = CatalogDisplay::default();
+        display.update(
+            CatalogSnapshot {
+                sessions: vec![before.clone(), provider.clone(), after.clone()],
+                ..Default::default()
+            },
+            true,
+        );
+        let incoming = CatalogSnapshot {
+            sessions: vec![after, managed.clone(), before],
+            ..Default::default()
+        };
+        for loading in [true, false] {
+            let shown = display.update(incoming.clone(), loading).unwrap();
+            assert_eq!(
+                shown
+                    .sessions
+                    .iter()
+                    .map(|session| session.id.as_str())
+                    .collect::<Vec<_>>(),
+                ["before", "canonical", "after"]
+            );
+            assert!(shown.sessions[1].managed);
+            assert_eq!(
+                RowIdentity::of(&provider).key(),
+                RowIdentity::of(&shown.sessions[1]).key()
+            );
+        }
     }
 
     #[test]

@@ -2565,9 +2565,6 @@ fn open(
     if tombstones.contains(&request.kind, &request.sid) {
         return;
     }
-    let Some(source) = catalog.get(&request.kind, &request.sid) else {
-        return;
-    };
     let Ok(parent) = parents.get(trigger.event().webview) else {
         return;
     };
@@ -2584,19 +2581,22 @@ fn open(
         window: windows.get(trigger.event().webview),
         open: request.open.unwrap_or_default(),
     };
-    let family = AgentFamily::of(&source.agent.0);
+    let family = AgentFamily::of(request.kind.trim_start_matches("acp:"));
     if let Some((_, id, _, _, _, _)) =
         existing
             .iter()
             .find(|(_, _, agent, resume, kind, provider_sid)| {
-                kind.is_some_and(|kind| kind == source.kind)
-                    && provider_sid.is_some_and(|sid| sid == source.id)
-                    || AgentFamily::of(&agent.0) == family && resume.0 == source.id.0
+                kind.is_some_and(|kind| kind.0 == request.kind)
+                    && provider_sid.is_some_and(|sid| sid.0 == request.sid)
+                    || AgentFamily::of(&agent.0) == family && resume.0 == request.sid
             })
     {
         opener.open(destination, Route::Session(id.clone()).url());
         return;
     }
+    let Some(source) = catalog.get(&request.kind, &request.sid) else {
+        return;
+    };
     imports.write(ImportRequested {
         entry: source.entity,
         agent: agents.resolve(&source.agent.0),
