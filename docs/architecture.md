@@ -363,6 +363,8 @@ Terminal operations release job payloads while retaining their shared identity a
 Full lanes retain requests for retry; unavailable lanes and panics publish typed failures.
 Low-level adapters can use `vmux_ecs::blocking` directly: bounded worker pools return entity-owned
 `BlockingTask` handles, isolate panics, and invoke a standard `Waker` after publishing the result.
+Notification panics are isolated from the worker and its queued work. Pools require positive
+worker counts and queue capacities; unsupported configurations report unavailable.
 The optional native `WakePlugin` binds the event-loop proxy to `JobWake`; another host can supply
 its own waker without linking Winit. Short, long, and process lanes remain independently configurable.
 Dropping a handle cancels queued work and discards late results; running adapters cooperate with

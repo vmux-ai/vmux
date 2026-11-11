@@ -92,7 +92,7 @@ pub struct BlockingPool {
 
 impl BlockingPool {
     pub fn new(name: &str, workers: usize, capacity: usize) -> Self {
-        if cfg!(target_family = "wasm") {
+        if cfg!(target_family = "wasm") || workers == 0 || capacity == 0 {
             return Self { sender: None };
         }
         let (sender, receiver) = mpsc::sync_channel::<Work>(capacity);
@@ -193,7 +193,7 @@ struct CompletionWake(Option<Waker>);
 impl Drop for CompletionWake {
     fn drop(&mut self) {
         if let Some(wake) = &self.0 {
-            wake.wake_by_ref();
+            let _ = catch_unwind(AssertUnwindSafe(|| wake.wake_by_ref()));
         }
     }
 }
@@ -451,13 +451,50 @@ mod tests {
         }
     }
 
+    struct PanicWake;
+
+    impl std::task::Wake for PanicWake {
+        fn wake(self: Arc<Self>) {
+            panic!("host wake failure");
+        }
+    }
+
     #[test]
-    fn a_pool_without_workers_reports_unavailable_instead_of_queue_backpressure() {
-        let pool = BlockingPool::new("test-unavailable", 0, 1);
-        assert!(matches!(
-            pool.try_spawn(None, || panic!("unavailable work must not run")),
-            Err(SpawnError::Unavailable)
-        ));
+    fn a_panicking_host_waker_does_not_discard_queued_work() {
+        let pool = BlockingPool::new("test-wake-panic", 1, 1);
+        let (started_tx, started_rx) = mpsc::sync_channel(1);
+        let (release_tx, release_rx) = mpsc::sync_channel(1);
+        let mut first = pool
+            .try_spawn(Some(Arc::new(PanicWake).into()), move || {
+                started_tx.send(()).unwrap();
+                release_rx.recv_timeout(Duration::from_secs(2)).unwrap();
+                7
+            })
+            .unwrap();
+        started_rx.recv_timeout(Duration::from_secs(2)).unwrap();
+        let mut following = pool.try_spawn(None, || 9).unwrap();
+        release_tx.send(()).unwrap();
+        let deadline = Instant::now() + Duration::from_secs(2);
+        loop {
+            if let Some(result) = following.poll() {
+                assert_eq!(result.unwrap(), 9);
+                break;
+            }
+            assert!(Instant::now() < deadline);
+            std::thread::yield_now();
+        }
+        assert_eq!(first.poll().unwrap().unwrap(), 7);
+    }
+
+    #[test]
+    fn unusable_pools_report_unavailable_instead_of_queue_backpressure() {
+        for (workers, capacity) in [(0, 1), (1, 0), (0, 0)] {
+            let pool = BlockingPool::new("test-unavailable", workers, capacity);
+            assert!(matches!(
+                pool.try_spawn(None, || panic!("unavailable work must not run")),
+                Err(SpawnError::Unavailable)
+            ));
+        }
     }
 
     #[test]
