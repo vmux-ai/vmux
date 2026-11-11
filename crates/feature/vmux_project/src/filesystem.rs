@@ -23,8 +23,9 @@ impl Plugin for FilesystemPlugin {
             .add_systems(Update, write.after(StoreSet::Write).before(FileSet))
             .add_systems(
                 Update,
-                (finish_reads, finish_writes, start).chain().in_set(FileSet),
-            );
+                (finish_reads, finish_writes).chain().before(StoreSet::Load),
+            )
+            .add_systems(Update, start.in_set(FileSet));
     }
 }
 
@@ -395,6 +396,87 @@ mod tests {
             *waker = Some(context.waker().clone());
             std::task::Poll::Pending
         }
+    }
+
+    #[test]
+    fn completed_io_commits_on_the_frame_awakened_by_the_worker() {
+        let root = tempfile::tempdir().unwrap();
+        let directory = root.path().canonicalize().unwrap();
+        let url = "vmux://projects/ready";
+        let mut app = App::new();
+        app.add_plugins(crate::ProjectPlugin);
+        let owner = app.world_mut().spawn(Root(directory.clone())).id();
+        app.update();
+        let request = app
+            .world_mut()
+            .resource_mut::<Messages<LoadRequest>>()
+            .drain()
+            .next()
+            .unwrap();
+        app.add_plugins(FilesystemPlugin);
+        let mut snapshot = Snapshot::default();
+        snapshot.projects.insert(
+            url.into(),
+            Record {
+                name: "Ready".into(),
+                directory: directory.clone(),
+                repository: None,
+                revision: 1,
+            },
+        );
+        let task = IoTaskPool::get().spawn(async move { Ok(snapshot) });
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(3);
+        while !task.is_finished() {
+            assert!(std::time::Instant::now() < deadline);
+            std::thread::yield_now();
+        }
+        app.world_mut().spawn((
+            Cwd(directory.clone()),
+            ReadTask {
+                ticket: request.ticket,
+                task,
+            },
+        ));
+        app.update();
+        assert!(app.world().get::<Loaded>(owner).is_some());
+        let project = app
+            .world_mut()
+            .query_filtered::<Entity, With<Registered>>()
+            .single(app.world())
+            .unwrap();
+        assert_eq!(app.world().get::<Name>(project).unwrap().as_str(), "Ready");
+        app.world_mut().spawn(WriteRequest {
+            root: directory,
+            mutation: Mutation::Archive {
+                url: url.into(),
+                archived: true,
+            },
+        });
+        app.update();
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(3);
+        loop {
+            let finished = app
+                .world_mut()
+                .query::<&WriteTask>()
+                .single(app.world())
+                .unwrap()
+                .task
+                .is_finished();
+            if finished {
+                break;
+            }
+            assert!(std::time::Instant::now() < deadline);
+            std::thread::yield_now();
+        }
+        app.update();
+        assert!(app.world().get::<crate::Archived>(project).is_some());
+        let completed = app
+            .world_mut()
+            .resource_mut::<Messages<WriteCompleted>>()
+            .drain()
+            .next()
+            .unwrap();
+        assert!(completed.result.is_ok());
     }
 
     #[test]

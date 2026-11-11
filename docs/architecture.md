@@ -1543,6 +1543,8 @@ Registered Projects are entities owned by a Project `Root`, composed from `Proje
 entities to that core root. `ProjectPlugin` loads once and serializes accepted writes per root;
 `FilesystemPlugin` owns atomic IO tasks. Save operations carry preparation, provisioning and
 commit state as components; systems enqueue immutable snapshots at the filesystem boundary.
+Completed IO is polled before the core store sets so the worker's wake commits its result
+in the same frame.
 Writes check the current ECS revision and reject duplicate checkouts before dispatch. Only a
 successful atomic write updates Project entities and emits `ProjectSaved`; failed writes retain
 the previous registration. Stable Project URLs survive source edits. Removal persists hidden
