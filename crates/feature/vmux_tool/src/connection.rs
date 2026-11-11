@@ -112,10 +112,9 @@ fn page_ready(
     mut commands: Commands,
 ) {
     let target = trigger.event().webview;
-    if pages
-        .get(target)
-        .is_ok_and(|page| page.url.starts_with(crate::CONNECTORS_URL))
-    {
+    if pages.get(target).is_ok_and(|page| {
+        vmux_api::RoutePattern::new(crate::CONNECTORS_URL, false).matches(&page.url)
+    }) {
         commands.trigger(McpSnapshotRequest { target });
     }
 }
@@ -1210,6 +1209,36 @@ mod tests {
                 .get::<super::PendingMcpSnapshot>(target)
                 .is_some()
         );
+    }
+
+    #[test]
+    fn tools_connectors_and_its_legacy_alias_load_connections_on_page_ready() {
+        let mut app = App::new();
+        app.add_plugins(super::McpConnectionPlugin);
+        for (url, should_load) in [
+            ("vmux://tools/connectors", true),
+            ("vmux://connectors/", true),
+            ("vmux://tools/mcp", false),
+            ("vmux://tools/acp", false),
+        ] {
+            let target = app
+                .world_mut()
+                .spawn(vmux_ecs::PageMetadata {
+                    url: url.into(),
+                    ..Default::default()
+                })
+                .id();
+            app.world_mut().trigger(UiInput {
+                webview: target,
+                payload: vmux_api::PageReady {},
+            });
+            app.update();
+            assert_eq!(
+                app.world().get::<McpPageState>(target).is_some(),
+                should_load,
+                "{url}"
+            );
+        }
     }
 
     #[test]
