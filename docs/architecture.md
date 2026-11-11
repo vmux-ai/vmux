@@ -678,6 +678,8 @@ scheme and rejects a custom handler. Page routing and renderer asset origins are
 metadata; an asset origin never becomes a bookmark destination.
 The command bar displays decoded URL path segments, including embedded file paths. Edits retain
 their original segment boundaries; navigation and whole-URL copies use the canonical encoded URL.
+Plain URL drafts retain their exact spelling while typing and deleting; presentation never adds
+a root slash or normalizes an unfinished authority.
 Ordinary bookmark clicks reuse an existing Stack or open one. Cmd-click, with or without Shift,
 opens a new Tab after resolving any project context.
 Fragment updates retain the page's breadcrumbs instead of replacing them with the generic route.

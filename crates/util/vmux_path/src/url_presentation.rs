@@ -25,7 +25,8 @@ impl<'a> UrlPresentation<'a> {
         let Ok(url) = url::Url::parse(canonical) else {
             return presentation;
         };
-        if !matches!(url.scheme(), "vmux" | "file" | "git" | "http" | "https")
+        if url.as_str() != canonical
+            || !matches!(url.scheme(), "vmux" | "file" | "git" | "http" | "https")
             || url.cannot_be_a_base()
         {
             return presentation;
@@ -90,6 +91,9 @@ impl<'a> UrlPresentation<'a> {
     pub fn edit(&self, edited: &str) -> String {
         if edited == self.text || edited == self.canonical {
             return self.canonical.to_string();
+        }
+        if self.text == self.canonical {
+            return edited.to_string();
         }
         let Some(mut url) = self.url.clone() else {
             return edited.to_string();
@@ -189,6 +193,43 @@ impl<'a> UrlPresentation<'a> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn incremental_url_entry_and_deletion_preserve_the_draft() {
+        for target in [
+            "https://accounts.google.com",
+            "http://localhost:3000/path?query=value#section",
+            "https://EXAMPLE.com:443/path",
+            "file:///tmp/a project/日本語",
+            "vmux://tools/acp",
+        ] {
+            let mut draft = String::new();
+            for character in target.chars() {
+                let edited = format!("{draft}{character}");
+                draft = UrlPresentation::new(&draft).edit(&edited);
+                assert_eq!(draft, edited);
+                assert_eq!(UrlPresentation::new(&draft).text(), edited);
+            }
+            while !draft.is_empty() {
+                let mut edited = draft.clone();
+                edited.pop();
+                draft = UrlPresentation::new(&draft).edit(&edited);
+                assert_eq!(draft, edited);
+                assert_eq!(UrlPresentation::new(&draft).text(), edited);
+            }
+        }
+    }
+
+    #[test]
+    fn plain_url_edits_preserve_path_delimiters_and_authority_spelling() {
+        for (original, edited) in [
+            ("https://example.com/", "https://example.com"),
+            ("https://example.com/path", "https://example.com/path/child"),
+            ("https://example.com/path", "https://EXAMPLE.com:443/path"),
+        ] {
+            assert_eq!(UrlPresentation::new(original).edit(edited), edited);
+        }
+    }
 
     #[test]
     fn embedded_file_paths_and_branches_display_readably_and_round_trip_after_edits() {
