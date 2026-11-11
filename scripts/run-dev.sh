@@ -36,9 +36,14 @@ if [[ "$(uname -s)" == Darwin ]]; then
     app="$debug_dir/Vmux Dev.app"
     [[ -d "$app" ]] || { echo "Debug app missing. Run make build-dev." >&2; exit 1; }
     codesign --verify --strict "$app"
+    if [[ "${VMUX_TEST_ENV_KEYS:-0}" == 1 ]]; then
+        exec env -u CEF_PATH DYLD_LIBRARY_PATH="$dylib_path" "$app/Contents/MacOS/vmux_desktop"
+    fi
     launch_args=(--env "VMUX_PROFILE=${VMUX_PROFILE:-personal}" --env "VMUX_TEST=${VMUX_TEST:-}")
     if [[ -n "${VMUX_DATA_DIR:-}" ]]; then
+        launch_args+=(-n)
         launch_args+=(--env "VMUX_DATA_DIR=$VMUX_DATA_DIR")
+        launch_args+=(--env "VMUX_TEST_ENV_KEYS=${VMUX_TEST_ENV_KEYS:-0}")
     fi
     exec open "${launch_args[@]}" "$app"
 fi

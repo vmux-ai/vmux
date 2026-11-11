@@ -300,6 +300,12 @@ impl AcpServiceConnection {
                     )
                     .await;
             }
+            ClientMessage::AuthenticateAcpAgent { sid, method_id } => {
+                self.service
+                    .sessions
+                    .input(sid, AcpInput::Authenticate { method_id })
+                    .await;
+            }
             ClientMessage::Shared(SharedMessage::AgentCancel { sid }) => {
                 self.service.sessions.input(sid, AcpInput::Cancel).await;
             }

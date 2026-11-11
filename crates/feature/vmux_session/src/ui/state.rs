@@ -263,6 +263,23 @@ impl Chat {
         self.run.status()
     }
 
+    pub fn authentication_methods(&self) -> Vec<vmux_api::protocol::AuthenticationMethod> {
+        self.identity
+            .snapshot
+            .value
+            .read()
+            .authentication_methods
+            .clone()
+    }
+
+    pub fn authentication_pending(&self) -> bool {
+        self.identity.snapshot.value.read().authentication_pending
+    }
+
+    pub fn install_percent(&self) -> Option<u8> {
+        self.identity.snapshot.value.read().install_percent
+    }
+
     pub fn in_use(&self) -> bool {
         self.status() == "errored" && vmux_session::Failure(&self.run.error()).in_use()
     }

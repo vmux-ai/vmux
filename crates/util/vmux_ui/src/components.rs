@@ -1,6 +1,7 @@
 pub mod address;
 pub mod agent_menu;
 pub mod alert_dialog;
+pub mod api_key;
 pub mod avatar;
 pub mod badge;
 pub mod breadcrumb;
@@ -37,6 +38,7 @@ pub mod select;
 pub mod sheet;
 pub mod skeleton;
 pub mod start_hero;
+pub mod starter_prompts;
 pub mod switch;
 pub mod textarea;
 pub mod tooltip;

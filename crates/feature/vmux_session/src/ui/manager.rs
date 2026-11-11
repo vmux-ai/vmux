@@ -225,6 +225,12 @@ fn SessionsManagerActions(
     let deleted_provider_count = mutations.deleted_provider_count();
     let delete_confirm = use_memo(move || Some(delete_confirm_open()));
     let mut toolbar = Vec::new();
+    toolbar.push(
+        ToolbarControl::button(translate("onboarding-start"), move |_| {
+            PageNavigation::replace("vmux://sessions/inbox?setup=1");
+        })
+        .icon(LineIcon::Plus),
+    );
     if deleted_provider_count > 0 {
         toolbar.push(
             ToolbarControl::button(translate("sessions-restore-deleted"), move |_| {
@@ -375,11 +381,7 @@ fn SessionsManagerContent(
             if presentation.loading {
                 SessionsSkeleton {}
             } else if presentation.snapshot.sessions.is_empty() {
-                ManagerEmpty {
-                    title: translate("sessions-empty"),
-                    detail: translate("sessions-empty-detail"),
-                    actions: rsx! { StartSessionButton {} },
-                }
+                super::onboarding::Onboarding {}
             } else if !presentation.visible_sessions {
                 ManagerEmpty {
                     title: translate("sessions-inbox-empty"),
@@ -510,7 +512,7 @@ fn StartSessionButton() -> Element {
         button {
             r#type: "button",
             class: "vmux-primary-action mt-2 inline-flex h-8 items-center gap-1.5 rounded-md px-3 text-[11px] font-medium",
-            onclick: move |_| StartPage::open(),
+            onclick: move |event| PageNavigation::click("vmux://sessions/inbox?setup=1", &event),
             LineIconView { icon: LineIcon::Plus, class: "size-3.5".to_string() }
             span { {translate("sessions-start")} }
         }

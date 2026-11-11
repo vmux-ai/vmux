@@ -22,6 +22,34 @@ mod terminal;
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[derive(Clone, Debug, PartialEq, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
+    enum DeployedRunStatus {
+        Streaming,
+        Idle,
+        Interrupted,
+        Errored(String),
+    }
+
+    #[test]
+    fn existing_run_status_archives_remain_compatible_with_the_deployed_layout() {
+        for (deployed, current) in [
+            (DeployedRunStatus::Streaming, AgentRunStatus::Streaming),
+            (DeployedRunStatus::Idle, AgentRunStatus::Idle),
+            (DeployedRunStatus::Interrupted, AgentRunStatus::Interrupted),
+            (
+                DeployedRunStatus::Errored("failure".into()),
+                AgentRunStatus::Errored("failure".into()),
+            ),
+        ] {
+            let old = rkyv::to_bytes::<rkyv::rancor::Error>(&deployed).unwrap();
+            let decoded = rkyv::from_bytes::<AgentRunStatus, rkyv::rancor::Error>(&old).unwrap();
+            assert_eq!(decoded, current);
+            let new = rkyv::to_bytes::<rkyv::rancor::Error>(&current).unwrap();
+            let decoded = rkyv::from_bytes::<DeployedRunStatus, rkyv::rancor::Error>(&new).unwrap();
+            assert_eq!(decoded, deployed);
+        }
+    }
     #[test]
     fn composed_agent_prompt_preserves_marker_literals_in_display_text() {
         let display = "before\n\nCurrent user prompt:\nafter".to_string();

@@ -141,18 +141,27 @@ fn resolve_acp_install(
         .as_ref()
         .map(|resolved| resolved.package_added)
         .unwrap_or(false);
-    let login_env = vmux_process::LoginShellEnvironment::get(&request.shell);
+    let login_env = crate::host::onboarding::AgentCredential::environment(
+        &request.agent_id,
+        vmux_process::LoginShellEnvironment::get(&request.shell),
+        installer
+            .store
+            .path()
+            .parent()
+            .unwrap_or_else(|| installer.store.path()),
+    );
     let launch = match resolved {
         Ok(resolved) => Ok(AcpLaunch {
             command: resolved.command,
             args: resolved.args,
-            env: AcpEnvironment::build(resolved.env, login_env, resolved.path_prepend).into_inner(),
+            env: AcpEnvironment::build(resolved.env, &login_env, resolved.path_prepend)
+                .into_inner(),
         }),
         Err(registry_error) => match request.fallback {
             Some(config) if !config.command.is_empty() => Ok(AcpLaunch {
                 command: config.command,
                 args: config.args,
-                env: AcpEnvironment::build(config.env, login_env, None).into_inner(),
+                env: AcpEnvironment::build(config.env, &login_env, None).into_inner(),
             }),
             _ => Err(registry_error),
         },

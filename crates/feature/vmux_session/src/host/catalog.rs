@@ -91,7 +91,11 @@ impl Plugin for CatalogPlugin {
 }
 
 #[derive(Component)]
-#[require(SessionCatalogView, SessionCatalogUiStateComponent)]
+#[require(
+    SessionCatalogView,
+    SessionCatalogUiStateComponent,
+    crate::onboarding::KeyPending
+)]
 pub struct SessionManagerView;
 
 fn unpublish(trigger: On<Remove, SessionManagerView>, mut commands: Commands) {

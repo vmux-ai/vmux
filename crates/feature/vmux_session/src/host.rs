@@ -20,6 +20,10 @@ pub use handoff::ImportedConversation;
 #[cfg(host)]
 pub use media::ChatAttachmentHydrationRequest;
 pub use model::{ChatModeStateChanged, ChatModelStateChanged, Models};
+#[cfg(host)]
+pub use onboarding::{ProvidersChanged, SetupPrompt};
+#[cfg(host)]
+pub use prompt::RecoverPrompt;
 pub use prompt::{Attach, Attachments, Browsed, RemoveAttachment};
 #[cfg(host)]
 pub use session::{
@@ -47,6 +51,8 @@ mod key;
 #[cfg(host)]
 mod media;
 mod model;
+#[cfg(host)]
+mod onboarding;
 mod presentation;
 mod projection;
 mod prompt;
@@ -84,6 +90,7 @@ impl Plugin for SessionPlugin {
             session::ChatHostPlugin,
             command_bar::Plugin,
             transcript::Plugin,
+            onboarding::Plugin,
         ));
     }
 }

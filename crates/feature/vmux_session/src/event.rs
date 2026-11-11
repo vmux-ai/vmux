@@ -145,6 +145,9 @@ pub struct QueuedPromptSnapshot {
 
 #[vmux_api::contract(Default, Eq)]
 pub struct ChatSnapshot {
+    pub authentication_methods: Vec<vmux_api::protocol::AuthenticationMethod>,
+    pub authentication_pending: bool,
+    pub install_percent: Option<u8>,
     pub status: String,
     pub error: String,
     pub header_name: String,

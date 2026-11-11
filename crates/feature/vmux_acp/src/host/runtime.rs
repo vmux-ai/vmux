@@ -503,6 +503,19 @@ mod tests {
         queue.enqueue("hello".to_string());
 
         assert!(!acp_prompt_dispatch_ready(&RunState::Idle, &queue, false));
+        assert!(!acp_prompt_dispatch_ready(
+            &RunState::Preparing,
+            &queue,
+            true
+        ));
+        assert!(!acp_prompt_dispatch_ready(
+            &RunState::AuthenticationRequired {
+                methods: Vec::new(),
+                pending: false,
+            },
+            &queue,
+            true
+        ));
         assert!(acp_prompt_dispatch_ready(&RunState::Idle, &queue, true));
         assert!(!acp_prompt_dispatch_ready(
             &RunState::Errored("failed".into()),

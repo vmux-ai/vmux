@@ -344,7 +344,7 @@ fn spawn(
                 AcpProjector::default(),
                 AcpAgentName::default(),
                 AcpSessionConfigs::default(),
-                AcpRunState(AgentRunStatus::Idle),
+                AcpRunState(AgentRunStatus::Starting),
                 AcpApprovalState::default(),
                 AcpHistoryReplay {
                     active: replay_pending,

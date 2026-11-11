@@ -199,8 +199,18 @@ fn project_statuses(
                 continue;
             }
             match &inbound.status {
+                AgentRunStatus::Starting => *state = RunState::Preparing,
                 AgentRunStatus::Idle => *state = RunState::Idle,
                 AgentRunStatus::Streaming => *state = RunState::Streaming,
+                AgentRunStatus::AuthenticationRequired { methods, pending } => {
+                    *state = RunState::AuthenticationRequired {
+                        methods: methods.as_ref().clone(),
+                        pending: *pending,
+                    };
+                    commands
+                        .entity(session)
+                        .remove::<vmux_session::TranscriptLoading>();
+                }
                 AgentRunStatus::Interrupted => {
                     *state = RunState::Idle;
                     if !queue.flush_pending() {

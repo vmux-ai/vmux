@@ -16,7 +16,7 @@ mod format;
 
 #[vmux_page::page(
     component = Page,
-    states = ["PageAddressUiState", "ThemeUiState", "ChatUiState", "SessionCatalogUiState", "SessionDetailUiState", "KeyClaimsUiState"],
+    states = ["PageAddressUiState", "ThemeUiState", "ChatUiState", "SessionCatalogUiState", "SessionDetailUiState", "OnboardingUiState", "KeyEntryUiState", "KeyClaimsUiState"],
     subtree,
     preserve_title,
     no_favicon,
@@ -29,11 +29,22 @@ pub fn Page() -> Element {
     vmux_ui::hooks::use_ui_state::<crate::state::ChatUiState>();
     vmux_ui::hooks::use_ui_state::<crate::state::SessionCatalogUiState>();
     vmux_ui::hooks::use_ui_state::<crate::state::SessionDetailUiState>();
+    vmux_ui::hooks::use_ui_state::<crate::onboarding::OnboardingUiState>();
+    vmux_ui::hooks::use_ui_state::<crate::onboarding::KeyEntryUiState>();
     let details_open = use_signal(|| false);
     let route = try_consume_context::<vmux_ecs::PageMetadata>()
         .and_then(|metadata| vmux_session::Route::parse(&metadata.url));
     match route {
-        Some(vmux_session::Route::Manager) => rsx! { manager::SessionsManager {} },
+        Some(vmux_session::Route::Manager) => {
+            let setup = try_consume_context::<vmux_ecs::PageMetadata>().is_some_and(|metadata| {
+                crate::Route::manager_filter(&metadata.url, "setup").as_deref() == Some("1")
+            });
+            if setup {
+                rsx! { main { class: "h-dvh overflow-auto bg-background text-foreground", onboarding::Onboarding {} } }
+            } else {
+                rsx! { manager::SessionsManager {} }
+            }
+        }
         Some(vmux_session::Route::Session(id)) => {
             let session_id = id.0;
             rsx! { SessionDetail { key: "{session_id}", session_id, details_open } }
@@ -119,6 +130,7 @@ fn SessionDetail(session_id: String, mut details_open: Signal<bool>) -> Element 
 
 pub mod agent;
 pub mod approval;
+mod authentication;
 pub mod composer;
 mod error;
 mod item;
@@ -126,6 +138,7 @@ mod keys;
 mod manager;
 mod manager_controller;
 mod manager_model;
+mod onboarding;
 mod scroll;
 mod state;
 mod transcript;

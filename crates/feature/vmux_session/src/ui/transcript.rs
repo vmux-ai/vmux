@@ -53,8 +53,11 @@ pub(super) fn ChatTranscript(chat: Chat) -> Element {
     let mut scroll_container = chat.transcript.scroll_container;
     let at_bottom = chat.transcript.at_bottom;
     let transcript = chat.transcript.current();
-    let transcript_loading =
-        chat.status() != "errored" && (chat.transcript_loading() || !chat.transcript.ready());
+    let setup = matches!(chat.status().as_str(), "authentication" | "preparing")
+        || chat.installing_splash();
+    let transcript_loading = !setup
+        && chat.status() != "errored"
+        && (chat.transcript_loading() || !chat.transcript.ready());
     let loaded_start = transcript.loaded_start;
     let history_loading = transcript.loading;
     let items = transcript.items;
@@ -111,7 +114,9 @@ pub(super) fn ChatTranscript(chat: Chat) -> Element {
                 } else if loaded_start > 0 {
                     HistorySentinel { loading: history_loading }
                 }
-                if !transcript_loading && chat.installing_splash() {
+                if !transcript_loading && chat.status() == "authentication" {
+                    super::authentication::Authentication { chat }
+                } else if !transcript_loading && (chat.installing_splash() || chat.status() == "preparing") {
                     InstallIntro { chat, detail: chat.install_detail() }
                 } else if !transcript_loading && items.is_empty() && chat.status() == "idle" {
                     ReadyIntro { chat }
@@ -220,6 +225,15 @@ fn InstallIntro(chat: Chat, detail: String) -> Element {
                 span { class: "h-1.5 w-1.5 shrink-0 rounded-full {accent.accent_bg}" }
                 span { class: "truncate", "{detail}" }
             }
+            if let Some(percent) = chat.install_percent() {
+                progress { class: "h-1 w-48", value: percent, max: "100", aria_label: translate("onboarding-install") }
+            }
+            button {
+                r#type: "button",
+                class: "rounded-lg px-3 py-2 text-xs text-muted-foreground hover:bg-muted/40",
+                onclick: move |_| { let _ = send(&crate::onboarding::ChatCancelSetup); },
+                {translate("common-cancel")}
+            }
         }
     }
 }
@@ -230,6 +244,7 @@ fn ReadyIntro(chat: Chat) -> Element {
         div { class: "flex flex-col items-center gap-3 py-16 text-center",
             AgentBanner { chat }
             p { class: "text-sm text-muted-foreground", {translate("agent-ready")} }
+            vmux_ui::components::starter_prompts::StarterPrompts { on_choose: move |text| chat.edit_draft(text) }
         }
     }
 }

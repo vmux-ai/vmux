@@ -110,7 +110,9 @@ impl ServerClient {
         inputs: ServerInputSender,
     ) -> std::io::Result<Self> {
         let store = crate::lsp::store::PackageStore::lsp();
-        let mut child = Command::new(&spec.command)
+        let mut command = Command::new(&spec.command);
+        vmux_process::LoginShellEnvironment::apply_isolation(&mut command);
+        let mut child = command
             .args(&spec.args)
             .current_dir(root)
             .env("PATH", store.server_path_env())

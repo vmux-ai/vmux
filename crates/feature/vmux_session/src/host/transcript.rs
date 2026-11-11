@@ -174,7 +174,10 @@ fn track_turn_duration(
                         .push(time.elapsed().saturating_sub(start).as_secs() as u32);
                 }
             }
-            RunState::AwaitingApproval { .. } => {}
+            RunState::Preparing
+            | RunState::Installing { .. }
+            | RunState::AwaitingApproval { .. }
+            | RunState::AuthenticationRequired { .. } => {}
         }
     }
 }
@@ -343,7 +346,10 @@ impl ChatProjection {
         });
         let page = messages.tail(limit);
         let error = match state {
-            RunState::Errored(message) => message.clone(),
+            RunState::Errored(message)
+            | RunState::Installing {
+                detail: message, ..
+            } => message.clone(),
             _ => String::new(),
         };
         let approval = match state {
@@ -377,6 +383,18 @@ impl ChatProjection {
             .unwrap_or_default();
         let transcript_empty = page.items.is_empty();
         let mut snapshot = ChatSnapshot {
+            install_percent: match state {
+                RunState::Installing { percent, .. } => *percent,
+                _ => None,
+            },
+            authentication_methods: match state {
+                RunState::AuthenticationRequired { methods, .. } => methods.clone(),
+                _ => Vec::new(),
+            },
+            authentication_pending: matches!(
+                state,
+                RunState::AuthenticationRequired { pending: true, .. }
+            ),
             status: state.status().to_string(),
             error,
             approval,

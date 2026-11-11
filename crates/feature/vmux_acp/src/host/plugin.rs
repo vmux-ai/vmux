@@ -14,6 +14,9 @@ impl Plugin for AcpPlugin {
         super::acp::add_config(app);
         super::runtime::add(app);
         super::command_bar::add(app);
+        super::onboarding::add(app);
+        #[cfg(target_os = "macos")]
+        app.add_plugins(super::credentials::Plugin);
         super::approval::add(app);
         super::attach::add(app);
         super::attention::add(app);

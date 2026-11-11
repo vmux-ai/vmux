@@ -15,8 +15,12 @@ pub(super) fn ChatFeedback(chat: Chat, #[props(default = rsx! {})] children: Ele
     let message = chat.run.error();
     let status = chat.status();
     let kind = Failure(&message).kind();
+    let key_state =
+        try_consume_context::<vmux_ui::hooks::UiStateBinding<crate::onboarding::KeyEntryUiState>>()
+            .map(|binding| binding.state.read().clone())
+            .unwrap_or_default();
     #[cfg(not(target_os = "ios"))]
-    let setup_url = Some(format!("{}acp", vmux_tool::ToolPlugin::URL));
+    let setup_url = Some("vmux://sessions/inbox?setup=1".to_string());
     #[cfg(target_os = "ios")]
     let setup_url: Option<String> = None;
     let mut visible = use_signal(|| true);
@@ -96,10 +100,15 @@ pub(super) fn ChatFeedback(chat: Chat, #[props(default = rsx! {})] children: Ele
         FailureKind::Setup => rsx! {
             Notice {
                 attached: true,
-                message: translate("agent-error-version-suggestion"),
+                message: translate("onboarding-setup-failed"),
                 kind: NoticeKind::Warning,
                 actions: rsx! {
                     if let Some(url) = setup_url {
+                        Button { size: ButtonSize::Xs, variant: ButtonVariant::Ghost,
+                            aria_label: translate("common-retry"),
+                            onclick: move |_| { let _ = send(&ChatRetrySession); },
+                            {translate("common-retry")}
+                        }
                         Button { size: ButtonSize::Xs, variant: ButtonVariant::Ghost,
                             aria_label: translate("agent-error-open-agents"),
                             onclick: move |_| PageNavigation::replace(url.clone()),
@@ -120,7 +129,16 @@ pub(super) fn ChatFeedback(chat: Chat, #[props(default = rsx! {})] children: Ele
     };
     let notice = (shown && kind != FailureKind::Other).then(|| feedback.clone());
     rsx! {
-        ComposerFrame { notice, {children} }
+        ComposerFrame { notice,
+            if shown && Failure(&message).needs_credentials() && !key_state.key_variable.is_empty() {
+                vmux_ui::components::api_key::ApiKeyEntry {
+                    pending: key_state.pending,
+                    failed: key_state.failed,
+                    on_submit: move |key| { let _ = send(&crate::onboarding::ChatSaveKey { key }); },
+                }
+            }
+            {children}
+        }
         if shown && kind == FailureKind::Other {
             {feedback}
         }
@@ -223,7 +241,7 @@ mod tests {
                 "agent command not found",
                 "status",
                 "agent-error-open-agents",
-                Some("vmux://tools/acp"),
+                Some("vmux://sessions/inbox?setup=1"),
             ),
             (
                 "operation failed unexpectedly",
@@ -245,7 +263,7 @@ mod tests {
             assert!(!html.contains("thread_active_writer"));
             assert!(html.contains(&format!("role=\"{role}\"")), "{html}");
             assert!(html.contains(&translate(label)), "{html}");
-            if request != Some("retry") {
+            if request != Some("retry") && Failure(message).kind() != FailureKind::Setup {
                 assert!(!html.contains(&translate("common-retry")));
             }
             let button = update

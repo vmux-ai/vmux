@@ -38,6 +38,15 @@ pub fn Page() -> Element {
                             on_activity: move |_| {},
                         }
                     }
+                    vmux_ui::components::starter_prompts::StarterPrompts {
+                        on_choose: move |text| {
+                            let _ = vmux_ui::hooks::send(&vmux_api::command_bar::PromptRequest {
+                                text,
+                                target_url: None,
+                                attachments: Vec::new(),
+                            });
+                        },
+                    }
                 }
             }
         }

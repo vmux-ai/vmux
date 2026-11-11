@@ -38,8 +38,68 @@ impl LoginShellEnvironment {
         Self::dedup(env);
     }
 
+    pub fn apply_isolation(command: &mut Command) {
+        let paths = vmux_profile::ProfilePaths::current();
+        if paths.isolated() {
+            let shell = std::env::var("SHELL").unwrap_or_else(|_| "/bin/sh".into());
+            command.env_clear().envs(Self::get(&shell).iter().cloned());
+        }
+    }
+
     fn capture(shell: &str) -> Vec<(String, String)> {
+        let paths = vmux_profile::ProfilePaths::current();
+        if paths.isolated() {
+            return Self::isolated(&paths.tool_home(), std::env::vars());
+        }
         Self::capture_via_pty(shell).unwrap_or_default()
+    }
+
+    fn isolated(
+        home: &Path,
+        inherited: impl IntoIterator<Item = (String, String)>,
+    ) -> Vec<(String, String)> {
+        let keys = std::env::var("VMUX_TEST_ENV_KEYS").ok().as_deref() == Some("1");
+        let mut environment = Vec::new();
+        for (key, value) in inherited {
+            if matches!(
+                key.as_str(),
+                "PATH"
+                    | "TMPDIR"
+                    | "LANG"
+                    | "LC_ALL"
+                    | "LC_CTYPE"
+                    | "SHELL"
+                    | "VMUX_DATA_DIR"
+                    | "VMUX_PROFILE"
+                    | "VMUX_TEST"
+                    | "VMUX_TEST_ENV_KEYS"
+            ) || (keys
+                && matches!(
+                    key.as_str(),
+                    "ANTHROPIC_API_KEY" | "OPENAI_API_KEY" | "MISTRAL_API_KEY"
+                ))
+            {
+                environment.push((key, value));
+            }
+        }
+        environment.push(("HOME".into(), home.to_string_lossy().into_owned()));
+        environment.push((
+            "XDG_CONFIG_HOME".into(),
+            home.join(".config").to_string_lossy().into_owned(),
+        ));
+        environment.push((
+            "XDG_CACHE_HOME".into(),
+            home.join(".cache").to_string_lossy().into_owned(),
+        ));
+        environment.push((
+            "XDG_DATA_HOME".into(),
+            home.join(".local/share").to_string_lossy().into_owned(),
+        ));
+        environment.push((
+            "XDG_STATE_HOME".into(),
+            home.join(".local/state").to_string_lossy().into_owned(),
+        ));
+        environment
     }
 
     fn capture_via_pty(shell: &str) -> Option<Vec<(String, String)>> {
@@ -195,6 +255,36 @@ impl LoginShellEnvironment {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn isolated_agent_environment_replaces_dotfile_paths_and_omits_unrelated_credentials() {
+        let fixture = std::path::Path::new("/fixture/home");
+        let environment = LoginShellEnvironment::isolated(
+            fixture,
+            [
+                ("HOME".into(), "/real/home".into()),
+                ("XDG_CONFIG_HOME".into(), "/real/config".into()),
+                ("PATH".into(), "/usr/bin:/bin".into()),
+                ("VMUX_DATA_DIR".into(), "/fixture/data".into()),
+                ("VMUX_PROFILE".into(), "onboarding".into()),
+                (
+                    "AWS_SECRET_ACCESS_KEY".into(),
+                    "must-not-be-inherited".into(),
+                ),
+            ],
+        );
+        let mut command = Command::new("/usr/bin/printenv");
+        command.env_clear().envs(environment);
+        let output = command.output().unwrap();
+        assert!(output.status.success());
+        let environment = String::from_utf8(output.stdout).unwrap();
+        assert!(environment.contains(&format!("HOME={}\n", fixture.display())));
+        assert!(!environment.contains("/real/"));
+        assert!(!environment.contains("AWS_SECRET_ACCESS_KEY"));
+        assert!(environment.contains("PATH=/usr/bin:/bin\n"));
+        assert!(environment.contains("VMUX_DATA_DIR=/fixture/data\n"));
+        assert!(environment.contains("VMUX_PROFILE=onboarding\n"));
+    }
 
     #[test]
     fn parse_env_splits_on_first_equals() {

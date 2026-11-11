@@ -72,6 +72,7 @@ impl SessionControl<'_> {
 impl Plugin for ChatPromptInputPlugin {
     fn build(&self, app: &mut App) {
         app.add_message::<ServiceRequest>()
+            .add_message::<RecoverPrompt>()
             .add_plugins(UiEventPlugin::<(
                 ChatSubmit,
                 ChatCancel,
@@ -88,7 +89,66 @@ impl Plugin for ChatPromptInputPlugin {
             .add_observer(escape)
             .add_observer(resume)
             .add_observer(clear_queue)
-            .add_observer(cancel_queued);
+            .add_observer(cancel_queued)
+            .add_systems(
+                Update,
+                (recover, restore)
+                    .chain()
+                    .after(vmux_ecs::PageOpenSet::HandleKnownPages),
+            );
+    }
+}
+
+#[cfg(host)]
+#[derive(Message)]
+pub struct RecoverPrompt {
+    pub session: SessionId,
+    pub text: String,
+}
+
+#[cfg(host)]
+#[derive(Component)]
+pub(super) struct RecoveredDraft(String);
+
+#[cfg(host)]
+fn recover(
+    mut requests: MessageReader<RecoverPrompt>,
+    sessions: Query<(Entity, &SessionId), With<vmux_session::Session>>,
+    mut commands: Commands,
+) {
+    for request in requests.read() {
+        for (entity, session) in &sessions {
+            if session == &request.session {
+                commands
+                    .entity(entity)
+                    .insert(RecoveredDraft(request.text.clone()));
+            }
+        }
+    }
+}
+
+#[cfg(host)]
+fn restore(
+    targets: super::session::SessionViews,
+    drafts: Query<&RecoveredDraft>,
+    mut views: Query<(Entity, &mut ComposerState), With<SessionView>>,
+    mut commands: Commands,
+) {
+    for (view, mut composer) in &mut views {
+        let Some(session) = targets.session(view) else {
+            continue;
+        };
+        let Ok(draft) = drafts.get(session) else {
+            continue;
+        };
+        if !composer.draft().is_empty() {
+            continue;
+        }
+        let effect = composer.effect(draft.0.clone(), true);
+        commands.trigger(
+            vmux_ecs::UiStateWrite::<crate::state::ChatUiState>::from_event(view, &effect),
+        );
+        commands.trigger(ComposerChanged::new(view));
     }
 }
 
@@ -146,6 +206,7 @@ fn submit(
             .insert((title, vmux_session::TitlePending));
     }
     enqueue_prompt(&mut queue, &mut state, text, attachments);
+    commands.entity(session).remove::<RecoveredDraft>();
     let effect = composer.effect(String::new(), true);
     commands
         .trigger(vmux_ecs::UiStateWrite::<crate::state::ChatUiState>::from_event(webview, &effect));
@@ -497,6 +558,74 @@ fn remove_attachments(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[cfg(host)]
+    #[test]
+    fn credential_recovery_survives_view_replacement_and_preserves_new_user_input() {
+        let mut app = App::new();
+        app.add_plugins((
+            ChatPromptInputPlugin,
+            super::super::composer::ChatComposerPlugin,
+        ));
+        let session = app
+            .world_mut()
+            .spawn((
+                TestSession::bundle(),
+                PromptQueue::default(),
+                RunState::Idle,
+            ))
+            .id();
+        let stack = app
+            .world_mut()
+            .spawn(vmux_ecs::EntityTarget::<vmux_session::Session>::new(
+                session,
+            ))
+            .id();
+        let old_view = app.world_mut().spawn((ChildOf(stack), SessionView)).id();
+        let id = app.world().get::<SessionId>(session).unwrap().clone();
+        app.world_mut().write_message(RecoverPrompt {
+            session: id,
+            text: "Explain the failing build".into(),
+        });
+        app.update();
+        assert_eq!(
+            app.world().get::<ComposerState>(old_view).unwrap().draft(),
+            "Explain the failing build"
+        );
+        let replacement = app.world_mut().spawn((ChildOf(stack), SessionView)).id();
+        app.update();
+        assert_eq!(
+            app.world()
+                .get::<ComposerState>(replacement)
+                .unwrap()
+                .draft(),
+            "Explain the failing build"
+        );
+        app.world_mut().trigger(UiInput {
+            webview: replacement,
+            payload: crate::event::ChatDraftChanged {
+                text: "Keep this newer request".into(),
+            },
+        });
+        app.world_mut().flush();
+        app.update();
+        assert_eq!(
+            app.world()
+                .get::<ComposerState>(replacement)
+                .unwrap()
+                .draft(),
+            "Keep this newer request"
+        );
+        let another_view = app.world_mut().spawn((ChildOf(stack), SessionView)).id();
+        app.update();
+        assert!(
+            app.world()
+                .get::<ComposerState>(another_view)
+                .unwrap()
+                .draft()
+                .is_empty()
+        );
+    }
 
     struct TestSession;
 

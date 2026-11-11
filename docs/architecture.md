@@ -1556,6 +1556,35 @@ their bound Session state. The service carries serialized agent protocol message
 persistent daemon sessions; `vmux_acp` owns the client-host Bevy messages produced when those
 wire messages enter ECS.
 
+Conversation setup lives inside the Sessions page, including its empty state. The launcher has a
+setup prompt target even when no ACP is installed. `vmux_session::host::onboarding::Plugin` owns
+the profile's draft, attachments and created Session reference; `OnboardingUiState` projects its
+starter choices and the ACP catalog. Typed edits and start requests preserve the draft and reuse
+the same Session on retry. ACP contributes supported agents and credential availability as booleans.
+Its existing installer reports progress to that Session. Preparing and authentication states hold
+the prompt queue until the provider establishes a session. Advertised ACP authentication methods
+run through `authenticate`; cancellation detaches the waiter or runtime while preserving the prompt.
+This delegates provider sign-in rather than duplicating an OAuth implementation or sharing GitHub
+tokens. Completed downloads may remain cached after a setup is cancelled.
+New transport variants append to existing enums. Authentication lists use boxed archive storage to
+preserve the deployed run-state layout while remaining ordinary arrays in JSON.
+
+macOS API-key entry uses a redacted, zeroizing input contract and an asynchronous Safe Storage write.
+`vmux_profile::CredentialStore` binds the encrypted envelope to the profile, credential namespace
+and key name. Only availability and save status reach UI state; neither the draft nor settings hold
+keys. A pending write holds conversation startup, and replacing a key retries only the same Session
+while it still needs authentication. Launch reads the saved key from the installer's data root, so
+fixture installers cannot read the personal credential store. The default projects directory remains
+unbound context: the agent asks for a project when the selected task needs one.
+
+`scripts/run-onboarding-test.sh clean` opens a prepared debug app with a fresh data directory and
+named profile. `env` uses the same isolation while allowing the current process's supported API
+keys. A supplied absolute second argument reuses a fixture for interruption tests. An isolated
+data directory owns Vmux configuration, projects, managed ACP/LSP downloads, browser state and
+an external-tool home per profile; agent and LSP subprocesses receive that home without unrelated inherited
+credentials or login dotfiles. Normal profiles retain their shared package store and existing home.
+System package managers and macOS permission grants remain machine resources.
+
 External session integration is a lifecycle-owned child plugin of `AcpPlugin`. It registers its
 catalog, history and archive state, observers, and ordered systems through `Plugin::build`;
 production and integration tests compose that same plugin through `add_plugins`.

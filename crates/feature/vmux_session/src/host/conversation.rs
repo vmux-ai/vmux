@@ -317,6 +317,8 @@ impl PageStatus for RemoteStatus {
             RemoteStatus::Errored(_) => "errored",
             RemoteStatus::Interrupted => "interrupted",
             RemoteStatus::Idle => "idle",
+            RemoteStatus::Starting => "preparing",
+            RemoteStatus::AuthenticationRequired { .. } => "authentication",
         }
     }
 }

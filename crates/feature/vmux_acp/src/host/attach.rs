@@ -149,7 +149,7 @@ fn attach(
         commands.entity(*session_entity).insert((
             vmux_ecs::agent::AgentSessionRoot,
             ProcessAnchor(anchor),
-            vmux_session::RunState::default(),
+            vmux_session::RunState::Preparing,
             vmux_session::ApprovalPolicy::default(),
             vmux_ecs::team::Profile::registry(agent_name, agent_id).with_icon(profile_icon),
             vmux_ecs::team::Agent { sid: sid.clone() },

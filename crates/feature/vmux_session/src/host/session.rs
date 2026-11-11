@@ -510,6 +510,7 @@ fn report_tab_identity(
     ChatListSelection,
     ChatSelectorProjection
 )]
+#[require(crate::onboarding::KeyPending)]
 pub struct SessionView;
 
 #[derive(Component, Default)]

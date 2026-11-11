@@ -6,6 +6,7 @@ pub use page::UiEventPermissions;
 pub use page_metadata::{PageIdentity, PageMetadata};
 pub use process_id::ProcessId;
 pub use route::{InvalidVmuxRoute, RoutePattern, VmuxRoute};
+pub use secret::Secret;
 pub use terminal::{
     AnsiPalette, CursorShape, CursorStyle, FLAG_BOLD, FLAG_DIM, FLAG_INVERSE, FLAG_ITALIC,
     FLAG_STRIKETHROUGH, FLAG_UNDERLINE, LinkRange, RgbColor, TermColor, TermCursor, TermLine,
@@ -48,6 +49,7 @@ pub mod process_id;
 pub mod prompt_media;
 pub mod protocol;
 pub mod route;
+mod secret;
 pub mod service;
 pub mod session;
 pub mod space;

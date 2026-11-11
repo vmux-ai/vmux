@@ -4,6 +4,11 @@ use std::time::Duration;
 #[derive(Component, Default)]
 #[require(AgentTurnMeta)]
 pub enum RunState {
+    Preparing,
+    Installing {
+        detail: String,
+        percent: Option<u8>,
+    },
     #[default]
     Idle,
     Streaming,
@@ -13,15 +18,30 @@ pub enum RunState {
         args: serde_json::Value,
     },
     Errored(String),
+    AuthenticationRequired {
+        methods: Vec<vmux_api::protocol::AuthenticationMethod>,
+        pending: bool,
+    },
 }
 
 impl RunState {
+    pub fn needs_credentials(&self) -> bool {
+        match self {
+            Self::AuthenticationRequired { .. } => true,
+            Self::Errored(error) => Failure(error).needs_credentials(),
+            _ => false,
+        }
+    }
+
     pub fn status(&self) -> &'static str {
         match self {
+            Self::Preparing => "preparing",
+            Self::Installing { .. } => "installing",
             Self::Idle => "idle",
             Self::Streaming => "streaming",
             Self::AwaitingApproval { .. } => "awaiting",
             Self::Errored(_) => "errored",
+            Self::AuthenticationRequired { .. } => "authentication",
         }
     }
 }
@@ -38,6 +58,14 @@ pub enum FailureKind {
 }
 
 impl Failure<'_> {
+    pub fn needs_credentials(&self) -> bool {
+        let message = self.0.to_ascii_lowercase();
+        message.contains("authentication")
+            || message.contains("api key")
+            || message.contains("unauthorized")
+            || message.contains("401")
+    }
+
     pub fn kind(&self) -> FailureKind {
         if self.in_use() {
             return FailureKind::Busy;
@@ -54,6 +82,12 @@ impl Failure<'_> {
             return FailureKind::Connection;
         }
         if message.contains("command not found")
+            || message.contains("acp installation failed")
+            || message.contains("acp setup cancelled")
+            || message.contains("authentication")
+            || message.contains("api key")
+            || message.contains("unauthorized")
+            || message.contains("401")
             || message.contains("not installed")
             || message.contains("unsupported version")
             || message.contains("package version")

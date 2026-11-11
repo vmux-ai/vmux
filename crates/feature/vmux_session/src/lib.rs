@@ -51,6 +51,8 @@ pub mod activity;
 pub mod event;
 #[cfg(feature = "app")]
 pub mod host;
+#[cfg(feature = "app")]
+pub mod onboarding;
 pub mod run_state;
 #[cfg(feature = "app")]
 pub mod selector;
