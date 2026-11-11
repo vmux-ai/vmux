@@ -1,0 +1,17 @@
+[package]
+name = "vmux_container"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Vmux-managed Linux VM and container engine commands"
+
+[dependencies]
+bevy_app = { workspace = true }
+bevy_ecs = { workspace = true }
+crossbeam-channel = { workspace = true }
+vmux_ecs = { path = "../../util/vmux_ecs" }
+vmux_profile = { path = "../../util/vmux_profile" }
+vmux_vm = { path = "../../util/vmux_vm" }
+
+[lints]
+workspace = true

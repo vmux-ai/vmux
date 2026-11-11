@@ -13,6 +13,7 @@ contracts = ["ecs", "vmux_ecs/contracts", "vmux_project?/contracts", "vmux_layou
 conformance = ["extension", "vmux_extension/conformance"]
 cli = [
     "ecs",
+    "dep:vmux_container",
     "acp",
     "bookmark",
     "browser",
@@ -115,6 +116,7 @@ start = ["runtime", "dep:vmux_start"]
 vault = ["layout-runtime", "dep:vmux_vault"]
 
 [dependencies]
+vmux_container = { path = "../../feature/vmux_container", optional = true }
 bevy_app = { workspace = true }
 bevy_ecs = { workspace = true, optional = true }
 vmux_acp = { path = "../../feature/vmux_acp", default-features = false, optional = true }

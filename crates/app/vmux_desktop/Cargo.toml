@@ -255,6 +255,7 @@ before-each-package-command = "bash ../../../scripts/before-each-package.sh"
 binaries = [
     { path = "vmux_desktop", main = true },
     { path = "vmux" },
+    { path = "vmux_vm" },
     { path = "Vmux Service" },
 ]
 

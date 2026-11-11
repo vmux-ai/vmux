@@ -1738,6 +1738,44 @@ out, because dependency resolution happens before any build script runs.
 
 ---
 
+## Native containers
+
+`vmux_container` owns the container CLI declarations and asynchronous command outcomes.
+`vmux_vm` provides the platform runtime without linking the desktop shell. Its supervisor
+holds an exclusive engine lease and owns a separate libkrun worker and gvproxy process.
+The worker enters the VMM in its own process because libkrun consumes that process's
+lifecycle. Closing the invoking CLI does not close the VM.
+
+```mermaid
+flowchart LR
+    cli["vmux container"] --> supervisor["VM supervisor + engine lease"]
+    supervisor --> worker["libkrun worker"]
+    supervisor --> network["gvproxy"]
+    worker --> guest["Linux: Docker + guest control"]
+```
+
+The Apple Silicon backend uses libkrun's stable 1.x ABI and libkrunfw's Linux kernel.
+A checksum-verified Alpine root filesystem supplies userspace. Docker uses nftables,
+matching the firmware's kernel configuration. A separate raw ext4 disk owns images and
+volumes; only a newly created disk may be formatted automatically. Installed guest
+packages remain in the root filesystem so restart does not require package downloads.
+
+Virtiofs shares the selected project at its host path. The worker's filesystem sandbox
+permits system/dependency reads and confines writes to its data and project directories.
+Host Docker clients connect through gvproxy's SSH Unix-socket forwarding, preserving
+Docker attach/exec half-close semantics. The installation key remains outside ECS;
+the guest enables public-key authentication only. A private vsock bridge on port 2375
+provides bootstrap readiness independently of the SSH tunnel.
+Published wildcard TCP/UDP bindings are projected through gvproxy onto localhost;
+readiness requires an actual Docker ping, not a live PID. Resource/share changes are
+refused while the engine lease is held.
+
+Shutdown travels over a separate guest control channel on vsock port 2376. Guest init
+terminates Docker, waits for daemon exit and syncs before ending its workload. The
+supervisor acknowledges completion only when the worker exits, its network process is
+reaped and the engine lease is released. Correlation and ownership use that lease and
+the control socket rather than an unchecked persisted PID.
+
 ## Where a crate lives
 
 ```

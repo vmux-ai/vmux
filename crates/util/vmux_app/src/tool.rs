@@ -5,6 +5,7 @@ pub struct VmuxToolPlugin;
 impl Plugin for VmuxToolPlugin {
     fn build(&self, app: &mut App) {
         app.add_plugins((
+            vmux_container::ContainerCliPlugin,
             vmux_service::ServiceCliPlugin,
             vmux_tool::ToolCliPlugin,
             vmux_mcp::McpCliPlugin,

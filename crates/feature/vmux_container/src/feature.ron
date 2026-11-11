@@ -1,0 +1,29 @@
+(
+    cli: Some((commands: [(
+        id: "container",
+        name: "container",
+        about: Some("Manage the Vmux Linux VM and Docker engine"),
+        subcommand_required: true,
+        commands: [
+            (
+                id: "container.start",
+                name: "start",
+                arguments: [
+                    (id: "data", long: Some("data"), value_name: Some("DIRECTORY")),
+                    (id: "shared", long: Some("shared"), value_name: Some("DIRECTORY")),
+                    (id: "cpus", long: Some("cpus"), value_name: Some("COUNT")),
+                    (id: "memory", long: Some("memory"), value_name: Some("MIB")),
+                ],
+            ),
+            (id: "container.stop", name: "stop", arguments: [
+                (id: "data", long: Some("data"), value_name: Some("DIRECTORY")),
+            ]),
+            (id: "container.status", name: "status", arguments: [
+                (id: "data", long: Some("data"), value_name: Some("DIRECTORY")),
+            ]),
+            (id: "container.logs", name: "logs", arguments: [
+                (id: "data", long: Some("data"), value_name: Some("DIRECTORY")),
+            ]),
+        ],
+    )])),
+)
