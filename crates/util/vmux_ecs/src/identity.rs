@@ -40,6 +40,7 @@ impl IdentityIndexSet {
 #[derive(Resource)]
 pub struct IdentityIndex<I: Component, M: Component = I> {
     identities: IdentityMap<I>,
+    scoped: IdentityMap<(Entity, I)>,
     marker: PhantomData<fn() -> M>,
 }
 
@@ -47,6 +48,7 @@ impl<I: Component, M: Component> Default for IdentityIndex<I, M> {
     fn default() -> Self {
         Self {
             identities: IdentityMap::default(),
+            scoped: IdentityMap::default(),
             marker: PhantomData,
         }
     }
@@ -57,7 +59,22 @@ impl<I: Component + Clone + Eq + Hash, M: Component> IdentityIndex<I, M> {
         self.identities.entity(id)
     }
 
-    fn include(&mut self, id: I, entity: Entity) {
+    pub fn entity_in(
+        &self,
+        owner: Entity,
+        id: &I,
+    ) -> Result<Option<Entity>, IdentityLookupError<I>> {
+        self.scoped
+            .entity(&(owner, id.clone()))
+            .map_err(|error| match error {
+                IdentityLookupError::Duplicate((_, id)) => IdentityLookupError::Duplicate(id),
+            })
+    }
+
+    fn include(&mut self, id: I, entity: Entity, owner: Option<Entity>) {
+        if let Some(owner) = owner {
+            self.scoped.include((owner, id.clone()), entity);
+        }
         self.identities.include(id, entity);
     }
 }
@@ -121,15 +138,17 @@ impl<I: Component, M: Component> Default for IndexedIdentities<I, M> {
 
 #[derive(SystemParam)]
 pub struct IdentityIndexWriter<'w, 's, I: Component + Clone + Eq + Hash, M: Component = I> {
-    entities: Query<'w, 's, (Entity, &'static I), With<M>>,
+    entities: Query<'w, 's, (Entity, &'static I, Option<&'static ChildOf>), With<M>>,
     changed: ChangedIdentities<'w, 's, I, M>,
     removed_markers: RemovedComponents<'w, 's, M>,
     removed_ids: RemovedComponents<'w, 's, I>,
+    removed_owners: RemovedComponents<'w, 's, ChildOf>,
     current: ResMut<'w, IdentityIndex<I, M>>,
     indexed: ResMut<'w, IndexedIdentities<I, M>>,
 }
 
-type ChangedIdentities<'w, 's, I, M> = Query<'w, 's, (), (With<M>, Or<(Added<M>, Changed<I>)>)>;
+type ChangedIdentities<'w, 's, I, M> =
+    Query<'w, 's, (), (With<M>, Or<(Added<M>, Changed<I>, Changed<ChildOf>)>)>;
 
 impl<I: Component + Clone + Eq + Hash, M: Component> IdentityIndexWriter<'_, '_, I, M> {
     pub fn rebuild(&mut self) {
@@ -144,14 +163,19 @@ impl<I: Component + Clone + Eq + Hash, M: Component> IdentityIndexWriter<'_, '_,
                 changed = true;
             }
         }
+        for entity in self.removed_owners.read() {
+            if self.indexed.entities.contains(&entity) {
+                changed = true;
+            }
+        }
         if !changed {
             return;
         }
         let mut next = IdentityIndex::default();
         let mut indexed = HashSet::new();
-        for (entity, id) in &self.entities {
+        for (entity, id, owner) in &self.entities {
             indexed.insert(entity);
-            next.include(id.clone(), entity);
+            next.include(id.clone(), entity, owner.map(ChildOf::parent));
         }
         *self.current = next;
         self.indexed.entities = indexed;
@@ -235,6 +259,58 @@ mod tests {
             app.world()
                 .resource::<IdentityIndex<Key, Primary>>()
                 .entity(&Key("renamed")),
+            Ok(None)
+        );
+    }
+
+    #[test]
+    fn owner_scopes_reconcile_reparenting_and_local_duplicates() {
+        let mut app = App::new();
+        app.add_plugins(IdentityIndexPlugin::<Key, Primary>::default());
+        let first_root = app.world_mut().spawn_empty().id();
+        let second_root = app.world_mut().spawn_empty().id();
+        let first = app
+            .world_mut()
+            .spawn((Primary, Key("shared"), ChildOf(first_root)))
+            .id();
+        let second = app
+            .world_mut()
+            .spawn((Primary, Key("shared"), ChildOf(second_root)))
+            .id();
+        app.update();
+        let index = app.world().resource::<IdentityIndex<Key, Primary>>();
+        assert_eq!(index.entity_in(first_root, &Key("shared")), Ok(Some(first)));
+        assert_eq!(
+            index.entity_in(second_root, &Key("shared")),
+            Ok(Some(second))
+        );
+        assert_eq!(
+            index.entity(&Key("shared")),
+            Err(IdentityLookupError::Duplicate(Key("shared")))
+        );
+        app.world_mut()
+            .entity_mut(first)
+            .insert(ChildOf(second_root));
+        app.update();
+        let index = app.world().resource::<IdentityIndex<Key, Primary>>();
+        assert_eq!(index.entity_in(first_root, &Key("shared")), Ok(None));
+        assert_eq!(
+            index.entity_in(second_root, &Key("shared")),
+            Err(IdentityLookupError::Duplicate(Key("shared")))
+        );
+        app.world_mut().entity_mut(first).remove::<ChildOf>();
+        app.update();
+        let index = app.world().resource::<IdentityIndex<Key, Primary>>();
+        assert_eq!(
+            index.entity_in(second_root, &Key("shared")),
+            Ok(Some(second))
+        );
+        app.world_mut().entity_mut(second).remove::<Primary>();
+        app.update();
+        assert_eq!(
+            app.world()
+                .resource::<IdentityIndex<Key, Primary>>()
+                .entity_in(second_root, &Key("shared")),
             Ok(None)
         );
     }

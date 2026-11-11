@@ -10544,6 +10544,7 @@ dependencies = [
  "vmux_path",
  "vmux_profile",
  "vmux_transport",
+ "web-time",
  "zip",
 ]
 
@@ -10981,6 +10982,7 @@ dependencies = [
  "base64 0.22.1",
  "bevy",
  "bevy_app",
+ "bevy_asset",
  "bevy_cef",
  "bevy_ecs",
  "bevy_reflect",

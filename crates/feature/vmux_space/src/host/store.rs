@@ -16,21 +16,19 @@ use moonshine_save::save::{EntityFilter, SaveCommand, SaveEvent};
 use serde::de::DeserializeSeed;
 use std::path::{Path, PathBuf};
 use std::sync::{Mutex, mpsc};
-use vmux_ecs::CreatedAt;
-use vmux_ecs::store::State;
+use vmux_ecs::store::{State, StoreAppExt};
+use vmux_ecs::{CreatedAt, PageMetadata};
 
 use vmux_api::BuiltinIcon;
 #[cfg(test)]
 use vmux_ecs::profile::ProfilePaths;
 use vmux_ecs::profile::{CurrentProfile, SessionEnvironment};
-#[cfg(test)]
-use vmux_ecs::store::StoreAppExt;
 use vmux_ecs::store::{
     StoreDirty, WorkspaceRestore, WorkspaceRestoreValidator, WorkspaceSaveRequest,
     WorkspaceStoreValidators, WorkspaceStored,
 };
 #[cfg(test)]
-use vmux_ecs::{ArchivedPage, ArchivedPagePosition, ArchivedTabPage, PageMetadata};
+use vmux_ecs::{ArchivedPage, ArchivedPagePosition, ArchivedTabPage};
 use vmux_layout::space::Space;
 #[cfg(test)]
 use vmux_layout::space::SpaceId;
@@ -46,6 +44,9 @@ pub(crate) struct WorkspaceStorePlugin;
 
 impl Plugin for WorkspaceStorePlugin {
     fn build(&self, app: &mut App) {
+        if !app.is_plugin_added::<SchemaPlugin>() {
+            app.add_plugins(SchemaPlugin);
+        }
         app.add_message::<WorkspaceSaveRequest>()
             .add_message::<LayoutRestoreRequest>()
             .add_message::<LayoutRestoreCommitted>()
@@ -68,10 +69,62 @@ impl Plugin for WorkspaceStorePlugin {
             )
             .add_systems(
                 Update,
-                (auto_save, handle_save_requests, drain_writes).chain(),
+                (scope_pages, auto_save, handle_save_requests, drain_writes).chain(),
             )
             .add_systems(Update, track_hierarchy.before(auto_save))
             .add_systems(Last, flush_on_exit);
+    }
+}
+
+struct SchemaPlugin;
+
+impl Plugin for SchemaPlugin {
+    fn build(&self, app: &mut App) {
+        app.add_plugins(vmux_ecs::store::SchemaPlugin::<PageStore>::default())
+            .track_store::<Save>();
+    }
+}
+
+#[vmux_ecs::store(domain = vmux_ecs::store::WorkspaceStore, track;
+    PageMetadata,
+    vmux_ecs::WorkspaceKind,
+    vmux_ecs::Cwd,
+    vmux_ecs::Description,
+    vmux_ecs::CollectionView,
+    CreatedAt,
+    vmux_ecs::LastActivatedAt,
+    vmux_ecs::ArchivedAt,
+    vmux_ecs::Order,
+)]
+struct PageStore;
+
+#[derive(Component)]
+struct ScopedPage;
+
+type WorkspacePages<'w, 's> = Query<
+    'w,
+    's,
+    (Entity, Option<&'static ChildOf>, Has<ScopedPage>, Has<Save>),
+    With<PageMetadata>,
+>;
+
+fn scope_pages(
+    pages: WorkspacePages,
+    retired: Query<Entity, (With<ScopedPage>, Without<PageMetadata>)>,
+    stacks: Query<(), With<vmux_layout::stack::Stack>>,
+    mut commands: Commands,
+) {
+    for (entity, parent, scoped, saved) in &pages {
+        if parent.is_some_and(|parent| stacks.contains(parent.parent())) {
+            if !scoped || !saved {
+                commands.entity(entity).insert((Save, ScopedPage));
+            }
+        } else if scoped {
+            commands.entity(entity).remove::<(Save, ScopedPage)>();
+        }
+    }
+    for entity in &retired {
+        commands.entity(entity).remove::<(Save, ScopedPage)>();
     }
 }
 
@@ -150,7 +203,7 @@ struct RestorePending;
 fn prune_restored(
     loaded: On<Loaded>,
     sessions: Query<(), With<vmux_session::Session>>,
-    candidates: Query<EntityRef, (With<CreatedAt>, With<ChildOf>, With<Save>)>,
+    candidates: Query<EntityRef, (With<CreatedAt>, With<ChildOf>)>,
     store: Single<&WorkspaceStorePath>,
     mut commands: Commands,
 ) {
@@ -159,7 +212,8 @@ fn prune_restored(
         let Ok(candidate) = candidates.get(entity) else {
             continue;
         };
-        if candidate.archetype().components().len() != 3 {
+        let expected = if candidate.contains::<Save>() { 3 } else { 2 };
+        if candidate.archetype().components().len() != expected {
             continue;
         }
         let parent = candidate.get::<ChildOf>().unwrap().parent();
@@ -1266,7 +1320,7 @@ mod tests {
             app.add_plugins((
                 MinimalPlugins,
                 AssetPlugin::default(),
-                vmux_ecs::PrimitivesPlugin,
+                (vmux_ecs::PrimitivesPlugin, SchemaPlugin),
             ))
             .register_stored::<SpaceId>()
             .register_stored::<PaneId>()
@@ -1463,7 +1517,7 @@ mod tests {
         fn new(name: &str) -> Self {
             let home = HomeEnvGuard::use_temp_home(name);
             let mut app = App::new();
-            app.add_plugins((MinimalPlugins, vmux_ecs::PrimitivesPlugin))
+            app.add_plugins((MinimalPlugins, (vmux_ecs::PrimitivesPlugin, SchemaPlugin)))
                 .register_stored::<Space>()
                 .insert_resource(test_settings())
                 .insert_resource(bevy::time::TimeUpdateStrategy::ManualDuration(
@@ -1516,6 +1570,76 @@ mod tests {
                 .unwrap()
                 .contains("Workspace")
         );
+    }
+
+    #[test]
+    fn workspace_claims_stack_pages_without_claiming_another_roots_shared_data() {
+        let mut fixture = WorkspaceSaveFixture::new("scoped-workspace-pages");
+        let stack = fixture
+            .app
+            .world_mut()
+            .spawn(vmux_layout::stack::Stack::default())
+            .id();
+        let page = fixture
+            .app
+            .world_mut()
+            .spawn((
+                PageMetadata {
+                    url: "file:///workspace".into(),
+                    ..Default::default()
+                },
+                vmux_ecs::Cwd("/workspace".into()),
+                ChildOf(stack),
+            ))
+            .id();
+        let restored_page = fixture
+            .app
+            .world_mut()
+            .spawn((
+                Save,
+                PageMetadata {
+                    url: "file:///restored".into(),
+                    ..Default::default()
+                },
+                ChildOf(stack),
+            ))
+            .id();
+        let other_root = fixture
+            .app
+            .world_mut()
+            .spawn(Name::new("Project store"))
+            .id();
+        let project = fixture
+            .app
+            .world_mut()
+            .spawn((
+                Name::new("Independent project"),
+                vmux_ecs::Cwd("/project".into()),
+                CreatedAt(1),
+                vmux_ecs::Order(0),
+                ChildOf(other_root),
+            ))
+            .id();
+        assert!(fixture.app.world().get::<Save>(page).is_none());
+        assert!(fixture.app.world().get::<Save>(project).is_none());
+        fixture.app.update();
+        assert!(fixture.app.world().get::<Save>(page).is_some());
+        assert!(fixture.app.world().get::<Save>(project).is_none());
+        fixture.finish_write();
+        fixture
+            .app
+            .world_mut()
+            .entity_mut(page)
+            .insert(ChildOf(other_root));
+        fixture
+            .app
+            .world_mut()
+            .entity_mut(restored_page)
+            .insert(ChildOf(other_root));
+        fixture.app.update();
+        assert!(fixture.app.world().get::<Save>(page).is_none());
+        assert!(fixture.app.world().get::<Save>(restored_page).is_none());
+        fixture.finish_write();
     }
 
     #[test]
@@ -1893,7 +2017,7 @@ mod tests {
         let _home = HomeEnvGuard::use_temp_home("saved-name-autosave");
         let mut app = App::new();
         app.add_plugins(MinimalPlugins)
-            .add_plugins(vmux_ecs::PrimitivesPlugin)
+            .add_plugins((vmux_ecs::PrimitivesPlugin, SchemaPlugin))
             .insert_resource(test_settings())
             .add_plugins(WorkspaceStorePlugin);
         let entity = app.world_mut().spawn((Save, Name::new("unchanged"))).id();
@@ -2116,7 +2240,7 @@ mod tests {
         let mut app_save = App::new();
         app_save
             .add_plugins(MinimalPlugins)
-            .add_plugins(vmux_ecs::PrimitivesPlugin)
+            .add_plugins((vmux_ecs::PrimitivesPlugin, SchemaPlugin))
             .register_stored::<vmux_ecs::Visit>()
             .register_stored::<vmux_ecs::Url>()
             .register_stored::<vmux_ecs::VisitCount>()
@@ -2138,7 +2262,7 @@ mod tests {
                 },
                 vmux_ecs::VisitCount(3),
                 vmux_ecs::LastVisitedAt(1000),
-                vmux_ecs::CreatedAt(500),
+                CreatedAt(500),
             ))
             .id();
 
@@ -2146,7 +2270,7 @@ mod tests {
             Save,
             vmux_ecs::Visit,
             vmux_ecs::VisitedUrl(url_e),
-            vmux_ecs::CreatedAt(900),
+            CreatedAt(900),
             vmux_ecs::TransitionType::Typed,
         ));
 
@@ -2158,7 +2282,7 @@ mod tests {
         let mut app_load = App::new();
         app_load
             .add_plugins((MinimalPlugins, AssetPlugin::default()))
-            .add_plugins(vmux_ecs::PrimitivesPlugin)
+            .add_plugins((vmux_ecs::PrimitivesPlugin, SchemaPlugin))
             .register_stored::<vmux_ecs::Visit>()
             .register_stored::<vmux_ecs::Url>()
             .register_stored::<vmux_ecs::VisitCount>()
@@ -2218,7 +2342,7 @@ mod tests {
         let mut app_save = App::new();
         app_save
             .add_plugins(MinimalPlugins)
-            .add_plugins(vmux_ecs::PrimitivesPlugin)
+            .add_plugins((vmux_ecs::PrimitivesPlugin, SchemaPlugin))
             .add_observer(save_on_default_event);
         app_save.world_mut().spawn((
             Save,
@@ -2240,7 +2364,7 @@ mod tests {
         let mut app_load = App::new();
         app_load
             .add_plugins((MinimalPlugins, AssetPlugin::default()))
-            .add_plugins(vmux_ecs::PrimitivesPlugin)
+            .add_plugins((vmux_ecs::PrimitivesPlugin, SchemaPlugin))
             .add_observer(load_on_default_event);
         app_load.update();
         app_load
@@ -2287,7 +2411,7 @@ mod tests {
 
         let mut app = App::new();
         app.add_plugins((MinimalPlugins, AssetPlugin::default()))
-            .add_plugins(vmux_ecs::PrimitivesPlugin)
+            .add_plugins((vmux_ecs::PrimitivesPlugin, SchemaPlugin))
             .register_type::<vmux_layout::side_sheet::SideSheetSectionsExpanded>()
             .add_observer(load_on_default_event);
         app.update();
@@ -2311,7 +2435,7 @@ mod tests {
 
         let mut app_save = App::new();
         app_save.add_plugins(MinimalPlugins);
-        app_save.add_plugins(vmux_ecs::PrimitivesPlugin);
+        app_save.add_plugins((vmux_ecs::PrimitivesPlugin, SchemaPlugin));
         app_save
             .register_stored::<WindowGeometry>()
             .register_type::<Option<IVec2>>()
@@ -2333,7 +2457,7 @@ mod tests {
         let mut app_load = App::new();
         app_load
             .add_plugins((MinimalPlugins, AssetPlugin::default()))
-            .add_plugins(vmux_ecs::PrimitivesPlugin);
+            .add_plugins((vmux_ecs::PrimitivesPlugin, SchemaPlugin));
         app_load
             .register_type::<WindowGeometry>()
             .register_type::<Option<IVec2>>()
@@ -2397,7 +2521,7 @@ mod tests {
         let mut app_save = App::new();
         app_save
             .add_plugins(MinimalPlugins)
-            .add_plugins(vmux_ecs::PrimitivesPlugin)
+            .add_plugins((vmux_ecs::PrimitivesPlugin, SchemaPlugin))
             .register_stored::<Space>()
             .register_stored::<SpaceId>()
             .register_stored::<WindowGeometry>()
@@ -2434,7 +2558,7 @@ mod tests {
 
         let mut app_save = App::new();
         app_save.add_plugins(MinimalPlugins);
-        app_save.add_plugins(vmux_ecs::PrimitivesPlugin);
+        app_save.add_plugins((vmux_ecs::PrimitivesPlugin, SchemaPlugin));
         app_save
             .register_stored::<PaneId>()
             .register_stored::<ArchivedPage>()
@@ -2477,7 +2601,7 @@ mod tests {
         let mut app_load = App::new();
         app_load
             .add_plugins((MinimalPlugins, AssetPlugin::default()))
-            .add_plugins(vmux_ecs::PrimitivesPlugin)
+            .add_plugins((vmux_ecs::PrimitivesPlugin, SchemaPlugin))
             .register_type::<PaneId>()
             .register_type::<ArchivedPage>()
             .register_type::<ArchivedPagePosition>()
@@ -2521,7 +2645,7 @@ mod tests {
     fn registry_app() -> App {
         let mut app = App::new();
         app.add_plugins(MinimalPlugins)
-            .add_plugins(vmux_ecs::PrimitivesPlugin);
+            .add_plugins((vmux_ecs::PrimitivesPlugin, SchemaPlugin));
         app
     }
 
@@ -2543,7 +2667,7 @@ mod tests {
     fn store_with_registered_component_types_is_compatible() {
         let app = registry_app();
         let registry = app.world().resource::<AppTypeRegistry>().read();
-        let key = <vmux_ecs::PageMetadata as bevy::reflect::TypePath>::type_path();
+        let key = <PageMetadata as bevy::reflect::TypePath>::type_path();
         let body = store_body_with_key(key);
         assert!(!space_has_unregistered_types(&body, &registry));
     }
@@ -2559,7 +2683,7 @@ mod tests {
   entities: {
     1: (
       components: {
-        "vmux_ecs::PageMetadata": (),
+        "PageMetadata": (),
       },
     ),
   },
@@ -2571,7 +2695,7 @@ mod tests {
             .expect("legacy resources");
 
         assert!(normalized.contains("resources: {}"));
-        assert!(normalized.contains("vmux_ecs::PageMetadata"));
+        assert!(normalized.contains("PageMetadata"));
         assert!(!normalized.contains("OfferedBookmarkDefaults"));
     }
 
@@ -2631,7 +2755,7 @@ mod tests {
         let (normalized, _) = normalized_store_icons(body).expect("unknown icon");
         let mut app = App::new();
         app.add_plugins((MinimalPlugins, AssetPlugin::default()))
-            .add_plugins(vmux_ecs::PrimitivesPlugin)
+            .add_plugins((vmux_ecs::PrimitivesPlugin, SchemaPlugin))
             .add_observer(load_on_default_event);
         app.update();
         app.world_mut()
@@ -2679,7 +2803,7 @@ mod tests {
         std::fs::write(store.version(), STORE_SCHEMA_VERSION.to_string()).unwrap();
 
         let mut app = App::new();
-        app.add_plugins((MinimalPlugins, vmux_ecs::PrimitivesPlugin))
+        app.add_plugins((MinimalPlugins, (vmux_ecs::PrimitivesPlugin, SchemaPlugin)))
             .register_stored::<Space>()
             .insert_resource(test_settings())
             .add_plugins(WorkspaceStorePlugin);

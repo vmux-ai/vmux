@@ -58,7 +58,7 @@ similar = { version = "2", optional = true }
 unicode-segmentation = "1"
 url = { workspace = true }
 uuid = { workspace = true }
-vmux_ecs = { path = "../../util/vmux_ecs", default-features = false }
+vmux_ecs = { path = "../../util/vmux_ecs", default-features = false, features = ["contracts", "store"] }
 vmux_command = { path = "../vmux_command", optional = true }
 vmux_page = { path = "../../util/vmux_page", optional = true }
 vmux_ui = { path = "../../util/vmux_ui", optional = true }
@@ -80,6 +80,7 @@ vmux_tool = { path = "../vmux_tool", optional = true }
 workspace = true
 
 [dev-dependencies]
+bevy_asset = "0.19"
 tokio = { workspace = true }
 tempfile = "3"
 dioxus-ssr = "=0.7.9"

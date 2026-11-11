@@ -730,10 +730,9 @@ impl EventMaterializer<'_, '_> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    #[cfg(feature = "app")]
-    use bevy::prelude::{AssetPlugin, MinimalPlugins};
+    use bevy_app::TaskPoolPlugin;
+    use bevy_asset::AssetPlugin;
     use bevy_ecs::system::RunSystemOnce;
-    #[cfg(feature = "app")]
     use moonshine_save::prelude::{LoadWorld, SaveWorld, TriggerLoad, TriggerSave};
     use vmux_api::session::AssistantBlock;
 
@@ -799,7 +798,6 @@ mod tests {
         assert_eq!(transcript.messages, messages);
     }
 
-    #[cfg(feature = "app")]
     #[test]
     fn saved_history_is_available_before_replay_and_replaced_without_duplicates() {
         let dir = tempfile::tempdir().unwrap();
@@ -814,13 +812,14 @@ mod tests {
         let mut source = App::new();
         source
             .add_plugins((
-                MinimalPlugins,
+                TaskPoolPlugin::default(),
                 AssetPlugin::default(),
                 vmux_ecs::PrimitivesPlugin,
                 ConversationPlugin,
             ))
             .register_stored::<Session>()
             .register_stored::<SessionId>()
+            .register_stored::<CreatedAt>()
             .add_observer(moonshine_save::save::save_on_default_event);
         let session = source.world_mut().spawn((Session, id.clone())).id();
         source.world_mut().write_message(SnapshotReceived {
@@ -850,13 +849,14 @@ mod tests {
         let mut restored = App::new();
         restored
             .add_plugins((
-                MinimalPlugins,
+                TaskPoolPlugin::default(),
                 AssetPlugin::default(),
                 vmux_ecs::PrimitivesPlugin,
                 ConversationPlugin,
             ))
             .register_stored::<Session>()
             .register_stored::<SessionId>()
+            .register_stored::<CreatedAt>()
             .add_observer(moonshine_save::load::load_on_default_event);
         restored.update();
         restored
