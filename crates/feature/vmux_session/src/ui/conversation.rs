@@ -28,8 +28,8 @@ pub(super) fn Section(turn: Turn, latest_index: usize, chat: Chat) -> Element {
         section { class: "relative", "data-vmux-sticky-section": "",
             div { class: "pointer-events-none absolute inset-x-0 top-0 h-px", "data-vmux-sticky-sentinel": "", aria_hidden: true }
             if has_header {
-                header { class: "pointer-events-none sticky top-0 z-30 h-16", "data-vmux-sticky-header": "", inert: true, aria_hidden: true,
-                    div { class: "flex h-16 flex-col justify-center gap-1 bg-background py-1.5", "data-vmux-sticky-content": "",
+                header { class: "pointer-events-none sticky top-0 z-30 h-12", "data-vmux-sticky-header": "", inert: true, aria_hidden: true,
+                    div { class: "flex h-12 flex-col justify-center bg-background py-1", "data-vmux-sticky-content": "",
                         if let Some(excerpt) = prompt {
                             PinnedMessage {
                                 excerpt,
@@ -54,7 +54,7 @@ pub(super) fn Section(turn: Turn, latest_index: usize, chat: Chat) -> Element {
                     }
                 }
             }
-            div { class: if has_header { "-mt-16 flex flex-col gap-5" } else { "flex flex-col gap-5" },
+            div { class: if has_header { "-mt-12 flex flex-col gap-5" } else { "flex flex-col gap-5" },
                 for (offset, item) in turn.items.into_iter().enumerate() {
                     {
                         let index = start + offset;
@@ -108,7 +108,7 @@ fn PinnedMessage(
         div { class: if right { "flex justify-end" } else { "flex justify-start" },
             button {
                 r#type: "button",
-                class: if right { "flex h-6 max-w-[80%] min-w-0 flex-row-reverse items-center gap-2 rounded-lg px-1 text-xs text-foreground/80 transition-colors hover:bg-foreground/[0.06]" } else { "flex h-6 max-w-full min-w-0 items-center gap-2 rounded-lg px-1 text-xs text-foreground/80 transition-colors hover:bg-foreground/[0.06]" },
+                class: if right { "flex h-5 max-w-[80%] min-w-0 flex-row-reverse items-center gap-2 rounded-lg px-1 text-xs text-foreground/80 transition-colors hover:bg-foreground/[0.06]" } else { "flex h-5 max-w-full min-w-0 items-center gap-2 rounded-lg px-1 text-xs text-foreground/80 transition-colors hover:bg-foreground/[0.06]" },
                 aria_label: label,
                 title: excerpt.text,
                 onclick: move |_| chat.transcript.reveal(&target),

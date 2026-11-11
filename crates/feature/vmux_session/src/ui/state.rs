@@ -742,8 +742,11 @@ impl Transcript {
         if *self.initial_follow.peek() {
             return;
         }
-        let transcript = self.current();
-        if transcript.loading || transcript.loaded_start == 0 {
+        let unavailable = {
+            let root = self.root.peek();
+            root.transcript.loading || root.transcript.loaded_start == 0
+        };
+        if unavailable {
             return;
         }
         let _ = send(&ChatHistoryMoreRequest);

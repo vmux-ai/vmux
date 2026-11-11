@@ -419,14 +419,26 @@ fn focus_command_bar(
 }
 
 fn mark_launcher(
-    starts: Query<(Entity, &PageMetadata), Without<HostsLauncher>>,
+    starts: Query<(
+        Entity,
+        &PageMetadata,
+        Has<HostsLauncher>,
+        Has<StartWorkSynced>,
+        Has<crate::StartInlineTransitionView>,
+    )>,
     mut commands: Commands,
 ) {
-    for (entity, meta) in starts.iter() {
-        if meta.url.starts_with(StartPlugin::URL) {
+    for (entity, meta, launcher, synced, transitioning) in starts.iter() {
+        if meta.url.starts_with(StartPlugin::URL) && !launcher {
             commands
                 .entity(entity)
                 .try_insert((HostsLauncher, vmux_command::CommandBarState::default()));
+        } else if !meta.url.starts_with(StartPlugin::URL) && synced && !transitioning {
+            commands.entity(entity).remove::<(
+                HostsLauncher,
+                vmux_command::CommandBarState,
+                StartWorkSynced,
+            )>();
         }
     }
 }
@@ -504,6 +516,36 @@ mod tests {
         app.add_plugins(StartPlugin);
         let mut q = app.world_mut().query::<&PageManifest>();
         assert!(q.iter(app.world()).any(|m| m.url == StartPlugin::URL));
+    }
+
+    #[test]
+    fn completed_session_transitions_release_the_hidden_launcher() {
+        let mut app = App::new();
+        app.add_plugins((bevy::prelude::MinimalPlugins, StartPlugin))
+            .insert_non_send(bevy_cef::prelude::Browsers::default());
+        let page = app
+            .world_mut()
+            .spawn((
+                HostsLauncher,
+                StartWorkSynced,
+                crate::StartInlineTransitionView,
+                PageMetadata {
+                    url: "vmux://sessions/failed-resume".into(),
+                    ..Default::default()
+                },
+            ))
+            .id();
+        app.world_mut().run_schedule(Update);
+        assert!(app.world().get::<HostsLauncher>(page).is_some());
+        app.world_mut()
+            .entity_mut(page)
+            .remove::<crate::StartInlineTransitionView>();
+        app.world_mut().run_schedule(Update);
+        assert!(app.world().get::<HostsLauncher>(page).is_none());
+        assert!(app.world().get::<StartWorkSynced>(page).is_none());
+        app.world_mut().get_mut::<PageMetadata>(page).unwrap().url = StartPlugin::URL.into();
+        app.world_mut().run_schedule(Update);
+        assert!(app.world().get::<HostsLauncher>(page).is_some());
     }
 
     #[test]

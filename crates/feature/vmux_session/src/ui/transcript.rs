@@ -93,7 +93,7 @@ pub(super) fn ChatTranscript(chat: Chat) -> Element {
                     chat.transcript.follow();
                 }
             },
-            class: "relative z-10 flex-1 overflow-y-auto overscroll-contain scroll-pt-16 px-3 pb-20 pt-3 outline-none sm:px-4 md:px-6",
+            class: "relative z-10 flex-1 overflow-y-auto overscroll-contain scroll-pt-12 px-3 pb-20 outline-none sm:px-4 md:px-6",
             tabindex: "0",
             onwheel: move |_| chat.transcript.note_scroll_input(),
             ontouchmove: move |_| chat.transcript.note_scroll_input(),
@@ -109,7 +109,7 @@ pub(super) fn ChatTranscript(chat: Chat) -> Element {
                 }
             },
             div {
-                class: "mx-auto flex min-h-full w-full max-w-3xl flex-col gap-5",
+                class: "mx-auto flex min-h-full w-full max-w-3xl flex-col gap-5 pt-3",
                 style: transcript_loading.then_some("height:100%;"),
                 onresize: move |_| {
                     if *chat.transcript.initial_follow.peek() || *at_bottom.peek() {

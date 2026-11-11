@@ -1003,6 +1003,10 @@ block. Existing item IDs remain scroll anchors; section keys survive earlier his
 stay mounted. Header visibility changes opacity without moving messages. Hidden previews are inert and
 excluded from accessibility. `StickySections` shares one intersection observer per scroll
 surface, observes added history, and disconnects removed surfaces; it does not poll or rerender on scroll.
+The scroll surface has no top inset while pinned; initial spacing belongs to its content. Header
+projections rebuild only when their inputs, active surface, catalog, or ownership change. Completed
+Session transitions release the hidden launcher and its palette rather than rebuilding it on scroll.
+Closed command panels skip palette projection; reopening them resumes the normal composer projection.
 A revisit restores that history window and reader position; the first visit follows the tail.
 Initial tail following remains active until user scroll input. Placeholder and zero-height scroll
 events neither finish placement nor replace the remembered reader position.
