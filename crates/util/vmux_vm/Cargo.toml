@@ -6,6 +6,9 @@ license.workspace = true
 description = "Native Linux virtual machine and container engine runtime"
 
 [dependencies]
+bevy_app = { workspace = true }
+bevy_ecs = { workspace = true }
+bevy_tasks = { workspace = true, features = ["multi_threaded"] }
 flate2 = "1"
 libc = "0.2"
 ring = { workspace = true }

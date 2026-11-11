@@ -1,9 +1,10 @@
 use std::io;
 use std::path::{Path, PathBuf};
 
+use bevy_ecs::prelude::Component;
 use serde::{Deserialize, Serialize};
 
-#[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
+#[derive(Component, Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
 pub struct Settings {
     pub directory: PathBuf,
     pub shared_directory: PathBuf,

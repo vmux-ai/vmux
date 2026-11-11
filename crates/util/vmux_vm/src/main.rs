@@ -1,7 +1,7 @@
 use std::io;
 use std::path::PathBuf;
 
-use vmux_vm::{Engine, NativeVm, Settings};
+use vmux_vm::{EngineClient, NativeVm, Settings};
 
 fn main() -> std::process::ExitCode {
     match Invocation::read().and_then(Invocation::run) {
@@ -52,7 +52,7 @@ impl Invocation {
             if self.command == "native" {
                 return NativeVm::run(settings);
             }
-            return Engine::new(settings).foreground(&std::env::current_exe()?);
+            return EngineClient::new(settings).foreground(&std::env::current_exe()?);
         }
         let settings_path = self.path.join("settings.json");
         let settings = if settings_path.exists() {
@@ -60,7 +60,7 @@ impl Invocation {
         } else {
             Settings::new(self.path, self.shared)
         };
-        let mut engine = Engine::new(settings);
+        let mut engine = EngineClient::new(settings);
         match self.command.as_str() {
             "prepare" => engine.prepare(),
             "start" => {

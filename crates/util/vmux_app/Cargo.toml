@@ -34,6 +34,7 @@ cli = [
 ]
 mcp = ["cli"]
 desktop = [
+    "container",
     "acp",
     "bookmark",
     "browser",
@@ -75,6 +76,7 @@ daemon = [
 ]
 tool = ["layout-runtime", "dep:vmux_tool"]
 capture = ["tool", "dep:vmux_input"]
+container = ["layout-runtime", "dep:vmux_container"]
 bookmark = ["layout-runtime", "dep:vmux_bookmark"]
 ecs = ["dep:vmux_ecs"]
 account = ["ecs", "dep:bevy_ecs", "dep:vmux_account"]
