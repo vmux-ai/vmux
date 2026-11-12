@@ -489,7 +489,7 @@ mod tests {
 
     #[test]
     fn unversioned_multi_document_edits_preserve_changes_to_affected_buffers() {
-        for changed in [false, true] {
+        for mode in 0..5 {
             let temp = tempfile::tempdir().unwrap();
             let source = temp.path().join("source.rs");
             let target = temp.path().join("target.rs");
@@ -522,8 +522,20 @@ mod tests {
                 &target,
                 1,
             );
+            if mode >= 2 {
+                fixture
+                    .app
+                    .world_mut()
+                    .get_mut::<Editor>(affected)
+                    .unwrap()
+                    .core
+                    .apply(EditCommand::InsertText("X".into()));
+            }
+            if mode == 4 {
+                second.synced_to(fixture.app.world_mut(), affected, &first);
+            }
             let origin = first.origin(fixture.app.world_mut(), owner, &source);
-            if changed {
+            if mode == 1 {
                 fixture
                     .app
                     .world_mut()
@@ -538,6 +550,16 @@ mod tests {
                     .unwrap()
                     .version = 2;
             }
+            if mode == 3 {
+                std::fs::write(&target, "Xabc\n").unwrap();
+                fixture
+                    .app
+                    .world_mut()
+                    .get_mut::<Editor>(affected)
+                    .unwrap()
+                    .core
+                    .mark_saved();
+            }
             let edit = lsp_types::WorkspaceEdit {
                 document_changes: Some(lsp_types::DocumentChanges::Edits(vec![
                     lsp_types::TextDocumentEdit {
@@ -551,8 +573,8 @@ mod tests {
                         },
                         edits: vec![lsp_types::OneOf::Left(lsp_types::TextEdit {
                             range: lsp_types::Range {
-                                start: lsp_types::Position::new(0, 0),
-                                end: lsp_types::Position::new(0, 3),
+                                start: lsp_types::Position::new(0, u32::from(mode == 4)),
+                                end: lsp_types::Position::new(0, if mode == 4 { 4 } else { 3 }),
                             },
                             new_text: "ABC".into(),
                         })],
@@ -572,10 +594,17 @@ mod tests {
             fixture.app.update();
             assert_eq!(
                 fixture.text(affected),
-                if changed { "Xabc\n" } else { "ABC\n" }
+                match mode {
+                    0 => "ABC\n",
+                    4 => "XABC\n",
+                    _ => "Xabc\n",
+                }
             );
             assert_eq!(fixture.text(owner), ApplyEdit::BEFORE);
-            assert_eq!(std::fs::read_to_string(&target).unwrap(), "abc\n");
+            assert_eq!(
+                std::fs::read_to_string(&target).unwrap(),
+                if mode == 3 { "Xabc\n" } else { "abc\n" }
+            );
         }
     }
 

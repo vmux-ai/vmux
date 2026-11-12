@@ -1199,6 +1199,8 @@ operation or reach a replacement document. The buffer's opaque change token surv
 edits and offered code actions; final application refuses edits, undo, or rebinding since acceptance,
 including changes not yet sent to the server. Client-requested multi-file edits keep accepted
 open-buffer snapshots on their Operation and validate the affected buffers before application.
+Unversioned edits also require an affected buffer to have been saved or synchronized to the
+originating server at acceptance; a later save does not establish that earlier knowledge.
 Versioned edits reject missing or ambiguous versions.
 Server-origin workspace edits validate the current server before applying or replying. Restart
 opens the current buffer, including unsaved text. Reload and encoding changes wait for the decoded

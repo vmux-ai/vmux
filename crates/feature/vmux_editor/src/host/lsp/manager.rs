@@ -248,6 +248,7 @@ struct BufferStamp {
     version: uuid::Uuid,
     document: Option<Entity>,
     path: PathBuf,
+    source_known: bool,
 }
 
 impl LspOrigin {
@@ -359,6 +360,7 @@ pub struct LspManager<'w, 's> {
     bindings: Query<'w, 's, &'static DocumentBinding>,
     editors: Query<'w, 's, (Entity, &'static Editor)>,
     snapshots: Query<'w, 's, &'static BufferSnapshot>,
+    synced: Query<'w, 's, &'static LspSynced>,
     views: Query<'w, 's, &'static FileView>,
     unsent: Query<'w, 's, (), With<LspEditDirty>>,
     wake: Option<Res<'w, JobWake>>,
@@ -464,25 +466,38 @@ fn read_text(path: &Path) -> Option<String> {
 }
 
 impl LspManager<'_, '_> {
-    fn buffer_snapshot(&self) -> BufferSnapshot {
+    fn buffer_snapshot(&self, source: Entity) -> BufferSnapshot {
         let mut buffers = Vec::new();
         for (owner, editor) in &self.editors {
             let Ok(view) = self.views.get(owner) else {
                 continue;
             };
+            let document = self.bindings.get(owner).ok().map(|binding| binding.0);
+            let mut source_known = !editor.core.dirty;
+            if let Some(document) = document
+                && let Ok((_, _, document)) = self.documents.get(document)
+                && self.server_entity(&document.key) == Some(source)
+                && self
+                    .synced
+                    .get(owner)
+                    .is_ok_and(|synced| synced.0 == editor.core.version())
+            {
+                source_known = true;
+            }
             buffers.push(BufferStamp {
                 owner,
                 version: editor.core.version(),
-                document: self.bindings.get(owner).ok().map(|binding| binding.0),
+                document,
                 path: PathIdentity::resolve(&view.path).into_path_buf(),
+                source_known,
             });
         }
         BufferSnapshot(buffers)
     }
 
-    fn request_buffers(&self, kind: &ReqKind) -> Option<BufferSnapshot> {
+    fn request_buffers(&self, kind: &ReqKind, source: Entity) -> Option<BufferSnapshot> {
         if matches!(kind, ReqKind::Rename { .. } | ReqKind::CodeAction) {
-            Some(self.buffer_snapshot())
+            Some(self.buffer_snapshot(source))
         } else {
             None
         }
@@ -505,10 +520,11 @@ impl LspManager<'_, '_> {
             if buffer.path != wanted.as_path() {
                 continue;
             }
-            if !self
-                .editors
-                .get(buffer.owner)
-                .is_ok_and(|(_, editor)| editor.core.version() == buffer.version)
+            if !buffer.source_known
+                || !self
+                    .editors
+                    .get(buffer.owner)
+                    .is_ok_and(|(_, editor)| editor.core.version() == buffer.version)
                 || !self
                     .views
                     .get(buffer.owner)
@@ -697,7 +713,7 @@ impl LspManager<'_, '_> {
             }
         }
         let stamp = self.request_stamp(entity, path)?;
-        let buffers = self.request_buffers(&kind);
+        let buffers = self.request_buffers(&kind, stamp.server);
         let (wire_id, rx) = client.send_request(method, params);
         Some(LspRequestOperation {
             target: entity,
@@ -865,7 +881,7 @@ impl LspManager<'_, '_> {
             }
         }
         let stamp = self.request_stamp(entity, path)?;
-        let buffers = self.request_buffers(&kind);
+        let buffers = self.request_buffers(&kind, stamp.server);
         let (wire_id, rx) = client.send_request(method, params);
         Some(LspRequestOperation {
             target: entity,
@@ -2606,6 +2622,18 @@ mod tests {
     }
 
     impl DocumentFixture {
+        pub(crate) fn synced_to(&self, world: &mut World, owner: Entity, source: &Self) {
+            let key = world.get::<ServerKey>(source.server).unwrap().clone();
+            world.get_mut::<OpenDoc>(self.document).unwrap().key = key;
+            world
+                .entity_mut(self.document)
+                .insert(ChildOf(source.server));
+            let version = world.get::<Editor>(owner).unwrap().core.version();
+            world
+                .entity_mut(owner)
+                .insert((ServerBinding(source.server), LspSynced(version)));
+        }
+
         pub(crate) fn open(world: &mut World, owner: Entity, path: &Path, version: i32) -> Self {
             let directory = path
                 .parent()
@@ -2633,7 +2661,7 @@ mod tests {
             let mut state = bevy::ecs::system::SystemState::<LspManager>::new(world);
             let manager = state.get_mut(world).unwrap();
             let stamp = manager.request_stamp(owner, path).unwrap();
-            let snapshot = manager.buffer_snapshot();
+            let snapshot = manager.buffer_snapshot(stamp.server);
             let operation = world
                 .spawn((Operation::bundle("lsp.test.edit").unwrap(), snapshot))
                 .id();
@@ -3050,7 +3078,7 @@ mod tests {
                 let mut state =
                     bevy::ecs::system::SystemState::<LspManager>::new(self.app.world_mut());
                 let manager = state.get_mut(self.app.world_mut()).unwrap();
-                manager.buffer_snapshot()
+                manager.buffer_snapshot(self.server)
             };
             let entity = self
                 .app
