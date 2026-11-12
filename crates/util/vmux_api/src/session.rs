@@ -468,6 +468,21 @@ mod tests {
     use super::*;
 
     #[test]
+    fn agent_setup_urls_keep_agent_identifiers_inside_one_query_value() {
+        let id = "agent/with?query&setup=0#fragment";
+        let value = super::AgentSetupRoute(id.into()).url();
+        let url = url::Url::parse(&value).unwrap();
+        assert_eq!(url.scheme(), "vmux");
+        assert_eq!(url.host_str(), Some("start"));
+        assert_eq!(url.path(), "/onboarding/agent");
+        assert_eq!(
+            url.query_pairs().collect::<Vec<_>>(),
+            [("agent".into(), id.into())]
+        );
+        assert!(url.fragment().is_none());
+    }
+
+    #[test]
     fn user_roundtrip() {
         let message = Message::user("hi");
         let json = serde_json::to_string(&message).unwrap();
