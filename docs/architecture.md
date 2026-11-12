@@ -413,17 +413,47 @@ System names use their module as context. Prefer `open`, `refresh`, `bind`, `pro
 transport, and request type. Keep a longer name only when two systems in the same module would
 otherwise be ambiguous.
 
-Not every Rust value is ECS state. Use a component when a value has identity, lifecycle,
-independent mutation, observation, or scheduling significance. Use a message when ordering or
-cross-system delivery matters. Keep immutable specifications, parsed manifests, serialization
-adapters, validated values, and deterministic transformations as plain Rust types. Promote one
-to ECS only when the world must address, observe, replace, or schedule it independently; wrapping
-a temporary function input in an entity adds indirection without composition.
+Vmux state and business behavior have one actual ECS owner. Identity, independent mutation,
+observation, persistence and removal belong to canonical entities/components; ordering and
+cross-system intent use typed events/messages. Systems decide selection, reconciliation,
+queueing, retries and commits against those owners. An immutable temporary business model,
+boxed policy trait, global/Local state machine, or Resource wrapping a second registry does not
+establish ownership. A derive is evidence of a type contract, not evidence that entities and
+production systems actually use it.
 
-Keep those non-ECS values in the owning feature's noun module, and put external side effects in a
-named boundary module such as `acp/install.rs` or `transport.rs`. Do not create a generic `util`
-drawer. `host.rs` and its root plugin remain the composition entrypoint; private systems call the
-boundary adapter and project its result back onto ECS entities.
+Plain values are limited to concrete immutable values of canonical ECS/contract owners,
+framework registration metadata and actual external-format/IO/native/DOM conversion. Scalar
+inputs do not need temporary entities. Separately addressed items or lifecycle-bearing records
+need their own canonical ownership; they cannot hide in an aggregate's private model graph.
+UiState is a one-way projection. UI intent enters the owning system before selection, mutation
+or persistence; rendering code does not feed a normalized snapshot back as business authority.
+
+### ECS ownership boundaries
+
+Every plain adapter names its external interface, canonical input/output, scope/lifetime,
+bounds and cancellation/eviction. Adapters may hold handles, byte cursors, codec scratch and
+read-only output caches; they cannot own parallel normalized vmux state or product policy.
+Their `ecs-policy.ron` records are executable review metadata, not a second design document.
+
+| Interface | Canonical input/output | Lifetime and permitted mechanics |
+|---|---|---|
+| AppKit/winit/CEF/UIKit input | window/surface-bound typed input -> canonical input state; ECS -> immutable native suppression/hit-test output | installed window/adapter generation; bounded raw mailbox, native handles and wake/reentrancy mechanics |
+| Provider/ACP/native storage | external records -> typed Session/source ingress; committed state -> protocol/file output | bounded task or explicitly leased provider process/watch; raw IDs, bytes, SDK cursors and response handles only |
+| Git/filesystem/persistence | entity-owned immutable IO request -> revision/generation-bound result | one task/store lease; external formats, locks, atomic writes and rollback mechanics, never a second mutable catalog |
+| DOM/wry/IPC | declared UiState/effects -> mounted rendering; typed UiEvent -> ECS | page/document/component generation; geometry, IME, listener/scroll/codec state with teardown, never domain mutation decisions |
+| QUIC/local socket/MCP | declared authorized request -> canonical operation -> committed response/events | connection/request scope; framing, callback correlations and IO cancellation |
+| Keychain/crypto | authorized owner operation -> opaque protected handle/result | named storage/Vault context and explicit release; zeroizing keys stay out of Reflect, Save and UiState |
+| Taffy/syntax rendering | canonical node/document/viewport state -> computed layout/render values | derived entity/revision-keyed cache with eviction; no independent layout/document policy |
+| Rust/Bevy metadata, build tools and fixtures | source/manifest/CLI/framework registration -> diagnostics, plugins/contracts or build artifacts | compile/registration/fixture scope before a product world; no alternative product implementation |
+| Website DOM/HTTP | static page/request -> rendered content/release response | mounted page/request; it has no product ECS world |
+
+The structural ownership gate runs with source policies in CI and pre-push. It inventories
+declarations, implementation/field graphs, Local/global state and opaque scripts, verifies actual
+ECS use and requires item-specific boundaries/owned values. Missing sources, parse failures and
+stale records fail closed. Existing exact fingerprints are frozen migration debt with historical
+Git provenance, not permanent adapter exceptions; migrations remove them instead of extending
+the baseline. Final acceptance requires no remaining domain debt and a repeated caller/lifecycle
+audit. Structural checks supplement ownership review; they cannot prove business semantics.
 
 ### Plugins
 
