@@ -23,6 +23,10 @@ if [[ "${1:-}" != stop ]]; then
     fi
 fi
 
+if [[ "${1:-}" != stop && "${VMUX_ONBOARDING_FRESH:-0}" == 1 ]]; then
+    exec "$root/scripts/run-onboarding-test.sh" clean
+fi
+
 rust_target_libdir="$(rustc --print target-libdir)"
 dylib_path="$rust_target_libdir:$debug_dir/deps"
 if [[ -n "${DYLD_LIBRARY_PATH:-}" ]]; then

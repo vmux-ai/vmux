@@ -1626,7 +1626,9 @@ fixture installers cannot read the personal credential store. The default projec
 unbound context: the agent asks for a project when the selected task needs one.
 
 `scripts/run-onboarding-test.sh clean` opens a prepared debug app with a fresh data directory and
-named profile. `env` uses the same isolation while allowing the current process's supported API
+the Fresh profile. `VMUX_ONBOARDING_FRESH=1` makes the ordinary debug launcher use that path on
+every launch; its fixture clears the flag before re-entering the launcher. `env` uses the Fresh-env
+profile with the same isolation while allowing the current process's supported API
 keys. A supplied absolute second argument reuses a fixture for interruption tests. An isolated
 data directory owns Vmux configuration, projects, managed ACP/LSP downloads, browser state and
 an external-tool home per profile; agent and LSP subprocesses receive that home without unrelated inherited

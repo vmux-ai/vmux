@@ -7,6 +7,17 @@ use support::Project;
 pub mod support;
 
 #[test]
+fn fresh_launches_isolate_prior_state_and_preserve_persistent_profiles() {
+    let project = Project::create();
+    let status = project
+        .command("bash")
+        .arg(project.repo().join("scripts/test-onboarding-launch.sh"))
+        .status()
+        .unwrap();
+    assert!(status.success());
+}
+
+#[test]
 fn prepared_debug_build_launches_without_recompiling_and_refuses_changed_artifacts() {
     let project = Project::create();
     fs::copy(
