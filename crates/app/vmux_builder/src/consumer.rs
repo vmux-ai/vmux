@@ -77,8 +77,9 @@ impl Consumer {
             ("vmux_project", "contracts,filesystem", true),
             ("vmux_flex", "", false),
             ("vmux_flex", "window", true),
-            ("vmux_pane", "", true),
-            ("vmux_pane", "store", true),
+            ("vmux_layout", "", true),
+            ("vmux_layout", "contracts,geometry", true),
+            ("vmux_layout", "store", true),
         ] {
             let mut command =
                 self.cargo(&["test", "--locked", "-p", package, "--no-default-features"]);
@@ -220,7 +221,7 @@ impl Graph {
             "vmux_ecs",
             "vmux_project",
             "vmux_flex",
-            "vmux_pane",
+            "vmux_layout",
         ] {
             if !packages.contains(required) {
                 return Err(format!("The consumer must exercise SDK package {required}").into());
@@ -234,7 +235,7 @@ impl Graph {
             "vmux_profile",
             "vmux_editor",
             "vmux_ui",
-            "vmux_layout",
+            "vmux_pane",
             "wry",
         ] {
             if packages.contains(forbidden) {
@@ -304,7 +305,7 @@ mod tests {
 
     #[test]
     fn graph_refuses_native_packages_even_with_the_complete_sdk_surface() {
-        let graph = "vmux_app v1\nvmux_ecs v1\nvmux_project v1\nvmux_flex v1\nvmux_pane v1\n";
+        let graph = "vmux_app v1\nvmux_ecs v1\nvmux_project v1\nvmux_flex v1\nvmux_layout v1\n";
         assert!(Graph::check(graph).is_ok());
         assert!(Graph::check(&format!("{graph}bevy_cef v1\n")).is_err());
     }

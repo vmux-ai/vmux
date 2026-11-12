@@ -107,7 +107,7 @@ vmux_ecs = { path = "../../util/vmux_ecs", optional = true, features = ["host"] 
 vmux_editor = { path = "../vmux_editor", optional = true }
 vmux_flex = { path = "../../util/vmux_flex", optional = true }
 vmux_git = { path = "../vmux_git", optional = true }
-vmux_layout = { path = "../vmux_layout", optional = true }
+vmux_layout = { path = "../vmux_layout", optional = true, features = ["host"] }
 vmux_start = { path = "../vmux_start", optional = true }
 vmux_mcp = { path = "../../util/vmux_mcp", optional = true }
 vmux_path = { path = "../../util/vmux_path", optional = true }

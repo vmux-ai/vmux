@@ -100,7 +100,7 @@ vmux_git = { path = "../../feature/vmux_git" }
 vmux_history = { path = "../../feature/vmux_history" }
 vmux_input = { path = "../../feature/vmux_input" }
 vmux_knowledge = { path = "../../feature/vmux_knowledge" }
-vmux_layout = { path = "../../feature/vmux_layout" }
+vmux_layout = { path = "../../feature/vmux_layout", features = ["host"] }
 vmux_page = { path = "../../util/vmux_page" }
 vmux_profile = { path = "../../util/vmux_profile" }
 vmux_service = { path = "../../feature/vmux_service" }

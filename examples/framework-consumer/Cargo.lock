@@ -1178,7 +1178,7 @@ dependencies = [
  "vmux_app",
  "vmux_ecs",
  "vmux_extension",
- "vmux_pane",
+ "vmux_layout",
 ]
 
 [[package]]
@@ -2622,8 +2622,8 @@ dependencies = [
  "vmux_ecs",
  "vmux_extension",
  "vmux_flex",
+ "vmux_layout",
  "vmux_macro",
- "vmux_pane",
  "vmux_project",
 ]
 
@@ -2670,6 +2670,22 @@ dependencies = [
 ]
 
 [[package]]
+name = "vmux_layout"
+version = "0.0.35"
+dependencies = [
+ "bevy_app",
+ "bevy_ecs",
+ "bevy_reflect",
+ "moonshine-save",
+ "percent-encoding",
+ "rkyv",
+ "serde",
+ "serde_json",
+ "vmux_api",
+ "vmux_ecs",
+]
+
+[[package]]
 name = "vmux_macro"
 version = "0.0.35"
 dependencies = [
@@ -2679,18 +2695,6 @@ dependencies = [
  "ron",
  "serde",
  "syn",
-]
-
-[[package]]
-name = "vmux_pane"
-version = "0.0.35"
-dependencies = [
- "bevy_app",
- "bevy_ecs",
- "bevy_reflect",
- "moonshine-save",
- "vmux_api",
- "vmux_ecs",
 ]
 
 [[package]]

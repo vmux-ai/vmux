@@ -63,7 +63,7 @@ unicode-segmentation = "1"
 url = { workspace = true }
 vmux_command = { path = "../vmux_command" }
 vmux_flex = { path = "../../util/vmux_flex" }
-vmux_layout = { path = "../vmux_layout" }
+vmux_layout = { path = "../vmux_layout", features = ["host"] }
 vmux_mcp = { path = "../../util/vmux_mcp" }
 vmux_tool = { path = "../vmux_tool" }
 vmux_transport = { path = "../../util/vmux_transport" }

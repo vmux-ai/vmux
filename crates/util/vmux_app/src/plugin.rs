@@ -21,8 +21,6 @@ pub enum VmuxPlugin {
     Jobs(vmux_ecs::JobsPlugin),
     #[plugin(feature = "flex", desktop, requires(ecs))]
     Flex(vmux_flex::FlexPlugin),
-    #[plugin(feature = "pane", desktop, requires(ecs))]
-    Pane(vmux_pane::PanePlugin),
     #[plugin(feature = "runtime", desktop, requires(ecs, flex))]
     Runtime(VmuxRuntimePlugin),
     #[plugin(feature = "command", desktop, requires(runtime))]
@@ -31,21 +29,27 @@ pub enum VmuxPlugin {
     Setting(vmux_setting::SettingsPlugin),
     #[plugin(feature = "session", desktop, mobile)]
     Session(vmux_session::SessionPlugin),
-    #[plugin(feature = "layout", desktop, requires(command, setting, pane))]
+    #[plugin(feature = "layout", desktop, requires(ecs))]
     Layout(vmux_layout::LayoutPlugin),
-    #[plugin(feature = "bookmark", desktop, requires(layout))]
+    #[plugin(
+        feature = "layout-runtime",
+        desktop,
+        requires(layout, command, setting)
+    )]
+    LayoutRuntime(vmux_layout::LayoutRuntimePlugin),
+    #[plugin(feature = "bookmark", desktop, requires(layout_runtime))]
     Bookmark(vmux_bookmark::BookmarkPlugin),
     #[plugin(feature = "capture", desktop, requires(tool))]
     Input(vmux_input::InputPlugin),
-    #[plugin(feature = "vault", desktop, requires(layout))]
+    #[plugin(feature = "vault", desktop, requires(layout_runtime))]
     Vault(vmux_vault::VaultPlugin),
-    #[plugin(feature = "terminal", desktop, requires(layout, service))]
+    #[plugin(feature = "terminal", desktop, requires(layout_runtime, service))]
     Terminal(vmux_terminal::TerminalPlugin),
-    #[plugin(feature = "editor", desktop, requires(layout, project))]
+    #[plugin(feature = "editor", desktop, requires(layout_runtime, project))]
     Editor(vmux_editor::EditorPlugin),
     #[plugin(feature = "extension", desktop, requires(browser, extension_core))]
     Extension(vmux_extension::ExtensionHostPlugin),
-    #[plugin(feature = "git", desktop, requires(layout))]
+    #[plugin(feature = "git", desktop, requires(layout_runtime))]
     Git(vmux_git::GitPlugin),
     #[plugin(
         feature = "acp",
@@ -57,23 +61,23 @@ pub enum VmuxPlugin {
     Knowledge(vmux_knowledge::KnowledgePlugin),
     #[plugin(feature = "history", desktop, requires(runtime))]
     History(vmux_history::HistoryPlugin),
-    #[plugin(feature = "simulator", desktop, requires(layout))]
+    #[plugin(feature = "simulator", desktop, requires(layout_runtime))]
     Simulator(vmux_simulator::SimulatorPlugin),
     #[plugin(feature = "shortcut", desktop, requires(runtime))]
     Shortcut(vmux_shortcut::ShortcutPlugin),
     #[plugin(feature = "team", desktop, requires(runtime))]
     Team(vmux_team::TeamPlugin),
-    #[plugin(feature = "space", desktop, requires(layout))]
+    #[plugin(feature = "space", desktop, requires(layout_runtime))]
     Space(vmux_space::SpacePlugin),
     #[plugin(feature = "service", desktop, requires(runtime))]
     Service(vmux_service::plugin::ServicePlugin),
-    #[plugin(feature = "remote", desktop, requires(layout, service))]
+    #[plugin(feature = "remote", desktop, requires(layout_runtime, service))]
     Remote(vmux_remote::RemotePlugin),
     #[plugin(feature = "start", desktop, requires(runtime))]
     Start(vmux_start::StartPlugin),
-    #[plugin(feature = "tool", desktop, requires(layout))]
+    #[plugin(feature = "tool", desktop, requires(layout_runtime))]
     Tool(vmux_tool::ToolPlugin),
-    #[plugin(feature = "browser", desktop, requires(layout))]
+    #[plugin(feature = "browser", desktop, requires(layout_runtime))]
     Browser(vmux_browser::BrowserPlugin),
     #[plugin(feature = "mobile", mobile)]
     MobilePages(crate::VmuxMobilePlugin),
@@ -107,6 +111,26 @@ impl Plugin for VmuxRuntimePlugin {
 #[cfg(all(test, any(feature = "layout", feature = "acp")))]
 mod tests {
     use super::*;
+    #[cfg(feature = "layout-runtime")]
+    use bevy_ecs::prelude::{ChildOf, Name};
+    #[cfg(feature = "layout-runtime")]
+    use vmux_layout::{Pane, SelectRequest};
+
+    #[cfg(feature = "layout-runtime")]
+    #[test]
+    fn core_selection_remains_headless_when_product_adapters_are_compiled() {
+        let mut app = App::new();
+        app.add_plugins(VmuxPlugin::builder().layout(true).build());
+        let root = app
+            .world_mut()
+            .spawn(Name::new("Independent application"))
+            .id();
+        let pane = app.world_mut().spawn((Pane, ChildOf(root))).id();
+        app.world_mut().write_message(SelectRequest { root, pane });
+        app.update();
+        assert!(app.world().get::<vmux_ecs::LastActivatedAt>(pane).is_some());
+        assert!(!app.is_plugin_added::<vmux_layout::LayoutRuntimePlugin>());
+    }
 
     #[cfg(feature = "layout")]
     #[test]

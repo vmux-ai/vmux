@@ -4,7 +4,7 @@ use vmux_flex::{AlignItems, FlexDirection, JustifyContent, Node, Val, Visibility
 
 use crate::{Pane, PaneSize, PaneSplit, PaneSplitDirection};
 
-pub const PANE_GAP_PX: f32 = 4.0;
+use crate::PANE_GAP_PX;
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct PaneSplitGaps {

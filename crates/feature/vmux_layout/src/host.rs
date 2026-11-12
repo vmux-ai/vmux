@@ -7,7 +7,7 @@ pub use cef::{
 };
 pub use contract::LayoutContractPlugin;
 pub use pane::OpenBesideRequest;
-pub use plugin::{ErrorPage, LayoutPlugin};
+pub use plugin::{ErrorPage, LayoutRuntimePlugin};
 pub use stack::{CloseStackReason, CloseStackRequest};
 pub use store::{LayoutRestoreCommitted, LayoutRestoreRequest, LayoutStoreSet};
 pub use vmux_ecs::ContributedCommandChosen;

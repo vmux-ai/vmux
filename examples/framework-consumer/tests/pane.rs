@@ -5,14 +5,14 @@ use moonshine_save::prelude::*;
 use vmux_app::VmuxPlugin;
 use vmux_app::ecs::LastActivatedAt;
 use vmux_app::ecs::store::Types;
-use vmux_app::pane::{
+use vmux_app::layout::{
     Hierarchy, Pane, PaneId, PaneSplit, PaneSplitDirection, PaneStore, SelectRequest, StorePlugin,
 };
 
 #[test]
 fn a_public_pane_plugin_selects_current_scoped_leaves_without_a_host() {
     let mut app = App::new();
-    app.add_plugins(VmuxPlugin::builder().pane(true).build());
+    app.add_plugins(VmuxPlugin::builder().layout(true).build());
     let root = app.world_mut().spawn(Name::new("Application root")).id();
     let other = app.world_mut().spawn(Name::new("Other root")).id();
     let split = app
@@ -61,7 +61,7 @@ fn opt_in_pane_store_restores_the_historical_components_and_topology() {
     let path = directory.path().join("panes.ron");
     let mut app = App::new();
     app.add_plugins((
-        VmuxPlugin::builder().pane(true).build(),
+        VmuxPlugin::builder().layout(true).build(),
         bevy_app::TaskPoolPlugin::default(),
         bevy_asset::AssetPlugin::default(),
         StorePlugin,
@@ -86,7 +86,7 @@ fn opt_in_pane_store_restores_the_historical_components_and_topology() {
     let mut restored = App::new();
     restored
         .add_plugins((
-            VmuxPlugin::builder().pane(true).build(),
+            VmuxPlugin::builder().layout(true).build(),
             bevy_app::TaskPoolPlugin::default(),
             bevy_asset::AssetPlugin::default(),
             StorePlugin,

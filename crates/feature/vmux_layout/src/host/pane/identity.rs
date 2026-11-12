@@ -1,8 +1,8 @@
+pub use crate::{PaneId, SpawnSeq};
 use bevy::prelude::*;
 use moonshine_save::prelude::*;
 use vmux_ecs::store::StoreAppExt;
 use vmux_history::LastActivatedAt;
-pub use vmux_pane::{PaneId, SpawnSeq};
 
 use super::{Pane, PaneSplit};
 use crate::stack::Stack;

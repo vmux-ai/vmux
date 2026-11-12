@@ -1,3 +1,4 @@
+pub use crate::{PaneSize, PaneSplitGaps};
 use bevy::{ecs::relationship::Relationship, prelude::*};
 use moonshine_save::prelude::*;
 use vmux_api::open_target::PaneDirection;
@@ -5,7 +6,6 @@ use vmux_ecs::store::StoreAppExt;
 use vmux_flex::prelude::*;
 #[cfg(test)]
 use vmux_history::LastActivatedAt;
-pub use vmux_pane::{PaneSize, PaneSplitGaps};
 
 use crate::settings::LayoutSettings;
 

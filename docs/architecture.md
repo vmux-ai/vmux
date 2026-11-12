@@ -640,11 +640,11 @@ dependency in an application uses the same revision; mixing revisions can create
 ECS types even when their names match. The SDK is not currently distributed as a supported
 set of crates.io packages. Publishing remains a separate release action.
 
-`vmux_app` is the composition entry point. Its optional `ecs`, `project`, `flex`, `pane`, and
+`vmux_app` is the composition entry point. Its optional `ecs`, `project`, `flex`, `layout`, and
 `extension` namespaces re-export their existing public types without wrappers. `contracts`
-enables shared wire values and the contracts of selected Project/Pane features; it does not
+enables shared wire values and the contracts of selected Project/Layout features; it does not
 install a renderer. Schema macros continue to name their owning crates. Core, jobs, Project,
-flex geometry, and pane topology are validated without Profile, CEF, Winit, or Layout.
+flex geometry, and layout topology are validated without Profile, CEF, Winit, or product UI.
 Extension currently selects product browser/layout adapters and is not part of that core guarantee.
 
 The supported Bevy minor is 0.19, as pinned by the consumer lockfile. A Bevy minor change or
@@ -1175,7 +1175,14 @@ Position in the tree defines ownership. Each native window owns a complete tree.
 identify projects; tabs preserve arrangements; splits tile panes; stacks hold page history.
 Global actions resolve through the focused window and then through active descendants.
 
-`vmux_pane` owns the canonical Pane, split, size, identity, and spawn-sequence components without
+`LayoutPlugin` installs the renderer-independent topology and selection core. `LayoutRuntimePlugin`
+composes the product's Window/Profile, interaction, storage, and feature integrations; Browser
+installs the CEF renderer adapter. The facade's `layout` selection enables only the core.
+`layout-runtime` explicitly requires that core, Command, and Setting. Compiling the `host`
+feature makes adapters available without installing them into a core-only application.
+Pane state is an internal part of Layout; there is no separate pane crate or facade feature.
+
+`vmux_layout` owns the canonical Pane, split, size, identity, and spawn-sequence components without
 Window, renderer, or Profile dependencies. Existing reflected paths under
 `vmux_desktop::layout::pane` remain the persistence contract. Its read-only Hierarchy capability
 resolves leaves and neighbors within an explicit root; SelectRequest refuses split targets,

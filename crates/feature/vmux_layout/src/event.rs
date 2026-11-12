@@ -1,5 +1,5 @@
+pub use crate::PANE_GAP_PX;
 use std::path::Path;
-pub use vmux_pane::PANE_GAP_PX;
 
 use vmux_api::PageIcon;
 use vmux_api::bookmark::{BookmarkFolderChoice, BookmarkRow};
@@ -403,8 +403,18 @@ pub struct AddressParts {
 }
 
 impl AddressParts {
+    fn web_host(url: &str) -> Option<&str> {
+        let url = url.trim();
+        let rest = url
+            .strip_prefix("https://")
+            .or_else(|| url.strip_prefix("http://"))?;
+        rest.split(['/', '?', '#'])
+            .next()
+            .filter(|host| !host.is_empty())
+    }
+
     pub fn web(url: &str, title: &str) -> Self {
-        let host = vmux_ui::favicon::FaviconSource::host(url).unwrap_or_default();
+        let host = Self::web_host(url).unwrap_or_default();
         let title = title.trim();
         if title.is_empty() {
             return match host.is_empty() {

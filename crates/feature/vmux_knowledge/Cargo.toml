@@ -24,7 +24,7 @@ notify = { workspace = true }
 serde_json = { workspace = true }
 toml = { workspace = true }
 vmux_git = { path = "../vmux_git" }
-vmux_layout = { path = "../vmux_layout" }
+vmux_layout = { path = "../vmux_layout", features = ["host"] }
 vmux_page = { path = "../../util/vmux_page" }
 vmux_path = { path = "../../util/vmux_path" }
 vmux_tool = { path = "../vmux_tool" }

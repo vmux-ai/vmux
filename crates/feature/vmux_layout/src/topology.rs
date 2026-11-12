@@ -3,16 +3,12 @@ use bevy_ecs::prelude::*;
 use bevy_reflect::Reflect;
 use vmux_ecs::types::AppExt;
 
-#[cfg(feature = "geometry")]
-pub use geometry::{PANE_GAP_PX, PaneSplitGaps};
-pub use hierarchy::Hierarchy;
-#[cfg(feature = "store")]
-pub use store::{Schema as PaneStore, StorePlugin};
+use crate::Hierarchy;
 
 #[vmux_ecs::types(Pane, PaneId, PaneSplit, PaneSplitDirection, PaneSize, SpawnSeq)]
-pub struct PanePlugin;
+pub struct LayoutPlugin;
 
-impl Plugin for PanePlugin {
+impl Plugin for LayoutPlugin {
     fn build(&self, app: &mut App) {
         if !app.is_plugin_added::<vmux_ecs::PrimitivesPlugin>() {
             app.add_plugins(vmux_ecs::PrimitivesPlugin);
@@ -24,12 +20,6 @@ impl Plugin for PanePlugin {
             .add_systems(Update, select.in_set(PaneSet::Select));
     }
 }
-
-#[cfg(feature = "geometry")]
-mod geometry;
-mod hierarchy;
-#[cfg(feature = "store")]
-mod store;
 
 #[derive(Component, Reflect, Default)]
 #[reflect(Component)]
@@ -142,7 +132,7 @@ mod tests {
     impl Fixture {
         fn new() -> Self {
             let mut app = App::new();
-            app.add_plugins(PanePlugin);
+            app.add_plugins(LayoutPlugin);
             let root = app.world_mut().spawn(Name::new("First root")).id();
             let other = app.world_mut().spawn(Name::new("Second root")).id();
             let split = app

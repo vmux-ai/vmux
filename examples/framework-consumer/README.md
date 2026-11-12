@@ -20,10 +20,14 @@ The verification runs through the Rust builder with Git and Cargo.
 
 For another application, select the required `vmux_app` Cargo features and use
 `VmuxPlugin::builder()` to install them. Public feature types live under `vmux_app::ecs`,
-`project`, `flex`, and `pane`; product extensions use the optional `extension` namespace.
+`project`, `flex`, and `layout`; product extensions use the optional `extension` namespace.
 Use one reviewed main commit or release tag for every Vmux dependency. Bevy 0.19 is the current
 supported minor. Keep `vmux_ecs` directly available for its schema macros, and select the
 owning crate's optional store/adapter features explicitly.
+
+`VmuxPlugin::builder().layout(true)` installs the renderer-free Layout core. Native Vmux
+composition selects `layout-runtime` separately; enabling its Cargo feature makes the adapter
+available without adding it to a core-only app. Layout owns its pane state and selection.
 
 An application providing Project IO supplies `LoadCompleted` and `WriteResult` against the
 accepted tickets, or opts into the filesystem adapter. It does not need Editor or a Vmux

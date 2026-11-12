@@ -24,16 +24,16 @@ impl Plugin for FocusPlugin {
             app.add_plugins(vmux_ecs::PrimitivesPlugin);
         }
         app.add_message::<FocusRequest>()
-            .add_message::<vmux_pane::SelectRequest>()
+            .add_message::<crate::SelectRequest>()
             .configure_sets(
                 Update,
-                vmux_pane::PaneSet::Select.in_set(LayoutRequestSet::Handle),
+                crate::PaneSet::Select.in_set(LayoutRequestSet::Handle),
             )
             .add_systems(
                 Update,
                 select
                     .in_set(LayoutRequestSet::Handle)
-                    .before(vmux_pane::PaneSet::Select),
+                    .before(crate::PaneSet::Select),
             )
             .add_systems(PostUpdate, warp_cursor_to_active);
         #[cfg(target_os = "macos")]
@@ -69,7 +69,7 @@ fn select(
     pane_activity: Query<(Entity, &LastActivatedAt), With<Pane>>,
     pane_layout: Query<&ComputedNode, With<Pane>>,
     mut commands: Commands,
-    mut selections: MessageWriter<vmux_pane::SelectRequest>,
+    mut selections: MessageWriter<crate::SelectRequest>,
 ) {
     for request in reader.read() {
         let focus = &request.0;
@@ -132,7 +132,7 @@ fn select(
                 target
             }
         };
-        selections.write(vmux_pane::SelectRequest {
+        selections.write(crate::SelectRequest {
             root: tab,
             pane: target,
         });
@@ -319,7 +319,7 @@ mod tests {
     impl FocusFixture {
         fn selection() -> Self {
             let mut app = App::new();
-            app.add_plugins((MinimalPlugins, vmux_pane::PanePlugin, FocusPlugin))
+            app.add_plugins((MinimalPlugins, crate::LayoutPlugin, FocusPlugin))
                 .insert_resource(ButtonInput::<KeyCode>::default());
             app.world_mut().spawn(PrimaryWindow);
             Self { app }

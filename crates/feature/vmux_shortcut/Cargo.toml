@@ -25,7 +25,7 @@ bevy_cef = { workspace = true }
 bevy_ecs = { workspace = true }
 vmux_command = { path = "../vmux_command" }
 vmux_input = { path = "../vmux_input" }
-vmux_layout = { path = "../vmux_layout" }
+vmux_layout = { path = "../vmux_layout", features = ["host"] }
 vmux_setting = { path = "../vmux_setting" }
 vmux_ui = { path = "../../util/vmux_ui", default-features = false }
 

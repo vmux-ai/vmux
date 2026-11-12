@@ -10313,7 +10313,6 @@ dependencies = [
  "vmux_layout",
  "vmux_macro",
  "vmux_mcp",
- "vmux_pane",
  "vmux_profile",
  "vmux_project",
  "vmux_remote",
@@ -10761,11 +10760,13 @@ name = "vmux_layout"
 version = "0.0.35"
 dependencies = [
  "bevy",
+ "bevy_app",
  "bevy_asset",
  "bevy_cef",
  "bevy_cef_core",
  "bevy_ecs",
  "bevy_reflect",
+ "bevy_transform",
  "dioxus",
  "dioxus-html",
  "dioxus-ssr",
@@ -10791,7 +10792,6 @@ dependencies = [
  "vmux_history",
  "vmux_input",
  "vmux_page",
- "vmux_pane",
  "vmux_path",
  "vmux_session",
  "vmux_tool",
@@ -10892,21 +10892,6 @@ dependencies = [
  "vmux_macro",
  "vmux_ui",
  "wry",
-]
-
-[[package]]
-name = "vmux_pane"
-version = "0.0.35"
-dependencies = [
- "bevy_app",
- "bevy_ecs",
- "bevy_reflect",
- "bevy_transform",
- "moonshine-save",
- "tempfile",
- "vmux_api",
- "vmux_ecs",
- "vmux_flex",
 ]
 
 [[package]]

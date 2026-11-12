@@ -13,8 +13,8 @@ pub use vmux_ecs as ecs;
 pub use vmux_extension as extension;
 #[cfg(feature = "flex")]
 pub use vmux_flex as flex;
-#[cfg(feature = "pane")]
-pub use vmux_pane as pane;
+#[cfg(feature = "layout")]
+pub use vmux_layout as layout;
 #[cfg(feature = "project")]
 pub use vmux_project as project;
 
