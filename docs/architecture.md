@@ -1213,6 +1213,9 @@ Winit keyboard delivery to embedded pages. Holding either Shift key preserves po
 across hover and clicks; input sampled during the hold is consumed, so releasing Shift does not
 replay it. Control suppresses hover selection while allowing explicit clicks, and directional
 keyboard selection remains available.
+Pane interaction composes one `PointerDevice` entity for the input device. Its `PointerFocus`
+and `PointerPress` Components own accepted input and consumption progress; native mailboxes hold
+only bounded raw samples. This state adds no Resources and is not persisted.
 Empty-tab startup pages are created before descendant activation and focus computation. Closing
 the final page preserves the Tab's workspace and checkout context while its replacement loads.
 

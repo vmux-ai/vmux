@@ -13,7 +13,10 @@ use vmux_history::LastActivatedAt;
 
 use crate::settings::LayoutSettings;
 
-use super::{Pane, PaneResize, PaneSplit, PaneSplitDirection, ResizeRequest};
+use super::{
+    Pane, PaneResize, PaneSplit, PaneSplitDirection, PointerDevice, PointerDevicePlugin,
+    ResizeRequest,
+};
 #[cfg(test)]
 use crate::stack::Stack;
 use crate::{
@@ -27,10 +30,16 @@ const RESIZE_STEP: f32 = 0.05;
 #[derive(SystemSet, Debug, Clone, PartialEq, Eq, Hash)]
 pub(crate) struct PointerResizeSet;
 
+#[derive(Component, Default)]
+pub(super) struct PointerPress(bool);
+
 pub(super) struct ResizePlugin;
 
 impl Plugin for ResizePlugin {
     fn build(&self, app: &mut App) {
+        if !app.is_plugin_added::<PointerDevicePlugin>() {
+            app.add_plugins(PointerDevicePlugin);
+        }
         app.add_message::<ResizeRequest>()
             .register_required_components::<PaneSize, Save>()
             .register_stored::<PaneSize>()
@@ -334,15 +343,15 @@ fn from_pointer(
     mut nodes: Query<&mut Node>,
     mut pane_sizes: Query<&mut PaneSize>,
     mouse: Res<ButtonInput<MouseButton>>,
-    mut was_pressed: Local<bool>,
+    mut was_pressed: Single<&mut PointerPress, With<PointerDevice>>,
     mut commands: Commands,
 ) {
     let pressed = match vmux_input::NativePointer::snapshot() {
         Some(pointer) => pointer.buttons.left,
         None => mouse.pressed(MouseButton::Left),
     };
-    let just_pressed = pressed && !*was_pressed;
-    *was_pressed = pressed;
+    let just_pressed = pressed && !was_pressed.0;
+    was_pressed.0 = pressed;
     let current_window = focused_window.entity();
     let tab = active_tab.get();
     for (entity, window) in &windows {

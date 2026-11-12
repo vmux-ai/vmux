@@ -48,6 +48,22 @@ mod open;
 mod resize;
 mod tree;
 
+pub(super) struct PointerDevicePlugin;
+
+impl Plugin for PointerDevicePlugin {
+    fn build(&self, app: &mut App) {
+        app.add_systems(Startup, spawn_pointer_device);
+    }
+}
+
+#[derive(Component)]
+#[require(focus::PointerFocus, resize::PointerPress)]
+pub(super) struct PointerDevice;
+
+fn spawn_pointer_device(mut commands: Commands) {
+    commands.spawn((PointerDevice, Name::new("native pointer")));
+}
+
 #[derive(SystemSet, Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub(super) struct ArrangementSet;
 

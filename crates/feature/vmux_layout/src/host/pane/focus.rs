@@ -6,7 +6,9 @@ use vmux_api::input::KeyModifiers;
 use vmux_flex::prelude::*;
 use vmux_history::LastActivatedAt;
 
-use super::{FocusRequest, Pane, PaneDrag, PaneFocus, PaneSplit};
+use super::{
+    FocusRequest, Pane, PaneDrag, PaneFocus, PaneSplit, PointerDevice, PointerDevicePlugin,
+};
 #[cfg(test)]
 use crate::stack::Stack;
 use crate::{
@@ -20,6 +22,9 @@ pub(super) struct FocusPlugin;
 
 impl Plugin for FocusPlugin {
     fn build(&self, app: &mut App) {
+        if !app.is_plugin_added::<PointerDevicePlugin>() {
+            app.add_plugins(PointerDevicePlugin);
+        }
         if !app.is_plugin_added::<vmux_ecs::PrimitivesPlugin>() {
             app.add_plugins(vmux_ecs::PrimitivesPlugin);
         }
@@ -144,10 +149,12 @@ fn select(
     }
 }
 
-struct PointerFocus {
+#[derive(Component)]
+pub(super) struct PointerFocus {
     sequence: u64,
     position: Option<Vec2>,
     buttons: u8,
+    modifiers: Option<KeyModifiers>,
 }
 
 impl Default for PointerFocus {
@@ -156,6 +163,7 @@ impl Default for PointerFocus {
             sequence: vmux_input::NativePointer::snapshot().map_or(0, |pointer| pointer.sequence),
             position: None,
             buttons: 0,
+            modifiers: None,
         }
     }
 }
@@ -166,7 +174,7 @@ impl PointerFocus {
         window_entity: Entity,
         window: &Window,
         mouse: &ButtonInput<MouseButton>,
-    ) -> Option<(Vec2, bool, bool, Option<KeyModifiers>)> {
+    ) -> Option<(Vec2, bool, bool)> {
         #[cfg(target_os = "macos")]
         let (position, buttons, moved, clicked, modifiers) = {
             let _ = (window_entity, window, mouse);
@@ -209,7 +217,22 @@ impl PointerFocus {
         };
         self.position = Some(position);
         self.buttons = buttons;
-        Some((position, clicked, moved && buttons == 0, modifiers))
+        self.modifiers = modifiers;
+        Some((position, clicked, moved && buttons == 0))
+    }
+
+    fn held(&self, keys: &ButtonInput<KeyCode>) -> bool {
+        if let Some(modifiers) = self.modifiers {
+            return modifiers.shift;
+        }
+        keys.pressed(KeyCode::ShiftLeft) || keys.pressed(KeyCode::ShiftRight)
+    }
+
+    fn active(&self, keys: &ButtonInput<KeyCode>) -> bool {
+        if let Some(modifiers) = self.modifiers {
+            return modifiers.ctrl || modifiers.shift;
+        }
+        keys.pressed(KeyCode::ControlLeft) || keys.pressed(KeyCode::ControlRight) || self.held(keys)
     }
 }
 
@@ -224,7 +247,7 @@ fn from_pointer(
     keys: Res<ButtonInput<KeyCode>>,
     mouse: Res<ButtonInput<MouseButton>>,
     active_drags: Query<(), With<PaneDrag>>,
-    mut pointer: Local<PointerFocus>,
+    mut pointer: Single<&mut PointerFocus, With<PointerDevice>>,
     mut selections: MessageWriter<crate::SelectRequest>,
     mut commands: Commands,
 ) {
@@ -234,14 +257,13 @@ fn from_pointer(
     let Ok(window) = windows.get(window_entity) else {
         return;
     };
-    let Some((position, clicked, moved, modifiers)) = pointer.sample(window_entity, window, &mouse)
-    else {
+    let Some((position, clicked, moved)) = pointer.sample(window_entity, window, &mouse) else {
         return;
     };
-    if !window.focused || !active_drags.is_empty() || HoverFocusLock::held(&keys, modifiers) {
+    if !window.focused || !active_drags.is_empty() || pointer.held(&keys) {
         return;
     }
-    if !clicked && (!moved || HoverFocusLock::active(&keys, modifiers)) {
+    if !clicked && (!moved || pointer.active(&keys)) {
         return;
     }
     let Some(tab) = active_tab.get() else {
@@ -279,26 +301,6 @@ fn from_pointer(
         root: tab,
         pane: target,
     });
-}
-
-struct HoverFocusLock;
-
-impl HoverFocusLock {
-    fn held(keys: &ButtonInput<KeyCode>, modifiers: Option<KeyModifiers>) -> bool {
-        if let Some(modifiers) = modifiers {
-            return modifiers.shift;
-        }
-        keys.pressed(KeyCode::ShiftLeft) || keys.pressed(KeyCode::ShiftRight)
-    }
-
-    fn active(keys: &ButtonInput<KeyCode>, modifiers: Option<KeyModifiers>) -> bool {
-        if let Some(modifiers) = modifiers {
-            return modifiers.ctrl || modifiers.shift;
-        }
-        keys.pressed(KeyCode::ControlLeft)
-            || keys.pressed(KeyCode::ControlRight)
-            || Self::held(keys, None)
-    }
 }
 
 fn warp_cursor_to_active(
