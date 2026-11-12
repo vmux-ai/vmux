@@ -99,31 +99,32 @@ pub fn Page() -> Element {
     });
     let snapshot = controls.snapshot();
     let catalog = Catalog(&snapshot.containers);
-    let available = snapshot.available();
-    let selection = if available {
-        catalog.selection(&selected())
+    let selection = catalog.selection(&selected());
+    let level = if selection.is_empty() {
+        Level::of(address.read().address.as_ref())
     } else {
-        String::new()
+        Level::Containers
     };
-    let transition = if available {
-        format!("{selection}:{}", panel())
+    let transition = if level == Level::Vm {
+        "vm".into()
+    } else if level == Level::Docker {
+        "docker".into()
     } else {
-        format!("service:{}", snapshot.phase)
+        format!("{selection}:{}", panel())
     };
     rsx! {
         PageShell {
             WorkspaceLayout {
                 resizable: true,
-                show_sidebar: available,
+                show_sidebar: true,
                 sidebar: rsx! {
                     ContainerSheet { selected: selection.clone(), onselect, onsettings: move |_| settings_open.set(true) }
                 },
                 toolbar: rsx! {
                     Header {
-                        selection: selection.clone(), panel: panel(),
+                        selection: selection.clone(), panel: panel(), level,
                         onpanel: move |value: String| { panel.set(value.clone()); let _ = Location { selection: selected(), panel: value }.open(&state().containers); },
                         ondelete: move |ids| deleting.set(ids),
-                        onsettings: move |_| settings_open.set(true),
                     }
                 },
                 if !snapshot.error.is_empty() {
@@ -133,8 +134,10 @@ pub fn Page() -> Element {
                 }
                 div { class: "flex min-h-0 flex-1 flex-col overflow-hidden",
                     ContentTransition { key: "{transition}", class: "flex min-h-0 flex-1 flex-col overflow-hidden",
-                        if !available {
-                            Service {}
+                        if level == Level::Vm {
+                            Overview { level }
+                        } else if level == Level::Docker {
+                            Overview { level }
                         } else if !selection.is_empty() {
                             Details {
                                 selection, entries: snapshot.containers.clone(),
@@ -149,52 +152,6 @@ pub fn Page() -> Element {
             if settings_open() { Preferences { onclose: move |_| settings_open.set(false) } }
             if !deleting().is_empty() {
                 DeleteDialog { ids: deleting(), onclose: move |_| deleting.set(Vec::new()) }
-            }
-        }
-    }
-}
-
-#[component]
-fn Service() -> Element {
-    let controls = Controls::current();
-    let snapshot = controls.snapshot();
-    if snapshot.data_directory.is_empty() {
-        return rsx! { Empty { title: translate("container-engine"), description: String::new(), pending: true } };
-    }
-    if !snapshot.supported {
-        return rsx! { Empty { title: translate("container-unsupported"), description: String::new() } };
-    }
-    let starting = snapshot.starting
-        || (snapshot.running
-            && !snapshot.ready
-            && !snapshot.stopping
-            && snapshot.phase != "stopping");
-    let stopping = snapshot.stopping || snapshot.phase == "stopping";
-    let service = if stopping {
-        "container-service-stopping"
-    } else if starting {
-        "container-docker-starting"
-    } else {
-        "container-docker-stopped"
-    };
-    rsx! {
-        div { class: "flex min-h-0 flex-1 items-center justify-center", aria_busy: starting || stopping,
-            div { class: "flex flex-col items-center gap-6",
-                VmIllustration {}
-                if starting || stopping {
-                    div { class: "flex h-8 items-center gap-2 text-xs text-muted-foreground",
-                        LoadingIcon { class: "size-4" }
-                        span { {translate(service)} }
-                    }
-                } else {
-                Button {
-                    size: ButtonSize::Sm, disabled: snapshot.busy,
-                    title: translate("container-start"),
-                    aria_label: translate("container-start"),
-                    onclick: move |_| controls.request(Intent::Start),
-                    {translate("container-start-vm")}
-                }
-                }
             }
         }
     }
@@ -225,13 +182,15 @@ fn ContainerSheet(
                         LineIconView { icon: LineIcon::Wrench, class: "size-3.5" }
                     }
                 }
-                EngineToolbar { compact: true, settings: false, onsettings }
+                EngineToolbar { compact: true, settings: false, start: true, onsettings }
             }
             ContentTransition { key: "{stage}", class: "flex min-h-0 flex-1 flex-col",
                 if !snapshot.inventory_ready && !snapshot.inventory_error.is_empty() {
                     Empty { title: translate("container-inventory-error"), description: snapshot.inventory_error.clone() }
-                } else if !snapshot.inventory_ready {
+                } else if !snapshot.inventory_ready && snapshot.available() {
                     ListSkeleton {}
+                } else if !snapshot.inventory_ready {
+                    div { class: "min-h-0 flex-1" }
                 } else if snapshot.containers.is_empty() {
                     Empty { title: translate("container-empty-title"), description: String::new() }
                 } else {
@@ -258,23 +217,15 @@ fn ContainerSheet(
 fn Header(
     selection: String,
     panel: String,
+    level: Level,
     onpanel: EventHandler<String>,
     ondelete: EventHandler<Vec<String>>,
-    onsettings: EventHandler<()>,
 ) -> Element {
     let controls = Controls::current();
     let snapshot = controls.snapshot();
     let mut members = Vec::new();
-    let navigation = use_ui_state::<PageAddressUiState>().state;
-    let mut engine_level = true;
-    let mut container_level = true;
-    if selection.is_empty()
-        && let Some(address) = &navigation.read().address
-        && let Some(route) = vmux_api::VmuxRoute::parse(&address.url)
-    {
-        engine_level = !route.is_root();
-        container_level = engine_level && route.path().trim_end_matches('/') != "/docker";
-    }
+    let engine_level = level != Level::Vm;
+    let container_level = level == Level::Containers;
     let project = selection.strip_prefix("project:");
     for entry in &snapshot.containers {
         if project.is_some_and(|project| entry.project == project) || entry.id == selection {
@@ -410,7 +361,7 @@ fn Header(
                 .disabled(snapshot.busy),
             );
         }
-        if !stop_ids.is_empty() {
+        if !stop_ids.is_empty() && snapshot.available() {
             toolbar.push(
                 ToolbarControl::button(
                     translate(if project.is_some() {
@@ -422,7 +373,7 @@ fn Header(
                 )
                 .icon(LineIcon::Pause)
                 .text()
-                .disabled(snapshot.busy),
+                .disabled(snapshot.busy || !snapshot.available()),
             );
             toolbar.push(
                 ToolbarControl::button(translate("container-restart"), move |_| {
@@ -431,7 +382,7 @@ fn Header(
                 .icon(LineIcon::RotateCcw)
                 .disabled(snapshot.busy),
             );
-        } else {
+        } else if snapshot.available() {
             toolbar.push(
                 ToolbarControl::button(translate("container-delete"), move |_| {
                     ondelete.call(all_ids.clone())
@@ -445,14 +396,10 @@ fn Header(
         PageBreadcrumbs { state: address,
             onintent: move |intent| { if let AddressIntent::Section { id } = intent && matches!(id.as_str(), "info" | "logs") { onpanel.call(id); } }
         }
-        if snapshot.available() {
-            if let Some(state) = progress {
-                div { class: "flex h-8 items-center justify-end gap-2 px-3 text-xs text-muted-foreground", StateLabel { state } }
-            } else {
-                PageToolbar { controls: toolbar }
-            }
+        if let Some(state) = progress {
+            div { class: "flex h-8 items-center justify-end gap-2 px-3 text-xs text-muted-foreground", StateLabel { state } }
         } else {
-            EngineToolbar { onsettings }
+            PageToolbar { controls: toolbar }
         }
     }
 }
@@ -461,13 +408,16 @@ fn Header(
 fn EngineToolbar(
     #[props(default)] compact: bool,
     #[props(default = true)] settings: bool,
+    #[props(default)] start: bool,
     onsettings: EventHandler<()>,
 ) -> Element {
     let controls = Controls::current();
     let snapshot = controls.snapshot();
     rsx! {
         div { class: if compact { "flex shrink-0 items-center gap-2" } else { "flex h-8 items-center justify-end gap-2 px-3" },
-            if snapshot.running {
+            if start && matches!(snapshot.vm_state(), "starting" | "stopping") {
+                StateLabel { state: snapshot.vm_state().to_string() }
+            } else if snapshot.running {
                 Button {
                     size: ButtonSize::Xs, variant: ButtonVariant::Ghost,
                     class: "h-7 gap-2 whitespace-nowrap px-1.5",
@@ -476,6 +426,16 @@ fn EngineToolbar(
                     onclick: move |_| controls.request(Intent::Stop),
                     LineIconView { icon: LineIcon::Pause, class: "size-3.5" }
                     span { {translate("container-stop-vm")} }
+                }
+            } else if start {
+                Button {
+                    size: ButtonSize::Xs, variant: ButtonVariant::Ghost,
+                    class: "h-7 gap-2 whitespace-nowrap px-1.5",
+                    title: translate("container-start"), aria_label: translate("container-start"),
+                    disabled: controls.engine_busy() || !snapshot.supported || snapshot.data_directory.is_empty(),
+                    onclick: move |_| controls.request(Intent::Start),
+                    LineIconView { icon: LineIcon::Play, class: "size-3.5" }
+                    span { {translate("container-start-vm")} }
                 }
             }
             if settings {
@@ -597,7 +557,7 @@ fn ContainerRow(
                     OperationButton {
                         ids: vec![operation_id], operation: if running { ContainerOperation::Stop } else { ContainerOperation::Start },
                         label: translate(if running { "container-stop-container" } else { "container-start-container" }),
-                        description: String::new(), disabled: busy,
+                        description: String::new(), disabled: busy, show_label: false,
                     }
                 }
             }
@@ -612,6 +572,7 @@ fn OperationButton(
     label: String,
     description: String,
     disabled: bool,
+    #[props(default = true)] show_label: bool,
 ) -> Element {
     let controls = Controls::current();
     let description = if description.is_empty() {
@@ -621,12 +582,57 @@ fn OperationButton(
     };
     rsx! {
         Button {
-            size: ButtonSize::Xs, variant: ButtonVariant::Ghost,
-            class: "h-7 shrink-0 gap-1.5 whitespace-nowrap px-1.5 text-[10px]",
+            size: if show_label { ButtonSize::Xs } else { ButtonSize::Icon }, variant: ButtonVariant::Ghost,
+            class: if show_label { "h-7 shrink-0 gap-1.5 whitespace-nowrap px-1.5 text-[10px]" } else { "shrink-0 p-0" },
             title: description.clone(), aria_label: description, disabled,
             onclick: move |event: MouseEvent| { event.stop_propagation(); controls.containers(ids.clone(), operation); },
             LineIconView { icon: if operation == ContainerOperation::Stop { LineIcon::Pause } else { LineIcon::Play }, class: "size-3" }
-            span { "{label}" }
+            if show_label { span { "{label}" } }
+        }
+    }
+}
+
+#[component]
+fn Overview(level: Level) -> Element {
+    let snapshot = Controls::current().snapshot();
+    let loaded = !snapshot.data_directory.is_empty();
+    rsx! {
+        div { class: "min-h-0 flex-1 overflow-auto px-4 py-5",
+            div { class: "max-w-2xl",
+                div { class: "mb-7 flex items-center gap-3",
+                    BuiltinIconView { icon: if level == Level::Vm { BuiltinIcon::Computer } else { BuiltinIcon::Docker }, class: "size-8 shrink-0 text-muted-foreground" }
+                    div {
+                        h1 { class: "text-sm font-medium text-foreground", {translate(if level == Level::Vm { "container-vm" } else { "container-engine" })} }
+                        p { class: "mt-1 text-xs text-muted-foreground/65", {translate(if loaded && !snapshot.supported { "container-unsupported" } else { "container-description" })} }
+                    }
+                }
+                dl { class: "space-y-5",
+                    Info { label: translate("container-status"),
+                        if loaded { StateLabel { state: snapshot.vm_state().to_string() } }
+                        else { div { class: "h-4 w-20 animate-pulse rounded bg-muted/40" } }
+                    }
+                    if level == Level::Vm {
+                        Info { label: translate("container-cpus"),
+                            if loaded { span { "{snapshot.cpus}" } }
+                            else { div { class: "h-4 w-10 animate-pulse rounded bg-muted/40" } }
+                        }
+                        Info { label: translate("container-memory"),
+                            if loaded { span { "{snapshot.memory_mib}" } }
+                            else { div { class: "h-4 w-16 animate-pulse rounded bg-muted/40" } }
+                        }
+                        Info { label: translate("container-shared-directory"),
+                            if loaded { code { class: "break-all text-xs", "{snapshot.shared_directory}" } }
+                            else { div { class: "h-4 w-64 max-w-full animate-pulse rounded bg-muted/40" } }
+                        }
+                    } else {
+                        Info { label: translate("container-docker-socket"), code { class: "break-all text-xs", "unix://{snapshot.socket}" } }
+                        Info { label: translate("container-title"),
+                            if snapshot.inventory_ready { span { "{snapshot.containers.len()}" } }
+                            else { div { class: "h-4 w-10 animate-pulse rounded bg-muted/40" } }
+                        }
+                    }
+                }
+            }
         }
     }
 }
@@ -652,6 +658,9 @@ fn Details(
     }
     rsx! {
         if panel == "logs" && group.is_none() {
+            if !snapshot.available() {
+                Empty { title: translate("container-service-not-running"), description: String::new() }
+            } else {
             div { class: "flex min-h-0 flex-1 flex-col px-4 py-3",
                 div { class: "mb-2 flex shrink-0 items-center gap-2 text-[10px] text-muted-foreground/65",
                     StateDot { state: "running" }
@@ -671,6 +680,7 @@ fn Details(
                 } else {
                     pre { class: "min-h-0 flex-1 overflow-auto rounded-md bg-foreground/[0.025] p-3 font-mono text-[11px] leading-relaxed text-foreground/80", "{snapshot.container_logs}" }
                 }
+            }
             }
         } else if group.is_some() {
             div { class: "min-h-0 flex-1 overflow-auto px-4 py-3",
@@ -882,6 +892,31 @@ struct Group {
 
 struct Catalog<'a>(&'a [ContainerEntry]);
 
+#[derive(Clone, Copy, PartialEq)]
+enum Level {
+    Vm,
+    Docker,
+    Containers,
+}
+
+impl Level {
+    fn of(address: Option<&PageAddress>) -> Self {
+        let Some(address) = address else {
+            return Self::Containers;
+        };
+        let Some(route) = vmux_api::VmuxRoute::parse(&address.url) else {
+            return Self::Containers;
+        };
+        if route.is_root() && route.is_host("vm") {
+            return Self::Vm;
+        }
+        if route.is_host("vm") && route.path().trim_end_matches('/') == "/docker" {
+            return Self::Docker;
+        }
+        Self::Containers
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 struct Location {
     selection: String,
@@ -981,6 +1016,25 @@ impl Catalog<'_> {
 }
 
 impl ContainerUiState {
+    fn vm_state(&self) -> &'static str {
+        if self.stopping || self.phase == "stopping" {
+            return "stopping";
+        }
+        if self.starting {
+            return "starting";
+        }
+        if self.phase == "failed" {
+            return "dead";
+        }
+        if self.running && !self.ready && self.phase != "ready" {
+            return "starting";
+        }
+        if self.running {
+            return "running";
+        }
+        "exited"
+    }
+
     fn available(&self) -> bool {
         (self.ready || (self.running && self.phase == "ready"))
             && !self.stopping
@@ -1129,6 +1183,9 @@ impl Intent {
             Self::Start => snapshot.starting = true,
             Self::Stop => snapshot.stopping = true,
             Self::Containers { ids, operation } => {
+                if *operation == ContainerOperation::Start && !snapshot.available() {
+                    snapshot.starting = true;
+                }
                 if *operation == ContainerOperation::Remove {
                     snapshot.containers.retain(|entry| !ids.contains(&entry.id));
                     return;
@@ -1149,21 +1206,6 @@ impl Intent {
                     .into();
                     entry.status.clear();
                 }
-            }
-        }
-    }
-}
-
-#[component]
-fn VmIllustration() -> Element {
-    rsx! {
-        svg { class: "h-28 w-40 text-muted-foreground/50", view_box: "0 0 160 112", fill: "none",
-            role: "img", "aria-label": translate("container-description"),
-            rect { x: "15", y: "8", width: "130", height: "82", rx: "9", fill: "currentColor", fill_opacity: "0.035", stroke: "currentColor", stroke_width: "2" }
-            path { d: "M62 90v14m36-14v14m-48 0h60", stroke: "currentColor", stroke_width: "2", stroke_linecap: "round" }
-            g { class: "text-primary/80", stroke: "currentColor", stroke_width: "1.7", stroke_linejoin: "round",
-                path { d: "m80 24 24 14v28L80 80 56 66V38Z", fill: "currentColor", fill_opacity: "0.07" }
-                path { d: "m56 38 24 14 24-14M80 52v28M68 31l24 14" }
             }
         }
     }
@@ -1312,6 +1354,29 @@ mod tests {
             self.render()
         }
 
+        fn address(&mut self, url: &str) -> String {
+            let frame = UiStateFrame::<
+                PageAddressUiState,
+                vmux_api::address::PageAddressUiStatePatch,
+            >::Snapshot(PageAddressUiState {
+                address: Some(PageAddress {
+                    url: url.into(),
+                    ..Default::default()
+                }),
+                ..Default::default()
+            });
+            let bytes = rkyv::to_bytes::<rkyv::rancor::Error>(&frame).unwrap();
+            let mut found = false;
+            for (id, listener) in self.host.listeners.borrow_mut().iter_mut() {
+                if id == PageAddressUiState::id() {
+                    listener(&bytes);
+                    found = true;
+                }
+            }
+            assert!(found, "the page must subscribe to its address");
+            self.render()
+        }
+
         fn apply(&mut self, edits: Vec<Mutation>) {
             for edit in edits {
                 if let Mutation::SetAttribute {
@@ -1359,8 +1424,93 @@ mod tests {
     }
 
     #[test]
-    fn stopped_service_has_one_start_control_without_inactive_workspace_controls() {
+    fn vm_resources_remain_visible_during_start_and_history_changes_the_overview() {
         let mut preview = Preview::new();
+        let mut snapshot = ContainerUiState {
+            supported: true,
+            phase: "stopped".into(),
+            data_directory: "/fixtures/data".into(),
+            shared_directory: "/fixtures/shared".into(),
+            cpus: 2,
+            memory_mib: 2048,
+            socket: "/fixtures/docker.sock".into(),
+            containers: vec![ContainerEntry {
+                id: "aaaaaaaaaaaa".into(),
+                name: "account".into(),
+                image: "account:dev".into(),
+                state: "exited".into(),
+                ..Default::default()
+            }],
+            ..Default::default()
+        };
+        preview.publish(snapshot.clone());
+        let html = preview.address("vmux://vm/");
+        assert!(html.contains(&translate("container-cpus")));
+        assert!(html.contains("/fixtures/shared"));
+        assert!(!html.contains(&translate("container-no-selection")));
+        assert!(!html.contains("<input"));
+        preview.click(&translate("container-start"));
+        let html = preview.render();
+        assert_eq!(preview.host.starts.get(), 1);
+        assert!(html.contains("/fixtures/shared"));
+        assert!(html.contains(&translate("container-state-starting")));
+        snapshot.running = true;
+        snapshot.ready = true;
+        snapshot.phase = "ready".into();
+        snapshot.inventory_ready = true;
+        snapshot.control_revision = 1;
+        preview.publish(snapshot);
+        let html = preview.address("vmux://vm/docker");
+        assert!(html.contains("unix:///fixtures/docker.sock"));
+        assert!(!html.contains(&translate("container-cpus")));
+        assert!(!html.contains(&translate("container-no-selection")));
+        let html = preview.address("vmux://vm/docker/containers");
+        assert!(html.contains(&translate("container-no-selection")));
+        preview.click("account");
+        assert!(preview.render().contains("account:dev"));
+        let html = preview.address("vmux://vm/");
+        assert!(html.contains("/fixtures/shared"));
+        assert!(!html.contains(&translate("container-no-selection")));
+    }
+
+    #[test]
+    fn stopped_vm_keeps_container_selection_and_previews_engine_start_for_a_service() {
+        let mut preview = Preview::new();
+        preview.address("vmux://vm/");
+        preview.publish(ContainerUiState {
+            supported: true,
+            phase: "stopped".into(),
+            data_directory: "/fixtures/data".into(),
+            inventory_ready: true,
+            containers: vec![ContainerEntry {
+                id: "aaaaaaaaaaaa".into(),
+                name: "account".into(),
+                image: "account:dev".into(),
+                state: "exited".into(),
+                ..Default::default()
+            }],
+            ..Default::default()
+        });
+        preview.click("account");
+        let html = preview.render();
+        assert!(html.contains("account:dev"));
+        assert!(!html.contains(&translate("container-no-selection")));
+        preview.click(&translate("container-start-container"));
+        assert_eq!(preview.host.starts.get(), 0);
+        let commands = preview.host.commands.borrow();
+        assert_eq!(commands.len(), 1);
+        assert_eq!(commands[0].ids, ["aaaaaaaaaaaa"]);
+        assert_eq!(commands[0].operation, ContainerOperation::Start);
+        drop(commands);
+        let html = preview.render();
+        assert!(html.contains(&translate("container-state-starting")));
+        assert!(!html.contains(&format!("aria-label=\"{}\"", translate("container-start"))));
+    }
+
+    #[test]
+    fn stopped_vm_keeps_the_side_sheet_and_has_one_engine_start() {
+        let mut preview = Preview::new();
+        preview.address("vmux://vm/");
         let html = preview.publish(ContainerUiState {
             supported: true,
             data_directory: "/fixtures/data".into(),
@@ -1372,18 +1522,17 @@ mod tests {
         assert_eq!(html.matches("<input").count(), 0);
         assert!(!html.contains(&translate("container-docker-stopped")));
         assert!(!html.contains(&translate("container-no-selection")));
-        assert!(!html.contains(&format!(
+        assert!(html.contains(&format!(
             "aria-label=\"{}\"",
             translate("schema-side-sheet")
         )));
         let start = translate("container-start");
         assert_eq!(html.matches(&format!("aria-label=\"{start}\"")).count(), 1);
-        assert!(!html.contains(&translate("container-cpus")));
+        assert!(html.contains(&translate("container-cpus")));
         preview.click(&start);
         assert_eq!(preview.host.starts.get(), 1);
         let html = preview.render();
-        assert!(html.contains("aria-busy=true"));
-        assert!(html.contains(&translate("container-docker-starting")));
+        assert!(html.contains(&translate("container-state-starting")));
         assert!(!html.contains(&format!("aria-label=\"{start}\"")));
         let mut stale = ContainerUiState {
             supported: true,
@@ -1391,14 +1540,14 @@ mod tests {
             ..Default::default()
         };
         let html = preview.publish(stale.clone());
-        assert!(html.contains(&translate("container-docker-starting")));
+        assert!(html.contains(&translate("container-state-starting")));
         stale.control_revision = 1;
         stale.control_error = "fixture start refused".into();
         stale.error = stale.control_error.clone();
         let html = preview.publish(stale);
         assert!(html.contains("fixture start refused"));
         assert!(html.contains(&format!("aria-label=\"{start}\"")));
-        assert!(!html.contains(&translate("container-docker-starting")));
+        assert!(!html.contains(&translate("container-state-starting")));
     }
 
     #[test]
@@ -1529,14 +1678,14 @@ mod tests {
         assert!(
             preview
                 .render()
-                .contains(&translate("container-service-stopping"))
+                .contains(&translate("container-phase-stopping"))
         );
         snapshot.control_revision = 2;
         snapshot.control_error = "fixture stop refused".into();
         snapshot.error = snapshot.control_error.clone();
         let html = preview.publish(snapshot);
         assert!(html.contains("fixture stop refused"));
-        assert!(!html.contains(&translate("container-service-stopping")));
+        assert!(!html.contains(&translate("container-phase-stopping")));
     }
 
     #[test]
@@ -1607,51 +1756,38 @@ mod tests {
     }
 
     #[test]
-    fn startup_and_shutdown_replace_the_workspace_without_losing_state() {
+    fn engine_transitions_keep_the_side_sheet_and_vm_information() {
         let mut preview = Preview::new();
-        let html = preview.publish(ContainerUiState {
+        preview.address("vmux://vm/");
+        let mut state = ContainerUiState {
             supported: true,
-            running: true,
-            starting: true,
-            busy: true,
             data_directory: "/fixtures/data".into(),
-            ..Default::default()
-        });
-        assert!(html.contains("aria-busy=true"));
-        assert!(!html.contains(&format!("aria-label=\"{}\"", translate("container-start"))));
-        let toggle = translate("schema-side-sheet");
-        assert!(!html.contains(&format!("aria-label=\"{toggle}\"")));
-        let mut ready = ContainerUiState {
-            supported: true,
-            running: true,
-            ready: true,
-            inventory_ready: true,
-            data_directory: "/fixtures/data".into(),
+            shared_directory: "/fixtures/shared".into(),
+            cpus: 2,
+            memory_mib: 2048,
             ..Default::default()
         };
-        let html = preview.publish(ready.clone());
-        assert!(html.contains(&format!("aria-label=\"{toggle}\"")));
-        assert!(html.contains(&translate("container-no-selection")));
-        ready.phase = "ready".into();
-        ready.ready = false;
-        let html = preview.publish(ready.clone());
-        assert!(html.contains(&format!("aria-label=\"{toggle}\"")));
-        assert!(html.contains(&translate("container-no-selection")));
-        assert!(!html.contains(&format!("aria-label=\"{}\"", translate("container-start"))));
-        ready.ready = true;
+        let toggle = translate("schema-side-sheet");
+        for (running, ready, starting, stopping) in [
+            (false, false, false, false),
+            (true, false, true, false),
+            (true, true, false, false),
+            (true, true, false, true),
+            (false, false, false, false),
+        ] {
+            state.running = running;
+            state.ready = ready;
+            state.starting = starting;
+            state.stopping = stopping;
+            let html = preview.publish(state.clone());
+            assert!(html.contains(&format!("aria-label=\"{toggle}\"")));
+            assert!(html.contains("/fixtures/shared"));
+            assert!(!html.contains(&translate("container-no-selection")));
+        }
         preview.click(&toggle);
         assert!(preview.sidebar_blocked);
         preview.click(&toggle);
         assert!(!preview.sidebar_blocked);
-        ready.stopping = true;
-        let html = preview.publish(ready.clone());
-        assert!(html.contains(&translate("container-service-stopping")));
-        assert!(html.contains("aria-busy=true"));
-        assert!(!html.contains(&translate("container-no-selection")));
-        assert!(!html.contains(&format!("aria-label=\"{toggle}\"")));
-        ready.stopping = false;
-        let html = preview.publish(ready);
-        assert!(html.contains(&translate("container-no-selection")));
         assert_eq!(
             preview
                 .host

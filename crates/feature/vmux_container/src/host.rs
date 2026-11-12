@@ -429,6 +429,13 @@ fn project(
         Phase::Stopped => "stopped",
         Phase::Failed => "failed",
     };
+    let mut containers = catalog.snapshot(engine);
+    if !(observed.0.docker_ready || observed.0.running && observed.0.phase == Phase::Ready) {
+        for container in &mut containers {
+            container.state = "exited".into();
+            container.status.clear();
+        }
+    }
     let snapshot = ContainerUiState {
         supported: cfg!(all(target_os = "macos", target_arch = "aarch64")),
         running: observed.0.running,
@@ -452,13 +459,13 @@ fn project(
             .unwrap_or_default(),
         engine_revision: engine_revision.0,
         inventory_revision: inventory.map_or(0, |inventory| inventory.revision.0),
-        containers: catalog.snapshot(engine),
+        containers,
         log_id: String::new(),
         container_logs: String::new(),
         container_log_error: String::new(),
         container_logs_ready: false,
         configuration_revision: revision.0,
-        starting: busy.is_some_and(Busy::starting),
+        starting: busy.is_some_and(Busy::starting) && !observed.0.docker_ready,
         stopping: busy.is_some_and(Busy::stopping),
         control_revision: 0,
         control_error: String::new(),
