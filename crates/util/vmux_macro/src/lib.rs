@@ -18,6 +18,15 @@ mod ui_state;
 mod variant_names;
 
 #[proc_macro_attribute]
+pub fn types(args: TokenStream, input: TokenStream) -> TokenStream {
+    let item = parse_macro_input!(input as DeriveInput);
+    match store::Declaration::parse_types(args.into(), item) {
+        Ok(declaration) => declaration.expand_types().into(),
+        Err(error) => error.to_compile_error().into(),
+    }
+}
+
+#[proc_macro_attribute]
 pub fn store(args: TokenStream, input: TokenStream) -> TokenStream {
     let item = parse_macro_input!(input as DeriveInput);
     match store::Declaration::parse(args.into(), item) {

@@ -1,6 +1,7 @@
 use bevy_app::{App, Plugin, Update};
 use bevy_ecs::prelude::*;
 use bevy_reflect::Reflect;
+use vmux_ecs::types::AppExt;
 
 #[cfg(feature = "geometry")]
 pub use geometry::{PANE_GAP_PX, PaneSplitGaps};
@@ -8,6 +9,7 @@ pub use hierarchy::Hierarchy;
 #[cfg(feature = "store")]
 pub use store::{Schema as PaneStore, StorePlugin};
 
+#[vmux_ecs::types(Pane, PaneId, PaneSplit, PaneSplitDirection, PaneSize, SpawnSeq)]
 pub struct PanePlugin;
 
 impl Plugin for PanePlugin {
@@ -15,12 +17,7 @@ impl Plugin for PanePlugin {
         if !app.is_plugin_added::<vmux_ecs::PrimitivesPlugin>() {
             app.add_plugins(vmux_ecs::PrimitivesPlugin);
         }
-        app.register_type::<Pane>()
-            .register_type::<PaneId>()
-            .register_type::<PaneSplit>()
-            .register_type::<PaneSplitDirection>()
-            .register_type::<PaneSize>()
-            .register_type::<SpawnSeq>()
+        app.register_types::<Self>()
             .add_message::<SelectRequest>()
             .add_message::<SelectionChanged>()
             .configure_sets(Update, (PaneSet::Select, PaneSet::AfterSelect).chain())

@@ -1,5 +1,7 @@
 extern crate self as vmux_ecs;
 
+pub use vmux_macro::types;
+
 #[cfg(feature = "store")]
 pub use vmux_macro::store;
 pub use vmux_task::{
@@ -128,6 +130,7 @@ pub mod store;
 pub mod team;
 #[cfg(all(host, feature = "host"))]
 pub mod terminal;
+pub mod types;
 #[cfg(all(host, feature = "host"))]
 mod ui_state;
 #[cfg(all(host, feature = "host"))]

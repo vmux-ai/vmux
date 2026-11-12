@@ -460,6 +460,11 @@ and navigation behavior remains owned by the product layout feature until separa
 Core clocks use `web-time` so activation and operation retention also work on
 `wasm32-unknown-unknown` without a native runtime.
 
+Reflection-only declarations use `#[vmux_ecs::types(...)]` on the owning plugin or a unit schema
+and `app.register_types::<Schema>()` in its normal build method. This registers reflected types
+without a store domain, Save requirements, tracking, or hidden lifecycle systems. Store schemas
+reuse the declaration parser and explicitly add their own domain and optional tracking.
+
 Shared data components do not imply persistence. Feature-owned markers and store plugins choose
 what is saved: Workspace storage registers its shared fields and includes pages owned by Stacks,
 while History explicitly marks its URL and visit records. The same `Cwd`, timestamps, and ordering
