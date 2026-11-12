@@ -974,7 +974,7 @@ impl SpaceProjects<'_, '_> {
                 ..Default::default()
             });
         }
-        rows.sort_by(|left, right| left.label.to_lowercase().cmp(&right.label.to_lowercase()));
+        rows.sort_by_key(|row| row.label.to_lowercase());
         rows
     }
 
