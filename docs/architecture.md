@@ -1635,8 +1635,10 @@ the daemon. One root UI-state subscription
 survives these transitions. A thin divider separates the side sheet and details.
 Details remain unselected until the user chooses an entry. The address reads
 `VM → Docker → Containers → group → selected entry → Info/Logs`. VM shutdown and settings
-live in separate rows of the Docker side-sheet header: the engine title and settings occupy
-one row, and Stop VM occupies its own row. The redundant running count is omitted.
+live on the VM row of the side sheet. The sheet follows
+`VM → Docker → Containers → group → container`; its level labels navigate to their
+information pages in the input frame. VM controls use play/pause icons on their owning row.
+The redundant running count is omitted.
 Group names and expand controls occupy one row, with counts and Start all/Stop all beneath;
 long names wrap without squeezing the operation label. Container Start/Stop
 controls have text labels in the details toolbar; list rows use play/pause icons with tooltips.

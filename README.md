@@ -117,7 +117,9 @@ host retains previously fetched container metadata for inspection during VM shut
 Containers
 created on this daemon appear automatically, including stopped containers and
 Compose groups. Selecting an entry opens its information and live logs. VM shutdown
-and settings occupy separate rows in the Docker side-sheet header. Compose groups
+and settings belong to the VM row of the side sheet, which follows
+VM, Docker, Containers, Compose groups and their services. Each level links to its page.
+Compose groups
 offer Start all/Stop all beneath their names. Starting a service also starts its
 dependencies in the same Compose project and waits for their declared readiness,
 starting the VM first when needed.
