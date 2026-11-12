@@ -1409,7 +1409,12 @@ version; unversioned notifications cannot prove which edit produced them.
 Process handles, framing, reader/writer threads, and wire correlation stay in the transport
 adapter. Publishing input or a response, and closing the reader, wakes the reactive runner.
 Package selection, settings, navigation, and rendered projections remain Editor-owned. This
-native lifecycle is not yet a renderer-independent public LSP plugin.
+public `vmux_lsp` core shares the server/document model, ownership relationships, and
+request cancellation, timeout, and response lifecycle with an independent application.
+Documents derive their server identity from `ChildOf`; transport handles and wire correlation
+remain behind `TransportIo`. The application facade's `lsp` selection requires the shared ECS
+core, and Editor declares that dependency. Server selection and document/process adapters
+remain Editor-owned. The independent consumer exercises the same request pipeline without UI.
 Lifecycle tests use the Rust `vmux_mock_lsp` recorder through real standard-input/output pipes.
 Run them with `cargo test --locked -p vmux_editor` so Cargo builds the registered test server.
 

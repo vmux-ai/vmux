@@ -24,6 +24,8 @@ pub use vmux_layout::{
     PaneSplitDirection, SelectRequest as PaneSelectRequest,
     SelectionChanged as PaneSelectionChanged,
 };
+#[cfg(feature = "lsp")]
+pub use vmux_lsp::LspPlugin;
 #[cfg(feature = "project")]
 pub use vmux_project::ProjectPlugin;
 #[cfg(feature = "service")]

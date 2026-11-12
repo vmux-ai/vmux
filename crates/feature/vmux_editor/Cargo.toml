@@ -21,6 +21,7 @@ rkyv = { workspace = true }
 unicode-width = "0.2"
 pulldown-cmark = { version = "0.12", default-features = false }
 vmux_ecs = { path = "../../util/vmux_ecs", features = ["host"] }
+vmux_lsp = { path = "../../vmux_lsp" }
 vmux_page = { path = "../../util/vmux_page" }
 vmux_path = { path = "../../util/vmux_path" }
 vmux_project = { path = "../vmux_project", features = ["contracts", "filesystem"] }

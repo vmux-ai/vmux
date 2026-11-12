@@ -10311,6 +10311,7 @@ dependencies = [
  "vmux_input",
  "vmux_knowledge",
  "vmux_layout",
+ "vmux_lsp",
  "vmux_macro",
  "vmux_mcp",
  "vmux_profile",
@@ -10602,6 +10603,7 @@ dependencies = [
  "vmux_git",
  "vmux_knowledge",
  "vmux_layout",
+ "vmux_lsp",
  "vmux_mcp",
  "vmux_page",
  "vmux_path",
@@ -10796,6 +10798,19 @@ dependencies = [
  "vmux_session",
  "vmux_tool",
  "vmux_ui",
+]
+
+[[package]]
+name = "vmux_lsp"
+version = "0.0.35"
+dependencies = [
+ "bevy_app",
+ "bevy_ecs",
+ "crossbeam-channel",
+ "lsp-types",
+ "serde_json",
+ "vmux_ecs",
+ "web-time",
 ]
 
 [[package]]

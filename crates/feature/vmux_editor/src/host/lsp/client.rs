@@ -17,9 +17,8 @@ use std::time::Duration;
 
 use std::io::BufRead;
 
-#[derive(bevy::prelude::Component)]
 pub struct ServerClient {
-    child: Option<Child>,
+    child: Mutex<Option<Child>>,
     outgoing: mpsc::Sender<serde_json::Value>,
     pending: PendingMap,
     next_id: AtomicI64,
@@ -169,7 +168,7 @@ impl ServerClient {
         });
 
         let mut client = ServerClient {
-            child: Some(child),
+            child: Mutex::new(Some(child)),
             outgoing,
             pending,
             next_id: AtomicI64::new(1),
@@ -352,8 +351,13 @@ impl ServerClient {
         );
     }
 
-    pub(crate) fn exited(&mut self) -> bool {
-        match self.child.as_mut() {
+    pub(crate) fn exited(&self) -> bool {
+        match self
+            .child
+            .lock()
+            .unwrap_or_else(|error| error.into_inner())
+            .as_mut()
+        {
             Some(child) => child.try_wait().ok().flatten().is_some(),
             None => true,
         }
@@ -362,7 +366,12 @@ impl ServerClient {
     pub fn shutdown(&mut self) {
         let _ = self.request("shutdown", serde_json::Value::Null, Duration::from_secs(2));
         self.notify("exit", serde_json::json!({}));
-        if let Some(child) = self.child.as_mut() {
+        if let Some(child) = self
+            .child
+            .get_mut()
+            .unwrap_or_else(|error| error.into_inner())
+            .as_mut()
+        {
             let _ = child.kill();
             let _ = child.wait();
         }
@@ -375,7 +384,12 @@ impl Drop for ServerClient {
             .lock()
             .unwrap_or_else(|error| error.into_inner())
             .clear();
-        if let Some(mut child) = self.child.take() {
+        if let Some(mut child) = self
+            .child
+            .get_mut()
+            .unwrap_or_else(|error| error.into_inner())
+            .take()
+        {
             let _ = child.kill();
             bevy::tasks::IoTaskPool::get()
                 .spawn(async move {
@@ -383,6 +397,29 @@ impl Drop for ServerClient {
                 })
                 .detach();
         }
+    }
+}
+
+impl vmux_lsp::TransportIo for ServerClient {
+    fn request(&self, method: &str, params: serde_json::Value) -> vmux_lsp::WireReply {
+        let (id, receiver) = self.send_request(method, params);
+        vmux_lsp::WireReply::new(id, receiver)
+    }
+
+    fn notify(&self, method: &str, params: serde_json::Value) {
+        self.notify(method, params);
+    }
+
+    fn cancel(&self, id: i64) {
+        self.cancel_request(id);
+    }
+
+    fn capabilities(&self) -> &lsp_types::ServerCapabilities {
+        &self.capabilities.server
+    }
+
+    fn exited(&self) -> bool {
+        self.exited()
     }
 }
 
