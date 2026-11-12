@@ -27,7 +27,7 @@ impl Plugin for ViewportPlugin {
                 (
                     sync_wrap_settings.after(EditorFileLoadedSet),
                     rehighlight_on_color_scheme,
-                    apply_lsp_folds.before(vmux_fold::FoldSet::Project),
+                    apply_lsp_folds.before(crate::host::fold_preferences::FoldSet::Project),
                 ),
             )
             .add_observer(file_resize)
