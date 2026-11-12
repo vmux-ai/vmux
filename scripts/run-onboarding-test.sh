@@ -7,7 +7,7 @@ case "$mode" in
     clean|env) ;;
     *) echo "Usage: $0 [clean|env] [absolute-data-directory]" >&2; exit 2 ;;
 esac
-data="${2:-$(mktemp -d "${TMPDIR:-/tmp}/vmux-onboarding-$mode.XXXXXX")}"
+data="${2:-$(mktemp -d "/tmp/vmux-fresh-$mode.XXXXXX")}"
 case "$data" in
     /*) ;;
     *) echo "The test data directory must be absolute." >&2; exit 2 ;;

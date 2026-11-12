@@ -3,6 +3,7 @@ set -euo pipefail
 
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)"
 python3 - "$root" <<'PY'
+import contextlib
 import hashlib
 import json
 import os
@@ -13,7 +14,7 @@ import sys
 import tempfile
 
 repository = Path(sys.argv[1])
-with tempfile.TemporaryDirectory(prefix="vmux-fresh-launch-") as temporary:
+with tempfile.TemporaryDirectory(prefix="vmux-fresh-launch-") as temporary, contextlib.ExitStack() as cleanup:
     fixture = Path(temporary).resolve()
     root = fixture / "worktree"
     scripts = root / "scripts"
@@ -51,7 +52,7 @@ print(json.dumps(values))
     executable(root / "bin/rustc", "#!/bin/sh\necho /fixture/rust-libraries\n")
     executable(root / "bin/codesign", "#!/bin/sh\nexit 0\n")
 
-    data = fixture / "data"
+    data = fixture / ("long-temporary-path-" * 6)
     data.mkdir()
     protected = fixture / "persistent"
     protected.mkdir()
@@ -64,13 +65,20 @@ print(json.dumps(values))
                        VMUX_PROFILE="personal", VMUX_DATA_DIR=str(protected),
                        VMUX_TEST_ENV_KEYS="0")
 
+    owned = set()
+
     def run(script, updates=None, arguments=()):
         configured = dict(environment)
         configured.update(updates or {})
         result = subprocess.run([str(scripts / script), *arguments], env=configured,
                                 capture_output=True, text=True, timeout=15)
         assert result.returncode == 0, (result.stdout, result.stderr)
-        return json.loads(result.stdout.splitlines()[-1])
+        launched = json.loads(result.stdout.splitlines()[-1])
+        directory = Path(launched["VMUX_DATA_DIR"])
+        if directory != protected and directory not in owned:
+            owned.add(directory)
+            cleanup.callback(shutil.rmtree, directory, True)
+        return launched
 
     fresh = {"VMUX_ONBOARDING_FRESH": "1", "VMUX_PROFILE": "fresh", "VMUX_TEST_ENV_KEYS": "1"}
     first = run("run-dev.sh", fresh)
@@ -78,7 +86,8 @@ print(json.dumps(values))
     assert first["VMUX_PROFILE"] == "fresh", first
     assert first["VMUX_TEST_ENV_KEYS"] == "0", first
     assert not first["VMUX_ONBOARDING_FRESH"], first
-    assert first_data.parent == data, first
+    assert first_data != protected, first
+    assert len(os.fsencode(first_data / "dev/services/vmux-dev-fresh.sock")) < 104
     assert (first_data / "profiles/fresh/home").is_dir()
     assert (first_data / "config/projects").is_dir()
     (first_data / "config/setup.ron").write_text("connected")
@@ -93,10 +102,10 @@ print(json.dumps(values))
     normal = run("run-dev.sh")
     assert normal["VMUX_PROFILE"] == "personal", normal
     assert normal["VMUX_DATA_DIR"] == str(protected), normal
-    before_stop = set(data.iterdir())
+    before_stop = set(owned)
     stopped = run("run-dev.sh", fresh, ("stop",))
     assert stopped["VMUX_DATA_DIR"] == str(protected), stopped
-    assert set(data.iterdir()) == before_stop
+    assert owned == before_stop
 
     reused = run("run-onboarding-test.sh", fresh, ("clean", str(first_data)))
     assert reused["VMUX_DATA_DIR"] == str(first_data), reused

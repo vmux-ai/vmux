@@ -1627,7 +1627,8 @@ unbound context: the agent asks for a project when the selected task needs one.
 
 `scripts/run-onboarding-test.sh clean` opens a prepared debug app with a fresh data directory and
 the Fresh profile. `VMUX_ONBOARDING_FRESH=1` makes the ordinary debug launcher use that path on
-every launch; its fixture clears the flag before re-entering the launcher. `env` uses the Fresh-env
+every launch; its fixture clears the flag before re-entering the launcher. Short `/tmp` fixture
+paths keep local service sockets within the platform limit. `env` uses the Fresh-env
 profile with the same isolation while allowing the current process's supported API
 keys. A supplied absolute second argument reuses a fixture for interruption tests. An isolated
 data directory owns Vmux configuration, projects, managed ACP/LSP downloads, browser state and
