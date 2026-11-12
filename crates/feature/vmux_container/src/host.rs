@@ -22,11 +22,17 @@ use crate::inventory::{Catalog, Inventory, InventoryPlugin, Output};
 impl Plugin for ContainerPlugin {
     fn build(&self, app: &mut App) {
         app.add_plugins(FeaturePlugin::<crate::Feature>::default())
-            .add_plugins(
+            .add_plugins((
                 Self::MANIFEST
                     .plugin()
-                    .hosted(HostedPage::page(Self::URL, "Docker")),
-            )
+                    .hosted(HostedPage::page(Self::URL, "VM")),
+                crate::Docker::MANIFEST
+                    .plugin()
+                    .hosted(HostedPage::page(crate::Docker::URL, "Docker")),
+                crate::Containers::MANIFEST
+                    .plugin()
+                    .hosted(HostedPage::subtree(crate::Containers::URL, "Containers")),
+            ))
             .add_plugins(UiStatePlugin::<ContainerUiState>::default())
             .add_plugins(UiEventPlugin::<(
                 ContainerStartRequest,
@@ -48,7 +54,11 @@ impl Plugin for ContainerPlugin {
                 .chain(),
         );
         #[cfg(ui)]
-        app.add_plugins(crate::ui::ContainerPage::plugin());
+        app.add_plugins((
+            crate::ui::VmPage::plugin(),
+            crate::ui::DockerPage::plugin(),
+            crate::ui::ContainerPage::plugin(),
+        ));
         app.add_observer(page_ready)
             .add_observer(start)
             .add_observer(configure)
@@ -145,7 +155,10 @@ fn page_ready(
     let Ok((page, revision)) = pages.get(entity) else {
         return;
     };
-    if !vmux_api::RoutePattern::new(ContainerPlugin::URL, false).matches(&page.url) {
+    if !vmux_api::RoutePattern::new(ContainerPlugin::URL, false).matches(&page.url)
+        && !vmux_api::RoutePattern::new(crate::Docker::URL, false).matches(&page.url)
+        && !vmux_api::RoutePattern::new(crate::Containers::URL, true).matches(&page.url)
+    {
         return;
     }
     commands.entity(entity).insert(PageView);

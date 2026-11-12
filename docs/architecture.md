@@ -1595,16 +1595,20 @@ out, because dependency resolution happens before any build script runs.
 
 ## Native containers
 
-`vmux_container` owns the `vmux://vm/docker/containers` page and container CLI. Both submit typed
+`vmux_container` owns the VM, Docker and Containers pages and container CLI. They submit typed
 requests to `ControlPlugin`; shared operation entities own asynchronous work, its target,
 and completion. `InventoryPlugin` reconciles Docker containers into child entities with
 stable IDs, shared names, image/state, Compose labels and published ports. Its ordered
 snapshot tasks preserve existing entity identity and retire removed containers. Per-page
 selection owns bounded log tasks and retains displayed output during refresh.
 
-The default VM bookmark opens `vmux://vm/docker/containers` beside Simulator.
-`vmux://vm/`, `vmux://vm/docker/`, `vmux://docker/containers`, `vmux://docker/`
-and the legacy `vmux://containers/` canonicalize to that route.
+The default VM bookmark opens `vmux://vm/` beside Simulator.
+VM (`vmux://vm/`), Docker (`vmux://vm/docker`) and Containers
+(`vmux://vm/docker/containers`) have distinct titles and computer, Docker and container icons.
+They share one document and DOM group, so changing level preserves the workspace.
+`vmux://docker/containers`, `vmux://docker/` and the legacy `vmux://containers/`
+canonicalize to Containers. Existing default container pins move to the VM entry once,
+preserving their identity, order and removal. Later explicit page pins remain distinct.
 The Containers page owns its subtree; group URLs use `groups/<name>/info|logs`, and
 group members use `groups/<name>/containers/<id>/info|logs`. Standalone entries use
 `<id>/info|logs`. Names are path-encoded; in-place navigation preserves the same DOM,
@@ -1624,7 +1628,10 @@ the side sheet and details appear when Docker is ready. One root UI-state subscr
 survives these transitions. A thin divider separates the side sheet and details.
 Details remain unselected until the user chooses an entry. The address reads
 `VM → Docker → Containers → group → selected entry → Info/Logs`. VM shutdown and settings
-live in the Docker side-sheet header; Stop VM has an explicit text label. Container Start/Stop
+live in separate rows of the Docker side-sheet header: the engine title and settings occupy
+one row, and Stop VM occupies its own row. The redundant running count is omitted.
+Group names and expand controls occupy one row, with counts and Start all/Stop all beneath;
+long names wrap without squeezing the operation label. Container Start/Stop
 controls have text labels in the details toolbar and list rows. Group headers expose Start all
 until every member runs, then Stop all; details retain scoped group controls.
 Pending controls show a spinner and Starting/Stopping/Restarting instead of an inactive play icon.
