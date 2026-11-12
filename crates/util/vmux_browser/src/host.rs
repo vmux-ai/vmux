@@ -22,11 +22,7 @@ mod agent;
 mod agent_pane;
 mod authentication;
 
-#[derive(Clone, Copy, Debug, Message)]
-pub struct WebviewLoadCompleted {
-    pub at: std::time::Instant,
-    pub webview: Entity,
-}
+pub use vmux_ecs::WebviewLoadCompleted;
 
 pub(crate) struct CefStartup;
 
