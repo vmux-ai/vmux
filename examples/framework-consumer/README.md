@@ -20,7 +20,8 @@ The verification runs through the Rust builder with Git and Cargo.
 
 For another application, select the required `vmux_app` Cargo features and use
 `VmuxPlugin::builder()` to install them. Public feature types live under `vmux_app::ecs`,
-`project`, `flex`, and `layout`; product extensions use the optional `extension` namespace.
+`project`, `flex`, and `layout`. `extension-core` exposes the renderer-independent `extension`
+namespace; `extension` adds its native product adapters.
 Use one reviewed main commit or release tag for every Vmux dependency. Bevy 0.19 is the current
 supported minor. Keep `vmux_ecs` directly available for its schema macros, and select the
 owning crate's optional store/adapter features explicitly.

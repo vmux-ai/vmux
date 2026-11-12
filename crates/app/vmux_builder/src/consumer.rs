@@ -75,6 +75,7 @@ impl Consumer {
             ("vmux_ecs", "store", true),
             ("vmux_ecs", "jobs", true),
             ("vmux_project", "contracts,filesystem", true),
+            ("vmux_extension", "filesystem", true),
             ("vmux_flex", "", false),
             ("vmux_flex", "window", true),
             ("vmux_layout", "", true),
@@ -220,6 +221,7 @@ impl Graph {
             "vmux_app",
             "vmux_ecs",
             "vmux_project",
+            "vmux_extension",
             "vmux_flex",
             "vmux_layout",
         ] {
@@ -305,7 +307,7 @@ mod tests {
 
     #[test]
     fn graph_refuses_native_packages_even_with_the_complete_sdk_surface() {
-        let graph = "vmux_app v1\nvmux_ecs v1\nvmux_project v1\nvmux_flex v1\nvmux_layout v1\n";
+        let graph = "vmux_app v1\nvmux_ecs v1\nvmux_project v1\nvmux_extension v1\nvmux_flex v1\nvmux_layout v1\n";
         assert!(Graph::check(graph).is_ok());
         assert!(Graph::check(&format!("{graph}bevy_cef v1\n")).is_err());
     }

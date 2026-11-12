@@ -644,8 +644,9 @@ set of crates.io packages. Publishing remains a separate release action.
 `extension` namespaces re-export their existing public types without wrappers. `contracts`
 enables shared wire values and the contracts of selected Project/Layout features; it does not
 install a renderer. Schema macros continue to name their owning crates. Core, jobs, Project,
-flex geometry, and layout topology are validated without Profile, CEF, Winit, or product UI.
-Extension currently selects product browser/layout adapters and is not part of that core guarantee.
+flex geometry, layout topology, and Extension catalog/operations are validated without Profile,
+CEF, Winit, or product UI. `extension-core` exposes the Extension namespace independently;
+`extension` composes its native browser/layout adapters explicitly.
 
 The supported Bevy minor is 0.19, as pinned by the consumer lockfile. A Bevy minor change or
 breaking supported API change requires an explicit SDK compatibility update and consumer gate.
