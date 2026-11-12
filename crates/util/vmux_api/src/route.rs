@@ -157,10 +157,6 @@ impl VmuxRoute {
                 url.set_host(Some("vm")).expect("static vmux route host");
                 url.set_path(&format!("/docker{path}"));
             }
-            ("vm", true) => url.set_path("/docker/containers"),
-            ("vm", false) if url.path().trim_end_matches('/') == "/docker" => {
-                url.set_path("/docker/containers")
-            }
             ("agents", true) => {
                 url.set_host(Some("tools")).expect("static vmux route host");
                 url.set_path("/acp");
@@ -264,8 +260,8 @@ mod tests {
             ("vmux://containers/", "vmux://vm/docker/containers"),
             ("vmux://docker", "vmux://vm/docker/containers"),
             ("vmux://docker/containers", "vmux://vm/docker/containers"),
-            ("vmux://vm", "vmux://vm/docker/containers"),
-            ("vmux://vm/docker", "vmux://vm/docker/containers"),
+            ("vmux://vm", "vmux://vm/"),
+            ("vmux://vm/docker", "vmux://vm/docker"),
         ];
         for (input, expected) in cases {
             assert_eq!(VmuxRoute::canonical(input).as_deref(), Some(expected));

@@ -21,7 +21,7 @@ use vmux_ui::components::sheet::SheetHeaderChevron;
 use vmux_ui::components::tree_row::TreeRowAccent;
 use vmux_ui::hooks::{send, use_theme, use_ui_state};
 use vmux_ui::i18n::{TranslationValue, translate, translate_with};
-use vmux_ui::icon::{LineIcon, LineIconView};
+use vmux_ui::icon::{BuiltinIconView, LineIcon, LineIconView};
 
 use crate::event::{
     ContainerCommandRequest, ContainerEntry, ContainerInspectRequest, ContainerLogsRequest,
@@ -29,7 +29,13 @@ use crate::event::{
     ContainerStopRequest, ContainerUiState,
 };
 
-#[vmux_page::page(component = Page, stylesheet = "/assets/index.css", states = ["PageAddressUiState", "ThemeUiState", "ContainerUiState"])]
+#[vmux_page::page(page = "vm", component = Page, document_url = "vmux://vm/docker/containers", dom_group = "vm", no_favicon, stylesheet = "/assets/index.css", states = ["PageAddressUiState", "ThemeUiState", "ContainerUiState"])]
+pub(crate) struct VmPage;
+
+#[vmux_page::page(page = "docker", component = Page, document_url = "vmux://vm/docker/containers", dom_group = "vm", no_favicon, stylesheet = "/assets/index.css", states = ["PageAddressUiState", "ThemeUiState", "ContainerUiState"])]
+pub(crate) struct DockerPage;
+
+#[vmux_page::page(page = "containers", component = Page, document_url = "vmux://vm/docker/containers", dom_group = "vm", no_favicon, stylesheet = "/assets/index.css", states = ["PageAddressUiState", "ThemeUiState", "ContainerUiState"])]
 pub(crate) struct ContainerPage;
 
 #[component]
@@ -202,11 +208,6 @@ fn ContainerSheet(
 ) -> Element {
     let controls = Controls::current();
     let snapshot = controls.snapshot();
-    let running = snapshot
-        .containers
-        .iter()
-        .filter(|entry| entry.running())
-        .count();
     let stage = if snapshot.inventory_ready {
         "ready"
     } else {
@@ -214,13 +215,17 @@ fn ContainerSheet(
     };
     rsx! {
         div { class: "flex h-full min-h-0 flex-col overflow-hidden bg-background font-sans text-xs text-foreground",
-            div { class: "flex h-8 shrink-0 items-center gap-2 px-2.5 text-[11px] font-medium text-foreground/70",
-                LineIconView { icon: LineIcon::Package, class: "size-3.5 shrink-0" }
-                span { class: "min-w-0 flex-1 truncate", {translate("container-engine")} }
-                if snapshot.inventory_ready {
-                    span { class: "text-[10px] tabular-nums text-muted-foreground/60", "{running}", " ", {translate("container-running")} }
+            div { class: "flex shrink-0 flex-col gap-1 px-2 py-2",
+                div { class: "flex h-7 items-center gap-2 text-xs font-medium text-foreground/80",
+                    BuiltinIconView { icon: BuiltinIcon::Docker, class: "size-4 shrink-0" }
+                    span { class: "flex-1", {translate("container-engine")} }
+                    ManagerIconButton {
+                        label: translate("container-settings"), disabled: snapshot.data_directory.is_empty(),
+                        onclick: move |_| onsettings.call(()),
+                        LineIconView { icon: LineIcon::Wrench, class: "size-3.5" }
+                    }
                 }
-                EngineToolbar { compact: true, onsettings }
+                EngineToolbar { compact: true, settings: false, onsettings }
             }
             ContentTransition { key: "{stage}", class: "flex min-h-0 flex-1 flex-col",
                 if !snapshot.inventory_ready && !snapshot.inventory_error.is_empty() {
@@ -230,7 +235,7 @@ fn ContainerSheet(
                 } else if snapshot.containers.is_empty() {
                     Empty { title: translate("container-empty-title"), description: String::new() }
                 } else {
-                    div { class: "min-h-0 flex-1 space-y-1 overflow-auto px-1 pb-3",
+                    div { class: "min-h-0 flex-1 space-y-3 overflow-auto px-1 pb-3",
                         for group in Catalog(&snapshot.containers).groups() {
                             ContainerGroup { key: "{group.name}", group, selected: selected.clone(), busy: snapshot.busy, onselect }
                         }
@@ -260,6 +265,16 @@ fn Header(
     let controls = Controls::current();
     let snapshot = controls.snapshot();
     let mut members = Vec::new();
+    let navigation = use_ui_state::<PageAddressUiState>().state;
+    let mut engine_level = true;
+    let mut container_level = true;
+    if selection.is_empty()
+        && let Some(address) = &navigation.read().address
+        && let Some(route) = vmux_api::VmuxRoute::parse(&address.url)
+    {
+        engine_level = !route.is_root();
+        container_level = engine_level && route.path().trim_end_matches('/') != "/docker";
+    }
     let project = selection.strip_prefix("project:");
     for entry in &snapshot.containers {
         if project.is_some_and(|project| entry.project == project) || entry.id == selection {
@@ -269,7 +284,7 @@ fn Header(
     let mut address = PageAddress {
         current: AddressOption {
             label_key: "container-vm".into(),
-            icon: Some(BuiltinIcon::Container),
+            icon: Some(BuiltinIcon::Computer),
             intent: Some(AddressIntent::Navigate {
                 url: "vmux://vm/".into(),
             }),
@@ -277,27 +292,32 @@ fn Header(
         },
         ..Default::default()
     };
-    address.fixed.push(AddressCrumb {
-        entry: AddressOption {
-            label_key: "container-engine".into(),
-            icon: Some(BuiltinIcon::Container),
-            intent: Some(AddressIntent::Navigate {
-                url: "vmux://vm/docker/containers".into(),
-            }),
+    if engine_level {
+        address.fixed.push(AddressCrumb {
+            entry: AddressOption {
+                label_key: "container-engine".into(),
+                icon: Some(BuiltinIcon::Docker),
+                intent: Some(AddressIntent::Navigate {
+                    url: "vmux://vm/docker".into(),
+                }),
+                ..Default::default()
+            },
             ..Default::default()
-        },
-        ..Default::default()
-    });
-    address.fixed.push(AddressCrumb {
-        entry: AddressOption {
-            label_key: "container-title".into(),
-            intent: Some(AddressIntent::Navigate {
-                url: "vmux://vm/docker/containers".into(),
-            }),
+        });
+    }
+    if container_level {
+        address.fixed.push(AddressCrumb {
+            entry: AddressOption {
+                label_key: "container-title".into(),
+                icon: Some(BuiltinIcon::Container),
+                intent: Some(AddressIntent::Navigate {
+                    url: "vmux://vm/docker/containers".into(),
+                }),
+                ..Default::default()
+            },
             ..Default::default()
-        },
-        ..Default::default()
-    });
+        });
+    }
     let mut toolbar = Vec::new();
     let progress = members
         .iter()
@@ -438,15 +458,19 @@ fn Header(
 }
 
 #[component]
-fn EngineToolbar(#[props(default)] compact: bool, onsettings: EventHandler<()>) -> Element {
+fn EngineToolbar(
+    #[props(default)] compact: bool,
+    #[props(default = true)] settings: bool,
+    onsettings: EventHandler<()>,
+) -> Element {
     let controls = Controls::current();
     let snapshot = controls.snapshot();
     rsx! {
-        div { class: if compact { "flex shrink-0 items-center gap-1" } else { "flex h-8 items-center justify-end gap-1 px-3" },
+        div { class: if compact { "flex shrink-0 items-center gap-2" } else { "flex h-8 items-center justify-end gap-2 px-3" },
             if snapshot.running {
                 Button {
                     size: ButtonSize::Xs, variant: ButtonVariant::Ghost,
-                    class: "h-6 gap-1 px-1.5",
+                    class: "h-7 gap-2 whitespace-nowrap px-1.5",
                     title: translate("container-stop"), aria_label: translate("container-stop"),
                     disabled: controls.engine_busy(),
                     onclick: move |_| controls.request(Intent::Stop),
@@ -454,10 +478,12 @@ fn EngineToolbar(#[props(default)] compact: bool, onsettings: EventHandler<()>) 
                     span { {translate("container-stop-vm")} }
                 }
             }
-            ManagerIconButton {
-                label: translate("container-settings"), disabled: snapshot.data_directory.is_empty(),
-                onclick: move |_| onsettings.call(()),
-                LineIconView { icon: LineIcon::Wrench, class: "size-3.5" }
+            if settings {
+                ManagerIconButton {
+                    label: translate("container-settings"), disabled: snapshot.data_directory.is_empty(),
+                    onclick: move |_| onsettings.call(()),
+                    LineIconView { icon: LineIcon::Wrench, class: "size-3.5" }
+                }
             }
         }
     }
@@ -503,26 +529,30 @@ fn ContainerGroup(
     );
     let accent = TreeRowAccent::resolve(selected == group_id, false).classes();
     rsx! {
-        section { class: "space-y-0.5",
+        section { class: "space-y-1",
             if !group.name.is_empty() {
-                div { class: "group flex h-8 items-center rounded-md px-1 {accent}",
-                    button { r#type: "button", class: "flex min-w-0 flex-1 items-center gap-2 px-1 text-left text-[11px]", onclick: move |_| onselect.call(group_id.clone()),
-                        LineIconView { icon: LineIcon::Package, class: "size-3.5 shrink-0 text-primary/70" }
-                        span { class: "min-w-0 flex-1 truncate font-medium", "{group.name}" }
-                        span { class: "text-[10px] tabular-nums text-muted-foreground/60", "{running}/{count}" }
+                div { class: "group rounded-md px-1 py-1 {accent}",
+                    div { class: "flex min-h-7 items-center",
+                        button { r#type: "button", class: "flex min-w-0 flex-1 items-center gap-2 px-1 py-1 text-left text-xs", title: group.name.clone(), onclick: move |_| onselect.call(group_id.clone()),
+                            LineIconView { icon: LineIcon::Package, class: "size-3.5 shrink-0 text-primary/70" }
+                            span { class: "min-w-0 flex-1 break-words font-medium", "{group.name}" }
+                        }
+                        SheetHeaderChevron { expanded: expanded(), label: group.name.clone(), subtle: true, onclick: move |_| expanded.set(!expanded()) }
                     }
-                    if let Some(state) = progress {
-                        span { class: "px-1 text-[10px] text-muted-foreground", StateLabel { state } }
-                    } else {
-                        OperationButton { ids, operation, label, description, disabled: busy }
+                    div { class: "flex flex-wrap items-center gap-x-3 gap-y-1 pb-1 pl-6 text-[10px]",
+                        span { class: "shrink-0 tabular-nums text-muted-foreground/60", "{running}/{count}" }
+                        if let Some(state) = progress {
+                            StateLabel { state }
+                        } else {
+                            OperationButton { ids, operation, label, description, disabled: busy }
+                        }
                     }
-                    SheetHeaderChevron { expanded: expanded(), label: group.name.clone(), subtle: true, onclick: move |_| expanded.set(!expanded()) }
                 }
             } else {
                 h2 { class: "flex h-7 items-center px-2 text-[10px] font-medium text-muted-foreground/65", {translate("container-standalone")} }
             }
             Collapsible { expanded: expanded(),
-                div { class: if group.name.is_empty() { "space-y-0.5" } else { "space-y-0.5 pl-3" }, aria_hidden: !expanded(), inert: (!expanded()).then_some(""),
+                div { class: if group.name.is_empty() { "space-y-1" } else { "space-y-1 pl-4" }, aria_hidden: !expanded(), inert: (!expanded()).then_some(""),
                     for entry in group.entries {
                         ContainerRow { key: "{entry.id}", selected: selected == entry.id, entry, busy, onselect }
                     }
@@ -563,7 +593,7 @@ fn ContainerRow(
             if entry.transitioning() {
                 span { class: "text-[10px] text-muted-foreground", {translate(if entry.state == "starting" { "container-state-starting" } else if entry.state == "stopping" { "container-phase-stopping" } else { "container-state-restarting" })} }
             } else {
-                div { class: "opacity-0 transition-opacity group-hover:opacity-100 group-focus-within:opacity-100",
+                div { class: "pointer-events-none absolute right-1 top-1/2 -translate-y-1/2 rounded-md bg-background opacity-0 transition-opacity group-hover:pointer-events-auto group-hover:opacity-100 group-focus-within:pointer-events-auto group-focus-within:opacity-100",
                     OperationButton {
                         ids: vec![operation_id], operation: if running { ContainerOperation::Stop } else { ContainerOperation::Start },
                         label: translate(if running { "container-stop-container" } else { "container-start-container" }),
@@ -592,7 +622,7 @@ fn OperationButton(
     rsx! {
         Button {
             size: ButtonSize::Xs, variant: ButtonVariant::Ghost,
-            class: "h-6 shrink-0 gap-1 px-1.5 text-[10px]",
+            class: "h-7 shrink-0 gap-1.5 whitespace-nowrap px-1.5 text-[10px]",
             title: description.clone(), aria_label: description, disabled,
             onclick: move |event: MouseEvent| { event.stop_propagation(); controls.containers(ids.clone(), operation); },
             LineIconView { icon: if operation == ContainerOperation::Stop { LineIcon::Pause } else { LineIcon::Play }, class: "size-3" }
@@ -866,7 +896,7 @@ impl Location {
             return None;
         }
         let (selection, panel) = match segments.as_slice() {
-            ["docker", "containers"] => (String::new(), "info"),
+            [] | ["docker"] | ["docker", "containers"] => (String::new(), "info"),
             ["docker", "containers", "groups", group, panel] => (
                 format!(
                     "project:{}",

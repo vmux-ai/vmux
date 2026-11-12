@@ -1,12 +1,39 @@
 (
     pages: [(
-        url: "vmux://vm/docker/containers",
-        owns_subtree: true,
+        name: "vm",
+        url: "vmux://vm/",
         title: "VM",
         title_message_id: "container-vm",
         bookmark: Some(135),
-        icon: "Container",
+        icon: "Computer",
         keywords: ["containers", "docker", "linux", "vm", "engine"],
+        command_bar: true,
+        permissions: [
+            "PageAddressPublish", "PageAddressRequest", "PageAddressUiState", "PageReady", "ThemeUiState", "OpenRequest",
+            "ContainerUiState", "ContainerStartRequest", "ContainerStopRequest", "ContainerLogsRequest",
+            "ContainerSettingsRequest", "ContainerCommandRequest", "ContainerInspectRequest",
+        ],
+    ), (
+        name: "docker",
+        url: "vmux://vm/docker",
+        title: "Docker",
+        title_message_id: "container-engine",
+        icon: "Docker",
+        keywords: ["docker", "engine"],
+        command_bar: true,
+        permissions: [
+            "PageAddressPublish", "PageAddressRequest", "PageAddressUiState", "PageReady", "ThemeUiState", "OpenRequest",
+            "ContainerUiState", "ContainerStartRequest", "ContainerStopRequest", "ContainerLogsRequest",
+            "ContainerSettingsRequest", "ContainerCommandRequest", "ContainerInspectRequest",
+        ],
+    ), (
+        name: "containers",
+        url: "vmux://vm/docker/containers",
+        owns_subtree: true,
+        title: "Containers",
+        title_message_id: "container-title",
+        icon: "Container",
+        keywords: ["containers", "compose"],
         command_bar: true,
         permissions: [
             "PageAddressPublish", "PageAddressRequest", "PageAddressUiState", "PageReady", "ThemeUiState", "OpenRequest",

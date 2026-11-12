@@ -35,6 +35,8 @@ pub enum BuiltinIcon {
     GitCommit,
     Branch,
     Container,
+    Computer,
+    Docker,
 }
 
 impl BuiltinIcon {
