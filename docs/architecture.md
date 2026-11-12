@@ -1414,7 +1414,8 @@ public `vmux_lsp` core shares the server/document model, ownership relationships
 server start/stop/restart, transport completion/failure, and request cancellation, timeout, and
 response lifecycle with an independent application. `StartServer` is idempotent while starting
 or ready. The process adapter receives `LaunchServer` and returns `ServerCompleted` on its
-Operation; the accepted launch identity stays private. Stop cancels pending startup without
+Operation; the private launch identity also binds that original Operation. A mismatched completion
+is discarded without canceling the current launch. Stop cancels pending startup without
 rewriting completed Operations. Root changes and restart invalidate only that server graph,
 so late startup completion cannot replace a newer transport.
 Documents derive their server identity from `ChildOf`; transport handles and wire correlation

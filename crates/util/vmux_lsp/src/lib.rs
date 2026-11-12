@@ -770,6 +770,18 @@ mod tests {
             .unwrap();
         let old_operation = old.operation;
         let new_operation = new.operation;
+        app.world_mut()
+            .entity_mut(new_operation)
+            .insert(ServerCompleted::new(
+                old.clone(),
+                Ok(Transport::new(Probe::default())),
+            ));
+        app.update();
+        assert!(app.world().get::<Transport>(server).is_none());
+        assert_eq!(
+            app.world().get::<OperationState>(new_operation),
+            Some(&OperationState::Pending)
+        );
         let transport = Transport::new(Probe::default());
         let identity = transport.identity();
         app.world_mut()

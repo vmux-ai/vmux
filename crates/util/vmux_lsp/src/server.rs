@@ -31,6 +31,7 @@ pub struct ServerFailure(pub String);
 
 #[derive(Component, Clone, Debug, PartialEq, Eq)]
 struct LaunchTicket {
+    operation: Entity,
     server: Entity,
     root: Entity,
     key: ServerKey,
@@ -195,19 +196,20 @@ fn accept(
             .entity(server)
             .remove::<(Stopped, ServerFailure)>()
             .insert(Starting);
-        let ticket = LaunchTicket {
-            server,
-            root,
-            key: key.clone(),
-        };
         let operation = commands
             .spawn((
                 Operation::bundle("lsp.start").unwrap(),
                 OperationTarget::new(server),
                 ChildOf(server),
-                ticket.clone(),
             ))
             .id();
+        let ticket = LaunchTicket {
+            operation,
+            server,
+            root,
+            key: key.clone(),
+        };
+        commands.entity(operation).insert(ticket.clone());
         launches.write(LaunchServer { operation, ticket });
     }
 }
@@ -224,7 +226,11 @@ fn finish(
         let Some(result) = completed.result.take() else {
             continue;
         };
-        let current = completed.ticket == *accepted
+        if completed.ticket != *accepted {
+            commands.entity(operation).remove::<ServerCompleted>();
+            continue;
+        }
+        let current = accepted.operation == operation
             && servers.get(accepted.server).is_ok_and(|(key, parent)| {
                 key == &accepted.key && parent.parent() == accepted.root
             })
