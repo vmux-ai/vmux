@@ -738,6 +738,9 @@ The command bar displays decoded URL path segments, including embedded file path
 their original segment boundaries; navigation and whole-URL copies use the canonical encoded URL.
 Plain URL drafts retain their exact spelling while typing and deleting; presentation never adds
 a root slash or normalizes an unfinished authority.
+Command Bar dismissal closes its owning Layout panel in the same host event that accepts a page
+selection, including keyboard submission. Native overlay cleanup and keyboard restoration share
+that dismissal; the panel never waits for a renderer callback or the destination page.
 Ordinary bookmark clicks reuse an existing Stack or open one. Cmd-click, with or without Shift,
 opens a new Tab after resolving any project context.
 Fragment updates retain the page's breadcrumbs instead of replacing them with the generic route.
