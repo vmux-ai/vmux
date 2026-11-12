@@ -116,6 +116,13 @@ fn activate_primary_window(
 fn grab_key_window_on_pane_hover(
     windows: Query<(Entity, &Window)>,
     focused_window: vmux_layout::window::FocusedWindow,
+    popup_windows: Query<
+        Option<&bevy_cef::prelude::HostWindow>,
+        (
+            With<vmux_browser::PopupWebview>,
+            With<vmux_ecs::KeyboardOwner>,
+        ),
+    >,
     panes: Query<
         &ComputedNode,
         (
@@ -146,6 +153,12 @@ fn grab_key_window_on_pane_hover(
     let Some(window_entity) = focused_window.entity() else {
         return;
     };
+    if popup_windows
+        .iter()
+        .any(|host| host.is_none_or(|host| host.0 == window_entity))
+    {
+        return;
+    }
     let Ok((_, window)) = windows.get(window_entity) else {
         return;
     };
@@ -454,15 +467,17 @@ fn install_input_wake_monitor(
         cef_wake_policy.begin_interaction();
         let ev = unsafe { event.as_ref() };
         let event_type = ev.r#type();
+        let event_belongs_to_main_window = event_belongs_to_main_window_frame(ev);
+        if !event_belongs_to_main_window {
+            titlebar_clicks
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner())
+                .forget();
+            local_wake(MOUSE_DRAG_WAKE_INTERVAL);
+            return event.as_ptr();
+        }
         let mut titlebar_gesture = None;
         let capture_window_gesture = match event_type {
-            NSEventType::LeftMouseDown if !event_belongs_to_main_window_frame(ev) => {
-                titlebar_clicks
-                    .lock()
-                    .unwrap_or_else(|poisoned| poisoned.into_inner())
-                    .forget();
-                false
-            }
             NSEventType::LeftMouseDown => {
                 let drag = begin_window_resize(ev);
                 *local_resize_drag
@@ -523,7 +538,6 @@ fn install_input_wake_monitor(
                 | NSEventType::RightMouseDragged
                 | NSEventType::OtherMouseDragged
         );
-        let event_belongs_to_main_window = event_belongs_to_main_window_frame(ev);
         let button_event = matches!(
             event_type,
             NSEventType::LeftMouseDown

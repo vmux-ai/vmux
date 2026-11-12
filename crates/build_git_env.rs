@@ -2,6 +2,7 @@ use std::path::Path;
 use std::process::Command;
 
 pub fn emit() {
+    println!("cargo::rerun-if-env-changed=VMUX_TARGET_DESTINATION");
     let hash = Command::new("git")
         .args(["rev-parse", "--short=7", "HEAD"])
         .output()
