@@ -91,6 +91,45 @@ impl PageIcon {
     }
 }
 
+pub struct StoredPageIcons<'a>(pub &'a str);
+
+impl StoredPageIcons<'_> {
+    pub fn normalize(self) -> Option<(String, Vec<String>)> {
+        let mut normalized = String::with_capacity(self.0.len());
+        let mut unknown = Vec::new();
+        for line in self.0.split_inclusive('\n') {
+            let (content, newline) = match line.strip_suffix('\n') {
+                Some(content) => (content, "\n"),
+                None => (line, ""),
+            };
+            let trimmed = content.trim();
+            let name = trimmed
+                .strip_prefix("icon: Builtin(")
+                .and_then(|value| value.strip_suffix("),"));
+            let Some(name) = name else {
+                normalized.push_str(line);
+                continue;
+            };
+            if serde_json::from_value::<BuiltinIcon>(serde_json::Value::String(name.to_string()))
+                .is_ok()
+            {
+                normalized.push_str(line);
+                continue;
+            }
+            let indent = &content[..content.len() - content.trim_start().len()];
+            normalized.push_str(indent);
+            normalized.push_str("icon: r#None,");
+            normalized.push_str(newline);
+            unknown.push(name.to_string());
+        }
+        if unknown.is_empty() {
+            None
+        } else {
+            Some((normalized, unknown))
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

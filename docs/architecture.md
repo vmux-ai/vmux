@@ -736,6 +736,9 @@ scheme and rejects a custom handler. Page routing and renderer asset origins are
 metadata; an asset origin never becomes a bookmark destination.
 The command bar displays decoded URL path segments, including embedded file paths. Edits retain
 their original segment boundaries; navigation and whole-URL copies use the canonical encoded URL.
+Stored workspace and bookmark icons share `StoredPageIcons` normalization before deserialization.
+An unavailable built-in icon falls back to no icon while preserving the bookmark, its URL and
+the rest of the store; loading does not rewrite the source file.
 Plain URL drafts retain their exact spelling while typing and deleting; presentation never adds
 a root slash or normalizes an unfinished authority.
 Ordinary bookmark clicks reuse an existing Stack or open one. Cmd-click, with or without Shift,

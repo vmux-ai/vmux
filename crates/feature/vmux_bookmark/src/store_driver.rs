@@ -35,6 +35,13 @@ impl BookmarkStorePath {
         ] {
             source = source.replace(legacy, current);
         }
+        if let Some((normalized, unknown)) = vmux_api::icon::StoredPageIcons(&source).normalize() {
+            warn!(
+                ?unknown,
+                "Replacing unavailable bookmark icons while loading"
+            );
+            source = normalized;
+        }
         Ok(LoadWorld::<BookmarkFilter>::from_stream(
             std::io::Cursor::new(source.into_bytes()),
         ))

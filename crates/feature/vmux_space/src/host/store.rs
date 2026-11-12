@@ -19,7 +19,6 @@ use std::sync::{Mutex, mpsc};
 use vmux_ecs::store::{State, StoreAppExt};
 use vmux_ecs::{CreatedAt, PageMetadata};
 
-use vmux_api::BuiltinIcon;
 #[cfg(test)]
 use vmux_ecs::profile::ProfilePaths;
 use vmux_ecs::profile::{CurrentProfile, SessionEnvironment};
@@ -1198,38 +1197,7 @@ impl WorkspaceStoreSource<'_> {
 }
 
 fn normalized_store_icons(body: &str) -> Option<(String, Vec<String>)> {
-    let mut normalized = String::with_capacity(body.len());
-    let mut unknown = Vec::new();
-
-    for line in body.split_inclusive('\n') {
-        let (content, newline) = line
-            .strip_suffix('\n')
-            .map(|content| (content, "\n"))
-            .unwrap_or((line, ""));
-        let trimmed = content.trim();
-        let name = trimmed
-            .strip_prefix("icon: Builtin(")
-            .and_then(|value| value.strip_suffix("),"));
-        let Some(name) = name else {
-            normalized.push_str(line);
-            continue;
-        };
-        if ron::from_str::<BuiltinIcon>(name).is_ok() {
-            normalized.push_str(line);
-            continue;
-        }
-        let indent = &content[..content.len() - content.trim_start().len()];
-        normalized.push_str(indent);
-        normalized.push_str("icon: r#None,");
-        normalized.push_str(newline);
-        unknown.push(name.to_string());
-    }
-
-    if unknown.is_empty() {
-        None
-    } else {
-        Some((normalized, unknown))
-    }
+    vmux_api::icon::StoredPageIcons(body).normalize()
 }
 
 fn space_has_unregistered_types(body: &str, registry: &bevy::reflect::TypeRegistry) -> bool {
