@@ -242,6 +242,7 @@ pub fn DropdownTrigger(
     label: String,
     open: bool,
     onclick: EventHandler<()>,
+    #[props(default)] on_primary: Option<EventHandler<()>>,
     #[props(default)] on_hover_open: Option<EventHandler<()>>,
     #[props(default)] title: String,
     #[props(default)] active: bool,
@@ -320,6 +321,12 @@ pub fn DropdownTrigger(
                     }
             },
             onclick: move |_| {
+                if let Some(on_primary) = on_primary {
+                    if let Some(task) = hover_task.write().take() { task.cancel(); }
+                    hover_preview.set(false);
+                    on_primary.call(());
+                    return;
+                }
                 if open_mode == DropdownOpenMode::Hover
                     && let Some(task) = hover_task.write().take() {
                         task.cancel();
@@ -391,6 +398,7 @@ pub fn DropdownSelector(
     open: bool,
     on_open_change: EventHandler<bool>,
     on_dismiss: EventHandler<()>,
+    #[props(default)] on_primary: Option<EventHandler<()>>,
     children: Element,
     #[props(default)] title: String,
     #[props(default)] active: bool,
@@ -418,6 +426,7 @@ pub fn DropdownSelector(
             on_dismiss: move |_| on_dismiss.call(()),
             DropdownTrigger {
                 label,
+                on_primary,
                 truncate,
                 title,
                 open,

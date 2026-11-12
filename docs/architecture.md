@@ -974,7 +974,9 @@ Tools, Settings, Sessions and Projects use the same icon column; labels and coun
 and hover titles identify collapsed entries. The mounted search retains its draft and becomes inert.
 `manager::ManagerSearch` fills that row with 13 px text and a subtle focus surface, retaining its
 width and height during input. Editor tabs remain beside the sidebar search. The sidebar's scroll
-region starts below it. Filter menus use the shared popover layer and may extend beyond the
+region starts below it. A parent collection breadcrumb navigates back to its collection on click while retaining its
+hover switch menu; the current item remains a selector. Terminal parent-folder choices display an up arrow and the folder name.
+Filter menus use the shared popover layer and may extend beyond the
 sidebar without changing the search row, editor tabs, or content positions.
 Git's initial skeleton and loaded dashboard share the same split layout, sidebar width and
 toolbar rows; loading does not add a second breadcrumb header inside the page.

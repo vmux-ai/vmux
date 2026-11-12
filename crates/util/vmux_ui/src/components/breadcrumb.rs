@@ -98,6 +98,7 @@ pub fn BreadcrumbDropdown(
     label: String,
     open: bool,
     on_open_change: EventHandler<bool>,
+    #[props(default)] on_primary: Option<EventHandler<()>>,
     children: Element,
     #[props(default)] title: String,
     #[props(default)] class: String,
@@ -115,6 +116,7 @@ pub fn BreadcrumbDropdown(
     rsx! {
         DropdownSelector {
             label,
+            on_primary,
             truncate,
             title,
             open,
