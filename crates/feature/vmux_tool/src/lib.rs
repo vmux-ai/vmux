@@ -10,9 +10,7 @@ use bevy_ecs::system::Commands;
 #[cfg(host)]
 pub use cli::ToolCliPlugin;
 #[cfg(not(target_os = "ios"))]
-pub use connection::{
-    ConnectionSet, ConnectorCancelRequest, ConnectorPopupRequest, McpConnectionPlugin,
-};
+pub use connection::{ConnectionSet, ConnectorConnectionCompleted, McpConnectionPlugin};
 #[cfg(all(host, not(target_os = "ios")))]
 pub use connector_tools::{ConnectorAccess, ConnectorToolPlugin};
 pub use dotfiles::*;

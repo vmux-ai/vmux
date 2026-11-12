@@ -1,7 +1,6 @@
 use dioxus::prelude::*;
 use vmux_api::mcp::{McpServerEntry, McpServerStatus, McpServersUiState};
 
-use crate::components::connector_authorization::ConnectorAuthorization;
 use crate::components::connector_icon::ConnectorIcon;
 use crate::components::prompt_box::{PromptMenuRow, PromptPopup, PromptPopupPlacement};
 use crate::i18n::translate;
@@ -27,11 +26,6 @@ pub fn McpMenu(
         .filter(|result| !result.success)
         .map(|result| result.message.clone())
         .unwrap_or_default();
-    let service = entries
-        .iter()
-        .find(|server| server.id == pending)
-        .map(|server| server.name.clone())
-        .unwrap_or_else(|| pending.clone());
     rsx! {
         PromptPopup {
             placement,
@@ -78,12 +72,6 @@ pub fn McpMenu(
                             }
                         }
                     }
-                }
-            }
-            if let Some(authorization) = state.authorization {
-                div { class: "px-3.5 py-2",
-                    ConnectorAuthorization { authorization, service }
-                    button { r#type: "button", class: "ml-2 text-muted-foreground", onclick: move |_| { let _ = crate::hooks::send(&vmux_api::mcp::McpServerCancelRequest); }, {translate("common-cancel")} }
                 }
             }
             button {

@@ -68,7 +68,6 @@ impl Plugin for LayoutRuntimePlugin {
                 crate::tool::LayoutToolPlugin,
                 LayoutUiProjectionPlugin,
                 LayoutOverlayPlugin,
-                crate::host::connector::Plugin,
                 SpaceLayoutPlugin,
                 WindowLayoutPlugin,
                 TabPlugin,

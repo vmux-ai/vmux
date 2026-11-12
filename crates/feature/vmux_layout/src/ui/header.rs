@@ -285,7 +285,6 @@ fn HeaderContent() -> Element {
                         }
                     }
                     TeamFacepile { user, profiles }
-                    super::connector::ConnectorBar {}
                     ExtensionBar { extensions }
                     if matches!(env!("VMUX_BUILD_PROFILE"), "dev" | "local") { RemoteControl { remote } }
                 }
