@@ -11,6 +11,7 @@ cargo test --locked -p vmux_ecs --no-default-features --lib
 cargo test --locked -p vmux_ecs --no-default-features --features store --lib
 cargo test --locked -p vmux_ecs --no-default-features --features jobs --lib
 cargo test --locked -p vmux_project --no-default-features --features contracts,filesystem --lib
+cargo test --locked -p vmux_extension --no-default-features --features filesystem --lib
 cargo test --locked -p vmux_flex --no-default-features
 cargo test --locked -p vmux_flex --no-default-features --features window --lib
 cargo test --locked -p vmux_pane --no-default-features --lib
@@ -30,7 +31,7 @@ result = subprocess.run(
 )
 metadata = json.loads(result.stdout)
 packages = {package["name"] for package in metadata["packages"]}
-required = {"vmux_app", "vmux_ecs", "vmux_project", "vmux_flex", "vmux_pane"}
+required = {"vmux_app", "vmux_ecs", "vmux_project", "vmux_flex", "vmux_pane", "vmux_extension"}
 if not required.issubset(packages):
     raise SystemExit("The consumer must exercise the public application and ECS packages")
 forbidden = {"bevy", "bevy_cef", "bevy_cef_core", "bevy_winit", "vmux_profile", "vmux_editor", "vmux_ui", "vmux_layout", "wry"}

@@ -15,6 +15,8 @@ pub enum VmuxPlugin {
     ),
     #[plugin(feature = "project", desktop, requires(ecs))]
     Project(vmux_project::ProjectPlugin),
+    #[plugin(feature = "extension-core", desktop, requires(ecs))]
+    ExtensionCore(vmux_extension::ExtensionPlugin),
     #[plugin(feature = "jobs", desktop, requires(ecs))]
     Jobs(vmux_ecs::JobsPlugin),
     #[plugin(feature = "flex", desktop, requires(ecs))]
@@ -41,8 +43,8 @@ pub enum VmuxPlugin {
     Terminal(vmux_terminal::TerminalPlugin),
     #[plugin(feature = "editor", desktop, requires(layout, project))]
     Editor(vmux_editor::EditorPlugin),
-    #[plugin(feature = "extension", desktop, requires(browser))]
-    Extension(vmux_extension::ExtensionPlugin),
+    #[plugin(feature = "extension", desktop, requires(browser, extension_core))]
+    Extension(vmux_extension::ExtensionHostPlugin),
     #[plugin(feature = "git", desktop, requires(layout))]
     Git(vmux_git::GitPlugin),
     #[plugin(

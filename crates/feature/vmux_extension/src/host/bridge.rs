@@ -131,6 +131,7 @@ pub struct ExtensionBridgeServer {
     endpoint: String,
     identities: HashMap<String, BridgeIdentity>,
     authorizations: HashMap<String, BridgeAuthorization>,
+    conformance: HashSet<String>,
     inbound_queue: BridgeInboundQueue,
     inbound_rx: crossbeam_channel::Receiver<BridgeInbound>,
     sessions: Arc<Mutex<HashMap<String, BridgeSession>>>,
@@ -212,6 +213,12 @@ impl ExtensionBridgeServer {
                 )
             })
             .collect::<HashMap<_, _>>();
+        let mut conformance = HashSet::new();
+        for registration in &registrations {
+            if registration.authorization.conformance {
+                conformance.insert(registration.extension_id.clone());
+            }
+        }
         let authorizations = registrations
             .into_iter()
             .map(|registration| (registration.extension_id, registration.authorization))
@@ -262,6 +269,7 @@ impl ExtensionBridgeServer {
             endpoint,
             identities,
             authorizations,
+            conformance,
             inbound_queue,
             inbound_rx,
             sessions,
@@ -307,6 +315,23 @@ impl ExtensionBridgeServer {
 
     pub fn authorization(&self, extension_id: &str) -> Option<&BridgeAuthorization> {
         self.authorizations.get(extension_id)
+    }
+
+    pub(super) fn project_authorizations(
+        &mut self,
+        mut authorizations: HashMap<String, BridgeAuthorization>,
+    ) -> Vec<String> {
+        for (id, authorization) in &mut authorizations {
+            authorization.conformance = self.conformance.contains(id);
+        }
+        let mut changed = Vec::new();
+        for (id, before) in &self.authorizations {
+            if authorizations.get(id) != Some(before) {
+                changed.push(id.clone());
+            }
+        }
+        self.authorizations = authorizations;
+        changed
     }
 
     pub(crate) fn arm_wake(&self, proxy: &EventLoopProxyWrapper) {
