@@ -2,7 +2,7 @@ use bevy::ecs::system::{SystemParam, SystemState};
 use bevy::prelude::*;
 use bevy_cef::prelude::{Browsers, HostWindow, JsEmitEventPlugin, Receive, UiEventPlugin, UiInput};
 use vmux_api::mcp::{
-    ConnectorPopupBoundsRequest, ConnectorPopupHideRequest, ConnectorPopupShowRequest,
+    ConnectorPopupBoundsRequest, ConnectorPopupCloseRequest, ConnectorPopupShowRequest,
     ConnectorPopupState,
 };
 use vmux_ecs::{
@@ -10,7 +10,7 @@ use vmux_ecs::{
     PopupWebview, UiStateWrite, WebviewLoadCompleted, WindowOverlay,
 };
 use vmux_flex::prelude::{LayoutSystems, Visibility};
-use vmux_tool::{ConnectionSet, ConnectorPopupRequest};
+use vmux_tool::{ConnectionSet, ConnectorCancelRequest, ConnectorPopupRequest};
 
 use crate::overlay::PopupBounds;
 use crate::state::LayoutUiState;
@@ -25,12 +25,12 @@ impl bevy::app::Plugin for Plugin {
             .add_message::<WebviewLoadCompleted>()
             .add_plugins(UiEventPlugin::<(
                 ConnectorPopupBoundsRequest,
-                ConnectorPopupHideRequest,
+                ConnectorPopupCloseRequest,
                 ConnectorPopupShowRequest,
             )>::default())
             .add_plugins(JsEmitEventPlugin::<Dismiss>::default())
             .add_observer(bounds)
-            .add_observer(hide)
+            .add_observer(close)
             .add_observer(show)
             .add_observer(dismiss)
             .add_systems(
@@ -206,15 +206,12 @@ impl Host<'_, '_> {
         self.select(entity, &popup, &name, false);
     }
 
-    fn hide(&mut self, entity: Entity, popup: &Popup, name: &Name, selected: bool) {
-        self.browsers.hide_child_window(&entity);
-        self.commands
-            .entity(entity)
-            .remove::<(Shown, KeyboardOwner, Presented)>()
-            .insert(Visibility::Hidden);
-        if selected {
-            self.publish(popup.layout, popup.state(name, false));
-        }
+    fn cancel(&mut self, entity: Entity, popup: &Popup, selected: bool) {
+        self.commands.trigger(ConnectorCancelRequest {
+            source: popup.source,
+            generation: popup.generation,
+        });
+        self.retire(entity, popup, selected);
     }
 
     fn retire(&mut self, entity: Entity, popup: &Popup, selected: bool) {
@@ -305,7 +302,7 @@ fn show(trigger: On<UiInput<ConnectorPopupShowRequest>>, mut host: Host) {
     }
 }
 
-fn hide(trigger: On<UiInput<ConnectorPopupHideRequest>>, mut host: Host) {
+fn close(trigger: On<UiInput<ConnectorPopupCloseRequest>>, mut host: Host) {
     let target = host
         .popups
         .iter()
@@ -315,8 +312,8 @@ fn hide(trigger: On<UiInput<ConnectorPopupHideRequest>>, mut host: Host) {
         .map(|(entity, popup, name, selected, _, _)| {
             (entity, popup.clone(), name.clone(), selected)
         });
-    if let Some((entity, popup, name, selected)) = target {
-        host.hide(entity, &popup, &name, selected);
+    if let Some((entity, popup, _, selected)) = target {
+        host.cancel(entity, &popup, selected);
     }
 }
 
@@ -327,18 +324,17 @@ struct Dismiss {
 }
 
 fn dismiss(trigger: On<Receive<Dismiss>>, mut host: Host) {
-    if trigger.payload.channel != "vmux-connector-popup-hide" {
+    if trigger.payload.channel != "vmux-connector-popup-close" {
         return;
     };
-    let Ok((_, popup, name, selected, _, _)) = host.popups.get(trigger.webview) else {
+    let Ok((_, popup, _, selected, _, _)) = host.popups.get(trigger.webview) else {
         return;
     };
     if popup.key() != trigger.payload.id {
         return;
     };
     let popup = popup.clone();
-    let name = name.clone();
-    host.hide(trigger.webview, &popup, &name, selected);
+    host.cancel(trigger.webview, &popup, selected);
 }
 
 fn dispose(mut host: Host) {
@@ -365,7 +361,7 @@ fn inject(
         let Ok(id) = serde_json::to_string(&popup.key()) else {
             continue;
         };
-        browsers.execute_js(&message.webview, &format!(r#"document.addEventListener('keydown', event => {{ if (event.key === 'Escape') {{ event.preventDefault(); cef.emit({{ channel: 'vmux-connector-popup-hide', id: {id} }}); }} }});"#));
+        browsers.execute_js(&message.webview, &format!(r#"document.addEventListener('keydown', event => {{ if (event.key === 'Escape') {{ event.preventDefault(); cef.emit({{ channel: 'vmux-connector-popup-close', id: {id} }}); }} }});"#));
     }
 }
 
@@ -419,6 +415,13 @@ mod tests {
     use crate::stack::Stack;
     use vmux_ecs::PageMetadata;
 
+    #[derive(Resource, Default)]
+    struct Cancellations(Vec<(Entity, u64)>);
+
+    fn capture(trigger: On<ConnectorCancelRequest>, mut cancellations: ResMut<Cancellations>) {
+        cancellations.0.push((trigger.source, trigger.generation));
+    }
+
     struct Fixture {
         app: App,
         layout: Entity,
@@ -429,6 +432,8 @@ mod tests {
         fn new() -> Self {
             let mut app = App::new();
             app.insert_non_send(Browsers::default())
+                .init_resource::<Cancellations>()
+                .add_observer(capture)
                 .init_resource::<bevy_cef::prelude::IpcEventRawBuffer>()
                 .add_plugins((vmux_ecs::UiStatePlugin::<LayoutUiState>::default(), Plugin));
             let window = app.world_mut().spawn(Window::default()).id();
@@ -492,23 +497,40 @@ mod tests {
     }
 
     #[test]
-    fn hidden_authentication_reopens_the_same_document_and_completion_retires_only_its_generation()
-    {
+    fn closing_requests_cancellation_and_removes_only_the_matching_popup() {
+        let mut fixture = Fixture::new();
+        fixture.open(3);
+        let (entity, id) = fixture.popup();
+        fixture.app.world_mut().trigger(UiInput {
+            webview: fixture.layout,
+            payload: ConnectorPopupCloseRequest { id: "old".into() },
+        });
+        fixture.app.world_mut().flush();
+        assert!(fixture.app.world().resource::<Cancellations>().0.is_empty());
+        fixture.app.world_mut().trigger(UiInput {
+            webview: fixture.layout,
+            payload: ConnectorPopupCloseRequest { id },
+        });
+        fixture.app.world_mut().flush();
+        assert_eq!(
+            fixture.app.world().resource::<Cancellations>().0,
+            [(fixture.source, 3)]
+        );
+        assert!(fixture.app.world().get_entity(entity).is_err());
+        assert!(fixture.app.world().get_entity(fixture.source).is_ok());
+    }
+
+    #[test]
+    fn reopening_keeps_the_same_document_and_completion_retires_only_its_generation() {
         let mut fixture = Fixture::new();
         fixture.open(2);
-        let (entity, id) = fixture.popup();
+        let (entity, _) = fixture.popup();
         fixture
             .app
             .world_mut()
             .get_mut::<PageMetadata>(entity)
             .unwrap()
             .url = "https://github.com/sessions/two-factor".into();
-        fixture.app.world_mut().trigger(UiInput {
-            webview: fixture.layout,
-            payload: ConnectorPopupHideRequest { id: id.clone() },
-        });
-        fixture.app.update();
-        assert!(!fixture.app.world().entity(entity).contains::<Shown>());
         fixture.open(2);
         assert_eq!(fixture.popup().0, entity);
         assert_eq!(
