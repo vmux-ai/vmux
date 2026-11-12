@@ -110,12 +110,18 @@ For the desktop workflow, build with `make build-dev`, then open the app with
 (`vmux://vm/docker`) and Containers (`vmux://vm/docker/containers`) have separate
 titles and icons while sharing the same workspace. `vmux://docker/containers`,
 `vmux://docker/` and the older `vmux://containers/` remain compatible.
-When the service is stopped, the page offers one Start control. Startup and shutdown
-show a full-page progress indicator; the side sheet appears when Docker is ready. Containers
+VM shows its state, CPU allocation, memory and shared directory, including during
+startup and shutdown. Docker shows its connection and container count. When the daemon
+is unavailable, the same side sheet remains visible with its VM controls. The current
+host retains previously fetched container metadata for inspection during VM shutdown.
+Containers
 created on this daemon appear automatically, including stopped containers and
 Compose groups. Selecting an entry opens its information and live logs. VM shutdown
 and settings occupy separate rows in the Docker side-sheet header. Compose groups
-offer Start all/Stop all beneath their names; selected-container controls belong
+offer Start all/Stop all beneath their names. Starting a service also starts its
+dependencies in the same Compose project and waits for their declared readiness,
+starting the VM first when needed.
+Container rows use play/pause icons; selected-container controls belong
 to the details toolbar. The initial share is
 the home directory.
 

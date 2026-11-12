@@ -75,6 +75,9 @@ impl Command {
             Self::Status => Ok(Reply::Status(client.status())),
             Self::Configure => Ok(Reply::Configured(client.configure()?)),
             Self::Containers { ids, operation } => {
+                if operation == ContainerOperation::Start && !client.status().docker_ready {
+                    client.start(helper)?;
+                }
                 let docker = DockerClient::new(&settings.socket());
                 let operation = match operation {
                     ContainerOperation::Start => DockerOperation::Start,
@@ -82,7 +85,7 @@ impl Command {
                     ContainerOperation::Restart => DockerOperation::Restart,
                     ContainerOperation::Remove => DockerOperation::Remove,
                 };
-                if matches!(operation, DockerOperation::Start) && ids.len() > 1 {
+                if matches!(operation, DockerOperation::Start) {
                     docker.start_many(&ids)?;
                     return Ok(Reply::Changed);
                 }
@@ -151,7 +154,14 @@ pub(crate) struct Busy(Command);
 
 impl Busy {
     pub(crate) fn starting(&self) -> bool {
-        matches!(self.0, Command::Start)
+        matches!(
+            self.0,
+            Command::Start
+                | Command::Containers {
+                    operation: ContainerOperation::Start,
+                    ..
+                }
+        )
     }
     pub(crate) fn stopping(&self) -> bool {
         matches!(self.0, Command::Stop)

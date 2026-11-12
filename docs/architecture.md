@@ -1757,6 +1757,9 @@ VM (`vmux://vm/`), Docker (`vmux://vm/docker`) and Containers
 (`vmux://vm/docker/containers`) have distinct titles and icons: a monitor containing a
 container, the Docker logo and a container cube.
 They share one document and DOM group, so changing level preserves the workspace.
+VM shows its state, CPU allocation, memory and shared directory, including during startup
+and shutdown. Docker shows its state, socket and container count. Only the Containers
+level shows an empty selection; choosing an entry opens its own Info/Logs route.
 `vmux://docker/containers`, `vmux://docker/` and the legacy `vmux://containers/`
 canonicalize to Containers. Existing default container pins move to the VM entry once,
 preserving their identity, order and removal. Later explicit page pins remain distinct.
@@ -1772,10 +1775,13 @@ toggle and width bounds, and Git's breadcrumb header and toolbar. The list can b
 and collapsed; selection and Info/Logs choices update the page address. Sidebar/group layout transitions
 use the shared 120 ms motion timing, content changes fade in over 100 ms, and service
 startup/shutdown use the shared loading indicator. Reduced-motion preferences disable
-layout and content transitions; layout and selection never wait for them. While Docker
-is unavailable, the whole page offers one Start control or a startup/shutdown indicator;
-the idle surface contains the VM illustration and Start, without a stopped-state caption;
-the side sheet and details appear when Docker is ready. One root UI-state subscription
+layout and content transitions; layout and selection never wait for them. The side sheet
+and details keep the same layout while the VM is stopped, starting or stopping. VM controls
+remain in the side sheet; progress changes their state without replacing the page.
+Within the host process, inventory retains the last successful container metadata while
+the VM is down. Configuration remains selectable and stopped VM projections mark its
+containers stopped. A new host obtains inventory when Docker starts; live logs require
+the daemon. One root UI-state subscription
 survives these transitions. A thin divider separates the side sheet and details.
 Details remain unselected until the user chooses an entry. The address reads
 `VM → Docker → Containers → group → selected entry → Info/Logs`. VM shutdown and settings
@@ -1783,14 +1789,17 @@ live in separate rows of the Docker side-sheet header: the engine title and sett
 one row, and Stop VM occupies its own row. The redundant running count is omitted.
 Group names and expand controls occupy one row, with counts and Start all/Stop all beneath;
 long names wrap without squeezing the operation label. Container Start/Stop
-controls have text labels in the details toolbar and list rows. Group headers expose Start all
+controls have text labels in the details toolbar; list rows use play/pause icons with tooltips.
+Group headers expose Start all
 until every member runs, then Stop all; details retain scoped group controls.
 Pending controls show a spinner and Starting/Stopping/Restarting instead of an inactive play icon.
-Batch startup orders selected Compose services by their declared dependency labels, waits for
-running, healthy or successfully completed dependencies, and reports partial failure while
-continuing independent services. It never starts containers outside the selected batch.
-Stopping uses a pause-shaped icon with an explicit stop tooltip. A native SVG monitor
-and container illustration accompanies the idle Start control. Local pending intents
+Single and group startup expand the selection with dependencies in the same Compose project,
+starting the VM first when needed. They
+order services by their declared dependency labels, wait for
+running, healthy or successfully completed dependencies, and report partial failure while
+continuing independent services. Dependency expansion leaves unrelated services and other
+Compose projects outside the batch. Stop, restart and removal retain the explicit selection.
+Stopping uses a pause-shaped icon with an explicit stop tooltip. Local pending intents
 project starting/stopping states in the input frame and suppress duplicate requests.
 Per-page `Revision` and `LastError` components acknowledge mutating completions through
 `ContainerUiState.control_revision` and `control_error`. Inventory tasks capture the engine's

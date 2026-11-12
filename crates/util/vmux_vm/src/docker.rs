@@ -59,17 +59,17 @@ impl Client {
 
     pub fn start_many(&self, ids: &[String]) -> io::Result<()> {
         let containers = self.list()?;
-        let ordered = Batch::new(ids, &containers)?.ordered()?;
+        let ordered = Batch::new(ids, &containers)?
+            .with_dependencies(&containers)
+            .ordered()?;
         let deadline = Instant::now() + Duration::from_secs(120);
         let mut failed = HashSet::new();
         let mut errors = Vec::new();
-        for entry in ordered {
+        for entry in &ordered {
             let mut refusal = None;
             for dependency in &entry.dependencies {
-                let Some(target) = containers.iter().find(|target| {
-                    target.project == entry.project
-                        && target.service == dependency.service
-                        && ids.contains(&target.id)
+                let Some(target) = ordered.iter().find(|target| {
+                    target.project == entry.project && target.service == dependency.service
                 }) else {
                     continue;
                 };
@@ -311,6 +311,29 @@ impl<'a> Batch<'a> {
             ordered.push(self.entries.remove(index));
         }
         Ok(ordered)
+    }
+
+    fn with_dependencies(mut self, containers: &'a [Container]) -> Self {
+        let mut index = 0;
+        while index < self.entries.len() {
+            let entry = self.entries[index];
+            index += 1;
+            if entry.project.is_empty() {
+                continue;
+            }
+            for dependency in &entry.dependencies {
+                let Some(target) = containers.iter().find(|target| {
+                    target.project == entry.project && target.service == dependency.service
+                }) else {
+                    continue;
+                };
+                if self.entries.iter().any(|entry| entry.id == target.id) {
+                    continue;
+                }
+                self.entries.push(target);
+            }
+        }
+        self
     }
 }
 
@@ -584,6 +607,43 @@ mod tests {
                 .map(|request| request.lines().next().unwrap())
                 .collect();
             assert_eq!(lines, expected);
+        }
+    }
+
+    #[test]
+    fn single_start_includes_only_its_compose_dependencies_and_waits_for_health() {
+        let inventory = r#"[{"Id":"aaaaaaaaaaaa","Names":["/account"],"Image":"account","State":"exited","Labels":{"com.docker.compose.project":"cloud","com.docker.compose.service":"account","com.docker.compose.depends_on":"postgres:service_healthy:true"}},{"Id":"cccccccccccc","Names":["/other-postgres"],"Image":"postgres","State":"exited","Labels":{"com.docker.compose.project":"a-other","com.docker.compose.service":"postgres"}},{"Id":"bbbbbbbbbbbb","Names":["/postgres"],"Image":"postgres","State":"exited","Labels":{"com.docker.compose.project":"cloud","com.docker.compose.service":"postgres"}},{"Id":"dddddddddddd","Names":["/relay"],"Image":"relay","State":"exited","Labels":{"com.docker.compose.project":"cloud","com.docker.compose.service":"relay"}}]"#;
+        for healthy in [true, false] {
+            let readiness = if healthy {
+                r#"{"State":{"Running":true,"Status":"running","Health":{"Status":"healthy"}}}"#
+            } else {
+                r#"{"State":{"Running":false,"Status":"exited","ExitCode":255}}"#
+            };
+            let mut replies = vec![
+                Daemon::reply(200, inventory),
+                Daemon::reply(204, ""),
+                Daemon::reply(200, readiness),
+            ];
+            if healthy {
+                replies.push(Daemon::reply(204, ""));
+            }
+            let daemon = Daemon::new(replies);
+            let result = Client::new(&daemon.socket).start_many(&["aaaaaaaaaaaa".into()]);
+            assert_eq!(result.is_ok(), healthy);
+            let requests = daemon.response.join().unwrap();
+            let mut expected = vec![
+                "GET /containers/json?all=1 HTTP/1.0",
+                "POST /containers/bbbbbbbbbbbb/start HTTP/1.0",
+                "GET /containers/bbbbbbbbbbbb/json HTTP/1.0",
+            ];
+            if healthy {
+                expected.push("POST /containers/aaaaaaaaaaaa/start HTTP/1.0");
+            }
+            let actual: Vec<_> = requests
+                .iter()
+                .map(|request| request.lines().next().unwrap())
+                .collect();
+            assert_eq!(actual, expected);
         }
     }
 

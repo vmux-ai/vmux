@@ -176,7 +176,6 @@ type InspectedEngines<'w, 's> = Query<
 
 fn begin(
     mut engines: InspectedEngines,
-    entries: Query<(Entity, &ChildOf), With<Entry>>,
     proxy: Option<Res<EventLoopProxyWrapper>>,
     mut commands: Commands,
 ) {
@@ -191,14 +190,8 @@ fn begin(
             if observed.0.running && observed.0.phase == vmux_vm::Phase::Ready {
                 continue;
             }
-            inventory.ready = false;
             inventory.error.clear();
             commands.entity(entity).remove::<SnapshotTask>();
-            for (entry, parent) in &entries {
-                if parent.parent() == entity {
-                    commands.entity(entry).despawn();
-                }
-            }
             continue;
         }
         if task.is_some() || Instant::now() < next.0 {
@@ -300,8 +293,9 @@ fn control(
     let Ok((entity, settings, observed, _)) = engines.single() else {
         return;
     };
-    if !(observed.0.docker_ready
-        || (observed.0.running && observed.0.phase == vmux_vm::Phase::Ready))
+    if event.payload.operation != crate::event::ContainerOperation::Start
+        && !(observed.0.docker_ready
+            || (observed.0.running && observed.0.phase == vmux_vm::Phase::Ready))
     {
         commands.trigger(Finished {
             entity,
@@ -431,7 +425,65 @@ fn poll_logs(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use bevy::ecs::system::RunSystemOnce;
     use vmux_vm::{Phase, Status};
+
+    #[test]
+    fn stopping_an_engine_retains_known_container_configuration() {
+        let mut app = App::new();
+        app.add_plugins(InventoryPlugin);
+        let settings = Settings::new("/fixtures/data", "/fixtures/shared");
+        let engine = app
+            .world_mut()
+            .spawn((
+                EngineView,
+                settings.clone(),
+                Revision(1),
+                Observed(Status {
+                    running: false,
+                    docker_ready: false,
+                    socket: settings.socket(),
+                    log: settings.log(),
+                    phase: Phase::Stopped,
+                    failure: None,
+                }),
+                Inventory {
+                    ready: true,
+                    ..Default::default()
+                },
+                NextPoll(Instant::now()),
+            ))
+            .id();
+        let entry = app
+            .world_mut()
+            .spawn((
+                Entry,
+                Id("aaaaaaaaaaaa".into()),
+                Name::new("account"),
+                Image("account:dev".into()),
+                State {
+                    state: "exited".into(),
+                    status: String::new(),
+                },
+                Compose {
+                    project: "cloud".into(),
+                    service: "account".into(),
+                },
+                Ports(Vec::new()),
+                ChildOf(engine),
+            ))
+            .id();
+        app.update();
+        assert!(app.world().get::<Entry>(entry).is_some());
+        assert!(app.world().get::<Inventory>(engine).unwrap().ready);
+        let rows = app
+            .world_mut()
+            .run_system_once(move |catalog: Catalog| catalog.snapshot(engine))
+            .unwrap();
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].image, "account:dev");
+        assert_eq!(rows[0].project, "cloud");
+    }
 
     #[test]
     fn a_snapshot_started_before_completion_cannot_replace_current_entries() {
