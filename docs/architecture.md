@@ -811,6 +811,9 @@ that frame. Presentation uses the first usable layout, including reserved placeh
 later data arrives as incremental frames. This gives every vmux page one stale-while-revalidate lifecycle
 instead of feature-specific loading gates.
 
+Interpreter event URLs use the document's scheme and authority, with reserved endpoints
+at the origin root. Nested page paths remain navigation paths rather than IPC prefixes.
+
 Live UI-state frames apply patches in place. Unconsumed increments remain queued across later
 frames until their component processes them; constructing a retained cache snapshot is a separate
 operation. A controller or catalog update therefore cannot discard diff chunks awaiting a render.
@@ -1692,8 +1695,6 @@ executable and retain the configured no-sandbox mode. Prewarmed terminal pages h
 identity and do not count as running terminals in quit confirmation.
 Both host and helper signing caches include identity and entitlements; a valid linker signature
 alone does not satisfy the development signing contract.
-Interpreter event URLs use the document's scheme and authority, with reserved endpoints
-at the origin root. Nested page paths remain navigation paths rather than IPC prefixes.
 Quit flushes pending layout changes, shuts down that profile's service, and waits for its daemon
 lease and child process to retire. Closing a page or hiding the window preserves background work;
 a successful restart within the same profile preserves the service too. Switching named profiles
@@ -1804,6 +1805,9 @@ waits for supervised cleanup even after its channel has already closed.
 An engine in Ready keeps its page and inventory through a transient API probe failure;
 explicit stopping and process exit end that presentation. Inspection tasks carry the
 engine revision so results captured before a control completion cannot replace it.
+Inventory reads retry transient transport failures twice in the background. A failed
+refresh keeps previously received entries and selection; a persistent error appears
+below the list instead of replacing it. An initial failure has no previous list to retain.
 
 ```mermaid
 flowchart LR

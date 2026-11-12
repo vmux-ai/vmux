@@ -192,7 +192,7 @@ fn ContainerSheet(
                 EngineToolbar { compact: true, onsettings }
             }
             ContentTransition { key: "{stage}", class: "flex min-h-0 flex-1 flex-col",
-                if !snapshot.inventory_error.is_empty() {
+                if !snapshot.inventory_ready && !snapshot.inventory_error.is_empty() {
                     Empty { title: translate("container-inventory-error"), description: snapshot.inventory_error.clone() }
                 } else if !snapshot.inventory_ready {
                     ListSkeleton {}
@@ -204,6 +204,14 @@ fn ContainerSheet(
                             ContainerGroup { key: "{group.name}", group, selected: selected.clone(), busy: snapshot.busy, onselect }
                         }
                     }
+                }
+            }
+            if snapshot.inventory_ready && !snapshot.inventory_error.is_empty() {
+                p {
+                    class: "shrink-0 px-2.5 py-2 text-[10px] text-destructive",
+                    role: "status",
+                    title: snapshot.inventory_error.clone(),
+                    {translate("container-inventory-error")}
                 }
             }
         }
@@ -815,7 +823,7 @@ impl Pending {
             Intent::Start => snapshot.ready,
             Intent::Stop => !snapshot.running,
             Intent::Containers { ids, operation } => {
-                if !snapshot.available() || !snapshot.inventory_error.is_empty() {
+                if !snapshot.available() {
                     return true;
                 }
                 for id in ids {
@@ -1150,8 +1158,12 @@ mod tests {
         let html = preview.publish(snapshot.clone());
         assert!(html.contains("nginx:alpine"));
         assert!(html.contains(&translate("container-no-selection")));
+        snapshot.inventory_error = "fixture refresh failed".into();
+        let html = preview.publish(snapshot.clone());
+        assert!(html.contains("nginx:alpine"));
         preview.click("web");
         assert!(preview.render().contains("Up 1 second"));
+        snapshot.inventory_error.clear();
         let addresses = preview.host.addresses.borrow();
         let address = addresses.last().unwrap();
         assert_eq!(address.current.label_key, "container-engine");
@@ -1197,6 +1209,10 @@ mod tests {
         let html = preview.render();
         assert!(html.contains(&translate("container-phase-stopping")));
         snapshot.control_revision = 1;
+        snapshot.inventory_error = "fixture refresh failed".into();
+        let html = preview.publish(snapshot.clone());
+        assert!(html.contains(&translate("container-phase-stopping")));
+        snapshot.inventory_error.clear();
         snapshot.containers[0].state = "exited".into();
         let html = preview.publish(snapshot.clone());
         assert!(!html.contains(&translate("container-phase-stopping")));
