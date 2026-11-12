@@ -230,7 +230,7 @@ fn from_pointer(
     let Some((position, clicked, moved)) = pointer.sample(window_entity, window, &mouse) else {
         return;
     };
-    if !window.focused || !active_drags.is_empty() {
+    if !window.focused || !active_drags.is_empty() || HoverFocusLock::held(&keys) {
         return;
     }
     if !clicked && (!moved || HoverFocusLock::active(&keys)) {
@@ -276,11 +276,14 @@ fn from_pointer(
 struct HoverFocusLock;
 
 impl HoverFocusLock {
+    fn held(keys: &ButtonInput<KeyCode>) -> bool {
+        keys.pressed(KeyCode::ShiftLeft) || keys.pressed(KeyCode::ShiftRight)
+    }
+
     fn active(keys: &ButtonInput<KeyCode>) -> bool {
         keys.pressed(KeyCode::ControlLeft)
             || keys.pressed(KeyCode::ControlRight)
-            || keys.pressed(KeyCode::ShiftLeft)
-            || keys.pressed(KeyCode::ShiftRight)
+            || Self::held(keys)
     }
 }
 
@@ -755,7 +758,7 @@ mod tests {
             .app
             .world_mut()
             .resource_mut::<ButtonInput<KeyCode>>()
-            .press(KeyCode::ShiftLeft);
+            .press(KeyCode::ControlLeft);
         fixture.app.update();
         assert_eq!(fixture.focused().stack, Some(fixture.right_stack));
         fixture
@@ -766,6 +769,34 @@ mod tests {
         fixture.pointer(Vec2::new(400.0, 225.0), true);
         fixture.app.update();
         assert_eq!(fixture.focused().stack, Some(fixture.left_stack));
+    }
+
+    #[test]
+    fn shift_holds_pointer_selection_and_does_not_replay_a_held_click() {
+        for key in [KeyCode::ShiftLeft, KeyCode::ShiftRight] {
+            let mut fixture = HoverFixture::new();
+            fixture
+                .app
+                .world_mut()
+                .resource_mut::<ButtonInput<KeyCode>>()
+                .press(key);
+            fixture.app.update();
+            fixture.pointer(Vec2::new(400.0, 225.0), true);
+            fixture.app.update();
+            assert_eq!(fixture.focused().stack, Some(fixture.right_stack));
+            fixture.pointer(Vec2::new(400.0, 225.0), false);
+            fixture.app.update();
+            fixture
+                .app
+                .world_mut()
+                .resource_mut::<ButtonInput<KeyCode>>()
+                .release(key);
+            fixture.app.update();
+            assert_eq!(fixture.focused().stack, Some(fixture.right_stack));
+            fixture.pointer(Vec2::new(401.0, 225.0), false);
+            fixture.app.update();
+            assert_eq!(fixture.focused().stack, Some(fixture.left_stack));
+        }
     }
 
     #[cfg(target_os = "macos")]

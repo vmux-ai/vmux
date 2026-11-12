@@ -1208,6 +1208,9 @@ sequence, and releases it on mouse-up. Pane Components
 remain the authority for resizing; a drag started in page content cannot acquire a divider later.
 Pointer focus is limited to the current tab and forwards a core `SelectRequest` before activation
 and focus projection, so nested Pane ancestors and the visible Stack agree in the input frame.
+Holding either Shift key preserves pointer selection across hover and clicks; input sampled
+during the hold is consumed, so releasing Shift does not replay it. Control suppresses hover
+selection while allowing explicit clicks, and directional keyboard selection remains available.
 Empty-tab startup pages are created before descendant activation and focus computation. Closing
 the final page preserves the Tab's workspace and checkout context while its replacement loads.
 
