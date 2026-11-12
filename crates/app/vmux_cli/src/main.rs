@@ -1,5 +1,6 @@
 use bevy_app::{App, AppExit};
 
+mod browser;
 mod command;
 mod plugin;
 

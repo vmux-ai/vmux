@@ -10410,8 +10410,10 @@ dependencies = [
  "predicates",
  "tempfile",
  "tokio",
+ "vmux_api",
  "vmux_app",
  "vmux_ecs",
+ "vmux_transport",
 ]
 
 [[package]]
@@ -10927,6 +10929,7 @@ dependencies = [
  "portable-pty",
  "rkyv",
  "serde",
+ "tempfile",
  "tokio",
  "url",
  "vmux_api",

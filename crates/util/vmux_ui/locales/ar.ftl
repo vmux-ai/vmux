@@ -1164,3 +1164,4 @@ onboarding-save-key = حفظ المفتاح في هذا الملف الشخصي
 onboarding-key-failed = تعذّر حفظ المفتاح. أعد المحاولة أو استخدم تسجيل الدخول.
 onboarding-workspace-question = أين نعمل؟
 agent-starting = جارٍ بدء تشغيل الوكيل…
+browser-open-external = فتح في متصفح خارجي

@@ -1164,3 +1164,4 @@ onboarding-save-key = Enregistrer la clé dans ce profil
 onboarding-key-failed = La clé n’a pas pu être enregistrée. Réessayez ou utilisez la connexion.
 onboarding-workspace-question = Où souhaites-tu travailler ?
 agent-starting = Démarrage de l’agent…
+browser-open-external = Ouvrir dans un navigateur externe

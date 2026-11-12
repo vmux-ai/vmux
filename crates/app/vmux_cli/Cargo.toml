@@ -16,6 +16,8 @@ clap = { version = "4", features = ["string"] }
 tokio = { workspace = true }
 vmux_app = { path = "../../util/vmux_app", features = ["cli"] }
 vmux_ecs = { path = "../../util/vmux_ecs", features = ["host"] }
+vmux_api = { path = "../../util/vmux_api" }
+vmux_transport = { path = "../../util/vmux_transport" }
 
 [dev-dependencies]
 assert_cmd = "2"

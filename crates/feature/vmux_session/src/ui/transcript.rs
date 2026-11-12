@@ -339,8 +339,7 @@ pub(super) fn QueuedPrompts(chat: Chat) -> Element {
                 }
             }
             div { class: "flex items-center gap-2 pr-1 text-[10px] text-foreground/40",
-                kbd { class: "inline-flex h-5 items-center rounded border border-foreground/15 bg-foreground/[0.06] px-1.5 font-mono text-[10px] font-medium text-foreground/60 shadow-sm", "Esc" }
-                span { {translate("agent-send-all-now")} }
+                vmux_ui::components::composer::ShortcutHint { shortcut: "Esc", label: translate("agent-send-all-now") }
             }
         }
     }

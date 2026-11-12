@@ -143,6 +143,7 @@
                 "PathCompleteRequest",
                 "PromptRequest",
                 "OpenRequest",
+                "OpenExternalBrowserRequest",
                 "TerminalRequest",
                 "InvokeRequest",
                 "SwitchSpaceRequest",

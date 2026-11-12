@@ -1144,3 +1144,4 @@ onboarding-save-key = このプロファイルにキーを保存
 onboarding-key-failed = キーを保存できませんでした。再試行するか、ログインを使ってください。
 onboarding-workspace-question = どこで作業しましょうか？
 agent-starting = エージェントを起動中…
+browser-open-external = 外部ブラウザで開く

@@ -1161,3 +1161,4 @@ onboarding-save-key = 將金鑰儲存至此設定檔
 onboarding-key-failed = 無法儲存金鑰。請重試或使用登入。
 onboarding-workspace-question = 我們在哪裡工作？
 agent-starting = 正在啟動 agent…
+browser-open-external = 在外部瀏覽器中開啟

@@ -8,6 +8,7 @@ pub fn ApiKeyEntry(
     failed: bool,
     #[props(default = "var(--primary)".to_string())] accent_color: String,
     #[props(default)] on_stop: Option<EventHandler<()>>,
+    #[props(default)] footer: Option<Element>,
     on_submit: EventHandler<vmux_api::Secret>,
 ) -> Element {
     let mut key = use_signal(String::new);
@@ -20,7 +21,7 @@ pub fn ApiKeyEntry(
             accent_color,
             accent_gradient: "from-indigo-500 to-violet-600".to_string(),
             placeholder: translate("onboarding-api-key"),
-            footer: Some(rsx! {}),
+            footer: Some(footer.unwrap_or_else(|| rsx! {})),
             show_add_button: false,
             disabled: pending && !stoppable,
             mode: if stoppable { PromptComposerMode::Stop } else { PromptComposerMode::Send },

@@ -28,3 +28,6 @@ libc = "0.2"
 
 [lints]
 workspace = true
+
+[dev-dependencies]
+tempfile = "3"

@@ -4,7 +4,9 @@ use crate::onboarding::{ChatAuthenticate, ChatCancelSetup, ChatSaveKey, KeyEntry
 use dioxus::prelude::*;
 use percent_encoding::{NON_ALPHANUMERIC, utf8_percent_encode};
 use vmux_ui::components::button::{Button, ButtonSize, ButtonVariant};
-use vmux_ui::components::composer::{ComposerFrame, PromptComposer, PromptComposerMode};
+use vmux_ui::components::composer::{
+    ComposerFrame, PromptComposer, PromptComposerMode, ShortcutHint,
+};
 use vmux_ui::components::progress::{LoadingIcon, Progress, ProgressIndicator};
 use vmux_ui::hooks::{UiStateBinding, send};
 use vmux_ui::i18n::translate;
@@ -154,17 +156,23 @@ fn SetupComposer(chat: Chat, keys: KeyEntryUiState) -> Element {
                 pending: keys.pending,
                 failed: keys.failed,
                 accent_color: chat.accent().css,
+                footer: Some(rsx! { ShortcutHint { shortcut: "Esc", label: translate("common-cancel") } }),
                 on_stop: Some(EventHandler::new(move |_| chat.stop_or_flush())),
                 on_submit: move |key| { let _ = send(&ChatSaveKey { key }); },
             }
         };
     }
     let busy = chat.setup_busy() || keys.pending;
+    let footer = if chat.status() == "errored" {
+        rsx! {}
+    } else {
+        rsx! { ShortcutHint { shortcut: "Esc", label: translate("common-cancel") } }
+    };
     rsx! {
         PromptComposer {
             value: chat.draft(), input_disabled: true,
             placeholder: translate("onboarding-composer-wait"), accent_color: chat.accent().css,
-            accent_gradient: "from-indigo-500 to-violet-600".to_string(), footer: Some(rsx! {}),
+            accent_gradient: "from-indigo-500 to-violet-600".to_string(), footer: Some(footer),
             show_add_button: false, show_send_button: false,
             mode: if busy { PromptComposerMode::Stop } else { PromptComposerMode::Send },
             action_title: translate("common-stop"), action_enabled: busy,
@@ -464,7 +472,10 @@ mod tests {
             dom.provide_root_context(HostBinding(host.clone()));
             let initial = dom.rebuild_to_vec();
             let html = dioxus_ssr::render(&dom);
-            assert!(!html.contains(&translate("common-cancel")));
+            assert!(html.contains(&translate("common-cancel")));
+            assert!(html.contains("Esc"));
+            assert!(!initial.edits.iter().any(|edit| matches!(edit,
+                Mutation::SetAttribute { name: "aria-label" | "title", value: AttributeValue::Text(value), .. } if value == &translate("common-cancel"))));
             assert!(!html.contains(&translate("composer-choose-agent")));
             if status != "authentication" {
                 assert!(!html.contains("role=\"listbox\""));
@@ -566,6 +577,8 @@ mod tests {
         let fields = dom.render_immediate_to_vec();
         let html = dioxus_ssr::render(&dom);
         assert!(html.contains("type=\"password\""));
+        assert!(html.contains("Esc"));
+        assert!(html.contains(&translate("common-cancel")));
         assert!(!html.contains("<textarea"));
         assert!(!html.contains("data-slot=\"composer-notice\""));
         assert!(!html.contains(&translate("onboarding-save-key")));

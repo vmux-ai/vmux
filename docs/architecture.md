@@ -1581,13 +1581,20 @@ composer and choice controls. The guide lists Claude, Codex, and Vibe candidates
 followed by the complete supported catalog in a scroll viewport capped at 160 px. Selection sits in the shared composer's outer notice frame;
 search filters the complete catalog. Setup uses a muted, theme-derived frame instead of an inverted notice surface. Authentication uses one Connect
 control for the provider's account/browser method. Compatible API keys are a secondary opt-in route.
+The shared `vmux open` entry point sends a typed browser request over the existing service bridge.
+ACP launches expose it through the provider's standard `BROWSER` setting with the source Session ID.
+The source conversation pane chooses an adjacent browser pane when its logical width can fit both
+surfaces, or a new browser Stack otherwise. Provider URLs remain intact, and normal browser metadata
+supplies the title and favicon. Header and Stack context menus can open the same HTTP(S) URL in
+the external default browser. Connectors can reuse the same URL-opening entry point.
 The host owns setup state; the cursor and search stay local to the UI. Normal text input is
 disabled until readiness. Explicit key entry uses the same composer with a password input and
 ordinary Send/Enter submission; private input never enters the normal draft. There is no separate
 key form or persistence control. The uncommitted key-entry mode resets outside authentication.
 Preparation and installation show the normal Stop control rather than management options.
 Stop, Ctrl+C and Escape route to setup cancellation without flushing queued work or discarding
-the Session. Shared loading/progress animations and phase icons accompany guide messages;
+the Session. Preparation, authentication, and API-key composer footers show the shared Escape
+cancellation hint. Shared loading/progress animations and phase icons accompany guide messages;
 installation progress is indeterminate until an actual percentage is available.
 ACP supplies its supported catalog, credential availability and managed installer.
 Agent thumbnails and favicons share a versioned, offline logo catalog. Matching MIT-licensed

@@ -24,6 +24,7 @@ pub mod address;
 pub mod avatar;
 pub mod bin_event;
 pub mod bookmark;
+pub mod browser;
 pub mod chat;
 mod command;
 pub mod command_bar;

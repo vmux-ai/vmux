@@ -219,12 +219,23 @@ impl AcpLaunch {
                 );
             })
             .ok();
+        let mut env = self.env.clone();
+        if !env.iter().any(|(key, _)| key == "BROWSER")
+            && let Some(mcp) = &mcp
+            && mcp.command != "cargo"
+        {
+            env.push((
+                "BROWSER".into(),
+                vmux_process::BrowserCommand::for_session(Path::new(&mcp.command), &session_id.0)
+                    .into_string(),
+            ));
+        }
         ClientMessage::SpawnAcpAgent {
             sid: session_id.0.clone(),
             agent_id: agent_id.0.clone(),
             command: self.command.clone(),
             args: self.args.clone(),
-            env: self.env.clone(),
+            env,
             cwd: cwd.0.to_string_lossy().into_owned(),
             anchor: anchor.0,
             mcp_command: mcp.as_ref().map(|mcp| mcp.command.clone()),

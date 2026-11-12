@@ -5,6 +5,7 @@ pub mod api_key;
 pub mod avatar;
 pub mod badge;
 pub mod breadcrumb;
+pub mod browser;
 pub mod button;
 pub mod card;
 pub mod checkbox;

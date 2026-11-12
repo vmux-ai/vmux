@@ -325,6 +325,16 @@ pub fn PromptComposer(
 }
 
 #[component]
+pub fn ShortcutHint(shortcut: String, label: String) -> Element {
+    rsx! {
+        div { class: "flex items-center gap-2 text-[10px] text-muted-foreground/60",
+            kbd { class: "inline-flex h-5 items-center rounded border border-foreground/15 bg-foreground/[0.06] px-1.5 font-mono text-[10px] font-medium text-foreground/60", "{shortcut}" }
+            span { "{label}" }
+        }
+    }
+}
+
+#[component]
 pub fn ComposerFrame(
     #[props(default)] notice: Option<Element>,
     #[props(default)] muted: bool,
