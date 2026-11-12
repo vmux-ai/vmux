@@ -582,7 +582,12 @@ fn install_input_wake_monitor(
             } else {
                 MOUSE_DRAG_WAKE_INTERVAL
             };
-            if !over_windowed_page || !was_over_windowed_page || !event_window_is_key(ev) {
+            if WindowPointerPolicy::motion_should_wake(
+                event_type != NSEventType::MouseMoved,
+                over_windowed_page,
+                was_over_windowed_page,
+                event_window_is_key(ev),
+            ) {
                 HOVER_OVER_PANE.store(true, Ordering::Relaxed);
                 local_wake(interval);
             }

@@ -1194,6 +1194,11 @@ do not require Save by default; the optional pane StorePlugin declares its schem
 Tree/Identity/Resize adapters explicitly retain Workspace save requirements. Native layout keeps
 ID allocation, sequencing, geometry synchronization, pointer/cursor behavior, and close policy.
 
+Pane drag resizing observes the native pointer backend, with Winit button state as a fallback.
+The resize system applies changes to the current window's pane Components and cancels the drag
+on release or lost ownership/focus. Native drag motion wakes the reactive runner even over an
+embedded page; the renderer's mouse event stream is not the authority for a native split drag.
+
 Only test a window's drag region with coordinates from that window. Never compare child-window
 coordinates with the owning window's region.
 
