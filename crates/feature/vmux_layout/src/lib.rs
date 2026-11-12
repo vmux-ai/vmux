@@ -14,15 +14,6 @@ pub use topology::{
     SelectionChanged, SpawnSeq,
 };
 
-pub const PANE_GAP_PX: f32 = 4.0;
-
-#[cfg(feature = "geometry")]
-mod geometry;
-mod hierarchy;
-#[cfg(feature = "store")]
-mod pane_store;
-mod topology;
-
 #[cfg(all(host, feature = "host"))]
 pub use host::{
     AgentOpenBeside, AgentPaneDirection, Browser, BrowserGoBackRequest, BrowserGoForwardRequest,
@@ -38,6 +29,15 @@ pub use host::{
     stack, tab, target, toggle, tool, unit, warm_page, window, workspace_snapshot,
     workspace_snapshot_publish, worktree,
 };
+
+pub const PANE_GAP_PX: f32 = 4.0;
+
+#[cfg(feature = "geometry")]
+mod geometry;
+mod hierarchy;
+#[cfg(feature = "store")]
+mod pane_store;
+mod topology;
 
 #[cfg(all(host, feature = "host"))]
 pub(crate) struct Feature;
