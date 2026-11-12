@@ -1147,6 +1147,7 @@ dependencies = [
  "vmux_app",
  "vmux_ecs",
  "vmux_flex",
+ "vmux_fold",
  "vmux_project",
 ]
 
@@ -2486,6 +2487,7 @@ dependencies = [
  "bevy_app",
  "vmux_ecs",
  "vmux_flex",
+ "vmux_fold",
  "vmux_macro",
  "vmux_project",
 ]
@@ -2516,6 +2518,16 @@ dependencies = [
  "bevy_ecs",
  "bevy_math",
  "taffy",
+]
+
+[[package]]
+name = "vmux_fold"
+version = "0.0.35"
+dependencies = [
+ "bevy_app",
+ "bevy_ecs",
+ "serde",
+ "vmux_ecs",
 ]
 
 [[package]]
