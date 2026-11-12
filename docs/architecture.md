@@ -968,6 +968,10 @@ remain available across project navigation, and completing a catalog refresh pre
 view rather than replacing it with the Project list.
 Search and page controls share `page::PageToolbarRow`, a 32 px row. Collection sidebars use the
 same default width as Code's file tree; their search and navigation icons share a 12 px left inset.
+Sidebar search rows and their adjacent toolbar reserve 44 px for consistent vertical spacing.
+Shared page sidebars collapse to a 40 px icon rail while keeping navigation interactive.
+Tools, Settings, Sessions and Projects use the same icon column; labels and counts fade away,
+and hover titles identify collapsed entries. The mounted search retains its draft and becomes inert.
 `manager::ManagerSearch` fills that row with 13 px text and a subtle focus surface, retaining its
 width and height during input. Editor tabs remain beside the sidebar search. The sidebar's scroll
 region starts below it. Filter menus use the shared popover layer and may extend beyond the
@@ -1491,6 +1495,9 @@ and remote terminals, independently of the launch directory. The Terminal breadc
 directory and lists alternatives through the daemon. Choosing a directory sends a shell-escaped
 `cd` only after the daemon verifies an empty prompt, unchanged directory and no intervening input;
 running commands and input in progress reject the request instead of queuing it for later.
+Nushell's generated init disables its built-in OSC 133 source before installing vmux hooks,
+so each command produces one pair of lifecycle events. Ctrl+L redraws without changing prompt readiness.
+Ctrl+C restores directory switching at the next prompt only when no newer input or queued command remains.
 Host input is one ordered ECS entity per write, related to its terminal until the process is
 ready. Multiple producers cannot overwrite one another through a singleton mailbox.
 

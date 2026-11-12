@@ -1144,3 +1144,5 @@ session-turn-view-response = Показать ответ
 agent-incoming-message = Сообщение агента
 
 schema-focus-follows-mouse = Фокус следует за мышью
+
+terminal-directory-input-pending = Завершите или отмените текущую команду либо ввод перед сменой каталога.

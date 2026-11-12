@@ -1144,3 +1144,5 @@ session-turn-view-response = Antwoord bekijken
 agent-incoming-message = Agentbericht
 
 schema-focus-follows-mouse = Focus volgt de muis
+
+terminal-directory-input-pending = Voltooi of annuleer de huidige opdracht of invoer voordat u van map wisselt.

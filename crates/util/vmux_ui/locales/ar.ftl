@@ -1144,3 +1144,5 @@ session-turn-view-response = عرض الرد
 agent-incoming-message = رسالة من الوكيل
 
 schema-focus-follows-mouse = التركيز يتبع الفأرة
+
+terminal-directory-input-pending = أكمل الأمر أو الإدخال الحالي أو ألغِه قبل تغيير المجلد.

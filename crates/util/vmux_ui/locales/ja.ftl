@@ -1124,3 +1124,5 @@ session-turn-view-response = 応答を表示
 agent-incoming-message = エージェントからのメッセージ
 
 schema-focus-follows-mouse = マウス位置に合わせてペインを選択
+
+terminal-directory-input-pending = ディレクトリを変更するには、コマンドや入力を完了するか、Ctrl+Cで中止してください。

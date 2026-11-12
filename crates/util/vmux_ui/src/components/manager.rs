@@ -79,6 +79,19 @@ pub fn ManagerPage(children: Element) -> Element {
     }
 }
 
+#[derive(Clone, Copy)]
+struct SidebarState {
+    open: Signal<bool>,
+}
+
+impl SidebarState {
+    fn is_open() -> bool {
+        try_consume_context::<Self>()
+            .map(|state| (state.open)())
+            .unwrap_or(true)
+    }
+}
+
 #[component]
 pub fn WorkspaceLayout(
     #[props(default = rsx! {})] toolbar: Element,
@@ -89,7 +102,9 @@ pub fn WorkspaceLayout(
 ) -> Element {
     let sidebar_width = vmux_api::editor::TreeWidth::DEFAULT;
     let mut sidebar_open = use_signal(|| !cfg!(any(target_os = "ios", target_os = "android")));
+    use_context_provider(move || SidebarState { open: sidebar_open });
     let duration = crate::motion::Motion::LAYOUT_MS;
+    let search_opacity = if sidebar_open() { 1 } else { 0 };
     let toolbar_class = if search.is_some() {
         "min-h-11 gap-2 px-3"
     } else {
@@ -100,7 +115,7 @@ pub fn WorkspaceLayout(
             "width:min(var(--vmux-sidebar-width),50vw);opacity:1;transition-duration:{duration}ms;"
         )
     } else {
-        format!("width:0px;opacity:0;transition-duration:{duration}ms;")
+        format!("width:40px;opacity:1;transition-duration:{duration}ms;")
     };
     rsx! {
         div { class: "flex min-h-0 flex-1 overflow-hidden", style: "--vmux-sidebar-width:{sidebar_width}px;",
@@ -108,12 +123,16 @@ pub fn WorkspaceLayout(
                     aside {
                         class: "flex min-h-0 shrink-0 flex-col overflow-hidden transition-[width,opacity] ease-out motion-reduce:transition-none",
                         style: sidebar_style,
-                        aria_hidden: !sidebar_open(),
-                        inert: (!sidebar_open()).then_some(""),
                         if let Some(search) = &search {
-                            div { class: "w-[min(var(--vmux-sidebar-width),50vw)] shrink-0", {search.clone()} }
+                            div {
+                                class: "w-[min(var(--vmux-sidebar-width),50vw)] shrink-0 transition-opacity motion-reduce:transition-none",
+                                style: "opacity:{search_opacity};transition-duration:{duration}ms;",
+                                aria_hidden: !sidebar_open(),
+                                inert: (!sidebar_open()).then_some(""),
+                                {search.clone()}
+                            }
                         }
-                        div { class: "min-h-0 w-[min(var(--vmux-sidebar-width),50vw)] flex-1 overflow-y-auto px-1 pb-2", {sidebar} }
+                        div { class: "min-h-0 w-full flex-1 overflow-y-auto px-1 pb-2", {sidebar} }
                     }
                 }
                 div { class: "flex min-w-0 flex-1 flex-col overflow-hidden",
@@ -146,9 +165,19 @@ pub fn ManagerSearchRow(children: Element) -> Element {
 
 #[component]
 pub fn ManagerSidebarSection(title: String, children: Element) -> Element {
+    let open = SidebarState::is_open();
+    let duration = crate::motion::Motion::LAYOUT_MS;
+    let height = if open { 24 } else { 0 };
+    let padding = if open { 4 } else { 0 };
+    let opacity = if open { 1 } else { 0 };
     rsx! {
         section { class: "flex flex-col gap-0.5",
-            h2 { class: "px-2 pb-1 text-[10px] font-medium text-muted-foreground/65", "{title}" }
+            h2 {
+                class: "overflow-hidden whitespace-nowrap px-2 text-[10px] font-medium text-muted-foreground/65 transition-[max-height,opacity,padding] motion-reduce:transition-none",
+                style: "max-height:{height}px;padding-bottom:{padding}px;opacity:{opacity};transition-duration:{duration}ms;",
+                aria_hidden: !open,
+                "{title}"
+            }
             {children}
         }
     }
@@ -159,12 +188,19 @@ pub fn ManagerSidebarItem(
     label: String,
     count: usize,
     selected: bool,
+    #[props(default = true)] show_count: bool,
+    #[props(default = "text-[11px]".to_string())] text_class: String,
     #[props(default)] icon: Option<LineIcon>,
     #[props(default)] builtin_icon: Option<vmux_api::BuiltinIcon>,
     #[props(default)] leading: Option<Element>,
     #[props(default)] dot: String,
     onclick: EventHandler<MouseEvent>,
 ) -> Element {
+    let open = SidebarState::is_open();
+    let duration = crate::motion::Motion::LAYOUT_MS;
+    let gap = if open { 8 } else { 0 };
+    let opacity = if open { 1 } else { 0 };
+    let count_width = if open { "4rem" } else { "0px" };
     let class = if selected {
         "bg-foreground/[0.065] text-foreground"
     } else {
@@ -173,19 +209,37 @@ pub fn ManagerSidebarItem(
     rsx! {
         button {
             r#type: "button",
-            class: "flex h-8 w-full items-center gap-2 rounded-md px-2 text-left text-[11px] transition-colors {class}",
+            class: "flex h-8 w-full items-center rounded-md px-2 text-left {text_class} transition-[color,background-color,column-gap] motion-reduce:transition-none {class}",
+            style: "column-gap:{gap}px;transition-duration:{duration}ms;",
+            title: label.clone(),
+            aria_label: label.clone(),
+            aria_pressed: selected,
             onclick: move |event| onclick.call(event),
-            if let Some(leading) = leading {
-                {leading}
-            } else if let Some(icon) = builtin_icon {
-                crate::icon::BuiltinIconView { icon, class: "size-3.5 shrink-0".to_string() }
-            } else if let Some(icon) = icon {
-                LineIconView { icon, class: "size-3.5 shrink-0".to_string() }
-            } else {
-                span { class: "size-2 shrink-0 rounded-full {dot}" }
+            span { class: "flex size-4 shrink-0 items-center justify-center",
+                if let Some(leading) = leading {
+                    {leading}
+                } else if let Some(icon) = builtin_icon {
+                    crate::icon::BuiltinIconView { icon, class: "size-3.5 shrink-0".to_string() }
+                } else if let Some(icon) = icon {
+                    LineIconView { icon, class: "size-3.5 shrink-0".to_string() }
+                } else {
+                    span { class: "size-2 shrink-0 rounded-full {dot}" }
+                }
             }
-            span { class: "min-w-0 flex-1 truncate", "{label}" }
-            span { class: "text-[10px] tabular-nums text-muted-foreground/65", "{count}" }
+            span {
+                class: "min-w-0 flex-1 truncate transition-opacity motion-reduce:transition-none",
+                style: "opacity:{opacity};transition-duration:{duration}ms;",
+                aria_hidden: !open,
+                "{label}"
+            }
+            if show_count {
+                span {
+                    class: "overflow-hidden text-[10px] tabular-nums text-muted-foreground/65 transition-[max-width,opacity] motion-reduce:transition-none",
+                    style: "max-width:{count_width};opacity:{opacity};transition-duration:{duration}ms;",
+                    aria_hidden: !open,
+                    "{count}"
+                }
+            }
         }
     }
 }
@@ -1013,10 +1067,28 @@ mod tests {
         }
     }
 
+    #[component]
+    fn SidebarNavigation() -> Element {
+        let mut selected = use_signal(|| false);
+        rsx! {
+            WorkspaceLayout {
+                sidebar: rsx! { ManagerSidebarItem {
+                    label: "Category".to_string(),
+                    icon: Some(LineIcon::Search),
+                    count: 0,
+                    selected: selected(),
+                    onclick: move |_| selected.set(true),
+                } },
+                div { "{selected}" }
+            }
+        }
+    }
+
     #[derive(Default)]
     struct SidebarInert {
         blocked: bool,
         toggle: Option<ElementId>,
+        item: Option<ElementId>,
     }
 
     impl SidebarInert {
@@ -1030,7 +1102,19 @@ mod tests {
                     } => {
                         self.blocked = !matches!(value, AttributeValue::None);
                     }
-                    Mutation::NewEventListener { name, id } if name == "click" => {
+                    Mutation::SetAttribute {
+                        name: "title",
+                        id,
+                        value: AttributeValue::Text(value),
+                        ..
+                    } if value == "Category" => {
+                        self.item = Some(id);
+                    }
+                    Mutation::SetAttribute {
+                        name: "aria-expanded",
+                        id,
+                        ..
+                    } => {
                         self.toggle = Some(id);
                     }
                     _ => {}
@@ -1060,5 +1144,25 @@ mod tests {
         assert!(sidebar.blocked);
         sidebar.click(&mut dom);
         assert!(!sidebar.blocked);
+    }
+
+    #[test]
+    fn collapsed_sidebar_navigation_remains_interactive() {
+        dioxus::html::set_event_converter(Box::new(dioxus::html::SerializedHtmlEventConverter));
+        let mut dom = VirtualDom::new(SidebarNavigation);
+        let mut sidebar = SidebarInert::default();
+        sidebar.apply(dom.rebuild_to_vec().edits);
+        let item = sidebar.item.unwrap();
+        sidebar.click(&mut dom);
+        assert!(!sidebar.blocked);
+        let event = EventData::Mouse(SerializedMouseData::default());
+        dom.runtime()
+            .handle_event("click", Event::new(event.into_any(), true), item);
+        let updates = dom.render_immediate_to_vec().edits;
+        assert!(
+            updates.iter().any(
+                |update| matches!(update, Mutation::SetText { value, .. } if *value == "true")
+            )
+        );
     }
 }

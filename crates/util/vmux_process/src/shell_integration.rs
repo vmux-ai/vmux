@@ -54,7 +54,8 @@ end
 __vmux_pc
 "#;
 
-const NU_HOOKS: &str = r#"$env.config.hooks.pre_execution = ($env.config.hooks.pre_execution? | default [] | append {|| print -rn $"\u{1b}]2;(commandline)\u{7}\u{1b}]133;C\u{7}" })
+const NU_HOOKS: &str = r#"$env.config.shell_integration.osc133 = false
+$env.config.hooks.pre_execution = ($env.config.hooks.pre_execution? | default [] | append {|| print -rn $"\u{1b}]2;(commandline)\u{7}\u{1b}]133;C\u{7}" })
 $env.config.hooks.pre_prompt = ($env.config.hooks.pre_prompt? | default [] | append {|| print -rn $"\u{1b}]133;D;($env.LAST_EXIT_CODE)\u{7}\u{1b}]7;file://localhost($env.PWD | str replace --all '%' '%25' | str replace --all '\' '%5C' | str replace --all '#' '%23' | str replace --all '?' '%3F')\u{7}" })
 "#;
 
@@ -186,17 +187,24 @@ pub(crate) struct ShellInput {
     revision: u64,
     submitted: VecDeque<u64>,
     executing: Option<u64>,
+    interrupted: Option<u64>,
+    prompt_observed: bool,
     ready: bool,
     overflowed: bool,
 }
 
 impl ShellInput {
     pub(crate) fn typed(&mut self, bytes: &[u8]) {
-        if bytes.is_empty() {
+        if bytes.is_empty() || bytes.iter().all(|byte| *byte == 0x0c) {
             return;
         }
         self.revision = self.revision.wrapping_add(1).max(1);
         self.ready = false;
+        if bytes == b"\x03" {
+            let confirmed =
+                self.executing.is_some() || (self.prompt_observed && self.submitted.is_empty());
+            self.interrupted = confirmed.then_some(self.revision);
+        }
         for byte in bytes {
             if !matches!(*byte, b'\r' | b'\n') {
                 continue;
@@ -215,12 +223,16 @@ impl ShellInput {
     }
 
     pub(crate) fn finished(&mut self) {
+        self.prompt_observed = true;
         let revision = self
             .executing
             .take()
             .or_else(|| self.submitted.pop_front())
             .unwrap_or(0);
-        self.ready = !self.overflowed && self.submitted.is_empty() && revision == self.revision;
+        let interrupted = self.interrupted.take() == Some(self.revision);
+        self.ready = !self.overflowed
+            && self.submitted.is_empty()
+            && (revision == self.revision || interrupted);
     }
 
     pub(crate) fn ready(&self) -> bool {
@@ -317,6 +329,64 @@ mod tests {
         input.started();
         input.finished();
         assert!(input.ready());
+    }
+
+    #[test]
+    fn screen_redraw_preserves_directory_switching_readiness_and_existing_drafts() {
+        let mut input = ShellInput::default();
+        input.finished();
+        input.typed(b"\x0c");
+        assert!(input.ready());
+        input.typed(b"unfinished command");
+        input.typed(b"\x0c");
+        assert!(!input.ready());
+    }
+
+    #[test]
+    fn cancelled_drafts_restore_directory_switching_only_when_the_next_prompt_arrives() {
+        let mut input = ShellInput::default();
+        input.finished();
+        input.typed(b"unfinished command");
+        input.typed(b"\x03");
+        assert!(!input.ready());
+        input.finished();
+        assert!(input.ready());
+        input.typed(b"other draft");
+        input.typed(b"\x03");
+        input.typed(b"newer input");
+        input.finished();
+        assert!(!input.ready());
+    }
+
+    #[test]
+    fn interrupted_running_commands_restore_directory_switching_after_completion() {
+        let mut input = ShellInput::default();
+        input.finished();
+        input.typed(b"sleep 1\r");
+        input.started();
+        input.typed(b"\x03");
+        assert!(!input.ready());
+        input.finished();
+        assert!(input.ready());
+    }
+
+    #[test]
+    fn startup_markers_cannot_enable_directory_switching_for_cancelled_early_input() {
+        let mut input = ShellInput::default();
+        input.typed(b"early draft");
+        input.typed(b"\x03");
+        input.finished();
+        assert!(!input.ready());
+    }
+
+    #[test]
+    fn unacknowledged_submissions_cannot_be_mistaken_for_a_cancelled_directory_prompt() {
+        let mut input = ShellInput::default();
+        input.finished();
+        input.typed(b"sleep 1\r");
+        input.typed(b"\x03");
+        input.finished();
+        assert!(!input.ready());
     }
 
     #[test]

@@ -1141,3 +1141,5 @@ session-turn-view-response = 응답 보기
 agent-incoming-message = 에이전트 메시지
 
 schema-focus-follows-mouse = 마우스 위치에 따라 패널 선택
+
+terminal-directory-input-pending = 디렉터리를 변경하려면 현재 명령이나 입력을 완료하거나 취소하세요.

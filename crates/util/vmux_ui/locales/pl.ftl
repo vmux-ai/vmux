@@ -1144,3 +1144,5 @@ session-turn-view-response = Pokaż odpowiedź
 agent-incoming-message = Wiadomość agenta
 
 schema-focus-follows-mouse = Fokus podąża za myszą
+
+terminal-directory-input-pending = Zakończ lub anuluj bieżące polecenie albo wprowadzanie tekstu przed zmianą katalogu.

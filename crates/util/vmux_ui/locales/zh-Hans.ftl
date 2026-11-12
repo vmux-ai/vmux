@@ -1141,3 +1141,5 @@ session-turn-view-response = 查看回复
 agent-incoming-message = 智能体消息
 
 schema-focus-follows-mouse = 焦点跟随鼠标
+
+terminal-directory-input-pending = 更改目录前，请完成或取消当前命令或输入。

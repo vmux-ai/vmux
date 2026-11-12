@@ -174,6 +174,10 @@ fn AddressMenu(
     let open_requests = requests.clone();
     let more_requests = requests.clone();
     let more = crumb.on_more.clone();
+    let terminal_directory = matches!(
+        &crumb.on_open,
+        Some(AddressIntent::TerminalDirectories { .. })
+    );
     rsx! {
         BreadcrumbDropdown {
             open_mode,
@@ -218,7 +222,13 @@ fn AddressMenu(
                 {
                     let requests = requests.clone();
                     let intent = entry.intent.clone();
+                    let title = if terminal_directory && intent.is_none() {
+                        translate("terminal-directory-input-pending")
+                    } else {
+                        entry.title.clone()
+                    };
                     rsx! { DropdownOption {
+                        title,
                         key: "{entry.identity}-{entry.path}-{entry.intent:?}",
                         label: AddressLabel(&entry).text(), selected: intent.is_some() && entry.intent == crumb.entry.intent,
                         disabled: intent.is_none(),
