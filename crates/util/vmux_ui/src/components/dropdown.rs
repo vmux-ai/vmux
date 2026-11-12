@@ -244,6 +244,7 @@ pub fn DropdownTrigger(
     onclick: EventHandler<()>,
     #[props(default)] on_primary: Option<EventHandler<()>>,
     #[props(default)] on_hover_open: Option<EventHandler<()>>,
+    #[props(default)] on_context_open: Option<EventHandler<()>>,
     #[props(default)] title: String,
     #[props(default)] active: bool,
     #[props(default)] disabled: bool,
@@ -289,6 +290,16 @@ pub fn DropdownTrigger(
             title,
             aria_expanded: open,
             disabled,
+            oncontextmenu: move |event| {
+                if let Some(on_context_open) = on_context_open {
+                    event.prevent_default();
+                    event.stop_propagation();
+                    if let Some(task) = hover_task.write().take() { task.cancel(); }
+                    hover_preview.set(false);
+                    if let Some(context) = context { context.activate.call(()); }
+                    on_context_open.call(());
+                }
+            },
             onmouseenter: move |_| {
                 if open_mode == DropdownOpenMode::Hover
                     && let Some(on_hover_open) = on_hover_open
@@ -372,6 +383,7 @@ pub fn DropdownOption(
             r#type: "button",
             disabled,
             "data-vmux-dropdown-option": "",
+            aria_label: label.clone(),
             "data-vmux-dropdown-selected": if selected { "true" } else { "false" },
             class: cn([
                 "flex min-h-8 w-full min-w-0 items-center gap-2 rounded-md px-2 py-1.5 text-left text-xs transition-colors data-[vmux-dropdown-active=true]:bg-foreground/[0.07] data-[vmux-dropdown-active=true]:text-foreground",

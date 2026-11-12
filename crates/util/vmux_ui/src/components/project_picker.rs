@@ -61,6 +61,8 @@ pub fn ProjectSelectPopup(
     on_add: EventHandler<()>,
     #[props(default)] on_open_selected: Option<EventHandler<ProjectRow>>,
     #[props(default)] on_rename_selected: Option<EventHandler<ProjectRow>>,
+    #[props(default)] on_remove_selected: Option<EventHandler<ProjectRow>>,
+    #[props(default)] on_open_all: Option<EventHandler<()>>,
 ) -> Element {
     let has_projects = !projects.is_empty();
     let selected_project = projects
@@ -104,7 +106,7 @@ pub fn ProjectSelectPopup(
                     leading: rsx! { LineIconView { icon: LineIcon::Pencil, class: "size-4 shrink-0" } },
                 }
             }
-            if let (Some(handler), Some(project)) = (on_open_selected, selected_project) {
+            if let (Some(handler), Some(project)) = (on_open_selected, selected_project.clone()) {
                 {
                     let row = project.clone();
                     rsx! {
@@ -120,11 +122,30 @@ pub fn ProjectSelectPopup(
                     }
                 }
             }
+            if let Some(handler) = on_open_all {
+                DropdownOption {
+                    label: translate("project-all"),
+                    selected: false,
+                    onclick: move |_| handler.call(()),
+                    leading: rsx! { LineIconView { icon: LineIcon::List, class: "size-4 shrink-0" } },
+                }
+            }
             DropdownOption {
                 label: translate("common-add"),
                 selected: false,
                 onclick: move |_| on_add.call(()),
                 leading: rsx! { LineIconView { icon: LineIcon::Plus, class: "size-4 shrink-0" } },
+            }
+            if let (Some(handler), Some(project)) = (on_remove_selected, selected_project) {
+                div { class: "mx-1 my-1 h-px bg-foreground/[0.08]" }
+                DropdownOption {
+                    label: translate("project-remove"),
+                    title: translate("project-remove-description"),
+                    class: "text-destructive hover:text-destructive".to_string(),
+                    selected: false,
+                    onclick: move |_| handler.call(project.clone()),
+                    leading: rsx! { LineIconView { icon: LineIcon::Trash, class: "size-4 shrink-0" } },
+                }
             }
         }
     }
@@ -378,5 +399,117 @@ fn BranchChangeStat(insertions: u32, deletions: u32) -> Element {
                 span { class: "text-rose-600 dark:text-rose-400", "−{deletions}" }
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::components::dropdown::Dropdown;
+    use crate::components::sheet::SheetSelectorRow;
+    use dioxus::core::{AttributeValue, ElementId, Mutation, VirtualDom};
+    use dioxus_html::{EventData, SerializedHtmlEventConverter, SerializedMouseData};
+    use std::{
+        cell::{Cell, RefCell},
+        collections::HashMap,
+        rc::Rc,
+    };
+
+    #[derive(Default)]
+    struct MenuRequests {
+        removed: RefCell<Vec<ProjectRow>>,
+        collections: Cell<usize>,
+        context: Cell<usize>,
+    }
+
+    #[component]
+    fn Menu() -> Element {
+        let requests = use_context::<Rc<MenuRequests>>();
+        let removed = requests.clone();
+        let collections = requests.clone();
+        rsx! {
+            Dropdown { open: true, on_dismiss: move |_| {},
+                SheetSelectorRow {
+                    label: "Projects".to_string(), open: true, onclick: move |_| {},
+                    on_context_open: move |_| requests.context.set(requests.context.get() + 1),
+                }
+                ProjectSelectPopup {
+                    projects: vec![
+                        ProjectRow { path: "/first".to_string(), identity: "vmux://projects/first".to_string(), label: "First".to_string(), ..Default::default() },
+                        ProjectRow { path: "/second".to_string(), identity: "vmux://projects/second".to_string(), label: "Second".to_string(), ..Default::default() },
+                    ],
+                    selected_path: "/second".to_string(),
+                    on_pick: move |_| {}, on_add: move |_| {},
+                    on_open_all: move |_| collections.collections.set(collections.collections.get() + 1),
+                    on_remove_selected: move |project| removed.removed.borrow_mut().push(project),
+                }
+            }
+        }
+    }
+
+    struct ProjectMenu {
+        dom: VirtualDom,
+        requests: Rc<MenuRequests>,
+        options: HashMap<String, ElementId>,
+        trigger: ElementId,
+    }
+
+    impl ProjectMenu {
+        fn mount() -> Self {
+            dioxus::html::set_event_converter(Box::new(SerializedHtmlEventConverter));
+            let requests = Rc::new(MenuRequests::default());
+            let mut dom = VirtualDom::new(Menu);
+            dom.provide_root_context(requests.clone());
+            let mut options = HashMap::new();
+            let mut trigger = None;
+            for mutation in dom.rebuild_to_vec().edits {
+                match mutation {
+                    Mutation::SetAttribute {
+                        name: "aria-label",
+                        value: AttributeValue::Text(label),
+                        id,
+                        ..
+                    } => {
+                        options.insert(label.to_string(), id);
+                    }
+                    Mutation::NewEventListener { name, id } if name == "contextmenu" => {
+                        trigger = Some(id)
+                    }
+                    _ => {}
+                }
+            }
+            Self {
+                dom,
+                requests,
+                options,
+                trigger: trigger.unwrap(),
+            }
+        }
+
+        fn event(&mut self, name: &str, target: ElementId) {
+            self.dom.runtime().handle_event(
+                name,
+                Event::new(
+                    EventData::Mouse(SerializedMouseData::default()).into_any(),
+                    true,
+                ),
+                target,
+            );
+            self.dom.render_immediate_to_vec();
+        }
+    }
+
+    #[test]
+    fn project_menu_opens_on_context_click_and_removes_the_selected_project() {
+        let mut menu = ProjectMenu::mount();
+        menu.event("contextmenu", menu.trigger);
+        assert_eq!(menu.requests.context.get(), 1);
+        menu.event("click", menu.options[&translate("project-all")]);
+        assert_eq!(menu.requests.collections.get(), 1);
+        menu.event("click", menu.options[&translate("project-remove")]);
+        let removed = menu.requests.removed.borrow();
+        assert_eq!(removed.len(), 1);
+        assert_eq!(removed[0].identity, "vmux://projects/second");
+        assert_eq!(removed[0].path, "/second");
     }
 }

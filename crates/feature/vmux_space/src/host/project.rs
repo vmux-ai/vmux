@@ -23,6 +23,9 @@ pub struct SpaceProjectPlugin;
 
 impl Plugin for SpaceProjectPlugin {
     fn build(&self, app: &mut App) {
+        if !app.is_plugin_added::<vmux_project::ProjectPlugin>() {
+            app.add_plugins(vmux_project::ProjectPlugin);
+        }
         app.add_systems(Startup, spawn_repository_roots)
             .init_resource::<vmux_git::GitRuntime>()
             .init_resource::<ActiveProjectRows>()
@@ -32,11 +35,17 @@ impl Plugin for SpaceProjectPlugin {
             .add_observer(pick)
             .add_plugins(bevy_cef::prelude::UiEventPlugin::<(
                 vmux_api::space::ProjectRenameRequest,
+                vmux_api::space::ProjectRemoveRequest,
             )>::default())
             .add_observer(rename)
+            .add_observer(remove)
             .add_systems(
                 Update,
                 (
+                    register
+                        .after(vmux_project::StoreSet::Load)
+                        .before(vmux_project::StoreSet::Write),
+                    finish_registrations.after(vmux_project::StoreSet::Write),
                     remember.before(EffectiveStartupSet),
                     start_repo_root_resolutions.after(remember),
                     finish_repo_root_resolutions.after(start_repo_root_resolutions),
@@ -55,15 +64,195 @@ impl Plugin for SpaceProjectPlugin {
 fn rename(
     trigger: On<UiInput<vmux_api::space::ProjectRenameRequest>>,
     scope: vmux_layout::window::WindowScope,
-    mut settings: ResMut<AppSettings>,
-    mut saves: MessageWriter<SettingsSaveRequest>,
+    projects: vmux_ecs::profile::Projects,
+    registrations: vmux_project::Registrations,
+    mut commands: Commands,
 ) {
     if scope.current_space(trigger.event().webview).is_none() {
         return;
     }
     let request = &trigger.event().payload;
-    if settings.rename_project(&request.id, &request.name) {
+    let Ok(root) = projects.path() else {
+        return;
+    };
+    let Some((_, cwd, repository, revision)) = registrations.get(root, &request.id) else {
+        return;
+    };
+    commands.spawn((
+        vmux_ecs::Operation::bundle("project.save")
+            .unwrap()
+            .running(),
+        vmux_project::WriteRequest {
+            root: root.to_path_buf(),
+            mutation: vmux_project::Mutation::Save {
+                expected: revision.0,
+                project: vmux_project::ProjectSaved {
+                    root: root.to_path_buf(),
+                    id: vmux_project::ProjectId(request.id.clone()),
+                    directory: cwd.0.clone(),
+                    name: request.name.clone(),
+                    repository: repository.0.clone(),
+                    revision: 0,
+                },
+            },
+        },
+    ));
+}
+
+fn remove(
+    trigger: On<UiInput<vmux_api::space::ProjectRemoveRequest>>,
+    scope: vmux_layout::window::WindowScope,
+    projects: vmux_ecs::profile::Projects,
+    registrations: vmux_project::Registrations,
+    mut commands: Commands,
+) {
+    if scope.current_space(trigger.event().webview).is_none() {
+        return;
+    }
+    let Ok(root) = projects.path() else {
+        return;
+    };
+    let id = &trigger.event().payload.id;
+    if registrations.get(root, id).is_none() {
+        return;
+    }
+    commands.spawn((
+        vmux_ecs::Operation::bundle("project.delete")
+            .unwrap()
+            .running(),
+        vmux_project::WriteRequest {
+            root: root.to_path_buf(),
+            mutation: vmux_project::Mutation::Remove(id.clone()),
+        },
+    ));
+}
+
+#[derive(Component)]
+struct Registration(vmux_project::ProjectId);
+
+fn register(
+    projects: vmux_ecs::profile::Projects,
+    registrations: vmux_project::Registrations,
+    mut changed: MessageReader<vmux_project::ProjectChanged>,
+    settings: Option<ResMut<AppSettings>>,
+    pending: Query<&Registration>,
+    mut saves: MessageWriter<SettingsSaveRequest>,
+    mut commands: Commands,
+) {
+    let updated = changed.read().count() > 0;
+    let Some(mut settings) = settings else {
+        return;
+    };
+    if !updated && !settings.is_changed() {
+        return;
+    }
+    let Ok(root) = projects.path() else {
+        return;
+    };
+    if registrations.ready(root) != Ok(true) {
+        return;
+    }
+    let root = root.to_path_buf();
+    let snapshot = registrations.snapshot(&root);
+    let mut candidates = std::collections::BTreeMap::new();
+    for project in settings
+        .projects
+        .iter()
+        .chain(settings.spaces.values().flat_map(|space| &space.projects))
+    {
+        candidates
+            .entry(project.path.clone())
+            .or_insert_with(|| project.clone());
+    }
+    let mut associated = false;
+    for project in candidates.into_values() {
+        let directory = std::path::Path::new(&project.path);
+        let proposed = if vmux_project::ProjectRoute::is_page(&project.id) {
+            project.id.clone()
+        } else {
+            vmux_project::ProjectRoute::from_path(&root, directory).unwrap_or_else(|| {
+                format!("{}{id}", vmux_project::ProjectRoute::ROOT, id = project.id)
+            })
+        };
+        if snapshot.hidden.contains(&proposed)
+            || vmux_project::ProjectRoute::from_path(&root, directory)
+                .is_some_and(|url| snapshot.hidden.contains(&url))
+        {
+            continue;
+        }
+        let existing = registrations.url_for_directory(&root, directory);
+        let id = vmux_project::ProjectId(existing.clone().unwrap_or(proposed));
+        if existing.is_some() {
+            associated |= settings
+                .bypass_change_detection()
+                .associate_project(&project.path, &id.0);
+        }
+        if pending.iter().any(|held| held.0 == id) {
+            continue;
+        }
+        let (name, repository, expected) = if let Some(url) = existing {
+            let Some(record) = snapshot.projects.get(&url) else {
+                continue;
+            };
+            if record.revision != 0
+                || project.label.is_none()
+                || project.display_label() == record.name
+            {
+                continue;
+            }
+            (
+                project.display_label().to_string(),
+                record.repository.clone(),
+                record.revision,
+            )
+        } else {
+            let name = project.label.clone().unwrap_or_else(|| {
+                directory
+                    .file_name()
+                    .unwrap_or_default()
+                    .to_string_lossy()
+                    .into_owned()
+            });
+            (name, None, 0)
+        };
+        commands.spawn((
+            vmux_ecs::Operation::bundle("project.save")
+                .unwrap()
+                .running(),
+            Registration(id.clone()),
+            vmux_project::WriteRequest {
+                root: root.clone(),
+                mutation: vmux_project::Mutation::Save {
+                    expected,
+                    project: vmux_project::ProjectSaved {
+                        root: root.clone(),
+                        id,
+                        directory: directory.to_path_buf(),
+                        name,
+                        repository,
+                        revision: 0,
+                    },
+                },
+            },
+        ));
+    }
+    if associated {
+        settings.set_changed();
         saves.write(SettingsSaveRequest);
+    }
+}
+
+fn finish_registrations(
+    mut completed: MessageReader<vmux_project::WriteCompleted>,
+    pending: Query<(), With<Registration>>,
+    mut commands: Commands,
+) {
+    for completed in completed.read() {
+        if pending.contains(completed.requester) {
+            commands
+                .entity(completed.requester)
+                .remove::<Registration>();
+        }
     }
 }
 
@@ -166,12 +355,69 @@ fn pick(
     });
 }
 
-fn finish_picks(mut pending: Query<(Entity, &mut PendingProjectPicker)>, mut commands: Commands) {
+fn finish_picks(
+    mut pending: Query<(Entity, &mut PendingProjectPicker)>,
+    projects: vmux_ecs::profile::Projects,
+    registrations: vmux_project::Registrations,
+    settings: Option<ResMut<AppSettings>>,
+    mut saves: MessageWriter<SettingsSaveRequest>,
+    mut commands: Commands,
+) {
+    let mut settings = settings;
     for (entity, mut picker) in &mut pending {
         let Some(selected) = future::block_on(future::poll_once(&mut picker.task)) else {
             continue;
         };
         if let Some(path) = selected {
+            if let Ok(root) = projects.path()
+                && registrations.ready(root) == Ok(true)
+            {
+                let id = registrations.url_for_directory(root, &path);
+                let id = if let Some(id) = id {
+                    id
+                } else {
+                    let id = format!(
+                        "{}{}",
+                        vmux_project::ProjectRoute::ROOT,
+                        uuid::Uuid::new_v4()
+                    );
+                    let name = settings
+                        .as_deref()
+                        .and_then(|settings| settings.project(&path.to_string_lossy()))
+                        .map(|project| project.display_label().to_string())
+                        .unwrap_or_else(|| {
+                            path.file_name()
+                                .unwrap_or_default()
+                                .to_string_lossy()
+                                .into_owned()
+                        });
+                    commands.spawn((
+                        vmux_ecs::Operation::bundle("project.save")
+                            .unwrap()
+                            .running(),
+                        vmux_project::WriteRequest {
+                            root: root.to_path_buf(),
+                            mutation: vmux_project::Mutation::Save {
+                                expected: 0,
+                                project: vmux_project::ProjectSaved {
+                                    root: root.to_path_buf(),
+                                    id: vmux_project::ProjectId(id.clone()),
+                                    directory: path.clone(),
+                                    name,
+                                    repository: None,
+                                    revision: 0,
+                                },
+                            },
+                        },
+                    ));
+                    id
+                };
+                if let Some(settings) = settings.as_mut()
+                    && settings.associate_project(&path.to_string_lossy(), &id)
+                {
+                    saves.write(SettingsSaveRequest);
+                }
+            }
             commands.trigger(UiInput {
                 webview: picker.webview,
                 payload: ProjectActivateRequest {
@@ -292,31 +538,45 @@ impl ProjectCatalog {
                         .into_owned();
                 }
             }
-            projected.path = checkout.root.to_string_lossy().into_owned();
+            if row.identity.is_empty() || row.identity == row.path {
+                projected.path = checkout.root.to_string_lossy().into_owned();
+            } else {
+                projected.path = vmux_path::PathIdentity::resolve(&row.path)
+                    .into_path_buf()
+                    .to_string_lossy()
+                    .into_owned();
+            }
             projected.display_path = vmux_path::DisplayPath::project(&identity);
             projected.is_worktree = checkout.root != identity;
             candidates.push((Some(identity), projected));
         }
         let mut projected = Vec::<(Option<std::path::PathBuf>, ProjectRow)>::new();
         for (identity, row) in &candidates {
-            if identity.as_ref().is_some_and(|identity| {
-                candidates.iter().any(|(other, _)| {
-                    other.as_ref().is_some_and(|other| {
-                        identity != other && std::path::Path::new(&row.path).starts_with(other)
+            if !row.identity.starts_with(vmux_project::ProjectRoute::ROOT)
+                && identity.as_ref().is_some_and(|identity| {
+                    candidates.iter().any(|(other, _)| {
+                        other.as_ref().is_some_and(|other| {
+                            identity != other && std::path::Path::new(&row.path).starts_with(other)
+                        })
                     })
                 })
-            }) {
+            {
                 continue;
             }
-            if let Some((_, held)) =
-                projected
-                    .iter_mut()
-                    .find(|(held, held_row)| match (held, identity) {
-                        (Some(held), Some(identity)) => held == identity,
-                        (None, None) => held_row.path == row.path,
-                        _ => false,
-                    })
-            {
+            if let Some((_, held)) = projected.iter_mut().find(|(held, held_row)| {
+                if row.identity.starts_with(vmux_project::ProjectRoute::ROOT)
+                    && held_row
+                        .identity
+                        .starts_with(vmux_project::ProjectRoute::ROOT)
+                {
+                    return held_row.identity == row.identity;
+                }
+                match (held, identity) {
+                    (Some(held), Some(identity)) => held == identity,
+                    (None, None) => held_row.path == row.path,
+                    _ => false,
+                }
+            }) {
                 if row.is_active && !held.is_active {
                     held.clone_from(row);
                 }
@@ -348,6 +608,7 @@ fn refresh_active_projects(
     mut scan: ResMut<ActiveProjectScan>,
     runtime: Res<vmux_git::GitRuntime>,
     wake: Option<Res<EventLoopProxyWrapper>>,
+    mut changed: MessageReader<vmux_project::ProjectChanged>,
 ) {
     let space = projects.active_space.id();
     if let Some(task) = scan.task.as_mut()
@@ -368,24 +629,21 @@ fn refresh_active_projects(
             active.repositories = catalog.repositories;
         }
     }
-    scan.requested |= active.space.as_deref() != space || projects.settings_changed();
+    scan.requested |= active.space.as_deref() != space
+        || projects.settings_changed()
+        || changed.read().count() > 0;
     if scan.task.is_some() || !scan.requested {
         return;
     }
     scan.requested = false;
     let space = space.map(str::to_string);
-    let settings = projects.settings.as_deref().cloned();
+    let rows = space
+        .as_deref()
+        .map(|space| projects.projects_of(space))
+        .unwrap_or_default();
     let wake = wake.as_deref().map(|wake| (**wake).clone());
     let Some(task) = runtime.spawn(wake, move || {
-        let catalog = match (space.as_deref(), settings.as_ref()) {
-            (Some(space), Some(settings)) => {
-                ProjectCatalog::from_rows(&settings.project_rows(space))
-            }
-            _ => ProjectCatalog {
-                rows: Vec::new(),
-                repositories: Vec::new(),
-            },
-        };
+        let catalog = ProjectCatalog::from_rows(&rows);
         (space, catalog)
     }) else {
         scan.requested = true;
@@ -597,6 +855,8 @@ pub struct SpaceProjects<'w, 's> {
     hierarchy: SpaceHierarchy<'w, 's>,
     space_ids: Query<'w, 's, &'static SpaceId>,
     expanded: Query<'w, 's, &'static ExpandedProjectDirs, With<Space>>,
+    project_roots: vmux_ecs::profile::Projects<'w, 's>,
+    registrations: vmux_project::Registrations<'w, 's>,
 }
 
 impl SpaceProjects<'_, '_> {
@@ -651,10 +911,71 @@ impl SpaceProjects<'_, '_> {
     }
 
     fn projects_of(&self, space_id: &str) -> Vec<ProjectRow> {
-        let Some(settings) = self.settings.as_deref() else {
-            return Vec::new();
+        let Ok(root) = self.project_roots.path() else {
+            return self
+                .settings
+                .as_deref()
+                .map(|settings| settings.project_rows(space_id))
+                .unwrap_or_default();
         };
-        settings.project_rows(space_id)
+        if self.registrations.ready(root) != Ok(true) {
+            return Vec::new();
+        }
+        let snapshot = self.registrations.snapshot(root);
+        let active = self
+            .settings
+            .as_deref()
+            .and_then(|settings| settings.space(space_id))
+            .and_then(|space| space.active_dir());
+        let mut selected = None;
+        if let Some(active) = active {
+            let path = std::path::Path::new(active);
+            let known = self
+                .settings
+                .as_deref()
+                .and_then(|settings| settings.project(active));
+            for (id, record) in &snapshot.projects {
+                if path.starts_with(&record.directory)
+                    || known
+                        .is_some_and(|known| std::path::Path::new(&known.path) == record.directory)
+                {
+                    let depth = record.directory.components().count();
+                    if selected
+                        .as_ref()
+                        .is_none_or(|(_, previous)| depth > *previous)
+                    {
+                        selected = Some((id.clone(), depth));
+                    }
+                }
+            }
+        }
+        let mut rows = Vec::new();
+        for (id, record) in snapshot.projects {
+            if snapshot.hidden.contains(&id) {
+                continue;
+            }
+            let is_active = selected
+                .as_ref()
+                .is_some_and(|(selected, _)| selected == &id);
+            let path = if is_active {
+                active.unwrap().to_string()
+            } else {
+                record.directory.to_string_lossy().into_owned()
+            };
+            rows.push(ProjectRow {
+                path,
+                identity: id,
+                label: record.name,
+                display_path: record
+                    .repository
+                    .unwrap_or_else(|| vmux_path::DisplayPath::project(&record.directory)),
+                is_active,
+                kind: ProjectRowKind::Project,
+                ..Default::default()
+            });
+        }
+        rows.sort_by(|left, right| left.label.to_lowercase().cmp(&right.label.to_lowercase()));
+        rows
     }
 
     fn rows_of(&self, space_id: &str, space: Option<Entity>) -> Vec<ProjectRow> {
@@ -1152,6 +1473,34 @@ mod tests {
                 .canonicalize()
                 .unwrap()
                 .to_string_lossy()
+        );
+    }
+
+    #[test]
+    fn distinct_project_ids_keep_their_names_and_working_directories_in_one_repository() {
+        let fixture = GitProjectRowsFixture::start();
+        let frontend = fixture.cloud.join("frontend");
+        let backend = fixture.cloud.join("backend");
+        std::fs::create_dir(&frontend).unwrap();
+        std::fs::create_dir(&backend).unwrap();
+        let mut first = fixture.row(&frontend, true);
+        first.identity = "vmux://projects/frontend".to_string();
+        first.label = "Product UI".to_string();
+        let mut second = fixture.row(&backend, false);
+        second.identity = "vmux://projects/backend".to_string();
+        second.label = "Product API".to_string();
+
+        let catalog = ProjectCatalog::from_rows(&[first, second]);
+        assert_eq!(catalog.rows.len(), 2);
+        assert_eq!(catalog.rows[0].label, "Product UI");
+        assert_eq!(
+            catalog.rows[0].path,
+            frontend.canonicalize().unwrap().display().to_string()
+        );
+        assert_eq!(catalog.rows[1].label, "Product API");
+        assert_eq!(
+            catalog.rows[1].path,
+            backend.canonicalize().unwrap().display().to_string()
         );
     }
 

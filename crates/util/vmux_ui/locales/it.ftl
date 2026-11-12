@@ -1134,6 +1134,9 @@ agent-video-play = Riproduci video
 command-toggle-url-bar = Layout > Layout > Mostra o nascondi barra degli indirizzi
 
 project-rename = Rinomina progetto
+project-all = Tutti i progetti
+project-remove = Rimuovi progetto
+project-remove-description = Rimuovi dall’elenco dei progetti. I file locali vengono conservati.
 
 agent-tool-slept = Ha atteso
 

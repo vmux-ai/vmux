@@ -575,6 +575,7 @@ fn load(
 fn restore(
     mut results: MessageReader<LoadCompleted>,
     roots: Query<(&Root, &Loading)>,
+    mut changed: MessageWriter<ProjectChanged>,
     mut commands: WorldCommands,
 ) {
     for completed in results.read() {
@@ -623,6 +624,9 @@ fn restore(
         commands
             .entity(completed.ticket.owner)
             .insert((Loaded, LoadedDirectory(root.0.clone())));
+        changed.write(ProjectChanged {
+            root: root.0.clone(),
+        });
     }
 }
 

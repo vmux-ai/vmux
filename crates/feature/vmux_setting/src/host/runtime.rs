@@ -368,6 +368,21 @@ impl AppSettings {
         changed
     }
 
+    pub fn associate_project(&mut self, path: &str, id: &str) -> bool {
+        let mut changed = false;
+        for project in self.projects.iter_mut().chain(
+            self.spaces
+                .values_mut()
+                .flat_map(|space| &mut space.projects),
+        ) {
+            if project.path == path && project.id != id {
+                project.id = id.to_string();
+                changed = true;
+            }
+        }
+        changed
+    }
+
     fn remember_known_project(&mut self, project: &SpaceProject) -> bool {
         match self.projects.iter().position(|p| p.path == project.path) {
             Some(0) => false,

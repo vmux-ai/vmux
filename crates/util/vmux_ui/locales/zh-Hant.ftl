@@ -1131,6 +1131,9 @@ agent-video-play = 播放影片
 command-toggle-url-bar = Layout > 版面配置 > 切換網址列
 
 project-rename = 重新命名專案
+project-all = 所有專案
+project-remove = 移除專案
+project-remove-description = 從專案清單中移除。保留本機檔案。
 
 agent-tool-slept = 已等待
 

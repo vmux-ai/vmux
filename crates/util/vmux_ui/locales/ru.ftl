@@ -1134,6 +1134,9 @@ agent-video-play = Воспроизвести видео
 command-toggle-url-bar = Layout > Макет > Переключить адресную строку
 
 project-rename = Переименовать проект
+project-all = Все проекты
+project-remove = Удалить проект
+project-remove-description = Удалить из списка проектов. Локальные файлы сохраняются.
 
 agent-tool-slept = Подождал
 

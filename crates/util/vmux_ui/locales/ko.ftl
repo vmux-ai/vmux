@@ -1131,6 +1131,9 @@ agent-video-play = 동영상 재생
 command-toggle-url-bar = Layout > 레이아웃 > 주소 표시줄 전환
 
 project-rename = 프로젝트 이름 변경
+project-all = 모든 프로젝트
+project-remove = 프로젝트 제거
+project-remove-description = 프로젝트 목록에서 제거합니다. 로컬 파일은 유지됩니다.
 
 agent-tool-slept = 대기함
 

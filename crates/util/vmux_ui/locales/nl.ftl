@@ -1134,6 +1134,9 @@ agent-video-play = Video afspelen
 command-toggle-url-bar = Layout > Indeling > Adresbalk schakelen
 
 project-rename = Project hernoemen
+project-all = Alle projecten
+project-remove = Project verwijderen
+project-remove-description = Uit de projectlijst verwijderen. Lokale bestanden blijven behouden.
 
 agent-tool-slept = Gewacht
 

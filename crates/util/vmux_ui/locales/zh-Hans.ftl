@@ -1131,6 +1131,9 @@ agent-video-play = 播放视频
 command-toggle-url-bar = Layout > 布局 > 切换地址栏
 
 project-rename = 重命名项目
+project-all = 所有项目
+project-remove = 移除项目
+project-remove-description = 从项目列表中移除。保留本地文件。
 
 agent-tool-slept = 已等待
 

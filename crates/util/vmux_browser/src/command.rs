@@ -1023,6 +1023,7 @@ fn side_sheet_project_page_open(
     trigger: On<UiInput<SideSheetProjectPageOpenRequest>>,
     leaf_panes: Query<Entity, (With<Pane>, Without<PaneSplit>)>,
     projects: vmux_ecs::profile::Projects,
+    registrations: vmux_project::Registrations,
     scope: WindowScope,
     mut requests: MessageWriter<PageOpenRequest>,
 ) {
@@ -1033,19 +1034,23 @@ fn side_sheet_project_page_open(
     }) else {
         return;
     };
+    let Some(project) = &request.project else {
+        requests.write(PageOpenRequest {
+            target: PageOpenTarget::ActiveStackInPane(target_pane),
+            url: vmux_project::ProjectRoute::ROOT.to_string(),
+            request_id: None,
+        });
+        return;
+    };
     let Ok(root) = projects.path() else {
         return;
     };
-    let url = match vmux_project::ProjectRoute::attach(root, std::path::Path::new(&request.path)) {
-        Ok(url) => url,
-        Err(error) => {
-            bevy::log::warn!("project could not be opened: {error}");
-            return;
-        }
-    };
+    if !matches!(registrations.directory(root, &project.0), Ok(Some(_))) {
+        return;
+    }
     requests.write(PageOpenRequest {
         target: PageOpenTarget::ActiveStackInPane(target_pane),
-        url,
+        url: project.0.clone(),
         request_id: None,
     });
 }

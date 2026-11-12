@@ -131,6 +131,7 @@
                 "ProjectActivateRequest",
                 "ProjectPickerRequest",
                 "ProjectRenameRequest",
+                "ProjectRemoveRequest",
                 "ProjectTreeToggle",
                 "ExtensionsUiState",
                 "ExtensionPopupOpenRequest",

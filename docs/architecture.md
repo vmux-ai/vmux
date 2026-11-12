@@ -787,6 +787,14 @@ settings, and history are shared by ID, while tabs, panes, focus, expansion, sid
 other layout state remain local to each window. Only the primary window's views persist.
 Bookmark cards start expanded. Their explicit open or closed choice is stored on the Space view,
 shared across its panes and tabs, and restored with the primary window's workspace.
+The side-sheet project selector opens on right-click as well as hover and offers the Projects
+collection directly. Its names and management requests use registered Project IDs. Renaming and
+removal share the Project store, while existing Tab directories and local files remain intact.
+The catalog renders registered Project records rather than inferring projects from directories.
+Legacy workspace preferences import previously selected projects and attach their canonical IDs
+without becoming another owner of Project names or removal state. Legacy page URLs resolve to
+the registered identity where available. A missing local folder does not remove the Project or
+prevent opening its metadata page.
 
 Each feature has one `feature.ron`. It is the static source of truth for the interfaces that
 feature publishes:

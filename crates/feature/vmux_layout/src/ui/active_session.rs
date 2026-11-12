@@ -250,6 +250,10 @@ fn ActiveWorkspaceProjectTree(project: ActiveWorkspaceProject, pane_id: u64) -> 
                             choosing_branch.set(false);
                             choosing.set(true);
                         },
+                        on_context_open: move |_| {
+                            choosing_branch.set(false);
+                            choosing.set(true);
+                        },
                         onclick: move |_| {
                             choosing_branch.set(false);
                             choosing.set(true);
@@ -289,13 +293,26 @@ fn ActiveWorkspaceProjectTree(project: ActiveWorkspaceProject, pane_id: u64) -> 
                                 choosing.set(false);
                                 let _ = send(&SideSheetProjectPageOpenRequest {
                                     pane_id,
-                                    path: project.path,
+                                    project: Some(vmux_project::ProjectId(project.identity)),
                                 });
                             },
                             on_rename_selected: move |project: ProjectRow| {
                                 choosing.set(false);
                                 name_draft.set(project.label.clone());
                                 renaming.set(Some(project));
+                            },
+                            on_open_all: move |_| {
+                                choosing.set(false);
+                                let _ = send(&SideSheetProjectPageOpenRequest {
+                                    pane_id,
+                                    project: None,
+                                });
+                            },
+                            on_remove_selected: move |project: ProjectRow| {
+                                choosing.set(false);
+                                let _ = send(&vmux_api::space::ProjectRemoveRequest {
+                                    id: project.identity,
+                                });
                             },
                         }
                     }

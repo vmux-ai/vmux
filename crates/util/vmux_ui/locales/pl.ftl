@@ -1134,6 +1134,9 @@ agent-video-play = Odtwórz wideo
 command-toggle-url-bar = Layout > Układ > Przełącz pasek adresu
 
 project-rename = Zmień nazwę projektu
+project-all = Wszystkie projekty
+project-remove = Usuń projekt
+project-remove-description = Usuń z listy projektów. Pliki lokalne zostaną zachowane.
 
 agent-tool-slept = Odczekano
 

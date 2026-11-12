@@ -163,6 +163,11 @@ pub struct ProjectRenameRequest {
     pub name: String,
 }
 
+#[vmux_api::ui_event(Eq)]
+pub struct ProjectRemoveRequest {
+    pub id: String,
+}
+
 #[vmux_api::contract(Default, Eq)]
 pub struct ProjectRow {
     pub path: String,

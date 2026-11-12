@@ -1134,6 +1134,9 @@ agent-video-play = تشغيل الفيديو
 command-toggle-url-bar = Layout > التخطيط > تبديل شريط العنوان
 
 project-rename = إعادة تسمية المشروع
+project-all = كل المشاريع
+project-remove = إزالة المشروع
+project-remove-description = إزالة من قائمة المشاريع. يتم الاحتفاظ بالملفات المحلية.
 
 agent-tool-slept = انتظر
 

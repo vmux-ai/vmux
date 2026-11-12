@@ -16,7 +16,7 @@ host = [
     "dep:vmux_page", "dep:vmux_path", "dep:vmux_ui", "dep:vmux_session", "dep:vmux_git",
     "dep:bevy", "dep:bevy_asset", "dep:bevy_cef", "dep:bevy_cef_core", "dep:libc",
     "dep:raw-window-handle", "dep:rfd", "dep:ron", "dep:sha2", "dep:uuid",
-    "dep:vmux_command", "dep:vmux_history", "dep:vmux_input", "dep:vmux_tool",
+    "dep:vmux_command", "dep:vmux_history", "dep:vmux_input", "dep:vmux_tool", "dep:vmux_project",
     "dep:dioxus", "dep:qrcode",
 ]
 debug = ["host"]
@@ -36,6 +36,7 @@ vmux_ui = { path = "../../util/vmux_ui", default-features = false, optional = tr
 vmux_api = { path = "../../util/vmux_api", optional = true }
 vmux_session = { path = "../vmux_session", default-features = false, optional = true }
 vmux_git = { path = "../vmux_git", optional = true }
+vmux_project = { path = "../vmux_project", features = ["contracts"], optional = true }
 vmux_flex = { path = "../../util/vmux_flex", optional = true }
 bevy_transform = { version = "0.19.0", default-features = false, features = ["std", "bevy-support"], optional = true }
 moonshine-save = { workspace = true, optional = true }

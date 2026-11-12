@@ -39,6 +39,7 @@
                 "SpaceFormRegenerateRequest",
                 "SpaceFormCloseRequest",
                 "ProjectForgetRequest",
+                "ProjectRemoveRequest",
                 "ProjectActivateRequest",
                 "TeamEvent",
                 "TeamOpenRequest",

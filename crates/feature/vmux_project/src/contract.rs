@@ -26,11 +26,11 @@ impl ProjectEntry {
         if !self.identity.is_empty() {
             return &self.identity;
         }
-        if !self.path.trim().is_empty() {
-            return &self.path;
-        }
         if !self.id.0.trim().is_empty() {
             return &self.id.0;
+        }
+        if !self.path.trim().is_empty() {
+            return &self.path;
         }
         if !self.url.trim().is_empty() {
             return &self.url;
@@ -85,6 +85,21 @@ pub struct ProjectUiState {
 
 #[cfg(host)]
 impl ProjectUiState {
+    pub fn identified(mut self) -> Self {
+        let entries = match &mut self.view {
+            ProjectView::Catalog(catalog) => &mut catalog.entries,
+            ProjectView::Detail(detail) => {
+                detail.identity = detail.id.0.clone();
+                &mut detail.choices
+            }
+            ProjectView::Loading | ProjectView::Error(_) => return self,
+        };
+        for entry in entries {
+            entry.identity = entry.id.0.clone();
+        }
+        self
+    }
+
     pub fn choices(&self) -> Vec<ProjectEntry> {
         match &self.view {
             ProjectView::Catalog(catalog) => catalog.entries.clone(),

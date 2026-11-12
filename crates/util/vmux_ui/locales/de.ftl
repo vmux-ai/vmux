@@ -1134,6 +1134,9 @@ agent-video-play = Video abspielen
 command-toggle-url-bar = Layout > Layout > URL-Leiste umschalten
 
 project-rename = Projekt umbenennen
+project-all = Alle Projekte
+project-remove = Projekt entfernen
+project-remove-description = Aus der Projektliste entfernen. Lokale Dateien bleiben erhalten.
 
 agent-tool-slept = Gewartet
 

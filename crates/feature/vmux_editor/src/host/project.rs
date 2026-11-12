@@ -1,3 +1,4 @@
+#[cfg(test)]
 use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
 
@@ -68,6 +69,7 @@ impl Plugin for ProjectPagePlugin {
                 sync_icons,
                 finish_catalogs,
                 finish_imports,
+                finish_registrations,
                 poll_deletes,
                 finish_removals,
                 finish_archives,
@@ -79,37 +81,14 @@ impl Plugin for ProjectPagePlugin {
         )
         .add_systems(
             PostUpdate,
-            (finish_repository_operations, sync_session_counts, saved).chain(),
+            (
+                finish_repository_operations,
+                sync_session_counts,
+                saved,
+                refresh,
+            )
+                .chain(),
         );
-    }
-}
-
-struct Names<'a>(&'a vmux_setting::AppSettings);
-
-impl Names<'_> {
-    fn apply(&self, mut state: ProjectUiState) -> ProjectUiState {
-        let entries = match &mut state.view {
-            ProjectView::Catalog(catalog) => &mut catalog.entries,
-            ProjectView::Detail(detail) => {
-                if let Some(project) = self.0.project(&detail.path) {
-                    if detail.revision == 0 {
-                        detail.name = project.display_label().to_string();
-                    }
-                    detail.identity = project.identity().to_string();
-                }
-                &mut detail.choices
-            }
-            _ => return state,
-        };
-        for entry in entries {
-            if let Some(project) = self.0.project(&entry.path) {
-                if entry.revision == 0 {
-                    entry.name = project.display_label().to_string();
-                }
-                entry.identity = project.identity().to_string();
-            }
-        }
-        state
     }
 }
 
@@ -215,13 +194,13 @@ struct ProjectCatalogTask {
 
 impl ProjectCatalogTask {
     fn spawn(
-        root: PathBuf,
+        _root: PathBuf,
         revision: u64,
         wake: Option<bevy::winit::EventLoopProxy<WinitUserEvent>>,
         registrations: Snapshot,
     ) -> Self {
         let task = IoTaskPool::get().spawn(async move {
-            let state = ProjectCatalog::read(&root, &registrations);
+            let state = ProjectCatalog::read(&registrations);
             if let Some(wake) = wake {
                 let _ = wake.send_event(WinitUserEvent::WakeUp);
             }
@@ -354,7 +333,42 @@ impl ProjectOperationPages<'_, '_> {
 }
 
 #[derive(Component)]
-struct ProjectImportTask(Task<Result<(), String>>);
+struct ProjectImportTask(Task<Result<Option<ProjectSaved>, String>>);
+
+#[derive(Component)]
+struct PendingSource(ProjectSaved);
+
+impl PendingSource {
+    fn new(root: &Path, directory: &Path, repository: Option<String>) -> Self {
+        Self(ProjectSaved {
+            root: root.to_path_buf(),
+            id: ProjectId(format!("{}{}", ProjectRoute::ROOT, uuid::Uuid::new_v4())),
+            directory: directory.to_path_buf(),
+            name: directory
+                .file_name()
+                .unwrap_or_default()
+                .to_string_lossy()
+                .into_owned(),
+            repository,
+            revision: 0,
+        })
+    }
+
+    fn for_provision(root: &Path, operation: &RepositoryProvisionOperation) -> Self {
+        match operation {
+            RepositoryProvisionOperation::Initialize { destination, .. } => {
+                Self::new(root, destination, None)
+            }
+            RepositoryProvisionOperation::Clone {
+                destination,
+                remote,
+            } => Self::new(root, destination, Some(remote.clone())),
+        }
+    }
+}
+
+#[derive(Component)]
+struct Registration;
 
 #[derive(Component)]
 struct ProjectDeleteTask(Task<Result<(), String>>);
@@ -391,16 +405,20 @@ impl ProjectName {
 pub(super) struct ProjectImport;
 
 impl ProjectImport {
-    async fn select(root: &Path) -> Result<(), String> {
+    async fn select(root: &Path) -> Result<Option<ProjectSaved>, String> {
         let selected = rfd::AsyncFileDialog::new()
             .set_title(vmux_ui::i18n::translate("project-import"))
             .pick_folder()
             .await;
         let Some(selected) = selected else {
-            return Ok(());
+            return Ok(None);
         };
         Self::register(root, selected.path())?;
-        Ok(())
+        let directory = selected
+            .path()
+            .canonicalize()
+            .map_err(|error| error.to_string())?;
+        Ok(Some(PendingSource::new(root, &directory, None).0))
     }
 
     pub(super) fn register(root: &Path, selected: &Path) -> Result<PathBuf, String> {
@@ -556,6 +574,7 @@ fn create(
     let requester = commands
         .spawn((
             Operation::bundle("project.create").unwrap().running(),
+            PendingSource::for_provision(root, &operation),
             ChildOf(webview),
             pending,
         ))
@@ -637,6 +656,7 @@ fn clone(
     let requester = commands
         .spawn((
             Operation::bundle("project.clone").unwrap().running(),
+            PendingSource::for_provision(root, &operation),
             ChildOf(webview),
             pending,
         ))
@@ -925,19 +945,24 @@ fn queue(
                         .file_name()
                         .map(|name| name.to_string_lossy().into_owned())
                         .unwrap_or_else(|| path.to_string_lossy().into_owned());
-                    let registration = registrations.get(&root, &url);
+                    let id = registrations
+                        .canonical_id(&root, &url)
+                        .unwrap_or_else(|| ProjectId(url.clone()));
+                    let registration = registrations.get(&root, &id.0);
                     if let Some((registration, _, _, _)) = registration {
                         name = registration.as_str().to_string();
                     }
                     page.title.clone_from(&name);
-                    let id = ProjectId(url.clone());
                     (
                         ProjectUiState {
                             view: ProjectView::Detail(ProjectDetailView {
                                 identity: String::new(),
                                 id: id.clone(),
                                 name,
-                                path: path.to_string_lossy().into_owned(),
+                                path: registration
+                                    .map_or(&path, |record| &record.1.0)
+                                    .to_string_lossy()
+                                    .into_owned(),
                                 repository: registration.and_then(|record| record.2.0.clone()),
                                 revision: registration.map_or(0, |record| record.3.0),
                                 choices_pending: choices.is_empty(),
@@ -957,7 +982,7 @@ fn queue(
                 ),
                 None => continue,
             };
-            let state = Names(&settings).apply(state);
+            let state = state.identified();
             if let ProjectView::Detail(detail) = &state.view {
                 page.title.clone_from(&detail.name);
             }
@@ -1040,7 +1065,7 @@ fn sync_icons(
         let Some(current) = state.current() else {
             continue;
         };
-        let next = Names(&settings).apply(current.clone());
+        let next = current.clone().identified();
         if let ProjectView::Detail(detail) = &next.view {
             page.title.clone_from(&detail.name);
             let seed = if detail.identity.is_empty() {
@@ -1178,7 +1203,6 @@ fn finish_deletes(
 }
 
 fn finish_catalogs(
-    settings: Res<vmux_setting::AppSettings>,
     mut tasks: Query<(
         Entity,
         &mut ProjectCatalogTask,
@@ -1207,7 +1231,8 @@ fn finish_catalogs(
             let Some(current) = current.current() else {
                 continue;
             };
-            if !matches!(&current.view, ProjectView::Detail(detail) if detail.id.0 == page.url) {
+            if !matches!(&current.view, ProjectView::Detail(detail) if registrations.canonical_id(root, &page.url).as_ref() == Some(&detail.id))
+            {
                 continue;
             }
         }
@@ -1252,7 +1277,7 @@ fn finish_catalogs(
         {
             state.collection_view = current.collection_view;
         }
-        let state = Names(&settings).apply(state);
+        let state = state.identified();
         commands.trigger(vmux_ecs::UiStateWrite::<ProjectUiState>::from_event(
             entity, &state,
         ));
@@ -1328,6 +1353,23 @@ fn finish_imports(
         let Some(result) = future::block_on(future::poll_once(&mut task.0)) else {
             continue;
         };
+        if let Ok(Some(project)) = &result {
+            commands
+                .entity(entity)
+                .remove::<(ChildOf, ProjectImportTask)>()
+                .insert((
+                    Registration,
+                    WriteRequest {
+                        root: operation.root.clone(),
+                        mutation: Mutation::Save {
+                            expected: 0,
+                            project: project.clone(),
+                        },
+                    },
+                ));
+            continue;
+        }
+        let result = result.map(|_| ());
         commands.trigger(OperationCompleted::from_result(entity, &result));
         let current = pages.get(target.entity()).is_ok_and(|(page, revision)| {
             ProjectRoute::is_root(&page.url) && captured.accepts(Some(revision.value))
@@ -1369,6 +1411,7 @@ fn finish_repository_operations(
         &OperationTarget,
         &OperationTargetRevision,
         &OperationState,
+        Option<&PendingSource>,
     )>,
     pages: Query<(&vmux_ecs::PageMetadata, &ProjectPageRevision)>,
     proxy: Option<Res<EventLoopProxyWrapper>>,
@@ -1376,7 +1419,8 @@ fn finish_repository_operations(
     mut commands: Commands,
 ) {
     for completed in completed.read() {
-        let Ok((operation, target, captured, state)) = pending.get(completed.requester) else {
+        let Ok((operation, target, captured, state, source)) = pending.get(completed.requester)
+        else {
             continue;
         };
         if !matches!(state, OperationState::Pending | OperationState::Running) {
@@ -1396,6 +1440,24 @@ fn finish_repository_operations(
                         registrations.snapshot(&operation.root),
                     ));
             }
+            continue;
+        }
+        if completed.result.is_ok()
+            && let Some(source) = source
+        {
+            commands
+                .entity(completed.requester)
+                .remove::<(ChildOf, PendingSource)>()
+                .insert((
+                    Registration,
+                    WriteRequest {
+                        root: operation.root.clone(),
+                        mutation: Mutation::Save {
+                            expected: 0,
+                            project: source.0.clone(),
+                        },
+                    },
+                ));
             continue;
         }
         commands.trigger(OperationCompleted::from_result(
@@ -1431,15 +1493,42 @@ fn finish_repository_operations(
         }
         commands
             .entity(completed.requester)
-            .remove::<PendingProjectOperation>();
+            .remove::<(PendingProjectOperation, PendingSource)>();
+    }
+}
+
+fn finish_registrations(
+    mut completed: MessageReader<WriteCompleted>,
+    pending: Query<(&OperationTarget, &OperationTargetRevision), With<Registration>>,
+    pages: Query<(&vmux_ecs::PageMetadata, &ProjectPageRevision)>,
+    mut commands: Commands,
+) {
+    for completed in completed.read() {
+        let Ok((target, captured)) = pending.get(completed.requester) else {
+            continue;
+        };
+        if let Err(error) = &completed.result
+            && pages.get(target.entity()).is_ok_and(|(page, revision)| {
+                ProjectRoute::is_root(&page.url) && captured.accepts(Some(revision.value))
+            })
+        {
+            commands.trigger(vmux_ecs::UiStateWrite::<ProjectUiState>::from_event(
+                target.entity(),
+                &ProjectUiState {
+                    view: ProjectView::Error(ErrorMessage(error.clone()).localized()),
+                    ..Default::default()
+                },
+            ));
+        }
+        commands
+            .entity(completed.requester)
+            .remove::<(Registration, PendingProjectOperation, DeletionResult)>();
     }
 }
 
 struct ProjectCatalog;
 
 impl ProjectCatalog {
-    const MAX_DEPTH: usize = 6;
-
     fn url_for_directory(root: &Path, directory: &Path) -> Option<String> {
         let root = vmux_path::PathIdentity::resolve(root).into_path_buf();
         let directory = vmux_path::PathIdentity::resolve(directory).into_path_buf();
@@ -1479,20 +1568,12 @@ impl ProjectCatalog {
         None
     }
 
-    fn read(root: &Path, registry: &Snapshot) -> ProjectUiState {
+    fn read(registry: &Snapshot) -> ProjectUiState {
         let mut entries = Vec::new();
-        Self::walk(root, root, 0, &registry.archived, &mut entries);
-        entries.retain(|entry| !registry.hidden.contains(&entry.url));
-        let mut target_paths = BTreeSet::new();
-        for record in registry.projects.values() {
-            target_paths.insert(record.directory.clone());
-        }
-        entries.retain(|entry| {
-            registry.projects.contains_key(&entry.url)
-                || !target_paths.contains(Path::new(&entry.path))
-        });
         for (url, record) in &registry.projects {
-            let existing = entries.iter().position(|entry| &entry.url == url);
+            if registry.hidden.contains(url) {
+                continue;
+            }
             let entry = ProjectEntry {
                 id: ProjectId(url.clone()),
                 url: url.clone(),
@@ -1510,11 +1591,7 @@ impl ProjectCatalog {
                     .unwrap_or_default(),
                 ..Default::default()
             };
-            if let Some(index) = existing {
-                entries[index] = entry;
-            } else {
-                entries.push(entry);
-            }
+            entries.push(entry);
         }
         entries.sort_by(|left, right| {
             left.name
@@ -1557,76 +1634,6 @@ impl ProjectCatalog {
         }
         state
     }
-
-    fn walk(
-        root: &Path,
-        directory: &Path,
-        depth: usize,
-        archive: &BTreeSet<String>,
-        entries: &mut Vec<ProjectEntry>,
-    ) {
-        let attachment = directory.parent() == Some(root.join("imported").as_path())
-            && std::fs::symlink_metadata(directory).is_ok_and(|metadata| metadata.is_symlink());
-        if depth > 0 && (directory.join(".git").exists() || attachment) {
-            let Some(url) = ProjectRoute::from_path(root, directory) else {
-                return;
-            };
-            let Some(Ok(path)) = ProjectRoute::resolve(&url, root) else {
-                return;
-            };
-            let Some(name) = directory.file_name().and_then(|name| name.to_str()) else {
-                return;
-            };
-            let source = directory
-                .strip_prefix(root)
-                .ok()
-                .and_then(Path::parent)
-                .map(|source| source.to_string_lossy().into_owned())
-                .unwrap_or_default();
-            let branch = RepoLabel::read(&path)
-                .map(|label| label.branch)
-                .unwrap_or_default();
-            let repository = source
-                .strip_prefix("github.com/")
-                .map(|namespace| format!("https://github.com/{namespace}/{name}.git"));
-            let archived = archive.contains(&url);
-            let id = ProjectId(url.clone());
-            entries.push(ProjectEntry {
-                identity: String::new(),
-                id,
-                name: name.to_string(),
-                source,
-                path: path.to_string_lossy().into_owned(),
-                url,
-                branch,
-                base_ref: String::new(),
-                is_worktree: false,
-                uncommitted: 0,
-                ahead: 0,
-                ongoing_sessions: 0,
-                stale_sessions: 0,
-                archived,
-                repository,
-                revision: 0,
-            });
-            return;
-        }
-        if depth >= Self::MAX_DEPTH {
-            return;
-        }
-        let Ok(read) = std::fs::read_dir(directory) else {
-            return;
-        };
-        for entry in read.flatten() {
-            let name = entry.file_name();
-            if name.to_string_lossy().starts_with('.') {
-                continue;
-            }
-            if entry.path().is_dir() {
-                Self::walk(root, &entry.path(), depth + 1, archive, entries);
-            }
-        }
-    }
 }
 
 fn saved(
@@ -1638,8 +1645,6 @@ fn saved(
         &vmux_ecs::UiState<ProjectUiState>,
     )>,
     projects: vmux_ecs::profile::Projects,
-    proxy: Option<Res<EventLoopProxyWrapper>>,
-    registrations: Registrations,
     mut commands: Commands,
 ) {
     let Ok(root) = projects.path() else {
@@ -1649,13 +1654,13 @@ fn saved(
         if vmux_path::PathIdentity::resolve(root) != vmux_path::PathIdentity::resolve(&event.root) {
             continue;
         }
-        for (entity, mut page, revision, state) in &mut pages {
+        for (entity, mut page, _revision, state) in &mut pages {
             if !ProjectRoute::is_page(&page.url) {
                 continue;
             }
-            if page.url == event.id.0
-                && let Some(mut state) = state.current().cloned()
+            if let Some(mut state) = state.current().cloned()
                 && let ProjectView::Detail(detail) = &mut state.view
+                && detail.id == event.id
             {
                 detail.name.clone_from(&event.name);
                 detail.path = event.directory.to_string_lossy().into_owned();
@@ -1670,78 +1675,135 @@ fn saved(
                     entity, &state,
                 ));
             }
-            let wake = proxy.as_deref().map(|proxy| (**proxy).clone());
-            commands.entity(entity).insert(ProjectCatalogTask::spawn(
-                root.to_path_buf(),
-                revision.value,
-                wake,
-                registrations.snapshot(root),
-            ));
         }
+    }
+}
+
+fn refresh(
+    mut changed: MessageReader<vmux_project::ProjectChanged>,
+    projects: vmux_ecs::profile::Projects,
+    registrations: Registrations,
+    pages: Query<(Entity, &vmux_ecs::PageMetadata, &ProjectPageRevision)>,
+    proxy: Option<Res<EventLoopProxyWrapper>>,
+    mut commands: Commands,
+) {
+    let Ok(root) = projects.path() else {
+        return;
+    };
+    if !changed.read().any(|change| change.root == root) {
+        return;
+    }
+    let snapshot = registrations.snapshot(root);
+    for (entity, page, revision) in &pages {
+        if !ProjectRoute::is_page(&page.url) {
+            continue;
+        }
+        if !ProjectRoute::is_root(&page.url)
+            && registrations.canonical_id(root, &page.url).is_none()
+        {
+            commands.entity(entity).remove::<ProjectCatalogTask>();
+            commands.trigger(vmux_ecs::UiStateWrite::<ProjectUiState>::from_event(
+                entity,
+                &ProjectUiState {
+                    view: ProjectView::Error(vmux_ui::i18n::translate("error-page-not-found")),
+                    ..Default::default()
+                },
+            ));
+            continue;
+        }
+        let wake = proxy.as_deref().map(|proxy| (**proxy).clone());
+        commands.entity(entity).insert(ProjectCatalogTask::spawn(
+            root.to_path_buf(),
+            revision.value,
+            wake,
+            snapshot.clone(),
+        ));
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use vmux_project::filesystem::FileStore;
     use vmux_session::{SessionSummary, StageSummary};
 
     #[test]
     fn registered_project_names_take_precedence_over_legacy_settings() {
-        let mut configured = vmux_setting::SpaceProject::at("/project");
-        configured.label = Some("Legacy name".to_string());
-        let settings = vmux_setting::AppSettings {
-            projects: vec![configured],
-            ..Default::default()
-        };
-        for (revision, expected) in [(0, "Legacy name"), (1, "Saved name")] {
-            let entry = ProjectEntry {
-                name: "Saved name".to_string(),
-                path: "/project".to_string(),
-                revision,
+        let root = tempfile::tempdir().unwrap();
+        let directory = root.path().join("directory-name");
+        std::fs::create_dir_all(directory.join(".git")).unwrap();
+        let path = directory.canonicalize().unwrap();
+        std::fs::create_dir_all(root.path().join("unregistered/.git")).unwrap();
+        let id = "vmux://projects/identity";
+        vmux_project::filesystem::FileStore::write(
+            Snapshot {
+                projects: std::collections::BTreeMap::from([(
+                    id.to_string(),
+                    vmux_project::Record {
+                        name: "Saved name".to_string(),
+                        directory: path.clone(),
+                        repository: None,
+                        revision: 0,
+                    },
+                )]),
                 ..Default::default()
-            };
-            let states = [
-                ProjectView::Catalog(ProjectCatalogView {
-                    entries: vec![entry.clone()],
-                    ..Default::default()
-                }),
-                ProjectView::Detail(ProjectDetailView {
-                    name: entry.name.clone(),
-                    path: entry.path.clone(),
-                    revision,
-                    choices: vec![entry],
-                    ..Default::default()
-                }),
-            ];
-            for view in states {
-                let state = Names(&settings).apply(ProjectUiState {
-                    view,
-                    ..Default::default()
-                });
-                match state.view {
-                    ProjectView::Catalog(catalog) => assert_eq!(catalog.entries[0].name, expected),
-                    ProjectView::Detail(detail) => {
-                        assert_eq!(detail.name, expected);
-                        assert_eq!(detail.choices[0].name, expected);
-                    }
-                    _ => panic!("expected project state"),
-                }
-            }
-        }
+            },
+            root.path(),
+            None,
+        )
+        .unwrap();
+        let mut configured = vmux_setting::SpaceProject::at(path.to_string_lossy().into_owned());
+        configured.label = Some("Legacy name".to_string());
+        let mut page = ProjectPage::at(root.path(), ProjectRoute::ROOT);
+        page.app
+            .world_mut()
+            .resource_mut::<vmux_setting::AppSettings>()
+            .projects
+            .push(configured);
+        page.wait_for_catalog();
+        let state = page
+            .app
+            .world()
+            .get::<vmux_ecs::UiState<ProjectUiState>>(page.view)
+            .unwrap()
+            .current()
+            .unwrap();
+        let ProjectView::Catalog(catalog) = &state.view else {
+            panic!("expected catalog");
+        };
+        assert_eq!(catalog.entries.len(), 1);
+        assert_eq!(catalog.entries[0].name, "Saved name");
+        assert_eq!(catalog.entries[0].identity, id);
     }
 
     #[test]
-    fn managed_checkout_delete_completes_the_operation_and_refreshes_the_catalog() {
+    fn legacy_project_removal_keeps_files_and_refreshes_the_catalog() {
         let root = tempfile::tempdir().unwrap();
         let checkout = root.path().join("checkout");
         std::fs::create_dir_all(checkout.join(".git")).unwrap();
         let url = ProjectRoute::from_path(root.path(), &checkout).unwrap();
+        FileStore::write(
+            Snapshot {
+                projects: std::collections::BTreeMap::from([(
+                    url.clone(),
+                    vmux_project::Record {
+                        name: "Project".to_string(),
+                        directory: checkout.canonicalize().unwrap(),
+                        repository: None,
+                        revision: 1,
+                    },
+                )]),
+                ..Default::default()
+            },
+            root.path(),
+            None,
+        )
+        .unwrap();
         let mut page = ProjectPage::at(root.path(), ProjectRoute::ROOT);
         page.wait_for_catalog();
         let operation = page.remove(&url);
         page.wait_for_operation(operation);
-        assert!(!checkout.exists());
+        assert!(checkout.exists());
         assert_eq!(
             page.app.world().get::<OperationState>(operation),
             Some(&OperationState::Succeeded)
@@ -1877,10 +1939,9 @@ mod tests {
                     .iter()
                     .map(|entry| entry.url.as_str())
                     .collect();
+                assert!(urls.is_empty());
                 if imported {
-                    assert_eq!(urls, ["vmux://projects/imported/unrelated"]);
-                } else {
-                    assert!(urls.is_empty());
+                    assert!(outside.path().join("unrelated/.git").is_dir());
                 }
             }
         }
@@ -2067,6 +2128,23 @@ mod tests {
     }
 
     impl ProjectPage {
+        fn registered_at(root: &Path, url: &str, projects: &[(&str, &str, &Path)]) -> Self {
+            let mut snapshot = Snapshot::default();
+            for (id, name, directory) in projects {
+                snapshot.projects.insert(
+                    (*id).to_string(),
+                    vmux_project::Record {
+                        name: (*name).to_string(),
+                        directory: directory.canonicalize().unwrap(),
+                        repository: None,
+                        revision: 1,
+                    },
+                );
+            }
+            FileStore::write(snapshot, root, None).unwrap();
+            Self::at(root, url)
+        }
+
         fn at(root: &Path, url: &str) -> Self {
             let mut app = App::new();
             app.add_plugins((
@@ -2228,7 +2306,11 @@ mod tests {
     fn a_late_catalog_result_cannot_revert_committed_archive_state() {
         let root = tempfile::tempdir().unwrap();
         std::fs::create_dir_all(root.path().join("repo/.git")).unwrap();
-        let mut page = ProjectPage::at(root.path(), ProjectRoute::ROOT);
+        let mut page = ProjectPage::registered_at(
+            root.path(),
+            ProjectRoute::ROOT,
+            &[("vmux://projects/repo", "Repo", &root.path().join("repo"))],
+        );
         page.wait_for_catalog();
         let stale = page
             .app
@@ -2273,7 +2355,11 @@ mod tests {
     fn the_project_catalog_runs_without_session_contributions() {
         let root = tempfile::tempdir().unwrap();
         std::fs::create_dir_all(root.path().join("repo/.git")).unwrap();
-        let mut page = ProjectPage::at(root.path(), ProjectRoute::ROOT);
+        let mut page = ProjectPage::registered_at(
+            root.path(),
+            ProjectRoute::ROOT,
+            &[("vmux://projects/repo", "Repo", &root.path().join("repo"))],
+        );
         page.app.world_mut().remove_resource::<CatalogSnapshot>();
         page.wait_for_catalog();
         let state = page
@@ -2295,7 +2381,14 @@ mod tests {
         let root = tempfile::tempdir().unwrap();
         std::fs::create_dir_all(root.path().join("one/.git")).unwrap();
         std::fs::create_dir_all(root.path().join("two/.git")).unwrap();
-        let mut page = ProjectPage::at(root.path(), "vmux://projects/one");
+        let mut page = ProjectPage::registered_at(
+            root.path(),
+            "vmux://projects/one",
+            &[
+                ("vmux://projects/one", "One", &root.path().join("one")),
+                ("vmux://projects/two", "Two", &root.path().join("two")),
+            ],
+        );
         page.wait_for_choices();
         let state = page
             .app
@@ -2322,7 +2415,14 @@ mod tests {
         let root = tempfile::tempdir().unwrap();
         std::fs::create_dir_all(root.path().join("one/.git")).unwrap();
         std::fs::create_dir_all(root.path().join("two/.git")).unwrap();
-        let mut page = ProjectPage::at(root.path(), "vmux://projects/one");
+        let mut page = ProjectPage::registered_at(
+            root.path(),
+            "vmux://projects/one",
+            &[
+                ("vmux://projects/one", "One", &root.path().join("one")),
+                ("vmux://projects/two", "Two", &root.path().join("two")),
+            ],
+        );
         page.app
             .world_mut()
             .get_mut::<bevy_cef::prelude::BinIpcEpoch>(page.view)
@@ -2404,17 +2504,53 @@ mod tests {
     }
 
     #[test]
-    fn catalog_finds_repository_roots_without_descending_into_them() {
+    fn catalog_uses_registered_projects_instead_of_directory_names() {
         let root = tempfile::tempdir().unwrap();
         let vmux = root.path().join("github.com/vmux-ai/vmux-cloud");
         let dashboard = root.path().join("github.com/mistralai/dashboard");
         std::fs::create_dir_all(vmux.join(".git")).unwrap();
         std::fs::create_dir_all(vmux.join("client/.git")).unwrap();
         std::fs::create_dir_all(dashboard.join(".git")).unwrap();
+        std::fs::create_dir_all(root.path().join("unregistered/.git")).unwrap();
+        FileStore::write(
+            Snapshot {
+                projects: std::collections::BTreeMap::from([
+                    (
+                        "vmux://projects/cloud".to_string(),
+                        vmux_project::Record {
+                            name: "Cloud service".to_string(),
+                            directory: vmux.canonicalize().unwrap(),
+                            repository: None,
+                            revision: 1,
+                        },
+                    ),
+                    (
+                        "vmux://projects/ui".to_string(),
+                        vmux_project::Record {
+                            name: "Product UI".to_string(),
+                            directory: dashboard.canonicalize().unwrap(),
+                            repository: None,
+                            revision: 1,
+                        },
+                    ),
+                ]),
+                ..Default::default()
+            },
+            root.path(),
+            None,
+        )
+        .unwrap();
+        let mut page = ProjectPage::at(root.path(), ProjectRoute::ROOT);
+        page.wait_for_catalog();
+        let state = page
+            .app
+            .world()
+            .get::<vmux_ecs::UiState<ProjectUiState>>(page.view)
+            .unwrap()
+            .current()
+            .unwrap();
 
-        let state = ProjectCatalog::read(root.path(), &Snapshot::default());
-
-        let ProjectView::Catalog(catalog) = state.view else {
+        let ProjectView::Catalog(catalog) = &state.view else {
             panic!("expected project catalog");
         };
         assert_eq!(
@@ -2423,12 +2559,9 @@ mod tests {
                 .iter()
                 .map(|entry| entry.name.as_str())
                 .collect::<Vec<_>>(),
-            vec!["dashboard", "vmux-cloud"]
+            vec!["Cloud service", "Product UI"]
         );
-        assert_eq!(
-            catalog.entries[0].url,
-            "vmux://projects/github.com/mistralai/dashboard"
-        );
+        assert_eq!(catalog.entries[0].url, "vmux://projects/cloud");
         assert!(!catalog.operation_pending);
     }
 
@@ -2438,10 +2571,21 @@ mod tests {
         let project = root.path().join("github.com/vmux-ai/vmux");
         std::fs::create_dir_all(project.join(".git")).unwrap();
         let url = "vmux://projects/github.com/vmux-ai/vmux";
-        let mut snapshot = Snapshot::default();
+        let mut snapshot = Snapshot {
+            projects: std::collections::BTreeMap::from([(
+                url.to_string(),
+                vmux_project::Record {
+                    name: "Project".to_string(),
+                    directory: project.canonicalize().unwrap(),
+                    repository: None,
+                    revision: 1,
+                },
+            )]),
+            ..Default::default()
+        };
         snapshot.archived.insert(url.to_string());
 
-        let state = ProjectCatalog::read(root.path(), &snapshot);
+        let state = ProjectCatalog::read(&snapshot);
 
         let ProjectView::Catalog(catalog) = state.view else {
             panic!("expected project catalog");
@@ -2452,12 +2596,24 @@ mod tests {
     }
 
     #[test]
-    fn project_identity_matches_its_canonical_vmux_url() {
+    fn project_identity_survives_directory_changes() {
         let root = tempfile::tempdir().unwrap();
         let local = root.path().join("local/vmux");
         std::fs::create_dir_all(local.join(".git")).unwrap();
 
-        let initial = ProjectCatalog::read(root.path(), &Snapshot::default());
+        let mut snapshot = Snapshot {
+            projects: std::collections::BTreeMap::from([(
+                "vmux://projects/stable".to_string(),
+                vmux_project::Record {
+                    name: "Project".to_string(),
+                    directory: local.canonicalize().unwrap(),
+                    repository: None,
+                    revision: 1,
+                },
+            )]),
+            ..Default::default()
+        };
+        let initial = ProjectCatalog::read(&snapshot);
         let ProjectView::Catalog(initial) = initial.view else {
             panic!("expected project catalog");
         };
@@ -2467,14 +2623,17 @@ mod tests {
         std::fs::create_dir_all(linked.parent().unwrap()).unwrap();
         std::fs::rename(local, &linked).unwrap();
 
-        let moved = ProjectCatalog::read(root.path(), &Snapshot::default());
+        let id = initial.entries[0].id.0.clone();
+        snapshot.projects.get_mut(&id).unwrap().directory = linked.canonicalize().unwrap();
+        let moved = ProjectCatalog::read(&snapshot);
         let ProjectView::Catalog(moved) = moved.view else {
             panic!("expected project catalog");
         };
         assert_eq!(moved.entries[0].id.0, moved.entries[0].url);
+        assert_eq!(moved.entries[0].url, id);
         assert_eq!(
-            moved.entries[0].url,
-            "vmux://projects/github.com/vmux-ai/vmux"
+            moved.entries[0].path,
+            linked.canonicalize().unwrap().display().to_string()
         );
     }
 
@@ -2548,19 +2707,40 @@ mod tests {
         std::fs::create_dir(&imports).unwrap();
         std::os::unix::fs::symlink(external.path(), imports.join("external")).unwrap();
 
-        let state = ProjectCatalog::read(root.path(), &Snapshot::default());
-        let ProjectView::Catalog(catalog) = state.view else {
-            panic!("expected project catalog");
-        };
-        let entry = catalog.entries.first().unwrap();
-        let resolved = ProjectRoute::resolve(&entry.url, root.path())
+        let id = "vmux://projects/imported-identity";
+        FileStore::write(
+            Snapshot {
+                projects: std::collections::BTreeMap::from([(
+                    id.to_string(),
+                    vmux_project::Record {
+                        name: "External project".to_string(),
+                        directory: external.path().canonicalize().unwrap(),
+                        repository: None,
+                        revision: 1,
+                    },
+                )]),
+                ..Default::default()
+            },
+            root.path(),
+            None,
+        )
+        .unwrap();
+        let mut page = ProjectPage::at(root.path(), id);
+        page.wait_for_choices();
+        let state = page
+            .app
+            .world()
+            .get::<vmux_ecs::UiState<ProjectUiState>>(page.view)
             .unwrap()
+            .current()
             .unwrap();
-
-        assert_eq!(catalog.entries.len(), 1);
-        assert_eq!(resolved, external.path().canonicalize().unwrap());
+        let ProjectView::Detail(detail) = &state.view else {
+            panic!("expected project detail");
+        };
+        assert_eq!(detail.id.0, id);
+        assert_eq!(detail.name, "External project");
         assert_eq!(
-            entry.path,
+            detail.path,
             external
                 .path()
                 .canonicalize()
@@ -2571,13 +2751,56 @@ mod tests {
     }
 
     #[test]
+    fn project_metadata_opens_even_when_its_local_directory_is_missing() {
+        let root = tempfile::tempdir().unwrap();
+        let directory = root.path().join("not-attached");
+        let id = "vmux://projects/planning";
+        FileStore::write(
+            Snapshot {
+                projects: std::collections::BTreeMap::from([(
+                    id.to_string(),
+                    vmux_project::Record {
+                        name: "Planning project".to_string(),
+                        directory: directory.clone(),
+                        repository: Some("https://github.com/example/project.git".to_string()),
+                        revision: 1,
+                    },
+                )]),
+                ..Default::default()
+            },
+            root.path(),
+            None,
+        )
+        .unwrap();
+        let mut page = ProjectPage::at(root.path(), id);
+        page.wait_for_choices();
+        let state = page
+            .app
+            .world()
+            .get::<vmux_ecs::UiState<ProjectUiState>>(page.view)
+            .unwrap()
+            .current()
+            .unwrap();
+        let ProjectView::Detail(detail) = &state.view else {
+            panic!("expected project metadata");
+        };
+        assert_eq!(detail.id.0, id);
+        assert_eq!(detail.name, "Planning project");
+        assert_eq!(
+            detail.repository.as_deref(),
+            Some("https://github.com/example/project.git")
+        );
+        assert!(!directory.exists());
+    }
+
+    #[test]
     fn catalog_excludes_unmanaged_external_symlinks() {
         let root = tempfile::tempdir().unwrap();
         let external = tempfile::tempdir().unwrap();
         std::fs::create_dir(external.path().join(".git")).unwrap();
         std::os::unix::fs::symlink(external.path(), root.path().join("external")).unwrap();
 
-        let state = ProjectCatalog::read(root.path(), &Snapshot::default());
+        let state = ProjectCatalog::read(&FileStore::read(root.path()).unwrap());
         let ProjectView::Catalog(catalog) = state.view else {
             panic!("expected project catalog");
         };

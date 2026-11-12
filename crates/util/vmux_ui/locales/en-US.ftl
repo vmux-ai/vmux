@@ -1122,6 +1122,9 @@ project-edit-conflict = This project changed. Reopen the editor to try again.
 command-toggle-url-bar = Layout > Layout > Toggle URL Bar
 
 project-rename = Rename project
+project-all = All projects
+project-remove = Remove project
+project-remove-description = Remove from the project list. Local files are kept.
 
 agent-tool-slept = Slept
 

@@ -658,7 +658,7 @@ pub struct SideSheetProjectOpenRequest {
 #[vmux_api::ui_event(Eq)]
 pub struct SideSheetProjectPageOpenRequest {
     pub pane_id: u64,
-    pub path: String,
+    pub project: Option<vmux_project::ProjectId>,
 }
 
 #[vmux_api::ui_event(Eq)]
