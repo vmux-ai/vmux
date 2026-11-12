@@ -2,16 +2,16 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use std::task::Wake;
 
+use crate::host::fold_io::{FileWake, FilesystemPlugin};
+use crate::host::fold_preferences::{
+    Collapsed, FileId, FoldPlugin, FoldSet, Mutation, Preferences, RetryRequest, Root, State,
+    Ticket, UpdateRequest,
+};
 use bevy::app::Plugin as BevyPlugin;
 use bevy::prelude::*;
 use bevy::winit::EventLoopProxyWrapper;
 use vmux_ecs::Revision;
 use vmux_ecs::profile::{ActiveProfile, ProfileDirectories};
-use vmux_fold::filesystem::{FileWake, FilesystemPlugin};
-use vmux_fold::{
-    Collapsed, FileId, FoldPlugin, FoldSet, Mutation, Preferences, RetryRequest, Root, State,
-    Ticket, UpdateRequest,
-};
 
 use super::editor::{Editor, FileView};
 use super::file_lifecycle::EditorFileLoadedSet;
@@ -21,11 +21,7 @@ pub(super) struct Plugin;
 
 impl BevyPlugin for Plugin {
     fn build(&self, app: &mut App) {
-        assert!(
-            app.is_plugin_added::<FoldPlugin>(),
-            "Editor requires FoldPlugin in the application composition"
-        );
-        app.add_plugins(FilesystemPlugin)
+        app.add_plugins((FoldPlugin, FilesystemPlugin))
             .add_systems(Update, (bind, forward).chain().before(FoldSet::Restore))
             .add_systems(
                 Update,
@@ -138,7 +134,7 @@ fn forward(
         updates.write(UpdateRequest {
             ticket: binding.ticket.clone(),
             file: FileId(binding.path.clone()),
-            mutation: Mutation::Change { collapse, expand },
+            mutation: Mutation { collapse, expand },
         });
         if roots
             .get(binding.ticket.owner)
@@ -220,8 +216,8 @@ mod tests {
     use super::*;
     use crate::host::edit::{EditCore, EditMode, highlight_cache::HighlightCache};
     use crate::host::fold::{FoldRegion, FoldState};
-    use vmux_fold::filesystem::FileStore;
-    use vmux_fold::{LoadRequest, Snapshot};
+    use crate::host::fold_io::FileStore;
+    use crate::host::fold_preferences::{LoadRequest, Snapshot};
 
     struct Fixture {
         app: App,
@@ -260,7 +256,7 @@ mod tests {
                 },
             )
             .unwrap();
-            app.add_plugins((FoldPlugin, Plugin)).add_systems(
+            app.add_plugins(Plugin).add_systems(
                 Update,
                 PendingEditor::finish
                     .after(FoldSet::Restore)
@@ -312,7 +308,7 @@ mod tests {
                 if self
                     .app
                     .world()
-                    .get::<vmux_fold::Loaded>(self.ticket.owner)
+                    .get::<crate::host::fold_preferences::Loaded>(self.ticket.owner)
                     .is_some()
                 {
                     break;

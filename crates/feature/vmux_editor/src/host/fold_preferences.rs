@@ -1,16 +1,15 @@
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::{BTreeMap, BTreeSet, HashSet};
 use std::path::{Path, PathBuf};
 
-use bevy_app::{App, Plugin};
-use bevy_ecs::prelude::*;
-use bevy_ecs::system::SystemParam;
+use bevy::app::{App, Plugin, Update};
+use bevy::ecs::prelude::*;
+use bevy::ecs::system::SystemParam;
 use serde::{Deserialize, Serialize};
 pub use vmux_ecs::store::{Phase, State};
-use vmux_ecs::{OperationPlugin, Revision};
-
-#[cfg(feature = "filesystem")]
-pub mod filesystem;
-mod lifecycle;
+use vmux_ecs::{
+    Operation, OperationCompleted, OperationPlugin, OperationState, OperationTarget,
+    OperationTargetRevision, Revision,
+};
 
 pub struct FoldPlugin;
 
@@ -19,7 +18,31 @@ impl Plugin for FoldPlugin {
         if !app.is_plugin_added::<OperationPlugin>() {
             app.add_plugins(OperationPlugin);
         }
-        app.add_plugins(lifecycle::Plugin);
+        app.init_resource::<Clock>()
+            .add_message::<LoadRequest>()
+            .add_message::<LoadCompleted>()
+            .add_message::<UpdateRequest>()
+            .add_message::<RetryRequest>()
+            .add_message::<SaveRequest>()
+            .add_message::<SaveCompleted>()
+            .configure_sets(
+                Update,
+                (
+                    FoldSet::Restore,
+                    FoldSet::Mutate,
+                    FoldSet::Save,
+                    FoldSet::Project,
+                )
+                    .chain(),
+            )
+            .add_systems(
+                Update,
+                (retry, reset, cancel, restore)
+                    .chain()
+                    .in_set(FoldSet::Restore),
+            )
+            .add_systems(Update, mutate.in_set(FoldSet::Mutate))
+            .add_systems(Update, (finish, save).chain().in_set(FoldSet::Save));
     }
 }
 
@@ -58,25 +81,17 @@ pub struct UpdateRequest {
 }
 
 #[derive(Clone)]
-pub enum Mutation {
-    Replace(Collapsed),
-    Change {
-        collapse: BTreeSet<u32>,
-        expand: BTreeSet<u32>,
-    },
+pub struct Mutation {
+    pub collapse: BTreeSet<u32>,
+    pub expand: BTreeSet<u32>,
 }
 
 impl Collapsed {
     fn apply(&mut self, mutation: &Mutation) {
-        match mutation {
-            Mutation::Replace(collapsed) => self.0.clone_from(&collapsed.0),
-            Mutation::Change { collapse, expand } => {
-                for line in expand {
-                    self.0.remove(line);
-                }
-                self.0.extend(collapse);
-            }
+        for line in &mutation.expand {
+            self.0.remove(line);
         }
+        self.0.extend(&mutation.collapse);
     }
 }
 
@@ -172,10 +187,331 @@ impl Preferences<'_, '_> {
     }
 }
 
+#[derive(Resource, Default)]
+struct Clock(u64);
+
+impl Clock {
+    fn next(&mut self, owner: Entity, path: &Path) -> Ticket {
+        self.0 = self
+            .0
+            .checked_add(1)
+            .expect("fold store generation exhausted");
+        Ticket {
+            owner,
+            path: path.to_path_buf(),
+            generation: self.0,
+        }
+    }
+}
+
+#[derive(Component)]
+struct Loading(Ticket);
+
+#[derive(Component)]
+struct Saving {
+    operation: Entity,
+    ticket: Ticket,
+    revision: u64,
+}
+
+#[derive(Component)]
+struct Accepted(Ticket);
+
+#[derive(Component)]
+struct Retry;
+
+#[derive(Component)]
+struct Reload;
+
+fn retry(
+    mut requests: MessageReader<RetryRequest>,
+    roots: Query<(&Root, &Scope, &State)>,
+    mut commands: Commands,
+) {
+    for request in requests.read() {
+        let ticket = &request.0;
+        let Ok((root, scope, state)) = roots.get(ticket.owner) else {
+            continue;
+        };
+        if root.0 != ticket.path || scope.0 != *ticket {
+            continue;
+        }
+        if state.phase() == Phase::Failed {
+            commands.entity(ticket.owner).insert(Reload);
+        } else {
+            commands.entity(ticket.owner).insert(Retry);
+        }
+    }
+}
+
+type ResetRoots<'w, 's> = Query<
+    'w,
+    's,
+    (
+        Entity,
+        Ref<'static, Root>,
+        Option<&'static Scope>,
+        Has<Reload>,
+    ),
+>;
+
+fn reset(
+    roots: ResetRoots,
+    records: Query<(Entity, &ChildOf), With<Record>>,
+    mut clock: ResMut<Clock>,
+    mut loads: MessageWriter<LoadRequest>,
+    mut commands: Commands,
+) {
+    for (owner, root, scope, reload) in &roots {
+        if !reload && !root.is_changed() && scope.is_some_and(|scope| scope.0.path == root.0) {
+            continue;
+        }
+        for (entity, parent) in &records {
+            if parent.parent() == owner {
+                commands.entity(entity).despawn();
+            }
+        }
+        let ticket = clock.next(owner, &root.0);
+        let mut state = State::default();
+        state.materialize();
+        commands
+            .entity(owner)
+            .remove::<(Loaded, Saving, Retry, Reload)>()
+            .insert((state, Scope(ticket.clone()), Loading(ticket.clone())));
+        loads.write(LoadRequest(ticket));
+    }
+}
+
+fn cancel(
+    roots: Query<(&Root, &Scope)>,
+    mut operations: Query<(Entity, &Accepted, &mut OperationState)>,
+    mut commands: Commands,
+) {
+    for (entity, accepted, mut state) in &mut operations {
+        let ticket = &accepted.0;
+        if roots
+            .get(ticket.owner)
+            .is_ok_and(|(root, scope)| root.0 == ticket.path && scope.0 == *ticket)
+        {
+            continue;
+        }
+        if matches!(*state, OperationState::Pending | OperationState::Running) {
+            *state = OperationState::Canceled;
+        }
+        commands.entity(entity).remove::<Accepted>();
+    }
+}
+
+fn restore(
+    mut completed: MessageReader<LoadCompleted>,
+    mut roots: Query<(&Root, &Scope, &Loading, &mut State)>,
+    mut commands: Commands,
+) {
+    for completion in completed.read() {
+        let ticket = &completion.ticket;
+        let Ok((root, scope, loading, mut state)) = roots.get_mut(ticket.owner) else {
+            continue;
+        };
+        if root.0 != ticket.path || scope.0 != *ticket || loading.0 != *ticket {
+            continue;
+        }
+        commands.entity(ticket.owner).remove::<Loading>();
+        match &completion.result {
+            Ok(snapshot) => {
+                for (path, collapsed) in &snapshot.files {
+                    commands.spawn((
+                        Record,
+                        FileId(path.into()),
+                        Collapsed(collapsed.iter().copied().collect()),
+                        ChildOf(ticket.owner),
+                    ));
+                }
+                state.ready();
+                commands.entity(ticket.owner).insert(Loaded);
+            }
+            Err(error) => state.fail(error.clone()),
+        }
+    }
+}
+
+fn mutate(world: &mut World) {
+    let requests: Vec<_> = world
+        .resource_mut::<Messages<UpdateRequest>>()
+        .drain()
+        .collect();
+    for request in requests {
+        let ticket = &request.ticket;
+        let Some(root) = world.get::<Root>(ticket.owner) else {
+            continue;
+        };
+        if root.0 != ticket.path
+            || world
+                .get::<Scope>(ticket.owner)
+                .is_none_or(|scope| scope.0 != *ticket)
+            || world.get::<Loaded>(ticket.owner).is_none()
+        {
+            continue;
+        }
+        let mut records =
+            world.query_filtered::<(Entity, &FileId, &Collapsed, &ChildOf), With<Record>>();
+        let mut found = None;
+        let mut duplicate = false;
+        for (entity, id, collapsed, parent) in records.iter(world) {
+            if parent.parent() != ticket.owner || *id != request.file {
+                continue;
+            }
+            if found.is_some() {
+                duplicate = true;
+                break;
+            }
+            found = Some((entity, collapsed.clone()));
+        }
+        if duplicate {
+            continue;
+        }
+        let mut collapsed = found
+            .as_ref()
+            .map(|(_, collapsed)| collapsed.clone())
+            .unwrap_or_default();
+        let previous = collapsed.clone();
+        collapsed.apply(&request.mutation);
+        if collapsed == previous {
+            continue;
+        }
+        match found {
+            Some((entity, _)) => {
+                let revision = world.get::<Revision>(entity).copied().unwrap_or_default();
+                world
+                    .entity_mut(entity)
+                    .insert((collapsed, revision.saturating_next()));
+            }
+            None => {
+                world.spawn((
+                    Record,
+                    request.file,
+                    collapsed,
+                    Revision(1),
+                    ChildOf(ticket.owner),
+                ));
+            }
+        }
+        if let Some(mut state) = world.get_mut::<State>(ticket.owner) {
+            state.advance();
+        }
+    }
+}
+
+fn finish(
+    mut completed: MessageReader<SaveCompleted>,
+    mut roots: Query<(&Root, &Scope, &Saving, &mut State)>,
+    mut commands: Commands,
+) {
+    for completion in completed.read() {
+        let ticket = &completion.ticket;
+        let Ok((root, scope, saving, mut state)) = roots.get_mut(ticket.owner) else {
+            continue;
+        };
+        if root.0 != ticket.path
+            || scope.0 != *ticket
+            || saving.ticket != *ticket
+            || saving.operation != completion.operation
+            || saving.revision != completion.revision
+        {
+            continue;
+        }
+        match &completion.result {
+            Ok(()) => {
+                state.succeed(completion.revision);
+            }
+            Err(error) => {
+                state.retry(completion.revision, error.clone());
+            }
+        }
+        commands.entity(ticket.owner).remove::<Saving>();
+        commands.entity(completion.operation).remove::<Accepted>();
+        commands.trigger(OperationCompleted::from_result(
+            completion.operation,
+            &completion.result,
+        ));
+    }
+}
+
+type SaveRoots<'w, 's> = Query<
+    'w,
+    's,
+    (
+        Entity,
+        &'static Root,
+        &'static Scope,
+        &'static mut State,
+        Has<Retry>,
+    ),
+    With<Loaded>,
+>;
+
+fn save(
+    mut roots: SaveRoots,
+    records: Query<(&FileId, &Collapsed, &ChildOf), With<Record>>,
+    mut requests: MessageWriter<SaveRequest>,
+    mut commands: Commands,
+) {
+    for (owner, root, scope, mut state, retry) in &mut roots {
+        if root.0 != scope.0.path || (state.error().is_some() && !retry) {
+            continue;
+        }
+        let Some(revision) = state.begin() else {
+            continue;
+        };
+        let mut snapshot = Snapshot::default();
+        let mut seen = HashSet::new();
+        let mut duplicate = false;
+        for (file, collapsed, parent) in &records {
+            if parent.parent() != owner {
+                continue;
+            }
+            if !seen.insert(&file.0) {
+                duplicate = true;
+                break;
+            }
+            if !collapsed.0.is_empty() {
+                snapshot.files.insert(
+                    file.0.to_string_lossy().into_owned(),
+                    collapsed.0.iter().copied().collect(),
+                );
+            }
+        }
+        if duplicate {
+            state.retry(revision, "duplicate fold file identity".into());
+            commands.entity(owner).remove::<Retry>();
+            continue;
+        }
+        let ticket = scope.0.clone();
+        let operation = commands
+            .spawn((
+                Operation::bundle("fold.save").unwrap().running(),
+                OperationTarget::new(owner),
+                OperationTargetRevision(revision),
+                Accepted(ticket.clone()),
+            ))
+            .id();
+        commands.entity(owner).remove::<Retry>().insert(Saving {
+            operation,
+            ticket: ticket.clone(),
+            revision,
+        });
+        requests.write(SaveRequest {
+            ticket,
+            operation,
+            revision,
+            snapshot,
+        });
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
-    use bevy_ecs::system::SystemState;
+    use bevy::ecs::system::SystemState;
     use vmux_ecs::OperationState;
 
     struct Fixture {
@@ -206,10 +542,20 @@ mod tests {
         }
 
         fn change(&mut self, lines: &[u32]) -> SaveRequest {
+            let mut state = SystemState::<Preferences>::new(self.app.world_mut());
+            let expand = state
+                .get(self.app.world())
+                .unwrap()
+                .get(&self.ticket, Path::new("/files/shared.rs"))
+                .map(|(_, collapsed, _)| collapsed.0.clone())
+                .unwrap_or_default();
             self.app.world_mut().write_message(UpdateRequest {
                 ticket: self.ticket.clone(),
                 file: FileId("/files/shared.rs".into()),
-                mutation: Mutation::Replace(Collapsed(lines.iter().copied().collect())),
+                mutation: Mutation {
+                    collapse: lines.iter().copied().collect(),
+                    expand,
+                },
             });
             self.app.update();
             self.take_save()
@@ -277,7 +623,10 @@ mod tests {
         fixture.app.world_mut().write_message(UpdateRequest {
             ticket: fixture.ticket.clone(),
             file: FileId("/files/shared.rs".into()),
-            mutation: Mutation::Replace(Collapsed([9].into())),
+            mutation: Mutation {
+                collapse: [9].into(),
+                expand: [2].into(),
+            },
         });
         fixture.app.update();
         fixture.finish(&first, Ok(()));
@@ -332,7 +681,7 @@ mod tests {
             fixture.app.world_mut().write_message(UpdateRequest {
                 ticket: fixture.ticket.clone(),
                 file: FileId("/files/shared.rs".into()),
-                mutation: Mutation::Change {
+                mutation: Mutation {
                     collapse: [line].into(),
                     expand: Default::default(),
                 },
@@ -341,7 +690,10 @@ mod tests {
         fixture.app.world_mut().write_message(UpdateRequest {
             ticket: ticket.clone(),
             file: FileId("/files/shared.rs".into()),
-            mutation: Mutation::Replace(Collapsed([99].into())),
+            mutation: Mutation {
+                collapse: [99].into(),
+                expand: BTreeSet::new(),
+            },
         });
         fixture.app.update();
         let mut state = SystemState::<Preferences>::new(fixture.app.world_mut());
@@ -404,7 +756,10 @@ mod tests {
         fixture.app.world_mut().write_message(UpdateRequest {
             ticket: fixture.ticket.clone(),
             file: FileId("/files/shared.rs".into()),
-            mutation: Mutation::Replace(Collapsed([2].into())),
+            mutation: Mutation {
+                collapse: [2].into(),
+                expand: BTreeSet::new(),
+            },
         });
         fixture.app.update();
         let next = fixture
@@ -464,7 +819,10 @@ mod tests {
         fixture.app.world_mut().write_message(UpdateRequest {
             ticket: ticket.clone(),
             file: FileId("/files/shared.rs".into()),
-            mutation: Mutation::Replace(Collapsed([2].into())),
+            mutation: Mutation {
+                collapse: [2].into(),
+                expand: BTreeSet::new(),
+            },
         });
         fixture.app.update();
         assert_eq!(

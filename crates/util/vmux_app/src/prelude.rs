@@ -24,6 +24,3 @@ pub use vmux_project::ProjectPlugin;
 pub use vmux_service::plugin::ServicePlugin;
 #[cfg(feature = "terminal")]
 pub use vmux_terminal::TerminalPlugin;
-
-#[cfg(feature = "fold")]
-pub use vmux_fold::{FoldPlugin, FoldSet, Preferences as FoldPreferences};

@@ -10305,7 +10305,6 @@ dependencies = [
  "vmux_editor",
  "vmux_extension",
  "vmux_flex",
- "vmux_fold",
  "vmux_git",
  "vmux_history",
  "vmux_input",
@@ -10599,7 +10598,6 @@ dependencies = [
  "vmux_command",
  "vmux_ecs",
  "vmux_flex",
- "vmux_fold",
  "vmux_git",
  "vmux_knowledge",
  "vmux_layout",
@@ -10656,21 +10654,6 @@ dependencies = [
  "bevy_math",
  "bevy_window",
  "taffy",
-]
-
-[[package]]
-name = "vmux_fold"
-version = "0.0.35"
-dependencies = [
- "bevy_app",
- "bevy_ecs",
- "bevy_tasks",
- "crossbeam-channel",
- "ron 0.12.1",
- "serde",
- "tempfile",
- "vmux_ecs",
- "vmux_path",
 ]
 
 [[package]]

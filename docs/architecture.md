@@ -484,16 +484,14 @@ Filesystem jobs queue by canonical directory. Unstarted jobs are discarded when 
 changes; started atomic IO finishes before a replacement root reads that directory. Backend IO
 tasks therefore own their finite lifetime rather than being despawned with a requesting root.
 
-`vmux_fold` owns durable collapsed-line preferences as FileId, Collapsed and Revision components
-on records under an explicit store root. Its default plugin has no Profile or renderer dependency;
-filesystem IO is optional. Views share a record within their root, and their own fold regions,
-caret, viewport and rendering stay local. Native Editor forwards changed line sets and projects
-canonical preferences back into each view, so simultaneous view changes compose without replacing
-unrelated preferences. Root store::State and observable save Operations retain dirty revisions
-on failure and require a retry; completion checks owner, path, generation and revision. The
-filesystem adapter preserves the historical folds.ron files map, queues IO by canonical store
-path, and publishes the result before waking the host. Started IO has an independent finite
-lifetime, so a replacement owner reads only after an older atomic commit finishes.
+Editor owns durable collapsed-line preferences through an internal plugin. FileId, Collapsed and
+Revision components belong to file records under a Profile store root. Views share those records;
+fold regions, caret, viewport and rendering remain local. Changed line sets compose without
+replacing unrelated preferences. Shared store::State and save Operations retain dirty revisions
+on failure, and completion checks owner, path, generation and revision. Atomic filesystem IO
+preserves the historical folds.ron map and publishes completion before waking the host. Started
+IO finishes before a replacement owner reads the same path. Fold preferences are an Editor
+implementation detail rather than a separate framework crate or application feature flag.
 
 Every product feature appears exactly once in that graph and exposes one crate-level plugin.
 That root plugin installs only its own manifest, components, systems, and private subplugins. It

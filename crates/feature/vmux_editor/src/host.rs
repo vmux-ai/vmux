@@ -72,6 +72,8 @@ pub mod contract;
 pub mod edit;
 pub mod encoding;
 pub mod fold;
+mod fold_io;
+mod fold_preferences;
 mod fold_store;
 pub(crate) mod highlight;
 pub mod keymap;

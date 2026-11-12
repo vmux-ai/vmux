@@ -12,8 +12,6 @@ pub enum VmuxPlugin {
     Jobs(vmux_ecs::JobsPlugin),
     #[plugin(feature = "flex", desktop, requires(ecs))]
     Flex(vmux_flex::FlexPlugin),
-    #[plugin(feature = "fold", desktop, requires(ecs))]
-    Fold(vmux_fold::FoldPlugin),
     #[plugin(feature = "runtime", desktop, requires(ecs, flex))]
     Runtime(VmuxRuntimePlugin),
     #[plugin(feature = "command", desktop, requires(runtime))]
@@ -32,7 +30,7 @@ pub enum VmuxPlugin {
     Vault(vmux_vault::VaultPlugin),
     #[plugin(feature = "terminal", desktop, requires(layout, service))]
     Terminal(vmux_terminal::TerminalPlugin),
-    #[plugin(feature = "editor", desktop, requires(layout, project, fold))]
+    #[plugin(feature = "editor", desktop, requires(layout, project))]
     Editor(vmux_editor::EditorPlugin),
     #[plugin(feature = "extension", desktop, requires(browser))]
     Extension(vmux_extension::ExtensionPlugin),

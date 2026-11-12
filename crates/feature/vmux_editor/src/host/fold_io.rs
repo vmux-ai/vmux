@@ -3,12 +3,12 @@ use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::path::Path;
 use std::task::Waker;
 
-use bevy_app::{App, Plugin, Update};
-use bevy_ecs::prelude::*;
-use bevy_tasks::{IoTaskPool, Task, TaskPool};
+use bevy::app::{App, Plugin, Update};
+use bevy::ecs::prelude::*;
+use bevy::tasks::{IoTaskPool, Task, TaskPool};
 use crossbeam_channel::{Receiver, bounded};
 
-use crate::{
+use crate::host::fold_preferences::{
     FileId, FoldSet, LoadCompleted, LoadRequest, Root, SaveCompleted, SaveRequest, Scope, Snapshot,
     Ticket,
 };
@@ -220,7 +220,9 @@ mod tests {
     use std::time::Duration;
 
     use super::*;
-    use crate::{Collapsed, FoldPlugin, Loaded, Mutation, State, UpdateRequest};
+    use crate::host::fold_preferences::{
+        Collapsed, FoldPlugin, Loaded, Mutation, State, UpdateRequest,
+    };
 
     struct HostWake(mpsc::Sender<()>);
 
@@ -265,7 +267,10 @@ mod tests {
         host.app.world_mut().write_message(UpdateRequest {
             ticket,
             file: FileId("/files/shared.rs".into()),
-            mutation: Mutation::Replace(Collapsed([9, 3].into())),
+            mutation: Mutation {
+                collapse: [9, 3].into(),
+                expand: [2, 7].into(),
+            },
         });
         host.app.update();
         host.awakened_frame();
@@ -293,7 +298,7 @@ mod tests {
         host.app.update();
         host.awakened_frame();
         let state = host.app.world().get::<State>(host.root).unwrap();
-        assert_eq!(state.phase(), crate::Phase::Failed);
+        assert_eq!(state.phase(), crate::host::fold_preferences::Phase::Failed);
         assert!(state.error().is_some());
         assert_eq!(std::fs::read_to_string(path).unwrap(), source);
     }
