@@ -1,6 +1,8 @@
 #[cfg(host)]
 use serde_json::{Value, json};
 #[cfg(host)]
+use std::fs::OpenOptions;
+#[cfg(host)]
 use std::io::{self, BufReader, Write};
 #[cfg(host)]
 use vmux_editor::lsp::framing::LspFrame;
@@ -34,17 +36,42 @@ fn main() {
     let mut reader = BufReader::new(stdin.lock());
     let mut stdout = io::stdout();
     let mut probe_uri = String::new();
+    let recording = std::env::args().any(|arg| arg == "--record");
+    let mut record = if recording {
+        Some(
+            OpenOptions::new()
+                .create(true)
+                .append(true)
+                .open("lsp-wire.jsonl")
+                .expect("open LSP wire recording"),
+        )
+    } else {
+        None
+    };
 
     while let Ok(Some(frame)) = LspFrame::read(&mut reader) {
         let msg = frame.into_message();
+        if let Some(record) = &mut record {
+            let mut line = serde_json::to_vec(&msg).expect("encode LSP recording line");
+            line.push(b'\n');
+            record.write_all(&line).expect("record LSP message");
+        }
         let method = msg.get("method").and_then(Value::as_str).unwrap_or("");
         let id = msg.get("id").cloned();
         match method {
             "initialize" => {
+                let mut capabilities = json!({"foldingRangeProvider": true});
+                if recording {
+                    capabilities["documentSymbolProvider"] = json!(true);
+                    capabilities["semanticTokensProvider"] = json!({
+                        "legend": {"tokenTypes": ["type"], "tokenModifiers": []},
+                        "full": true
+                    });
+                }
                 let resp = json!({
                     "jsonrpc": "2.0",
                     "id": id,
-                    "result": {"capabilities": {"foldingRangeProvider": true}}
+                    "result": {"capabilities": capabilities}
                 });
                 let _ = LspFrame::new(resp).write(&mut stdout);
             }
@@ -52,11 +79,19 @@ fn main() {
                 let resp = json!({
                     "jsonrpc": "2.0",
                     "id": id,
-                    "result": [{"startLine": 0, "endLine": 2}]
+                    "result": if recording { json!([]) } else { json!([{"startLine": 0, "endLine": 2}]) }
                 });
                 let _ = LspFrame::new(resp).write(&mut stdout);
             }
-            "textDocument/didOpen" => {
+            "textDocument/documentSymbol" => {
+                let _ = LspFrame::new(json!({"jsonrpc":"2.0", "id":id, "result":[]}))
+                    .write(&mut stdout);
+            }
+            "textDocument/semanticTokens/full" => {
+                let _ = LspFrame::new(json!({"jsonrpc":"2.0", "id":id, "result":{"data":[]}}))
+                    .write(&mut stdout);
+            }
+            "textDocument/didOpen" if !recording => {
                 let uri = msg
                     .pointer("/params/textDocument/uri")
                     .and_then(Value::as_str)

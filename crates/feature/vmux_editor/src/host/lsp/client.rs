@@ -17,8 +17,9 @@ use std::time::Duration;
 
 use std::io::BufRead;
 
+#[derive(bevy::prelude::Component)]
 pub struct ServerClient {
-    child: Child,
+    child: Option<Child>,
     outgoing: mpsc::Sender<serde_json::Value>,
     pending: PendingMap,
     next_id: AtomicI64,
@@ -109,6 +110,17 @@ impl ServerClient {
         diagnostics: LspDiagnosticsSender,
         inputs: ServerInputSender,
     ) -> std::io::Result<Self> {
+        Self::spawn_with_wake(spec, root, diagnostics, inputs, None)
+    }
+
+    pub fn spawn_with_wake(
+        spec: &ServerSpec,
+        root: &std::path::Path,
+        diagnostics: LspDiagnosticsSender,
+        inputs: ServerInputSender,
+        wake: Option<std::task::Waker>,
+    ) -> std::io::Result<Self> {
+        bevy::tasks::IoTaskPool::get_or_init(bevy::tasks::TaskPool::new);
         let store = crate::lsp::store::PackageStore::lsp();
         let mut child = Command::new(&spec.command)
             .args(&spec.args)
@@ -144,7 +156,8 @@ impl ServerClient {
             }
         });
 
-        let dispatcher = Reader::new(pending.clone(), diagnostics, outgoing.clone(), inputs, root);
+        let dispatcher = Reader::new(pending.clone(), diagnostics, outgoing.clone(), inputs, root)
+            .with_wake(wake);
         let reader = std::thread::spawn(move || dispatcher.run(stdout));
 
         let cmd_name = spec.command.clone();
@@ -156,7 +169,7 @@ impl ServerClient {
         });
 
         let mut client = ServerClient {
-            child,
+            child: Some(child),
             outgoing,
             pending,
             next_id: AtomicI64::new(1),
@@ -197,13 +210,34 @@ impl ServerClient {
             .lock()
             .unwrap_or_else(|p| p.into_inner())
             .insert(id, tx);
-        let _ = self.outgoing.send(serde_json::json!({
-            "jsonrpc": "2.0",
-            "id": id,
-            "method": method,
-            "params": params,
-        }));
+        if self
+            .outgoing
+            .send(serde_json::json!({
+                "jsonrpc": "2.0",
+                "id": id,
+                "method": method,
+                "params": params,
+            }))
+            .is_err()
+        {
+            self.pending
+                .lock()
+                .unwrap_or_else(|error| error.into_inner())
+                .remove(&id);
+        }
         (id, rx)
+    }
+
+    pub fn cancel_request(&self, id: i64) {
+        let removed = self
+            .pending
+            .lock()
+            .unwrap_or_else(|error| error.into_inner())
+            .remove(&id)
+            .is_some();
+        if removed {
+            self.notify("$/cancelRequest", serde_json::json!({ "id": id }));
+        }
     }
 
     fn request(
@@ -318,18 +352,37 @@ impl ServerClient {
         );
     }
 
+    pub(crate) fn exited(&mut self) -> bool {
+        match self.child.as_mut() {
+            Some(child) => child.try_wait().ok().flatten().is_some(),
+            None => true,
+        }
+    }
+
     pub fn shutdown(&mut self) {
         let _ = self.request("shutdown", serde_json::Value::Null, Duration::from_secs(2));
         self.notify("exit", serde_json::json!({}));
-        let _ = self.child.kill();
-        let _ = self.child.wait();
+        if let Some(child) = self.child.as_mut() {
+            let _ = child.kill();
+            let _ = child.wait();
+        }
     }
 }
 
 impl Drop for ServerClient {
     fn drop(&mut self) {
-        let _ = self.child.kill();
-        let _ = self.child.wait();
+        self.pending
+            .lock()
+            .unwrap_or_else(|error| error.into_inner())
+            .clear();
+        if let Some(mut child) = self.child.take() {
+            let _ = child.kill();
+            bevy::tasks::IoTaskPool::get()
+                .spawn(async move {
+                    let _ = child.wait();
+                })
+                .detach();
+        }
     }
 }
 

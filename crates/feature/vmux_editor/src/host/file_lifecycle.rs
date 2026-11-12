@@ -579,6 +579,7 @@ fn reload_changed_files(
             .remove::<crate::lsp::manager::LintRan>();
         if let Some(lsp_changes) = lsp_changes.as_mut() {
             lsp_changes.write(crate::lsp::manager::LspDocumentChangeRequest {
+                owner: entity,
                 path: file.path.clone(),
                 text: None,
             });
@@ -596,10 +597,7 @@ mod tests {
         app.add_plugins(MinimalPlugins)
             .add_plugins(FileLifecyclePlugin);
         app.world_mut().insert_non_send(Browsers::default());
-        app.world_mut().spawn(crate::lsp::manager::LspManager::new(
-            crate::lsp::LspDiagnosticsSender::default(),
-            crate::lsp::server_request::ServerInputSender::default(),
-        ));
+
         app
     }
 

@@ -2,6 +2,7 @@ use std::io::BufReader;
 use std::path::PathBuf;
 use std::process::ChildStdout;
 use std::sync::mpsc;
+use std::task::Waker;
 
 use serde_json::Value;
 
@@ -9,7 +10,7 @@ use crate::lsp::client::ServerClient;
 use crate::lsp::framing::LspFrame;
 use crate::lsp::server_request::{ApplyEditInput, ReplyHandle, ServerInputSender, ServerLogInput};
 use crate::lsp::wire::{ErrorCode, Incoming, RequestId};
-use crate::lsp::{LspDiagnosticsSender, PendingMap};
+use crate::lsp::{LspDiagnosticsSender, PathDiagnostics, PendingMap};
 
 pub struct Reader {
     pending: PendingMap,
@@ -19,6 +20,7 @@ pub struct Reader {
     root_uri: String,
     root_name: String,
     root: PathBuf,
+    wake: Option<Waker>,
 }
 
 impl Reader {
@@ -45,7 +47,13 @@ impl Reader {
             root_uri,
             root_name,
             root: root.to_path_buf(),
+            wake: None,
         }
+    }
+
+    pub(crate) fn with_wake(mut self, wake: Option<Waker>) -> Self {
+        self.wake = wake;
+        self
     }
 
     pub fn run(self, stdout: ChildStdout) {
@@ -53,6 +61,11 @@ impl Reader {
         while let Ok(Some(frame)) = LspFrame::read(&mut r) {
             self.dispatch(frame.into_message());
         }
+        self.pending
+            .lock()
+            .unwrap_or_else(|error| error.into_inner())
+            .clear();
+        self.wake();
     }
 
     fn dispatch(&self, msg: Value) {
@@ -61,6 +74,13 @@ impl Reader {
             Incoming::Request { id, method, params } => self.answer(id, &method, params),
             Incoming::Notification { method, params } => self.observe(&method, params),
             Incoming::Invalid => {}
+        }
+        self.wake();
+    }
+
+    fn wake(&self) {
+        if let Some(wake) = &self.wake {
+            wake.wake_by_ref();
         }
     }
 
@@ -114,6 +134,7 @@ impl Reader {
             reply: reply.clone(),
             root: self.root.clone(),
             params,
+            server: self.inputs.server,
         };
         if self.inputs.apply_edits.send(input).is_err() {
             reply.err(ErrorCode::RequestCancelled);
@@ -128,7 +149,12 @@ impl Reader {
         let Some(path) = ServerClient::path_from_uri(parsed.uri.as_str()) else {
             return;
         };
-        self.diagnostics.send((path, parsed.diagnostics));
+        self.diagnostics.send(PathDiagnostics {
+            path,
+            diagnostics: parsed.diagnostics,
+            version: parsed.version,
+            server: None,
+        });
     }
 
     fn log(&self, params: Value) {
@@ -185,6 +211,7 @@ mod tests {
                 ServerInputSender {
                     apply_edits: apply_edit_tx,
                     logs: log_tx,
+                    server: None,
                 },
                 std::path::Path::new("/tmp/proj"),
             );
@@ -201,6 +228,42 @@ mod tests {
             self.reader.dispatch(msg);
             self.sent.try_recv().expect("a request must be answered")
         }
+    }
+
+    struct ResponseWake {
+        response: crossbeam_channel::Receiver<Value>,
+        delivered: mpsc::Sender<Value>,
+    }
+
+    impl std::task::Wake for ResponseWake {
+        fn wake(self: std::sync::Arc<Self>) {
+            self.delivered
+                .send(
+                    self.response
+                        .try_recv()
+                        .expect("response published before wake"),
+                )
+                .unwrap();
+        }
+    }
+
+    #[test]
+    fn response_is_published_before_the_runner_is_woken() {
+        let mut harness = Harness::start();
+        let (sender, response) = crossbeam_channel::bounded(1);
+        harness.reader.pending.lock().unwrap().insert(5, sender);
+        let (delivered, received) = mpsc::channel();
+        harness.reader = harness
+            .reader
+            .with_wake(Some(Waker::from(std::sync::Arc::new(ResponseWake {
+                response,
+                delivered,
+            }))));
+        harness
+            .reader
+            .dispatch(json!({ "jsonrpc": "2.0", "id": 5, "result": "ready" }));
+        assert_eq!(received.try_recv().unwrap()["result"], "ready");
+        assert!(harness.reader.pending.lock().unwrap().is_empty());
     }
 
     #[test]
@@ -222,8 +285,19 @@ mod tests {
         }));
         let q = h.diagnostics.drain();
         assert_eq!(q.len(), 1);
-        assert_eq!(q[0].0, PathBuf::from("/tmp/main.rs"));
-        assert_eq!(q[0].1[0].message, "boom");
+        assert_eq!(q[0].path, PathBuf::from("/tmp/main.rs"));
+        assert_eq!(q[0].diagnostics[0].message, "boom");
+        assert_eq!(q[0].version, None);
+        h.reader.dispatch(json!({
+            "jsonrpc": "2.0",
+            "method": "textDocument/publishDiagnostics",
+            "params": { "uri": "file:///tmp/main.rs", "version": 7, "diagnostics": [] }
+        }));
+        let versioned = h.diagnostics.drain();
+        assert_eq!(versioned.len(), 1);
+        assert_eq!(versioned[0].path, PathBuf::from("/tmp/main.rs"));
+        assert_eq!(versioned[0].version, Some(7));
+        assert!(versioned[0].diagnostics.is_empty());
     }
 
     #[test]

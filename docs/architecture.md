@@ -86,7 +86,9 @@ spatial profiles are not supported presets.
 
 A feature plugin never installs a sibling feature. Shared composition belongs in `vmux_app`.
 Plugin boundaries represent independently configurable, reusable, platform-gated, or
-lifecycle-owned capabilities, not wrappers around a few systems. Platform-specific behavior
+lifecycle-owned capabilities, not wrappers around a few systems. An internal ECS lifecycle
+does not require a public crate: expose a boundary when a consumer or renderer/IO dependency
+justifies it, and keep smaller lifecycles in their owning feature. Platform-specific behavior
 enters through a platform plugin or adapter at the composition edge.
 
 ### Out of the box
@@ -1201,8 +1203,35 @@ ready. Multiple producers cannot overwrite one another through a singleton mailb
 
 **Editor.** `syntect` plus `two-face` — the ~200 grammars from `bat` — highlight line by
 line into `StyledSpan`s. The file viewer, the preview and git diffs all emit the same
-spans, so code looks identical wherever it appears. No tree-sitter, no LSP. The host ships
-only the visible slice of a file and re-slices as you scroll.
+spans, so code looks identical wherever it appears. Grammar-based highlighting runs without
+a language server. The host ships only the visible slice of a file and re-slices as you scroll.
+
+**Language servers.** `EditCore` remains the text editing and undo kernel owned by the `Editor`
+component. Its `content_version` changes on edits and undo/redo, independently of the document's
+LSP protocol version. Editor's private server, document, request, and diagnostics plugins own
+the native LSP lifecycle. A workspace root has shared `Cwd` and `Name`; its server children
+identify the root, command, and arguments; document children carry their path and accepted
+protocol version. Views bind to those documents, so closing one view preserves other users
+of the document. Removing a root or restarting a server invalidates only its descendants
+and bindings. Requests use shared Operations and retain their document identity, server
+instance, version, and target view. Cancellation and stale results cannot restore a terminal
+operation or reach a replacement document. The buffer's opaque change token survives queued
+edits and offered code actions; final application refuses edits, undo, or rebinding since acceptance,
+including changes not yet sent to the server. Client-requested multi-file edits keep accepted
+open-buffer snapshots on their Operation and validate the affected buffers before application.
+Unversioned edits also require an affected buffer to have been saved or synchronized to the
+originating server at acceptance; a later save does not establish that earlier knowledge.
+Versioned edits reject missing or ambiguous versions.
+Server-origin workspace edits validate the current server before applying or replying. Restart
+opens the current buffer, including unsaved text. Reload and encoding changes wait for the decoded
+buffer, synchronize it, and then reinitialize metadata. Diagnostics retain their server and the protocol's optional
+version; unversioned notifications cannot prove which edit produced them.
+Process handles, framing, reader/writer threads, and wire correlation stay in the transport
+adapter. Publishing input or a response, and closing the reader, wakes the reactive runner.
+Package selection, settings, navigation, and rendered projections remain Editor-owned. This
+native lifecycle is not yet a renderer-independent public LSP plugin.
+Lifecycle tests use the Rust `vmux_mock_lsp` recorder through real standard-input/output pipes.
+Run them with `cargo test --locked -p vmux_editor` so Cargo builds the registered test server.
 
 **Git.** The Git page and automatic Git-backed projections for the editor, Projects, Sessions and
 ACP enqueue work and only project completed results. Their repository discovery, status

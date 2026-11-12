@@ -19,6 +19,7 @@ impl Plugin for ServerRequestPlugin {
                 ServerInputSender {
                     apply_edits: apply_edit_sender.clone(),
                     logs: log_sender.clone(),
+                    server: None,
                 },
                 ApplyEditInbox(apply_edit_receiver.clone()),
                 ServerLogInbox(log_receiver.clone()),
@@ -56,13 +57,28 @@ pub enum ServerRequestSet {
 pub struct ServerInputSender {
     pub(crate) apply_edits: crossbeam_channel::Sender<ApplyEditInput>,
     pub(crate) logs: crossbeam_channel::Sender<ServerLogInput>,
+    pub(crate) server: Option<Entity>,
+}
+
+impl ServerInputSender {
+    pub(crate) fn scoped(&self, server: Entity) -> Self {
+        Self {
+            apply_edits: self.apply_edits.clone(),
+            logs: self.logs.clone(),
+            server: Some(server),
+        }
+    }
 }
 
 impl Default for ServerInputSender {
     fn default() -> Self {
         let (apply_edits, _) = crossbeam_channel::unbounded();
         let (logs, _) = crossbeam_channel::unbounded();
-        Self { apply_edits, logs }
+        Self {
+            apply_edits,
+            logs,
+            server: None,
+        }
     }
 }
 
@@ -76,6 +92,7 @@ pub struct ApplyEditInput {
     pub reply: ReplyHandle,
     pub root: PathBuf,
     pub params: lsp_types::ApplyWorkspaceEditParams,
+    pub server: Option<Entity>,
 }
 
 pub struct ServerLogInput {
@@ -108,17 +125,19 @@ pub struct ServerRequestPending {
     reply: ReplyHandle,
     frames: u32,
     since: Instant,
+    server: Option<Entity>,
 }
 
 impl ServerRequestPending {
     const MAX_FRAMES: u32 = 180;
     const MAX_WAIT: Duration = Duration::from_secs(5);
 
-    fn new(reply: ReplyHandle) -> Self {
+    fn new(reply: ReplyHandle, server: Option<Entity>) -> Self {
         Self {
             reply,
             frames: 0,
             since: Instant::now(),
+            server,
         }
     }
 
@@ -132,6 +151,7 @@ impl ServerRequestPending {
 pub struct AwaitingApplyEdit {
     pub root: PathBuf,
     pub params: lsp_types::ApplyWorkspaceEditParams,
+    pub server: Option<Entity>,
 }
 
 #[derive(Message)]
@@ -143,10 +163,11 @@ pub struct ServerReply {
 fn spawn_apply_edit_requests(inputs: Single<&ApplyEditInbox>, mut commands: Commands) {
     for input in inputs.0.try_iter() {
         commands.spawn((
-            ServerRequestPending::new(input.reply),
+            ServerRequestPending::new(input.reply, input.server),
             AwaitingApplyEdit {
                 root: input.root,
                 params: input.params,
+                server: input.server,
             },
         ));
     }
@@ -166,18 +187,31 @@ fn answer_server_requests(
     mut replies: MessageReader<ServerReply>,
     mut pending: Query<(Entity, &mut ServerRequestPending)>,
     mut commands: Commands,
+    manager: crate::lsp::manager::LspManager,
 ) {
     let mut answered = std::collections::HashSet::new();
     for reply in replies.read() {
         let Ok((entity, request)) = pending.get(reply.request) else {
             continue;
         };
-        request.reply.ok(reply.result.clone());
+        if request
+            .server
+            .is_some_and(|server| !manager.server_current(server))
+        {
+            request.reply.err(ErrorCode::RequestCancelled);
+        } else {
+            request.reply.ok(reply.result.clone());
+        }
         commands.entity(entity).despawn();
         answered.insert(entity);
     }
     for (entity, mut request) in &mut pending {
-        if answered.contains(&entity) || !request.expired() {
+        if answered.contains(&entity)
+            || (request
+                .server
+                .is_none_or(|server| manager.server_current(server))
+                && !request.expired())
+        {
             continue;
         }
         request.reply.err(ErrorCode::RequestCancelled);
@@ -212,6 +246,7 @@ mod tests {
                 .send(ApplyEditInput {
                     reply,
                     root: std::path::PathBuf::from("/tmp/project"),
+                    server: None,
                     params: lsp_types::ApplyWorkspaceEditParams {
                         label: None,
                         edit: lsp_types::WorkspaceEdit::default(),

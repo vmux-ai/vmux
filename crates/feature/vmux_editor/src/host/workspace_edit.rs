@@ -22,40 +22,86 @@ impl Plugin for WorkspaceEditPlugin {
 
 fn apply_lsp(
     requests: Query<(Entity, &crate::lsp::server_request::AwaitingApplyEdit)>,
-    mut replies: MessageWriter<crate::lsp::server_request::ServerReply>,
     mut renames: MessageReader<crate::lsp::manager::LspRequestedEdit>,
-    mut edits: WorkspaceEdits,
+    mut commands: Commands,
 ) {
     for (request, awaiting) in &requests {
-        let refusal = match WorkspaceEditPlan::within(&awaiting.root, &awaiting.params.edit) {
-            Ok(plan) => edits.apply(plan),
-            Err(refusal) => Some(refusal.to_string()),
-        };
-        replies.write(crate::lsp::server_request::ServerReply {
-            request,
-            result: match &refusal {
-                None => serde_json::json!({ "applied": true }),
-                Some(reason) => {
-                    serde_json::json!({ "applied": false, "failureReason": reason })
-                }
-            },
+        commands.queue(ApplyWorkspaceEdit {
+            request: Some(request),
+            target: None,
+            server: awaiting.server,
+            origin: None,
+            root: awaiting.root.clone(),
+            result: Ok(awaiting.params.edit.clone()),
         });
     }
-
     for rename in renames.read() {
-        let refusal = match &rename.result {
-            Err(reason) => Some(reason.clone()),
-            Ok(edit) => match WorkspaceEditPlan::within(&rename.root, edit) {
-                Ok(plan) => edits.apply(plan),
-                Err(refusal) => Some(refusal.to_string()),
-            },
+        commands.queue(ApplyWorkspaceEdit {
+            request: None,
+            target: Some(rename.entity),
+            server: rename.origin.map(|origin| origin.server()),
+            origin: rename.origin,
+            root: rename.root.clone(),
+            result: rename.result.clone(),
+        });
+    }
+}
+
+struct ApplyWorkspaceEdit {
+    request: Option<Entity>,
+    target: Option<Entity>,
+    server: Option<Entity>,
+    origin: Option<crate::lsp::manager::LspOrigin>,
+    root: std::path::PathBuf,
+    result: Result<lsp_types::WorkspaceEdit, String>,
+}
+
+impl Command for ApplyWorkspaceEdit {
+    type Out = ();
+
+    fn apply(self, world: &mut World) {
+        let mut state = bevy::ecs::system::SystemState::<WorkspaceEdits>::new(world);
+        let mut edits = state
+            .get_mut(world)
+            .expect("workspace edit resources are available");
+        let refusal = if self
+            .origin
+            .is_some_and(|origin| !origin.current(&edits.manager))
+        {
+            Some("document changed since the edit was computed".to_string())
+        } else if self
+            .server
+            .is_some_and(|server| !edits.manager.server_current(server))
+            && self.origin.is_none()
+        {
+            Some("language server instance is no longer current".to_string())
+        } else {
+            match self.result {
+                Err(error) => Some(error),
+                Ok(edit) => match WorkspaceEditPlan::within(&self.root, &edit) {
+                    Ok(plan) => edits.apply(plan, self.server, self.origin.as_ref()),
+                    Err(error) => Some(error.to_string()),
+                },
+            }
         };
-        let Some(reason) = refusal else {
-            continue;
-        };
-        edits
-            .commands
-            .trigger(super::feedback::EditFailure::new(rename.entity, reason));
+        if let Some(request) = self.request {
+            edits
+                .replies
+                .write(crate::lsp::server_request::ServerReply {
+                    request,
+                    result: match &refusal {
+                        None => serde_json::json!({ "applied": true }),
+                        Some(reason) => {
+                            serde_json::json!({ "applied": false, "failureReason": reason })
+                        }
+                    },
+                });
+        } else if let (Some(target), Some(reason)) = (self.target, refusal) {
+            edits
+                .commands
+                .trigger(super::feedback::EditFailure::new(target, reason));
+        }
+        state.apply(world);
     }
 }
 
@@ -63,13 +109,20 @@ fn apply_lsp(
 struct WorkspaceEdits<'w, 's> {
     views: Query<'w, 's, (Entity, &'static FileView, &'static Editor)>,
     self_writes: NonSendMut<'w, SelfWrites>,
-    manager: Single<'w, 's, &'static crate::lsp::manager::LspManager>,
+    manager: crate::lsp::manager::LspManager<'w, 's>,
+    unsent: Query<'w, 's, (), With<super::language::LspEditDirty>>,
+    replies: MessageWriter<'w, crate::lsp::server_request::ServerReply>,
     commands: Commands<'w, 's>,
 }
 
 impl WorkspaceEdits<'_, '_> {
-    fn apply(&mut self, plan: WorkspaceEditPlan) -> Option<String> {
-        let prepared = match self.prepare(plan) {
+    fn apply(
+        &mut self,
+        plan: WorkspaceEditPlan,
+        server: Option<Entity>,
+        origin: Option<&crate::lsp::manager::LspOrigin>,
+    ) -> Option<String> {
+        let prepared = match self.prepare(plan, server, origin) {
             Ok(prepared) => prepared,
             Err(reason) => return Some(reason),
         };
@@ -81,10 +134,15 @@ impl WorkspaceEdits<'_, '_> {
         None
     }
 
-    fn prepare(&self, plan: WorkspaceEditPlan) -> Result<PreparedWorkspaceEdit, String> {
+    fn prepare(
+        &self,
+        plan: WorkspaceEditPlan,
+        server: Option<Entity>,
+        origin: Option<&crate::lsp::manager::LspOrigin>,
+    ) -> Result<PreparedWorkspaceEdit, String> {
         let mut documents = Vec::with_capacity(plan.documents.len());
         for document in plan.documents {
-            documents.push(self.prepare_document(document)?);
+            documents.push(self.prepare_document(document, server, origin)?);
         }
         Ok(PreparedWorkspaceEdit { documents })
     }
@@ -92,12 +150,14 @@ impl WorkspaceEdits<'_, '_> {
     fn prepare_document(
         &self,
         document: crate::lsp::workspace_edit::PlannedDocument,
+        server: Option<Entity>,
+        origin: Option<&crate::lsp::manager::LspOrigin>,
     ) -> Result<PreparedDocument, String> {
-        if let (Some(expected), Some(actual)) = (
-            document.version,
-            self.manager.document_version(document.path.as_path()),
-        ) && expected != actual
-        {
+        if document.version.is_some_and(|expected| {
+            self.manager
+                .document_version_from(server, document.path.as_path())
+                != Some(expected)
+        }) {
             return Err(format!(
                 "{} changed since the edit was computed",
                 document.path.as_path().display()
@@ -111,6 +171,24 @@ impl WorkspaceEdits<'_, '_> {
             .filter(|(_, view, ..)| vmux_path::PathIdentity::resolve(&view.path) == wanted)
             .map(|(entity, ..)| entity)
             .collect();
+        if document.version.is_none()
+            && origin.is_some_and(|origin| {
+                !self
+                    .manager
+                    .buffers_current(origin, document.path.as_path(), &targets)
+            })
+        {
+            return Err(format!(
+                "{} changed since the edit was accepted",
+                document.path.as_path().display()
+            ));
+        }
+        if targets.iter().any(|entity| self.unsent.contains(*entity)) {
+            return Err(format!(
+                "{} has changes not yet sent to the language server",
+                document.path.as_path().display()
+            ));
+        }
         let source = if targets.is_empty() {
             std::fs::read_to_string(document.path.as_path())
                 .map_err(|_| format!("{} could not be read", document.path.as_path().display()))?
@@ -201,6 +279,7 @@ mod tests {
                     entity: views[0],
                     root: path.parent().unwrap_or(path).to_path_buf(),
                     result: Ok(Self::renaming(path)),
+                    origin: None,
                 });
             let (_outgoing, sent) = std::sync::mpsc::channel();
             Self { app, views, sent }
@@ -226,6 +305,7 @@ mod tests {
                         outgoing,
                     ),
                     root: path.parent().unwrap_or(path).to_path_buf(),
+                    server: None,
                     params: lsp_types::ApplyWorkspaceEditParams { label: None, edit },
                 })
                 .unwrap();
@@ -243,10 +323,6 @@ mod tests {
             app.world_mut().insert_non_send(ClipboardHandle(None));
             app.world_mut().insert_non_send(SelfWrites::default());
             app.world_mut().insert_non_send(Browsers::default());
-            app.world_mut().spawn(crate::lsp::manager::LspManager::new(
-                crate::lsp::LspDiagnosticsSender::default(),
-                crate::lsp::server_request::ServerInputSender::default(),
-            ));
 
             let mut views = Vec::new();
             for _ in 0..panes {
@@ -331,6 +407,286 @@ mod tests {
                 .unwrap()
                 .core
                 .apply(EditCommand::Undo);
+        }
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn a_versioned_edit_resolves_the_open_document_through_its_file_alias() {
+        let temp = tempfile::tempdir().unwrap();
+        let path = temp.path().join("main.rs");
+        let alias = temp.path().join("alias.rs");
+        std::fs::write(&path, ApplyEdit::BEFORE).unwrap();
+        std::os::unix::fs::symlink(&path, &alias).unwrap();
+        let request = lsp_types::WorkspaceEdit {
+            document_changes: Some(lsp_types::DocumentChanges::Edits(vec![
+                lsp_types::TextDocumentEdit {
+                    text_document: lsp_types::OptionalVersionedTextDocumentIdentifier {
+                        uri: url::Url::from_file_path(&path)
+                            .unwrap()
+                            .as_str()
+                            .parse()
+                            .unwrap(),
+                        version: Some(1),
+                    },
+                    edits: vec![lsp_types::OneOf::Left(lsp_types::TextEdit {
+                        range: lsp_types::Range {
+                            start: lsp_types::Position::new(0, 0),
+                            end: lsp_types::Position::new(0, 3),
+                        },
+                        new_text: "replacement".into(),
+                    })],
+                },
+            ])),
+            ..Default::default()
+        };
+        let mut edit = ApplyEdit::with_workspace_edit(&alias, 1, request);
+        crate::lsp::manager::DocumentFixture::open(edit.app.world_mut(), edit.views[0], &alias, 1);
+        edit.app.update();
+        assert_eq!(edit.sent.try_recv().unwrap()["result"]["applied"], true);
+        assert_eq!(edit.text(edit.views[0]), "replacement two three\n");
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), ApplyEdit::BEFORE);
+    }
+
+    #[test]
+    fn an_ambiguous_open_document_version_refuses_the_whole_edit() {
+        let temp = tempfile::tempdir().unwrap();
+        let path = temp.path().join("main.rs");
+        std::fs::write(&path, ApplyEdit::BEFORE).unwrap();
+        let request = lsp_types::WorkspaceEdit {
+            document_changes: Some(lsp_types::DocumentChanges::Edits(vec![
+                lsp_types::TextDocumentEdit {
+                    text_document: lsp_types::OptionalVersionedTextDocumentIdentifier {
+                        uri: url::Url::from_file_path(&path)
+                            .unwrap()
+                            .as_str()
+                            .parse()
+                            .unwrap(),
+                        version: Some(1),
+                    },
+                    edits: vec![lsp_types::OneOf::Left(lsp_types::TextEdit {
+                        range: lsp_types::Range {
+                            start: lsp_types::Position::new(0, 0),
+                            end: lsp_types::Position::new(0, 3),
+                        },
+                        new_text: "replacement".into(),
+                    })],
+                },
+            ])),
+            ..Default::default()
+        };
+        let mut edit = ApplyEdit::with_workspace_edit(&path, 2, request);
+        for view in &edit.views {
+            crate::lsp::manager::DocumentFixture::open(edit.app.world_mut(), *view, &path, 2);
+        }
+        edit.app.update();
+        assert_eq!(edit.sent.try_recv().unwrap()["result"]["applied"], false);
+        for view in edit.views.clone() {
+            assert_eq!(edit.text(view), ApplyEdit::BEFORE);
+        }
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), ApplyEdit::BEFORE);
+    }
+
+    #[test]
+    fn unversioned_multi_document_edits_preserve_changes_to_affected_buffers() {
+        for mode in 0..5 {
+            let temp = tempfile::tempdir().unwrap();
+            let source = temp.path().join("source.rs");
+            let target = temp.path().join("target.rs");
+            std::fs::write(&source, ApplyEdit::BEFORE).unwrap();
+            std::fs::write(&target, "abc\n").unwrap();
+            let (app, views) = ApplyEdit::bare(&source, 2);
+            let (_outgoing, sent) = std::sync::mpsc::channel();
+            let mut fixture = ApplyEdit { app, views, sent };
+            let owner = fixture.views[0];
+            let affected = fixture.views[1];
+            fixture.app.world_mut().entity_mut(affected).insert((
+                FileView {
+                    path: target.clone(),
+                },
+                Editor::new(
+                    EditCore::new(target.clone(), "Rust".into(), "abc\n", EditMode::Normal),
+                    HighlightCache::new(&target),
+                    crate::fold::FoldState::default(),
+                ),
+            ));
+            let first = crate::lsp::manager::DocumentFixture::open(
+                fixture.app.world_mut(),
+                owner,
+                &source,
+                1,
+            );
+            let second = crate::lsp::manager::DocumentFixture::open(
+                fixture.app.world_mut(),
+                affected,
+                &target,
+                1,
+            );
+            if mode >= 2 {
+                fixture
+                    .app
+                    .world_mut()
+                    .get_mut::<Editor>(affected)
+                    .unwrap()
+                    .core
+                    .apply(EditCommand::InsertText("X".into()));
+            }
+            if mode == 4 {
+                second.synced_to(fixture.app.world_mut(), affected, &first);
+            }
+            let origin = first.origin(fixture.app.world_mut(), owner, &source);
+            if mode == 1 {
+                fixture
+                    .app
+                    .world_mut()
+                    .get_mut::<Editor>(affected)
+                    .unwrap()
+                    .core
+                    .apply(EditCommand::InsertText("X".into()));
+                fixture
+                    .app
+                    .world_mut()
+                    .get_mut::<crate::lsp::OpenDoc>(second.document)
+                    .unwrap()
+                    .version = 2;
+            }
+            if mode == 3 {
+                std::fs::write(&target, "Xabc\n").unwrap();
+                fixture
+                    .app
+                    .world_mut()
+                    .get_mut::<Editor>(affected)
+                    .unwrap()
+                    .core
+                    .mark_saved();
+            }
+            let edit = lsp_types::WorkspaceEdit {
+                document_changes: Some(lsp_types::DocumentChanges::Edits(vec![
+                    lsp_types::TextDocumentEdit {
+                        text_document: lsp_types::OptionalVersionedTextDocumentIdentifier {
+                            uri: url::Url::from_file_path(&target)
+                                .unwrap()
+                                .as_str()
+                                .parse()
+                                .unwrap(),
+                            version: None,
+                        },
+                        edits: vec![lsp_types::OneOf::Left(lsp_types::TextEdit {
+                            range: lsp_types::Range {
+                                start: lsp_types::Position::new(0, u32::from(mode == 4)),
+                                end: lsp_types::Position::new(0, if mode == 4 { 4 } else { 3 }),
+                            },
+                            new_text: "ABC".into(),
+                        })],
+                    },
+                ])),
+                ..Default::default()
+            };
+            fixture
+                .app
+                .world_mut()
+                .write_message(crate::lsp::manager::LspRequestedEdit {
+                    entity: owner,
+                    root: temp.path().into(),
+                    result: Ok(edit),
+                    origin: Some(origin),
+                });
+            fixture.app.update();
+            assert_eq!(
+                fixture.text(affected),
+                match mode {
+                    0 => "ABC\n",
+                    4 => "XABC\n",
+                    _ => "Xabc\n",
+                }
+            );
+            assert_eq!(fixture.text(owner), ApplyEdit::BEFORE);
+            assert_eq!(
+                std::fs::read_to_string(&target).unwrap(),
+                if mode == 3 { "Xabc\n" } else { "abc\n" }
+            );
+        }
+    }
+
+    #[test]
+    fn queued_edits_refuse_changed_buffers_rebindings_and_server_replacement() {
+        for change in 0..6 {
+            let temp = tempfile::tempdir().unwrap();
+            let path = temp.path().join("main.rs");
+            std::fs::write(&path, ApplyEdit::BEFORE).unwrap();
+            let (app, views) = ApplyEdit::bare(&path, 1);
+            let (_outgoing, sent) = std::sync::mpsc::channel();
+            let mut edit = ApplyEdit { app, views, sent };
+            let view = edit.views[0];
+            let fixture =
+                crate::lsp::manager::DocumentFixture::open(edit.app.world_mut(), view, &path, 1);
+            let origin = fixture.origin(edit.app.world_mut(), view, &path);
+            edit.app
+                .world_mut()
+                .write_message(crate::lsp::manager::LspRequestedEdit {
+                    entity: view,
+                    root: temp.path().into(),
+                    result: Ok(ApplyEdit::renaming(&path)),
+                    origin: Some(origin),
+                });
+            match change {
+                0 => {}
+                1 | 2 => {
+                    edit.app
+                        .world_mut()
+                        .get_mut::<Editor>(view)
+                        .unwrap()
+                        .core
+                        .apply(EditCommand::InsertText("MINE ".into()));
+                    if change == 2 {
+                        edit.undo(view);
+                    }
+                }
+                3 => {
+                    edit.app.world_mut().entity_mut(fixture.document).despawn();
+                    crate::lsp::manager::DocumentFixture::open(
+                        edit.app.world_mut(),
+                        view,
+                        &path,
+                        1,
+                    );
+                }
+                4 => {
+                    edit.app.world_mut().entity_mut(fixture.server).despawn();
+                    crate::lsp::manager::DocumentFixture::open(
+                        edit.app.world_mut(),
+                        view,
+                        &path,
+                        1,
+                    );
+                }
+                5 => {
+                    let mut second = ApplyEdit::renaming(&path);
+                    for changes in second.changes.as_mut().unwrap().values_mut() {
+                        changes[0].new_text = "SECOND".into();
+                    }
+                    edit.app
+                        .world_mut()
+                        .write_message(crate::lsp::manager::LspRequestedEdit {
+                            entity: view,
+                            root: temp.path().into(),
+                            result: Ok(second),
+                            origin: Some(origin),
+                        });
+                }
+                _ => unreachable!(),
+            }
+            let before = edit.text(view);
+            edit.app.update();
+            assert_eq!(
+                edit.text(view),
+                if change == 0 || change == 5 {
+                    "1 two 3\n".to_string()
+                } else {
+                    before
+                }
+            );
+            assert_eq!(std::fs::read_to_string(&path).unwrap(), ApplyEdit::BEFORE);
         }
     }
 
