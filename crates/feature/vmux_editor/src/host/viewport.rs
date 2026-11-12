@@ -27,8 +27,7 @@ impl Plugin for ViewportPlugin {
                 (
                     sync_wrap_settings.after(EditorFileLoadedSet),
                     rehighlight_on_color_scheme,
-                    apply_lsp_folds,
-                    persist_folds,
+                    apply_lsp_folds.before(crate::host::fold_preferences::FoldSet::Project),
                 ),
             )
             .add_observer(file_resize)
@@ -485,24 +484,6 @@ fn file_fold_toggle(
     commands.trigger(ViewportRenderRequest::new(entity));
     commands.trigger(CursorRenderRequest::new(entity));
     commands.entity(entity).insert(FoldsDirty);
-}
-
-fn persist_folds(
-    views: Query<(Entity, &FileView, &Editor), With<FoldsDirty>>,
-    mut store: NonSendMut<crate::host::fold_store::FoldStore>,
-    mut commands: Commands,
-) {
-    let mut changed = false;
-    for (entity, file, edit) in &views {
-        let mut collapsed: Vec<u32> = edit.folds.collapsed.iter().copied().collect();
-        collapsed.sort_unstable();
-        store.set(&file.path, &collapsed);
-        commands.entity(entity).remove::<FoldsDirty>();
-        changed = true;
-    }
-    if changed {
-        store.save();
-    }
 }
 
 fn apply_lsp_folds(

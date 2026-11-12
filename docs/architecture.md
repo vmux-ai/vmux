@@ -489,6 +489,15 @@ Filesystem jobs queue by canonical directory. Unstarted jobs are discarded when 
 changes; started atomic IO finishes before a replacement root reads that directory. Backend IO
 tasks therefore own their finite lifetime rather than being despawned with a requesting root.
 
+Editor owns durable collapsed-line preferences through an internal plugin. FileId, Collapsed and
+Revision components belong to file records under a Profile store root. Views share those records;
+fold regions, caret, viewport and rendering remain local. Changed line sets compose without
+replacing unrelated preferences. Shared store::State and save Operations retain dirty revisions
+on failure, and completion checks owner, path, generation and revision. Atomic filesystem IO
+preserves the historical folds.ron map and publishes completion before waking the host. Started
+IO finishes before a replacement owner reads the same path. Fold preferences are an Editor
+implementation detail rather than a separate framework crate or application feature flag.
+
 Every product feature appears exactly once in that graph and exposes one crate-level plugin.
 That root plugin installs only its own manifest, components, systems, and private subplugins. It
 never installs a sibling feature plugin. Cross-feature requirements belong to the `vmux_app`

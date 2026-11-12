@@ -52,7 +52,6 @@ impl Plugin for FileLifecyclePlugin {
             Err(error) => tracing::warn!("file watcher init failed: {error}"),
         }
         app.insert_non_send(SelfWrites::default())
-            .insert_non_send(crate::fold_store::FoldStore::load())
             .add_systems(
                 Update,
                 (
@@ -327,7 +326,6 @@ fn load_file_buffers(
 fn apply_loaded_file_buffers(
     mut files: Query<(Entity, &FileView, &mut FileLoadTask)>,
     settings: Option<Res<vmux_setting::AppSettings>>,
-    store: Option<NonSend<crate::fold_store::FoldStore>>,
     mut commands: Commands,
 ) {
     let keymap = KeymapConfig::resolve(settings.as_deref());
@@ -381,10 +379,6 @@ fn apply_loaded_file_buffers(
                 let mut folds = crate::fold::FoldState::default();
                 if !heavy {
                     folds.set_indented(&core.buffer.rope);
-                    if let Some(store) = &store {
-                        folds.collapsed.extend(store.get(&view.path));
-                        folds.reconcile();
-                    }
                 }
                 core.fold_view = folds.view(core.buffer.len_lines() as u32);
                 let editor = Editor::new(core, highlight, folds);
