@@ -4,6 +4,7 @@ use std::task::Waker;
 
 use base64::Engine;
 use bevy::prelude::*;
+use bevy::tasks::{IoTaskPool, TaskPool};
 use crossbeam_channel::{Receiver, Sender};
 use vmux_api::extension::{ExtInstallPhase, ExtInstallProgress};
 use vmux_ecs::{
@@ -82,6 +83,7 @@ struct StagingDirectory(PathBuf);
 
 impl Staging {
     fn new(path: PathBuf) -> Self {
+        IoTaskPool::get_or_init(TaskPool::new);
         Self(Arc::new(StagingDirectory(path)))
     }
 
@@ -92,15 +94,32 @@ impl Staging {
     fn lifetime(&self) -> Arc<dyn Send + Sync> {
         self.0.clone()
     }
+
+    #[cfg(test)]
+    fn await_removal(path: &Path) {
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+        while path.exists() {
+            assert!(
+                std::time::Instant::now() < deadline,
+                "staging cleanup did not complete"
+            );
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        }
+    }
 }
 
 impl Drop for StagingDirectory {
     fn drop(&mut self) {
-        if let Err(error) = std::fs::remove_dir_all(&self.0)
-            && error.kind() != std::io::ErrorKind::NotFound
-        {
-            warn!(path = %self.0.display(), %error, "failed to remove extension staging");
-        }
+        let path = self.0.clone();
+        IoTaskPool::get()
+            .spawn(async move {
+                if let Err(error) = std::fs::remove_dir_all(&path)
+                    && error.kind() != std::io::ErrorKind::NotFound
+                {
+                    warn!(path = %path.display(), %error, "failed to remove extension staging");
+                }
+            })
+            .detach();
     }
 }
 
@@ -633,6 +652,7 @@ mod tests {
         }
         .unpack(Vec::new());
         assert!(result.is_err());
+        Staging::await_removal(&failed);
         assert!(!failed.exists());
         assert!(!root.path().join("index.json").exists());
         assert_eq!(
@@ -646,6 +666,7 @@ mod tests {
         assert!(!output.entry.enabled_for("test"));
         let staged = output.staging.path().to_path_buf();
         drop(output);
+        Staging::await_removal(&staged);
         assert!(!staged.exists());
         assert_eq!(
             std::fs::read_to_string(installed.join("background.js")).unwrap(),
@@ -772,6 +793,7 @@ mod tests {
         );
         assert!(app.world().get::<InstallOwner>(operation).is_none());
         drop(materialize);
+        Staging::await_removal(&staged);
         assert!(!staged.exists());
         let canceled_staging = directory.path().join("staging/canceled");
         std::fs::create_dir_all(&canceled_staging).unwrap();
@@ -815,6 +837,7 @@ mod tests {
         app.update();
         assert!(canceled_staging.join("download.crx").exists());
         drop(worker);
+        Staging::await_removal(&canceled_staging);
         assert!(!canceled_staging.exists());
     }
 }

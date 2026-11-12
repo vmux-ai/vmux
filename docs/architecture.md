@@ -1135,9 +1135,9 @@ packages and another Profile's pending install. Native downloads and archive ext
 owned blocking jobs and isolated staging. A different source cannot overwrite an installed
 package's existing version directory.
 Staging uses an IO lease retained by the installation and materialization workers; the last user
-removes temporary files after success, failure or cancellation without touching installed sources.
+queues temporary-file removal off the ECS thread after success, failure or cancellation, without touching installed sources.
 Reseeding the same root during an older write schedules the new canonical snapshot after that IO,
-so the store cannot become clean while its disk image still belongs to the previous generation.
+and preserves that repair across further resets and path aliases until compensation succeeds. The store cannot become clean while its disk image belongs to the previous generation.
 
 The explicit host feature adds ExtensionHostPlugin for runtime preparation, bridge transport,
 service workers, browser API projection, popups, web-store injection, conformance tooling, and

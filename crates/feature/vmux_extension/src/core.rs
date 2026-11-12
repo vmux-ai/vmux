@@ -591,6 +591,7 @@ fn reset(
         Option<&Scope>,
         Option<&Seed>,
         Option<&Writing>,
+        Has<Repair>,
     )>,
     packages: Query<(Entity, &ChildOf), With<Package>>,
     mut clock: ResMut<Clock>,
@@ -598,7 +599,7 @@ fn reset(
     mut completed: MessageWriter<LoadCompleted>,
     mut commands: Commands,
 ) {
-    for (owner, root, scope, seed, writing) in &roots {
+    for (owner, root, scope, seed, writing, pending_repair) in &roots {
         if seed.is_none()
             && !root.is_changed()
             && scope.is_some_and(|scope| scope.0.directory == root.0)
@@ -613,7 +614,7 @@ fn reset(
         let ticket = clock.ticket(owner, &root.0);
         let mut state = State::default();
         state.materialize();
-        let repair = writing.is_some_and(|writing| writing.ticket.directory == root.0);
+        let repair = writing.is_some() || pending_repair;
         if repair {
             state.advance();
         }

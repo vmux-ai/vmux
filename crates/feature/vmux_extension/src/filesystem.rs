@@ -577,6 +577,55 @@ mod tests {
                 self.wake.recv_timeout(Duration::from_secs(2)).unwrap();
             }
         }
+
+        fn hold_file_jobs(&mut self) -> (vmux_ecs::BlockingTask<()>, mpsc::Sender<()>) {
+            self.app.insert_resource(vmux_ecs::BlockingRuntime::new(
+                vmux_ecs::BlockingPool::new("test-extension-short", 1, 8),
+                vmux_ecs::BlockingPool::new("test-extension-long", 1, 8),
+                vmux_ecs::BlockingPool::new("test-extension-process", 1, 8),
+            ));
+            let (started, entered) = mpsc::channel();
+            let (release, wait) = mpsc::channel();
+            let task = self
+                .app
+                .world()
+                .resource::<vmux_ecs::BlockingRuntime>()
+                .try_spawn(vmux_ecs::blocking::Lane::Short, None, move || {
+                    started.send(()).unwrap();
+                    wait.recv_timeout(Duration::from_secs(5)).unwrap();
+                })
+                .unwrap();
+            entered.recv_timeout(Duration::from_secs(2)).unwrap();
+            (task, release)
+        }
+
+        fn settle(&mut self) {
+            let deadline = Instant::now() + Duration::from_secs(5);
+            loop {
+                let running = self
+                    .app
+                    .world_mut()
+                    .query_filtered::<Entity, Or<(With<Queued>, With<Executing>)>>()
+                    .iter(self.app.world())
+                    .next()
+                    .is_some();
+                let dirty = self
+                    .app
+                    .world()
+                    .get::<crate::State>(self.root)
+                    .unwrap()
+                    .is_dirty();
+                if !running && !dirty {
+                    return;
+                }
+                assert!(
+                    Instant::now() < deadline,
+                    "replacement store did not settle"
+                );
+                self.wake.recv_timeout(Duration::from_secs(2)).unwrap();
+                self.app.update();
+            }
+        }
     }
 
     #[test]
@@ -710,6 +759,68 @@ mod tests {
             host.app.world().get::<OperationState>(operation),
             Some(&OperationState::Canceled)
         );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn repeated_seed_and_an_alias_preserve_repair_until_started_io_settles() {
+        for alias in [false, true] {
+            let directory = tempfile::tempdir().unwrap();
+            let mut original = Index::default();
+            let mut entry = ExtEntry {
+                id: ID.into(),
+                name: "Example".into(),
+                version: "1".into(),
+                ..Default::default()
+            };
+            entry.profile_enabled.insert("personal".into(), false);
+            entry.profile_pinned.insert("personal".into(), false);
+            entry.approved_grants.insert(
+                "personal".into(),
+                crate::snapshot::ExtensionGrants::default(),
+            );
+            original.entries.push(entry);
+            FileStore::write(directory.path(), &original).unwrap();
+            let mut host = Host::new(directory.path());
+            host.load();
+            let (blocker, release) = host.hold_file_jobs();
+            host.submit(
+                "personal",
+                Mutation::Pin(ExtPinRequest {
+                    id: ID.into(),
+                    pinned: true,
+                }),
+            );
+            if alias {
+                let path = directory.path().join("alias");
+                std::os::unix::fs::symlink(directory.path(), &path).unwrap();
+                host.app
+                    .world_mut()
+                    .entity_mut(host.root)
+                    .insert(Root(path));
+            }
+            host.app
+                .world_mut()
+                .entity_mut(host.root)
+                .insert(crate::Seed(Err("temporary read failure".into())));
+            host.app.update();
+            host.app
+                .world_mut()
+                .entity_mut(host.root)
+                .insert(crate::Seed(Ok(original.clone())));
+            host.app.update();
+            release.send(()).unwrap();
+            host.settle();
+            drop(blocker);
+            let mut catalog = SystemState::<Catalog>::new(host.app.world_mut());
+            let snapshot = catalog
+                .get(host.app.world())
+                .unwrap()
+                .snapshot(host.root)
+                .unwrap();
+            assert_eq!(FileStore::read(directory.path()).unwrap(), snapshot);
+            assert_eq!(snapshot, original);
+        }
     }
 
     #[test]
