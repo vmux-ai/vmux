@@ -212,8 +212,8 @@ impl Candidates {
         match id {
             "claude" | "claude-acp" => Some(0),
             "codex" | "codex-acp" => Some(1),
-            "gemini" | "gemini-cli" => Some(2),
-            "mistral-vibe" | "vibe" | "vibe-acp" => Some(3),
+            "mistral-vibe" | "vibe" | "vibe-acp" => Some(2),
+            "gemini" | "gemini-cli" => Some(3),
             "opencode" | "opencode-acp" => Some(4),
             "goose" | "goose-acp" => Some(5),
             _ => None,
@@ -465,11 +465,11 @@ mod tests {
             [
                 "claude",
                 "codex",
-                "gemini",
+                "mistral-vibe",
                 "bob",
                 "claude-acp",
                 "codex-acp",
-                "mistral-vibe"
+                "gemini"
             ]
         );
         assert_eq!(

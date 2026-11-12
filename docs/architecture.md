@@ -1577,7 +1577,7 @@ the first ready or streaming ACP status removes it. Chat snapshots project this 
 ordinary conversation with an empty transcript and a resume failure never becomes setup.
 
 The bootstrap and live Session share their conversation surface, transcript, assistant/user turns,
-composer and choice controls. The guide lists preferred candidates from three common agent families first,
+composer and choice controls. The guide lists Claude, Codex, and Vibe candidates first,
 followed by the complete supported catalog in a scroll viewport capped at 160 px. Selection sits in the shared composer's outer notice frame;
 search filters the complete catalog. Setup uses a muted, theme-derived frame instead of an inverted notice surface. Authentication uses one Connect
 control for the provider's account/browser method. Compatible API keys are a secondary opt-in route.
