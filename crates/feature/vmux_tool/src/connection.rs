@@ -34,6 +34,12 @@ pub struct McpConnectionPlugin;
 #[derive(SystemSet, Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct ConnectionSet;
 
+#[derive(Event, Clone, Debug)]
+pub struct ConnectorCancelRequest {
+    pub source: Entity,
+    pub generation: u64,
+}
+
 #[derive(Message, Clone, Debug)]
 pub enum ConnectorPopupRequest {
     Open {
@@ -63,6 +69,7 @@ impl Plugin for McpConnectionPlugin {
         ))
         .add_systems(Startup, spawn_mcp_catalog)
         .add_observer(cancel)
+        .add_observer(cancel_popup)
         .add_message::<PageOpenRequest>()
         .add_message::<ConnectorPopupRequest>()
         .add_observer(open_link)
@@ -242,6 +249,22 @@ fn cancel(
         state.snapshot.result = None;
     }
     commands.trigger(McpSnapshotRequest { target });
+}
+
+fn cancel_popup(
+    trigger: On<ConnectorCancelRequest>,
+    states: Query<&McpPageState>,
+    mut commands: Commands,
+) {
+    if states
+        .get(trigger.source)
+        .is_ok_and(|state| state.generation == trigger.generation)
+    {
+        commands.trigger(UiInput {
+            webview: trigger.source,
+            payload: McpServerCancelRequest,
+        });
+    }
 }
 
 fn page_ready(
@@ -1413,6 +1436,47 @@ mod tests {
                 .authorization,
             Some(authorization)
         );
+    }
+
+    #[test]
+    fn popup_cancellation_requires_the_active_operation_generation() {
+        let mut app = App::new();
+        app.add_plugins(super::McpConnectionPlugin);
+        let cancellation = Cancellation::default();
+        let source = app
+            .world_mut()
+            .spawn((
+                cancellation.clone(),
+                McpPageState {
+                    generation: 2,
+                    snapshot: McpServersUiState {
+                        pending: Some(McpServerPending {
+                            id: "github".into(),
+                            operation: McpServerOperation::Connect,
+                        }),
+                        authorization: Some(vmux_api::mcp::McpAuthorization {
+                            url: "https://github.com/login/device".into(),
+                            code: Some("ABCD-1234".into()),
+                        }),
+                        ..Default::default()
+                    },
+                },
+            ))
+            .id();
+        app.world_mut().trigger(super::ConnectorCancelRequest {
+            source,
+            generation: 1,
+        });
+        app.world_mut().flush();
+        assert!(cancellation.check().is_ok());
+        app.world_mut().trigger(super::ConnectorCancelRequest {
+            source,
+            generation: 2,
+        });
+        app.world_mut().flush();
+        assert!(cancellation.check().is_err());
+        let state = app.world().get::<McpPageState>(source).unwrap();
+        assert!(state.snapshot.pending.is_none() && state.snapshot.authorization.is_none());
     }
 
     #[test]

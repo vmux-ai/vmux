@@ -1439,3 +1439,4 @@ connectors-agent-configuration = إعدادات الوكيل
 connectors-configured = تم الإعداد
 connectors-open-in-app = فتح في Vmux
 connectors-open-external = فتح في متصفح خارجي
+connectors-verification-code-help = انسخ هذا الرمز وأدخله في { $service } لإكمال تسجيل الدخول.
