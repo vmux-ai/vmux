@@ -1390,6 +1390,8 @@ a language server. The host ships only the visible slice of a file and re-slices
 component. Its `content_version` changes on edits and undo/redo, independently of the document's
 LSP protocol version. The renderer-independent `vmux_lsp` plugin owns server lifecycle and
 accepted requests; Editor's private adapters currently own document synchronization and diagnostics.
+The core owns capability gating and server identity lookup; Editor delegates both through
+`Capabilities` and `Lookup` rather than maintaining separate method tables or identity rules.
 A workspace root has shared `Cwd` and `Name`; its server children
 identify the root, command, and arguments; document children carry their path and accepted
 protocol version. Views bind to those documents, so closing one view preserves other users

@@ -59,46 +59,7 @@ impl Capabilities {
     }
 
     pub fn allows(&self, method: &str) -> bool {
-        let caps = &self.server;
-        match method {
-            "textDocument/hover" => match &caps.hover_provider {
-                Some(lsp_types::HoverProviderCapability::Simple(yes)) => *yes,
-                Some(lsp_types::HoverProviderCapability::Options(_)) => true,
-                None => false,
-            },
-            "textDocument/foldingRange" => match &caps.folding_range_provider {
-                Some(lsp_types::FoldingRangeProviderCapability::Simple(yes)) => *yes,
-                Some(_) => true,
-                None => false,
-            },
-            "textDocument/codeAction" => match &caps.code_action_provider {
-                Some(lsp_types::CodeActionProviderCapability::Simple(yes)) => *yes,
-                Some(lsp_types::CodeActionProviderCapability::Options(_)) => true,
-                None => false,
-            },
-            "textDocument/semanticTokens/full" => caps.semantic_tokens_provider.is_some(),
-            "textDocument/completion" => caps.completion_provider.is_some(),
-            "textDocument/definition" => Self::offered(&caps.definition_provider),
-            "textDocument/declaration" => caps.declaration_provider.is_some(),
-            "textDocument/typeDefinition" => caps.type_definition_provider.is_some(),
-            "textDocument/implementation" => caps.implementation_provider.is_some(),
-            "textDocument/references" => Self::offered(&caps.references_provider),
-            "textDocument/documentSymbol" => Self::offered(&caps.document_symbol_provider),
-            "textDocument/rename" => Self::offered(&caps.rename_provider),
-            "textDocument/formatting" => Self::offered(&caps.document_formatting_provider),
-            "textDocument/rangeFormatting" => {
-                Self::offered(&caps.document_range_formatting_provider)
-            }
-            _ => true,
-        }
-    }
-
-    fn offered<T>(provider: &Option<lsp_types::OneOf<bool, T>>) -> bool {
-        match provider {
-            Some(lsp_types::OneOf::Left(yes)) => *yes,
-            Some(lsp_types::OneOf::Right(_)) => true,
-            None => false,
-        }
+        vmux_lsp::Capabilities::new(&self.server).provides(method)
     }
 }
 

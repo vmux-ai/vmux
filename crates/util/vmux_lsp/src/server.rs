@@ -2,7 +2,7 @@ use bevy_app::{App, Plugin, Update};
 use bevy_ecs::prelude::*;
 use vmux_ecs::{Cwd, Operation, OperationCompleted, OperationState, OperationTarget};
 
-use crate::{Document, LspSet, Root, Server, ServerKey, Transport};
+use crate::{Document, Root, Server, ServerKey, Set, Transport};
 
 pub(crate) struct ServersPlugin;
 
@@ -15,7 +15,7 @@ impl Plugin for ServersPlugin {
                 Update,
                 (reset, restart, stop, accept, finish, poll)
                     .chain()
-                    .in_set(LspSet::Servers),
+                    .in_set(Set::Servers),
             );
     }
 }

@@ -30,19 +30,19 @@ impl Plugin for LspPlugin {
             .configure_sets(
                 Update,
                 (
-                    LspSet::Servers,
-                    LspSet::Documents,
-                    LspSet::Diagnostics,
-                    LspSet::Requests,
+                    Set::Servers,
+                    Set::Documents,
+                    Set::Diagnostics,
+                    Set::Requests,
                 )
                     .chain(),
             )
-            .add_systems(Update, (cancel, collect).chain().in_set(LspSet::Requests));
+            .add_systems(Update, (cancel, collect).chain().in_set(Set::Requests));
     }
 }
 
 #[derive(SystemSet, Clone, Copy, Debug, PartialEq, Eq, Hash)]
-pub enum LspSet {
+pub enum Set {
     Servers,
     Documents,
     Requests,
@@ -180,7 +180,42 @@ impl Transport {
     }
 
     pub fn provides(&self, method: &str) -> bool {
-        let caps = self.capabilities();
+        Capabilities::new(self.capabilities()).provides(method)
+    }
+
+    pub fn notify(&self, method: &str, params: Value) {
+        self.io.notify(method, params);
+    }
+
+    pub fn exited(&self) -> bool {
+        self.io.exited()
+    }
+
+    pub fn did_open(&self, uri: &str, language: &str, version: i32, text: &str) {
+        self.notify("textDocument/didOpen", serde_json::json!({ "textDocument": { "uri": uri, "languageId": language, "version": version, "text": text } }));
+    }
+
+    pub fn did_change(&self, uri: &str, version: i32, text: &str) {
+        self.notify("textDocument/didChange", serde_json::json!({ "textDocument": { "uri": uri, "version": version }, "contentChanges": [{ "text": text }] }));
+    }
+
+    pub fn did_close(&self, uri: &str) {
+        self.notify(
+            "textDocument/didClose",
+            serde_json::json!({ "textDocument": { "uri": uri } }),
+        );
+    }
+}
+
+pub struct Capabilities<'a>(&'a ServerCapabilities);
+
+impl<'a> Capabilities<'a> {
+    pub fn new(capabilities: &'a ServerCapabilities) -> Self {
+        Self(capabilities)
+    }
+
+    pub fn provides(&self, method: &str) -> bool {
+        let caps = self.0;
         match method {
             "textDocument/hover" => match &caps.hover_provider {
                 Some(lsp_types::HoverProviderCapability::Simple(yes)) => *yes,
@@ -221,29 +256,6 @@ impl Transport {
             None => false,
         }
     }
-
-    pub fn notify(&self, method: &str, params: Value) {
-        self.io.notify(method, params);
-    }
-
-    pub fn exited(&self) -> bool {
-        self.io.exited()
-    }
-
-    pub fn did_open(&self, uri: &str, language: &str, version: i32, text: &str) {
-        self.notify("textDocument/didOpen", serde_json::json!({ "textDocument": { "uri": uri, "languageId": language, "version": version, "text": text } }));
-    }
-
-    pub fn did_change(&self, uri: &str, version: i32, text: &str) {
-        self.notify("textDocument/didChange", serde_json::json!({ "textDocument": { "uri": uri, "version": version }, "contentChanges": [{ "text": text }] }));
-    }
-
-    pub fn did_close(&self, uri: &str) {
-        self.notify(
-            "textDocument/didClose",
-            serde_json::json!({ "textDocument": { "uri": uri } }),
-        );
-    }
 }
 
 #[derive(Component, Clone, Copy, Debug, PartialEq, Eq)]
@@ -255,7 +267,7 @@ pub struct Stamp {
 }
 
 impl Stamp {
-    pub fn current(&self, owner: Entity, lookup: &LspLookup) -> bool {
+    pub fn current(&self, owner: Entity, lookup: &Lookup) -> bool {
         let Ok(binding) = lookup.bindings.get(owner) else {
             return false;
         };
@@ -274,7 +286,7 @@ impl Stamp {
 }
 
 #[derive(SystemParam)]
-pub struct LspLookup<'w, 's> {
+pub struct Lookup<'w, 's> {
     servers: Query<'w, 's, (Entity, &'static ServerKey), With<Server>>,
     transports: Query<'w, 's, &'static Transport>,
     documents: Query<
@@ -290,7 +302,7 @@ pub struct LspLookup<'w, 's> {
     bindings: Query<'w, 's, &'static DocumentBinding>,
 }
 
-impl LspLookup<'_, '_> {
+impl Lookup<'_, '_> {
     pub fn server_current(&self, server: Entity) -> bool {
         self.servers.contains(server) && self.transports.contains(server)
     }
@@ -415,7 +427,7 @@ impl Drop for Request {
 pub struct Response(pub Value);
 
 fn cancel(
-    lookup: LspLookup,
+    lookup: Lookup,
     policy: Res<RequestPolicy>,
     mut requests: Query<(Entity, &mut Request, &OperationState)>,
     responses: Query<(Entity, &Stamp, &RequestOwner), With<Response>>,
@@ -583,7 +595,7 @@ mod tests {
         }
 
         fn request(&mut self, root: usize) -> Entity {
-            let mut state = bevy_ecs::system::SystemState::<LspLookup>::new(self.app.world_mut());
+            let mut state = bevy_ecs::system::SystemState::<Lookup>::new(self.app.world_mut());
             let request = state
                 .get_mut(self.app.world_mut())
                 .unwrap()

@@ -377,7 +377,7 @@ pub struct LspManager<'w, 's> {
             &'static ChildOf,
         ),
     >,
-    lookup: vmux_lsp::LspLookup<'w, 's>,
+    lookup: vmux_lsp::Lookup<'w, 's>,
     bindings: Query<'w, 's, &'static DocumentBinding>,
     editors: Query<'w, 's, (Entity, &'static Editor)>,
     snapshots: Query<'w, 's, &'static BufferSnapshot>,
@@ -606,26 +606,15 @@ impl LspManager<'_, '_> {
     }
 
     fn server_entity(&self, key: &ServerKey) -> Option<Entity> {
-        let mut found = None;
-        for (entity, server_key) in &self.servers {
-            if server_key != key {
-                continue;
-            }
-            if found.is_some() {
-                return None;
-            }
-            found = Some(entity);
-        }
-        found
+        self.lookup.server(key)
     }
 
     pub(crate) fn server_current(&self, server: Entity) -> bool {
-        self.servers.contains(server) && self.clients.contains(server)
+        self.lookup.server_current(server)
     }
 
     fn client(&self, key: &ServerKey) -> Option<&Transport> {
-        let entity = self.server_entity(key)?;
-        self.clients.get(entity).ok()
+        self.lookup.transport(self.server_entity(key)?)
     }
 
     fn request_stamp(&self, owner: Entity, path: &Path) -> Option<RequestStamp> {
@@ -1304,17 +1293,17 @@ struct ServersPlugin;
 impl Plugin for ServersPlugin {
     fn build(&self, app: &mut App) {
         app.add_plugins(JobPlugin::<StartJob>::default())
-            .configure_sets(Update, vmux_lsp::LspSet::Servers.after(JobSet::Apply))
+            .configure_sets(Update, vmux_lsp::Set::Servers.after(JobSet::Apply))
             .add_systems(
                 Update,
                 finish_server_starts
                     .after(JobSet::Apply)
-                    .before(vmux_lsp::LspSet::Servers),
+                    .before(vmux_lsp::Set::Servers),
             )
             .add_systems(
                 Update,
                 launch_servers
-                    .after(vmux_lsp::LspSet::Servers)
+                    .after(vmux_lsp::Set::Servers)
                     .before(DocumentSet),
             );
     }
@@ -1738,14 +1727,14 @@ impl Plugin for RequestsPlugin {
                     .chain()
                     .after(DiagnosticsSet)
                     .after(DocumentSet)
-                    .after(vmux_lsp::LspSet::Servers)
-                    .before(vmux_lsp::LspSet::Requests),
+                    .after(vmux_lsp::Set::Servers)
+                    .before(vmux_lsp::Set::Requests),
             )
             .add_systems(
                 Update,
                 (drain_requests, apply_semantic_tokens)
                     .chain()
-                    .after(vmux_lsp::LspSet::Requests),
+                    .after(vmux_lsp::Set::Requests),
             );
     }
 }
@@ -2090,7 +2079,7 @@ impl Plugin for ManagerPlugin {
             )
                 .chain()
                 .in_set(DocumentSet)
-                .in_set(vmux_lsp::LspSet::Documents)
+                .in_set(vmux_lsp::Set::Documents)
                 .after(JobSet::Apply),
         );
     }
@@ -2324,7 +2313,7 @@ impl Plugin for DiagnosticsPlugin {
                 (drain_diagnostics, drain_lint, emit_diagnostics)
                     .chain()
                     .in_set(DiagnosticsSet)
-                    .in_set(vmux_lsp::LspSet::Diagnostics)
+                    .in_set(vmux_lsp::Set::Diagnostics)
                     .after(DocumentSet),
             );
     }

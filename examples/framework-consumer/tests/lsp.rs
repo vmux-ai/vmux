@@ -6,7 +6,7 @@ use bevy_ecs::prelude::*;
 use serde_json::Value;
 use vmux_app::VmuxPlugin;
 use vmux_app::lsp::{
-    Document, DocumentBinding, DocumentPath, LaunchServer, LspLookup, Response, RestartServer,
+    Document, DocumentBinding, DocumentPath, LaunchServer, Lookup, Response, RestartServer,
     Root, Server, ServerCompleted, ServerFailure, ServerKey, StartServer, StopServer, Stopped,
     Transport, TransportIo, WireReply,
 };
@@ -111,7 +111,7 @@ impl LanguageWorkspace {
     }
 
     fn definition(&self, app: &mut App) -> Entity {
-        let mut state = bevy_ecs::system::SystemState::<LspLookup>::new(app.world_mut());
+        let mut state = bevy_ecs::system::SystemState::<Lookup>::new(app.world_mut());
         let request = state
             .get_mut(app.world_mut())
             .unwrap()
