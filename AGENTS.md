@@ -164,11 +164,11 @@ Manual QA is performed by the user; agents prepare the build and inspect its log
 Each handoff includes:
 
 - PR number and URL, target branch, and head commit.
-- Feature branch and worktree path.
+- Feature branch, primary worktree, and every task-owned review, integration, or QA worktree path.
 - Local checks and results, including test count, Clippy, and pre-push status.
 - Self-review findings, fixes, and any remaining concerns, or an explicit report that no findings were identified.
 - Manual QA result and artifact, or why it is not applicable.
-- Cache cleanup status and any artifacts or active worktrees being retained.
+- Cache cleanup status, every task-owned `CARGO_TARGET_DIR` outside the worktree (including `/tmp`), and any artifacts or active worktrees being retained.
 - Remaining CI or review work.
 
 A user handoff of a QA-complete PR to the designated integration agent authorizes review and CI fixes, normal feature-branch pushes, and squash merge into the stated target after review findings are addressed or triaged and all applicable checks pass on the latest head. Carry it through without asking for approval again for each PR. Follow explicit holds, scope changes, and runtime approvals. Keep this ownership with the same agent across successive handoffs.
@@ -180,7 +180,16 @@ Before merging any PR:
 1. **Check review comments.** Read all review feedback — CodeRabbit and human reviewers — and address or explicitly triage every item. Report triage in chat. Post replies or resolve threads only when the user explicitly requests it.
 2. **Check CI.** Confirm all applicable checks have passed on the PR's latest head commit.
 
-After merging, clean up: remove the worktree (`git worktree remove .worktrees/<name>`) and delete the branch (`gh pr merge --delete-branch` for the remote; delete the local branch too if it lingers).
+Cleanup is part of merge completion and remains the integration agent's responsibility. A merged PR with retained task storage is still pending cleanup; report that state instead of calling the task complete.
+
+After GitHub confirms the PR is merged:
+
+1. Inspect all worktrees and temporary target directories listed in the handoff, including review, integration, and QA copies. Check each repository and initialized submodule's registrations before removing a parent directory.
+2. Preserve worktrees with source changes, unpublished commits, another task still editing, running apps or VMs, or an active build/test lock. Do not force removal or stop an app to finish cleanup. Confirm that the exact local branch head has landed before deleting it; squash merges alone are not proof that newer local work landed.
+3. Leave the worktree, then remove each eligible task-owned worktree with `git worktree remove <absolute-path>`. Its ignored `target/` belongs to that cleanup too. Remove task-owned temporary compile caches outside it; keep shared caches and fixtures needed by another task.
+4. Delete the merged feature branch remotely when it is no longer a stacked PR base, and locally when no worktree uses it and no unpublished work remains. Retarget and update dependents before removing their base. Do not advance a submodule pin to an unmerged branch.
+5. Verify that removed worktrees disappeared from `git worktree list`, that their directories and temporary targets are gone, and that the primary checkout's source changes and submodule pin are preserved. Measure free space with `df`; APFS clone sizes are not additive reclaimed space.
+6. Report removed paths and before/after free space. List each retained path, its reason, and the condition that allows cleanup. Keep those paths on the integration agent's follow-up list until the condition clears.
 
 ## Documentation
 
