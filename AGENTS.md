@@ -1,207 +1,79 @@
 # Agent Instructions
 
-## Communication Style
-
-Use caveman mode. Terse, direct, no filler. Execute first, talk second. No meta-commentary, no preamble, no postamble. Code speaks.
-
-## Architecture
-
-Before designing a feature or changing ownership, plugin composition, ECS state, system boundaries, UI state flow, runtime adapters, agents, commands, tools, or persistence, read `docs/architecture.md` and use its change-routing questions. It is the design map; code, tests, typed contracts, and `feature.ron` remain the source of truth. Update it in the same PR when a durable boundary changes.
-
-## Pre-commit Checks
-
-CI runs fmt, clippy, and tests for PRs.
-
-Run targeted tests during the edit loop when they clarify non-trivial behavior, reproduce a regression, or verify a risky change. TDD is useful but not mandatory; do not add tests mechanically for every edit. Run workspace-wide local checks manually only when the user asks. The required pre-push hook runs builder tests, formatting, diff validation, and source conventions. Run targeted Clippy separately for Rust changes that warrant it; report Clippy as not run unless a separate invocation passed, and include the command and result in the handoff.
-
-**Install that hook in every new worktree — `./scripts/setup-hooks.sh`.** Hooks live under `.git/`, which a fresh worktree does not inherit, so the gate this file leans on is simply absent until you run it. Nothing announces that; the first sign is a push that should have been stopped and wasn't. The reverse failure is worse and quieter: believing there is no gate, you hand-run `clippy --workspace` and `test --workspace` on every change, which costs half an hour each and — because cargo takes one lock per target directory — starves anything else building beside you.
-
-Never run two cargo invocations against the same target directory at once. The second does not fail, it queues, so both take far longer than either alone and neither reports why; worse, tests that spawn subprocesses start failing on timeouts that have nothing to do with the code. A workspace test racing a release build is enough to do it.
-
-If a change affects an excluded patched CEF crate, run the appropriate package checks too.
-
-If any check fails, fix the issue before committing. Do not push broken code.
-
-## Test Quality
-
-Keep the suite lean. Every test must have an independent oracle and catch a plausible behavioral regression or explicit repository-policy violation.
-
-Do not add tests that only:
-
-- Assert static Tailwind/CSS class literals, source-code substrings, or implementation shape.
-- Read Rust source with `include_str!`/`read_to_string` and check `contains(...)`.
-- Restate a constant, constructor input, struct field, enum payload, derived `Default`, or framework behavior.
-- Check one item in a registry/list when one table-driven exact-set test can cover the contract.
-- Duplicate behavior already covered by a stronger integration or boundary test.
-- Silently pass when a required fixture or generated artifact is missing.
-
-Prefer tests for observable behavior: pure decision logic, parser and serialization contracts, persistence, typed ECS message/system integration, and packaging/runtime invariants. For important UI behavior, test rendered DOM, computed state, interaction output, or a visual regression; otherwise leave styling untested.
-
-Source scans are allowed only for explicit repository-wide policies or packaging invariants that cannot reasonably be tested through behavior. For these tests, the protected invariant is the independent oracle. Keep them narrow and state that invariant in the test name.
-
-Before adding a test, verify that it would fail under a realistic bug and remain valid after a behavior-preserving refactor. If not, do not add it.
-
-Keep module-specific tests inline. Split tests only when they form an independently reusable integration harness; never move them solely to reduce a source file's line count. Structural size audits measure production items and exclude `#[cfg(test)]` modules.
-
-## Debugging
-
-**Never launch or run vmux yourself.** Do not execute `make dev`, `make run-dev`, `vmux_desktop`, `Vmux.app`, or automate input against the app. For manual iteration, run `make build-dev`: it builds and signs the debug binaries without launching or stopping anything. On macOS it leaves `target/debug/Vmux Dev.app`, backed by the local CEF SDK and Bevy dylib cache rather than a copied release framework. For vmux-cloud worktrees, a completed build publishes a `target/release/Vmux Dev.app` link so the user opens it from the cloud root with only `make <worktree>`; standalone client work uses `make run-dev`. Neither launch path compiles once an artifact exists. Keep `make build-local` for packaging, permissions, and release-like final checks. After the user runs the app, inspect its logs directly.
-
-Local and debug builds share the workspace store and one Chromium profile per named profile across worktrees. Quit the previous GUI before switching; the next build drains its old daemon automatically while holding the GUI lock, then waits for its data lease. Switching builds ends the old daemon's terminals and agents; reopening the same build retains them. `make stop-dev` is optional explicit shutdown, not an iteration step. Use `VMUX_DATA_DIR=/absolute/path/to/a/copy` for persistence/schema/migration work, never `VMUX_TEST=1` with real shared data. Legacy builds without leases must be quit before the first shared-data launch.
-
-When adding temporary diagnostics to investigate a bug, make logging unconditional (default-on) — never gate it behind an env var or flag the user must set. The user runs the normal build; logs must appear without extra setup. Strip every temporary diagnostic before committing the fix.
-
-**Always read the app's own logs in Application Support first** — do not ask the user to capture stderr. After the user runs the app, read these files yourself directly; never ask them to paste, relay, or summarize log contents. vmux writes them to:
-
-- `~/Library/Application Support/Vmux/<build-profile>/logs/vmux-<build-profile>.<date>.log` — the Bevy/tracing output (`info!`/`warn!`/`error!`). For the `dev` build that's `…/Vmux/dev/logs/vmux-dev.<date>.log`.
-- `~/Library/Application Support/Vmux/<build-profile>/profiles/<profile>/chrome_debug.log` — CEF/Chromium plus the page JS console (surfaced via `display_handler`).
-
-Diagnostics must use the tracing macros (`bevy::log::info!`/`warn!`) to land in the tracing log — **raw `eprintln!`/stderr is NOT captured there**.
-
-## Build Storage
-
-Prepare apps through `make build-dev`, `make build-local`, or `make build-release`. These entry points share a target lock, disk-space preflight, and successful-build cleanup; do not bypass them to work around a storage refusal. The defaults warn below 50 GiB free, refuse below 20 GiB, prune unused compile caches above 50 GiB, and retain three local app bundles plus running apps. Prepared debug binaries and runtime libraries and release distribution artifacts are kept.
-
-Before handing over a build, verify its ready artifact and the final free-space report. If an active app or build prevents cleanup, report the retained target instead of stopping it. `make clean-build-cache` previews cache deletion; `VMUX_BUILD_STORAGE_APPLY=1 make clean-build-cache` applies it under the same lock. Remove task-owned temporary compile/dependency caches when work ends, preserving source edits and fixtures that must survive.
-
-Before removing a worktree after its PR merges, inspect its own repository's worktree registrations, including initialized submodules, and preserve any still-active client worktree. Never infer that a client worktree is orphaned solely because its parent repository does not list it.
-
-## Platform-Specific Code
-
-This project targets macOS (primary) and Linux (CI). When adding imports or code that uses platform-specific APIs (CEF, winit, AppKit), always add appropriate `#[cfg(...)]` gates. Let rustfmt reorder cfg-gated imports.
-
-## Code Style
-
-Prefer plain, imperative control flow. Early returns, `match`, `if let` / `let ... else`, and `for` loops read better under pressure than combinator chains, and they produce better error messages and stack traces.
-
-Avoid functional-style composition as a default: long `map` / `and_then` / `filter_map` / `fold` chains, closures passed in to build values, and iterator pipelines that assemble state. Reach for a builder or an explicit loop instead.
-
-Combinators are fine where they stay small and local — `map_err` to convert an error, `unwrap_or` for a default, a `map` that drops one half of a tuple. The line is whether a reader has to hold intermediate state in their head to follow it.
-
-`crates/vmux_service/src/remote/quic/dispatch.rs` is the reference: one `match` on the request, early returns for every refusal, and a single choke point that every session mutation passes through.
-
-## Rules
-
-- Never show literal loading copy such as "Loading..." or "Loading data..." in product UI. Use a skeleton for structured content or matrix rain for a full-surface transition.
-- Layout, selection, focus, and routing respond in the input frame. Never hold a layout transition for page readiness, background data, font completion, or a stability timer. Present the first usable page layout with reserved loading geometry; preserve scroll and element positions during later updates. Initial transcript placement must happen before its messages become visible.
-- Page roots use themed surface tokens. Never use pure black or pure white as a page background; reserve them for content that requires it, such as media, QR codes, and scrims. Prefer flat surface hierarchy over borders and decorative shadows.
-- Reserve `Chrome` for Google Chrome or Chromium compatibility code. Never use `chrome` to mean application UI, window controls, a panel, a toolbar, a shell, or presentation state.
-- Do not use generic `Action` names for vmux-owned types, fields, functions, sets, or modules. Use `Request` for an intent entering a feature, `Operation` for accepted work being executed, `Effect` for a versioned UI-side effect, or a concrete domain noun such as `Selection`, `Decision`, or `Transition`. Externally fixed protocol vocabulary and standard domain terms such as LSP `CodeAction` are exempt at their boundaries; translate them when they enter vmux-owned state.
-- Do not repeat a crate, module, feature, or owning entity name in a type when the namespace already makes ownership clear. Prefer `Stage`, `Description`, and `AgentId` inside `vmux_session` over `SessionStage`, `SessionDescription`, and `SessionAgentId`; retain a prefix only at shared or serialized boundaries where it prevents a real collision.
-- When constructing a Bevy entity, first compose it from existing shared components such as `Name`, ID components, `Active`, `Order`, and timestamps. Add a feature-specific marker component when the entity needs a distinct role. Do not introduce a new aggregate component or row struct that duplicates fields already represented by common components.
-- Route every new user-facing UI string through Fluent (`vmux_ui::i18n`). Add the message to `en-US.ftl` and every bundled locale with identical IDs and variables. Do not ship untranslated English literals or rely on English fallback for bundled locales. Dynamic external content and raw diagnostic output are exempt.
-- No comments in Rust sources. Not `//`, not `///`, not `//!`. Names and types carry what the code does; `docs/architecture.md` carries why the system is shaped the way it is. A *why* worth writing down goes there, where a reader finds it without opening a file and where one paragraph serves the ten call sites that would each have grown their own. This does not apply to `patches/`, which is vendored third-party code we re-apply on every version bump.
-- Do not add `macro_rules!`, function-like procedural macros, or custom derive macros to vmux-owned code. Use ordinary functions, typed systems, and explicit control flow. Attribute macros may express declarative metadata or framework integration. Framework and serialization derives remain allowed. Vendored patches and tuple-arity generation required by Rust remain exceptions.
-- Leave one blank line between an item with a body and whatever follows it. A `fn`, `impl`, `struct` or `mod` that ends in `}` must be followed by a blank line before the next declaration or its attributes — jamming them together turns a file into one wall of text, and it is the usual casualty of splitting a large module. Declarations without bodies stay packed: consecutive `use`, `mod foo;` or `const` lines want no gaps, and neither does an attribute sitting on the declaration it belongs to. Inside a function body it is your judgement — two guard clauses in a row read better touching. rustfmt cannot express this (`blank_lines_lower_bound` is unstable and separates *every* statement), so `every_item_is_separated_from_the_body_above_it` in `vmux_desktop` enforces it.
-- **A crate lives in `crates/app/`, `crates/feature/`, or `crates/util/`.** `app/` is something a user starts: desktop, mobile, or CLI. `feature/` owns a user-facing capability and its page registration, UI, host ECS, and domain behavior. A crate that answers or contributes a `vmux://` or `file://` page belongs there even when it also owns background runtime behavior. `util/` contains reusable infrastructure and composition without a user-facing page of its own, including `vmux_browser`, `vmux_mcp`, `vmux_transport`, and the platform-neutral `vmux_app` facade. The cfg alias `host` describes compiled code, never a directory category.
-- Never add or commit `.claude/*` files. They are local agent config, not project files.
-- Do not use mod.rs files. Use the filename-based module pattern (e.g. `layout.rs` + `layout/` directory).
-- Do not create a module directory holding a single file. `foo.rs` plus `foo/bar.rs` and nothing else is one module wearing two filenames — make `bar` a sibling of `foo` instead. A directory earns its place at two children. Nesting also lets the child reach the parent's *private* imports through `use super::*`, so a split that looks like separation quietly isn't; siblings have to name what they use.
-- Behaviour hangs off a type, not loose in a module. A function that takes a value and returns something derived from it belongs to that value's type — `ToolActivity::of(name)`, not `tool_activity(name)`; `entry.reference()`, not `media_reference(entry)`. This is what keeps a module from becoming a bag of verbs that any caller may combine in any order, and it is how the type stays the place you look to find out what it can do. The exceptions are narrow: entry points a framework calls by shape (`main`, `#[test]` functions, Bevy systems, Dioxus components), and a private helper used once by the item directly above it. A helper with no obvious owning type usually means the type is missing, not that the rule does not apply — when in doubt introduce the type, even if its only field is the thing being passed around. This holds inside `mod tests` too: a test fixture is behaviour like any other, so it hangs off the type it builds (`Relay::start()`), and a fixture that only wraps a constructor should be the constructor.
-- Do not define a function inside another function. Nested functions hide reusable logic inside control flow and make systems read like containers. Put derived behaviour on its owning type; keep framework entry points such as Bevy systems at module scope.
-- Declare a file's entry point at the top, above what it composes, and order the rest by composition — a component's children follow it, not the other way round. For a Bevy module that is its `Plugin`; for a Dioxus page it is the root component (`Page`, `App`). The entry point is the table of contents — what the file spawns, schedules or renders — and reading it first is what makes the rest navigable. Burying it behind helpers hides that.
-- A plugin with platform-specific code splits into platform plugins rather than growing `#[cfg]` inside one. `FooPlugin` composes `add_plugins((FooNativePlugin, FooMobilePlugin))`, each gated once at its own module, so what runs where is visible from the composition instead of having to be reconstructed from attributes scattered through a build method.
-- Split a large plugin by feature, not by item kind. `approval.rs` holding its components, its systems, its messages and its tests beats `components.rs` + `systems.rs` + `events.rs`, because a change is almost always to one behaviour and the by-kind split spreads that behaviour across every file while putting unrelated things next to each other. This is what Bevy itself does — `RenderPlugin` composes `CameraPlugin`, `MeshPlugin`, `ViewPlugin` — and it makes the parent plugin a table of contents. A slice earns a directory at two children, the same as any other module; do not pre-split one feature into by-kind files.
-- Plugin boundaries represent independently configurable, reusable, platform-gated, or lifecycle-owned features, not every small group of systems. As a rule of thumb, fewer than four closely coupled systems stay in the owning plugin. Prefer ordinary entity/component state, targeted observers, and owner-type methods over a generic micro-plugin or another `App` extension. A smaller plugin is justified only when it has an independent composition or scheduling boundary.
-- When configuring a Bevy `App` in plugins or tests, chain consecutive `App` builder calls in one expression (e.g. `app.add_plugins(...).init_resource::<T>().add_systems(...);`) instead of separate `app.*;` statements. Do not chain `app.world()`, `app.world_mut()`, `app.update()`, or control-flow-dependent mutations.
-- Prefer Bevy system + message integration over direct helper-function calls for cross-module behavior. Register message types and systems in plugins/tests, send typed messages, run schedules, and assert on resulting ECS state/messages instead of bypassing production flow with ad hoc helpers.
-- Use custom `SystemParam` types actively when one name describes one coherent ECS capability and the bundle either avoids Bevy's system-parameter arity limit or makes systems materially easier to read and follow. Methods may encapsulate synchronous lookup, validation, selection, and tightly scoped mutation through the contained queries, commands, readers, and writers. Keep request iteration, lifecycle transitions, async task ownership, multi-feature dispatch, and schedule ordering visible in ordinary systems. Do not use `SystemParam` as an arbitrary `*Params`/`*Context` grab bag, as hidden long-lived state, or as a system disguised behind one large `run`/`handle`/`dispatch` method. Prefer inline parameters for a one-off bundle with no cohesive behavior; keep the `SystemParam` private or at the narrowest scope that shares the capability.
-- Name systems and observers from the operation visible inside their owning module: `pin`, `unpin`, `add`, `list`, `remove`, `sync`, `load`. Do not repeat the crate, feature, module, or plugin name, and do not add `system`, `plugin`, or `feature` to the function name. An observer may use the `on_` prefix, but the operation after it follows the same rule. The module and plugin already provide the missing context. `registered_systems_and_observers_use_short_names_from_their_module_context` enforces this across the workspace.
-- **A system is private to the module whose plugin registers it, and a test must not widen that.** If a system is `pub`/`pub(crate)`, the plugin that schedules it is not the only way in, so its ordering, its set and its run conditions are no longer guaranteed by anything. The usual culprit is a test reaching past the plugin to `add_systems` the function directly, which forces the visibility and then quietly tests a different schedule from the one that ships — a system registered without its `.in_set(..)` runs in a different order than production, so the test can pass on an ordering the app never has. Add the plugin in the test instead and leave the system `fn`.
-- **A module does not export a bag of verbs for another module to compose.** A long `use super::thing::{a, b, c, ...}` of free functions is the symptom: nothing then says which order they may be called in, or which are meaningful together, so the knowledge lives in the caller and is duplicated by the next one. Hang them off the type they operate on, or make the module a nested `Plugin` that owns its own systems and exposes messages instead of functions. The parent plugin composing children is the table of contents; a pile of imported verbs is the opposite.
-- **Anything that returns `Element` is a component: `#[component]`, PascalCase, rendered as `Foo { .. }`.** Never write a plain `fn thing(..) -> Element` and call it as `{thing(..)}`. A helper is inlined into its caller's scope, so it re-runs whenever the caller does and cannot memoize on its inputs; a component owns a scope and skips re-render when its props are unchanged. Take owned props — `String`, `Vec<T>` — rather than borrowing to keep a helper signature. `every_component_is_named_like_an_element` in `vmux_ui` enforces the naming; Rust's own lints cannot, because every page carries `#![allow(non_snake_case)]` to permit the convention at all.
-- **Never use `bevy::winit::UpdateMode::Continuous`.** It causes 100-200% idle CPU. Use `UpdateMode::Reactive` or `UpdateMode::reactive_low_power`. If input/scroll/animation lags, the fix is to route the missing wake source through `EventLoopProxy::send_event(WinitUserEvent::WakeUp)` — not to switch to Continuous. The CEF wake throttler (`MessageLoopWakePolicy` + `cef-wake-throttle` thread) already wakes the loop at display refresh rate when CEF schedules pump work. A `no_continuous_update_mode` test in `vmux_desktop` enforces this.
-
-## Feature Design
-
-A feature issue is not ready when it stops at product behavior, UX, or acceptance criteria. Carry the design through the implementation shape before work starts:
-
-- Name the owning crate and every existing crate whose public boundary changes. State dependency direction and reject cycles or feature ownership leaks.
-- Name the root plugin and meaningful child plugins. Show where each plugin is composed and which target or platform adapter installs it.
-- Define the ECS entities and their components. State which entity owns lifecycle state, relationships, persistent identity, asynchronous tasks, results, and failures. Use resources only for truly global state.
-- List internal messages, agent/tool contracts, and cross-crate requests. State sender, receiver, ordering requirement, and whether completion is represented by a message or a component transition.
-- Name the systems or observers that advance each state transition and the system sets that order them. Keep systems private to the plugin that registers them.
-- When the feature has UI, name every typed `UiState` snapshot or patch and every `#[vmux_api::ui_event]` payload. Define their fields, source entity, projection system, sender, and receiver. Current values travel through UI state; UI events carry user intent; one-shot DOM behavior uses versioned effects.
-- Define persistence, transport, process, filesystem, and platform boundaries. External side effects end at adapters.
-- Include an end-to-end flow from user action to observable result, including failure, cancellation, retry, rollback, and approval gates.
-- Use concrete proposed type and module names instead of placeholders such as "manager", "service", or "handler". Separate settled decisions from open questions and non-goals.
-
-Update the Linear issue when implementation changes the design. Record only architecture that actually lands in `docs/architecture.md`; do not create a second design document in the repository.
-
-## Linear
-
-When taking a Linear issue (e.g. "take VMX-XX"), immediately move it to **In Progress** before doing anything else — before creating a worktree, before reading code, before drafting a PR.
-
-## Worktrees
-
-**Never edit files on the main worktree.** All changes must happen inside a feature worktree. Before writing any code for a Linear issue:
-
-1. Check if a worktree already exists: `git worktree list`
-2. Create worktree if needed: `git worktree add .worktrees/vmx-<number> -b <branch-name>` — always name the worktree directory using the `vmx-<number>` convention matching the Linear issue (e.g., `.worktrees/vmx-88`).
-3. `cd` into the worktree directory and make all edits there. The first build through `make` automatically seeds its build cache from the main worktree.
-4. When done, commit on the feature branch, push it, and open a PR. Never merge feature work into local `main`.
-5. After the PR is merged remotely, remove the worktree: `git worktree remove .worktrees/<short-name>`
-6. Remember: if the worktree is deleted while your shell is inside it, `cd` back to the repo root — `../..` won't work.
-
-Worktree directory: `.worktrees/` (already in `.gitignore`).
-
-## Pull Request Scope
-
-Deliver user-facing work as an end-to-end vertical slice. A core-only PR is incomplete when the requested use case cannot be exercised through the product UI.
-
-Do not stack PRs by default. Stack only when the work genuinely depends on another unmerged PR and cannot be based on `main`; state that dependency in the PR. Keep the dependent PR as one coherent end-to-end change rather than splitting it into implementation-layer PRs.
-
-## PR Handoff
-
-Keep one user-designated integration agent responsible for reviewing and merging QA-complete PRs in this repository. Implementation agents finish implementation, self-review, local validation, the pre-push gate, PR creation, applicable manual QA, and task-owned cache cleanup before handing over the PR. The integration agent owns accepted PRs through review triage, CI fixes, current-head monitoring, squash merge, and worktree cleanup. Other agents return to implementation work and leave accepted PR branches to that owner.
-
-Before manual QA, self-review the complete diff against the fetched target branch, including new files and the affected callers and tests. Verify scope and repository rules, then examine the changed behavior, failure and cancellation paths, state ownership, persistence, and relevant platform or security boundaries. Passing tests alone do not constitute self-review. Fix findings and rerun the affected checks before preparing the QA artifact; avoid repeating broad checks without a new change or unresolved concern.
-
-The integration agent verifies the reported head, checks, and QA result, reviews the current diff, and handles external review findings. Self-review findings and their disposition travel with the handoff.
-
-Manual QA is performed by the user; agents prepare the build and inspect its logs under the existing no-launch rule. Record the tested artifact and result. Infrastructure-only changes may record manual QA as not applicable with a concrete reason. Repeat QA when later changes invalidate the recorded result.
-
-Each handoff includes:
-
-- PR number and URL, target branch, and head commit.
-- Feature branch, primary worktree, and every task-owned review, integration, or QA worktree path.
-- Local checks and results, including test count, Clippy, and pre-push status.
-- Self-review findings, fixes, and any remaining concerns, or an explicit report that no findings were identified.
-- Manual QA result and artifact, or why it is not applicable.
-- Cache cleanup status, every task-owned `CARGO_TARGET_DIR` outside the worktree (including `/tmp`), and any artifacts or active worktrees being retained.
-- Remaining CI or review work.
-
-A user handoff of a QA-complete PR to the designated integration agent authorizes review and CI fixes, normal feature-branch pushes, and squash merge into the stated target after review findings are addressed or triaged and all applicable checks pass on the latest head. Carry it through without asking for approval again for each PR. Follow explicit holds, scope changes, and runtime approvals. Keep this ownership with the same agent across successive handoffs.
-
-## Merging
-
-Before merging any PR:
-
-1. **Check review comments.** Read all review feedback — CodeRabbit and human reviewers — and address or explicitly triage every item. Report triage in chat. Post replies or resolve threads only when the user explicitly requests it.
-2. **Check CI.** Confirm all applicable checks have passed on the PR's latest head commit.
-
-Cleanup is part of merge completion and remains the integration agent's responsibility. A merged PR with retained task storage is still pending cleanup; report that state instead of calling the task complete.
-
-After GitHub confirms the PR is merged:
-
-1. Inspect all worktrees and temporary target directories listed in the handoff, including review, integration, and QA copies. Check each repository and initialized submodule's registrations before removing a parent directory.
-2. Preserve worktrees with source changes, unpublished commits, another task still editing, running apps or VMs, or an active build/test lock. Do not force removal or stop an app to finish cleanup. Confirm that the exact local branch head has landed before deleting it; squash merges alone are not proof that newer local work landed.
-3. Leave the worktree, then remove each eligible task-owned worktree with `git worktree remove <absolute-path>`. Its ignored `target/` belongs to that cleanup too. Remove task-owned temporary compile caches outside it; keep shared caches and fixtures needed by another task.
-4. Delete the merged feature branch remotely when it is no longer a stacked PR base, and locally when no worktree uses it and no unpublished work remains. Retarget and update dependents before removing their base. Do not advance a submodule pin to an unmerged branch.
-5. Verify that removed worktrees disappeared from `git worktree list`, that their directories and temporary targets are gone, and that the primary checkout's source changes and submodule pin are preserved. Measure free space with `df`; APFS clone sizes are not additive reclaimed space.
-6. Report removed paths and before/after free space. List each retained path, its reason, and the condition that allows cleanup. Keep those paths on the integration agent's follow-up list until the condition clears.
-
-## Documentation
-
-- **No design specs, no plan files, no dated design records.** Git, GitHub and Linear already hold the history, and a copy in the tree is one that goes stale silently — with nothing to catch it, because no test reads a spec. Write the decision into the architecture doc it changes, in the same PR as the behaviour.
-- **`docs/architecture.md` is the only file in `docs/`, and the only design document.** vmux.ai serves it as the single `/docs` page, via `include_str!` in `website/src/docs.rs` — so a change to it ships with the site. It is not an index and it does not link out to deep dives; a subject that will not fit belongs in the prose of the section that covers it, or does not belong yet. Keep it short and keep the diagrams.
-- There is no API reference and no `vmux_docs` generator. Rustdoc therefore has no consumer, which is why the no-comments rule above admits no exception for it.
-- **Relay internals belong to `vmux-cloud`, not here.** This repo says what the client sends, what it pins, and what it does when the relay is unreachable. It does not explain the registry, tag routing, admission limits or deployment. The *Three roles* section names the relay as a node and then defers, which is the boundary to hold.
-
-## Git
-
-Never merge, rebase, or cherry-pick feature work into local `main`. Land changes through PRs only.
-
-Always prefer `git rebase` over `git merge` when updating branches. Use `git push --force-with-lease` after rebasing.
-
-When asked to create or open a PR, create it directly with `gh pr create`. Do not use `-w`, stop at a prefilled browser form, or require the user to submit it. Return the created PR URL.
+Use caveman mode: terse, direct, no filler. Execute first, then report.
+
+## Design
+
+- Read `docs/architecture.md` and its change-routing questions before changing feature design, ownership, composition, state, or boundaries. Code, tests, typed contracts, and `feature.ron` remain authoritative.
+- `docs/architecture.md` is the only file in `docs/` and the only design document. Update durable boundaries in the same PR; do not add specs, plans, dated records, API references, or documentation generators. Relay internals belong to `vmux-cloud`.
+- Before implementation, carry the Linear issue beyond UX/acceptance criteria: name crates and dependency direction, root/child plugins and their composition, entities/components/ownership, contracts and sender/receiver, systems and ordering, persistence/adapters, and the end-to-end success/failure/cancellation/retry/rollback/approval flow. Reject cycles and ownership leaks; distinguish settled decisions, open questions, and non-goals. Update the issue when design changes.
+- For UI, specify typed `UiState` snapshots/patches and `#[vmux_api::ui_event]` payloads, their fields, source entity, projection, sender, and receiver. State carries current values, events carry intent, and versioned effects carry one-shot DOM behavior.
+- When taking a Linear issue, move it to **In Progress before any other work**.
+
+## Rust and modules
+
+- Prefer imperative control flow, early returns, `match`, and explicit loops. Small local conversions/defaults are fine; avoid long combinator chains and closures that assemble state.
+- Put behavior on its owning type. Exceptions: framework entry points and a private helper used once by the item above it. Fixtures follow the same rule; a constructor wrapper should be the constructor. Do not nest functions or export loose functions for another module to orchestrate.
+- No Rust comments (`//`, `///`, `//!`) outside vendored `patches/`. Put architectural reasons in the architecture document.
+- No vmux-owned `macro_rules!`, function-like procedural macros, or custom derives. Attribute metadata/framework integration and framework/serialization derives are allowed; vendored code and Rust-required tuple-arity generation are exceptions.
+- Put entry points first, followed by their composed children. Separate declarations with bodies by one blank line; keep imports, attributes, and bodyless declarations together.
+- Crates belong in `crates/app/` (user-started products), `crates/feature/` (user-facing capabilities/pages plus their domain/UI/host behavior), or `crates/util/` (reusable infrastructure/composition). The `host` cfg alias describes compiled code, not directory placement.
+- Use filename modules, never `mod.rs`. A module directory needs at least two children; otherwise use siblings with explicit imports.
+- Names should not repeat their crate/module/feature/owner except to prevent a shared or serialized boundary collision. Reserve `Chrome` for Chrome/Chromium compatibility. Replace generic vmux `Action` vocabulary with `Request`, `Operation`, `Effect`, or a domain noun; externally fixed vocabulary and standard domain terms such as LSP `CodeAction` are exempt at their boundaries and translated into vmux-owned state.
+- Never commit `.claude/*`, `Co-Authored-By`, or `Generated by` trailers.
+
+## ECS
+
+- Compose entities from shared `Name`, IDs, `Active`, `Order`, and timestamps before adding feature markers. Do not duplicate shared fields in aggregate components or rows. Resources are for truly global state.
+- Keep systems/observers private to their registering plugin. Name them by the local operation (`load`, `sync`, `remove`; optional `on_`), without owner or `system`/`plugin`/`feature` suffixes. Tests add the production plugin instead of exporting/registering its private systems.
+- Use typed systems/messages for cross-module behavior. Register messages, run production schedules, and assert observable ECS results.
+- Split plugins by independently configurable, reusable, platform, or lifecycle boundaries, not by item kind. Fewer than four closely coupled systems normally stay with their owner; smaller plugins need an independent composition or scheduling boundary. Prefer entity state, targeted observers, and owner methods over micro-plugins or `App` extensions.
+- Gate platform imports/APIs and compose platform plugins separately. macOS is primary; Linux builds/tests in CI.
+- Use cohesive `SystemParam` capabilities for readability or parameter limits, at the narrowest visibility. Their methods may perform synchronous lookup, validation, selection, and scoped mutation. Keep request iteration, transitions, async ownership, multi-feature dispatch, and ordering in systems; avoid grab bags, hidden state, and large `run`/`handle`/`dispatch` facades. Inline one-off parameters without cohesive behavior.
+- Chain consecutive `App` builder calls. Keep `world()`, `world_mut()`, `update()`, and conditional mutations separate.
+- Never use `UpdateMode::Continuous`. Use reactive modes and route missing wakes through `EventLoopProxy::send_event(WinitUserEvent::WakeUp)`; preserve CEF wake throttling.
+
+## UI
+
+- Localize new user-facing strings through Fluent (`vmux_ui::i18n`) in every bundled locale, with matching IDs/variables. No untranslated literals or English fallback; external content and raw diagnostics are exempt.
+- Use skeletons or matrix rain instead of literal loading text. Layout, selection, focus, and routing respond in the input frame; do not wait for data, page readiness, fonts, or timers. Reserve loading geometry, preserve scroll/positions, and place initial transcripts before revealing messages.
+- Use themed page surfaces; pure black/white are reserved for media, QR codes, and scrims. Prefer flat hierarchy over decorative borders/shadows.
+- Anything returning `Element` is a PascalCase `#[component]`, rendered as `Foo { .. }`, with owned props. Do not inline plain `Element` helpers.
+
+## Validation
+
+- Add targeted tests only for plausible regressions or explicit policies, with an independent oracle that survives behavior-preserving refactors. Prefer contracts, state transitions, persistence, typed ECS integration, and packaging behavior. Important UI tests inspect DOM/computed state/interaction/visual output.
+- Do not test CSS literals, constructor fields, constants, enum payloads, derived defaults, framework behavior, or implementation shape. Source scans are limited to explicit repository/packaging policies that cannot be tested behaviorally; name the protected invariant.
+- Avoid duplicate coverage and silently missing fixtures. Use exact-set/table-driven registry checks. Keep unit tests inline; split only reusable integration harnesses, not to reduce line count. Production size audits exclude `#[cfg(test)]`.
+- Install `./scripts/setup-hooks.sh` in every worktree. The required pre-push gate runs builder tests, fmt, diff validation, and source conventions. Run appropriate checks for excluded CEF patches and targeted Clippy when Rust changes warrant it; never claim a check passed unless it ran. Fix failures before committing/pushing.
+- Never run concurrent Cargo/build/test commands against the same target. Run workspace-wide local checks only when the user asks.
+
+## Builds and debugging
+
+- Agents never launch or automate vmux. Use `make build-dev` for iteration; it builds/signs without launching or stopping apps and uses shared CEF/Bevy runtime libraries. The user launches with cloud-root `make <worktree>` or standalone `make run-dev`; completed artifacts launch without compiling. Use `make build-local` for packaging, permissions, and release-like checks; `make build-release` for release preparation.
+- Build entry points enforce target locks and storage policy; do not bypass a refusal. `make build-storage-status` reports usage, `make clean-build-cache` previews cleanup, and `VMUX_BUILD_STORAGE_APPLY=1 make clean-build-cache` applies it under the lock. Preserve prepared binaries, runtime libraries, and distribution artifacts; verify the ready artifact/mtime and final free-space report before handoff.
+- Builds share a store and Chromium profile per named profile. The user quits the previous GUI before switching; the next build drains its old daemon and waits for its lease under the GUI lock. A same-profile restart preserves background work. `make stop-dev` is explicit shutdown, not an iteration step; quit legacy builds without leases before shared-data use.
+- Use `VMUX_DATA_DIR=/absolute/path/to/a/copy` for persistence/schema/migrations. Never use `VMUX_TEST=1` with real shared data.
+- Temporary diagnostics are unconditional tracing (`bevy::log::info!`/`warn!`), removed before commit. Raw stderr/`eprintln!` is not captured. After user reproduction, read logs yourself; never ask for pasted logs or captured stderr:
+  - `~/Library/Application Support/Vmux/<build-profile>/logs/vmux-<build-profile>.<date>.log`
+  - `~/Library/Application Support/Vmux/<build-profile>/profiles/<profile>/chrome_debug.log`
+
+## Delivery
+
+- Never edit the primary worktree or land feature work in local `main` via merge/rebase/cherry-pick. Use `.worktrees/vmx-<issue>` for Linear work, otherwise a feature worktree. Rebase onto the fetched target for updates; verify scope and use `git push --force-with-lease` for rebased PR branches. Create PRs directly with `gh pr create`, never `-w`; return the URL.
+- Deliver user-facing work end to end through the product UI. Stack only for a real dependency on an unmerged PR, name that dependency, and keep each PR coherent rather than splitting implementation layers.
+- Implementation agents finish self-review, local validation, the pre-push gate, applicable manual QA, and unused task-cache cleanup before handoff. One user-designated integration agent then owns accepted QA-complete PRs through review/CI fixes, latest-head checks, squash merge, and cleanup; other agents leave accepted branches to that owner. Such a handoff authorizes feature pushes and squash merge into the stated target after findings are addressed/triaged and all applicable checks pass; honor holds, scope changes, and runtime approvals without repeated permission questions.
+- Before QA, self-review the entire diff against the fetched target, including new files, callers/tests, ownership, persistence, platform/security boundaries, and failure/cancellation paths. Fix findings and repeat affected checks/QA when later changes invalidate them; passing tests alone is not self-review.
+- Manual app QA is performed by the user; agents prepare artifacts and inspect logs. Record the result/artifact, or a concrete reason QA is not applicable for infrastructure-only work.
+- Handoff includes PR URL/target/approved head; feature branch and all primary/review/integration/QA worktree paths; every external temporary `CARGO_TARGET_DIR` (including `/tmp`); check commands/results/counts and Clippy/hook status; self-review findings/disposition; QA result; remaining CI/reviews and retained storage/release conditions.
+- Before merging, review all feedback and verify applicable checks on the latest head. Report triage in chat; post replies or resolve threads only when explicitly requested. Record the approved head used for the merge.
+
+## Cleanup after merge
+
+The integration agent owns cleanup until verified; retained task storage means **cleanup pending**, not task complete.
+
+1. Confirm GitHub merged the recorded approved head and each local head has landed. Inventory all handoff worktrees/temporary targets and each repository's own registrations, including submodules; a parent repository's list cannot prove a client worktree orphaned.
+2. Retain dirty/unpublished/actively edited work, initialized submodules, running apps/VMs, active build/test locks, and stacked PR bases. Do not force worktree removal, deinitialize submodules, or stop apps to qualify for cleanup. Retarget/rebase dependents before removing a base.
+3. Leave the worktree, use `git worktree remove <absolute-path>` for eligible worktrees, and remove their task-owned external compile caches. Preserve shared caches/fixtures, the primary checkout's edits, and submodule pins. Local branch deletion requires no worktree users or unpublished work.
+4. Before remote branch deletion, compare `git ls-remote origin refs/heads/<branch>` with the recorded approved merge head. Delete only with an explicit `--force-with-lease=refs/heads/<branch>:<approved-head>` lease; retain and report a changed head. Submodule pins may advance only to client `main` commits/tags.
+5. Verify Git registrations and filesystem removal. Report removed paths and before/after `df` free space (APFS clone sizes are not additive). Keep retained paths, reasons, and release conditions on the owner's follow-up list until handled.
