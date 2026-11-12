@@ -6,6 +6,8 @@ use bootstrap::Bootstrap;
 #[cfg(unix)]
 use ci_scope::Scope;
 #[cfg(unix)]
+use consumer::Consumer;
+#[cfg(unix)]
 use execution::Failure;
 use policy::Policy;
 #[cfg(unix)]
@@ -18,6 +20,8 @@ use storage::Storage;
 mod bootstrap;
 #[cfg(unix)]
 mod ci_scope;
+#[cfg(unix)]
+mod consumer;
 #[cfg(unix)]
 mod debug;
 mod environment;
@@ -95,7 +99,8 @@ impl Arguments {
                     break;
                 }
                 Some(
-                    value @ ("prepare-dev" | "prepare-local" | "prepare-release" | "ci-scope"),
+                    value @ ("prepare-dev" | "prepare-local" | "prepare-release" | "ci-scope"
+                    | "framework-consumer"),
                 ) => {
                     mode = Some(value.to_owned());
                     command.extend(args);
@@ -143,6 +148,10 @@ impl Arguments {
         }
         if self.mode == "ci-scope" {
             Scope::new(self.root)?.run(&self.command)?;
+            return Ok(0);
+        }
+        if self.mode == "framework-consumer" {
+            Consumer::new(self.root, self.target)?.run(&self.command)?;
             return Ok(0);
         }
         let runner = Runner::new(self.root, self.target)?;

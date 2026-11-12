@@ -664,7 +664,8 @@ UI contracts; it does not gain arbitrary native access. Dynamic Rust loading and
 generic product host are not supported SDK capabilities yet.
 
 The independent consumer runs from path dependencies and immutable Git dependencies using the
-same behavioral suite. Neither mode inherits the repository patches or requires vmux-cloud.
+same behavioral suite. The dependency-free Rust builder owns verification and Git workspace
+preparation; the shell command delegates to it. Neither mode inherits the repository patches or requires vmux-cloud.
 Existing product hosts cover macOS desktop, iOS mobile, and native service/CLI/MCP; these are
 product compositions, not a guarantee that every extracted SDK capability has an adapter on
 every target. Windows, Android, web, game, and spatial SDK hosts remain unverified.

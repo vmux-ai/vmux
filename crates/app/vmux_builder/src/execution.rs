@@ -59,6 +59,7 @@ impl Execution {
         Signals::check()?;
         let output = output?;
         if !output.status.success() {
+            std::io::stderr().write_all(&output.stderr)?;
             return Err(Failure::status(output.status).into());
         }
         Ok(output)

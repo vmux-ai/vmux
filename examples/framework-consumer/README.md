@@ -16,7 +16,7 @@ The second command copies this workspace to a temporary directory and replaces i
 dependencies with Git dependencies pinned to the current committed revision. It runs the same
 tests and rejects native dependencies or mixed SDK revisions. Commit the candidate first; this
 mode intentionally tests committed source.
-The Git mode requires Git, Cargo, and Python 3.11 or newer.
+The verification runs through the Rust builder with Git and Cargo.
 
 For another application, select the required `vmux_app` Cargo features and use
 `VmuxPlugin::builder()` to install them. Public feature types live under `vmux_app::ecs`,
