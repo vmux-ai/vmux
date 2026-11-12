@@ -70,6 +70,10 @@ pub struct CommandPaletteUiState {
 }
 
 impl crate::UiStateProjection<CommandBarUiStatePatch> for CommandBarUiState {
+    fn retain(&mut self) {
+        self.focus = CommandBarFocusEffect::default();
+    }
+
     fn apply(&mut self, patch: CommandBarUiStatePatch) {
         if let Some(snapshot) = patch.snapshot {
             self.snapshot = *snapshot;

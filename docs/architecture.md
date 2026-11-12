@@ -820,6 +820,8 @@ composer focus again when its document becomes ready, including a reused prewarm
 Its first presented frame also requests composer focus for the selected launcher; hidden prewarmed
 pages and launchers transitioning into a Session cannot claim it. Start does not claim opening focus
 from palette initialization; host focus effects assign it to the selected composer.
+Command-bar snapshots retain drafts and workspace data while discarding focus effects before
+caching or replay, so another Start cannot inherit a caret claim or a larger focus revision.
 Loading feedback includes the reload revision and page URL in its identity, so a completed delay
 cannot light up the next reload of the same stack. External-page address rows keep their origin
 pill and text; their favicon remains in the tab.
