@@ -51,7 +51,7 @@ impl Plugin for RuntimePlatformPlugin {
     }
 }
 
-fn seed(_non_send: bevy::ecs::system::NonSendMarker, mut system: Single<&mut SystemAppearance>) {
+fn seed(_non_send: NonSendMarker, mut system: Single<&mut SystemAppearance>) {
     if system.0.is_some() {
         return;
     }
