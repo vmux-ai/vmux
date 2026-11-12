@@ -250,7 +250,7 @@ mod tests {
             ("vmux://connectors", "vmux://tools/connectors"),
             ("vmux://tools/connectors", "vmux://tools/connectors"),
             ("vmux://tools/mcp", "vmux://tools/mcp"),
-            ("vmux://tools/mcp/", "vmux://tools/mcp"),
+            ("vmux://tools/mcp/", "vmux://tools/mcp/"),
             ("vmux://cheatsheet/", "vmux://shortcuts/"),
             ("vmux://cheetsheet", "vmux://shortcuts/"),
         ];
