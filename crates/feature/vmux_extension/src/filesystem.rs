@@ -1,5 +1,6 @@
 use std::collections::HashSet;
 use std::path::Path;
+use std::sync::Arc;
 
 use bevy_app::{App, Plugin, Update};
 use bevy_ecs::prelude::*;
@@ -40,6 +41,29 @@ pub struct MaterializeRequest {
     pub operation: Entity,
     pub entry: Box<ExtEntry>,
     pub source: std::path::PathBuf,
+    _lifetime: Option<Arc<dyn Send + Sync>>,
+}
+
+impl MaterializeRequest {
+    pub fn new(
+        ticket: Ticket,
+        operation: Entity,
+        entry: Box<ExtEntry>,
+        source: std::path::PathBuf,
+    ) -> Self {
+        Self {
+            ticket,
+            operation,
+            entry,
+            source,
+            _lifetime: None,
+        }
+    }
+
+    pub(crate) fn with_lifetime(mut self, lifetime: Arc<dyn Send + Sync>) -> Self {
+        self._lifetime = Some(lifetime);
+        self
+    }
 }
 
 #[derive(Message)]
@@ -528,12 +552,12 @@ mod tests {
                 ))
                 .id();
             self.app.update();
-            self.app.world_mut().write_message(MaterializeRequest {
+            self.app.world_mut().write_message(MaterializeRequest::new(
                 ticket,
                 operation,
-                entry: Box::new(entry),
-                source: source.to_path_buf(),
-            });
+                Box::new(entry),
+                source.to_path_buf(),
+            ));
             let deadline = Instant::now() + Duration::from_secs(5);
             loop {
                 self.app.update();
@@ -615,6 +639,77 @@ mod tests {
             before
         );
         assert_eq!(FileStore::read(directory.path()).unwrap(), index);
+    }
+
+    #[test]
+    fn reseeding_the_same_store_compensates_an_older_write_before_becoming_clean() {
+        let directory = tempfile::tempdir().unwrap();
+        let mut original = Index::default();
+        let mut entry = ExtEntry {
+            id: ID.into(),
+            name: "Example".into(),
+            version: "1".into(),
+            ..Default::default()
+        };
+        entry.profile_enabled.insert("personal".into(), false);
+        entry.profile_pinned.insert("personal".into(), false);
+        entry.approved_grants.insert(
+            "personal".into(),
+            crate::snapshot::ExtensionGrants::default(),
+        );
+        original.entries.push(entry);
+        FileStore::write(directory.path(), &original).unwrap();
+        let mut host = Host::new(directory.path());
+        host.load();
+        let operation = host.submit(
+            "personal",
+            Mutation::Pin(ExtPinRequest {
+                id: ID.into(),
+                pinned: true,
+            }),
+        );
+        host.app
+            .world_mut()
+            .entity_mut(host.root)
+            .insert(crate::Seed(Ok(original.clone())));
+        host.app.update();
+        let deadline = Instant::now() + Duration::from_secs(5);
+        loop {
+            let running = host
+                .app
+                .world_mut()
+                .query_filtered::<Entity, Or<(With<Queued>, With<Executing>)>>()
+                .iter(host.app.world())
+                .next()
+                .is_some();
+            let dirty = host
+                .app
+                .world()
+                .get::<crate::State>(host.root)
+                .unwrap()
+                .is_dirty();
+            if !running && !dirty {
+                break;
+            }
+            assert!(
+                Instant::now() < deadline,
+                "replacement store did not settle"
+            );
+            host.wake.recv_timeout(Duration::from_secs(2)).unwrap();
+            host.app.update();
+        }
+        let mut catalog = SystemState::<Catalog>::new(host.app.world_mut());
+        let snapshot = catalog
+            .get(host.app.world())
+            .unwrap()
+            .snapshot(host.root)
+            .unwrap();
+        assert_eq!(FileStore::read(directory.path()).unwrap(), snapshot);
+        assert_eq!(snapshot, original);
+        assert_eq!(
+            host.app.world().get::<OperationState>(operation),
+            Some(&OperationState::Canceled)
+        );
     }
 
     #[test]

@@ -585,14 +585,20 @@ struct Reconcile {
 }
 
 fn reset(
-    roots: Query<(Entity, Ref<Root>, Option<&Scope>, Option<&Seed>)>,
+    roots: Query<(
+        Entity,
+        Ref<Root>,
+        Option<&Scope>,
+        Option<&Seed>,
+        Option<&Writing>,
+    )>,
     packages: Query<(Entity, &ChildOf), With<Package>>,
     mut clock: ResMut<Clock>,
     mut loads: MessageWriter<LoadRequest>,
     mut completed: MessageWriter<LoadCompleted>,
     mut commands: Commands,
 ) {
-    for (owner, root, scope, seed) in &roots {
+    for (owner, root, scope, seed, writing) in &roots {
         if seed.is_none()
             && !root.is_changed()
             && scope.is_some_and(|scope| scope.0.directory == root.0)
@@ -607,10 +613,17 @@ fn reset(
         let ticket = clock.ticket(owner, &root.0);
         let mut state = State::default();
         state.materialize();
+        let repair = writing.is_some_and(|writing| writing.ticket.directory == root.0);
+        if repair {
+            state.advance();
+        }
         commands
             .entity(owner)
-            .remove::<(Loaded, Writing, WriteError, Seed)>()
+            .remove::<(Loaded, Writing, WriteError, Seed, Repair)>()
             .insert((Scope(ticket.clone()), state, Revision::default()));
+        if repair {
+            commands.entity(owner).insert(Repair);
+        }
         if let Some(seed) = seed {
             completed.write(LoadCompleted {
                 ticket,

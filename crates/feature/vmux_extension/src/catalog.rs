@@ -17,6 +17,10 @@ pub(crate) struct ExtensionCatalogPlugin;
 impl Plugin for ExtensionCatalogPlugin {
     fn build(&self, app: &mut App) {
         app.add_message::<OpenManagerRequest>()
+            .configure_sets(
+                Update,
+                ExtensionSet::Step.after(bevy_cef::prelude::UiEventSystems::Flush),
+            )
             .add_plugins((
                 crate::install::InstallPlugin,
                 UiEventPlugin::<(
@@ -410,6 +414,88 @@ fn publish(
             );
         }
         subscriber.emitted_revision = subscriber.revision;
+    }
+}
+
+#[cfg(test)]
+mod scheduling_tests {
+    use super::*;
+    use crate::snapshot::{ExtEntry, Index};
+    use vmux_ecs::profile::{ActiveProfile, ProfileDirectories, ProfilePaths};
+
+    #[derive(Resource)]
+    struct PendingPin(bool);
+
+    struct UiFixturePlugin;
+
+    impl Plugin for UiFixturePlugin {
+        fn build(&self, app: &mut App) {
+            app.add_plugins((crate::CorePlugin, ExtensionCatalogPlugin))
+                .insert_resource(PendingPin(false))
+                .add_message::<vmux_layout::stack::OpenRequest>()
+                .add_message::<crate::filesystem::MaterializeRequest>()
+                .add_message::<crate::filesystem::MaterializeCompleted>()
+                .add_systems(
+                    Update,
+                    emit.in_set(bevy_cef::prelude::UiEventSystems::Flush),
+                );
+        }
+    }
+
+    fn emit(
+        mut pending: ResMut<PendingPin>,
+        root: Single<Entity, With<Binding>>,
+        mut commands: Commands,
+    ) {
+        if !pending.0 {
+            return;
+        }
+        pending.0 = false;
+        commands.trigger(UiInput {
+            webview: *root,
+            payload: ExtPinRequest {
+                id: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa".into(),
+                pinned: true,
+            },
+        });
+    }
+
+    #[test]
+    fn a_ui_intent_dispatched_during_flush_starts_metadata_io_in_the_same_update() {
+        let profile = vmux_ecs::profile::Profile::current();
+        let mut entry = ExtEntry {
+            id: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa".into(),
+            name: "Example".into(),
+            version: "1".into(),
+            ..Default::default()
+        };
+        entry.profile_enabled.insert(profile.id().into(), false);
+        let mut index = Index::default();
+        index.entries.push(entry);
+        let mut app = App::new();
+        app.add_plugins(UiFixturePlugin);
+        app.world_mut().spawn((
+            Name::new("Profile"),
+            ActiveProfile(profile),
+            ProfileDirectories(ProfilePaths::current()),
+        ));
+        app.world_mut().spawn((
+            Binding,
+            crate::Root("/ui-test/extensions".into()),
+            crate::Seed(Ok(index)),
+        ));
+        app.update();
+        app.world_mut().resource_mut::<PendingPin>().0 = true;
+        app.update();
+        let writes: Vec<_> = app
+            .world_mut()
+            .resource_mut::<Messages<crate::WriteTaskRequest>>()
+            .drain()
+            .collect();
+        assert_eq!(writes.len(), 1);
+        assert!(
+            writes[0].snapshot.entries[0].pinned_for(vmux_ecs::profile::Profile::current().id())
+        );
     }
 }
 

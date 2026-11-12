@@ -1134,6 +1134,10 @@ disk schedules a compensating save of current state. Removing one Profile retain
 packages and another Profile's pending install. Native downloads and archive extraction use
 owned blocking jobs and isolated staging. A different source cannot overwrite an installed
 package's existing version directory.
+Staging uses an IO lease retained by the installation and materialization workers; the last user
+removes temporary files after success, failure or cancellation without touching installed sources.
+Reseeding the same root during an older write schedules the new canonical snapshot after that IO,
+so the store cannot become clean while its disk image still belongs to the previous generation.
 
 The explicit host feature adds ExtensionHostPlugin for runtime preparation, bridge transport,
 service workers, browser API projection, popups, web-store injection, conformance tooling, and

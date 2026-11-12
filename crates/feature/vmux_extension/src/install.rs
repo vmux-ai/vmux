@@ -1,4 +1,5 @@
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 use std::task::Waker;
 
 use base64::Engine;
@@ -74,11 +75,40 @@ struct DownloadProgress {
 #[derive(Component)]
 struct Materializing;
 
+#[derive(Component, Clone)]
+struct Staging(Arc<StagingDirectory>);
+
+struct StagingDirectory(PathBuf);
+
+impl Staging {
+    fn new(path: PathBuf) -> Self {
+        Self(Arc::new(StagingDirectory(path)))
+    }
+
+    fn path(&self) -> &Path {
+        &self.0.0
+    }
+
+    fn lifetime(&self) -> Arc<dyn Send + Sync> {
+        self.0.clone()
+    }
+}
+
+impl Drop for StagingDirectory {
+    fn drop(&mut self) {
+        if let Err(error) = std::fs::remove_dir_all(&self.0)
+            && error.kind() != std::io::ErrorKind::NotFound
+        {
+            warn!(path = %self.0.display(), %error, "failed to remove extension staging");
+        }
+    }
+}
+
 #[derive(Clone)]
 struct ResolvedInstall {
     id: String,
     profile: String,
-    staging: PathBuf,
+    staging: Staging,
     crx_path: PathBuf,
     download_url: String,
 }
@@ -87,19 +117,20 @@ struct ResolvedInstall {
 struct DownloadedInstall {
     id: String,
     profile: String,
-    staging: PathBuf,
+    staging: Staging,
     crx_path: PathBuf,
 }
 
 struct PackageInstaller {
     id: String,
     profile: String,
-    staging: PathBuf,
+    staging: Staging,
 }
 
 struct InstallOutput {
     entry: store::ExtEntry,
     source: PathBuf,
+    staging: Staging,
 }
 
 #[derive(Clone)]
@@ -161,7 +192,8 @@ impl ResolvedInstall {
             .join("staging")
             .join(&id)
             .join(operation.to_bits().to_string());
-        let crx_path = staging.join("download.crx");
+        let staging = Staging::new(staging);
+        let crx_path = staging.path().join("download.crx");
         let download_url = ChromeWebStore::crx_url(&id, DEFAULT_PRODVERSION);
         Ok(Self {
             id,
@@ -173,7 +205,7 @@ impl ResolvedInstall {
     }
 
     fn download(self, progress: impl FnMut(u64, Option<u64>)) -> Result<DownloadedInstall, String> {
-        std::fs::create_dir_all(&self.staging).map_err(|error| error.to_string())?;
+        std::fs::create_dir_all(self.staging.path()).map_err(|error| error.to_string())?;
         download::Downloader::fetch(&self.download_url, &self.crx_path, progress)?;
         Ok(DownloadedInstall {
             id: self.id,
@@ -194,7 +226,7 @@ impl PackageInstaller {
             )
         })?;
         let public_key_b64 = Some(base64::engine::general_purpose::STANDARD.encode(public_key));
-        let unpack_dir = self.staging.join("unpacked");
+        let unpack_dir = self.staging.path().join("unpacked");
         archive.unpack(&unpack_dir)?;
         let manifest_json = std::fs::read_to_string(unpack_dir.join("manifest.json"))
             .map_err(|error| error.to_string())?;
@@ -234,6 +266,7 @@ impl PackageInstaller {
         Ok(InstallOutput {
             entry,
             source: unpack_dir,
+            staging: self.staging,
         })
     }
 
@@ -422,13 +455,18 @@ fn materialize(
             .remove::<(JobResult<UnpackJob>, vmux_ecs::JobOwner<UnpackJob>)>();
         match &result.0 {
             Ok(Ok(output)) => {
-                materialize.write(MaterializeRequest {
-                    ticket: install.ticket.clone(),
-                    operation: entity,
-                    entry: Box::new(output.entry.clone()),
-                    source: output.source.clone(),
-                });
-                commands.entity(entity).insert(Materializing);
+                materialize.write(
+                    MaterializeRequest::new(
+                        install.ticket.clone(),
+                        entity,
+                        Box::new(output.entry.clone()),
+                        output.source.clone(),
+                    )
+                    .with_lifetime(output.staging.lifetime()),
+                );
+                commands
+                    .entity(entity)
+                    .insert((Materializing, output.staging.clone()));
                 if let Some(wake) = &wake {
                     wake.0.wake_by_ref()
                 }
@@ -521,6 +559,7 @@ fn finish(
             Resolved,
             DownloadProgressChannel,
             Materializing,
+            Staging,
         )>();
     }
 }
@@ -575,7 +614,7 @@ mod tests {
         let output = PackageInstaller {
             id: fixture.id.clone(),
             profile: "test".into(),
-            staging: root.path().join("staging/operation"),
+            staging: Staging::new(root.path().join("staging/operation")),
         }
         .unpack(fixture.bytes)
         .unwrap();
@@ -584,6 +623,17 @@ mod tests {
             std::fs::read_to_string(installed.join("background.js")).unwrap(),
             "previous"
         );
+        let failed = root.path().join("staging/failed");
+        std::fs::create_dir_all(&failed).unwrap();
+        std::fs::write(failed.join("download.crx"), "invalid archive").unwrap();
+        let result = PackageInstaller {
+            id: fixture.id,
+            profile: "test".into(),
+            staging: Staging::new(failed.clone()),
+        }
+        .unpack(Vec::new());
+        assert!(result.is_err());
+        assert!(!failed.exists());
         assert!(!root.path().join("index.json").exists());
         assert_eq!(
             output.entry.source_hash,
@@ -594,10 +644,21 @@ mod tests {
             Some(base64::engine::general_purpose::STANDARD.encode(b"PUBKEY"))
         );
         assert!(!output.entry.enabled_for("test"));
+        let staged = output.staging.path().to_path_buf();
+        drop(output);
+        assert!(!staged.exists());
+        assert_eq!(
+            std::fs::read_to_string(installed.join("background.js")).unwrap(),
+            "previous"
+        );
     }
 
     #[test]
     fn requester_completion_waits_for_materialization_and_the_core_metadata_commit() {
+        let directory = tempfile::tempdir().unwrap();
+        let staged = directory.path().join("staging/success");
+        std::fs::create_dir_all(&staged).unwrap();
+        std::fs::write(staged.join("download.crx"), "download").unwrap();
         let mut app = App::new();
         app.add_plugins((crate::CorePlugin, InstallPlugin))
             .add_message::<MaterializeRequest>()
@@ -643,7 +704,8 @@ mod tests {
                 },
                 JobResult::<UnpackJob>(Ok(Ok(InstallOutput {
                     entry: entry.clone(),
-                    source: "/extensions/staging/operation/unpacked".into(),
+                    source: staged.join("unpacked"),
+                    staging: Staging::new(staged.clone()),
                 }))),
             ))
             .id();
@@ -684,7 +746,7 @@ mod tests {
                 .is_none()
         );
         app.world_mut().write_message(crate::WriteCompleted {
-            ticket,
+            ticket: ticket.clone(),
             operation,
             revision: write.revision,
             result: Ok(()),
@@ -709,5 +771,50 @@ mod tests {
                 .is_none()
         );
         assert!(app.world().get::<InstallOwner>(operation).is_none());
+        drop(materialize);
+        assert!(!staged.exists());
+        let canceled_staging = directory.path().join("staging/canceled");
+        std::fs::create_dir_all(&canceled_staging).unwrap();
+        std::fs::write(canceled_staging.join("download.crx"), "download").unwrap();
+        let canceled = app
+            .world_mut()
+            .spawn((
+                Operation::bundle("extension.install").unwrap().running(),
+                ExtensionInstallOperation,
+                ExtensionInstallRequest {
+                    source: id.into(),
+                    requester: None,
+                },
+                InstallRequest {
+                    ticket,
+                    profile: "personal".into(),
+                    id: id.into(),
+                },
+                JobResult::<UnpackJob>(Ok(Ok(InstallOutput {
+                    entry: store::ExtEntry {
+                        id: id.into(),
+                        name: "Example".into(),
+                        version: "2".into(),
+                        ..Default::default()
+                    },
+                    source: canceled_staging.join("unpacked"),
+                    staging: Staging::new(canceled_staging.clone()),
+                }))),
+            ))
+            .id();
+        app.update();
+        let worker = app
+            .world_mut()
+            .resource_mut::<Messages<MaterializeRequest>>()
+            .drain()
+            .next()
+            .unwrap();
+        app.world_mut()
+            .entity_mut(canceled)
+            .insert(OperationState::Canceled);
+        app.update();
+        assert!(canceled_staging.join("download.crx").exists());
+        drop(worker);
+        assert!(!canceled_staging.exists());
     }
 }
