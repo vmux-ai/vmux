@@ -1188,7 +1188,9 @@ line into `StyledSpan`s. The file viewer, the preview and git diffs all emit the
 spans, so code looks identical wherever it appears. Grammar-based highlighting runs without
 a language server. The host ships only the visible slice of a file and re-slices as you scroll.
 
-**Language servers.** Editor's private server, document, request, and diagnostics plugins own
+**Language servers.** `EditCore` remains the text editing and undo kernel owned by the `Editor`
+component. Its `content_version` changes on edits and undo/redo, independently of the document's
+LSP protocol version. Editor's private server, document, request, and diagnostics plugins own
 the native LSP lifecycle. A workspace root has shared `Cwd` and `Name`; its server children
 identify the root, command, and arguments; document children carry their path and accepted
 protocol version. Views bind to those documents, so closing one view preserves other users
@@ -1210,6 +1212,8 @@ Process handles, framing, reader/writer threads, and wire correlation stay in th
 adapter. Publishing input or a response, and closing the reader, wakes the reactive runner.
 Package selection, settings, navigation, and rendered projections remain Editor-owned. This
 native lifecycle is not yet a renderer-independent public LSP plugin.
+Lifecycle tests use the Rust `vmux_mock_lsp` recorder through real standard-input/output pipes.
+Run them with `cargo test --locked -p vmux_editor` so Cargo builds the registered test server.
 
 **Git.** The Git page and automatic Git-backed projections for the editor, Projects, Sessions and
 ACP enqueue work and only project completed results. Their repository discovery, status

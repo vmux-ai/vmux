@@ -229,7 +229,7 @@ impl RequestStamp {
             && manager
                 .editors
                 .get(owner)
-                .is_ok_and(|(_, editor)| editor.core.version() == self.buffer)
+                .is_ok_and(|(_, editor)| editor.core.content_version() == self.buffer)
     }
 }
 
@@ -480,13 +480,13 @@ impl LspManager<'_, '_> {
                 && self
                     .synced
                     .get(owner)
-                    .is_ok_and(|synced| synced.0 == editor.core.version())
+                    .is_ok_and(|synced| synced.0 == editor.core.content_version())
             {
                 source_known = true;
             }
             buffers.push(BufferStamp {
                 owner,
-                version: editor.core.version(),
+                version: editor.core.content_version(),
                 document,
                 path: PathIdentity::resolve(&view.path).into_path_buf(),
                 source_known,
@@ -524,7 +524,7 @@ impl LspManager<'_, '_> {
                 || !self
                     .editors
                     .get(buffer.owner)
-                    .is_ok_and(|(_, editor)| editor.core.version() == buffer.version)
+                    .is_ok_and(|(_, editor)| editor.core.content_version() == buffer.version)
                 || !self
                     .views
                     .get(buffer.owner)
@@ -622,7 +622,7 @@ impl LspManager<'_, '_> {
             document,
             server: self.server_entity(&doc.key)?,
             version: doc.version,
-            buffer: self.editors.get(owner).ok()?.1.core.version(),
+            buffer: self.editors.get(owner).ok()?.1.core.content_version(),
         })
     }
 
@@ -1481,7 +1481,7 @@ fn change_documents(
                 {
                     commands
                         .entity(view)
-                        .insert(LspSynced(editor.core.version()));
+                        .insert(LspSynced(editor.core.content_version()));
                 }
             }
         }
@@ -1714,7 +1714,7 @@ fn open_documents(
             DocumentBinding(document),
             ServerBinding(manager.server_entity(&key).unwrap()),
             LspOpened,
-            LspSynced(editor.core.version()),
+            LspSynced(editor.core.content_version()),
         ));
     }
 }
@@ -1742,7 +1742,7 @@ fn sync_ready_buffers(
     mut requests: MessageWriter<LspDocumentChangeRequest>,
 ) {
     for (owner, view, editor, synced) in &views {
-        if synced.0 == editor.core.version() || editor.core.buffer.path != view.path {
+        if synced.0 == editor.core.content_version() || editor.core.buffer.path != view.path {
             continue;
         }
         requests.write(LspDocumentChangeRequest {
@@ -1759,7 +1759,9 @@ fn initialize_views(
     mut commands: Commands,
 ) {
     for (entity, fv, editor, synced) in &views {
-        if synced.0 != editor.core.version() || manager.request_stamp(entity, &fv.path).is_none() {
+        if synced.0 != editor.core.content_version()
+            || manager.request_stamp(entity, &fv.path).is_none()
+        {
             continue;
         }
         if let Some(request) = manager.folding_range(entity, &fv.path) {
@@ -2628,7 +2630,7 @@ mod tests {
             world
                 .entity_mut(self.document)
                 .insert(ChildOf(source.server));
-            let version = world.get::<Editor>(owner).unwrap().core.version();
+            let version = world.get::<Editor>(owner).unwrap().core.content_version();
             world
                 .entity_mut(owner)
                 .insert((ServerBinding(source.server), LspSynced(version)));
@@ -2699,15 +2701,24 @@ mod tests {
     impl RestartFixture {
         fn new() -> Self {
             let directory = tempfile::tempdir().unwrap();
-            let script = directory.path().join("server.py");
-            std::fs::write(
-                &script,
-                include_str!("../../../tests/fixtures/lsp_record.py"),
-            )
-            .unwrap();
+            let executable = std::env::current_exe().unwrap();
+            let dependencies = executable.parent().expect("test executable directory");
+            assert_eq!(
+                dependencies.file_name().unwrap(),
+                "deps",
+                "unexpected Cargo test artifact layout"
+            );
+            let server = dependencies
+                .parent()
+                .unwrap()
+                .join(format!("vmux_mock_lsp{}", std::env::consts::EXE_SUFFIX));
+            assert!(
+                server.is_file(),
+                "missing Rust LSP fixture; run cargo test --locked -p vmux_editor host::lsp::manager::tests without --lib"
+            );
             let mut settings = AppSettings::default();
             settings.editor.lsp.servers.insert("rs".into(), serde_json::from_value(serde_json::json!({
-                "command": "python3", "args": [script], "language_id": "rust", "root_markers": [".git"]
+                "command": server, "args": ["--record"], "language_id": "rust", "root_markers": [".git"]
             })).unwrap());
             let (diagnostics, inbox) = LspDiagnosticsSender::channel();
             let mut app = App::new();
@@ -3073,7 +3084,7 @@ mod tests {
                 .get::<Editor>(self.view)
                 .unwrap()
                 .core
-                .version();
+                .content_version();
             let buffers = {
                 let mut state =
                     bevy::ecs::system::SystemState::<LspManager>::new(self.app.world_mut());
@@ -3147,8 +3158,7 @@ mod tests {
                 .app
                 .add_plugins(crate::host::viewport::ViewportPlugin)
                 .insert_resource(settings)
-                .add_message::<vmux_setting::ColorSchemeChanged>()
-                .insert_non_send(crate::host::fold_store::FoldStore::default());
+                .add_message::<vmux_setting::ColorSchemeChanged>();
             match change {
                 0 => {}
                 1 => {
