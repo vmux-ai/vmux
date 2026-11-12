@@ -423,7 +423,13 @@ struct OpenResolver<'w, 's> {
 impl OpenResolver<'_, '_> {
     fn resolve(&self, source: Option<&str>) -> Result<(Entity, bool), String> {
         let stack = if let Some(source) = source {
-            let url = format!("vmux://sessions/{source}");
+            let mut route =
+                url::Url::parse("vmux://sessions/").expect("static Session route is valid");
+            route
+                .path_segments_mut()
+                .expect("Session route supports path segments")
+                .push(source);
+            let url = route.as_str();
             self.stacks
                 .iter()
                 .find_map(|(stack, metadata)| (metadata.url == url).then_some(stack))
@@ -545,7 +551,8 @@ mod opening_tests {
                     ..Default::default()
                 })
                 .id();
-            let source_url = "vmux://sessions/sign-in-source";
+            let source = "sign-in/source?draft#1";
+            let source_url = "vmux://sessions/sign-in%2Fsource%3Fdraft%231";
             let stack = app.world_mut().spawn((Stack::bundle(), ChildOf(pane))).id();
             app.world_mut()
                 .entity_mut(stack)
@@ -575,7 +582,7 @@ mod opening_tests {
                 },
                 payload: AgentOpenBrowser {
                     url: url.into(),
-                    source: Some("sign-in-source".into()),
+                    source: Some(source.into()),
                 },
             });
             app.update();

@@ -1587,6 +1587,10 @@ The source conversation pane chooses an adjacent browser pane when its logical w
 surfaces, or a new browser Stack otherwise. Provider URLs remain intact, and normal browser metadata
 supplies the title and favicon. Header and Stack context menus can open the same HTTP(S) URL in
 the external default browser. Connectors can reuse the same URL-opening entry point.
+The service routes browser requests to one desktop attached to the source Session, using live
+connection handles instead of broadcasting to unrelated desktops. Unscoped opens likewise choose
+one subscriber. Missing sources return a service error; the CLI preserves that cause. Session
+URLs encode source IDs as path segments, matching the Session route contract.
 The host owns setup state; the cursor and search stay local to the UI. Normal text input is
 disabled until readiness. Explicit key entry uses the same composer with a password input and
 ordinary Send/Enter submission; private input never enters the normal draft. There is no separate

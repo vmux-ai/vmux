@@ -152,6 +152,13 @@ impl AcpServiceConnection {
         self.catalog_tasks.retain(|_, task| !task.is_finished());
         match message {
             ClientMessage::SubscribeAgentCommands => {
+                self.service.broker.subscribe_browser(&self.outbound).await;
+                for sid in self.session_forwarders.keys() {
+                    self.service
+                        .broker
+                        .attach_browser(sid, &self.outbound)
+                        .await;
+                }
                 if let Some(task) = self.command_subscription.take() {
                     task.abort();
                 }
@@ -432,6 +439,12 @@ impl AcpServiceConnection {
             }
         }
         self.detach(&sid);
+        if self.command_subscription.is_some() {
+            self.service
+                .broker
+                .attach_browser(&sid, &self.outbound)
+                .await;
+        }
         let outbound = self.outbound.clone();
         let task = tokio::spawn(async move {
             loop {

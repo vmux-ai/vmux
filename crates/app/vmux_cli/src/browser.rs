@@ -54,12 +54,10 @@ impl Open {
         while let Some(message) =
             ServiceCodec::read_service_blocking(&mut reader).map_err(|error| error.to_string())?
         {
-            let ServiceMessage::AgentCommandResult {
-                request_id: received,
-                result,
-            } = message
-            else {
-                continue;
+            let (received, result) = match message {
+                ServiceMessage::AgentCommandResult { request_id, result } => (request_id, result),
+                ServiceMessage::Error { message } => return Err(message),
+                _ => continue,
             };
             if received != request_id {
                 continue;
@@ -139,5 +137,47 @@ mod tests {
         let received = receiver.join().unwrap();
         assert_eq!(received.url, url);
         assert_eq!(received.source.as_deref(), Some("setup-session"));
+    }
+
+    #[test]
+    fn opening_reports_a_service_error_without_waiting_for_disconnect() {
+        let fixture = tempfile::tempdir().unwrap();
+        let socket = fixture.path().join("browser.sock");
+        let listener = UnixListener::bind(&socket).unwrap();
+        let receiver = std::thread::spawn(move || {
+            let (stream, _) = listener.accept().unwrap();
+            stream.set_nonblocking(true).unwrap();
+            let runtime = tokio::runtime::Builder::new_current_thread()
+                .enable_all()
+                .build()
+                .unwrap();
+            runtime.block_on(async move {
+                let mut stream = tokio::net::UnixStream::from_std(stream).unwrap();
+                let _ = ServiceCodec::read_client(&mut tokio::io::BufReader::new(&mut stream))
+                    .await
+                    .unwrap();
+                ServiceCodec::write_service(
+                    &mut stream,
+                    &ServiceMessage::Error {
+                        message: "no desktop subscribed to agent commands".into(),
+                    },
+                )
+                .await
+                .unwrap();
+                let _ = ServiceCodec::read_raw(&mut stream).await;
+            });
+        });
+        let invocation = CliInvocation {
+            command: "browser.open".into(),
+            arguments: std::collections::BTreeMap::from([(
+                "url".into(),
+                vec!["https://example.test/auth".into()],
+            )]),
+        };
+        assert_eq!(
+            Open::try_from(&invocation).unwrap().send(&socket),
+            Err("no desktop subscribed to agent commands".into())
+        );
+        receiver.join().unwrap();
     }
 }
