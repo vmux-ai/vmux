@@ -635,6 +635,40 @@ The current framework foundation is:
 
 Vmux is the first complete composition built from that foundation.
 
+The initial SDK is consumed through a reviewed main commit or release tag in Git. Every Vmux
+dependency in an application uses the same revision; mixing revisions can create incompatible
+ECS types even when their names match. The SDK is not currently distributed as a supported
+set of crates.io packages. Publishing remains a separate release action.
+
+`vmux_app` is the composition entry point. Its optional `ecs`, `project`, `flex`, `pane`, and
+`extension` namespaces re-export their existing public types without wrappers. `contracts`
+enables shared wire values and the contracts of selected Project/Pane features; it does not
+install a renderer. Schema macros continue to name their owning crates. Core, jobs, Project,
+flex geometry, and pane topology are validated without Profile, CEF, Winit, or Layout.
+Extension currently selects product browser/layout adapters and is not part of that core guarantee.
+
+The supported Bevy minor is 0.19, as pinned by the consumer lockfile. A Bevy minor change or
+breaking supported API change requires an explicit SDK compatibility update and consumer gate.
+During 0.0.x, pin an exact revision; there is no floating-revision compatibility guarantee.
+Release notes identify breaking changes and replacement APIs. Compatible aliases remain where
+practical; no fixed deprecation window is promised before a stable SDK version.
+Store schema changes remain owned by their feature: retain stable reflected names, version
+persisted contracts, and provide a migration or explicit refusal before accepting incompatible
+data. Wire compatibility follows each protocol's versioned handshake, not a matching crate name.
+
+Native plugins are Rust crates linked at build time. They expose a `Plugin`, own their typed
+components/requests and any `feature.ron`, and package their pages/assets with the host build.
+The host composes IO, permissions, renderer, and runner adapters. An embedded web surface can
+keep its presentation while moving domain behavior into a typed plugin through the existing
+UI contracts; it does not gain arbitrary native access. Dynamic Rust loading and a prebuilt
+generic product host are not supported SDK capabilities yet.
+
+The independent consumer runs from path dependencies and immutable Git dependencies using the
+same behavioral suite. Neither mode inherits the repository patches or requires vmux-cloud.
+Existing product hosts cover macOS desktop, iOS mobile, and native service/CLI/MCP; these are
+product compositions, not a guarantee that every extracted SDK capability has an adapter on
+every target. Windows, Android, web, game, and spatial SDK hosts remain unverified.
+
 Read contracts belong to a capability rather than a page. A client subscribes to typed resource
 selectors; the host derives and publishes only that selection, and multiple pages share the
 underlying read. The transport carries the resulting projection, not the entire ECS world.

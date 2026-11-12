@@ -1,8 +1,8 @@
 use bevy_app::App;
 use bevy_ecs::prelude::*;
 use bevy_math::Vec2;
+use vmux_app::flex::{FlexDirection, UiRect, Val};
 use vmux_app::prelude::{ComputedNode, FlexViewport, LayoutContext, Node, VmuxPlugin};
-use vmux_flex::{FlexDirection, UiRect, Val};
 
 #[test]
 fn a_public_facade_lays_out_owned_nodes_without_a_window_or_profile() {

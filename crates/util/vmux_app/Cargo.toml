@@ -9,6 +9,7 @@ repository.workspace = true
 
 [features]
 default = []
+contracts = ["ecs", "vmux_ecs/contracts", "vmux_project?/contracts", "vmux_pane?/contracts"]
 conformance = ["extension", "vmux_extension/conformance"]
 cli = [
     "ecs",

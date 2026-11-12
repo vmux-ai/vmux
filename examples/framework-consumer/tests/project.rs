@@ -4,8 +4,9 @@ use std::path::{Path, PathBuf};
 use bevy_app::App;
 use bevy_ecs::prelude::*;
 use bevy_ecs::system::SystemState;
-use vmux_ecs::{Operation, OperationState};
-use vmux_project::{
+use vmux_app::ecs::{Operation, OperationState};
+use vmux_app::project::contract::ProjectArchiveRequest;
+use vmux_app::project::{
     AliasCompleted, AliasRequest, Error, LoadCompleted, LoadRequest, Mutation, ProjectId,
     ProjectSaved, Registrations, Root, Snapshot, WriteCompleted, WriteRequest, WriteResult,
     WriteTaskRequest,
@@ -85,6 +86,17 @@ impl Consumer {
             .collect()
     }
 
+    fn archive(&mut self, root: &str, payload: &str) -> Entity {
+        let request: ProjectArchiveRequest = serde_json::from_str(payload).unwrap();
+        self.submit(
+            root,
+            Mutation::Archive {
+                url: request.url,
+                archived: request.archived,
+            },
+        )
+    }
+
     fn complete(&mut self, request: WriteTaskRequest, result: Result<BTreeSet<String>, Error>) {
         self.0.world_mut().write_message(WriteResult {
             ticket: request.ticket,
@@ -112,7 +124,7 @@ impl Consumer {
     fn write_operation(&mut self, owner: Entity) -> Entity {
         self.0
             .world_mut()
-            .query::<(Entity, &vmux_ecs::OperationKind, &vmux_ecs::OperationTarget)>()
+            .query::<(Entity, &vmux_app::ecs::OperationKind, &vmux_app::ecs::OperationTarget)>()
             .iter(self.0.world())
             .find(|(_, kind, target)| kind.as_str() == "project.write" && target.entity() == owner)
             .unwrap()
@@ -133,7 +145,7 @@ fn completed_project_operations_keep_shared_retention_without_proposal_payloads(
         Some(&OperationState::Succeeded)
     );
     assert!(consumer.0.world().get::<Operation>(operation).is_some());
-    assert!(consumer.0.world().get::<vmux_ecs::Cwd>(operation).is_none());
+    assert!(consumer.0.world().get::<vmux_app::ecs::Cwd>(operation).is_none());
     assert_eq!(
         consumer.snapshot("/projects").projects["shared-id"].name,
         "Saved"
@@ -185,7 +197,7 @@ fn a_terminal_dispatched_operation_reconciles_late_success_without_losing_retent
     consumer
         .0
         .world_mut()
-        .trigger(vmux_ecs::OperationCompleted {
+        .trigger(vmux_app::ecs::OperationCompleted {
             entity: operation,
             result: Err("canceled".into()),
         });
@@ -295,7 +307,7 @@ fn replayed_write_completion_commits_one_identity_and_one_result() {
     let index = consumer
         .0
         .world()
-        .resource::<vmux_ecs::IdentityIndex<ProjectId>>();
+        .resource::<vmux_app::ecs::IdentityIndex<ProjectId>>();
     assert!(
         index
             .entity(&ProjectId("shared-id".into()))
@@ -404,22 +416,16 @@ fn an_accepted_save_survives_requester_removal_and_rejects_stale_edits() {
 fn archive_changes_commit_after_success_and_preserve_state_on_failure() {
     let mut consumer = Consumer::new();
     consumer.root("/projects");
-    consumer.submit(
+    consumer.archive(
         "/projects",
-        Mutation::Archive {
-            url: "discovered-project".into(),
-            archived: true,
-        },
+        r#"{"url":"discovered-project","archived":true}"#,
     );
     let request = consumer.requests().pop().unwrap();
     assert!(consumer.snapshot("/projects").archived.is_empty());
     consumer.complete(request, Ok(BTreeSet::new()));
-    consumer.submit(
+    consumer.archive(
         "/projects",
-        Mutation::Archive {
-            url: "discovered-project".into(),
-            archived: false,
-        },
+        r#"{"url":"discovered-project","archived":false}"#,
     );
     let request = consumer.requests().pop().unwrap();
     consumer.complete(request, Err(Error::Unavailable("write failed".into())));

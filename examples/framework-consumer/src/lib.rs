@@ -4,8 +4,8 @@ use bevy_reflect::Reflect;
 use moonshine_save::prelude::*;
 use std::collections::HashSet;
 use vmux_app::VmuxEcsPlugin;
-use vmux_ecs::store::SchemaPlugin;
-use vmux_ecs::{
+use vmux_app::ecs::store::SchemaPlugin;
+use vmux_app::ecs::{
     Cwd, IdentityIndex, IdentityIndexPlugin, IdentityIndexSet, OperationCompleted, OperationState,
     Revision,
 };
@@ -114,8 +114,8 @@ struct DocumentStore;
 #[cfg(test)]
 mod tests {
     use super::*;
-    use vmux_ecs::store::Types;
-    use vmux_ecs::{IdentityLookupError, Operation};
+    use vmux_app::ecs::store::Types;
+    use vmux_app::ecs::{IdentityLookupError, Operation};
 
     #[test]
     fn independent_roots_share_components_and_complete_operations_without_a_ui() {

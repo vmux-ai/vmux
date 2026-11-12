@@ -1172,14 +1172,13 @@ dependencies = [
  "bevy_math",
  "bevy_reflect",
  "moonshine-save",
+ "serde_json",
  "tempfile",
  "vmux_api",
  "vmux_app",
  "vmux_ecs",
  "vmux_extension",
- "vmux_flex",
  "vmux_pane",
- "vmux_project",
 ]
 
 [[package]]
@@ -2604,6 +2603,8 @@ name = "vmux_api"
 version = "0.0.35"
 dependencies = [
  "base64",
+ "bevy_ecs",
+ "bevy_reflect",
  "rkyv",
  "serde",
  "serde_json",
@@ -2635,10 +2636,12 @@ dependencies = [
  "bevy_reflect",
  "bevy_world_serialization",
  "moonshine-save",
+ "rkyv",
  "ron",
  "serde",
  "serde_json",
  "uuid",
+ "vmux_api",
  "vmux_macro",
  "vmux_task",
  "web-time",
@@ -2686,6 +2689,7 @@ dependencies = [
  "bevy_ecs",
  "bevy_reflect",
  "moonshine-save",
+ "vmux_api",
  "vmux_ecs",
 ]
 
@@ -2697,8 +2701,10 @@ dependencies = [
  "bevy_ecs",
  "bevy_reflect",
  "percent-encoding",
+ "rkyv",
  "serde",
  "url",
+ "vmux_api",
  "vmux_ecs",
 ]
 

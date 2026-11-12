@@ -3,9 +3,9 @@ use bevy_ecs::prelude::*;
 use bevy_ecs::system::SystemState;
 use moonshine_save::prelude::*;
 use vmux_app::VmuxPlugin;
-use vmux_ecs::LastActivatedAt;
-use vmux_ecs::store::Types;
-use vmux_pane::{
+use vmux_app::ecs::LastActivatedAt;
+use vmux_app::ecs::store::Types;
+use vmux_app::pane::{
     Hierarchy, Pane, PaneId, PaneSplit, PaneSplitDirection, PaneStore, SelectRequest, StorePlugin,
 };
 
