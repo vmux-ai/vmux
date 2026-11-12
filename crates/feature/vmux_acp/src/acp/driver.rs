@@ -29,6 +29,7 @@ use tokio::sync::{broadcast, mpsc, oneshot, watch};
 use tokio_util::compat::{TokioAsyncReadCompatExt, TokioAsyncWriteCompatExt};
 use vmux_ecs::ProcessId;
 
+use super::agent_process::AgentProcess;
 #[cfg(test)]
 use super::projection_driver::AcpProjector;
 use super::projection_driver::{AcpToolTitle, ApprovalDetailsQuery};
@@ -847,15 +848,16 @@ impl AcpDriver {
         mut input_rx: mpsc::UnboundedReceiver<AcpInput>,
     ) {
         let agent_cwd = shared.cwd();
-        let mut child = match Command::new(&command)
-            .args(&args)
-            .envs(env)
-            .current_dir(agent_cwd)
-            .stdin(Stdio::piped())
-            .stdout(Stdio::piped())
-            .stderr(Stdio::piped())
-            .spawn()
-        {
+        let mut launch = Command::new(&command);
+        let mut child = match AgentProcess::spawn(
+            launch
+                .args(&args)
+                .envs(env)
+                .current_dir(agent_cwd)
+                .stdin(Stdio::piped())
+                .stdout(Stdio::piped())
+                .stderr(Stdio::piped()),
+        ) {
             Ok(child) => child,
             Err(err) => {
                 shared
@@ -864,9 +866,14 @@ impl AcpDriver {
                 return;
             }
         };
-        let stdin = child.stdin.take().expect("piped stdin").compat_write();
-        let stdout = child.stdout.take().expect("piped stdout").compat();
-        if let Some(stderr) = child.stderr.take() {
+        let stdin = child
+            .child
+            .stdin
+            .take()
+            .expect("piped stdin")
+            .compat_write();
+        let stdout = child.child.stdout.take().expect("piped stdout").compat();
+        if let Some(stderr) = child.child.stderr.take() {
             tokio::spawn(drain_stderr(stderr, shared.clone()));
         }
         let transport = agent_client_protocol::ByteStreams::new(stdin, stdout);
@@ -1386,7 +1393,7 @@ impl AcpDriver {
                 shared.stderr_detail()
             )));
         }
-        let _ = child.kill().await;
+        child.stop().await;
     }
 }
 

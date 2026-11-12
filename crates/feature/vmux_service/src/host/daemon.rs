@@ -52,7 +52,7 @@ impl DaemonBinary {
     }
 
     #[cfg(unix)]
-    pub(crate) fn spawn_detached(&self) -> std::io::Result<()> {
+    pub(crate) fn spawn_detached(&self) -> std::io::Result<std::process::Child> {
         let log_dir = ServicePaths::log_dir();
         let _ = std::fs::create_dir_all(&log_dir);
         let stderr = match std::fs::File::create(ServicePaths::current().log()) {
@@ -62,18 +62,22 @@ impl DaemonBinary {
                 std::process::Stdio::null()
             }
         };
-        unsafe {
-            std::process::Command::new(self.path())
+        let mut command = std::process::Command::new(self.path());
+        vmux_spawn::Descriptors::isolate(&mut command)?;
+        let child = unsafe {
+            command
                 .stdin(std::process::Stdio::null())
                 .stdout(std::process::Stdio::null())
                 .stderr(stderr)
                 .pre_exec(|| {
-                    libc::setsid();
+                    if libc::setsid() < 0 {
+                        return Err(std::io::Error::last_os_error());
+                    }
                     Ok(())
                 })
-                .spawn()?;
-        }
-        Ok(())
+                .spawn()?
+        };
+        Ok(child)
     }
 
     pub fn identity(&self) -> std::io::Result<DaemonIdentity> {

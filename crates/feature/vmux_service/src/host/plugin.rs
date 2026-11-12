@@ -11,7 +11,8 @@ use crate::registry::{Backend, RegistrationError};
 use vmux_api::protocol::ClientMessage;
 use vmux_ecs::manifest::FeaturePlugin;
 use vmux_ecs::service::{
-    ServiceConnected, ServiceInbound, ServiceMessageIngressSet, ServiceRequest, ServiceUnavailable,
+    Restarting, ServiceConnected, ServiceInbound, ServiceMessageIngressSet, ServiceRequest,
+    ServiceUnavailable, ShutdownSet,
 };
 
 use super::client::{ServiceClient, ServiceHandle, ServiceWake};
@@ -76,9 +77,113 @@ struct ServiceLaunchCompleted;
 
 pub struct ServicePlugin;
 
+#[derive(Resource)]
+struct Lifetime {
+    socket: std::path::PathBuf,
+    lock: std::path::PathBuf,
+    child: Option<std::process::Child>,
+    launched: bool,
+    #[cfg(target_os = "macos")]
+    managed: Option<crate::LaunchAgent>,
+}
+
+impl Default for Lifetime {
+    fn default() -> Self {
+        let paths = crate::ServicePaths::current();
+        Self {
+            socket: paths.socket(),
+            lock: paths.daemon_lock(),
+            child: None,
+            launched: false,
+            #[cfg(target_os = "macos")]
+            managed: if crate::ServicePaths::build_profile() == "release"
+                && !vmux_profile::SessionEnvironment::requires_inherited_service_environment()
+            {
+                Some(crate::LaunchAgent::for_profile("release"))
+            } else {
+                None
+            },
+        }
+    }
+}
+
+impl Lifetime {
+    fn stop(&mut self) -> std::io::Result<()> {
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+        while self.launched && (!self.socket.exists() || !self.lock.exists()) {
+            if let Some(child) = &mut self.child
+                && matches!(child.try_wait(), Ok(Some(_)))
+            {
+                self.child = None;
+                return Ok(());
+            }
+            if std::time::Instant::now() >= deadline {
+                break;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(25));
+        }
+        let ready = self.socket.exists() && self.lock.exists();
+        let result = if self.launched && !ready {
+            Err(std::io::Error::new(
+                std::io::ErrorKind::TimedOut,
+                "Vmux service did not finish startup before shutdown",
+            ))
+        } else {
+            crate::RuntimeHandoff::shutdown_runtime(
+                &self.socket,
+                &self.lock,
+                deadline.saturating_duration_since(std::time::Instant::now()),
+            )
+        };
+        #[cfg(target_os = "macos")]
+        let result = if self.child.is_none()
+            && let Some(agent) = &self.managed
+            && let Err(error) = &result
+            && matches!(
+                error.kind(),
+                std::io::ErrorKind::TimedOut
+                    | std::io::ErrorKind::WouldBlock
+                    | std::io::ErrorKind::ConnectionReset
+                    | std::io::ErrorKind::BrokenPipe
+            ) {
+            agent.bootout()?;
+            crate::RuntimeHandoff::shutdown_runtime(
+                &self.socket,
+                &self.lock,
+                std::time::Duration::from_secs(3),
+            )
+        } else {
+            result
+        };
+        if let Some(mut child) = self.child.take() {
+            while matches!(child.try_wait(), Ok(None)) && std::time::Instant::now() < deadline {
+                std::thread::sleep(std::time::Duration::from_millis(25));
+            }
+            if !matches!(child.try_wait(), Ok(Some(_))) {
+                let _ = child.kill();
+            }
+            if let Err(error) = child.wait()
+                && result.is_ok()
+            {
+                return Err(error);
+            }
+        }
+        result
+    }
+}
+
+impl Drop for Lifetime {
+    fn drop(&mut self) {
+        if let Some(child) = self.child.take() {
+            let _ = vmux_spawn::Reaper::start(child);
+        }
+    }
+}
+
 impl Plugin for ServicePlugin {
     fn build(&self, app: &mut App) {
         app.add_plugins(FeaturePlugin::<crate::Feature>::default())
+            .init_resource::<Lifetime>()
             .add_message::<ServiceRequest>()
             .add_message::<ServiceInbound>()
             .add_systems(
@@ -95,7 +200,24 @@ impl Plugin for ServicePlugin {
                 )
                     .chain(),
             )
-            .add_systems(Last, (queue_requests, send_requests).chain());
+            .add_systems(
+                Last,
+                (queue_requests, send_requests).chain().before(ShutdownSet),
+            )
+            .add_systems(Last, shutdown.in_set(ShutdownSet));
+    }
+}
+
+fn shutdown(
+    mut exits: MessageReader<AppExit>,
+    restarting: Option<Res<Restarting>>,
+    mut lifetime: ResMut<Lifetime>,
+) {
+    if exits.read().count() == 0 || restarting.is_some() {
+        return;
+    }
+    if let Err(error) = lifetime.stop() {
+        tracing::error!(%error, "application service shutdown failed");
     }
 }
 
@@ -135,6 +257,7 @@ fn start(mut commands: Commands, proxy: Option<Res<EventLoopProxyWrapper>>) {
 fn register(
     registrations: Query<(Entity, &DaemonBinary, &ServiceRegistration)>,
     mut commands: Commands,
+    mut lifetime: ResMut<Lifetime>,
 ) {
     for (entity, binary, registration) in &registrations {
         #[cfg(target_os = "macos")]
@@ -210,6 +333,7 @@ fn register(
         service.remove::<ServiceRegistration>();
         match result {
             Ok(()) => {
+                lifetime.launched = true;
                 service.insert(ServiceLaunchCompleted);
             }
             Err(error) => {
@@ -226,6 +350,7 @@ fn register(
 fn launch_detached(
     launches: Query<(Entity, &DaemonBinary), With<DetachedServiceLaunch>>,
     mut commands: Commands,
+    mut lifetime: ResMut<Lifetime>,
 ) {
     for (entity, binary) in &launches {
         binary.prepare_detached_spawn();
@@ -233,7 +358,9 @@ fn launch_detached(
         let mut service = commands.entity(entity);
         service.remove::<DetachedServiceLaunch>();
         match result {
-            Ok(()) => {
+            Ok(child) => {
+                lifetime.child = Some(child);
+                lifetime.launched = true;
                 service.insert(ServiceLaunchCompleted);
             }
             Err(error) => {
@@ -385,6 +512,97 @@ fn reconnect_disconnected(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn quitting_during_daemon_startup_waits_for_and_stops_the_owned_child() {
+        let directory = tempfile::tempdir().unwrap();
+        let socket = directory.path().join("own.sock");
+        let lock = directory.path().join("own.lock");
+        let child = std::process::Command::new("/bin/sleep")
+            .arg("30")
+            .spawn()
+            .unwrap();
+        let pid = child.id();
+        let mut app = App::new();
+        app.add_plugins(ServicePlugin).add_message::<AppExit>();
+        app.insert_resource(Lifetime {
+            socket: socket.clone(),
+            lock: lock.clone(),
+            child: Some(child),
+            launched: true,
+            #[cfg(target_os = "macos")]
+            managed: None,
+        });
+        let server = std::thread::spawn(move || {
+            std::thread::sleep(std::time::Duration::from_millis(50));
+            let lease = std::fs::File::create(lock).unwrap();
+            lease.lock().unwrap();
+            let listener = std::os::unix::net::UnixListener::bind(socket).unwrap();
+            let (mut stream, _) = listener.accept().unwrap();
+            let payload = vmux_transport::service::ServiceCodec::read_raw_blocking(&mut stream)
+                .unwrap()
+                .unwrap();
+            assert!(matches!(
+                rkyv::from_bytes::<ClientMessage, rkyv::rancor::Error>(&payload).unwrap(),
+                ClientMessage::Shutdown
+            ));
+            assert_eq!(unsafe { libc::kill(pid as libc::pid_t, libc::SIGTERM) }, 0);
+        });
+        app.world_mut().write_message(AppExit::Success);
+        app.world_mut().run_schedule(Last);
+        server.join().unwrap();
+        assert!(app.world().resource::<Lifetime>().child.is_none());
+        assert_eq!(unsafe { libc::kill(pid as libc::pid_t, 0) }, -1);
+        assert_eq!(
+            std::io::Error::last_os_error().raw_os_error(),
+            Some(libc::ESRCH)
+        );
+    }
+
+    #[test]
+    fn final_application_frame_stops_its_service_while_restart_preserves_it() {
+        for restarting in [false, true] {
+            let directory = tempfile::tempdir().unwrap();
+            let socket = directory.path().join("own.sock");
+            let listener = std::os::unix::net::UnixListener::bind(&socket).unwrap();
+            if restarting {
+                listener.set_nonblocking(true).unwrap();
+            }
+            let server = std::thread::spawn(move || {
+                if restarting {
+                    std::thread::sleep(std::time::Duration::from_millis(50));
+                    assert!(
+                        matches!(listener.accept(), Err(error) if error.kind() == std::io::ErrorKind::WouldBlock)
+                    );
+                } else {
+                    let (mut stream, _) = listener.accept().unwrap();
+                    let payload =
+                        vmux_transport::service::ServiceCodec::read_raw_blocking(&mut stream)
+                            .unwrap()
+                            .unwrap();
+                    let message =
+                        rkyv::from_bytes::<ClientMessage, rkyv::rancor::Error>(&payload).unwrap();
+                    assert!(matches!(message, ClientMessage::Shutdown));
+                }
+            });
+            let mut app = App::new();
+            app.add_plugins(ServicePlugin).add_message::<AppExit>();
+            app.insert_resource(Lifetime {
+                socket,
+                lock: directory.path().join("own.lock"),
+                child: None,
+                launched: false,
+                #[cfg(target_os = "macos")]
+                managed: None,
+            });
+            if restarting {
+                app.insert_resource(Restarting);
+            }
+            app.world_mut().write_message(AppExit::Success);
+            app.world_mut().run_schedule(Last);
+            server.join().unwrap();
+        }
+    }
 
     #[test]
     fn disconnected_service_retries_without_dropping_requests() {

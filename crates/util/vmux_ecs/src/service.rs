@@ -2,12 +2,28 @@
 
 use std::sync::Arc;
 
+use bevy::ecs::schedule::ScheduleLabel;
 use bevy::prelude::*;
 use tokio::sync::mpsc;
 use vmux_api::protocol::{ClientMessage, ServiceMessage};
 pub use vmux_api::service::ServiceMessageSet;
 use vmux_api::service::ServiceMessageVariant;
 use vmux_transport::service::{RemoteDriver, RemoteOperationStore, ServiceProtocolDriver};
+
+#[derive(ScheduleLabel, Clone, Debug, PartialEq, Eq, Hash)]
+pub struct Shutdown;
+
+#[derive(ScheduleLabel, Clone, Debug, PartialEq, Eq, Hash)]
+pub struct ShutdownComplete;
+
+#[derive(Component)]
+pub struct ShutdownPending;
+
+#[derive(SystemSet, Clone, Debug, PartialEq, Eq, Hash)]
+pub struct ShutdownSet;
+
+#[derive(Resource)]
+pub struct Restarting;
 
 #[derive(Component, Clone)]
 pub struct Executor(pub tokio::runtime::Handle);

@@ -153,7 +153,7 @@ impl ServiceStart {
         }
         let binary = DaemonBinary::current()?;
         if Self::detached() {
-            binary.spawn_detached()?;
+            vmux_spawn::Reaper::start(binary.spawn_detached()?)?;
         } else {
             LaunchAgent::current().ensure_running(binary.path())?;
         }

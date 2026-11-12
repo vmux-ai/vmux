@@ -1409,10 +1409,14 @@ executable and retain the configured no-sandbox mode. Prewarmed terminal pages h
 identity and do not count as running terminals in quit confirmation.
 Both host and helper signing caches include identity and entitlements; a valid linker signature
 alone does not satisfy the development signing contract.
-Quit flushes pending layout changes. Switching named profiles restarts the GUI rather than
-opening another writer. After the old GUI exits, a different build drains its daemon and waits
-for the data lease automatically; no manual stop is needed. This ends old terminals and agents,
-while reopening the same build keeps them. Old binaries without leases are not
+Quit flushes pending layout changes, shuts down that profile's service, and waits for its daemon
+lease and child process to retire. Closing a page or hiding the window preserves background work;
+a successful restart within the same profile preserves the service too. Switching named profiles
+ends the old profile's service before opening another writer. A different build drains the old
+daemon and waits for its data lease automatically. Service shutdown closes agent inputs, pumps
+ECS requests while their tasks drain, then aborts remaining tasks and reaps owned processes.
+Detached children inherit only standard descriptors, and agent process groups
+remain owned even after the parent agent exits. Old binaries without leases are not
 protected by these advisory locks. VMUX_DATA_DIR selects a separate data root and runtime
 endpoints for copied-state tests; manual service start inherits that root and named profile
 instead of using a global launchd environment. Browser paths outside the chosen data root

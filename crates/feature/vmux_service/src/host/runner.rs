@@ -49,12 +49,41 @@ impl WakeDrivenRunner {
         loop {
             app.update();
             if let Some(exit) = app.should_exit() {
-                return exit;
+                return self.finish(app, exit);
             }
             if self.park(HOUSEKEEPING_FLOOR) == ParkOutcome::Shutdown {
-                return AppExit::Success;
+                return self.finish(app, AppExit::Success);
             }
         }
+    }
+
+    fn finish(&self, app: &mut App, exit: AppExit) -> AppExit {
+        if let Err(error) = app
+            .world_mut()
+            .try_run_schedule(vmux_ecs::service::Shutdown)
+        {
+            tracing::debug!(%error, "no additional service shutdown participants");
+        }
+        let deadline = std::time::Instant::now() + Duration::from_secs(3);
+        loop {
+            let world = app.world_mut();
+            let pending = world
+                .query_filtered::<&vmux_ecs::service::AbortTask, bevy_ecs::prelude::With<vmux_ecs::service::ShutdownPending>>()
+                .iter(world)
+                .any(|task| !task.0.is_finished());
+            if !pending || std::time::Instant::now() >= deadline {
+                break;
+            }
+            app.update();
+            std::thread::sleep(Duration::from_millis(5));
+        }
+        if let Err(error) = app
+            .world_mut()
+            .try_run_schedule(vmux_ecs::service::ShutdownComplete)
+        {
+            tracing::debug!(%error, "no final service shutdown participants");
+        }
+        exit
     }
 
     fn park(&mut self, floor: Duration) -> ParkOutcome {
@@ -79,6 +108,72 @@ impl WakeDrivenRunner {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[derive(bevy_ecs::prelude::Resource)]
+    struct BeginDrain(Option<tokio::sync::oneshot::Sender<()>>);
+
+    impl BeginDrain {
+        fn begin(mut state: bevy_ecs::prelude::ResMut<Self>) {
+            state.0.take().unwrap().send(()).unwrap();
+        }
+    }
+
+    #[test]
+    fn shutdown_keeps_processing_ecs_requests_until_the_closing_task_finishes() {
+        let rt = runtime();
+        let (wake_tx, wake_rx) = mpsc::unbounded_channel();
+        let (signal_tx, signal_rx) = mpsc::channel(1);
+        signal_tx.try_send(()).unwrap();
+        let (processes, inboxes) = vmux_process::ProcessRuntime::new(wake_tx);
+        let finalized = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let done = finalized.clone();
+        let (begin, started) = tokio::sync::oneshot::channel();
+        let task = rt.spawn(async move {
+            started.await.unwrap();
+            assert!(processes.list().await.unwrap().is_empty());
+            done.store(true, std::sync::atomic::Ordering::SeqCst);
+        });
+        let mut app = App::new();
+        app.add_plugins(vmux_process::ProcessPlugin)
+            .insert_resource(BeginDrain(Some(begin)))
+            .add_systems(vmux_ecs::service::Shutdown, BeginDrain::begin)
+            .set_runner(
+                WakeDrivenRunner::new(rt.handle().clone(), wake_rx, signal_rx).into_runner(),
+            );
+        app.world_mut().spawn(inboxes);
+        app.world_mut().spawn((
+            vmux_ecs::service::AbortTask(task),
+            vmux_ecs::service::ShutdownPending,
+        ));
+        assert_eq!(app.run(), AppExit::Success);
+        assert!(finalized.load(std::sync::atomic::Ordering::SeqCst));
+    }
+
+    #[derive(bevy_ecs::prelude::Resource)]
+    struct Finalized(std::sync::Arc<std::sync::atomic::AtomicBool>);
+
+    impl Finalized {
+        fn finish(state: bevy_ecs::prelude::Res<Self>) {
+            state.0.store(true, std::sync::atomic::Ordering::SeqCst);
+        }
+    }
+
+    #[test]
+    fn shutdown_signal_runs_registered_cleanup_before_dropping_the_application() {
+        let rt = runtime();
+        let (_wake_tx, wake_rx) = mpsc::unbounded_channel();
+        let (signal_tx, signal_rx) = mpsc::channel(1);
+        signal_tx.try_send(()).unwrap();
+        let finalized = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let mut app = App::new();
+        app.insert_resource(Finalized(finalized.clone()))
+            .add_systems(vmux_ecs::service::Shutdown, Finalized::finish)
+            .set_runner(
+                WakeDrivenRunner::new(rt.handle().clone(), wake_rx, signal_rx).into_runner(),
+            );
+        assert_eq!(app.run(), AppExit::Success);
+        assert!(finalized.load(std::sync::atomic::Ordering::SeqCst));
+    }
 
     struct Feature;
 

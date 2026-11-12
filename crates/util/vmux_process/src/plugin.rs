@@ -52,7 +52,8 @@ impl Plugin for ProcessPlugin {
                 poll,
             )
                 .chain(),
-        );
+        )
+        .add_systems(vmux_ecs::service::ShutdownComplete, finish_shutdown);
     }
 }
 
@@ -464,6 +465,13 @@ fn shutdown(
             commands.entity(entity).despawn();
         }
         let _ = request.reply.send(());
+    }
+}
+
+fn finish_shutdown(mut processes: Processes, mut commands: Commands) {
+    for (entity, _, mut driver) in &mut processes.values {
+        driver.0.get().kill();
+        commands.entity(entity).despawn();
     }
 }
 
