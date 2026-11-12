@@ -52,6 +52,7 @@ pub fn Page() -> Element {
     let mut inspected = use_signal(|| None::<(String, bool)>);
     let address = use_ui_state::<PageAddressUiState>().state;
     let mut observed_route = use_signal(String::new);
+    let mut requested_level = use_signal(|| None::<Level>);
     use_effect(move || {
         let Some(current) = address
             .read()
@@ -68,10 +69,12 @@ pub fn Page() -> Element {
             return;
         };
         observed_route.set(current);
+        requested_level.set(None);
         selected.set(location.selection);
         panel.set(location.panel);
     });
     let onselect = EventHandler::new(move |id: String| {
+        requested_level.set(Some(Level::Containers));
         selected.set(id.clone());
         let _ = Location {
             selection: id,
@@ -100,7 +103,9 @@ pub fn Page() -> Element {
     let snapshot = controls.snapshot();
     let catalog = Catalog(&snapshot.containers);
     let selection = catalog.selection(&selected());
-    let level = if selection.is_empty() {
+    let level = if let Some(level) = requested_level() {
+        level
+    } else if selection.is_empty() {
         Level::of(address.read().address.as_ref())
     } else {
         Level::Containers
@@ -118,7 +123,15 @@ pub fn Page() -> Element {
                 resizable: true,
                 show_sidebar: true,
                 sidebar: rsx! {
-                    ContainerSheet { selected: selection.clone(), onselect, onsettings: move |_| settings_open.set(true) }
+                    ContainerSheet {
+                        selected: selection.clone(), level, onselect,
+                        onlevel: move |level: Level| {
+                            requested_level.set(Some(level));
+                            selected.set(String::new());
+                            let _ = level.open();
+                        },
+                        onsettings: move |_| settings_open.set(true),
+                    }
                 },
                 toolbar: rsx! {
                     Header {
@@ -160,55 +173,63 @@ pub fn Page() -> Element {
 #[component]
 fn ContainerSheet(
     selected: String,
+    level: Level,
     onselect: EventHandler<String>,
+    onlevel: EventHandler<Level>,
     onsettings: EventHandler<()>,
 ) -> Element {
-    let controls = Controls::current();
-    let snapshot = controls.snapshot();
-    let stage = if snapshot.inventory_ready {
-        "ready"
-    } else {
-        "inventory"
-    };
+    let snapshot = Controls::current().snapshot();
+    let mut expanded = use_signal(|| true);
     rsx! {
         div { class: "flex h-full min-h-0 flex-col overflow-hidden bg-background font-sans text-xs text-foreground",
-            div { class: "flex shrink-0 flex-col gap-1 px-2 py-2",
-                div { class: "flex h-7 items-center gap-2 text-xs font-medium text-foreground/80",
-                    BuiltinIconView { icon: BuiltinIcon::Docker, class: "size-4 shrink-0" }
-                    span { class: "flex-1", {translate("container-engine")} }
-                    ManagerIconButton {
-                        label: translate("container-settings"), disabled: snapshot.data_directory.is_empty(),
-                        onclick: move |_| onsettings.call(()),
-                        LineIconView { icon: LineIcon::Wrench, class: "size-3.5" }
-                    }
-                }
-                EngineToolbar { compact: true, settings: false, start: true, onsettings }
+            div { class: "flex h-8 shrink-0 items-center gap-1 px-1",
+                LevelLink { value: Level::Vm, selected: level == Level::Vm, onselect: onlevel }
+                EngineToolbar { compact: true, start: true, icon_only: true, onsettings }
             }
-            ContentTransition { key: "{stage}", class: "flex min-h-0 flex-1 flex-col",
-                if !snapshot.inventory_ready && !snapshot.inventory_error.is_empty() {
-                    Empty { title: translate("container-inventory-error"), description: snapshot.inventory_error.clone() }
-                } else if !snapshot.inventory_ready && snapshot.available() {
-                    ListSkeleton {}
-                } else if !snapshot.inventory_ready {
-                    div { class: "min-h-0 flex-1" }
-                } else if snapshot.containers.is_empty() {
-                    Empty { title: translate("container-empty-title"), description: String::new() }
-                } else {
-                    div { class: "min-h-0 flex-1 space-y-3 overflow-auto px-1 pb-3",
-                        for group in Catalog(&snapshot.containers).groups() {
-                            ContainerGroup { key: "{group.name}", group, selected: selected.clone(), busy: snapshot.busy, onselect }
+            div { class: "min-h-0 flex-1 pl-3",
+                div { class: "flex h-8 items-center px-1",
+                    LevelLink { value: Level::Docker, selected: level == Level::Docker, onselect: onlevel }
+                }
+                div { class: "min-h-0 pl-3",
+                    div { class: "group flex min-h-8 items-center px-1",
+                        LevelLink { value: Level::Containers, selected: level == Level::Containers && selected.is_empty(), onselect: onlevel }
+                        SheetHeaderChevron { expanded: expanded(), label: Level::Containers.label(), subtle: true, onclick: move |_| expanded.set(!expanded()) }
+                    }
+                    Collapsible { expanded: expanded(),
+                        div { class: "space-y-2 pb-3 pl-2", aria_hidden: !expanded(), inert: (!expanded()).then_some(""),
+                            if !snapshot.inventory_ready && !snapshot.inventory_error.is_empty() {
+                                Empty { title: translate("container-inventory-error"), description: snapshot.inventory_error.clone() }
+                            } else if !snapshot.inventory_ready && snapshot.available() {
+                                ListSkeleton {}
+                            } else if snapshot.inventory_ready && snapshot.containers.is_empty() {
+                                Empty { title: translate("container-empty-title"), description: String::new() }
+                            } else {
+                                for group in Catalog(&snapshot.containers).groups() {
+                                    ContainerGroup { key: "{group.name}", group, selected: selected.clone(), busy: snapshot.busy, onselect }
+                                }
+                            }
                         }
                     }
                 }
             }
             if snapshot.inventory_ready && !snapshot.inventory_error.is_empty() {
-                p {
-                    class: "shrink-0 px-2.5 py-2 text-[10px] text-destructive",
-                    role: "status",
-                    title: snapshot.inventory_error.clone(),
-                    {translate("container-inventory-error")}
+                p { class: "shrink-0 px-2.5 py-2 text-[10px] text-destructive", role: "status",
+                    title: snapshot.inventory_error.clone(), {translate("container-inventory-error")}
                 }
             }
+        }
+    }
+}
+
+#[component]
+fn LevelLink(value: Level, selected: bool, onselect: EventHandler<Level>) -> Element {
+    let accent = TreeRowAccent::resolve(selected, false).classes();
+    rsx! {
+        button {
+            r#type: "button", class: "flex h-7 min-w-0 flex-1 items-center gap-2 rounded-md px-2 text-left text-xs {accent}",
+            aria_label: value.label(), aria_selected: selected, onclick: move |_| onselect.call(value),
+            BuiltinIconView { icon: value.icon(), class: "size-3.5 shrink-0 text-muted-foreground" }
+            span { class: "truncate", {value.label()} }
         }
     }
 }
@@ -409,6 +430,7 @@ fn EngineToolbar(
     #[props(default)] compact: bool,
     #[props(default = true)] settings: bool,
     #[props(default)] start: bool,
+    #[props(default)] icon_only: bool,
     onsettings: EventHandler<()>,
 ) -> Element {
     let controls = Controls::current();
@@ -419,23 +441,23 @@ fn EngineToolbar(
                 StateLabel { state: snapshot.vm_state().to_string() }
             } else if snapshot.running {
                 Button {
-                    size: ButtonSize::Xs, variant: ButtonVariant::Ghost,
-                    class: "h-7 gap-2 whitespace-nowrap px-1.5",
+                    size: if icon_only { ButtonSize::Icon } else { ButtonSize::Xs }, variant: ButtonVariant::Ghost,
+                    class: if icon_only { "p-0" } else { "h-7 gap-2 whitespace-nowrap px-1.5" },
                     title: translate("container-stop"), aria_label: translate("container-stop"),
                     disabled: controls.engine_busy(),
                     onclick: move |_| controls.request(Intent::Stop),
                     LineIconView { icon: LineIcon::Pause, class: "size-3.5" }
-                    span { {translate("container-stop-vm")} }
+                    if !icon_only { span { {translate("container-stop-vm")} } }
                 }
             } else if start {
                 Button {
-                    size: ButtonSize::Xs, variant: ButtonVariant::Ghost,
-                    class: "h-7 gap-2 whitespace-nowrap px-1.5",
+                    size: if icon_only { ButtonSize::Icon } else { ButtonSize::Xs }, variant: ButtonVariant::Ghost,
+                    class: if icon_only { "p-0" } else { "h-7 gap-2 whitespace-nowrap px-1.5" },
                     title: translate("container-start"), aria_label: translate("container-start"),
                     disabled: controls.engine_busy() || !snapshot.supported || snapshot.data_directory.is_empty(),
                     onclick: move |_| controls.request(Intent::Start),
                     LineIconView { icon: LineIcon::Play, class: "size-3.5" }
-                    span { {translate("container-start-vm")} }
+                    if !icon_only { span { {translate("container-start-vm")} } }
                 }
             }
             if settings {
@@ -900,6 +922,34 @@ enum Level {
 }
 
 impl Level {
+    fn icon(self) -> BuiltinIcon {
+        match self {
+            Self::Vm => BuiltinIcon::Computer,
+            Self::Docker => BuiltinIcon::Docker,
+            Self::Containers => BuiltinIcon::Container,
+        }
+    }
+
+    fn label(self) -> String {
+        translate(match self {
+            Self::Vm => "container-vm",
+            Self::Docker => "container-engine",
+            Self::Containers => "container-title",
+        })
+    }
+
+    fn open(self) -> Result<(), vmux_ui::hooks::EventListenerError> {
+        let url = match self {
+            Self::Vm => VmPage::URL,
+            Self::Docker => DockerPage::URL,
+            Self::Containers => ContainerPage::URL,
+        };
+        send(&OpenRequest {
+            value: url.into(),
+            open: Some(OpenTarget::InPlace),
+        })
+    }
+
     fn of(address: Option<&PageAddress>) -> Self {
         let Some(address) = address else {
             return Self::Containers;
@@ -1471,6 +1521,52 @@ mod tests {
         let html = preview.address("vmux://vm/");
         assert!(html.contains("/fixtures/shared"));
         assert!(!html.contains(&translate("container-no-selection")));
+    }
+
+    #[test]
+    fn side_sheet_navigation_switches_levels_before_the_host_answers() {
+        let mut preview = Preview::new();
+        preview.address("vmux://vm/");
+        preview.publish(ContainerUiState {
+            supported: true,
+            running: true,
+            ready: true,
+            inventory_ready: true,
+            phase: "ready".into(),
+            data_directory: "/fixtures/data".into(),
+            shared_directory: "/fixtures/shared".into(),
+            socket: "/fixtures/docker.sock".into(),
+            containers: vec![ContainerEntry {
+                id: "aaaaaaaaaaaa".into(),
+                name: "account".into(),
+                image: "account:dev".into(),
+                state: "exited".into(),
+                ..Default::default()
+            }],
+            ..Default::default()
+        });
+        preview.click(&Level::Docker.label());
+        assert!(preview.render().contains("unix:///fixtures/docker.sock"));
+        assert_eq!(
+            preview.host.opens.borrow().last().unwrap().value,
+            "vmux://vm/docker"
+        );
+        preview.click(&Level::Containers.label());
+        assert!(
+            preview
+                .render()
+                .contains(&translate("container-no-selection"))
+        );
+        preview.click("account");
+        assert!(preview.render().contains("account:dev"));
+        preview.click(&Level::Vm.label());
+        let html = preview.render();
+        assert!(html.contains("/fixtures/shared"));
+        assert!(!html.contains(&translate("container-no-selection")));
+        assert_eq!(
+            preview.host.opens.borrow().last().unwrap().value,
+            "vmux://vm/"
+        );
     }
 
     #[test]
