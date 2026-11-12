@@ -3,6 +3,7 @@ use vmux_api::mcp::{
     McpServerCancelRequest, McpServerEntry, McpServerRequest, McpServerStatus, McpServersUiState,
 };
 use vmux_ui::components::button::{Button, ButtonSize, ButtonVariant};
+use vmux_ui::components::connector_authorization::ConnectorAuthorization;
 use vmux_ui::components::connector_icon::ConnectorIcon;
 use vmux_ui::components::connector_link::ConnectorLink;
 use vmux_ui::components::manager::{ManagerEmpty, ManagerSkeleton};
@@ -41,6 +42,9 @@ pub(crate) fn Accounts(state: McpServersUiState, query: String) -> Element {
                                     if let Some(url) = server.setup_url {
                                         ConnectorLink { url, label: translate("connectors-manage-access"), class: "mt-1 text-xs text-primary" }
                                     }
+                                    if pending && let Some(authorization) = snapshot.authorization.as_ref() {
+                                        ConnectorAuthorization { authorization: authorization.clone(), service: server.name.clone() }
+                                    }
                                 }
                                 if server.status == McpServerStatus::Configured {
                                     span { class: "text-xs text-muted-foreground", {translate("tools-managed")} }
@@ -59,12 +63,6 @@ pub(crate) fn Accounts(state: McpServersUiState, query: String) -> Element {
                             }
                         }
                     }
-                }
-            }
-            if let Some(authorization) = snapshot.authorization {
-                div { class: "flex items-center gap-3 px-2 py-3 text-sm",
-                    if let Some(code) = authorization.code { code { "{code}" } }
-                    ConnectorLink { url: authorization.url, label: translate("connectors-open-sign-in"), class: "text-xs text-primary" }
                 }
             }
             if let Some(result) = snapshot.result && !result.success {

@@ -135,7 +135,7 @@
                 "ExtensionPopupBoundsRequest",
                 "ExtensionPopupCloseRequest",
                 "ConnectorPopupBoundsRequest",
-                "ConnectorPopupHideRequest",
+                "ConnectorPopupCloseRequest",
                 "ConnectorPopupShowRequest",
                 "ExtPinRequest",
                 "ExtOpenManagerRequest",

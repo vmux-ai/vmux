@@ -1178,3 +1178,4 @@ connectors-agent-configuration = 代理程式設定
 connectors-configured = 已設定
 connectors-open-in-app = 在 Vmux 中開啟
 connectors-open-external = 在外部瀏覽器中開啟
+connectors-verification-code-help = 複製此代碼並在 { $service } 中輸入，以完成登入。

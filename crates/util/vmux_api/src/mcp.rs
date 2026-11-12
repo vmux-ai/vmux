@@ -51,7 +51,7 @@ pub struct ConnectorPopupShowRequest {
 }
 
 #[vmux_api::ui_event]
-pub struct ConnectorPopupHideRequest {
+pub struct ConnectorPopupCloseRequest {
     pub id: String,
 }
 

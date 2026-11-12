@@ -1356,7 +1356,9 @@ public client and Device Flow; providers advertising dynamic registration use PK
 and account labels remain in encrypted Profile storage. Pending authorization can be cancelled
 before credentials commit. `ConnectorPopupRequest` carries the requesting page and operation
 generation to Layout, which presents authentication in a native toolbar popup with a provider favicon.
-Hiding the popup preserves its document for reopening; completion retires only the matching operation.
+Closing the popup cancels its matching authentication generation; completion retires only the matching
+operation. Provider marks are bundled transparent SVGs. Device verification codes are explained beside
+the provider with a copy control, rather than placed in the popup header.
 The browser tab projection uses a visible web popup as the autofill target without selecting a Stack.
 Sign-in and setup links reuse
 the shared link context menu, with explicit opening in Vmux or the external browser.

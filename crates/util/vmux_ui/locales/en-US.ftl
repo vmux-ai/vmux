@@ -1170,3 +1170,4 @@ connectors-agent-configuration = Agent configuration
 connectors-configured = Configured
 connectors-open-in-app = Open in Vmux
 connectors-open-external = Open in external browser
+connectors-verification-code-help = Copy this code and enter it on { $service } to finish signing in.

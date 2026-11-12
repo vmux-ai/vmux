@@ -1181,3 +1181,4 @@ connectors-agent-configuration = Agent-Konfiguration
 connectors-configured = Konfiguriert
 connectors-open-in-app = In Vmux öffnen
 connectors-open-external = Im externen Browser öffnen
+connectors-verification-code-help = Kopiere diesen Code und gib ihn bei { $service } ein, um die Anmeldung abzuschließen.

@@ -1178,3 +1178,4 @@ connectors-agent-configuration = 에이전트 설정
 connectors-configured = 설정됨
 connectors-open-in-app = Vmux에서 열기
 connectors-open-external = 외부 브라우저에서 열기
+connectors-verification-code-help = 이 코드를 복사하여 { $service }에 입력하고 로그인을 완료하세요.

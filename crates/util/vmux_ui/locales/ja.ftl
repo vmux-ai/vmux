@@ -1161,3 +1161,4 @@ connectors-agent-configuration = エージェントの設定
 connectors-configured = 設定済み
 connectors-open-in-app = Vmux 内で開く
 connectors-open-external = 外部ブラウザで開く
+connectors-verification-code-help = このコードをコピーして { $service } に入力し、サインインを完了してください。
