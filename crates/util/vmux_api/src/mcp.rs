@@ -35,6 +35,35 @@ pub struct McpAuthorization {
     pub code: Option<String>,
 }
 
+#[vmux_api::contract(Default, Eq)]
+pub struct ConnectorPopupState {
+    pub id: String,
+    pub provider: String,
+    pub name: String,
+    pub origin: String,
+    pub code: Option<String>,
+    pub open: bool,
+}
+
+#[vmux_api::ui_event]
+pub struct ConnectorPopupShowRequest {
+    pub id: String,
+}
+
+#[vmux_api::ui_event]
+pub struct ConnectorPopupHideRequest {
+    pub id: String,
+}
+
+#[vmux_api::ui_event]
+pub struct ConnectorPopupBoundsRequest {
+    pub id: String,
+    pub left: f32,
+    pub top: f32,
+    pub width: f32,
+    pub height: f32,
+}
+
 #[vmux_api::ui_event]
 pub struct McpServersRequest;
 

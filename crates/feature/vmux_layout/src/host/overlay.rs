@@ -4,7 +4,7 @@ use crate::cef::Browser;
 use crate::event::{LayoutOverlayEvent, LayoutOverlayKind};
 use crate::window::VmuxWindow;
 use bevy::prelude::*;
-use bevy_cef::prelude::{HostWindow, UiEventPlugin, UiInput};
+use bevy_cef::prelude::{Browsers, HostWindow, UiEventPlugin, UiInput};
 use vmux_ecs::overlay::WindowOverlay;
 
 pub(crate) struct LayoutOverlayPlugin;
@@ -16,6 +16,64 @@ impl Plugin for LayoutOverlayPlugin {
             .add_observer(emit)
             .add_systems(PreUpdate, adopt_window_overlays)
             .add_systems(PostUpdate, cleanup);
+    }
+}
+
+#[derive(Component, Clone, Copy, Debug, PartialEq)]
+pub struct PopupBounds {
+    pub left: f32,
+    pub top: f32,
+    pub width: f32,
+    pub height: f32,
+}
+
+impl PopupBounds {
+    pub fn new(left: f32, top: f32, width: f32, height: f32) -> Option<Self> {
+        if !left.is_finite()
+            || !top.is_finite()
+            || !width.is_finite()
+            || !height.is_finite()
+            || width <= 0.0
+            || height <= 0.0
+        {
+            return None;
+        }
+        Some(Self {
+            left,
+            top,
+            width,
+            height,
+        })
+    }
+
+    pub fn present(
+        self,
+        browsers: &Browsers,
+        entity: Entity,
+        window: &Window,
+        presented: bool,
+    ) -> bool {
+        if !browsers.has_browser(entity) {
+            return false;
+        }
+        let scale = window.resolution.scale_factor();
+        browsers.resize(&entity, Vec2::new(self.width, self.height), scale);
+        browsers.set_windowed_corner_radius(&entity, 14.0 * scale, scale, true);
+        if !browsers.host_in_child_window(
+            &entity,
+            self.left as f64,
+            self.top as f64,
+            self.width as f64,
+            self.height as f64,
+        ) {
+            return false;
+        }
+        browsers.set_windowed_hidden(&entity, false);
+        if !presented {
+            browsers.set_windowed_focus(&entity, true);
+            browsers.nudge_windowed_repaint(&entity);
+        }
+        true
     }
 }
 

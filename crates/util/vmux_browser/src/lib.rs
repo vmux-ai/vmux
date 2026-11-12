@@ -9,8 +9,9 @@ pub use command::{
 };
 pub use host::AgentBrowserResolve;
 pub use host::WebviewLoadCompleted;
+pub use vmux_ecs::{BrowserLoadSet, BrowserOverlaySet, PopupWebview};
 pub use host_focus::HostFocusIntent;
-pub use infrastructure::{InfrastructureWebview, PopupWebview, RetiredInfrastructureWebview};
+pub use infrastructure::{InfrastructureWebview, RetiredInfrastructureWebview};
 pub use input::WindowPointerRegions;
 pub use native_bridge::NativeBridge;
 #[cfg(target_os = "macos")]
@@ -81,11 +82,7 @@ pub(crate) enum BrowserSystemSet {
     SyncWindowedFrames,
 }
 
-#[derive(SystemSet, Debug, Hash, PartialEq, Eq, Clone)]
-pub struct BrowserLoadSet;
 
-#[derive(SystemSet, Debug, Hash, PartialEq, Eq, Clone)]
-pub struct BrowserOverlaySet;
 
 #[derive(Component, Clone, Debug, Default, PartialEq, Eq)]
 pub struct HostedPageLifecycle {
