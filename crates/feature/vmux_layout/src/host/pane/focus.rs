@@ -13,7 +13,6 @@ use crate::{
     stack::{ActiveTabParam, LayoutFocus},
 };
 
-#[cfg_attr(target_os = "macos", allow(dead_code))]
 const HOVER_COOLDOWN_MS: u64 = 300;
 
 pub(super) struct FocusPlugin;
@@ -36,13 +35,15 @@ impl Plugin for FocusPlugin {
                     .before(crate::PaneSet::Select),
             )
             .add_systems(PostUpdate, warp_cursor_to_active);
-        #[cfg(target_os = "macos")]
         app.add_systems(
             Update,
-            apply_pending_hover.before(crate::stack::ComputeFocusSet),
+            from_pointer
+                .after(crate::window::WindowFocusSet)
+                .after(super::resize::PointerResizeSet)
+                .before(crate::PaneSet::Select)
+                .before(crate::active::ActiveSystemSet::Descendants)
+                .before(crate::stack::ComputeFocusSet),
         );
-        #[cfg(not(target_os = "macos"))]
-        app.add_systems(Update, poll_cursor.before(crate::stack::ComputeFocusSet));
     }
 }
 
@@ -142,121 +143,123 @@ fn select(
     }
 }
 
-#[cfg_attr(target_os = "macos", allow(dead_code))]
-fn poll_cursor(
-    windows: Query<(Entity, &Window)>,
-    focused_window: crate::window::FocusedWindow,
-    hierarchy: crate::window::WindowHierarchy,
-    leaf_panes: Query<(Entity, &ComputedNode), (With<Pane>, Without<PaneSplit>)>,
-    pane_cooldowns: Query<&PaneHoverCooldown>,
-    pane_activity: Query<(Entity, &LastActivatedAt), With<Pane>>,
-    focus: LayoutFocus,
-    mut commands: Commands,
-    keys: Res<ButtonInput<KeyCode>>,
-    active_drags: Query<(), With<PaneDrag>>,
-) {
-    if HoverFocusLock::active(&keys) {
-        return;
-    }
-    if !active_drags.is_empty() {
-        return;
-    }
-    let Some(window_entity) = focused_window.entity() else {
-        return;
-    };
-    let Ok((_, window)) = windows.get(window_entity) else {
-        return;
-    };
-    let Some(cursor) = vmux_input::NativePointer::position(window_entity, window) else {
-        return;
-    };
+struct PointerFocus {
+    sequence: u64,
+    position: Option<Vec2>,
+    buttons: u8,
+}
 
-    let mut window_panes = Vec::new();
-    let mut hovered_pane = None;
-    for (entity, layout) in &leaf_panes {
-        if hierarchy.get(entity) == Some(window_entity) {
-            window_panes.push(entity);
-            if layout.contains(cursor) {
-                hovered_pane = Some(entity);
-            }
+impl Default for PointerFocus {
+    fn default() -> Self {
+        Self {
+            sequence: vmux_input::NativePointer::snapshot().map_or(0, |pointer| pointer.sequence),
+            position: None,
+            buttons: 0,
         }
-    }
-
-    let Some(target) = hovered_pane else {
-        return;
-    };
-    let current = LastActivatedAt::latest(
-        window_panes
-            .iter()
-            .filter_map(|&entity| pane_activity.get(entity).ok())
-            .map(|(entity, activated_at)| (entity, *activated_at)),
-    );
-    if let Some(current) = current
-        && let Ok(cooldown) = pane_cooldowns.get(current)
-    {
-        if cooldown.active() {
-            return;
-        }
-        commands.entity(current).remove::<PaneHoverCooldown>();
-    }
-    if current == Some(target) {
-        return;
-    }
-
-    commands.entity(target).insert(LastActivatedAt::now());
-    if let Some(stack) = focus.stack(target) {
-        commands.entity(stack).insert(LastActivatedAt::now());
     }
 }
 
-#[cfg(target_os = "macos")]
-fn apply_pending_hover(
+impl PointerFocus {
+    fn sample(
+        &mut self,
+        window_entity: Entity,
+        window: &Window,
+        mouse: &ButtonInput<MouseButton>,
+    ) -> Option<(Vec2, bool, bool)> {
+        #[cfg(target_os = "macos")]
+        let (position, buttons, moved, clicked) = {
+            let _ = (window_entity, window, mouse);
+            let pointer = vmux_input::NativePointer::snapshot()?;
+            if pointer.sequence == self.sequence {
+                return None;
+            }
+            let clicked = pointer.press_sequence > self.sequence;
+            let moved = pointer.motion_sequence == pointer.sequence;
+            self.sequence = pointer.sequence;
+            let buttons = u8::from(pointer.buttons.left)
+                | (u8::from(pointer.buttons.right) << 1)
+                | (u8::from(pointer.buttons.middle) << 2);
+            let position = if clicked {
+                pointer.press_position_px
+            } else {
+                pointer.position_px
+            };
+            (position, buttons, moved, clicked)
+        };
+        #[cfg(not(target_os = "macos"))]
+        let (position, buttons, moved, clicked) = {
+            let _ = self.sequence;
+            let position = vmux_input::NativePointer::position(window_entity, window)?;
+            let buttons = u8::from(mouse.pressed(MouseButton::Left))
+                | (u8::from(mouse.pressed(MouseButton::Right)) << 1)
+                | (u8::from(mouse.pressed(MouseButton::Middle)) << 2);
+            (
+                position,
+                buttons,
+                self.position != Some(position),
+                buttons & !self.buttons != 0,
+            )
+        };
+        self.position = Some(position);
+        self.buttons = buttons;
+        Some((position, clicked, moved && buttons == 0))
+    }
+}
+
+fn from_pointer(
+    windows: Query<&Window>,
     focused_window: crate::window::FocusedWindow,
     hierarchy: crate::window::WindowHierarchy,
-    leaf_panes: Query<(Entity, &ComputedNode), (With<Pane>, Without<PaneSplit>)>,
+    leaf_panes: Query<&ComputedNode, (With<Pane>, Without<PaneSplit>)>,
     pane_cooldowns: Query<&PaneHoverCooldown>,
-    pane_activity: Query<(Entity, &LastActivatedAt), With<Pane>>,
+    active_tab: ActiveTabParam,
     focus: LayoutFocus,
-    mut commands: Commands,
     keys: Res<ButtonInput<KeyCode>>,
-    mut last_motion_sequence: Local<u64>,
+    mouse: Res<ButtonInput<MouseButton>>,
+    active_drags: Query<(), With<PaneDrag>>,
+    mut pointer: Local<PointerFocus>,
+    mut selections: MessageWriter<crate::SelectRequest>,
+    mut commands: Commands,
 ) {
-    if HoverFocusLock::active(&keys) {
-        return;
-    }
-    let Some(pointer) = vmux_input::NativePointer::snapshot() else {
-        return;
-    };
-    if pointer.motion_sequence == 0 || pointer.motion_sequence == *last_motion_sequence {
-        return;
-    }
-    *last_motion_sequence = pointer.motion_sequence;
     let Some(window_entity) = focused_window.entity() else {
         return;
     };
+    let Ok(window) = windows.get(window_entity) else {
+        return;
+    };
+    let Some((position, clicked, moved)) = pointer.sample(window_entity, window, &mouse) else {
+        return;
+    };
+    if !window.focused || !active_drags.is_empty() {
+        return;
+    }
+    if !clicked && (!moved || HoverFocusLock::active(&keys)) {
+        return;
+    }
+    let Some(tab) = active_tab.get() else {
+        return;
+    };
     let mut target = None;
-    let mut window_panes = Vec::new();
-    for (entity, layout) in leaf_panes.iter() {
-        if hierarchy.get(entity) == Some(window_entity) {
-            window_panes.push(entity);
-            if layout.contains(pointer.position_px) {
-                target = Some(entity);
-            }
+    for pane in focus.leaves(tab) {
+        if hierarchy.get(pane) != Some(window_entity) {
+            continue;
+        }
+        if let Ok(layout) = leaf_panes.get(pane)
+            && !layout.is_empty()
+            && layout.contains(position)
+        {
+            target = Some(pane);
+            break;
         }
     }
     let Some(target) = target else {
         return;
     };
-    let current = LastActivatedAt::latest(
-        window_panes
-            .iter()
-            .filter_map(|&entity| pane_activity.get(entity).ok())
-            .map(|(entity, activated_at)| (entity, *activated_at)),
-    );
+    let current = focus.pane(tab);
     if let Some(current) = current
         && let Ok(cooldown) = pane_cooldowns.get(current)
     {
-        if cooldown.active() {
+        if !clicked && cooldown.active() {
             return;
         }
         commands.entity(current).remove::<PaneHoverCooldown>();
@@ -264,10 +267,10 @@ fn apply_pending_hover(
     if current == Some(target) {
         return;
     }
-    commands.entity(target).insert(LastActivatedAt::now());
-    if let Some(stack) = focus.stack(target) {
-        commands.entity(stack).insert(LastActivatedAt::now());
-    }
+    selections.write(crate::SelectRequest {
+        root: tab,
+        pane: target,
+    });
 }
 
 struct HoverFocusLock;
@@ -320,16 +323,28 @@ mod tests {
         fn selection() -> Self {
             let mut app = App::new();
             app.add_plugins((MinimalPlugins, crate::LayoutPlugin, FocusPlugin))
-                .insert_resource(ButtonInput::<KeyCode>::default());
+                .insert_resource(ButtonInput::<KeyCode>::default())
+                .insert_resource(ButtonInput::<MouseButton>::default())
+                .insert_resource(crate::settings::LayoutSettings::default());
             app.world_mut().spawn(PrimaryWindow);
             Self { app }
         }
 
         fn hover() -> Self {
             let mut app = App::new();
-            app.add_plugins(MinimalPlugins)
-                .insert_resource(ButtonInput::<KeyCode>::default())
-                .add_systems(Update, poll_cursor);
+            app.add_plugins((
+                MinimalPlugins,
+                crate::LayoutPlugin,
+                crate::contract::LayoutContractPlugin,
+                crate::host::command::LayoutRequestPlugin,
+                FocusPlugin,
+                crate::active::ActivePlugin,
+                crate::stack::StackPlugin,
+            ))
+            .add_message::<crate::tab::CloseTabRequest>()
+            .insert_resource(ButtonInput::<KeyCode>::default())
+            .insert_resource(ButtonInput::<MouseButton>::default())
+            .insert_resource(crate::settings::LayoutSettings::default());
             Self { app }
         }
 
@@ -532,32 +547,6 @@ mod tests {
     }
 
     #[test]
-    fn pane_hover_activates_hovered_pane_in_single_update() {
-        let mut fixture = HoverFixture::new();
-
-        fixture.app.update();
-
-        assert!(
-            fixture
-                .app
-                .world()
-                .get::<LastActivatedAt>(fixture.left)
-                .unwrap()
-                .0
-                > 10
-        );
-        assert!(
-            fixture
-                .app
-                .world()
-                .get::<LastActivatedAt>(fixture.left_stack)
-                .unwrap()
-                .0
-                > 1
-        );
-    }
-
-    #[test]
     fn shift_prevents_hover_from_activating_another_pane() {
         let mut fixture = HoverFixture::new();
         fixture
@@ -590,31 +579,27 @@ mod tests {
 
     struct HoverFixture {
         app: App,
+        window: Entity,
+        tab: Entity,
         left: Entity,
         left_stack: Entity,
+        left_branch: Entity,
+        right: Entity,
+        right_stack: Entity,
+        _pointer_guard: std::sync::MutexGuard<'static, ()>,
     }
 
     impl HoverFixture {
         fn new() -> Self {
+            let guard = super::super::NATIVE_POINTER_TEST.lock().unwrap();
+            vmux_input::NativePointer::publish(Vec2::new(-10.0, -10.0), Default::default(), false);
             let mut fixture = FocusFixture::hover();
             let window = fixture
                 .app
                 .world_mut()
-                .spawn((Window::default(), PrimaryWindow))
+                .spawn((Window::default(), PrimaryWindow, vmux_ecs::Active))
                 .id();
-            fixture
-                .app
-                .world_mut()
-                .entity_mut(window)
-                .insert(vmux_ecs::Active);
             let root = fixture.app.world_mut().spawn(HostWindow(window)).id();
-            fixture
-                .app
-                .world_mut()
-                .entity_mut(window)
-                .get_mut::<Window>()
-                .unwrap()
-                .set_physical_cursor_position(Some(bevy::math::DVec2::new(400.0, 450.0)));
             let tab = fixture
                 .app
                 .world_mut()
@@ -631,37 +616,193 @@ mod tests {
                     ChildOf(tab),
                 ))
                 .id();
-            let left = fixture.pane(row, Vec2::new(400.0, 450.0), Vec2::new(800.0, 900.0));
+            let left_branch = fixture
+                .app
+                .world_mut()
+                .spawn((
+                    Pane,
+                    PaneSplit {
+                        direction: PaneSplitDirection::Column,
+                    },
+                    LastActivatedAt(1),
+                    ChildOf(row),
+                ))
+                .id();
+            let left = fixture.pane(
+                left_branch,
+                Vec2::new(400.0, 225.0),
+                Vec2::new(800.0, 450.0),
+            );
+            let bottom = fixture.pane(
+                left_branch,
+                Vec2::new(400.0, 675.0),
+                Vec2::new(800.0, 450.0),
+            );
             let right = fixture.pane(row, Vec2::new(1200.0, 450.0), Vec2::new(800.0, 900.0));
-            fixture
-                .app
-                .world_mut()
-                .entity_mut(left)
-                .insert(LastActivatedAt(1));
-            fixture
-                .app
-                .world_mut()
-                .entity_mut(right)
-                .insert(LastActivatedAt(10));
-            let left_stack = fixture
-                .app
-                .world()
-                .get::<Children>(left)
-                .unwrap()
-                .iter()
-                .find(|&entity| fixture.app.world().get::<Stack>(entity).is_some())
-                .unwrap();
-            fixture
-                .app
-                .world_mut()
-                .entity_mut(left_stack)
-                .insert(LastActivatedAt(1));
-
-            Self {
+            for (pane, timestamp) in [(left, 1), (bottom, 2), (right, 10)] {
+                fixture
+                    .app
+                    .world_mut()
+                    .entity_mut(pane)
+                    .insert(LastActivatedAt(timestamp));
+                let stack = Self::stack(&fixture.app, pane);
+                fixture
+                    .app
+                    .world_mut()
+                    .entity_mut(stack)
+                    .insert(LastActivatedAt(timestamp));
+            }
+            let left_stack = Self::stack(&fixture.app, left);
+            let right_stack = Self::stack(&fixture.app, right);
+            let mut result = Self {
                 app: fixture.app,
+                window,
+                tab,
                 left,
                 left_stack,
+                left_branch,
+                right,
+                right_stack,
+                _pointer_guard: guard,
+            };
+            result.app.update();
+            result.pointer(Vec2::new(400.0, 225.0), false);
+            result
+        }
+
+        fn stack(app: &App, pane: Entity) -> Entity {
+            app.world()
+                .get::<Children>(pane)
+                .unwrap()
+                .iter()
+                .find(|&entity| app.world().get::<Stack>(entity).is_some())
+                .unwrap()
+        }
+
+        fn pointer(&mut self, position: Vec2, pressed: bool) {
+            vmux_input::NativePointer::publish(
+                position,
+                bevy_cef_core::prelude::NativeMouseButtons {
+                    left: pressed,
+                    ..default()
+                },
+                !pressed,
+            );
+            self.app
+                .world_mut()
+                .entity_mut(self.window)
+                .get_mut::<Window>()
+                .unwrap()
+                .set_physical_cursor_position(Some(position.as_dvec2()));
+            let mut mouse = self
+                .app
+                .world_mut()
+                .resource_mut::<ButtonInput<MouseButton>>();
+            if pressed {
+                mouse.press(MouseButton::Left);
+            } else {
+                mouse.release(MouseButton::Left);
             }
         }
+
+        fn focused(&mut self) -> crate::active_pane::ActiveStack {
+            let world = self.app.world_mut();
+            let mut query = world.query::<&crate::active_pane::ActiveStack>();
+            *query.single(world).unwrap()
+        }
+    }
+
+    impl Drop for HoverFixture {
+        fn drop(&mut self) {
+            vmux_input::NativePointer::publish(Vec2::ZERO, Default::default(), false);
+        }
+    }
+
+    #[test]
+    fn nested_hover_updates_active_ancestors_and_focused_stack_in_one_frame() {
+        let mut fixture = HoverFixture::new();
+        assert_eq!(fixture.focused().stack, Some(fixture.right_stack));
+        fixture.app.update();
+        assert_eq!(fixture.focused().pane, Some(fixture.left));
+        assert_eq!(fixture.focused().stack, Some(fixture.left_stack));
+        assert!(
+            fixture
+                .app
+                .world()
+                .get::<vmux_ecs::Active>(fixture.left_branch)
+                .is_some()
+        );
+        assert!(
+            fixture
+                .app
+                .world()
+                .get::<vmux_ecs::Active>(fixture.left)
+                .is_some()
+        );
+        assert!(
+            fixture
+                .app
+                .world()
+                .get::<vmux_ecs::Active>(fixture.right)
+                .is_none()
+        );
+    }
+
+    #[test]
+    fn click_bypasses_hover_locks_and_cooldown() {
+        let mut fixture = HoverFixture::new();
+        fixture
+            .app
+            .world_mut()
+            .resource_mut::<ButtonInput<KeyCode>>()
+            .press(KeyCode::ShiftLeft);
+        fixture.app.update();
+        assert_eq!(fixture.focused().stack, Some(fixture.right_stack));
+        fixture
+            .app
+            .world_mut()
+            .entity_mut(fixture.right)
+            .insert(PaneHoverCooldown::start());
+        fixture.pointer(Vec2::new(400.0, 225.0), true);
+        fixture.app.update();
+        assert_eq!(fixture.focused().stack, Some(fixture.left_stack));
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn quick_native_click_is_selected_after_release_without_an_intervening_frame() {
+        let mut fixture = HoverFixture::new();
+        fixture.pointer(Vec2::new(400.0, 225.0), true);
+        fixture.pointer(Vec2::new(1200.0, 450.0), false);
+        fixture.app.update();
+        assert_eq!(fixture.focused().stack, Some(fixture.left_stack));
+    }
+
+    #[test]
+    fn hidden_tab_geometry_cannot_receive_pointer_focus() {
+        let mut fixture = HoverFixture::new();
+        let parent = fixture
+            .app
+            .world()
+            .get::<ChildOf>(fixture.tab)
+            .unwrap()
+            .parent();
+        let hidden_tab = fixture
+            .app
+            .world_mut()
+            .spawn((Tab::default(), LastActivatedAt(0), ChildOf(parent)))
+            .id();
+        fixture.app.world_mut().spawn((
+            Pane,
+            ChildOf(hidden_tab),
+            ComputedNode {
+                center: Vec2::new(400.0, 225.0),
+                size: Vec2::new(800.0, 450.0),
+                ..default()
+            },
+        ));
+        fixture.app.update();
+        assert_eq!(fixture.focused().tab, Some(fixture.tab));
+        assert_eq!(fixture.focused().stack, Some(fixture.left_stack));
     }
 }

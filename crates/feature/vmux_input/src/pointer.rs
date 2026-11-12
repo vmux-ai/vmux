@@ -14,12 +14,17 @@ static X_BITS: AtomicU32 = AtomicU32::new(0);
 static Y_BITS: AtomicU32 = AtomicU32::new(0);
 static BUTTONS: AtomicU8 = AtomicU8::new(0);
 static MOTION_SEQUENCE: AtomicU64 = AtomicU64::new(0);
+static PRESS_SEQUENCE: AtomicU64 = AtomicU64::new(0);
+static PRESS_X_BITS: AtomicU32 = AtomicU32::new(0);
+static PRESS_Y_BITS: AtomicU32 = AtomicU32::new(0);
 static WINDOW_GESTURE: AtomicBool = AtomicBool::new(false);
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct NativePointerSnapshot {
     pub sequence: u64,
     pub motion_sequence: u64,
+    pub press_sequence: u64,
+    pub press_position_px: Vec2,
     pub position_px: Vec2,
     pub buttons: NativeMouseButtons,
 }
@@ -48,8 +53,14 @@ impl NativePointer {
         };
         X_BITS.store(position_px.x.to_bits(), Ordering::Relaxed);
         Y_BITS.store(position_px.y.to_bits(), Ordering::Relaxed);
-        BUTTONS.store(Self::button_bits(buttons), Ordering::Relaxed);
+        let button_bits = Self::button_bits(buttons);
+        let previous_buttons = BUTTONS.swap(button_bits, Ordering::Relaxed);
         let completed = writing.wrapping_add(1);
+        if button_bits & !previous_buttons != 0 {
+            PRESS_SEQUENCE.store(completed, Ordering::Relaxed);
+            PRESS_X_BITS.store(position_px.x.to_bits(), Ordering::Relaxed);
+            PRESS_Y_BITS.store(position_px.y.to_bits(), Ordering::Relaxed);
+        }
         if motion {
             MOTION_SEQUENCE.store(completed, Ordering::Relaxed);
         }
@@ -78,12 +89,19 @@ impl NativePointer {
             );
             let buttons = Self::buttons_from_bits(BUTTONS.load(Ordering::Relaxed));
             let motion_sequence = MOTION_SEQUENCE.load(Ordering::Relaxed);
+            let press_sequence = PRESS_SEQUENCE.load(Ordering::Relaxed);
+            let press_position_px = Vec2::new(
+                f32::from_bits(PRESS_X_BITS.load(Ordering::Relaxed)),
+                f32::from_bits(PRESS_Y_BITS.load(Ordering::Relaxed)),
+            );
             fence(Ordering::Acquire);
             let after = SEQUENCE.load(Ordering::Relaxed);
             if before == after {
                 return Some(NativePointerSnapshot {
                     sequence: after,
                     motion_sequence,
+                    press_sequence,
+                    press_position_px,
                     position_px,
                     buttons,
                 });
@@ -168,8 +186,11 @@ impl NativePointer {
 mod tests {
     use super::*;
 
+    static POINTER_TEST: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
     #[test]
     fn snapshot_is_coherent() {
+        let _guard = POINTER_TEST.lock().unwrap();
         NativePointer::publish(
             Vec2::new(123.5, 456.25),
             NativeMouseButtons {
@@ -196,6 +217,7 @@ mod tests {
 
     #[test]
     fn button_update_preserves_position_and_motion_sequence() {
+        let _guard = POINTER_TEST.lock().unwrap();
         NativePointer::publish(Vec2::new(10.0, 20.0), NativeMouseButtons::default(), true);
         let before = NativePointer::snapshot().expect("snapshot");
 
@@ -209,5 +231,27 @@ mod tests {
         assert_eq!(after.position_px, before.position_px);
         assert_eq!(after.motion_sequence, before.motion_sequence);
         assert!(after.buttons.left);
+    }
+
+    #[test]
+    fn press_position_survives_release_and_subsequent_motion() {
+        let _guard = POINTER_TEST.lock().unwrap();
+        NativePointer::publish(Vec2::ZERO, NativeMouseButtons::default(), false);
+        NativePointer::publish(
+            Vec2::new(20.0, 40.0),
+            NativeMouseButtons {
+                left: true,
+                ..Default::default()
+            },
+            false,
+        );
+        let pressed = NativePointer::snapshot().unwrap();
+        NativePointer::publish(Vec2::new(80.0, 60.0), NativeMouseButtons::default(), false);
+        NativePointer::publish(Vec2::new(90.0, 70.0), NativeMouseButtons::default(), true);
+        let after = NativePointer::snapshot().unwrap();
+        assert!(!after.buttons.left);
+        assert_eq!(after.press_sequence, pressed.sequence);
+        assert_eq!(after.press_position_px, Vec2::new(20.0, 40.0));
+        assert_eq!(after.position_px, Vec2::new(90.0, 70.0));
     }
 }

@@ -1199,6 +1199,17 @@ The resize system applies changes to the current window's pane Components and ca
 on release or lost ownership/focus. Native drag motion wakes the reactive runner even over an
 embedded page; the renderer's mouse event stream is not the authority for a native split drag.
 
+The window's `ResizeGrip` is a projection of the current divider with a minimum width of twelve
+logical pixels; it leaves the rendered gap unchanged. Its `CursorIcon` previews the axis and
+shows a grabbing cursor after capture. The native adapter caches only the window and grip
+geometry, uses classic divider cursors for macOS 13 compatibility, consumes the captured mouse
+sequence, and releases it on mouse-up. Pane Components
+remain the authority for resizing; a drag started in page content cannot acquire a divider later.
+Pointer focus is limited to the current tab and forwards a core `SelectRequest` before activation
+and focus projection, so nested Pane ancestors and the visible Stack agree in the input frame.
+Empty-tab startup pages are created before descendant activation and focus computation. Closing
+the final page preserves the Tab's workspace and checkout context while its replacement loads.
+
 Only test a window's drag region with coordinates from that window. Never compare child-window
 coordinates with the owning window's region.
 

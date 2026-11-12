@@ -25,7 +25,7 @@ use open::OpenPlugin;
 use open::{BesideOpenPlugin, DirectionalOpenPlugin};
 pub use open::{OpenBesideRequest, PanePlacement};
 use resize::ResizePlugin;
-pub use resize::{PaneDrag, PaneSize, PaneSplitGaps};
+pub use resize::{PaneDrag, PaneSize, PaneSplitGaps, ResizeGrip};
 pub(crate) use tree::PaneHierarchy;
 use tree::TreePlugin;
 pub use tree::{Pane, PaneSplit, PaneSplitDirection, PaneTree};
@@ -271,6 +271,9 @@ impl PaneStacks<'_, '_> {
         children.iter().find(|&entity| self.stacks.contains(entity))
     }
 }
+
+#[cfg(test)]
+pub(super) static NATIVE_POINTER_TEST: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
 #[cfg(test)]
 mod tests {
