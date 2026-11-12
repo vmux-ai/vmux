@@ -43,6 +43,9 @@ use vmux_flex::{Display, Node, Visibility};
 #[cfg(test)]
 use vmux_history::LastActivatedAt;
 
+#[cfg(test)]
+static NATIVE_POINTER_TEST: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
 mod arrangement;
 mod close;
 mod focus;
@@ -400,7 +403,7 @@ mod tests {
         LayoutSettings {
             radius: 0.0,
             window: WindowSettings { padding: 0.0 },
-            pane: PaneSettings { gap: 0.0 },
+            pane: PaneSettings::default(),
             side_sheet: SideSheetSettings::default(),
             focus_ring: FocusRingSettings::default(),
         }

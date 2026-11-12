@@ -1142,3 +1142,5 @@ project-directory-unavailable = Каталог проекта недоступе
 session-turn-view-prompt = Показать запрос
 session-turn-view-response = Показать ответ
 agent-incoming-message = Сообщение агента
+
+schema-focus-follows-mouse = Фокус следует за мышью

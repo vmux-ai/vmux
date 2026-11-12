@@ -1122,3 +1122,5 @@ project-directory-unavailable = プロジェクトのディレクトリにアク
 session-turn-view-prompt = プロンプトを表示
 session-turn-view-response = 応答を表示
 agent-incoming-message = エージェントからのメッセージ
+
+schema-focus-follows-mouse = マウス位置に合わせてペインを選択

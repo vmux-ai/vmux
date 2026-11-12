@@ -1139,3 +1139,5 @@ project-directory-unavailable = 项目目录不可用
 session-turn-view-prompt = 查看提示
 session-turn-view-response = 查看回复
 agent-incoming-message = 智能体消息
+
+schema-focus-follows-mouse = 焦点跟随鼠标

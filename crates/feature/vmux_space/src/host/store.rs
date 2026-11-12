@@ -2182,7 +2182,7 @@ mod tests {
             layout: LayoutSettings {
                 radius: 0.0,
                 window: WindowSettings { padding: 0.0 },
-                pane: PaneSettings { gap: 0.0 },
+                pane: PaneSettings::default(),
                 side_sheet: SideSheetSettings::default(),
                 focus_ring: FocusRingSettings::default(),
             },

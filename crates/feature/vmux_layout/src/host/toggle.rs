@@ -448,7 +448,7 @@ mod tests {
             .insert_resource(LayoutSettings {
                 radius: 0.0,
                 window: WindowSettings { padding: 16.0 },
-                pane: PaneSettings { gap: 0.0 },
+                pane: PaneSettings::default(),
                 side_sheet: SideSheetSettings::default(),
                 focus_ring: FocusRingSettings::default(),
             })
@@ -482,7 +482,7 @@ mod tests {
             .insert_resource(LayoutSettings {
                 radius: 0.0,
                 window: WindowSettings { padding: 16.0 },
-                pane: PaneSettings { gap: 0.0 },
+                pane: PaneSettings::default(),
                 side_sheet: SideSheetSettings::default(),
                 focus_ring: FocusRingSettings::default(),
             })
@@ -525,7 +525,7 @@ mod tests {
             .insert_resource(LayoutSettings {
                 radius: 0.0,
                 window: WindowSettings { padding: 16.0 },
-                pane: PaneSettings { gap: 0.0 },
+                pane: PaneSettings::default(),
                 side_sheet: SideSheetSettings::default(),
                 focus_ring: FocusRingSettings::default(),
             })
@@ -563,7 +563,7 @@ mod tests {
             .insert_resource(LayoutSettings {
                 radius: 0.0,
                 window: WindowSettings { padding: 16.0 },
-                pane: PaneSettings { gap: 0.0 },
+                pane: PaneSettings::default(),
                 side_sheet: SideSheetSettings::default(),
                 focus_ring: FocusRingSettings::default(),
             });

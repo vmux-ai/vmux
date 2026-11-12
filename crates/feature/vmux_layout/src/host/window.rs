@@ -1005,7 +1005,7 @@ mod tests {
         LayoutSettings {
             radius: 0.0,
             window: crate::settings::WindowSettings { padding: 0.0 },
-            pane: crate::settings::PaneSettings { gap },
+            pane: crate::settings::PaneSettings { gap, ..default() },
             side_sheet: crate::settings::SideSheetSettings::default(),
             focus_ring: crate::settings::FocusRingSettings::default(),
         }
@@ -1344,7 +1344,7 @@ mod tests {
             .insert_resource(LayoutSettings {
                 radius: 0.0,
                 window: crate::settings::WindowSettings { padding: 0.0 },
-                pane: crate::settings::PaneSettings { gap: 0.0 },
+                pane: crate::settings::PaneSettings::default(),
                 side_sheet: crate::settings::SideSheetSettings::default(),
                 focus_ring: crate::settings::FocusRingSettings::default(),
             })
@@ -1527,7 +1527,7 @@ mod tests {
             .insert_resource(LayoutSettings {
                 radius: 0.0,
                 window: crate::settings::WindowSettings { padding: 0.0 },
-                pane: crate::settings::PaneSettings { gap: 0.0 },
+                pane: crate::settings::PaneSettings::default(),
                 side_sheet: crate::settings::SideSheetSettings::default(),
                 focus_ring: crate::settings::FocusRingSettings::default(),
             })
@@ -1565,7 +1565,7 @@ mod tests {
             .insert_resource(LayoutSettings {
                 radius: 0.0,
                 window: crate::settings::WindowSettings { padding: 0.0 },
-                pane: crate::settings::PaneSettings { gap: 0.0 },
+                pane: crate::settings::PaneSettings::default(),
                 side_sheet: crate::settings::SideSheetSettings::default(),
                 focus_ring: crate::settings::FocusRingSettings::default(),
             })
@@ -1600,7 +1600,7 @@ mod tests {
             .insert_resource(LayoutSettings {
                 radius: 0.0,
                 window: crate::settings::WindowSettings { padding: 16.0 },
-                pane: crate::settings::PaneSettings { gap: 0.0 },
+                pane: crate::settings::PaneSettings::default(),
                 side_sheet: crate::settings::SideSheetSettings::default(),
                 focus_ring: crate::settings::FocusRingSettings::default(),
             })

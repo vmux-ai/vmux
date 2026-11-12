@@ -1041,7 +1041,13 @@ surface, observes added history, and disconnects removed surfaces; it does not p
 The scroll surface has no top inset while pinned; initial spacing belongs to its content. Header
 projections rebuild only when their inputs, active surface, catalog, or ownership change. Completed
 Session transitions release the hidden launcher and its palette rather than rebuilding it on scroll.
+Pane clicks select their Stack through `ActivateRequest`, propagating selection through every
+ancestor before active branches and `ActiveStack` are computed in the same input frame.
+`layout.pane.focus_follows_mouse` controls hover selection; clicks ignore hover locks and cooldowns.
+Pointer hit testing is limited to the current Tab, and dragging does not change pane selection.
+Native pointer snapshots retain press coordinates across release so short clicks survive frame coalescing.
 macOS input routing hit-tests the actual native view before consulting cached layout pointer flags.
+Crossing between native page frames wakes layout once; pointer motion within a native page stays asleep.
 Scrolls delivered to a `WKWebView` do not request Bevy frames or start a CEF interaction burst;
 the page's bounded viewport notifications provide the host updates it needs.
 Closed command panels skip palette projection; reopening them resumes the normal composer projection.

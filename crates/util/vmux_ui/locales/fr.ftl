@@ -1142,3 +1142,5 @@ project-directory-unavailable = Le dossier du projet est inaccessible
 session-turn-view-prompt = Afficher la demande
 session-turn-view-response = Afficher la réponse
 agent-incoming-message = Message de l’agent
+
+schema-focus-follows-mouse = Le focus suit la souris

@@ -127,8 +127,25 @@ fn default_focus_ring_color() -> FocusRingColor {
     FocusRingColor::default()
 }
 
-#[derive(Clone, Debug, Default, Deserialize, Serialize)]
+#[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct PaneSettings {
     #[serde(default)]
     pub gap: f32,
+    #[serde(default = "PaneSettings::default_focus_follows_mouse")]
+    pub focus_follows_mouse: bool,
+}
+
+impl PaneSettings {
+    fn default_focus_follows_mouse() -> bool {
+        true
+    }
+}
+
+impl Default for PaneSettings {
+    fn default() -> Self {
+        Self {
+            gap: 0.0,
+            focus_follows_mouse: Self::default_focus_follows_mouse(),
+        }
+    }
 }
