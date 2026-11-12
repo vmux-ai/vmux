@@ -1735,7 +1735,7 @@ mod tests {
         let path = directory.canonicalize().unwrap();
         std::fs::create_dir_all(root.path().join("unregistered/.git")).unwrap();
         let id = "vmux://projects/identity";
-        vmux_project::filesystem::FileStore::write(
+        FileStore::write(
             Snapshot {
                 projects: std::collections::BTreeMap::from([(
                     id.to_string(),
