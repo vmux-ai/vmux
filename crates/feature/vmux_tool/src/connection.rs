@@ -31,6 +31,25 @@ use vmux_ecs::{UiStatePlugin, UiStateWrite};
 
 pub struct McpConnectionPlugin;
 
+#[derive(SystemSet, Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub struct ConnectionSet;
+
+#[derive(Message, Clone, Debug)]
+pub enum ConnectorPopupRequest {
+    Open {
+        source: Entity,
+        generation: u64,
+        provider: String,
+        name: String,
+        url: String,
+        code: Option<String>,
+    },
+    Close {
+        source: Entity,
+        generation: u64,
+    },
+}
+
 impl Plugin for McpConnectionPlugin {
     fn build(&self, app: &mut App) {
         app.add_plugins((
@@ -45,6 +64,7 @@ impl Plugin for McpConnectionPlugin {
         .add_systems(Startup, spawn_mcp_catalog)
         .add_observer(cancel)
         .add_message::<PageOpenRequest>()
+        .add_message::<ConnectorPopupRequest>()
         .add_observer(open_link)
         .add_observer(page_ready)
         .add_observer(request_mcp_connections)
@@ -61,7 +81,8 @@ impl Plugin for McpConnectionPlugin {
                 start_links,
                 finish_links,
             )
-                .chain(),
+                .chain()
+                .in_set(ConnectionSet),
         );
     }
 }
@@ -77,6 +98,7 @@ fn open_link(
     states: Query<&McpPageState>,
     catalog: McpCatalog,
     mut opens: MessageWriter<PageOpenRequest>,
+    mut popups: MessageWriter<ConnectorPopupRequest>,
     mut commands: Commands,
 ) {
     let event = trigger.event();
@@ -104,6 +126,28 @@ fn open_link(
             ExternalLink(url.clone()),
             ChildOf(event.webview),
         ));
+    } else if sign_in {
+        let Ok(state) = states.get(event.webview) else {
+            return;
+        };
+        let Some(pending) = &state.snapshot.pending else {
+            return;
+        };
+        let Some(name) = catalog.name(&pending.id) else {
+            return;
+        };
+        popups.write(ConnectorPopupRequest::Open {
+            source: event.webview,
+            generation: state.generation,
+            provider: pending.id.clone(),
+            name,
+            url: url.clone(),
+            code: state
+                .snapshot
+                .authorization
+                .as_ref()
+                .and_then(|authorization| authorization.code.clone()),
+        });
     } else {
         opens.write(PageOpenRequest {
             target: PageOpenTarget::NewStack,
@@ -177,6 +221,7 @@ fn cancel(
     trigger: On<UiInput<McpServerCancelRequest>>,
     cancellations: Query<&Cancellation>,
     mut states: Query<&mut McpPageState>,
+    mut popups: MessageWriter<ConnectorPopupRequest>,
     mut commands: Commands,
 ) {
     let target = trigger.event().webview;
@@ -188,6 +233,10 @@ fn cancel(
         .entity(target)
         .remove::<(McpOperationTask, PendingMcpOperation, Cancellation)>();
     if let Ok(mut state) = states.get_mut(target) {
+        popups.write(ConnectorPopupRequest::Close {
+            source: target,
+            generation: state.generation,
+        });
         state.snapshot.pending = None;
         state.snapshot.authorization = None;
         state.snapshot.result = None;
@@ -333,11 +382,12 @@ fn start_mcp_operation(
         commands
             .entity(entity)
             .remove::<PendingMcpOperation>()
-            .insert(cancellation)
+            .insert(cancellation.clone())
             .insert(McpOperationTask {
                 generation,
                 id,
                 operation,
+                cancellation,
                 task,
                 progress: Mutex::new(progress_receiver),
             });
@@ -347,23 +397,40 @@ fn start_mcp_operation(
 fn drain_mcp_operations(
     mut tasks: Query<(Entity, &mut McpOperationTask)>,
     mut states: Query<&mut McpPageState>,
-    mut opens: MessageWriter<PageOpenRequest>,
+    catalog: McpCatalog,
+    mut popups: MessageWriter<ConnectorPopupRequest>,
     mut commands: Commands,
 ) {
     for (entity, mut task) in &mut tasks {
         while let Ok(authorization) = task.progress.get_mut().try_recv() {
-            opens.write(PageOpenRequest {
-                target: PageOpenTarget::NewStack,
-                url: authorization.url.clone(),
-                request_id: None,
-            });
-            if let Ok(mut state) = states.get_mut(entity) {
+            if let Ok(mut state) = states.get_mut(entity)
+                && state.generation == task.generation
+            {
+                if let Some(name) = catalog.name(&task.id) {
+                    popups.write(ConnectorPopupRequest::Open {
+                        source: entity,
+                        generation: task.generation,
+                        provider: task.id.clone(),
+                        name,
+                        url: authorization.url.clone(),
+                        code: authorization.code.clone(),
+                    });
+                }
                 state.snapshot.authorization = Some(authorization);
             }
         }
         let Some(result) = future::block_on(future::poll_once(&mut task.task)) else {
             continue;
         };
+        popups.write(ConnectorPopupRequest::Close {
+            source: entity,
+            generation: task.generation,
+        });
+        if let Ok(mut state) = states.get_mut(entity)
+            && state.generation == task.generation
+        {
+            state.snapshot.authorization = None;
+        }
         commands
             .entity(entity)
             .remove::<(McpOperationTask, Cancellation)>();
@@ -476,8 +543,15 @@ struct McpOperationTask {
     generation: u64,
     id: String,
     operation: McpServerOperation,
+    cancellation: Cancellation,
     task: Task<Result<(), String>>,
     progress: Mutex<mpsc::Receiver<McpAuthorization>>,
+}
+
+impl Drop for McpOperationTask {
+    fn drop(&mut self) {
+        self.cancellation.cancel();
+    }
 }
 
 #[derive(Component)]
@@ -532,6 +606,13 @@ struct McpCatalog<'w, 's> {
 }
 
 impl McpCatalog<'_, '_> {
+    fn name(&self, id: &str) -> Option<String> {
+        self.servers
+            .iter()
+            .find(|(_, server)| server.id == id)
+            .map(|(name, _)| name.as_str().to_string())
+    }
+
     fn server(&self, id: &str) -> Option<McpCatalogServer> {
         self.servers
             .iter()
@@ -1184,7 +1265,7 @@ fn base64_url(bytes: &[u8]) -> String {
 #[cfg(test)]
 mod tests {
     use super::{
-        McpCallback, McpConnection, McpPageState, PendingMcpOperation, base64_url,
+        Cancellation, McpCallback, McpConnection, McpPageState, PendingMcpOperation, base64_url,
         request_mcp_server,
     };
     use bevy::prelude::*;
@@ -1192,17 +1273,25 @@ mod tests {
     use vmux_api::mcp::{
         McpServerOperation, McpServerPending, McpServerRequest, McpServersUiState,
     };
+    use vmux_ecs::manifest::FeatureManifest;
 
     #[test]
     fn connector_links_open_in_app_and_queue_external_opening_only_on_request() {
         let mut app = App::new();
         app.add_plugins(super::McpConnectionPlugin);
+        app.world_mut()
+            .spawn(FeatureManifest::of::<crate::Feature>());
+        app.update();
         let url = "https://github.com/login/device";
         let target = app
             .world_mut()
             .spawn(McpPageState {
                 generation: 1,
                 snapshot: McpServersUiState {
+                    pending: Some(McpServerPending {
+                        id: "github".into(),
+                        operation: McpServerOperation::Connect,
+                    }),
                     authorization: Some(vmux_api::mcp::McpAuthorization {
                         url: url.into(),
                         code: Some("ABCD-1234".into()),
@@ -1221,12 +1310,13 @@ mod tests {
         app.world_mut().flush();
         let opens = app
             .world_mut()
-            .resource_mut::<Messages<super::PageOpenRequest>>()
+            .resource_mut::<Messages<super::ConnectorPopupRequest>>()
             .drain()
             .collect::<Vec<_>>();
         assert_eq!(opens.len(), 1);
-        assert_eq!(opens[0].url, url);
-        assert!(matches!(opens[0].target, super::PageOpenTarget::NewStack));
+        assert!(
+            matches!(&opens[0], super::ConnectorPopupRequest::Open { source, url: opened, .. } if *source == target && opened == url)
+        );
         app.world_mut().trigger(UiInput {
             webview: target,
             payload: vmux_api::mcp::McpLinkOpenRequest {
@@ -1276,10 +1366,12 @@ mod tests {
     }
 
     #[test]
-    fn sign_in_progress_opens_an_in_app_stack_and_keeps_the_verification_code() {
+    fn sign_in_progress_requests_an_authentication_popup_and_keeps_the_verification_code() {
         let pool = bevy::tasks::IoTaskPool::get_or_init(bevy::tasks::TaskPool::new);
         let mut app = App::new();
         app.add_plugins(super::McpConnectionPlugin);
+        app.world_mut()
+            .spawn(FeatureManifest::of::<crate::Feature>());
         let (send, receive) = std::sync::mpsc::channel();
         let authorization = vmux_api::mcp::McpAuthorization {
             url: "https://github.com/login/device".into(),
@@ -1289,11 +1381,15 @@ mod tests {
         let target = app
             .world_mut()
             .spawn((
-                McpPageState::default(),
+                McpPageState {
+                    generation: 1,
+                    ..Default::default()
+                },
                 super::McpOperationTask {
                     generation: 1,
                     id: "github".into(),
                     operation: McpServerOperation::Connect,
+                    cancellation: Cancellation::default(),
                     task: pool.spawn(std::future::pending()),
                     progress: super::Mutex::new(receive),
                 },
@@ -1302,12 +1398,13 @@ mod tests {
         app.update();
         let opens = app
             .world_mut()
-            .resource_mut::<Messages<super::PageOpenRequest>>()
+            .resource_mut::<Messages<super::ConnectorPopupRequest>>()
             .drain()
             .collect::<Vec<_>>();
         assert_eq!(opens.len(), 1);
-        assert_eq!(opens[0].url, authorization.url);
-        assert!(matches!(opens[0].target, super::PageOpenTarget::NewStack));
+        assert!(
+            matches!(&opens[0], super::ConnectorPopupRequest::Open { source, url, code, .. } if *source == target && *url == authorization.url && *code == authorization.code)
+        );
         assert_eq!(
             app.world()
                 .get::<McpPageState>(target)
@@ -1316,6 +1413,27 @@ mod tests {
                 .authorization,
             Some(authorization)
         );
+    }
+
+    #[test]
+    fn disposing_an_authentication_operation_cancels_its_polling() {
+        let pool = bevy::tasks::IoTaskPool::get_or_init(bevy::tasks::TaskPool::new);
+        let cancellation = Cancellation::default();
+        let (_, receive) = std::sync::mpsc::channel();
+        let mut app = App::new();
+        let entity = app
+            .world_mut()
+            .spawn(super::McpOperationTask {
+                generation: 1,
+                id: "github".into(),
+                operation: McpServerOperation::Connect,
+                cancellation: cancellation.clone(),
+                task: pool.spawn(std::future::pending()),
+                progress: super::Mutex::new(receive),
+            })
+            .id();
+        app.world_mut().despawn(entity);
+        assert!(cancellation.check().is_err());
     }
 
     #[test]
@@ -1380,7 +1498,7 @@ mod tests {
 
     #[test]
     fn cancelling_device_sign_in_interrupts_the_polling_wait() {
-        let cancellation = super::Cancellation::default();
+        let cancellation = Cancellation::default();
         cancellation.cancel();
         let started = std::time::Instant::now();
         assert!(
@@ -1414,13 +1532,13 @@ mod tests {
     }
 
     #[test]
-    fn tools_connectors_and_its_legacy_alias_load_connections_on_page_ready() {
+    fn only_connector_pages_load_account_connections_on_page_ready() {
         let mut app = App::new();
         app.add_plugins(super::McpConnectionPlugin);
         for (url, should_load) in [
             ("vmux://tools/connectors", true),
             ("vmux://connectors/", true),
-            ("vmux://tools/mcp", true),
+            ("vmux://tools/mcp", false),
             ("vmux://tools/acp", false),
         ] {
             let target = app

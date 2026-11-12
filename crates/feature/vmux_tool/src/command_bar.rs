@@ -63,6 +63,9 @@ fn routes(
         }
     }
     categories
+        .entry("connectors".to_string())
+        .or_insert((translate("connectors-title"), 45));
+    categories
         .entry("extensions".to_string())
         .or_insert((translate("extensions-title"), 100));
     for (route, (label, rank)) in categories {
@@ -191,6 +194,7 @@ mod tests {
                 "homebrew",
                 "npm",
                 "connectors",
+                "mcp",
                 "dotfiles",
                 "extensions"
             ]

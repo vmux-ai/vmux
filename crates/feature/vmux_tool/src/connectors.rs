@@ -3,6 +3,7 @@ use vmux_api::mcp::{
     McpServerCancelRequest, McpServerEntry, McpServerRequest, McpServerStatus, McpServersUiState,
 };
 use vmux_ui::components::button::{Button, ButtonSize, ButtonVariant};
+use vmux_ui::components::connector_icon::ConnectorIcon;
 use vmux_ui::components::connector_link::ConnectorLink;
 use vmux_ui::components::manager::{ManagerEmpty, ManagerSkeleton};
 use vmux_ui::hooks::send;
@@ -32,6 +33,7 @@ pub(crate) fn Accounts(state: McpServersUiState, query: String) -> Element {
                         let id = server.id.clone();
                         rsx! {
                             article { key: "{server.id}", class: "flex min-w-0 items-center gap-3 rounded-md px-2 py-2",
+                                ConnectorIcon { id: server.id.clone() }
                                 div { class: "min-w-0 flex-1",
                                     div { class: "truncate text-sm font-medium", "{server.name}" }
                                     div { class: "truncate text-xs text-muted-foreground", "{server.description}" }

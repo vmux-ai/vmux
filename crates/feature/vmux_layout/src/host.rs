@@ -22,6 +22,7 @@ pub mod archive;
 pub mod bookmark;
 pub mod cef;
 mod command;
+mod connector;
 pub mod contract;
 mod deadline;
 pub mod hosted_page;

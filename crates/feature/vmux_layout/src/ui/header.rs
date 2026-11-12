@@ -271,6 +271,7 @@ fn HeaderContent() -> Element {
                         }
                     }
                     TeamFacepile { user, profiles }
+                    super::connector::ConnectorBar {}
                     ExtensionBar { extensions }
                     div { class: "hidden", RemoteControl { remote } }
                 }

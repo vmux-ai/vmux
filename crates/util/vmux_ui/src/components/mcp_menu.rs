@@ -1,6 +1,7 @@
 use dioxus::prelude::*;
 use vmux_api::mcp::{McpServerEntry, McpServerStatus, McpServersUiState};
 
+use crate::components::connector_icon::ConnectorIcon;
 use crate::components::connector_link::ConnectorLink;
 use crate::components::prompt_box::{PromptMenuRow, PromptPopup, PromptPopupPlacement};
 use crate::i18n::translate;
@@ -56,6 +57,7 @@ pub fn McpMenu(
                                     || !pending.is_empty() && !server_pending,
                                 onclick: move |_| on_select.call(index),
                                 onmouseenter: move |_| on_hover.call(index),
+                                ConnectorIcon { id: server.id.clone() }
                                 span { class: "flex min-w-0 flex-1 flex-col",
                                     span { class: "truncate text-sm text-foreground", "{server.name}" }
                                     span { class: "truncate text-xs text-muted-foreground", "{description}" }

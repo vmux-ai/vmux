@@ -14,9 +14,11 @@ use crate::event::{LayoutOverlayEvent, LayoutOverlayKind};
 
 mod active_session;
 mod bookmark;
+mod connector;
 mod error;
 mod extension;
 mod header;
+mod popup;
 mod remote;
 mod side_sheet;
 mod stack;
@@ -45,6 +47,7 @@ pub struct LayoutPage;
 pub fn Page() -> Element {
     use_theme();
     ToolbarAnchor::provide();
+    connector::ToolbarAnchor::provide();
     let layout_ui = LayoutUi::use_state();
     layout_ui.provide();
     let layout = layout_ui.use_selector(|state| state.layout.unwrap_or_default());
@@ -57,6 +60,7 @@ pub fn Page() -> Element {
             SideSheetView {}
             HeaderView {}
             CommandBarPanel {}
+            connector::ConnectorPopup {}
             ExtensionPopup {}
         }
     }

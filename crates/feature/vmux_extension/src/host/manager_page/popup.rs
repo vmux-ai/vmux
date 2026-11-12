@@ -11,6 +11,7 @@ use vmux_api::extension::{
 use vmux_ecs::overlay::WindowOverlay;
 use vmux_ecs::{KeyboardOwner, UiStateWrite};
 use vmux_flex::prelude::{LayoutSystems, Visibility};
+use vmux_layout::overlay::PopupBounds;
 use vmux_layout::{Browser, LayoutCef, state::LayoutUiState};
 
 use super::super::model::ExtensionPopup;
@@ -360,34 +361,6 @@ fn dispose(mut host: PopupHost) {
     }
 }
 
-#[derive(Component, Clone, Copy, Debug, PartialEq)]
-pub(crate) struct ExtensionPopupBounds {
-    pub(crate) left: f32,
-    pub(crate) top: f32,
-    pub(crate) width: f32,
-    pub(crate) height: f32,
-}
-
-impl ExtensionPopupBounds {
-    fn from_request(request: &ExtensionPopupBoundsRequest) -> Option<Self> {
-        if !request.left.is_finite()
-            || !request.top.is_finite()
-            || !request.width.is_finite()
-            || !request.height.is_finite()
-            || request.width <= 0.0
-            || request.height <= 0.0
-        {
-            return None;
-        }
-        Some(Self {
-            left: request.left,
-            top: request.top,
-            width: request.width,
-            height: request.height,
-        })
-    }
-}
-
 #[derive(Component)]
 pub(crate) struct ExtensionPopupPresented;
 
@@ -437,7 +410,9 @@ fn bounds_request(
     popups: Query<(Entity, &ExtensionPopup)>,
     mut commands: Commands,
 ) {
-    let Some(bounds) = ExtensionPopupBounds::from_request(&trigger.event().payload) else {
+    let request = &trigger.payload;
+    let Some(bounds) = PopupBounds::new(request.left, request.top, request.width, request.height)
+    else {
         return;
     };
     for (entity, popup) in &popups {
@@ -541,7 +516,7 @@ fn present(
     popups: Query<
         (
             Entity,
-            &ExtensionPopupBounds,
+            &PopupBounds,
             Option<&HostWindow>,
             Option<&ExtensionWindowId>,
             Has<ExtensionPopupPresented>,
@@ -577,27 +552,12 @@ fn present(
         let Ok(window) = windows.get(window_entity) else {
             continue;
         };
-        if !browsers.has_browser(entity) {
+        if !bounds.present(&browsers, entity, window, presented) {
             continue;
         }
-        let scale = window.resolution.scale_factor();
-        browsers.resize(&entity, Vec2::new(bounds.width, bounds.height), scale);
-        browsers.set_windowed_corner_radius(&entity, 14.0 * scale, scale, true);
-        if !browsers.host_in_child_window(
-            &entity,
-            bounds.left as f64,
-            bounds.top as f64,
-            bounds.width as f64,
-            bounds.height as f64,
-        ) {
-            continue;
-        }
-        browsers.set_windowed_hidden(&entity, false);
         if presented {
             continue;
         }
-        browsers.set_windowed_focus(&entity, true);
-        browsers.nudge_windowed_repaint(&entity);
         commands.entity(entity).insert(ExtensionPopupPresented);
     }
 }

@@ -10,7 +10,7 @@ pub use command::{
 pub use host::AgentBrowserResolve;
 pub use host::WebviewLoadCompleted;
 pub use host_focus::HostFocusIntent;
-pub use infrastructure::{InfrastructureWebview, PopupWebview, RetiredInfrastructureWebview};
+pub use infrastructure::{InfrastructureWebview, RetiredInfrastructureWebview};
 pub use native_bridge::{NativeBridge, NativeHistoryPhase};
 #[cfg(target_os = "macos")]
 pub use native_bridge::{queue_command_bar_pointer_button, queue_command_bar_pointer_move};
@@ -18,6 +18,7 @@ pub use native_layout::NativeLayout;
 pub use navigation::OpenHistoryRequest;
 pub use tool::BrowserToolPlugin;
 use vmux_command::{PendingCommandBarReveal, ReadCommandRequests};
+pub use vmux_ecs::{BrowserLoadSet, BrowserOverlaySet, PopupWebview};
 use vmux_ecs::{
     PageOpenSet,
     page::{PageManifest, PageReady},
@@ -75,12 +76,6 @@ pub(crate) enum BrowserSystemSet {
     SyncWindowedCommandBar,
     SyncWindowedFrames,
 }
-
-#[derive(SystemSet, Debug, Hash, PartialEq, Eq, Clone)]
-pub struct BrowserLoadSet;
-
-#[derive(SystemSet, Debug, Hash, PartialEq, Eq, Clone)]
-pub struct BrowserOverlaySet;
 
 #[derive(Component, Clone, Debug, Default, PartialEq, Eq)]
 pub struct HostedPageLifecycle {

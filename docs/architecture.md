@@ -1349,14 +1349,21 @@ the Session workspace.
 
 `vmux_tool` owns Tools / Connectors, its catalog, and Profile-owned OAuth. The connection list lives
 inside the existing Tools sidebar, search, and breadcrumb layout at `vmux://tools/connectors`;
-`vmux://connectors/` and `vmux://tools/mcp` remain route aliases. The sidebar exposes one Connectors
-category; agent-native settings appear as a collapsed configuration reference within it. Built-in
-service registrations are excluded from that reference, so accounts do not become duplicate
-configuration rows. GitHub uses a registered
+`vmux://connectors/` remains a route alias. Connectors shows service accounts and their connection
+status; Tools / MCP shows agent-native server configuration. Each category counts its own entries,
+and service registrations are excluded from native configuration rows. GitHub uses a registered
 public client and Device Flow; providers advertising dynamic registration use PKCE. Credentials
 and account labels remain in encrypted Profile storage. Pending authorization can be cancelled
-before credentials commit, and sign-in opens an in-app browser stack. Sign-in and setup links reuse
+before credentials commit. `ConnectorPopupRequest` carries the requesting page and operation
+generation to Layout, which presents authentication in a native toolbar popup with a provider favicon.
+Hiding the popup preserves its document for reopening; completion retires only the matching operation.
+The browser tab projection uses a visible web popup as the autofill target without selecting a Stack.
+Sign-in and setup links reuse
 the shared link context menu, with explicit opening in Vmux or the external browser.
+
+Extension and connector popups share the native bounds/presentation helper and DOM surface.
+`PopupWebview`, browser load messages, and their scheduling sets live in the shared ECS layer,
+so Layout can host a popup without depending on the browser adapter that consumes Layout.
 
 `vmux_session` owns each conversation's persisted connector selection. `/connectors` reuses the
 composer selector; selecting an unconnected provider signs in before attaching it. Removing a
