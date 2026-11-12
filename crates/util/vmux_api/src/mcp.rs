@@ -112,6 +112,8 @@ pub struct McpServerResult {
 
 #[cfg(test)]
 mod tests {
+    use super::*;
+
     #[test]
     fn connector_setup_urls_select_one_provider_and_reject_other_routes() {
         for id in ["github", "linear"] {
@@ -129,8 +131,6 @@ mod tests {
             assert_eq!(super::ConnectorSetupRoute::parse(url), None);
         }
     }
-
-    use super::*;
 
     #[test]
     fn server_result_round_trips_inside_state() {

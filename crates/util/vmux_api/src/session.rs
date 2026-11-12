@@ -464,6 +464,8 @@ impl AgentSetupRoute {
 
 #[cfg(test)]
 mod tests {
+    use super::*;
+
     #[test]
     fn agent_setup_urls_keep_agent_identifiers_inside_one_query_value() {
         let id = "agent/with?query&setup=0#fragment";
@@ -478,8 +480,6 @@ mod tests {
         );
         assert!(url.fragment().is_none());
     }
-
-    use super::*;
 
     #[test]
     fn user_roundtrip() {
