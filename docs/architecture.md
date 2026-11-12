@@ -1754,7 +1754,8 @@ selection owns bounded log tasks and retains displayed output during refresh.
 
 The default VM bookmark opens `vmux://vm/` beside Simulator.
 VM (`vmux://vm/`), Docker (`vmux://vm/docker`) and Containers
-(`vmux://vm/docker/containers`) have distinct titles and computer, Docker and container icons.
+(`vmux://vm/docker/containers`) have distinct titles and icons: a monitor containing a
+container, the Docker logo and a container cube.
 They share one document and DOM group, so changing level preserves the workspace.
 `vmux://docker/containers`, `vmux://docker/` and the legacy `vmux://containers/`
 canonicalize to Containers. Existing default container pins move to the VM entry once,
