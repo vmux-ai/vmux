@@ -50,42 +50,61 @@ impl Viewport {
         Some((col as u16, row as u16))
     }
 
-    fn container_resized(&mut self, client: (f64, f64), padding: f64) {
-        if client.0 <= 2.0 * padding + 1.0 || client.1 <= 2.0 * padding + 1.0 {
-            return;
-        }
-        if self.client == client {
-            return;
+    fn container_resized(&mut self, client: (f64, f64), padding: f64) -> bool {
+        if !client.0.is_finite()
+            || !client.1.is_finite()
+            || client.0 <= 2.0 * padding + 1.0
+            || client.1 <= 2.0 * padding + 1.0
+        {
+            return false;
         }
         self.client = client;
-        self.announce(padding);
+        true
     }
 
-    fn cell_measured(&mut self, cell: (f64, f64), padding: f64) {
-        if self.cell == cell {
-            return;
+    fn cell_measured(&mut self, cell: (f64, f64)) {
+        if cell.0.is_finite() && cell.1.is_finite() && cell.0 > 0.0 && cell.1 > 0.0 {
+            self.cell = cell;
         }
-        self.cell = cell;
-        self.announce(padding);
     }
 
-    fn announce(&self, padding: f64) {
+    fn announce(&self, padding: f64) -> bool {
         let (cw, ch) = self.cell;
         if cw <= 0.0
             || ch <= 0.0
             || self.client.0 <= 2.0 * padding + cw
             || self.client.1 <= 2.0 * padding + ch
         {
-            return;
+            return false;
         }
-        let _ = DeferredSend::new(&TermResizeEvent {
+        let result = DeferredSend::new(&TermResizeEvent {
             char_width: cw as f32,
             char_height: ch as f32,
             viewport_width: (self.client.0 - 2.0 * padding) as f32,
             viewport_height: (self.client.1 - 2.0 * padding) as f32,
         })
         .send();
+        #[cfg(host)]
+        if let Err(error) = &result {
+            bevy::log::warn!(%error, "terminal viewport report failed");
+        }
+        result.is_ok()
     }
+}
+
+#[component]
+fn ViewportSizing(viewport: Signal<Viewport>, padding: f64) -> Element {
+    let revision = vmux_ui::transport::HostBinding::current()
+        .map_or(0, |binding| binding.navigation_revision());
+    let reported = use_hook(|| Rc::new(std::cell::Cell::new(None)));
+    use_effect(use_reactive!(|revision, padding| {
+        let view = viewport();
+        let current = (revision, view.cell, view.client, padding);
+        if reported.get() != Some(current) && view.announce(padding) {
+            reported.set(Some(current));
+        }
+    }));
+    rsx! {}
 }
 
 fn localized_terminal_title(title: &str) -> String {
@@ -147,10 +166,10 @@ pub fn Page() -> Element {
                 if let Ok(rect) = element.get_client_rect().await {
                     let padding = theme.peek().as_ref().map(|t| t.padding).unwrap_or(4.0) as f64;
                     let mut view = viewport.write();
-                    view.origin = (rect.origin.x, rect.origin.y);
-                    view.container_resized((rect.size.width, rect.size.height), padding);
-                    view.announce(padding);
-                    return;
+                    if view.container_resized((rect.size.width, rect.size.height), padding) {
+                        view.origin = (rect.origin.x, rect.origin.y);
+                        return;
+                    }
                 }
                 vmux_ui::platform::Platform::sleep(32).await;
             }
@@ -221,6 +240,7 @@ pub fn Page() -> Element {
     rsx! {
         if !title.is_empty() {
         }
+        ViewportSizing { viewport, padding }
         div {
             id: CONTAINER_ID,
             "data-vmux-initial-scroll": if alt() || copy_mode() || mouse() { "0" } else { "bottom" },
@@ -449,13 +469,10 @@ pub fn Page() -> Element {
                     let Ok(size) = e.get_border_box_size() else {
                         return;
                     };
-                    viewport.write().cell_measured(
-                        (
-                            size.width / MEASURE_COLS as f64,
-                            size.height / MEASURE_ROWS as f64,
-                        ),
-                        padding,
-                    );
+                    viewport.write().cell_measured((
+                        size.width / MEASURE_COLS as f64,
+                        size.height / MEASURE_ROWS as f64,
+                    ));
                 },
                 {measure_text}
             }
@@ -754,6 +771,90 @@ fn row_selection_cols(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    use std::cell::{Cell, RefCell};
+    use vmux_api::BinEvent;
+    use vmux_ui::transport::event_listener::EventListenerError;
+    use vmux_ui::transport::{HostBinding, PageHost};
+
+    struct SizingHost {
+        revision: Cell<u64>,
+        reports: RefCell<Vec<(u64, TermResizeEvent)>>,
+    }
+
+    impl SizingHost {
+        fn new() -> Rc<Self> {
+            Rc::new(Self {
+                revision: Cell::new(1),
+                reports: RefCell::new(Vec::new()),
+            })
+        }
+
+        fn rebind(&self) {
+            self.reports.borrow_mut().clear();
+            self.revision.set(self.revision.get() + 1);
+        }
+    }
+
+    impl PageHost for SizingHost {
+        fn send(&self, id: &str, bytes: &[u8]) -> Result<(), EventListenerError> {
+            if id == TermResizeEvent::id() {
+                let event =
+                    rkyv::from_bytes::<TermResizeEvent, rkyv::rancor::Error>(bytes).unwrap();
+                self.reports.borrow_mut().push((self.revision.get(), event));
+            }
+            Ok(())
+        }
+
+        fn listen(
+            &self,
+            _: &str,
+            _: vmux_ui::transport::BytesListener,
+        ) -> Result<(), EventListenerError> {
+            Ok(())
+        }
+
+        fn navigation_revision(&self) -> u64 {
+            self.revision.get()
+        }
+    }
+
+    #[component]
+    fn MeasuredViewport() -> Element {
+        let viewport = use_signal(|| Viewport {
+            cell: (8.0, 16.0),
+            client: (1288.0, 1008.0),
+            ..Default::default()
+        });
+        rsx! { ViewportSizing { viewport, padding: 4.0 } }
+    }
+
+    #[test]
+    fn reused_page_reannounces_unchanged_geometry_to_its_new_binding() {
+        let host = SizingHost::new();
+        let mut dom = VirtualDom::new(MeasuredViewport);
+        dom.provide_root_context(HostBinding(host.clone()));
+        dom.rebuild_to_vec();
+        dom.render_immediate_to_vec();
+        dom.render_immediate_to_vec();
+        assert_eq!(host.reports.borrow().len(), 1);
+        host.rebind();
+        dom.mark_all_dirty();
+        dom.render_immediate_to_vec();
+        dom.render_immediate_to_vec();
+        let reports = host.reports.borrow();
+        assert_eq!(reports.len(), 1);
+        assert_eq!(reports[0].0, 2);
+        assert_eq!(
+            (reports[0].1.viewport_width, reports[0].1.viewport_height),
+            (1280.0, 1000.0)
+        );
+        drop(reports);
+        dom.mark_all_dirty();
+        dom.render_immediate_to_vec();
+        dom.render_immediate_to_vec();
+        assert_eq!(host.reports.borrow().len(), 1);
+    }
 
     #[test]
     fn process_specific_terminal_pages_can_exchange_their_state_and_input() {

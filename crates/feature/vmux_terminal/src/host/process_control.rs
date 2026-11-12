@@ -85,9 +85,7 @@ fn term_resize(
 ) {
     let entity = trigger.event_target();
     let event = &trigger.payload;
-    let Ok(webview_size) = webviews.get(entity) else {
-        return;
-    };
+    let webview_size = webviews.get(entity).ok();
     if !event.char_width.is_finite()
         || !event.char_height.is_finite()
         || event.char_width <= 0.0
@@ -99,12 +97,12 @@ fn term_resize(
     let viewport_width = if event.viewport_width > 0.0 {
         event.viewport_width
     } else {
-        webview_size.0.x
+        webview_size.map_or(0.0, |size| size.0.x)
     };
     let viewport_height = if event.viewport_height > 0.0 {
         event.viewport_height
     } else {
-        webview_size.0.y
+        webview_size.map_or(0.0, |size| size.0.y)
     };
     if !viewport_width.is_finite()
         || !viewport_height.is_finite()
@@ -212,6 +210,38 @@ mod tests {
             app.world()
                 .get::<PendingTerminalSnapshot>(webview)
                 .is_some()
+        );
+    }
+
+    #[test]
+    fn native_page_dimensions_resize_the_pty_without_a_cef_size_component() {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins)
+            .add_message::<ServiceRequest>()
+            .add_observer(term_resize);
+        let process_id = ProcessId::new();
+        let entity = app
+            .world_mut()
+            .spawn((Terminal, process_id, TerminalGridSize::default()))
+            .id();
+        app.world_mut().trigger(UiInput {
+            webview: entity,
+            payload: TermResizeEvent {
+                char_width: 8.0,
+                char_height: 16.0,
+                viewport_width: 1280.0,
+                viewport_height: 1000.0,
+            },
+        });
+        let grid = app.world().get::<TerminalGridSize>(entity).unwrap();
+        assert_eq!((grid.cols, grid.rows), (160, 62));
+        let requests = app
+            .world_mut()
+            .resource_mut::<Messages<ServiceRequest>>()
+            .drain()
+            .collect::<Vec<_>>();
+        assert!(
+            matches!(requests.as_slice(), [ServiceRequest(ClientMessage::ResizeProcess { process_id: id, cols: 160, rows: 62 })] if *id == process_id)
         );
     }
 }

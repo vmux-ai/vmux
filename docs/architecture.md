@@ -1488,7 +1488,10 @@ Each exposes the same two surfaces: a **broadcast channel** of updates, and a po
 **Terminal.** `portable_pty` opens the PTY and spawns the shell; a reader thread pumps its
 output through `alacritty_terminal`'s VTE engine into a cell grid. Each poll diffs the grid
 by row hash and broadcasts only the **changed lines**. The page applies each patch to
-per-row signals, so only those lines repaint. The daemon also owns what should outlive a
+per-row signals, so only those lines repaint. Measured cell and viewport dimensions are replayed
+when a retained page changes its host binding; unchanged geometry does not resend on ordinary renders.
+Native sizing uses the page's explicit viewport dimensions without requiring a CEF size component.
+The daemon also owns what should outlive a
 frame: OSC 133 command tracking, per-shell integration, copy-mode motions.
 OSC 7 reports the shell's current directory through the same process subscription used by local
 and remote terminals, independently of the launch directory. The Terminal breadcrumb shows that
