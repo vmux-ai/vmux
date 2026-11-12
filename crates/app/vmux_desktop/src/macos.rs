@@ -18,6 +18,7 @@ use objc2_foundation::{
     NSNotification, NSNotificationCenter, NSPoint, NSRect, NSSize, NSString, NSUserDefaults,
 };
 use raw_window_handle::{HasWindowHandle, RawWindowHandle};
+use vmux_api::input::KeyModifiers;
 use vmux_flex::prelude::*;
 use vmux_setting::{ResolvedScheme, SystemAppearance};
 
@@ -709,7 +710,18 @@ fn install_input_wake_monitor(
         }
         let buttons = mouse_buttons();
         if pointer_position_changed && let Some((x, y)) = location {
-            vmux_input::NativePointer::publish(Vec2::new(x, y), buttons, motion);
+            let flags = ev.modifierFlags();
+            vmux_input::NativePointer::publish_with_modifiers(
+                Vec2::new(x, y),
+                buttons,
+                motion,
+                Some(KeyModifiers {
+                    shift: flags.contains(NSEventModifierFlags::Shift),
+                    ctrl: flags.contains(NSEventModifierFlags::Control),
+                    alt: flags.contains(NSEventModifierFlags::Option),
+                    super_key: flags.contains(NSEventModifierFlags::Command),
+                }),
+            );
         }
         if motion && event_belongs_to_main_window {
             let interval = if event_type == NSEventType::MouseMoved {

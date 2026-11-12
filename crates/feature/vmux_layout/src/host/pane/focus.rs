@@ -2,6 +2,7 @@ use bevy::prelude::*;
 #[cfg(test)]
 use bevy_cef::prelude::HostWindow;
 use std::time::Instant;
+use vmux_api::input::KeyModifiers;
 use vmux_flex::prelude::*;
 use vmux_history::LastActivatedAt;
 
@@ -165,9 +166,9 @@ impl PointerFocus {
         window_entity: Entity,
         window: &Window,
         mouse: &ButtonInput<MouseButton>,
-    ) -> Option<(Vec2, bool, bool)> {
+    ) -> Option<(Vec2, bool, bool, Option<KeyModifiers>)> {
         #[cfg(target_os = "macos")]
-        let (position, buttons, moved, clicked) = {
+        let (position, buttons, moved, clicked, modifiers) = {
             let _ = (window_entity, window, mouse);
             let pointer = vmux_input::NativePointer::snapshot()?;
             if pointer.sequence == self.sequence {
@@ -184,10 +185,15 @@ impl PointerFocus {
             } else {
                 pointer.position_px
             };
-            (position, buttons, moved, clicked)
+            let modifiers = if clicked {
+                pointer.press_modifiers
+            } else {
+                pointer.modifiers
+            };
+            (position, buttons, moved, clicked, modifiers)
         };
         #[cfg(not(target_os = "macos"))]
-        let (position, buttons, moved, clicked) = {
+        let (position, buttons, moved, clicked, modifiers) = {
             let _ = self.sequence;
             let position = vmux_input::NativePointer::position(window_entity, window)?;
             let buttons = u8::from(mouse.pressed(MouseButton::Left))
@@ -198,11 +204,12 @@ impl PointerFocus {
                 buttons,
                 self.position != Some(position),
                 buttons & !self.buttons != 0,
+                None,
             )
         };
         self.position = Some(position);
         self.buttons = buttons;
-        Some((position, clicked, moved && buttons == 0))
+        Some((position, clicked, moved && buttons == 0, modifiers))
     }
 }
 
@@ -227,13 +234,14 @@ fn from_pointer(
     let Ok(window) = windows.get(window_entity) else {
         return;
     };
-    let Some((position, clicked, moved)) = pointer.sample(window_entity, window, &mouse) else {
+    let Some((position, clicked, moved, modifiers)) = pointer.sample(window_entity, window, &mouse)
+    else {
         return;
     };
-    if !window.focused || !active_drags.is_empty() || HoverFocusLock::held(&keys) {
+    if !window.focused || !active_drags.is_empty() || HoverFocusLock::held(&keys, modifiers) {
         return;
     }
-    if !clicked && (!moved || HoverFocusLock::active(&keys)) {
+    if !clicked && (!moved || HoverFocusLock::active(&keys, modifiers)) {
         return;
     }
     let Some(tab) = active_tab.get() else {
@@ -276,14 +284,20 @@ fn from_pointer(
 struct HoverFocusLock;
 
 impl HoverFocusLock {
-    fn held(keys: &ButtonInput<KeyCode>) -> bool {
+    fn held(keys: &ButtonInput<KeyCode>, modifiers: Option<KeyModifiers>) -> bool {
+        if let Some(modifiers) = modifiers {
+            return modifiers.shift;
+        }
         keys.pressed(KeyCode::ShiftLeft) || keys.pressed(KeyCode::ShiftRight)
     }
 
-    fn active(keys: &ButtonInput<KeyCode>) -> bool {
+    fn active(keys: &ButtonInput<KeyCode>, modifiers: Option<KeyModifiers>) -> bool {
+        if let Some(modifiers) = modifiers {
+            return modifiers.ctrl || modifiers.shift;
+        }
         keys.pressed(KeyCode::ControlLeft)
             || keys.pressed(KeyCode::ControlRight)
-            || Self::held(keys)
+            || Self::held(keys, None)
     }
 }
 
@@ -683,13 +697,23 @@ mod tests {
         }
 
         fn pointer(&mut self, position: Vec2, pressed: bool) {
-            vmux_input::NativePointer::publish(
+            self.pointer_with_modifiers(position, pressed, None);
+        }
+
+        fn pointer_with_modifiers(
+            &mut self,
+            position: Vec2,
+            pressed: bool,
+            modifiers: Option<KeyModifiers>,
+        ) {
+            vmux_input::NativePointer::publish_with_modifiers(
                 position,
                 bevy_cef_core::prelude::NativeMouseButtons {
                     left: pressed,
                     ..default()
                 },
                 !pressed,
+                modifiers,
             );
             self.app
                 .world_mut()
@@ -752,7 +776,7 @@ mod tests {
     }
 
     #[test]
-    fn click_bypasses_hover_locks_and_cooldown() {
+    fn click_bypasses_control_hover_lock_and_cooldown() {
         let mut fixture = HoverFixture::new();
         fixture
             .app
@@ -797,6 +821,33 @@ mod tests {
             fixture.app.update();
             assert_eq!(fixture.focused().stack, Some(fixture.left_stack));
         }
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn native_shift_holds_selection_without_winit_modifier_events() {
+        let mut fixture = HoverFixture::new();
+        let shift = Some(KeyModifiers {
+            shift: true,
+            ..default()
+        });
+        fixture.pointer_with_modifiers(Vec2::new(400.0, 225.0), false, shift);
+        fixture.app.update();
+        assert_eq!(fixture.focused().stack, Some(fixture.right_stack));
+        fixture.pointer_with_modifiers(Vec2::new(400.0, 225.0), true, shift);
+        fixture.pointer_with_modifiers(Vec2::new(400.0, 225.0), false, Some(default()));
+        fixture.app.update();
+        assert_eq!(fixture.focused().stack, Some(fixture.right_stack));
+        fixture.app.update();
+        assert_eq!(fixture.focused().stack, Some(fixture.right_stack));
+        fixture
+            .app
+            .world_mut()
+            .resource_mut::<ButtonInput<KeyCode>>()
+            .press(KeyCode::ShiftLeft);
+        fixture.pointer_with_modifiers(Vec2::new(401.0, 225.0), false, Some(default()));
+        fixture.app.update();
+        assert_eq!(fixture.focused().stack, Some(fixture.left_stack));
     }
 
     #[cfg(target_os = "macos")]

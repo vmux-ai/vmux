@@ -8,15 +8,18 @@ use objc2_app_kit::{NSApplication, NSEvent, NSView};
 use raw_window_handle::{HasWindowHandle, RawWindowHandle};
 use std::hint::spin_loop;
 use std::sync::atomic::{AtomicBool, AtomicU8, AtomicU32, AtomicU64, Ordering, fence};
+use vmux_api::input::KeyModifiers;
 
 static SEQUENCE: AtomicU64 = AtomicU64::new(0);
 static X_BITS: AtomicU32 = AtomicU32::new(0);
 static Y_BITS: AtomicU32 = AtomicU32::new(0);
 static BUTTONS: AtomicU8 = AtomicU8::new(0);
+static MODIFIERS: AtomicU8 = AtomicU8::new(0);
 static MOTION_SEQUENCE: AtomicU64 = AtomicU64::new(0);
 static PRESS_SEQUENCE: AtomicU64 = AtomicU64::new(0);
 static PRESS_X_BITS: AtomicU32 = AtomicU32::new(0);
 static PRESS_Y_BITS: AtomicU32 = AtomicU32::new(0);
+static PRESS_MODIFIERS: AtomicU8 = AtomicU8::new(0);
 static WINDOW_GESTURE: AtomicBool = AtomicBool::new(false);
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -27,12 +30,23 @@ pub struct NativePointerSnapshot {
     pub press_position_px: Vec2,
     pub position_px: Vec2,
     pub buttons: NativeMouseButtons,
+    pub modifiers: Option<KeyModifiers>,
+    pub press_modifiers: Option<KeyModifiers>,
 }
 
 pub struct NativePointer;
 
 impl NativePointer {
     pub fn publish(position_px: Vec2, buttons: NativeMouseButtons, motion: bool) {
+        Self::publish_with_modifiers(position_px, buttons, motion, None);
+    }
+
+    pub fn publish_with_modifiers(
+        position_px: Vec2,
+        buttons: NativeMouseButtons,
+        motion: bool,
+        modifiers: Option<KeyModifiers>,
+    ) {
         let writing = loop {
             let current = SEQUENCE.load(Ordering::Acquire);
             if current & 1 != 0 {
@@ -53,6 +67,8 @@ impl NativePointer {
         };
         X_BITS.store(position_px.x.to_bits(), Ordering::Relaxed);
         Y_BITS.store(position_px.y.to_bits(), Ordering::Relaxed);
+        let modifier_bits = Self::modifier_bits(modifiers);
+        MODIFIERS.store(modifier_bits, Ordering::Relaxed);
         let button_bits = Self::button_bits(buttons);
         let previous_buttons = BUTTONS.swap(button_bits, Ordering::Relaxed);
         let completed = writing.wrapping_add(1);
@@ -60,6 +76,7 @@ impl NativePointer {
             PRESS_SEQUENCE.store(completed, Ordering::Relaxed);
             PRESS_X_BITS.store(position_px.x.to_bits(), Ordering::Relaxed);
             PRESS_Y_BITS.store(position_px.y.to_bits(), Ordering::Relaxed);
+            PRESS_MODIFIERS.store(modifier_bits, Ordering::Relaxed);
         }
         if motion {
             MOTION_SEQUENCE.store(completed, Ordering::Relaxed);
@@ -69,7 +86,7 @@ impl NativePointer {
 
     pub fn publish_buttons(buttons: NativeMouseButtons) {
         if let Some(pointer) = Self::snapshot() {
-            Self::publish(pointer.position_px, buttons, false);
+            Self::publish_with_modifiers(pointer.position_px, buttons, false, pointer.modifiers);
         }
     }
 
@@ -88,6 +105,9 @@ impl NativePointer {
                 f32::from_bits(Y_BITS.load(Ordering::Relaxed)),
             );
             let buttons = Self::buttons_from_bits(BUTTONS.load(Ordering::Relaxed));
+            let modifiers = Self::modifiers_from_bits(MODIFIERS.load(Ordering::Relaxed));
+            let press_modifiers =
+                Self::modifiers_from_bits(PRESS_MODIFIERS.load(Ordering::Relaxed));
             let motion_sequence = MOTION_SEQUENCE.load(Ordering::Relaxed);
             let press_sequence = PRESS_SEQUENCE.load(Ordering::Relaxed);
             let press_position_px = Vec2::new(
@@ -104,6 +124,8 @@ impl NativePointer {
                     press_position_px,
                     position_px,
                     buttons,
+                    modifiers,
+                    press_modifiers,
                 });
             }
         }
@@ -166,6 +188,28 @@ impl NativePointer {
             } else {
                 None
             }
+        })
+    }
+
+    fn modifier_bits(modifiers: Option<KeyModifiers>) -> u8 {
+        let Some(modifiers) = modifiers else {
+            return 0;
+        };
+        0x80 | u8::from(modifiers.shift)
+            | (u8::from(modifiers.ctrl) << 1)
+            | (u8::from(modifiers.alt) << 2)
+            | (u8::from(modifiers.super_key) << 3)
+    }
+
+    fn modifiers_from_bits(bits: u8) -> Option<KeyModifiers> {
+        if bits & 0x80 == 0 {
+            return None;
+        }
+        Some(KeyModifiers {
+            shift: bits & 1 != 0,
+            ctrl: bits & (1 << 1) != 0,
+            alt: bits & (1 << 2) != 0,
+            super_key: bits & (1 << 3) != 0,
         })
     }
 
