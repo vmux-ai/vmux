@@ -17,6 +17,8 @@ vmux_api = { path = "../../util/vmux_api" }
 vmux_page = { path = "../../util/vmux_page" }
 rkyv = { workspace = true }
 serde = { workspace = true }
+url = { workspace = true }
+percent-encoding = "2"
 
 [target.'cfg(not(target_os = "ios"))'.dependencies]
 bevy = { workspace = true }

@@ -1,7 +1,7 @@
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashSet};
 use std::io;
 use std::path::Path;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use serde::Deserialize;
 
@@ -57,6 +57,95 @@ impl Client {
         Ok(())
     }
 
+    pub fn start_many(&self, ids: &[String]) -> io::Result<()> {
+        let containers = self.list()?;
+        let ordered = Batch::new(ids, &containers)?.ordered()?;
+        let deadline = Instant::now() + Duration::from_secs(120);
+        let mut failed = HashSet::new();
+        let mut errors = Vec::new();
+        for entry in ordered {
+            let mut refusal = None;
+            for dependency in &entry.dependencies {
+                let Some(target) = containers.iter().find(|target| {
+                    target.project == entry.project
+                        && target.service == dependency.service
+                        && ids.contains(&target.id)
+                }) else {
+                    continue;
+                };
+                if failed.contains(&target.id) {
+                    refusal = Some(format!("dependency {} failed to start", dependency.service));
+                    break;
+                }
+                if let Err(error) = self.wait(&target.id, dependency.condition, deadline) {
+                    refusal = Some(format!("dependency {}: {error}", dependency.service));
+                    break;
+                }
+            }
+            let result = match refusal {
+                Some(error) => Err(io::Error::other(error)),
+                None => self.change(&entry.id, Operation::Start),
+            };
+            if let Err(error) = result {
+                failed.insert(entry.id.clone());
+                errors.push(format!("{}: {error}", entry.name));
+            }
+        }
+        if errors.is_empty() {
+            Ok(())
+        } else {
+            Err(io::Error::other(errors.join("\n")))
+        }
+    }
+
+    fn wait(&self, id: &str, condition: Condition, deadline: Instant) -> io::Result<()> {
+        let id = Id::new(id)?;
+        loop {
+            let body = self.0.get(&id.endpoint("/json"))?.require_success()?;
+            let observation: Readiness = serde_json::from_slice(&body).map_err(io::Error::other)?;
+            let state = observation.state;
+            let ready = match condition {
+                Condition::Started => state.running,
+                Condition::Healthy => {
+                    state.running
+                        && state
+                            .health
+                            .as_ref()
+                            .is_some_and(|health| health.status == "healthy")
+                }
+                Condition::Completed => {
+                    !state.running && state.status == "exited" && state.exit_code == 0
+                }
+            };
+            if ready {
+                return Ok(());
+            }
+            if !state.running && matches!(state.status.as_str(), "exited" | "dead") {
+                return Err(io::Error::other(format!(
+                    "container stopped with exit code {}",
+                    state.exit_code
+                )));
+            }
+            if condition == Condition::Healthy
+                && state
+                    .health
+                    .as_ref()
+                    .is_none_or(|health| health.status == "unhealthy")
+            {
+                return Err(io::Error::other(
+                    "container healthcheck is missing or unhealthy",
+                ));
+            }
+            if Instant::now() >= deadline {
+                return Err(io::Error::new(
+                    io::ErrorKind::TimedOut,
+                    "container dependency did not become ready",
+                ));
+            }
+            std::thread::sleep(Duration::from_millis(200));
+        }
+    }
+
     pub fn logs(&self, id: &str) -> io::Result<String> {
         let id = Id::new(id)?;
         let inspection = self.0.get(&id.endpoint("/json"))?.require_success()?;
@@ -87,6 +176,7 @@ pub struct Container {
     pub status: String,
     pub project: String,
     pub service: String,
+    pub dependencies: Vec<Dependency>,
     pub ports: Vec<Port>,
 }
 
@@ -116,6 +206,25 @@ impl Container {
             }
             ports.sort();
             ports.dedup();
+            let mut dependencies = Vec::new();
+            if let Some(value) = response.labels.get("com.docker.compose.depends_on") {
+                for item in value.split(',') {
+                    let mut fields = item.split(':');
+                    let service = fields.next().unwrap_or_default().trim();
+                    if service.is_empty() {
+                        continue;
+                    }
+                    let condition = match fields.next() {
+                        Some("service_healthy") => Condition::Healthy,
+                        Some("service_completed_successfully") => Condition::Completed,
+                        _ => Condition::Started,
+                    };
+                    dependencies.push(Dependency {
+                        service: service.into(),
+                        condition,
+                    });
+                }
+            }
             containers.push(Self {
                 id: response.id,
                 name,
@@ -132,6 +241,7 @@ impl Container {
                     .get("com.docker.compose.service")
                     .cloned()
                     .unwrap_or_default(),
+                dependencies,
                 ports,
             });
         }
@@ -142,6 +252,90 @@ impl Container {
         });
         Ok(containers)
     }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Dependency {
+    pub service: String,
+    pub condition: Condition,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Condition {
+    Started,
+    Healthy,
+    Completed,
+}
+
+struct Batch<'a> {
+    entries: Vec<&'a Container>,
+}
+
+impl<'a> Batch<'a> {
+    fn new(ids: &[String], containers: &'a [Container]) -> io::Result<Self> {
+        let mut entries = Vec::new();
+        for id in ids {
+            let Some(entry) = containers.iter().find(|entry| entry.id == *id) else {
+                return Err(io::Error::new(
+                    io::ErrorKind::NotFound,
+                    format!("container {id} is no longer present"),
+                ));
+            };
+            if !entries
+                .iter()
+                .any(|existing: &&Container| existing.id == entry.id)
+            {
+                entries.push(entry);
+            }
+        }
+        Ok(Self { entries })
+    }
+
+    fn ordered(mut self) -> io::Result<Vec<&'a Container>> {
+        let mut ordered = Vec::new();
+        while !self.entries.is_empty() {
+            let next = self.entries.iter().position(|entry| {
+                !entry.dependencies.iter().any(|dependency| {
+                    self.entries.iter().any(|candidate| {
+                        candidate.project == entry.project
+                            && candidate.service == dependency.service
+                    })
+                })
+            });
+            let Some(index) = next else {
+                return Err(io::Error::new(
+                    io::ErrorKind::InvalidInput,
+                    "container group has a dependency cycle",
+                ));
+            };
+            ordered.push(self.entries.remove(index));
+        }
+        Ok(ordered)
+    }
+}
+
+#[derive(Deserialize)]
+struct Readiness {
+    #[serde(rename = "State")]
+    state: RunState,
+}
+
+#[derive(Deserialize)]
+struct RunState {
+    #[serde(rename = "Running")]
+    running: bool,
+    #[serde(rename = "Status")]
+    status: String,
+    #[serde(rename = "ExitCode", default)]
+    exit_code: i32,
+    #[serde(rename = "Health", default)]
+    health: Option<Health>,
+}
+
+#[derive(Deserialize)]
+struct Health {
+    #[serde(rename = "Status")]
+    status: String,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
@@ -258,7 +452,6 @@ mod tests {
     use std::os::unix::net::UnixListener;
     use std::path::PathBuf;
     use std::thread::{self, JoinHandle};
-    use std::time::Instant;
 
     struct Daemon {
         socket: PathBuf,
@@ -291,6 +484,7 @@ mod tests {
                             Err(error) => panic!("{error}"),
                         }
                     };
+                    stream.set_nonblocking(false).unwrap();
                     stream
                         .set_read_timeout(Some(Duration::from_secs(2)))
                         .unwrap();
@@ -337,6 +531,60 @@ mod tests {
             daemon.request().lines().next(),
             Some("GET /containers/json?all=1 HTTP/1.0")
         );
+    }
+
+    #[test]
+    fn group_start_orders_dependencies_and_waits_for_their_health() {
+        let inventory = r#"[{"Id":"aaaaaaaaaaaa","Names":["/account"],"Image":"account","State":"exited","Labels":{"com.docker.compose.project":"cloud","com.docker.compose.service":"account","com.docker.compose.depends_on":"postgres:service_healthy:true"}},{"Id":"bbbbbbbbbbbb","Names":["/postgres"],"Image":"postgres","State":"exited","Labels":{"com.docker.compose.project":"cloud","com.docker.compose.service":"postgres"}},{"Id":"cccccccccccc","Names":["/relay"],"Image":"relay","State":"exited","Labels":{"com.docker.compose.project":"cloud","com.docker.compose.service":"relay"}}]"#;
+        for healthy in [true, false] {
+            let readiness = if healthy {
+                r#"{"State":{"Running":true,"Status":"running","Health":{"Status":"healthy"}}}"#
+            } else {
+                r#"{"State":{"Running":false,"Status":"exited","ExitCode":255}}"#
+            };
+            let mut replies = vec![Daemon::reply(200, inventory), Daemon::reply(204, "")];
+            if healthy {
+                replies.push(Daemon::reply(200, r#"{"State":{"Running":true,"Status":"running","Health":{"Status":"starting"}}}"#));
+            }
+            replies.push(Daemon::reply(200, readiness));
+            if healthy {
+                replies.push(Daemon::reply(204, ""));
+            }
+            replies.push(Daemon::reply(204, ""));
+            let daemon = Daemon::new(replies);
+            let result = Client::new(&daemon.socket).start_many(&[
+                "aaaaaaaaaaaa".into(),
+                "bbbbbbbbbbbb".into(),
+                "cccccccccccc".into(),
+            ]);
+            assert_eq!(result.is_ok(), healthy);
+            if !healthy {
+                assert!(
+                    result
+                        .unwrap_err()
+                        .to_string()
+                        .contains("dependency postgres")
+                );
+            }
+            let requests = daemon.response.join().unwrap();
+            let mut expected = vec![
+                "GET /containers/json?all=1 HTTP/1.0",
+                "POST /containers/bbbbbbbbbbbb/start HTTP/1.0",
+            ];
+            if healthy {
+                expected.push("GET /containers/bbbbbbbbbbbb/json HTTP/1.0");
+            }
+            expected.push("GET /containers/bbbbbbbbbbbb/json HTTP/1.0");
+            if healthy {
+                expected.push("POST /containers/aaaaaaaaaaaa/start HTTP/1.0");
+            }
+            expected.push("POST /containers/cccccccccccc/start HTTP/1.0");
+            let lines: Vec<_> = requests
+                .iter()
+                .map(|request| request.lines().next().unwrap())
+                .collect();
+            assert_eq!(lines, expected);
+        }
     }
 
     #[test]
