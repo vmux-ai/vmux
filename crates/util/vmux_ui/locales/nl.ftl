@@ -1182,3 +1182,6 @@ connectors-configured = Geconfigureerd
 connectors-open-in-app = Openen in Vmux
 connectors-open-external = Openen in externe browser
 connectors-verification-code-help = Kopieer deze code en voer deze in bij { $service } om het aanmelden te voltooien.
+
+connectors-setup-intro = Verbind { $service } met dit profiel. Ik begeleid je bij het aanmelden. Daarna kun je de dienst in je gesprekken kiezen.
+connectors-setup-connected = { $service } is verbonden. Je kunt de dienst nu in een gesprek kiezen.

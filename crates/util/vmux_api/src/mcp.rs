@@ -35,33 +35,36 @@ pub struct McpAuthorization {
     pub code: Option<String>,
 }
 
-#[vmux_api::contract(Default, Eq)]
-pub struct ConnectorPopupState {
-    pub id: String,
-    pub provider: String,
-    pub name: String,
-    pub origin: String,
-    pub code: Option<String>,
-    pub open: bool,
-}
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ConnectorSetupRoute(pub String);
 
-#[vmux_api::ui_event]
-pub struct ConnectorPopupShowRequest {
-    pub id: String,
-}
+impl ConnectorSetupRoute {
+    pub fn url(&self) -> String {
+        format!("vmux://tools/connectors/{}/setup", self.0)
+    }
 
-#[vmux_api::ui_event]
-pub struct ConnectorPopupCloseRequest {
-    pub id: String,
-}
-
-#[vmux_api::ui_event]
-pub struct ConnectorPopupBoundsRequest {
-    pub id: String,
-    pub left: f32,
-    pub top: f32,
-    pub width: f32,
-    pub height: f32,
+    pub fn parse(value: &str) -> Option<Self> {
+        let route = crate::VmuxRoute::parse(value)?;
+        if route.host() != "tools" || route.query().is_some() || route.fragment().is_some() {
+            return None;
+        }
+        let mut segments = route.path_segments();
+        if segments.next()? != "connectors" {
+            return None;
+        }
+        let id = segments.next()?;
+        if id.is_empty()
+            || !id
+                .bytes()
+                .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_' | b'.'))
+        {
+            return None;
+        }
+        if segments.next()? != "setup" || segments.next().is_some() {
+            return None;
+        }
+        Some(Self(id.to_string()))
+    }
 }
 
 #[vmux_api::ui_event]
@@ -109,6 +112,24 @@ pub struct McpServerResult {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn connector_setup_urls_select_one_provider_and_reject_other_routes() {
+        for id in ["github", "linear"] {
+            let route = super::ConnectorSetupRoute(id.into());
+            assert_eq!(super::ConnectorSetupRoute::parse(&route.url()), Some(route));
+        }
+        for url in [
+            "https://tools/connectors/github/setup",
+            "vmux://tools/connectors",
+            "vmux://tools/connectors/github",
+            "vmux://tools/connectors/github/setup/other",
+            "vmux://tools/connectors/github/setup?other=1",
+            "vmux://tools/connectors/github%2Flinear/setup",
+        ] {
+            assert_eq!(super::ConnectorSetupRoute::parse(url), None);
+        }
+    }
+
     use super::*;
 
     #[test]

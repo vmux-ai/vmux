@@ -3,12 +3,11 @@ use bevy_cef::prelude::{UiEventPlugin, UiInput};
 use moonshine_save::prelude::Save;
 use serde::{Deserialize, Serialize};
 use vmux_api::mcp::{
-    McpServerOperation, McpServerRequest, McpServerSelectionRequest, McpServerStatus,
-    McpServersUiState,
+    McpServerOperation, McpServerSelectionRequest, McpServerStatus, McpServersUiState,
 };
 use vmux_ecs::store::StoreAppExt;
-use vmux_ecs::{UiState, UiStateWrite};
-use vmux_tool::ConnectorAccess;
+use vmux_ecs::{PageOpenRequest, PageOpenTarget, UiState, UiStateWrite};
+use vmux_tool::{ConnectorAccess, ConnectorConnectionCompleted};
 
 use super::session::{SessionView, SessionViews};
 
@@ -18,6 +17,7 @@ impl bevy::app::Plugin for Plugin {
     fn build(&self, app: &mut App) {
         app.register_stored::<Connectors>()
             .add_plugins(UiEventPlugin::<(McpServerSelectionRequest,)>::default())
+            .add_message::<PageOpenRequest>()
             .add_observer(select)
             .add_observer(connected)
             .add_systems(Update, project);
@@ -50,6 +50,8 @@ fn select(
     views: SessionViews,
     states: Query<&UiState<McpServersUiState>>,
     selections: Query<&Connectors>,
+    parents: Query<&ChildOf>,
+    mut pages: MessageWriter<PageOpenRequest>,
     mut commands: Commands,
 ) {
     let webview = trigger.event().webview;
@@ -93,52 +95,57 @@ fn select(
         session,
         id: id.clone(),
     });
-    commands.trigger(UiInput {
-        webview,
-        payload: McpServerRequest { id: id.clone() },
+    let target = if let Ok(stack) = parents.get(webview)
+        && let Ok(pane) = parents.get(stack.parent())
+    {
+        PageOpenTarget::NewStackInPane(pane.parent())
+    } else {
+        PageOpenTarget::NewStack
+    };
+    pages.write(PageOpenRequest {
+        target,
+        url: vmux_api::mcp::ConnectorSetupRoute(id.clone()).url(),
+        request_id: None,
     });
 }
 
 fn connected(
-    trigger: On<UiStateWrite<McpServersUiState>>,
+    trigger: On<ConnectorConnectionCompleted>,
     views: SessionViews,
-    pending: Query<&PendingSelection>,
+    pending: Query<(Entity, &PendingSelection)>,
+    states: Query<&UiState<McpServersUiState>>,
     selections: Query<&Connectors>,
     mut commands: Commands,
 ) {
-    let webview = trigger.event().webview();
-    let Ok(pending) = pending.get(webview) else {
-        return;
-    };
-    let state = trigger.event().update();
-    let Some(result) = &state.result else {
-        if state.loaded
-            && !state.loading
-            && state.pending.is_none()
-            && state.authorization.is_none()
-        {
-            commands.entity(webview).remove::<PendingSelection>();
-        }
-        return;
-    };
-    if result.id != pending.id || result.operation != McpServerOperation::Connect {
+    let result = &trigger.event().0;
+    if result.operation != McpServerOperation::Connect {
         return;
     }
-    commands.entity(webview).remove::<PendingSelection>();
-    if result.success && views.session(webview) == Some(pending.session) {
+    for (webview, pending) in &pending {
+        if result.id != pending.id {
+            continue;
+        }
+        commands.entity(webview).remove::<PendingSelection>();
+        if !result.success || views.session(webview) != Some(pending.session) {
+            continue;
+        }
         let mut selection = selections.get(pending.session).cloned().unwrap_or_default();
         if !selection.0.contains(&pending.id) {
             selection.0.push(pending.id.clone());
         }
-        let mut snapshot = state.clone();
-        snapshot.selected = selection.0.clone();
         commands
             .entity(webview)
             .insert(ConnectorAccess(selection.0.clone()));
+        if let Ok(state) = states.get(webview)
+            && let Some(state) = state.current()
+        {
+            let mut snapshot = state.clone();
+            snapshot.selected = selection.0.clone();
+            commands.trigger(UiStateWrite::<McpServersUiState>::from_event(
+                webview, &snapshot,
+            ));
+        }
         commands.entity(pending.session).insert(selection);
-        commands.trigger(UiStateWrite::<McpServersUiState>::from_event(
-            webview, &snapshot,
-        ));
     }
 }
 
@@ -233,6 +240,10 @@ mod tests {
                 .trigger(UiStateWrite::<McpServersUiState>::from_event(
                     self.view, &snapshot,
                 ));
+            if let Some(result) = snapshot.result {
+                app.world_mut()
+                    .trigger(ConnectorConnectionCompleted(result));
+            }
             app.world_mut().flush();
         }
 
@@ -294,7 +305,7 @@ mod tests {
     }
 
     #[test]
-    fn failed_sign_in_does_not_attach_and_successful_retry_does() {
+    fn cancelled_setup_cannot_attach_on_an_unrelated_later_connection() {
         let mut app = App::new();
         app.add_plugins((
             vmux_ecs::UiStatePlugin::<McpServersUiState>::default(),
@@ -303,6 +314,38 @@ mod tests {
         let chat = Conversation::create(&mut app);
         chat.publish(&mut app, McpServerStatus::Available, None);
         chat.select(&mut app);
+        for success in [false, true] {
+            app.world_mut()
+                .trigger(ConnectorConnectionCompleted(McpServerResult {
+                    id: "github".into(),
+                    operation: McpServerOperation::Connect,
+                    success,
+                    message: String::new(),
+                }));
+            app.update();
+            assert!(chat.selected(&app).is_empty());
+        }
+    }
+
+    #[test]
+    fn failed_sign_in_does_not_attach_and_successful_retry_does() {
+        let mut app = App::new();
+        app.add_plugins((
+            vmux_ecs::UiStatePlugin::<McpServersUiState>::default(),
+            Plugin,
+        ));
+        let chat = Conversation::create(&mut app);
+        let other = Conversation::create(&mut app);
+        other.publish(&mut app, McpServerStatus::Available, None);
+        chat.publish(&mut app, McpServerStatus::Available, None);
+        chat.select(&mut app);
+        let pages = app
+            .world_mut()
+            .resource_mut::<Messages<PageOpenRequest>>()
+            .drain()
+            .collect::<Vec<_>>();
+        assert_eq!(pages.len(), 1);
+        assert_eq!(pages[0].url, "vmux://tools/connectors/github/setup");
         chat.publish(
             &mut app,
             McpServerStatus::Available,
@@ -328,6 +371,7 @@ mod tests {
         );
         app.update();
         assert_eq!(chat.selected(&app), ["github"]);
+        assert!(other.selected(&app).is_empty());
         let persisted =
             ron::to_string(app.world().get::<Connectors>(chat.session).unwrap()).unwrap();
         let restored: Connectors = ron::from_str(&persisted).unwrap();

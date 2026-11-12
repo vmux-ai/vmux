@@ -1179,3 +1179,6 @@ connectors-configured = 已配置
 connectors-open-in-app = 在 Vmux 中打开
 connectors-open-external = 在外部浏览器中打开
 connectors-verification-code-help = 复制此代码并在 { $service } 中输入，以完成登录。
+
+connectors-setup-intro = 将 { $service } 连接到此个人资料。我会引导你登录，之后你可以在对话中选择使用。
+connectors-setup-connected = { $service } 已连接。现在可以在对话中选择使用。

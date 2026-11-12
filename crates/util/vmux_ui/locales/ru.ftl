@@ -1182,3 +1182,6 @@ connectors-configured = Настроено
 connectors-open-in-app = Открыть в Vmux
 connectors-open-external = Открыть во внешнем браузере
 connectors-verification-code-help = Скопируйте этот код и введите его в { $service }, чтобы завершить вход.
+
+connectors-setup-intro = Подключите { $service } к этому профилю. Я помогу вам войти, после чего вы сможете выбрать сервис в своих беседах.
+connectors-setup-connected = { $service } подключён. Теперь вы можете выбрать его в беседе.

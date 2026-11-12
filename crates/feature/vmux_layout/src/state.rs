@@ -6,7 +6,6 @@ use crate::event::{
 };
 use vmux_api::bookmark::{BookmarkEditState, BookmarkMenuEffect, BookmarkStateEvent};
 use vmux_api::extension::{ExtensionPopupEvent, ExtensionPopupSizeEvent, ExtensionsUiState};
-use vmux_api::mcp::ConnectorPopupState;
 use vmux_ecs::event::space::{SpaceFormState, SpacesListEvent};
 
 #[vmux_api::ui_state_patch(Default)]
@@ -26,7 +25,6 @@ pub struct LayoutUiStatePatch {
     pub extensions: Option<ExtensionsUiState>,
     pub extension_popup: Option<ExtensionPopupEvent>,
     pub extension_popup_size: Option<ExtensionPopupSizeEvent>,
-    pub connector_popup: Option<ConnectorPopupState>,
     pub update_progress: Option<UpdateProgress>,
     pub update_ready: Option<UpdateReady>,
     pub update_cleared: Option<UpdateCleared>,
@@ -53,7 +51,7 @@ pub enum UpdateStatus {
     },
 }
 
-#[vmux_api::ui_state(Default, patch = LayoutUiStatePatch, version = 8)]
+#[vmux_api::ui_state(Default, patch = LayoutUiStatePatch, version = 9)]
 pub struct LayoutUiState {
     pub layout: Option<LayoutGeometry>,
     pub stacks: Option<StackNavigationState>,
@@ -67,7 +65,6 @@ pub struct LayoutUiState {
     pub extensions: ExtensionsUiState,
     pub extension_popup: ExtensionPopupEvent,
     pub extension_popup_size: ExtensionPopupSizeEvent,
-    pub connector_popup: ConnectorPopupState,
     pub update: Option<UpdateStatus>,
     pub bookmark_menu: BookmarkMenuEffect,
     pub bookmark_edit: BookmarkEditState,
@@ -114,9 +111,6 @@ impl vmux_api::UiStateProjection<LayoutUiStatePatch> for LayoutUiState {
         }
         if let Some(event) = patch.extension_popup_size {
             self.extension_popup_size = event;
-        }
-        if let Some(event) = patch.connector_popup {
-            self.connector_popup = event;
         }
         if let Some(event) = patch.update_progress {
             self.update = Some(if event.installing {

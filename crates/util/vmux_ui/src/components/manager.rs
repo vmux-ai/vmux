@@ -695,6 +695,7 @@ pub fn ManagerRow(
     subtitle: String,
     meta: Element,
     actions: Element,
+    #[props(default = rsx! {})] details: Element,
     #[props(default = true)] show_icon: bool,
     #[props(default = true)] icon_surface: bool,
     #[props(default)] selected: bool,
@@ -729,7 +730,7 @@ pub fn ManagerRow(
                 }
             },
             onkeydown: move |event| {
-                if disabled { return; }
+                if disabled || !interactive { return; }
                 let activate = event.key() == Key::Enter
                     || matches!(event.key(), Key::Character(key) if key == " ");
                 if !activate {
@@ -757,8 +758,9 @@ pub fn ManagerRow(
                 if !subtitle.is_empty() {
                     span { class: "truncate text-xs text-muted-foreground/70", "{subtitle}" }
                 }
+                {details}
             }
-            div { class: "flex shrink-0 items-center gap-2", {actions} }
+            div { class: "flex shrink-0 items-center gap-2", onclick: move |event| event.stop_propagation(), onkeydown: move |event| event.stop_propagation(), {actions} }
         }
     }
 }
@@ -770,36 +772,38 @@ pub fn ManagerCard(
     subtitle: String,
     meta: Element,
     actions: Element,
+    #[props(default = rsx! {})] details: Element,
     #[props(default = true)] show_icon: bool,
     #[props(default = true)] icon_surface: bool,
     #[props(default)] selected: bool,
     #[props(default)] disabled: bool,
     #[props(default)] aria_label: Option<String>,
-    onselect: EventHandler<NavigationGesture>,
+    #[props(default)] onselect: Option<EventHandler<NavigationGesture>>,
 ) -> Element {
     let keyboard_select = onselect;
+    let interactive = onselect.is_some();
     rsx! {
         div {
             class: if selected {
-                "group flex min-h-28 min-w-0 cursor-pointer flex-col rounded-xl bg-primary/[0.09] p-3 shadow-[inset_2px_0_0_var(--primary)] transition-colors"
+                "group flex min-h-28 min-w-0 flex-col rounded-xl bg-primary/[0.09] p-3 shadow-[inset_2px_0_0_var(--primary)] transition-colors"
             } else {
-                "group flex min-h-28 min-w-0 cursor-pointer flex-col rounded-xl bg-foreground/[0.03] p-3 transition-colors hover:bg-foreground/[0.06]"
+                "group flex min-h-28 min-w-0 flex-col rounded-xl bg-foreground/[0.03] p-3 transition-colors hover:bg-foreground/[0.06]"
             },
-            role: "button",
-            tabindex: if disabled { "-1" } else { "0" },
+            role: if interactive { "button" } else { "group" },
+            tabindex: if interactive && !disabled { "0" } else { "-1" },
             aria_selected: selected,
             aria_disabled: disabled,
             aria_label,
-            onclick: move |event| { if !disabled { onselect.call(NavigationGesture::from_mouse(&event)); } },
+            onclick: move |event| { if !disabled && let Some(handler) = onselect { handler.call(NavigationGesture::from_mouse(&event)); } },
             onkeydown: move |event| {
-                if disabled { return; }
+                if disabled || !interactive { return; }
                 let activate = event.key() == Key::Enter
                     || matches!(event.key(), Key::Character(key) if key == " ");
                 if !activate {
                     return;
                 }
                 event.prevent_default();
-                keyboard_select.call(NavigationGesture::default());
+                if let Some(handler) = keyboard_select { handler.call(NavigationGesture::default()); }
             },
             div { class: "flex min-w-0 items-start gap-3",
                 if show_icon {
@@ -817,12 +821,34 @@ pub fn ManagerCard(
                         div { class: "mt-0.5 truncate text-xs text-muted-foreground/70", "{subtitle}" }
                     }
                 }
-                {actions}
+                div { class: "flex shrink-0 items-center gap-2", onclick: move |event| event.stop_propagation(), onkeydown: move |event| event.stop_propagation(), {actions} }
             }
             div { class: "mt-3 flex min-w-0 flex-wrap items-center gap-1.5",
                 {meta}
             }
+            {details}
         }
+    }
+}
+
+#[component]
+pub fn ManagerItem(
+    view: ManagerView,
+    icon: Element,
+    title: String,
+    subtitle: String,
+    meta: Element,
+    actions: Element,
+    #[props(default = rsx! {})] details: Element,
+    #[props(default)] selected: bool,
+    #[props(default)] disabled: bool,
+    #[props(default)] aria_label: Option<String>,
+    #[props(default)] onselect: Option<EventHandler<NavigationGesture>>,
+) -> Element {
+    if view == ManagerView::Grid {
+        rsx! { ManagerCard { icon_surface: false, icon, title, subtitle, meta, actions, details, selected, disabled, aria_label, onselect } }
+    } else {
+        rsx! { ManagerRow { icon_surface: false, icon, title, subtitle, meta, actions, details, selected, disabled, aria_label, onselect } }
     }
 }
 

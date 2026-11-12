@@ -1162,3 +1162,6 @@ connectors-configured = 設定済み
 connectors-open-in-app = Vmux 内で開く
 connectors-open-external = 外部ブラウザで開く
 connectors-verification-code-help = このコードをコピーして { $service } に入力し、サインインを完了してください。
+
+connectors-setup-intro = このプロファイルに { $service } を接続します。ログインを案内します。接続後は会話から選んで使えます。
+connectors-setup-connected = { $service } を接続しました。会話から選んで使えます。

@@ -16,9 +16,9 @@ use vmux_api::mcp::{McpServersRequest, McpServersUiState};
 use vmux_ui::components::avatar::AgentThumbnail;
 use vmux_ui::components::breadcrumb::{BreadcrumbOption, BreadcrumbOptionIcon};
 use vmux_ui::components::manager::{
-    ManagerButton, ManagerButtonVariant, ManagerCard, ManagerCollection, ManagerDetails,
-    ManagerEmpty, ManagerList, ManagerPage, ManagerRow, ManagerSection, ManagerSidebarItem,
-    ManagerSpinner, ManagerThumbnail, ManagerView, WorkspaceLayout,
+    ManagerButton, ManagerButtonVariant, ManagerCollection, ManagerDetails, ManagerEmpty,
+    ManagerItem, ManagerList, ManagerPage, ManagerSection, ManagerSidebarItem, ManagerSpinner,
+    ManagerThumbnail, ManagerView, WorkspaceLayout,
 };
 use vmux_ui::components::page_address::{PageBreadcrumbs, PageToolbar, ToolbarControl};
 use vmux_ui::hooks::{send, use_theme, use_ui_state};
@@ -60,7 +60,22 @@ pub fn Page() -> Element {
             let _ = send(&McpServersRequest);
         }
     }));
+    let setup = try_consume_context::<vmux_ecs::PageMetadata>()
+        .and_then(|metadata| vmux_api::mcp::ConnectorSetupRoute::parse(&metadata.url));
     let mut toolbar = Vec::new();
+    let populated = match route.as_str() {
+        "connectors" => connector_state.loaded && !connector_state.servers.is_empty(),
+        "extensions" => extension_state.loaded && !extension_state.visible.is_empty(),
+        _ => state.snapshot.loaded && state.view.visible_count > 0,
+    };
+    if populated {
+        toolbar.extend(ToolbarControl::view(
+            manager_view(),
+            translate("tools-view-list"),
+            translate("tools-view-grid"),
+            move |view| manager_view.set(view),
+        ));
+    }
     if route == "connectors" {
         toolbar.push(
             ToolbarControl::button(translate("common-refresh"), move |_| {
@@ -68,33 +83,28 @@ pub fn Page() -> Element {
             })
             .icon(LineIcon::RefreshCw),
         );
-    } else if route != "extensions" {
-        if state.snapshot.loaded && state.view.visible_count > 0 {
-            toolbar.extend(ToolbarControl::view(
-                manager_view(),
-                translate("tools-view-list"),
-                translate("tools-view-grid"),
-                move |view| manager_view.set(view),
-            ));
-        }
-        if let Some(provider) = state.view.apply_provider.clone() {
-            let pending = state.pending.contains(&ToolOperationKey::new(
-                provider.clone(),
-                ToolOperationKind::Apply,
-                "",
-            ));
-            toolbar.push(
-                ToolbarControl::button(translate("tools-apply"), move |_| {
-                    send_operation(
-                        provider.clone(),
-                        ToolOperationKind::Apply,
-                        String::new(),
-                        String::new(),
-                    );
-                })
-                .disabled(pending),
-            );
-        }
+    } else if route != "extensions"
+        && let Some(provider) = state.view.apply_provider.clone()
+    {
+        let pending = state.pending.contains(&ToolOperationKey::new(
+            provider.clone(),
+            ToolOperationKind::Apply,
+            "",
+        ));
+        toolbar.push(
+            ToolbarControl::button(translate("tools-apply"), move |_| {
+                send_operation(
+                    provider.clone(),
+                    ToolOperationKind::Apply,
+                    String::new(),
+                    String::new(),
+                );
+            })
+            .disabled(pending),
+        );
+    }
+    if let Some(setup) = setup {
+        return rsx! { crate::connectors::Setup { id: setup.0, state: connector_state } };
     }
     rsx! {
         document::Title { "{title}" }
@@ -105,10 +115,10 @@ pub fn Page() -> Element {
                 sidebar: rsx! { ToolsSidebar { active: route.clone(), state: state.clone(), extensions: extension_state.clone(), connectors: connector_state.clone() } },
                 toolbar: rsx! { if !toolbar.is_empty() { PageToolbar { controls: toolbar } } },
                 if route == "extensions" {
-                    ExtensionManager { state: extension_state }
+                    ExtensionManager { state: extension_state, view: manager_view() }
                 } else if route == "connectors" {
                     ManagerList {
-                        crate::connectors::Accounts { state: connector_state, query: state.view.query.clone() }
+                        crate::connectors::Accounts { state: connector_state, query: state.view.query.clone(), view: manager_view() }
                     }
                 } else {
                     ToolManager { state, manager_view }
@@ -409,7 +419,7 @@ fn ToolThumbnail(item: ToolItem, provider: ToolProviderMetadata, class: String) 
         };
     }
     rsx! {
-        ManagerThumbnail { src: item.icon, fallback: provider.short_label }
+        ManagerThumbnail { src: item.icon.or_else(|| Some(ToolRouteOption::icon_url(&provider.route))), fallback: provider.short_label }
     }
 }
 
@@ -539,24 +549,11 @@ fn ToolSection(
         ManagerSection { label, count,
             ManagerCollection { view,
                 for entry in entries {
-                    if view == ManagerView::Grid {
-                        ToolCard {
-                            key: "{entry.provider.provider.id()}:{entry.item.id}",
-                            item: entry.item.clone(),
-                            provider: entry.provider,
-                            selected: selection.as_ref().is_some_and(|selected| selected.matches(&entry.item)),
-                            pending: pending.clone(),
-                            onselect,
-                        }
-                    } else {
-                        ToolRow {
-                            key: "{entry.provider.provider.id()}:{entry.item.id}",
-                            item: entry.item.clone(),
-                            provider: entry.provider,
-                            selected: selection.as_ref().is_some_and(|selected| selected.matches(&entry.item)),
-                            pending: pending.clone(),
-                            onselect,
-                        }
+                    ToolItemView {
+                        key: "{entry.provider.provider.id()}:{entry.item.id}",
+                        view, item: entry.item.clone(), provider: entry.provider,
+                        selected: selection.as_ref().is_some_and(|selected| selected.matches(&entry.item)),
+                        pending: pending.clone(), onselect,
                     }
                 }
             }
@@ -597,43 +594,8 @@ fn HomebrewSourceCard(root: String) -> Element {
 }
 
 #[component]
-fn ToolRow(
-    item: ToolItem,
-    provider: ToolProviderMetadata,
-    selected: bool,
-    pending: BTreeSet<ToolOperationKey>,
-    onselect: EventHandler<ToolSelection>,
-) -> Element {
-    let version = item.version.clone().unwrap_or_default();
-    let show_icon = provider.thumbnails;
-    let selection = ToolSelection::of(&item);
-    rsx! {
-        ManagerRow {
-            show_icon,
-            icon_surface: !provider.provider.is("acp"),
-            selected,
-            onselect: move |_| onselect.call(selection.clone()),
-            icon: rsx! {
-                ToolThumbnail {
-                    item: item.clone(),
-                    provider: provider.clone(),
-                    class: "size-7 text-[8px]".to_string(),
-                }
-            },
-            title: item.name.clone(),
-            subtitle: version,
-            meta: rsx! {
-                ToolMeta { item: item.clone(), provider: provider.clone() }
-            },
-            actions: rsx! {
-                ToolQuickInstall { item: item.clone(), pending }
-            },
-        }
-    }
-}
-
-#[component]
-fn ToolCard(
+fn ToolItemView(
+    view: ManagerView,
     item: ToolItem,
     provider: ToolProviderMetadata,
     selected: bool,
@@ -643,32 +605,27 @@ fn ToolCard(
     let version = item.version.clone().unwrap_or_default();
     let selection = ToolSelection::of(&item);
     rsx! {
-        ManagerCard {
-            show_icon: provider.thumbnails,
-            icon_surface: !provider.provider.is("acp"),
-            selected,
-            onselect: move |_| onselect.call(selection.clone()),
-            icon: rsx! {
-                ToolThumbnail {
-                    item: item.clone(),
-                    provider: provider.clone(),
-                    class: "size-10 text-[10px]".to_string(),
-                }
-            },
-            title: item.name.clone(),
-            subtitle: version,
-            actions: rsx! {
-                ToolQuickInstall { item: item.clone(), pending }
-            },
-            meta: rsx! {
-                ToolMeta { item: item.clone(), provider }
-            },
+        ManagerItem {
+            view, selected, onselect: move |_| onselect.call(selection.clone()),
+            icon: rsx! { ToolThumbnail { item: item.clone(), provider: provider.clone(), class: "size-6 text-[8px]".to_string() } },
+            title: item.name.clone(), subtitle: version,
+            meta: rsx! { ToolMeta { item: item.clone(), provider: provider.clone() } },
+            actions: rsx! { ToolQuickInstall { item, pending } },
         }
     }
 }
 
 #[component]
 fn ToolQuickInstall(item: ToolItem, pending: BTreeSet<ToolOperationKey>) -> Element {
+    if item.provider.is("acp") {
+        let url = vmux_api::session::AgentSetupRoute(item.id).url();
+        return rsx! {
+            ManagerButton { variant: ManagerButtonVariant::Ghost,
+                onclick: move |event: MouseEvent| { event.stop_propagation(); PageNavigation::stack(url.clone()); },
+                {translate("onboarding-setup")}
+            }
+        };
+    }
     if !item.installable() {
         return rsx! {};
     }

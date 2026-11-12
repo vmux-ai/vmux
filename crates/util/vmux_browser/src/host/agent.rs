@@ -8,8 +8,8 @@ use vmux_ecs::agent::{
     AgentRequestRouteSet, CommandOrigin,
 };
 use vmux_ecs::browser::{
-    BrowserNavigationSnapshotResponse, BrowserScrollRequest, BrowserScrollResponse,
-    BrowserSnapshotRequest, BrowserSnapshotResponse,
+    BrowserNavigationSnapshotResponse, BrowserOpenRequest, BrowserScrollRequest,
+    BrowserScrollResponse, BrowserSnapshotRequest, BrowserSnapshotResponse,
 };
 use vmux_ecs::profile::Projects;
 use vmux_ecs::service::ServiceRequest;
@@ -72,7 +72,8 @@ pub(crate) struct AgentBrowserPlugin;
 
 impl Plugin for AgentBrowserPlugin {
     fn build(&self, app: &mut App) {
-        app.add_agent_request::<AgentBrowserNavigate>()
+        app.add_plugins(OpeningPlugin)
+            .add_agent_request::<AgentBrowserNavigate>()
             .add_agent_request::<AgentOpenBrowser>()
             .add_message::<PageOpenRequest>()
             .add_message::<OpenBesideRequest>()
@@ -115,11 +116,23 @@ impl Plugin for AgentBrowserPlugin {
                     go_forward,
                     search_history,
                     open_in_new_stack,
-                    open,
                 )
                     .after(AgentRequestRouteSet),)
                     .chain(),
             );
+    }
+}
+
+struct OpeningPlugin;
+
+impl Plugin for OpeningPlugin {
+    fn build(&self, app: &mut App) {
+        app.add_message::<AgentRequestMessage<AgentOpenBrowser>>()
+            .add_message::<AgentCommandResponse>()
+            .add_message::<BrowserOpenRequest>()
+            .add_message::<OpenBesideRequest>()
+            .add_message::<PageOpenRequest>()
+            .add_systems(Update, (open, open_from_page).after(AgentRequestRouteSet));
     }
 }
 
@@ -437,6 +450,24 @@ impl OpenResolver<'_, '_> {
             self.focused.stack
         }
         .ok_or("browser source conversation is unavailable")?;
+        self.pane(stack)
+    }
+
+    fn page(&self, source: Entity) -> Result<(Entity, bool), String> {
+        let mut ancestor = source;
+        loop {
+            if self.stacks.contains(ancestor) {
+                return self.pane(ancestor);
+            }
+            ancestor = self
+                .parents
+                .get(ancestor)
+                .map_err(|_| "browser source page is unavailable")?
+                .parent();
+        }
+    }
+
+    fn pane(&self, stack: Entity) -> Result<(Entity, bool), String> {
         let pane = self
             .parents
             .get(stack)
@@ -451,13 +482,45 @@ impl OpenResolver<'_, '_> {
     }
 }
 
+#[derive(bevy::ecs::system::SystemParam)]
+struct BrowserOpening<'w, 's> {
+    beside: MessageWriter<'w, OpenBesideRequest>,
+    pages: MessageWriter<'w, PageOpenRequest>,
+    commands: Commands<'w, 's>,
+}
+
+impl BrowserOpening<'_, '_> {
+    fn open(&mut self, target: (Entity, bool), url: String, request_id: [u8; 16]) {
+        let (pane, wide) = target;
+        if wide {
+            self.beside.write(OpenBesideRequest {
+                pane,
+                direction: Some(PaneDirection::Right),
+                url,
+                request_id,
+                focus: true,
+            });
+        } else {
+            let stack = self
+                .commands
+                .spawn((Stack::bundle(), LastActivatedAt::now(), ChildOf(pane)))
+                .id();
+            self.pages.write(PageOpenRequest {
+                target: PageOpenTarget::Stack(stack),
+                url,
+                request_id: None,
+            });
+            self.commands
+                .trigger(vmux_ecs::ActivateRequest { entity: stack });
+        }
+    }
+}
+
 fn open(
     mut requests: MessageReader<AgentRequestMessage<AgentOpenBrowser>>,
     target: OpenResolver,
     mut responses: MessageWriter<AgentCommandResponse>,
-    mut beside: MessageWriter<OpenBesideRequest>,
-    mut pages: MessageWriter<PageOpenRequest>,
-    mut commands: Commands,
+    mut opening: BrowserOpening,
 ) {
     for request in requests.read() {
         if let Err(error) = Url::parse(&request.payload.url) {
@@ -465,30 +528,35 @@ fn open(
             continue;
         }
         match target.resolve(request.payload.source.as_deref()) {
-            Ok((pane, wide)) => {
-                if wide {
-                    beside.write(OpenBesideRequest {
-                        pane,
-                        direction: Some(PaneDirection::Right),
-                        url: request.payload.url.clone(),
-                        request_id: request.reply.request_id.0,
-                        focus: true,
-                    });
-                } else {
-                    let stack = commands
-                        .spawn((Stack::bundle(), LastActivatedAt::now(), ChildOf(pane)))
-                        .id();
-                    pages.write(PageOpenRequest {
-                        target: PageOpenTarget::Stack(stack),
-                        url: request.payload.url.clone(),
-                        request_id: None,
-                    });
-                    commands.trigger(vmux_ecs::ActivateRequest { entity: stack });
-                }
+            Ok(target) => {
+                opening.open(
+                    target,
+                    request.payload.url.clone(),
+                    request.reply.request_id.0,
+                );
                 responses.write(request.reply.ok());
             }
             Err(error) => {
                 responses.write(request.reply.response(AgentCommandResult::Error(error)));
+            }
+        }
+    }
+}
+
+fn open_from_page(
+    mut requests: MessageReader<BrowserOpenRequest>,
+    target: OpenResolver,
+    mut opening: BrowserOpening,
+) {
+    for request in requests.read() {
+        if let Err(error) = Url::parse(&request.url) {
+            bevy::log::warn!("browser page request refused: {error}");
+            continue;
+        }
+        match target.page(request.source) {
+            Ok(target) => opening.open(target, request.url.clone(), AgentRequestId::new().0),
+            Err(error) => {
+                bevy::log::warn!("browser page request refused: {error}");
             }
         }
     }
@@ -531,18 +599,17 @@ mod opening_tests {
 
     #[test]
     fn account_pages_preserve_the_source_and_choose_layout_from_logical_width() {
-        for (physical_width, inverse_scale, wide) in [
-            (2400.0, 0.5, true),
-            (1200.0, 0.5, false),
-            (600.0, 1.0, false),
+        for (physical_width, inverse_scale, wide, connector) in [
+            (2400.0, 0.5, true, false),
+            (1200.0, 0.5, false, false),
+            (600.0, 1.0, false, false),
+            (2400.0, 0.5, true, true),
+            (1200.0, 0.5, false, true),
+            (600.0, 1.0, false, true),
         ] {
             let mut app = App::new();
             app.add_plugins((MinimalPlugins, vmux_ecs::PrimitivesPlugin))
-                .add_message::<AgentRequestMessage<AgentOpenBrowser>>()
-                .add_message::<AgentCommandResponse>()
-                .add_message::<OpenBesideRequest>()
-                .add_message::<PageOpenRequest>()
-                .add_systems(Update, open);
+                .add_plugins(OpeningPlugin);
             let pane = app
                 .world_mut()
                 .spawn(ComputedNode {
@@ -552,7 +619,11 @@ mod opening_tests {
                 })
                 .id();
             let source = "sign-in/source?draft#1";
-            let source_url = "vmux://sessions/sign-in%2Fsource%3Fdraft%231";
+            let source_url = if connector {
+                "vmux://tools/connectors/github/setup"
+            } else {
+                "vmux://sessions/sign-in%2Fsource%3Fdraft%231"
+            };
             let stack = app.world_mut().spawn((Stack::bundle(), ChildOf(pane))).id();
             app.world_mut()
                 .entity_mut(stack)
@@ -574,17 +645,25 @@ mod opening_tests {
                 .local_bundle(),
             );
             let url = "https://example.test/auth?state=%2B%2F&challenge=a+b";
-            app.world_mut().write_message(AgentRequestMessage {
-                reply: AgentReply::new(AgentRequestId::new()),
-                origin: CommandOrigin::Agent {
-                    sid: None,
-                    anchor: None,
-                },
-                payload: AgentOpenBrowser {
+            if connector {
+                let view = app.world_mut().spawn(ChildOf(stack)).id();
+                app.world_mut().write_message(BrowserOpenRequest {
+                    source: view,
                     url: url.into(),
-                    source: Some(source.into()),
-                },
-            });
+                });
+            } else {
+                app.world_mut().write_message(AgentRequestMessage {
+                    reply: AgentReply::new(AgentRequestId::new()),
+                    origin: CommandOrigin::Agent {
+                        sid: None,
+                        anchor: None,
+                    },
+                    payload: AgentOpenBrowser {
+                        url: url.into(),
+                        source: Some(source.into()),
+                    },
+                });
+            }
             app.update();
             assert_eq!(
                 app.world()

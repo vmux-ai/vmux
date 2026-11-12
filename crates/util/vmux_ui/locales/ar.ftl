@@ -1182,3 +1182,6 @@ connectors-configured = تم الإعداد
 connectors-open-in-app = فتح في Vmux
 connectors-open-external = فتح في متصفح خارجي
 connectors-verification-code-help = انسخ هذا الرمز وأدخله في { $service } لإكمال تسجيل الدخول.
+
+connectors-setup-intro = اربط { $service } بهذا الملف الشخصي. سأرشدك خلال تسجيل الدخول، ثم يمكنك اختياره في محادثاتك.
+connectors-setup-connected = تم ربط { $service }. يمكنك الآن اختياره في محادثة.

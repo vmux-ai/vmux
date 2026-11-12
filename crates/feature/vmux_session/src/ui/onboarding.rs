@@ -17,6 +17,23 @@ pub(super) fn Onboarding() -> Element {
         .state
         .read()
         .clone();
+    let requested = try_consume_context::<vmux_ecs::PageMetadata>()
+        .and_then(|metadata| crate::Route::manager_filter(&metadata.url, "agent"));
+    let mut entered = use_signal(|| false);
+    use_effect(use_reactive!(|state, requested| {
+        if entered() || state.starting {
+            return;
+        }
+        let Some(id) = &requested else {
+            return;
+        };
+        if state.agents.iter().any(|agent| agent.id == *id) {
+            entered.set(true);
+            let _ = send(&OnboardingConnect {
+                agent_id: id.clone(),
+            });
+        }
+    }));
     rsx! { Conversation { state } }
 }
 
