@@ -618,6 +618,65 @@ mod tests {
     }
 
     #[test]
+    fn an_unavailable_icon_does_not_hide_other_bookmarks_or_rewrite_the_source() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("bookmarks.ron");
+        let body = r#"(
+            resources: {},
+            entities: {
+                1: (components: {
+                    "vmux_ecs::Bookmark": (),
+                    "vmux_header::system::PageMetadata": (
+                        title: "Legacy",
+                        url: "vmux://vm/docker/containers",
+                        icon: Builtin(Container),
+                        bg_color: None,
+                    ),
+                }),
+                2: (components: {
+                    "vmux_ecs::Bookmark": (),
+                    "vmux_header::system::PageMetadata": (
+                        title: "Terminal",
+                        url: "vmux://terminal/",
+                        icon: Builtin(Terminal),
+                        bg_color: None,
+                    ),
+                }),
+            },
+        )"#;
+        std::fs::write(&path, body).unwrap();
+        let mut app = App::new();
+        app.add_plugins((
+            MinimalPlugins,
+            bevy::asset::AssetPlugin::default(),
+            vmux_ecs::PrimitivesPlugin,
+        ))
+        .add_plugins(SchemaPlugin::<BookmarkStore>::default())
+        .init_resource::<OfferedBookmarkDefaults>()
+        .add_observer(load_on::<LoadWorld<BookmarkFilter>>);
+        let load = BookmarkStorePath(path.clone()).load().unwrap();
+        app.world_mut().commands().trigger_load(load);
+        app.update();
+        let mut bookmarks = app
+            .world_mut()
+            .query_filtered::<&PageMetadata, With<Bookmark>>()
+            .iter(app.world())
+            .cloned()
+            .collect::<Vec<_>>();
+        bookmarks.sort_by(|left, right| left.title.cmp(&right.title));
+        assert_eq!(bookmarks.len(), 2);
+        assert_eq!(bookmarks[0].title, "Legacy");
+        assert_eq!(bookmarks[0].url, "vmux://vm/docker/containers");
+        assert_eq!(bookmarks[0].icon, PageIcon::None);
+        assert_eq!(bookmarks[1].title, "Terminal");
+        assert_eq!(
+            bookmarks[1].icon,
+            PageIcon::Builtin(vmux_api::BuiltinIcon::Terminal)
+        );
+        assert_eq!(std::fs::read_to_string(path).unwrap(), body);
+    }
+
+    #[test]
     fn existing_bookmark_store_receives_missing_defaults() {
         let dir = tempfile::tempdir().expect("tempdir");
         let path = dir.path().join("bookmarks.ron");
