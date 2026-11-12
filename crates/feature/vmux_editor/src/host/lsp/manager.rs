@@ -4,6 +4,8 @@ use std::path::{Path, PathBuf};
 use bevy::prelude::*;
 use bevy_cef::prelude::{Browsers, UiInput};
 #[cfg(test)]
+use vmux_ecs::Operation;
+#[cfg(test)]
 use vmux_ecs::event::FileLine;
 use vmux_ecs::event::{
     CompletionItem, DiagSeverity, EditorCapability, FileCodeActionDismissRequest,
@@ -13,11 +15,11 @@ use vmux_ecs::event::{
 };
 use vmux_ecs::page::PageReady;
 use vmux_ecs::{
-    FileUiStateWrite, Job, JobPlugin, JobRequest, JobResult, JobSet, JobWake, Operation,
-    OperationCompleted, OperationState, OperationTarget,
+    FileUiStateWrite, Job, JobPlugin, JobRequest, JobResult, JobSet, JobWake, OperationState,
 };
 use vmux_lsp::{
-    DocumentBinding, DocumentPath, Root as WorkspaceRoot, Server, ServerBinding, Transport,
+    DocumentBinding, DocumentPath, LaunchServer, Root as WorkspaceRoot, Server, ServerBinding,
+    ServerCompleted, ServerFailure, StartServer, Stopped, Transport,
 };
 use vmux_path::PathIdentity;
 use vmux_setting::AppSettings;
@@ -40,6 +42,8 @@ use lsp_types::{HoverContents, MarkedString};
 
 #[cfg(test)]
 pub(crate) use tests::DocumentFixture;
+
+pub use vmux_lsp::RestartServer as LspRestartRequest;
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub(crate) struct LspLine(String);
@@ -373,7 +377,6 @@ pub struct LspManager<'w, 's> {
             &'static ChildOf,
         ),
     >,
-    context: Query<'w, 's, &'static LspContext>,
     lookup: vmux_lsp::LspLookup<'w, 's>,
     bindings: Query<'w, 's, &'static DocumentBinding>,
     editors: Query<'w, 's, (Entity, &'static Editor)>,
@@ -381,7 +384,6 @@ pub struct LspManager<'w, 's> {
     synced: Query<'w, 's, &'static LspSynced>,
     views: Query<'w, 's, &'static FileView>,
     unsent: Query<'w, 's, (), With<LspEditDirty>>,
-    wake: Option<Res<'w, JobWake>>,
     roots: Query<'w, 's, (Entity, &'static vmux_ecs::Cwd), With<WorkspaceRoot>>,
 }
 
@@ -392,11 +394,7 @@ struct LspContext {
 }
 
 #[derive(Component)]
-struct LspServerStartTask {
-    key: ServerKey,
-    command: String,
-    server: Entity,
-}
+struct LspServerStartTask(LaunchServer);
 
 #[derive(Clone)]
 struct StartJob {
@@ -425,9 +423,6 @@ impl Job for StartJob {
         vmux_ecs::blocking::Lane::Long
     }
 }
-
-#[derive(Component)]
-struct LspServerFailed(ServerKey);
 
 #[derive(Message)]
 pub(crate) struct LspDocumentChangeRequest {
@@ -475,7 +470,11 @@ impl LspManager<'_, '_> {
             let Ok(view) = self.views.get(owner) else {
                 continue;
             };
-            let document = self.bindings.get(owner).ok().map(|binding| binding.document());
+            let document = self
+                .bindings
+                .get(owner)
+                .ok()
+                .map(|binding| binding.document());
             let mut source_known = !editor.core.dirty;
             if let Some(document) = document
                 && let Ok((_, _, _, parent)) = self.documents.get(document)
@@ -1305,138 +1304,75 @@ struct ServersPlugin;
 impl Plugin for ServersPlugin {
     fn build(&self, app: &mut App) {
         app.add_plugins(JobPlugin::<StartJob>::default())
-            .add_message::<LspRestartRequest>()
+            .configure_sets(Update, vmux_lsp::LspSet::Servers.after(JobSet::Apply))
             .add_systems(
                 Update,
-                (
-                    reset_workspaces,
-                    restart_servers,
-                    finish_server_starts,
-                    poll_server_exits,
-                )
-                    .chain()
-                    .in_set(ServerSet)
-                    .in_set(vmux_lsp::LspSet::Servers)
+                finish_server_starts
                     .after(JobSet::Apply)
+                    .before(vmux_lsp::LspSet::Servers),
+            )
+            .add_systems(
+                Update,
+                launch_servers
+                    .after(vmux_lsp::LspSet::Servers)
                     .before(DocumentSet),
             );
     }
 }
 
-#[derive(SystemSet, Clone, Copy, Debug, PartialEq, Eq, Hash)]
-struct ServerSet;
-
-#[derive(Message)]
-pub struct LspRestartRequest {
-    pub server: Entity,
-}
-
-fn restart_servers(
-    mut requests: MessageReader<LspRestartRequest>,
-    servers: Query<(), With<Server>>,
-    views: Query<(Entity, &ServerBinding)>,
+fn launch_servers(
+    mut launches: MessageReader<LaunchServer>,
+    context: Query<&LspContext>,
+    operations: Query<&OperationState>,
+    wake: Option<Res<JobWake>>,
     mut commands: Commands,
 ) {
-    for request in requests.read() {
-        if !servers.contains(request.server) {
+    for launch in launches.read() {
+        if !matches!(
+            operations.get(launch.operation),
+            Ok(OperationState::Pending | OperationState::Running)
+        ) {
             continue;
         }
-        for (entity, binding) in &views {
-            if binding.server() == request.server {
-                commands.entity(entity).remove::<(
-                    LspOpened,
-                    ServerBinding,
-                    DocumentBinding,
-                    LspInitialized,
-                    LspDiagnostics,
-                )>();
-            }
-        }
-        commands.entity(request.server).despawn();
-    }
-}
-
-type WorkspaceChanges = (With<WorkspaceRoot>, Changed<vmux_ecs::Cwd>);
-
-fn reset_workspaces(
-    roots: Query<(Entity, Ref<vmux_ecs::Cwd>), WorkspaceChanges>,
-    servers: Query<(Entity, &ChildOf), With<Server>>,
-    mut commands: Commands,
-) {
-    for (root, path) in &roots {
-        if path.is_added() {
+        let Ok(context) = context.single() else {
             continue;
+        };
+        let key = launch.key();
+        let spec = ServerSpec::new(
+            key.command().to_string(),
+            key.arguments().to_vec(),
+            String::new(),
+            Vec::new(),
+        );
+        commands.entity(launch.operation).insert((
+            LspServerStartTask(launch.clone()),
+            JobRequest(StartJob {
+                spec,
+                root: key.root().to_path_buf(),
+                diagnostics: context.diagnostics.scoped(launch.server()),
+                inputs: context.inputs.scoped(launch.server()),
+                wake: wake.as_ref().map(|wake| wake.0.clone()),
+            }),
+        ));
+        if let Some(wake) = &wake {
+            wake.0.wake_by_ref();
         }
-        for (entity, parent) in &servers {
-            if parent.parent() == root {
-                commands.entity(entity).despawn();
-            }
-        }
-    }
-}
-
-fn poll_server_exits(
-    clients: Query<(Entity, &ServerKey, &Transport)>,
-    documents: Query<(Entity, &ChildOf), With<OpenDoc>>,
-    mut commands: Commands,
-) {
-    for (entity, key, client) in &clients {
-        if !client.exited() {
-            continue;
-        }
-        for (document, parent) in &documents {
-            if parent.parent() == entity {
-                commands.entity(document).despawn();
-            }
-        }
-        commands
-            .entity(entity)
-            .insert(LspServerFailed(key.clone()))
-            .remove::<Transport>();
     }
 }
 
 fn finish_server_starts(
     mut starts: Query<(Entity, &LspServerStartTask, &mut JobResult<StartJob>)>,
-    servers: Query<&ServerKey, With<Server>>,
     mut commands: Commands,
 ) {
     for (entity, start, mut result) in &mut starts {
         let value = std::mem::replace(&mut result.0, Err("startup result consumed".into()));
-        if !servers.get(start.server).is_ok_and(|key| *key == start.key) {
-            commands.entity(entity).insert(OperationState::Canceled);
-            commands
-                .entity(entity)
-                .remove::<(LspServerStartTask, JobResult<StartJob>)>();
-            continue;
-        }
-        let value = match value {
-            Ok(value) => value,
+        let transport = match value {
+            Ok(value) => value.map(Transport::new),
             Err(error) => Err(error),
         };
-        match value {
-            Ok(client) => {
-                commands
-                    .entity(start.server)
-                    .insert((Name::new(start.command.clone()), Transport::new(client)));
-                commands.trigger(OperationCompleted {
-                    entity,
-                    result: Ok(()),
-                });
-            }
-            Err(error) => {
-                commands.entity(start.server).insert((
-                    Name::new(format!("Failed LSP server {}", start.command)),
-                    LspServerFailed(start.key.clone()),
-                ));
-                commands.trigger(OperationCompleted {
-                    entity,
-                    result: Err(error),
-                });
-            }
-        }
         commands
             .entity(entity)
+            .insert(ServerCompleted::new(start.0.clone(), transport))
             .remove::<(LspServerStartTask, JobResult<StartJob>)>();
     }
 }
@@ -1570,25 +1506,24 @@ fn cleanup_documents(manager: LspManager, views: Query<&DocumentBinding>, mut co
     }
 }
 
+type BlockedServers = Or<(With<ServerFailure>, With<Stopped>)>;
+
 fn open_documents(
     q: Query<(Entity, &FileView, &Editor), Without<LspOpened>>,
-    starts: Query<&LspServerStartTask>,
-    failures: Query<&LspServerFailed>,
+    failures: Query<&ServerKey, BlockedServers>,
     registry: Single<&LspRegistry>,
     settings: Res<AppSettings>,
     manager: LspManager,
+    wake: Option<Res<JobWake>>,
     mut commands: Commands,
 ) {
     let overrides = server_overrides(&settings);
-    let mut starting = HashSet::new();
-    for start in &starts {
-        starting.insert(start.key.clone());
-    }
     let mut failed = HashSet::new();
-    for failure in &failures {
-        failed.insert(failure.0.clone());
+    for key in &failures {
+        failed.insert(key.clone());
     }
     let mut pending_roots = Vec::<(PathBuf, Entity)>::new();
+    let mut pending_servers = Vec::<(ServerKey, Entity)>::new();
     let mut pending_documents = Vec::<(ServerKey, PathBuf, Entity)>::new();
     for (entity, view, editor) in &q {
         let Some(extension) = view
@@ -1621,10 +1556,16 @@ fn open_documents(
             continue;
         }
         let Some(client) = manager.client(&key) else {
-            if starting.insert(key.clone()) {
-                let Ok(context) = manager.context.single() else {
-                    continue;
-                };
+            let mut pending = None;
+            for (candidate, server) in &pending_servers {
+                if *candidate == key {
+                    pending = Some(*server);
+                    break;
+                }
+            }
+            if let Some(server) = pending {
+                commands.entity(entity).insert(ServerBinding::new(server));
+            } else if manager.server_entity(&key).is_none() {
                 let mut owner = None;
                 for (candidate, directory) in &manager.roots {
                     if directory.0 == root {
@@ -1655,33 +1596,15 @@ fn open_documents(
                 let server = commands
                     .spawn((
                         Server,
+                        StartServer,
                         key.clone(),
                         ChildOf(owner),
                         Name::new(format!("Starting LSP server {}", spec.command)),
                     ))
                     .id();
                 commands.entity(entity).insert(ServerBinding::new(server));
-                let diagnostics = context.diagnostics.scoped(server);
-                let inputs = context.inputs.scoped(server);
-                let command = spec.command.clone();
-                commands.spawn((
-                    Operation::bundle("lsp.start").unwrap(),
-                    OperationTarget::new(server),
-                    ChildOf(server),
-                    LspServerStartTask {
-                        key,
-                        command,
-                        server,
-                    },
-                    JobRequest(StartJob {
-                        spec,
-                        root,
-                        diagnostics,
-                        inputs,
-                        wake: manager.wake.as_ref().map(|wake| wake.0.clone()),
-                    }),
-                ));
-                if let Some(wake) = &manager.wake {
+                pending_servers.push((key.clone(), server));
+                if let Some(wake) = &wake {
                     wake.0.wake_by_ref();
                 }
             }
@@ -1815,7 +1738,7 @@ impl Plugin for RequestsPlugin {
                     .chain()
                     .after(DiagnosticsSet)
                     .after(DocumentSet)
-                    .after(ServerSet)
+                    .after(vmux_lsp::LspSet::Servers)
                     .before(vmux_lsp::LspSet::Requests),
             )
             .add_systems(
@@ -2143,8 +2066,6 @@ impl Plugin for ManagerPlugin {
             DiagnosticsPlugin,
             CodeActionsPlugin,
         ))
-        .add_observer(binding_removed::<DocumentBinding>)
-        .add_observer(binding_removed::<ServerBinding>)
         .add_systems(Startup, start)
         .configure_sets(
             Update,
@@ -2396,14 +2317,16 @@ struct DiagnosticsPlugin;
 
 impl Plugin for DiagnosticsPlugin {
     fn build(&self, app: &mut App) {
-        app.add_systems(
-            Update,
-            (drain_diagnostics, drain_lint, emit_diagnostics)
-                .chain()
-                .in_set(DiagnosticsSet)
-                .in_set(vmux_lsp::LspSet::Diagnostics)
-                .after(DocumentSet),
-        );
+        app.add_observer(binding_removed::<DocumentBinding>)
+            .add_observer(binding_removed::<ServerBinding>)
+            .add_systems(
+                Update,
+                (drain_diagnostics, drain_lint, emit_diagnostics)
+                    .chain()
+                    .in_set(DiagnosticsSet)
+                    .in_set(vmux_lsp::LspSet::Diagnostics)
+                    .after(DocumentSet),
+            );
     }
 }
 
@@ -2944,7 +2867,7 @@ mod tests {
     impl DiagnosticFixture {
         fn new() -> Self {
             let mut app = App::new();
-            app.add_plugins(DiagnosticsPlugin)
+            app.add_plugins((vmux_lsp::LspPlugin, DiagnosticsPlugin))
                 .insert_non_send(Browsers::default());
             let (sender, inbox) = LspDiagnosticsSender::channel();
             let (_, lint) = LintDiagnosticsSender::channel();
@@ -3051,7 +2974,7 @@ mod tests {
             .entity_mut(fixture.documents[0])
             .despawn();
         fixture.publish(0, Some(2), "closed");
-        assert_eq!(fixture.message(0), Some("unversioned"));
+        assert_eq!(fixture.message(0), None);
         assert_eq!(fixture.message(1), Some("two"));
     }
 
@@ -3526,7 +3449,6 @@ mod tests {
     #[test]
     fn restarting_a_server_refuses_queued_diagnostics_and_preserves_other_roots() {
         let mut fixture = DiagnosticFixture::new();
-        fixture.app.add_plugins(ServersPlugin);
         fixture.publish(0, Some(1), "one");
         fixture.publish(1, Some(1), "two");
         fixture.app.world_mut().write_message(LspRestartRequest {
@@ -3591,7 +3513,6 @@ mod tests {
     #[test]
     fn restarting_one_server_cancels_its_work_without_disturbing_another_server() {
         let mut fixture = RequestFixture::new();
-        fixture.app.add_plugins(ServersPlugin);
         let request = fixture.accept();
         let root = fixture
             .app

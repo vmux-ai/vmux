@@ -12,6 +12,12 @@ use vmux_ecs::{
     OperationTargetRevision,
 };
 
+pub use server::{
+    LaunchServer, RestartServer, ServerCompleted, ServerFailure, StartServer, StopServer, Stopped,
+};
+
+mod server;
+
 pub struct LspPlugin;
 
 impl Plugin for LspPlugin {
@@ -19,7 +25,8 @@ impl Plugin for LspPlugin {
         if !app.is_plugin_added::<OperationPlugin>() {
             app.add_plugins(OperationPlugin);
         }
-        app.init_resource::<RequestPolicy>()
+        app.add_plugins(server::ServersPlugin)
+            .init_resource::<RequestPolicy>()
             .configure_sets(
                 Update,
                 (
@@ -617,6 +624,175 @@ mod tests {
         assert_eq!(
             harness.app.world().get::<Response>(second).unwrap().0["result"],
             "other root"
+        );
+    }
+
+    #[test]
+    fn server_start_completion_and_stop_use_current_launch_identity() {
+        let mut app = App::new();
+        app.add_plugins(LspPlugin);
+        let root = app
+            .world_mut()
+            .spawn((Root, vmux_ecs::Cwd("/one".into())))
+            .id();
+        let server = app
+            .world_mut()
+            .spawn((
+                Server,
+                ServerKey::new("/one", "server"),
+                StartServer,
+                ChildOf(root),
+            ))
+            .id();
+        app.update();
+        let launches = app
+            .world_mut()
+            .resource_mut::<Messages<LaunchServer>>()
+            .drain()
+            .collect::<Vec<_>>();
+        assert_eq!(launches.len(), 1);
+        let launch = &launches[0];
+        app.world_mut()
+            .entity_mut(launch.operation)
+            .insert(ServerCompleted::new(
+                launch.clone(),
+                Ok(Transport::new(Probe::default())),
+            ));
+        app.update();
+        assert!(app.world().get::<Transport>(server).is_some());
+        assert_eq!(
+            app.world().get::<OperationState>(launch.operation),
+            Some(&OperationState::Succeeded)
+        );
+        app.world_mut().entity_mut(server).insert(StartServer);
+        app.update();
+        assert!(
+            app.world_mut()
+                .resource_mut::<Messages<LaunchServer>>()
+                .drain()
+                .next()
+                .is_none()
+        );
+        let document = app
+            .world_mut()
+            .spawn((
+                Document { version: 1 },
+                DocumentPath("/one/file.rs".into()),
+                ChildOf(server),
+            ))
+            .id();
+        app.world_mut().write_message(StopServer { server });
+        app.update();
+        assert!(app.world().get::<Transport>(server).is_none());
+        assert!(app.world().get::<Stopped>(server).is_some());
+        assert!(app.world().get_entity(document).is_err());
+        assert_eq!(
+            app.world().get::<OperationState>(launch.operation),
+            Some(&OperationState::Succeeded)
+        );
+    }
+
+    #[test]
+    fn root_change_discards_startup_and_keeps_another_root_running() {
+        let mut harness = Harness::new();
+        harness
+            .app
+            .world_mut()
+            .entity_mut(harness.servers[0])
+            .remove::<Transport>()
+            .insert(StartServer);
+        harness.app.update();
+        let launches = harness
+            .app
+            .world_mut()
+            .resource_mut::<Messages<LaunchServer>>()
+            .drain()
+            .collect::<Vec<_>>();
+        assert_eq!(launches.len(), 1);
+        harness
+            .app
+            .world_mut()
+            .entity_mut(launches[0].operation)
+            .insert(ServerCompleted::new(
+                launches[0].clone(),
+                Ok(Transport::new(Probe::default())),
+            ));
+        harness
+            .app
+            .world_mut()
+            .get_mut::<vmux_ecs::Cwd>(harness.roots[0])
+            .unwrap()
+            .0 = "/changed".into();
+        harness.app.update();
+        assert!(harness.app.world().get_entity(harness.servers[0]).is_err());
+        assert!(
+            harness
+                .app
+                .world()
+                .get::<Transport>(harness.servers[1])
+                .is_some()
+        );
+    }
+
+    #[test]
+    fn stopped_startup_completion_cannot_replace_a_new_start_on_the_same_server() {
+        let mut app = App::new();
+        app.add_plugins(LspPlugin);
+        let root = app
+            .world_mut()
+            .spawn((Root, vmux_ecs::Cwd("/one".into())))
+            .id();
+        let server = app
+            .world_mut()
+            .spawn((
+                Server,
+                ServerKey::new("/one", "server"),
+                StartServer,
+                ChildOf(root),
+            ))
+            .id();
+        app.update();
+        let old = app
+            .world_mut()
+            .resource_mut::<Messages<LaunchServer>>()
+            .drain()
+            .next()
+            .unwrap();
+        app.world_mut().write_message(StopServer { server });
+        app.update();
+        app.world_mut().entity_mut(server).insert(StartServer);
+        app.update();
+        let new = app
+            .world_mut()
+            .resource_mut::<Messages<LaunchServer>>()
+            .drain()
+            .next()
+            .unwrap();
+        let old_operation = old.operation;
+        let new_operation = new.operation;
+        let transport = Transport::new(Probe::default());
+        let identity = transport.identity();
+        app.world_mut()
+            .entity_mut(new_operation)
+            .insert(ServerCompleted::new(new, Ok(transport)));
+        app.world_mut()
+            .entity_mut(old_operation)
+            .insert(ServerCompleted::new(
+                old,
+                Ok(Transport::new(Probe::default())),
+            ));
+        app.update();
+        assert_eq!(
+            app.world().get::<Transport>(server).unwrap().identity(),
+            identity
+        );
+        assert_eq!(
+            app.world().get::<OperationState>(old_operation),
+            Some(&OperationState::Canceled)
+        );
+        assert_eq!(
+            app.world().get::<OperationState>(new_operation),
+            Some(&OperationState::Succeeded)
         );
     }
 

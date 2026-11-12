@@ -1388,8 +1388,9 @@ a language server. The host ships only the visible slice of a file and re-slices
 
 **Language servers.** `EditCore` remains the text editing and undo kernel owned by the `Editor`
 component. Its `content_version` changes on edits and undo/redo, independently of the document's
-LSP protocol version. Editor's private server, document, request, and diagnostics plugins own
-the native LSP lifecycle. A workspace root has shared `Cwd` and `Name`; its server children
+LSP protocol version. The renderer-independent `vmux_lsp` plugin owns server lifecycle and
+accepted requests; Editor's private adapters currently own document synchronization and diagnostics.
+A workspace root has shared `Cwd` and `Name`; its server children
 identify the root, command, and arguments; document children carry their path and accepted
 protocol version. Views bind to those documents, so closing one view preserves other users
 of the document. Removing a root or restarting a server invalidates only its descendants
@@ -1410,11 +1411,18 @@ Process handles, framing, reader/writer threads, and wire correlation stay in th
 adapter. Publishing input or a response, and closing the reader, wakes the reactive runner.
 Package selection, settings, navigation, and rendered projections remain Editor-owned. This
 public `vmux_lsp` core shares the server/document model, ownership relationships, and
-request cancellation, timeout, and response lifecycle with an independent application.
+server start/stop/restart, transport completion/failure, and request cancellation, timeout, and
+response lifecycle with an independent application. `StartServer` is idempotent while starting
+or ready. The process adapter receives `LaunchServer` and returns `ServerCompleted` on its
+Operation; the accepted launch identity stays private. Stop cancels pending startup without
+rewriting completed Operations. Root changes and restart invalidate only that server graph,
+so late startup completion cannot replace a newer transport.
 Documents derive their server identity from `ChildOf`; transport handles and wire correlation
 remain behind `TransportIo`. The application facade's `lsp` selection requires the shared ECS
 core, and Editor declares that dependency. Server selection and document/process adapters
-remain Editor-owned. The independent consumer exercises the same request pipeline without UI.
+remain Editor-owned. Native process initialization remains bounded inside the IO adapter.
+The independent consumer exercises the same server and request lifecycle, including stop,
+restart, transport failure, configuration identity, and concurrent roots, without UI.
 Lifecycle tests use the Rust `vmux_mock_lsp` recorder through real standard-input/output pipes.
 Run them with `cargo test --locked -p vmux_editor` so Cargo builds the registered test server.
 
