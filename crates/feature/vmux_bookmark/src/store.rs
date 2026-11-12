@@ -166,7 +166,7 @@ impl BookmarkSeed<'_, '_> {
             order = order.saturating_add(1);
         }
         pins.sort_by_key(|(entity, _, order)| (*order, entity.to_bits()));
-        let container_key = Self::key("vmux://docker/containers");
+        let container_key = Self::key("vmux://vm/docker/containers");
         let simulator_key = Self::key("vmux://simulator/");
         let Some(container) = pins.iter().position(|(_, key, _)| *key == container_key) else {
             return;
@@ -739,7 +739,7 @@ mod tests {
         let mut settings = AppSettings::default();
         settings.browser.bookmarks = vec![
             "vmux://simulator/".into(),
-            "vmux://docker/containers".into(),
+            "vmux://vm/docker/containers".into(),
         ];
         let mut app = App::new();
         app.add_plugins((

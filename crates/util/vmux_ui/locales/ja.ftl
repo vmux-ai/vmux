@@ -1169,3 +1169,12 @@ container-service-not-running = サービスは停止しています
 container-service-starting = サービスを起動中
 container-service-stopping = サービスを停止中
 container-no-selection = 未選択
+
+container-start-vm = VMを開始
+container-stop-vm = VMを停止
+container-start-all = すべて開始
+container-stop-all = すべて停止
+container-state-starting = 開始中
+container-start-group = { $group }のコンテナをすべて開始
+container-stop-group = { $group }のコンテナをすべて停止
+container-vm = VM

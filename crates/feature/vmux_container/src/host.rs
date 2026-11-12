@@ -391,6 +391,7 @@ type ProjectedEngines<'w, 's> = Query<
         Entity,
         Option<&'static Inventory>,
         &'static ConfigurationRevision,
+        &'static Revision,
     ),
     With<EngineView>,
 >;
@@ -401,7 +402,8 @@ fn project(
     catalog: Catalog,
     mut commands: Commands,
 ) {
-    let Ok((settings, observed, logs, error, busy, engine, inventory, revision)) = engines.single()
+    let Ok((settings, observed, logs, error, busy, engine, inventory, revision, engine_revision)) =
+        engines.single()
     else {
         return;
     };
@@ -435,6 +437,8 @@ fn project(
         inventory_error: inventory
             .map(|inventory| inventory.error.clone())
             .unwrap_or_default(),
+        engine_revision: engine_revision.0,
+        inventory_revision: inventory.map_or(0, |inventory| inventory.revision.0),
         containers: catalog.snapshot(engine),
         log_id: String::new(),
         container_logs: String::new(),

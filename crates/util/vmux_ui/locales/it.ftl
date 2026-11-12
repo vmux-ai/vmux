@@ -1189,3 +1189,12 @@ container-service-not-running = Servizio arrestato
 container-service-starting = Avvio del servizio
 container-service-stopping = Arresto del servizio
 container-no-selection = Nessuna selezione
+
+container-start-vm = Avvia VM
+container-stop-vm = Arresta VM
+container-start-all = Avvia tutti
+container-stop-all = Arresta tutti
+container-state-starting = Avvio in corso
+container-start-group = Avvia tutti in { $group }
+container-stop-group = Arresta tutti in { $group }
+container-vm = VM

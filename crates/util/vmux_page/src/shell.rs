@@ -105,6 +105,10 @@ mod tests {
     #[test]
     fn nested_documents_send_events_to_the_origin_endpoint() {
         for (document, endpoint) in [
+            (
+                "vmux://vm/docker/containers/groups/cloud/info",
+                "vmux://vm/__events",
+            ),
             ("vmux://docker/containers", "vmux://docker/__events"),
             (
                 "vmux://docker/containers/?view=logs#top",

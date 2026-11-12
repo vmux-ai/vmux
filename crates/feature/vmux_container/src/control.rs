@@ -82,6 +82,10 @@ impl Command {
                     ContainerOperation::Restart => DockerOperation::Restart,
                     ContainerOperation::Remove => DockerOperation::Remove,
                 };
+                if matches!(operation, DockerOperation::Start) && ids.len() > 1 {
+                    docker.start_many(&ids)?;
+                    return Ok(Reply::Changed);
+                }
                 let mut errors = Vec::new();
                 for id in ids {
                     if let Err(error) = docker.change(&id, operation) {

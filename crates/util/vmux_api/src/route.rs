@@ -145,11 +145,22 @@ impl VmuxRoute {
         }
         match (host.as_str(), root) {
             ("containers", true) => {
-                url.set_host(Some("docker"))
-                    .expect("static vmux route host");
-                url.set_path("/containers");
+                url.set_host(Some("vm")).expect("static vmux route host");
+                url.set_path("/docker/containers");
             }
-            ("docker", true) => url.set_path("/containers"),
+            ("docker", _) => {
+                let path = if root {
+                    "/containers".to_string()
+                } else {
+                    url.path().to_string()
+                };
+                url.set_host(Some("vm")).expect("static vmux route host");
+                url.set_path(&format!("/docker{path}"));
+            }
+            ("vm", true) => url.set_path("/docker/containers"),
+            ("vm", false) if url.path().trim_end_matches('/') == "/docker" => {
+                url.set_path("/docker/containers")
+            }
             ("agents", true) => {
                 url.set_host(Some("tools")).expect("static vmux route host");
                 url.set_path("/acp");
@@ -250,9 +261,11 @@ mod tests {
             ("vmux://tools/extensions", "vmux://tools/extensions"),
             ("vmux://cheatsheet/", "vmux://shortcuts/"),
             ("vmux://cheetsheet", "vmux://shortcuts/"),
-            ("vmux://containers/", "vmux://docker/containers"),
-            ("vmux://docker", "vmux://docker/containers"),
-            ("vmux://docker/containers", "vmux://docker/containers"),
+            ("vmux://containers/", "vmux://vm/docker/containers"),
+            ("vmux://docker", "vmux://vm/docker/containers"),
+            ("vmux://docker/containers", "vmux://vm/docker/containers"),
+            ("vmux://vm", "vmux://vm/docker/containers"),
+            ("vmux://vm/docker", "vmux://vm/docker/containers"),
         ];
         for (input, expected) in cases {
             assert_eq!(VmuxRoute::canonical(input).as_deref(), Some(expected));
@@ -267,7 +280,7 @@ mod tests {
         );
         assert_eq!(
             VmuxRoute::canonical("vmux://containers/?source=bookmark#logs").as_deref(),
-            Some("vmux://docker/containers?source=bookmark#logs")
+            Some("vmux://vm/docker/containers?source=bookmark#logs")
         );
     }
 
@@ -328,11 +341,14 @@ mod tests {
         assert!(exact.matches("vmux://projects?view=grid#active"));
         assert!(!exact.matches("vmux://projects/one"));
 
-        let containers = RoutePattern::new("vmux://docker/containers", false);
+        let containers = RoutePattern::new("vmux://vm/docker/containers", true);
         assert!(containers.matches("vmux://containers/?source=bookmark"));
         assert!(containers.matches("vmux://docker/"));
         assert!(!containers.matches("vmux://docker/images"));
         assert!(!containers.matches("vmux://kubernetes/pods"));
+        assert!(containers.matches("vmux://vm/docker/containers/groups/cloud/info"));
+        assert!(containers.matches("vmux://docker/containers/groups/cloud/info"));
+        assert!(!containers.matches("vmux://vm/kubernetes/containers"));
 
         let subtree = RoutePattern::new("https://example.com/tools/", true);
         assert!(subtree.matches("https://example.com/tools/git?branch=main"));

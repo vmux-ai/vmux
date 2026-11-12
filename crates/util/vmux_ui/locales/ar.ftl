@@ -1189,3 +1189,12 @@ container-service-not-running = الخدمة متوقفة
 container-service-starting = جارٍ تشغيل الخدمة
 container-service-stopping = جارٍ إيقاف الخدمة
 container-no-selection = لا يوجد تحديد
+
+container-start-vm = تشغيل الآلة الافتراضية
+container-stop-vm = إيقاف الآلة الافتراضية
+container-start-all = تشغيل الكل
+container-stop-all = إيقاف الكل
+container-state-starting = جارٍ التشغيل
+container-start-group = تشغيل الكل في { $group }
+container-stop-group = إيقاف الكل في { $group }
+container-vm = آلة افتراضية

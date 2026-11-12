@@ -1,6 +1,7 @@
 pub use client::{EngineClient, Status};
 pub use docker::{
-    Client as DockerClient, Container, Operation as DockerOperation, Port as DockerPort,
+    Client as DockerClient, Condition as DockerCondition, Container,
+    Dependency as DockerDependency, Operation as DockerOperation, Port as DockerPort,
 };
 pub use engine::{Engine, EnginePlugin, Failure, Phase};
 pub use process::{Executable, NetworkProxy};
