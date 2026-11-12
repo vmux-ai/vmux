@@ -450,9 +450,36 @@ pub struct ApprovalRequest {
     pub decision: crate::protocol::ApprovalDecision,
 }
 
+pub struct AgentSetupRoute(pub String);
+
+impl AgentSetupRoute {
+    pub fn url(&self) -> String {
+        let mut url = url::Url::parse("vmux://sessions/inbox").expect("static setup URL");
+        url.query_pairs_mut()
+            .append_pair("setup", "1")
+            .append_pair("agent", &self.0);
+        url.to_string()
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn agent_setup_urls_keep_agent_identifiers_inside_one_query_value() {
+        let id = "agent/with?query&setup=0#fragment";
+        let value = super::AgentSetupRoute(id.into()).url();
+        let url = url::Url::parse(&value).unwrap();
+        assert_eq!(url.scheme(), "vmux");
+        assert_eq!(url.host_str(), Some("sessions"));
+        assert_eq!(url.path(), "/inbox");
+        assert_eq!(
+            url.query_pairs().collect::<Vec<_>>(),
+            [("setup".into(), "1".into()), ("agent".into(), id.into())]
+        );
+        assert!(url.fragment().is_none());
+    }
 
     #[test]
     fn user_roundtrip() {

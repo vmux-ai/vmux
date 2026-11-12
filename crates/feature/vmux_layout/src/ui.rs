@@ -17,6 +17,7 @@ mod bookmark;
 mod error;
 mod extension;
 mod header;
+mod popup;
 mod remote;
 mod side_sheet;
 mod stack;

@@ -15,6 +15,3 @@ impl RetiredInfrastructureWebview {
         self.0 == entity
     }
 }
-
-#[derive(Component)]
-pub struct PopupWebview;

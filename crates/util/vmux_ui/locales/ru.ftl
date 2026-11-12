@@ -1165,3 +1165,23 @@ onboarding-key-failed = Не удалось сохранить ключ. Пов�
 onboarding-workspace-question = Где будем работать?
 agent-starting = Запуск агента…
 browser-open-external = Открыть во внешнем браузере
+connectors-title = Коннекторы
+connectors-description = Управляйте аккаунтами и выбирайте коннекторы в разговоре.
+connectors-empty = Нет доступных коннекторов
+connectors-sign-in-required = Требуется вход
+connectors-open-sign-in = Открыть вход
+
+connectors-command-description = Выберите коннекторы для этого разговора
+connectors-use = Использовать в чате
+connectors-selected = Выбран · убрать
+connectors-manage = Управление коннекторами
+connectors-manage-access = Управление доступом к репозиториям
+
+connectors-agent-configuration = Настройки агента
+connectors-configured = Настроено
+connectors-open-in-app = Открыть в Vmux
+connectors-open-external = Открыть во внешнем браузере
+connectors-verification-code-help = Скопируйте этот код и введите его в { $service }, чтобы завершить вход.
+
+connectors-setup-intro = Подключите { $service } к этому профилю. Я помогу вам войти, после чего вы сможете выбрать сервис в своих беседах.
+connectors-setup-connected = { $service } подключён. Теперь вы можете выбрать его в беседе.

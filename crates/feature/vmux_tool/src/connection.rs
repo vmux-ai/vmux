@@ -2,21 +2,26 @@ use std::collections::BTreeSet;
 use std::io::{BufRead, BufReader, Read, Write};
 use std::net::{TcpListener, TcpStream};
 use std::sync::mpsc;
+use std::sync::{
+    Arc,
+    atomic::{AtomicBool, Ordering},
+};
 use std::time::{Duration, Instant};
 
-use crate::{McpServerManifest, McpTransport, ToolStore};
+use crate::{McpServerManifest, ToolStore};
 use bevy::ecs::system::SystemParam;
 use bevy::prelude::*;
 use bevy::tasks::{IoTaskPool, Task, futures_lite::future};
-use bevy_cef::prelude::{Browsers, UiEventPlugin, UiInput};
+use bevy_cef::prelude::{UiEventPlugin, UiInput};
 use parking_lot::Mutex;
 use reqwest::blocking::{Client, Response};
 use ring::digest::{SHA256, digest};
 use serde::{Deserialize, Serialize};
 use url::Url;
 use vmux_api::mcp::{
-    McpServerEntry, McpServerOperation, McpServerPending, McpServerRequest, McpServerResult,
-    McpServerStatus, McpServersRequest, McpServersUiState,
+    McpAuthorization, McpLinkOpenRequest, McpServerCancelRequest, McpServerEntry,
+    McpServerOperation, McpServerPending, McpServerRequest, McpServerResult, McpServerStatus,
+    McpServersRequest, McpServersUiState,
 };
 use vmux_ecs::manifest::FeatureManifest;
 use vmux_ecs::profile::McpCredentials;
@@ -26,14 +31,30 @@ use vmux_ecs::{UiStatePlugin, UiStateWrite};
 
 pub struct McpConnectionPlugin;
 
+#[derive(SystemSet, Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub struct ConnectionSet;
+
+#[derive(Event)]
+pub struct ConnectorConnectionCompleted(pub McpServerResult);
+
 impl Plugin for McpConnectionPlugin {
     fn build(&self, app: &mut App) {
         app.add_plugins((
-            UiEventPlugin::<(McpServersRequest, McpServerRequest)>::default(),
+            UiEventPlugin::<(
+                McpServersRequest,
+                McpServerRequest,
+                McpServerCancelRequest,
+                McpLinkOpenRequest,
+            )>::default(),
             UiStatePlugin::<McpServersUiState>::default(),
         ))
         .add_systems(Startup, spawn_mcp_catalog)
+        .add_observer(cancel)
         .add_message::<PageOpenRequest>()
+        .add_message::<vmux_ecs::browser::BrowserOpenRequest>()
+        .add_observer(open_link)
+        .add_observer(page_ready)
+        .add_observer(dispose_setup)
         .add_observer(request_mcp_connections)
         .add_observer(begin_mcp_snapshot)
         .add_observer(request_mcp_server)
@@ -45,9 +66,214 @@ impl Plugin for McpConnectionPlugin {
                 start_mcp_snapshots,
                 drain_mcp_snapshots,
                 publish_mcp_connections,
+                start_links,
+                finish_links,
             )
-                .chain(),
+                .chain()
+                .in_set(ConnectionSet),
         );
+    }
+}
+
+#[derive(Component)]
+struct ExternalLink(String);
+
+#[derive(Component)]
+struct ExternalLinkTask(Task<Result<(), String>>);
+
+fn open_link(
+    trigger: On<UiInput<McpLinkOpenRequest>>,
+    states: Query<&McpPageState>,
+    catalog: McpCatalog,
+    mut opens: MessageWriter<PageOpenRequest>,
+    mut browsers: MessageWriter<vmux_ecs::browser::BrowserOpenRequest>,
+    mut commands: Commands,
+) {
+    let event = trigger.event();
+    let url = &event.payload.url;
+    if McpConnection::https_url(url, "connector link").is_err() {
+        return;
+    }
+    let sign_in = states.get(event.webview).is_ok_and(|state| {
+        state
+            .snapshot
+            .authorization
+            .as_ref()
+            .is_some_and(|authorization| &authorization.url == url)
+    });
+    let setup = catalog
+        .servers
+        .iter()
+        .any(|(_, server)| server.setup_url.as_ref() == Some(url));
+    if !sign_in && !setup {
+        return;
+    }
+    if event.payload.external {
+        commands.spawn((
+            Name::new("Open connector link externally"),
+            ExternalLink(url.clone()),
+            ChildOf(event.webview),
+        ));
+    } else if sign_in {
+        browsers.write(vmux_ecs::browser::BrowserOpenRequest {
+            source: event.webview,
+            url: url.clone(),
+        });
+    } else {
+        opens.write(PageOpenRequest {
+            target: PageOpenTarget::NewStack,
+            url: url.clone(),
+            request_id: None,
+        });
+    }
+}
+
+fn start_links(
+    requests: Query<(Entity, &ExternalLink), Without<ExternalLinkTask>>,
+    proxy: Option<Res<bevy::winit::EventLoopProxyWrapper>>,
+    mut commands: Commands,
+) {
+    for (entity, link) in &requests {
+        let url = link.0.clone();
+        let wake = proxy.as_deref().map(|proxy| (**proxy).clone());
+        commands
+            .entity(entity)
+            .insert(ExternalLinkTask(IoTaskPool::get().spawn(async move {
+                let result = SystemBrowser::open(&url);
+                if let Some(wake) = wake {
+                    let _ = wake.send_event(bevy::winit::WinitUserEvent::WakeUp);
+                }
+                result
+            })));
+    }
+}
+
+fn finish_links(mut tasks: Query<(Entity, &mut ExternalLinkTask)>, mut commands: Commands) {
+    for (entity, mut task) in &mut tasks {
+        let Some(result) = future::block_on(future::poll_once(&mut task.0)) else {
+            continue;
+        };
+        if let Err(error) = result {
+            warn!("Failed to open external connector link: {error}");
+        }
+        commands.entity(entity).despawn();
+    }
+}
+
+#[derive(Component, Clone, Default)]
+struct Cancellation(Arc<AtomicBool>);
+
+impl Cancellation {
+    fn cancel(&self) {
+        self.0.store(true, Ordering::Release);
+    }
+
+    fn check(&self) -> Result<(), String> {
+        if self.0.load(Ordering::Acquire) {
+            return Err("Authentication cancelled".to_string());
+        }
+        Ok(())
+    }
+
+    fn wait(&self, duration: Duration) -> Result<(), String> {
+        let deadline = Instant::now() + duration;
+        loop {
+            self.check()?;
+            let remaining = deadline.saturating_duration_since(Instant::now());
+            if remaining.is_zero() {
+                return Ok(());
+            }
+            std::thread::sleep(remaining.min(Duration::from_millis(50)));
+        }
+    }
+}
+
+fn cancel(
+    trigger: On<UiInput<McpServerCancelRequest>>,
+    cancellations: Query<&Cancellation>,
+    mut states: Query<&mut McpPageState>,
+    mut commands: Commands,
+) {
+    let target = trigger.event().webview;
+    let Ok(cancellation) = cancellations.get(target) else {
+        return;
+    };
+    cancellation.cancel();
+    commands
+        .entity(target)
+        .remove::<(McpOperationTask, PendingMcpOperation, Cancellation)>();
+    if let Ok(mut state) = states.get_mut(target) {
+        if let Some(pending) = &state.snapshot.pending {
+            commands.trigger(ConnectorConnectionCompleted(McpServerResult {
+                id: pending.id.clone(),
+                operation: pending.operation,
+                success: false,
+                message: String::new(),
+            }));
+        }
+        state.snapshot.pending = None;
+        state.snapshot.authorization = None;
+        state.snapshot.result = None;
+    }
+    commands.trigger(McpSnapshotRequest { target });
+}
+
+#[derive(Component)]
+struct SetupOwner(vmux_api::mcp::ConnectorSetupRoute);
+
+fn page_ready(
+    trigger: On<UiInput<vmux_api::PageReady>>,
+    pages: Query<&vmux_ecs::PageMetadata>,
+    owners: Query<&SetupOwner>,
+    mut commands: Commands,
+) {
+    let target = trigger.event().webview;
+    let Ok(page) = pages.get(target) else {
+        return;
+    };
+    let setup = vmux_api::mcp::ConnectorSetupRoute::parse(&page.url);
+    if owners
+        .get(target)
+        .is_ok_and(|owner| Some(&owner.0) != setup.as_ref())
+    {
+        if let Ok(owner) = owners.get(target) {
+            commands.trigger(ConnectorConnectionCompleted(McpServerResult {
+                id: owner.0.0.clone(),
+                operation: McpServerOperation::Connect,
+                success: false,
+                message: String::new(),
+            }));
+        }
+        commands.trigger(UiInput {
+            webview: target,
+            payload: McpServerCancelRequest,
+        });
+        commands.entity(target).remove::<SetupOwner>();
+    }
+    if let Some(setup) = setup {
+        commands.entity(target).insert(SetupOwner(setup));
+    }
+    if vmux_api::RoutePattern::new(crate::CONNECTORS_URL, true).matches(&page.url) {
+        commands.trigger(McpSnapshotRequest { target });
+    }
+}
+
+fn dispose_setup(
+    trigger: On<Despawn, SetupOwner>,
+    owners: Query<&SetupOwner>,
+    cancellations: Query<&Cancellation>,
+    mut commands: Commands,
+) {
+    if let Ok(cancellation) = cancellations.get(trigger.entity) {
+        cancellation.cancel();
+    }
+    if let Ok(owner) = owners.get(trigger.entity) {
+        commands.trigger(ConnectorConnectionCompleted(McpServerResult {
+            id: owner.0.0.clone(),
+            operation: McpServerOperation::Connect,
+            success: false,
+            message: String::new(),
+        }));
     }
 }
 
@@ -59,14 +285,10 @@ fn request_mcp_connections(trigger: On<UiInput<McpServersRequest>>, mut commands
 
 fn begin_mcp_snapshot(
     trigger: On<McpSnapshotRequest>,
-    browsers: NonSend<Browsers>,
     mut states: Query<&mut McpPageState>,
     mut commands: Commands,
 ) {
     let target = trigger.event().target;
-    if !browsers.can_emit_to(&target) {
-        return;
-    }
     let generation = match states.get_mut(target) {
         Ok(mut state) => {
             if state.snapshot.loading || state.snapshot.pending.is_some() {
@@ -153,10 +375,12 @@ fn start_mcp_operation(
         let completion_wake = proxy.as_deref().map(|proxy| (**proxy).clone());
         let progress_wake = completion_wake.clone();
         let (progress_sender, progress_receiver) = mpsc::channel();
+        let cancellation = Cancellation::default();
+        let operation_cancellation = cancellation.clone();
         let task = IoTaskPool::get().spawn(async move {
             let result = match (operation, server.as_ref()) {
                 (McpServerOperation::Connect, Some(server)) => {
-                    McpConnection::connect(server, &credentials, |url| {
+                    McpConnection::connect(server, &credentials, &operation_cancellation, |url| {
                         if progress_sender.send(url).is_ok()
                             && let Some(wake) = &progress_wake
                         {
@@ -178,10 +402,12 @@ fn start_mcp_operation(
         commands
             .entity(entity)
             .remove::<PendingMcpOperation>()
+            .insert(cancellation.clone())
             .insert(McpOperationTask {
                 generation,
                 id,
                 operation,
+                cancellation,
                 task,
                 progress: Mutex::new(progress_receiver),
             });
@@ -190,39 +416,55 @@ fn start_mcp_operation(
 
 fn drain_mcp_operations(
     mut tasks: Query<(Entity, &mut McpOperationTask)>,
-    browsers: NonSend<Browsers>,
-    mut page_open_requests: MessageWriter<PageOpenRequest>,
+    mut states: Query<&mut McpPageState>,
+    mut browsers: MessageWriter<vmux_ecs::browser::BrowserOpenRequest>,
+    other_pages: Query<Entity, With<McpPageState>>,
     mut commands: Commands,
 ) {
     for (entity, mut task) in &mut tasks {
-        while let Ok(url) = task.progress.get_mut().try_recv() {
-            if browsers.can_emit_to(&entity) {
-                page_open_requests.write(PageOpenRequest {
-                    target: PageOpenTarget::NewStack,
-                    url,
-                    request_id: None,
+        while let Ok(authorization) = task.progress.get_mut().try_recv() {
+            if let Ok(mut state) = states.get_mut(entity)
+                && state.generation == task.generation
+            {
+                browsers.write(vmux_ecs::browser::BrowserOpenRequest {
+                    source: entity,
+                    url: authorization.url.clone(),
                 });
+                state.snapshot.authorization = Some(authorization);
             }
         }
         let Some(result) = future::block_on(future::poll_once(&mut task.task)) else {
             continue;
         };
-        commands.entity(entity).remove::<McpOperationTask>();
+        if let Ok(mut state) = states.get_mut(entity)
+            && state.generation == task.generation
+        {
+            state.snapshot.authorization = None;
+        }
+        commands
+            .entity(entity)
+            .remove::<(McpOperationTask, Cancellation)>();
         let (success, message) = match result {
-            Ok(()) => (true, String::new()),
+            Ok(()) => {
+                for target in &other_pages {
+                    if target != entity {
+                        commands.trigger(McpSnapshotRequest { target });
+                    }
+                }
+                (true, String::new())
+            }
             Err(message) => (false, message),
         };
-        if !browsers.can_emit_to(&entity) {
-            continue;
-        }
+        let result = McpServerResult {
+            id: task.id.clone(),
+            operation: task.operation,
+            success,
+            message,
+        };
+        commands.trigger(ConnectorConnectionCompleted(result.clone()));
         commands.entity(entity).insert(PendingMcpSnapshot {
             generation: task.generation,
-            result: Some(McpServerResult {
-                id: task.id.clone(),
-                operation: task.operation,
-                success,
-                message,
-            }),
+            result: Some(result),
         });
     }
 }
@@ -280,16 +522,13 @@ fn drain_mcp_snapshots(
 
 fn publish_mcp_connections(
     states: Query<(Entity, &McpPageState), Changed<McpPageState>>,
-    browsers: NonSend<Browsers>,
     mut commands: Commands,
 ) {
     for (target, state) in &states {
-        if browsers.can_emit_to(&target) {
-            commands.trigger(UiStateWrite::<McpServersUiState>::from_event(
-                target,
-                &state.snapshot,
-            ));
-        }
+        commands.trigger(UiStateWrite::<McpServersUiState>::from_event(
+            target,
+            &state.snapshot,
+        ));
     }
 }
 
@@ -323,8 +562,15 @@ struct McpOperationTask {
     generation: u64,
     id: String,
     operation: McpServerOperation,
+    cancellation: Cancellation,
     task: Task<Result<(), String>>,
-    progress: Mutex<mpsc::Receiver<String>>,
+    progress: Mutex<mpsc::Receiver<McpAuthorization>>,
+}
+
+impl Drop for McpOperationTask {
+    fn drop(&mut self) {
+        self.cancellation.cancel();
+    }
 }
 
 #[derive(Component)]
@@ -335,6 +581,10 @@ struct McpSnapshotTask {
 
 #[derive(Component, Clone)]
 struct McpCatalogServer {
+    setup_url: Option<String>,
+    client_id: Option<String>,
+    client_id_env: Option<String>,
+    account_endpoint: Option<String>,
     id: String,
     url: String,
     scopes: Vec<String>,
@@ -342,17 +592,7 @@ struct McpCatalogServer {
 
 impl McpCatalogServer {
     fn manifest(&self) -> McpServerManifest {
-        McpServerManifest {
-            transport: McpTransport::Http,
-            command: None,
-            args: Vec::new(),
-            env: Default::default(),
-            cwd: None,
-            url: Some(self.url.clone()),
-            headers: Default::default(),
-            header_env: Default::default(),
-            bearer_token_env_var: None,
-        }
+        McpServerManifest::http(&self.url)
     }
 
     fn owns(&self, server: &McpServerManifest) -> bool {
@@ -367,6 +607,10 @@ fn spawn_mcp_catalog(features: Query<&FeatureManifest>, mut commands: Commands) 
         commands.spawn((
             Name::new(server.name.clone()),
             McpCatalogServer {
+                setup_url: server.setup_url.clone(),
+                client_id: server.client_id.clone(),
+                client_id_env: server.client_id_env.clone(),
+                account_endpoint: server.account_endpoint.clone(),
                 id: server.id.clone(),
                 url: server.url.clone(),
                 scopes: server.scopes.clone(),
@@ -407,67 +651,78 @@ impl McpSnapshotSource {
     ) -> McpServersUiState {
         let manifest = ToolStore::current().load().unwrap_or_default();
         let mut servers = Vec::new();
-        let mut catalog_ids = BTreeSet::new();
         for (name, server) in self.0 {
-            catalog_ids.insert(server.id.clone());
             let configured = manifest
                 .mcp
                 .servers
                 .get(&server.id)
                 .is_some_and(|manifest| server.owns(manifest));
             let occupied = manifest.mcp.servers.contains_key(&server.id);
+            let stored = credentials.storage.load(&server.id).ok().flatten();
             let authenticated = configured
-                && credentials
-                    .storage
-                    .load(&server.id)
-                    .ok()
-                    .flatten()
-                    .is_some_and(|credentials| credentials.authorizes(&server.url));
+                && stored.as_ref().is_some_and(|credentials| {
+                    credentials.authorizes(&server.url)
+                        && (!credentials.expires_soon()
+                            || credentials
+                                .refresh_token
+                                .as_ref()
+                                .is_some_and(|token| !token.is_empty()))
+                });
             let status = match (configured, authenticated, occupied) {
                 (false, _, true) => McpServerStatus::Configured,
                 (true, true, _) => McpServerStatus::Connected,
                 (true, false, _) => McpServerStatus::AuthenticationRequired,
                 (false, _, false) => McpServerStatus::Available,
             };
+            let account = stored.and_then(|credentials| credentials.account);
             servers.push(McpServerEntry {
+                setup_url: server.setup_url,
+                account,
                 id: server.id,
                 name,
                 description: String::new(),
                 status,
             });
         }
-        for (id, server) in manifest.mcp.servers {
-            if catalog_ids.contains(id.as_str()) || id == "vmux" {
-                continue;
-            }
-            let description = server
-                .url
-                .or(server.command)
-                .unwrap_or_else(|| format!("{:?}", server.transport).to_ascii_lowercase());
-            servers.push(McpServerEntry {
-                name: id.clone(),
-                id,
-                description,
-                status: McpServerStatus::Configured,
-            });
-        }
         McpServersUiState {
+            selected: Vec::new(),
             loaded: true,
             loading: false,
             servers,
             pending: None,
             result,
+            authorization: None,
         }
     }
 }
 
 struct McpConnection;
 
+struct SystemBrowser;
+
+impl SystemBrowser {
+    fn open(url: &str) -> Result<(), String> {
+        #[cfg(target_os = "macos")]
+        let program = "open";
+        #[cfg(not(target_os = "macos"))]
+        let program = "xdg-open";
+        let status = std::process::Command::new(program)
+            .arg(url)
+            .status()
+            .map_err(|error| error.to_string())?;
+        if !status.success() {
+            return Err(format!("System browser failed ({status})"));
+        }
+        Ok(())
+    }
+}
+
 impl McpConnection {
     async fn connect(
         server: &McpCatalogServer,
         credentials: &McpCredentials,
-        progress: impl FnOnce(String),
+        cancellation: &Cancellation,
+        progress: impl FnMut(McpAuthorization),
     ) -> Result<(), String> {
         {
             let store = ToolStore::current();
@@ -482,6 +737,7 @@ impl McpConnection {
         let redirect_uri = format!("http://127.0.0.1:{}/callback", address.port());
         let client = Client::builder()
             .timeout(Duration::from_secs(30))
+            .user_agent("Vmux")
             .redirect(reqwest::redirect::Policy::none())
             .build()
             .map_err(|error| error.to_string())?;
@@ -491,39 +747,42 @@ impl McpConnection {
             .first()
             .ok_or_else(|| "MCP server did not advertise an authorization server".to_string())?;
         let authorization = Self::authorization_metadata(&client, issuer)?;
-        let registration = Self::register(&client, &authorization, &redirect_uri)?;
-        let verifier = format!(
-            "{}{}",
-            uuid::Uuid::new_v4().simple(),
-            uuid::Uuid::new_v4().simple()
-        );
-        let challenge = base64_url(digest(&SHA256, verifier.as_bytes()).as_ref());
-        let state = uuid::Uuid::new_v4().simple().to_string();
-        let mut url = Self::https_url(
-            &authorization.authorization_endpoint,
-            "OAuth authorization endpoint",
-        )?;
-        url.query_pairs_mut()
-            .append_pair("response_type", "code")
-            .append_pair("client_id", &registration.client_id)
-            .append_pair("redirect_uri", &redirect_uri)
-            .append_pair("code_challenge", &challenge)
-            .append_pair("code_challenge_method", "S256")
-            .append_pair("state", &state)
-            .append_pair("resource", &server.url)
-            .append_pair("scope", &server.scopes.join(" "));
-        progress(url.to_string());
-        let code = McpCallback::receive(listener, &state)?;
-        let token = Self::exchange(
-            &client,
-            &authorization.token_endpoint,
-            &registration,
-            &code,
-            &verifier,
-            &redirect_uri,
-            &server.url,
-        )?;
+        let (registration, token) = if authorization.registration_endpoint.is_some() {
+            Self::authorization_code(
+                &client,
+                &authorization,
+                &redirect_uri,
+                listener,
+                server,
+                cancellation,
+                progress,
+            )?
+        } else {
+            DeviceFlow::authorize(&client, &authorization, server, cancellation, progress)?
+        };
+        let account = match &server.account_endpoint {
+            Some(endpoint) => {
+                let response: Result<serde_json::Value, String> =
+                    Self::https_url(endpoint, "account endpoint").and_then(|endpoint| {
+                        Self::json(client.get(endpoint).bearer_auth(&token.access_token).send())
+                    });
+                match response {
+                    Ok(value) => value
+                        .get("preferred_username")
+                        .or_else(|| value.get("login"))
+                        .or_else(|| value.get("name"))
+                        .and_then(serde_json::Value::as_str)
+                        .map(str::to_string),
+                    Err(error) => {
+                        warn!("Connector account lookup failed: {error}");
+                        None
+                    }
+                }
+            }
+            None => None,
+        };
         let oauth = McpOauthCredentials {
+            account,
             token_endpoint: authorization.token_endpoint,
             client_id: registration.client_id,
             client_secret: registration.client_secret,
@@ -537,6 +796,7 @@ impl McpConnection {
         let store = ToolStore::current();
         let _lease = store.lease_async().await;
         credentials.access.write(|| {
+            cancellation.check()?;
             Self::ensure_catalog_slot(&store, server)?;
             let original_credentials = credentials.storage.load(id)?;
             credentials.storage.store(id, &oauth)?;
@@ -551,43 +811,62 @@ impl McpConnection {
         })
     }
 
+    fn authorization_code(
+        client: &Client,
+        authorization: &AuthorizationServer,
+        redirect_uri: &str,
+        listener: TcpListener,
+        server: &McpCatalogServer,
+        cancellation: &Cancellation,
+        mut progress: impl FnMut(McpAuthorization),
+    ) -> Result<(ClientRegistration, TokenResponse), String> {
+        let registration = Self::register(client, authorization, redirect_uri)?;
+        let verifier = format!(
+            "{}{}",
+            uuid::Uuid::new_v4().simple(),
+            uuid::Uuid::new_v4().simple()
+        );
+        let challenge = base64_url(digest(&SHA256, verifier.as_bytes()).as_ref());
+        let state = uuid::Uuid::new_v4().simple().to_string();
+        let mut url = Self::https_url(
+            &authorization.authorization_endpoint,
+            "OAuth authorization endpoint",
+        )?;
+        url.query_pairs_mut()
+            .append_pair("response_type", "code")
+            .append_pair("client_id", &registration.client_id)
+            .append_pair("redirect_uri", redirect_uri)
+            .append_pair("code_challenge", &challenge)
+            .append_pair("code_challenge_method", "S256")
+            .append_pair("state", &state)
+            .append_pair("resource", &server.url)
+            .append_pair("scope", &server.scopes.join(" "));
+        progress(McpAuthorization {
+            url: url.to_string(),
+            code: None,
+        });
+        let code = McpCallback::receive(listener, &state, cancellation)?;
+        let token = Self::exchange(
+            client,
+            &authorization.token_endpoint,
+            &registration,
+            &code,
+            &verifier,
+            redirect_uri,
+            &server.url,
+        )?;
+        Ok((registration, token))
+    }
+
     async fn disconnect(
         server: &McpCatalogServer,
         credentials: &McpCredentials,
     ) -> Result<(), String> {
-        let id = &server.id;
         let store = ToolStore::current();
         let _lease = store.lease_async().await;
-        credentials.access.write(|| {
-            let stored = credentials.storage.load(id)?;
-            let original = store.load()?;
-            let configured = original
-                .mcp
-                .servers
-                .get(id)
-                .ok_or_else(|| format!("MCP server is not configured: {id}"))?;
-            if !server.owns(configured) {
-                return Err(format!(
-                    "MCP server ID is already managed by tools.toml: {id}"
-                ));
-            }
-            let mut updated = original.clone();
-            updated.mcp.servers.remove(id);
-            store.save(&updated)?;
-            if let Err(error) = credentials.storage.remove(id) {
-                let manifest_rollback = store.save(&original);
-                let credentials_rollback = stored
-                    .as_ref()
-                    .map(|stored| credentials.storage.store(id, stored))
-                    .unwrap_or(Ok(()));
-                return Err(Self::rollback_error(
-                    error,
-                    manifest_rollback,
-                    credentials_rollback,
-                ));
-            }
-            Ok(())
-        })
+        credentials
+            .access
+            .write(|| credentials.storage.remove(&server.id))
     }
 
     fn protected_metadata(client: &Client, resource: &str) -> Result<ProtectedResource, String> {
@@ -738,12 +1017,17 @@ impl McpConnection {
 struct McpCallback;
 
 impl McpCallback {
-    fn receive(listener: TcpListener, expected_state: &str) -> Result<String, String> {
+    fn receive(
+        listener: TcpListener,
+        expected_state: &str,
+        cancellation: &Cancellation,
+    ) -> Result<String, String> {
         listener
             .set_nonblocking(true)
             .map_err(|error| error.to_string())?;
         let deadline = Instant::now() + Duration::from_secs(300);
         loop {
+            cancellation.check()?;
             match listener.accept() {
                 Ok((mut stream, _)) => return Self::read(&mut stream, expected_state),
                 Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
@@ -819,6 +1103,8 @@ struct ProtectedResource {
 
 #[derive(Deserialize)]
 struct AuthorizationServer {
+    #[serde(default)]
+    device_authorization_endpoint: Option<String>,
     authorization_endpoint: String,
     token_endpoint: String,
     registration_endpoint: Option<String>,
@@ -847,6 +1133,128 @@ struct TokenResponse {
     scope: Option<String>,
 }
 
+struct DeviceFlow;
+
+impl DeviceFlow {
+    fn authorize(
+        client: &Client,
+        authorization: &AuthorizationServer,
+        server: &McpCatalogServer,
+        cancellation: &Cancellation,
+        mut progress: impl FnMut(McpAuthorization),
+    ) -> Result<(ClientRegistration, TokenResponse), String> {
+        let client_id = server
+            .client_id_env
+            .as_deref()
+            .and_then(|key| std::env::var(key).ok())
+            .or_else(|| server.client_id.clone())
+            .filter(|id| !id.trim().is_empty())
+            .ok_or_else(|| {
+                "This connector has no registered OAuth client ID in this build".to_string()
+            })?;
+        let endpoint = authorization
+            .device_authorization_endpoint
+            .as_deref()
+            .ok_or_else(|| "Authorization server does not support device flow".to_string())?;
+        let endpoint = McpConnection::https_url(endpoint, "device authorization endpoint")?;
+        let response: DeviceAuthorization = McpConnection::json(
+            client
+                .post(endpoint)
+                .header("Accept", "application/json")
+                .form(&[
+                    ("client_id", client_id.as_str()),
+                    ("scope", server.scopes.join(" ").as_str()),
+                ])
+                .send(),
+        )?;
+        let url =
+            McpConnection::https_url(&response.verification_uri, "verification URI")?.to_string();
+        progress(McpAuthorization {
+            url,
+            code: Some(response.user_code),
+        });
+        let deadline = Instant::now() + Duration::from_secs(response.expires_in.min(900));
+        let mut interval = response.interval.unwrap_or(5).max(1);
+        let endpoint = McpConnection::https_url(&authorization.token_endpoint, "token endpoint")?;
+        loop {
+            if Instant::now() >= deadline {
+                return Err("Authentication timed out".to_string());
+            }
+            cancellation.wait(
+                Duration::from_secs(interval)
+                    .min(deadline.saturating_duration_since(Instant::now())),
+            )?;
+            if Instant::now() >= deadline {
+                return Err("Authentication timed out".to_string());
+            }
+            let response = client
+                .post(endpoint.clone())
+                .header("Accept", "application/json")
+                .form(&[
+                    ("client_id", client_id.as_str()),
+                    ("device_code", response.device_code.as_str()),
+                    ("grant_type", "urn:ietf:params:oauth:grant-type:device_code"),
+                ])
+                .send()
+                .map_err(|error| error.to_string())?;
+            let result: DeviceToken = response.json().map_err(|error| error.to_string())?;
+            if let Some(token) = result.poll(&mut interval)? {
+                return Ok((
+                    ClientRegistration {
+                        client_id,
+                        client_secret: None,
+                    },
+                    token,
+                ));
+            }
+        }
+    }
+}
+
+#[derive(Deserialize)]
+struct DeviceAuthorization {
+    device_code: String,
+    user_code: String,
+    verification_uri: String,
+    expires_in: u64,
+    interval: Option<u64>,
+}
+
+#[derive(Deserialize)]
+struct DeviceToken {
+    access_token: Option<String>,
+    refresh_token: Option<String>,
+    expires_in: Option<u64>,
+    scope: Option<String>,
+    error: Option<String>,
+}
+
+impl DeviceToken {
+    fn poll(self, interval: &mut u64) -> Result<Option<TokenResponse>, String> {
+        if let Some(access_token) = self.access_token {
+            if access_token.is_empty() {
+                return Err("Authentication returned an empty token".to_string());
+            }
+            return Ok(Some(TokenResponse {
+                access_token,
+                refresh_token: self.refresh_token,
+                expires_in: self.expires_in,
+                scope: self.scope,
+            }));
+        }
+        match self.error.as_deref() {
+            Some("authorization_pending") => Ok(None),
+            Some("slow_down") => {
+                *interval = interval.saturating_add(5);
+                Ok(None)
+            }
+            Some("access_denied") => Err("Authentication was denied".to_string()),
+            Some("expired_token") => Err("Authentication timed out".to_string()),
+            _ => Err("Authentication failed".to_string()),
+        }
+    }
+}
+
 fn base64_url(bytes: &[u8]) -> String {
     const TABLE: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_";
     let mut encoded = String::with_capacity(bytes.len().div_ceil(3) * 4);
@@ -869,7 +1277,7 @@ fn base64_url(bytes: &[u8]) -> String {
 #[cfg(test)]
 mod tests {
     use super::{
-        McpCallback, McpConnection, McpPageState, PendingMcpOperation, base64_url,
+        Cancellation, McpCallback, McpConnection, McpPageState, PendingMcpOperation, base64_url,
         request_mcp_server,
     };
     use bevy::prelude::*;
@@ -877,6 +1285,252 @@ mod tests {
     use vmux_api::mcp::{
         McpServerOperation, McpServerPending, McpServerRequest, McpServersUiState,
     };
+    use vmux_ecs::manifest::FeatureManifest;
+
+    #[test]
+    fn connector_links_open_in_app_and_queue_external_opening_only_on_request() {
+        let mut app = App::new();
+        app.add_plugins(super::McpConnectionPlugin);
+        app.world_mut()
+            .spawn(FeatureManifest::of::<crate::Feature>());
+        app.update();
+        let url = "https://github.com/login/device";
+        let target = app
+            .world_mut()
+            .spawn(McpPageState {
+                generation: 1,
+                snapshot: McpServersUiState {
+                    pending: Some(McpServerPending {
+                        id: "github".into(),
+                        operation: McpServerOperation::Connect,
+                    }),
+                    authorization: Some(vmux_api::mcp::McpAuthorization {
+                        url: url.into(),
+                        code: Some("ABCD-1234".into()),
+                    }),
+                    ..Default::default()
+                },
+            })
+            .id();
+        app.world_mut().trigger(UiInput {
+            webview: target,
+            payload: vmux_api::mcp::McpLinkOpenRequest {
+                url: url.into(),
+                external: false,
+            },
+        });
+        app.world_mut().flush();
+        let opens = app
+            .world_mut()
+            .resource_mut::<Messages<vmux_ecs::browser::BrowserOpenRequest>>()
+            .drain()
+            .collect::<Vec<_>>();
+        assert_eq!(opens.len(), 1);
+        assert!(opens[0].source == target && opens[0].url == url);
+        app.world_mut().trigger(UiInput {
+            webview: target,
+            payload: vmux_api::mcp::McpLinkOpenRequest {
+                url: url.into(),
+                external: true,
+            },
+        });
+        app.world_mut().flush();
+        let mut links = app.world_mut().query::<(&super::ExternalLink, &ChildOf)>();
+        let requested = links.iter(app.world()).collect::<Vec<_>>();
+        assert_eq!(requested.len(), 1);
+        assert_eq!(requested[0].0.0, url);
+        assert_eq!(requested[0].1.parent(), target);
+        assert!(
+            app.world()
+                .resource::<Messages<super::PageOpenRequest>>()
+                .is_empty()
+        );
+    }
+
+    #[test]
+    fn connector_links_reject_unpublished_urls_and_non_https_schemes() {
+        let mut app = App::new();
+        app.add_plugins(super::McpConnectionPlugin);
+        let target = app.world_mut().spawn(McpPageState::default()).id();
+        for url in [
+            "https://example.com",
+            "file:///tmp/private",
+            "javascript:alert(1)",
+        ] {
+            app.world_mut().trigger(UiInput {
+                webview: target,
+                payload: vmux_api::mcp::McpLinkOpenRequest {
+                    url: url.into(),
+                    external: false,
+                },
+            });
+        }
+        app.world_mut().flush();
+        assert!(
+            app.world()
+                .resource::<Messages<super::PageOpenRequest>>()
+                .is_empty()
+        );
+        let mut links = app.world_mut().query::<&super::ExternalLink>();
+        assert_eq!(links.iter(app.world()).count(), 0);
+    }
+
+    #[test]
+    fn sign_in_progress_opens_from_its_setup_page_and_keeps_the_verification_code() {
+        let pool = bevy::tasks::IoTaskPool::get_or_init(bevy::tasks::TaskPool::new);
+        let mut app = App::new();
+        app.add_plugins(super::McpConnectionPlugin);
+        app.world_mut()
+            .spawn(FeatureManifest::of::<crate::Feature>());
+        let (send, receive) = std::sync::mpsc::channel();
+        let authorization = vmux_api::mcp::McpAuthorization {
+            url: "https://github.com/login/device".into(),
+            code: Some("ABCD-1234".into()),
+        };
+        send.send(authorization.clone()).unwrap();
+        let target = app
+            .world_mut()
+            .spawn((
+                McpPageState {
+                    generation: 1,
+                    ..Default::default()
+                },
+                super::McpOperationTask {
+                    generation: 1,
+                    id: "github".into(),
+                    operation: McpServerOperation::Connect,
+                    cancellation: Cancellation::default(),
+                    task: pool.spawn(std::future::pending()),
+                    progress: super::Mutex::new(receive),
+                },
+            ))
+            .id();
+        app.update();
+        let opens = app
+            .world_mut()
+            .resource_mut::<Messages<vmux_ecs::browser::BrowserOpenRequest>>()
+            .drain()
+            .collect::<Vec<_>>();
+        assert_eq!(opens.len(), 1);
+        assert!(opens[0].source == target && opens[0].url == authorization.url);
+        assert_eq!(
+            app.world()
+                .get::<McpPageState>(target)
+                .unwrap()
+                .snapshot
+                .authorization,
+            Some(authorization)
+        );
+    }
+
+    #[test]
+    fn leaving_a_setup_page_cancels_polling_without_removing_its_account() {
+        for destination in [
+            "vmux://tools/connectors",
+            "vmux://tools/connectors/linear/setup",
+            "vmux://start/",
+        ] {
+            let mut app = App::new();
+            app.add_plugins(super::McpConnectionPlugin);
+            let cancellation = Cancellation::default();
+            let target = app
+                .world_mut()
+                .spawn((
+                    cancellation.clone(),
+                    super::SetupOwner(vmux_api::mcp::ConnectorSetupRoute("github".into())),
+                    vmux_ecs::PageMetadata {
+                        url: destination.into(),
+                        ..Default::default()
+                    },
+                    McpPageState {
+                        generation: 1,
+                        snapshot: McpServersUiState {
+                            loaded: true,
+                            servers: vec![vmux_api::mcp::McpServerEntry {
+                                id: "existing".into(),
+                                status: vmux_api::mcp::McpServerStatus::Connected,
+                                account: Some("account".into()),
+                                ..Default::default()
+                            }],
+                            pending: Some(McpServerPending {
+                                id: "github".into(),
+                                operation: McpServerOperation::Connect,
+                            }),
+                            ..Default::default()
+                        },
+                    },
+                ))
+                .id();
+            app.world_mut().trigger(UiInput {
+                webview: target,
+                payload: vmux_api::PageReady {},
+            });
+            app.world_mut().flush();
+            assert!(cancellation.check().is_err());
+            let state = &app.world().get::<McpPageState>(target).unwrap().snapshot;
+            assert!(state.pending.is_none() && state.authorization.is_none());
+            assert_eq!(state.servers[0].account.as_deref(), Some("account"));
+            assert_eq!(
+                state.servers[0].status,
+                vmux_api::mcp::McpServerStatus::Connected
+            );
+        }
+    }
+
+    #[test]
+    fn closing_setup_reports_cancellation_even_before_sign_in_starts() {
+        for running in [false, true] {
+            let recorded = std::sync::Arc::new(super::Mutex::new(Vec::new()));
+            let received = recorded.clone();
+            let mut app = App::new();
+            app.add_plugins(super::McpConnectionPlugin).add_observer(
+                move |event: On<super::ConnectorConnectionCompleted>| {
+                    received.lock().push(event.event().0.clone());
+                },
+            );
+            let cancellation = Cancellation::default();
+            let owner = app
+                .world_mut()
+                .spawn((
+                    super::SetupOwner(vmux_api::mcp::ConnectorSetupRoute("github".into())),
+                    McpPageState::default(),
+                ))
+                .id();
+            if running {
+                app.world_mut()
+                    .entity_mut(owner)
+                    .insert(cancellation.clone());
+            }
+            app.world_mut().entity_mut(owner).despawn();
+            app.world_mut().flush();
+            let outcomes = recorded.lock();
+            assert_eq!(outcomes.len(), 1);
+            assert_eq!(outcomes[0].id, "github");
+            assert!(!outcomes[0].success);
+            assert_eq!(cancellation.check().is_err(), running);
+        }
+    }
+
+    #[test]
+    fn disposing_an_authentication_operation_cancels_its_polling() {
+        let pool = bevy::tasks::IoTaskPool::get_or_init(bevy::tasks::TaskPool::new);
+        let cancellation = Cancellation::default();
+        let (_, receive) = std::sync::mpsc::channel();
+        let mut app = App::new();
+        let entity = app
+            .world_mut()
+            .spawn(super::McpOperationTask {
+                generation: 1,
+                id: "github".into(),
+                operation: McpServerOperation::Connect,
+                cancellation: cancellation.clone(),
+                task: pool.spawn(std::future::pending()),
+                progress: super::Mutex::new(receive),
+            })
+            .id();
+        app.world_mut().despawn(entity);
+        assert!(cancellation.check().is_err());
+    }
 
     #[test]
     fn pkce_uses_unpadded_url_safe_base64() {
@@ -913,6 +1567,97 @@ mod tests {
     }
 
     #[test]
+    fn device_authorization_waits_slows_down_and_stops_on_denial_or_expiry() {
+        let mut interval = 5;
+        for error in ["authorization_pending", "slow_down"] {
+            let response: super::DeviceToken =
+                serde_json::from_value(serde_json::json!({"error": error})).unwrap();
+            assert!(response.poll(&mut interval).unwrap().is_none());
+        }
+        assert_eq!(interval, 10);
+        for (error, message) in [
+            ("access_denied", "Authentication was denied"),
+            ("expired_token", "Authentication timed out"),
+        ] {
+            let response: super::DeviceToken =
+                serde_json::from_value(serde_json::json!({"error": error})).unwrap();
+            assert_eq!(response.poll(&mut interval).err().as_deref(), Some(message));
+        }
+        let response: super::DeviceToken = serde_json::from_value(
+            serde_json::json!({"access_token": "approved", "expires_in": 28800}),
+        )
+        .unwrap();
+        let token = response.poll(&mut interval).unwrap().unwrap();
+        assert_eq!(token.access_token, "approved");
+        assert_eq!(token.expires_in, Some(28800));
+    }
+
+    #[test]
+    fn cancelling_device_sign_in_interrupts_the_polling_wait() {
+        let cancellation = Cancellation::default();
+        cancellation.cancel();
+        let started = std::time::Instant::now();
+        assert!(
+            cancellation
+                .wait(std::time::Duration::from_secs(30))
+                .is_err()
+        );
+        assert!(started.elapsed() < std::time::Duration::from_secs(1));
+    }
+
+    #[test]
+    fn snapshot_requests_are_retained_before_the_browser_is_ready() {
+        let mut app = App::new();
+        app.add_plugins(super::McpConnectionPlugin);
+        let target = app.world_mut().spawn_empty().id();
+        app.world_mut()
+            .trigger(super::McpSnapshotRequest { target });
+        app.update();
+        assert!(
+            app.world()
+                .get::<McpPageState>(target)
+                .unwrap()
+                .snapshot
+                .loading
+        );
+        assert!(
+            app.world()
+                .get::<super::PendingMcpSnapshot>(target)
+                .is_some()
+        );
+    }
+
+    #[test]
+    fn only_connector_pages_load_account_connections_on_page_ready() {
+        let mut app = App::new();
+        app.add_plugins(super::McpConnectionPlugin);
+        for (url, should_load) in [
+            ("vmux://tools/connectors", true),
+            ("vmux://connectors/", true),
+            ("vmux://tools/mcp", false),
+            ("vmux://tools/acp", false),
+        ] {
+            let target = app
+                .world_mut()
+                .spawn(vmux_ecs::PageMetadata {
+                    url: url.into(),
+                    ..Default::default()
+                })
+                .id();
+            app.world_mut().trigger(UiInput {
+                webview: target,
+                payload: vmux_api::PageReady {},
+            });
+            app.update();
+            assert_eq!(
+                app.world().get::<McpPageState>(target).is_some(),
+                should_load,
+                "{url}"
+            );
+        }
+    }
+
+    #[test]
     fn server_request_queues_one_operation_on_the_page_entity() {
         let mut app = App::new();
         app.add_observer(request_mcp_server);
@@ -923,6 +1668,8 @@ mod tests {
                 snapshot: McpServersUiState {
                     loaded: true,
                     servers: vec![vmux_api::mcp::McpServerEntry {
+                        setup_url: None,
+                        account: None,
                         id: "linear".to_string(),
                         name: "Linear".to_string(),
                         description: String::new(),

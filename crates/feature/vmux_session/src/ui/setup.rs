@@ -2,27 +2,17 @@ use super::approval::{ChoiceKey, ChoiceOptions};
 use super::state::Chat;
 use crate::onboarding::{ChatAuthenticate, ChatCancelSetup, ChatSaveKey, KeyEntryUiState};
 use dioxus::prelude::*;
-use percent_encoding::{NON_ALPHANUMERIC, utf8_percent_encode};
 use vmux_ui::components::button::{Button, ButtonSize, ButtonVariant};
-use vmux_ui::components::composer::{
-    ComposerFrame, PromptComposer, PromptComposerMode, ShortcutHint,
-};
-use vmux_ui::components::progress::{LoadingIcon, Progress, ProgressIndicator};
+use vmux_ui::components::composer::{ComposerFrame, ShortcutHint};
+pub(super) use vmux_ui::components::setup::SetupGuide as Identity;
+use vmux_ui::components::setup::{SetupConnect, SetupProgress, SetupTurn};
 use vmux_ui::hooks::{UiStateBinding, send};
 use vmux_ui::i18n::translate;
-use vmux_ui::icon::{LineIcon, LineIconView};
+use vmux_ui::icon::LineIcon;
 
 #[component]
 pub(super) fn Turn(children: Element) -> Element {
-    rsx! {
-        super::item::AssistantTurn {
-            agent_id: Identity::ID.to_string(),
-            name: Identity::name(),
-            avatar_src: Some(Identity::avatar()),
-            avatar_background: Identity::COLOR.to_string(),
-            {children}
-        }
-    }
+    rsx! { SetupTurn { {children} } }
 }
 
 #[component]
@@ -53,24 +43,18 @@ fn ConnectionControls(chat: Chat, keys: KeyEntryUiState) -> Element {
     let pending = chat.authentication_pending() || keys.pending;
     let clicked = connection.clone();
     rsx! {
-        div { "data-slot": "composer-notice", class: "flex flex-wrap items-center gap-2 px-3 py-3",
-            Button {
-                size: ButtonSize::Sm,
-                aria_label: translate("onboarding-connect"),
-                disabled: pending || !available,
-                onclick: move |_| clicked.connect(chat),
-                {translate("onboarding-connect")}
-            }
-            if connection.method.is_some() && connection.key && !chat.key_input_requested() && !pending {
-                Button {
-                    size: ButtonSize::Xs,
-                    variant: ButtonVariant::Ghost,
-                    class: "text-inherit opacity-60",
-                    aria_label: translate("onboarding-use-key"),
-                    onclick: move |_| chat.request_key_input(true),
-                    {translate("onboarding-use-key")}
+        SetupConnect {
+            pending, available, onclick: move |_| clicked.connect(chat),
+            secondary: rsx! {
+                if connection.method.is_some() && connection.key && !chat.key_input_requested() && !pending {
+                    Button {
+                        size: ButtonSize::Xs, variant: ButtonVariant::Ghost,
+                        class: "text-inherit opacity-60", aria_label: translate("onboarding-use-key"),
+                        onclick: move |_| chat.request_key_input(true),
+                        {translate("onboarding-use-key")}
+                    }
                 }
-            }
+            },
         }
     }
 }
@@ -163,21 +147,10 @@ fn SetupComposer(chat: Chat, keys: KeyEntryUiState) -> Element {
         };
     }
     let busy = chat.setup_busy() || keys.pending;
-    let footer = if chat.status() == "errored" {
-        rsx! {}
-    } else {
-        rsx! { ShortcutHint { shortcut: "Esc", label: translate("common-cancel") } }
-    };
     rsx! {
-        PromptComposer {
-            value: chat.draft(), input_disabled: true,
-            placeholder: translate("onboarding-composer-wait"), accent_color: chat.accent().css,
-            accent_gradient: "from-indigo-500 to-violet-600".to_string(), footer: Some(footer),
-            show_add_button: false, show_send_button: false,
-            mode: if busy { PromptComposerMode::Stop } else { PromptComposerMode::Send },
-            action_title: translate("common-stop"), action_enabled: busy,
-            on_input: move |_| {}, on_keydown: move |_| {}, on_paste: move |_| {}, on_attach: move |_| {},
-            on_remove_attachment: move |_| {}, on_action: move |_| chat.stop_or_flush(),
+        vmux_ui::components::setup::SetupComposer {
+            accent: chat.accent().css, busy, value: chat.draft(),
+            cancel_hint: chat.status() != "errored", on_stop: move |_| chat.stop_or_flush(),
         }
     }
 }
@@ -188,26 +161,8 @@ pub(super) fn ProgressTurn(
     #[props(default)] detail: String,
     #[props(default)] percent: Option<u8>,
 ) -> Element {
-    let label = phase.label();
-    let detail = detail.trim();
-    let show_detail =
-        !detail.is_empty() && detail != label && detail != translate("agent-preparing");
     rsx! {
-        Turn {
-            div { role: "status", aria_live: "polite", class: "flex items-center gap-2 text-sm",
-                LineIconView { icon: phase.icon(), class: "size-4 shrink-0 text-muted-foreground" }
-                span { "{label}" }
-                LoadingIcon { class: "size-3.5 text-muted-foreground".to_string() }
-            }
-            if show_detail { p { class: "text-xs text-muted-foreground", "{detail}" } }
-            if phase == Phase::Installation {
-                div { class: "w-full max-w-xs",
-                    Progress { value: percent.map(|value| f64::from(value.min(100))), max: 100.0, aria_label: translate("setup-installing"),
-                        ProgressIndicator {}
-                    }
-                }
-            }
-        }
+        Turn { SetupProgress { label: phase.label(), icon: phase.icon(), detail, installation: phase == Phase::Installation, percent } }
     }
 }
 
@@ -267,25 +222,6 @@ impl Choice {
                 }
             }
         }
-    }
-}
-
-pub(super) struct Identity;
-
-impl Identity {
-    pub(super) const ID: &str = "vmux-setup-guide";
-    pub(super) const COLOR: &str = "#6366f1";
-
-    pub(super) fn name() -> String {
-        translate("onboarding-guide")
-    }
-
-    fn avatar() -> String {
-        let svg = include_str!("../../../../util/vmux_ui/assets/agent-logos/setup-guide.svg");
-        format!(
-            "data:image/svg+xml,{}",
-            utf8_percent_encode(svg, NON_ALPHANUMERIC)
-        )
     }
 }
 

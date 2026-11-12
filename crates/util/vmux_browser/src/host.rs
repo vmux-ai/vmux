@@ -13,6 +13,7 @@ use bevy_cef_core::prelude::CommandLineConfig;
 use std::sync::atomic::AtomicBool;
 use std::sync::{LazyLock, Mutex};
 use vmux_command::CommandBarPanelActive;
+pub use vmux_ecs::WebviewLoadCompleted;
 use vmux_flex::prelude::*;
 use vmux_layout::{
     Header, Open, UpdateState, bookmark::BookmarkContextMenuActive, overlay::LayoutOverlayActive,
@@ -25,11 +26,6 @@ use vmux_ecs::service::ServiceRequest;
 
 mod agent;
 mod agent_pane;
-
-#[derive(Clone, Copy, Debug, Message)]
-pub struct WebviewLoadCompleted {
-    pub webview: Entity,
-}
 
 pub(crate) struct CefStartup;
 

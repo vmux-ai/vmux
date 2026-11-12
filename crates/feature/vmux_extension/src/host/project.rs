@@ -4,7 +4,8 @@ use bevy::prelude::*;
 use bevy::window::{PrimaryWindow, WindowPosition};
 use bevy_cef::prelude::HostWindow;
 use std::collections::HashMap;
-use vmux_ecs::{Order, PageMetadata};
+use vmux_ecs::{Order, PageMetadata, PopupWebview};
+use vmux_flex::prelude::Visibility;
 use vmux_history::LastActivatedAt;
 use vmux_layout::Loading;
 use vmux_layout::space::Space;
@@ -63,6 +64,7 @@ type PageData = (
 
 #[derive(SystemParam)]
 struct ProjectionData<'w, 's> {
+    focused_window: vmux_layout::window::FocusedWindow<'w, 's>,
     windows: Query<
         'w,
         's,
@@ -85,6 +87,18 @@ struct ProjectionData<'w, 's> {
             &'static ExtensionWindowId,
         ),
         With<ExtensionPopup>,
+    >,
+    browser_popups: Query<
+        'w,
+        's,
+        (
+            &'static PageMetadata,
+            &'static ExtensionTabId,
+            &'static HostWindow,
+            &'static Visibility,
+            Has<Loading>,
+        ),
+        (With<PopupWebview>, Without<ExtensionPopup>),
     >,
 }
 
@@ -124,7 +138,7 @@ fn assign_ids(
     tabs: Query<
         Entity,
         (
-            Or<(With<Stack>, With<ExtensionPopup>)>,
+            Or<(With<Stack>, With<ExtensionPopup>, With<PopupWebview>)>,
             With<PageMetadata>,
             Without<ExtensionTabId>,
         ),
@@ -226,10 +240,46 @@ fn rebuild_model(
             status: "complete".into(),
         });
     }
-    let model = ExtensionModel {
-        windows: projected_windows,
-        tabs,
-    };
+    let mut windows = projected_windows;
+    for (metadata, id, host, visibility, loading) in &projection.browser_popups {
+        if *visibility == Visibility::Hidden
+            || !(metadata.url.starts_with("https://") || metadata.url.starts_with("http://"))
+        {
+            continue;
+        }
+        let Ok((_, _, window_id, _)) = projection.windows.get(host.0) else {
+            continue;
+        };
+        for tab in &mut tabs {
+            if tab.window_id == window_id.0 {
+                tab.active = false;
+                tab.highlighted = false;
+            }
+        }
+        if projection.focused_window.entity() == Some(host.0) {
+            for window in &mut windows {
+                window.focused = window.id == window_id.0;
+            }
+        }
+        let index = tabs
+            .iter()
+            .filter(|tab| tab.window_id == window_id.0)
+            .map(|tab| tab.index)
+            .max()
+            .map_or(0, |index| index.saturating_add(1));
+        tabs.push(ExtensionTabSnapshot {
+            id: id.0,
+            window_id: window_id.0,
+            index,
+            active: true,
+            highlighted: true,
+            pinned: false,
+            url: metadata.url.clone(),
+            title: metadata.title.clone(),
+            status: if loading { "loading" } else { "complete" }.into(),
+        });
+    }
+    let model = ExtensionModel { windows, tabs };
     for event in previous.events(&model) {
         events.write(event);
     }
@@ -538,6 +588,72 @@ mod tests {
     use crate::protocol::{ApiRequest, ExtensionCallerContext};
     use serde_json::json;
     use vmux_layout::active_pane::ActiveStack;
+
+    #[test]
+    fn a_visible_browser_popup_is_the_autofill_target_and_hiding_it_restores_the_content_tab() {
+        let mut app = App::new();
+        app.add_plugins(ExtensionProjectPlugin);
+        let window = app
+            .world_mut()
+            .spawn((
+                Window {
+                    focused: false,
+                    ..default()
+                },
+                PrimaryWindow,
+                vmux_ecs::Active,
+            ))
+            .id();
+        let space = app.world_mut().spawn(Space).id();
+        let tab = app.world_mut().spawn((Tab::default(), ChildOf(space))).id();
+        let stack = app
+            .world_mut()
+            .spawn((
+                Stack::default(),
+                HostWindow(window),
+                ChildOf(tab),
+                PageMetadata {
+                    url: "https://example.com/".into(),
+                    ..default()
+                },
+            ))
+            .id();
+        app.world_mut().spawn(
+            ActiveStack {
+                stack: Some(stack),
+                ..default()
+            }
+            .local_bundle(),
+        );
+        let popup = app
+            .world_mut()
+            .spawn((
+                PopupWebview,
+                HostWindow(window),
+                Visibility::Visible,
+                PageMetadata {
+                    url: "https://github.com/login/device".into(),
+                    ..default()
+                },
+            ))
+            .id();
+        app.update();
+        {
+            let world = app.world_mut();
+            let model = world.query::<&ExtensionModel>().single(world).unwrap();
+            let active: Vec<_> = model.tabs.iter().filter(|tab| tab.active).collect();
+            assert_eq!(active.len(), 1);
+            assert_eq!(active[0].url, "https://github.com/login/device");
+            assert!(model.windows[0].focused);
+        }
+        app.world_mut().entity_mut(popup).insert(Visibility::Hidden);
+        app.update();
+        let world = app.world_mut();
+        let model = world.query::<&ExtensionModel>().single(world).unwrap();
+        assert_eq!(model.tabs.len(), 1);
+        assert_eq!(model.tabs[0].url, "https://example.com/");
+        assert!(model.tabs[0].active);
+    }
 
     #[test]
     fn authentication_popup_is_searchable_for_close_without_becoming_the_active_content_tab() {

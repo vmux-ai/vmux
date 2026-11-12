@@ -6,6 +6,20 @@ use vmux_flex::prelude::*;
 #[derive(Component, Clone, Copy, Debug, PartialEq, Eq)]
 pub struct WindowOverlay;
 
+#[derive(Component)]
+pub struct PopupWebview;
+
+#[derive(SystemSet, Debug, Hash, PartialEq, Eq, Clone)]
+pub struct BrowserOverlaySet;
+
+#[derive(SystemSet, Debug, Hash, PartialEq, Eq, Clone)]
+pub struct BrowserLoadSet;
+
+#[derive(Clone, Copy, Debug, Message)]
+pub struct WebviewLoadCompleted {
+    pub webview: Entity,
+}
+
 #[derive(Message, Clone, Copy, Debug, Default)]
 pub struct PopupDismissRequest;
 

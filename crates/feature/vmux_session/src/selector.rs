@@ -22,7 +22,9 @@ impl<'a> SelectorMode<'a> {
         {
             return Self::Models(rest.trim_start_matches(char::is_whitespace));
         }
-        if let Some(rest) = token.strip_prefix("mcp")
+        if let Some(rest) = token
+            .strip_prefix("connectors")
+            .or_else(|| token.strip_prefix("mcp"))
             && (rest.is_empty() || rest.chars().next().is_some_and(char::is_whitespace))
         {
             return Self::Mcp(rest.trim_start_matches(char::is_whitespace));
@@ -63,6 +65,14 @@ mod tests {
             SelectorMode::Models("son")
         );
         assert_eq!(SelectorMode::from_draft("/mcp"), SelectorMode::Mcp(""));
+        assert_eq!(
+            SelectorMode::from_draft("/connectors github"),
+            SelectorMode::Mcp("github")
+        );
+        assert_eq!(
+            SelectorMode::from_draft("/connectors-extra"),
+            SelectorMode::Commands("connectors-extra")
+        );
         assert_eq!(
             SelectorMode::from_draft("/mcp lin"),
             SelectorMode::Mcp("lin")

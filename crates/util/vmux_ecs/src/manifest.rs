@@ -365,6 +365,14 @@ pub struct Tool {
 #[derive(Clone, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct McpServer {
+    #[serde(default)]
+    pub setup_url: Option<String>,
+    #[serde(default)]
+    pub client_id: Option<String>,
+    #[serde(default)]
+    pub client_id_env: Option<String>,
+    #[serde(default)]
+    pub account_endpoint: Option<String>,
     pub id: String,
     pub name: String,
     pub url: String,

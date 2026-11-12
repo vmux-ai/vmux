@@ -1165,3 +1165,23 @@ onboarding-key-failed = Der Schlüssel konnte nicht gespeichert werden. Versuche
 onboarding-workspace-question = Wo sollen wir arbeiten?
 agent-starting = Agent wird gestartet…
 browser-open-external = Im externen Browser öffnen
+connectors-title = Konnektoren
+connectors-description = Verwalten Sie Konten und wählen Sie Konnektoren in einer Unterhaltung.
+connectors-empty = Keine Konnektoren verfügbar
+connectors-sign-in-required = Anmeldung erforderlich
+connectors-open-sign-in = Anmeldung öffnen
+
+connectors-command-description = Konnektoren für dieses Gespräch auswählen
+connectors-use = Im Chat verwenden
+connectors-selected = Ausgewählt · entfernen
+connectors-manage = Konnektoren verwalten
+connectors-manage-access = Repository-Zugriff verwalten
+
+connectors-agent-configuration = Agent-Konfiguration
+connectors-configured = Konfiguriert
+connectors-open-in-app = In Vmux öffnen
+connectors-open-external = Im externen Browser öffnen
+connectors-verification-code-help = Kopiere diesen Code und gib ihn bei { $service } ein, um die Anmeldung abzuschließen.
+
+connectors-setup-intro = Verbinde { $service } mit diesem Profil. Ich begleite dich bei der Anmeldung. Danach kannst du den Dienst in deinen Unterhaltungen auswählen.
+connectors-setup-connected = { $service } ist verbunden. Du kannst den Dienst jetzt in einer Unterhaltung auswählen.

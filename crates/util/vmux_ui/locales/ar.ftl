@@ -1165,3 +1165,23 @@ onboarding-key-failed = تعذّر حفظ المفتاح. أعد المحاول�
 onboarding-workspace-question = أين نعمل؟
 agent-starting = جارٍ بدء تشغيل الوكيل…
 browser-open-external = فتح في متصفح خارجي
+connectors-title = الموصلات
+connectors-description = أدر الحسابات المتصلة واختر الموصلات من المحادثة.
+connectors-empty = لا توجد موصلات متاحة
+connectors-sign-in-required = يلزم تسجيل الدخول
+connectors-open-sign-in = فتح تسجيل الدخول
+
+connectors-command-description = اختر الموصلات لهذه المحادثة
+connectors-use = استخدام في المحادثة
+connectors-selected = محدد · إزالة
+connectors-manage = إدارة الموصلات
+connectors-manage-access = إدارة الوصول إلى المستودعات
+
+connectors-agent-configuration = إعدادات الوكيل
+connectors-configured = تم الإعداد
+connectors-open-in-app = فتح في Vmux
+connectors-open-external = فتح في متصفح خارجي
+connectors-verification-code-help = انسخ هذا الرمز وأدخله في { $service } لإكمال تسجيل الدخول.
+
+connectors-setup-intro = اربط { $service } بهذا الملف الشخصي. سأرشدك خلال تسجيل الدخول، ثم يمكنك اختياره في محادثاتك.
+connectors-setup-connected = تم ربط { $service }. يمكنك الآن اختياره في محادثة.

@@ -15,7 +15,7 @@ mod format;
 
 #[vmux_page::page(
     component = Page,
-    states = ["PageAddressUiState", "ThemeUiState", "ChatUiState", "SessionCatalogUiState", "SessionDetailUiState", "OnboardingUiState", "KeyEntryUiState", "KeyClaimsUiState"],
+    states = ["PageAddressUiState", "ThemeUiState", "ChatUiState", "SessionCatalogUiState", "SessionDetailUiState", "OnboardingUiState", "KeyEntryUiState", "KeyClaimsUiState", "McpServersUiState"],
     subtree,
     preserve_title,
     no_favicon,
@@ -25,6 +25,7 @@ pub(crate) struct ChatPage;
 
 #[component]
 pub fn Page() -> Element {
+    vmux_ui::hooks::use_ui_state::<vmux_api::mcp::McpServersUiState>();
     vmux_ui::hooks::use_ui_state::<crate::state::ChatUiState>();
     vmux_ui::hooks::use_ui_state::<crate::state::SessionCatalogUiState>();
     vmux_ui::hooks::use_ui_state::<crate::state::SessionDetailUiState>();

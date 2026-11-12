@@ -1345,8 +1345,41 @@ anchor, so a background agent cannot read or disrupt the space you are looking a
 Each ACP agent's default config file is authoritative for its native MCP servers. Vmux may discover
 recognized native configs for read-only display, but never copies them into `tools.toml` or injects
 them back into ACP session creation. Agent launch injects only the internal `vmux` MCP anchored to
-the Session workspace. Profile-owned integrations and OAuth are a separate future feature rather
-than another representation of agent-native MCP config.
+the Session workspace.
+
+`vmux_tool` owns Tools / Connectors, its catalog, and Profile-owned OAuth. The account list lives
+inside the existing Tools sidebar, search, and breadcrumbs at `vmux://tools/connectors`;
+`vmux://connectors/` remains an alias. All Tools categories use the same `ManagerItem` and
+List/Grid controls, including ACP, connectors, browser extensions, packages, LSP, MCP, and dotfiles.
+Tools / MCP shows agent-native configuration and counts its own entries independently.
+
+The Tools page takes reactive `PageMetadata`, so its renderer receives the complete requested
+URL and updates when navigation changes the same hosted document.
+Tools lists and manages accounts; setup runs in a conversation tab at
+`vmux://tools/connectors/<provider>/setup`. ACP setup links open the onboarding conversation with
+the chosen agent, using the ordinary promptless Session path. Both flows share conversation
+surfaces, guide turns, Connect, progress, and Stop controls in `vmux_ui`. The host owns each
+provider's authentication protocol. GitHub uses a registered public client and Device Flow;
+providers advertising dynamic registration use PKCE. Credentials and account labels remain in
+encrypted Profile storage. Device verification codes are explained and copied inside the setup
+conversation. Stop, Escape, navigation away, and closing its tab cancel pending authentication;
+completed accounts remain available in the Profile.
+
+ACP and connector sign-in share browser placement: a sufficiently wide source pane opens the
+provider page beside its conversation; a narrow pane opens a new browser Stack without replacing
+the source. Sign-in and management links retain explicit opening in Vmux or the external browser.
+Provider marks are bundled transparent SVGs. Extension popups retain their shared native
+bounds/presentation helper and DOM surface. `PopupWebview`, browser load messages, and scheduling
+sets live in shared ECS, so Layout does not depend on its browser adapter.
+
+`vmux_session` owns each conversation's persisted connector selection. `/connectors` reuses the
+composer selector; an unconnected choice opens the same setup tab and records the conversation's
+intent. A typed connection outcome attaches only waiting conversations still bound to their
+original Session, and cancellation clears those intents. Removing a selection leaves the Profile
+account available elsewhere. `connector_tools` and `connector_call` travel through the anchored
+tool-query boundary to `vmux_tool`, which checks the conversation selection and exact credential
+resource before making an HTTP MCP request. Responses complete at the matching JSON-RPC event;
+credentials never enter agent prompts or native MCP configuration.
 
 `read_layout` / `update_layout` are the interesting pair: fetch the pane tree with stable
 ids, mutate it, commit it back. Vmux diffs against the live graph and reconciles
@@ -1586,7 +1619,7 @@ ACP launches expose it through the provider's standard `BROWSER` setting with th
 The source conversation pane chooses an adjacent browser pane when its logical width can fit both
 surfaces, or a new browser Stack otherwise. Provider URLs remain intact, and normal browser metadata
 supplies the title and favicon. Header and Stack context menus can open the same HTTP(S) URL in
-the external default browser. Connectors can reuse the same URL-opening entry point.
+the external default browser. Connector setup uses the same source-pane resolver and browser opener.
 The service routes browser requests to one desktop attached to the source Session, using live
 connection handles instead of broadcasting to unrelated desktops. Unscoped opens likewise choose
 one subscriber. Missing sources return a service error; the CLI preserves that cause. Session

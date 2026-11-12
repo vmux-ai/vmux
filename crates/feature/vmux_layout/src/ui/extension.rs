@@ -14,8 +14,6 @@ use vmux_ui::components::icon::Icon;
 use vmux_ui::hooks::send;
 use vmux_ui::i18n::translate;
 
-use crate::event::LayoutOverlayEvent;
-
 #[derive(Clone, Copy)]
 pub(super) struct ToolbarAnchor {
     node: Signal<Option<Rc<MountedData>>>,
@@ -49,161 +47,39 @@ pub(crate) fn ExtensionPopupModal(
     popup: ExtensionPopupEvent,
     preferred_size: ExtensionPopupSizeEvent,
 ) -> Element {
-    let current = popup;
-    let state = ExtensionPopupState;
     let toolbar = use_context::<ToolbarAnchor>();
-    let mut anchor = use_signal(|| current.anchor);
-    let popup_id = current.id.clone();
-    let fallback_anchor = current.anchor;
+    let mut anchor = use_signal(|| popup.anchor);
+    let popup_id = popup.id.clone();
+    let fallback_anchor = popup.anchor;
     use_effect(use_reactive!(|(popup_id, fallback_anchor)| {
         let _ = &popup_id;
         spawn(async move {
             anchor.set(toolbar.measure().await.unwrap_or(fallback_anchor));
         });
     }));
-    let placement = ExtensionPopupPlacement::from(anchor());
-    let size = if preferred_size.id == current.id {
+    let anchor = anchor();
+    let size = if preferred_size.id == popup.id {
         preferred_size
     } else {
         ExtensionPopupSizeEvent {
-            id: current.id.clone(),
+            id: popup.id,
             width: 360.0,
             height: 600.0,
         }
     };
-    let reporter = ExtensionPopupBoundsReporter {
-        region: use_signal(|| None::<Rc<MountedData>>),
-    };
-    let mounted = reporter;
-    let resized = reporter;
-    let bounds_key = (
-        current.id.clone(),
-        placement.right,
-        placement.top,
-        size.width,
-        size.height,
-    );
-    use_effect(use_reactive!(|(bounds_key)| {
-        let _ = &bounds_key;
-        reporter.publish();
-    }));
-    use_effect(move || {
-        let _ = anchor();
-        reporter.publish();
-    });
-    use_effect(move || {
-        let _ = send(&LayoutOverlayEvent {
-            id: "extension-popup".to_string(),
-            active: true,
-            ..Default::default()
-        });
-    });
-    use_drop(move || {
-        let _ = send(&LayoutOverlayEvent {
-            id: "extension-popup".to_string(),
-            active: false,
-            ..Default::default()
-        });
-        let _ = send(&ExtensionPopupCloseRequest);
-    });
-
     rsx! {
-        div {
-            class: "pointer-events-auto fixed inset-0 z-[1000]",
-            tabindex: "-1",
-            onmounted: move |event: Event<MountedData>| {
-                let target = event.data();
-                spawn(async move {
-                    let _ = target.set_focus(true).await;
-                });
-            },
-            onkeydown: move |event| {
-                if event.key() == Key::Escape {
-                    event.prevent_default();
-                    state.close();
-                }
-            },
-            onpointerdown: move |_| state.close(),
-            div {
-                key: "{current.id}",
-                class: "pointer-events-none absolute",
-                style: "{placement.style(&size)}",
-                onpointerdown: move |event| event.stop_propagation(),
-                onmounted: move |event: Event<MountedData>| mounted.mount(event.data()),
-                onresize: move |_: Event<ResizeData>| resized.publish(),
-            }
-        }
-    }
-}
-
-#[derive(Clone, Copy)]
-struct ExtensionPopupPlacement {
-    right: i32,
-    top: i32,
-}
-
-impl From<ExtensionPopupAnchor> for ExtensionPopupPlacement {
-    fn from(anchor: ExtensionPopupAnchor) -> Self {
-        Self {
+        super::popup::NativePopupSurface {
+            id: "extension-popup".to_string(),
             right: anchor.right.max(48),
             top: anchor.bottom.max(40) + 8,
+            width: size.width.clamp(200.0, 360.0),
+            height: size.height.max(80.0),
+            onbounds: move |(left, top, width, height)| {
+                let _ = send(&ExtensionPopupBoundsRequest { left, top, width, height });
+            },
+            ondismiss: move |_| { let _ = send(&ExtensionPopupCloseRequest); },
+            children: rsx! {},
         }
-    }
-}
-
-impl ExtensionPopupPlacement {
-    fn style(self, size: &ExtensionPopupSizeEvent) -> String {
-        format!(
-            "right:max(8px,calc(100vw - {}px));top:{}px;width:min({:.0}px,calc(100vw - 16px));height:min({:.0}px,calc(100vh - {}px));",
-            self.right,
-            self.top,
-            size.width.clamp(200.0, 360.0),
-            size.height.max(80.0),
-            self.top + 8
-        )
-    }
-}
-
-#[derive(Clone, Copy)]
-struct ExtensionPopupState;
-
-impl ExtensionPopupState {
-    fn close(self) {
-        let _ = send(&LayoutOverlayEvent {
-            id: "extension-popup".to_string(),
-            active: false,
-            ..Default::default()
-        });
-        let _ = send(&ExtensionPopupCloseRequest);
-    }
-}
-
-#[derive(Clone, Copy)]
-struct ExtensionPopupBoundsReporter {
-    region: Signal<Option<Rc<MountedData>>>,
-}
-
-impl ExtensionPopupBoundsReporter {
-    fn mount(mut self, region: Rc<MountedData>) {
-        self.region.set(Some(region));
-        self.publish();
-    }
-
-    fn publish(self) {
-        spawn(async move {
-            let Some(region) = (self.region)() else {
-                return;
-            };
-            let Ok(rect) = region.get_client_rect().await else {
-                return;
-            };
-            let _ = send(&ExtensionPopupBoundsRequest {
-                left: rect.origin.x as f32,
-                top: rect.origin.y as f32,
-                width: rect.size.width as f32,
-                height: rect.size.height as f32,
-            });
-        });
     }
 }
 

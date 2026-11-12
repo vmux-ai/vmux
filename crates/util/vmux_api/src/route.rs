@@ -149,6 +149,10 @@ impl VmuxRoute {
                 url.set_path("/acp");
             }
             ("tools", true) => url.set_path("/acp"),
+            ("connectors", true) => {
+                url.set_host(Some("tools")).expect("static vmux route host");
+                url.set_path("/connectors");
+            }
             ("lsp", true) => {
                 url.set_host(Some("tools")).expect("static vmux route host");
                 url.set_path("/lsp");
@@ -242,6 +246,11 @@ mod tests {
             ("vmux://lsp/", "vmux://tools/lsp"),
             ("vmux://extensions", "vmux://tools/extensions"),
             ("vmux://tools/extensions", "vmux://tools/extensions"),
+            ("vmux://connectors/", "vmux://tools/connectors"),
+            ("vmux://connectors", "vmux://tools/connectors"),
+            ("vmux://tools/connectors", "vmux://tools/connectors"),
+            ("vmux://tools/mcp", "vmux://tools/mcp"),
+            ("vmux://tools/mcp/", "vmux://tools/mcp/"),
             ("vmux://cheatsheet/", "vmux://shortcuts/"),
             ("vmux://cheetsheet", "vmux://shortcuts/"),
         ];
