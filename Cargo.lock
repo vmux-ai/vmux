@@ -10809,6 +10809,7 @@ dependencies = [
  "crossbeam-channel",
  "lsp-types",
  "serde_json",
+ "uuid",
  "vmux_ecs",
  "web-time",
 ]

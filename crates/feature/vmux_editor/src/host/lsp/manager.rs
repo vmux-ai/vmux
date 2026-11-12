@@ -207,6 +207,7 @@ struct RequestStamp {
     server: Entity,
     version: i32,
     buffer: uuid::Uuid,
+    transport: Option<uuid::Uuid>,
 }
 
 impl RequestStamp {
@@ -231,6 +232,12 @@ impl RequestStamp {
                 .editors
                 .get(owner)
                 .is_ok_and(|(_, editor)| editor.core.content_version() == self.buffer)
+            && manager
+                .clients
+                .get(self.server)
+                .ok()
+                .map(Transport::identity)
+                == self.transport
     }
 }
 
@@ -633,6 +640,11 @@ impl LspManager<'_, '_> {
             server: self.documents.get(document).ok()?.3.parent(),
             version: doc.version,
             buffer: self.editors.get(owner).ok()?.1.core.content_version(),
+            transport: self
+                .clients
+                .get(self.documents.get(document).ok()?.3.parent())
+                .ok()
+                .map(Transport::identity),
         })
     }
 
@@ -3133,6 +3145,11 @@ mod tests {
                 )
             };
             let sender = self.replies.lock().unwrap().take().unwrap();
+            let transport = self
+                .app
+                .world()
+                .get::<Transport>(self.server)
+                .map(Transport::identity);
             let entity = self
                 .app
                 .world_mut()
@@ -3147,6 +3164,7 @@ mod tests {
                                 server: self.server,
                                 version: 1,
                                 buffer,
+                                transport,
                             },
                         },
                         buffers: Some(buffers),
@@ -3166,7 +3184,7 @@ mod tests {
 
     #[test]
     fn deferred_folds_refuse_edits_reopen_and_server_replacement_after_response_delivery() {
-        for change in 0..4 {
+        for change in 0..5 {
             let mut fixture = RequestFixture::new();
             let (request, sender) = fixture.pending();
             fixture
@@ -3229,6 +3247,16 @@ mod tests {
                         Path::new("/workspace/file.rs"),
                         1,
                     );
+                }
+                4 => {
+                    fixture
+                        .app
+                        .world_mut()
+                        .entity_mut(fixture.server)
+                        .insert(Transport::new(ProbeTransport {
+                            replies: fixture.replies.clone(),
+                            capabilities: lsp_types::ServerCapabilities::default(),
+                        }));
                 }
                 _ => unreachable!(),
             }

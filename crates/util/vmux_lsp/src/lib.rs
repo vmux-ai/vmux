@@ -147,19 +147,29 @@ pub trait TransportIo: Send + Sync + 'static {
 }
 
 #[derive(Component, Clone)]
-pub struct Transport(Arc<dyn TransportIo>);
+pub struct Transport {
+    identity: uuid::Uuid,
+    io: Arc<dyn TransportIo>,
+}
 
 impl Transport {
     pub fn new(transport: impl TransportIo) -> Self {
-        Self(Arc::new(transport))
+        Self {
+            identity: uuid::Uuid::new_v4(),
+            io: Arc::new(transport),
+        }
+    }
+
+    pub fn identity(&self) -> uuid::Uuid {
+        self.identity
     }
 
     pub fn capabilities(&self) -> &ServerCapabilities {
-        self.0.capabilities()
+        self.io.capabilities()
     }
 
     pub fn request(&self, method: &str, params: Value) -> WireReply {
-        self.0.request(method, params)
+        self.io.request(method, params)
     }
 
     pub fn provides(&self, method: &str) -> bool {
@@ -206,11 +216,11 @@ impl Transport {
     }
 
     pub fn notify(&self, method: &str, params: Value) {
-        self.0.notify(method, params);
+        self.io.notify(method, params);
     }
 
     pub fn exited(&self) -> bool {
-        self.0.exited()
+        self.io.exited()
     }
 
     pub fn did_open(&self, uri: &str, language: &str, version: i32, text: &str) {
@@ -234,6 +244,7 @@ pub struct Stamp {
     pub document: Entity,
     pub server: Entity,
     pub version: i32,
+    pub transport: uuid::Uuid,
 }
 
 impl Stamp {
@@ -247,7 +258,10 @@ impl Stamp {
         binding.document() == self.document
             && document.version == self.version
             && parent.parent() == self.server
-            && lookup.transports.contains(self.server)
+            && lookup
+                .transports
+                .get(self.server)
+                .is_ok_and(|transport| transport.identity == self.transport)
             && lookup.servers.contains(self.server)
     }
 }
@@ -298,6 +312,7 @@ impl LspLookup<'_, '_> {
             document: entity,
             server: parent.parent(),
             version: document.version,
+            transport: self.transport(parent.parent())?.identity,
         })
     }
 
@@ -325,7 +340,7 @@ impl LspLookup<'_, '_> {
         if !transport.provides(method) {
             return None;
         }
-        let wire = transport.0.request(method, params);
+        let wire = transport.io.request(method, params);
         Some(Request {
             owner,
             stamp,
@@ -377,7 +392,7 @@ impl Request {
 
     fn cancel(&mut self) {
         if !self.finished {
-            self.transport.0.cancel(self.wire.id);
+            self.transport.io.cancel(self.wire.id);
             self.finished = true;
         }
     }
@@ -603,6 +618,55 @@ mod tests {
             harness.app.world().get::<Response>(second).unwrap().0["result"],
             "other root"
         );
+    }
+
+    #[test]
+    fn replacing_a_transport_invalidates_pending_and_retained_responses() {
+        for completed in [false, true] {
+            let mut harness = Harness::new();
+            let old = harness.request(0);
+            if completed {
+                harness.probes[0].reply(serde_json::json!({ "result": "old" }));
+                harness.app.update();
+                assert!(harness.app.world().get::<Response>(old).is_some());
+            }
+            let replacement = Probe {
+                capabilities: harness.probes[0].capabilities.clone(),
+                ..Default::default()
+            };
+            harness
+                .app
+                .world_mut()
+                .entity_mut(harness.servers[0])
+                .insert(Transport::new(replacement.clone()));
+            if !completed {
+                harness.probes[0].reply(serde_json::json!({ "result": "old" }));
+            }
+            harness.app.update();
+            assert!(harness.app.world().get::<Response>(old).is_none());
+            assert_eq!(
+                harness.app.world().get::<OperationState>(old),
+                Some(if completed {
+                    &OperationState::Succeeded
+                } else {
+                    &OperationState::Canceled
+                })
+            );
+            if !completed {
+                assert_eq!(*harness.probes[0].canceled.lock().unwrap(), vec![1]);
+            }
+            let new = harness.request(0);
+            replacement.reply(serde_json::json!({ "result": "replacement" }));
+            harness.app.update();
+            assert_eq!(
+                harness.app.world().get::<OperationState>(new),
+                Some(&OperationState::Succeeded)
+            );
+            assert_eq!(
+                harness.app.world().get::<Response>(new).unwrap().0["result"],
+                "replacement"
+            );
+        }
     }
 
     #[test]
