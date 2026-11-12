@@ -62,7 +62,12 @@ app.add_plugins(
 ```
 
 Cargo features decide what is compiled. Builder options decide which compiled plugins are
-installed. Platform crates then add only their adapters:
+installed. The facade exposes `desktop()`, `mobile()`, `daemon()`, `cli()`, and `mcp()` profiles
+when their Cargo profile is selected. `service-daemon` remains an alias for `daemon`, which
+installs the shared ECS primitives, service server, and ACP service without the desktop runtime
+or window viewport plugin. CLI and MCP share the existing typed tool contributions through
+`CliTools`; the CLI host selects the same facade rather than installing a parallel plugin list.
+Platform crates then add only their adapters:
 
 | Runtime | Adds |
 |---|---|
@@ -71,6 +76,13 @@ installed. Platform crates then add only their adapters:
 | `vmux_service` | local server, durable processes and sessions |
 | `vmux_cli` | argument parsing and one-shot execution |
 | `vmux_mcp` | JSON-RPC transport and tool publication |
+
+Profiles select features; they do not choose a runner or create IO handles. Hosts install runners
+with Bevy's `App::set_runner`, provide their own sockets/runtime/wake inputs, and finish and
+clean up plugins before the first update. The daemon retains its wake-driven runner and existing
+shutdown schedules; CLI retains its argument parsing and result-driven exit. Product identity,
+paths, packaging, and platform support remain host concerns. Future Windows, web, game, and
+spatial profiles are not supported presets.
 
 A feature plugin never installs a sibling feature. Shared composition belongs in `vmux_app`.
 Plugin boundaries represent independently configurable, reusable, platform-gated, or
