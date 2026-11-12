@@ -32,3 +32,8 @@ pub struct BrowserScrollResponse {
     pub request_id: [u8; 16],
     pub result: Result<String, String>,
 }
+#[derive(bevy_ecs::prelude::Message, Clone, Debug)]
+pub struct BrowserOpenRequest {
+    pub source: bevy_ecs::prelude::Entity,
+    pub url: String,
+}

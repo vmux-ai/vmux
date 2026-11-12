@@ -550,3 +550,14 @@ mod tests {
         assert_eq!(InlineMediaQuery::parse("inspect @image.png next"), None);
     }
 }
+
+pub struct AgentSetupRoute(pub String);
+
+impl AgentSetupRoute {
+    pub fn url(&self) -> String {
+        let mut url = url::Url::parse("vmux://start/onboarding/agent").expect("static setup URL");
+        url.query_pairs_mut()
+            .append_pair("agent", &self.0);
+        url.to_string()
+    }
+}

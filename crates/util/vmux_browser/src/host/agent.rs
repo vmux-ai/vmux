@@ -9,7 +9,7 @@ use vmux_ecs::agent::{
     AgentRequestRouteSet, CommandOrigin,
 };
 use vmux_ecs::browser::{
-    BrowserNavigationSnapshotResponse, BrowserScrollRequest, BrowserScrollResponse,
+    BrowserNavigationSnapshotResponse, BrowserOpenRequest, BrowserScrollRequest, BrowserScrollResponse,
     BrowserSnapshotRequest, BrowserSnapshotResponse,
 };
 use vmux_ecs::profile::Projects;
@@ -78,13 +78,14 @@ impl Plugin for BrowserOpenPlugin {
         app.add_plugins(super::authentication::AuthenticationPlugin)
             .add_agent_request::<AgentOpenBrowser>()
             .add_message::<PageOpenRequest>()
+            .add_message::<BrowserOpenRequest>()
             .add_message::<OpenBesideRequest>()
             .add_message::<AgentCommandResponse>()
             .add_plugins(UiEventPlugin::<(OpenExternalBrowserRequest,)>::default())
             .add_observer(open_external)
             .add_systems(
                 Update,
-                open.in_set(vmux_ecs::agent::AgentRequestApplySet)
+                (open, open_from_page).in_set(vmux_ecs::agent::AgentRequestApplySet)
                     .after(AgentRequestRouteSet),
             );
     }
@@ -516,6 +517,34 @@ impl OpenResolver<'_, '_> {
         Ok((pane, width.is_finite() && width >= 1120.0))
     }
 
+    fn page(&self, source: Entity) -> Result<(Entity, bool), String> {
+        let mut ancestor = source;
+        loop {
+            if self.stacks.contains(ancestor) {
+                return self.pane(ancestor);
+            }
+            ancestor = self
+                .parents
+                .get(ancestor)
+                .map_err(|_| "browser source page is unavailable")?
+                .parent();
+        }
+    }
+
+    fn pane(&self, stack: Entity) -> Result<(Entity, bool), String> {
+        let pane = self
+            .parents
+            .get(stack)
+            .map_err(|_| "browser source pane is unavailable")?
+            .parent();
+        let width = self
+            .nodes
+            .get(pane)
+            .map(|node| node.size.x * node.inverse_scale_factor)
+            .unwrap_or_default();
+        Ok((pane, width.is_finite() && width >= 1120.0))
+    }
+
     fn authentication(
         &self,
         id: String,
@@ -636,6 +665,59 @@ fn open(
             }
             Err(error) => {
                 responses.write(request.reply.response(AgentCommandResult::Error(error)));
+            }
+        }
+    }
+}
+
+#[derive(bevy::ecs::system::SystemParam)]
+struct BrowserOpening<'w, 's> {
+    beside: MessageWriter<'w, OpenBesideRequest>,
+    pages: MessageWriter<'w, PageOpenRequest>,
+    commands: Commands<'w, 's>,
+}
+
+impl BrowserOpening<'_, '_> {
+    fn open(&mut self, target: (Entity, bool), url: String, request_id: [u8; 16]) {
+        let (pane, wide) = target;
+        if wide {
+            self.beside.write(OpenBesideRequest {
+                pane,
+                direction: Some(PaneDirection::Right),
+                url,
+                request_id,
+                focus: true,
+            });
+        } else {
+            let stack = self
+                .commands
+                .spawn((Stack::bundle(), LastActivatedAt::now(), ChildOf(pane)))
+                .id();
+            self.pages.write(PageOpenRequest {
+                target: PageOpenTarget::Stack(stack),
+                url,
+                request_id: None,
+            });
+            self.commands
+                .trigger(vmux_ecs::ActivateRequest { entity: stack });
+        }
+    }
+}
+
+fn open_from_page(
+    mut requests: MessageReader<BrowserOpenRequest>,
+    target: OpenResolver,
+    mut opening: BrowserOpening,
+) {
+    for request in requests.read() {
+        if let Err(error) = Url::parse(&request.url) {
+            bevy::log::warn!("browser page request refused: {error}");
+            continue;
+        }
+        match target.page(request.source) {
+            Ok(target) => opening.open(target, request.url.clone(), AgentRequestId::new().0),
+            Err(error) => {
+                bevy::log::warn!("browser page request refused: {error}");
             }
         }
     }
