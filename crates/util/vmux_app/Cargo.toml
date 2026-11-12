@@ -11,6 +11,7 @@ repository.workspace = true
 default = []
 conformance = ["extension", "vmux_extension/conformance"]
 cli = [
+    "ecs",
     "acp",
     "bookmark",
     "browser",
@@ -28,6 +29,7 @@ cli = [
     "dep:bevy_ecs",
     "dep:vmux_mcp",
 ]
+mcp = ["cli"]
 desktop = [
     "acp",
     "bookmark",
@@ -54,14 +56,17 @@ desktop = [
     "vault",
 ]
 mobile = ["session", "dep:vmux_start", "dep:vmux_team"]
-service-daemon = [
-    "service",
+service-daemon = ["daemon"]
+daemon = [
+    "ecs",
+    "vmux_ecs/host",
     "dep:tokio",
     "dep:tracing",
     "dep:tracing-appender",
     "dep:tracing-subscriber",
     "dep:vmux_acp",
     "dep:vmux_profile",
+    "dep:vmux_service",
     "dep:vmux_transport",
     "vmux_acp/service",
 ]

@@ -19,7 +19,7 @@ impl Plugin for CliPlugin {
     fn build(&self, app: &mut App) {
         app.add_plugins((
             FeaturePlugin::<Feature>::default(),
-            vmux_app::VmuxToolPlugin,
+            vmux_app::VmuxPlugin::builder().cli().build(),
             CliRuntimePlugin,
         ))
         .add_systems(Update, open);

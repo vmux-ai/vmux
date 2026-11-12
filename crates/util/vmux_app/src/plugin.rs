@@ -4,8 +4,15 @@ use vmux_macro::app_plugin;
 
 #[app_plugin]
 pub enum VmuxPlugin {
-    #[plugin(feature = "ecs", desktop)]
+    #[plugin(feature = "ecs", desktop, daemon, cli, mcp)]
     Ecs(VmuxEcsPlugin),
+    #[plugin(feature = "cli", cli, mcp, requires(ecs))]
+    CliTools(crate::VmuxToolPlugin),
+    #[plugin(feature = "daemon", daemon, requires(ecs))]
+    ServiceDaemon(
+        vmux_service::server::ServiceDaemonPlugin,
+        vmux_acp::AcpServicePlugin,
+    ),
     #[plugin(feature = "project", desktop, requires(ecs))]
     Project(vmux_project::ProjectPlugin),
     #[plugin(feature = "jobs", desktop, requires(ecs))]
@@ -149,5 +156,84 @@ mod tests {
         assert!(options.history);
         assert!(options.knowledge);
         assert!(options.service);
+    }
+}
+
+#[cfg(all(test, feature = "daemon"))]
+mod profile_tests {
+    use super::*;
+    use bevy_ecs::prelude::*;
+    use vmux_ecs::manifest::FeatureManifest;
+    use vmux_ecs::{
+        ActivateRequest, LastActivatedAt, Operation, OperationCompleted, OperationState,
+    };
+
+    #[test]
+    fn headless_profiles_preserve_core_lifecycles_and_select_their_cli_catalog() {
+        let runtime = tokio::runtime::Runtime::new().unwrap();
+        let _entered = runtime.enter();
+        let profiles = [
+            (VmuxPluginOptions::daemon(), false),
+            #[cfg(feature = "cli")]
+            (VmuxPluginOptions::cli(), true),
+            #[cfg(feature = "mcp")]
+            (VmuxPluginOptions::mcp(), true),
+        ];
+        for (options, tools) in profiles {
+            let mut app = App::new();
+            app.add_plugins(VmuxPlugin::builder().options(options).build());
+            app.finish();
+            app.cleanup();
+            #[cfg(feature = "runtime")]
+            assert!(!app.is_plugin_added::<VmuxRuntimePlugin>());
+            let mut catalog = Vec::new();
+            let world = app.world_mut();
+            for feature in world.query::<&FeatureManifest>().iter(world) {
+                if let Some(cli) = &feature.cli {
+                    for command in &cli.commands {
+                        catalog.push(command.id.clone());
+                    }
+                }
+            }
+            catalog.sort();
+            if tools {
+                assert_eq!(catalog, ["mcp", "remote.pair", "service", "tool"]);
+            } else {
+                assert!(catalog.is_empty());
+            }
+            let root = app.world_mut().spawn(LastActivatedAt(10)).id();
+            let child = app
+                .world_mut()
+                .spawn((LastActivatedAt(10), ChildOf(root)))
+                .id();
+            app.world_mut().trigger(ActivateRequest { entity: child });
+            app.world_mut().flush();
+            let root_time = app.world().get::<LastActivatedAt>(root).unwrap().0;
+            assert!(root_time > 10);
+            assert_eq!(
+                app.world().get::<LastActivatedAt>(child).unwrap().0,
+                root_time
+            );
+            let operation = app
+                .world_mut()
+                .spawn(Operation::bundle("profile.work").unwrap())
+                .id();
+            app.world_mut().trigger(OperationCompleted {
+                entity: operation,
+                result: Ok(()),
+            });
+            assert_eq!(
+                app.world().get::<OperationState>(operation),
+                Some(&OperationState::Succeeded)
+            );
+            app.world_mut().trigger(OperationCompleted {
+                entity: operation,
+                result: Err("late completion".into()),
+            });
+            assert_eq!(
+                app.world().get::<OperationState>(operation),
+                Some(&OperationState::Succeeded)
+            );
+        }
     }
 }
