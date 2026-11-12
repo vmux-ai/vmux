@@ -676,11 +676,16 @@ fn deactivate(
 
 fn close(
     trigger: On<CommandBarDismiss>,
+    panels: Query<(), With<RendersLauncherPanel>>,
     workspace: Single<&CommandBarWorkspaceSnapshot>,
     mut surface: CommandBarSurface,
     mut restore_keyboard: MessageWriter<RestoreKeyboardToStack>,
     mut commands: Commands,
 ) {
+    let webview = trigger.event().webview;
+    if panels.contains(webview) {
+        commands.trigger(CommandBarPanelClose { layout: webview });
+    }
     if let Some(modal_e) = surface.close() {
         commands
             .entity(modal_e)

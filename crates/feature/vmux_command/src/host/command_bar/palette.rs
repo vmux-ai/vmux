@@ -1351,6 +1351,133 @@ mod tests {
         assert_eq!(input.input_revision, 2);
     }
 
+    #[derive(Component, Default)]
+    struct CapturedPageOpens(Vec<vmux_api::command_bar::OpenRequest>);
+
+    fn capture_page_open(
+        trigger: On<UiInput<vmux_api::command_bar::OpenRequest>>,
+        mut captured: Query<&mut CapturedPageOpens>,
+    ) {
+        if let Ok(mut captured) = captured.get_mut(trigger.event().webview) {
+            captured.0.push(trigger.event().payload.clone());
+        }
+    }
+
+    #[test]
+    fn selecting_a_page_closes_its_inline_panel_before_any_ui_round_trip() {
+        for keyboard in [false, true] {
+            let mut app = App::new();
+            app.add_plugins(MinimalPlugins)
+                .init_resource::<bevy_cef::prelude::BinIpcEventRawBuffer>()
+                .init_non_send::<bevy_cef::prelude::Browsers>()
+                .add_plugins((
+                    PalettePlugin,
+                    super::super::controller::Plugin,
+                    super::super::panel::PanelPlugin,
+                ))
+                .add_observer(capture_page_open);
+            let stack = app.world_mut().spawn_empty().id();
+            app.world_mut()
+                .spawn(crate::host::snapshot::CommandBarWorkspaceSnapshot {
+                    stack: Some(stack),
+                    ..Default::default()
+                });
+            let page = app
+                .world_mut()
+                .spawn((RendersLauncherPanel, CapturedPageOpens::default()))
+                .id();
+            let other = app
+                .world_mut()
+                .spawn((
+                    RendersLauncherPanel,
+                    super::super::panel::CommandBarPanelActive,
+                ))
+                .id();
+            app.update();
+            let open_id = OpenId(11);
+            let url = "vmux://tools/lsp";
+            app.world_mut()
+                .trigger(UiStateWrite::<CommandBarUiState>::from_event(
+                    page,
+                    &CommandBarOpenEvent {
+                        open_id,
+                        url: "vmux://tools/".into(),
+                        target: Some(vmux_api::open_target::OpenTarget::InPlace),
+                        pages: vec![CommandBarPage {
+                            url: url.into(),
+                            title: "LSP Servers".into(),
+                            ..Default::default()
+                        }],
+                        ..Default::default()
+                    },
+                ));
+            app.update();
+            assert!(
+                app.world()
+                    .get::<super::super::panel::CommandBarPanelActive>(page)
+                    .is_some()
+            );
+            let index = app
+                .world()
+                .get::<PaletteSnapshot>(page)
+                .unwrap()
+                .0
+                .projection
+                .rows
+                .iter()
+                .position(|row| row.url == url)
+                .expect("the provider page must be selectable");
+            if keyboard {
+                app.world_mut().trigger(UiInput {
+                    webview: page,
+                    payload: CommandPaletteHighlightRequest {
+                        open_id,
+                        index: index as u32,
+                    },
+                });
+                app.update();
+                app.world_mut().trigger(UiInput {
+                    webview: page,
+                    payload: CommandPaletteSubmitRequest { open_id },
+                });
+            } else {
+                app.world_mut().trigger(UiInput {
+                    webview: page,
+                    payload: CommandPaletteActivateRequest {
+                        open_id,
+                        index: index as u32,
+                    },
+                });
+            }
+            app.world_mut().flush();
+            assert!(
+                app.world()
+                    .get::<super::super::panel::CommandBarPanelActive>(page)
+                    .is_none()
+            );
+            assert!(
+                app.world()
+                    .get::<super::super::panel::CommandBarPanelActive>(other)
+                    .is_some()
+            );
+            assert!(
+                !app.world()
+                    .get::<PaletteOpen>(page)
+                    .unwrap()
+                    .0
+                    .open_id
+                    .is_open()
+            );
+            assert_eq!(
+                app.world().get::<CapturedPageOpens>(page).unwrap().0,
+                [vmux_api::command_bar::OpenRequest {
+                    value: url.into(),
+                    open: Some(vmux_api::open_target::OpenTarget::InPlace)
+                }]
+            );
+        }
+    }
+
     #[test]
     fn submission_dispatches_the_projected_row_in_host_ecs() {
         let mut app = App::new();
