@@ -42,10 +42,9 @@ impl Plugin for SpaceProjectPlugin {
             .add_systems(
                 Update,
                 (
-                    register
+                    associate
                         .after(vmux_project::StoreSet::Load)
                         .before(vmux_project::StoreSet::Write),
-                    finish_registrations.after(vmux_project::StoreSet::Write),
                     remember.before(EffectiveStartupSet),
                     start_repo_root_resolutions.after(remember),
                     finish_repo_root_resolutions.after(start_repo_root_resolutions),
@@ -127,17 +126,12 @@ fn remove(
     ));
 }
 
-#[derive(Component)]
-struct Registration(vmux_project::ProjectId);
-
-fn register(
+fn associate(
     projects: vmux_ecs::profile::Projects,
     registrations: vmux_project::Registrations,
     mut changed: MessageReader<vmux_project::ProjectChanged>,
     settings: Option<ResMut<AppSettings>>,
-    pending: Query<&Registration>,
     mut saves: MessageWriter<SettingsSaveRequest>,
-    mut commands: Commands,
 ) {
     let updated = changed.read().count() > 0;
     let Some(mut settings) = settings else {
@@ -153,7 +147,6 @@ fn register(
         return;
     }
     let root = root.to_path_buf();
-    let snapshot = registrations.snapshot(&root);
     let mut candidates = std::collections::BTreeMap::new();
     for project in settings
         .projects
@@ -167,92 +160,16 @@ fn register(
     let mut associated = false;
     for project in candidates.into_values() {
         let directory = std::path::Path::new(&project.path);
-        let proposed = if vmux_project::ProjectRoute::is_page(&project.id) {
-            project.id.clone()
-        } else {
-            vmux_project::ProjectRoute::from_path(&root, directory).unwrap_or_else(|| {
-                format!("{}{id}", vmux_project::ProjectRoute::ROOT, id = project.id)
-            })
-        };
-        if snapshot.hidden.contains(&proposed)
-            || vmux_project::ProjectRoute::from_path(&root, directory)
-                .is_some_and(|url| snapshot.hidden.contains(&url))
-        {
+        let Some(id) = registrations.url_for_directory(&root, directory) else {
             continue;
-        }
-        let existing = registrations.url_for_directory(&root, directory);
-        let id = vmux_project::ProjectId(existing.clone().unwrap_or(proposed));
-        if existing.is_some() {
-            associated |= settings
-                .bypass_change_detection()
-                .associate_project(&project.path, &id.0);
-        }
-        if pending.iter().any(|held| held.0 == id) {
-            continue;
-        }
-        let (name, repository, expected) = if let Some(url) = existing {
-            let Some(record) = snapshot.projects.get(&url) else {
-                continue;
-            };
-            if record.revision != 0
-                || project.label.is_none()
-                || project.display_label() == record.name
-            {
-                continue;
-            }
-            (
-                project.display_label().to_string(),
-                record.repository.clone(),
-                record.revision,
-            )
-        } else {
-            let name = project.label.clone().unwrap_or_else(|| {
-                directory
-                    .file_name()
-                    .unwrap_or_default()
-                    .to_string_lossy()
-                    .into_owned()
-            });
-            (name, None, 0)
         };
-        commands.spawn((
-            vmux_ecs::Operation::bundle("project.save")
-                .unwrap()
-                .running(),
-            Registration(id.clone()),
-            vmux_project::WriteRequest {
-                root: root.clone(),
-                mutation: vmux_project::Mutation::Save {
-                    expected,
-                    project: vmux_project::ProjectSaved {
-                        root: root.clone(),
-                        id,
-                        directory: directory.to_path_buf(),
-                        name,
-                        repository,
-                        revision: 0,
-                    },
-                },
-            },
-        ));
+        associated |= settings
+            .bypass_change_detection()
+            .associate_project(&project.path, &id);
     }
     if associated {
         settings.set_changed();
         saves.write(SettingsSaveRequest);
-    }
-}
-
-fn finish_registrations(
-    mut completed: MessageReader<vmux_project::WriteCompleted>,
-    pending: Query<(), With<Registration>>,
-    mut commands: Commands,
-) {
-    for completed in completed.read() {
-        if pending.contains(completed.requester) {
-            commands
-                .entity(completed.requester)
-                .remove::<Registration>();
-        }
     }
 }
 
@@ -912,11 +829,7 @@ impl SpaceProjects<'_, '_> {
 
     fn projects_of(&self, space_id: &str) -> Vec<ProjectRow> {
         let Ok(root) = self.project_roots.path() else {
-            return self
-                .settings
-                .as_deref()
-                .map(|settings| settings.project_rows(space_id))
-                .unwrap_or_default();
+            return Vec::new();
         };
         if self.registrations.ready(root) != Ok(true) {
             return Vec::new();
@@ -1620,6 +1533,77 @@ mod tests {
     }
 
     #[test]
+    fn directory_history_never_registers_a_project_or_supplies_selector_entries() {
+        let root = tempfile::tempdir().unwrap();
+        let history = root.path().join("client");
+        let official = root.path().join("official");
+        std::fs::create_dir_all(&history).unwrap();
+        std::fs::create_dir_all(&official).unwrap();
+        let mut fixture = Fixture::start("work");
+        fixture.select(&history.to_string_lossy());
+        let directory =
+            vmux_ecs::profile::ProjectsDirectory::ensure_at(root.path().to_path_buf()).unwrap();
+        let owner = fixture
+            .app
+            .world_mut()
+            .spawn((
+                vmux_ecs::profile::ProjectsRoot(directory.clone()),
+                vmux_project::Root(directory.path().to_path_buf()),
+                vmux_project::Loaded,
+            ))
+            .id();
+        fixture
+            .app
+            .world_mut()
+            .write_message(vmux_project::ProjectChanged {
+                root: directory.path().to_path_buf(),
+            });
+        fixture.app.update();
+        assert_eq!(
+            fixture
+                .app
+                .world_mut()
+                .query::<&vmux_project::WriteRequest>()
+                .iter(fixture.app.world())
+                .count(),
+            0
+        );
+        let rows = fixture
+            .app
+            .world_mut()
+            .run_system_once(move |projects: SpaceProjects| projects.rows(fixture.pane))
+            .unwrap();
+        assert!(rows.is_empty());
+
+        fixture.app.world_mut().spawn((
+            vmux_project::Project,
+            vmux_project::Registered,
+            vmux_project::ProjectId("vmux://projects/official".to_string()),
+            Name::new("Official project"),
+            vmux_ecs::Cwd(official.clone()),
+            vmux_project::Repository(None),
+            vmux_ecs::Revision(1),
+            ChildOf(owner),
+        ));
+        fixture
+            .app
+            .world_mut()
+            .write_message(vmux_project::ProjectChanged {
+                root: directory.path().to_path_buf(),
+            });
+        fixture.app.update();
+        let rows = fixture
+            .app
+            .world_mut()
+            .run_system_once(move |projects: SpaceProjects| projects.rows(fixture.pane))
+            .unwrap();
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].label, "Official project");
+        assert_eq!(rows[0].identity, "vmux://projects/official");
+        assert!(history.is_dir());
+    }
+
+    #[test]
     fn active_project_tree_is_visible_without_a_persisted_toggle() {
         let root = tempfile::tempdir().unwrap();
         let project = root.path().join("project");
@@ -1636,6 +1620,26 @@ mod tests {
         );
         let mut app = App::new();
         app.insert_resource(settings);
+        let directory =
+            vmux_ecs::profile::ProjectsDirectory::ensure_at(root.path().to_path_buf()).unwrap();
+        let owner = app
+            .world_mut()
+            .spawn((
+                vmux_ecs::profile::ProjectsRoot(directory.clone()),
+                vmux_project::Root(directory.path().to_path_buf()),
+                vmux_project::Loaded,
+            ))
+            .id();
+        app.world_mut().spawn((
+            vmux_project::Project,
+            vmux_project::Registered,
+            vmux_project::ProjectId("vmux://projects/official".to_string()),
+            Name::new("Project"),
+            vmux_ecs::Cwd(project),
+            vmux_project::Repository(None),
+            vmux_ecs::Revision(1),
+            ChildOf(owner),
+        ));
         let expanded_space = app
             .world_mut()
             .spawn((

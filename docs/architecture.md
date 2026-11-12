@@ -791,8 +791,9 @@ The side-sheet project selector opens on right-click as well as hover and offers
 collection directly. Its names and management requests use registered Project IDs. Renaming and
 removal share the Project store, while existing Tab directories and local files remain intact.
 The catalog renders registered Project records rather than inferring projects from directories.
-Legacy workspace preferences import previously selected projects and attach their canonical IDs
-without becoming another owner of Project names or removal state. Legacy page URLs resolve to
+Workspace directory history only associates with existing registered Project IDs and never
+creates a Project or supplies catalog entries. Project creation requires an explicit add, create,
+import, or clone request. Legacy page URLs resolve to
 the registered identity where available. A missing local folder does not remove the Project or
 prevent opening its metadata page.
 
