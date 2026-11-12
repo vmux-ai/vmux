@@ -15,8 +15,30 @@ impl Client {
     }
 
     pub fn list(&self) -> io::Result<Vec<Container>> {
-        let body = self.0.get("/containers/json?all=1")?.require_success()?;
-        Container::decode(&body)
+        let mut retries = 0;
+        loop {
+            match self.0.get("/containers/json?all=1") {
+                Ok(response) => return Container::decode(&response.require_success()?),
+                Err(error) => {
+                    if retries == 2
+                        || !matches!(
+                            error.kind(),
+                            io::ErrorKind::WouldBlock
+                                | io::ErrorKind::TimedOut
+                                | io::ErrorKind::Interrupted
+                                | io::ErrorKind::ConnectionReset
+                                | io::ErrorKind::ConnectionAborted
+                                | io::ErrorKind::ConnectionRefused
+                                | io::ErrorKind::UnexpectedEof
+                        )
+                    {
+                        return Err(error);
+                    }
+                    retries += 1;
+                    std::thread::sleep(Duration::from_millis(250));
+                }
+            }
+        }
     }
 
     pub fn change(&self, id: &str, operation: Operation) -> io::Result<()> {
@@ -236,35 +258,55 @@ mod tests {
     use std::os::unix::net::UnixListener;
     use std::path::PathBuf;
     use std::thread::{self, JoinHandle};
+    use std::time::Instant;
 
     struct Daemon {
         socket: PathBuf,
-        response: JoinHandle<String>,
+        response: JoinHandle<Vec<String>>,
         _directory: tempfile::TempDir,
     }
 
+    enum Reply {
+        Stalled,
+        Http(String),
+    }
+
     impl Daemon {
-        fn new(status: u16, body: &str) -> Self {
+        fn new(replies: Vec<Reply>) -> Self {
             let directory = tempfile::tempdir().unwrap();
             let socket = directory.path().join("docker.sock");
             let listener = UnixListener::bind(&socket).unwrap();
-            let reply = format!(
-                "HTTP/1.0 {status} OK\r\nContent-Length: {}\r\n\r\n{body}",
-                body.len()
-            );
+            listener.set_nonblocking(true).unwrap();
             let response = thread::spawn(move || {
-                let (mut stream, _) = listener.accept().unwrap();
-                stream
-                    .set_read_timeout(Some(Duration::from_secs(2)))
-                    .unwrap();
-                let mut request = Vec::new();
-                let mut byte = [0];
-                while !request.ends_with(b"\r\n\r\n") {
-                    stream.read_exact(&mut byte).unwrap();
-                    request.push(byte[0]);
+                let mut requests = Vec::new();
+                for reply in replies {
+                    let deadline = Instant::now() + Duration::from_secs(5);
+                    let mut stream = loop {
+                        match listener.accept() {
+                            Ok((stream, _)) => break stream,
+                            Err(error) if error.kind() == io::ErrorKind::WouldBlock => {
+                                assert!(Instant::now() < deadline, "missing Docker request");
+                                thread::sleep(Duration::from_millis(10));
+                            }
+                            Err(error) => panic!("{error}"),
+                        }
+                    };
+                    stream
+                        .set_read_timeout(Some(Duration::from_secs(2)))
+                        .unwrap();
+                    let mut request = Vec::new();
+                    let mut byte = [0];
+                    while !request.ends_with(b"\r\n\r\n") {
+                        stream.read_exact(&mut byte).unwrap();
+                        request.push(byte[0]);
+                    }
+                    match reply {
+                        Reply::Stalled => thread::sleep(Duration::from_millis(2100)),
+                        Reply::Http(reply) => stream.write_all(reply.as_bytes()).unwrap(),
+                    }
+                    requests.push(String::from_utf8(request).unwrap());
                 }
-                stream.write_all(reply.as_bytes()).unwrap();
-                String::from_utf8(request).unwrap()
+                requests
             });
             Self {
                 socket,
@@ -274,18 +316,60 @@ mod tests {
         }
 
         fn request(self) -> String {
-            self.response.join().unwrap()
+            let mut requests = self.response.join().unwrap();
+            assert_eq!(requests.len(), 1);
+            requests.pop().unwrap()
+        }
+
+        fn reply(status: u16, body: &str) -> Reply {
+            Reply::Http(format!(
+                "HTTP/1.0 {status} OK\r\nContent-Length: {}\r\n\r\n{body}",
+                body.len()
+            ))
         }
     }
 
     #[test]
     fn inventory_requests_stopped_containers_from_the_daemon() {
-        let daemon = Daemon::new(200, "[]");
+        let daemon = Daemon::new(vec![Daemon::reply(200, "[]")]);
         assert!(Client::new(&daemon.socket).list().unwrap().is_empty());
         assert_eq!(
             daemon.request().lines().next(),
             Some("GET /containers/json?all=1 HTTP/1.0")
         );
+    }
+
+    #[test]
+    fn inventory_retries_interrupted_reads_with_a_bounded_budget() {
+        let daemon = Daemon::new(vec![Reply::Stalled, Daemon::reply(200, "[]")]);
+        assert!(Client::new(&daemon.socket).list().unwrap().is_empty());
+        assert_eq!(daemon.response.join().unwrap().len(), 2);
+        for failures in [1, 3] {
+            let mut replies = Vec::new();
+            for _ in 0..failures {
+                replies.push(Reply::Http(
+                    "HTTP/1.0 200 OK\r\nContent-Length: 2\r\n\r\n[".into(),
+                ));
+            }
+            if failures == 1 {
+                replies.push(Daemon::reply(200, "[]"));
+            }
+            let daemon = Daemon::new(replies);
+            let result = Client::new(&daemon.socket).list();
+            if failures == 1 {
+                assert!(result.unwrap().is_empty());
+            } else {
+                assert_eq!(result.unwrap_err().kind(), io::ErrorKind::UnexpectedEof);
+            }
+            let requests = daemon.response.join().unwrap();
+            assert_eq!(requests.len(), if failures == 1 { 2 } else { 3 });
+            for request in requests {
+                assert_eq!(
+                    request.lines().next(),
+                    Some("GET /containers/json?all=1 HTTP/1.0")
+                );
+            }
+        }
     }
 
     #[test]
@@ -312,7 +396,7 @@ mod tests {
                 "DELETE /containers/eeeeeeeeeeee?force=false&v=false HTTP/1.0",
             ),
         ] {
-            let daemon = Daemon::new(status, "");
+            let daemon = Daemon::new(vec![Daemon::reply(status, "")]);
             Client::new(&daemon.socket)
                 .change("eeeeeeeeeeee", operation)
                 .unwrap();
