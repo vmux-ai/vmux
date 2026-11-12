@@ -2,6 +2,7 @@ use crate::filesystem::FilesystemPlugin;
 use crate::{AutoSave, Catalog, CorePlugin, ExtensionSchedule, Root, Seed};
 use bevy::ecs::system::SystemState;
 use bevy::prelude::*;
+pub(crate) use load::PreparedExtensions;
 use serde::Deserialize;
 use vmux_api::protocol::AgentRequest;
 use vmux_ecs::agent::{
@@ -40,7 +41,7 @@ impl Plugin for ExtensionPlugin {
         let mut seed = store.load_index();
         if let Ok(index) = &mut seed
             && index.requires_save()
-            && let Err(error) = load::PreparedExtensions::migrate_index_permissions(&store, index)
+            && let Err(error) = PreparedExtensions::migrate_index_permissions(&store, index)
         {
             seed = Err(error);
         }
@@ -57,7 +58,7 @@ impl Plugin for ExtensionPlugin {
             .unwrap()
             .generation;
         let initial = catalog.get(app.world()).unwrap().snapshot(root);
-        let preparation = initial.and_then(|index| load::PreparedExtensions::prepare(&index));
+        let preparation = initial.and_then(|index| PreparedExtensions::prepare(&index));
         let prepared = match preparation {
             Ok((prepared, evidence)) => {
                 app.world_mut().entity_mut(root).insert(evidence);
@@ -67,7 +68,7 @@ impl Plugin for ExtensionPlugin {
             Err(error) => {
                 bevy::log::error!(%error, "failed to prepare extensions; starting without them");
                 unsafe { std::env::remove_var("VMUX_LOAD_EXTENSIONS") };
-                load::PreparedExtensions::default()
+                PreparedExtensions::default()
             }
         };
         let mut ids = Vec::new();

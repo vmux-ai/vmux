@@ -10,6 +10,36 @@ use super::service_worker_cache::ServiceWorkerCache;
 pub struct PreparedExtensions(pub Vec<PreparedRuntime>);
 
 impl PreparedExtensions {
+    pub(crate) fn snapshot(
+        &self,
+        index: &store::Index,
+        profile: &str,
+        loaded: &[String],
+    ) -> vmux_api::extension::ExtensionsUiState {
+        let mut snapshot = index.snapshot(profile, loaded);
+        for entry in &index.entries {
+            if !entry.enabled_for(profile) {
+                continue;
+            }
+            let Some(runtime) = self
+                .0
+                .iter()
+                .find(|runtime| runtime.extension_id == entry.id)
+            else {
+                snapshot.pending = true;
+                continue;
+            };
+            let grants = entry.grants_for(profile);
+            if runtime.source_hash != entry.source_hash
+                || runtime.granted_permissions != grants.permissions
+                || runtime.granted_host_permissions != grants.host_permissions
+            {
+                snapshot.pending = true;
+            }
+        }
+        snapshot
+    }
+
     pub(super) fn prepare(index: &store::Index) -> Result<(Self, PreparedEvidence), String> {
         let store = store::ExtensionStore::current();
         let runtime_store = store::ExtensionStore::at(Self::runtime_store_root());
@@ -172,6 +202,34 @@ mod tests {
                 .map(|runtime| runtime.extension_id.as_str())
                 .collect::<Vec<_>>(),
             ["working"]
+        );
+    }
+
+    #[test]
+    fn same_identity_updates_and_grant_changes_require_a_prepared_runtime_refresh() {
+        let id = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+        let mut index = store::Index::default();
+        index.entries.push(enabled_entry(id));
+        let prepared = PreparedExtensions(vec![PreparedRuntime::fixture(id, "runtime-hash")]);
+        let loaded = vec![id.to_string()];
+        assert!(!prepared.snapshot(&index, "personal", &loaded).pending);
+        index.entries[0].source_hash = "updated-source-hash".into();
+        assert!(prepared.snapshot(&index, "personal", &loaded).pending);
+        index.entries[0].source_hash = "source-hash".into();
+        index.entries[0].approved_grants.insert(
+            "personal".into(),
+            store::ExtensionGrants {
+                permissions: vec!["storage".into()],
+                host_permissions: Vec::new(),
+            },
+        );
+        assert!(prepared.snapshot(&index, "personal", &loaded).pending);
+        let mut updated = PreparedRuntime::fixture(id, "runtime-hash");
+        updated.granted_permissions = vec!["storage".into()];
+        assert!(
+            !PreparedExtensions(vec![updated])
+                .snapshot(&index, "personal", &loaded)
+                .pending
         );
     }
 

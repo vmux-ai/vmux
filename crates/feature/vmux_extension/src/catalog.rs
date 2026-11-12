@@ -286,7 +286,18 @@ fn finish(
 }
 
 fn project(
-    roots: Query<(Entity, &Revision, &RuntimeIds, Has<crate::Loaded>), With<Binding>>,
+    roots: Query<
+        (
+            Entity,
+            &Revision,
+            &RuntimeIds,
+            &crate::host::RuntimeGeneration,
+            Has<crate::Loaded>,
+        ),
+        With<Binding>,
+    >,
+    prepared: Query<&crate::host::PreparedExtensions>,
+    bindings: Query<(&crate::Id, &ChildOf), With<crate::host::RuntimeBinding>>,
     source: Catalog,
     profile: vmux_ecs::profile::CurrentProfile,
     mut catalog: Single<&mut ExtensionCatalog>,
@@ -295,7 +306,7 @@ fn project(
         return;
     };
     let profile = profile.clone().into_id();
-    let Ok((root, revision, runtime, loaded)) = roots.single() else {
+    let Ok((root, revision, runtime, runtime_generation, loaded)) = roots.single() else {
         return;
     };
     let generation = source.ticket(root).map(|ticket| ticket.generation);
@@ -307,7 +318,26 @@ fn project(
         return;
     }
     let snapshot = match source.snapshot(root) {
-        Ok(snapshot) => snapshot.snapshot(&profile, &runtime.0),
+        Ok(index) => {
+            let mut snapshot = match prepared.single() {
+                Ok(prepared) => prepared.snapshot(&index, &profile, &runtime.0),
+                Err(_) => index.snapshot(&profile, &runtime.0),
+            };
+            for entry in &index.entries {
+                if !entry.enabled_for(&profile) {
+                    continue;
+                }
+                let association = source.association(root, &entry.id, &profile);
+                if generation != Some(runtime_generation.0)
+                    || !bindings.iter().any(|(id, parent)| {
+                        id.0 == entry.id && Some(parent.parent()) == association
+                    })
+                {
+                    snapshot.pending = true;
+                }
+            }
+            snapshot
+        }
         Err(error) => {
             warn!("extension catalog unavailable: {error}");
             ExtensionsUiState {
