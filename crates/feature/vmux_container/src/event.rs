@@ -14,6 +14,8 @@ pub struct ContainerUiState {
     pub logs: String,
     pub inventory_ready: bool,
     pub inventory_error: String,
+    pub engine_revision: u64,
+    pub inventory_revision: u64,
     pub containers: Vec<ContainerEntry>,
     pub log_id: String,
     pub container_logs: String,
@@ -77,6 +79,10 @@ pub struct ContainerEntry {
 impl ContainerEntry {
     pub fn running(&self) -> bool {
         matches!(self.state.as_str(), "running" | "restarting" | "paused")
+    }
+
+    pub fn transitioning(&self) -> bool {
+        matches!(self.state.as_str(), "starting" | "stopping" | "restarting")
     }
 }
 

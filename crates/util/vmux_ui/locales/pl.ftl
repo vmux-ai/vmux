@@ -1189,3 +1189,12 @@ container-service-not-running = Usługa zatrzymana
 container-service-starting = Uruchamianie usługi
 container-service-stopping = Zatrzymywanie usługi
 container-no-selection = Brak wyboru
+
+container-start-vm = Uruchom VM
+container-stop-vm = Zatrzymaj VM
+container-start-all = Uruchom wszystkie
+container-stop-all = Zatrzymaj wszystkie
+container-state-starting = Uruchamianie
+container-start-group = Uruchom wszystkie w { $group }
+container-stop-group = Zatrzymaj wszystkie w { $group }
+container-vm = VM

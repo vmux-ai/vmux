@@ -1595,16 +1595,21 @@ out, because dependency resolution happens before any build script runs.
 
 ## Native containers
 
-`vmux_container` owns the `vmux://docker/containers` page and container CLI. Both submit typed
+`vmux_container` owns the `vmux://vm/docker/containers` page and container CLI. Both submit typed
 requests to `ControlPlugin`; shared operation entities own asynchronous work, its target,
 and completion. `InventoryPlugin` reconciles Docker containers into child entities with
 stable IDs, shared names, image/state, Compose labels and published ports. Its ordered
 snapshot tasks preserve existing entity identity and retire removed containers. Per-page
 selection owns bounded log tasks and retains displayed output during refresh.
 
-The default Docker bookmark opens `vmux://docker/containers` beside Simulator.
-`vmux://docker/` and the legacy `vmux://containers/` canonicalize to that route;
-only the implemented Containers page is registered. Canonical bookmark keys reuse old
+The default VM bookmark opens `vmux://vm/docker/containers` beside Simulator.
+`vmux://vm/`, `vmux://vm/docker/`, `vmux://docker/containers`, `vmux://docker/`
+and the legacy `vmux://containers/` canonicalize to that route.
+The Containers page owns its subtree; group URLs use `groups/<name>/info|logs`, and
+group members use `groups/<name>/containers/<id>/info|logs`. Standalone entries use
+`<id>/info|logs`. Names are path-encoded; in-place navigation preserves the same DOM,
+and shared page-address state restores selection and view after history navigation.
+Canonical bookmark keys reuse old
 pins, and a one-time placement migration moves the Docker pin after Simulator while
 preserving the order of other pins and later user rearrangements.
 The page uses `WorkspaceLayout` with the editor's side-sheet
@@ -1618,15 +1623,24 @@ the idle surface contains the VM illustration and Start, without a stopped-state
 the side sheet and details appear when Docker is ready. One root UI-state subscription
 survives these transitions. A thin divider separates the side sheet and details.
 Details remain unselected until the user chooses an entry. The address reads
-`Docker → Containers → selected entry → Info/Logs`. VM shutdown and settings live in
-the Docker side-sheet header, while play/stop/restart controls in the details toolbar
-operate on the selected container or Compose group. Tooltips retain operation labels.
+`VM → Docker → Containers → group → selected entry → Info/Logs`. VM shutdown and settings
+live in the Docker side-sheet header; Stop VM has an explicit text label. Container Start/Stop
+controls have text labels in the details toolbar and list rows. Group headers expose Start all
+until every member runs, then Stop all; details retain scoped group controls.
+Pending controls show a spinner and Starting/Stopping/Restarting instead of an inactive play icon.
+Batch startup orders selected Compose services by their declared dependency labels, waits for
+running, healthy or successfully completed dependencies, and reports partial failure while
+continuing independent services. It never starts containers outside the selected batch.
 Stopping uses a pause-shaped icon with an explicit stop tooltip. A native SVG monitor
 and container illustration accompanies the idle Start control. Local pending intents
 project starting/stopping states in the input frame and suppress duplicate requests.
 Per-page `Revision` and `LastError` components acknowledge mutating completions through
-`ContainerUiState.control_revision` and `control_error`; successful container intents
-remain visible until inventory converges, while failures restore authoritative state.
+`ContainerUiState.control_revision` and `control_error`. Inventory tasks capture the engine's
+shared control revision and discard results overtaken by a completion. `engine_revision` and
+`inventory_revision` identify the first authoritative snapshot after a command: pending feedback
+ends then, including when a container immediately exits, rather than waiting forever for Running.
+An inventory failure retains pending feedback; a completed container command does not prevent
+stopping the VM while its subsequent refresh is pending. Command failures restore authoritative state.
 Settings are read-only with one Close control while Docker runs,
 and offer Cancel/Save only when stopped.
 Startup uses persisted defaults and initially shares the home directory. Containers
@@ -1662,7 +1676,7 @@ below the list instead of replacing it. An initial failure has no previous list 
 ```mermaid
 flowchart LR
     cli["vmux container"] --> control["ControlPlugin: operation entities"]
-    page["vmux://docker/containers"] --> control
+    page["vmux://vm/docker/containers"] --> control
     control --> client["EngineClient"]
     client --> engine["EnginePlugin: engine entity + lease"]
     engine --> worker["libkrun worker entity"]

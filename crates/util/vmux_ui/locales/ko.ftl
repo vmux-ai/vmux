@@ -1186,3 +1186,12 @@ container-service-not-running = 서비스가 중지되어 있습니다
 container-service-starting = 서비스 시작 중
 container-service-stopping = 서비스 중지 중
 container-no-selection = 선택 없음
+
+container-start-vm = VM 시작
+container-stop-vm = VM 중지
+container-start-all = 모두 시작
+container-stop-all = 모두 중지
+container-state-starting = 시작 중
+container-start-group = { $group }의 모든 컨테이너 시작
+container-stop-group = { $group }의 모든 컨테이너 중지
+container-vm = VM

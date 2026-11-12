@@ -7,6 +7,7 @@ use bevy::prelude::*;
 use bevy::tasks::{IoTaskPool, Task, futures_lite::future};
 use bevy::winit::EventLoopProxyWrapper;
 use bevy_cef::prelude::{UiEventPlugin, UiInput};
+use vmux_ecs::Revision;
 use vmux_ecs::wake::Wake;
 use vmux_vm::{Container as DockerContainer, DockerClient, DockerPort, Settings};
 
@@ -39,13 +40,17 @@ impl Plugin for InventoryPlugin {
 pub(crate) struct Inventory {
     pub(crate) ready: bool,
     pub(crate) error: String,
+    pub(crate) revision: Revision,
 }
 
 #[derive(Component)]
 struct NextPoll(Instant);
 
 #[derive(Component)]
-struct SnapshotTask(Task<io::Result<Vec<DockerContainer>>>);
+struct SnapshotTask {
+    revision: Revision,
+    task: Task<io::Result<Vec<DockerContainer>>>,
+}
 
 #[derive(Component)]
 struct Entry;
@@ -161,6 +166,7 @@ type InspectedEngines<'w, 's> = Query<
         Entity,
         &'static Settings,
         &'static Observed,
+        &'static Revision,
         Option<&'static mut Inventory>,
         Option<&'static mut NextPoll>,
         Option<&'static SnapshotTask>,
@@ -174,7 +180,7 @@ fn begin(
     proxy: Option<Res<EventLoopProxyWrapper>>,
     mut commands: Commands,
 ) {
-    for (entity, settings, observed, inventory, next, task) in &mut engines {
+    for (entity, settings, observed, revision, inventory, next, task) in &mut engines {
         let (Some(mut inventory), Some(next)) = (inventory, next) else {
             commands
                 .entity(entity)
@@ -200,29 +206,40 @@ fn begin(
         }
         let socket = settings.socket();
         let wake = Wake::beside(proxy.as_deref());
-        commands
-            .entity(entity)
-            .insert(SnapshotTask(IoTaskPool::get().spawn(async move {
+        commands.entity(entity).insert(SnapshotTask {
+            revision: *revision,
+            task: IoTaskPool::get().spawn(async move {
                 let result = DockerClient::new(&socket).list();
                 drop(wake);
                 result
-            })));
+            }),
+        });
     }
 }
 
 fn poll(
     mut engines: Query<
-        (Entity, &mut Inventory, &mut NextPoll, &mut SnapshotTask),
+        (
+            Entity,
+            &mut Inventory,
+            &mut NextPoll,
+            &mut SnapshotTask,
+            &Revision,
+        ),
         With<EngineView>,
     >,
     entries: Query<(Entity, &Id, &ChildOf), With<Entry>>,
     mut commands: Commands,
 ) {
-    for (entity, mut inventory, mut next, mut task) in &mut engines {
-        let Some(result) = future::block_on(future::poll_once(&mut task.0)) else {
+    for (entity, mut inventory, mut next, mut task, revision) in &mut engines {
+        let Some(result) = future::block_on(future::poll_once(&mut task.task)) else {
             continue;
         };
         commands.entity(entity).remove::<SnapshotTask>();
+        if task.revision != *revision {
+            next.0 = Instant::now();
+            continue;
+        }
         next.0 = Instant::now() + Duration::from_secs(2);
         let containers = match result {
             Ok(containers) => containers,
@@ -233,6 +250,7 @@ fn poll(
         };
         inventory.ready = true;
         inventory.error.clear();
+        inventory.revision = task.revision;
         let mut existing = HashMap::new();
         for (entry, id, parent) in &entries {
             if parent.parent() == entity {
@@ -407,5 +425,88 @@ fn poll_logs(
                 output.error = error.to_string();
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use vmux_vm::{Phase, Status};
+
+    #[test]
+    fn a_snapshot_started_before_completion_cannot_replace_current_entries() {
+        IoTaskPool::get_or_init(|| bevy::tasks::TaskPoolBuilder::new().num_threads(1).build());
+        let mut app = App::new();
+        app.add_plugins(InventoryPlugin);
+        let settings = Settings::new("/fixtures/data", "/fixtures/shared");
+        let engine = app
+            .world_mut()
+            .spawn((
+                EngineView,
+                settings.clone(),
+                Revision(1),
+                Observed(Status {
+                    running: true,
+                    docker_ready: false,
+                    socket: settings.socket(),
+                    log: settings.log(),
+                    phase: Phase::Ready,
+                    failure: None,
+                }),
+                Inventory {
+                    ready: true,
+                    ..Default::default()
+                },
+                NextPoll(Instant::now()),
+                SnapshotTask {
+                    revision: Revision(0),
+                    task: IoTaskPool::get().spawn(async { Ok(Vec::new()) }),
+                },
+            ))
+            .id();
+        let entry = app
+            .world_mut()
+            .spawn((
+                Entry,
+                Id("aaaaaaaaaaaa".into()),
+                Name::new("kept"),
+                Image("image".into()),
+                State {
+                    state: "running".into(),
+                    status: "Up".into(),
+                },
+                Compose {
+                    project: "cloud".into(),
+                    service: "web".into(),
+                },
+                Ports(Vec::new()),
+                ChildOf(engine),
+            ))
+            .id();
+        let deadline = Instant::now() + Duration::from_secs(2);
+        while app.world().get::<SnapshotTask>(engine).is_some() {
+            assert!(Instant::now() < deadline);
+            app.update();
+            std::thread::sleep(Duration::from_millis(1));
+        }
+        assert!(app.world().get::<Entry>(entry).is_some());
+        assert_eq!(
+            app.world().get::<Inventory>(engine).unwrap().revision,
+            Revision(0)
+        );
+        app.world_mut().entity_mut(engine).insert(SnapshotTask {
+            revision: Revision(1),
+            task: IoTaskPool::get().spawn(async { Ok(Vec::new()) }),
+        });
+        while app.world().get::<SnapshotTask>(engine).is_some() {
+            assert!(Instant::now() < deadline);
+            app.update();
+            std::thread::sleep(Duration::from_millis(1));
+        }
+        assert!(app.world().get::<Entry>(entry).is_none());
+        assert_eq!(
+            app.world().get::<Inventory>(engine).unwrap().revision,
+            Revision(1)
+        );
     }
 }

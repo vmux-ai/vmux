@@ -1189,3 +1189,12 @@ container-service-not-running = Сервіс не запущено
 container-service-starting = Запуск сервісу
 container-service-stopping = Зупинка сервісу
 container-no-selection = Немає вибору
+
+container-start-vm = Запустити VM
+container-stop-vm = Зупинити VM
+container-start-all = Запустити всі
+container-stop-all = Зупинити всі
+container-state-starting = Запуск
+container-start-group = Запустити всі в { $group }
+container-stop-group = Зупинити всі в { $group }
+container-vm = VM

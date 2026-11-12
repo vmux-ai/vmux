@@ -1,8 +1,9 @@
 (
     pages: [(
-        url: "vmux://docker/containers",
-        title: "Docker",
-        title_message_id: "container-engine",
+        url: "vmux://vm/docker/containers",
+        owns_subtree: true,
+        title: "VM",
+        title_message_id: "container-vm",
         bookmark: Some(135),
         icon: "Container",
         keywords: ["containers", "docker", "linux", "vm", "engine"],

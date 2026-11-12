@@ -1186,3 +1186,12 @@ container-service-not-running = 服务未运行
 container-service-starting = 正在启动服务
 container-service-stopping = 正在停止服务
 container-no-selection = 未选择
+
+container-start-vm = 启动虚拟机
+container-stop-vm = 停止虚拟机
+container-start-all = 全部启动
+container-stop-all = 全部停止
+container-state-starting = 正在启动
+container-start-group = 启动 { $group } 中的所有容器
+container-stop-group = 停止 { $group } 中的所有容器
+container-vm = 虚拟机
