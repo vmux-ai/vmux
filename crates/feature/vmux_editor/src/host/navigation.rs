@@ -472,17 +472,21 @@ fn knowledge_link_open(
         path,
         line: request.line.unwrap_or(0),
         utf16_col: 0,
+        origin: None,
     });
 }
 
 #[allow(clippy::type_complexity)]
 fn apply_goto(
     mut messages: MessageReader<crate::lsp::manager::LspGoto>,
-    mut views: Query<(
-        &mut Editor,
-        &mut FileViewport,
-        &mut FileView,
-        &mut PageMetadata,
+    mut view_params: ParamSet<(
+        crate::lsp::manager::LspManager,
+        Query<(
+            &mut Editor,
+            &mut FileViewport,
+            &mut FileView,
+            &mut PageMetadata,
+        )>,
     )>,
     mut lsp_closes: Option<MessageWriter<crate::lsp::manager::LspDocumentCloseRequest>>,
     mut actions: GotoActions,
@@ -491,6 +495,13 @@ fn apply_goto(
         return;
     }
     for goto in messages.read() {
+        if goto
+            .origin
+            .is_some_and(|origin| !origin.current(&view_params.p0()))
+        {
+            continue;
+        }
+        let mut views = view_params.p1();
         let Ok((mut edit, mut viewport, mut view, mut metadata)) = views.get_mut(goto.entity)
         else {
             continue;
@@ -712,8 +723,70 @@ mod tests {
                     path,
                     line,
                     utf16_col: 0,
+                    origin: None,
                 });
             self.app.update();
+        }
+    }
+
+    #[test]
+    fn deferred_lsp_goto_keeps_its_origin_until_navigation() {
+        for change in 0..3 {
+            let path = Path::new("/tmp/goto.rs");
+            let mut fixture = GotoSession::scrolled_to_the_top_of(path);
+            let scope = crate::lsp::manager::DocumentFixture::open(
+                fixture.app.world_mut(),
+                fixture.view,
+                path,
+                1,
+            );
+            let origin = scope.origin(fixture.app.world_mut(), fixture.view, path);
+            fixture
+                .app
+                .world_mut()
+                .write_message(crate::lsp::manager::LspGoto {
+                    entity: fixture.view,
+                    path: path.into(),
+                    line: 5,
+                    utf16_col: 0,
+                    origin: Some(origin),
+                });
+            match change {
+                0 => {}
+                1 => {
+                    fixture
+                        .app
+                        .world_mut()
+                        .get_mut::<Editor>(fixture.view)
+                        .unwrap()
+                        .core
+                        .apply(crate::edit::EditCommand::InsertText("mine".into()));
+                }
+                2 => {
+                    fixture.app.world_mut().entity_mut(scope.document).despawn();
+                    crate::lsp::manager::DocumentFixture::open(
+                        fixture.app.world_mut(),
+                        fixture.view,
+                        path,
+                        1,
+                    );
+                }
+                _ => unreachable!(),
+            }
+            let before = fixture
+                .app
+                .world()
+                .get::<Editor>(fixture.view)
+                .unwrap()
+                .core
+                .primary();
+            fixture.app.update();
+            let editor = fixture.app.world().get::<Editor>(fixture.view).unwrap();
+            if change == 0 {
+                assert_eq!(editor.core.cursor_pos().line, 5);
+            } else {
+                assert_eq!(editor.core.primary(), before);
+            }
         }
     }
 

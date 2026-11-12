@@ -1195,8 +1195,11 @@ protocol version. Views bind to those documents, so closing one view preserves o
 of the document. Removing a root or restarting a server invalidates only its descendants
 and bindings. Requests use shared Operations and retain their document identity, server
 instance, version, and target view. Cancellation and stale results cannot restore a terminal
-operation or reach a replacement document. Server-origin workspace edits validate the current
-server before applying or replying. Diagnostics retain their server and the protocol's optional
+operation or reach a replacement document. The buffer's opaque change token survives queued
+edits and offered code actions; final application refuses edits, undo, or rebinding since acceptance,
+including changes not yet sent to the server. Versioned edits reject missing or ambiguous versions.
+Server-origin workspace edits validate the current server before applying or replying. Restart
+opens the current buffer, including unsaved text. Diagnostics retain their server and the protocol's optional
 version; unversioned notifications cannot prove which edit produced them.
 Process handles, framing, reader/writer threads, and wire correlation stay in the transport
 adapter. Publishing input or a response, and closing the reader, wakes the reactive runner.

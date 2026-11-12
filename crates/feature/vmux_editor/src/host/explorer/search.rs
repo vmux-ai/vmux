@@ -107,6 +107,7 @@ fn goto(
         path: file_view.path.clone(),
         line: trigger.event().payload.line,
         utf16_col: 0,
+        origin: None,
     });
 }
 

@@ -92,6 +92,7 @@ pub struct EditCore {
     pub dirty: bool,
     pub registers: Registers,
     rev: u64,
+    version: uuid::Uuid,
     saved_rev: Option<u64>,
     undo: crate::edit::undo::UndoTree,
     last_group: Option<Group>,
@@ -109,6 +110,10 @@ pub struct EditCore {
 }
 
 impl EditCore {
+    pub(crate) fn version(&self) -> uuid::Uuid {
+        self.version
+    }
+
     pub fn new(path: PathBuf, language: String, text: &str, default_mode: EditMode) -> Self {
         let buffer = TextBuffer::from_text(path, language, text);
         let fold_view = crate::fold::FoldState::default().view(buffer.len_lines() as u32);
@@ -126,6 +131,7 @@ impl EditCore {
             dirty: false,
             registers: Registers::default(),
             rev: 0,
+            version: uuid::Uuid::new_v4(),
             saved_rev: Some(0),
             undo,
             last_group: None,
@@ -504,6 +510,7 @@ impl EditCore {
     }
 
     fn restore(&mut self, state: crate::edit::undo::Restored) {
+        self.version = uuid::Uuid::new_v4();
         self.buffer.rope = state.rope;
         self.selections = state.selections;
         self.active = 0;
@@ -518,6 +525,7 @@ impl EditCore {
     }
 
     fn checkpoint(&mut self, group: Group) {
+        self.version = uuid::Uuid::new_v4();
         let wants_snapshot = self.last_group != Some(group) || group == Group::Other;
         if wants_snapshot && !(self.in_sweep && self.sweep_snapshotted) {
             self.snapshot();

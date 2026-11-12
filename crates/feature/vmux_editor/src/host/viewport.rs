@@ -486,13 +486,27 @@ fn file_fold_toggle(
     commands.entity(entity).insert(FoldsDirty);
 }
 
+type FoldViews<'w, 's> = Query<
+    'w,
+    's,
+    (&'static mut Editor, &'static FileView),
+    (With<EditorKeymap>, With<FileViewport>),
+>;
+
 fn apply_lsp_folds(
     mut folds: MessageReader<crate::host::lsp::manager::LspFolds>,
-    mut views: Query<(&mut Editor, &FileView, &EditorKeymap, &FileViewport)>,
+    mut view_params: ParamSet<(crate::lsp::manager::LspManager, FoldViews)>,
     mut commands: Commands,
 ) {
     for fold in folds.read() {
-        let Ok((mut edit, file, _, _)) = views.get_mut(fold.entity) else {
+        if fold
+            .origin
+            .is_some_and(|origin| !origin.current(&view_params.p0()))
+        {
+            continue;
+        }
+        let mut views = view_params.p1();
+        let Ok((mut edit, file)) = views.get_mut(fold.entity) else {
             continue;
         };
         if vmux_path::PathIdentity::resolve(&file.path)

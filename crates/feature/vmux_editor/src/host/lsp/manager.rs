@@ -21,6 +21,7 @@ use vmux_setting::AppSettings;
 
 use crate::host::editor::{Editor, FileView};
 use crate::host::highlight::{HIGHLIGHT_MAX_BYTES, Highlighter};
+use crate::host::language::LspEditDirty;
 use crate::host::markdown::ParsedNote;
 use crate::host::viewport::ViewportRenderRequest;
 use crate::lsp::client::ServerClient;
@@ -33,6 +34,9 @@ use crate::lsp::{
 
 use lsp_types::GotoDefinitionResponse::*;
 use lsp_types::{HoverContents, MarkedString};
+
+#[cfg(test)]
+pub(crate) use tests::DocumentFixture;
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub(crate) struct LspLine(String);
@@ -195,10 +199,99 @@ impl LspRequestOperation {
     }
 }
 
+#[derive(Clone, Copy)]
 struct RequestStamp {
     document: Entity,
     server: Entity,
     version: i32,
+    buffer: uuid::Uuid,
+}
+
+impl RequestStamp {
+    fn current(&self, owner: Entity, manager: &LspManager) -> bool {
+        manager
+            .documents
+            .get(self.document)
+            .is_ok_and(|(_, path, doc)| {
+                manager
+                    .views
+                    .get(owner)
+                    .is_ok_and(|view| view.path == path.0)
+                    && doc.version == self.version
+                    && manager.server_entity(&doc.key) == Some(self.server)
+            })
+            && manager
+                .bindings
+                .get(owner)
+                .is_ok_and(|binding| binding.0 == self.document)
+            && manager
+                .editors
+                .get(owner)
+                .is_ok_and(|editor| editor.core.version() == self.buffer)
+    }
+}
+
+#[derive(Clone, Copy)]
+pub struct LspOrigin {
+    owner: Entity,
+    stamp: RequestStamp,
+}
+
+impl LspOrigin {
+    pub(crate) fn current(&self, manager: &LspManager) -> bool {
+        self.stamp.current(self.owner, manager)
+    }
+
+    pub(crate) fn server(&self) -> Entity {
+        self.stamp.server
+    }
+}
+
+pub(crate) struct GuardedResponse<E: Event> {
+    pub(crate) origin: LspOrigin,
+    pub(crate) event: E,
+}
+
+impl<E> Command for GuardedResponse<E>
+where
+    E: Event,
+    for<'a> E::Trigger<'a>: Default,
+{
+    type Out = ();
+
+    fn apply(self, world: &mut World) {
+        let mut state = bevy::ecs::system::SystemState::<LspManager>::new(world);
+        let current = {
+            let manager = state.get_mut(world).expect("LSP lookup is available");
+            self.origin.current(&manager)
+        };
+        if current {
+            world.trigger(self.event);
+        }
+    }
+}
+
+struct GuardedOffer {
+    origin: LspOrigin,
+    actions: Vec<lsp_types::CodeActionOrCommand>,
+}
+
+impl Command for GuardedOffer {
+    type Out = ();
+
+    fn apply(self, world: &mut World) {
+        let mut state = bevy::ecs::system::SystemState::<LspManager>::new(world);
+        let current = {
+            let manager = state.get_mut(world).expect("LSP lookup is available");
+            self.origin.current(&manager)
+        };
+        if current {
+            world.entity_mut(self.origin.owner).insert((
+                OfferedCodeActions(self.actions, self.origin),
+                CodeActionSelection::default(),
+            ));
+        }
+    }
 }
 
 #[derive(Message)]
@@ -207,6 +300,7 @@ pub struct LspGoto {
     pub path: PathBuf,
     pub line: u32,
     pub utf16_col: u32,
+    pub origin: Option<LspOrigin>,
 }
 
 #[derive(Message)]
@@ -214,6 +308,7 @@ pub struct LspFolds {
     pub entity: Entity,
     pub path: PathBuf,
     pub regions: Vec<crate::fold::FoldRegion>,
+    pub origin: Option<LspOrigin>,
 }
 
 impl LspFolds {
@@ -239,6 +334,7 @@ pub struct LspRequestedEdit {
     pub entity: Entity,
     pub root: PathBuf,
     pub result: Result<lsp_types::WorkspaceEdit, String>,
+    pub origin: Option<LspOrigin>,
 }
 
 #[derive(bevy::ecs::system::SystemParam)]
@@ -248,6 +344,9 @@ pub struct LspManager<'w, 's> {
     documents: Query<'w, 's, (Entity, &'static DocumentPath, &'static mut OpenDoc)>,
     context: Query<'w, 's, &'static LspContext>,
     bindings: Query<'w, 's, &'static DocumentBinding>,
+    editors: Query<'w, 's, &'static Editor>,
+    views: Query<'w, 's, &'static FileView>,
+    unsent: Query<'w, 's, (), With<LspEditDirty>>,
     wake: Option<Res<'w, JobWake>>,
     roots: Query<'w, 's, (Entity, &'static vmux_ecs::Cwd), With<WorkspaceRoot>>,
 }
@@ -352,9 +451,10 @@ fn read_text(path: &Path) -> Option<String> {
 
 impl LspManager<'_, '_> {
     fn document(&self, path: &Path) -> Option<&OpenDoc> {
+        let target = PathIdentity::resolve(path);
         let mut found = None;
         for (_, document_path, document) in &self.documents {
-            if document_path.0 != path {
+            if PathIdentity::resolve(&document_path.0) != target {
                 continue;
             }
             if found.is_some() {
@@ -412,17 +512,40 @@ impl LspManager<'_, '_> {
     }
 
     fn request_stamp(&self, owner: Entity, path: &Path) -> Option<RequestStamp> {
+        if self.unsent.contains(owner) {
+            return None;
+        }
         let document = self.bindings.get(owner).ok()?.0;
         let doc = self.document_for(owner, path)?;
         Some(RequestStamp {
             document,
             server: self.server_entity(&doc.key)?,
             version: doc.version,
+            buffer: self.editors.get(owner).ok()?.core.version(),
         })
     }
 
     pub(crate) fn document_version(&self, path: &Path) -> Option<i32> {
         self.document(path).map(|doc| doc.version)
+    }
+
+    pub(crate) fn document_version_from(&self, server: Option<Entity>, path: &Path) -> Option<i32> {
+        let Some(server) = server else {
+            return self.document_version(path);
+        };
+        let key = self.servers.get(server).ok()?.1;
+        let target = PathIdentity::resolve(path);
+        let mut found = None;
+        for (_, candidate, document) in &self.documents {
+            if document.key != *key || PathIdentity::resolve(&candidate.0) != target {
+                continue;
+            }
+            if found.is_some() {
+                return None;
+            }
+            found = Some(document.version);
+        }
+        found
     }
 
     fn menu_capabilities(&self, owner: Entity, path: &Path) -> Vec<EditorCapability> {
@@ -488,12 +611,13 @@ impl LspManager<'_, '_> {
                 obj.insert(k.clone(), v.clone());
             }
         }
+        let stamp = self.request_stamp(entity, path)?;
         let (wire_id, rx) = client.send_request(method, params);
         Some(LspRequestOperation {
             target: entity,
             kind,
             rx,
-            stamp: self.request_stamp(entity, path)?,
+            stamp,
             wire_id,
         })
     }
@@ -653,12 +777,13 @@ impl LspManager<'_, '_> {
                 obj.insert(k.clone(), v.clone());
             }
         }
+        let stamp = self.request_stamp(entity, path)?;
         let (wire_id, rx) = client.send_request(method, params);
         Some(LspRequestOperation {
             target: entity,
             kind,
             rx,
-            stamp: self.request_stamp(entity, path)?,
+            stamp,
             wire_id,
         })
     }
@@ -720,6 +845,7 @@ impl LspManager<'_, '_> {
                 obj.insert(k.clone(), v.clone());
             }
         }
+        let stamp = self.request_stamp(entity, path)?;
         let (wire_id, rx) = client.send_request(method, params);
         Some(LspRequestOperation {
             target: entity,
@@ -728,7 +854,7 @@ impl LspManager<'_, '_> {
                 root,
             },
             rx,
-            stamp: self.request_stamp(entity, path)?,
+            stamp,
             wire_id,
         })
     }
@@ -795,6 +921,7 @@ impl LspManager<'_, '_> {
             return None;
         }
         let params = serde_json::json!({ "textDocument": { "uri": uri } });
+        let stamp = self.request_stamp(entity, path)?;
         let (wire_id, rx) = client.send_request("textDocument/foldingRange", params);
         Some(LspRequestOperation {
             target: entity,
@@ -802,7 +929,7 @@ impl LspManager<'_, '_> {
                 path: path.to_path_buf(),
             },
             rx,
-            stamp: self.request_stamp(entity, path)?,
+            stamp,
             wire_id,
         })
     }
@@ -819,12 +946,13 @@ impl LspManager<'_, '_> {
             return None;
         }
         let params = serde_json::json!({ "textDocument": { "uri": uri } });
+        let stamp = self.request_stamp(entity, path)?;
         let (wire_id, rx) = client.send_request("textDocument/documentSymbol", params);
         Some(LspRequestOperation {
             target: entity,
             kind: ReqKind::DocumentSymbol,
             rx,
-            stamp: self.request_stamp(entity, path)?,
+            stamp,
             wire_id,
         })
     }
@@ -842,6 +970,7 @@ impl LspManager<'_, '_> {
             return None;
         }
         let params = serde_json::json!({ "textDocument": { "uri": uri } });
+        let stamp = self.request_stamp(entity, path)?;
         let (wire_id, rx) = client.send_request("textDocument/semanticTokens/full", params);
         Some(LspRequestOperation {
             target: entity,
@@ -850,7 +979,7 @@ impl LspManager<'_, '_> {
                 path: path.to_path_buf(),
             },
             rx,
-            stamp: self.request_stamp(entity, path)?,
+            stamp,
             wire_id,
         })
     }
@@ -1317,7 +1446,7 @@ fn open_documents(
     }
     let mut pending_roots = Vec::<(PathBuf, Entity)>::new();
     let mut pending_documents = Vec::<(ServerKey, PathBuf, Entity)>::new();
-    for (entity, view, _) in &q {
+    for (entity, view, editor) in &q {
         let Some(extension) = view
             .path
             .extension()
@@ -1424,10 +1553,18 @@ fn open_documents(
         let document = match document {
             Some(document) => document,
             None => {
-                let (Some(uri), Some(text)) = (uri_for(&view.path), read_text(&view.path)) else {
+                let Some(uri) = uri_for(&view.path) else {
                     commands.entity(entity).insert(LspOpened);
                     continue;
                 };
+                if editor.core.buffer.path != view.path {
+                    continue;
+                }
+                let text = editor.core.buffer.text();
+                if text.len() as u64 > LSP_MAX_BYTES {
+                    commands.entity(entity).insert(LspOpened);
+                    continue;
+                }
                 client.did_open(&uri, &spec.language_id, 1, &text);
                 let server = manager.server_entity(&key).unwrap();
                 let document = commands
@@ -1523,20 +1660,10 @@ fn cancel_requests(
         &RequestDeadline,
         &OperationState,
     )>,
-    bindings: Query<&DocumentBinding>,
     mut commands: Commands,
 ) {
     for (entity, request, deadline, state) in &requests {
-        let current = manager
-            .documents
-            .get(request.stamp.document)
-            .is_ok_and(|(_, _, doc)| {
-                doc.version == request.stamp.version
-                    && manager.server_entity(&doc.key) == Some(request.stamp.server)
-            })
-            && bindings
-                .get(request.target)
-                .is_ok_and(|binding| binding.0 == request.stamp.document);
+        let current = request.stamp.current(request.target, &manager);
         let expired = deadline.0.elapsed() >= std::time::Duration::from_secs(10);
         if !current
             || expired
@@ -1605,20 +1732,27 @@ fn drain_requests(
             .entity(request_entity)
             .remove::<(LspRequestOperation, RequestDeadline)>();
         let ready = browsers.can_emit_to(&request.target);
+        let origin = LspOrigin {
+            owner: request.target,
+            stamp: request.stamp,
+        };
         match &request.kind {
             ReqKind::Hover { line, col } => {
                 let blocks = parse_hover(&value);
                 if !blocks.is_empty() && ready {
-                    commands.trigger(FileUiStateWrite::from_event(
-                        request.target,
-                        &FileHoverState {
-                            value: Some(FileHover {
-                                line: *line,
-                                col: *col,
-                                blocks,
-                            }),
-                        },
-                    ));
+                    commands.queue(GuardedResponse {
+                        origin,
+                        event: FileUiStateWrite::from_event(
+                            request.target,
+                            &FileHoverState {
+                                value: Some(FileHover {
+                                    line: *line,
+                                    col: *col,
+                                    blocks,
+                                }),
+                            },
+                        ),
+                    });
                 }
             }
             ReqKind::Definition => {
@@ -1628,6 +1762,10 @@ fn drain_requests(
                         path,
                         line,
                         utf16_col,
+                        origin: Some(LspOrigin {
+                            owner: request.target,
+                            stamp: request.stamp,
+                        }),
                     });
                 }
             }
@@ -1643,6 +1781,10 @@ fn drain_requests(
                     entity: request.target,
                     root: root.clone(),
                     result,
+                    origin: Some(LspOrigin {
+                        owner: request.target,
+                        stamp: request.stamp,
+                    }),
                 });
             }
             ReqKind::CodeAction => {
@@ -1657,26 +1799,33 @@ fn drain_requests(
                         lsp_types::CodeActionOrCommand::CodeAction(a) => a.title.clone(),
                     })
                     .collect();
-                commands
-                    .entity(request.target)
-                    .insert((OfferedCodeActions(offered), CodeActionSelection::default()));
+                commands.queue(GuardedOffer {
+                    origin,
+                    actions: offered,
+                });
                 if !ready {
                     continue;
                 }
                 if titles.is_empty() {
-                    commands.trigger(crate::host::feedback::EditFailure::new(
-                        request.target,
-                        "no code actions here".to_string(),
-                    ));
+                    commands.queue(GuardedResponse {
+                        origin,
+                        event: crate::host::feedback::EditFailure::new(
+                            request.target,
+                            "no code actions here".to_string(),
+                        ),
+                    });
                     continue;
                 }
-                commands.trigger(FileUiStateWrite::from_event(
-                    request.target,
-                    &FileCodeActions {
-                        titles,
-                        selected: 0,
-                    },
-                ));
+                commands.queue(GuardedResponse {
+                    origin,
+                    event: FileUiStateWrite::from_event(
+                        request.target,
+                        &FileCodeActions {
+                            titles,
+                            selected: 0,
+                        },
+                    ),
+                });
             }
             ReqKind::Formatting { path, root } => {
                 let payload = value.get("result").cloned().unwrap_or_default();
@@ -1690,6 +1839,10 @@ fn drain_requests(
                     entity: request.target,
                     root: root.clone(),
                     result,
+                    origin: Some(LspOrigin {
+                        owner: request.target,
+                        stamp: request.stamp,
+                    }),
                 });
             }
             ReqKind::References => {
@@ -1707,22 +1860,27 @@ fn drain_requests(
                         }
                     })
                     .collect();
-                commands.trigger(crate::host::panel::ReferencesResult::new(
-                    request.target,
-                    items,
-                ));
+                commands.queue(GuardedResponse {
+                    origin,
+                    event: crate::host::panel::ReferencesResult::new(request.target, items)
+                        .with_origin(origin),
+                });
             }
             ReqKind::Completion {
                 line,
                 replace_from_col,
             } => {
                 let items = parse_completion(&value);
-                commands.trigger(crate::host::panel::CompletionResult::new(
-                    request.target,
-                    items,
-                    *replace_from_col,
-                    *line,
-                ));
+                commands.queue(GuardedResponse {
+                    origin,
+                    event: crate::host::panel::CompletionResult::new(
+                        request.target,
+                        items,
+                        *replace_from_col,
+                        *line,
+                    )
+                    .with_origin(origin),
+                });
             }
             ReqKind::Folding { path } => {
                 writers.folds.write(LspFolds {
@@ -1731,6 +1889,10 @@ fn drain_requests(
                     regions: LspFolds::regions(
                         value.get("result").unwrap_or(&serde_json::Value::Null),
                     ),
+                    origin: Some(LspOrigin {
+                        owner: request.target,
+                        stamp: request.stamp,
+                    }),
                 });
             }
             ReqKind::DocumentSymbol => {
@@ -1739,10 +1901,13 @@ fn drain_requests(
                 )
                 .into_vec();
                 if ready {
-                    commands.trigger(FileUiStateWrite::from_event(
-                        request.target,
-                        &OutlineEvent { items },
-                    ));
+                    commands.queue(GuardedResponse {
+                        origin,
+                        event: FileUiStateWrite::from_event(
+                            request.target,
+                            &OutlineEvent { items },
+                        ),
+                    });
                 }
             }
             ReqKind::SemanticTokens { key, path } => {
@@ -1750,6 +1915,10 @@ fn drain_requests(
                     entity: request.target,
                     path: path.clone(),
                     tokens: parse_semantic_tokens(&value, manager.semantic_legend(key)),
+                    origin: Some(LspOrigin {
+                        owner: request.target,
+                        stamp: request.stamp,
+                    }),
                 });
             }
         }
@@ -1778,14 +1947,22 @@ pub struct LspSemantic {
     pub entity: Entity,
     pub path: PathBuf,
     pub tokens: Vec<crate::lsp::semantic::SemanticToken>,
+    pub origin: Option<LspOrigin>,
 }
 
 fn apply_semantic_tokens(
     mut reader: MessageReader<LspSemantic>,
-    mut views: Query<(&mut Editor, &FileView)>,
+    mut view_params: ParamSet<(LspManager, Query<(&mut Editor, &FileView)>)>,
     mut commands: Commands,
 ) {
     for message in reader.read() {
+        if message
+            .origin
+            .is_some_and(|origin| !origin.current(&view_params.p0()))
+        {
+            continue;
+        }
+        let mut views = view_params.p1();
         let Ok((mut edit, view)) = views.get_mut(message.entity) else {
             continue;
         };
@@ -1829,35 +2006,37 @@ impl Plugin for ManagerPlugin {
                 lint_inbox,
             },
         ));
-        app.add_plugins((ServersPlugin, RequestsPlugin, DiagnosticsPlugin))
-            .add_systems(Startup, start)
-            .configure_sets(
-                Update,
-                crate::lsp::server_request::ServerRequestSet::Answer.after(DocumentSet),
+        app.add_plugins((
+            ServersPlugin,
+            RequestsPlugin,
+            DiagnosticsPlugin,
+            CodeActionsPlugin,
+        ))
+        .add_systems(Startup, start)
+        .configure_sets(
+            Update,
+            crate::lsp::server_request::ServerRequestSet::Answer.after(DocumentSet),
+        )
+        .add_message::<LspRestartRequest>()
+        .add_message::<LspCodeActionRequest>()
+        .add_message::<LspDocumentChangeRequest>()
+        .add_message::<LspDocumentCloseRequest>()
+        .add_systems(
+            Update,
+            (
+                close_documents,
+                refresh_bindings,
+                change_documents,
+                open_documents,
+                initialize_views,
+                cleanup_documents,
+                lint_on_open,
+                publish_status,
             )
-            .add_message::<LspRestartRequest>()
-            .add_message::<LspCodeActionRequest>()
-            .add_message::<LspDocumentChangeRequest>()
-            .add_message::<LspDocumentCloseRequest>()
-            .add_observer(move_code_action)
-            .add_observer(file_code_action_pick)
-            .add_observer(dismiss_code_actions)
-            .add_systems(
-                Update,
-                (
-                    close_documents,
-                    refresh_bindings,
-                    change_documents,
-                    open_documents,
-                    initialize_views,
-                    cleanup_documents,
-                    lint_on_open,
-                    publish_status,
-                )
-                    .chain()
-                    .in_set(DocumentSet)
-                    .after(JobSet::Apply),
-            );
+                .chain()
+                .in_set(DocumentSet)
+                .after(JobSet::Apply),
+        );
     }
 }
 
@@ -1892,6 +2071,16 @@ fn start(
         startup.lint_inbox.clone(),
     ));
     commands.entity(entity).despawn();
+}
+
+struct CodeActionsPlugin;
+
+impl Plugin for CodeActionsPlugin {
+    fn build(&self, app: &mut App) {
+        app.add_observer(move_code_action)
+            .add_observer(file_code_action_pick)
+            .add_observer(dismiss_code_actions);
+    }
 }
 
 fn move_code_action(
@@ -1948,6 +2137,9 @@ fn file_code_action_pick(
     let Ok((editor, actions)) = views.get(entity) else {
         return;
     };
+    if !actions.1.current(&manager) {
+        return;
+    }
     let Some(action) = actions
         .0
         .get(trigger.event().payload.index as usize)
@@ -1959,15 +2151,15 @@ fn file_code_action_pick(
     let Some(document) = manager.document_for(entity, path) else {
         return;
     };
-    let Some(client) = manager.client(&document.key) else {
-        return;
-    };
     let root = document.key.root().to_path_buf();
     let (command, edit) = match action {
         lsp_types::CodeActionOrCommand::Command(command) => (Some(command), None),
         lsp_types::CodeActionOrCommand::CodeAction(action) => (action.command, action.edit),
     };
     if let Some(command) = command {
+        let Some(client) = manager.client(&document.key) else {
+            return;
+        };
         let (_, _response) = client.send_request(
             "workspace/executeCommand",
             serde_json::json!({
@@ -1981,6 +2173,7 @@ fn file_code_action_pick(
             entity,
             root,
             result: Ok(edit),
+            origin: Some(actions.1),
         });
     }
 }
@@ -2011,8 +2204,8 @@ struct LspDiagnostics {
 #[derive(Component, Default)]
 struct LintDiagnostics(Vec<FileDiagnostic>);
 
-#[derive(Component, Default)]
-pub(crate) struct OfferedCodeActions(pub(crate) Vec<lsp_types::CodeActionOrCommand>);
+#[derive(Component)]
+pub(crate) struct OfferedCodeActions(pub(crate) Vec<lsp_types::CodeActionOrCommand>, LspOrigin);
 
 #[derive(Component, Default)]
 struct CodeActionSelection(usize);
@@ -2265,8 +2458,50 @@ mod tests {
     use crate::edit::highlight_cache::HighlightCache;
     use crate::edit::{EditCore, EditMode};
     use crate::host::editor::{Editor, FileView};
+    use crate::host::keymap::EditorKeymap;
+    use crate::keymap::KeymapKindExt;
+    use crate::lsp::registry;
     use crate::lsp::{LspDiagnosticsInbox, LspDiagnosticsSender};
     use std::path::PathBuf;
+
+    pub(crate) struct DocumentFixture {
+        pub(crate) document: Entity,
+        pub(crate) server: Entity,
+    }
+
+    impl DocumentFixture {
+        pub(crate) fn open(world: &mut World, owner: Entity, path: &Path, version: i32) -> Self {
+            let directory = path
+                .parent()
+                .unwrap()
+                .join(format!("scope-{}", owner.index()));
+            let root = world
+                .spawn((WorkspaceRoot, vmux_ecs::Cwd(directory.clone())))
+                .id();
+            let key = ServerKey::new(directory, "fixture-server");
+            let server = world.spawn((Server, key.clone(), ChildOf(root))).id();
+            let document = world
+                .spawn((
+                    DocumentPath(path.into()),
+                    OpenDoc { key, version },
+                    ChildOf(server),
+                ))
+                .id();
+            world
+                .entity_mut(owner)
+                .insert((DocumentBinding(document), ServerBinding(server)));
+            Self { document, server }
+        }
+
+        pub(crate) fn origin(&self, world: &mut World, owner: Entity, path: &Path) -> LspOrigin {
+            let mut state = bevy::ecs::system::SystemState::<LspManager>::new(world);
+            let manager = state.get_mut(world).unwrap();
+            LspOrigin {
+                owner,
+                stamp: manager.request_stamp(owner, path).unwrap(),
+            }
+        }
+    }
 
     struct RequestFixture {
         app: App,
@@ -2282,6 +2517,162 @@ mod tests {
         servers: [Entity; 2],
         documents: [Entity; 2],
         views: [Entity; 2],
+    }
+
+    struct RestartFixture {
+        app: App,
+        _directory: tempfile::TempDir,
+        roots: [PathBuf; 2],
+        views: [Entity; 2],
+    }
+
+    impl RestartFixture {
+        fn new() -> Self {
+            let directory = tempfile::tempdir().unwrap();
+            let script = directory.path().join("server.py");
+            std::fs::write(
+                &script,
+                include_str!("../../../tests/fixtures/lsp_record.py"),
+            )
+            .unwrap();
+            let mut settings = AppSettings::default();
+            settings.editor.lsp.servers.insert("rs".into(), serde_json::from_value(serde_json::json!({
+                "command": "python3", "args": [script], "language_id": "rust", "root_markers": [".git"]
+            })).unwrap());
+            let (diagnostics, inbox) = LspDiagnosticsSender::channel();
+            let mut app = App::new();
+            app.add_plugins((
+                MinimalPlugins,
+                vmux_ecs::manifest::FeaturePlugin::<crate::Feature>::default(),
+                crate::lsp::server_request::ServerRequestPlugin,
+                ManagerPlugin::new(diagnostics, inbox),
+            ))
+            .insert_resource(settings)
+            .insert_non_send(Browsers::default())
+            .add_message::<crate::lsp::manager_page::PackageInstallRequest>();
+            registry::add(&mut app);
+            let roots = [directory.path().join("one"), directory.path().join("two")];
+            let mut views = Vec::new();
+            for root in &roots {
+                std::fs::create_dir(root).unwrap();
+                std::fs::create_dir(root.join(".git")).unwrap();
+                let path = root.join("main.rs");
+                std::fs::write(&path, "disk text\n").unwrap();
+                views.push(
+                    app.world_mut()
+                        .spawn((
+                            FileView { path: path.clone() },
+                            Editor::new(
+                                EditCore::new(
+                                    path.clone(),
+                                    "Rust".into(),
+                                    "disk text\n",
+                                    EditMode::Normal,
+                                ),
+                                HighlightCache::plain(&path),
+                                crate::fold::FoldState::default(),
+                            ),
+                        ))
+                        .id(),
+                );
+            }
+            Self {
+                app,
+                _directory: directory,
+                roots,
+                views: views.try_into().unwrap(),
+            }
+        }
+
+        fn message(&mut self, root: usize, method: &str, count: usize) -> serde_json::Value {
+            let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+            loop {
+                self.app.update();
+                match std::fs::read_to_string(self.roots[root].join("lsp-wire.jsonl")) {
+                    Ok(records) => {
+                        let mut found = Vec::new();
+                        for record in records.lines() {
+                            let value: serde_json::Value = serde_json::from_str(record).unwrap();
+                            if value["method"] == method {
+                                found.push(value);
+                            }
+                        }
+                        if found.len() >= count {
+                            return found.pop().unwrap();
+                        }
+                    }
+                    Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+                    Err(error) => panic!("wire recording: {error}"),
+                }
+                assert!(
+                    std::time::Instant::now() < deadline,
+                    "missing {method} message {count} from root {root}"
+                );
+                std::thread::sleep(std::time::Duration::from_millis(5));
+            }
+        }
+    }
+
+    #[test]
+    fn restarting_a_real_transport_opens_the_unsaved_buffer_and_preserves_another_root() {
+        let mut fixture = RestartFixture::new();
+        assert_eq!(
+            fixture.message(0, "textDocument/didOpen", 1)["params"]["textDocument"]["text"],
+            "disk text\n"
+        );
+        fixture.message(1, "textDocument/didOpen", 1);
+        let first = fixture.views[0];
+        let other = fixture.views[1];
+        let server = fixture.app.world().get::<ServerBinding>(first).unwrap().0;
+        let other_server = fixture.app.world().get::<ServerBinding>(other).unwrap().0;
+        fixture
+            .app
+            .world_mut()
+            .get_mut::<Editor>(first)
+            .unwrap()
+            .core
+            .apply(crate::edit::EditCommand::ReplaceText(
+                "unsaved text\n".into(),
+            ));
+        fixture
+            .app
+            .world_mut()
+            .write_message(LspDocumentChangeRequest {
+                path: fixture.roots[0].join("main.rs"),
+                owner: first,
+                text: Some("unsaved text\n".into()),
+            });
+        assert_eq!(
+            fixture.message(0, "textDocument/didChange", 1)["params"]["contentChanges"][0]["text"],
+            "unsaved text\n"
+        );
+        fixture
+            .app
+            .world_mut()
+            .write_message(LspRestartRequest { server });
+        assert_eq!(
+            fixture.message(0, "textDocument/didOpen", 2)["params"]["textDocument"]["text"],
+            "unsaved text\n"
+        );
+        assert_ne!(
+            fixture.app.world().get::<ServerBinding>(first).unwrap().0,
+            server
+        );
+        assert_eq!(
+            fixture.app.world().get::<ServerBinding>(other).unwrap().0,
+            other_server
+        );
+        assert!(
+            fixture
+                .app
+                .world()
+                .get::<ServerClient>(other_server)
+                .is_some()
+        );
+        assert_eq!(
+            std::fs::read_to_string(fixture.roots[0].join("main.rs")).unwrap(),
+            "disk text\n"
+        );
     }
 
     impl DiagnosticFixture {
@@ -2401,7 +2792,7 @@ mod tests {
     impl RequestFixture {
         fn new() -> Self {
             let mut app = App::new();
-            app.add_plugins(RequestsPlugin)
+            app.add_plugins((RequestsPlugin, CodeActionsPlugin))
                 .insert_non_send(Browsers::default());
             let root = app
                 .world_mut()
@@ -2425,7 +2816,23 @@ mod tests {
                 .id();
             let view = app
                 .world_mut()
-                .spawn((DocumentBinding(document), ServerBinding(server)))
+                .spawn((
+                    DocumentBinding(document),
+                    ServerBinding(server),
+                    FileView {
+                        path: "/workspace/file.rs".into(),
+                    },
+                    Editor::new(
+                        EditCore::new(
+                            "/workspace/file.rs".into(),
+                            "Rust".into(),
+                            "fn x() {}\n",
+                            EditMode::Normal,
+                        ),
+                        HighlightCache::plain(Path::new("/workspace/file.rs")),
+                        crate::fold::FoldState::default(),
+                    ),
+                ))
                 .id();
             Self {
                 app,
@@ -2438,6 +2845,13 @@ mod tests {
 
         fn pending(&mut self) -> (Entity, crossbeam_channel::Sender<serde_json::Value>) {
             let (sender, receiver) = crossbeam_channel::bounded(1);
+            let buffer = self
+                .app
+                .world()
+                .get::<Editor>(self.view)
+                .unwrap()
+                .core
+                .version();
             let entity = self
                 .app
                 .world_mut()
@@ -2450,6 +2864,7 @@ mod tests {
                             document: self.document,
                             server: self.server,
                             version: 1,
+                            buffer,
                         },
                         wire_id: 1,
                     }
@@ -2463,6 +2878,251 @@ mod tests {
             let (entity, sender) = self.pending();
             sender.send(serde_json::json!({ "result": { "uri": "file:///workspace/target.rs", "range": { "start": { "line": 3, "character": 2 }, "end": { "line": 3, "character": 5 } } } })).unwrap();
             entity
+        }
+    }
+
+    #[test]
+    fn deferred_folds_refuse_edits_reopen_and_server_replacement_after_response_delivery() {
+        for change in 0..4 {
+            let mut fixture = RequestFixture::new();
+            let (request, sender) = fixture.pending();
+            fixture
+                .app
+                .world_mut()
+                .get_mut::<LspRequestOperation>(request)
+                .unwrap()
+                .kind = ReqKind::Folding {
+                path: "/workspace/file.rs".into(),
+            };
+            sender
+                .send(serde_json::json!({ "result": [{ "startLine": 0, "endLine": 1 }] }))
+                .unwrap();
+            fixture.app.update();
+            assert_eq!(
+                fixture.app.world().get::<OperationState>(request),
+                Some(&OperationState::Succeeded)
+            );
+            let settings = AppSettings::default();
+            fixture.app.world_mut().entity_mut(fixture.view).insert((
+                EditorKeymap(vmux_api::editor::KeymapKind::Vscode.make(&[], "\\")),
+                crate::host::viewport::FileViewport {
+                    top_row: 0,
+                    rows: 20,
+                    wrap_columns: 0,
+                    word_wrap: settings.editor.word_wrap,
+                    word_wrap_column: settings.editor.word_wrap_column,
+                    scroll_revision: 0,
+                },
+            ));
+            fixture
+                .app
+                .add_plugins(crate::host::viewport::ViewportPlugin)
+                .insert_resource(settings)
+                .add_message::<vmux_setting::ColorSchemeChanged>()
+                .insert_non_send(crate::host::fold_store::FoldStore::default());
+            match change {
+                0 => {}
+                1 => {
+                    fixture
+                        .app
+                        .world_mut()
+                        .get_mut::<Editor>(fixture.view)
+                        .unwrap()
+                        .core
+                        .apply(crate::edit::EditCommand::InsertText("mine".into()));
+                }
+                2 | 3 => {
+                    if change == 2 {
+                        fixture
+                            .app
+                            .world_mut()
+                            .entity_mut(fixture.document)
+                            .despawn();
+                    } else {
+                        fixture.app.world_mut().entity_mut(fixture.server).despawn();
+                    }
+                    DocumentFixture::open(
+                        fixture.app.world_mut(),
+                        fixture.view,
+                        Path::new("/workspace/file.rs"),
+                        1,
+                    );
+                }
+                _ => unreachable!(),
+            }
+            fixture.app.update();
+            let expected = if change == 0 {
+                vec![crate::fold::FoldRegion { start: 0, end: 1 }]
+            } else {
+                Vec::new()
+            };
+            assert_eq!(
+                fixture
+                    .app
+                    .world()
+                    .get::<Editor>(fixture.view)
+                    .unwrap()
+                    .folds
+                    .regions,
+                expected
+            );
+        }
+    }
+
+    #[test]
+    fn offered_commands_are_not_sent_after_edit_reopen_or_restart() {
+        for change in 0..4 {
+            let mut fixture = RestartFixture::new();
+            fixture.message(0, "textDocument/didOpen", 1);
+            let owner = fixture.views[0];
+            let path = fixture.roots[0].join("main.rs");
+            let origin = {
+                let mut state =
+                    bevy::ecs::system::SystemState::<LspManager>::new(fixture.app.world_mut());
+                let manager = state.get_mut(fixture.app.world_mut()).unwrap();
+                LspOrigin {
+                    owner,
+                    stamp: manager.request_stamp(owner, &path).unwrap(),
+                }
+            };
+            fixture
+                .app
+                .world_mut()
+                .entity_mut(owner)
+                .insert(OfferedCodeActions(
+                    vec![lsp_types::CodeActionOrCommand::Command(
+                        lsp_types::Command {
+                            title: "Fix".into(),
+                            command: "fix".into(),
+                            arguments: None,
+                        },
+                    )],
+                    origin,
+                ));
+            match change {
+                0 => {}
+                1 => {
+                    fixture
+                        .app
+                        .world_mut()
+                        .get_mut::<Editor>(owner)
+                        .unwrap()
+                        .core
+                        .apply(crate::edit::EditCommand::InsertText("mine".into()));
+                }
+                2 => {
+                    fixture
+                        .app
+                        .world_mut()
+                        .entity_mut(origin.stamp.document)
+                        .despawn();
+                    fixture.message(0, "textDocument/didOpen", 2);
+                }
+                3 => {
+                    fixture.app.world_mut().write_message(LspRestartRequest {
+                        server: origin.stamp.server,
+                    });
+                    fixture.message(0, "textDocument/didOpen", 2);
+                }
+                _ => unreachable!(),
+            }
+            fixture.app.world_mut().trigger(UiInput {
+                webview: owner,
+                payload: FileCodeActionPick { index: 0 },
+            });
+            if change == 0 {
+                fixture.message(0, "workspace/executeCommand", 1);
+            } else {
+                fixture.app.update();
+                let records =
+                    std::fs::read_to_string(fixture.roots[0].join("lsp-wire.jsonl")).unwrap();
+                for record in records.lines() {
+                    let value: serde_json::Value = serde_json::from_str(record).unwrap();
+                    assert_ne!(value["method"], "workspace/executeCommand");
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn offered_edits_keep_their_origin_until_the_action_is_picked() {
+        for change in 0..4 {
+            let mut fixture = RequestFixture::new();
+            let (request, sender) = fixture.pending();
+            fixture
+                .app
+                .world_mut()
+                .get_mut::<LspRequestOperation>(request)
+                .unwrap()
+                .kind = ReqKind::CodeAction;
+            sender.send(serde_json::json!({ "result": [{ "title": "Change", "edit": { "changes": { "file:///workspace/file.rs": [] } } }] })).unwrap();
+            fixture.app.update();
+            assert!(
+                fixture
+                    .app
+                    .world()
+                    .get::<OfferedCodeActions>(fixture.view)
+                    .is_some()
+            );
+            match change {
+                0 => {}
+                1 => {
+                    fixture
+                        .app
+                        .world_mut()
+                        .get_mut::<Editor>(fixture.view)
+                        .unwrap()
+                        .core
+                        .apply(crate::edit::EditCommand::InsertText("mine".into()));
+                }
+                2 => {
+                    fixture
+                        .app
+                        .world_mut()
+                        .entity_mut(fixture.document)
+                        .despawn();
+                    let document = fixture
+                        .app
+                        .world_mut()
+                        .spawn((
+                            DocumentPath("/workspace/file.rs".into()),
+                            OpenDoc {
+                                key: fixture.key.clone(),
+                                version: 1,
+                            },
+                            ChildOf(fixture.server),
+                        ))
+                        .id();
+                    fixture
+                        .app
+                        .world_mut()
+                        .entity_mut(fixture.view)
+                        .insert(DocumentBinding(document));
+                }
+                3 => {
+                    fixture.app.world_mut().entity_mut(fixture.server).despawn();
+                }
+                _ => unreachable!(),
+            }
+            fixture.app.world_mut().trigger(UiInput {
+                webview: fixture.view,
+                payload: FileCodeActionPick { index: 0 },
+            });
+            fixture.app.update();
+            let edits = fixture
+                .app
+                .world_mut()
+                .resource_mut::<Messages<LspRequestedEdit>>()
+                .drain()
+                .collect::<Vec<_>>();
+            assert_eq!(edits.len(), usize::from(change == 0));
+            assert!(
+                fixture
+                    .app
+                    .world()
+                    .get::<OfferedCodeActions>(fixture.view)
+                    .is_none()
+            );
         }
     }
 
@@ -2742,7 +3402,7 @@ mod tests {
 
     #[test]
     fn request_results_only_reach_the_current_document_server_and_view_binding() {
-        for change in 0..5 {
+        for change in 0..6 {
             let mut fixture = RequestFixture::new();
             let request = fixture.accept();
             match change {
@@ -2784,6 +3444,15 @@ mod tests {
                 4 => {
                     fixture.app.world_mut().entity_mut(fixture.server).despawn();
                     fixture.app.world_mut().spawn((Server, fixture.key.clone()));
+                }
+                5 => {
+                    fixture
+                        .app
+                        .world_mut()
+                        .get_mut::<Editor>(fixture.view)
+                        .unwrap()
+                        .core
+                        .apply(crate::edit::EditCommand::InsertText("unsent".into()));
                 }
                 _ => unreachable!(),
             }

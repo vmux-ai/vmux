@@ -10,7 +10,7 @@ use vmux_ecs::event::{
 use crate::edit::{EditCommand, Selection};
 use crate::host::editing::EditRequest;
 use crate::host::editor::{Editor, FileView};
-use crate::lsp::manager::LspLine;
+use crate::lsp::manager::{GuardedResponse, LspLine, LspOrigin};
 
 pub(super) struct PanelPlugin;
 
@@ -85,6 +85,7 @@ enum FilePanelSource {
 
 #[derive(Component, Default)]
 pub(super) struct FilePanel {
+    origin: Option<LspOrigin>,
     source: FilePanelSource,
     state: FilePanelState,
 }
@@ -205,6 +206,7 @@ impl FilePanel {
     }
 
     fn dismiss(&mut self) -> bool {
+        self.origin = None;
         if self.state.content.is_none() && matches!(&self.source, FilePanelSource::None) {
             return false;
         }
@@ -219,6 +221,7 @@ impl FilePanel {
     }
 
     fn reset(&mut self) -> bool {
+        self.origin = None;
         if self.state.content.is_none() && matches!(&self.source, FilePanelSource::None) {
             return false;
         }
@@ -281,6 +284,7 @@ pub(super) struct CompletionResult {
     items: Vec<CompletionItem>,
     replace_from_col: u32,
     line: u32,
+    origin: Option<LspOrigin>,
 }
 
 impl CompletionResult {
@@ -295,7 +299,13 @@ impl CompletionResult {
             items,
             replace_from_col,
             line,
+            origin: None,
         }
+    }
+
+    pub(super) fn with_origin(mut self, origin: LspOrigin) -> Self {
+        self.origin = Some(origin);
+        self
     }
 }
 
@@ -304,11 +314,21 @@ pub(super) struct ReferencesResult {
     #[event_target]
     entity: Entity,
     items: Vec<RefItem>,
+    origin: Option<LspOrigin>,
 }
 
 impl ReferencesResult {
     pub(super) fn new(entity: Entity, items: Vec<RefItem>) -> Self {
-        Self { entity, items }
+        Self {
+            entity,
+            items,
+            origin: None,
+        }
+    }
+
+    pub(super) fn with_origin(mut self, origin: LspOrigin) -> Self {
+        self.origin = Some(origin);
+        self
     }
 }
 
@@ -327,6 +347,7 @@ fn receive_completion(
         event.line,
         edit,
     );
+    panel.origin = event.origin;
     commands.trigger(vmux_ecs::FileUiStateWrite::from_event(
         trigger.event_target(),
         &panel.state(),
@@ -342,6 +363,7 @@ fn receive_references(
         return;
     };
     panel.show_references(trigger.event().items.clone());
+    panel.origin = trigger.event().origin;
     commands.trigger(vmux_ecs::FileUiStateWrite::from_event(
         trigger.event_target(),
         &panel.state(),
@@ -423,14 +445,34 @@ fn select_previous_item(
 
 fn choose_item(
     trigger: On<FilePanelChooseRequest>,
-    mut panels: Query<(&mut FilePanel, &mut Editor)>,
+    mut panel_params: ParamSet<(
+        crate::lsp::manager::LspManager,
+        Query<(&mut FilePanel, &mut Editor)>,
+    )>,
     mut goto: MessageWriter<crate::lsp::manager::LspGoto>,
     mut commands: Commands,
 ) {
     let entity = trigger.event_target();
+    let origin = {
+        let panels = panel_params.p1();
+        let Ok((panel, _)) = panels.get(entity) else {
+            return;
+        };
+        panel.origin
+    };
+    let stale = origin.is_some_and(|origin| !origin.current(&panel_params.p0()));
+    let mut panels = panel_params.p1();
     let Ok((mut panel, mut edit)) = panels.get_mut(entity) else {
         return;
     };
+    if stale {
+        panel.reset();
+        commands.trigger(vmux_ecs::FileUiStateWrite::from_event(
+            entity,
+            &panel.state(),
+        ));
+        return;
+    }
     let choice = panel.choice(trigger.event().index);
     let state = choice.as_ref().map(|_| panel.state());
     match choice {
@@ -443,6 +485,7 @@ fn choose_item(
                 path,
                 line: item.line,
                 utf16_col,
+                origin,
             });
         }
         Some(FilePanelChoice::Completion {
@@ -459,10 +502,15 @@ fn choose_item(
                 anchor: start.min(head),
                 head: start.max(head),
             }];
-            commands.trigger(EditRequest::new(
-                entity,
-                vec![EditCommand::InsertText(item.insert_text)],
-            ));
+            let request = EditRequest::new(entity, vec![EditCommand::InsertText(item.insert_text)]);
+            if let Some(origin) = origin {
+                commands.queue(GuardedResponse {
+                    origin,
+                    event: request,
+                });
+            } else {
+                commands.trigger(request);
+            }
         }
         None => {}
     }
