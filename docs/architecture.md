@@ -813,7 +813,8 @@ the pending viewport position before navigation. These events retain synchronous
 replies for cancellation; queued scroll events are discarded when their document or interpreter
 changes, so native round trips cannot pause scrolling or affect a replaced page.
 The selected tab's favicon spinner follows the page after 150 ms of continued loading, avoiding
-brief flashes on fast local reloads without delaying the page. Reload then becomes a stop button;
+brief flashes on fast local reloads without delaying the page. Address breadcrumbs retain their
+normal page icons while loading. Reload then becomes a stop button;
 stopping cancels browser loading and rolls an uncommitted handoff back to its retained page.
 Inactive restored pages do not animate the selected page's controls. A selected Start page requests
 composer focus again when its document becomes ready, including a reused prewarmed page.
