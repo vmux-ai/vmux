@@ -1197,9 +1197,12 @@ and bindings. Requests use shared Operations and retain their document identity,
 instance, version, and target view. Cancellation and stale results cannot restore a terminal
 operation or reach a replacement document. The buffer's opaque change token survives queued
 edits and offered code actions; final application refuses edits, undo, or rebinding since acceptance,
-including changes not yet sent to the server. Versioned edits reject missing or ambiguous versions.
+including changes not yet sent to the server. Client-requested multi-file edits keep accepted
+open-buffer snapshots on their Operation and validate the affected buffers before application.
+Versioned edits reject missing or ambiguous versions.
 Server-origin workspace edits validate the current server before applying or replying. Restart
-opens the current buffer, including unsaved text. Diagnostics retain their server and the protocol's optional
+opens the current buffer, including unsaved text. Reload and encoding changes wait for the decoded
+buffer, synchronize it, and then reinitialize metadata. Diagnostics retain their server and the protocol's optional
 version; unversioned notifications cannot prove which edit produced them.
 Process handles, framing, reader/writer threads, and wire correlation stay in the transport
 adapter. Publishing input or a response, and closing the reader, wakes the reactive runner.

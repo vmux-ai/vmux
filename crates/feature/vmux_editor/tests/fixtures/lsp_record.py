@@ -20,9 +20,23 @@ while True:
     method = message.get("method")
     if method == "exit":
         sys.exit(0)
-    if method not in ("initialize", "shutdown"):
+    if method == "initialize":
+        result = {"capabilities": {
+            "foldingRangeProvider": True,
+            "documentSymbolProvider": True,
+            "semanticTokensProvider": {
+                "legend": {"tokenTypes": ["type"], "tokenModifiers": []},
+                "full": True,
+            },
+        }}
+    elif method == "textDocument/semanticTokens/full":
+        result = {"data": []}
+    elif method in ("textDocument/foldingRange", "textDocument/documentSymbol"):
+        result = []
+    elif method == "shutdown":
+        result = None
+    else:
         continue
-    result = {"capabilities": {}} if method == "initialize" else None
     body = json.dumps({"jsonrpc": "2.0", "id": message["id"], "result": result}).encode()
     sys.stdout.buffer.write(f"Content-Length: {len(body)}\r\n\r\n".encode() + body)
     sys.stdout.buffer.flush()

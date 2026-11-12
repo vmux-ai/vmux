@@ -182,18 +182,20 @@ pub(crate) struct LspRequestOperation {
     rx: crossbeam_channel::Receiver<serde_json::Value>,
     stamp: RequestStamp,
     wire_id: i64,
+    buffers: Option<BufferSnapshot>,
 }
 
 #[derive(Component)]
 struct RequestDeadline(web_time::Instant);
 
 impl LspRequestOperation {
-    pub(crate) fn bundle(self) -> impl Bundle {
+    pub(crate) fn bundle(mut self) -> impl Bundle {
         (
             Operation::bundle("lsp.request").unwrap(),
             OperationTarget::new(self.stamp.document),
             OperationTargetRevision(self.stamp.version as u64),
             RequestDeadline(web_time::Instant::now()),
+            self.buffers.take().unwrap_or_default(),
             self,
         )
     }
@@ -227,7 +229,7 @@ impl RequestStamp {
             && manager
                 .editors
                 .get(owner)
-                .is_ok_and(|editor| editor.core.version() == self.buffer)
+                .is_ok_and(|(_, editor)| editor.core.version() == self.buffer)
     }
 }
 
@@ -235,6 +237,17 @@ impl RequestStamp {
 pub struct LspOrigin {
     owner: Entity,
     stamp: RequestStamp,
+    operation: Option<Entity>,
+}
+
+#[derive(Component, Default)]
+struct BufferSnapshot(Vec<BufferStamp>);
+
+struct BufferStamp {
+    owner: Entity,
+    version: uuid::Uuid,
+    document: Option<Entity>,
+    path: PathBuf,
 }
 
 impl LspOrigin {
@@ -344,7 +357,8 @@ pub struct LspManager<'w, 's> {
     documents: Query<'w, 's, (Entity, &'static DocumentPath, &'static mut OpenDoc)>,
     context: Query<'w, 's, &'static LspContext>,
     bindings: Query<'w, 's, &'static DocumentBinding>,
-    editors: Query<'w, 's, &'static Editor>,
+    editors: Query<'w, 's, (Entity, &'static Editor)>,
+    snapshots: Query<'w, 's, &'static BufferSnapshot>,
     views: Query<'w, 's, &'static FileView>,
     unsent: Query<'w, 's, (), With<LspEditDirty>>,
     wake: Option<Res<'w, JobWake>>,
@@ -450,6 +464,77 @@ fn read_text(path: &Path) -> Option<String> {
 }
 
 impl LspManager<'_, '_> {
+    fn buffer_snapshot(&self) -> BufferSnapshot {
+        let mut buffers = Vec::new();
+        for (owner, editor) in &self.editors {
+            let Ok(view) = self.views.get(owner) else {
+                continue;
+            };
+            buffers.push(BufferStamp {
+                owner,
+                version: editor.core.version(),
+                document: self.bindings.get(owner).ok().map(|binding| binding.0),
+                path: PathIdentity::resolve(&view.path).into_path_buf(),
+            });
+        }
+        BufferSnapshot(buffers)
+    }
+
+    fn request_buffers(&self, kind: &ReqKind) -> Option<BufferSnapshot> {
+        if matches!(kind, ReqKind::Rename { .. } | ReqKind::CodeAction) {
+            Some(self.buffer_snapshot())
+        } else {
+            None
+        }
+    }
+
+    pub(crate) fn buffers_current(
+        &self,
+        origin: &LspOrigin,
+        path: &Path,
+        targets: &[Entity],
+    ) -> bool {
+        let Some(operation) = origin.operation else {
+            return true;
+        };
+        let Ok(snapshot) = self.snapshots.get(operation) else {
+            return false;
+        };
+        let wanted = PathIdentity::resolve(path);
+        for buffer in &snapshot.0 {
+            if buffer.path != wanted.as_path() {
+                continue;
+            }
+            if !self
+                .editors
+                .get(buffer.owner)
+                .is_ok_and(|(_, editor)| editor.core.version() == buffer.version)
+                || !self
+                    .views
+                    .get(buffer.owner)
+                    .is_ok_and(|view| PathIdentity::resolve(&view.path) == wanted)
+                || self
+                    .bindings
+                    .get(buffer.owner)
+                    .ok()
+                    .map(|binding| binding.0)
+                    != buffer.document
+            {
+                return false;
+            }
+        }
+        for target in targets {
+            if !snapshot
+                .0
+                .iter()
+                .any(|buffer| buffer.owner == *target && buffer.path == wanted.as_path())
+            {
+                return false;
+            }
+        }
+        true
+    }
+
     fn document(&self, path: &Path) -> Option<&OpenDoc> {
         let target = PathIdentity::resolve(path);
         let mut found = None;
@@ -521,7 +606,7 @@ impl LspManager<'_, '_> {
             document,
             server: self.server_entity(&doc.key)?,
             version: doc.version,
-            buffer: self.editors.get(owner).ok()?.core.version(),
+            buffer: self.editors.get(owner).ok()?.1.core.version(),
         })
     }
 
@@ -612,6 +697,7 @@ impl LspManager<'_, '_> {
             }
         }
         let stamp = self.request_stamp(entity, path)?;
+        let buffers = self.request_buffers(&kind);
         let (wire_id, rx) = client.send_request(method, params);
         Some(LspRequestOperation {
             target: entity,
@@ -619,6 +705,7 @@ impl LspManager<'_, '_> {
             rx,
             stamp,
             wire_id,
+            buffers,
         })
     }
 
@@ -778,6 +865,7 @@ impl LspManager<'_, '_> {
             }
         }
         let stamp = self.request_stamp(entity, path)?;
+        let buffers = self.request_buffers(&kind);
         let (wire_id, rx) = client.send_request(method, params);
         Some(LspRequestOperation {
             target: entity,
@@ -785,6 +873,7 @@ impl LspManager<'_, '_> {
             rx,
             stamp,
             wire_id,
+            buffers,
         })
     }
 
@@ -856,6 +945,7 @@ impl LspManager<'_, '_> {
             rx,
             stamp,
             wire_id,
+            buffers: None,
         })
     }
 
@@ -931,6 +1021,7 @@ impl LspManager<'_, '_> {
             rx,
             stamp,
             wire_id,
+            buffers: None,
         })
     }
 
@@ -954,6 +1045,7 @@ impl LspManager<'_, '_> {
             rx,
             stamp,
             wire_id,
+            buffers: None,
         })
     }
 
@@ -981,6 +1073,7 @@ impl LspManager<'_, '_> {
             rx,
             stamp,
             wire_id,
+            buffers: None,
         })
     }
 
@@ -1147,6 +1240,9 @@ pub struct LspOpened;
 #[derive(Component)]
 struct LspInitialized;
 
+#[derive(Component)]
+struct LspSynced(uuid::Uuid);
+
 fn server_overrides(settings: &AppSettings) -> ServerOverrides {
     settings
         .editor
@@ -1312,10 +1408,19 @@ fn finish_server_starts(
 fn change_documents(
     mut requests: MessageReader<LspDocumentChangeRequest>,
     mut manager: LspManager,
-    views: Query<(Entity, &DocumentBinding)>,
+    views: Query<(Entity, &DocumentBinding, Option<&Editor>)>,
     mut commands: Commands,
 ) {
+    let mut ordered = Vec::new();
+    let mut newest = HashMap::new();
     for request in requests.read() {
+        newest.insert(request.owner, ordered.len());
+        ordered.push(request);
+    }
+    for (index, request) in ordered.into_iter().enumerate() {
+        if newest.get(&request.owner) != Some(&index) {
+            continue;
+        }
         let Ok(binding) = manager.bindings.get(request.owner) else {
             continue;
         };
@@ -1333,10 +1438,10 @@ fn change_documents(
         let text = match &request.text {
             Some(text) => text.clone(),
             None => {
-                let Some(text) = read_text(&request.path) else {
+                let Ok((_, _, Some(editor))) = views.get(request.owner) else {
                     continue;
                 };
-                text
+                editor.core.buffer.text()
             }
         };
         let (key, version) = {
@@ -1352,9 +1457,16 @@ fn change_documents(
         if let Some(client) = manager.client(&key) {
             client.did_change(&uri, version, &text);
         }
-        for (view, binding) in &views {
+        for (view, binding, editor) in &views {
             if binding.0 == entity {
                 commands.entity(view).remove::<LspInitialized>();
+                if view == request.owner
+                    && let Some(editor) = editor
+                {
+                    commands
+                        .entity(view)
+                        .insert(LspSynced(editor.core.version()));
+                }
             }
         }
     }
@@ -1586,18 +1698,54 @@ fn open_documents(
             DocumentBinding(document),
             ServerBinding(manager.server_entity(&key).unwrap()),
             LspOpened,
+            LspSynced(editor.core.version()),
         ));
     }
 }
 
-type UninitializedViews = (With<DocumentBinding>, Without<LspInitialized>);
+type UninitializedViews = (
+    With<DocumentBinding>,
+    Without<LspInitialized>,
+    Without<LspEditDirty>,
+);
+
+type SyncReadyViews<'w, 's> = Query<
+    'w,
+    's,
+    (
+        Entity,
+        &'static FileView,
+        &'static Editor,
+        &'static LspSynced,
+    ),
+    (With<DocumentBinding>, Without<LspEditDirty>),
+>;
+
+fn sync_ready_buffers(
+    views: SyncReadyViews,
+    mut requests: MessageWriter<LspDocumentChangeRequest>,
+) {
+    for (owner, view, editor, synced) in &views {
+        if synced.0 == editor.core.version() || editor.core.buffer.path != view.path {
+            continue;
+        }
+        requests.write(LspDocumentChangeRequest {
+            owner,
+            path: view.path.clone(),
+            text: Some(editor.core.buffer.text()),
+        });
+    }
+}
 
 fn initialize_views(
-    views: Query<(Entity, &FileView), UninitializedViews>,
+    views: Query<(Entity, &FileView, &Editor, &LspSynced), UninitializedViews>,
     manager: LspManager,
     mut commands: Commands,
 ) {
-    for (entity, fv) in &views {
+    for (entity, fv, editor, synced) in &views {
+        if synced.0 != editor.core.version() || manager.request_stamp(entity, &fv.path).is_none() {
+            continue;
+        }
         if let Some(request) = manager.folding_range(entity, &fv.path) {
             commands.spawn(request.bundle());
         }
@@ -1735,6 +1883,8 @@ fn drain_requests(
         let origin = LspOrigin {
             owner: request.target,
             stamp: request.stamp,
+            operation: matches!(request.kind, ReqKind::Rename { .. } | ReqKind::CodeAction)
+                .then_some(request_entity),
         };
         match &request.kind {
             ReqKind::Hover { line, col } => {
@@ -1762,10 +1912,7 @@ fn drain_requests(
                         path,
                         line,
                         utf16_col,
-                        origin: Some(LspOrigin {
-                            owner: request.target,
-                            stamp: request.stamp,
-                        }),
+                        origin: Some(origin),
                     });
                 }
             }
@@ -1781,10 +1928,7 @@ fn drain_requests(
                     entity: request.target,
                     root: root.clone(),
                     result,
-                    origin: Some(LspOrigin {
-                        owner: request.target,
-                        stamp: request.stamp,
-                    }),
+                    origin: Some(origin),
                 });
             }
             ReqKind::CodeAction => {
@@ -1839,10 +1983,7 @@ fn drain_requests(
                     entity: request.target,
                     root: root.clone(),
                     result,
-                    origin: Some(LspOrigin {
-                        owner: request.target,
-                        stamp: request.stamp,
-                    }),
+                    origin: Some(origin),
                 });
             }
             ReqKind::References => {
@@ -1889,10 +2030,7 @@ fn drain_requests(
                     regions: LspFolds::regions(
                         value.get("result").unwrap_or(&serde_json::Value::Null),
                     ),
-                    origin: Some(LspOrigin {
-                        owner: request.target,
-                        stamp: request.stamp,
-                    }),
+                    origin: Some(origin),
                 });
             }
             ReqKind::DocumentSymbol => {
@@ -1915,10 +2053,7 @@ fn drain_requests(
                     entity: request.target,
                     path: path.clone(),
                     tokens: parse_semantic_tokens(&value, manager.semantic_legend(key)),
-                    origin: Some(LspOrigin {
-                        owner: request.target,
-                        stamp: request.stamp,
-                    }),
+                    origin: Some(origin),
                 });
             }
         }
@@ -2026,6 +2161,7 @@ impl Plugin for ManagerPlugin {
             (
                 close_documents,
                 refresh_bindings,
+                sync_ready_buffers,
                 change_documents,
                 open_documents,
                 initialize_views,
@@ -2496,9 +2632,15 @@ mod tests {
         pub(crate) fn origin(&self, world: &mut World, owner: Entity, path: &Path) -> LspOrigin {
             let mut state = bevy::ecs::system::SystemState::<LspManager>::new(world);
             let manager = state.get_mut(world).unwrap();
+            let stamp = manager.request_stamp(owner, path).unwrap();
+            let snapshot = manager.buffer_snapshot();
+            let operation = world
+                .spawn((Operation::bundle("lsp.test.edit").unwrap(), snapshot))
+                .id();
             LspOrigin {
                 owner,
-                stamp: manager.request_stamp(owner, path).unwrap(),
+                stamp,
+                operation: Some(operation),
             }
         }
     }
@@ -2610,6 +2752,58 @@ mod tests {
                 );
                 std::thread::sleep(std::time::Duration::from_millis(5));
             }
+        }
+    }
+
+    #[test]
+    fn decoded_reload_resynchronizes_before_initial_metadata_requests() {
+        for utf16 in [false, true] {
+            let mut fixture = RestartFixture::new();
+            fixture.message(0, "textDocument/didOpen", 1);
+            fixture.message(0, "textDocument/foldingRange", 1);
+            let owner = fixture.views[0];
+            let path = fixture.roots[0].join("main.rs");
+            let text = "decoded replacement\n";
+            let mut bytes = Vec::new();
+            if utf16 {
+                bytes.extend_from_slice(&[0xff, 0xfe]);
+                for unit in text.encode_utf16() {
+                    bytes.extend_from_slice(&unit.to_le_bytes());
+                }
+            } else {
+                bytes.extend_from_slice(text.as_bytes());
+            }
+            std::fs::write(&path, bytes).unwrap();
+            fixture.app.world_mut().entity_mut(owner).remove::<Editor>();
+            fixture
+                .app
+                .world_mut()
+                .write_message(LspDocumentChangeRequest {
+                    owner,
+                    path: path.clone(),
+                    text: None,
+                });
+            fixture.app.update();
+            let decoded = crate::host::encoding::DecodedText::read(&path).unwrap();
+            fixture
+                .app
+                .world_mut()
+                .entity_mut(owner)
+                .insert(Editor::new(
+                    EditCore::new(path.clone(), "Rust".into(), &decoded.text, EditMode::Normal),
+                    HighlightCache::plain(&path),
+                    crate::fold::FoldState::default(),
+                ));
+            assert_eq!(
+                fixture.message(0, "textDocument/didChange", 1)["params"]["contentChanges"][0]["text"],
+                text
+            );
+            assert_eq!(
+                fixture.message(0, "textDocument/foldingRange", 2)["params"]["textDocument"]["uri"],
+                uri_for(&path).unwrap()
+            );
+            fixture.message(0, "textDocument/documentSymbol", 2);
+            fixture.message(0, "textDocument/semanticTokens/full", 2);
         }
     }
 
@@ -2852,6 +3046,12 @@ mod tests {
                 .unwrap()
                 .core
                 .version();
+            let buffers = {
+                let mut state =
+                    bevy::ecs::system::SystemState::<LspManager>::new(self.app.world_mut());
+                let manager = state.get_mut(self.app.world_mut()).unwrap();
+                manager.buffer_snapshot()
+            };
             let entity = self
                 .app
                 .world_mut()
@@ -2867,6 +3067,7 @@ mod tests {
                             buffer,
                         },
                         wire_id: 1,
+                        buffers: Some(buffers),
                     }
                     .bundle(),
                 )
@@ -2983,6 +3184,7 @@ mod tests {
                 LspOrigin {
                     owner,
                     stamp: manager.request_stamp(owner, &path).unwrap(),
+                    operation: None,
                 }
             };
             fixture
