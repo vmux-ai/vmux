@@ -5,6 +5,7 @@ use vmux_ecs::store::StoreAppExt;
 use vmux_flex::prelude::*;
 #[cfg(test)]
 use vmux_history::LastActivatedAt;
+pub use vmux_pane::{PaneSize, PaneSplitGaps};
 
 use crate::settings::LayoutSettings;
 
@@ -24,31 +25,12 @@ pub(super) struct ResizePlugin;
 impl Plugin for ResizePlugin {
     fn build(&self, app: &mut App) {
         app.add_message::<ResizeRequest>()
+            .register_required_components::<PaneSize, Save>()
             .register_stored::<PaneSize>()
             .add_systems(Update, from_commands.in_set(LayoutRequestSet::Handle))
             .add_systems(Update, from_pointer)
             .add_systems(PostUpdate, sync_split_gaps);
     }
-}
-
-#[derive(Component, Reflect, Clone, Copy, Debug)]
-#[reflect(Component)]
-#[type_path = "vmux_desktop::layout::pane"]
-#[require(Save)]
-pub struct PaneSize {
-    pub flex_grow: f32,
-}
-
-impl Default for PaneSize {
-    fn default() -> Self {
-        Self { flex_grow: 1.0 }
-    }
-}
-
-#[derive(Clone, Copy, Debug, PartialEq)]
-pub struct PaneSplitGaps {
-    pub column_gap: Val,
-    pub row_gap: Val,
 }
 
 #[derive(Component)]
@@ -58,29 +40,6 @@ pub struct PaneDrag {
     start_position: f32,
     previous_grow: f32,
     next_grow: f32,
-}
-
-impl PaneSplitDirection {
-    pub fn gaps(self, gap: f32) -> PaneSplitGaps {
-        match self {
-            Self::Row => PaneSplitGaps {
-                column_gap: Val::Px(gap),
-                row_gap: Val::Px(0.0),
-            },
-            Self::Column => PaneSplitGaps {
-                column_gap: Val::Px(0.0),
-                row_gap: Val::Px(gap),
-            },
-        }
-    }
-}
-
-impl PaneSplit {
-    pub fn apply_gaps(&self, node: &mut Node, gap: f32) {
-        let gaps = self.direction.gaps(gap);
-        node.column_gap = gaps.column_gap;
-        node.row_gap = gaps.row_gap;
-    }
 }
 
 fn from_commands(

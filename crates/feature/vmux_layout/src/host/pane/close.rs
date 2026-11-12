@@ -135,13 +135,13 @@ fn close(
             continue;
         }
 
-        let Ok(children) = panes.children.get(parent) else {
+        let Some(children) = panes.children(parent) else {
             continue;
         };
         let siblings: Vec<Entity> = children
             .iter()
             .filter(|&entity| {
-                entity != active && (panes.leaves.contains(entity) || splits.contains(entity))
+                entity != active && (panes.is_leaf(entity) || splits.contains(entity))
             })
             .collect();
 
@@ -164,8 +164,7 @@ fn close(
             continue;
         };
         let sibling_children: Vec<Entity> = panes
-            .children
-            .get(sibling)
+            .children(sibling)
             .map(|children| children.iter().collect())
             .unwrap_or_default();
         for &child in &sibling_children {

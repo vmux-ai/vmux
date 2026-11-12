@@ -9,8 +9,8 @@ publish = false
 [features]
 default = []
 jobs = []
-contracts = ["dep:rkyv", "dep:vmux_api", "dep:vmux_macro"]
-store = ["dep:bevy_world_serialization", "dep:moonshine-save", "dep:ron", "dep:vmux_macro"]
+contracts = ["dep:rkyv", "dep:vmux_api"]
+store = ["dep:bevy_world_serialization", "dep:moonshine-save", "dep:ron"]
 host = [
     "jobs",
     "contracts",
@@ -44,7 +44,7 @@ ron = { workspace = true, optional = true }
 vmux_profile = { path = "../vmux_profile", optional = true }
 vmux_path = { path = "../vmux_path", optional = true }
 vmux_task = { path = "../vmux_task" }
-vmux_macro = { path = "../vmux_macro", optional = true }
+vmux_macro = { path = "../vmux_macro" }
 vmux_api = { path = "../vmux_api", features = ["bevy"], optional = true }
 
 [dev-dependencies]

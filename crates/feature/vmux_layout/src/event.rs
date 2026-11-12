@@ -1,4 +1,5 @@
 use std::path::Path;
+pub use vmux_pane::PANE_GAP_PX;
 
 use vmux_api::PageIcon;
 use vmux_api::bookmark::{BookmarkFolderChoice, BookmarkRow};
@@ -105,7 +106,6 @@ pub const CEF_RESERVED_HEIGHT_PX: f32 = HEADER_HEIGHT_PX;
 
 pub const WINDOW_PAD_PX: f32 = 8.0;
 
-pub const PANE_GAP_PX: f32 = 4.0;
 pub const SIDE_SHEET_GAP_PX: f32 = 8.0;
 
 pub const SIDE_SHEET_WIDTH_PX: f32 = 220.0;

@@ -460,6 +460,11 @@ and navigation behavior remains owned by the product layout feature until separa
 Core clocks use `web-time` so activation and operation retention also work on
 `wasm32-unknown-unknown` without a native runtime.
 
+Reflection-only declarations use `#[vmux_ecs::types(...)]` on the owning plugin or a unit schema
+and `app.register_types::<Schema>()` in its normal build method. This registers reflected types
+without a store domain, Save requirements, tracking, or hidden lifecycle systems. Store schemas
+reuse the declaration parser and explicitly add their own domain and optional tracking.
+
 Shared data components do not imply persistence. Feature-owned markers and store plugins choose
 what is saved: Workspace storage registers its shared fields and includes pages owned by Stacks,
 while History explicitly marks its URL and visit records. The same `Cwd`, timestamps, and ordering
@@ -1037,6 +1042,18 @@ Bevy world or unrestricted native APIs.
 Position in the tree defines ownership. Each native window owns a complete tree. Spaces
 identify projects; tabs preserve arrangements; splits tile panes; stacks hold page history.
 Global actions resolve through the focused window and then through active descendants.
+
+`vmux_pane` owns the canonical Pane, split, size, identity, and spawn-sequence components without
+Window, renderer, or Profile dependencies. Existing reflected paths under
+`vmux_desktop::layout::pane` remain the persistence contract. Its read-only Hierarchy capability
+resolves leaves and neighbors within an explicit root; SelectRequest refuses split targets,
+missing targets, and stale ownership before shared activation and SelectionChanged publication.
+Native directional focus forwards its selected target into PaneSet::Select inside the existing
+layout request set, so focus projections observe the result in the same update.
+Geometry/bundle helpers and wire-direction conversion are optional capabilities. Pane components
+do not require Save by default; the optional pane StorePlugin declares its schema and the native
+Tree/Identity/Resize adapters explicitly retain Workspace save requirements. Native layout keeps
+ID allocation, sequencing, geometry synchronization, pointer/cursor behavior, and close policy.
 
 Only test a window's drag region with coordinates from that window. Never compare child-window
 coordinates with the owning window's region.

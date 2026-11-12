@@ -267,7 +267,7 @@ impl StackCloser<'_, '_> {
     }
 
     fn active_stack(&self, pane: Entity) -> Option<Entity> {
-        self.panes.children.get(pane).ok().and_then(|children| {
+        self.panes.children(pane).and_then(|children| {
             LastActivatedAt::latest(
                 children
                     .iter()
@@ -316,7 +316,7 @@ fn close_stack(
     let Ok(pane) = closer.child_of.get(request.stack).map(Relationship::get) else {
         return;
     };
-    let Ok(children) = closer.panes.children.get(pane) else {
+    let Some(children) = closer.panes.children(pane) else {
         return;
     };
     let was_active = closer.active_stack(pane) == Some(request.stack);
@@ -428,7 +428,7 @@ fn close_last_stack_in_pane(
             .entity(tab)
             .remove::<crate::page_context::PendingWorkspaceSelection>();
         let mut transition = Transition::retiring(visible, stack, pending);
-        if !close_tab && let Ok(children) = closer.panes.children.get(pane) {
+        if !close_tab && let Some(children) = closer.panes.children(pane) {
             for sibling in children.iter() {
                 if sibling == stack || !closer.stacks.contains(sibling) {
                     continue;
@@ -455,14 +455,13 @@ fn close_last_stack_in_pane(
     };
 
     commands.entity(stack).try_despawn();
-    let Ok(siblings) = closer.panes.children.get(parent) else {
+    let Some(siblings) = closer.panes.children(parent) else {
         return;
     };
     let pane_siblings: Vec<Entity> = siblings
         .iter()
         .filter(|&entity| {
-            entity != pane
-                && (closer.panes.leaves.contains(entity) || closer.splits.contains(entity))
+            entity != pane && (closer.panes.is_leaf(entity) || closer.splits.contains(entity))
         })
         .collect();
 
@@ -492,8 +491,7 @@ fn close_last_stack_in_pane(
     };
     let sibling_children: Vec<Entity> = closer
         .panes
-        .children
-        .get(sibling)
+        .children(sibling)
         .map(|children| children.iter().collect())
         .unwrap_or_default();
 

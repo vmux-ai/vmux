@@ -1,6 +1,6 @@
 use proc_macro2::TokenStream;
 use quote::quote;
-use syn::parse::{Parse, ParseStream};
+use syn::parse::{Parse, ParseStream, Parser};
 use syn::punctuated::Punctuated;
 use syn::{Data, DeriveInput, Fields, Ident, Token, Type};
 
@@ -31,6 +31,26 @@ impl Declaration {
             ));
         }
         Ok(Self { item, args })
+    }
+
+    pub(crate) fn parse_types(args: TokenStream, item: DeriveInput) -> syn::Result<Self> {
+        Punctuated::<Type, Token![,]>::parse_terminated.parse2(args.clone())?;
+        Self::parse(args, item)
+    }
+
+    pub(crate) fn expand_types(&self) -> TokenStream {
+        let item = &self.item;
+        let name = &item.ident;
+        let types = &self.args.types;
+        quote! {
+            #item
+
+            impl ::vmux_ecs::types::Schema for #name {
+                fn register(registry: &mut ::vmux_ecs::types::TypeRegistry) {
+                    #(registry.register::<#types>();)*
+                }
+            }
+        }
     }
 
     pub(crate) fn expand(&self) -> TokenStream {
@@ -164,5 +184,47 @@ mod tests {
         for (args, item) in cases {
             assert!(Declaration::parse(args, item).is_err());
         }
+    }
+
+    #[test]
+    fn reflection_declarations_reject_store_options_and_invalid_schema_shapes() {
+        let cases = [
+            (
+                quote!(domain = WorkspaceStore; Name),
+                parse_quote!(
+                    struct Types;
+                ),
+            ),
+            (
+                quote!(Name),
+                parse_quote!(
+                    struct Types(String);
+                ),
+            ),
+            (
+                quote!(Name),
+                parse_quote!(
+                    struct Types<T>;
+                ),
+            ),
+            (
+                quote!(),
+                parse_quote!(
+                    struct Types;
+                ),
+            ),
+        ];
+        for (args, item) in cases {
+            assert!(Declaration::parse_types(args, item).is_err());
+        }
+        assert!(
+            Declaration::parse_types(
+                quote!(Name, Cwd),
+                parse_quote!(
+                    struct Types;
+                )
+            )
+            .is_ok()
+        );
     }
 }

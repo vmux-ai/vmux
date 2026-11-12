@@ -71,11 +71,12 @@ bookmark = ["layout", "dep:vmux_bookmark"]
 ecs = ["dep:vmux_ecs"]
 jobs = ["ecs", "vmux_ecs/jobs"]
 flex = ["ecs", "dep:vmux_flex"]
+pane = ["ecs", "dep:vmux_pane"]
 runtime = ["flex", "vmux_flex/window", "vmux_ecs/host"]
 command = ["runtime", "dep:vmux_command"]
 setting = ["runtime", "dep:vmux_setting"]
 session = ["dep:vmux_session"]
-layout = ["command", "setting", "dep:vmux_layout"]
+layout = ["command", "setting", "pane", "dep:vmux_layout"]
 browser = ["command", "layout", "dep:vmux_browser"]
 extension = ["browser", "dep:vmux_extension"]
 terminal = ["layout", "service", "dep:vmux_terminal"]
@@ -140,6 +141,7 @@ tracing = { version = "0.1", optional = true }
 tracing-appender = { version = "0.2", optional = true }
 tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"], optional = true }
 vmux_profile = { path = "../vmux_profile", optional = true }
+vmux_pane = { path = "../../feature/vmux_pane", optional = true }
 vmux_project = { path = "../../feature/vmux_project", optional = true }
 vmux_transport = { path = "../vmux_transport", optional = true }
 

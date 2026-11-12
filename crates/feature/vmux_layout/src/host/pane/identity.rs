@@ -2,6 +2,7 @@ use bevy::prelude::*;
 use moonshine_save::prelude::*;
 use vmux_ecs::store::StoreAppExt;
 use vmux_history::LastActivatedAt;
+pub use vmux_pane::{PaneId, SpawnSeq};
 
 use super::{Pane, PaneSplit};
 use crate::stack::Stack;
@@ -10,7 +11,9 @@ pub(super) struct IdentityPlugin;
 
 impl Plugin for IdentityPlugin {
     fn build(&self, app: &mut App) {
-        app.register_stored::<PaneId>()
+        app.register_required_components::<PaneId, Save>()
+            .register_required_components::<SpawnSeq, Save>()
+            .register_stored::<PaneId>()
             .register_type::<SpawnSeq>()
             .add_systems(Update, repair_stack_parents)
             .add_systems(Update, stamp_spawn_seq)
@@ -23,18 +26,6 @@ impl Plugin for IdentityPlugin {
             );
     }
 }
-
-#[derive(Component, Reflect, Default, Clone, Debug, PartialEq, Eq, Hash)]
-#[reflect(Component)]
-#[type_path = "vmux_desktop::layout::pane"]
-#[require(Save)]
-pub struct PaneId(pub String);
-
-#[derive(Component, Reflect, Clone, Copy, Debug, Default, PartialEq, Eq)]
-#[reflect(Component)]
-#[type_path = "vmux_desktop::layout::pane"]
-#[require(Save)]
-pub struct SpawnSeq(pub u64);
 
 #[derive(Component, Default)]
 pub struct SpawnCounter(pub u64);
