@@ -31,7 +31,9 @@ use crate::route::ToolRoute;
 #[vmux_page::page(
     component = Page,
     states = ["PageAddressUiState", "ThemeUiState", "ToolsUiState", "ExtensionsUiState", "McpServersUiState"],
-    subtree
+    subtree,
+    takes = vmux_ecs::PageMetadata,
+    reactive_takes
 )]
 pub struct ToolsPage;
 
@@ -837,6 +839,85 @@ fn open_tool_file(path: String) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::rc::Rc;
+    use vmux_ui::hooks::EventListenerError;
+    use vmux_ui::transport::{BytesListener, HostBinding, PageHost};
+
+    struct Host;
+
+    impl PageHost for Host {
+        fn send(&self, _: &str, _: &[u8]) -> Result<(), EventListenerError> {
+            Ok(())
+        }
+
+        fn listen(&self, _: &str, _: BytesListener) -> Result<(), EventListenerError> {
+            Ok(())
+        }
+    }
+
+    #[component]
+    fn ReadyTools() -> Element {
+        use_context_provider(|| HostBinding(Rc::new(Host)));
+        let mut tools = use_ui_state::<ToolsUiState>().state;
+        let mut connectors = use_ui_state::<McpServersUiState>().state;
+        use_hook(move || {
+            let mut state = ToolsUiState::default();
+            state.snapshot.loaded = true;
+            state.view.route = "connectors".into();
+            tools.set(state);
+            connectors.set(McpServersUiState {
+                loaded: true,
+                servers: vec![vmux_api::mcp::McpServerEntry {
+                    id: "github".into(),
+                    name: "GitHub".into(),
+                    ..Default::default()
+                }],
+                ..Default::default()
+            });
+        });
+        rsx! { Page {} }
+    }
+
+    #[test]
+    fn opening_the_registered_setup_url_renders_a_conversation_instead_of_the_tools_list() {
+        let mut app = bevy_app::App::new();
+        app.add_plugins(ToolsPage::plugin());
+        app.update();
+        let entity = app
+            .world_mut()
+            .spawn(vmux_ecs::PageMetadata {
+                url: "vmux://tools/connectors/github/setup".into(),
+                ..Default::default()
+            })
+            .id();
+        let registration = *app
+            .world_mut()
+            .query::<&vmux_page::PageRegistration>()
+            .single(app.world())
+            .unwrap();
+        let mut page = vmux_page::PageDom::mount(
+            ReadyTools,
+            registration.instance(app.world().entity(entity)),
+        );
+        let rendered = page.rebuild();
+        let intro = translate_with(
+            "connectors-setup-intro",
+            &[("service", TranslationValue::String("GitHub"))],
+        );
+        assert!(
+            rendered
+                .windows(intro.len())
+                .any(|bytes| bytes == intro.as_bytes()),
+            "the setup conversation must render for the registered URL"
+        );
+        let description = translate("connectors-description");
+        assert!(
+            !rendered
+                .windows(description.len())
+                .any(|bytes| bytes == description.as_bytes()),
+            "setup must not render a duplicate connector list"
+        );
+    }
 
     #[test]
     fn tool_breadcrumbs_keep_the_page_root_and_navigate_to_the_selected_category() {

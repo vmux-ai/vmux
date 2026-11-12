@@ -1353,6 +1353,8 @@ inside the existing Tools sidebar, search, and breadcrumbs at `vmux://tools/conn
 List/Grid controls, including ACP, connectors, browser extensions, packages, LSP, MCP, and dotfiles.
 Tools / MCP shows agent-native configuration and counts its own entries independently.
 
+The Tools page takes reactive `PageMetadata`, so its renderer receives the complete requested
+URL and updates when navigation changes the same hosted document.
 Tools lists and manages accounts; setup runs in a conversation tab at
 `vmux://tools/connectors/<provider>/setup`. ACP setup links open the onboarding conversation with
 the chosen agent, using the ordinary promptless Session path. Both flows share conversation
