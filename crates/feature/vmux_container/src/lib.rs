@@ -9,8 +9,16 @@ impl vmux_ecs::manifest::FeatureManifestSource for Feature {
     const SOURCE: &'static str = include_str!("feature.ron");
 }
 
-#[vmux_page::page]
+#[vmux_page::page(page = "vm")]
 pub struct ContainerPlugin;
+
+#[cfg(host)]
+#[vmux_page::page(page = "docker")]
+pub(crate) struct Docker;
+
+#[cfg(host)]
+#[vmux_page::page(page = "containers")]
+pub(crate) struct Containers;
 
 pub mod event;
 

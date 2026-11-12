@@ -135,12 +135,41 @@ pub(super) struct OfferedBookmarkDefaults {
     #[reflect(default)]
     pin_order_revision: u32,
     #[reflect(default)]
+    vm_root_revision: u32,
+    #[reflect(default)]
     folders: Vec<String>,
     #[reflect(default)]
     folder_bookmarks: Vec<String>,
 }
 
 impl BookmarkSeed<'_, '_> {
+    fn move_vm_default(&mut self, urls: &[String]) -> HashSet<Entity> {
+        let mut migrated = HashSet::new();
+        let vm = Self::key("vmux://vm/");
+        if self.offered.vm_root_revision > 0 || !urls.iter().any(|url| Self::key(url) == vm) {
+            return migrated;
+        }
+        let containers = Self::key("vmux://vm/docker/containers");
+        for url in &mut self.offered.urls {
+            if Self::key(url) == containers {
+                *url = "vmux://vm/".into();
+            }
+        }
+        for (entity, metadata, _) in &self.pins {
+            if Self::key(&metadata.url) != containers {
+                continue;
+            }
+            let mut metadata = metadata.clone();
+            metadata.url = "vmux://vm/".into();
+            metadata.title = "VM".into();
+            metadata.icon = PageIcon::Builtin(vmux_api::BuiltinIcon::Computer);
+            self.commands.entity(entity).insert(metadata);
+            migrated.insert(entity);
+        }
+        self.offered.vm_root_revision = 1;
+        migrated
+    }
+
     fn key(url: &str) -> String {
         if let Some(canonical) = vmux_api::VmuxRoute::canonical(url) {
             return canonical.trim_end_matches('/').to_ascii_lowercase();
@@ -166,7 +195,7 @@ impl BookmarkSeed<'_, '_> {
             order = order.saturating_add(1);
         }
         pins.sort_by_key(|(entity, _, order)| (*order, entity.to_bits()));
-        let container_key = Self::key("vmux://vm/docker/containers");
+        let container_key = Self::key("vmux://vm/");
         let simulator_key = Self::key("vmux://simulator/");
         let Some(container) = pins.iter().position(|(_, key, _)| *key == container_key) else {
             return;
@@ -214,6 +243,8 @@ fn insert_defaults(
     let urls = &settings.browser.bookmarks;
     let folders = &settings.browser.bookmark_folders;
     let pin_revision = seed.offered.pin_order_revision;
+    let vm_revision = seed.offered.vm_root_revision;
+    let migrated = seed.move_vm_default(urls);
     let retired_keys = RETIRED_DEFAULT_BOOKMARKS
         .iter()
         .map(|url| BookmarkSeed::key(url))
@@ -272,12 +303,20 @@ fn insert_defaults(
     let mut changed = !claimed_urls.is_empty()
         || !claimed_folders.is_empty()
         || legacy_folder_bookmarks
+        || vm_revision != seed.offered.vm_root_revision
         || !retired_entities.is_empty();
     let existing_pins = seed
         .pins
         .iter()
         .filter(|(entity, _, _)| !retired_entities.contains(entity))
-        .map(|(entity, metadata, order)| (entity, BookmarkSeed::key(&metadata.url), order.0))
+        .map(|(entity, metadata, order)| {
+            let key = if migrated.contains(&entity) {
+                BookmarkSeed::key("vmux://vm/")
+            } else {
+                BookmarkSeed::key(&metadata.url)
+            };
+            (entity, key, order.0)
+        })
         .collect::<Vec<_>>();
     let mut pinned = existing_pins
         .iter()
@@ -737,10 +776,7 @@ mod tests {
     #[test]
     fn legacy_container_pin_moves_after_simulator_without_reordering_other_pins() {
         let mut settings = AppSettings::default();
-        settings.browser.bookmarks = vec![
-            "vmux://simulator/".into(),
-            "vmux://vm/docker/containers".into(),
-        ];
+        settings.browser.bookmarks = vec!["vmux://simulator/".into(), "vmux://vm/".into()];
         let mut app = App::new();
         app.add_plugins((
             MinimalPlugins,
@@ -796,7 +832,7 @@ mod tests {
             [
                 "https://first.example/",
                 "vmux://simulator/",
-                "vmux://containers/",
+                "vmux://vm/",
                 "https://second.example/",
             ]
         );
@@ -811,9 +847,12 @@ mod tests {
         app.update();
         assert_eq!(app.world().get::<BookmarkOrder>(container).unwrap().0, 10);
         app.world_mut().despawn(container);
-        app.world_mut()
-            .resource_mut::<OfferedBookmarkDefaults>()
-            .pin_order_revision = 4;
+        {
+            let mut offered = app.world_mut().resource_mut::<OfferedBookmarkDefaults>();
+            offered.pin_order_revision = 4;
+            offered.vm_root_revision = 0;
+            offered.urls = vec!["vmux://simulator/".into(), "vmux://containers/".into()];
+        }
         app.world_mut().trigger(SeedBookmarkDefaults);
         app.update();
         assert_eq!(
