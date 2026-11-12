@@ -60,6 +60,7 @@ impl MaterializeRequest {
         }
     }
 
+    #[cfg(all(host, feature = "host"))]
     pub(crate) fn with_lifetime(mut self, lifetime: Arc<dyn Send + Sync>) -> Self {
         self._lifetime = Some(lifetime);
         self
