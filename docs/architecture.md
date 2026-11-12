@@ -1137,7 +1137,7 @@ package's existing version directory.
 Staging uses an IO lease retained by the installation and materialization workers; the last user
 queues temporary-file removal off the ECS thread after success, failure or cancellation, without touching installed sources.
 Reseeding the same root during an older write schedules the new canonical snapshot after that IO,
-and preserves that repair across further resets and path aliases until compensation succeeds. The store cannot become clean while its disk image belongs to the previous generation.
+and preserves that repair across further resets and path aliases until compensation succeeds. Failed compensation keeps repair provenance while suspending automatic retries; an explicit request or reseed can retry after IO recovers. Only a successful current write clears that repair, so the store cannot become clean while its disk image belongs to the previous generation.
 
 The explicit host feature adds ExtensionHostPlugin for runtime preparation, bridge transport,
 service workers, browser API projection, popups, web-store injection, conformance tooling, and

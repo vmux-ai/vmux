@@ -471,6 +471,81 @@ mod tests {
         wake: mpsc::Receiver<()>,
     }
 
+    struct ManualStore {
+        app: App,
+        root: Entity,
+    }
+
+    impl ManualStore {
+        fn new(directory: &Path, snapshot: Index) -> Self {
+            FileStore::write(directory, &snapshot).unwrap();
+            let mut app = App::new();
+            app.add_plugins(CorePlugin);
+            let root = app
+                .world_mut()
+                .spawn((Root(directory.to_path_buf()), crate::Seed(Ok(snapshot))))
+                .id();
+            app.update();
+            Self { app, root }
+        }
+
+        fn submit(&mut self, mutation: Mutation) -> WriteTaskRequest {
+            let mut catalog = SystemState::<Catalog>::new(self.app.world_mut());
+            let ticket = catalog
+                .get(self.app.world())
+                .unwrap()
+                .ticket(self.root)
+                .unwrap()
+                .clone();
+            self.app.world_mut().spawn(
+                Request {
+                    ticket,
+                    profile: "personal".into(),
+                    mutation,
+                }
+                .bundle(),
+            );
+            self.app.update();
+            self.write()
+        }
+
+        fn write(&mut self) -> WriteTaskRequest {
+            self.app
+                .world_mut()
+                .resource_mut::<Messages<WriteTaskRequest>>()
+                .drain()
+                .next()
+                .unwrap()
+        }
+
+        fn finish(&mut self, request: &WriteTaskRequest, result: Result<(), String>) {
+            self.app.world_mut().write_message(WriteCompleted {
+                ticket: request.ticket.clone(),
+                operation: request.operation,
+                revision: request.revision,
+                result,
+            });
+            self.app.update();
+        }
+
+        fn reseed(&mut self, snapshot: Index) {
+            self.app
+                .world_mut()
+                .entity_mut(self.root)
+                .insert(crate::Seed(Ok(snapshot)));
+            self.app.update();
+        }
+
+        fn snapshot(&mut self) -> Index {
+            let mut catalog = SystemState::<Catalog>::new(self.app.world_mut());
+            catalog
+                .get(self.app.world())
+                .unwrap()
+                .snapshot(self.root)
+                .unwrap()
+        }
+    }
+
     impl Host {
         fn new(directory: &Path) -> Self {
             let (sender, wake) = mpsc::channel();
@@ -821,6 +896,76 @@ mod tests {
             assert_eq!(FileStore::read(directory.path()).unwrap(), snapshot);
             assert_eq!(snapshot, original);
         }
+    }
+
+    #[test]
+    fn failed_compensation_stays_suspended_and_reseed_retries_after_io_recovers() {
+        let directory = tempfile::tempdir().unwrap();
+        let mut original = Index::default();
+        let mut entry = ExtEntry {
+            id: ID.into(),
+            name: "Example".into(),
+            version: "1".into(),
+            ..Default::default()
+        };
+        entry.profile_enabled.insert("personal".into(), false);
+        entry.profile_pinned.insert("personal".into(), false);
+        entry.approved_grants.insert(
+            "personal".into(),
+            crate::snapshot::ExtensionGrants::default(),
+        );
+        original.entries.push(entry);
+        let mut host = ManualStore::new(directory.path(), original.clone());
+        let old = host.submit(Mutation::Pin(ExtPinRequest {
+            id: ID.into(),
+            pinned: true,
+        }));
+        FileStore::write(directory.path(), &old.snapshot).unwrap();
+        host.reseed(original.clone());
+        let repair = host.write();
+        host.finish(&old, Ok(()));
+        let path = directory.path().join("index.json");
+        std::fs::remove_file(&path).unwrap();
+        std::fs::create_dir(&path).unwrap();
+        let failure = FileStore::write(directory.path(), &repair.snapshot);
+        assert!(failure.is_err());
+        host.finish(&repair, failure);
+        for _ in 0..3 {
+            host.app.update();
+        }
+        assert!(
+            host.app
+                .world_mut()
+                .resource_mut::<Messages<WriteTaskRequest>>()
+                .drain()
+                .next()
+                .is_none()
+        );
+        assert!(
+            host.app
+                .world()
+                .get::<crate::State>(host.root)
+                .unwrap()
+                .is_dirty()
+        );
+        std::fs::remove_dir(&path).unwrap();
+        FileStore::write(directory.path(), &old.snapshot).unwrap();
+        assert!(FileStore::read(directory.path()).unwrap().entries[0].pinned_for("personal"));
+        host.reseed(original.clone());
+        let retry = host.write();
+        let result = FileStore::write(directory.path(), &retry.snapshot);
+        host.finish(&retry, result);
+        let snapshot = host.snapshot();
+        assert_eq!(FileStore::read(directory.path()).unwrap(), snapshot);
+        assert_eq!(snapshot, original);
+        assert!(
+            !host
+                .app
+                .world()
+                .get::<crate::State>(host.root)
+                .unwrap()
+                .is_dirty()
+        );
     }
 
     #[test]

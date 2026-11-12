@@ -564,7 +564,10 @@ impl Clock {
 struct Queued(u64);
 
 #[derive(Component)]
-struct Repair;
+enum Repair {
+    Required,
+    Suspended,
+}
 
 #[derive(Component)]
 struct Writing {
@@ -623,7 +626,7 @@ fn reset(
             .remove::<(Loaded, Writing, WriteError, Seed, Repair)>()
             .insert((Scope(ticket.clone()), state, Revision::default()));
         if repair {
-            commands.entity(owner).insert(Repair);
+            commands.entity(owner).insert(Repair::Required);
         }
         if let Some(seed) = seed {
             completed.write(LoadCompleted {
@@ -842,7 +845,9 @@ fn finish(
                     snapshot: writing.snapshot.clone(),
                     revision: *revision,
                 });
-                commands.entity(ticket.owner).remove::<WriteError>();
+                commands
+                    .entity(ticket.owner)
+                    .remove::<(WriteError, Repair)>();
                 effects.changed.write(Changed(ticket.owner));
                 if let Mutation::Remove(request) = &writing.request.mutation {
                     effects.cleanup.write(CleanupRequest {
@@ -863,7 +868,7 @@ fn finish(
             Err(error) => {
                 if completion.result.is_ok() {
                     state.retry(completion.revision, error.clone());
-                    commands.entity(ticket.owner).insert(Repair);
+                    commands.entity(ticket.owner).insert(Repair::Required);
                 } else if *revision == writing.base {
                     *state = writing.before.clone();
                 } else {
@@ -1146,16 +1151,22 @@ fn evidence(
 
 fn autosave(
     roots: Query<
-        (&Scope, &State, Has<WriteError>, Has<Repair>, Has<AutoSave>),
+        (
+            &Scope,
+            &State,
+            Has<WriteError>,
+            Option<&Repair>,
+            Has<AutoSave>,
+        ),
         (With<Loaded>, Without<Writing>),
     >,
     requests: Query<&Request>,
     mut commands: Commands,
 ) {
     for (scope, state, error, repair, auto) in &roots {
-        if (!auto && !repair)
+        if (!auto && repair.is_none())
             || !state.is_dirty()
-            || (error && !repair)
+            || (error && !matches!(repair, Some(Repair::Required)))
             || requests.iter().any(|request| request.ticket == scope.0)
         {
             continue;
@@ -1264,7 +1275,9 @@ fn accept(world: &mut World) {
         world
             .entity_mut(operation)
             .insert((OperationState::Running, OperationTargetRevision(revision)));
-        world.entity_mut(owner).remove::<Repair>();
+        if world.get::<Repair>(owner).is_some() {
+            world.entity_mut(owner).insert(Repair::Suspended);
+        }
         world.entity_mut(owner).insert(Writing {
             ticket: request.ticket.clone(),
             operation,
