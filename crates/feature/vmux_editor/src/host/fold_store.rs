@@ -124,7 +124,17 @@ fn forward(
         let current: std::collections::BTreeSet<_> =
             editor.folds.collapsed.iter().copied().collect();
         let collapse = current.difference(&binding.projected.0).copied().collect();
-        let expand = binding.projected.0.difference(&current).copied().collect();
+        let mut expand = std::collections::BTreeSet::new();
+        for line in binding.projected.0.difference(&current) {
+            if editor
+                .folds
+                .regions
+                .iter()
+                .any(|region| region.start == *line)
+            {
+                expand.insert(*line);
+            }
+        }
         updates.write(UpdateRequest {
             ticket: binding.ticket.clone(),
             file: FileId(binding.path.clone()),
@@ -159,19 +169,37 @@ fn project(
         }
         let record = preferences.get(&binding.ticket, &binding.path);
         let revision = record.map(|(_, _, revision)| *revision);
-        if binding.initialized && binding.revision == revision {
+        if binding.initialized && binding.revision == revision && !editor.is_changed() {
             continue;
         }
         if dirty {
             continue;
         }
-        editor.folds.collapsed.clear();
+        let mut projected = Collapsed::default();
         if let Some((_, collapsed, _)) = record {
-            editor.folds.collapsed.extend(collapsed.0.iter().copied());
+            for region in &editor.folds.regions {
+                if collapsed.0.contains(&region.start) {
+                    projected.0.insert(region.start);
+                }
+            }
         }
+        if binding.initialized
+            && binding.revision == revision
+            && binding.projected == projected
+            && editor
+                .folds
+                .collapsed
+                .iter()
+                .copied()
+                .collect::<std::collections::BTreeSet<_>>()
+                == projected.0
+        {
+            continue;
+        }
+        editor.folds.collapsed = projected.0.iter().copied().collect();
         editor.folds.reconcile();
         editor.sync_fold_view();
-        binding.projected = Collapsed(editor.folds.collapsed.iter().copied().collect());
+        binding.projected = projected;
         binding.revision = revision;
         binding.initialized = true;
         commands.trigger(ViewportRenderRequest::new(entity));
@@ -191,8 +219,9 @@ fn report(roots: Query<(&Root, &State), Changed<State>>) {
 mod tests {
     use super::*;
     use crate::host::edit::{EditCore, EditMode, highlight_cache::HighlightCache};
-    use crate::host::fold::FoldState;
-    use vmux_fold::{LoadCompleted, LoadRequest, SaveRequest, Snapshot};
+    use crate::host::fold::{FoldRegion, FoldState};
+    use vmux_fold::filesystem::FileStore;
+    use vmux_fold::{LoadRequest, Snapshot};
 
     struct Fixture {
         app: App,
@@ -201,20 +230,44 @@ mod tests {
         directory: tempfile::TempDir,
     }
 
+    #[derive(Component)]
+    struct PendingEditor(Option<Editor>);
+
+    impl PendingEditor {
+        fn finish(mut pending: Query<(Entity, &mut Self)>, mut commands: Commands) {
+            for (entity, mut pending) in &mut pending {
+                if let Some(editor) = pending.0.take() {
+                    commands
+                        .entity(entity)
+                        .remove::<Editor>()
+                        .insert(editor)
+                        .remove::<Self>();
+                }
+            }
+        }
+    }
+
     impl Fixture {
-        fn new() -> Self {
+        fn new(lines: &[u32]) -> Self {
             let directory = tempfile::tempdir().unwrap();
             let path = directory.path().canonicalize().unwrap().join("shared.rs");
             let mut app = App::new();
-            app.add_plugins(FoldPlugin)
-                .add_systems(Update, forward.before(FoldSet::Restore))
-                .add_systems(
-                    Update,
-                    attach.after(FoldSet::Restore).before(FoldSet::Mutate),
-                )
-                .add_systems(Update, project.in_set(FoldSet::Project));
+            let root = directory.path().join("folds.ron");
+            FileStore::write(
+                &root,
+                &Snapshot {
+                    files: [(path.to_string_lossy().into_owned(), lines.to_vec())].into(),
+                },
+            )
+            .unwrap();
+            app.add_plugins((FoldPlugin, Plugin)).add_systems(
+                Update,
+                PendingEditor::finish
+                    .after(FoldSet::Restore)
+                    .in_set(EditorFileLoadedSet),
+            );
             app.world_mut().spawn((
-                Root(directory.path().join("folds.ron")),
+                Root(root),
                 ActiveProfile(vmux_ecs::profile::Profile::current()),
             ));
             let mut views = Vec::new();
@@ -252,22 +305,61 @@ mod tests {
             }
         }
 
-        fn restore(&mut self, lines: &[u32]) {
-            let path = self
-                .app
-                .world()
-                .get::<FileView>(self.views[0])
+        fn restore(&mut self) {
+            let deadline = std::time::Instant::now() + std::time::Duration::from_secs(2);
+            loop {
+                self.app.update();
+                if self
+                    .app
+                    .world()
+                    .get::<vmux_fold::Loaded>(self.ticket.owner)
+                    .is_some()
+                {
+                    break;
+                }
+                assert!(
+                    std::time::Instant::now() < deadline,
+                    "fold preferences did not restore"
+                );
+                std::thread::sleep(std::time::Duration::from_millis(5));
+            }
+        }
+
+        fn snapshot(&mut self) -> Snapshot {
+            let deadline = std::time::Instant::now() + std::time::Duration::from_secs(2);
+            loop {
+                self.app.update();
+                let state = self.app.world().get::<State>(self.ticket.owner).unwrap();
+                assert!(
+                    state.error().is_none(),
+                    "fold save failed: {:?}",
+                    state.error()
+                );
+                if !state.is_dirty() && state.saving().is_none() {
+                    return FileStore::read(&self.ticket.path).unwrap();
+                }
+                assert!(
+                    std::time::Instant::now() < deadline,
+                    "fold preferences did not save"
+                );
+                std::thread::sleep(std::time::Duration::from_millis(5));
+            }
+        }
+
+        fn regions(&mut self, index: usize, headers: &[u32]) {
+            let regions = headers
+                .iter()
+                .map(|start| FoldRegion {
+                    start: *start,
+                    end: start + 1,
+                })
+                .collect();
+            self.app
+                .world_mut()
+                .get_mut::<Editor>(self.views[index])
                 .unwrap()
-                .path
-                .to_string_lossy()
-                .into_owned();
-            self.app.world_mut().write_message(LoadCompleted {
-                ticket: self.ticket.clone(),
-                result: Ok(Snapshot {
-                    files: [(path, lines.to_vec())].into(),
-                }),
-            });
-            self.app.update();
+                .folds
+                .set_regions(regions);
         }
 
         fn toggle(&mut self, index: usize, line: u32) {
@@ -295,9 +387,49 @@ mod tests {
     }
 
     #[test]
+    fn changing_local_regions_does_not_expand_stored_folds_in_other_views() {
+        for project_before_toggle in [false, true] {
+            let mut fixture = Fixture::new(&[0]);
+            fixture.restore();
+            fixture.regions(0, &[2]);
+            if project_before_toggle {
+                fixture.app.update();
+            }
+            fixture.toggle(0, 2);
+            fixture.app.update();
+            assert_eq!(fixture.collapsed(0), std::collections::HashSet::from([2]));
+            assert_eq!(
+                fixture.collapsed(1),
+                std::collections::HashSet::from([0, 2])
+            );
+            let path = fixture
+                .app
+                .world()
+                .get::<FileView>(fixture.views[0])
+                .unwrap()
+                .path
+                .to_string_lossy()
+                .into_owned();
+            assert_eq!(fixture.snapshot().files[&path], [0, 2]);
+        }
+    }
+
+    #[test]
+    fn stored_folds_apply_when_their_regions_arrive_without_a_preference_revision() {
+        let mut fixture = Fixture::new(&[2]);
+        fixture.regions(0, &[0]);
+        fixture.restore();
+        assert!(fixture.collapsed(0).is_empty());
+        assert_eq!(fixture.collapsed(1), std::collections::HashSet::from([2]));
+        fixture.regions(0, &[0, 2]);
+        fixture.app.update();
+        assert_eq!(fixture.collapsed(0), std::collections::HashSet::from([2]));
+    }
+
+    #[test]
     fn separate_native_views_share_changes_without_copying_local_fold_regions() {
-        let mut fixture = Fixture::new();
-        fixture.restore(&[]);
+        let mut fixture = Fixture::new(&[]);
+        fixture.restore();
         fixture.toggle(0, 0);
         fixture.toggle(1, 2);
         fixture.app.update();
@@ -309,14 +441,7 @@ mod tests {
             fixture.collapsed(1),
             std::collections::HashSet::from([0, 2])
         );
-        let snapshot = fixture
-            .app
-            .world_mut()
-            .resource_mut::<Messages<SaveRequest>>()
-            .drain()
-            .next()
-            .unwrap()
-            .snapshot;
+        let snapshot = fixture.snapshot();
         let path = fixture
             .app
             .world()
@@ -329,9 +454,9 @@ mod tests {
 
     #[test]
     fn a_local_fold_intent_survives_pending_restore_and_preserves_other_stored_lines() {
-        let mut fixture = Fixture::new();
+        let mut fixture = Fixture::new(&[2]);
         fixture.toggle(0, 0);
-        fixture.restore(&[2]);
+        fixture.restore();
         assert_eq!(fixture.collapsed(0), std::collections::HashSet::from([0]));
         fixture.app.update();
         assert_eq!(
@@ -346,8 +471,8 @@ mod tests {
 
     #[test]
     fn navigation_refuses_pending_fold_changes_for_the_previous_file() {
-        let mut fixture = Fixture::new();
-        fixture.restore(&[]);
+        let mut fixture = Fixture::new(&[]);
+        fixture.restore();
         fixture.toggle(0, 0);
         fixture
             .app
@@ -356,22 +481,15 @@ mod tests {
             .unwrap()
             .path = fixture.directory.path().join("other.rs");
         fixture.app.update();
-        assert!(
-            fixture
-                .app
-                .world_mut()
-                .resource_mut::<Messages<SaveRequest>>()
-                .drain()
-                .next()
-                .is_none()
-        );
+        let snapshot = fixture.snapshot();
+        assert!(snapshot.files.values().all(Vec::is_empty));
         assert!(fixture.collapsed(1).is_empty());
     }
 
     #[test]
     fn reloading_the_same_file_projects_its_durable_folds_into_the_new_editor() {
-        let mut fixture = Fixture::new();
-        fixture.restore(&[0, 2]);
+        let mut fixture = Fixture::new(&[0, 2]);
+        fixture.restore();
         let entity = fixture.views[0];
         let path = fixture
             .app
@@ -392,8 +510,11 @@ mod tests {
             .app
             .world_mut()
             .entity_mut(entity)
-            .remove::<Editor>()
-            .insert(Editor::new(core, HighlightCache::plain(&path), folds));
+            .insert(PendingEditor(Some(Editor::new(
+                core,
+                HighlightCache::plain(&path),
+                folds,
+            ))));
         fixture.app.update();
         assert_eq!(
             fixture.collapsed(0),
