@@ -10623,6 +10623,7 @@ version = "0.0.35"
 dependencies = [
  "base64 0.22.1",
  "bevy",
+ "bevy_app",
  "bevy_cef",
  "bevy_ecs",
  "crossbeam-channel",
@@ -10643,6 +10644,7 @@ dependencies = [
  "vmux_flex",
  "vmux_history",
  "vmux_layout",
+ "vmux_path",
  "vmux_tool",
  "zip",
 ]

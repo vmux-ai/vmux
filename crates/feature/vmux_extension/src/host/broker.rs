@@ -31,13 +31,19 @@ impl Plugin for ExtensionBrokerPlugin {
                 Update,
                 drain_bridge_requests
                     .in_set(super::ExtensionSystemSet::DrainBridge)
+                    .after(super::access::AccessSet)
                     .after(super::ExtensionSystemSet::SyncWindows),
             )
             .add_systems(
                 Update,
-                forward_model_events.after(super::project::ExtensionProjectionSet),
+                forward_model_events
+                    .after(super::project::ExtensionProjectionSet)
+                    .after(super::access::AccessSet),
             )
-            .add_systems(Update, fire_conformance_wake_timer)
+            .add_systems(
+                Update,
+                fire_conformance_wake_timer.after(super::access::AccessSet),
+            )
             .add_systems(Update, arm_bridge_wake);
     }
 }
@@ -105,6 +111,12 @@ struct SeenBridgeRequests(HashMap<(String, u64), VecDeque<String>>);
 #[derive(Component, Default)]
 pub struct BridgeResponseCache(HashMap<String, VecDeque<(String, BridgeServerMessage)>>);
 
+impl BridgeResponseCache {
+    pub(super) fn revoke(&mut self, id: &str) {
+        self.0.remove(id);
+    }
+}
+
 #[derive(Component)]
 pub struct PendingBridgeEvents {
     next_sequence: u64,
@@ -117,6 +129,12 @@ impl Default for PendingBridgeEvents {
             next_sequence: 1,
             events: HashMap::new(),
         }
+    }
+}
+
+impl PendingBridgeEvents {
+    pub(super) fn revoke(&mut self, id: &str) {
+        self.events.remove(id);
     }
 }
 
@@ -136,6 +154,13 @@ impl Default for ConformanceWakeTimer {
             scheduled: HashSet::new(),
             scheduler: None,
         }
+    }
+}
+
+impl ConformanceWakeTimer {
+    pub(super) fn revoke(&mut self, id: &str) {
+        self.deadlines.remove(id);
+        self.scheduled.remove(id);
     }
 }
 
@@ -177,6 +202,16 @@ fn drain_bridge_requests(
             message,
         } = inbound;
         if !server.is_current_session(&extension_id, session_id) {
+            continue;
+        }
+        if server.authorization(&extension_id).is_none() {
+            send_fatal_to_session(
+                &server,
+                &extension_id,
+                session_id,
+                "unauthorized_extension",
+                "extension association or runtime is no longer authorized",
+            );
             continue;
         }
         seen.0
@@ -726,6 +761,9 @@ fn forward_model_events(
 ) {
     for event in events.read() {
         for (extension_id, entries) in &subscriptions.0 {
+            if server.authorization(extension_id).is_none() {
+                continue;
+            }
             if entries.iter().any(|entry| {
                 entry.namespace == CONFORMANCE_NAMESPACE && entry.event == MODEL_CHANGED_EVENT
             }) {

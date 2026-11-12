@@ -24,13 +24,13 @@ BUILD_PROFILE="${VMUX_CONFORMANCE_BUILD_PROFILE:-${VMUX_BUILD_PROFILE:-dev}}"
 case "$VMUX_BIN" in
   "$DEFAULT_VMUX_BIN")
     env -u CEF_PATH cargo build \
-      -p vmux_browser -p vmux_desktop -p vmux_service \
-      --features vmux_desktop/conformance
+      -p vmux_extension -p vmux_desktop -p vmux_service \
+      --features vmux_desktop/conformance,vmux_extension/conformance
     ;;
   *)
     : "${VMUX_CONFORMANCE_BUILD_PROFILE:?set VMUX_CONFORMANCE_BUILD_PROFILE for a custom VMUX_BIN}"
     BUILD_PROFILE="$VMUX_CONFORMANCE_BUILD_PROFILE"
-    env -u CEF_PATH cargo build -p vmux_browser --bin vmux-extension-conformance
+    env -u CEF_PATH cargo build -p vmux_extension --features conformance --bin vmux-extension-conformance
     ;;
 esac
 

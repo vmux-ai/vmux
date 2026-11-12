@@ -1,5 +1,5 @@
 use crate::webstore::ChromeWebStore;
-use crate::{ExtensionInstallCompleted, ExtensionInstallRequest, OpenManagerRequest, store};
+use crate::{ExtensionInstallCompleted, ExtensionInstallRequest, OpenManagerRequest};
 use bevy::prelude::*;
 use bevy_cef::prelude::{
     Browsers, JsEmitEventPlugin, Receive, UiEventPlugin, UiInput, WebviewCommittedNavigationEvent,
@@ -66,6 +66,8 @@ struct WebStoreInjection<'w, 's> {
     browsers: NonSend<'w, Browsers>,
     injectors: Query<'w, 's, &'static WebStoreInjector>,
     profile: vmux_ecs::profile::CurrentProfile<'w, 's>,
+    roots: Query<'w, 's, Entity, With<crate::host::Binding>>,
+    catalog: crate::Catalog<'w, 's>,
     commands: Commands<'w, 's>,
 }
 
@@ -79,14 +81,17 @@ impl WebStoreInjection<'_, '_> {
             self.commands.entity(webview).remove::<WebStoreInjector>();
             return;
         };
-        let Some((profile, paths)) = self.profile.profile().zip(self.profile.paths()) else {
+        let Some(profile) = self.profile.profile() else {
             return;
         };
         let profile = profile.clone().into_id();
         let injector = WebStoreInjector::resolve(self.injectors.get(webview).ok(), extension_id);
-        let index = store::ExtensionStore::at(paths.extensions())
-            .load_index()
-            .unwrap_or_default();
+        let Ok(root) = self.roots.single() else {
+            return;
+        };
+        let Ok(index) = self.catalog.snapshot(root) else {
+            return;
+        };
         let installed = index
             .entries
             .iter()

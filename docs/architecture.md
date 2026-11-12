@@ -474,7 +474,7 @@ the same ID in different roots remains valid, while a duplicate inside one root 
 
 `examples/framework-consumer` is an independent Cargo workspace using only public APIs and no
 repository patch configuration. Its tests exercise typed requests, scoped identity, operation
-completion, optional storage, owned jobs, and Project mutations in a Bevy App without Profile or UI dependencies. CI runs
+completion, optional storage, owned jobs, Project mutations, and Extension associations in a Bevy App without Profile or UI dependencies. CI runs
 the consumer and checks its resolved dependency graph along with the minimal core configurations.
 
 `vmux_project` owns renderer-independent Project entities and mutation lifecycles. Its default
@@ -1119,9 +1119,28 @@ full Bevy Remote Protocol is locked to the `debug` page alone.
 
 ### Browser extensions
 
-`vmux_extension` owns package metadata, installation, permissions, enabled state, catalog ECS,
-runtime preparation, bridge transport, service workers, browser API projection, extension
-popups, web-store injection, conformance tooling, and the manager page. `vmux_browser` exposes
+`vmux_extension::ExtensionPlugin` owns renderer-independent Package entities and per-Profile
+Association entities, using shared names, revisions, operations, and store state. Packages hold
+identity, version, source hash, public signing key, and declared permissions; associations hold
+installation, enablement, pinning, and approved grants. Its public Catalog reads canonical
+components. Index values exist only at restore, IO, and projection boundaries. The default
+plugin has no product Profile, filesystem, or CEF dependency. Applications may run its
+ExtensionSchedule before starting their renderer.
+
+The optional filesystem adapter serializes index IO, package materialization, and cleanup by
+canonical root. Metadata becomes visible only after an atomic write succeeds. Root tickets,
+installation ownership, and revisions reject stale completions; a canceled write that reached
+disk schedules a compensating save of current state. Removing one Profile retains shared
+packages and another Profile's pending install. Native downloads and archive extraction use
+owned blocking jobs and isolated staging. A different source cannot overwrite an installed
+package's existing version directory.
+
+The explicit host feature adds ExtensionHostPlugin for runtime preparation, bridge transport,
+service workers, browser API projection, popups, web-store injection, conformance tooling, and
+the manager page. The application facade selects extension-core independently; its native
+extension feature requires that core and Browser. Bootstrap seeds the same ECS world and
+applies preparation evidence before CEF starts. Live catalog and UI intent use the same model;
+filesystem helpers do not own load-edit-save mutation callbacks. `vmux_browser` exposes
 only generic CEF primitives and lifecycle boundaries used by browser-backed features; it neither
 depends on nor installs extension behavior.
 
@@ -1145,6 +1164,11 @@ next mouse or keyboard event. Web-page tab IDs are learned from content-script s
 translated at the shim boundary; extension pages keep the model IDs the bridge owns.
 The prepared extension catalog and bridge server belong to separate entities. Bridge-page
 reconciliation reads them independently to create the hidden transport pages used by extensions.
+Bridge permissions are projected from the current Profile association and the loaded runtime's
+source hash and root generation. Disabled, removed, or replaced associations cannot use an old
+runtime. Grant reductions clear cached responses, subscriptions, and pending events before the
+broker runs; newly approved capabilities require a runtime that was prepared with those grants.
+
 On macOS, extension-owned authentication popups use the owning Layout's existing extension modal. Their
 virtual window IDs remain stable for extension APIs while the underlying browser tab stays selected
 for matching and autofill. Reopening from the toolbar reuses the current authentication document;

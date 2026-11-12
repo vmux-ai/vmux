@@ -1,6 +1,4 @@
 use bevy::prelude::*;
-use bevy::tasks::{IoTaskPool, Task, futures_lite::future};
-use bevy::winit::EventLoopProxyWrapper;
 use bevy_cef::prelude::{UiEventPlugin, UiInput};
 use vmux_api::extension::{
     ExtFilterRequest, ExtInstallPhase, ExtInstallProgress, ExtOpenManagerRequest, ExtPinRequest,
@@ -10,7 +8,9 @@ use vmux_ecs::PageMetadata;
 use vmux_ecs::UiStateWrite;
 use vmux_layout::LayoutUiStateUpdates;
 
-use crate::store;
+use crate::host::{Binding, RuntimeIds};
+use crate::{Catalog, ExtensionSet, Mutation, Request};
+use vmux_ecs::{OperationError, OperationState, Revision};
 
 pub(crate) struct ExtensionCatalogPlugin;
 
@@ -34,7 +34,10 @@ impl Plugin for ExtensionCatalogPlugin {
             .add_observer(open_manager)
             .add_observer(filter)
             .add_systems(Startup, spawn)
-            .add_systems(Update, (finish, publish).chain());
+            .add_systems(
+                Update,
+                (finish, project, publish).chain().after(ExtensionSet::Step),
+            );
 
         #[cfg(ui)]
         app.add_systems(Update, open_page);
@@ -48,20 +51,13 @@ pub struct OpenManagerRequest;
 pub(crate) struct ExtensionCatalog {
     snapshot: ExtensionsUiState,
     revision: u64,
+    root_revision: Option<Revision>,
+    root_generation: Option<u64>,
+    root_loaded: bool,
+    profile: String,
 }
 
 impl ExtensionCatalog {
-    pub(crate) fn enabled(&self, id: &str) -> Option<&vmux_api::extension::ExtRow> {
-        self.snapshot
-            .extensions
-            .iter()
-            .find(|entry| entry.id == id && entry.enabled && !entry.needs_approval)
-    }
-
-    pub(crate) fn loaded(&self) -> bool {
-        self.snapshot.loaded
-    }
-
     pub(crate) fn replace(&mut self, mut snapshot: ExtensionsUiState) {
         snapshot.loaded = true;
         snapshot.installing = std::mem::take(&mut self.snapshot.installing);
@@ -143,36 +139,13 @@ impl ExtensionSubscriber {
 }
 
 #[derive(Component)]
-struct ExtensionCatalogTask(Task<Result<Option<ExtensionsUiState>, String>>);
+struct PendingCatalogOperation;
 
 #[derive(Component)]
 struct ExtensionCatalogKey(String);
 
-#[derive(Component)]
-struct InitialCatalogLoad;
-
-fn spawn(
-    profile: vmux_ecs::profile::CurrentProfile,
-    proxy: Option<Res<EventLoopProxyWrapper>>,
-    mut commands: Commands,
-) {
-    let Some((profile, paths)) = profile.profile().zip(profile.paths()) else {
-        return;
-    };
-    let profile = profile.clone().into_id();
-    let store = store::ExtensionStore::at(paths.extensions());
-    let wake = vmux_ecs::wake::Wake::beside(proxy.as_deref());
-    let task = IoTaskPool::get().spawn(async move {
-        let result = store.snapshot(&profile).map(Some);
-        drop(wake);
-        result
-    });
+fn spawn(mut commands: Commands) {
     commands.spawn((Name::new("Extension catalog"), ExtensionCatalog::default()));
-    commands.spawn((
-        Name::new("Load extensions"),
-        ExtensionCatalogTask(task),
-        InitialCatalogLoad,
-    ));
 }
 
 fn page_ready(
@@ -205,124 +178,149 @@ fn page_ready(
 fn toggle(
     trigger: On<UiInput<ExtToggleRequest>>,
     profile: vmux_ecs::profile::CurrentProfile,
-    proxy: Option<Res<EventLoopProxyWrapper>>,
+    root: Single<Entity, With<Binding>>,
+    catalog: Catalog,
     mut commands: Commands,
 ) {
-    let Some((profile, paths)) = profile.profile().zip(profile.paths()) else {
+    let Some(profile) = profile.profile() else {
         return;
     };
-    let profile = profile.clone().into_id();
-    let store = store::ExtensionStore::at(paths.extensions());
-    let request = trigger.event().payload.clone();
-    let wake = vmux_ecs::wake::Wake::beside(proxy.as_deref());
-    let task = IoTaskPool::get().spawn(async move {
-        let result = store.update_index(|index| {
-            index.set_enabled_for(
-                &profile,
-                &request.id,
-                request.enabled,
-                request.approve_permissions,
-            );
-        });
-        let result = result.and_then(|()| store.snapshot(&profile)).map(Some);
-        drop(wake);
-        result
-    });
-    commands.spawn((Name::new("Toggle extension"), ExtensionCatalogTask(task)));
+    let Some(ticket) = catalog.ticket(*root) else {
+        return;
+    };
+    commands.spawn((
+        Request {
+            ticket: ticket.clone(),
+            profile: profile.clone().into_id(),
+            mutation: Mutation::Toggle(trigger.event().payload.clone()),
+        }
+        .bundle(),
+        PendingCatalogOperation,
+    ));
 }
 
 fn uninstall(
     trigger: On<UiInput<ExtUninstallRequest>>,
     profile: vmux_ecs::profile::CurrentProfile,
-    proxy: Option<Res<EventLoopProxyWrapper>>,
+    root: Single<Entity, With<Binding>>,
+    catalog: Catalog,
     mut commands: Commands,
 ) {
-    let Some((profile, paths)) = profile.profile().zip(profile.paths()) else {
+    let Some(profile) = profile.profile() else {
         return;
     };
-    let profile = profile.clone().into_id();
-    let store = store::ExtensionStore::at(paths.extensions());
-    let request = trigger.event().payload.clone();
-    let wake = vmux_ecs::wake::Wake::beside(proxy.as_deref());
-    let task = IoTaskPool::get().spawn(async move {
-        let result = store
-            .uninstall_for_profile(&profile, &request.id)
-            .and_then(|()| store.snapshot(&profile))
-            .map(Some);
-        drop(wake);
-        result
-    });
-    commands.spawn((Name::new("Uninstall extension"), ExtensionCatalogTask(task)));
+    let Some(ticket) = catalog.ticket(*root) else {
+        return;
+    };
+    commands.spawn((
+        Request {
+            ticket: ticket.clone(),
+            profile: profile.clone().into_id(),
+            mutation: Mutation::Remove(trigger.event().payload.clone()),
+        }
+        .bundle(),
+        PendingCatalogOperation,
+    ));
 }
 
 fn pin(
     trigger: On<UiInput<ExtPinRequest>>,
     profile: vmux_ecs::profile::CurrentProfile,
-    proxy: Option<Res<EventLoopProxyWrapper>>,
+    root: Single<Entity, With<Binding>>,
+    catalog: Catalog,
     mut commands: Commands,
 ) {
-    let Some((profile, paths)) = profile.profile().zip(profile.paths()) else {
+    let Some(profile) = profile.profile() else {
         return;
     };
-    let profile = profile.clone().into_id();
-    let store = store::ExtensionStore::at(paths.extensions());
+    let Some(ticket) = catalog.ticket(*root) else {
+        return;
+    };
     let request = trigger.event().payload.clone();
-    let key = request.id.clone();
-    let wake = vmux_ecs::wake::Wake::beside(proxy.as_deref());
-    let task = IoTaskPool::get().spawn(async move {
-        let loaded = store.loaded_ids(&profile);
-        let result = store.update_index_if_changed(|index| {
-            index
-                .set_pinned_for(&profile, &request.id, request.pinned)
-                .then(|| index.snapshot(&profile, &loaded))
-        });
-        drop(wake);
-        result
-    });
     commands.spawn((
-        Name::new("Pin extension"),
-        ExtensionCatalogTask(task),
-        ExtensionCatalogKey(key),
+        Request {
+            ticket: ticket.clone(),
+            profile: profile.clone().into_id(),
+            mutation: Mutation::Pin(request.clone()),
+        }
+        .bundle(),
+        PendingCatalogOperation,
+        ExtensionCatalogKey(request.id),
     ));
 }
 
 fn finish(
-    mut tasks: Query<(
-        Entity,
-        &Name,
-        &mut ExtensionCatalogTask,
-        Option<&ExtensionCatalogKey>,
-        Has<InitialCatalogLoad>,
-    )>,
+    operations: Query<
+        (
+            Entity,
+            &OperationState,
+            Option<&OperationError>,
+            Option<&ExtensionCatalogKey>,
+        ),
+        With<PendingCatalogOperation>,
+    >,
     mut catalog: Single<&mut ExtensionCatalog>,
     mut commands: Commands,
 ) {
-    for (entity, name, mut task, key, initial) in &mut tasks {
-        let Some(result) = future::block_on(future::poll_once(&mut task.0)) else {
+    for (entity, state, error, key) in &operations {
+        if matches!(state, OperationState::Pending | OperationState::Running) {
             continue;
-        };
-        commands.entity(entity).despawn();
-        match result {
-            Ok(Some(snapshot)) => catalog.replace(snapshot),
-            Ok(None) => {}
-            Err(error) => {
-                warn!(operation = name.as_str(), "{error}");
-                if let Some(key) = key {
-                    catalog.update_progress(ExtInstallProgress {
-                        key: key.0.clone(),
-                        phase: ExtInstallPhase::Failed,
-                        pct: None,
-                        message: error,
-                    });
-                } else if initial {
-                    catalog.replace(ExtensionsUiState {
-                        loaded: true,
-                        ..default()
-                    });
-                }
+        }
+        if *state == OperationState::Failed
+            && let Some(error) = error
+        {
+            warn!("extension operation failed: {}", error.message());
+            if let Some(key) = key {
+                catalog.update_progress(ExtInstallProgress {
+                    key: key.0.clone(),
+                    phase: ExtInstallPhase::Failed,
+                    pct: None,
+                    message: error.message().into(),
+                });
             }
         }
+        commands
+            .entity(entity)
+            .remove::<(PendingCatalogOperation, ExtensionCatalogKey)>();
     }
+}
+
+fn project(
+    roots: Query<(Entity, &Revision, &RuntimeIds, Has<crate::Loaded>), With<Binding>>,
+    source: Catalog,
+    profile: vmux_ecs::profile::CurrentProfile,
+    mut catalog: Single<&mut ExtensionCatalog>,
+) {
+    let Some(profile) = profile.profile() else {
+        return;
+    };
+    let profile = profile.clone().into_id();
+    let Ok((root, revision, runtime, loaded)) = roots.single() else {
+        return;
+    };
+    let generation = source.ticket(root).map(|ticket| ticket.generation);
+    if catalog.root_revision == Some(*revision)
+        && catalog.root_generation == generation
+        && catalog.root_loaded == loaded
+        && catalog.profile == profile
+    {
+        return;
+    }
+    let snapshot = match source.snapshot(root) {
+        Ok(snapshot) => snapshot.snapshot(&profile, &runtime.0),
+        Err(error) => {
+            warn!("extension catalog unavailable: {error}");
+            ExtensionsUiState {
+                loaded: true,
+                ..Default::default()
+            }
+        }
+    };
+    catalog.replace(snapshot);
+    catalog.root_revision = Some(*revision);
+    catalog.root_generation = generation;
+    catalog.root_loaded = loaded;
+    catalog.profile = profile;
 }
 
 fn open_manager(

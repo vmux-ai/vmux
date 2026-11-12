@@ -1,4 +1,3 @@
-use crate::store;
 use bevy::ecs::system::SystemState;
 use bevy::{prelude::*, window::WindowResized};
 use bevy_cef::prelude::{
@@ -16,7 +15,6 @@ use vmux_layout::{Browser, LayoutCef, state::LayoutUiState};
 use super::super::model::ExtensionPopup;
 use super::super::model::{ExtensionModel, ExtensionModelEvent, ExtensionWindowId};
 use super::super::windows::{ExtensionWindows, WindowRequestSet};
-use crate::catalog::ExtensionCatalog;
 
 pub(super) struct PopupPlugin;
 
@@ -87,8 +85,8 @@ struct PopupHost<'w, 's> {
     layouts: Query<'w, 's, (Entity, Option<&'static HostWindow>), With<LayoutCef>>,
     host_windows: Query<'w, 's, &'static HostWindow>,
     native_windows: Query<'w, 's, (Entity, &'static Window, &'static ExtensionWindowId)>,
-    catalog: Query<'w, 's, &'static ExtensionCatalog>,
-    profile: vmux_ecs::profile::CurrentProfile<'w, 's>,
+    catalog: crate::Catalog<'w, 's>,
+    roots: Query<'w, 's, (Entity, &'static crate::ProfileId), With<crate::host::Binding>>,
     model: Single<'w, 's, &'static ExtensionModel>,
     virtual_windows: Single<'w, 's, &'static mut ExtensionWindows>,
     events: MessageWriter<'w, ExtensionModelEvent>,
@@ -98,15 +96,8 @@ struct PopupHost<'w, 's> {
 
 impl PopupHost<'_, '_> {
     fn entry(&self, id: &str) -> Option<ExtRow> {
-        if let Some(catalog) = self.catalog.iter().next()
-            && catalog.loaded()
-        {
-            return catalog.enabled(id).cloned();
-        }
-        let (profile, paths) = self.profile.profile().zip(self.profile.paths())?;
-        let snapshot = store::ExtensionStore::at(paths.extensions())
-            .snapshot(profile.id())
-            .ok()?;
+        let (root, profile) = self.roots.single().ok()?;
+        let snapshot = self.catalog.snapshot(root).ok()?.snapshot(&profile.0, &[]);
         snapshot
             .extensions
             .into_iter()
@@ -635,7 +626,6 @@ mod tests {
     use crate::host::windows::{ExtensionWindowsPlugin, WindowDispatch};
     use crate::protocol::{ApiRequest, ExtensionCallerContext};
     use serde_json::{Value, json};
-    use vmux_api::extension::{ExtStatus, ExtensionsUiState};
     use vmux_layout::stack::{CloseStackRequest, Stack};
 
     const ID: &str = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
@@ -658,9 +648,9 @@ mod tests {
     }
 
     impl Fixture {
-        fn new() -> Self {
+        fn new(popup: Option<&str>) -> Self {
             let mut app = App::new();
-            app.add_plugins(MinimalPlugins)
+            app.add_plugins((MinimalPlugins, crate::CorePlugin))
                 .add_message::<WindowResized>()
                 .add_message::<vmux_browser::WebviewLoadCompleted>()
                 .add_message::<ExtensionModelEvent>()
@@ -717,24 +707,23 @@ mod tests {
                     status: "complete".into(),
                 }],
             });
-            let mut catalog = ExtensionCatalog::default();
-            catalog.replace(ExtensionsUiState {
-                extensions: vec![ExtRow {
-                    id: ID.into(),
-                    name: "Extension".into(),
-                    version: "1".into(),
-                    icon: None,
-                    popup: Some("popup/index.html".into()),
-                    enabled: true,
-                    pinned: true,
-                    needs_approval: false,
-                    required_permissions: Vec::new(),
-                    required_host_permissions: Vec::new(),
-                    status: ExtStatus::Installed,
-                }],
+            let mut index = crate::snapshot::Index::default();
+            let mut entry = crate::snapshot::ExtEntry {
+                id: ID.into(),
+                name: "Extension".into(),
+                version: "1".into(),
+                popup: popup.map(str::to_string),
                 ..default()
-            });
-            app.world_mut().spawn(catalog);
+            };
+            entry.profile_enabled.insert("personal".into(), true);
+            entry.profile_pinned.insert("personal".into(), true);
+            index.entries.push(entry);
+            app.world_mut().spawn((
+                crate::host::Binding,
+                crate::Root("/popup-fixture/extensions".into()),
+                crate::ProfileId("personal".into()),
+                crate::Seed(Ok(index)),
+            ));
             app.update();
             Self {
                 app,
@@ -812,7 +801,7 @@ mod tests {
 
     #[test]
     fn authentication_opens_in_the_modal_without_replacing_the_browser_stack() {
-        let mut fixture = Fixture::new();
+        let mut fixture = Fixture::new(Some("popup/index.html"));
         let url =
             format!("chrome-extension://{ID}/popup/index.html?singleActionPopout=fido#/fido2");
         let id = fixture.open(&url);
@@ -852,7 +841,7 @@ mod tests {
 
     #[test]
     fn toolbar_reopening_preserves_the_authentication_document_and_window_identity() {
-        let mut fixture = Fixture::new();
+        let mut fixture = Fixture::new(Some("popup/index.html"));
         let url =
             format!("chrome-extension://{ID}/popup/index.html?singleActionPopout=fido#/fido2");
         let id = fixture.open(&url);
@@ -898,7 +887,7 @@ mod tests {
 
     #[test]
     fn modal_keeps_the_browser_window_available_for_current_tab_queries() {
-        let mut fixture = Fixture::new();
+        let mut fixture = Fixture::new(Some("popup/index.html"));
         fixture.open(&format!("chrome-extension://{ID}/popup/index.html#/unlock"));
         let world = fixture.app.world_mut();
         let mut query = world.query::<&mut ExtensionModel>();
@@ -917,16 +906,7 @@ mod tests {
 
     #[test]
     fn extension_without_a_toolbar_document_can_open_an_authentication_modal() {
-        let mut fixture = Fixture::new();
-        let world = fixture.app.world_mut();
-        let mut query = world.query::<&mut ExtensionCatalog>();
-        let mut catalog = query.single_mut(world).unwrap();
-        let mut entry = catalog.enabled(ID).unwrap().clone();
-        entry.popup = None;
-        catalog.replace(ExtensionsUiState {
-            extensions: vec![entry],
-            ..default()
-        });
+        let mut fixture = Fixture::new(None);
         fixture.open(&format!(
             "chrome-extension://{ID}/authentication.html#/unlock"
         ));
@@ -949,7 +929,7 @@ mod tests {
 
     #[test]
     fn native_escape_dismisses_the_modal_and_its_virtual_window() {
-        let mut fixture = Fixture::new();
+        let mut fixture = Fixture::new(Some("popup/index.html"));
         let id = fixture.open(&format!("chrome-extension://{ID}/popup/index.html#/unlock"));
         let popup = fixture.popup();
         fixture.app.world_mut().trigger(Receive {
@@ -975,7 +955,7 @@ mod tests {
 
     #[test]
     fn toolbar_popup_publishes_its_window_lifecycle() {
-        let mut fixture = Fixture::new();
+        let mut fixture = Fixture::new(Some("popup/index.html"));
         let mut cursor = fixture
             .app
             .world()
@@ -1010,7 +990,7 @@ mod tests {
 
     #[test]
     fn disposing_the_layout_retires_its_modal_and_virtual_window() {
-        let mut fixture = Fixture::new();
+        let mut fixture = Fixture::new(Some("popup/index.html"));
         fixture.open(&format!("chrome-extension://{ID}/popup/index.html#/unlock"));
         let popup = fixture.popup();
         fixture.app.world_mut().despawn(fixture.layout);
@@ -1029,7 +1009,7 @@ mod tests {
 
     #[test]
     fn closing_the_parent_returns_window_focus_to_an_existing_window() {
-        let mut fixture = Fixture::new();
+        let mut fixture = Fixture::new(Some("popup/index.html"));
         fixture.open(&format!("chrome-extension://{ID}/popup/index.html#/unlock"));
         let world = fixture.app.world_mut();
         let mut query = world.query::<&mut ExtensionModel>();
@@ -1055,7 +1035,7 @@ mod tests {
 
     #[test]
     fn requests_in_one_frame_keep_one_popup_entity_and_the_latest_window() {
-        let mut fixture = Fixture::new();
+        let mut fixture = Fixture::new(Some("popup/index.html"));
         let mut latest = 0;
         for path in ["popup/index.html#/unlock", "authentication/confirm.html"] {
             let dispatch = fixture.dispatch(
@@ -1092,7 +1072,7 @@ mod tests {
 
     #[test]
     fn removing_native_popup_preserves_matching_stack_and_closes_only_its_extra_tab() {
-        let mut fixture = Fixture::new();
+        let mut fixture = Fixture::new(Some("popup/index.html"));
         let popup_url = format!("chrome-extension://{ID}/popup/index.html");
         fixture
             .app
@@ -1159,7 +1139,7 @@ mod tests {
 
     #[test]
     fn late_close_of_replaced_authentication_cannot_dismiss_the_current_popup() {
-        let mut fixture = Fixture::new();
+        let mut fixture = Fixture::new(Some("popup/index.html"));
         let first = fixture.open(&format!("chrome-extension://{ID}/popup/index.html#/unlock"));
         let popup = fixture.popup();
         let next_url =
@@ -1212,7 +1192,7 @@ mod tests {
 
     #[test]
     fn popup_cannot_navigate_to_another_extension_or_a_web_origin() {
-        let mut fixture = Fixture::new();
+        let mut fixture = Fixture::new(Some("popup/index.html"));
         let url = format!("chrome-extension://{ID}/popup/index.html#/unlock");
         let id = fixture.open(&url);
         let popup = fixture.popup();
