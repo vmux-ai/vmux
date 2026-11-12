@@ -130,7 +130,7 @@ vmux_history = { path = "../../feature/vmux_history", optional = true }
 vmux_input = { path = "../../feature/vmux_input", optional = true }
 vmux_knowledge = { path = "../../feature/vmux_knowledge", optional = true }
 vmux_layout = { path = "../../feature/vmux_layout", optional = true }
-vmux_lsp = { path = "../../vmux_lsp", optional = true }
+vmux_lsp = { path = "../vmux_lsp", optional = true }
 vmux_mcp = { path = "../vmux_mcp", optional = true }
 vmux_macro = { path = "../vmux_macro" }
 vmux_remote = { path = "../../feature/vmux_remote", optional = true }
