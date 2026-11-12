@@ -27,9 +27,16 @@ fn apply_lsp(
     mut edits: WorkspaceEdits,
 ) {
     for (request, awaiting) in &requests {
-        let refusal = match WorkspaceEditPlan::within(&awaiting.root, &awaiting.params.edit) {
-            Ok(plan) => edits.apply(plan),
-            Err(refusal) => Some(refusal.to_string()),
+        let refusal = if awaiting
+            .server
+            .is_some_and(|server| !edits.manager.server_current(server))
+        {
+            Some("language server instance is no longer current".into())
+        } else {
+            match WorkspaceEditPlan::within(&awaiting.root, &awaiting.params.edit) {
+                Ok(plan) => edits.apply(plan),
+                Err(refusal) => Some(refusal.to_string()),
+            }
         };
         replies.write(crate::lsp::server_request::ServerReply {
             request,
@@ -63,7 +70,7 @@ fn apply_lsp(
 struct WorkspaceEdits<'w, 's> {
     views: Query<'w, 's, (Entity, &'static FileView, &'static Editor)>,
     self_writes: NonSendMut<'w, SelfWrites>,
-    manager: Single<'w, 's, &'static crate::lsp::manager::LspManager>,
+    manager: crate::lsp::manager::LspManager<'w, 's>,
     commands: Commands<'w, 's>,
 }
 
@@ -226,6 +233,7 @@ mod tests {
                         outgoing,
                     ),
                     root: path.parent().unwrap_or(path).to_path_buf(),
+                    server: None,
                     params: lsp_types::ApplyWorkspaceEditParams { label: None, edit },
                 })
                 .unwrap();
@@ -243,10 +251,6 @@ mod tests {
             app.world_mut().insert_non_send(ClipboardHandle(None));
             app.world_mut().insert_non_send(SelfWrites::default());
             app.world_mut().insert_non_send(Browsers::default());
-            app.world_mut().spawn(crate::lsp::manager::LspManager::new(
-                crate::lsp::LspDiagnosticsSender::default(),
-                crate::lsp::server_request::ServerInputSender::default(),
-            ));
 
             let mut views = Vec::new();
             for _ in 0..panes {

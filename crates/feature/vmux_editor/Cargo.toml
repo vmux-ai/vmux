@@ -15,6 +15,7 @@ path = "src/lib.rs"
 [dependencies]
 uuid.workspace = true
 regex.workspace = true
+web-time.workspace = true
 serde = { workspace = true }
 rkyv = { workspace = true }
 unicode-width = "0.2"

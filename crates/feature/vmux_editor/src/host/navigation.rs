@@ -321,6 +321,7 @@ fn apply_file(
     if let Some(lsp_closes) = lsp_closes.as_mut() {
         lsp_closes.write(crate::lsp::manager::LspDocumentCloseRequest {
             path: previous.clone(),
+            owner: request.entity,
         });
     }
     metadata.title = view.page_title();
@@ -515,6 +516,7 @@ fn apply_goto(
         if let Some(lsp_closes) = lsp_closes.as_mut() {
             lsp_closes.write(crate::lsp::manager::LspDocumentCloseRequest {
                 path: view.path.clone(),
+                owner: goto.entity,
             });
         }
         metadata.title = goto
@@ -655,10 +657,7 @@ mod tests {
                         emitted.0.push(event);
                     },
                 );
-            app.world_mut().spawn(crate::lsp::manager::LspManager::new(
-                crate::lsp::LspDiagnosticsSender::default(),
-                crate::lsp::server_request::ServerInputSender::default(),
-            ));
+
             let view = app
                 .world_mut()
                 .spawn((

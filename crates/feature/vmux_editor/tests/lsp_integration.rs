@@ -44,10 +44,10 @@ impl Mock {
         let deadline = Instant::now() + Duration::from_secs(5);
         let mut seen = Vec::new();
         loop {
-            for (path, diagnostics) in self.diagnostics.0.try_iter() {
-                for diagnostic in diagnostics {
+            for batch in self.diagnostics.0.try_iter() {
+                for diagnostic in batch.diagnostics {
                     if diagnostic.message.contains(wanted) {
-                        return (path, diagnostic.message);
+                        return (batch.path, diagnostic.message);
                     }
                     seen.push(diagnostic.message);
                 }

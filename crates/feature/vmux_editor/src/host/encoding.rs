@@ -50,6 +50,7 @@ fn reopen_with(
         .remove::<crate::lsp::manager::LintRan>();
     if let Some(lsp_changes) = lsp_changes.as_mut() {
         lsp_changes.write(crate::lsp::manager::LspDocumentChangeRequest {
+            owner: entity,
             path: view.path.clone(),
             text: None,
         });

@@ -540,10 +540,7 @@ mod tests {
             PageOpenPlugin,
             vmux_layout::hosted_page::HostedPagePlugin,
         ));
-        app.world_mut().spawn(crate::lsp::manager::LspManager::new(
-            crate::lsp::LspDiagnosticsSender::default(),
-            crate::lsp::server_request::ServerInputSender::default(),
-        ));
+
         app
     }
 

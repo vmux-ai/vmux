@@ -63,9 +63,6 @@ mod tests {
 
     use crate::host::navigation::NavigationPlugin;
     use crate::host::page_open::PageOpenPlugin;
-    use crate::lsp::LspDiagnosticsSender;
-    use crate::lsp::manager::LspManager;
-    use crate::lsp::server_request::ServerInputSender;
 
     struct Editor {
         app: App,
@@ -83,10 +80,7 @@ mod tests {
                 .add_plugins(NavigationPlugin)
                 .add_plugins(HistoryPlugin)
                 .add_plugins(PageOpenPlugin);
-            app.world_mut().spawn(LspManager::new(
-                LspDiagnosticsSender::default(),
-                ServerInputSender::default(),
-            ));
+
             let navigation = PageOpenId::new();
             let stack = app
                 .world_mut()

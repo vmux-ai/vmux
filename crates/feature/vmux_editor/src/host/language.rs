@@ -60,7 +60,12 @@ impl Plugin for LanguagePlugin {
             .add_observer(select_occurrences)
             .add_observer(request_completion)
             .add_observer(wiki_completion)
-            .add_systems(Update, flush_lsp_changes);
+            .add_systems(
+                Update,
+                flush_lsp_changes
+                    .before(crate::lsp::manager::DocumentSet)
+                    .after(bevy_cef::prelude::UiEventSystems::Flush),
+            );
     }
 }
 
@@ -299,7 +304,7 @@ impl WikiCompletion {
 fn hover(
     trigger: On<EditorHoverRequest>,
     views: Query<&Editor>,
-    mut manager: Single<&mut crate::lsp::manager::LspManager>,
+    manager: crate::lsp::manager::LspManager<'_, '_>,
     mut commands: Commands,
 ) {
     let entity = trigger.event_target();
@@ -315,14 +320,14 @@ fn hover(
         position.char_col as u32,
     );
     if let Some(request) = request {
-        commands.spawn(request);
+        commands.spawn(request.bundle());
     }
 }
 
 fn definition(
     trigger: On<EditorDefinitionRequest>,
     views: Query<&Editor>,
-    mut manager: Single<&mut crate::lsp::manager::LspManager>,
+    manager: crate::lsp::manager::LspManager<'_, '_>,
     mut commands: Commands,
 ) {
     let entity = trigger.event_target();
@@ -337,14 +342,14 @@ fn definition(
         position.utf16_col,
     );
     if let Some(request) = request {
-        commands.spawn(request);
+        commands.spawn(request.bundle());
     }
 }
 
 fn references(
     trigger: On<EditorReferencesRequest>,
     views: Query<&Editor>,
-    mut manager: Single<&mut crate::lsp::manager::LspManager>,
+    manager: crate::lsp::manager::LspManager<'_, '_>,
     mut commands: Commands,
 ) {
     let entity = trigger.event_target();
@@ -359,7 +364,7 @@ fn references(
         position.utf16_col,
     );
     if let Some(request) = request {
-        commands.spawn(request);
+        commands.spawn(request.bundle());
     }
 }
 
@@ -394,7 +399,7 @@ fn rename(
 fn completion(
     trigger: On<EditorCompletionRequest>,
     views: Query<&Editor>,
-    mut manager: Single<&mut crate::lsp::manager::LspManager>,
+    manager: crate::lsp::manager::LspManager<'_, '_>,
     mut commands: Commands,
 ) {
     let entity = trigger.event_target();
@@ -410,14 +415,14 @@ fn completion(
         position.word_start_col(),
     );
     if let Some(request) = request {
-        commands.spawn(request);
+        commands.spawn(request.bundle());
     }
 }
 
 fn declaration(
     trigger: On<EditorDeclarationRequest>,
     views: Query<&Editor>,
-    mut manager: Single<&mut crate::lsp::manager::LspManager>,
+    manager: crate::lsp::manager::LspManager<'_, '_>,
     mut commands: Commands,
 ) {
     let entity = trigger.event_target();
@@ -432,14 +437,14 @@ fn declaration(
         position.utf16_col,
     );
     if let Some(request) = request {
-        commands.spawn(request);
+        commands.spawn(request.bundle());
     }
 }
 
 fn type_definition(
     trigger: On<EditorTypeDefinitionRequest>,
     views: Query<&Editor>,
-    mut manager: Single<&mut crate::lsp::manager::LspManager>,
+    manager: crate::lsp::manager::LspManager<'_, '_>,
     mut commands: Commands,
 ) {
     let entity = trigger.event_target();
@@ -454,14 +459,14 @@ fn type_definition(
         position.utf16_col,
     );
     if let Some(request) = request {
-        commands.spawn(request);
+        commands.spawn(request.bundle());
     }
 }
 
 fn implementation(
     trigger: On<EditorImplementationRequest>,
     views: Query<&Editor>,
-    mut manager: Single<&mut crate::lsp::manager::LspManager>,
+    manager: crate::lsp::manager::LspManager<'_, '_>,
     mut commands: Commands,
 ) {
     let entity = trigger.event_target();
@@ -476,14 +481,14 @@ fn implementation(
         position.utf16_col,
     );
     if let Some(request) = request {
-        commands.spawn(request);
+        commands.spawn(request.bundle());
     }
 }
 
 fn format_document(
     trigger: On<EditorFormatDocumentRequest>,
     views: Query<&Editor>,
-    mut manager: Single<&mut crate::lsp::manager::LspManager>,
+    manager: crate::lsp::manager::LspManager<'_, '_>,
     mut commands: Commands,
 ) {
     let entity = trigger.event_target();
@@ -491,14 +496,14 @@ fn format_document(
         return;
     };
     if let Some(request) = manager.format_document(entity, &edit.core.buffer.path) {
-        commands.spawn(request);
+        commands.spawn(request.bundle());
     }
 }
 
 fn format_selection(
     trigger: On<EditorFormatSelectionRequest>,
     views: Query<&Editor>,
-    mut manager: Single<&mut crate::lsp::manager::LspManager>,
+    manager: crate::lsp::manager::LspManager<'_, '_>,
     mut commands: Commands,
 ) {
     let entity = trigger.event_target();
@@ -507,7 +512,7 @@ fn format_selection(
     };
     let (from, to) = edit.core.selected_lines();
     if let Some(request) = manager.format_range(entity, &edit.core.buffer.path, from, to) {
-        commands.spawn(request);
+        commands.spawn(request.bundle());
     }
 }
 
@@ -551,7 +556,7 @@ fn wiki_completion(
 fn request_hover(
     trigger: On<UiInput<FileHoverRequest>>,
     views: Query<&Editor>,
-    mut manager: Single<&mut crate::lsp::manager::LspManager>,
+    manager: crate::lsp::manager::LspManager<'_, '_>,
     mut commands: Commands,
 ) {
     let entity = trigger.event().webview;
@@ -568,7 +573,7 @@ fn request_hover(
         position.char_col as u32,
     );
     if let Some(request) = request {
-        commands.spawn(request);
+        commands.spawn(request.bundle());
     }
 }
 
@@ -582,7 +587,7 @@ fn dismiss_hover(trigger: On<UiInput<FileHoverDismissRequest>>, mut commands: Co
 fn request_definition(
     trigger: On<UiInput<FileDefinitionRequest>>,
     views: Query<&Editor>,
-    mut manager: Single<&mut crate::lsp::manager::LspManager>,
+    manager: crate::lsp::manager::LspManager<'_, '_>,
     mut commands: Commands,
 ) {
     let entity = trigger.event().webview;
@@ -598,7 +603,7 @@ fn request_definition(
         position.utf16_col,
     );
     if let Some(request) = request {
-        commands.spawn(request);
+        commands.spawn(request.bundle());
     }
 }
 
@@ -697,7 +702,7 @@ fn select_occurrences(
 fn request_rename(
     trigger: On<UiInput<FileRenameRequest>>,
     views: Query<&Editor>,
-    mut manager: Single<&mut crate::lsp::manager::LspManager>,
+    manager: crate::lsp::manager::LspManager<'_, '_>,
     mut commands: Commands,
 ) {
     let entity = trigger.event().webview;
@@ -721,7 +726,7 @@ fn request_rename(
         &request.new_name,
     );
     if let Some(request) = request {
-        commands.spawn(request);
+        commands.spawn(request.bundle());
     }
 }
 
@@ -755,7 +760,7 @@ fn dismiss_rename(trigger: On<UiInput<FileRenameDismissRequest>>, mut commands: 
 fn request_references(
     trigger: On<UiInput<FileReferencesRequest>>,
     views: Query<&Editor>,
-    mut manager: Single<&mut crate::lsp::manager::LspManager>,
+    manager: crate::lsp::manager::LspManager<'_, '_>,
     mut commands: Commands,
 ) {
     let entity = trigger.event().webview;
@@ -771,7 +776,7 @@ fn request_references(
         position.utf16_col,
     );
     if let Some(request) = request {
-        commands.spawn(request);
+        commands.spawn(request.bundle());
     }
 }
 
@@ -780,7 +785,7 @@ fn request_completion(
     views: Query<&Editor>,
     indexes: Query<&vmux_knowledge::KnowledgeIndex>,
     mut commands: Commands,
-    mut manager: Single<&mut crate::lsp::manager::LspManager>,
+    manager: crate::lsp::manager::LspManager<'_, '_>,
 ) {
     let entity = trigger.event().webview;
     let request = trigger.event().payload;
@@ -802,7 +807,7 @@ fn request_completion(
         position.word_start_col(),
     );
     if let Some(request) = request {
-        commands.spawn(request);
+        commands.spawn(request.bundle());
     }
 }
 
@@ -810,7 +815,6 @@ fn flush_lsp_changes(
     time: Res<Time>,
     mut elapsed: Local<f32>,
     views: Query<(Entity, &FileView, &Editor), With<LspEditDirty>>,
-    mut manager: Single<&mut crate::lsp::manager::LspManager>,
     mut lsp_changes: Option<MessageWriter<crate::lsp::manager::LspDocumentChangeRequest>>,
     mut commands: Commands,
 ) {
@@ -825,20 +829,10 @@ fn flush_lsp_changes(
     for (entity, view, edit) in &views {
         if let Some(lsp_changes) = lsp_changes.as_mut() {
             lsp_changes.write(crate::lsp::manager::LspDocumentChangeRequest {
+                owner: entity,
                 path: view.path.clone(),
                 text: Some(edit.core.buffer.text()),
             });
-        }
-        if let Some(request) = manager.folding_range(entity, &view.path) {
-            commands.spawn(request);
-        }
-        if let Some(request) = manager.semantic_tokens(entity, &view.path) {
-            commands.spawn(request);
-        }
-        if !ParsedNote::supports(&view.path)
-            && let Some(request) = manager.document_symbol(entity, &view.path)
-        {
-            commands.spawn(request);
         }
         commands.entity(entity).remove::<LspEditDirty>();
     }
