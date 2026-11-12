@@ -90,6 +90,11 @@ pub fn WorkspaceLayout(
     let sidebar_width = vmux_api::editor::TreeWidth::DEFAULT;
     let mut sidebar_open = use_signal(|| !cfg!(any(target_os = "ios", target_os = "android")));
     let duration = crate::motion::Motion::LAYOUT_MS;
+    let toolbar_class = if search.is_some() {
+        "min-h-11 gap-2 px-3"
+    } else {
+        "gap-2 px-3"
+    };
     let sidebar_style = if sidebar_open() {
         format!(
             "width:min(var(--vmux-sidebar-width),50vw);opacity:1;transition-duration:{duration}ms;"
@@ -113,6 +118,7 @@ pub fn WorkspaceLayout(
                 }
                 div { class: "flex min-w-0 flex-1 flex-col overflow-hidden",
                     PageToolbarRow {
+                        class: toolbar_class.to_string(),
                         if show_sidebar {
                             PageSidebarToggle {
                                 open: sidebar_open(),
@@ -135,7 +141,7 @@ pub fn WorkspaceLayout(
 
 #[component]
 pub fn ManagerSearchRow(children: Element) -> Element {
-    rsx! { PageToolbarRow { class: "relative w-full px-2".to_string(), {children} } }
+    rsx! { PageToolbarRow { class: "relative w-full min-h-11 px-2 py-2".to_string(), {children} } }
 }
 
 #[component]
