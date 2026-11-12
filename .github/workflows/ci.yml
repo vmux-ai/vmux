@@ -124,7 +124,7 @@ jobs:
           bash scripts/test-dev-sign.sh
 
       - name: Test workspace source conventions
-        run: cargo test --locked -p vmux_macro --test source_conventions
+        run: cargo test --locked -p vmux_macro --test source_conventions --test ecs_ownership
 
       - name: Test the public framework from an independent Cargo workspace
         run: bash scripts/test-framework-consumer.sh
@@ -157,6 +157,7 @@ jobs:
           predicate-quantifier: 'some-with-excludes'
           filters: |
             code:
+              - 'ecs-policy.ron'
               - 'crates/**'
               - 'examples/framework-consumer/**'
               - 'cef/**'

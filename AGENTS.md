@@ -24,6 +24,11 @@ Use caveman mode: terse, direct, no filler. Execute first, then report.
 
 ## ECS
 
+- Give every vmux-owned declaration and behavior one actual ECS owner or a documented external adapter. This applies inside feature crates, app/util code, UI, tests/examples and vmux-owned patch changes. A name, directory, immutable temporary model, wrapper, or unused ECS derive is not ownership.
+- Keep domain decisions, reconciliation, selection, queues and state transitions in the owning components and registered systems. Do not embed an independently addressed registry, boxed business engine or workflow graph inside one aggregate Component/Resource. Resources own truly global facts; indexes are derived from canonical entities.
+- Materialize native/provider input into canonical ECS before domain consumers use it. Adapters translate external formats or perform bounded IO; they do not retain parallel normalized state or choose vmux behavior. UI contracts are one-way projections and typed intent, never a second mutation authority.
+- Plain nested values need a concrete canonical owner. Plain adapters need an item-specific `ecs-policy.ron` record and an architecture boundary identifying external interface, canonical input/output, scope/lifetime and cancellation/eviction. Never add a wildcard exception or treat deterministic domain logic as external conversion.
+- Run the ownership policy gate when changing declarations or boundaries. Frozen legacy entries are migration debt: verify their historical provenance, remove them when changed/deleted, and never enlarge or refresh the baseline to approve new code. Each owner migration removes its entries; VMX-253 ends only after the final audit accounts for all remaining declarations.
 - Compose entities from shared `Name`, IDs, `Active`, `Order`, and timestamps before adding feature markers. Do not duplicate shared fields in aggregate components or rows. Resources are for truly global state.
 - Keep systems/observers private to their registering plugin. Name them by the local operation (`load`, `sync`, `remove`; optional `on_`), without owner or `system`/`plugin`/`feature` suffixes. Tests add the production plugin instead of exporting/registering its private systems.
 - Use typed systems/messages for cross-module behavior. Register messages, run production schedules, and assert observable ECS results.
