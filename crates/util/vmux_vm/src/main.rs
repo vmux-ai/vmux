@@ -4,12 +4,17 @@ use std::path::PathBuf;
 use vmux_vm::{EngineClient, NativeVm, NetworkProxy, Settings};
 
 fn main() -> std::process::ExitCode {
-    match Invocation::read().and_then(Invocation::run) {
+    let invocation = match Invocation::read() {
+        Ok(invocation) => invocation,
+        Err(error) => return Invocation::failed(error),
+    };
+    let settings: Settings = match invocation.settings() {
+        Ok(settings) => settings,
+        Err(error) => return Invocation::failed(error),
+    };
+    match invocation.run(settings) {
         Ok(()) => std::process::ExitCode::SUCCESS,
-        Err(error) => {
-            eprintln!("vmux container engine: {error}");
-            std::process::ExitCode::FAILURE
-        }
+        Err(error) => Invocation::failed(error),
     }
 }
 
@@ -46,28 +51,38 @@ impl Invocation {
         })
     }
 
-    fn run(self) -> io::Result<()> {
+    fn settings(&self) -> io::Result<Settings> {
+        if matches!(self.command.as_str(), "network" | "native" | "run") {
+            return Settings::load(&self.path);
+        }
+        let path = self.path.join("settings.json");
+        if path.exists() {
+            Settings::load(&path)
+        } else {
+            Ok(Settings::new(self.path.clone(), self.shared.clone()))
+        }
+    }
+
+    fn failed(error: io::Error) -> std::process::ExitCode {
+        eprintln!("vmux container engine: {error}");
+        std::process::ExitCode::FAILURE
+    }
+
+    fn run(self, settings: Settings) -> io::Result<()> {
         if self.command == "network" {
             let port = self
                 .shared
                 .to_string_lossy()
                 .parse::<u16>()
                 .map_err(io::Error::other)?;
-            return NetworkProxy::run(Settings::load(&self.path)?, port);
+            return NetworkProxy::run(settings, port);
         }
         if self.command == "native" || self.command == "run" {
-            let settings = Settings::load(&self.path)?;
             if self.command == "native" {
                 return NativeVm::run(settings);
             }
             return EngineClient::new(settings).foreground(&std::env::current_exe()?);
         }
-        let settings_path = self.path.join("settings.json");
-        let settings = if settings_path.exists() {
-            Settings::load(&settings_path)?
-        } else {
-            Settings::new(self.path, self.shared)
-        };
         let mut engine = EngineClient::new(settings);
         match self.command.as_str() {
             "prepare" => engine.prepare(),

@@ -131,7 +131,37 @@ struct Effect;
 struct Failure(String);
 
 #[derive(Component)]
-struct ReadError(String);
+struct ReadError {
+    kind: io::ErrorKind,
+    message: String,
+}
+
+impl From<io::Error> for ReadError {
+    fn from(error: io::Error) -> Self {
+        Self {
+            kind: error.kind(),
+            message: error.to_string(),
+        }
+    }
+}
+
+impl ReadError {
+    fn retryable(&self) -> bool {
+        matches!(
+            self.kind,
+            io::ErrorKind::WouldBlock
+                | io::ErrorKind::TimedOut
+                | io::ErrorKind::Interrupted
+                | io::ErrorKind::ConnectionReset
+                | io::ErrorKind::ConnectionAborted
+                | io::ErrorKind::ConnectionRefused
+                | io::ErrorKind::UnexpectedEof
+        )
+    }
+}
+
+#[derive(Component)]
+struct RetryAt(Instant);
 
 #[derive(Component)]
 struct Poll {
@@ -221,6 +251,19 @@ type Observations<'w, 's> = Query<
         Option<&'static Failure>,
     ),
     With<Entry>,
+>;
+
+type Effects<'w, 's> = Query<
+    'w,
+    's,
+    (
+        Entity,
+        &'static Identifier,
+        &'static Operation,
+        &'static ChildOf,
+        Option<&'static RetryAt>,
+    ),
+    With<Effect>,
 >;
 
 #[derive(SystemParam)]
@@ -480,9 +523,13 @@ fn inspect(roots: Roots, rows: Rows, mut commands: Commands) {
                 entity.insert(Observation(state)).remove::<ReadError>();
             }
             Err(error) => {
-                entity
-                    .insert(ReadError(error.to_string()))
-                    .remove::<Observation>();
+                let error = ReadError::from(error);
+                entity.remove::<Observation>();
+                if error.retryable() {
+                    entity.remove::<ReadError>();
+                } else {
+                    entity.insert(error);
+                }
             }
         }
         entity.insert(Poll {
@@ -519,7 +566,7 @@ fn advance(roots: Roots, rows: Rows, mut commands: Commands) {
         let result = if failure.is_some() {
             Err(format!("dependency {name} failed to start"))
         } else if let Some(error) = read_error {
-            Err(format!("dependency {name}: {}", error.0))
+            Err(format!("dependency {name}: {}", error.message))
         } else if let Some(observation) = observation {
             observation
                 .assess(*condition)
@@ -550,25 +597,41 @@ fn advance(roots: Roots, rows: Rows, mut commands: Commands) {
     commands.entity(candidate).insert(Effect);
 }
 
-fn apply(
-    roots: Roots,
-    effects: Query<(Entity, &Identifier, &Operation, &ChildOf), With<Effect>>,
-    mut commands: Commands,
-) {
-    let Ok((root, stage, endpoint, _, _, _)) = roots.single() else {
+fn apply(roots: Roots, effects: Effects, mut commands: Commands) {
+    let Ok((root, stage, endpoint, _, deadline, _)) = roots.single() else {
         return;
     };
     if *stage != Stage::Execute {
         return;
     }
-    for (entity, id, operation, parent) in &effects {
+    for (entity, id, operation, parent, retry) in &effects {
         if parent.parent() != root {
             continue;
         }
-        if let Err(error) = endpoint.0.change(&id.0, *operation) {
-            commands.entity(entity).insert(Failure(error.to_string()));
+        if Instant::now() >= deadline.0 {
+            commands.entity(entity).remove::<Effect>().insert((
+                Finished,
+                Failure("container start did not complete before its deadline".into()),
+            ));
+            continue;
         }
-        commands.entity(entity).remove::<Effect>().insert(Finished);
+        if retry.is_some_and(|retry| Instant::now() < retry.0) {
+            continue;
+        }
+        if let Err(error) = endpoint.0.change(&id.0, *operation) {
+            let error = ReadError::from(error);
+            if matches!(operation, Operation::Start) && error.retryable() {
+                commands
+                    .entity(entity)
+                    .insert(RetryAt(Instant::now() + Duration::from_millis(200)));
+                continue;
+            }
+            commands.entity(entity).insert(Failure(error.message));
+        }
+        commands
+            .entity(entity)
+            .remove::<(Effect, RetryAt)>()
+            .insert(Finished);
     }
 }
 

@@ -63,6 +63,12 @@ pub(crate) struct Response {
 
 impl Response {
     fn parse(bytes: Vec<u8>) -> io::Result<Self> {
+        if bytes.is_empty() {
+            return Err(io::Error::new(
+                io::ErrorKind::UnexpectedEof,
+                "connection closed before the HTTP response",
+            ));
+        }
         let boundary = bytes
             .windows(4)
             .position(|part| part == b"\r\n\r\n")

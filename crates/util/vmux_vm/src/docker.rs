@@ -328,12 +328,11 @@ mod tests {
     use super::*;
     use std::io::{Read, Write};
     use std::os::unix::net::UnixListener;
-    use std::path::PathBuf;
     use std::thread::{self, JoinHandle};
     use std::time::Instant;
 
     struct Daemon {
-        socket: PathBuf,
+        settings: crate::Settings,
         response: JoinHandle<Vec<String>>,
         _directory: tempfile::TempDir,
     }
@@ -346,7 +345,8 @@ mod tests {
     impl Daemon {
         fn new(replies: Vec<Reply>) -> Self {
             let directory = tempfile::tempdir().unwrap();
-            let socket = directory.path().join("docker.sock");
+            let settings = crate::Settings::new(directory.path(), directory.path());
+            let socket = settings.socket();
             let listener = UnixListener::bind(&socket).unwrap();
             listener.set_nonblocking(true).unwrap();
             let response = thread::spawn(move || {
@@ -382,7 +382,7 @@ mod tests {
                 requests
             });
             Self {
-                socket,
+                settings,
                 response,
                 _directory: directory,
             }
@@ -405,7 +405,12 @@ mod tests {
     #[test]
     fn inventory_requests_stopped_containers_from_the_daemon() {
         let daemon = Daemon::new(vec![Daemon::reply(200, "[]")]);
-        assert!(Client::new(&daemon.socket).list().unwrap().is_empty());
+        assert!(
+            Client::new(&daemon.settings.socket())
+                .list()
+                .unwrap()
+                .is_empty()
+        );
         assert_eq!(
             daemon.request().lines().next(),
             Some("GET /containers/json?all=1 HTTP/1.0")
@@ -415,13 +420,16 @@ mod tests {
     #[test]
     fn group_start_orders_dependencies_and_waits_for_their_health() {
         let inventory = r#"[{"Id":"aaaaaaaaaaaa","Names":["/account"],"Image":"account","State":"exited","Labels":{"com.docker.compose.project":"cloud","com.docker.compose.service":"account","com.docker.compose.depends_on":"postgres:service_healthy:true"}},{"Id":"bbbbbbbbbbbb","Names":["/postgres"],"Image":"postgres","State":"exited","Labels":{"com.docker.compose.project":"cloud","com.docker.compose.service":"postgres"}},{"Id":"cccccccccccc","Names":["/relay"],"Image":"relay","State":"exited","Labels":{"com.docker.compose.project":"cloud","com.docker.compose.service":"relay"}}]"#;
-        for healthy in [true, false] {
+        for (healthy, temporary_read) in [(true, false), (true, true), (false, false)] {
             let readiness = if healthy {
                 r#"{"State":{"Running":true,"Status":"running","Health":{"Status":"healthy"}}}"#
             } else {
                 r#"{"State":{"Running":false,"Status":"exited","ExitCode":255}}"#
             };
             let mut replies = vec![Daemon::reply(200, inventory), Daemon::reply(204, "")];
+            if temporary_read {
+                replies.push(Reply::Stalled);
+            }
             if healthy {
                 replies.push(Daemon::reply(200, r#"{"State":{"Running":true,"Status":"running","Health":{"Status":"starting"}}}"#));
             }
@@ -431,7 +439,7 @@ mod tests {
             }
             replies.push(Daemon::reply(204, ""));
             let daemon = Daemon::new(replies);
-            let result = Client::new(&daemon.socket).start_many(&[
+            let result = Client::new(&daemon.settings.socket()).start_many(&[
                 "aaaaaaaaaaaa".into(),
                 "bbbbbbbbbbbb".into(),
                 "cccccccccccc".into(),
@@ -450,6 +458,9 @@ mod tests {
                 "GET /containers/json?all=1 HTTP/1.0",
                 "POST /containers/bbbbbbbbbbbb/start HTTP/1.0",
             ];
+            if temporary_read {
+                expected.push("GET /containers/bbbbbbbbbbbb/json HTTP/1.0");
+            }
             if healthy {
                 expected.push("GET /containers/bbbbbbbbbbbb/json HTTP/1.0");
             }
@@ -464,6 +475,32 @@ mod tests {
                 .collect();
             assert_eq!(lines, expected);
         }
+    }
+
+    #[test]
+    fn start_retries_a_lost_reply_and_accepts_already_running() {
+        let inventory = r#"[{"Id":"aaaaaaaaaaaa","Names":["/account"],"Image":"account","State":"exited","Labels":{"com.docker.compose.project":"cloud","com.docker.compose.service":"account"}}]"#;
+        let daemon = Daemon::new(vec![
+            Daemon::reply(200, inventory),
+            Reply::Stalled,
+            Daemon::reply(304, ""),
+        ]);
+        Client::new(&daemon.settings.socket())
+            .start_many(&["aaaaaaaaaaaa".into()])
+            .unwrap();
+        let requests = daemon.response.join().unwrap();
+        let paths: Vec<_> = requests
+            .iter()
+            .map(|request| request.lines().next().unwrap())
+            .collect();
+        assert_eq!(
+            paths,
+            [
+                "GET /containers/json?all=1 HTTP/1.0",
+                "POST /containers/aaaaaaaaaaaa/start HTTP/1.0",
+                "POST /containers/aaaaaaaaaaaa/start HTTP/1.0"
+            ]
+        );
     }
 
     #[test]
@@ -484,7 +521,8 @@ mod tests {
                 replies.push(Daemon::reply(204, ""));
             }
             let daemon = Daemon::new(replies);
-            let result = Client::new(&daemon.socket).start_many(&["aaaaaaaaaaaa".into()]);
+            let result =
+                Client::new(&daemon.settings.socket()).start_many(&["aaaaaaaaaaaa".into()]);
             assert_eq!(result.is_ok(), healthy);
             let requests = daemon.response.join().unwrap();
             let mut expected = vec![
@@ -506,7 +544,12 @@ mod tests {
     #[test]
     fn inventory_retries_interrupted_reads_with_a_bounded_budget() {
         let daemon = Daemon::new(vec![Reply::Stalled, Daemon::reply(200, "[]")]);
-        assert!(Client::new(&daemon.socket).list().unwrap().is_empty());
+        assert!(
+            Client::new(&daemon.settings.socket())
+                .list()
+                .unwrap()
+                .is_empty()
+        );
         assert_eq!(daemon.response.join().unwrap().len(), 2);
         for failures in [1, 3] {
             let mut replies = Vec::new();
@@ -519,7 +562,7 @@ mod tests {
                 replies.push(Daemon::reply(200, "[]"));
             }
             let daemon = Daemon::new(replies);
-            let result = Client::new(&daemon.socket).list();
+            let result = Client::new(&daemon.settings.socket()).list();
             if failures == 1 {
                 assert!(result.unwrap().is_empty());
             } else {
@@ -561,7 +604,7 @@ mod tests {
             ),
         ] {
             let daemon = Daemon::new(vec![Daemon::reply(status, "")]);
-            Client::new(&daemon.socket)
+            Client::new(&daemon.settings.socket())
                 .change("eeeeeeeeeeee", operation)
                 .unwrap();
             assert_eq!(daemon.request().lines().next(), Some(expected));

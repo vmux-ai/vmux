@@ -11,6 +11,7 @@ use syn::visit::{self, Visit};
 use syn::{Attribute, Item, Type};
 
 const FROZEN_REVISION: &str = "a59db6addc6195f4673b5aacd2d604a96b50272c";
+
 const UPSTREAM_SETS: &[(&str, &str)] = &[
     ("bevy_cef", "cf3bf141760a42d3"),
     ("bevy_cef_core", "d551cf781692e304"),
@@ -1068,6 +1069,169 @@ fn standard_result_does_not_resolve_to_an_unrelated_module_alias() {
         let inventory = Inventory::fixture(source);
         let entry = &inventory.entries[&inventory.key("struct:Completed")];
         assert!(!inventory.canonical(entry, &Policy::default(), &mut BTreeSet::new()));
+    }
+}
+
+#[test]
+fn io_results_require_a_proven_standard_library_binding() {
+    for path in ["std::io::Result", "io::Result", "Result"] {
+        let inventory = Inventory::fixture(&format!(
+            "use std::io; use std::io::Result; #[derive(Component)] struct Work {{ result: {path}<()> }} fn read(work: Query<&Work>) {{}} struct Root; impl Plugin for Root {{ fn build(&self, app: &mut App) {{ app.add_systems(Update, read); }} }}"
+        ));
+        let key = inventory.key("struct:Work");
+        assert!(inventory.canonical(
+            &inventory.entries[&key],
+            &Policy::default(),
+            &mut BTreeSet::new()
+        ));
+    }
+    let inventory = Inventory::fixture(
+        "mod io { pub struct Result<T> { pub value:T } } struct Domain { value:String } #[derive(Component)] struct Work { result:io::Result<Domain> } fn read(work:Query<&Work>) {} struct Root; impl Plugin for Root { fn build(&self, app:&mut App) { app.add_systems(Update,read); } }",
+    );
+    let key = inventory.key("struct:Work");
+    assert!(!inventory.canonical(
+        &inventory.entries[&key],
+        &Policy::default(),
+        &mut BTreeSet::new()
+    ));
+}
+
+#[test]
+fn query_data_is_owned_only_through_registered_queries() {
+    for (registered, suffix) in [(true, "struct:View"), (false, "struct:Unused")] {
+        let source = if registered {
+            "use bevy_ecs::query::QueryData; #[derive(Component)] struct Position { x:f32 } #[derive(QueryData)] struct View { position:&'static Position } fn read(rows:Query<View>) {} struct Root; impl Plugin for Root { fn build(&self,app:&mut App) { app.add_systems(Update,read); } }"
+        } else {
+            "use bevy_ecs::query::QueryData; #[derive(QueryData)] struct Unused { value:&'static String }"
+        };
+        let inventory = Inventory::fixture(source);
+        let key = inventory.key(suffix);
+        assert_eq!(
+            inventory.canonical(
+                &inventory.entries[&key],
+                &Policy::default(),
+                &mut BTreeSet::new()
+            ),
+            registered
+        );
+    }
+}
+
+#[test]
+fn a_binary_import_cannot_replace_its_library_export() {
+    let mut inventory = Inventory::default();
+    inventory.source(
+        "crates/util/fixture/src/lib.rs",
+        "mod settings; mod engine; pub use settings::Settings;",
+    );
+    inventory.source(
+        "crates/util/fixture/src/settings.rs",
+        "#[derive(Component)] pub struct Settings { value:u32 }",
+    );
+    inventory.source("crates/util/fixture/src/engine.rs", "use crate::Settings; fn read(state:Query<&Settings>) {} struct Root; impl Plugin for Root { fn build(&self,app:&mut App) { app.add_systems(Update,read); } }");
+    inventory.source(
+        "crates/util/fixture/src/main.rs",
+        "use fixture::Settings; struct Unowned { value:String } fn main() {}",
+    );
+    inventory.resolve_usage();
+    let key = inventory.key("struct:Settings");
+    assert!(inventory.canonical(
+        &inventory.entries[&key],
+        &Policy::default(),
+        &mut BTreeSet::new()
+    ));
+    let key = inventory.key("struct:Unowned");
+    assert!(!inventory.canonical(
+        &inventory.entries[&key],
+        &Policy::default(),
+        &mut BTreeSet::new()
+    ));
+}
+
+#[test]
+fn self_qualified_contracts_belong_to_the_contract_crate() {
+    for (path, accepted) in [
+        ("crates/util/vmux_api/src/lib.rs", true),
+        ("crates/feature/sample/src/lib.rs", false),
+    ] {
+        let mut inventory = Inventory::default();
+        inventory.source(
+            path,
+            "#[crate::contract] pub struct Payload { value:String }",
+        );
+        inventory.resolve_usage();
+        let key = inventory.key("struct:Payload");
+        assert_eq!(
+            inventory.canonical(
+                &inventory.entries[&key],
+                &Policy::default(),
+                &mut BTreeSet::new()
+            ),
+            accepted
+        );
+    }
+}
+
+#[test]
+fn renderer_ownership_follows_component_nodes_and_ignores_labels() {
+    for (body, referenced) in [
+        ("rsx! { Child {} }", true),
+        ("rsx! { div { \"Child\" } }", false),
+    ] {
+        let inventory = Inventory::fixture(&format!(
+            "#[component] fn Child() -> Element {{ rsx! {{ div {{}} }} }} #[component] fn Parent() -> Element {{ {body} }}"
+        ));
+        let parent = inventory.key("fn:Parent");
+        let child = inventory.key("fn:Child");
+        assert_eq!(
+            inventory.owner_references(&inventory.entries[&parent], &inventory.entries[&child]),
+            referenced
+        );
+    }
+}
+
+#[test]
+fn nested_adapter_owners_retain_the_root_contract() {
+    let inventory = Inventory::fixture(
+        "#[vmux_api::contract] struct View { value:u32 } struct Root { view:View, middle:Middle } struct Middle { leaf:Leaf } struct Leaf;",
+    );
+    let mut policy = Policy::default();
+    for (name, owner) in [
+        ("struct:Root", None),
+        ("struct:Middle", Some("struct:Root")),
+        ("struct:Leaf", Some("struct:Middle")),
+    ] {
+        let mut boundary = Boundary::fixture(&inventory, name);
+        boundary.input = format!("ECS: {}", inventory.key("struct:View"));
+        boundary.output = "external: bounded rendering".into();
+        boundary.owner = owner.map(|owner| inventory.key(owner));
+        policy.boundaries.push(boundary);
+    }
+    let leaf = policy.boundaries.last().unwrap();
+    assert!(leaf.references_from(&inventory, &policy, &mut BTreeSet::new()));
+    policy.boundaries[1].owner = Some(inventory.key("struct:Leaf"));
+    assert!(!policy.boundaries.last().unwrap().references_from(
+        &inventory,
+        &policy,
+        &mut BTreeSet::new()
+    ));
+}
+
+#[test]
+fn embedded_script_ownership_requires_an_actual_include() {
+    for (body, included) in [("include_str!(\"boot.sh\")", true), ("\"boot.sh\"", false)] {
+        let mut inventory = Inventory::default();
+        inventory.source(
+            "crates/util/fixture/src/adapter.rs",
+            &format!("struct Adapter; impl Adapter {{ fn script() -> &'static str {{ {body} }} }}"),
+        );
+        inventory.script("crates/util/fixture/src/boot.sh", "exit 0");
+        let owner = inventory.key("struct:Adapter");
+        let script = inventory.key("boot.sh||script");
+        assert_eq!(
+            inventory.owner_references(&inventory.entries[&owner], &inventory.entries[&script]),
+            included
+        );
     }
 }
 
@@ -3572,8 +3736,15 @@ impl Inventory {
             for path in &candidate.reference_paths {
                 let mut path = path.as_str();
                 loop {
-                    if let Some(resolved) =
-                        self.resolve(&candidate.namespace, path, &mut BTreeSet::new())
+                    if let Some(resolved) = self
+                        .resolve(&candidate.namespace, path, &mut BTreeSet::new())
+                        .or_else(|| {
+                            self.function_reference(
+                                &candidate.namespace,
+                                path,
+                                &mut BTreeSet::new(),
+                            )
+                        })
                     {
                         if resolved.key == value.key {
                             return true;
@@ -4094,8 +4265,29 @@ impl Inventory {
         {
             return false;
         }
-        if matches!(reference, "std::result::Result" | "core::result::Result") {
+        if matches!(
+            reference,
+            "std::result::Result" | "core::result::Result" | "std::io::Result"
+        ) {
             return !self.local_binding(namespace, reference.split("::").next().unwrap());
+        }
+        if reference == "io::Result" {
+            let mut scope = Some(namespace);
+            while let Some(current) = scope {
+                if self.symbols.contains_key(&format!("{current}::io")) {
+                    return false;
+                }
+                if let Some(imports) = self.imports.get(current) {
+                    if imports.ambiguous.contains("io") || imports.opaque_modules.contains("io") {
+                        return false;
+                    }
+                    if let Some(target) = imports.aliases.get("io") {
+                        return target == "std::io" && !self.local_binding(current, "std");
+                    }
+                }
+                scope = current.rsplit_once("::").map(|(parent, _)| parent);
+            }
+            return false;
         }
         if reference != "Result" {
             return false;
@@ -4114,7 +4306,7 @@ impl Inventory {
                 if let Some(target) = imports.aliases.get("Result") {
                     return matches!(
                         target.as_str(),
-                        "std::result::Result" | "core::result::Result"
+                        "std::result::Result" | "core::result::Result" | "std::io::Result"
                     ) && !self.local_binding(current, target.split("::").next().unwrap());
                 }
                 for prefix in &imports.globs {
@@ -4689,7 +4881,15 @@ impl Namespace {
             } else {
                 parts[1]
             };
-            let package = package.split("-0.").next().unwrap().replace('-', "_");
+            let mut package = package.split("-0.").next().unwrap().replace('-', "_");
+            if parts[source + 1..] == ["main.rs"] {
+                package.push_str("__bin");
+            } else if parts.get(source + 1) == Some(&"bin")
+                && let Some(binary) = parts.get(source + 2)
+            {
+                package.push_str("__bin_");
+                package.push_str(binary.trim_end_matches(".rs"));
+            }
             module.push(package);
             for part in &parts[source + 1..] {
                 let name = part.trim_end_matches(".rs");
@@ -5013,16 +5213,18 @@ impl Declarations<'_> {
                                 | "Message"
                                 | "Bundle"
                                 | "SystemParam"
+                                | "QueryData"
                                 | "SystemSet"
                         )
                     }) {
                         ecs = true;
                     }
-                    if path
-                        .segments
-                        .last()
-                        .is_some_and(|segment| segment.ident == "SystemParam")
-                    {
+                    if path.segments.last().is_some_and(|segment| {
+                        matches!(
+                            segment.ident.to_string().as_str(),
+                            "SystemParam" | "QueryData"
+                        )
+                    }) {
                         parameter = true;
                         parameter_path = Some(
                             path.segments
@@ -5356,6 +5558,7 @@ impl<'ast> Visit<'ast> for Declarations<'_> {
 
 #[derive(Default)]
 struct References {
+    included: BTreeSet<String>,
     include_tests: bool,
     plugins: BTreeSet<String>,
     registered_systems: BTreeSet<(String, String)>,
