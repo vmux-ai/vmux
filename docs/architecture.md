@@ -454,6 +454,11 @@ stale records fail closed. Existing exact fingerprints are frozen migration debt
 Git provenance, not permanent adapter exceptions; migrations remove them instead of extending
 the baseline. Final acceptance requires no remaining domain debt and a repeated caller/lifecycle
 audit. Structural checks supplement ownership review; they cannot prove business semantics.
+Private helpers belong to one production caller, including qualified imports and callback values;
+other-module users cannot silently share that owner. Nested immutable values retain a complete,
+referenced chain to one canonical component. Typed app composition follows its actual plugin
+payloads, stateless manifest sources bind the real `FeatureManifestSource` interface, and test
+mutex metadata is limited to `Mutex<()>` guards outside production configuration.
 Registered exclusive systems prove typed `SystemState` use; used query capabilities propagate
 usage through their nested parameters. Conditional production derives and imported contract
 attributes keep their actual bindings. Foreign framework names cannot borrow an unrelated owned

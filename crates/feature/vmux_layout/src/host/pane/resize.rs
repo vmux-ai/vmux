@@ -1,4 +1,6 @@
 pub use crate::{PaneSize, PaneSplitGaps};
+use bevy::ecs::system::Commands;
+use bevy::window::Window;
 use bevy::{
     ecs::{relationship::Relationship, system::SystemParam},
     prelude::*,
