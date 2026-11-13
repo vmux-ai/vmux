@@ -78,6 +78,7 @@ pub(super) struct WindowResizeDrag {
 }
 
 impl WindowResizeDrag {
+    #[cfg(target_os = "macos")]
     pub(super) const GRIP_PX: f64 = 8.0;
 
     pub(super) fn resized_frame(self, cursor_x: f64, cursor_y: f64) -> WindowFrame {
