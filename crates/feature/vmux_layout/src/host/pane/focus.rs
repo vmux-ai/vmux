@@ -241,6 +241,7 @@ impl PointerFocus {
 fn from_pointer(
     windows: Query<&Window>,
     focused_window: crate::window::FocusedWindow,
+    overlays: super::OverlayInput,
     hierarchy: crate::window::WindowHierarchy,
     leaf_panes: Query<&ComputedNode, (With<Pane>, Without<PaneSplit>)>,
     pane_cooldowns: Query<&PaneHoverCooldown>,
@@ -262,7 +263,11 @@ fn from_pointer(
     let Some((position, clicked, moved)) = pointer.sample(window_entity, window, &mouse) else {
         return;
     };
-    if !window.focused || !active_drags.is_empty() || pointer.held(&keys) {
+    if !window.focused
+        || overlays.owns(window_entity)
+        || !active_drags.is_empty()
+        || pointer.held(&keys)
+    {
         return;
     }
     if !clicked && (!moved || pointer.active(&keys)) {
@@ -746,6 +751,48 @@ mod tests {
     impl Drop for HoverFixture {
         fn drop(&mut self) {
             vmux_input::NativePointer::publish(Vec2::ZERO, Default::default(), false);
+        }
+    }
+
+    #[test]
+    fn overlay_input_preserves_selection_and_consumes_modal_clicks() {
+        for scope in 0..4 {
+            let mut fixture = HoverFixture::new();
+            let overlay = fixture.app.world_mut().spawn(vmux_ecs::WindowOverlay).id();
+            if scope != 3 {
+                fixture
+                    .app
+                    .world_mut()
+                    .entity_mut(overlay)
+                    .insert(vmux_ecs::KeyboardOwner);
+            }
+            if scope != 1 {
+                let owner = if scope == 2 {
+                    fixture.app.world_mut().spawn(Window::default()).id()
+                } else {
+                    fixture.window
+                };
+                fixture
+                    .app
+                    .world_mut()
+                    .entity_mut(overlay)
+                    .insert(HostWindow(owner));
+            }
+            fixture.app.update();
+            if scope >= 2 {
+                assert_eq!(fixture.focused().stack, Some(fixture.left_stack));
+                continue;
+            }
+            assert_eq!(fixture.focused().stack, Some(fixture.right_stack));
+            fixture.pointer(Vec2::new(401.0, 225.0), true);
+            fixture.app.update();
+            assert_eq!(fixture.focused().stack, Some(fixture.right_stack));
+            fixture.app.world_mut().entity_mut(overlay).despawn();
+            fixture.app.update();
+            assert_eq!(fixture.focused().stack, Some(fixture.right_stack));
+            fixture.pointer(Vec2::new(402.0, 225.0), false);
+            fixture.app.update();
+            assert_eq!(fixture.focused().stack, Some(fixture.left_stack));
         }
     }
 

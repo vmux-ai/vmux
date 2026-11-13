@@ -7,13 +7,14 @@ use crate::stack::Stack;
 #[cfg(test)]
 use crate::tab::Tab;
 use arrangement::ArrangementPlugin;
-use bevy::ecs::system::Commands;
+use bevy::ecs::system::{Commands, SystemParam};
 use bevy::prelude::*;
 #[cfg(test)]
 use bevy::{
     ecs::{message::Messages, relationship::Relationship},
     window::PrimaryWindow,
 };
+use bevy_cef::prelude::HostWindow;
 use close::ClosePlugin;
 pub use close::{ForcePaneClose, PendingPaneClose};
 use focus::FocusPlugin;
@@ -48,6 +49,24 @@ mod identity;
 mod open;
 mod resize;
 mod tree;
+
+#[derive(SystemParam)]
+pub(super) struct OverlayInput<'w, 's> {
+    owners: Query<
+        'w,
+        's,
+        Option<&'static HostWindow>,
+        (With<vmux_ecs::WindowOverlay>, With<vmux_ecs::KeyboardOwner>),
+    >,
+}
+
+impl OverlayInput<'_, '_> {
+    fn owns(&self, window: Entity) -> bool {
+        self.owners
+            .iter()
+            .any(|owner| owner.is_none_or(|owner| owner.0 == window))
+    }
+}
 
 pub(super) struct PointerDevicePlugin;
 

@@ -458,7 +458,8 @@ Private helpers belong to one production caller, including qualified imports and
 other-module users cannot silently share that owner. Nested immutable values retain a complete,
 referenced chain to one canonical component. Typed app composition follows its actual plugin
 payloads, stateless manifest sources bind the real `FeatureManifestSource` interface, and test
-mutex metadata is limited to `Mutex<()>` guards outside production configuration.
+mutex metadata checks the complete `Mutex<()>` type outside production configuration. Manifest
+markers cannot retain fields, including zero-sized values and callback pointers.
 Registered exclusive systems prove typed `SystemState` use; used query capabilities propagate
 usage through their nested parameters. Conditional production derives and imported contract
 attributes keep their actual bindings. Foreign framework names cannot borrow an unrelated owned
@@ -1228,6 +1229,11 @@ Only test a window's drag region with coordinates from that window. Never compar
 coordinates with the owning window's region.
 
 ---
+
+Window overlays that own keyboard input suppress native pane selection and divider capture
+only for their owning window; an unscoped overlay holds input globally. Suppressed samples are
+consumed so dismissing an overlay cannot replay its click. Captured dividers keep their axis
+and ordered adjacent pane pair; a topology change cancels capture before changing sizes.
 
 ## Pages, and the trust boundary
 

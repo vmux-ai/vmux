@@ -60,9 +60,26 @@ impl Plugin for ResizePlugin {
 pub struct PaneDrag {
     previous: Entity,
     next: Entity,
+    direction: PaneSplitDirection,
     start_position: f32,
     previous_grow: f32,
     next_grow: f32,
+}
+
+impl PaneDrag {
+    fn matches(&self, split: &PaneSplit, siblings: impl Iterator<Item = Entity>) -> bool {
+        if self.direction != split.direction {
+            return false;
+        }
+        let mut previous = None;
+        for next in siblings {
+            if previous == Some(self.previous) && next == self.next {
+                return true;
+            }
+            previous = Some(next);
+        }
+        false
+    }
 }
 
 fn from_commands(
@@ -336,6 +353,7 @@ fn from_pointer(
     windows: Query<(Entity, &Window)>,
     mut feedback: PointerCursors,
     focused_window: crate::window::FocusedWindow,
+    overlays: super::OverlayInput,
     hierarchy: crate::window::WindowHierarchy,
     active_tab: ActiveTabParam,
     panes: crate::Hierarchy,
@@ -356,17 +374,24 @@ fn from_pointer(
     let just_pressed = pressed && !was_pressed.0;
     was_pressed.0 = pressed;
     let current_window = focused_window.entity();
+    let blocked = current_window.is_some_and(|window| overlays.owns(window));
     let tab = active_tab.get();
     for (entity, window) in &windows {
-        if Some(entity) != current_window || !window.focused || tab.is_none() {
+        if Some(entity) != current_window || !window.focused || tab.is_none() || blocked {
             feedback.release(entity);
         }
     }
     for (split, drag, _) in &active_drags {
-        let current = tab.is_some_and(|tab| panes.contains(tab, split))
+        let current = !blocked
+            && tab.is_some_and(|tab| panes.contains(tab, split))
             && hierarchy.get(split) == current_window
-            && splits.get(split).is_ok_and(|(_, _, children)| {
-                children.contains(&drag.previous) && children.contains(&drag.next)
+            && splits.get(split).is_ok_and(|(_, split, children)| {
+                drag.matches(
+                    split,
+                    children
+                        .iter()
+                        .filter(|child| panes.is_leaf(*child) || splits.contains(*child)),
+                )
             });
         if !pressed || !current {
             commands.entity(split).remove::<PaneDrag>();
@@ -378,7 +403,7 @@ fn from_pointer(
     let Ok((_, window)) = windows.get(window_entity) else {
         return;
     };
-    if !window.focused {
+    if !window.focused || blocked {
         for (split, _, _) in &active_drags {
             commands.entity(split).remove::<PaneDrag>();
         }
@@ -402,7 +427,12 @@ fn from_pointer(
             let Ok((_, _, children)) = splits.get(split_entity) else {
                 continue;
             };
-            if !children.contains(&drag.previous) || !children.contains(&drag.next) {
+            if !drag.matches(
+                split,
+                children
+                    .iter()
+                    .filter(|child| panes.is_leaf(*child) || splits.contains(*child)),
+            ) {
                 continue;
             }
             let (Ok(previous), Ok(next)) = (layouts.get(drag.previous), layouts.get(drag.next))
@@ -484,6 +514,7 @@ fn from_pointer(
                 commands.entity(split_entity).insert(PaneDrag {
                     previous: previous_entity,
                     next: next_entity,
+                    direction: split.direction,
                     start_position: match split.direction {
                         PaneSplitDirection::Row => hit_position.x,
                         PaneSplitDirection::Column => hit_position.y,
@@ -679,6 +710,119 @@ mod tests {
             if self.pointer_guard.is_some() {
                 vmux_input::NativePointer::publish(Vec2::ZERO, Default::default(), false);
             }
+        }
+    }
+
+    #[test]
+    fn changed_pane_order_or_axis_cancels_capture_without_changing_sizes() {
+        for change in 0..4 {
+            let mut fixture = ResizeFixture::native(PaneSplitDirection::Row);
+            let start = Vec2::new(500.0, 250.0);
+            fixture.pointer(false, Some(start));
+            fixture.pointer(true, Some(start));
+            let previous = fixture.grows(fixture.left);
+            let next = fixture.grows(fixture.right);
+            match change {
+                0 => {
+                    let middle = fixture.app.world_mut().spawn(Pane).id();
+                    fixture
+                        .app
+                        .world_mut()
+                        .entity_mut(fixture.split)
+                        .insert_children(1, &[middle]);
+                }
+                1 => {
+                    fixture
+                        .app
+                        .world_mut()
+                        .entity_mut(fixture.split)
+                        .insert_children(0, &[fixture.right]);
+                }
+                2 => {
+                    fixture
+                        .app
+                        .world_mut()
+                        .entity_mut(fixture.split)
+                        .insert(PaneSplit {
+                            direction: PaneSplitDirection::Column,
+                        });
+                }
+                3 => {
+                    let auxiliary = fixture.app.world_mut().spawn_empty().id();
+                    fixture
+                        .app
+                        .world_mut()
+                        .entity_mut(fixture.split)
+                        .insert_children(1, &[auxiliary]);
+                }
+                _ => unreachable!(),
+            }
+            fixture.pointer(true, Some(start));
+            assert_eq!(
+                fixture.app.world().get::<PaneDrag>(fixture.split).is_some(),
+                change == 3
+            );
+            assert_eq!(fixture.grows(fixture.left), previous);
+            assert_eq!(fixture.grows(fixture.right), next);
+            if change != 3 {
+                assert!(
+                    fixture
+                        .app
+                        .world()
+                        .get::<ResizeGrip>(fixture.window.unwrap())
+                        .is_none()
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn overlay_input_blocks_capture_and_cancels_an_existing_drag() {
+        for scope in 0..3 {
+            let mut fixture = ResizeFixture::native(PaneSplitDirection::Row);
+            let start = Vec2::new(500.0, 250.0);
+            fixture.pointer(false, Some(start));
+            let overlay = fixture
+                .app
+                .world_mut()
+                .spawn((vmux_ecs::WindowOverlay, vmux_ecs::KeyboardOwner))
+                .id();
+            if scope != 1 {
+                let window = if scope == 2 {
+                    fixture.app.world_mut().spawn(Window::default()).id()
+                } else {
+                    fixture.window.unwrap()
+                };
+                fixture
+                    .app
+                    .world_mut()
+                    .entity_mut(overlay)
+                    .insert(HostWindow(window));
+            }
+            fixture.pointer(true, Some(start));
+            if scope == 2 {
+                assert!(fixture.app.world().get::<PaneDrag>(fixture.split).is_some());
+                fixture
+                    .app
+                    .world_mut()
+                    .entity_mut(overlay)
+                    .insert(HostWindow(fixture.window.unwrap()));
+                fixture.pointer(true, Some(Vec2::new(600.0, 250.0)));
+            } else {
+                assert!(fixture.app.world().get::<PaneDrag>(fixture.split).is_none());
+                fixture.app.world_mut().entity_mut(overlay).despawn();
+                fixture.pointer(true, Some(Vec2::new(600.0, 250.0)));
+            }
+            assert!(fixture.app.world().get::<PaneDrag>(fixture.split).is_none());
+            assert!(
+                fixture
+                    .app
+                    .world()
+                    .get::<ResizeGrip>(fixture.window.unwrap())
+                    .is_none()
+            );
+            assert_eq!(fixture.grows(fixture.left), (1.0, 1.0));
+            assert_eq!(fixture.grows(fixture.right), (1.0, 1.0));
         }
     }
 

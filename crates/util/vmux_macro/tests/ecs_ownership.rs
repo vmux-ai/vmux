@@ -87,24 +87,35 @@ fn private_helpers_count_qualified_aliases_callbacks_and_other_modules() {
 
 #[test]
 fn nested_owned_geometry_values_require_a_complete_referenced_component_chain() {
-    let inventory = Inventory::fixture(
-        "#[derive(Component)] struct Split { direction: Direction } enum Direction { Row } struct Gaps { size: f32 } impl Direction { fn gaps(&self) -> Gaps { Gaps { size: 4.0 } } } fn read(split: Query<&Split>) {} struct Root; impl Plugin for Root { fn build(&self, app: &mut App) { app.add_systems(Update, read); } }",
-    );
-    let mut policy = Policy::default();
-    for (key, owner) in [
-        ("enum:Direction", "struct:Split"),
-        ("struct:Gaps", "enum:Direction"),
-    ] {
-        policy.values.push(ValueOwner {
-            key: inventory.key(key),
-            owner: inventory.key(owner),
-            lifetime: "one immutable component-owned geometry value".into(),
-        });
+    for dynamic in [false, true] {
+        let fields = if dynamic {
+            "Row(Box<dyn Engine>)"
+        } else {
+            "Row"
+        };
+        let inventory = Inventory::fixture(&format!(
+            "trait Engine {{}} #[derive(Component)] struct Split {{ direction: Direction }} enum Direction {{ {fields} }} struct Gaps {{ size: f32 }} impl Direction {{ fn gaps(&self) -> Gaps {{ Gaps {{ size: 4.0 }} }} }} fn read(split: Query<&Split>) {{}} struct Root; impl Plugin for Root {{ fn build(&self, app: &mut App) {{ app.add_systems(Update, read); }} }}"
+        ));
+
+        let mut policy = Policy::default();
+        for (key, owner) in [
+            ("enum:Direction", "struct:Split"),
+            ("struct:Gaps", "enum:Direction"),
+        ] {
+            policy.values.push(ValueOwner {
+                key: inventory.key(key),
+                owner: inventory.key(owner),
+                lifetime: "one immutable component-owned geometry value".into(),
+            });
+        }
+        let gaps = &inventory.entries[&inventory.key("struct:Gaps")];
+        assert_eq!(
+            inventory.canonical(gaps, &policy, &mut BTreeSet::new()),
+            !dynamic
+        );
+        policy.values.remove(0);
+        assert!(!inventory.canonical(gaps, &policy, &mut BTreeSet::new()));
     }
-    let gaps = &inventory.entries[&inventory.key("struct:Gaps")];
-    assert!(inventory.canonical(gaps, &policy, &mut BTreeSet::new()));
-    policy.values.remove(0);
-    assert!(!inventory.canonical(gaps, &policy, &mut BTreeSet::new()));
 }
 
 #[test]
@@ -116,6 +127,18 @@ fn fixture_mutex_boundaries_cannot_approve_product_state_or_shadowed_standard_ty
         ),
         (
             "static GUARD: std::sync::Mutex<()> = std::sync::Mutex::new(());",
+            false,
+        ),
+        (
+            "#[cfg(test)] static GUARD: std::sync::Mutex<fn()> = std::sync::Mutex::new(callback);",
+            false,
+        ),
+        (
+            "#[cfg(test)] static GUARD: std::sync::Mutex<&()> = std::sync::Mutex::new(&());",
+            false,
+        ),
+        (
+            "#[cfg(test)] static GUARD: std::sync::Mutex<[(); 1]> = std::sync::Mutex::new([()]);",
             false,
         ),
         (
@@ -184,6 +207,16 @@ fn manifest_metadata_boundaries_require_the_real_interface_and_a_stateless_marke
         ("", "vmux_ecs::manifest::FeatureManifestSource", true),
         (
             "{ state: String }",
+            "vmux_ecs::manifest::FeatureManifestSource",
+            false,
+        ),
+        (
+            "{ callback: fn() }",
+            "vmux_ecs::manifest::FeatureManifestSource",
+            false,
+        ),
+        (
+            "{ unit: () }",
             "vmux_ecs::manifest::FeatureManifestSource",
             false,
         ),
@@ -1506,6 +1539,8 @@ struct Declaration {
     test: bool,
     production: bool,
     private: bool,
+    has_fields: bool,
+    unit_mutex: bool,
     owner: Option<String>,
     reference_paths: BTreeSet<String>,
     fields: BTreeSet<String>,
@@ -1518,6 +1553,26 @@ struct Declaration {
 }
 
 impl Declaration {
+    fn unit_mutex(value: &Type) -> bool {
+        let Type::Path(value) = value else {
+            return false;
+        };
+        if value.qself.is_some() {
+            return false;
+        }
+        let Some(segment) = value.path.segments.last() else {
+            return false;
+        };
+        if segment.ident != "Mutex" {
+            return false;
+        }
+        let syn::PathArguments::AngleBracketed(arguments) = &segment.arguments else {
+            return false;
+        };
+        arguments.args.len() == 1
+            && matches!(arguments.args.first(), Some(syn::GenericArgument::Type(Type::Tuple(unit))) if unit.elems.is_empty())
+    }
+
     fn fingerprint(source: &str) -> String {
         let mut hash = 0xcbf29ce484222325u64;
         for byte in source.bytes() {
@@ -1636,6 +1691,8 @@ impl Inventory {
                 test: false,
                 production: true,
                 private: false,
+                has_fields: false,
+                unit_mutex: false,
                 owner: None,
                 reference_paths: BTreeSet::new(),
                 fields: BTreeSet::new(),
@@ -1682,6 +1739,9 @@ impl Inventory {
         if let Some(value) = policy.values.iter().find(|value| value.key == entry.key)
             && let Some(owner) = self.entries.get(&value.owner)
             && !value.lifetime.trim().is_empty()
+            && !entry.local
+            && !entry.dynamic
+            && !entry.opaque
             && self.owner_references(owner, entry)
         {
             return self.value_root(owner, policy, &mut BTreeSet::new());
@@ -1791,6 +1851,7 @@ impl Inventory {
     fn fixture_lock(&self, adapter: &Declaration) -> bool {
         !adapter.production
             && matches!(adapter.kind, Kind::Static)
+            && adapter.unit_mutex
             && adapter.fields == BTreeSet::from(["Mutex".into()])
             && adapter.field_paths == BTreeSet::from(["std::sync::Mutex".into()])
             && !self.local_binding(&adapter.namespace, "std")
@@ -1804,7 +1865,7 @@ impl Inventory {
         let Some(source) = source else {
             return false;
         };
-        if !matches!(source.kind, Kind::Struct) || !source.field_paths.is_empty() {
+        if !matches!(source.kind, Kind::Struct) || source.has_fields {
             return false;
         }
         for implementation in self.entries.values() {
@@ -1846,8 +1907,11 @@ impl Inventory {
         if !visiting.insert(owner.key.clone()) {
             return false;
         }
+        if owner.local || owner.dynamic || owner.opaque {
+            return false;
+        }
         if owner.ecs {
-            return self.used(owner) && !owner.local && !owner.dynamic && !owner.opaque;
+            return self.used(owner);
         }
         let Some(value) = policy.values.iter().find(|value| value.key == owner.key) else {
             return false;
@@ -3011,6 +3075,8 @@ impl Declarations<'_> {
             test,
             production: self.production && !Usage::test_only(attrs),
             private: false,
+            has_fields: !fields.is_empty(),
+            unit_mutex: fields.len() == 1 && Declaration::unit_mutex(&fields[0]),
             owner,
             reference_paths: references.paths,
             fields: field_names.names,
