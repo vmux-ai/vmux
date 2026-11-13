@@ -120,8 +120,10 @@ fn forward(
             continue;
         };
         let in_region = regions.contains(event.window, position * scale);
-        let inside = !suppress.0 && !event.cancelled && (captures.contains(layout) || in_region);
-        if event.motion && (inside || hover.inside) {
+        let inside = !suppress.0
+            && !event.cancelled
+            && (capture.owner() == Some(layout) || captures.contains(layout) || in_region);
+        if (event.motion || (event.cancelled && hover.inside)) && (inside || hover.inside) {
             effects.write(PointerEffect::Move {
                 target: layout,
                 buttons: event.buttons,
@@ -387,6 +389,103 @@ mod tests {
                 .count();
             assert_eq!(clicks, expected_clicks);
         }
+    }
+
+    #[test]
+    fn captured_layout_receives_outside_motion_and_idle_cancel_emits_leave() {
+        let mut app = App::new();
+        app.add_plugins((
+            MinimalPlugins,
+            bevy::input::InputPlugin,
+            InputPlugin,
+            crate::frame_rate::FrameRatePlugin,
+        ))
+        .init_resource::<CefSuppressPointerInput>()
+        .init_non_send::<Browsers>();
+        let window = app
+            .world_mut()
+            .spawn((
+                Window::default(),
+                PointerState::default(),
+                PointerCapture::default(),
+            ))
+            .id();
+        let layout = app.world_mut().spawn(LayoutCef::bundle(window)).id();
+        app.update();
+        app.world_mut()
+            .get_mut::<PointerCapture>(window)
+            .unwrap()
+            .claim(layout, MouseButton::Left);
+        for position in [Vec2::new(400.0, 300.0), Vec2::new(600.0, 500.0)] {
+            let event = app
+                .world_mut()
+                .get_mut::<PointerState>(window)
+                .unwrap()
+                .update(vmux_input::PointerInput::sample(
+                    window,
+                    position,
+                    NativeMouseButtons {
+                        left: true,
+                        ..default()
+                    },
+                    true,
+                ));
+            app.world_mut().write_message(event);
+            app.update();
+            let effects = app
+                .world_mut()
+                .resource_mut::<Messages<PointerEffect>>()
+                .drain()
+                .collect::<Vec<_>>();
+            assert!(effects.iter().any(|effect| matches!(
+                effect,
+                PointerEffect::Move { target, position: actual, leave: false, .. }
+                    if *target == layout && *actual == position
+            )));
+            assert!(app.world().get::<CefHoverPosition>(layout).unwrap().inside);
+        }
+        app.world_mut()
+            .get_mut::<PointerCapture>(window)
+            .unwrap()
+            .clear();
+        app.world_mut()
+            .entity_mut(layout)
+            .insert(LayoutOverlayActive::new("test", LayoutOverlayKind::Panel));
+        let event = app
+            .world_mut()
+            .get_mut::<PointerState>(window)
+            .unwrap()
+            .update(vmux_input::PointerInput::sample(
+                window,
+                Vec2::new(600.0, 500.0),
+                NativeMouseButtons::default(),
+                true,
+            ));
+        app.world_mut().write_message(event);
+        app.update();
+        app.world_mut()
+            .resource_mut::<Messages<PointerEffect>>()
+            .clear();
+        let event = app
+            .world_mut()
+            .get_mut::<PointerState>(window)
+            .unwrap()
+            .update(vmux_input::PointerInput {
+                cancelled: true,
+                ..vmux_input::PointerInput::buttons(window, NativeMouseButtons::default())
+            });
+        app.world_mut().write_message(event);
+        app.update();
+        let effects = app
+            .world_mut()
+            .resource_mut::<Messages<PointerEffect>>()
+            .drain()
+            .collect::<Vec<_>>();
+        assert!(matches!(
+            effects.as_slice(),
+            [PointerEffect::Move { target, leave: true, .. }] if *target == layout
+        ));
+        assert!(!app.world().get::<CefHoverPosition>(layout).unwrap().inside);
     }
 
     #[test]

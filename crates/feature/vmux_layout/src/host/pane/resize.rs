@@ -547,6 +547,16 @@ fn from_pointer(world: &mut World) {
                             commands.entity(split_entity).remove::<PaneDrag>();
                             continue;
                         };
+                        if previous.is_empty() || next.is_empty() {
+                            commands.entity(split_entity).remove::<PaneDrag>();
+                            if let Ok(mut capture) = captures.get_mut(window_entity)
+                                && capture.owner() == Some(split_entity)
+                            {
+                                capture.release(MouseButton::Left);
+                            }
+                            feedback.release(window_entity);
+                            continue;
+                        }
                         let grip = ResizeGrip::between(split.direction, *previous, *next);
                         feedback.publish(window_entity, grip, SystemCursorIcon::Grabbing.into());
                         let position = match split.direction {
@@ -996,6 +1006,47 @@ mod tests {
                 fixture.pointer(true, Some(Vec2::new(600.0, 250.0)));
             }
             assert!(fixture.app.world().get::<PaneDrag>(fixture.split).is_none());
+            assert!(
+                fixture
+                    .app
+                    .world()
+                    .get::<ResizeGrip>(fixture.window.unwrap())
+                    .is_none()
+            );
+            assert_eq!(fixture.grows(fixture.left), (1.0, 1.0));
+            assert_eq!(fixture.grows(fixture.right), (1.0, 1.0));
+        }
+    }
+
+    #[test]
+    fn empty_endpoint_cancels_drag_without_resizing_or_retaining_capture() {
+        for empty_previous in [true, false] {
+            let mut fixture = ResizeFixture::native(PaneSplitDirection::Row);
+            let start = Vec2::new(500.0, 250.0);
+            fixture.pointer(false, Some(start));
+            fixture.pointer(true, Some(start));
+            assert!(fixture.app.world().get::<PaneDrag>(fixture.split).is_some());
+            let endpoint = if empty_previous {
+                fixture.left
+            } else {
+                fixture.right
+            };
+            fixture
+                .app
+                .world_mut()
+                .entity_mut(endpoint)
+                .insert(ComputedNode::default());
+            fixture.pointer(true, Some(Vec2::new(600.0, 250.0)));
+            assert!(fixture.app.world().get::<PaneDrag>(fixture.split).is_none());
+            assert!(
+                fixture
+                    .app
+                    .world()
+                    .get::<vmux_input::PointerCapture>(fixture.window.unwrap())
+                    .unwrap()
+                    .owner()
+                    .is_none()
+            );
             assert!(
                 fixture
                     .app

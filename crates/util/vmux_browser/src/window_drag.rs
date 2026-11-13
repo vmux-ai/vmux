@@ -3,9 +3,9 @@ use bevy::prelude::*;
 use bevy::window::Window;
 use bevy_cef::prelude::{HostWindow, UiInput};
 use std::sync::{LazyLock, Mutex};
-use vmux_ecs::overlay::Overlay;
+use vmux_ecs::overlay::{OverlayShownInline, OverlayState, WindowOverlay};
 use vmux_ecs::page::HostsPage;
-use vmux_flex::prelude::{ComputedNode, LayoutSystems};
+use vmux_flex::prelude::{ComputedNode, Display, LayoutSystems, Node, Visibility};
 use vmux_layout::event::WindowDragRegionEvent;
 use vmux_layout::{
     LayoutCef,
@@ -141,13 +141,50 @@ pub struct WindowDragRegions<'w, 's> {
     reported: Query<'w, 's, (Entity, &'static ReportedWindowDragRegions)>,
     viewports: Query<'w, 's, (Entity, &'static ComputedNode), With<VmuxWindow>>,
     hierarchy: WindowHierarchy<'w, 's>,
-    overlay: Overlay<'w, 's>,
+    overlays: Query<
+        'w,
+        's,
+        (
+            Entity,
+            Option<&'static Node>,
+            Option<&'static Visibility>,
+            Has<vmux_ecs::KeyboardOwner>,
+            Has<OverlayShownInline>,
+        ),
+        With<WindowOverlay>,
+    >,
     captures: Query<'w, 's, &'static HostWindow, (With<LayoutCef>, LayoutPointerCapture)>,
 }
 
 impl WindowDragRegions<'_, '_> {
+    fn blocked(&self, window: Entity) -> bool {
+        if self.captures.iter().any(|host| host.0 == window) {
+            return true;
+        }
+        for (entity, node, visibility, keyboard, inline) in &self.overlays {
+            if self
+                .hierarchy
+                .get(entity)
+                .is_some_and(|owner| owner != window)
+            {
+                continue;
+            }
+            if OverlayState::resolve(
+                node.map_or(Display::Flex, |node| node.display),
+                visibility.copied().unwrap_or_default(),
+                keyboard,
+                inline,
+            )
+            .owns_input()
+            {
+                return true;
+            }
+        }
+        false
+    }
+
     pub fn contains(&self, window: Entity, position: Vec2) -> bool {
-        if self.overlay.owns_input() || self.captures.iter().any(|host| host.0 == window) {
+        if self.blocked(window) {
             return false;
         }
         let mut allowed = false;
@@ -181,7 +218,7 @@ impl WindowDragRegions<'_, '_> {
 fn publish_region(regions: WindowDragRegions, windows: Query<Entity, With<Window>>) {
     let mut published = PublishedWindowDragRegions::default();
     for window in &windows {
-        if regions.overlay.owns_input() || regions.captures.iter().any(|host| host.0 == window) {
+        if regions.blocked(window) {
             continue;
         }
         for (viewport_entity, viewport) in &regions.viewports {
@@ -212,6 +249,7 @@ fn publish_region(regions: WindowDragRegions, windows: Query<Entity, With<Window
 #[cfg(test)]
 mod tests {
     use super::*;
+    use bevy::ecs::system::RunSystemOnce;
 
     struct HeaderNode;
 
@@ -369,5 +407,64 @@ mod tests {
         assert!(regions.contains(window, 50.0, 20.0));
         assert!(!regions.contains(window, 200.0, 20.0));
         assert!(regions.contains(window, 400.0, 20.0));
+    }
+
+    #[test]
+    fn overlay_blocking_follows_its_window_and_unbound_overlays_remain_global() {
+        let mut app = App::new();
+        app.add_plugins(WindowDragPlugin);
+        let first = app.world_mut().spawn(Window::default()).id();
+        let second = app.world_mut().spawn(Window::default()).id();
+        for window in [first, second] {
+            app.world_mut().spawn((
+                VmuxWindow,
+                HostWindow(window),
+                HeaderNode::at(Vec2::ZERO, Vec2::new(500.0, 40.0), 1.0),
+            ));
+            let mut reports = ReportedWindowDragRegions::default();
+            reports.update(WindowDragRegionEvent {
+                id: "titlebar".into(),
+                left: 0.0,
+                top: 0.0,
+                width: 500.0,
+                height: 40.0,
+                ..default()
+            });
+            app.world_mut().spawn((HostWindow(window), reports));
+        }
+        let parent = app.world_mut().spawn(HostWindow(first)).id();
+        let overlay = app
+            .world_mut()
+            .spawn((
+                WindowOverlay,
+                vmux_ecs::KeyboardOwner,
+                Node::default(),
+                Visibility::Visible,
+                ChildOf(parent),
+            ))
+            .id();
+        app.update();
+        let allowed = app
+            .world_mut()
+            .run_system_once(move |regions: WindowDragRegions| {
+                [
+                    regions.contains(first, Vec2::new(50.0, 20.0)),
+                    regions.contains(second, Vec2::new(50.0, 20.0)),
+                ]
+            })
+            .unwrap();
+        assert_eq!(allowed, [false, true]);
+        app.world_mut().entity_mut(overlay).remove::<ChildOf>();
+        app.update();
+        let allowed = app
+            .world_mut()
+            .run_system_once(move |regions: WindowDragRegions| {
+                [
+                    regions.contains(first, Vec2::new(50.0, 20.0)),
+                    regions.contains(second, Vec2::new(50.0, 20.0)),
+                ]
+            })
+            .unwrap();
+        assert_eq!(allowed, [false, false]);
     }
 }

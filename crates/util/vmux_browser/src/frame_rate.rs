@@ -73,7 +73,8 @@ fn refresh_layout_hover(
             .position_px
             .map(|position| position / window.resolution.scale_factor());
         let inside = enabled
-            && (captures.contains(layout)
+            && (capture.owner() == Some(layout)
+                || captures.contains(layout)
                 || pointer
                     .position_px
                     .is_some_and(|position| regions.contains(host.0, position)));
