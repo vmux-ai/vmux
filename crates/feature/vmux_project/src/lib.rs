@@ -1,11 +1,13 @@
 use bevy_ecs::reflect::ReflectComponent;
 
 pub use registration::{
-    Archived, Error, Hidden, LoadCompleted, LoadError, LoadRequest, Loaded, Mutation, Project,
-    ProjectChanged, ProjectPlugin, ProjectSaved, Record, Registered, Registrations, Repository,
-    Root, Snapshot, StoreSet, Ticket, WriteCompleted, WriteRequest, WriteResult, WriteTaskRequest,
+    AliasCompleted, AliasRequest, Archived, Error, Hidden, LoadCompleted, LoadError, LoadRequest,
+    Loaded, Mutation, Project, ProjectChanged, ProjectPlugin, ProjectSaved, Registered,
+    Registrations, Repository, Root, StoreSet, Ticket, WriteCompleted, WriteRequest, WriteResult,
+    WriteTaskRequest,
 };
 pub use route::ProjectRoute;
+pub use snapshot::{Record, Snapshot};
 pub use vmux_ecs::Revision;
 
 #[cfg(feature = "contracts")]
@@ -14,6 +16,7 @@ pub mod contract;
 pub mod filesystem;
 mod registration;
 mod route;
+mod snapshot;
 
 #[derive(
     bevy_ecs::prelude::Component,

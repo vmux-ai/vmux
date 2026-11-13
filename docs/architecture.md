@@ -541,6 +541,14 @@ provides the Project page's read and input contracts without an Editor dependenc
 builder selects Project explicitly, and Editor requires that core in the composition. Editor owns
 the Profile-root binding, folder selection, UI feedback, Git provisioning, filesystem discovery,
 and Session contributions. Store tickets bind every result to its root, directory, and generation.
+Core request systems validate names, identities, revisions and duplicate checkouts directly against
+Project components. An accepted write is a Root-owned operation whose staged target intent and
+shared values survive removal of the requester. Target IDs stay out of the canonical Project
+identity index until commit. Dispatch projects one immutable persistence snapshot from committed
+entities plus the accepted changes; serialized Record values have no mutation or entity behavior.
+Removal first obtains ticket-bound root-relative path and imported-symlink facts. Project systems stage Hidden
+intents for unregistered aliases on the accepted operation; the filesystem adapter never decides
+registration membership or mutates that snapshot. Alias lookup failure leaves committed state intact.
 Filesystem jobs queue by canonical directory. Unstarted jobs are discarded when their owner
 changes; started atomic IO finishes before a replacement root reads that directory. Backend IO
 tasks therefore own their finite lifetime rather than being despawned with a requesting root.
