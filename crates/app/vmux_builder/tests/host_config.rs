@@ -291,8 +291,9 @@ fn packaging_projects_selected_assets_and_identity_and_restores_templates_on_fai
                 "scripts/cargo-with-cef-cache.sh",
                 r#"#!/bin/bash
 set -euo pipefail
+CARGO_PACKAGER_FORMAT=app bash scripts/before-each-package.sh
 python3 - <<'PY'
-import json,os,pathlib,plistlib,tomllib
+import json,os,pathlib,plistlib,tomllib,shutil
 root=pathlib.Path.cwd()
 with (root/'crates/app/vmux_desktop/Cargo.toml').open('rb') as source:
     metadata=tomllib.load(source)['package']['metadata']['packager']
@@ -307,6 +308,8 @@ assert metadata['binaries'][-1]['path']==name+' Service'
 if os.environ['FAIL_PACKAGE']=='1':
     raise SystemExit(42)
 bundle=pathlib.Path(os.environ['VMUX_APP_BUNDLE'])
+if bundle.exists():
+    shutil.rmtree(bundle)
 contents=bundle/'Contents'
 (contents/'MacOS').mkdir(parents=True)
 (contents/'Frameworks').mkdir()
@@ -316,7 +319,6 @@ for executable in ['vmux_desktop','vmux',name+' Service']:
     binary.chmod(0o755)
 (contents/'Info.plist').write_bytes((root/'packaging/macos/Info.plist').read_bytes())
 PY
-CARGO_PACKAGER_FORMAT=app bash scripts/before-each-package.sh
 "#,
             );
             let name = if custom { "Atlas \"Lab\" & Co" } else { "Vmux" };

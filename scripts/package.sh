@@ -116,6 +116,9 @@ if [[ ( "$PROFILE" == "local" || "${VMUX_CI_FAST_PACKAGE:-}" == "1" ) && -d "$VM
     if [[ "$PROFILE" == "local" ]]; then
         "$ROOT/scripts/build-title.sh" local "$ROOT" "$VMUX_APP_BUNDLE/Contents/Info.plist" >/dev/null
     fi
+    mkdir -p "$VMUX_APP_BUNDLE/Contents/Resources"
+    cp "$VMUX_HOST_TRAY_ICON" "$VMUX_APP_BUNDLE/Contents/Resources/tray.png"
+
     echo "==> Injecting CEF into .app"
     CARGO_PACKAGER_FORMAT=dmg bash "$ROOT/scripts/inject-cef.sh"
 

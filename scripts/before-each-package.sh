@@ -10,10 +10,9 @@ app_bundle="${VMUX_APP_BUNDLE:-$release_dir/$VMUX_HOST_NAME.app}"
 
 "$ROOT/scripts/inject-cef.sh"
 
-mkdir -p "$app_bundle/Contents/Resources"
-cp "$VMUX_HOST_TRAY_ICON" "$app_bundle/Contents/Resources/tray.png"
-
 if [[ "${CARGO_PACKAGER_FORMAT:-}" == "dmg" ]]; then
+    mkdir -p "$app_bundle/Contents/Resources"
+    cp "$VMUX_HOST_TRAY_ICON" "$app_bundle/Contents/Resources/tray.png"
     VMUX_APP_BUNDLE="$app_bundle" "$ROOT/scripts/embed-launch-agent-plist.sh"
     APP_BUNDLE="$app_bundle" "$ROOT/scripts/sign-and-notarize.sh"
 fi
