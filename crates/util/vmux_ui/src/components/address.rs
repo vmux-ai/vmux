@@ -196,7 +196,7 @@ fn AddressMenu(
         });
         return rsx! { BreadcrumbItem {
             label: AddressLabel(&crumb.entry).text(), title: crumb.entry.title.clone(), active: crumb.active, onclick,
-            leading: rsx! { AddressIcon { entry: crumb.entry.clone() } },
+            leading: rsx! { if !preserve_name || crumb.active { AddressIcon { entry: crumb.entry.clone() } } },
         } };
     }
     let active = open.read().as_ref() == Some(&id);
