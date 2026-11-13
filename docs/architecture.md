@@ -467,6 +467,10 @@ Native file locking retries with cancellation and a two-second limit. On AppExit
 systems cancel older work, read incomplete files, drain file-targeted input through the preference
 owner, and capture the latest canonical snapshot. All exit files share a four-second lock budget;
 failed reads refuse replacement writes and preserve the existing file.
+Initial mode-read errors reach the queued Session's existing error projection. Retained prompts
+stay unconsumed; explicit Session retry rearms preference IO, and successful loading removes only
+the matching preference block before dispatch. Registered enqueue systems own order compaction
+and retained-request creation; each typed registration selects its canonical file kind.
 
 Every plain adapter names its external interface, canonical input/output, scope/lifetime,
 bounds and cancellation/eviction. Adapters may hold handles, byte cursors, codec scratch and

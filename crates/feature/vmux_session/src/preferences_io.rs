@@ -394,7 +394,9 @@ fn finish(
                         file: target.entity(),
                         content,
                     });
-                    commands.entity(target.entity()).try_remove::<Unavailable>();
+                    commands
+                        .entity(target.entity())
+                        .try_remove::<(Unavailable, OperationError)>();
                 }
             }
             Ok(Err(error)) | Err(error) => {
@@ -405,6 +407,9 @@ fn finish(
                 }
                 if !ready {
                     commands.entity(target.entity()).insert(Unavailable);
+                    if let Ok(failure) = OperationError::new(error.clone()) {
+                        commands.entity(target.entity()).insert(failure);
+                    }
                 }
                 tracing::warn!("preference file IO failed: {error}");
             }
@@ -431,6 +436,9 @@ fn settle(
         file.retry_allowed = false;
         if !ready {
             commands.entity(entity).insert(Unavailable);
+            commands
+                .entity(entity)
+                .insert(OperationError::new("preference initial read was canceled").unwrap());
         }
     }
 }
@@ -493,7 +501,9 @@ fn flush(world: &mut World) {
                 Ok(content) => {
                     world.trigger(Loaded { file, content });
                     world.flush();
-                    world.entity_mut(file).remove::<Unavailable>();
+                    world
+                        .entity_mut(file)
+                        .remove::<(Unavailable, OperationError)>();
                 }
                 Err(error) => {
                     world.get_mut::<File>(file).unwrap().retry_allowed = false;

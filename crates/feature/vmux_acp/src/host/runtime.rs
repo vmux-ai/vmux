@@ -370,6 +370,12 @@ fn present_process(
     }
 }
 
+#[derive(Component)]
+pub(super) struct PreferencesBlocked {
+    file: Entity,
+    error: String,
+}
+
 fn input(
     mut q: Query<(
         Entity,
@@ -380,12 +386,14 @@ fn input(
         Has<TitlePending>,
         Option<&mut PendingHandoff>,
         Option<&mut ImportedConversation>,
+        Option<&PreferencesBlocked>,
     )>,
     workspace: PromptWorkspace,
     policy: Single<&AcpWorkspacePolicy>,
     modes: crate::host::model_selection::AgentPreferences,
     mut service_requests: MessageWriter<ServiceRequest>,
     mut queues: QueuedPrompts,
+    mut commands: Commands,
 ) {
     for (
         entity,
@@ -396,9 +404,34 @@ fn input(
         title_pending,
         mut pending,
         mut imported,
+        blocked,
     ) in &mut q
     {
-        if !modes.ready(crate::host::model_selection::Kind::Modes) || !spawn_queued || !queues.ready(entity, matches!(*state, RunState::Idle)) {
+        let kind = crate::host::model_selection::Kind::Modes;
+        if let Some(blocked) = blocked {
+            if modes.file(kind) != Some(blocked.file) {
+                continue;
+            }
+            if modes.ready(kind) {
+                if matches!(&*state, RunState::Errored(error) if *error == blocked.error) {
+                    *state = RunState::Idle;
+                }
+                commands.entity(entity).remove::<PreferencesBlocked>();
+            }
+        }
+        if !modes.ready(kind) {
+            if spawn_queued && queues.ready(entity, matches!(*state, RunState::Idle))
+                && let Some((file, error)) = modes.load_error(kind)
+            {
+                *state = RunState::Errored(error.to_string());
+                commands.entity(entity).insert(PreferencesBlocked {
+                    file,
+                    error: error.to_string(),
+                });
+            }
+            continue;
+        }
+        if !spawn_queued || !queues.ready(entity, matches!(*state, RunState::Idle)) {
             continue;
         }
         let Some((_, text, attachments)) = queues.take_next(entity) else {
@@ -1286,5 +1319,109 @@ mod tests {
         app.world_mut()
             .spawn(TestSession::bundle("vibe-acp", "s1", "/tmp"));
         app.update();
+    }
+
+    #[test]
+    fn mode_load_failure_is_visible_and_retry_dispatches_the_retained_prompt_once() {
+        let directory = tempfile::tempdir().unwrap();
+        std::fs::write(directory.path().join("agent-modes.json"), "{").unwrap();
+        let mut app = App::new();
+        app.add_plugins((
+            bevy::app::TaskPoolPlugin::default(),
+            vmux_session::QueuePlugin,
+            vmux_session::preferences::Plugin,
+            super::Plugin,
+        ));
+        app.world_mut()
+            .write_message(vmux_session::preferences::ProfileRequested(
+                directory.path().to_path_buf(),
+            ));
+        let session = app
+            .world_mut()
+            .spawn((
+                TestSession::bundle("one", "load-error", directory.path()),
+                RunState::Idle,
+                vmux_session::PromptQueue::default(),
+                AcpSpawnQueued,
+            ))
+            .id();
+        app.world_mut()
+            .run_system_once(move |mut queues: QueuedPrompts| {
+                queues.enqueue(session, "retained".into(), Vec::new(), false);
+            })
+            .unwrap();
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+        loop {
+            app.update();
+            if matches!(
+                app.world().get::<RunState>(session),
+                Some(RunState::Errored(_))
+            ) {
+                break;
+            }
+            assert!(
+                std::time::Instant::now() < deadline,
+                "mode loading failure did not reach session state"
+            );
+            std::thread::sleep(std::time::Duration::from_millis(1));
+        }
+        assert_eq!(
+            app.world_mut()
+                .run_system_once(move |queues: vmux_session::QueuedPromptReads| {
+                    queues.visible(session).len()
+                })
+                .unwrap(),
+            1
+        );
+        assert_eq!(
+            app.world_mut()
+                .resource_mut::<Messages<ServiceRequest>>()
+                .drain()
+                .count(),
+            0
+        );
+        std::fs::write(
+            directory.path().join("agent-modes.json"),
+            r#"{"one":{"selected":"ask","modes":[]}}"#,
+        )
+        .unwrap();
+        app.world_mut()
+            .write_message(vmux_session::preferences::RetryPreferences {
+                kind: vmux_session::preferences::Kind::Modes,
+            });
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+        let requests = loop {
+            app.update();
+            let requests = app
+                .world_mut()
+                .resource_mut::<Messages<ServiceRequest>>()
+                .drain()
+                .collect::<Vec<_>>();
+            if !requests.is_empty() {
+                break requests;
+            }
+            assert!(
+                std::time::Instant::now() < deadline,
+                "retained prompt did not recover after preference retry"
+            );
+            std::thread::sleep(std::time::Duration::from_millis(1));
+        };
+        assert!(
+            matches!(requests.as_slice(), [ServiceRequest(ClientMessage::Shared(SharedMessage::AgentInput { sid, text, preferred_mode: Some(mode), .. }))] if sid == "load-error" && text == "retained" && mode == "ask")
+        );
+        assert!(app.world().get::<PreferencesBlocked>(session).is_none());
+        assert!(
+            app.world_mut()
+                .run_system_once(move |queues: QueuedPrompts| queues.empty(session))
+                .unwrap()
+        );
+        app.update();
+        assert_eq!(
+            app.world_mut()
+                .resource_mut::<Messages<ServiceRequest>>()
+                .drain()
+                .count(),
+            0
+        );
     }
 }

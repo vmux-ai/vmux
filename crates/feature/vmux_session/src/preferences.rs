@@ -21,6 +21,7 @@ impl BevyPlugin for Plugin {
             .add_message::<RememberMode>()
             .add_message::<RememberModels>()
             .add_message::<RememberModes>()
+            .add_message::<RetryPreferences>()
             .add_observer(restore)
             .add_observer(drain)
             .add_observer(select_model)
@@ -33,7 +34,22 @@ impl BevyPlugin for Plugin {
                 bind.in_set(ProfileSet)
                     .before(crate::preferences_io::SubmitSet),
             )
-            .add_systems(Update, (enqueue, consume).chain().in_set(ModelSelectionSet));
+            .add_systems(
+                Update,
+                retry.after(bind).before(crate::preferences_io::SubmitSet),
+            )
+            .add_systems(
+                Update,
+                (
+                    enqueue::<RememberModel, false>,
+                    enqueue::<RememberMode, true>,
+                    enqueue::<RememberModels, false>,
+                    enqueue::<RememberModes, true>,
+                    consume,
+                )
+                    .chain()
+                    .in_set(ModelSelectionSet),
+            );
     }
 }
 
@@ -99,6 +115,11 @@ pub(crate) struct Queued {
 
 #[derive(Message)]
 pub struct ProfileRequested(pub PathBuf);
+
+#[derive(Message)]
+pub struct RetryPreferences {
+    pub kind: Kind,
+}
 
 #[derive(Event)]
 pub(crate) struct Loaded {
@@ -197,6 +218,7 @@ fn bind(
 
 #[derive(SystemParam)]
 pub struct AgentPreferences<'w, 's> {
+    failures: Query<'w, 's, &'static vmux_ecs::OperationError, With<File>>,
     roots: Query<'w, 's, (Entity, Ref<'static, Active>, &'static Cwd), With<Root>>,
     files: Query<
         'w,
@@ -249,7 +271,7 @@ impl AgentPreferences<'_, '_> {
             .is_ok_and(|(_, _, cwd)| cwd.0 == directory)
     }
 
-    pub(crate) fn file(&self, kind: Kind) -> Option<Entity> {
+    pub fn file(&self, kind: Kind) -> Option<Entity> {
         for (entity, parent, candidate, _, _) in &self.files {
             if *candidate == kind && self.root() == Some(parent.parent()) {
                 return Some(entity);
@@ -265,6 +287,15 @@ impl AgentPreferences<'_, '_> {
         self.files
             .get(file)
             .is_ok_and(|(_, _, _, _, ready)| ready.is_some())
+    }
+
+    pub fn load_error(&self, kind: Kind) -> Option<(Entity, &str)> {
+        if self.ready(kind) {
+            return None;
+        }
+        let file = self.file(kind)?;
+        let error = self.failures.get(file).ok()?;
+        Some((file, error.message()))
     }
 
     pub fn changed(&self, kind: Kind) -> bool {
@@ -401,59 +432,61 @@ impl AgentPreferences<'_, '_> {
     }
 }
 
-#[derive(SystemParam)]
-struct InputQueue<'w, 's> {
-    roots: Query<'w, 's, Entity, (With<Root>, With<Active>)>,
-    files: Query<
-        'w,
-        's,
-        (
-            Entity,
-            &'static ChildOf,
-            &'static Kind,
-            &'static mut File,
-            Has<Ready>,
-        ),
-    >,
-    pending: Query<'w, 's, (Entity, &'static ChildOf, &'static mut Order), With<Queued>>,
-    commands: Commands<'w, 's>,
-    wake: Option<Res<'w, vmux_ecs::jobs::JobWake>>,
+fn retry(
+    mut requests: MessageReader<RetryPreferences>,
+    preferences: AgentPreferences,
+    mut files: Query<&mut File>,
+    wake: Option<Res<vmux_ecs::jobs::JobWake>>,
+) {
+    for request in requests.read() {
+        let Some(file) = preferences.file(request.kind) else {
+            continue;
+        };
+        let Ok(mut state) = files.get_mut(file) else {
+            continue;
+        };
+        state.retry_allowed = true;
+        if let Some(wake) = &wake {
+            wake.0.wake_by_ref();
+        }
+    }
 }
 
-impl InputQueue<'_, '_> {
-    fn root(&self) -> Option<Entity> {
-        self.roots.single().ok()
-    }
-    fn push<T: Component>(&mut self, kind: Kind, request: T) {
-        let mut target = None;
-        for (entity, parent, candidate, _, _) in &self.files {
-            if *candidate == kind && self.root() == Some(parent.parent()) {
-                target = Some(entity);
-                break;
-            }
-        }
-        let Some(file_entity) = target else {
-            return;
-        };
-        let Ok((_, _, _, mut file, ready)) = self.files.get_mut(file_entity) else {
-            return;
+fn enqueue<T: Component + Message + Clone, const MODES: bool>(
+    mut requests: MessageReader<T>,
+    roots: Query<Entity, (With<Root>, With<Active>)>,
+    mut files: Query<(Entity, &ChildOf, &Kind, &mut File, Has<Ready>)>,
+    mut pending: Query<(Entity, &ChildOf, &mut Order), With<Queued>>,
+    wake: Option<Res<vmux_ecs::jobs::JobWake>>,
+    mut commands: Commands,
+) {
+    let Ok(root) = roots.single() else {
+        return;
+    };
+    for request in requests.read() {
+        let Some((file_entity, _, _, mut file, ready)) =
+            files.iter_mut().find(|(_, parent, kind, _, _)| {
+                parent.parent() == root && **kind == if MODES { Kind::Modes } else { Kind::Models }
+            })
+        else {
+            continue;
         };
         if file.next_order == u32::MAX {
-            let mut pending = Vec::new();
-            for (entity, parent, order) in &self.pending {
+            let mut ordered = Vec::new();
+            for (entity, parent, order) in &pending {
                 if parent.parent() == file_entity {
-                    pending.push((order.0, entity));
+                    ordered.push((order.0, entity));
                 }
             }
-            pending.sort_unstable_by_key(|(order, _)| *order);
-            let Ok(next_order) = u32::try_from(pending.len()) else {
-                return;
+            ordered.sort_unstable_by_key(|(order, _)| *order);
+            let Ok(next_order) = u32::try_from(ordered.len()) else {
+                continue;
             };
             if next_order == u32::MAX {
-                return;
+                continue;
             }
-            for (index, (_, entity)) in pending.into_iter().enumerate() {
-                if let Ok((_, _, mut order)) = self.pending.get_mut(entity) {
+            for (index, (_, entity)) in ordered.into_iter().enumerate() {
+                if let Ok((_, _, mut order)) = pending.get_mut(entity) {
                     order.0 = index as u32;
                 }
             }
@@ -464,36 +497,15 @@ impl InputQueue<'_, '_> {
         }
         let order = file.next_order;
         file.next_order += 1;
-        self.commands.spawn((
+        commands.spawn((
             Queued { consumed: false },
-            request,
+            request.clone(),
             Order(order),
             ChildOf(file_entity),
         ));
-        if !ready && let Some(wake) = &self.wake {
+        if !ready && let Some(wake) = &wake {
             wake.0.wake_by_ref();
         }
-    }
-}
-
-fn enqueue(
-    mut model: MessageReader<RememberModel>,
-    mut mode: MessageReader<RememberMode>,
-    mut models: MessageReader<RememberModels>,
-    mut modes: MessageReader<RememberModes>,
-    mut queue: InputQueue,
-) {
-    for request in model.read() {
-        queue.push(Kind::Models, request.clone());
-    }
-    for request in mode.read() {
-        queue.push(Kind::Modes, request.clone());
-    }
-    for request in models.read() {
-        queue.push(Kind::Models, request.clone());
-    }
-    for request in modes.read() {
-        queue.push(Kind::Modes, request.clone());
     }
 }
 
@@ -1414,5 +1426,51 @@ mod tests {
                 .unwrap();
         assert_eq!(stored["one"]["selected"], "new");
         release.join().unwrap();
+    }
+
+    #[test]
+    fn malformed_mode_data_reports_failure_and_explicit_retry_replays_retained_input() {
+        let mut fixture = Fixture::new(None, Some("{"));
+        fixture.send(RememberMode {
+            agent_id: "one".into(),
+            mode_id: "new".into(),
+        });
+        let deadline = Instant::now() + Duration::from_secs(5);
+        loop {
+            fixture.app.update();
+            let failed = fixture
+                .app
+                .world_mut()
+                .run_system_once(|preferences: AgentPreferences| {
+                    preferences.load_error(Kind::Modes).is_some()
+                })
+                .unwrap();
+            if failed {
+                break;
+            }
+            assert!(
+                Instant::now() < deadline,
+                "mode loading failure was not exposed"
+            );
+            std::thread::sleep(Duration::from_millis(1));
+        }
+        assert_eq!(
+            std::fs::read_to_string(fixture.directory.path().join("agent-modes.json")).unwrap(),
+            "{"
+        );
+        std::fs::write(fixture.directory.path().join("agent-modes.json"), r#"{"one":{"selected":"old","modes":[{"id":"old","name":"Old"},{"id":"new","name":"New"}]},"two":{"selected":"kept","modes":[]}}"#).unwrap();
+        fixture.send(RetryPreferences { kind: Kind::Modes });
+        fixture.settle();
+        assert_eq!(fixture.mode("one").as_deref(), Some("new"));
+        assert_eq!(fixture.mode("two").as_deref(), Some("kept"));
+        assert!(
+            fixture
+                .app
+                .world_mut()
+                .run_system_once(|preferences: AgentPreferences| preferences
+                    .load_error(Kind::Modes)
+                    .is_none())
+                .unwrap()
+        );
     }
 }
