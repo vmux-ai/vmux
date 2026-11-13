@@ -844,6 +844,7 @@ the registered manifests supply the page-switch menu. Pages publish only typed `
 data through `AddressContribution` or `PageAddressPublish`: the current route, project and session
 choices, directories, symbols, and their intents. `vmux_layout` renders the active surface with
 one `AddressTrail`. No page component, callback, context, or mounted slot crosses into Layout.
+The page entity's `AddressContribution` owns the immutable `PageAddress` rendered by Layout.
 Hosted subtree registration also extends its route metadata's ownership. During navigation,
 Layout reads the incoming surface and existing breadcrumb choices supply the selected label and
 icon immediately, before the page publishes its enriched address.
@@ -1796,8 +1797,13 @@ from polling alone. Missing or invalid caches fall back to daemon discovery, and
 writes retain live entities. Configuration remains selectable and stopped VM projections
 mark its containers stopped; live logs require the daemon. One root UI-state subscription
 survives these transitions. A thin divider separates the side sheet and details.
-Details remain unselected until the user chooses an entry. The address reads
-`VM → Docker → Containers → group → selected entry → Info/Logs`. VM shutdown and settings
+Details remain unselected until the user chooses an entry. Selected addresses fold
+`VM → Docker → Containers` into an ancestor menu, leaving
+`… → group → service → Info/Logs`; standalone entries retain their container name.
+The full Docker name remains available on hover. Info and Logs use distinct line icons.
+Breadcrumbs without sibling choices navigate directly without opening an empty menu.
+The workspace and details retain their mounted DOM during navigation; the content entrance
+animation runs on initial mount. VM shutdown and settings
 live on the VM row of the side sheet. The sheet follows
 `VM → Docker → Containers → group → container`; its level labels navigate to their
 information pages in the input frame. VM controls use play/pause icons on their owning row.

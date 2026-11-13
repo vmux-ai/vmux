@@ -110,15 +110,6 @@ pub fn Page() -> Element {
     } else {
         Level::Containers
     };
-    let transition = if !snapshot.available() {
-        format!("service:{}", snapshot.vm_state())
-    } else if level == Level::Vm {
-        "vm".into()
-    } else if level == Level::Docker {
-        "docker".into()
-    } else {
-        format!("{selection}:{}", panel())
-    };
     rsx! {
         PageShell {
             WorkspaceLayout {
@@ -148,12 +139,10 @@ pub fn Page() -> Element {
                     }
                 }
                 div { class: "flex min-h-0 flex-1 flex-col overflow-hidden",
-                    ContentTransition { key: "{transition}", class: "flex min-h-0 flex-1 flex-col overflow-hidden",
+                    ContentTransition { class: "flex min-h-0 flex-1 flex-col overflow-hidden",
                         if !snapshot.available() {
                             Service {}
-                        } else if level == Level::Vm {
-                            Overview { level }
-                        } else if level == Level::Docker {
+                        } else if matches!(level, Level::Vm | Level::Docker) {
                             Overview { level }
                         } else if !selection.is_empty() {
                             Details {
@@ -311,7 +300,29 @@ fn Header(
         },
         ..Default::default()
     };
-    if engine_level {
+    if !selection.is_empty() {
+        address.current.label = "…".into();
+        address.current.label_key.clear();
+        address.current.title = translate("container-title");
+        address.current.icon = None;
+        address.current.intent = None;
+        for value in [Level::Vm, Level::Docker, Level::Containers] {
+            address.views.push(AddressOption {
+                label: value.label(),
+                icon: Some(value.icon()),
+                intent: Some(AddressIntent::Navigate {
+                    url: match value {
+                        Level::Vm => VmPage::URL,
+                        Level::Docker => DockerPage::URL,
+                        Level::Containers => ContainerPage::URL,
+                    }
+                    .into(),
+                }),
+                ..Default::default()
+            });
+        }
+    }
+    if engine_level && selection.is_empty() {
         address.fixed.push(AddressCrumb {
             entry: AddressOption {
                 label_key: "container-engine".into(),
@@ -324,7 +335,7 @@ fn Header(
             ..Default::default()
         });
     }
-    if container_level {
+    if container_level && selection.is_empty() {
         address.fixed.push(AddressCrumb {
             entry: AddressOption {
                 label_key: "container-title".into(),
@@ -362,25 +373,38 @@ fn Header(
         }
         address.fixed.push(AddressCrumb {
             entry: AddressOption {
-                label: project.unwrap_or(&first.name).to_string(),
+                label: project
+                    .unwrap_or(if first.service.is_empty() {
+                        &first.name
+                    } else {
+                        &first.service
+                    })
+                    .to_string(),
                 icon: Some(if project.is_some() {
                     BuiltinIcon::Layers
                 } else {
                     BuiltinIcon::Container
                 }),
-                title: first.image.clone(),
+                title: first.name.clone(),
+                intent: Some(AddressIntent::Navigate {
+                    url: Location {
+                        selection: selection.clone(),
+                        panel: "info".into(),
+                    }
+                    .url(&snapshot.containers),
+                }),
                 ..Default::default()
             },
             ..Default::default()
         });
         let mut views = Vec::new();
-        for (id, label) in [
-            ("info", "container-info"),
-            ("logs", "container-service-logs"),
+        for (id, label, icon) in [
+            ("info", "container-info", BuiltinIcon::Info),
+            ("logs", "container-service-logs", BuiltinIcon::Terminal),
         ] {
             views.push(AddressOption {
                 label_key: label.into(),
-                identity: id.into(),
+                icon: Some(icon),
                 intent: Some(AddressIntent::Section { id: id.into() }),
                 ..Default::default()
             });
@@ -393,6 +417,12 @@ fn Header(
                     "container-info"
                 }
                 .into(),
+                icon: Some(if panel == "logs" {
+                    BuiltinIcon::Terminal
+                } else {
+                    BuiltinIcon::Info
+                }),
+                intent: Some(AddressIntent::Section { id: panel.clone() }),
                 ..Default::default()
             },
             options: views,
@@ -1429,6 +1459,7 @@ mod tests {
         dom: VirtualDom,
         controls: HashMap<String, ElementId>,
         sidebar_blocked: bool,
+        replacements: usize,
         _scope: HostScope,
     }
 
@@ -1445,6 +1476,7 @@ mod tests {
                 dom,
                 controls: HashMap::new(),
                 sidebar_blocked: false,
+                replacements: 0,
                 _scope: scope,
             };
             preview.apply(edits.edits);
@@ -1491,6 +1523,9 @@ mod tests {
 
         fn apply(&mut self, edits: Vec<Mutation>) {
             for edit in edits {
+                if matches!(&edit, Mutation::ReplaceWith { .. }) {
+                    self.replacements += 1;
+                }
                 if let Mutation::SetAttribute {
                     name: "inert",
                     value,
@@ -1533,6 +1568,53 @@ mod tests {
             );
             self.render();
         }
+    }
+
+    #[test]
+    fn container_navigation_keeps_the_details_mounted_and_shortens_the_address() {
+        let mut preview = Preview::new();
+        preview.publish(ContainerUiState {
+            supported: true,
+            running: true,
+            ready: true,
+            inventory_ready: true,
+            phase: "ready".into(),
+            containers: vec![
+                ContainerEntry {
+                    id: "aaaaaaaaaaaa".into(),
+                    name: "vmux-cloud-account-1".into(),
+                    service: "account".into(),
+                    project: "vmux-cloud".into(),
+                    state: "exited".into(),
+                    image: "account:dev".into(),
+                    ..Default::default()
+                },
+                ContainerEntry {
+                    id: "bbbbbbbbbbbb".into(),
+                    name: "vmux-cloud-relay-1".into(),
+                    service: "relay".into(),
+                    project: "vmux-cloud".into(),
+                    state: "exited".into(),
+                    image: "relay:dev".into(),
+                    ..Default::default()
+                },
+            ],
+            ..Default::default()
+        });
+        preview.click("vmux-cloud-account-1");
+        let address = preview.host.addresses.borrow().last().unwrap().clone();
+        assert_eq!(address.current.label, "…");
+        assert_eq!(address.fixed[0].entry.label, "vmux-cloud");
+        assert_eq!(address.fixed[1].entry.label, "account");
+        assert_eq!(address.fixed.len(), 3);
+        preview.replacements = 0;
+        preview.click("vmux-cloud-relay-1");
+        assert_eq!(preview.replacements, 0);
+        assert!(preview.render().contains("relay:dev"));
+        assert_eq!(
+            preview.host.opens.borrow().last().unwrap().value,
+            "vmux://vm/docker/containers/groups/vmux-cloud/containers/bbbbbbbbbbbb/info"
+        );
     }
 
     #[test]
@@ -1789,18 +1871,19 @@ mod tests {
         snapshot.inventory_error.clear();
         let addresses = preview.host.addresses.borrow();
         let address = addresses.last().unwrap();
-        assert_eq!(address.current.label_key, "container-vm");
-        assert_eq!(address.fixed[0].entry.label_key, "container-engine");
-        assert_eq!(address.fixed[1].entry.label_key, "container-title");
-        assert_eq!(address.fixed[2].entry.label, "web");
-        assert_eq!(address.fixed[3].entry.label_key, "container-info");
+        assert_eq!(address.current.label, "…");
+        assert_eq!(address.fixed[0].entry.label, "web");
+        assert_eq!(address.fixed[1].entry.label_key, "container-info");
         assert_eq!(
-            address.fixed[3]
+            address.fixed[1]
                 .options
                 .iter()
-                .map(|option| option.identity.as_str())
+                .map(|option| option.intent.clone())
                 .collect::<Vec<_>>(),
-            ["info", "logs"]
+            [
+                Some(AddressIntent::Section { id: "info".into() }),
+                Some(AddressIntent::Section { id: "logs".into() }),
+            ]
         );
         drop(addresses);
         let requests = preview.host.inspections.borrow().len();

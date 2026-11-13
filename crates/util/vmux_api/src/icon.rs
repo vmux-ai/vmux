@@ -38,6 +38,7 @@ pub enum BuiltinIcon {
     Computer,
     Docker,
     Containers,
+    Info,
 }
 
 impl BuiltinIcon {

@@ -6,7 +6,7 @@ use vmux_api::address::{
 };
 
 use crate::components::avatar::IdentityOrb;
-use crate::components::breadcrumb::{BreadcrumbDropdown, BreadcrumbSeparator};
+use crate::components::breadcrumb::{BreadcrumbDropdown, BreadcrumbItem, BreadcrumbSeparator};
 use crate::components::dropdown::DropdownOption;
 use crate::components::manager::{ManagerAddButton, ManagerIconButton};
 use crate::file_icon::TypeIcon;
@@ -156,15 +156,24 @@ fn AddressMenu(
     #[props(default)] preserve_name: bool,
     #[props(default)] loading: bool,
 ) -> Element {
-    if crumb.options.is_empty()
+    if !crumb
+        .options
+        .iter()
+        .any(|option| option.intent.is_some() && option.intent != crumb.entry.intent)
         && crumb.tabs.is_empty()
         && crumb.on_open.is_none()
         && crumb.on_more.is_none()
-        && crumb.entry.intent.is_none()
     {
-        return rsx! { span { class: "flex h-7 min-w-0 items-center gap-1", title: crumb.entry.title.clone(),
-            AddressIcon { entry: crumb.entry.clone(), loading }
-            span { class: "truncate", {AddressLabel(&crumb.entry).text()} }
+        let intent = crumb.entry.intent.clone();
+        let onclick = intent.map(|intent| {
+            EventHandler::new(move |_| {
+                open.set(None);
+                requests.send(intent.clone());
+            })
+        });
+        return rsx! { BreadcrumbItem {
+            label: AddressLabel(&crumb.entry).text(), title: crumb.entry.title.clone(), active: crumb.active, onclick,
+            leading: rsx! { AddressIcon { entry: crumb.entry.clone(), loading } },
         } };
     }
     let active = open.read().as_ref() == Some(&id);
@@ -366,6 +375,19 @@ mod tests {
                     intent: Some(AddressIntent::Navigate { url: "vmux://projects/".into() }),
                     ..Default::default()
                 }],
+                fixed: vec![AddressCrumb {
+                    entry: AddressOption {
+                        label: "Docker".into(),
+                        intent: Some(AddressIntent::Navigate { url: "vmux://vm/docker".into() }),
+                        ..Default::default()
+                    },
+                    options: vec![AddressOption {
+                        label: "Docker".into(),
+                        intent: Some(AddressIntent::Navigate { url: "vmux://vm/docker".into() }),
+                        ..Default::default()
+                    }],
+                    ..Default::default()
+                }],
                 checkout: Some(AddressOption { label: "Checkout".into(), ..Default::default() }),
                 ..Default::default()
             },
@@ -374,6 +396,48 @@ mod tests {
         }
         button { id: format!("dismiss-{}", "address"), onclick: move |_| dismissed += 1, "Dismiss" }
         }
+    }
+
+    #[test]
+    fn single_destination_breadcrumb_navigates_without_an_empty_popup() {
+        dioxus::html::set_event_converter(Box::new(SerializedHtmlEventConverter));
+        let probe = Rc::new(TrailProbe::default());
+        let _host = HostScope::enter(probe.clone());
+        let mut dom = VirtualDom::new(RoutedTrail);
+        dom.provide_root_context(probe.clone());
+        let initial = dom.rebuild_to_vec();
+        let target = initial
+            .edits
+            .iter()
+            .find_map(|edit| match edit {
+                Mutation::SetAttribute {
+                    name: "title",
+                    value: AttributeValue::Text(value),
+                    id,
+                    ..
+                } if value == "Docker" => Some(*id),
+                _ => None,
+            })
+            .expect("parent breadcrumb link");
+        dom.runtime().handle_event(
+            "click",
+            Event::new(
+                EventData::Mouse(SerializedMouseData::default()).into_any(),
+                true,
+            ),
+            target,
+        );
+        dom.render_immediate_to_vec();
+        dom.render_immediate_to_vec();
+        assert_eq!(probe.requests.borrow().len(), 1);
+        assert_eq!(
+            probe.requests.borrow()[0].intent,
+            AddressIntent::Navigate {
+                url: "vmux://vm/docker".into(),
+            }
+        );
+        assert!(!probe.popup.borrow().contains(&true));
+        assert!(!dioxus_ssr::render(&dom).contains(&translate("editor-breadcrumb-empty")));
     }
 
     #[test]
