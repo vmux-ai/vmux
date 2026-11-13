@@ -78,6 +78,7 @@ struct LoadedDirectory(PathBuf);
 
 #[derive(Component)]
 struct Accepted {
+    operation: Entity,
     owner: Entity,
     directory: PathBuf,
 }
@@ -504,7 +505,10 @@ fn cancel(
             .get(pending.ticket.owner)
             .is_ok_and(|root| root.0 == pending.ticket.directory)
         {
-            commands.entity(entity).despawn();
+            commands.trigger(OperationCompleted {
+                entity,
+                result: Err("project owner was removed or replaced".into()),
+            });
         }
     }
 }
@@ -702,6 +706,7 @@ fn write(
                 requester,
             });
             commands.entity(requester).insert(Accepted {
+                operation: accepted,
                 owner,
                 directory: root.0.clone(),
             });
@@ -891,16 +896,84 @@ fn dispatch(
 
 fn prune(
     registrations: Registrations,
-    operations: Query<(Entity, &OperationState), With<Prepared>>,
+    operations: Query<(Entity, &OperationState, &Prepared)>,
+    roots: Query<(Entity, &Writing)>,
+    accepted: Query<(Entity, &Accepted)>,
+    aliases: Query<(Entity, &ChildOf), With<HideAlias>>,
+    mut completed: MessageWriter<WriteCompleted>,
     mut commands: WorldCommands,
 ) {
     for entity in &registrations.unused {
         commands.entity(entity).despawn();
     }
-    for (entity, state) in &operations {
-        if !matches!(state, OperationState::Pending | OperationState::Running) {
-            commands.entity(entity).despawn();
+    for (owner, writing) in &roots {
+        if operations.get(writing.operation).is_ok() {
+            continue;
         }
+        commands.entity(owner).remove::<Writing>();
+        for (requester, pending) in &accepted {
+            if pending.operation != writing.operation {
+                continue;
+            }
+            let error = Error::Unavailable("accepted project write was removed".into());
+            commands.entity(requester).remove::<Accepted>();
+            commands.trigger(OperationCompleted {
+                entity: requester,
+                result: Err(error.to_string()),
+            });
+            completed.write(WriteCompleted {
+                requester,
+                result: Err(error),
+            });
+        }
+    }
+    for (operation, state, prepared) in &operations {
+        if matches!(state, OperationState::Pending | OperationState::Running) {
+            continue;
+        }
+        if let Ok((owner, writing)) = roots.get(prepared.ticket.owner)
+            && writing.operation == operation
+            && writing.ticket == prepared.ticket
+        {
+            commands.entity(owner).remove::<Writing>();
+        }
+        for (requester, pending) in &accepted {
+            if pending.operation != operation {
+                continue;
+            }
+            let error =
+                Error::Unavailable("accepted project write ended before persistence".into());
+            commands.entity(requester).remove::<Accepted>();
+            commands.trigger(OperationCompleted {
+                entity: requester,
+                result: Err(error.to_string()),
+            });
+            completed.write(WriteCompleted {
+                requester,
+                result: Err(error),
+            });
+        }
+        for (entity, parent) in &aliases {
+            if parent.parent() == operation {
+                commands.entity(entity).despawn();
+            }
+        }
+        commands.entity(operation).remove::<(
+            Prepared,
+            Proposal,
+            RequestedProject,
+            SaveIntent,
+            RemoveIntent,
+            Archive,
+            Dispatched,
+            Aliasing,
+            AliasesReady,
+            EntityTarget<Project>,
+            Name,
+            Cwd,
+            Repository,
+            Revision,
+        )>();
     }
 }
 

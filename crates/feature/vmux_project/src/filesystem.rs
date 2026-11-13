@@ -41,6 +41,16 @@ struct FileSet;
 #[derive(Resource, Clone)]
 pub struct FileWake(pub Waker);
 
+impl FileWake {
+    fn poll<T>(&self, task: &mut Task<T>) -> Option<T> {
+        let mut context = std::task::Context::from_waker(&self.0);
+        match std::future::Future::poll(std::pin::Pin::new(task), &mut context) {
+            std::task::Poll::Ready(value) => Some(value),
+            std::task::Poll::Pending => None,
+        }
+    }
+}
+
 #[derive(Component)]
 struct QueuedRead {
     ticket: Ticket,
@@ -381,10 +391,15 @@ fn start(
 fn finish_reads(
     mut tasks: Query<(Entity, &mut ReadTask)>,
     mut results: MessageWriter<LoadCompleted>,
+    wake: Option<Res<FileWake>>,
     mut commands: WorldCommands,
 ) {
     for (entity, mut task) in &mut tasks {
-        let Some(result) = future::block_on(future::poll_once(&mut task.task)) else {
+        let result = match &wake {
+            Some(wake) => wake.poll(&mut task.task),
+            None => future::block_on(future::poll_once(&mut task.task)),
+        };
+        let Some(result) = result else {
             continue;
         };
         results.write(LoadCompleted {
@@ -398,10 +413,15 @@ fn finish_reads(
 fn finish_writes(
     mut tasks: Query<(Entity, &mut WriteTask)>,
     mut results: MessageWriter<WriteResult>,
+    wake: Option<Res<FileWake>>,
     mut commands: WorldCommands,
 ) {
     for (entity, mut task) in &mut tasks {
-        let Some(result) = future::block_on(future::poll_once(&mut task.task)) else {
+        let result = match &wake {
+            Some(wake) => wake.poll(&mut task.task),
+            None => future::block_on(future::poll_once(&mut task.task)),
+        };
+        let Some(result) = result else {
             continue;
         };
         results.write(WriteResult {
@@ -415,10 +435,15 @@ fn finish_writes(
 fn finish_aliases(
     mut tasks: Query<(Entity, &mut AliasTask)>,
     mut results: MessageWriter<AliasCompleted>,
+    wake: Option<Res<FileWake>>,
     mut commands: WorldCommands,
 ) {
     for (entity, mut task) in &mut tasks {
-        let Some(result) = future::block_on(future::poll_once(&mut task.task)) else {
+        let result = match &wake {
+            Some(wake) => wake.poll(&mut task.task),
+            None => future::block_on(future::poll_once(&mut task.task)),
+        };
+        let Some(result) = result else {
             continue;
         };
         results.write(AliasCompleted {
@@ -434,7 +459,7 @@ mod tests {
     use std::path::PathBuf;
     use std::sync::{
         Arc, Mutex,
-        atomic::{AtomicBool, Ordering},
+        atomic::{AtomicBool, AtomicUsize, Ordering},
     };
 
     use super::*;
@@ -448,6 +473,23 @@ mod tests {
         app: App,
         root: PathBuf,
         owner: Entity,
+    }
+
+    struct WakeCounter(AtomicUsize);
+
+    impl WakeCounter {
+        fn host(counter: Arc<Self>) -> FileWake {
+            FileWake(Waker::from(counter))
+        }
+    }
+
+    impl std::task::Wake for WakeCounter {
+        fn wake(self: Arc<Self>) {
+            self.0.fetch_add(1, Ordering::SeqCst);
+        }
+        fn wake_by_ref(self: &Arc<Self>) {
+            self.0.fetch_add(1, Ordering::SeqCst);
+        }
     }
 
     #[derive(Clone, Default)]
@@ -479,6 +521,29 @@ mod tests {
             *waker = Some(context.waker().clone());
             std::task::Poll::Pending
         }
+    }
+
+    #[test]
+    fn pending_io_completion_wakes_the_registered_host_after_publication() {
+        IoTaskPool::get_or_init(TaskPool::new);
+        let counter = Arc::new(WakeCounter(AtomicUsize::new(0)));
+        let wake = WakeCounter::host(counter.clone());
+        let signal = Signal::default();
+        let gate = signal.clone();
+        let mut task = IoTaskPool::get().spawn(async move {
+            gate.await;
+            true
+        });
+        assert!(wake.poll(&mut task).is_none());
+        let before = counter.0.load(Ordering::SeqCst);
+        signal.release();
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(3);
+        while !task.is_finished() {
+            assert!(std::time::Instant::now() < deadline);
+            std::thread::yield_now();
+        }
+        assert!(counter.0.load(Ordering::SeqCst) > before);
+        assert!(wake.poll(&mut task).is_some());
     }
 
     #[test]

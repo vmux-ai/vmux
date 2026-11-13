@@ -310,6 +310,24 @@ fn codec_boundaries_use_their_declared_canonical_endpoint() {
 }
 
 #[test]
+fn trait_adapter_contracts_follow_the_same_owner_and_module() {
+    let inventory = Inventory::fixture(
+        "#[vmux_api::ui_event] struct Received { bytes: Vec<u8> } struct Codec { bytes: Vec<u8> } impl Codec { fn decode(self) -> Received { Received { bytes:self.bytes } } } impl Drop for Codec { fn drop(&mut self) {} }",
+    );
+    let mut boundary = Boundary::fixture(&inventory, "impl:Drop for Codec");
+    boundary.input = "external: owned byte buffer".into();
+    boundary.output = format!("ECS: {}", inventory.key("struct:Received"));
+    assert!(boundary.references(&inventory));
+    let unrelated = Inventory::fixture(
+        "#[vmux_api::ui_event] struct Received { bytes:Vec<u8> } mod one { struct Codec; impl Drop for Codec { fn drop(&mut self) {} } } mod two { struct Codec; impl Codec { fn decode(self) -> super::Received { super::Received { bytes:vec![] } } } }",
+    );
+    boundary.key = unrelated.key("one|impl:Drop for Codec");
+    boundary.fingerprint = unrelated.entries[&boundary.key].fingerprint.clone();
+    boundary.output = format!("ECS: {}", unrelated.key("struct:Received"));
+    assert!(!boundary.references(&unrelated));
+}
+
+#[test]
 fn path_overridden_module_exports_cannot_establish_standard_type_bindings() {
     for attribute in [
         "#[path=\"implementation.rs\"]",
@@ -726,7 +744,9 @@ impl Boundary {
                 let mut connected = adapter.references.contains(&entry.name);
                 for implementation in inventory.entries.values() {
                     if implementation.path == adapter.path
-                        && implementation.owner.as_deref() == Some(adapter.name.as_str())
+                        && implementation.namespace == adapter.namespace
+                        && implementation.owner.as_deref()
+                            == Some(adapter.owner.as_deref().unwrap_or(adapter.name.as_str()))
                         && implementation.references.contains(&entry.name)
                     {
                         connected = true;

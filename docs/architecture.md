@@ -552,6 +552,10 @@ registration membership or mutates that snapshot. Alias lookup failure leaves co
 Filesystem jobs queue by canonical directory. Unstarted jobs are discarded when their owner
 changes; started atomic IO finishes before a replacement root reads that directory. Backend IO
 tasks therefore own their finite lifetime rather than being despawned with a requesting root.
+Pending tasks register the host waker when polled, so publishing completion schedules its consuming
+frame. Missing or terminal accepted operations release the Root write slot and settle any surviving
+requester. Terminal operations retain the shared five-minute lifecycle while staged values and
+alias intents are discarded.
 
 Editor owns durable collapsed-line preferences through an internal plugin. FileId, Collapsed and
 Revision components belong to file records under a Profile store root. Views share those records;

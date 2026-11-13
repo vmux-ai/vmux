@@ -108,6 +108,99 @@ impl Consumer {
         });
         self.0.update();
     }
+
+    fn write_operation(&mut self, owner: Entity) -> Entity {
+        self.0
+            .world_mut()
+            .query::<(Entity, &vmux_ecs::OperationKind, &vmux_ecs::OperationTarget)>()
+            .iter(self.0.world())
+            .find(|(_, kind, target)| kind.as_str() == "project.write" && target.entity() == owner)
+            .unwrap()
+            .0
+    }
+}
+
+#[test]
+fn completed_project_operations_keep_shared_retention_without_proposal_payloads() {
+    let mut consumer = Consumer::new();
+    let owner = consumer.root("/projects");
+    consumer.save("/projects", "Saved", 0);
+    let operation = consumer.write_operation(owner);
+    let request = consumer.requests().pop().unwrap();
+    consumer.complete(request, Ok(BTreeSet::new()));
+    assert_eq!(
+        consumer.0.world().get::<OperationState>(operation),
+        Some(&OperationState::Succeeded)
+    );
+    assert!(consumer.0.world().get::<Operation>(operation).is_some());
+    assert!(consumer.0.world().get::<vmux_ecs::Cwd>(operation).is_none());
+    assert_eq!(
+        consumer.snapshot("/projects").projects["shared-id"].name,
+        "Saved"
+    );
+}
+
+#[test]
+fn a_removed_accepted_operation_releases_the_root_and_settles_its_requester() {
+    let mut consumer = Consumer::new();
+    let owner = consumer.root("/projects");
+    let requester = consumer.save("/projects", "Removed operation", 0);
+    let operation = consumer.write_operation(owner);
+    consumer.requests();
+    consumer.0.world_mut().despawn(operation);
+    consumer.0.update();
+    assert_eq!(
+        consumer.0.world().get::<OperationState>(requester),
+        Some(&OperationState::Failed)
+    );
+    let results: Vec<_> = consumer
+        .0
+        .world_mut()
+        .resource_mut::<Messages<WriteCompleted>>()
+        .drain()
+        .collect();
+    assert_eq!(results.len(), 1);
+    assert!(results[0].result.is_err());
+    consumer.save("/projects", "Next", 0);
+    let request = consumer.requests().pop().unwrap();
+    consumer.complete(request, Ok(BTreeSet::new()));
+    assert_eq!(
+        consumer.snapshot("/projects").projects["shared-id"].name,
+        "Next"
+    );
+}
+
+#[test]
+fn a_terminal_accepted_operation_releases_writing_without_losing_retention() {
+    let mut consumer = Consumer::new();
+    let owner = consumer.root("/projects");
+    let requester = consumer.save("/projects", "Canceled operation", 0);
+    let operation = consumer.write_operation(owner);
+    consumer.requests();
+    consumer
+        .0
+        .world_mut()
+        .trigger(vmux_ecs::OperationCompleted {
+            entity: operation,
+            result: Err("canceled".into()),
+        });
+    consumer.0.update();
+    assert_eq!(
+        consumer.0.world().get::<OperationState>(operation),
+        Some(&OperationState::Failed)
+    );
+    assert_eq!(
+        consumer.0.world().get::<OperationState>(requester),
+        Some(&OperationState::Failed)
+    );
+    assert!(consumer.0.world().get::<Operation>(operation).is_some());
+    consumer.save("/projects", "Retry", 0);
+    let request = consumer.requests().pop().unwrap();
+    consumer.complete(request, Ok(BTreeSet::new()));
+    assert_eq!(
+        consumer.snapshot("/projects").projects["shared-id"].name,
+        "Retry"
+    );
 }
 
 #[test]
