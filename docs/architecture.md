@@ -440,6 +440,7 @@ Their `ecs-policy.ron` records are executable review metadata, not a second desi
 | AppKit/winit/CEF/UIKit input | window/surface-bound typed input -> canonical input state; ECS -> immutable native suppression/hit-test output | installed window/adapter generation; bounded raw mailbox, native handles and wake/reentrancy mechanics |
 | Provider/ACP/native storage | external records -> typed Session/source ingress; committed state -> protocol/file output | bounded task or explicitly leased provider process/watch; raw IDs, bytes, SDK cursors and response handles only |
 | Git/filesystem/persistence | entity-owned immutable IO request -> revision/generation-bound result | one task/store lease; external formats, locks, atomic writes and rollback mechanics, never a second mutable catalog |
+| Docker/libkrun/gvproxy/SSH | canonical Settings/Operation -> bounded native IO; Docker ingress -> batch/container entities | one control task or leased VM generation; verified guest files, codec buffers and acknowledged forwarding-output cache only; worker retirement and parent monitoring release handles |
 | DOM/wry/IPC | declared UiState/effects -> mounted rendering; typed UiEvent -> ECS | page/document/component generation; geometry, IME, listener/scroll/codec state with teardown, never domain mutation decisions |
 | QUIC/local socket/MCP | declared authorized request -> canonical operation -> committed response/events | connection/request scope; framing, callback correlations and IO cancellation |
 | Keychain/crypto | authorized owner operation -> opaque protected handle/result | named storage/Vault context and explicit release; zeroizing keys stay out of Reflect, Save and UiState |
@@ -1806,6 +1807,17 @@ long names wrap without squeezing the operation label. Container Start/Stop
 controls have text labels in the details toolbar; list rows use play/pause icons with tooltips.
 Group headers expose Start all
 until every member runs, then Stop all; details retain scoped group controls.
+The blocking Docker facade drives a scoped headless `BatchPlugin` from its IO worker.
+Docker `Container` messages are materialized into named child entities before selection.
+Dependency labels become `Links` to entities in the same Compose project; `Position`, `Rank`,
+`Observation`, `Failure` and `Finished` carry ordering and completion on those entities.
+Registered systems expand targets, reject cycles before side effects, inspect dependency state,
+and enqueue the exact Docker operation. The socket adapter executes that approved intent and
+returns observations to ECS before readiness decisions. Query views and temporary order indexes
+derive from those canonical entities; the runtime drops its whole world after `Completion`.
+The shared operation deadline bounds dependency waits and failed services do not stop independent
+targets. `BookmarkDefaults` materializes only URL/folder defaults from settings ingress, so bookmark
+seeding reads its canonical global configuration without consuming the settings project's registry.
 Pending controls show a spinner and Starting/Stopping/Restarting instead of an inactive play icon.
 Single and group startup expand the selection with dependencies in the same Compose project,
 starting the VM first when needed. They

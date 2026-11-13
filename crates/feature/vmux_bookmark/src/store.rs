@@ -9,7 +9,9 @@ use vmux_ecs::store::State;
 use vmux_ecs::store::{SchemaPlugin, Types};
 use vmux_ecs::{Bookmark, BookmarkOrder, Collapsed, Folder, PageMetadata, Pin, Uuid};
 use vmux_layout::LayoutStartupSet;
+#[cfg(test)]
 use vmux_setting::AppSettings;
+use vmux_setting::BookmarkDefaults;
 
 use crate::store_driver::{BookmarkFilter, BookmarkStorePath};
 
@@ -36,8 +38,6 @@ impl Plugin for BookmarkStorePlugin {
     }
 }
 
-const BOOKMARK_PIN_ORDER_REVISION: u32 = 5;
-const LEGACY_PIN_ORDER_REVISION: u32 = 4;
 const RETIRED_DEFAULT_BOOKMARKS: [&str; 2] = ["vmux://spaces/", "vmux://team/"];
 
 #[vmux_ecs::store(
@@ -143,6 +143,9 @@ pub(super) struct OfferedBookmarkDefaults {
 }
 
 impl BookmarkSeed<'_, '_> {
+    const PIN_ORDER_REVISION: u32 = 5;
+    const LEGACY_PIN_ORDER_REVISION: u32 = 4;
+
     fn move_vm_default(&mut self, urls: &[String]) -> HashSet<Entity> {
         let mut migrated = HashSet::new();
         let vm = Self::key("vmux://vm/");
@@ -237,11 +240,11 @@ struct BookmarkSeed<'w, 's> {
 
 fn insert_defaults(
     _trigger: On<SeedBookmarkDefaults>,
-    settings: Res<AppSettings>,
+    settings: Res<BookmarkDefaults>,
     mut seed: BookmarkSeed,
 ) {
-    let urls = &settings.browser.bookmarks;
-    let folders = &settings.browser.bookmark_folders;
+    let urls = &settings.urls;
+    let folders = &settings.folders;
     let pin_revision = seed.offered.pin_order_revision;
     let vm_revision = seed.offered.vm_root_revision;
     let migrated = seed.move_vm_default(urls);
@@ -256,7 +259,7 @@ fn insert_defaults(
         .map(|url| BookmarkSeed::key(url))
         .collect::<HashSet<_>>();
     let mut retired_entities = HashSet::new();
-    if pin_revision < LEGACY_PIN_ORDER_REVISION {
+    if pin_revision < BookmarkSeed::LEGACY_PIN_ORDER_REVISION {
         for (entity, metadata, _) in &seed.pins {
             let key = BookmarkSeed::key(&metadata.url);
             if retired_keys.contains(&key) && offered_before.contains(&key) {
@@ -329,7 +332,7 @@ fn insert_defaults(
         .max()
         .map_or(0, |order| order.saturating_add(1));
     let mut claimed_orders = HashMap::new();
-    if pin_revision < LEGACY_PIN_ORDER_REVISION {
+    if pin_revision < BookmarkSeed::LEGACY_PIN_ORDER_REVISION {
         let claimed = claimed_urls
             .iter()
             .map(|url| BookmarkSeed::key(url))
@@ -370,8 +373,8 @@ fn insert_defaults(
         }
         changed = true;
     }
-    if pin_revision < BOOKMARK_PIN_ORDER_REVISION {
-        if pin_revision >= LEGACY_PIN_ORDER_REVISION {
+    if pin_revision < BookmarkSeed::PIN_ORDER_REVISION {
+        if pin_revision >= BookmarkSeed::LEGACY_PIN_ORDER_REVISION {
             seed.place_container(
                 &existing_pins,
                 &claimed_urls,
@@ -379,7 +382,7 @@ fn insert_defaults(
                 &mut claimed_orders,
             );
         }
-        seed.offered.pin_order_revision = BOOKMARK_PIN_ORDER_REVISION;
+        seed.offered.pin_order_revision = BookmarkSeed::PIN_ORDER_REVISION;
         changed = true;
     }
     for url in claimed_urls {
@@ -784,6 +787,7 @@ mod tests {
             vmux_ecs::PrimitivesPlugin,
         ))
         .add_plugins(SchemaPlugin::<BookmarkStore>::default())
+        .insert_resource(BookmarkDefaults::from(&settings))
         .insert_resource(settings)
         .insert_resource(OfferedBookmarkDefaults {
             urls: vec!["vmux://simulator/".into(), "vmux://containers/".into()],
@@ -916,6 +920,7 @@ mod tests {
             .add_plugins(MinimalPlugins)
             .add_plugins(bevy::asset::AssetPlugin::default())
             .add_plugins(vmux_ecs::PrimitivesPlugin)
+            .insert_resource(BookmarkDefaults::from(&settings))
             .insert_resource(settings)
             .add_plugins(SchemaPlugin::<BookmarkStore>::default())
             .init_resource::<OfferedBookmarkDefaults>()

@@ -1,12 +1,15 @@
-use std::collections::{BTreeMap, HashSet};
+use std::collections::BTreeMap;
 use std::io;
 use std::path::Path;
-use std::time::{Duration, Instant};
+use std::time::Duration;
+
+use bevy_ecs::prelude::{Component, Message};
 
 use serde::{Deserialize, Serialize};
 
 use crate::http::UnixHttp;
 
+#[derive(Clone)]
 pub struct Client(UnixHttp);
 
 impl Client {
@@ -58,92 +61,14 @@ impl Client {
     }
 
     pub fn start_many(&self, ids: &[String]) -> io::Result<()> {
-        let containers = self.list()?;
-        let ordered = Batch::new(ids, &containers)?
-            .with_dependencies(&containers)
-            .ordered()?;
-        let deadline = Instant::now() + Duration::from_secs(120);
-        let mut failed = HashSet::new();
-        let mut errors = Vec::new();
-        for entry in &ordered {
-            let mut refusal = None;
-            for dependency in &entry.dependencies {
-                let Some(target) = ordered.iter().find(|target| {
-                    target.project == entry.project && target.service == dependency.service
-                }) else {
-                    continue;
-                };
-                if failed.contains(&target.id) {
-                    refusal = Some(format!("dependency {} failed to start", dependency.service));
-                    break;
-                }
-                if let Err(error) = self.wait(&target.id, dependency.condition, deadline) {
-                    refusal = Some(format!("dependency {}: {error}", dependency.service));
-                    break;
-                }
-            }
-            let result = match refusal {
-                Some(error) => Err(io::Error::other(error)),
-                None => self.change(&entry.id, Operation::Start),
-            };
-            if let Err(error) = result {
-                failed.insert(entry.id.clone());
-                errors.push(format!("{}: {error}", entry.name));
-            }
-        }
-        if errors.is_empty() {
-            Ok(())
-        } else {
-            Err(io::Error::other(errors.join("\n")))
-        }
+        crate::batch::Runtime::run(self.clone(), ids)
     }
 
-    fn wait(&self, id: &str, condition: Condition, deadline: Instant) -> io::Result<()> {
+    pub(crate) fn inspect(&self, id: &str) -> io::Result<RunState> {
         let id = Id::new(id)?;
-        loop {
-            let body = self.0.get(&id.endpoint("/json"))?.require_success()?;
-            let observation: Readiness = serde_json::from_slice(&body).map_err(io::Error::other)?;
-            let state = observation.state;
-            let ready = match condition {
-                Condition::Started => state.running,
-                Condition::Healthy => {
-                    state.running
-                        && state
-                            .health
-                            .as_ref()
-                            .is_some_and(|health| health.status == "healthy")
-                }
-                Condition::Completed => {
-                    !state.running && state.status == "exited" && state.exit_code == 0
-                }
-            };
-            if ready {
-                return Ok(());
-            }
-            if !state.running && matches!(state.status.as_str(), "exited" | "dead") {
-                return Err(io::Error::other(format!(
-                    "container stopped with exit code {}",
-                    state.exit_code
-                )));
-            }
-            if condition == Condition::Healthy
-                && state
-                    .health
-                    .as_ref()
-                    .is_none_or(|health| health.status == "unhealthy")
-            {
-                return Err(io::Error::other(
-                    "container healthcheck is missing or unhealthy",
-                ));
-            }
-            if Instant::now() >= deadline {
-                return Err(io::Error::new(
-                    io::ErrorKind::TimedOut,
-                    "container dependency did not become ready",
-                ));
-            }
-            std::thread::sleep(Duration::from_millis(200));
-        }
+        let body = self.0.get(&id.endpoint("/json"))?.require_success()?;
+        let observation: Readiness = serde_json::from_slice(&body).map_err(io::Error::other)?;
+        Ok(observation.state)
     }
 
     pub fn logs(&self, id: &str) -> io::Result<String> {
@@ -159,7 +84,7 @@ impl Client {
     }
 }
 
-#[derive(Clone, Copy, Debug)]
+#[derive(Component, Clone, Copy, Debug)]
 pub enum Operation {
     Start,
     Stop,
@@ -167,7 +92,7 @@ pub enum Operation {
     Remove,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Message, Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Container {
     pub id: String,
     pub name: String,
@@ -267,76 +192,6 @@ pub enum Condition {
     Completed,
 }
 
-struct Batch<'a> {
-    entries: Vec<&'a Container>,
-}
-
-impl<'a> Batch<'a> {
-    fn new(ids: &[String], containers: &'a [Container]) -> io::Result<Self> {
-        let mut entries = Vec::new();
-        for id in ids {
-            let Some(entry) = containers.iter().find(|entry| entry.id == *id) else {
-                return Err(io::Error::new(
-                    io::ErrorKind::NotFound,
-                    format!("container {id} is no longer present"),
-                ));
-            };
-            if !entries
-                .iter()
-                .any(|existing: &&Container| existing.id == entry.id)
-            {
-                entries.push(entry);
-            }
-        }
-        Ok(Self { entries })
-    }
-
-    fn ordered(mut self) -> io::Result<Vec<&'a Container>> {
-        let mut ordered = Vec::new();
-        while !self.entries.is_empty() {
-            let next = self.entries.iter().position(|entry| {
-                !entry.dependencies.iter().any(|dependency| {
-                    self.entries.iter().any(|candidate| {
-                        candidate.project == entry.project
-                            && candidate.service == dependency.service
-                    })
-                })
-            });
-            let Some(index) = next else {
-                return Err(io::Error::new(
-                    io::ErrorKind::InvalidInput,
-                    "container group has a dependency cycle",
-                ));
-            };
-            ordered.push(self.entries.remove(index));
-        }
-        Ok(ordered)
-    }
-
-    fn with_dependencies(mut self, containers: &'a [Container]) -> Self {
-        let mut index = 0;
-        while index < self.entries.len() {
-            let entry = self.entries[index];
-            index += 1;
-            if entry.project.is_empty() {
-                continue;
-            }
-            for dependency in &entry.dependencies {
-                let Some(target) = containers.iter().find(|target| {
-                    target.project == entry.project && target.service == dependency.service
-                }) else {
-                    continue;
-                };
-                if self.entries.iter().any(|entry| entry.id == target.id) {
-                    continue;
-                }
-                self.entries.push(target);
-            }
-        }
-        self
-    }
-}
-
 #[derive(Deserialize)]
 struct Readiness {
     #[serde(rename = "State")]
@@ -344,21 +199,21 @@ struct Readiness {
 }
 
 #[derive(Deserialize)]
-struct RunState {
+pub(crate) struct RunState {
     #[serde(rename = "Running")]
-    running: bool,
+    pub(crate) running: bool,
     #[serde(rename = "Status")]
-    status: String,
+    pub(crate) status: String,
     #[serde(rename = "ExitCode", default)]
-    exit_code: i32,
+    pub(crate) exit_code: i32,
     #[serde(rename = "Health", default)]
-    health: Option<Health>,
+    pub(crate) health: Option<Health>,
 }
 
 #[derive(Deserialize)]
-struct Health {
+pub(crate) struct Health {
     #[serde(rename = "Status")]
-    status: String,
+    pub(crate) status: String,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
@@ -475,6 +330,7 @@ mod tests {
     use std::os::unix::net::UnixListener;
     use std::path::PathBuf;
     use std::thread::{self, JoinHandle};
+    use std::time::Instant;
 
     struct Daemon {
         socket: PathBuf,

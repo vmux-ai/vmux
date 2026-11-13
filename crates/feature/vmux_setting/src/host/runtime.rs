@@ -25,6 +25,7 @@ impl Plugin for SettingsRuntimePlugin {
     fn build(&self, app: &mut App) {
         app.add_message::<SettingsWriteRequest>()
             .add_message::<SettingsSaveRequest>()
+            .init_resource::<BookmarkDefaults>()
             .init_resource::<SettingsDefaults>()
             .init_resource::<crate::themes::TerminalColorSchemes>()
             .configure_sets(
@@ -42,10 +43,32 @@ impl Plugin for SettingsRuntimePlugin {
                     flush_settings_save,
                     persist_settings_to_disk,
                     reload_settings_on_change,
+                    project_bookmark_defaults,
                 )
                     .chain(),
             )
             .add_systems(Update, sync_search_engine);
+    }
+}
+
+#[derive(Resource, Clone, Default)]
+pub struct BookmarkDefaults {
+    pub urls: Vec<String>,
+    pub folders: Vec<BookmarkFolderSettings>,
+}
+
+impl From<&AppSettings> for BookmarkDefaults {
+    fn from(settings: &AppSettings) -> Self {
+        Self {
+            urls: settings.browser.bookmarks.clone(),
+            folders: settings.browser.bookmark_folders.clone(),
+        }
+    }
+}
+
+fn project_bookmark_defaults(settings: Res<AppSettings>, mut defaults: ResMut<BookmarkDefaults>) {
+    if settings.is_changed() {
+        *defaults = BookmarkDefaults::from(&*settings);
     }
 }
 
@@ -1292,6 +1315,7 @@ fn load_settings(
             .as_ref()
             .is_none_or(|terminal| terminal.confirm_close),
     });
+    commands.insert_resource(BookmarkDefaults::from(&settings));
     commands.insert_resource(settings);
 
     if let Some(path) = config_path {
