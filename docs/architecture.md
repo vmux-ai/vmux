@@ -1802,6 +1802,9 @@ Details remain unselected until the user chooses an entry. Selected addresses fo
 `… → group → service → Info/Logs`; standalone entries retain their container name.
 The full Docker name remains available on hover. Info and Logs use distinct line icons.
 Breadcrumbs without sibling choices navigate directly without opening an empty menu.
+Stable breadcrumb slots animate measured position changes and short entry/exit transitions.
+Leaving DOM copies are inert, remove duplicate identities, and disappear after the bounded
+layout duration. Unmount releases observers and animations; reduced motion disables them.
 The workspace and details retain their mounted DOM during navigation; the content entrance
 animation runs on initial mount. VM shutdown and settings
 live on the VM row of the side sheet. The sheet follows
@@ -1824,6 +1827,10 @@ derive from those canonical entities; the runtime drops its whole world after `C
 The shared operation deadline bounds dependency waits and failed services do not stop independent targets.
 Temporary Docker read failures remain pending within that deadline. A lost Start acknowledgement
 is retried because Docker Start is idempotent and an already-running response is accepted.
+Periodic forwarding reads retain the last confirmed result through transient transport errors;
+port conflicts and permanent failures remain visible. The supervised network helper retires its
+gvproxy child when its parent channel closes. Named, atomically refreshed copies of the signed
+VM helper identify the VM directory and Linux/Network roles in host process lists.
 `BookmarkDefaults` materializes only URL/folder defaults from settings ingress, so bookmark
 seeding reads its canonical global configuration without consuming the settings project's registry.
 Pending controls show a spinner and Starting/Stopping/Restarting instead of an inactive play icon.

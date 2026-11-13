@@ -3,6 +3,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
+use proc_macro2::{Delimiter, TokenTree};
 use quote::ToTokens;
 use serde::{Deserialize, Serialize};
 use syn::ext::IdentExt;
@@ -3987,7 +3988,6 @@ impl<'ast> Visit<'ast> for References {
 
 impl References {
     fn component_paths(&mut self, tokens: proc_macro2::TokenStream) {
-        use proc_macro2::{Delimiter, TokenTree};
         let mut path = String::new();
         for token in tokens {
             match token {

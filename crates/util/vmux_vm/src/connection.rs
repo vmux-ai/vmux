@@ -187,6 +187,17 @@ fn poll(mut engines: ActiveConnections, mut commands: Commands) {
                     Ok(()) => {
                         commands.entity(entity).remove::<ConnectionIssue>();
                     }
+                    Err(error)
+                        if matches!(
+                            error.kind(),
+                            io::ErrorKind::WouldBlock
+                                | io::ErrorKind::TimedOut
+                                | io::ErrorKind::Interrupted
+                                | io::ErrorKind::ConnectionReset
+                                | io::ErrorKind::ConnectionAborted
+                                | io::ErrorKind::ConnectionRefused
+                                | io::ErrorKind::UnexpectedEof
+                        ) => {}
                     Err(error) => {
                         commands
                             .entity(entity)
@@ -262,5 +273,64 @@ fn shutdown(
         commands.entity(entity).insert(StopTask(
             IoTaskPool::get().spawn(async move { EngineClient::new(settings).request_stop() }),
         ));
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::EnginePlugin;
+
+    #[test]
+    fn transient_port_reads_preserve_the_last_forwarding_result() {
+        for (kind, previous, expected) in [
+            (io::ErrorKind::WouldBlock, None, None),
+            (
+                io::ErrorKind::TimedOut,
+                Some("address already in use"),
+                Some("address already in use"),
+            ),
+            (io::ErrorKind::PermissionDenied, None, Some("read failed")),
+        ] {
+            let directory = tempfile::tempdir().unwrap();
+            let settings = Settings::new(directory.path(), directory.path());
+            let ports = PortForwarder::new(&settings.socket(), &settings.network_api());
+            let mut app = App::new();
+            app.add_plugins(EnginePlugin);
+            let entity = app
+                .world_mut()
+                .spawn((
+                    Engine,
+                    settings,
+                    Phase::Ready,
+                    Connection {
+                        stage: Stage::Ports,
+                        next: Instant::now(),
+                        ports: None,
+                    },
+                    ConnectionTask(IoTaskPool::get().spawn(async move {
+                        Report::Ports(ports, Err(io::Error::new(kind, "read failed")))
+                    })),
+                    Deadline(Instant::now() + Duration::from_secs(3)),
+                ))
+                .id();
+            if let Some(previous) = previous {
+                app.world_mut()
+                    .entity_mut(entity)
+                    .insert(ConnectionIssue(previous.into()));
+            }
+            let deadline = Instant::now() + Duration::from_secs(3);
+            while app.world().get::<ConnectionTask>(entity).is_some() {
+                assert!(Instant::now() < deadline);
+                app.update();
+                std::thread::sleep(Duration::from_millis(1));
+            }
+            assert_eq!(
+                app.world()
+                    .get::<ConnectionIssue>(entity)
+                    .map(|issue| issue.0.as_str()),
+                expected
+            );
+        }
     }
 }

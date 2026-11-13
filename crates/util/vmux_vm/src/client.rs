@@ -12,6 +12,7 @@ use crate::Settings;
 use crate::engine::{Phase, State};
 use crate::http::UnixHttp;
 use crate::image::GuestImage;
+use crate::process::Executable;
 use crate::ssh::Ssh;
 
 pub struct EngineClient {
@@ -86,7 +87,7 @@ impl EngineClient {
             .create(true)
             .append(true)
             .open(self.settings.log())?;
-        let mut command = Command::new(helper);
+        let mut command = Command::new(Executable::named(helper, &self.settings, "")?);
         command
             .arg("run")
             .arg(self.settings.directory.join("settings.json"))

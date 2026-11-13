@@ -1,5 +1,6 @@
 use std::{collections::HashMap, rc::Rc};
 
+use dioxus::core::current_scope_id;
 use dioxus::prelude::*;
 use vmux_api::address::{
     AddressCrumb, AddressIntent, AddressOption, PageAddress, PageAddressRequest,
@@ -46,14 +47,33 @@ pub fn AddressTrail(
     let mut available = use_signal(|| 0.0);
     let mut widths = use_signal(HashMap::<String, f64>::new);
     let measurement_open = use_signal(|| None::<String>);
+    let root_id = format!("vmux-address-{}", current_scope_id().0);
+    let motion_id = root_id.clone();
+    use_effect(move || {
+        let script = include_str!("address_motion.js")
+            .replace("__VMUX_ADDRESS_ROOT__", &format!("{motion_id:?}"))
+            .replace(
+                "__VMUX_ADDRESS_DURATION__",
+                &crate::motion::Motion::LAYOUT_MS.to_string(),
+            );
+        let _ = document::eval(&script);
+    });
+    let motion_id = root_id.clone();
+    use_drop(move || {
+        let _ = document::eval(&format!(
+            "globalThis.__vmuxAddressMotion?.get({motion_id:?})?.();"
+        ));
+    });
     let visible = PathVisibility::start(&state.paths, available(), &widths.read());
     let requests = AddressSender::new(&state);
     rsx! {
         nav {
+            id: root_id,
             class: "relative flex h-7 min-w-0 flex-1 items-center gap-1 text-xs",
             aria_label: translate("editor-breadcrumb"),
             onclick: move |event: MouseEvent| event.stop_propagation(),
-            AddressMenu {
+            span { class: "flex min-w-0 shrink items-center", "data-vmux-crumb-key": "page",
+              AddressMenu {
                 id: "page".to_string(),
                 crumb: AddressCrumb {
                     entry: state.current.clone(), options: state.views.clone(),
@@ -61,9 +81,11 @@ pub fn AddressTrail(
                 },
                 requests: requests.clone(), open,
                 loading,
+              }
             }
             for (index, crumb) in state.fixed.iter().enumerate() {
                 span { key: "fixed-{index}", class: "flex min-w-0 shrink items-center gap-1",
+                    "data-vmux-crumb-key": "fixed-{index}",
                     BreadcrumbSeparator {}
                     AddressMenu { id: format!("fixed-{index}"), crumb: crumb.clone(), requests: requests.clone(), open }
                 }
@@ -86,7 +108,8 @@ pub fn AddressTrail(
                     {
                         rsx! {
                             span {
-                                key: "{crumb.entry.path}", class: "flex shrink-0 items-center",
+                                key: "path-{index}", class: "flex shrink-0 items-center",
+                                "data-vmux-crumb-key": "path-{index}",
                                 AddressMenu { id: format!("path-{}", crumb.entry.path), crumb: crumb.clone(), requests: requests.clone(), open, preserve_name: true }
                                 if index + 1 < state.paths.len() { BreadcrumbSeparator {} }
                             }
@@ -96,6 +119,7 @@ pub fn AddressTrail(
             }
             for (index, crumb) in state.symbols.iter().enumerate() {
                 span { key: "symbol-{index}", class: "flex min-w-0 shrink items-center gap-1",
+                    "data-vmux-crumb-key": "symbol-{index}",
                     BreadcrumbSeparator {}
                     AddressMenu { id: format!("symbol-{index}"), crumb: crumb.clone(), requests: requests.clone(), open }
                 }
@@ -193,7 +217,7 @@ fn AddressMenu(
                     if let Some(intent) = &on_open { open_requests.send(intent.clone()); }
                 } else if open.peek().as_ref() == Some(&open_id) { open.set(None); }
             },
-            leading: rsx! { if !preserve_name || crumb.active { AddressIcon { entry: crumb.entry.clone(), loading } } },
+            leading: rsx! { AddressIcon { entry: crumb.entry.clone(), loading } },
             if !crumb.tabs.is_empty() {
                 div { class: "flex gap-1 p-1",
                     for tab in crumb.tabs {
