@@ -389,6 +389,7 @@ assert agent['AssociatedBundleIdentifiers']==[info['CFBundleIdentifier']]
 signs=[__import__('json').loads(line) for line in pathlib.Path(sys.argv[4]).read_text().splitlines()]
 assert any('--identifier' in args and namespace+'.cli' in args and str(bundle/'Contents/MacOS/vmux') in args for args in signs)
 assert any(str(bundle/'Contents/Frameworks/lib-fixture.dylib') in args for args in signs)
+assert any(str(bundle/'Contents/Library/LoginItems'/(name+' Service.app')) in args for args in signs)
 "#).arg(bundle).arg(name).arg(namespace).arg(project.root().join("sign.jsonl")).output().unwrap();
             assert!(
                 output.status.success(),
