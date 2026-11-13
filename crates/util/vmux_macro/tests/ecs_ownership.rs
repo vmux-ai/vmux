@@ -4,6 +4,7 @@ use std::process::Command;
 
 use quote::ToTokens;
 use serde::{Deserialize, Serialize};
+use syn::parse::Parser;
 use syn::visit::{self, Visit};
 use syn::{Attribute, Item, Type};
 
@@ -202,6 +203,39 @@ fn codec_boundaries_use_their_declared_canonical_endpoint() {
         boundary.output = format!("ECS: {}", inventory.key("struct:Theme"));
     }
     assert!(!policy.audit(&inventory).is_empty());
+}
+
+#[test]
+fn path_overridden_module_exports_cannot_establish_standard_type_bindings() {
+    for attribute in [
+        "#[path=\"implementation.rs\"]",
+        "#[cfg_attr(target_os=\"linux\",path=\"implementation.rs\")]",
+        "#[cfg_attr(feature=\"host\",cfg_attr(target_os=\"linux\",path=\"implementation.rs\"))]",
+    ] {
+        let mut inventory = Inventory::default();
+        inventory.source("crates/sample/src/lib.rs", &format!("{attribute} mod adapter; use adapter::*; #[derive(Message)] struct Completed {{ result: std::result::Result<u64,String> }} struct Root; impl Plugin for Root {{ fn build(&self, app: &mut App) {{ app.add_message::<Completed>(); }} }}"));
+        inventory.source("crates/sample/src/adapter.rs", "");
+        inventory.source(
+            "crates/sample/src/implementation.rs",
+            "pub mod std { pub mod result { pub struct Result<T,E> { value:T,error:E } } }",
+        );
+        inventory.resolve_usage();
+        let entry = &inventory.entries[&inventory.key("struct:Completed")];
+        assert!(!inventory.canonical(entry, &Policy::default(), &mut BTreeSet::new()));
+    }
+}
+
+#[test]
+fn module_directory_exports_keep_their_logical_namespace() {
+    let mut inventory = Inventory::default();
+    inventory.source("crates/sample/src/lib.rs", "mod adapter; use adapter::*; #[derive(Message)] struct Completed { result: std::result::Result<u64,String> } struct Root; impl Plugin for Root { fn build(&self, app: &mut App) { app.add_message::<Completed>(); } }");
+    inventory.source(
+        "crates/sample/src/adapter/mod.rs",
+        "pub mod std { pub mod result { pub struct Result<T,E> { value:T,error:E } } }",
+    );
+    inventory.resolve_usage();
+    let entry = &inventory.entries[&inventory.key("struct:Completed")];
+    assert!(!inventory.canonical(entry, &Policy::default(), &mut BTreeSet::new()));
 }
 
 #[test]
@@ -1079,7 +1113,7 @@ impl Inventory {
             return None;
         }
         let imports = self.imports.get(namespace)?;
-        if imports.ambiguous.contains(name) {
+        if imports.ambiguous.contains(name) || imports.opaque_modules.contains(name) {
             return None;
         }
         if imports.modules.contains(name) {
@@ -1262,7 +1296,7 @@ impl Namespace {
             module.push(package);
             for part in &parts[source + 1..] {
                 let name = part.trim_end_matches(".rs");
-                if !matches!(name, "lib" | "main") {
+                if !matches!(name, "lib" | "main" | "mod") {
                     module.push(name.into());
                 }
             }
@@ -1284,6 +1318,7 @@ struct Imports {
     ambiguous: BTreeSet<String>,
     globs: BTreeSet<String>,
     modules: BTreeSet<String>,
+    opaque_modules: BTreeSet<String>,
 }
 
 impl Imports {
@@ -1346,6 +1381,28 @@ impl Imports {
 }
 
 impl Declarations<'_> {
+    fn path_override(meta: &syn::Meta) -> bool {
+        if meta.path().is_ident("path") {
+            return true;
+        }
+        let syn::Meta::List(list) = meta else {
+            return false;
+        };
+        if !list.path.is_ident("cfg_attr") {
+            return false;
+        }
+        let parser = syn::punctuated::Punctuated::<syn::Meta, syn::Token![,]>::parse_terminated;
+        let Ok(attributes) = parser.parse2(list.tokens.clone()) else {
+            return true;
+        };
+        for attribute in attributes.iter().skip(1) {
+            if Self::path_override(attribute) {
+                return true;
+            }
+        }
+        false
+    }
+
     fn add(
         &mut self,
         name: String,
@@ -1639,6 +1696,19 @@ impl<'ast> Visit<'ast> for Declarations<'_> {
                 return;
             }
             Item::Mod(value) => {
+                if value.content.is_none()
+                    && value
+                        .attrs
+                        .iter()
+                        .any(|attribute| Self::path_override(&attribute.meta))
+                {
+                    self.inventory
+                        .imports
+                        .entry(Namespace::of(self.path, &self.scope).0)
+                        .or_default()
+                        .opaque_modules
+                        .insert(value.ident.to_string());
+                }
                 self.inventory
                     .imports
                     .entry(Namespace::of(self.path, &self.scope).0)
