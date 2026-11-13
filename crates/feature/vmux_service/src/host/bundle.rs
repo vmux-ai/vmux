@@ -29,4 +29,4 @@ impl TryFrom<&Path> for AppBundle {
     }
 }
 
-pub const EMBEDDED_AGENT_PLIST: &str = "ai.vmux.service.plist";
+pub const EMBEDDED_AGENT_PLIST: &str = vmux_profile::Product::agent_plist();

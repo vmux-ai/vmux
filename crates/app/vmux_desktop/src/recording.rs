@@ -178,6 +178,13 @@ fn start(
     };
     let default_dir = CaptureOutput::directory(&settings);
     for req in start_reader.read() {
+        if !vmux_profile::Product::screen() {
+            start_responses.write(RecordStartResponse {
+                request_id: req.request_id,
+                result: Err("Screen recording is disabled by this application.".into()),
+            });
+            continue;
+        }
         let capture = match source.resolve(req.pane.as_deref()) {
             Ok(capture) => capture,
             Err(message) => {

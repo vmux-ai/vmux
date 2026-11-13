@@ -577,7 +577,7 @@ menu-browser = Browser
 menu-service = Service
 menu-bookmark = Bookmark
 menu-edit = Edit
-menu-close-vmux = Close Vmux
+menu-close-product = Close { $product }
 
 layout-knowledge = Knowledge
 layout-projects = Projects
@@ -1137,3 +1137,18 @@ agent-incoming-message = Agent message
 schema-focus-follows-mouse = Focus follows mouse
 
 terminal-directory-input-pending = Finish or cancel the current command or input before changing directories.
+
+media-permission-title = Allow { $host } to use your { $devices }?
+media-permission-remember = { $product } will remember your choice for this site.
+media-permission-allow = Allow
+media-permission-block = Block
+media-permission-devices = { $kind ->
+   *[0] media
+    [1] camera
+    [2] microphone
+    [3] camera and microphone
+    [4] screen
+    [5] camera and screen
+    [6] microphone and screen
+    [7] camera, microphone, and screen
+    }

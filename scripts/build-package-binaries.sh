@@ -3,6 +3,8 @@ set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 source "$ROOT/scripts/cargo-target-paths.sh"
+source "$ROOT/scripts/product-host.sh"
+vmux_host_read "$ROOT"
 
 release_dir="$(vmux_cargo_profile_dir "$ROOT" release)"
 helper_dir="$(vmux_cargo_profile_dir "$ROOT" cef-helper)"
@@ -14,4 +16,4 @@ cd "$ROOT"
 "$ROOT/scripts/verify-web-bundle.sh"
 "$ROOT/scripts/cargo-with-cef-cache.sh" build -p bevy_cef_debug_render_process --profile cef-helper
 cp -f "$helper_dir/bevy_cef_debug_render_process" "$release_dir/bevy_cef_debug_render_process"
-cp -f "$release_dir/vmux_service" "$release_dir/Vmux Service"
+cp -f "$release_dir/vmux_service" "$release_dir/$VMUX_HOST_SERVICE_NAME"

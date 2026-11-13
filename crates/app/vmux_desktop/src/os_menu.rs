@@ -30,7 +30,7 @@ use vmux_layout::tab::TabClosed;
 use vmux_page::menu::{OsContextMenu, OsMenuSeparator};
 use vmux_page::menu::{OsMenuEntry, OsMenuSelection, OsMenuSet, TransientOsMenuEntry};
 use vmux_setting::{AppSettings, SettingsLoadSet};
-use vmux_ui::i18n::{DEFAULT_LOCALE, Locale};
+use vmux_ui::i18n::{DEFAULT_LOCALE, Locale, TranslationValue};
 
 pub struct OsMenuPlugin;
 
@@ -270,7 +270,13 @@ fn localize_menu_items(
         let id = item.id().0.clone();
         if let Some(menu_item) = item.as_menuitem() {
             if id == "app_quit" {
-                menu_item.set_text(locale.translate("menu-close-vmux"));
+                menu_item.set_text(locale.translate_with(
+                    "menu-close-product",
+                    &[(
+                        "product",
+                        TranslationValue::String(vmux_profile::Product::name()),
+                    )],
+                ));
             } else if let Some(definition) =
                 definitions.iter().find(|definition| definition.id == id)
             {
@@ -355,7 +361,13 @@ fn append_application_menu(menu: &Menu) -> Result<(), muda::Error> {
     let submenu = Submenu::new(app_name, true);
     let quit = MenuItem::with_id(
         "app_quit",
-        "Close Vmux",
+        Locale::from(DEFAULT_LOCALE).translate_with(
+            "menu-close-product",
+            &[(
+                "product",
+                TranslationValue::String(vmux_profile::Product::name()),
+            )],
+        ),
         true,
         Some("super+q".parse().unwrap()),
     );

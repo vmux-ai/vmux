@@ -9,6 +9,7 @@ repository.workspace = true
 
 [features]
 default = []
+host = ["dep:vmux_profile"]
 contracts = ["ecs", "vmux_ecs/contracts", "vmux_project?/contracts", "vmux_layout?/contracts"]
 conformance = ["extension", "vmux_extension/conformance"]
 cli = [
@@ -59,6 +60,7 @@ desktop = [
 mobile = ["session", "dep:vmux_start", "dep:vmux_team"]
 service-daemon = ["daemon"]
 daemon = [
+    "host",
     "ecs",
     "vmux_ecs/host",
     "dep:tokio",
@@ -66,7 +68,6 @@ daemon = [
     "dep:tracing-appender",
     "dep:tracing-subscriber",
     "dep:vmux_acp",
-    "dep:vmux_profile",
     "dep:vmux_service",
     "dep:vmux_transport",
     "vmux_acp/service",

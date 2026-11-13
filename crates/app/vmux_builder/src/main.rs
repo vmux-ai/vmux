@@ -7,6 +7,7 @@ use bootstrap::Bootstrap;
 use ci_scope::Scope;
 #[cfg(unix)]
 use consumer::Consumer;
+use environment::Environment;
 #[cfg(unix)]
 use execution::Failure;
 use policy::Policy;
@@ -31,6 +32,8 @@ mod execution;
 mod mac_package;
 mod policy;
 mod processes;
+#[path = "../../../build_product.rs"]
+pub mod product;
 mod profile;
 #[cfg(unix)]
 mod runner;
@@ -118,7 +121,8 @@ impl Arguments {
                 }
                 Some(
                     value @ ("check" | "preflight" | "finish" | "status" | "clean" | "inherited"
-                    | "open-local" | "open-release" | "--test" | "--print-bin"),
+                    | "open-local" | "open-release" | "host-config" | "--test"
+                    | "--print-bin"),
                 ) => {
                     if mode.replace(value.to_owned()).is_some() {
                         return Err("Specify one storage mode".into());
@@ -138,6 +142,12 @@ impl Arguments {
     }
 
     fn run(self) -> Result<i32> {
+        if self.mode == "host-config" {
+            let mut environment = Environment::current();
+            environment.load(&self.root)?;
+            println!("{}", environment.product(&self.root)?.json());
+            return Ok(0);
+        }
         if self.mode == "--print-bin" {
             println!("{}", std::env::current_exe()?.display());
             return Ok(0);

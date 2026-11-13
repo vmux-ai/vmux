@@ -858,7 +858,7 @@ command-group-open = Openen
 command-group-view = Weergave
 command-group-bar = Balk
 
-menu-close-vmux = Vmux sluiten
+menu-close-product = { $product } sluiten
 
 agents-terminal-coding-agent = Terminalgebaseerde codingagent
 knowledge-search = Zoek kennis
@@ -1149,3 +1149,18 @@ agent-incoming-message = Agentbericht
 schema-focus-follows-mouse = Focus volgt de muis
 
 terminal-directory-input-pending = Voltooi of annuleer de huidige opdracht of invoer voordat u van map wisselt.
+
+media-permission-title = Mag { $host } { $devices } gebruiken?
+media-permission-remember = { $product } onthoudt uw keuze voor deze site.
+media-permission-allow = Toestaan
+media-permission-block = Blokkeren
+media-permission-devices = { $kind ->
+   *[0] media
+    [1] de camera
+    [2] de microfoon
+    [3] de camera en microfoon
+    [4] het scherm
+    [5] de camera en het scherm
+    [6] de microfoon en het scherm
+    [7] de camera, microfoon en het scherm
+    }

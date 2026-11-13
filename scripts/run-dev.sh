@@ -3,6 +3,8 @@ set -euo pipefail
 
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)"
 source "$root/scripts/cargo-target-paths.sh"
+source "$root/scripts/product-host.sh"
+vmux_host_read "$root"
 debug_dir="$(vmux_cargo_profile_dir "$root" debug)"
 stamp="$debug_dir/.vmux-dev-ready"
 
@@ -10,7 +12,7 @@ if [[ "${1:-}" != stop ]]; then
     ready=false
     if [[ -f "$stamp" && "$(head -n 1 "$stamp")" == "$root" ]] \
         && (tail -n +2 "$stamp" | shasum -a 256 --check --status) \
-        && { [[ "$(uname -s)" != Darwin ]] || [[ -d "$debug_dir/Vmux Dev.app" ]]; }; then
+        && { [[ "$(uname -s)" != Darwin ]] || [[ -d "$debug_dir/$VMUX_HOST_NAME Dev.app" ]]; }; then
         ready=true
     fi
     if [[ "$ready" != true ]]; then
@@ -33,7 +35,7 @@ if [[ "${1:-}" == stop ]]; then
         VMUX_PROFILE="${VMUX_PROFILE:-personal}" "$debug_dir/vmux" service stop
 fi
 if [[ "$(uname -s)" == Darwin ]]; then
-    app="$debug_dir/Vmux Dev.app"
+    app="$debug_dir/$VMUX_HOST_NAME Dev.app"
     [[ -d "$app" ]] || { echo "Debug app missing. Run make build-dev." >&2; exit 1; }
     codesign --verify --strict "$app"
     launch_args=(--env "VMUX_PROFILE=${VMUX_PROFILE:-personal}" --env "VMUX_TEST=${VMUX_TEST:-}")

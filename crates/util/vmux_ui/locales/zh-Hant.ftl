@@ -855,7 +855,7 @@ command-group-open = 開啟
 command-group-view = 檢視
 command-group-bar = 工具列
 
-menu-close-vmux = 關閉 Vmux
+menu-close-product = 關閉 { $product }
 
 agents-terminal-coding-agent = 終端機型程式碼代理
 knowledge-search = 搜尋知識
@@ -1146,3 +1146,18 @@ agent-incoming-message = 代理訊息
 schema-focus-follows-mouse = 焦點跟隨滑鼠
 
 terminal-directory-input-pending = 變更目錄前，請完成或取消目前的命令或輸入。
+
+media-permission-title = 允許 { $host } 使用您的{ $devices }嗎？
+media-permission-remember = { $product } 會記住您對此網站的選擇。
+media-permission-allow = 允許
+media-permission-block = 封鎖
+media-permission-devices = { $kind ->
+   *[0] 媒體裝置
+    [1] 相機
+    [2] 麥克風
+    [3] 相機和麥克風
+    [4] 螢幕
+    [5] 相機和螢幕
+    [6] 麥克風和螢幕
+    [7] 相機、麥克風和螢幕
+    }

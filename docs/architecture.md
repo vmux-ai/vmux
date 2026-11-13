@@ -81,8 +81,21 @@ Profiles select features; they do not choose a runner or create IO handles. Host
 with Bevy's `App::set_runner`, provide their own sockets/runtime/wake inputs, and finish and
 clean up plugins before the first update. The daemon retains its wake-driven runner and existing
 shutdown schedules; CLI retains its argument parsing and result-driven exit. Product identity,
-paths, packaging, and platform support remain host concerns. Future Windows, web, game, and
-spatial profiles are not supported presets.
+paths, packaging, and platform support remain host concerns. The optional `vmux_app::host`
+namespace exposes Profile paths and immutable `Product` metadata without installing a renderer.
+`VMUX_HOST_NAME` and `VMUX_HOST_NAMESPACE` select a distinct product together; the Profile
+build adapter validates names and assets and compiles the accepted identity into the host.
+Data/configuration paths, service and credential namespaces, native display names, media
+capability limits, and update endpoints consume that identity. Custom hosts default to no
+media capabilities and no Vmux update endpoints. Per-origin permissions and update checks
+stay with their existing ECS owners; product metadata adds no runtime Resources.
+Packaging consumes the same build metadata; host binaries must be built and packaged from
+the same product inputs. Custom data/configuration and runtime paths derive from the namespace,
+even when two hosts share a display name. Changing product identity never imports Vmux data or
+credentials. `examples/host-consumer` exercises the explicit host facade without a renderer;
+its native credential calls retain the desktop-process access restriction. The default SDK
+consumer continues to omit Profile. Future Windows, web, game, and spatial profiles are not
+supported presets.
 
 A feature plugin never installs a sibling feature. Shared composition belongs in `vmux_app`.
 Plugin boundaries represent independently configurable, reusable, platform-gated, or

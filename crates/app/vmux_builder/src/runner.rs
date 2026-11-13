@@ -131,6 +131,10 @@ impl Runner {
     }
 
     pub fn open(&self, profile: &str) -> Result<()> {
+        let mut environment = Environment::current();
+        environment.load(&self.root)?;
+        let product = environment.product(&self.root)?;
+        let product_name = product.value("VMUX_HOST_NAME");
         let mut release = self.target.clone();
         if let Some(target) = std::env::var_os("CARGO_BUILD_TARGET")
             && !target.is_empty()
@@ -147,9 +151,12 @@ impl Runner {
             if !output.status.success() {
                 return Err("Cannot identify local bundle".into());
             }
-            format!("Vmux ({}).app", String::from_utf8(output.stdout)?.trim())
+            format!(
+                "{product_name} ({}).app",
+                String::from_utf8(output.stdout)?.trim()
+            )
         } else {
-            String::from("Vmux.app")
+            format!("{product_name}.app")
         };
         let mut command = Command::new("open");
         command.arg(release.join(name)).current_dir(&self.root);

@@ -1,0 +1,18 @@
+[package]
+name = "host-consumer"
+version = "0.1.0"
+edition = "2024"
+publish = false
+autotests = false
+
+[workspace]
+
+[[test]]
+name = "host"
+path = "tests/host.rs"
+
+[dependencies]
+vmux_app = { path = "../../crates/util/vmux_app", features = ["host"] }
+
+[dev-dependencies]
+tempfile = "3"

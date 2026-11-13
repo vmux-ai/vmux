@@ -11,6 +11,11 @@ fn host_bootstrap_is_cached_and_rebuilds_after_source_changes() {
     let project = Project::create();
     let sources = project.root().join("crates/app/vmux_builder/src");
     fs::create_dir_all(&sources).unwrap();
+    fs::copy(
+        project.repo().join("crates/build_product.rs"),
+        project.root().join("crates/build_product.rs"),
+    )
+    .unwrap();
     for entry in fs::read_dir(project.repo().join("crates/app/vmux_builder/src")).unwrap() {
         let entry = entry.unwrap();
         fs::copy(entry.path(), sources.join(entry.file_name())).unwrap();
@@ -24,12 +29,18 @@ exec "$REAL_RUSTC" "$@"
     );
     let compiler = std::env::var_os("RUSTC").unwrap_or_else(|| "rustc".into());
     let log = project.root().join("compiler.log");
-    for expected in [1, 1, 2] {
+    for expected in [1, 1, 2, 3] {
         if expected == 2 {
             let main = sources.join("main.rs");
             let mut text = fs::read_to_string(&main).unwrap();
             text.push('\n');
             fs::write(main, text).unwrap();
+        }
+        if expected == 3 {
+            let metadata = project.root().join("crates/build_product.rs");
+            let mut text = fs::read_to_string(&metadata).unwrap();
+            text.push('\n');
+            fs::write(metadata, text).unwrap();
         }
         let mut command = project.command("./scripts/vmux-builder");
         command

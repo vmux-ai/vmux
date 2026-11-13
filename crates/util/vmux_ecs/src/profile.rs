@@ -5,6 +5,7 @@ use bevy::ecs::system::SystemParam;
 use bevy::prelude::*;
 use bevy::tasks::{IoTaskPool, Task, futures_lite::future};
 
+use vmux_profile::mcp_credentials::{McpCredentialAccess, McpCredentialStorage};
 pub use vmux_profile::*;
 
 pub struct ProfilePlugin;
@@ -33,14 +34,14 @@ fn migrate(jobs: Query<(Entity, &ProfileMigrationJob)>, mut commands: Commands) 
     }
 }
 
-fn spawn(mut commands: Commands) {
+fn spawn(mut commands: bevy::prelude::Commands) {
     let profile = Profile::current();
     let paths = ProfilePaths::current();
     let catalog = ProfileCatalog(ProfileStore::current());
     let label = catalog.0.active_label();
     let credentials = McpCredentials {
-        access: mcp_credentials::McpCredentialAccess::default(),
-        storage: mcp_credentials::McpCredentialStorage::at(profile.clone(), paths.clone()),
+        access: McpCredentialAccess::default(),
+        storage: McpCredentialStorage::at(profile.clone(), paths.clone()),
     };
     let mut active = commands.spawn((
         Name::new(label),
@@ -95,8 +96,8 @@ pub struct ProfileCatalog(pub ProfileStore);
 
 #[derive(Component, Clone, Debug)]
 pub struct McpCredentials {
-    pub access: mcp_credentials::McpCredentialAccess,
-    pub storage: mcp_credentials::McpCredentialStorage,
+    pub access: McpCredentialAccess,
+    pub storage: McpCredentialStorage,
 }
 
 #[derive(SystemParam)]

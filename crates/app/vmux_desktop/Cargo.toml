@@ -61,7 +61,7 @@ recording = [
     "objc2-foundation/NSURL",
 ]
 screenshots = ["screen-capture-backend"]
-tray = ["dep:tray-icon"]
+tray = ["dep:tray-icon", "dep:image"]
 updater = ["dep:cargo-packager-updater", "dep:semver"]
 
 [[bin]]
@@ -76,6 +76,7 @@ cargo-packager-updater = { version = "0.2", optional = true }
 chrono = { workspace = true }
 crossbeam-channel = { workspace = true }
 libc = "0.2"
+image = { version = "0.25", default-features = false, features = ["png"], optional = true }
 muda = "0.19"
 notify = { workspace = true }
 rfd = { workspace = true }
@@ -117,7 +118,6 @@ vmux_api = { path = "../../util/vmux_api" }
 [target.'cfg(target_os = "macos")'.dependencies]
 color_quant = { version = "2", optional = true }
 gif = { version = "0.14", optional = true }
-image = { version = "0.25", default-features = false, features = ["png"], optional = true }
 objc2 = "0.6"
 objc2-app-kit = { version = "0.3", default-features = false, features = [
     "std",

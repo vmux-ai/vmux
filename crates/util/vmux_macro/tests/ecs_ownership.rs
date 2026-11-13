@@ -757,6 +757,59 @@ fn boundary_records_require_current_code_and_a_real_lifetime() {
 }
 
 #[test]
+fn shared_product_build_adapters_do_not_approve_runtime_configuration_models() {
+    for (path, accepted) in [
+        ("crates/build_product.rs", true),
+        ("crates/build_cfg_product.rs", true),
+        ("crates/util/vmux_profile/src/product.rs", false),
+        ("crates/feature/vmux_setting/src/product.rs", false),
+    ] {
+        let mut inventory = Inventory::default();
+        inventory.source(
+            path,
+            "pub struct Metadata; impl Metadata { pub fn read() {} }",
+        );
+        inventory.resolve_usage();
+        let mut policy = Policy::default();
+        policy
+            .boundaries
+            .push(Boundary::fixture(&inventory, "struct:Metadata"));
+        policy
+            .boundaries
+            .push(Boundary::fixture(&inventory, "impl:Metadata"));
+        assert_eq!(policy.audit(&inventory).is_empty(), accepted, "{path}");
+    }
+}
+
+#[test]
+fn bevy_window_reexports_bind_the_pinned_component_without_accepting_shadow_modules() {
+    for (prefix, allowed) in [
+        ("", true),
+        ("mod bevy { pub mod window { pub struct Window; } }", false),
+        (
+            "mod other { pub mod window { pub struct Window; } } use other as bevy;",
+            false,
+        ),
+    ] {
+        let mut inventory = Inventory::default();
+        inventory.source(
+            "patches/bevy_window-0.19.0/src/lib.rs",
+            "pub mod window; pub use window::Window;",
+        );
+        inventory.source(
+            "patches/bevy_window-0.19.0/src/window.rs",
+            "#[derive(Component)] pub struct Window;",
+        );
+        inventory.source("crates/app/example/src/lib.rs", &format!("{prefix} use bevy::window::Window as NativeWindow; pub struct Factory; impl Factory {{ pub fn create() -> NativeWindow {{ NativeWindow }} }} fn inspect(windows: Query<&NativeWindow>) {{}} struct Root; impl Plugin for Root {{ fn build(&self, app:&mut App) {{ app.add_systems(Update, inspect); }} }}"));
+        inventory.resolve_usage();
+        let mut boundary = Boundary::fixture(&inventory, "impl:Factory");
+        boundary.input = "external: native window metadata".into();
+        boundary.output = "ECS: patches/bevy_window-0.19.0/src/window.rs||struct:Window".into();
+        assert_eq!(boundary.references(&inventory), allowed, "{prefix}");
+    }
+}
+
+#[test]
 fn legacy_revision_cannot_be_moved_to_refresh_domain_debt() {
     let policy = Policy {
         revision: "0000000000000000000000000000000000000000".into(),
@@ -2391,6 +2444,8 @@ impl Boundary {
                     | "crates/build_cfg_git.rs"
                     | "crates/build_git_env.rs"
                     | "crates/build_platform_cfg.rs"
+                    | "crates/build_product.rs"
+                    | "crates/build_cfg_product.rs"
             )
     }
 
@@ -4104,6 +4159,12 @@ impl Inventory {
     ) -> Option<&Declaration> {
         let parts = reference.split("::").collect::<Vec<_>>();
         let first = parts.first().copied()?;
+        if first == "bevy"
+            && parts.get(1) == Some(&"window")
+            && !self.local_binding(namespace, "bevy")
+        {
+            return self.resolve("bevy_window", &parts[2..].join("::"), visiting);
+        }
         if first == "crate" {
             let root = namespace.split("::").next()?;
             return self.resolve(root, &parts[1..].join("::"), visiting);

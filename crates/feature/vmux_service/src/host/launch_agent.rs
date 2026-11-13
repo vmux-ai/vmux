@@ -1,5 +1,6 @@
 use std::path::PathBuf;
 
+use vmux_profile::Product;
 use vmux_profile::ServicePaths;
 use vmux_profile::git_hash;
 
@@ -24,10 +25,11 @@ impl LaunchAgent {
     }
 
     pub fn label(&self) -> String {
+        let product = Product::service_id();
         match self.profile.as_str() {
-            "release" => "ai.vmux.service".to_string(),
-            "local" => format!("ai.vmux.service.{}", git_hash()),
-            profile => format!("ai.vmux.service.{profile}"),
+            "release" => product.into(),
+            "local" => format!("{product}.{}", git_hash()),
+            profile => format!("{product}.{profile}"),
         }
     }
 

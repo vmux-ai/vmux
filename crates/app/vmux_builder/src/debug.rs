@@ -28,13 +28,17 @@ impl Debug {
     }
 
     pub fn prepare(&mut self, features: &[OsString]) -> Result<()> {
+        self.environment.load(&self.root)?;
+        self.environment.set("VMUX_BUILD_PROFILE", "dev");
         let debug = self.directory("debug");
         let stamp = debug.join(".vmux-dev-ready");
-        let alias = self.directory("release").join("Vmux Dev.app");
         fs::create_dir_all(&debug)?;
         if stamp.exists() {
             fs::remove_file(&stamp)?;
         }
+        let product = self.environment.product(&self.root)?;
+        let bundle = format!("{} Dev.app", product.value("VMUX_HOST_NAME"));
+        let alias = self.directory("release").join(&bundle);
         if fs::symlink_metadata(&alias).is_ok_and(|metadata| metadata.is_symlink()) {
             fs::remove_file(&alias)?;
         }
@@ -72,13 +76,14 @@ impl Debug {
             hashes.push_str(&self.checksum(&path)?);
         }
         if cfg!(target_os = "macos") {
-            hashes
-                .push_str(&self.checksum(&debug.join("Vmux Dev.app/Contents/MacOS/vmux_desktop"))?);
+            hashes.push_str(
+                &self.checksum(&debug.join(&bundle).join("Contents/MacOS/vmux_desktop"))?,
+            );
             fs::create_dir_all(alias.parent().ok_or("Missing release directory")?)?;
             if alias.exists() {
                 return Err("Cannot publish debug app over an existing bundle".into());
             }
-            symlink(debug.join("Vmux Dev.app"), &alias)?;
+            symlink(debug.join(&bundle), &alias)?;
         }
         let temporary = stamp.with_extension("tmp");
         fs::write(&temporary, hashes)?;

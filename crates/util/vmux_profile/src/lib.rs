@@ -1,11 +1,13 @@
 use std::path::{Path, PathBuf};
 
 pub use lease::DataLease;
+pub use product::Product;
 pub use profile_driver::{ProfileMigration, ProfileRecord, ProfileStore};
 pub use service::{RemotePaths, ServicePaths};
 
 mod lease;
 pub mod mcp_credentials;
+mod product;
 mod profile_driver;
 pub mod safe_storage;
 mod service;
@@ -144,7 +146,7 @@ impl ProfilePaths {
         #[cfg(not(target_os = "macos"))]
         let base = std::env::temp_dir();
         let test = SessionEnvironment::is_test();
-        let mut data = base.join("Vmux");
+        let mut data = base.join(Product::data_name());
         if let Some(override_dir) = std::env::var_os("VMUX_DATA_DIR")
             && !override_dir.is_empty()
         {
@@ -183,7 +185,7 @@ impl ProfilePaths {
     }
 
     pub fn config(&self) -> PathBuf {
-        home_dir().join(".vmux")
+        home_dir().join(Product::config_name())
     }
 
     pub fn projects(&self) -> PathBuf {
