@@ -25,6 +25,14 @@ case "$PROFILE" in
         ;;
 esac
 
+if [[ "${VMUX_CI_FAST_PACKAGE:-}" == "1" ]]; then
+    if [[ "$PROFILE" != "release" || "${GITHUB_EVENT_NAME:-}" != "pull_request" || "${IS_RELEASE_PR:-}" != "0" ]]; then
+        echo "Fast package mode is restricted to non-release pull requests" >&2
+        exit 1
+    fi
+    export SKIP_NOTARIZE=1
+fi
+
 echo "==> Packaging profile: $PROFILE"
 echo "    Product name: $PRODUCT_NAME"
 echo "    Bundle ID:    $BUNDLE_ID"
@@ -61,21 +69,23 @@ packager_args=(packager --release)
 if [[ -n "${CARGO_BUILD_TARGET:-}" ]]; then
     packager_args+=(--target "$CARGO_BUILD_TARGET")
 fi
-if [[ "$PROFILE" == "local" ]]; then
+if [[ "$PROFILE" == "local" || "${VMUX_CI_FAST_PACKAGE:-}" == "1" ]]; then
     packager_args+=(--formats app)
 fi
 VMUX_BUILD_PROFILE="$PROFILE" "$ROOT/scripts/cargo-with-cef-cache.sh" "${packager_args[@]}"
 
-if [[ "$PROFILE" == "local" && -d "$VMUX_APP_BUNDLE" ]]; then
-    "$ROOT/scripts/build-title.sh" local "$ROOT" "$VMUX_APP_BUNDLE/Contents/Info.plist" >/dev/null
-    echo "==> Injecting CEF into .app (local build)"
+if [[ ( "$PROFILE" == "local" || "${VMUX_CI_FAST_PACKAGE:-}" == "1" ) && -d "$VMUX_APP_BUNDLE" ]]; then
+    if [[ "$PROFILE" == "local" ]]; then
+        "$ROOT/scripts/build-title.sh" local "$ROOT" "$VMUX_APP_BUNDLE/Contents/Info.plist" >/dev/null
+    fi
+    echo "==> Injecting CEF into .app"
     CARGO_PACKAGER_FORMAT=dmg bash "$ROOT/scripts/inject-cef.sh"
 
-    echo "==> Embedding launchd plist (local build)"
-    VMUX_GIT_HASH="$SHA" "$ROOT/scripts/embed-launch-agent-plist.sh"
+    echo "==> Embedding launchd plist"
+    VMUX_GIT_HASH="${SHA:-}" "$ROOT/scripts/embed-launch-agent-plist.sh"
 
-    echo "==> Signing + notarizing local build"
-    APP_BUNDLE="$VMUX_APP_BUNDLE" VMUX_GIT_HASH="$SHA" "$ROOT/scripts/sign-and-notarize.sh"
+    echo "==> Signing app bundle"
+    APP_BUNDLE="$VMUX_APP_BUNDLE" VMUX_GIT_HASH="${SHA:-}" "$ROOT/scripts/sign-and-notarize.sh"
 fi
 
 echo "==> Packaging complete: $VMUX_APP_BUNDLE"

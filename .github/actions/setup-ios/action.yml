@@ -22,7 +22,7 @@ runs:
     - uses: Swatinem/rust-cache@v2
       with:
         shared-key: ${{ inputs.cache-key }}
-        save-if: ${{ github.ref == 'refs/heads/main' }}
+        save-if: ${{ github.ref == 'refs/heads/main' || github.event_name == 'pull_request' }}
 
     - name: Cache tailwindcss
       if: inputs.tailwind == 'true'
