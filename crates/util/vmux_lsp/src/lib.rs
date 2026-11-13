@@ -14,10 +14,14 @@ use vmux_ecs::{
     OperationTargetRevision,
 };
 
+pub use diagnostics::{Diagnostics, DiagnosticsInbox, DiagnosticsSender, ReceivedDiagnostics};
+pub use document::{ChangeDocument, CloseDocument, DocumentApplied, DocumentFailure, OpenDocument};
 pub use server::{
     LaunchServer, RestartServer, ServerCompleted, ServerFailure, StartServer, StopServer, Stopped,
 };
 
+mod diagnostics;
+mod document;
 mod server;
 
 pub struct LspPlugin;
@@ -27,19 +31,23 @@ impl Plugin for LspPlugin {
         if !app.is_plugin_added::<OperationPlugin>() {
             app.add_plugins(OperationPlugin);
         }
-        app.add_plugins(server::ServersPlugin)
-            .init_resource::<RequestPolicy>()
-            .configure_sets(
-                Update,
-                (
-                    Set::Servers,
-                    Set::Documents,
-                    Set::Diagnostics,
-                    Set::Requests,
-                )
-                    .chain(),
+        app.add_plugins((
+            server::ServersPlugin,
+            document::DocumentsPlugin,
+            diagnostics::DiagnosticsPlugin,
+        ))
+        .init_resource::<RequestPolicy>()
+        .configure_sets(
+            Update,
+            (
+                Set::Servers,
+                Set::Documents,
+                Set::Diagnostics,
+                Set::Requests,
             )
-            .add_systems(Update, (cancel, collect).chain().in_set(Set::Requests));
+                .chain(),
+        )
+        .add_systems(Update, (cancel, collect).chain().in_set(Set::Requests));
     }
 }
 
@@ -116,7 +124,15 @@ fn bind(mut world: DeferredWorld, context: HookContext) {
 #[derive(Component, Clone, Debug, PartialEq, Eq)]
 pub struct DocumentPath(pub PathBuf);
 
+impl DocumentPath {
+    pub fn uri(&self) -> Option<String> {
+        url::Url::from_file_path(&self.0).ok().map(String::from)
+    }
+}
+
 #[derive(Component, Clone, Copy)]
+#[require(BindingGeneration)]
+#[component(on_insert = renew)]
 #[relationship(relationship_target = DocumentViews)]
 pub struct DocumentBinding(Entity);
 
@@ -133,6 +149,22 @@ impl DocumentBinding {
 #[derive(Component)]
 #[relationship_target(relationship = DocumentBinding)]
 pub struct DocumentViews(Vec<Entity>);
+
+#[derive(Component)]
+struct BindingGeneration(uuid::Uuid);
+
+impl Default for BindingGeneration {
+    fn default() -> Self {
+        Self(uuid::Uuid::new_v4())
+    }
+}
+
+fn renew(mut world: DeferredWorld, context: HookContext) {
+    world
+        .get_mut::<BindingGeneration>(context.entity)
+        .unwrap()
+        .0 = uuid::Uuid::new_v4();
+}
 
 #[derive(Component, Clone, Copy)]
 #[relationship(relationship_target = ServerUsers)]
@@ -311,17 +343,19 @@ pub struct Stamp {
     pub server: Entity,
     pub version: i32,
     pub transport: uuid::Uuid,
+    pub binding: uuid::Uuid,
 }
 
 impl Stamp {
     pub fn current(&self, owner: Entity, lookup: &Lookup) -> bool {
-        let Ok(binding) = lookup.bindings.get(owner) else {
+        let Ok((binding, generation)) = lookup.bindings.get(owner) else {
             return false;
         };
         let Ok((_, _, document, parent, connection)) = lookup.documents.get(self.document) else {
             return false;
         };
         binding.document() == self.document
+            && generation.0 == self.binding
             && document.version == self.version
             && parent.parent() == self.server
             && connection.0 == Some(self.transport)
@@ -347,13 +381,21 @@ pub struct Lookup<'w, 's> {
             &'static ChildOf,
             &'static DocumentConnection,
         ),
+        Without<document::Closed>,
     >,
-    bindings: Query<'w, 's, &'static DocumentBinding>,
+    bindings: Query<'w, 's, (&'static DocumentBinding, &'static BindingGeneration)>,
+    diagnostics: Query<'w, 's, &'static Diagnostics>,
 }
 
 impl Lookup<'_, '_> {
     pub fn server_current(&self, server: Entity) -> bool {
         self.servers.contains(server) && self.transports.contains(server)
+    }
+
+    pub fn diagnostics(&self, owner: Entity) -> Option<&Diagnostics> {
+        let (binding, _) = self.bindings.get(owner).ok()?;
+        let diagnostics = self.diagnostics.get(binding.document()).ok()?;
+        diagnostics.current(self).then_some(diagnostics)
     }
 
     pub fn server(&self, key: &ServerKey) -> Option<Entity> {
@@ -371,7 +413,8 @@ impl Lookup<'_, '_> {
     }
 
     pub fn document(&self, owner: Entity, path: &Path) -> Option<Stamp> {
-        let entity = self.bindings.get(owner).ok()?.document();
+        let (binding, generation) = self.bindings.get(owner).ok()?;
+        let entity = binding.document();
         let (_, candidate, document, parent, connection) = self.documents.get(entity).ok()?;
         if candidate.0 != path || !self.server_current(parent.parent()) {
             return None;
@@ -385,6 +428,7 @@ impl Lookup<'_, '_> {
             server: parent.parent(),
             version: document.version,
             transport: identity,
+            binding: generation.0,
         })
     }
 
@@ -572,6 +616,21 @@ mod tests {
         }
     }
 
+    impl DiagnosticsSender {
+        fn publish_fixture(&self, version: Option<i32>, message: &str) {
+            self.send(ReceivedDiagnostics {
+                path: "/shared.rs".into(),
+                diagnostics: vec![lsp_types::Diagnostic {
+                    message: message.into(),
+                    ..Default::default()
+                }],
+                version,
+                server: None,
+                transport: None,
+            });
+        }
+    }
+
     impl TransportIo for Probe {
         fn request(&self, method: &str, params: Value) -> WireReply {
             self.calls.lock().unwrap().push((method.into(), params));
@@ -607,6 +666,19 @@ mod tests {
     }
 
     impl Harness {
+        fn diagnostics(&mut self, root: usize) -> DiagnosticsSender {
+            let (sender, inbox) = DiagnosticsSender::channel();
+            self.app
+                .world_mut()
+                .spawn((Name::new("Diagnostics fixture"), inbox));
+            sender.scoped(self.servers[root]).with_transport(
+                self.app
+                    .world()
+                    .get::<Transport>(self.servers[root])
+                    .unwrap()
+                    .identity(),
+            )
+        }
         fn reopen(&mut self, root: usize, text: &str) {
             let owner = self.owners[root];
             if let Some(binding) = self.app.world().get::<DocumentBinding>(owner) {
@@ -687,12 +759,16 @@ mod tests {
         }
 
         fn request(&mut self, root: usize) -> Entity {
+            self.request_from(self.owners[root])
+        }
+
+        fn request_from(&mut self, owner: Entity) -> Entity {
             let mut state = bevy_ecs::system::SystemState::<Lookup>::new(self.app.world_mut());
             let request = state
                 .get_mut(self.app.world_mut())
                 .unwrap()
                 .request(
-                    self.owners[root],
+                    owner,
                     Path::new("/shared.rs"),
                     "textDocument/definition",
                     serde_json::json!({}),
@@ -700,6 +776,323 @@ mod tests {
                 .unwrap();
             self.app.world_mut().spawn(request.bundle()).id()
         }
+    }
+
+    #[test]
+    fn replacing_one_owner_binding_does_not_resurrect_pending_or_retained_requests() {
+        for retained in [false, true] {
+            let mut harness = Harness::new();
+            let owner = harness.owners[0];
+            let document = harness
+                .app
+                .world()
+                .get::<DocumentBinding>(owner)
+                .unwrap()
+                .document();
+            let shared_owner = harness
+                .app
+                .world_mut()
+                .spawn(DocumentBinding::new(document))
+                .id();
+            let previous = harness.request(0);
+            let shared = harness.request_from(shared_owner);
+            let other_root = harness.request(1);
+            if retained {
+                harness.probes[0].reply(serde_json::json!({"result": 42}));
+                harness.app.update();
+                assert!(harness.app.world().get::<Response>(previous).is_some());
+            }
+            harness
+                .app
+                .world_mut()
+                .entity_mut(owner)
+                .remove::<DocumentBinding>();
+            harness
+                .app
+                .world_mut()
+                .entity_mut(owner)
+                .insert(DocumentBinding::new(document));
+            harness.app.update();
+            assert!(harness.app.world().get::<Response>(previous).is_none());
+            if !retained {
+                assert_eq!(
+                    harness.app.world().get::<OperationState>(previous),
+                    Some(&OperationState::Canceled)
+                );
+                assert_eq!(*harness.probes[0].canceled.lock().unwrap(), [1]);
+            }
+            assert_ne!(
+                harness.app.world().get::<OperationState>(shared),
+                Some(&OperationState::Canceled)
+            );
+            assert_ne!(
+                harness.app.world().get::<OperationState>(other_root),
+                Some(&OperationState::Canceled)
+            );
+            assert_eq!(
+                harness
+                    .app
+                    .world()
+                    .get::<DocumentBinding>(shared_owner)
+                    .unwrap()
+                    .document(),
+                document
+            );
+        }
+    }
+
+    #[test]
+    fn closing_an_unbound_document_cancels_its_open_without_canceling_other_waiting_owners() {
+        let mut harness = Harness::new();
+        harness
+            .app
+            .world_mut()
+            .entity_mut(harness.servers[0])
+            .remove::<Transport>();
+        let mut owners = Vec::new();
+        for path in ["/canceled.rs", "/waiting.rs"] {
+            owners.push(
+                harness
+                    .app
+                    .world_mut()
+                    .spawn(OpenDocument {
+                        server: harness.servers[0],
+                        path: path.into(),
+                        language: "rust".into(),
+                        text: "current text".into(),
+                        revision: None,
+                    })
+                    .id(),
+            );
+        }
+        harness.app.update();
+        assert!(harness.app.world().get::<OpenDocument>(owners[0]).is_some());
+        assert!(
+            harness
+                .app
+                .world()
+                .get::<DocumentBinding>(owners[0])
+                .is_none()
+        );
+        harness.app.world_mut().write_message(CloseDocument {
+            owner: owners[0],
+            path: "/canceled.rs".into(),
+        });
+        harness.app.update();
+        let replacement = Probe::default();
+        harness
+            .app
+            .world_mut()
+            .entity_mut(harness.servers[0])
+            .insert(Transport::new(replacement.clone()));
+        harness.app.update();
+        assert!(harness.app.world().get::<OpenDocument>(owners[0]).is_none());
+        assert!(
+            harness
+                .app
+                .world()
+                .get::<DocumentBinding>(owners[0])
+                .is_none()
+        );
+        assert!(
+            harness
+                .app
+                .world()
+                .get::<DocumentBinding>(owners[1])
+                .is_some()
+        );
+        let calls = replacement.calls.lock().unwrap();
+        assert_eq!(calls.len(), 1);
+        assert_eq!(calls[0].0, "textDocument/didOpen");
+        assert_eq!(calls[0].1["textDocument"]["uri"], "file:///waiting.rs");
+    }
+
+    #[test]
+    fn public_document_requests_share_owners_close_once_and_reopen_with_a_new_version() {
+        let mut harness = Harness::new();
+        let path = PathBuf::from("/public.rs");
+        let revision = uuid::Uuid::new_v4();
+        let first = harness
+            .app
+            .world_mut()
+            .spawn(OpenDocument {
+                server: harness.servers[0],
+                path: path.clone(),
+                language: "rust".into(),
+                text: "fn first() {}".into(),
+                revision: Some(revision),
+            })
+            .id();
+        harness.app.update();
+        let document = harness
+            .app
+            .world()
+            .get::<DocumentBinding>(first)
+            .unwrap()
+            .document();
+        assert_eq!(
+            harness
+                .app
+                .world()
+                .get::<DocumentApplied>(first)
+                .unwrap()
+                .revision,
+            Some(revision)
+        );
+        let second = harness
+            .app
+            .world_mut()
+            .spawn(OpenDocument {
+                server: harness.servers[0],
+                path: path.clone(),
+                language: "rust".into(),
+                text: "fn first() {}".into(),
+                revision: None,
+            })
+            .id();
+        harness.app.update();
+        harness.app.world_mut().write_message(CloseDocument {
+            owner: first,
+            path: path.clone(),
+        });
+        harness.app.update();
+        harness.app.world_mut().write_message(ChangeDocument {
+            owner: second,
+            path: path.clone(),
+            text: "fn second() {}".into(),
+            revision: None,
+        });
+        harness.app.update();
+        harness.app.world_mut().write_message(CloseDocument {
+            owner: second,
+            path: path.clone(),
+        });
+        harness.app.update();
+        harness
+            .app
+            .world_mut()
+            .entity_mut(first)
+            .insert(OpenDocument {
+                server: harness.servers[0],
+                path: path.clone(),
+                language: "rust".into(),
+                text: "fn reopened() {}".into(),
+                revision: None,
+            });
+        harness.app.update();
+        let calls = harness.probes[0].calls.lock().unwrap();
+        assert_eq!(
+            calls
+                .iter()
+                .map(|(method, _)| method.as_str())
+                .collect::<Vec<_>>(),
+            [
+                "textDocument/didOpen",
+                "textDocument/didChange",
+                "textDocument/didClose",
+                "textDocument/didOpen"
+            ]
+        );
+        assert_eq!(calls[0].1["textDocument"]["text"], "fn first() {}");
+        assert_eq!(calls[1].1["contentChanges"][0]["text"], "fn second() {}");
+        assert_eq!(calls[3].1["textDocument"]["version"], 3);
+        assert_eq!(calls[3].1["textDocument"]["text"], "fn reopened() {}");
+        assert_eq!(
+            harness
+                .app
+                .world()
+                .get::<DocumentBinding>(first)
+                .unwrap()
+                .document(),
+            document
+        );
+        assert!(harness.app.world().get::<DocumentBinding>(second).is_none());
+        assert!(harness.probes[1].calls.lock().unwrap().is_empty());
+    }
+
+    #[test]
+    fn shared_diagnostics_reject_closed_versions_and_replaced_connections_without_clearing_another_root()
+     {
+        let mut harness = Harness::new();
+        let first = harness.diagnostics(0);
+        let second = harness.diagnostics(1);
+        first.publish_fixture(Some(1), "first");
+        second.publish_fixture(Some(1), "other");
+        harness.app.update();
+        let previous = harness
+            .app
+            .world()
+            .get::<DocumentBinding>(harness.owners[0])
+            .unwrap()
+            .document();
+        let other = harness
+            .app
+            .world()
+            .get::<DocumentBinding>(harness.owners[1])
+            .unwrap()
+            .document();
+        assert_eq!(
+            harness
+                .app
+                .world()
+                .get::<Diagnostics>(previous)
+                .unwrap()
+                .items()[0]
+                .message,
+            "first"
+        );
+        first.publish_fixture(None, "queued before close");
+        harness.app.world_mut().write_message(CloseDocument {
+            owner: harness.owners[0],
+            path: "/shared.rs".into(),
+        });
+        harness
+            .app
+            .world_mut()
+            .entity_mut(harness.owners[0])
+            .insert(OpenDocument {
+                server: harness.servers[0],
+                path: "/shared.rs".into(),
+                language: "rust".into(),
+                text: "current".into(),
+                revision: None,
+            });
+        harness.app.update();
+        assert!(harness.app.world().get::<Diagnostics>(previous).is_none());
+        first.publish_fixture(Some(1), "late closed version");
+        harness.app.update();
+        assert!(harness.app.world().get::<Diagnostics>(previous).is_none());
+        first.publish_fixture(Some(2), "current");
+        harness.app.update();
+        assert_eq!(
+            harness
+                .app
+                .world()
+                .get::<Diagnostics>(previous)
+                .unwrap()
+                .items()[0]
+                .message,
+            "current"
+        );
+        harness
+            .app
+            .world_mut()
+            .entity_mut(harness.servers[0])
+            .insert(Transport::new(Probe::default()));
+        first.publish_fixture(Some(2), "old connection");
+        second.publish_fixture(Some(1), "still current");
+        harness.app.update();
+        assert!(harness.app.world().get::<Diagnostics>(previous).is_none());
+        assert_eq!(
+            harness
+                .app
+                .world()
+                .get::<Diagnostics>(other)
+                .unwrap()
+                .items()[0]
+                .message,
+            "still current"
+        );
     }
 
     #[test]

@@ -1,3 +1,4 @@
+use bevy::ecs::system::Commands;
 use bevy::prelude::*;
 use bevy_cef::prelude::*;
 use vmux_ecs::event::*;
@@ -63,14 +64,18 @@ impl Plugin for LanguagePlugin {
             .add_systems(
                 Update,
                 flush_lsp_changes
-                    .before(crate::lsp::manager::DocumentSet)
+                    .before(vmux_lsp::Set::Documents)
                     .after(bevy_cef::prelude::UiEventSystems::Flush),
             );
     }
 }
 
 #[derive(Component)]
+#[require(LspChangeElapsed)]
 pub(super) struct LspEditDirty;
+
+#[derive(Component, Default)]
+struct LspChangeElapsed(std::time::Duration);
 
 #[derive(EntityEvent)]
 pub(super) struct WikiCompletionRequest(#[event_target] Entity);
@@ -813,34 +818,101 @@ fn request_completion(
 
 fn flush_lsp_changes(
     time: Res<Time>,
-    mut elapsed: Local<f32>,
-    views: Query<(Entity, &FileView, &Editor), With<LspEditDirty>>,
-    mut lsp_changes: Option<MessageWriter<crate::lsp::manager::LspDocumentChangeRequest>>,
+    mut views: Query<(Entity, &FileView, &Editor, &mut LspChangeElapsed), With<LspEditDirty>>,
+    mut lsp_changes: Option<MessageWriter<vmux_lsp::ChangeDocument>>,
     mut commands: Commands,
 ) {
-    if views.is_empty() {
-        return;
-    }
-    *elapsed += time.delta_secs();
-    if *elapsed < 0.15 {
-        return;
-    }
-    *elapsed = 0.0;
-    for (entity, view, edit) in &views {
+    for (entity, view, edit, mut elapsed) in &mut views {
+        elapsed.0 += time.delta();
+        if elapsed.0 < std::time::Duration::from_millis(150) {
+            continue;
+        }
         if let Some(lsp_changes) = lsp_changes.as_mut() {
-            lsp_changes.write(crate::lsp::manager::LspDocumentChangeRequest {
+            lsp_changes.write(vmux_lsp::ChangeDocument {
                 owner: entity,
                 path: view.path.clone(),
-                text: Some(edit.core.buffer.text()),
+                text: edit.core.buffer.text(),
+                revision: Some(edit.core.content_version()),
             });
         }
-        commands.entity(entity).remove::<LspEditDirty>();
+        commands
+            .entity(entity)
+            .remove::<(LspEditDirty, LspChangeElapsed)>();
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn dirty_views_flush_on_their_own_interval_and_release_the_timer() {
+        let mut app = App::new();
+        app.init_resource::<Time>()
+            .add_message::<vmux_lsp::ChangeDocument>()
+            .add_plugins(LanguagePlugin);
+        let mut views = Vec::new();
+        for name in ["first", "second"] {
+            let path = std::path::PathBuf::from(format!("/workspace/{name}.rs"));
+            let entity = app
+                .world_mut()
+                .spawn((
+                    FileView { path: path.clone() },
+                    Editor::new(
+                        crate::edit::EditCore::new(
+                            path.clone(),
+                            "Rust".into(),
+                            name,
+                            crate::edit::EditMode::Normal,
+                        ),
+                        crate::edit::highlight_cache::HighlightCache::plain(&path),
+                        crate::fold::FoldState::default(),
+                    ),
+                ))
+                .id();
+            views.push(entity);
+        }
+        app.world_mut().entity_mut(views[0]).insert(LspEditDirty);
+        app.world_mut()
+            .resource_mut::<Time>()
+            .advance_by(std::time::Duration::from_millis(100));
+        app.update();
+        assert!(
+            app.world_mut()
+                .resource_mut::<Messages<vmux_lsp::ChangeDocument>>()
+                .drain()
+                .next()
+                .is_none()
+        );
+        app.world_mut().entity_mut(views[1]).insert(LspEditDirty);
+        app.world_mut()
+            .resource_mut::<Time>()
+            .advance_by(std::time::Duration::from_millis(50));
+        app.update();
+        let changes: Vec<_> = app
+            .world_mut()
+            .resource_mut::<Messages<vmux_lsp::ChangeDocument>>()
+            .drain()
+            .collect();
+        assert_eq!(changes.len(), 1);
+        assert_eq!(changes[0].owner, views[0]);
+        assert_eq!(changes[0].text, "first");
+        assert!(app.world().get::<LspChangeElapsed>(views[0]).is_none());
+        assert!(app.world().get::<LspEditDirty>(views[1]).is_some());
+        app.world_mut()
+            .resource_mut::<Time>()
+            .advance_by(std::time::Duration::from_millis(100));
+        app.update();
+        let changes: Vec<_> = app
+            .world_mut()
+            .resource_mut::<Messages<vmux_lsp::ChangeDocument>>()
+            .drain()
+            .collect();
+        assert_eq!(changes.len(), 1);
+        assert_eq!(changes[0].owner, views[1]);
+        assert_eq!(changes[0].text, "second");
+        assert!(app.world().get::<LspChangeElapsed>(views[1]).is_none());
+    }
 
     #[test]
     fn rename_prefill_is_the_identifier_around_the_caret() {

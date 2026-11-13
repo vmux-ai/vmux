@@ -1,3 +1,4 @@
+use bevy::ecs::system::Commands;
 use bevy::prelude::*;
 use bevy_cef::prelude::*;
 use chardetng::{EncodingDetector, Iso2022JpDetection, Utf8Detection};
@@ -28,7 +29,7 @@ impl Plugin for EncodingPlugin {
 fn reopen_with(
     trigger: On<UiInput<FileEncodingReopenRequest>>,
     views: Query<&FileView>,
-    mut lsp_changes: Option<MessageWriter<crate::lsp::manager::LspDocumentChangeRequest>>,
+    mut lsp_changes: Option<MessageWriter<vmux_lsp::CloseDocument>>,
     mut commands: Commands,
 ) {
     let entity = trigger.event().webview;
@@ -49,10 +50,9 @@ fn reopen_with(
         .remove::<FileInitialMetaSent>()
         .remove::<crate::lsp::manager::LintRan>();
     if let Some(lsp_changes) = lsp_changes.as_mut() {
-        lsp_changes.write(crate::lsp::manager::LspDocumentChangeRequest {
+        lsp_changes.write(vmux_lsp::CloseDocument {
             owner: entity,
             path: view.path.clone(),
-            text: None,
         });
     }
 }

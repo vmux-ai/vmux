@@ -6,9 +6,10 @@ use bevy_ecs::prelude::*;
 use serde_json::Value;
 use vmux_app::VmuxPlugin;
 use vmux_app::lsp::{
-    Document, DocumentBinding, DocumentPath, LaunchServer, Lookup, Response, RestartServer,
-    Root, Server, ServerCompleted, ServerFailure, ServerKey, StartServer, StopServer, Stopped,
-    Transport, TransportIo, WireReply,
+    ChangeDocument, CloseDocument, Diagnostics, DiagnosticsSender, DocumentBinding, LaunchServer,
+    Lookup, OpenDocument, ReceivedDiagnostics, Response, RestartServer, Root, Server,
+    ServerCompleted, ServerFailure, ServerKey, StartServer, StopServer, Stopped, Transport,
+    TransportIo, WireReply,
 };
 use vmux_ecs::{Cwd, OperationState};
 
@@ -16,6 +17,7 @@ struct MemoryTransport {
     replies: Arc<Mutex<Option<crossbeam_channel::Sender<Value>>>>,
     canceled: Arc<Mutex<Vec<i64>>>,
     capabilities: lsp_types::ServerCapabilities,
+    calls: Arc<Mutex<Vec<(String, Value)>>>,
 }
 
 impl TransportIo for MemoryTransport {
@@ -27,7 +29,9 @@ impl TransportIo for MemoryTransport {
         WireReply::new(1, receiver)
     }
 
-    fn notify(&self, _method: &str, _params: Value) {}
+    fn notify(&self, method: &str, params: Value) {
+        self.calls.lock().unwrap().push((method.into(), params));
+    }
 
     fn cancel(&self, id: i64) {
         self.canceled.lock().unwrap().push(id);
@@ -48,12 +52,15 @@ struct LanguageWorkspace {
     owner: Entity,
     replies: Arc<Mutex<Option<crossbeam_channel::Sender<Value>>>>,
     canceled: Arc<Mutex<Vec<i64>>>,
+    calls: Arc<Mutex<Vec<(String, Value)>>>,
+    diagnostics: DiagnosticsSender,
 }
 
 impl LanguageWorkspace {
     fn attach(app: &mut App, directory: &str) -> Self {
         let replies = Arc::new(Mutex::new(None));
         let canceled = Arc::new(Mutex::new(Vec::new()));
+        let calls = Arc::new(Mutex::new(Vec::new()));
         let root = app
             .world_mut()
             .spawn((
@@ -65,6 +72,7 @@ impl LanguageWorkspace {
         let transport = MemoryTransport {
             replies: replies.clone(),
             canceled: canceled.clone(),
+            calls: calls.clone(),
             capabilities: lsp_types::ServerCapabilities {
                 definition_provider: Some(lsp_types::OneOf::Left(true)),
                 ..Default::default()
@@ -92,22 +100,45 @@ impl LanguageWorkspace {
             .entity_mut(launch.operation)
             .insert(ServerCompleted::new(launch, Ok(Transport::new(transport))));
         app.update();
-        let document = app
+        let (diagnostics, inbox) = DiagnosticsSender::channel();
+        app.world_mut()
+            .spawn((Name::new("Language diagnostics"), inbox));
+        let diagnostics = diagnostics
+            .scoped(server)
+            .with_transport(app.world().get::<Transport>(server).unwrap().identity());
+        let owner = app
             .world_mut()
-            .spawn((
-                Document { version: 1 },
-                DocumentPath("/shared.rs".into()),
-                ChildOf(server),
-            ))
+            .spawn(OpenDocument {
+                server,
+                path: "/shared.rs".into(),
+                language: "rust".into(),
+                text: "fn shared() {}".into(),
+                revision: None,
+            })
             .id();
-        let owner = app.world_mut().spawn(DocumentBinding::new(document)).id();
+        app.update();
         Self {
             root,
             server,
             owner,
             replies,
             canceled,
+            calls,
+            diagnostics,
         }
+    }
+
+    fn publish(&self, version: Option<i32>, message: &str) {
+        self.diagnostics.send(ReceivedDiagnostics {
+            path: "/shared.rs".into(),
+            diagnostics: vec![lsp_types::Diagnostic {
+                message: message.into(),
+                ..Default::default()
+            }],
+            version,
+            server: None,
+            transport: None,
+        });
     }
 
     fn definition(&self, app: &mut App) -> Entity {
@@ -236,4 +267,97 @@ fn stopped_and_failed_servers_restart_without_disrupting_another_workspace() {
         1
     );
     assert!(app.world().get::<Transport>(second.server).is_some());
+}
+
+#[test]
+fn public_document_and_diagnostic_lifetimes_survive_shared_close_and_refuse_retired_work() {
+    let mut app = App::new();
+    app.add_plugins(VmuxPlugin::builder().lsp(true).build());
+    let first = LanguageWorkspace::attach(&mut app, "/one");
+    let second = LanguageWorkspace::attach(&mut app, "/two");
+    first.publish(Some(1), "first");
+    second.publish(Some(1), "other root");
+    app.update();
+    let document = app
+        .world()
+        .get::<DocumentBinding>(first.owner)
+        .unwrap()
+        .document();
+    let other = app
+        .world()
+        .get::<DocumentBinding>(second.owner)
+        .unwrap()
+        .document();
+    let shared = app
+        .world_mut()
+        .spawn(OpenDocument {
+            server: first.server,
+            path: "/shared.rs".into(),
+            language: "rust".into(),
+            text: "fn shared() {}".into(),
+            revision: None,
+        })
+        .id();
+    app.update();
+    let stale = first.definition(&mut app);
+    first.complete(serde_json::json!({"result": "old owner"}));
+    app.update();
+    app.world_mut().write_message(CloseDocument {
+        owner: first.owner,
+        path: "/shared.rs".into(),
+    });
+    app.world_mut()
+        .entity_mut(first.owner)
+        .insert(OpenDocument {
+            server: first.server,
+            path: "/shared.rs".into(),
+            language: "rust".into(),
+            text: "fn shared() {}".into(),
+            revision: None,
+        });
+    app.update();
+    assert!(app.world().get::<Response>(stale).is_none());
+    app.world_mut().write_message(CloseDocument {
+        owner: first.owner,
+        path: "/shared.rs".into(),
+    });
+    app.world_mut().write_message(ChangeDocument {
+        owner: shared,
+        path: "/shared.rs".into(),
+        text: "fn changed() {}".into(),
+        revision: None,
+    });
+    app.update();
+    assert!(app.world().get::<Diagnostics>(document).is_none());
+    first.publish(Some(1), "old version");
+    app.update();
+    assert!(app.world().get::<Diagnostics>(document).is_none());
+    first.publish(Some(2), "current");
+    app.update();
+    assert_eq!(
+        app.world().get::<Diagnostics>(document).unwrap().items()[0].message,
+        "current"
+    );
+    app.world_mut().write_message(CloseDocument {
+        owner: shared,
+        path: "/shared.rs".into(),
+    });
+    app.update();
+    let calls = first.calls.lock().unwrap();
+    assert_eq!(
+        calls
+            .iter()
+            .map(|(name, _)| name.as_str())
+            .collect::<Vec<_>>(),
+        [
+            "textDocument/didOpen",
+            "textDocument/didChange",
+            "textDocument/didClose"
+        ]
+    );
+    assert_eq!(calls[1].1["contentChanges"][0]["text"], "fn changed() {}");
+    assert_eq!(
+        app.world().get::<Diagnostics>(other).unwrap().items()[0].message,
+        "other root"
+    );
 }

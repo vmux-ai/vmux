@@ -14,6 +14,10 @@ use crate::lsp::catalog::CatalogSource;
 use crate::lsp::purl::Purl;
 use crate::lsp::target::PlatformTarget;
 
+pub use vmux_lsp::{
+    DiagnosticsInbox as LspDiagnosticsInbox, DiagnosticsSender as LspDiagnosticsSender,
+    ReceivedDiagnostics as PathDiagnostics,
+};
 pub use vmux_lsp::{Document as OpenDoc, ServerKey};
 
 pub mod archive;
@@ -208,74 +212,6 @@ fn operate_tool(
             Ok(format!("imported {imported} lsp item(s)"))
         }
         _ => Err(format!("LSP does not support {:?}", operation.kind)),
-    }
-}
-
-pub struct PathDiagnostics {
-    pub path: PathBuf,
-    pub diagnostics: Vec<lsp_types::Diagnostic>,
-    pub version: Option<i32>,
-    pub server: Option<Entity>,
-    pub transport: Option<uuid::Uuid>,
-}
-
-#[derive(Clone)]
-pub struct LspDiagnosticsSender {
-    sender: crossbeam_channel::Sender<PathDiagnostics>,
-    server: Option<Entity>,
-    transport: Option<uuid::Uuid>,
-}
-
-impl LspDiagnosticsSender {
-    pub fn channel() -> (Self, LspDiagnosticsInbox) {
-        let (sender, receiver) = crossbeam_channel::unbounded();
-        (
-            Self {
-                sender,
-                server: None,
-                transport: None,
-            },
-            LspDiagnosticsInbox(receiver),
-        )
-    }
-
-    pub(crate) fn scoped(&self, server: Entity) -> Self {
-        Self {
-            sender: self.sender.clone(),
-            server: Some(server),
-            transport: self.transport,
-        }
-    }
-
-    pub(crate) fn with_transport(mut self, transport: uuid::Uuid) -> Self {
-        self.transport = Some(transport);
-        self
-    }
-
-    pub(crate) fn send(&self, mut diagnostics: PathDiagnostics) {
-        diagnostics.server = self.server;
-        diagnostics.transport = self.transport;
-        let _ = self.sender.send(diagnostics);
-    }
-}
-
-impl Default for LspDiagnosticsSender {
-    fn default() -> Self {
-        let (sender, _) = crossbeam_channel::unbounded();
-        Self {
-            sender,
-            server: None,
-            transport: None,
-        }
-    }
-}
-
-#[derive(Component, Clone)]
-pub struct LspDiagnosticsInbox(pub crossbeam_channel::Receiver<PathDiagnostics>);
-
-impl LspDiagnosticsInbox {
-    pub(crate) fn drain(&self) -> Vec<PathDiagnostics> {
-        self.0.try_iter().collect()
     }
 }
 
