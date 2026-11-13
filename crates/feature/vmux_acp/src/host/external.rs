@@ -1,4 +1,4 @@
-use std::collections::{HashMap, HashSet, VecDeque};
+use std::collections::{HashMap, HashSet};
 use std::io::{BufRead, Read};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, mpsc};
@@ -17,19 +17,30 @@ use vmux_ecs::service::{
     ServiceConnected, ServiceMessageAppExt, ServiceMessageSet, ServiceRequest,
 };
 use vmux_ecs::{
-    ArchivedAt, BlockingRuntime, BlockingTask, CreatedAt, PageOpenRequest, PageOpenTarget,
+    ArchivedAt, BlockingRuntime, BlockingTask, CreatedAt, EntityTarget, PageOpenRequest,
+    PageOpenTarget,
 };
 use vmux_layout::{TabLayoutSpawnContent, TabLayoutSpawnRequest};
+use vmux_session::history::{
+    Committed as HistoryCommitted, FileFacts, Prepare as HistoryPrepare, Read as HistoryRead,
+    Ready as HistoryReady, Received as HistoryReceived, Versions as HistoryVersions,
+};
 use vmux_session::host::{SessionManagerView, SessionView, SessionViews};
+use vmux_session::provider::{
+    Capability as CatalogCapability, Destination as ResumeDestination,
+    Discovery as CatalogDiscovery, Entries as ProviderEntries, Generation as CatalogGeneration,
+    Import, ImportRequested, Imported, Opened, Opening, Origin as CatalogOrigin,
+    Prepared as CatalogPrepared, Read as CatalogRead, Ready as CatalogReady,
+    Received as CatalogReceived, Source as CatalogSource, Started as CatalogReadStarted,
+};
 use vmux_session::{
-    AgentConversationTitle, AgentFamily, AgentId, ArchiveRequest, ArchiveState,
-    ConversationAppendReceived, CreateRequest, Created, ProviderArchive, ProviderCatalog,
-    ProviderKind, ProviderSession, ProviderSessionId, ProviderSessionKey,
+    AgentFamily, AgentId, ArchiveRequest, ArchiveState, ConversationAppendReceived,
+    ProviderArchive, ProviderKind, ProviderSession, ProviderSessionId, ProviderSessionKey,
     ProviderSessionTombstones, Route, RunState, Session, SessionDuplicate, SessionId,
     SnapshotReceived, SourceUpdatedAt, TranscriptLoading, Transcripts,
 };
 #[cfg(test)]
-use vmux_session::{ProviderArchiveCompleted, ProviderArchiveWriteRequest};
+use vmux_session::{CreateRequest, Created, ProviderArchiveCompleted, ProviderArchiveWriteRequest};
 use vmux_setting::AppSettings;
 use vmux_tool::ToolInventoryChanged;
 
@@ -46,37 +57,87 @@ pub(super) struct Plugin;
 
 impl bevy::prelude::Plugin for Plugin {
     fn build(&self, app: &mut App) {
-        app.add_plugins((archive::Plugin, HistoryReadPlugin))
-            .init_resource::<SourceSnapshot>()
-            .init_resource::<NativeReaders>()
-            .init_resource::<AcpSnapshot>()
-            .init_resource::<CatalogRequests>()
-            .init_resource::<PendingImports>()
-            .init_resource::<ProviderCatalog>()
-            .init_resource::<ActivationDirty>()
-            .add_message::<ToolInventoryChanged>()
-            .add_message::<ProviderConversationChanged>()
-            .add_message::<vmux_session::OperationReceived>()
-            .add_service_message::<AcpCatalogReceived>()
+        if !app.is_plugin_added::<vmux_session::provider::Plugin>() {
+            app.add_plugins(vmux_session::provider::Plugin);
+        }
+        app.add_plugins((
+            CatalogPlugin,
+            ImportPlugin,
+            archive::Plugin,
+            HistoryReadPlugin,
+        ))
+        .init_resource::<NativeReaders>()
+        .init_resource::<ActivationDirty>()
+        .add_message::<ToolInventoryChanged>()
+        .add_message::<ProviderConversationChanged>()
+        .add_message::<vmux_session::OperationReceived>()
+        .add_systems(
+            Update,
+            (
+                mark_activation_dirty,
+                activate,
+                cancel_scans,
+                watch,
+                request_changed_conversations,
+                finish,
+                scan,
+            )
+                .chain()
+                .after(CatalogPrepared)
+                .before(CatalogReady),
+        )
+        .add_systems(
+            Update,
+            (
+                complete_discovery,
+                associate,
+                request_conversation_refreshes,
+            )
+                .chain()
+                .after(CatalogReady),
+        );
+    }
+}
+
+struct ImportPlugin;
+
+impl bevy::prelude::Plugin for ImportPlugin {
+    fn build(&self, app: &mut App) {
+        if !app.is_plugin_added::<vmux_session::provider::Plugin>() {
+            app.add_plugins(vmux_session::provider::Plugin);
+        }
+        app.init_resource::<AppSettings>()
+            .add_message::<PageOpenRequest>()
+            .add_message::<TabLayoutSpawnRequest>()
             .add_observer(open)
-            .add_observer(attach)
+            .add_observer(opening)
+            .add_observer(imported);
+    }
+}
+
+struct CatalogPlugin;
+
+impl bevy::prelude::Plugin for CatalogPlugin {
+    fn build(&self, app: &mut App) {
+        if !app.is_plugin_added::<vmux_session::provider::Plugin>() {
+            app.add_plugins(vmux_session::provider::Plugin);
+        }
+        app.add_message::<AcpPackageChanged>()
+            .add_message::<ToolInventoryChanged>()
+            .add_message::<ServiceRequest>()
+            .add_service_message::<AcpCatalogReceived>()
             .add_systems(
                 Update,
                 (
+                    register,
                     request_catalogs,
                     receive_catalogs.after(ServiceMessageSet),
-                    mark_activation_dirty,
-                    activate,
-                    watch,
-                    request_changed_conversations,
-                    scan,
-                    finish,
-                    project,
-                    associate,
-                    request_conversation_refreshes,
                 )
-                    .chain(),
+                    .chain()
+                    .before(CatalogPrepared),
             );
+        app.world_mut()
+            .spawn((CatalogControl::default(), CatalogDiscovery::default()));
     }
 }
 
@@ -84,22 +145,28 @@ struct HistoryReadPlugin;
 
 impl bevy::prelude::Plugin for HistoryReadPlugin {
     fn build(&self, app: &mut App) {
+        if !app.is_plugin_added::<vmux_session::history::Plugin>() {
+            app.add_plugins(vmux_session::history::Plugin);
+        }
         app.init_resource::<BlockingRuntime>()
-            .init_resource::<SourceSnapshot>()
             .add_message::<SnapshotReceived>()
             .add_message::<ConversationAppendReceived>()
             .add_message::<vmux_session::OperationReceived>()
             .add_systems(
                 Update,
                 (
+                    reset_source,
                     queue_initial_conversations,
                     queue_failed_conversations,
                     queue_conversation_refreshes,
                     finish_conversations,
                 )
                     .chain()
-                    .after(request_conversation_refreshes),
-            );
+                    .after(request_conversation_refreshes)
+                    .after(HistoryPrepare)
+                    .before(HistoryReady),
+            )
+            .add_systems(Update, commit_conversations.after(HistoryReady));
     }
 }
 
@@ -122,14 +189,6 @@ struct AcpCatalogReceived {
     error: Option<String>,
 }
 
-#[derive(Resource, Default)]
-struct AcpSnapshot(HashMap<String, AcpSource>);
-
-struct AcpSource {
-    state: AcpSourceState,
-    sessions: Vec<ProviderSession>,
-}
-
 #[derive(Resource)]
 struct ActivationDirty(bool);
 
@@ -139,108 +198,22 @@ impl Default for ActivationDirty {
     }
 }
 
-#[derive(Clone, Copy, PartialEq, Eq)]
-enum AcpSourceState {
-    Unprobed,
-    Pending,
-    Supported,
-    Unsupported,
-    Failed,
-}
-
-impl AcpSnapshot {
-    fn allows_fallback(&self, family: &AgentFamily) -> bool {
-        for (agent, source) in &self.0 {
-            if AgentFamily::of(agent) != *family {
-                continue;
-            }
-            if source.state != AcpSourceState::Unsupported {
-                return false;
-            }
-        }
-        true
-    }
-
-    fn sessions(&self) -> impl Iterator<Item = &ProviderSession> {
-        self.0.values().flat_map(|source| source.sessions.iter())
-    }
-
-    fn refresh_codex_activity(&mut self, activity: &codex::RolloutActivity) -> bool {
-        let family = SourceKind::Codex.family();
-        let mut refreshed = false;
-        for (agent, source) in &mut self.0 {
-            if AgentFamily::of(agent) != family || source.state != AcpSourceState::Supported {
-                continue;
-            }
-            refreshed |= activity.refresh(&mut source.sessions);
-        }
-        refreshed
-    }
-}
-
-#[derive(Resource, Default)]
-struct CatalogRequests {
+#[derive(Component, Default)]
+struct CatalogControl {
     active: bool,
     refresh: bool,
     generation: u64,
     next_request_id: u64,
-    pending: HashMap<u64, CatalogRequest>,
-    queued: VecDeque<CatalogQueued>,
 }
 
-struct CatalogRequest {
-    generation: u64,
-    agent_id: String,
-    started_at: Option<Instant>,
-}
+#[derive(Component)]
+struct CatalogQueued(vmux_api::protocol::ClientMessage);
 
-struct CatalogQueued {
-    request_id: u64,
-    request: CatalogRequest,
-    message: vmux_api::protocol::ClientMessage,
-}
+#[derive(Component)]
+struct CatalogStarted(Instant);
 
-struct CatalogLaunch {
-    agent_id: String,
-    message: vmux_api::protocol::ClientMessage,
-}
-
-impl CatalogRequests {
-    fn request_id(&mut self) -> u64 {
-        self.next_request_id = self.next_request_id.wrapping_add(1).max(1);
-        self.next_request_id
-    }
-
-    fn launch(&mut self) -> Vec<CatalogLaunch> {
-        let available = CATALOG_CONCURRENCY.saturating_sub(self.pending.len());
-        let mut launched = Vec::with_capacity(available);
-        for _ in 0..available {
-            let Some(queued) = self.queued.pop_front() else {
-                break;
-            };
-            let agent_id = queued.request.agent_id.clone();
-            let mut request = queued.request;
-            request.started_at = Some(Instant::now());
-            self.pending.insert(queued.request_id, request);
-            launched.push(CatalogLaunch {
-                agent_id,
-                message: queued.message,
-            });
-        }
-        launched
-    }
-
-    fn cancel(&mut self) -> (Vec<u64>, HashSet<String>) {
-        let mut request_ids = Vec::with_capacity(self.pending.len());
-        let mut agents = HashSet::new();
-        for (request_id, request) in self.pending.drain() {
-            request_ids.push(request_id);
-            agents.insert(request.agent_id);
-        }
-        self.queued.clear();
-        (request_ids, agents)
-    }
-}
+#[derive(Component)]
+struct AcpCatalogRead;
 
 struct CatalogCwd;
 
@@ -253,35 +226,184 @@ impl CatalogCwd {
     }
 }
 
+fn register(
+    agents: Query<&RegistryAgent>,
+    settings: Option<Res<AppSettings>>,
+    sources: Query<(Entity, &AgentId, &CatalogOrigin, Option<&Name>), With<CatalogSource>>,
+    mut state: Single<&mut CatalogControl>,
+    mut commands: Commands,
+) {
+    let Some(settings) = settings else {
+        return;
+    };
+    let mut registered = HashMap::new();
+    for (entity, agent, origin, name) in &sources {
+        if *origin == CatalogOrigin::Acp {
+            registered.insert(agent.0.as_str(), (entity, name));
+        }
+    }
+    let mut present = HashSet::new();
+    let mut installed_families = HashSet::new();
+    for agent in &agents {
+        if !agent.is_installed() {
+            continue;
+        }
+        present.insert(agent.id.as_str());
+        installed_families.insert(AgentFamily::of(&agent.id));
+        if let Some((source, name)) = registered.get(agent.id.as_str()) {
+            if name.is_none_or(|name| name.as_str() != agent.name) {
+                commands
+                    .entity(*source)
+                    .insert(Name::new(agent.name.clone()));
+                state.refresh = true;
+            }
+            continue;
+        }
+        commands.spawn((
+            CatalogSource,
+            CatalogOrigin::Acp,
+            CatalogCapability::Unprobed,
+            CatalogGeneration(state.generation),
+            AgentId(agent.id.clone()),
+            Name::new(agent.name.clone()),
+        ));
+        state.refresh = true;
+    }
+    for config in &settings.agent.acp {
+        if config.command.trim().is_empty()
+            || present.contains(config.id.as_str())
+            || installed_families.contains(&AgentFamily::of(&config.id))
+        {
+            continue;
+        }
+        present.insert(config.id.as_str());
+        if let Some((source, name)) = registered.get(config.id.as_str()) {
+            if name.is_none_or(|name| name.as_str() != config.name) {
+                commands
+                    .entity(*source)
+                    .insert(Name::new(config.name.clone()));
+                state.refresh = true;
+            }
+            continue;
+        }
+        commands.spawn((
+            CatalogSource,
+            CatalogOrigin::Acp,
+            CatalogCapability::Unprobed,
+            CatalogGeneration(state.generation),
+            AgentId(config.id.clone()),
+            Name::new(config.name.clone()),
+        ));
+        state.refresh = true;
+    }
+    for (agent, (source, _)) in registered {
+        if !present.contains(agent) {
+            commands.entity(source).despawn();
+            state.refresh = true;
+        }
+    }
+}
+
 fn request_catalogs(
     activity: Activity<SessionManagerView>,
-    connected: Query<(), With<ServiceConnected>>,
+    connected: Query<Ref<ServiceConnected>>,
+    unavailable: Query<(), With<vmux_ecs::service::ServiceUnavailable>>,
     agents: Query<Ref<RegistryAgent>>,
     settings: Option<Res<AppSettings>>,
     mut package_changes: MessageReader<AcpPackageChanged>,
     mut tool_changes: MessageReader<ToolInventoryChanged>,
-    mut snapshot: ResMut<AcpSnapshot>,
-    mut state: ResMut<CatalogRequests>,
+    mut state: Single<&mut CatalogControl>,
     mut requests: MessageWriter<ServiceRequest>,
+    sources: Query<
+        (
+            Entity,
+            &AgentId,
+            &CatalogOrigin,
+            Option<&EntityTarget<CatalogRead>>,
+            &CatalogCapability,
+        ),
+        With<CatalogSource>,
+    >,
+    operations: Query<
+        (
+            Entity,
+            &ChildOf,
+            &CatalogRead,
+            &vmux_ecs::OperationState,
+            Option<&CatalogStarted>,
+            Option<&CatalogQueued>,
+        ),
+        With<AcpCatalogRead>,
+    >,
+    mut commands: Commands,
 ) {
+    let mut source_entities = HashMap::new();
+    for (entity, agent, origin, _, _) in &sources {
+        if *origin == CatalogOrigin::Acp {
+            source_entities.insert(agent.0.clone(), entity);
+        }
+    }
     let package_changed = package_changes.read().count() > 0;
     let mut tool_changed = false;
     for changed in tool_changes.read() {
         tool_changed |= changed.0.is("acp");
     }
     let registry_changed = agents.iter().any(|agent| agent.is_changed());
-    if !Activity::present(activity) {
-        let (request_ids, launched) = state.cancel();
-        for request_id in request_ids {
-            requests.write(ServiceRequest(
-                vmux_api::protocol::ClientMessage::CancelAcpSessionCatalog { request_id },
-            ));
-        }
-        for agent in launched {
-            if let Some(source) = snapshot.0.get_mut(&agent) {
-                source.state = AcpSourceState::Failed;
+    let present = Activity::present(activity);
+    let online = !connected.is_empty();
+    if connected.iter().any(|connected| connected.is_added()) {
+        state.refresh = true;
+    }
+    if present && !online && !unavailable.is_empty() {
+        for source in source_entities.values() {
+            if sources
+                .get(*source)
+                .is_ok_and(|(_, _, _, _, capability)| *capability != CatalogCapability::Failed)
+            {
+                commands.entity(*source).insert(CatalogCapability::Failed);
             }
         }
+        state.refresh = true;
+    }
+    let mut canceled = HashSet::new();
+    for (operation, parent, read, status, started, _) in &operations {
+        if !matches!(
+            status,
+            vmux_ecs::OperationState::Pending | vmux_ecs::OperationState::Running
+        ) {
+            continue;
+        }
+        let timeout = started.is_some_and(|started| started.0.elapsed() >= CATALOG_REQUEST_TIMEOUT);
+        if present && online && !timeout {
+            continue;
+        }
+        if started.is_some() && online {
+            requests.write(ServiceRequest(
+                vmux_api::protocol::ClientMessage::CancelAcpSessionCatalog {
+                    request_id: read.wire_id,
+                },
+            ));
+        }
+        commands
+            .entity(operation)
+            .insert(if timeout {
+                vmux_ecs::OperationState::Failed
+            } else {
+                vmux_ecs::OperationState::Canceled
+            })
+            .remove::<CatalogQueued>();
+        canceled.insert(operation);
+        let source = parent.parent();
+        if let Ok((_, _, _, target, _)) = sources.get(source)
+            && target.is_some_and(|target| target.entity() == operation)
+        {
+            commands
+                .entity(source)
+                .insert(CatalogCapability::Failed)
+                .remove::<EntityTarget<CatalogRead>>();
+        }
+    }
+    if !present {
         state.active = false;
         state.refresh = true;
         return;
@@ -293,39 +415,32 @@ fn request_catalogs(
     if package_changed || tool_changed || registry_changed {
         state.refresh = true;
     }
-    if connected.is_empty() {
-        if !state.pending.is_empty() || !state.queued.is_empty() {
-            let (_, agents) = state.cancel();
+    if !online {
+        if !canceled.is_empty() {
             state.refresh = true;
-            for agent in agents {
-                if let Some(source) = snapshot.0.get_mut(&agent) {
-                    source.state = AcpSourceState::Failed;
-                }
-            }
         }
         return;
     }
-    let timed_out = state
-        .pending
-        .iter()
-        .filter_map(|(request_id, request)| {
-            request
-                .started_at
-                .is_some_and(|started| started.elapsed() >= CATALOG_REQUEST_TIMEOUT)
-                .then_some(*request_id)
-        })
-        .collect::<Vec<_>>();
-    for request_id in timed_out {
-        if let Some(request) = state.pending.remove(&request_id) {
-            requests.write(ServiceRequest(
-                vmux_api::protocol::ClientMessage::CancelAcpSessionCatalog { request_id },
-            ));
-            if let Some(source) = snapshot.0.get_mut(&request.agent_id) {
-                source.state = AcpSourceState::Failed;
-            }
+    let mut outstanding = 0;
+    let mut running = 0;
+    let mut queued = Vec::new();
+    for (entity, _, read, status, started, wire) in &operations {
+        if canceled.contains(&entity)
+            || !matches!(
+                status,
+                vmux_ecs::OperationState::Pending | vmux_ecs::OperationState::Running
+            )
+        {
+            continue;
+        }
+        outstanding += 1;
+        if started.is_some() {
+            running += 1;
+        } else if wire.is_some() {
+            queued.push((read.wire_id, entity));
         }
     }
-    if state.refresh && state.pending.is_empty() && state.queued.is_empty() {
+    if state.refresh && outstanding == 0 {
         let Some(settings) = settings else {
             return;
         };
@@ -333,39 +448,91 @@ fn request_catalogs(
             return;
         };
         state.refresh = false;
-        state.generation = state.generation.wrapping_add(1).max(1);
-        let generation = state.generation;
+        let Some(generation) = state.generation.checked_add(1) else {
+            for source in source_entities.values() {
+                commands.entity(*source).insert(CatalogCapability::Failed);
+                if let Ok(error) = vmux_ecs::OperationError::new("catalog generation exhausted") {
+                    commands.entity(*source).insert(error);
+                }
+            }
+            return;
+        };
+        state.generation = generation;
         let shell = settings.shell();
         let mut installed = HashSet::new();
         let mut installed_families = HashSet::new();
+        let mut created = Vec::new();
         for agent in &agents {
             if !agent.is_installed() {
                 continue;
             }
             installed.insert(agent.id.clone());
             installed_families.insert(AgentFamily::of(&agent.id));
-            let source = snapshot.0.entry(agent.id.clone()).or_insert(AcpSource {
-                state: AcpSourceState::Unprobed,
-                sessions: Vec::new(),
-            });
+            let Some(source_entity) = source_entities.get(&agent.id).copied() else {
+                continue;
+            };
+            commands
+                .entity(source_entity)
+                .insert((Name::new(agent.name.clone()), CatalogGeneration(generation)));
             let launch = match AcpLaunch::installed_catalog(&agent, &shell) {
                 Ok(launch) => launch,
                 Err(error) => {
-                    source.state = AcpSourceState::Failed;
                     bevy::log::warn!("failed to resolve installed ACP {}: {error}", agent.id);
+                    commands
+                        .entity(source_entity)
+                        .insert(CatalogCapability::Failed);
+                    if let Ok(error) = vmux_ecs::OperationError::new(error) {
+                        commands.entity(source_entity).insert(error);
+                    }
                     continue;
                 }
             };
-            let request_id = state.request_id();
-            state.queued.push_back(CatalogQueued {
-                request_id,
-                request: CatalogRequest {
-                    generation,
-                    agent_id: agent.id.clone(),
-                    started_at: None,
-                },
-                message: launch.catalog_message(request_id, &agent.id, &agent.name, &cwd),
-            });
+            let Some(request_id) = state.next_request_id.checked_add(1) else {
+                commands
+                    .entity(source_entity)
+                    .insert(CatalogCapability::Failed);
+                if let Ok(error) = vmux_ecs::OperationError::new("catalog wire ID exhausted") {
+                    commands.entity(source_entity).insert(error);
+                }
+                continue;
+            };
+            state.next_request_id = request_id;
+            let operation = commands
+                .spawn((
+                    AcpCatalogRead,
+                    CatalogRead {
+                        generation,
+                        wire_id: request_id,
+                    },
+                    vmux_ecs::Operation::bundle("provider catalog")
+                        .expect("catalog operation kind"),
+                    ChildOf(source_entity),
+                ))
+                .id();
+            commands
+                .entity(source_entity)
+                .insert((
+                    Name::new(agent.name.clone()),
+                    CatalogGeneration(generation),
+                    CatalogCapability::Pending,
+                    EntityTarget::<CatalogRead>::new(operation),
+                ))
+                .remove::<moonshine_save::prelude::Save>();
+
+            let message = launch.catalog_message(request_id, &agent.id, &agent.name, &cwd);
+            if created.len() < CATALOG_CONCURRENCY {
+                requests.write(ServiceRequest(message));
+                commands.entity(operation).insert((
+                    vmux_ecs::OperationState::Running,
+                    CatalogStarted(Instant::now()),
+                ));
+                commands
+                    .entity(source_entity)
+                    .insert(CatalogCapability::Pending);
+            } else {
+                commands.entity(operation).insert(CatalogQueued(message));
+            }
+            created.push(operation);
         }
         for config in &settings.agent.acp {
             if config.command.trim().is_empty()
@@ -374,90 +541,153 @@ fn request_catalogs(
             {
                 continue;
             }
+            installed.insert(config.id.clone());
+            let Some(source_entity) = source_entities.get(&config.id).copied() else {
+                continue;
+            };
+            commands.entity(source_entity).insert((
+                Name::new(config.name.clone()),
+                CatalogGeneration(generation),
+            ));
             let launch = match AcpLaunch::configured_catalog(config, &shell) {
                 Ok(launch) => launch,
                 Err(error) => {
                     bevy::log::debug!("configured ACP catalog skipped for {}: {error}", config.id);
+                    commands
+                        .entity(source_entity)
+                        .insert(CatalogCapability::Failed);
+                    if let Ok(error) = vmux_ecs::OperationError::new(error) {
+                        commands.entity(source_entity).insert(error);
+                    }
                     continue;
                 }
             };
-            installed.insert(config.id.clone());
-            snapshot.0.entry(config.id.clone()).or_insert(AcpSource {
-                state: AcpSourceState::Unprobed,
-                sessions: Vec::new(),
-            });
-            let request_id = state.request_id();
+            let Some(request_id) = state.next_request_id.checked_add(1) else {
+                commands
+                    .entity(source_entity)
+                    .insert(CatalogCapability::Failed);
+                if let Ok(error) = vmux_ecs::OperationError::new("catalog wire ID exhausted") {
+                    commands.entity(source_entity).insert(error);
+                }
+                continue;
+            };
+            state.next_request_id = request_id;
+            let operation = commands
+                .spawn((
+                    AcpCatalogRead,
+                    CatalogRead {
+                        generation,
+                        wire_id: request_id,
+                    },
+                    vmux_ecs::Operation::bundle("provider catalog")
+                        .expect("catalog operation kind"),
+                    ChildOf(source_entity),
+                ))
+                .id();
+            commands
+                .entity(source_entity)
+                .insert((
+                    Name::new(config.name.clone()),
+                    CatalogGeneration(generation),
+                    CatalogCapability::Pending,
+                    EntityTarget::<CatalogRead>::new(operation),
+                ))
+                .remove::<moonshine_save::prelude::Save>();
+
             let configured_cwd = config
                 .cwd
                 .as_deref()
                 .filter(|path| path.is_dir())
                 .unwrap_or(&cwd);
-            state.queued.push_back(CatalogQueued {
-                request_id,
-                request: CatalogRequest {
-                    generation,
-                    agent_id: config.id.clone(),
-                    started_at: None,
-                },
-                message: launch.catalog_message(
-                    request_id,
-                    &config.id,
-                    &config.name,
-                    configured_cwd,
-                ),
-            });
+            let message =
+                launch.catalog_message(request_id, &config.id, &config.name, configured_cwd);
+            if created.len() < CATALOG_CONCURRENCY {
+                requests.write(ServiceRequest(message));
+                commands.entity(operation).insert((
+                    vmux_ecs::OperationState::Running,
+                    CatalogStarted(Instant::now()),
+                ));
+                commands
+                    .entity(source_entity)
+                    .insert(CatalogCapability::Pending);
+            } else {
+                commands.entity(operation).insert(CatalogQueued(message));
+            }
+            created.push(operation);
         }
-        snapshot.0.retain(|agent, _| installed.contains(agent));
+
+        return;
     }
-    for launch in state.launch() {
-        if let Some(source) = snapshot.0.get_mut(&launch.agent_id) {
-            source.state = AcpSourceState::Pending;
+    queued.sort_by_key(|(order, _)| *order);
+    for (_, operation) in queued {
+        if running >= CATALOG_CONCURRENCY {
+            break;
         }
-        requests.write(ServiceRequest(launch.message));
+        let Ok((_, parent, _, _, _, Some(wire))) = operations.get(operation) else {
+            continue;
+        };
+        if sources.get(parent.parent()).is_err() {
+            continue;
+        }
+        requests.write(ServiceRequest(wire.0.clone()));
+        commands
+            .entity(operation)
+            .insert((
+                vmux_ecs::OperationState::Running,
+                CatalogStarted(Instant::now()),
+            ))
+            .remove::<CatalogQueued>();
+        commands
+            .entity(parent.parent())
+            .insert(CatalogCapability::Pending);
+        running += 1;
     }
 }
 
 fn receive_catalogs(
     mut received: MessageReader<AcpCatalogReceived>,
-    mut snapshot: ResMut<AcpSnapshot>,
-    mut compatibility: ResMut<SourceSnapshot>,
-    mut state: ResMut<CatalogRequests>,
+    operations: Query<
+        (Entity, &ChildOf, &CatalogRead, &vmux_ecs::OperationState),
+        (Without<CatalogQueued>, With<CatalogStarted>),
+    >,
+    sources: Query<
+        (
+            &AgentId,
+            &CatalogGeneration,
+            &EntityTarget<CatalogRead>,
+            &CatalogOrigin,
+        ),
+        With<CatalogSource>,
+    >,
+    mut canonical: MessageWriter<CatalogReceived>,
 ) {
     for received in received.read() {
-        let Some(request) = state.pending.remove(&received.request_id) else {
+        let Some((operation, parent, read, status)) = operations
+            .iter()
+            .find(|(_, _, read, _)| read.wire_id == received.request_id)
+        else {
             continue;
         };
-        if request.generation != state.generation || request.agent_id != received.agent_id {
+        let Ok((agent, generation, target, origin)) = sources.get(parent.parent()) else {
+            continue;
+        };
+        if *origin != CatalogOrigin::Acp
+            || agent.0 != received.agent_id
+            || generation.0 != read.generation
+            || target.entity() != operation
+            || *status != vmux_ecs::OperationState::Running
+        {
             continue;
         }
-        let source = snapshot
-            .0
-            .entry(received.agent_id.clone())
-            .or_insert(AcpSource {
-                state: AcpSourceState::Unprobed,
-                sessions: Vec::new(),
-            });
-        if let Some(error) = &received.error {
-            source.state = AcpSourceState::Failed;
-            bevy::log::warn!(
-                "ACP session catalog failed for {}: {error}",
-                received.agent_id
-            );
-            continue;
-        }
-        if !received.supported {
-            source.state = AcpSourceState::Unsupported;
-            source.sessions.clear();
-        } else {
-            source.state = AcpSourceState::Supported;
-            source.sessions = AcpCatalog::sessions(received);
-        }
-        let family = AgentFamily::of(&received.agent_id);
-        if source.state == AcpSourceState::Supported {
-            compatibility
-                .0
-                .retain(|source, _| source.family() != family);
-        }
+        let result = match &received.error {
+            Some(error) => Err(error.clone()),
+            None => Ok(AcpCatalog::sessions(received)),
+        };
+        canonical.write(CatalogReceived {
+            operation,
+            supported: received.supported,
+            result,
+        });
     }
 }
 
@@ -495,138 +725,6 @@ impl AcpCatalog {
         sessions.sort_by_key(|session| std::cmp::Reverse(session.updated_at));
         sessions
     }
-}
-
-#[derive(Resource, Default)]
-struct SourceSnapshot(HashMap<SourceKind, Vec<ProviderSession>>);
-
-impl SourceSnapshot {
-    fn get(&self, kind: &str, sid: &str) -> Option<&ProviderSession> {
-        self.0
-            .values()
-            .flatten()
-            .find(|session| session.kind == kind && session.sid == sid)
-    }
-
-    fn association(
-        &self,
-        agent: &str,
-        resume: &str,
-        name: &str,
-        cwd: &str,
-        created_at: i64,
-    ) -> Option<&ProviderSession> {
-        let family = AgentFamily::of(agent);
-        if let Some(session) = self
-            .0
-            .values()
-            .flatten()
-            .find(|session| AgentFamily::of(&session.agent) == family && session.sid == resume)
-        {
-            return Some(session);
-        }
-        let mut fallback = None;
-        let mut matches = 0;
-        for session in self.0.values().flatten() {
-            if AgentFamily::of(&session.agent) != family
-                || session.cwd != cwd
-                || session.created_at != created_at
-            {
-                continue;
-            }
-            if session.name == name || session.conversation_title == name {
-                return Some(session);
-            }
-            matches += 1;
-            fallback = Some(session);
-        }
-        if matches == 1 { fallback } else { None }
-    }
-}
-
-struct ProviderSessionIndex<'a>(HashMap<(&'a str, &'a str), &'a ProviderSession>);
-
-impl<'a> ProviderSessionIndex<'a> {
-    fn from_snapshots(snapshot: &'a SourceSnapshot, acp: &'a AcpSnapshot) -> Self {
-        let mut sessions = HashMap::new();
-        for session in snapshot.0.values().flatten() {
-            sessions.insert((session.kind.as_str(), session.sid.as_str()), session);
-        }
-        for session in acp.sessions() {
-            sessions.insert((session.kind.as_str(), session.sid.as_str()), session);
-        }
-        Self(sessions)
-    }
-
-    fn get(&self, kind: &str, sid: &str) -> Option<&'a ProviderSession> {
-        self.0.get(&(kind, sid)).copied()
-    }
-}
-
-#[derive(Resource, Default)]
-struct PendingImports {
-    by_id: HashMap<SessionId, PendingImport>,
-    by_source: HashMap<(AgentFamily, String), SessionId>,
-}
-
-impl PendingImports {
-    fn reserve(&mut self, id: SessionId, import: PendingImport) -> PendingImportReservation {
-        let key = (
-            AgentFamily::of(&import.source.agent),
-            import.source.sid.clone(),
-        );
-        if let Some(existing) = self.by_source.get(&key)
-            && let Some(pending) = self.by_id.get_mut(existing)
-        {
-            pending.destination = import.destination;
-            let open_now = pending.deferred_open && !import.deferred_open;
-            pending.deferred_open = import.deferred_open;
-            return PendingImportReservation {
-                id: existing.clone(),
-                created: false,
-                open_now,
-            };
-        }
-        self.by_source.insert(key, id.clone());
-        let open_now = !import.deferred_open;
-        self.by_id.insert(id.clone(), import);
-        PendingImportReservation {
-            id,
-            created: true,
-            open_now,
-        }
-    }
-
-    fn take(&mut self, id: &SessionId) -> Option<PendingImport> {
-        let import = self.by_id.remove(id)?;
-        self.by_source.remove(&(
-            AgentFamily::of(&import.source.agent),
-            import.source.sid.clone(),
-        ));
-        Some(import)
-    }
-}
-
-struct PendingImport {
-    destination: ResumeDestination,
-    deferred_open: bool,
-    source: ProviderSession,
-    agent: AgentId,
-}
-
-struct PendingImportReservation {
-    id: SessionId,
-    created: bool,
-    open_now: bool,
-}
-
-#[derive(Clone, Copy)]
-struct ResumeDestination {
-    stack: Entity,
-    pane: Option<Entity>,
-    space: Option<Entity>,
-    window: Option<Entity>,
-    open: OpenTarget,
 }
 
 #[derive(SystemParam)]
@@ -679,19 +777,6 @@ impl ResumeOpener<'_> {
             url,
             request_id: None,
         });
-    }
-}
-
-impl ResumeDestination {
-    fn opens_in_place(self) -> bool {
-        matches!(
-            self.open,
-            OpenTarget::InPlace
-                | OpenTarget::InPane {
-                    mode: PaneOpenMode::InPlace,
-                    ..
-                }
-        )
     }
 }
 
@@ -752,12 +837,40 @@ impl Runtime {
 }
 
 #[derive(Component)]
-struct ScanRequested(HashSet<SourceKind>);
+struct ScanRequested;
+
+#[derive(SystemParam)]
+struct NativeSources<'w, 's> {
+    entries: Query<'w, 's, (Entity, &'static SourceKind), With<CatalogSource>>,
+    commands: Commands<'w, 's>,
+}
+
+impl NativeSources<'_, '_> {
+    fn entity(&mut self, kind: SourceKind) -> Entity {
+        if let Some((entity, _)) = self.entries.iter().find(|(_, found)| **found == kind) {
+            return entity;
+        }
+        self.commands.spawn(kind.bundle()).id()
+    }
+
+    fn queue(&mut self, kind: SourceKind) {
+        let entity = self.entity(kind);
+        self.commands
+            .entity(entity)
+            .insert((ScanRequested, CatalogCapability::Pending));
+    }
+
+    fn archives(&mut self, kind: SourceKind) {
+        let entity = self.entity(kind);
+        self.commands
+            .entity(entity)
+            .insert(archive::RefreshRequested);
+    }
+}
 
 #[derive(Component)]
 struct ScanTask {
-    started_at: Instant,
-    task: BlockingTask<Vec<SourceRead>>,
+    task: BlockingTask<Result<Vec<ProviderSession>, String>>,
 }
 
 #[derive(Component)]
@@ -782,20 +895,20 @@ struct ConversationCursor(u64);
 struct ConversationFile(PathBuf);
 
 #[derive(Component)]
+struct ConversationSourceScope(ProviderSessionKey);
+
+#[derive(Component)]
 struct ConversationLoadTask {
-    session: Entity,
-    sid: SessionId,
     revision: i64,
-    task: BlockingTask<Result<ConversationRead, String>>,
+    task: BlockingTask<Result<conversation::ReadResult, String>>,
 }
 
-struct ConversationRead {
+#[derive(Component)]
+struct ConversationReadReady {
+    revision: i64,
     path: Option<PathBuf>,
     watch_paths: Vec<PathBuf>,
-    records: Vec<conversation::Record>,
-    messages: Vec<vmux_api::session::Message>,
     cursor: u64,
-    snapshot: bool,
     complete: bool,
 }
 
@@ -805,15 +918,13 @@ struct NativeReaders(Arc<Mutex<Option<conversation::ProcessReader>>>);
 #[derive(Component)]
 struct ConversationWatchPaths(Vec<PathBuf>);
 
-impl ConversationRead {
+impl conversation::ReadResult {
     fn empty(cursor: Option<u64>) -> Self {
         Self {
             path: None,
             watch_paths: Vec::new(),
-            records: Vec::new(),
-            messages: Vec::new(),
+            history: HistoryReceived::messages(Vec::new(), cursor.is_none()),
             cursor: cursor.unwrap_or_default(),
-            snapshot: false,
             complete: true,
         }
     }
@@ -826,21 +937,21 @@ struct ConversationSource {
 }
 
 impl ConversationSource {
-    fn new(kind: &str, sid: &str, created_at: i64) -> Option<Self> {
-        let agent = kind.strip_prefix("acp:")?;
+    fn new(kind: &ProviderKind, sid: &ProviderSessionId, created_at: i64) -> Option<Self> {
+        let agent = kind.0.strip_prefix("acp:")?;
         let family = AgentFamily::of(agent);
         let source = SourceKind::for_family(&family)?;
-        if !conversation::Files::valid_id(sid) {
+        if !conversation::Files::valid_id(&sid.0) {
             return None;
         }
         Some(Self {
             kind: format!("acp:{}", source.id()),
-            sid: sid.to_string(),
+            sid: sid.0.clone(),
             created_at,
         })
     }
 
-    fn for_failed(kind: &str, sid: &str, created_at: i64) -> Option<Self> {
+    fn for_failed(kind: &ProviderKind, sid: &ProviderSessionId, created_at: i64) -> Option<Self> {
         Self::new(kind, sid, created_at)
     }
 
@@ -848,10 +959,10 @@ impl ConversationSource {
         self,
         paths: &SourcePaths,
         cursor: Option<u64>,
-        known: Vec<vmux_api::session::Message>,
         native: NativeReaders,
         hint: Option<PathBuf>,
-    ) -> Result<ConversationRead, String> {
+        known: Option<FileFacts>,
+    ) -> Result<conversation::ReadResult, String> {
         let source = SourceKind::for_family(&AgentFamily::of(
             self.kind.strip_prefix("acp:").unwrap_or_default(),
         ))
@@ -862,6 +973,7 @@ impl ConversationSource {
                     codex::Reader::conversation_file(
                         &path,
                         cursor,
+                        known.as_ref(),
                         conversation::FileConversation::TAIL_BYTES,
                     )?
                 } else {
@@ -869,6 +981,7 @@ impl ConversationSource {
                         &self.sid,
                         self.created_at,
                         cursor,
+                        known.as_ref(),
                     )?
                 }
             }
@@ -879,11 +992,12 @@ impl ConversationSource {
                     false,
                 )?);
                 let Some(path) = path else {
-                    return Ok(ConversationRead::empty(cursor));
+                    return Ok(conversation::ReadResult::empty(cursor));
                 };
                 conversation::FileConversation::read(
                     &path,
                     cursor,
+                    known.as_ref(),
                     conversation::FileConversation::TAIL_BYTES,
                     conversation::ChatDecoder,
                 )?
@@ -897,132 +1011,22 @@ impl ConversationSource {
                 }
                 let path = hint.or(conversation::Files::locate(&root, &self.sid, true)?);
                 let Some(path) = path else {
-                    return Ok(ConversationRead::empty(cursor));
+                    return Ok(conversation::ReadResult::empty(cursor));
                 };
                 conversation::FileConversation::read(
                     &path,
                     cursor,
+                    known.as_ref(),
                     conversation::FileConversation::TAIL_BYTES,
                     conversation::ChatDecoder,
                 )?
             }
         };
-        let snapshot = cursor.is_none() && known.is_empty();
-        let messages = if read.tail && !known.is_empty() {
-            KnownConversation(known).unseen(read.messages)
-        } else {
-            read.messages
-        };
-        Ok(ConversationRead {
-            path: read.path,
-            watch_paths: Vec::new(),
-            records: Vec::new(),
-            messages,
-            cursor: read.cursor,
-            snapshot,
-            complete: read.complete,
-        })
+        Ok(read)
     }
 }
 
-struct KnownConversation(Vec<vmux_api::session::Message>);
-
-impl KnownConversation {
-    const LIMIT: usize = 512;
-
-    fn tail(messages: &[vmux_api::session::Message]) -> Vec<vmux_api::session::Message> {
-        let start = messages.len().saturating_sub(Self::LIMIT);
-        messages[start..].to_vec()
-    }
-
-    fn units(messages: &[vmux_api::session::Message]) -> Vec<vmux_api::session::Message> {
-        let mut units = Vec::new();
-        for message in messages {
-            match message {
-                vmux_api::session::Message::Assistant { blocks } => {
-                    for block in blocks {
-                        units.push(vmux_api::session::Message::Assistant {
-                            blocks: vec![block.clone()],
-                        });
-                    }
-                }
-                _ => units.push(message.clone()),
-            }
-        }
-        units
-    }
-
-    fn same(left: &vmux_api::session::Message, right: &vmux_api::session::Message) -> bool {
-        match (left, right) {
-            (
-                vmux_api::session::Message::User {
-                    text: left,
-                    attachments: a,
-                },
-                vmux_api::session::Message::User {
-                    text: right,
-                    attachments: b,
-                },
-            ) => {
-                vmux_api::protocol::AgentPromptEnvelope::new(left)
-                    .display()
-                    .unwrap_or(left)
-                    == vmux_api::protocol::AgentPromptEnvelope::new(right)
-                        .display()
-                        .unwrap_or(right)
-                    && a == b
-            }
-            (
-                vmux_api::session::Message::Assistant { blocks: a },
-                vmux_api::session::Message::Assistant { blocks: b },
-            ) => match (a.as_slice(), b.as_slice()) {
-                (
-                    [
-                        vmux_api::session::AssistantBlock::ToolUse {
-                            call_id: a,
-                            args: x,
-                            ..
-                        },
-                    ],
-                    [
-                        vmux_api::session::AssistantBlock::ToolUse {
-                            call_id: b,
-                            args: y,
-                            ..
-                        },
-                    ],
-                ) => {
-                    a == b
-                        && (x == y
-                            || serde_json::from_str::<serde_json::Value>(x)
-                                .ok()
-                                .zip(serde_json::from_str::<serde_json::Value>(y).ok())
-                                .is_some_and(|(x, y)| x == y))
-                }
-                _ => a == b,
-            },
-            _ => left == right,
-        }
-    }
-
-    fn unseen(&self, incoming: Vec<vmux_api::session::Message>) -> Vec<vmux_api::session::Message> {
-        let known = Self::units(&self.0);
-        let incoming = Self::units(&incoming);
-        let limit = known.len().min(incoming.len());
-        for overlap in (1..=limit).rev() {
-            if known[known.len() - overlap..]
-                .iter()
-                .zip(&incoming[..overlap])
-                .all(|(left, right)| Self::same(left, right))
-            {
-                return incoming[overlap..].to_vec();
-            }
-        }
-        incoming
-    }
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+#[derive(Component, Clone, Copy, Debug, PartialEq, Eq, Hash)]
 enum SourceKind {
     Codex,
     Claude,
@@ -1031,6 +1035,28 @@ enum SourceKind {
 
 impl SourceKind {
     const ALL: [Self; 3] = [Self::Codex, Self::Claude, Self::Vibe];
+
+    fn bundle(
+        self,
+    ) -> (
+        CatalogSource,
+        CatalogOrigin,
+        CatalogCapability,
+        CatalogGeneration,
+        AgentId,
+        Name,
+        Self,
+    ) {
+        (
+            CatalogSource,
+            CatalogOrigin::Native,
+            CatalogCapability::Unprobed,
+            CatalogGeneration(0),
+            AgentId(self.id().into()),
+            Name::new(self.family().name(self.id())),
+            self,
+        )
+    }
 
     fn id(self) -> &'static str {
         match self {
@@ -1078,28 +1104,12 @@ impl SourcePaths {
         })
     }
 
-    fn readers(&self, sources: &HashSet<SourceKind>, snapshot: &SourceSnapshot) -> Readers {
-        let mut readers = Vec::<(SourceKind, Box<dyn Reader>)>::new();
-        for source in SourceKind::ALL {
-            if !sources.contains(&source) {
-                continue;
-            }
-            let reader: Box<dyn Reader> = match source {
-                SourceKind::Codex => Box::new(
-                    codex::Reader::at(&self.codex).with_previous(
-                        snapshot
-                            .0
-                            .get(&source)
-                            .map(Vec::as_slice)
-                            .unwrap_or_default(),
-                    ),
-                ),
-                SourceKind::Claude => Box::new(claude::Reader::at(&self.claude)),
-                SourceKind::Vibe => Box::new(vibe::Reader::at(&self.vibe)),
-            };
-            readers.push((source, reader));
+    fn reader(&self, source: SourceKind, hints: Vec<(String, i64)>) -> Box<dyn Reader> {
+        match source {
+            SourceKind::Codex => Box::new(codex::Reader::at(&self.codex).with_hints(hints)),
+            SourceKind::Claude => Box::new(claude::Reader::at(&self.claude)),
+            SourceKind::Vibe => Box::new(vibe::Reader::at(&self.vibe)),
         }
-        Readers(readers)
     }
 
     fn watches(
@@ -1183,56 +1193,11 @@ trait Reader: Send + Sync {
     fn read(&self) -> Result<Vec<ProviderSession>, String>;
 }
 
-struct Readers(Vec<(SourceKind, Box<dyn Reader>)>);
-
-impl Readers {
-    fn read(self) -> Vec<SourceRead> {
-        let mut reads = Vec::new();
-        for (source, reader) in self.0 {
-            reads.push(SourceRead::read(source, reader));
-        }
-        reads
-    }
-}
-
-struct SourceRead {
-    source: SourceKind,
-    sessions: Result<Vec<ProviderSession>, String>,
-}
-
-impl SourceRead {
-    fn read(source: SourceKind, reader: Box<dyn Reader>) -> Self {
-        let sessions = reader.read().map(Self::deduplicated);
-        Self { source, sessions }
-    }
-
-    fn deduplicated(sessions: Vec<ProviderSession>) -> Vec<ProviderSession> {
-        let mut indexed = HashMap::<ProviderSessionKey, ProviderSession>::new();
-        for session in sessions {
-            if session.kind.trim().is_empty() || session.sid.trim().is_empty() {
-                continue;
-            }
-            let key = ProviderSessionKey::new(
-                ProviderKind(session.kind.clone()),
-                ProviderSessionId(session.sid.clone()),
-            );
-            match indexed.get(&key) {
-                Some(current) if current.updated_at > session.updated_at => {}
-                _ => {
-                    indexed.insert(key, session);
-                }
-            }
-        }
-        let mut sessions = indexed.into_values().collect::<Vec<_>>();
-        sessions.sort_by_key(|session| std::cmp::Reverse(session.updated_at));
-        sessions
-    }
-}
-
 struct BoundedLines<R> {
     reader: R,
     remaining: usize,
     consumed: usize,
+    line_start: usize,
 }
 
 impl<R: BufRead> BoundedLines<R> {
@@ -1241,11 +1206,16 @@ impl<R: BufRead> BoundedLines<R> {
             reader,
             remaining: PROVIDER_READ_LIMIT,
             consumed: 0,
+            line_start: 0,
         }
     }
 
     fn consumed(&self) -> usize {
         self.consumed
+    }
+
+    fn line_start(&self) -> usize {
+        self.line_start
     }
 }
 
@@ -1254,6 +1224,7 @@ impl<R: BufRead> Iterator for BoundedLines<R> {
 
     fn next(&mut self) -> Option<Self::Item> {
         while self.remaining > 0 {
+            self.line_start = self.consumed;
             let limit = self.remaining.min(PROVIDER_LINE_LIMIT.saturating_add(1));
             let mut bytes = Vec::new();
             let read = {
@@ -1266,9 +1237,11 @@ impl<R: BufRead> Iterator for BoundedLines<R> {
             self.remaining = self.remaining.saturating_sub(read);
             self.consumed = self.consumed.saturating_add(read);
             if bytes.len() > PROVIDER_LINE_LIMIT {
-                let skipped = self.reader.skip_until(b'\n').ok()?;
-                self.remaining = self.remaining.saturating_sub(skipped);
-                self.consumed = self.consumed.saturating_add(skipped);
+                if bytes.last() != Some(&b'\n') {
+                    let skipped = self.reader.skip_until(b'\n').ok()?;
+                    self.remaining = self.remaining.saturating_sub(skipped);
+                    self.consumed = self.consumed.saturating_add(skipped);
+                }
                 continue;
             }
             while matches!(bytes.last(), Some(b'\n' | b'\r')) {
@@ -1453,7 +1426,12 @@ impl ProviderConversationChanged {
         self.session.id.0 == sid
             && AgentFamily::of(self.session.kind.0.strip_prefix("acp:").unwrap_or_default())
                 == AgentFamily::of(kind.strip_prefix("acp:").unwrap_or_default())
-            && ConversationSource::new(kind, sid, 0).is_some()
+            && ConversationSource::new(
+                &ProviderKind(kind.into()),
+                &ProviderSessionId(sid.into()),
+                0,
+            )
+            .is_some()
     }
 
     fn codex(activity: &codex::RolloutActivity) -> Self {
@@ -1462,7 +1440,7 @@ impl ProviderConversationChanged {
                 ProviderKind("acp:codex".to_string()),
                 ProviderSessionId(activity.sid().to_string()),
             ),
-            updated_at: activity.updated_at(),
+            updated_at: activity.updated_at().0,
         }
     }
 }
@@ -1536,7 +1514,7 @@ impl SourceChanges {
 fn activate(
     manager_activity: Activity<SessionManagerView>,
     session_activity: Activity<SessionView>,
-    acp: Res<AcpSnapshot>,
+    acp: ProviderEntries,
     view_targets: SessionViews,
     views: Query<Entity, With<SessionView>>,
     sessions: Query<
@@ -1552,6 +1530,7 @@ fn activate(
     >,
     mut dirty: ResMut<ActivationDirty>,
     mut runtime: Query<(Entity, &mut Runtime, &SourcePaths)>,
+    mut native_sources: NativeSources,
     proxy: Option<Res<EventLoopProxyWrapper>>,
     mut commands: Commands,
 ) {
@@ -1600,7 +1579,7 @@ fn activate(
     }
     let mut conversation_paths = HashSet::new();
     for (entity, kind, sid, file, state, watched) in &sessions {
-        if !viewed.contains(&entity) || ConversationSource::new(&kind.0, &sid.0, 0).is_none() {
+        if !viewed.contains(&entity) || ConversationSource::new(kind, sid, 0).is_none() {
             continue;
         }
         if let (Some(file), Some(RunState::Errored(_))) = (file, state) {
@@ -1621,7 +1600,7 @@ fn activate(
         }
         return;
     }
-    if let Ok((entity, mut runtime, paths)) = runtime.single_mut() {
+    if let Ok((_, mut runtime, paths)) = runtime.single_mut() {
         if let Some(watch) = &mut runtime.conversation_watch {
             watch.set_paths(conversation_paths);
         }
@@ -1637,8 +1616,8 @@ fn activate(
             runtime.watch_codex_activity = watch_codex_activity;
             runtime.manager = manager;
             runtime.ensure_watches(paths);
-            if !requested.is_empty() {
-                commands.entity(entity).insert(ScanRequested(requested));
+            for source in requested {
+                native_sources.queue(source);
             }
         }
         return;
@@ -1674,14 +1653,14 @@ fn activate(
         conversation_watch: Some(conversation_watch),
     };
     runtime.ensure_watches(&paths);
-    let mut entity = commands.spawn((Name::new("ACP provider session catalog"), runtime, paths));
-    if !sources.is_empty() {
-        entity.insert(ScanRequested(sources));
+    commands.spawn((Name::new("ACP provider session catalog"), runtime, paths));
+    for source in sources {
+        native_sources.queue(source);
     }
 }
 
 fn mark_activation_dirty(
-    acp: Res<AcpSnapshot>,
+    mut acp: ProviderEntries,
     managers: Query<
         (),
         (
@@ -1710,13 +1689,13 @@ fn mark_activation_dirty(
             )>,
         ),
     >,
-    targets: Query<(), Changed<vmux_ecs::EntityTarget<Session>>>,
+    targets: Query<(), Changed<EntityTarget<Session>>>,
     mut removed_managers: RemovedComponents<SessionManagerView>,
     mut removed_views: RemovedComponents<SessionView>,
     mut removed_ready: RemovedComponents<PageReady>,
     mut removed_sessions: RemovedComponents<Session>,
     mut removed_providers: RemovedComponents<ProviderKind>,
-    mut removed_targets: RemovedComponents<vmux_ecs::EntityTarget<Session>>,
+    mut removed_targets: RemovedComponents<EntityTarget<Session>>,
     mut dirty: ResMut<ActivationDirty>,
 ) {
     let manager_removed = removed_managers.read().count() > 0;
@@ -1743,14 +1722,15 @@ fn mark_activation_dirty(
 
 fn watch(
     runtime: Single<(Entity, &mut Runtime, &SourcePaths)>,
-    mut requested: Query<&mut ScanRequested>,
-    mut snapshot: ResMut<SourceSnapshot>,
-    mut acp: ResMut<AcpSnapshot>,
-    mut catalogs: ResMut<CatalogRequests>,
+    mut sources: NativeSources,
+    mut entries: Query<
+        (&ProviderSessionId, &AgentId, &mut SourceUpdatedAt),
+        With<vmux_session::provider::Entry>,
+    >,
+    mut catalogs: Single<&mut CatalogControl>,
     mut conversations: MessageWriter<ProviderConversationChanged>,
-    mut commands: Commands,
 ) {
-    let (entity, mut runtime, paths) = runtime.into_inner();
+    let (_, mut runtime, paths) = runtime.into_inner();
     let mut changes = SourceChanges::default();
     {
         let Ok(receiver) = runtime.changes.lock() else {
@@ -1779,7 +1759,7 @@ fn watch(
         changes.codex_archives = false;
     }
     if changes.codex_archives && runtime.manager && runtime.sources.contains(&SourceKind::Codex) {
-        commands.entity(entity).insert(archive::RefreshRequested);
+        sources.archives(SourceKind::Codex);
     }
     runtime.ensure_watches(paths);
     for path in changes.codex_activity {
@@ -1787,27 +1767,30 @@ fn watch(
             continue;
         };
         conversations.write(ProviderConversationChanged::codex(&activity));
-        if runtime.watch_codex_activity {
-            if !acp.refresh_codex_activity(&activity) {
+        let mut refreshed = false;
+        for (id, agent, mut updated_at) in &mut entries {
+            if id.0 == activity.sid() && AgentFamily::of(&agent.0) == SourceKind::Codex.family() {
+                let next = updated_at.0.max(activity.updated_at().0);
+                if updated_at.0 != next {
+                    updated_at.0 = next;
+                }
+                refreshed = true;
+            }
+        }
+        if !refreshed {
+            if runtime.watch_codex_activity {
                 catalogs.refresh = true;
             }
-            continue;
-        }
-        let Some(sessions) = snapshot.0.get_mut(&SourceKind::Codex) else {
-            changes.scans.insert(SourceKind::Codex);
-            continue;
-        };
-        if !activity.refresh(sessions) {
-            changes.scans.insert(SourceKind::Codex);
+            if runtime.sources.contains(&SourceKind::Codex) {
+                changes.scans.insert(SourceKind::Codex);
+            }
         }
     }
     if changes.scans.is_empty() {
         return;
     }
-    if let Ok(mut requested) = requested.get_mut(entity) {
-        requested.0.extend(changes.scans);
-    } else {
-        commands.entity(entity).insert(ScanRequested(changes.scans));
+    for source in changes.scans {
+        sources.queue(source);
     }
 }
 
@@ -1846,185 +1829,175 @@ fn request_changed_conversations(
     }
 }
 
-fn scan(
-    runtime: Single<
-        (Entity, &Runtime, &SourcePaths, &ScanRequested),
-        (With<Runtime>, Without<ScanTask>),
+fn cancel_scans(
+    runtimes: Query<&Runtime>,
+    sources: Query<
+        (
+            Entity,
+            &SourceKind,
+            Option<&EntityTarget<CatalogRead>>,
+            Option<&vmux_ecs::OperationError>,
+        ),
+        With<ScanRequested>,
     >,
-    snapshot: Res<SourceSnapshot>,
+    entries: Query<&ChildOf, With<vmux_session::provider::Entry>>,
+    mut commands: Commands,
+) {
+    for (source, kind, target, error) in &sources {
+        if runtimes
+            .iter()
+            .any(|runtime| runtime.sources.contains(kind))
+        {
+            continue;
+        }
+        commands.entity(source).remove::<ScanRequested>();
+        if target.is_none() {
+            let capability = if error.is_some() {
+                CatalogCapability::Failed
+            } else if entries.iter().any(|parent| parent.parent() == source) {
+                CatalogCapability::Supported
+            } else {
+                CatalogCapability::Unprobed
+            };
+            commands.entity(source).insert(capability);
+        }
+    }
+}
+
+fn scan(
+    runtime: Single<(Entity, &Runtime, &SourcePaths)>,
+    entries: ProviderEntries,
+    sources: Query<
+        (Entity, &SourceKind, &CatalogGeneration),
+        (With<CatalogSource>, With<ScanRequested>),
+    >,
+    reads: Query<&ChildOf, With<ScanTask>>,
     workers: Res<BlockingRuntime>,
     proxy: Option<Res<EventLoopProxyWrapper>>,
     mut commands: Commands,
 ) {
-    let (entity, runtime, paths, requested) = *runtime;
-    let requested = requested
-        .0
-        .intersection(&runtime.sources)
-        .copied()
-        .collect::<HashSet<_>>();
-    if requested.is_empty() {
-        commands.entity(entity).remove::<ScanRequested>();
-        return;
+    let (runtime_entity, runtime, paths) = runtime.into_inner();
+    let mut active = HashSet::new();
+    for parent in &reads {
+        active.insert(parent.parent());
     }
-    let readers = paths.readers(&requested, &snapshot);
-    let wake = proxy.as_deref().map(|proxy| (**proxy).clone());
-    let started_at = Instant::now();
-    let Some(task) = workers.spawn(vmux_ecs::wake::Wake::optional_waker(wake), move || {
-        readers.read()
-    }) else {
-        return;
-    };
-    commands
-        .entity(entity)
-        .remove::<ScanRequested>()
-        .insert(ScanTask { started_at, task });
+    let mut available = CATALOG_CONCURRENCY.saturating_sub(active.len());
+    for kind in SourceKind::ALL {
+        if available == 0 {
+            break;
+        }
+        let Some((source, _, generation)) = sources
+            .iter()
+            .find(|(_, source_kind, _)| **source_kind == kind)
+        else {
+            continue;
+        };
+        if !runtime.sources.contains(&kind) {
+            commands.entity(source).remove::<ScanRequested>();
+            continue;
+        }
+        if active.contains(&source) {
+            continue;
+        }
+        let Some(generation) = generation.0.checked_add(1) else {
+            commands.entity(source).insert(CatalogCapability::Failed);
+            if let Ok(error) = vmux_ecs::OperationError::new("native catalog generation exhausted")
+            {
+                commands.entity(source).insert(error);
+            }
+            commands.entity(source).remove::<ScanRequested>();
+            continue;
+        };
+        let mut hints = Vec::new();
+        for entry in entries.from_origin(CatalogOrigin::Native) {
+            if AgentFamily::of(&entry.agent.0) == kind.family() && entry.created_at.0 != 0 {
+                hints.push((entry.id.0.clone(), entry.created_at.0));
+            }
+        }
+        let reader = paths.reader(kind, hints);
+        let wake = proxy.as_deref().map(|proxy| (**proxy).clone());
+        let started_at = Instant::now();
+        let Some(task) = workers.spawn(vmux_ecs::wake::Wake::optional_waker(wake), move || {
+            reader.read()
+        }) else {
+            continue;
+        };
+        let operation = commands
+            .spawn((
+                CatalogRead {
+                    generation,
+                    wire_id: 0,
+                },
+                CatalogReadStarted(started_at),
+                ScanTask { task },
+                vmux_ecs::Operation::bundle("provider catalog")
+                    .expect("catalog operation kind")
+                    .running(),
+                EntityTarget::<Runtime>::new(runtime_entity),
+                ChildOf(source),
+            ))
+            .id();
+        commands.entity(source).insert((
+            CatalogGeneration(generation),
+            CatalogCapability::Pending,
+            EntityTarget::<CatalogRead>::new(operation),
+        ));
+        commands.entity(source).remove::<ScanRequested>();
+        available -= 1;
+    }
 }
 
 fn finish(
-    task: Single<(Entity, &mut ScanTask)>,
-    mut snapshot: ResMut<SourceSnapshot>,
-    mut overlay: ResMut<archive::Overlay>,
+    mut tasks: Query<(Entity, &ChildOf, &EntityTarget<Runtime>, &mut ScanTask)>,
+    runtimes: Query<(), With<Runtime>>,
+    sources: Query<Option<&EntityTarget<CatalogRead>>, With<CatalogSource>>,
+    mut received: MessageWriter<CatalogReceived>,
     mut commands: Commands,
 ) {
-    let (entity, mut task) = task.into_inner();
-    let Some(result) = task.task.poll() else {
-        return;
-    };
-    let reads = match result {
-        Ok(reads) => reads,
-        Err(_) => {
-            bevy::log::warn!("provider catalog worker panicked");
-            commands.entity(entity).remove::<ScanTask>();
-            return;
-        }
-    };
-    let mut next = snapshot.0.clone();
-    for read in reads {
-        match read.sessions {
-            Ok(mut sessions) => {
-                overlay.apply(read.source, task.started_at, &mut sessions);
-                next.insert(read.source, sessions);
+    for (operation, parent, runtime, mut task) in &mut tasks {
+        if !runtimes.contains(runtime.entity()) {
+            commands
+                .entity(operation)
+                .insert(vmux_ecs::OperationState::Canceled)
+                .remove::<ScanTask>();
+            if sources
+                .get(parent.parent())
+                .is_ok_and(|target| target.is_some_and(|target| target.entity() == operation))
+            {
+                commands
+                    .entity(parent.parent())
+                    .insert(CatalogCapability::Failed)
+                    .remove::<EntityTarget<CatalogRead>>();
             }
-            Err(error) => {
-                bevy::log::warn!("failed to read provider sessions: {error}");
-            }
-        }
-    }
-    if snapshot.0 != next {
-        snapshot.0 = next;
-    }
-    commands.entity(entity).remove::<ScanTask>();
-}
-
-fn project(
-    snapshot: Res<SourceSnapshot>,
-    acp: Res<AcpSnapshot>,
-    requests: Res<CatalogRequests>,
-    scans: Query<(), Or<(With<ScanRequested>, With<ScanTask>)>>,
-    unavailable: Query<(), With<vmux_ecs::service::ServiceUnavailable>>,
-    imported: Query<
-        (
-            &AgentId,
-            Option<&ProviderKind>,
-            Option<&ProviderSessionId>,
-            Option<&AcpSessionId>,
-        ),
-        (With<Session>, Without<SessionDuplicate>),
-    >,
-    changed: Query<
-        (),
-        (
-            With<Session>,
-            Or<(
-                Changed<AgentId>,
-                Changed<ProviderKind>,
-                Changed<ProviderSessionId>,
-                Changed<AcpSessionId>,
-                Changed<SessionDuplicate>,
-            )>,
-        ),
-    >,
-    mut removed: RemovedComponents<AcpSessionId>,
-    mut removed_duplicates: RemovedComponents<SessionDuplicate>,
-    mut catalog: ResMut<ProviderCatalog>,
-) {
-    let mut loading_changed = false;
-    if requests.active {
-        let loading = unavailable.is_empty()
-            && (requests.generation == 0
-                || requests.refresh
-                || !requests.pending.is_empty()
-                || !requests.queued.is_empty()
-                || !scans.is_empty());
-        if catalog.loading != loading {
-            catalog.loading = loading;
-            loading_changed = true;
-        }
-    }
-    let session_removed = removed.read().count() > 0;
-    let duplicate_removed = removed_duplicates.read().count() > 0;
-    let removed = session_removed || duplicate_removed;
-    if !loading_changed
-        && !snapshot.is_changed()
-        && !acp.is_changed()
-        && changed.is_empty()
-        && !removed
-        && !catalog.is_added()
-    {
-        return;
-    }
-    let imported = imported
-        .iter()
-        .filter_map(|(agent, kind, provider_sid, resume)| {
-            let sid = provider_sid
-                .map(|sid| sid.0.clone())
-                .or_else(|| resume.map(|sid| sid.0.clone()))?;
-            let family = kind
-                .and_then(|kind| kind.0.strip_prefix("acp:"))
-                .map(AgentFamily::of)
-                .unwrap_or_else(|| AgentFamily::of(&agent.0));
-            Some((family, sid))
-        })
-        .collect::<HashSet<_>>();
-    let mut indexed = HashMap::<(AgentFamily, String), ProviderSession>::new();
-    for session in acp.sessions() {
-        let key = (AgentFamily::of(&session.agent), session.sid.clone());
-        match indexed.get(&key) {
-            Some(current) if current.updated_at > session.updated_at => {}
-            _ => {
-                indexed.insert(key, session.clone());
-            }
-        }
-    }
-    for source in SourceKind::ALL {
-        if !acp.allows_fallback(&source.family()) {
             continue;
         }
-        let Some(source_sessions) = snapshot.0.get(&source) else {
+        let Some(result) = task.task.poll() else {
             continue;
         };
-        for session in source_sessions {
-            let key = (AgentFamily::of(&session.agent), session.sid.clone());
-            match indexed.get(&key) {
-                Some(current) if current.updated_at > session.updated_at => {}
-                _ => {
-                    indexed.insert(key, session.clone());
-                }
-            }
-        }
+        let result = match result {
+            Ok(result) => result,
+            Err(_) => Err("provider catalog worker panicked".into()),
+        };
+        received.write(CatalogReceived {
+            operation,
+            supported: true,
+            result,
+        });
+        commands.entity(operation).remove::<ScanTask>();
     }
-    let mut sessions = indexed
-        .into_iter()
-        .filter_map(|(key, session)| (!imported.contains(&key)).then_some(session))
-        .collect::<Vec<_>>();
-    sessions.sort_by_key(|session| std::cmp::Reverse(session.updated_at));
-    if catalog.sessions != sessions {
-        catalog.sessions = sessions;
+}
+
+fn complete_discovery(
+    control: Single<&CatalogControl>,
+    mut discovery: Single<&mut CatalogDiscovery>,
+) {
+    if control.active && !discovery.complete {
+        discovery.complete = true;
     }
 }
 
 fn associate(
-    snapshot: Res<SourceSnapshot>,
+    entries: ProviderEntries,
     sessions: Query<
         (
             Entity,
@@ -2038,26 +2011,21 @@ fn associate(
     >,
     mut commands: Commands,
 ) {
-    if snapshot.0.is_empty() {
-        return;
-    }
     for (entity, agent, resume, name, cwd, created_at) in &sessions {
         let cwd = cwd.0.to_string_lossy();
         let Some(source) =
-            snapshot.association(&agent.0, &resume.0, name.as_str(), &cwd, created_at.0)
+            entries.association(&agent.0, &resume.0, name.as_str(), &cwd, created_at.0)
         else {
             continue;
         };
-        commands.entity(entity).insert((
-            ProviderKind(source.kind.clone()),
-            ProviderSessionId(source.sid.clone()),
-        ));
+        commands
+            .entity(entity)
+            .insert((source.kind.clone(), source.id.clone()));
     }
 }
 
 fn request_conversation_refreshes(
-    snapshot: Res<SourceSnapshot>,
-    acp: Res<AcpSnapshot>,
+    mut acp: ProviderEntries,
     archive_overrides: Query<
         (
             &ProviderKind,
@@ -2083,10 +2051,9 @@ fn request_conversation_refreshes(
     mut archive_requests: MessageWriter<ArchiveRequest>,
     mut commands: Commands,
 ) {
-    if !snapshot.is_changed() && !acp.is_changed() {
+    if !acp.is_changed() {
         return;
     }
-    let sources = ProviderSessionIndex::from_snapshots(&snapshot, &acp);
     let mut archive_overrides_by_session = HashMap::new();
     for (kind, sid, source_updated_at, archived_at) in &archive_overrides {
         archive_overrides_by_session.insert(
@@ -2108,15 +2075,22 @@ fn request_conversation_refreshes(
         requested,
     ) in &mut sessions
     {
-        let Some(source) = sources.get(&kind.0, &provider_sid.0) else {
+        let Some(source) = acp.get(&kind.0, &provider_sid.0) else {
             continue;
         };
+        let source_created_at = source.created_at.0;
+        let source_updated_at = source.updated_at.0;
+        let source_archive = source
+            .archive_observed_at
+            .map(|at| match source.archived_at {
+                Some(_) => ArchiveState::Archived(at.0),
+                None => ArchiveState::Active(at.0),
+            });
         let archive_override =
             archive_overrides_by_session.get(&(kind.0.as_str(), provider_sid.0.as_str()));
         let archive = match archive_override {
             Some((source_updated_at, override_archived_at))
-                if source
-                    .archive
+                if source_archive
                     .is_none_or(|archive| *source_updated_at >= archive.updated_at()) =>
             {
                 Some(match override_archived_at {
@@ -2124,7 +2098,7 @@ fn request_conversation_refreshes(
                     None => ArchiveState::Active(*source_updated_at),
                 })
             }
-            _ => source.archive,
+            _ => source_archive,
         };
         match archive {
             Some(ArchiveState::Archived(at))
@@ -2143,27 +2117,64 @@ fn request_conversation_refreshes(
             }
             _ => {}
         }
-        if activated_at.0 < source.updated_at {
-            activated_at.0 = source.updated_at;
+        if activated_at.0 < source_updated_at {
+            activated_at.0 = source_updated_at;
         }
-        if ConversationSource::new(&kind.0, &provider_sid.0, source.created_at).is_none()
-            || revision.is_some_and(|revision| revision.0 >= source.updated_at)
+        if ConversationSource::new(kind, provider_sid, source_created_at).is_none()
+            || revision.is_some_and(|revision| revision.0 >= source_updated_at)
         {
             continue;
         }
         if let Some(mut requested) = requested {
-            requested.0 = requested.0.max(source.updated_at);
+            requested.0 = requested.0.max(source_updated_at);
         } else {
             commands
                 .entity(session)
-                .insert(ConversationRefreshRequested(source.updated_at));
+                .insert(ConversationRefreshRequested(source_updated_at));
+        }
+    }
+}
+
+fn reset_source(
+    sessions: Query<
+        (
+            Entity,
+            &ProviderKind,
+            &ProviderSessionId,
+            Option<&ConversationSourceScope>,
+            Option<&RunState>,
+        ),
+        With<Session>,
+    >,
+    mut commands: Commands,
+) {
+    for (session, kind, provider, scope, state) in &sessions {
+        if scope.is_some_and(|scope| &scope.0.kind == kind && &scope.0.id == provider) {
+            continue;
+        }
+        commands
+            .entity(session)
+            .insert(ConversationSourceScope(ProviderSessionKey::new(
+                kind.clone(),
+                provider.clone(),
+            )))
+            .remove::<(
+                ConversationCursor,
+                ConversationFile,
+                ConversationWatchPaths,
+                ConversationRevision,
+            )>();
+        if matches!(state, Some(RunState::Errored(_))) {
+            commands
+                .entity(session)
+                .insert(FailedConversationReadRequested);
         }
     }
 }
 
 fn queue_initial_conversations(
     paths: Single<&SourcePaths>,
-    snapshot: Res<SourceSnapshot>,
+    entries: ProviderEntries,
     sessions: Query<
         (
             Entity,
@@ -2184,11 +2195,12 @@ fn queue_initial_conversations(
     transcripts: Transcripts,
     native: Option<Res<NativeReaders>>,
     files: Query<&ConversationFile>,
+    versions: HistoryVersions,
     workers: Res<BlockingRuntime>,
     proxy: Option<Res<EventLoopProxyWrapper>>,
     mut commands: Commands,
 ) {
-    for (session, sid, kind, provider_sid, created_at, requested, cursor) in &sessions {
+    for (session, _sid, kind, provider_sid, created_at, requested, cursor) in &sessions {
         if kind.0.starts_with("acp:") {
             continue;
         }
@@ -2196,19 +2208,19 @@ fn queue_initial_conversations(
             commands.entity(session).remove::<TranscriptLoading>();
             continue;
         }
-        if snapshot.get(&kind.0, &provider_sid.0).is_none() {
+        if entries.get(&kind.0, &provider_sid.0).is_none() {
             commands.entity(session).remove::<TranscriptLoading>();
             continue;
         }
-        let Some(source) = ConversationSource::new(&kind.0, &provider_sid.0, created_at.0) else {
+        let Some(source) = ConversationSource::new(kind, provider_sid, created_at.0) else {
             commands.entity(session).remove::<TranscriptLoading>();
             continue;
         };
         let revision = requested.map_or_else(
             || {
-                snapshot
+                entries
                     .get(&kind.0, &provider_sid.0)
-                    .map_or(0, |source| source.updated_at)
+                    .map_or(0, |source| source.updated_at.0)
             },
             |requested| requested.0,
         );
@@ -2218,11 +2230,15 @@ fn queue_initial_conversations(
             .map(|native| (**native).clone())
             .unwrap_or_default();
         let hint = files.get(session).ok().map(|file| file.0.clone());
+        let known = versions.file(session);
         let paths = paths.clone();
+        let Some(read) = versions.capture(session, false) else {
+            continue;
+        };
         let wake = proxy.as_deref().map(|proxy| (**proxy).clone());
         let Some(task) = workers
             .spawn_long(vmux_ecs::wake::Wake::optional_waker(wake), move || {
-                source.read(&paths, cursor, Vec::new(), native, hint)
+                source.read(&paths, cursor, native, hint, known)
             })
         else {
             continue;
@@ -2231,15 +2247,15 @@ fn queue_initial_conversations(
             .entity(session)
             .insert(ConversationLoadPending)
             .remove::<ConversationRefreshRequested>();
-        commands.spawn((
+        let operation = commands.spawn((
             ChildOf(session),
-            ConversationLoadTask {
-                session,
-                sid: sid.clone(),
-                revision,
-                task,
-            },
+            read,
+            ConversationLoadTask { revision, task },
         ));
+        let operation = operation.id();
+        commands
+            .entity(session)
+            .insert(EntityTarget::<HistoryRead>::new(operation));
     }
 }
 
@@ -2262,9 +2278,9 @@ fn queue_failed_conversations(
             Without<SessionDuplicate>,
         ),
     >,
-    transcripts: Transcripts,
     native: Option<Res<NativeReaders>>,
     files: Query<&ConversationFile>,
+    versions: HistoryVersions,
     workers: Res<BlockingRuntime>,
     proxy: Option<Res<EventLoopProxyWrapper>>,
     mut commands: Commands,
@@ -2281,15 +2297,14 @@ fn queue_failed_conversations(
             paths
         }
     };
-    for (session, sid, kind, provider_sid, created_at, state, cursor) in &sessions {
+    for (session, _sid, kind, provider_sid, created_at, state, cursor) in &sessions {
         if !matches!(state, RunState::Errored(_)) {
             commands
                 .entity(session)
                 .remove::<FailedConversationReadRequested>();
             continue;
         }
-        let Some(source) = ConversationSource::for_failed(&kind.0, &provider_sid.0, created_at.0)
-        else {
+        let Some(source) = ConversationSource::for_failed(kind, provider_sid, created_at.0) else {
             continue;
         };
         let native = native
@@ -2297,13 +2312,16 @@ fn queue_failed_conversations(
             .map(|native| (**native).clone())
             .unwrap_or_default();
         let hint = files.get(session).ok().map(|file| file.0.clone());
+        let known = versions.file(session);
         let paths = paths.clone();
         let cursor = cursor.map(|cursor| cursor.0);
-        let known = KnownConversation::tail(&transcripts.get(session).messages);
+        let Some(read) = versions.capture(session, true) else {
+            continue;
+        };
         let wake = proxy.as_deref().map(|proxy| (**proxy).clone());
         let Some(task) = workers
             .spawn_long(vmux_ecs::wake::Wake::optional_waker(wake), move || {
-                source.read(&paths, cursor, known, native, hint)
+                source.read(&paths, cursor, native, hint, known)
             })
         else {
             commands
@@ -2315,16 +2333,19 @@ fn queue_failed_conversations(
             .entity(session)
             .insert(ConversationLoadPending)
             .remove::<FailedConversationReadRequested>();
-        commands.spawn((
-            FailedConversationRead,
+        let mut operation = commands.spawn((
             ChildOf(session),
+            read,
             ConversationLoadTask {
-                session,
-                sid: sid.clone(),
                 revision: created_at.0,
                 task,
             },
         ));
+        operation.insert(FailedConversationRead);
+        let operation = operation.id();
+        commands
+            .entity(session)
+            .insert(EntityTarget::<HistoryRead>::new(operation));
     }
 }
 
@@ -2347,15 +2368,15 @@ fn queue_conversation_refreshes(
             Without<SessionDuplicate>,
         ),
     >,
-    transcripts: Transcripts,
     native: Option<Res<NativeReaders>>,
     files: Query<&ConversationFile>,
+    versions: HistoryVersions,
     workers: Res<BlockingRuntime>,
     proxy: Option<Res<EventLoopProxyWrapper>>,
     mut commands: Commands,
 ) {
-    for (session, sid, kind, provider_sid, created_at, requested, cursor) in &sessions {
-        let Some(source) = ConversationSource::new(&kind.0, &provider_sid.0, created_at.0) else {
+    for (session, _sid, kind, provider_sid, created_at, requested, cursor) in &sessions {
+        let Some(source) = ConversationSource::new(kind, provider_sid, created_at.0) else {
             commands
                 .entity(session)
                 .remove::<ConversationRefreshRequested>();
@@ -2363,17 +2384,20 @@ fn queue_conversation_refreshes(
         };
         let revision = requested.0;
         let cursor = cursor.map(|cursor| cursor.0);
-        let known = KnownConversation::tail(&transcripts.get(session).messages);
         let native = native
             .as_ref()
             .map(|native| (**native).clone())
             .unwrap_or_default();
         let hint = files.get(session).ok().map(|file| file.0.clone());
+        let known = versions.file(session);
         let paths = paths.clone();
+        let Some(read) = versions.capture(session, false) else {
+            continue;
+        };
         let wake = proxy.as_deref().map(|proxy| (**proxy).clone());
         let Some(task) = workers
             .spawn_long(vmux_ecs::wake::Wake::optional_waker(wake), move || {
-                source.read(&paths, cursor, known, native, hint)
+                source.read(&paths, cursor, native, hint, known)
             })
         else {
             continue;
@@ -2382,155 +2406,132 @@ fn queue_conversation_refreshes(
             .entity(session)
             .insert(ConversationLoadPending)
             .remove::<ConversationRefreshRequested>();
-        commands.spawn((
+        let operation = commands.spawn((
             ChildOf(session),
-            ConversationLoadTask {
-                session,
-                sid: sid.clone(),
-                revision,
-                task,
-            },
+            read,
+            ConversationLoadTask { revision, task },
         ));
+        let operation = operation.id();
+        commands
+            .entity(session)
+            .insert(EntityTarget::<HistoryRead>::new(operation));
     }
 }
 
 fn finish_conversations(
-    mut tasks: Query<(
-        Entity,
-        &mut ConversationLoadTask,
-        Has<FailedConversationRead>,
-    )>,
-    states: Query<&RunState, With<Session>>,
-    files: Query<&ConversationFile>,
-    watched: Query<&ConversationWatchPaths>,
-    children: Query<&Children, With<Session>>,
-    existing: Query<
-        (
-            &vmux_session::EventIdentity,
-            &vmux_session::MessageContent,
-            &ChildOf,
-        ),
-        With<vmux_session::ConversationEvent>,
-    >,
-    transcripts: Transcripts,
-    mut snapshots: MessageWriter<SnapshotReceived>,
-    mut appended: MessageWriter<ConversationAppendReceived>,
-    mut operations: MessageWriter<vmux_session::OperationReceived>,
+    mut tasks: Query<(Entity, &mut ConversationLoadTask)>,
+    mut received: MessageWriter<HistoryReceived>,
     mut commands: Commands,
 ) {
-    for (task_entity, mut task, failed_read) in &mut tasks {
+    for (operation, mut task) in &mut tasks {
         let Some(result) = task.task.poll() else {
             continue;
         };
         let result = result.unwrap_or_else(|_| Err("provider history worker panicked".into()));
-        if failed_read
-            && (!states
-                .get(task.session)
-                .is_ok_and(|state| matches!(state, RunState::Errored(_)))
-                || result.as_ref().is_ok_and(|read| read.snapshot)
-                    && !transcripts.get(task.session).messages.is_empty())
-        {
-            commands
-                .entity(task.session)
-                .try_remove::<ConversationLoadPending>();
-            commands.entity(task_entity).despawn();
+        let mut read = match result {
+            Ok(read) => read,
+            Err(error) => {
+                let mut read = conversation::ReadResult::empty(None);
+                read.history.error = Some(error);
+                read
+            }
+        };
+        read.history.operation = operation;
+        read.history.updated_at = task.revision;
+        received.write(read.history);
+        commands
+            .entity(operation)
+            .remove::<ConversationLoadTask>()
+            .insert(ConversationReadReady {
+                revision: task.revision,
+                path: read.path,
+                watch_paths: read.watch_paths,
+                cursor: read.cursor,
+                complete: read.complete,
+            });
+    }
+}
+
+fn commit_conversations(
+    mut completed: MessageReader<HistoryCommitted>,
+    reads: Query<(
+        &ChildOf,
+        Option<&HistoryRead>,
+        Option<&ConversationReadReady>,
+        Has<FailedConversationRead>,
+    )>,
+    pending: Query<&EntityTarget<HistoryRead>>,
+    versions: HistoryVersions,
+    files: Query<&ConversationFile>,
+    watched: Query<&ConversationWatchPaths>,
+    mut commands: Commands,
+) {
+    let mut handled = HashSet::new();
+    for completed in completed.read() {
+        let operation = completed.operation;
+        if !handled.insert(operation) {
             continue;
         }
-        match result {
-            Ok(read) => {
-                if !read.watch_paths.is_empty()
-                    && !watched
-                        .get(task.session)
-                        .is_ok_and(|paths| paths.0 == read.watch_paths)
-                {
-                    commands
-                        .entity(task.session)
-                        .insert(ConversationWatchPaths(read.watch_paths));
-                }
-                if !read.records.is_empty() {
-                    let mut indexed = HashMap::new();
-                    let mut sequence = 0u64;
-                    for child in children
-                        .get(task.session)
-                        .into_iter()
-                        .flat_map(|children| children.iter())
-                    {
-                        let Ok((identity, content, _)) = existing.get(child) else {
-                            continue;
-                        };
-                        sequence = sequence.max(identity.sequence);
-                        indexed.insert(identity.event_id.clone(), (identity.sequence, &content.0));
-                    }
-                    for record in read.records {
-                        let id = vmux_api::session::EventId::new(format!(
-                            "session:{}:external:{}",
-                            task.sid.0, record.id
-                        ));
-                        let event_sequence = if let Some((sequence, content)) = indexed.get(&id) {
-                            if **content == record.message {
-                                continue;
-                            }
-                            *sequence
-                        } else {
-                            sequence = sequence.saturating_add(1);
-                            sequence
-                        };
-                        let actor =
-                            if matches!(&record.message, vmux_api::session::Message::User { .. }) {
-                                vmux_api::session::MemberId::local(&task.sid)
-                            } else {
-                                vmux_api::session::MemberId::agent(&task.sid)
-                            };
-                        operations.write(vmux_session::OperationReceived(
-                            vmux_api::session::ConversationEvent {
-                                event_id: id,
-                                session_id: task.sid.clone(),
-                                actor_id: actor,
-                                client_op_id: None,
-                                server_seq: event_sequence,
-                                created_at_ms: task.revision.max(0) as u64,
-                                reply_to: None,
-                                message: record.message,
-                            },
-                        ));
-                    }
-                }
-                if let Some(path) = read.path
-                    && !files.get(task.session).is_ok_and(|file| file.0 == path)
-                {
-                    commands.entity(task.session).insert(ConversationFile(path));
-                }
-                if !read.messages.is_empty() {
-                    if read.snapshot {
-                        snapshots.write(SnapshotReceived {
-                            session: task.sid.clone(),
-                            messages: read.messages,
-                        });
-                    } else {
-                        appended.write(ConversationAppendReceived {
-                            session: task.sid.clone(),
-                            messages: read.messages,
-                        });
-                    }
-                }
-                commands
-                    .entity(task.session)
-                    .insert(ConversationCursor(read.cursor));
-                if !read.complete {
-                    commands
-                        .entity(task.session)
-                        .insert(ConversationRefreshRequested(task.revision));
-                }
-            }
-            Err(error) => {
-                bevy::log::warn!("failed to read provider conversation: {error}");
-            }
+        let Ok((parent, read, ready, failed)) = reads.get(operation) else {
+            continue;
+        };
+        let session = parent.parent();
+        if !pending
+            .get(session)
+            .is_ok_and(|pending| pending.entity() == operation)
+        {
+            commands.entity(operation).despawn();
+            continue;
         }
+        let source_matches = read.is_some_and(|read| versions.matches(session, read));
         commands
-            .entity(task.session)
-            .insert(ConversationRevision(task.revision))
-            .remove::<(ConversationLoadPending, TranscriptLoading)>();
-        commands.entity(task_entity).despawn();
+            .entity(session)
+            .remove::<(ConversationLoadPending, EntityTarget<HistoryRead>)>();
+        match &completed.result {
+            Ok(true) if source_matches => {
+                if let Some(ready) = ready {
+                    if let Some(path) = &ready.path
+                        && !files.get(session).is_ok_and(|file| &file.0 == path)
+                    {
+                        commands
+                            .entity(session)
+                            .insert(ConversationFile(path.clone()));
+                    }
+                    if !ready.watch_paths.is_empty()
+                        && !watched
+                            .get(session)
+                            .is_ok_and(|paths| paths.0 == ready.watch_paths)
+                    {
+                        commands
+                            .entity(session)
+                            .insert(ConversationWatchPaths(ready.watch_paths.clone()));
+                    }
+                    commands.entity(session).insert((
+                        ConversationCursor(ready.cursor),
+                        ConversationRevision(ready.revision),
+                    ));
+                    if !ready.complete {
+                        commands
+                            .entity(session)
+                            .insert(ConversationRefreshRequested(ready.revision));
+                    }
+                }
+                commands.entity(session).remove::<TranscriptLoading>();
+            }
+            Ok(true) => {}
+            Ok(false) if source_matches => {
+                if !failed && versions.has_events(session) {
+                    commands.entity(session).remove::<TranscriptLoading>();
+                }
+            }
+            Ok(false) => {}
+            Err(error) if source_matches => {
+                bevy::log::warn!("failed to read provider conversation: {error}");
+                commands.entity(session).remove::<TranscriptLoading>();
+            }
+            Err(_) => {}
+        }
+        commands.entity(operation).despawn();
     }
 }
 
@@ -2540,7 +2541,7 @@ fn open(
     panes: Query<(), With<vmux_layout::pane::Pane>>,
     spaces: vmux_layout::space::SpaceHierarchy,
     windows: vmux_layout::window::WindowHierarchy,
-    catalog: Res<ProviderCatalog>,
+    catalog: ProviderEntries,
     agents: AgentCatalog,
     existing: Query<
         (
@@ -2554,8 +2555,7 @@ fn open(
         (With<Session>, Without<SessionDuplicate>),
     >,
     tombstones: Res<ProviderSessionTombstones>,
-    mut pending: ResMut<PendingImports>,
-    mut creates: MessageWriter<CreateRequest>,
+    mut imports: MessageWriter<ImportRequested>,
     mut opener: ResumeOpener,
 ) {
     let request = &trigger.event().payload;
@@ -2565,7 +2565,7 @@ fn open(
     if tombstones.contains(&request.kind, &request.sid) {
         return;
     }
-    let Some(mut source) = catalog.get(&request.kind, &request.sid).cloned() else {
+    let Some(source) = catalog.get(&request.kind, &request.sid) else {
         return;
     };
     let Ok(parent) = parents.get(trigger.event().webview) else {
@@ -2573,6 +2573,7 @@ fn open(
     };
     let stack = parent.parent();
     let destination = ResumeDestination {
+        origin: trigger.event().webview,
         stack,
         pane: parents
             .get(stack)
@@ -2583,82 +2584,71 @@ fn open(
         window: windows.get(trigger.event().webview),
         open: request.open.unwrap_or_default(),
     };
-    let family = AgentFamily::of(&source.agent);
+    let family = AgentFamily::of(&source.agent.0);
     if let Some((_, id, _, _, _, _)) =
         existing
             .iter()
             .find(|(_, _, agent, resume, kind, provider_sid)| {
-                kind.is_some_and(|kind| kind.0 == source.kind)
-                    && provider_sid.is_some_and(|sid| sid.0 == source.sid)
-                    || AgentFamily::of(&agent.0) == family && resume.0 == source.sid
+                kind.is_some_and(|kind| kind == source.kind)
+                    && provider_sid.is_some_and(|sid| sid == source.id)
+                    || AgentFamily::of(&agent.0) == family && resume.0 == source.id.0
             })
     {
         opener.open(destination, Route::Session(id.clone()).url());
         return;
     }
-    let Ok(cwd) = PathBuf::from(&source.cwd).canonicalize() else {
+    imports.write(ImportRequested {
+        entry: source.entity,
+        agent: agents.resolve(&source.agent.0),
+        destination,
+    });
+}
+
+fn opening(
+    event: On<Opening>,
+    imports: Query<(&SessionId, &ResumeDestination, &vmux_ecs::OperationState), With<Import>>,
+    mut opener: ResumeOpener,
+) {
+    let Ok((id, destination, state)) = imports.get(event.entity) else {
         return;
     };
-    if !cwd.is_dir() {
-        return;
-    }
-    source.cwd = cwd.to_string_lossy().into_owned();
-    let agent = agents.resolve(&source.agent);
-    let name = if source.name.trim().is_empty() {
-        source.sid.clone()
-    } else {
-        source.name.clone()
-    };
-    let create = CreateRequest::imported(
-        name,
-        source.description.clone(),
-        cwd,
-        agent.clone(),
-        source.created_at,
-        source.updated_at,
-    );
-    let deferred_open = !destination.opens_in_place();
-    let reservation = pending.reserve(
-        create.id().clone(),
-        PendingImport {
-            destination,
-            deferred_open,
-            source,
-            agent,
-        },
-    );
-    if reservation.open_now {
-        opener.open(destination, Route::Session(reservation.id.clone()).url());
-    }
-    if reservation.created {
-        creates.write(create);
+    if matches!(
+        state,
+        vmux_ecs::OperationState::Pending | vmux_ecs::OperationState::Running
+    ) {
+        opener.open(*destination, Route::Session(id.clone()).url());
     }
 }
 
-fn attach(
-    trigger: On<Created>,
-    mut pending: ResMut<PendingImports>,
+fn imported(
+    event: On<Imported>,
+    imports: Query<
+        (
+            &SessionId,
+            &ResumeDestination,
+            Option<&Opened>,
+            &vmux_ecs::OperationState,
+        ),
+        With<Import>,
+    >,
+    sessions: Query<&ProviderSessionId, With<Session>>,
     mut opener: ResumeOpener,
     mut commands: Commands,
 ) {
-    let event = trigger.event();
-    let Some(import) = pending.take(&event.id) else {
+    let Ok((id, destination, opened, state)) = imports.get(event.operation) else {
         return;
     };
-    let title = if import.source.conversation_title.trim().is_empty() {
-        import.source.name.clone()
-    } else {
-        import.source.conversation_title.clone()
+    if *state != vmux_ecs::OperationState::Succeeded {
+        return;
+    }
+    let Ok(sid) = sessions.get(event.entity) else {
+        return;
     };
-    commands.entity(event.entity).insert((
-        import.agent,
-        AcpSessionId(import.source.sid.clone()),
-        ProviderKind(import.source.kind),
-        ProviderSessionId(import.source.sid),
-        AgentConversationTitle(title),
-    ));
-    if import.deferred_open {
-        opener.open(import.destination, Route::Session(event.id.clone()).url());
+    commands
+        .entity(event.entity)
+        .insert(AcpSessionId(sid.0.clone()));
+    if opened.is_none() {
+        opener.open(*destination, Route::Session(id.clone()).url());
     }
 }
 
@@ -2741,7 +2731,141 @@ impl PromptText {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use bevy_ecs::system::RunSystemOnce;
     use std::io::Write;
+
+    struct ImportFixture {
+        app: App,
+        entry: Entity,
+        created: Arc<Mutex<Vec<(Entity, usize)>>>,
+    }
+
+    impl ImportFixture {
+        fn new(cwd: PathBuf) -> Self {
+            let mut app = App::new();
+            app.add_plugins((MinimalPlugins, vmux_session::DomainPlugin, ImportPlugin));
+            let created = Arc::new(Mutex::new(Vec::new()));
+            let observed = created.clone();
+            app.add_observer(move |event: On<Created>, world: &World| {
+                observed.lock().unwrap().push((
+                    event.entity,
+                    world.resource::<Messages<PageOpenRequest>>().len(),
+                ));
+            });
+            let source = app.world_mut().spawn(SourceKind::Codex.bundle()).id();
+            let operation = app
+                .world_mut()
+                .spawn((
+                    CatalogRead {
+                        generation: 1,
+                        wire_id: 0,
+                    },
+                    ChildOf(source),
+                    vmux_ecs::Operation::bundle("provider catalog")
+                        .unwrap()
+                        .running(),
+                ))
+                .id();
+            app.world_mut().entity_mut(source).insert((
+                CatalogGeneration(1),
+                EntityTarget::<CatalogRead>::new(operation),
+            ));
+            app.world_mut().write_message(CatalogReceived {
+                operation,
+                supported: true,
+                result: Ok(vec![ProviderSession {
+                    kind: "acp:codex".into(),
+                    sid: "provider-session".into(),
+                    agent: "codex".into(),
+                    name: "Provider task".into(),
+                    cwd: cwd.to_string_lossy().into_owned(),
+                    created_at: 100,
+                    updated_at: 200,
+                    conversation_title: "Provider task".into(),
+                    ..Default::default()
+                }]),
+            });
+            app.update();
+            let entry = app
+                .world_mut()
+                .query_filtered::<Entity, With<vmux_session::provider::Entry>>()
+                .single(app.world())
+                .unwrap();
+            Self {
+                app,
+                entry,
+                created,
+            }
+        }
+
+        fn origin(&mut self) -> Entity {
+            let stack = self.app.world_mut().spawn_empty().id();
+            self.app.world_mut().spawn(ChildOf(stack)).id()
+        }
+
+        fn open(&mut self, webview: Entity, open: Option<OpenTarget>) {
+            self.app.world_mut().trigger(UiInput {
+                webview,
+                payload: ResumeSession {
+                    kind: "acp:codex".into(),
+                    sid: "provider-session".into(),
+                    cwd: String::new(),
+                    open,
+                },
+            });
+        }
+
+        fn pages(&mut self) -> Vec<PageOpenRequest> {
+            self.app
+                .world_mut()
+                .resource_mut::<Messages<PageOpenRequest>>()
+                .drain()
+                .collect()
+        }
+    }
+
+    struct CatalogFixture {
+        app: App,
+    }
+
+    impl CatalogFixture {
+        fn new() -> Self {
+            let mut app = App::new();
+            app.add_plugins(MinimalPlugins)
+                .add_message::<ArchiveRequest>()
+                .init_resource::<ProviderSessionTombstones>()
+                .add_plugins(Plugin);
+            Self { app }
+        }
+
+        fn receive(&mut self, kind: SourceKind, sessions: Vec<ProviderSession>) {
+            let source = self.app.world_mut().spawn(kind.bundle()).id();
+            let operation = self
+                .app
+                .world_mut()
+                .spawn((
+                    CatalogRead {
+                        generation: 1,
+                        wire_id: 0,
+                    },
+                    CatalogReadStarted(Instant::now()),
+                    vmux_ecs::Operation::bundle("provider catalog")
+                        .unwrap()
+                        .running(),
+                    ChildOf(source),
+                ))
+                .id();
+            self.app.world_mut().entity_mut(source).insert((
+                CatalogGeneration(1),
+                EntityTarget::<CatalogRead>::new(operation),
+            ));
+            self.app.world_mut().write_message(CatalogReceived {
+                operation,
+                supported: true,
+                result: Ok(sessions),
+            });
+        }
+    }
 
     #[test]
     fn matching_conversations_requires_the_same_family_even_with_equal_provider_ids() {
@@ -2755,38 +2879,6 @@ mod tests {
         assert!(changed.matches("acp:codex-acp", "same"));
         assert!(!changed.matches("acp:claude", "same"));
         assert!(!changed.matches("acp:mistral-vibe", "same"));
-    }
-
-    #[test]
-    fn replay_matching_ignores_display_metadata_and_assistant_message_grouping() {
-        let tool = vmux_api::session::AssistantBlock::ToolUse {
-            call_id: "call".into(),
-            name: "Bash".into(),
-            args: "{}".into(),
-            parent_call_id: None,
-            kind: Some(vmux_api::session::ToolKind::Execute),
-        };
-        let known = KnownConversation(vec![vmux_api::session::Message::Assistant {
-            blocks: vec![
-                vmux_api::session::AssistantBlock::Text("context".into()),
-                tool.clone(),
-            ],
-        }]);
-        let mut replay = tool;
-        if let vmux_api::session::AssistantBlock::ToolUse { kind, name, .. } = &mut replay {
-            *kind = None;
-            *name = "Execute command".into();
-        }
-        let unseen = known.unseen(vec![
-            vmux_api::session::Message::Assistant {
-                blocks: vec![vmux_api::session::AssistantBlock::Text("context".into())],
-            },
-            vmux_api::session::Message::Assistant {
-                blocks: vec![replay],
-            },
-            vmux_api::session::Message::user("new"),
-        ]);
-        assert_eq!(unseen, [vmux_api::session::Message::user("new")]);
     }
 
     #[test]
@@ -2805,28 +2897,39 @@ mod tests {
             claude: directory.path().into(),
             vibe: directory.path().into(),
         };
-        let first = ConversationSource::new("acp:claude", "thread", 0)
-            .unwrap()
-            .read(&paths, None, Vec::new(), NativeReaders::default(), None)
-            .unwrap();
-        assert_eq!(first.messages, [vmux_api::session::Message::user("first")]);
+        let first = ConversationSource::new(
+            &ProviderKind("acp:claude".into()),
+            &ProviderSessionId("thread".into()),
+            0,
+        )
+        .unwrap()
+        .read(&paths, None, NativeReaders::default(), None, None)
+        .unwrap();
+        assert_eq!(
+            first.messages(),
+            [vmux_api::session::Message::user("first")]
+        );
         let mut file = std::fs::OpenOptions::new()
             .append(true)
             .open(&path)
             .unwrap();
         file.write_all(b"{\"type\":\"assistant\",\"message\":{\"role\":\"assistant\",\"content\":[{\"type\":\"text\",\"text\":\"next\"}]}}\n").unwrap();
-        let next = ConversationSource::new("acp:claude", "thread", 0)
-            .unwrap()
-            .read(
-                &paths,
-                Some(first.cursor),
-                first.messages,
-                NativeReaders::default(),
-                first.path,
-            )
-            .unwrap();
+        let next = ConversationSource::new(
+            &ProviderKind("acp:claude".into()),
+            &ProviderSessionId("thread".into()),
+            0,
+        )
+        .unwrap()
+        .read(
+            &paths,
+            Some(first.cursor),
+            NativeReaders::default(),
+            first.path,
+            first.history.file,
+        )
+        .unwrap();
         assert_eq!(
-            next.messages,
+            next.messages(),
             [vmux_api::session::Message::Assistant {
                 blocks: vec![vmux_api::session::AssistantBlock::Text("next".into())]
             }]
@@ -2884,10 +2987,11 @@ mod tests {
                 "01a14fcc-f46a-7c12-b000-779be98d72ae",
                 Timestamp::parse("2026-10-18T16:16:34.454Z"),
                 Some(cursor),
+                None,
             )
             .unwrap();
         assert_eq!(
-            read.messages,
+            read.messages(),
             [vmux_api::session::Message::user("live update")]
         );
         watch.set_paths(HashSet::new());
@@ -2947,7 +3051,7 @@ mod tests {
             let mut app = App::new();
             app.add_plugins(MinimalPlugins)
                 .insert_resource(workers)
-                .add_plugins(HistoryReadPlugin);
+                .add_plugins((vmux_session::history::Plugin, HistoryReadPlugin));
             app.world_mut().spawn(SourcePaths {
                 codex: directory.path().to_path_buf(),
                 claude: directory.path().join("claude"),
@@ -2966,19 +3070,21 @@ mod tests {
                 ))
                 .id();
             for (sequence, message) in cached.into_iter().enumerate() {
-                app.world_mut().spawn((
-                    vmux_session::ConversationEvent,
-                    vmux_session::EventIdentity {
-                        event_id: vmux_api::session::EventId::new(format!("cached-{sequence}")),
-                        actor_id: vmux_api::session::MemberId::local(&SessionId::new("canonical")),
-                        client_op_id: None,
-                        sequence: sequence as u64,
-                        reply_to: None,
-                    },
-                    vmux_session::MessageContent(message),
-                    CreatedAt(1),
-                    ChildOf(session),
-                ));
+                app.world_mut()
+                    .write_message(vmux_session::OperationReceived(
+                        vmux_api::session::ConversationEvent {
+                            event_id: vmux_api::session::EventId::new(format!("cached-{sequence}")),
+                            session_id: SessionId::new("canonical"),
+                            actor_id: vmux_api::session::MemberId::local(&SessionId::new(
+                                "canonical",
+                            )),
+                            client_op_id: None,
+                            server_seq: sequence as u64,
+                            created_at_ms: 1,
+                            reply_to: None,
+                            message,
+                        },
+                    ));
             }
             app.update();
             Self {
@@ -2990,7 +3096,7 @@ mod tests {
             }
         }
 
-        fn finish(&mut self) -> Vec<SnapshotReceived> {
+        fn finish(&mut self) -> Vec<vmux_api::session::Message> {
             for release in self.release.drain(..) {
                 release.send(()).unwrap();
             }
@@ -3008,60 +3114,72 @@ mod tests {
                 self.app.update();
                 std::thread::sleep(Duration::from_millis(2));
             }
-            self.app
-                .world_mut()
-                .resource_mut::<Messages<SnapshotReceived>>()
-                .drain()
-                .collect()
-        }
-
-        fn native(
-            &mut self,
-            message: vmux_api::session::Message,
-        ) -> Vec<vmux_api::session::ConversationEvent> {
             let session = self.session;
             self.app
                 .world_mut()
-                .entity_mut(session)
-                .insert(ConversationLoadPending);
-            self.app.world_mut().spawn(ConversationLoadTask {
-                session,
-                sid: SessionId::new("canonical"),
-                revision: 1,
-                task: vmux_ecs::BlockingPool::new("test-catalog", 1, 1)
-                    .spawn(None, move || {
-                        Ok(ConversationRead {
-                            path: None,
-                            watch_paths: Vec::new(),
-                            records: vec![conversation::Record {
-                                id: "stable".into(),
-                                message,
-                            }],
-                            messages: Vec::new(),
-                            cursor: 1,
-                            snapshot: false,
-                            complete: true,
-                        })
-                    })
-                    .unwrap(),
-            });
-            let deadline = Instant::now() + Duration::from_secs(3);
-            while self
+                .run_system_once(move |transcripts: Transcripts| transcripts.get(session).messages)
+                .unwrap()
+        }
+
+        fn native(&mut self, message: vmux_api::session::Message) -> Entity {
+            let session = self.session;
+            let read = self
+                .app
+                .world_mut()
+                .run_system_once(move |versions: HistoryVersions| versions.capture(session, false))
+                .unwrap()
+                .unwrap();
+            let operation = self
+                .app
+                .world_mut()
+                .spawn((
+                    ChildOf(session),
+                    read,
+                    ConversationLoadTask {
+                        revision: 1,
+                        task: vmux_ecs::BlockingPool::new("test-catalog", 1, 1)
+                            .spawn(None, move || {
+                                let mut history = HistoryReceived::messages(Vec::new(), false);
+                                history.entries.push((Some("stable".into()), message));
+                                Ok(conversation::ReadResult {
+                                    path: None,
+                                    watch_paths: Vec::new(),
+                                    history,
+                                    cursor: 1,
+                                    complete: true,
+                                })
+                            })
+                            .unwrap(),
+                    },
+                ))
+                .id();
+            self.app.world_mut().entity_mut(session).insert((
+                ConversationLoadPending,
+                EntityTarget::<HistoryRead>::new(operation),
+            ));
+            self.finish();
+            let kind = self
                 .app
                 .world()
-                .get::<ConversationLoadPending>(session)
-                .is_some()
-            {
-                assert!(Instant::now() < deadline, "native history update");
-                self.app.update();
-                std::thread::sleep(Duration::from_millis(2));
-            }
+                .get::<ProviderKind>(session)
+                .unwrap()
+                .clone();
+            let provider = self
+                .app
+                .world()
+                .get::<ProviderSessionId>(session)
+                .unwrap()
+                .clone();
             self.app
                 .world_mut()
-                .resource_mut::<Messages<vmux_session::OperationReceived>>()
-                .drain()
-                .map(|event| event.0)
-                .collect()
+                .query::<(&ChildOf, &Name, &ProviderKind, &ProviderSessionId)>()
+                .iter(self.app.world())
+                .find(|(_, name, source, id)| {
+                    name.as_str() == "stable" && **source == kind && **id == provider
+                })
+                .unwrap()
+                .0
+                .parent()
         }
     }
 
@@ -3069,50 +3187,63 @@ mod tests {
     fn native_history_updates_keep_the_record_identity_and_ignore_unchanged_entries() {
         let mut fixture = FailedReadFixture::new();
         fixture.finish();
-        let first = fixture.native(vmux_api::session::Message::user("first"));
-        assert_eq!(first.len(), 1);
-        let event = &first[0];
-        let entity = fixture
+        let entity = fixture.native(vmux_api::session::Message::user("first"));
+        let sequence = fixture
             .app
-            .world_mut()
-            .spawn((
-                vmux_session::ConversationEvent,
-                vmux_session::EventIdentity {
-                    event_id: event.event_id.clone(),
-                    actor_id: event.actor_id.clone(),
-                    client_op_id: None,
-                    sequence: event.server_seq,
-                    reply_to: None,
-                },
-                vmux_session::MessageContent(event.message.clone()),
-                CreatedAt(1),
-                ChildOf(fixture.session),
-            ))
-            .id();
-        let updated = fixture.native(vmux_api::session::Message::user("updated"));
-        assert_eq!(updated.len(), 1);
-        assert_eq!(updated[0].event_id, event.event_id);
-        assert_eq!(updated[0].server_seq, event.server_seq);
-        fixture
-            .app
-            .world_mut()
-            .entity_mut(entity)
-            .insert(vmux_session::MessageContent(updated[0].message.clone()));
-        assert!(
+            .world()
+            .get::<vmux_session::EventIdentity>(entity)
+            .unwrap()
+            .sequence;
+        assert_eq!(
+            fixture.native(vmux_api::session::Message::user("updated")),
+            entity
+        );
+        assert_eq!(
             fixture
-                .native(vmux_api::session::Message::user("updated"))
-                .is_empty()
+                .app
+                .world()
+                .get::<vmux_session::EventIdentity>(entity)
+                .unwrap()
+                .sequence,
+            sequence
+        );
+        assert_eq!(
+            fixture
+                .app
+                .world()
+                .get::<vmux_session::MessageContent>(entity)
+                .unwrap()
+                .0,
+            vmux_api::session::Message::user("updated")
+        );
+        let changed = fixture
+            .app
+            .world()
+            .entity(entity)
+            .get_ref::<vmux_session::MessageContent>()
+            .unwrap()
+            .last_changed();
+        assert_eq!(
+            fixture.native(vmux_api::session::Message::user("updated")),
+            entity
+        );
+        assert_eq!(
+            fixture
+                .app
+                .world()
+                .entity(entity)
+                .get_ref::<vmux_session::MessageContent>()
+                .unwrap()
+                .last_changed(),
+            changed
         );
     }
 
     #[test]
     fn failed_codex_resume_reads_the_original_history_without_replacing_its_identity() {
         let mut fixture = FailedReadFixture::new();
-        let snapshots = fixture.finish();
-        assert_eq!(snapshots.len(), 1);
-        assert_eq!(snapshots[0].session.0, "canonical");
         assert_eq!(
-            snapshots[0].messages,
+            fixture.finish(),
             [vmux_api::session::Message::user("original conversation")]
         );
         assert!(
@@ -3128,26 +3259,13 @@ mod tests {
     fn failed_codex_resume_keeps_cached_history_and_appends_new_provider_messages() {
         let cached = vmux_api::session::Message::user("original conversation");
         let mut fixture = FailedReadFixture::with_cached(vec![cached.clone()]);
-        assert!(fixture.finish().is_empty());
-        let appended = fixture
-            .app
-            .world_mut()
-            .resource_mut::<Messages<ConversationAppendReceived>>()
-            .drain()
-            .collect::<Vec<_>>();
-        assert_eq!(appended.len(), 1);
-        assert_eq!(appended[0].session, SessionId::new("canonical"));
         assert_eq!(
-            appended[0].messages,
-            [vmux_api::session::Message::user(
-                "new message after cached history"
-            )]
+            fixture.finish(),
+            [
+                cached,
+                vmux_api::session::Message::user("new message after cached history")
+            ]
         );
-        let mut contents = fixture
-            .app
-            .world_mut()
-            .query::<&vmux_session::MessageContent>();
-        assert_eq!(contents.single(fixture.app.world()).unwrap().0, cached);
         assert_eq!(
             fixture
                 .app
@@ -3171,65 +3289,237 @@ mod tests {
     }
 
     #[test]
-    fn a_pending_provider_does_not_hide_completed_catalogs() {
-        let mut app = App::new();
-        app.init_resource::<SourceSnapshot>()
-            .init_resource::<AcpSnapshot>()
-            .init_resource::<ProviderCatalog>()
-            .insert_resource(CatalogRequests {
-                active: true,
-                generation: 1,
-                refresh: true,
-                ..Default::default()
-            })
-            .add_systems(Update, project);
-        let mut snapshot = app.world_mut().resource_mut::<AcpSnapshot>();
-        snapshot.0.insert(
-            "codex".into(),
-            AcpSource {
-                state: AcpSourceState::Supported,
-                sessions: vec![ProviderSession {
-                    kind: "acp:codex".into(),
-                    sid: "ready".into(),
-                    agent: "codex".into(),
-                    ..Default::default()
-                }],
-            },
+    fn changing_provider_identity_discards_the_previous_read_and_file_cursor() {
+        let mut fixture = FailedReadFixture::new();
+        fixture.app.world_mut().entity_mut(fixture.session).insert((
+            ProviderSessionId("replacement".into()),
+            ConversationCursor(999),
+            ConversationFile(fixture._directory.path().join("old.jsonl")),
+        ));
+        fixture.app.update();
+        assert!(fixture.finish().is_empty());
+        assert!(
+            fixture
+                .app
+                .world()
+                .get::<ConversationFile>(fixture.session)
+                .is_none()
         );
-        snapshot.0.insert(
-            "mistral-vibe".into(),
-            AcpSource {
-                state: AcpSourceState::Pending,
-                sessions: Vec::new(),
-            },
+        assert_ne!(
+            fixture
+                .app
+                .world()
+                .get::<ConversationCursor>(fixture.session)
+                .map(|cursor| cursor.0),
+            Some(999)
         );
-        app.update();
-        let catalog = app.world().resource::<ProviderCatalog>();
-        assert!(catalog.loading);
-        assert_eq!(catalog.sessions.len(), 1);
-        assert_eq!(catalog.sessions[0].sid, "ready");
     }
 
     #[test]
-    fn provider_store_fallback_requires_an_explicitly_unsupported_catalog() {
-        let family = AgentFamily::of("codex");
-        let mut snapshot = AcpSnapshot::default();
-        assert!(snapshot.allows_fallback(&family));
-
-        snapshot.0.insert(
-            "codex-acp".into(),
-            AcpSource {
-                state: AcpSourceState::Pending,
-                sessions: Vec::new(),
+    fn history_that_arrives_after_local_input_is_not_retried_as_a_new_snapshot() {
+        let mut fixture = FailedReadFixture::new();
+        fixture.app.world_mut().spawn((
+            vmux_session::ConversationEvent,
+            vmux_session::EventIdentity {
+                event_id: vmux_api::session::EventId::new("local-event"),
+                actor_id: vmux_api::session::MemberId::local(&SessionId::new("canonical")),
+                client_op_id: None,
+                sequence: 1,
+                reply_to: None,
             },
+            vmux_session::MessageContent(vmux_api::session::Message::user("local")),
+            CreatedAt(1),
+            ChildOf(fixture.session),
+        ));
+        assert_eq!(
+            fixture.finish(),
+            [vmux_api::session::Message::user("local")]
         );
-        assert!(!snapshot.allows_fallback(&family));
+        fixture.app.update();
+        assert!(
+            fixture
+                .app
+                .world()
+                .get::<FailedConversationReadRequested>(fixture.session)
+                .is_none()
+        );
+        assert!(
+            fixture
+                .app
+                .world_mut()
+                .query::<&ConversationLoadTask>()
+                .iter(fixture.app.world())
+                .next()
+                .is_none()
+        );
+    }
 
-        snapshot.0.get_mut("codex-acp").unwrap().state = AcpSourceState::Failed;
-        assert!(!snapshot.allows_fallback(&family));
+    #[test]
+    fn configured_catalog_failure_blocks_fallback_until_the_source_is_removed() {
+        let mut settings = AppSettings::default();
+        settings.agent.acp = vec![vmux_setting::AcpAgentConfig {
+            id: "codex".into(),
+            name: "Codex".into(),
+            command: "npx".into(),
+            args: Vec::new(),
+            env: Vec::new(),
+            cwd: None,
+            version: None,
+        }];
+        let mut app = App::new();
+        app.add_plugins((MinimalPlugins, CatalogPlugin))
+            .insert_resource(settings);
+        app.world_mut().spawn((SessionManagerView, PageReady));
+        app.update();
+        let source = app
+            .world_mut()
+            .query_filtered::<Entity, With<CatalogSource>>()
+            .single(app.world())
+            .unwrap();
+        assert_eq!(
+            app.world().get::<CatalogCapability>(source),
+            Some(&CatalogCapability::Unprobed)
+        );
+        let fallback = app
+            .world_mut()
+            .run_system_once(|entries: ProviderEntries| {
+                entries.allows_fallback(&AgentFamily::of("codex"))
+            })
+            .unwrap();
+        assert!(!fallback);
+        app.world_mut().spawn(ServiceConnected);
+        app.update();
+        assert_eq!(
+            app.world().get::<CatalogCapability>(source),
+            Some(&CatalogCapability::Failed)
+        );
+        assert!(
+            app.world()
+                .get::<vmux_ecs::OperationError>(source)
+                .is_some()
+        );
+        let fallback = app
+            .world_mut()
+            .run_system_once(|entries: ProviderEntries| {
+                entries.allows_fallback(&AgentFamily::of("codex"))
+            })
+            .unwrap();
+        assert!(!fallback);
+        assert!(
+            app.world_mut()
+                .query::<&CatalogRead>()
+                .iter(app.world())
+                .next()
+                .is_none()
+        );
+        app.world_mut()
+            .resource_mut::<AppSettings>()
+            .agent
+            .acp
+            .clear();
+        app.update();
+        assert!(app.world().get_entity(source).is_err());
+        let fallback = app
+            .world_mut()
+            .run_system_once(|entries: ProviderEntries| {
+                entries.allows_fallback(&AgentFamily::of("codex"))
+            })
+            .unwrap();
+        assert!(fallback);
+    }
 
-        snapshot.0.get_mut("codex-acp").unwrap().state = AcpSourceState::Unsupported;
-        assert!(snapshot.allows_fallback(&family));
+    #[test]
+    fn catalog_results_preserve_mismatched_requests_and_materialize_source_entries() {
+        let mut app = App::new();
+        app.add_plugins((MinimalPlugins, CatalogPlugin));
+        app.world_mut().spawn((SessionManagerView, PageReady));
+        app.world_mut().spawn(ServiceConnected);
+        let source = app
+            .world_mut()
+            .spawn((
+                CatalogSource,
+                CatalogOrigin::Acp,
+                CatalogCapability::Pending,
+                CatalogGeneration(1),
+                AgentId("codex".into()),
+                Name::new("Codex"),
+            ))
+            .id();
+        let operation = app
+            .world_mut()
+            .spawn((
+                AcpCatalogRead,
+                CatalogRead {
+                    generation: 1,
+                    wire_id: 7,
+                },
+                vmux_ecs::Operation::bundle("provider catalog")
+                    .unwrap()
+                    .running(),
+                ChildOf(source),
+            ))
+            .id();
+        app.world_mut()
+            .entity_mut(source)
+            .insert(EntityTarget::<CatalogRead>::new(operation));
+        app.world_mut()
+            .entity_mut(operation)
+            .insert(CatalogStarted(Instant::now()));
+        let mut controls = app.world_mut().query::<&mut CatalogControl>();
+        let mut control = controls.single_mut(app.world_mut()).unwrap();
+        control.active = true;
+        control.generation = 1;
+        app.world_mut().write_message(AcpCatalogReceived {
+            request_id: 7,
+            agent_id: "other".into(),
+            agent_name: "Other".into(),
+            supported: true,
+            sessions: Vec::new(),
+            error: None,
+        });
+        app.update();
+        assert_eq!(
+            app.world()
+                .get::<EntityTarget<CatalogRead>>(source)
+                .unwrap()
+                .entity(),
+            operation
+        );
+        assert_eq!(
+            app.world().get::<vmux_ecs::OperationState>(operation),
+            Some(&vmux_ecs::OperationState::Running)
+        );
+        app.world_mut().write_message(AcpCatalogReceived {
+            request_id: 7,
+            agent_id: "codex".into(),
+            agent_name: "Codex".into(),
+            supported: true,
+            sessions: vec![AcpProviderSession {
+                id: "native-id".into(),
+                title: "Canonical catalog".into(),
+                cwd: "/work".into(),
+                updated_at: "2026-11-13T08:00:00Z".into(),
+            }],
+            error: None,
+        });
+        app.update();
+        let name = app
+            .world_mut()
+            .run_system_once(|entries: vmux_session::provider::Entries| {
+                entries
+                    .get("acp:codex", "native-id")
+                    .map(|entry| entry.name.as_str().to_string())
+            })
+            .unwrap();
+        assert_eq!(name.as_deref(), Some("Canonical catalog"));
+        assert_eq!(
+            app.world().get::<CatalogCapability>(source),
+            Some(&CatalogCapability::Supported)
+        );
+        assert_eq!(
+            app.world().get::<vmux_ecs::OperationState>(operation),
+            Some(&vmux_ecs::OperationState::Succeeded)
+        );
     }
 
     #[test]
@@ -3371,184 +3661,138 @@ mod tests {
     }
 
     #[test]
+    fn native_scan_intents_are_canceled_when_their_runtime_is_absent() {
+        let mut fixture = CatalogFixture::new();
+        let source = fixture
+            .app
+            .world_mut()
+            .spawn((SourceKind::Codex.bundle(), ScanRequested))
+            .id();
+        fixture
+            .app
+            .world_mut()
+            .entity_mut(source)
+            .insert(CatalogCapability::Pending);
+        fixture.app.update();
+        assert!(fixture.app.world().get::<ScanRequested>(source).is_none());
+        assert_eq!(
+            fixture.app.world().get::<CatalogCapability>(source),
+            Some(&CatalogCapability::Unprobed)
+        );
+        assert_eq!(
+            fixture
+                .app
+                .world_mut()
+                .query::<&ScanTask>()
+                .iter(fixture.app.world())
+                .count(),
+            0
+        );
+    }
+
+    #[test]
     fn provider_resume_opens_the_pending_session_before_materialization() {
         let cwd = tempfile::tempdir().unwrap();
-        let cwd = cwd.path().canonicalize().unwrap();
-        let mut app = App::new();
-        app.init_resource::<ProviderCatalog>()
-            .init_resource::<PendingImports>()
-            .init_resource::<ProviderSessionTombstones>()
-            .init_resource::<AppSettings>()
-            .add_message::<CreateRequest>()
-            .add_message::<PageOpenRequest>()
-            .add_message::<TabLayoutSpawnRequest>()
-            .add_observer(open)
-            .add_observer(attach);
-        app.world_mut()
-            .resource_mut::<ProviderCatalog>()
-            .sessions
-            .push(ProviderSession {
-                kind: "acp:codex".into(),
-                sid: "provider-session".into(),
-                agent: "codex".into(),
-                agent_name: "Codex".into(),
-                name: "Provider task".into(),
-                cwd: cwd.to_string_lossy().into_owned(),
-                created_at: 100,
-                updated_at: 200,
-                conversation_title: "Provider task".into(),
-                ..Default::default()
-            });
-        let stack = app.world_mut().spawn_empty().id();
-        let webview = app.world_mut().spawn(ChildOf(stack)).id();
-
-        app.world_mut().trigger(UiInput {
-            webview,
-            payload: ResumeSession {
-                kind: "acp:codex".into(),
-                sid: "provider-session".into(),
-                cwd: cwd.to_string_lossy().into_owned(),
-                open: None,
-            },
-        });
-        app.world_mut().trigger(UiInput {
-            webview,
-            payload: ResumeSession {
-                kind: "acp:codex".into(),
-                sid: "provider-session".into(),
-                cwd: cwd.to_string_lossy().into_owned(),
-                open: None,
-            },
-        });
-
-        let created = app
-            .world_mut()
-            .resource_mut::<Messages<CreateRequest>>()
-            .drain()
-            .collect::<Vec<_>>();
+        let mut fixture = ImportFixture::new(cwd.path().to_path_buf());
+        let origin = fixture.origin();
+        let stack = fixture.app.world().get::<ChildOf>(origin).unwrap().parent();
+        fixture.open(origin, None);
+        fixture.open(origin, None);
+        fixture.app.update();
+        let created = fixture.created.lock().unwrap().clone();
         assert_eq!(created.len(), 1);
-        assert_eq!(created[0].agent, Some(AgentId("codex".into())));
-        let id = created[0].id().clone();
-        let opened = app
-            .world_mut()
-            .resource_mut::<Messages<PageOpenRequest>>()
-            .drain()
-            .collect::<Vec<_>>();
-        assert_eq!(opened.len(), 1);
-        assert_eq!(opened[0].url, Route::Session(id.clone()).url());
-        assert!(matches!(
-            opened[0].target,
-            PageOpenTarget::Stack(entity) if entity == stack
-        ));
-        let session = app.world_mut().spawn_empty().id();
-        app.world_mut().trigger(Created {
-            entity: session,
-            id: id.clone(),
-        });
-        app.world_mut().flush();
-
+        assert_eq!(created[0].1, 1);
+        let session = created[0].0;
         assert_eq!(
-            app.world().get::<AcpSessionId>(session),
+            fixture.app.world().get::<AcpSessionId>(session),
             Some(&AcpSessionId("provider-session".into()))
         );
-        assert_eq!(
-            app.world().get::<ProviderKind>(session),
-            Some(&ProviderKind("acp:codex".into()))
-        );
-        assert_eq!(
-            app.world().get::<ProviderSessionId>(session),
-            Some(&ProviderSessionId("provider-session".into()))
-        );
-        assert!(
-            app.world_mut()
-                .resource_mut::<Messages<PageOpenRequest>>()
-                .drain()
-                .next()
-                .is_none()
-        );
+        let id = fixture
+            .app
+            .world()
+            .get::<SessionId>(session)
+            .unwrap()
+            .clone();
+        let pages = fixture.pages();
+        assert_eq!(pages.len(), 1);
+        assert_eq!(pages[0].url, Route::Session(id).url());
+        assert!(matches!(pages[0].target, PageOpenTarget::Stack(entity) if entity == stack));
     }
 
     #[test]
     fn provider_resume_defers_new_stack_navigation_until_materialization() {
         let cwd = tempfile::tempdir().unwrap();
-        let cwd = cwd.path().canonicalize().unwrap();
-        let mut app = App::new();
-        app.init_resource::<ProviderCatalog>()
-            .init_resource::<PendingImports>()
-            .init_resource::<ProviderSessionTombstones>()
-            .init_resource::<AppSettings>()
-            .add_message::<CreateRequest>()
-            .add_message::<PageOpenRequest>()
-            .add_message::<TabLayoutSpawnRequest>()
-            .add_observer(open)
-            .add_observer(attach);
-        app.world_mut()
-            .resource_mut::<ProviderCatalog>()
-            .sessions
-            .push(ProviderSession {
-                kind: "acp:codex".into(),
-                sid: "provider-session".into(),
-                agent: "codex".into(),
-                name: "Provider task".into(),
-                cwd: cwd.to_string_lossy().into_owned(),
-                ..Default::default()
+        let mut fixture = ImportFixture::new(cwd.path().to_path_buf());
+        let origin = fixture.origin();
+        fixture.open(origin, Some(OpenTarget::InNewStack));
+        fixture.app.update();
+        let created = fixture.created.lock().unwrap().clone();
+        assert_eq!(created.len(), 1);
+        assert_eq!(created[0].1, 0);
+        let id = fixture
+            .app
+            .world()
+            .get::<SessionId>(created[0].0)
+            .unwrap()
+            .clone();
+        let pages = fixture.pages();
+        assert_eq!(pages.len(), 1);
+        assert_eq!(pages[0].url, Route::Session(id).url());
+        assert!(matches!(pages[0].target, PageOpenTarget::NewStack));
+    }
+
+    #[test]
+    fn repeated_import_uses_one_session_and_the_latest_destination() {
+        let cwd = tempfile::tempdir().unwrap();
+        let mut fixture = ImportFixture::new(cwd.path().to_path_buf());
+        let first = fixture.origin();
+        let latest = fixture.origin();
+        let stack = fixture.app.world().get::<ChildOf>(latest).unwrap().parent();
+        fixture.open(first, Some(OpenTarget::InNewStack));
+        fixture.open(latest, Some(OpenTarget::InPlace));
+        fixture.app.update();
+        let created = fixture.created.lock().unwrap().clone();
+        assert_eq!(created.len(), 1);
+        let id = fixture
+            .app
+            .world()
+            .get::<SessionId>(created[0].0)
+            .unwrap()
+            .clone();
+        let pages = fixture.pages();
+        assert_eq!(pages.len(), 1);
+        assert_eq!(pages[0].url, Route::Session(id).url());
+        assert!(matches!(pages[0].target, PageOpenTarget::Stack(entity) if entity == stack));
+    }
+
+    #[test]
+    fn a_removed_source_cannot_materialize_a_queued_import() {
+        let cwd = tempfile::tempdir().unwrap();
+        let mut fixture = ImportFixture::new(cwd.path().to_path_buf());
+        let source = fixture
+            .app
+            .world()
+            .get::<ChildOf>(fixture.entry)
+            .unwrap()
+            .parent();
+        fixture
+            .app
+            .add_observer(move |_: On<Opening>, mut commands: Commands| {
+                commands.entity(source).despawn();
             });
-        let stack = app.world_mut().spawn_empty().id();
-        let webview = app.world_mut().spawn(ChildOf(stack)).id();
-
-        app.world_mut().trigger(UiInput {
-            webview,
-            payload: ResumeSession {
-                kind: "acp:codex".into(),
-                sid: "provider-session".into(),
-                cwd: cwd.to_string_lossy().into_owned(),
-                open: Some(OpenTarget::InNewStack),
-            },
-        });
-
-        assert!(
-            app.world_mut()
-                .resource_mut::<Messages<PageOpenRequest>>()
-                .drain()
-                .next()
-                .is_none()
-        );
-        let [created] = app
-            .world_mut()
-            .resource_mut::<Messages<CreateRequest>>()
-            .drain()
-            .collect::<Vec<_>>()
-            .try_into()
-            .unwrap();
-        let id = created.id().clone();
-        let session = app.world_mut().spawn_empty().id();
-        app.world_mut().trigger(Created {
-            entity: session,
-            id: id.clone(),
-        });
-        app.world_mut().flush();
-
-        let opened = app
-            .world_mut()
-            .resource_mut::<Messages<PageOpenRequest>>()
-            .drain()
-            .collect::<Vec<_>>();
-        assert_eq!(opened.len(), 1);
-        assert_eq!(opened[0].url, Route::Session(id).url());
-        assert!(matches!(opened[0].target, PageOpenTarget::NewStack));
+        let origin = fixture.origin();
+        fixture.open(origin, None);
+        fixture.app.update();
+        assert!(fixture.created.lock().unwrap().is_empty());
+        assert!(fixture.app.world().get_entity(source).is_err());
     }
 
     #[test]
     fn provider_association_survives_a_changed_acp_resume_identity() {
-        let mut app = App::new();
-        app.init_resource::<SourceSnapshot>()
-            .add_systems(Update, associate);
-        app.world_mut()
-            .resource_mut::<SourceSnapshot>()
-            .0
-            .entry(SourceKind::Codex)
-            .or_default()
-            .push(ProviderSession {
+        let mut fixture = CatalogFixture::new();
+        fixture.receive(
+            SourceKind::Codex,
+            vec![ProviderSession {
                 kind: "acp:codex".into(),
                 sid: "source-session".into(),
                 agent: "codex".into(),
@@ -3556,7 +3800,9 @@ mod tests {
                 cwd: "/work/dashboard".into(),
                 created_at: 100,
                 ..Default::default()
-            });
+            }],
+        );
+        let app = &mut fixture.app;
         let session = app
             .world_mut()
             .spawn((
@@ -3639,225 +3885,75 @@ mod tests {
     #[test]
     fn provider_resume_reuses_the_canonical_session_after_resume_identity_changes() {
         let cwd = tempfile::tempdir().unwrap();
-        let cwd = cwd.path().canonicalize().unwrap();
-        let mut app = App::new();
-        app.init_resource::<ProviderCatalog>()
-            .init_resource::<PendingImports>()
-            .init_resource::<ProviderSessionTombstones>()
-            .init_resource::<AppSettings>()
-            .add_message::<CreateRequest>()
-            .add_message::<PageOpenRequest>()
-            .add_message::<TabLayoutSpawnRequest>()
-            .add_observer(open);
-        app.world_mut()
-            .resource_mut::<ProviderCatalog>()
-            .sessions
-            .push(ProviderSession {
-                kind: "acp:codex".into(),
-                sid: "provider-session".into(),
-                agent: "codex".into(),
-                cwd: cwd.to_string_lossy().into_owned(),
-                ..Default::default()
-            });
-        let id = SessionId::new("canonical-session");
-        app.world_mut().spawn((
-            Session,
-            id.clone(),
-            AgentId("codex".into()),
+        let mut fixture = ImportFixture::new(cwd.path().to_path_buf());
+        let create = CreateRequest::new(
+            "Existing",
+            "",
+            cwd.path().to_path_buf(),
+            Some(AgentId("codex".into())),
+        );
+        let id = create.id().clone();
+        fixture.app.world_mut().write_message(create);
+        fixture.app.update();
+        let session = fixture.created.lock().unwrap()[0].0;
+        fixture.app.world_mut().entity_mut(session).insert((
             AcpSessionId("replacement-resume-session".into()),
             ProviderKind("acp:codex".into()),
             ProviderSessionId("provider-session".into()),
         ));
-        let stack = app.world_mut().spawn_empty().id();
-        let webview = app.world_mut().spawn(ChildOf(stack)).id();
-
-        app.world_mut().trigger(UiInput {
-            webview,
-            payload: ResumeSession {
-                kind: "acp:codex".into(),
-                sid: "provider-session".into(),
-                cwd: cwd.to_string_lossy().into_owned(),
-                open: None,
-            },
-        });
-
-        assert!(
-            app.world_mut()
-                .resource_mut::<Messages<CreateRequest>>()
-                .drain()
-                .next()
-                .is_none()
-        );
-        let opened = app
-            .world_mut()
-            .resource_mut::<Messages<PageOpenRequest>>()
-            .drain()
-            .collect::<Vec<_>>();
-        assert_eq!(opened.len(), 1);
-        assert_eq!(opened[0].url, Route::Session(id).url());
+        fixture.created.lock().unwrap().clear();
+        let origin = fixture.origin();
+        fixture.open(origin, None);
+        fixture.app.update();
+        assert!(fixture.created.lock().unwrap().is_empty());
+        let pages = fixture.pages();
+        assert_eq!(pages.len(), 1);
+        assert_eq!(pages[0].url, Route::Session(id).url());
     }
 
     #[test]
     fn provider_resume_rejects_a_dismissed_session() {
         let cwd = tempfile::tempdir().unwrap();
-        let cwd = cwd.path().canonicalize().unwrap();
-        let mut app = App::new();
-        app.init_resource::<ProviderCatalog>()
-            .init_resource::<PendingImports>()
-            .insert_resource(ProviderSessionTombstones::new([ProviderSessionKey::new(
-                ProviderKind("acp:codex".into()),
-                ProviderSessionId("provider-session".into()),
-            )]))
-            .init_resource::<AppSettings>()
-            .add_message::<CreateRequest>()
-            .add_message::<PageOpenRequest>()
-            .add_message::<TabLayoutSpawnRequest>()
-            .add_observer(open);
-        app.world_mut()
-            .resource_mut::<ProviderCatalog>()
-            .sessions
-            .push(ProviderSession {
-                kind: "acp:codex".into(),
-                sid: "provider-session".into(),
-                agent: "codex".into(),
-                cwd: cwd.to_string_lossy().into_owned(),
-                ..Default::default()
-            });
-        let stack = app.world_mut().spawn_empty().id();
-        let webview = app.world_mut().spawn(ChildOf(stack)).id();
-
-        app.world_mut().trigger(UiInput {
-            webview,
-            payload: ResumeSession {
-                kind: "acp:codex".into(),
-                sid: "provider-session".into(),
-                cwd: cwd.to_string_lossy().into_owned(),
-                open: None,
-            },
-        });
-
-        assert!(
-            app.world_mut()
-                .resource_mut::<Messages<CreateRequest>>()
-                .drain()
-                .next()
-                .is_none()
-        );
-        assert!(
-            app.world_mut()
-                .resource_mut::<Messages<PageOpenRequest>>()
-                .drain()
-                .next()
-                .is_none()
-        );
+        let mut fixture = ImportFixture::new(cwd.path().to_path_buf());
+        fixture.app.world_mut().spawn((
+            vmux_session::ProviderSessionTombstone,
+            ProviderKind("acp:codex".into()),
+            ProviderSessionId("provider-session".into()),
+        ));
+        fixture.app.update();
+        let origin = fixture.origin();
+        fixture.open(origin, None);
+        fixture.app.update();
+        assert!(fixture.created.lock().unwrap().is_empty());
+        assert!(fixture.pages().is_empty());
     }
 
     #[test]
     fn provider_resume_rejects_a_missing_working_directory() {
-        let mut app = App::new();
-        app.init_resource::<ProviderCatalog>()
-            .init_resource::<PendingImports>()
-            .init_resource::<ProviderSessionTombstones>()
-            .init_resource::<AppSettings>()
-            .add_message::<CreateRequest>()
-            .add_message::<PageOpenRequest>()
-            .add_message::<TabLayoutSpawnRequest>()
-            .add_observer(open);
-        app.world_mut()
-            .resource_mut::<ProviderCatalog>()
-            .sessions
-            .push(ProviderSession {
-                kind: "acp:codex".into(),
-                sid: "missing".into(),
-                agent: "codex".into(),
-                cwd: "/vmux/provider/session/path/that/does/not/exist".into(),
-                ..Default::default()
-            });
-        let stack = app.world_mut().spawn_empty().id();
-        let webview = app.world_mut().spawn(ChildOf(stack)).id();
-
-        app.world_mut().trigger(UiInput {
-            webview,
-            payload: ResumeSession {
-                kind: "acp:codex".into(),
-                sid: "missing".into(),
-                cwd: String::new(),
-                open: None,
-            },
-        });
-
-        assert!(
-            app.world_mut()
-                .resource_mut::<Messages<CreateRequest>>()
-                .drain()
-                .next()
-                .is_none()
-        );
-    }
-
-    #[test]
-    fn provider_sessions_keep_only_the_latest_duplicate_identity() {
-        let sessions = SourceRead::deduplicated(vec![
-            ProviderSession {
-                kind: "acp:mistral-vibe".into(),
-                sid: "same".into(),
-                name: "old".into(),
-                updated_at: 1,
-                ..Default::default()
-            },
-            ProviderSession {
-                kind: "acp:mistral-vibe".into(),
-                sid: "same".into(),
-                name: "new".into(),
-                updated_at: 2,
-                ..Default::default()
-            },
-        ]);
-
-        assert_eq!(sessions.len(), 1);
-        assert_eq!(sessions[0].name, "new");
-    }
-
-    #[test]
-    fn known_conversation_removes_only_the_shared_boundary() {
-        let known = KnownConversation(vec![
-            vmux_api::session::Message::user("first"),
-            vmux_api::session::Message::Assistant {
-                blocks: vec![vmux_api::session::AssistantBlock::Text("second".into())],
-            },
-        ]);
-        let incoming = vec![
-            vmux_api::session::Message::Assistant {
-                blocks: vec![vmux_api::session::AssistantBlock::Text("second".into())],
-            },
-            vmux_api::session::Message::user("third"),
-        ];
-
-        assert_eq!(
-            known.unseen(incoming),
-            vec![vmux_api::session::Message::user("third")]
-        );
+        let mut fixture = ImportFixture::new(PathBuf::from(
+            "/vmux/provider/session/path/that/does/not/exist",
+        ));
+        let origin = fixture.origin();
+        fixture.open(origin, None);
+        fixture.app.update();
+        assert!(fixture.created.lock().unwrap().is_empty());
+        assert!(fixture.pages().is_empty());
     }
 
     #[test]
     fn newer_provider_activity_requests_an_imported_conversation_refresh() {
-        let mut app = App::new();
-        app.init_resource::<SourceSnapshot>()
-            .init_resource::<AcpSnapshot>()
-            .add_message::<ArchiveRequest>()
-            .add_systems(Update, request_conversation_refreshes);
-        app.world_mut()
-            .resource_mut::<SourceSnapshot>()
-            .0
-            .entry(SourceKind::Codex)
-            .or_default()
-            .push(ProviderSession {
+        let mut fixture = CatalogFixture::new();
+        fixture.receive(
+            SourceKind::Codex,
+            vec![ProviderSession {
                 kind: "acp:codex".into(),
                 sid: "provider-session".into(),
                 created_at: 100,
                 updated_at: 300,
                 ..Default::default()
-            });
+            }],
+        );
+        let app = &mut fixture.app;
         let stale = app
             .world_mut()
             .spawn((
@@ -3948,17 +4044,10 @@ mod tests {
 
     #[test]
     fn durable_archive_overrides_win_until_the_provider_has_newer_state() {
-        let mut app = App::new();
-        app.init_resource::<SourceSnapshot>()
-            .init_resource::<AcpSnapshot>()
-            .add_message::<ArchiveRequest>()
-            .add_systems(Update, request_conversation_refreshes);
-        app.world_mut()
-            .resource_mut::<SourceSnapshot>()
-            .0
-            .entry(SourceKind::Codex)
-            .or_default()
-            .extend([
+        let mut fixture = CatalogFixture::new();
+        fixture.receive(
+            SourceKind::Codex,
+            vec![
                 ProviderSession {
                     kind: "acp:codex".into(),
                     sid: "locally-active".into(),
@@ -3983,7 +4072,9 @@ mod tests {
                     archive: Some(ArchiveState::Archived(300)),
                     ..Default::default()
                 },
-            ]);
+            ],
+        );
+        let app = &mut fixture.app;
         app.world_mut().spawn((
             ProviderArchive,
             ProviderKind("acp:codex".into()),

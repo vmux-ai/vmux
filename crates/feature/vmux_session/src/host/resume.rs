@@ -9,15 +9,17 @@ use vmux_api::chat::{
     ResumeListRequest, ResumeSession,
 };
 use vmux_api::command_bar::CommandBarUiState;
+#[cfg(test)]
+use vmux_ecs::EntityTarget;
 use vmux_ecs::team::Profile;
 use vmux_ecs::{Cwd, Description, LastActivatedAt, PageOpenRequest, PageOpenTarget, UiStateWrite};
 use vmux_git::RepoInfoCache;
 use vmux_session::{
-    AgentFamily, AgentId, ProviderCatalog, ProviderSessionTombstones, Route, Session,
-    SessionDuplicate, SessionId, Transcripts,
+    AgentFamily, AgentId, ProviderSessionTombstones, Route, Session, SessionDuplicate, SessionId,
+    Transcripts,
 };
 #[cfg(test)]
-use vmux_session::{ProviderKind, ProviderSessionId, ProviderSessionKey};
+use vmux_session::{ProviderKind, ProviderSessionId};
 
 use crate::event::ChatResumeQueryRequest;
 use crate::host::session::{ChatResumeProjection, SessionView};
@@ -27,8 +29,10 @@ pub(super) struct Plugin;
 
 impl BevyPlugin for Plugin {
     fn build(&self, app: &mut App) {
-        app.init_resource::<ProviderCatalog>()
-            .init_resource::<ProviderSessionTombstones>()
+        if !app.is_plugin_added::<crate::provider::Plugin>() {
+            app.add_plugins(crate::provider::Plugin);
+        }
+        app.init_resource::<ProviderSessionTombstones>()
             .add_plugins(UiEventPlugin::<(
                 PromptHistoryRequest,
                 ResumeListRequest,
@@ -60,10 +64,51 @@ type Sessions<'w, 's> = Query<
 #[derive(SystemParam)]
 struct ResumeCatalog<'w, 's> {
     sessions: Sessions<'w, 's>,
-    providers: Res<'w, ProviderCatalog>,
+    providers: crate::provider::Entries<'w, 's>,
     tombstones: Res<'w, ProviderSessionTombstones>,
     cache: Option<Single<'w, 's, &'static mut RepoInfoCache>>,
-    catalog: Option<Res<'w, vmux_session::CatalogSnapshot>>,
+    linked: Query<
+        'w,
+        's,
+        (
+            &'static crate::ProviderKind,
+            &'static crate::ProviderSessionId,
+        ),
+        (With<Session>, Without<SessionDuplicate>),
+    >,
+    states: Query<
+        'w,
+        's,
+        (
+            &'static SessionId,
+            &'static crate::Stage,
+            Option<&'static crate::RunState>,
+        ),
+        (With<Session>, Without<SessionDuplicate>),
+    >,
+    stages: Query<
+        'w,
+        's,
+        (
+            &'static crate::StageId,
+            &'static Name,
+            &'static vmux_ecs::Order,
+            Has<vmux_ecs::Terminal>,
+        ),
+        With<crate::StageDefinition>,
+    >,
+    provider_stages: Query<
+        'w,
+        's,
+        (
+            &'static crate::ProviderKind,
+            &'static crate::ProviderSessionId,
+            &'static crate::Stage,
+            &'static crate::StageChangedAt,
+            &'static crate::SourceUpdatedAt,
+        ),
+        With<crate::ProviderStage>,
+    >,
 }
 
 impl ResumeCatalog<'_, '_> {
@@ -137,34 +182,44 @@ impl ResumeCatalog<'_, '_> {
                 },
             ));
         }
-        for session in &self.providers.sessions {
-            if self.tombstones.contains(&session.kind, &session.sid) {
+        for entity in self.providers.selected() {
+            let Some(session) = self.providers.record(entity) else {
+                continue;
+            };
+            let family = AgentFamily::of(&session.agent.0);
+            if self.linked.iter().any(|(kind, sid)| {
+                sid == session.id
+                    && AgentFamily::of(kind.0.strip_prefix("acp:").unwrap_or(&kind.0)) == family
+            }) {
                 continue;
             }
-            let path = Path::new(&session.cwd);
+            if self.tombstones.contains_family(&family, &session.id.0) {
+                continue;
+            }
+            let path = session.cwd.0.as_path();
             let subtitle = path
                 .file_name()
                 .map(|name| name.to_string_lossy().into_owned())
-                .unwrap_or_else(|| session.cwd.clone());
+                .unwrap_or_else(|| session.cwd.0.to_string_lossy().into_owned());
             let project = subtitle.clone();
             let branch = String::new();
             if !query_lower.is_empty()
                 && ![
                     session.name.as_str(),
-                    session.description.as_str(),
-                    session.cwd.as_str(),
+                    session.description.0.as_str(),
+                    session.cwd.0.to_str().unwrap_or_default(),
                     project.as_str(),
                     branch.as_str(),
-                    session.agent.as_str(),
-                    session.agent_name.as_str(),
+                    session.agent.0.as_str(),
+                    session.agent_name.map_or("", Name::as_str),
                 ]
                 .iter()
                 .any(|value| value.to_ascii_lowercase().contains(&query_lower))
             {
                 continue;
             }
-            let age_seconds = now.saturating_sub(session.updated_at.max(0)).max(0) as u64 / 1_000;
-            let updated_at = chrono::DateTime::from_timestamp_millis(session.updated_at)
+            let age_seconds = now.saturating_sub(session.updated_at.0.max(0)).max(0) as u64 / 1_000;
+            let updated_at = chrono::DateTime::from_timestamp_millis(session.updated_at.0)
                 .map(|timestamp| {
                     timestamp
                         .with_timezone(&chrono::Local)
@@ -173,18 +228,18 @@ impl ResumeCatalog<'_, '_> {
                 })
                 .unwrap_or_default();
             sessions.push((
-                session.updated_at,
+                session.updated_at.0,
                 ResumableSessionEntry {
-                    kind: session.kind.clone(),
-                    sid: session.sid.clone(),
-                    cwd: session.cwd.clone(),
+                    kind: session.kind.0.clone(),
+                    sid: session.id.0.clone(),
+                    cwd: session.cwd.0.to_string_lossy().into_owned(),
                     url: String::new(),
-                    title: session.name.clone(),
-                    latest: session.description.clone(),
+                    title: session.name.as_str().to_string(),
+                    latest: session.description.0.clone(),
                     subtitle,
                     age_seconds,
                     updated_at,
-                    agent_name: AgentFamily::of(&session.agent).name(&session.agent_name),
+                    agent_name: family.name(session.agent_name.map_or("", Name::as_str)),
                     project,
                     branch,
                     cross_runtime: true,
@@ -192,30 +247,51 @@ impl ResumeCatalog<'_, '_> {
                 },
             ));
         }
-        if let Some(catalog) = self.catalog.as_ref() {
-            for (_, entry) in &mut sessions {
-                let summary = catalog.sessions.iter().find(|summary| {
-                    summary.kind == entry.kind && summary.sid == entry.sid
-                        || summary.provider_kind == entry.kind && summary.provider_sid == entry.sid
-                });
-                let Some(summary) = summary else {
-                    continue;
-                };
-                let presentation =
-                    vmux_session::SessionSummaryProjection::new(summary, &catalog.stages, now);
-                entry.stage.clone_from(&summary.stage);
-                entry.runtime.clone_from(&summary.runtime);
-                entry.terminal = presentation.terminal;
-                entry.stale = presentation.stale;
-                if let Some(stage) = catalog
-                    .stages
-                    .iter()
-                    .find(|stage| stage.id == summary.stage)
+        let default_stage = self
+            .stages
+            .iter()
+            .filter(|(_, _, _, terminal)| !terminal)
+            .min_by_key(|(_, _, order, _)| order.0)
+            .map(|(id, _, _, _)| id.0.as_str())
+            .unwrap_or("in_progress");
+        for (updated_at, entry) in &mut sessions {
+            let mut stage = default_stage;
+            let mut runtime = "inactive";
+            if entry.kind == "session" {
+                if let Some((_, current, state)) =
+                    self.states.iter().find(|(id, _, _)| id.0 == entry.sid)
                 {
-                    entry.stage_name.clone_from(&stage.name);
-                    entry.stage_order = stage.order;
+                    stage = &current.0.0;
+                    runtime = state.map_or("inactive", crate::RunState::status);
+                }
+            } else if let Some(provider) = self.providers.get(&entry.kind, &entry.sid) {
+                for (kind, id, current, changed_at, source_updated_at) in &self.provider_stages {
+                    if kind == provider.kind
+                        && id == provider.id
+                        && source_updated_at.0.max(if source_updated_at.0 == 0 {
+                            changed_at.0
+                        } else {
+                            0
+                        }) >= provider.source_updated_at()
+                    {
+                        stage = &current.0.0;
+                        break;
+                    }
                 }
             }
+            entry.stage = stage.to_string();
+            entry.runtime = runtime.to_string();
+            if let Some((_, name, order, terminal)) =
+                self.stages.iter().find(|(id, _, _, _)| id.0 == stage)
+            {
+                entry.stage_name = name.as_str().to_string();
+                entry.stage_order = order.0;
+                entry.terminal = terminal;
+            }
+            entry.stale = !entry.terminal
+                && !matches!(runtime, "streaming" | "awaiting" | "installing" | "errored")
+                && now.saturating_sub(*updated_at).max(0) as u64
+                    >= crate::SessionSummaryProjection::STALE_AFTER * 1_000;
         }
         sessions.sort_by_key(|(activated, _)| std::cmp::Reverse(*activated));
         let total = sessions.len() as u32;
@@ -461,12 +537,38 @@ mod tests {
     fn dismissed_provider_sessions_stay_out_of_resume_results() {
         let mut app = App::new();
         app.init_resource::<Responses>()
-            .add_plugins(Plugin)
+            .add_plugins((crate::DomainPlugin, Plugin))
             .add_observer(Responses::command_bar);
+        let source = app
+            .world_mut()
+            .spawn((
+                crate::provider::Source,
+                crate::provider::Origin::Native,
+                AgentId("codex".into()),
+                crate::provider::Capability::Pending,
+                crate::provider::Generation(1),
+            ))
+            .id();
+        let operation = app
+            .world_mut()
+            .spawn((
+                crate::provider::Read {
+                    generation: 1,
+                    wire_id: 0,
+                },
+                ChildOf(source),
+                vmux_ecs::Operation::bundle("provider catalog")
+                    .unwrap()
+                    .running(),
+            ))
+            .id();
         app.world_mut()
-            .resource_mut::<ProviderCatalog>()
-            .sessions
-            .push(vmux_session::ProviderSession {
+            .entity_mut(source)
+            .insert(EntityTarget::<crate::provider::Read>::new(operation));
+        app.world_mut().write_message(crate::provider::Received {
+            operation,
+            supported: true,
+            result: Ok(vec![vmux_session::ProviderSession {
                 kind: "acp:codex".into(),
                 sid: "provider-session".into(),
                 agent: "codex".into(),
@@ -474,11 +576,14 @@ mod tests {
                 cwd: "/work/vmux".into(),
                 updated_at: 2,
                 ..Default::default()
-            });
-        app.insert_resource(ProviderSessionTombstones::new([ProviderSessionKey::new(
+            }]),
+        });
+        app.world_mut().spawn((
+            crate::ProviderSessionTombstone,
             ProviderKind("acp:codex".into()),
             ProviderSessionId("provider-session".into()),
-        )]));
+        ));
+        app.update();
         let webview = app.world_mut().spawn_empty().id();
 
         app.world_mut().trigger(UiInput {

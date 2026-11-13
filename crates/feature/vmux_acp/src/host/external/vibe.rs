@@ -3,7 +3,7 @@ use std::io::BufReader;
 use std::path::{Path, PathBuf};
 use std::time::UNIX_EPOCH;
 
-use vmux_session::ProviderSession;
+use vmux_session::{ProviderSession, history::Received};
 
 use super::{BoundedLines, PromptText, Reader as ProviderReader, Timestamp};
 
@@ -18,7 +18,7 @@ impl Reader {
         root: &Path,
         sid: &str,
         readers: &super::NativeReaders,
-    ) -> Result<super::ConversationRead, String> {
+    ) -> Result<super::conversation::ReadResult, String> {
         if !super::conversation::Files::valid_id(sid) {
             return Err("invalid session history identifier".into());
         }
@@ -46,19 +46,17 @@ impl Reader {
             .flatten()
             .filter_map(|value| value.as_str().map(PathBuf::from))
             .collect::<Vec<_>>();
-        let records = super::conversation::ChatDecoder::history(
+        let history: Received = super::conversation::ChatDecoder::history(
             value.get("history").unwrap_or(&serde_json::Value::Null),
         );
-        Ok(super::ConversationRead {
+        Ok(super::conversation::ReadResult {
             path: watch_paths.first().cloned(),
             watch_paths,
-            records,
-            messages: Vec::new(),
+            history,
             cursor: value
                 .get("cursor")
                 .and_then(serde_json::Value::as_u64)
                 .unwrap_or_default(),
-            snapshot: false,
             complete: true,
         })
     }

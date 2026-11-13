@@ -1,27 +1,37 @@
 use std::collections::VecDeque;
-use std::fs::File;
+use std::fs::{File, Metadata};
 use std::io::Write;
 use std::io::{BufRead, BufReader, Read, Seek, SeekFrom};
+#[cfg(unix)]
+use std::os::unix::fs::MetadataExt;
 use std::path::{Path, PathBuf};
 use std::process::{Child, ChildStdin, Command, Stdio};
 use std::sync::mpsc;
 use std::time::Duration;
+use std::time::UNIX_EPOCH;
 
 use vmux_api::session::{AssistantBlock, Message, ToolKind};
+use vmux_session::history::{FileFacts, Received};
 
 use super::{BoundedLines, PROVIDER_LINE_LIMIT, PROVIDER_READ_LIMIT};
 
 pub(super) struct ReadResult {
     pub path: Option<PathBuf>,
-    pub messages: Vec<Message>,
+    pub history: Received,
+    pub watch_paths: Vec<PathBuf>,
     pub cursor: u64,
-    pub tail: bool,
     pub complete: bool,
 }
 
-pub(super) struct Record {
-    pub id: String,
-    pub message: Message,
+#[cfg(test)]
+impl ReadResult {
+    pub(super) fn messages(&self) -> Vec<Message> {
+        let mut messages = Vec::with_capacity(self.history.entries.len());
+        for (_, message) in &self.history.entries {
+            messages.push(message.clone());
+        }
+        messages
+    }
 }
 
 pub(super) struct ChatDecoder;
@@ -189,11 +199,11 @@ impl ChatDecoder {
         messages
     }
 
-    pub(super) fn history(value: &serde_json::Value) -> Vec<Record> {
+    pub(super) fn history(value: &serde_json::Value) -> Received {
         let Some(entries) = value.as_array() else {
-            return Vec::new();
+            return Received::messages(Vec::new(), false);
         };
-        let mut records = Vec::new();
+        let mut history = Received::messages(Vec::new(), false);
         for entry in entries {
             let Some(id) = entry.get("id").and_then(serde_json::Value::as_str) else {
                 continue;
@@ -205,10 +215,9 @@ impl ChatDecoder {
             match kind {
                 "message" => {
                     for (index, message) in Self::record(entry).into_iter().enumerate() {
-                        records.push(Record {
-                            id: format!("{id}/message/{index}"),
-                            message,
-                        });
+                        history
+                            .entries
+                            .push((Some(format!("{id}/message/{index}")), message));
                     }
                 }
                 "reasoning" => {
@@ -218,12 +227,12 @@ impl ChatDecoder {
                         .map(|value| JsonText::new(value).text())
                         .unwrap_or_default();
                     if !text.is_empty() {
-                        records.push(Record {
-                            id: id.into(),
-                            message: Message::Assistant {
+                        history.entries.push((
+                            Some(id.into()),
+                            Message::Assistant {
                                 blocks: vec![AssistantBlock::Thinking(text)],
                             },
-                        });
+                        ));
                     }
                 }
                 "effect" => {
@@ -246,9 +255,9 @@ impl ChatDecoder {
                         "file_edit" | "file_write" => Some(ToolKind::Edit),
                         _ => None,
                     };
-                    records.push(Record {
-                        id: format!("{id}/use"),
-                        message: Message::Assistant {
+                    history.entries.push((
+                        Some(format!("{id}/use")),
+                        Message::Assistant {
                             blocks: vec![AssistantBlock::ToolUse {
                                 call_id: id.into(),
                                 name: name.into(),
@@ -260,7 +269,7 @@ impl ChatDecoder {
                                 parent_call_id: None,
                             }],
                         },
-                    });
+                    ));
                     let status = state
                         .get("status")
                         .and_then(serde_json::Value::as_str)
@@ -271,22 +280,22 @@ impl ChatDecoder {
                             .filter(|value| !value.is_null())
                             .or_else(|| state.get("output"))
                             .or_else(|| state.get("error"));
-                        records.push(Record {
-                            id: format!("{id}/result"),
-                            message: Message::ToolResult {
+                        history.entries.push((
+                            Some(format!("{id}/result")),
+                            Message::ToolResult {
                                 call_id: id.into(),
                                 content: output
                                     .map(|value| JsonText::new(value).text())
                                     .unwrap_or_default(),
                                 is_error: matches!(status, "failed" | "cancelled"),
                             },
-                        });
+                        ));
                     }
                 }
                 _ => {}
             }
         }
-        records
+        history
     }
 }
 
@@ -447,34 +456,54 @@ impl FileConversation {
     pub(super) fn read(
         path: &Path,
         cursor: Option<u64>,
+        known: Option<&FileFacts>,
         tail_bytes: u64,
         mut decoder: impl Decoder,
     ) -> Result<ReadResult, String> {
         let mut file = File::open(path).map_err(|error| error.to_string())?;
-        let physical_length = file.metadata().map_err(|error| error.to_string())?.len();
+        let metadata = file.metadata().map_err(|error| error.to_string())?;
+        let physical_length = metadata.len();
+        let identity = Self::identity(path, &metadata)?;
         let length = Self::complete_length(&mut file, physical_length)?;
+        file.seek(SeekFrom::Start(0))
+            .map_err(|error| error.to_string())?;
+        let mut prefix = Vec::new();
+        Read::by_ref(&mut file)
+            .take(4096)
+            .read_to_end(&mut prefix)
+            .map_err(|error| error.to_string())?;
+        let unchanged = known.is_none_or(|known| {
+            known.identity == identity
+                && physical_length >= known.length
+                && prefix.starts_with(&known.prefix)
+        });
         let incremental = cursor.filter(|cursor| {
-            *cursor <= length && length.saturating_sub(*cursor) <= PROVIDER_READ_LIMIT as u64
+            unchanged
+                && *cursor <= length
+                && length.saturating_sub(*cursor) <= PROVIDER_READ_LIMIT as u64
         });
         let tail = incremental.is_none();
         let start = incremental.unwrap_or_else(|| length.saturating_sub(tail_bytes));
         file.seek(SeekFrom::Start(start))
             .map_err(|error| error.to_string())?;
-        let remaining = length.saturating_sub(start);
-        let mut reader = BufReader::new(file.take(remaining));
-        if tail && start > 0 {
+        let mut reader = BufReader::new(file.take(length.saturating_sub(start)));
+        let skipped = if tail && start > 0 {
             reader
                 .skip_until(b'\n')
-                .map_err(|error| error.to_string())?;
-        }
+                .map_err(|error| error.to_string())? as u64
+        } else {
+            0
+        };
+        let base = start.saturating_add(skipped);
         let mut messages = VecDeque::new();
         let mut lines = BoundedLines::new(reader);
-        for line in lines.by_ref() {
-            for message in decoder.messages(&line) {
+        while let Some(line) = lines.next() {
+            let position = base.saturating_add(lines.line_start() as u64);
+            for (subrecord, message) in decoder.messages(&line).into_iter().enumerate() {
                 if tail && messages.len() == Self::TAIL_MESSAGES {
                     messages.pop_front();
                 }
-                messages.push_back(message);
+                messages.push_back((message, (position, subrecord)));
             }
             if !tail && messages.len() >= Self::TAIL_MESSAGES {
                 break;
@@ -483,15 +512,51 @@ impl FileConversation {
         let cursor = if tail {
             length
         } else {
-            start.saturating_add(lines.consumed() as u64).min(length)
+            base.saturating_add(lines.consumed() as u64).min(length)
         };
+        let mut history = Received::messages(Vec::new(), tail);
+        let mut positions = Vec::with_capacity(messages.len());
+        for (message, position) in messages {
+            history.entries.push((None, message));
+            positions.push(position);
+        }
+        history.file = Some(FileFacts {
+            identity,
+            prefix,
+            length: physical_length,
+            cursor,
+            positions,
+        });
         Ok(ReadResult {
             path: Some(path.to_path_buf()),
-            messages: messages.into_iter().collect(),
+            history,
+            watch_paths: Vec::new(),
             cursor,
-            tail,
             complete: cursor == length,
         })
+    }
+
+    fn identity(path: &Path, metadata: &Metadata) -> Result<String, String> {
+        let created = metadata
+            .created()
+            .ok()
+            .and_then(|time| time.duration_since(UNIX_EPOCH).ok())
+            .map(|time| time.as_nanos());
+        #[cfg(unix)]
+        {
+            let _ = path;
+            Ok(format!(
+                "unix:{}:{}:{created:?}",
+                metadata.dev(),
+                metadata.ino()
+            ))
+        }
+        #[cfg(not(unix))]
+        {
+            let created = created.ok_or("native file creation identity is unavailable")?;
+            let path = path.canonicalize().map_err(|error| error.to_string())?;
+            Ok(format!("file:{}:{created}", path.display()))
+        }
     }
 
     fn complete_length(file: &mut File, length: u64) -> Result<u64, String> {
