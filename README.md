@@ -83,6 +83,69 @@ The first build through `make` in a linked worktree seeds its build cache from t
 worktree. See [Makefile](Makefile) for all targets and [AGENTS.md](AGENTS.md) for repository
 rules.
 
+Native container development on Apple Silicon macOS 14+ requires libkrun 1.x,
+libkrunfw 5 and gvproxy. Declare the dependencies in your Homebrew Brewfile:
+
+```ruby
+tap "slp/krun"
+brew "slp/krun/libkrun"
+brew "slp/krun/gvproxy"
+```
+
+```sh
+make build-container-engine
+./target/debug/vmux container start --data /tmp/vmux-container --shared "$PWD"
+docker --host unix:///tmp/vmux-container/docker.sock compose up
+./target/debug/vmux container status --data /tmp/vmux-container
+./target/debug/vmux container stop --data /tmp/vmux-container
+```
+
+Vmux starts its own Linux VM and Docker daemon. Wildcard-published container ports
+are forwarded to macOS localhost. Images and volumes survive VM restart on the
+dedicated data disk; the selected project directory is shared at the same path
+inside Linux. `container logs` reads the engine and guest logs.
+
+For the desktop workflow, build with `make build-dev`, then open the app with
+`make run-dev`. The default VM bookmark opens `vmux://vm/`. VM, Docker
+(`vmux://vm/docker`) and Containers (`vmux://vm/docker/containers`) have separate
+titles and icons while sharing the same workspace. `vmux://docker/containers`,
+`vmux://docker/` and the older `vmux://containers/` remain compatible.
+Opening a VM, Docker or Containers page starts the VM automatically once per app host,
+after inspecting its current state. Manually stopping it leaves it stopped until another
+Start request; reopening the app allows automatic startup again. While the daemon is
+unavailable, the main area shows a VM illustration and startup progress or a Start button,
+and the hierarchical side sheet remains visible. Once ready, VM shows its state, CPU
+allocation, memory and shared directory; Docker shows its connection and container count.
+Containers uses stacked boxes, while an individual container uses one box.
+The last successful inventory is saved per VM and restored when the app restarts, so known
+containers remain selectable while stopped. Live logs require the daemon.
+Containers created on this daemon appear automatically, including stopped containers and
+Compose groups. Selecting an entry opens its information and live logs. VM shutdown
+and settings belong to the VM row of the side sheet, which follows
+VM, Docker, Containers, Compose groups and their services. Each level links to its page.
+Compose groups
+offer Start all/Stop all beneath their names. Starting a service also starts its
+dependencies in the same Compose project and waits for their declared readiness,
+starting the VM first when needed.
+Container rows use play/pause icons; selected-container controls belong
+to the details toolbar. The initial share is
+the home directory.
+
+Point Docker CLI at the same daemon, then use normal Docker commands:
+
+```sh
+docker context create vmux --docker "host=unix://$HOME/Library/Application Support/Vmux/containers/docker.sock"
+docker --context vmux compose -f examples/containers/compose.yaml up -d --build
+```
+
+The bundled [Dockerfile](examples/containers/Dockerfile) builds a small nginx demo.
+The `vmux-demo` group and its `web` container appear in Containers. Open
+`http://localhost:8080` from the published port link, then select Logs to see requests.
+Remove the demo with `docker --context vmux compose -f examples/containers/compose.yaml down`.
+
+`docker build` creates an image. `docker run` and `docker compose up` create the
+containers that appear in the list; no registration step is needed.
+
 ## License
 
 Copyright (c) 2024-2026 Junichi Sugiura

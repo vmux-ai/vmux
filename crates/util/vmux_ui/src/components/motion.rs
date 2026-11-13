@@ -1,6 +1,14 @@
 use dioxus::prelude::*;
 
 #[component]
+pub fn ContentTransition(#[props(default)] class: String, children: Element) -> Element {
+    let duration = crate::motion::Motion::CONTENT_MS;
+    rsx! {
+        div { class: "vmux-content-enter {class}", style: "--vmux-content-motion-ms:{duration}ms;", {children} }
+    }
+}
+
+#[component]
 pub fn Collapse(leaving: bool, #[props(default)] class: String, children: Element) -> Element {
     rsx! {
         Collapsible { expanded: !leaving, class, {children} }

@@ -17,6 +17,7 @@ if [[ "${1:-}" != --fixture ]]; then
     [[ "$(/usr/libexec/PlistBuddy -c 'Print :NSCameraUsageDescription' "$plist")" == *camera* ]]
     [[ "$(/usr/libexec/PlistBuddy -c 'Print :NSMicrophoneUsageDescription' "$plist")" == *microphone* ]]
     [[ -x "$app/Contents/MacOS/vmux" ]]
+    [[ -x "$app/Contents/MacOS/vmux_vm" ]]
     [[ -x "$app/Contents/Library/LoginItems/Vmux Service.app/Contents/MacOS/Vmux Service" ]]
     [[ -f "$app/Contents/Resources/Vmux.icns" ]]
     [[ ! -d "$app/Contents/Frameworks/Chromium Embedded Framework.framework" ]]
@@ -26,6 +27,7 @@ if [[ "${1:-}" != --fixture ]]; then
     otool -l "$app/Contents/MacOS/vmux_desktop" | grep -Fq "path $stdlib ("
     otool -L "$app/Contents/MacOS/vmux_desktop" | grep -q '@rpath/libbevy_dylib'
     codesign --verify --strict "$app"
+    codesign --verify --strict "$app/Contents/MacOS/vmux_vm"
     printf 'Debug app bundle layout passed\n'
     exit 0
 fi
@@ -40,8 +42,9 @@ cp "$root/scripts/bundle-dev.sh" "$root/scripts/cargo-target-paths.sh" "$fixture
 cp "$root/packaging/macos/Info.plist" "$root/packaging/macos/usage-descriptions.plist" \
     "$root/packaging/macos/VmuxDev.entitlements" "$root/packaging/macos/Vmux.icns" "$fixture/packaging/macos/"
 printf '[workspace.package]\nversion = "0.1.2"\n' > "$fixture/Cargo.toml"
-for binary in vmux vmux_service vmux_desktop; do
+for binary in vmux vmux_vm vmux_service vmux_desktop; do
     printf 'compiled %s\n' "$binary" > "$target/debug/$binary"
+    chmod +x "$target/debug/$binary"
 done
 cat > "$tmp/bin/codesign" <<'SIGN'
 #!/usr/bin/env bash
@@ -111,6 +114,7 @@ export PLIST_BUDDY="$plist_buddy"
 app="$target/debug/Vmux Dev.app"
 service="$app/Contents/Library/LoginItems/Vmux Service.app"
 "$fixture/scripts/bundle-dev.sh"
+[[ -x "$app/Contents/MacOS/vmux_vm" ]]
 [[ "$(wc -l < "$TEST_SIGN_LOG" | tr -d ' ')" == 2 ]]
 service_before="$(shasum -a 256 "$service/Contents/MacOS/Vmux Service")"
 mtime_before="$(python3 -c 'import os,sys; print(os.stat(sys.argv[1]).st_mtime_ns)' "$service/Contents/MacOS/Vmux Service")"
@@ -139,4 +143,23 @@ for index, filename in enumerate(sys.argv[1:]):
     assert data['CFBundleShortVersionString'] == '0.1.2'
     assert data['LSUIElement'] is (index == 1)
 VERIFY
+exec 3< "$app/Contents/MacOS/vmux_vm"
+exec 4< "$app/Contents/MacOS/vmux_desktop"
+exec 5< "$service/Contents/MacOS/Vmux Service"
+machine_before="$(cat "$app/Contents/MacOS/vmux_vm")"
+desktop_before="$(cat "$app/Contents/MacOS/vmux_desktop")"
+service_contents_before="$(cat "$service/Contents/MacOS/Vmux Service")"
+printf 'updated VM\n' >> "$target/debug/vmux_vm"
+printf 'updated desktop\n' >> "$target/debug/vmux_desktop"
+printf 'updated service\n' >> "$target/debug/vmux_service"
+"$fixture/scripts/bundle-dev.sh"
+[[ "$machine_before" == "$(cat <&3)" ]]
+[[ "$desktop_before" == "$(cat <&4)" ]]
+[[ "$service_contents_before" == "$(cat <&5)" ]]
+[[ "$machine_before" != "$(cat "$app/Contents/MacOS/vmux_vm")" ]]
+[[ "$desktop_before" != "$(cat "$app/Contents/MacOS/vmux_desktop")" ]]
+[[ "$service_contents_before" != "$(cat "$service/Contents/MacOS/Vmux Service")" ]]
+exec 3<&-
+exec 4<&-
+exec 5<&-
 printf 'Debug bundle templates, spaced paths, and no-op service identity passed\n'

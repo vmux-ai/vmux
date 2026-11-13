@@ -12,6 +12,7 @@ default = []
 conformance = ["extension", "vmux_extension/conformance"]
 cli = [
     "ecs",
+    "dep:vmux_container",
     "acp",
     "bookmark",
     "browser",
@@ -31,6 +32,7 @@ cli = [
 ]
 mcp = ["cli"]
 desktop = [
+    "container",
     "acp",
     "bookmark",
     "browser",
@@ -72,6 +74,7 @@ daemon = [
 ]
 tool = ["dep:vmux_tool"]
 capture = ["tool", "dep:vmux_input"]
+container = ["layout", "dep:vmux_container"]
 bookmark = ["layout", "dep:vmux_bookmark"]
 ecs = ["dep:vmux_ecs"]
 jobs = ["ecs", "vmux_ecs/jobs"]
@@ -113,6 +116,7 @@ start = ["runtime", "dep:vmux_start"]
 vault = ["layout", "dep:vmux_vault"]
 
 [dependencies]
+vmux_container = { path = "../../feature/vmux_container", optional = true }
 bevy_app = { workspace = true }
 bevy_ecs = { workspace = true, optional = true }
 vmux_acp = { path = "../../feature/vmux_acp", default-features = false, optional = true }

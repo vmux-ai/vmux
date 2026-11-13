@@ -440,6 +440,7 @@ Their `ecs-policy.ron` records are executable review metadata, not a second desi
 | AppKit/winit/CEF/UIKit input | window/surface-bound typed input -> canonical input state; ECS -> immutable native suppression/hit-test output | installed window/adapter generation; bounded raw mailbox, native handles and wake/reentrancy mechanics |
 | Provider/ACP/native storage | external records -> typed Session/source ingress; committed state -> protocol/file output | bounded task or explicitly leased provider process/watch; raw IDs, bytes, SDK cursors and response handles only |
 | Git/filesystem/persistence | entity-owned immutable IO request -> revision/generation-bound result | one task/store lease; external formats, locks, atomic writes and rollback mechanics, never a second mutable catalog |
+| Docker/libkrun/gvproxy/SSH | canonical Settings/Operation -> bounded native IO; Docker ingress -> batch/container entities | one control task or leased VM generation; verified guest files, codec buffers and acknowledged forwarding-output cache only; worker retirement and parent monitoring release handles |
 | DOM/wry/IPC | declared UiState/effects -> mounted rendering; typed UiEvent -> ECS | page/document/component generation; geometry, IME, listener/scroll/codec state with teardown, never domain mutation decisions |
 | QUIC/local socket/MCP | declared authorized request -> canonical operation -> committed response/events | connection/request scope; framing, callback correlations and IO cancellation |
 | Keychain/crypto | authorized owner operation -> opaque protected handle/result | named storage/Vault context and explicit release; zeroizing keys stay out of Reflect, Save and UiState |
@@ -723,6 +724,9 @@ DOM frame; the interpreter applies it as soon as the root exists, and its first 
 that frame. Presentation uses the first usable layout, including reserved placeholders, while
 later data arrives as incremental frames. This gives every vmux page one stale-while-revalidate lifecycle
 instead of feature-specific loading gates.
+
+Interpreter event URLs use the document's scheme and authority, with reserved endpoints
+at the origin root. Nested page paths remain navigation paths rather than IPC prefixes.
 
 Live UI-state frames apply patches in place. Unconsumed increments remain queued across later
 frames until their component processes them; constructing a retained cache snapshot is a separate
@@ -1482,6 +1486,8 @@ compilation. Build and launch are separate: plain run-dev verifies the completed
 and never compiles or kills an existing app. The cloud launcher requests build-if-needed,
 which builds only when the completion stamp is missing or invalid. Unchanged signed inputs
 reuse their bundled executables so a no-op build does not replace the daemon identity.
+Changed bundle files are copied to new files and atomically renamed into place, preserving
+the old executable for running processes rather than invalidating their mapped code signatures.
 After a successful build, a launch link under `target/release/` lets the existing vmux-cloud
 `make <worktree>` launcher find the debug app
 without depending on cloud-specific files or changing the public client's build prerequisites.
@@ -1587,6 +1593,162 @@ predicates. Cargo's own `[target.'cfg(...)'.dependencies]` still has to spell th
 out, because dependency resolution happens before any build script runs.
 
 ---
+
+## Native containers
+
+`vmux_container` owns the VM, Docker and Containers pages and container CLI. They submit typed
+requests to `ControlPlugin`; shared operation entities own asynchronous work, its target,
+and completion. `InventoryPlugin` reconciles Docker containers into child entities with
+stable IDs, shared names, image/state, Compose labels and published ports. Its ordered
+snapshot tasks preserve existing entity identity and retire removed containers. Per-page
+selection owns bounded log tasks and retains displayed output during refresh.
+
+The default VM bookmark opens `vmux://vm/` beside Simulator.
+VM (`vmux://vm/`), Docker (`vmux://vm/docker`) and Containers
+(`vmux://vm/docker/containers`) have distinct titles and icons: a monitor containing a
+container, the Docker logo and three stacked cubes. Individual containers retain one cube.
+They share one document and DOM group, so changing level preserves the workspace.
+Once ready, VM shows its state, CPU allocation, memory and shared directory.
+Docker shows its state, socket and container count. Only the Containers
+level shows an empty selection; choosing an entry opens its own Info/Logs route.
+`vmux://docker/containers`, `vmux://docker/` and the legacy `vmux://containers/`
+canonicalize to Containers. Existing default container pins move to the VM entry once,
+preserving their identity, order and removal. Later explicit page pins remain distinct.
+The Containers page owns its subtree; group URLs use `groups/<name>/info|logs`, and
+group members use `groups/<name>/containers/<id>/info|logs`. Standalone entries use
+`<id>/info|logs`. Names are path-encoded; in-place navigation preserves the same DOM,
+and shared page-address state restores selection and view after history navigation.
+Canonical bookmark keys reuse old
+pins, and a one-time placement migration moves the Docker pin after Simulator while
+preserving the order of other pins and later user rearrangements.
+The page uses `WorkspaceLayout` with the editor's side-sheet
+toggle and width bounds, and Git's breadcrumb header and toolbar. The list can be resized
+and collapsed; selection and Info/Logs choices update the page address. Sidebar/group layout transitions
+use the shared 120 ms motion timing, content changes fade in over 100 ms, and service
+startup/shutdown use the shared loading indicator. Reduced-motion preferences disable
+layout and content transitions; layout and selection never wait for them. The side sheet
+keeps its hierarchy while the VM is stopped, starting or stopping. Its selected Containers
+row includes the expand control inside the same highlight. The main area shows a VM
+illustration with progress or one Start button until Docker is ready. VM stop and settings
+remain on the VM row, without duplicating the central Start button.
+The host marks its engine `Inspected` after its first valid status read. A selected, ready
+VM-family page with `KeyboardOwner` triggers startup once and marks the engine `Opened`;
+running, ready or busy engines are marked without an extra request. Unselected pages do not start
+the VM. `Opened` lasts for the host process, so manual Stop is respected across page
+navigation, while a new host can start automatically again. Failed startup leaves an
+explicit Start retry rather than looping.
+Inventory retains the last successful container metadata while the VM is down, including
+after host restart. `InventoryPlugin` first restores a versioned per-VM `inventory.json`,
+then reconciles daemon snapshots. Only accepted daemon snapshots enqueue `PendingSave`;
+one `SaveTask` writes at a time and pending snapshots coalesce to the latest. The filesystem
+adapter atomically replaces the cache and excludes relative uptime text to avoid writes
+from polling alone. Missing or invalid caches fall back to daemon discovery, and failed
+writes retain live entities. Configuration remains selectable and stopped VM projections
+mark its containers stopped; live logs require the daemon. One root UI-state subscription
+survives these transitions. A thin divider separates the side sheet and details.
+Details remain unselected until the user chooses an entry. The address reads
+`VM → Docker → Containers → group → selected entry → Info/Logs`. VM shutdown and settings
+live on the VM row of the side sheet. The sheet follows
+`VM → Docker → Containers → group → container`; its level labels navigate to their
+information pages in the input frame. VM controls use play/pause icons on their owning row.
+The redundant running count is omitted.
+Group names and expand controls occupy one row, with counts and Start all/Stop all beneath;
+long names wrap without squeezing the operation label. Container Start/Stop
+controls have text labels in the details toolbar; list rows use play/pause icons with tooltips.
+Group headers expose Start all
+until every member runs, then Stop all; details retain scoped group controls.
+The blocking Docker facade drives a scoped headless `BatchPlugin` from its IO worker.
+Docker `Container` messages are materialized into named child entities before selection.
+Dependency labels become `Links` to entities in the same Compose project; `Position`, `Rank`,
+`Observation`, `Failure` and `Finished` carry ordering and completion on those entities.
+Registered systems expand targets, reject cycles before side effects, inspect dependency state,
+and enqueue the exact Docker operation. The socket adapter executes that approved intent and
+returns observations to ECS before readiness decisions. Query views and temporary order indexes
+derive from those canonical entities; the runtime drops its whole world after `Completion`.
+The shared operation deadline bounds dependency waits and failed services do not stop independent
+targets. `BookmarkDefaults` materializes only URL/folder defaults from settings ingress, so bookmark
+seeding reads its canonical global configuration without consuming the settings project's registry.
+Pending controls show a spinner and Starting/Stopping/Restarting instead of an inactive play icon.
+Single and group startup expand the selection with dependencies in the same Compose project,
+starting the VM first when needed. They
+order services by their declared dependency labels, wait for
+running, healthy or successfully completed dependencies, and report partial failure while
+continuing independent services. Dependency expansion leaves unrelated services and other
+Compose projects outside the batch. Stop, restart and removal retain the explicit selection.
+Stopping uses a pause-shaped icon with an explicit stop tooltip. Local pending intents
+project starting/stopping states in the input frame and suppress duplicate requests.
+Per-page `Revision` and `LastError` components acknowledge mutating completions through
+`ContainerUiState.control_revision` and `control_error`. Inventory tasks capture the engine's
+shared control revision and discard results overtaken by a completion. `engine_revision` and
+`inventory_revision` identify the first authoritative snapshot after a command: pending feedback
+ends then, including when a container immediately exits, rather than waiting forever for Running.
+An inventory failure retains pending feedback; a completed container command does not prevent
+stopping the VM while its subsequent refresh is pending. Command failures restore authoritative state.
+Settings are read-only with one Close control while Docker runs,
+and offer Cancel/Save only when stopped.
+Startup uses persisted defaults and initially shares the home directory. Containers
+created through Docker CLI or Compose appear automatically from the daemon's inventory;
+the UI does not import or register projects. Resource/share settings
+and connection diagnostics live in a settings dialog.
+`ContainerUiState` projects engine, inventory, configuration acknowledgements and per-page
+logs. Typed events carry lifecycle, container and selection intent. Async task
+completion wakes the event loop; polling never blocks the desktop schedule. Container
+operations validate daemon IDs, and deletion keeps volumes and refuses forced removal.
+
+`vmux_vm` provides the platform runtime without linking the desktop shell. `EnginePlugin`
+owns an engine entity with settings, phase, deadline, failure and an exclusive lease.
+The libkrun worker and gvproxy are child process entities; `ConnectionPlugin` owns staged
+transport, SSH, Docker readiness and port-refresh tasks. Launch, connection, observation
+and retirement run in ordered system sets. Blocking waits belong to `EngineClient`, the
+CLI and GUI adapter. The worker enters the VMM in its own process because libkrun consumes
+that process's lifecycle. Closing the invoking CLI or page does not close the VM.
+
+The network entity runs `NetworkProxy`, which owns gvproxy behind a parent-held stdin
+channel. Closing that channel, including an unexpected supervisor exit, reaps gvproxy
+before releasing `network.lock`. The VM worker holds `machine.lock` and monitors its
+supervisor; parent loss requests guest shutdown, with a bounded forced exit if needed.
+Startup waits for both leases before changing guest files or sockets. Process retirement
+waits for supervised cleanup even after its channel has already closed.
+An engine in Ready keeps its page and inventory through a transient API probe failure;
+explicit stopping and process exit end that presentation. Inspection tasks carry the
+engine revision so results captured before a control completion cannot replace it.
+Inventory reads retry transient transport failures twice in the background. A failed
+refresh keeps previously received entries and selection; a persistent error appears
+below the list instead of replacing it. An initial failure has no previous list to retain.
+
+```mermaid
+flowchart LR
+    cli["vmux container"] --> control["ControlPlugin: operation entities"]
+    page["vmux://vm/docker/containers"] --> control
+    control --> client["EngineClient"]
+    client --> engine["EnginePlugin: engine entity + lease"]
+    engine --> worker["libkrun worker entity"]
+    engine --> network["gvproxy entity"]
+    worker --> guest["Linux: Docker + guest control"]
+```
+
+The Apple Silicon backend uses libkrun's stable 1.x ABI and libkrunfw's Linux kernel.
+A checksum-verified Alpine root filesystem supplies userspace. Docker uses nftables,
+matching the firmware's kernel configuration. A separate raw ext4 disk owns images and
+volumes; only a newly created disk may be formatted automatically. Installed guest
+packages remain in the root filesystem so restart does not require package downloads.
+
+Virtiofs shares the selected project at its host path. The worker's filesystem sandbox
+permits system/dependency reads and confines writes to its data and project directories.
+Host Docker clients connect through gvproxy's SSH Unix-socket forwarding, preserving
+Docker attach/exec half-close semantics. The installation key remains outside ECS;
+the guest enables public-key authentication only. A private vsock bridge on port 2375
+provides bootstrap readiness independently of the SSH tunnel.
+Published wildcard TCP/UDP bindings are projected through gvproxy onto localhost;
+readiness requires an actual Docker ping, not a live PID. Resource/share changes are
+refused while the engine lease is held.
+
+Shutdown travels over a separate guest control channel on vsock port 2376. Guest init
+terminates Docker, waits for daemon exit and syncs before ending its workload. The
+engine acknowledges completion only when the worker exits and its network process is
+reaped. It writes the final phase before releasing its lease, so the previous runtime
+cannot overwrite a newly started engine's state. Correlation and ownership use that
+lease and the control socket rather than an unchecked persisted PID.
 
 ## Where a crate lives
 

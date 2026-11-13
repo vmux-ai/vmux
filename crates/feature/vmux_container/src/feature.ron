@@ -1,0 +1,71 @@
+(
+    pages: [(
+        name: "vm",
+        url: "vmux://vm/",
+        title: "VM",
+        title_message_id: "container-vm",
+        bookmark: Some(135),
+        icon: "Computer",
+        keywords: ["containers", "docker", "linux", "vm", "engine"],
+        command_bar: true,
+        permissions: [
+            "PageAddressPublish", "PageAddressRequest", "PageAddressUiState", "PageReady", "ThemeUiState", "OpenRequest",
+            "ContainerUiState", "ContainerStartRequest", "ContainerStopRequest", "ContainerLogsRequest",
+            "ContainerSettingsRequest", "ContainerCommandRequest", "ContainerInspectRequest",
+        ],
+    ), (
+        name: "docker",
+        url: "vmux://vm/docker",
+        title: "Docker",
+        title_message_id: "container-engine",
+        icon: "Docker",
+        keywords: ["docker", "engine"],
+        command_bar: true,
+        permissions: [
+            "PageAddressPublish", "PageAddressRequest", "PageAddressUiState", "PageReady", "ThemeUiState", "OpenRequest",
+            "ContainerUiState", "ContainerStartRequest", "ContainerStopRequest", "ContainerLogsRequest",
+            "ContainerSettingsRequest", "ContainerCommandRequest", "ContainerInspectRequest",
+        ],
+    ), (
+        name: "containers",
+        url: "vmux://vm/docker/containers",
+        owns_subtree: true,
+        title: "Containers",
+        title_message_id: "container-title",
+        icon: "Containers",
+        keywords: ["containers", "compose"],
+        command_bar: true,
+        permissions: [
+            "PageAddressPublish", "PageAddressRequest", "PageAddressUiState", "PageReady", "ThemeUiState", "OpenRequest",
+            "ContainerUiState", "ContainerStartRequest", "ContainerStopRequest", "ContainerLogsRequest",
+            "ContainerSettingsRequest", "ContainerCommandRequest", "ContainerInspectRequest",
+        ],
+    )],
+    cli: Some((commands: [(
+        id: "container",
+        name: "container",
+        about: Some("Manage the Vmux Linux VM and Docker engine"),
+        subcommand_required: true,
+        commands: [
+            (
+                id: "container.start",
+                name: "start",
+                arguments: [
+                    (id: "data", long: Some("data"), value_name: Some("DIRECTORY")),
+                    (id: "shared", long: Some("shared"), value_name: Some("DIRECTORY")),
+                    (id: "cpus", long: Some("cpus"), value_name: Some("COUNT")),
+                    (id: "memory", long: Some("memory"), value_name: Some("MIB")),
+                ],
+            ),
+            (id: "container.stop", name: "stop", arguments: [
+                (id: "data", long: Some("data"), value_name: Some("DIRECTORY")),
+            ]),
+            (id: "container.status", name: "status", arguments: [
+                (id: "data", long: Some("data"), value_name: Some("DIRECTORY")),
+            ]),
+            (id: "container.logs", name: "logs", arguments: [
+                (id: "data", long: Some("data"), value_name: Some("DIRECTORY")),
+            ]),
+        ],
+    )])),
+)

@@ -1,0 +1,25 @@
+[package]
+name = "vmux_vm"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Native Linux virtual machine and container engine runtime"
+
+[dependencies]
+bevy_app = { workspace = true }
+bevy_ecs = { workspace = true }
+bevy_tasks = { workspace = true, features = ["multi_threaded"] }
+flate2 = "1"
+libc = "0.2"
+ring = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+tar = "0.4"
+tempfile = "3"
+url = { workspace = true }
+
+[target.'cfg(all(target_os = "macos", target_arch = "aarch64"))'.dependencies]
+libloading = "0.8"
+
+[lints]
+workspace = true

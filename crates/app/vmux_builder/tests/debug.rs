@@ -25,6 +25,12 @@ for binary in vmux vmux_service vmux_desktop; do
   printf '#!/bin/sh\nexit 0\n' > "$CARGO_TARGET_DIR/debug/$binary"
   chmod +x "$CARGO_TARGET_DIR/debug/$binary"
 done
+case " $* " in
+  *' -p vmux_vm '*)
+    printf '#!/bin/sh\nexit 0\n' > "$CARGO_TARGET_DIR/debug/vmux_vm"
+    chmod +x "$CARGO_TARGET_DIR/debug/vmux_vm"
+    ;;
+esac
 "#,
     );
     project.script(
@@ -32,6 +38,10 @@ done
         "#!/bin/sh\nprintf 'fixture\\n'\n",
     );
     project.script("scripts/sign-dev-mac.sh", "#!/bin/sh\nexit 0\n");
+    project.script(
+        "scripts/sign-container-engine.sh",
+        "#!/bin/sh\ntest -x \"$CARGO_TARGET_DIR/debug/vmux_vm\"\n",
+    );
     project.script("scripts/bundle-dev.sh", r#"#!/bin/sh
 mkdir -p "$CARGO_TARGET_DIR/debug/Vmux Dev.app/Contents/MacOS"
 cp "$CARGO_TARGET_DIR/debug/vmux_desktop" "$CARGO_TARGET_DIR/debug/Vmux Dev.app/Contents/MacOS/vmux_desktop"
@@ -70,6 +80,16 @@ test -f "$app/Contents/MacOS/vmux_desktop"
         fs::read_to_string(project.root().join("build.log")).unwrap(),
         log
     );
+    let engine = project.target().join("debug/vmux_vm");
+    fs::write(&engine, "#!/bin/sh\nexit 1\n").unwrap();
+    assert!(
+        !project
+            .command("./scripts/run-dev.sh")
+            .status()
+            .unwrap()
+            .success()
+    );
+    fs::write(engine, "#!/bin/sh\nexit 0\n").unwrap();
     fs::write(
         project.target().join("debug/vmux_desktop"),
         "#!/bin/sh\nexit 1\n",
