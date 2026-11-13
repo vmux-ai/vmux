@@ -346,7 +346,8 @@ fn from_pointer(
     mut was_pressed: Single<&mut PointerPress, With<PointerDevice>>,
     mut commands: Commands,
 ) {
-    let pressed = match vmux_input::NativePointer::snapshot() {
+    let native = vmux_input::NativePointer::snapshot();
+    let pressed = match native {
         Some(pointer) => pointer.buttons.left,
         None => mouse.pressed(MouseButton::Left),
     };
@@ -384,6 +385,10 @@ fn from_pointer(
     let Some(cursor) = vmux_input::NativePointer::position(window_entity, window) else {
         feedback.release(window_entity);
         return;
+    };
+    let hit_position = match (just_pressed, native) {
+        (true, Some(pointer)) => pointer.press_position_px,
+        _ => cursor,
     };
     if pressed {
         for (split_entity, drag, split) in &active_drags {
@@ -461,7 +466,7 @@ fn from_pointer(
                 continue;
             }
             let grip = ResizeGrip::between(split.direction, *previous, *next);
-            if !grip.contains(cursor) {
+            if !grip.contains(hit_position) {
                 continue;
             }
             let icon = if just_pressed {
@@ -478,8 +483,8 @@ fn from_pointer(
                     previous: previous_entity,
                     next: next_entity,
                     start_position: match split.direction {
-                        PaneSplitDirection::Row => cursor.x,
-                        PaneSplitDirection::Column => cursor.y,
+                        PaneSplitDirection::Row => hit_position.x,
+                        PaneSplitDirection::Column => hit_position.y,
                     },
                     previous_grow: nodes
                         .get(previous_entity)
@@ -752,6 +757,37 @@ mod tests {
         assert!(fixture.app.world().get::<PaneDrag>(split).is_none());
         assert_eq!(fixture.grows(previous), (1.0, 1.0));
         assert_eq!(fixture.grows(next), (1.0, 1.0));
+    }
+
+    #[test]
+    fn divider_capture_uses_the_press_before_motion_in_the_same_frame() {
+        for direction in [PaneSplitDirection::Row, PaneSplitDirection::Column] {
+            for (start, end, captured) in [(500.0, 700.0, true), (470.0, 500.0, false)] {
+                let mut fixture = ResizeFixture::native(direction);
+                let start = match direction {
+                    PaneSplitDirection::Row => Vec2::new(start, 250.0),
+                    PaneSplitDirection::Column => Vec2::new(250.0, start),
+                };
+                let end = match direction {
+                    PaneSplitDirection::Row => Vec2::new(end, 250.0),
+                    PaneSplitDirection::Column => Vec2::new(250.0, end),
+                };
+                fixture.pointer(false, Some(start));
+                let mut buttons = vmux_input::NativePointer::snapshot().unwrap().buttons;
+                buttons.left = true;
+                vmux_input::NativePointer::publish(start, buttons, false);
+                fixture.pointer(true, Some(end));
+                assert_eq!(
+                    fixture.app.world().get::<PaneDrag>(fixture.split).is_some(),
+                    captured
+                );
+                if captured {
+                    fixture.app.update();
+                    assert!((fixture.grows(fixture.left).0 - 1.4).abs() < 0.0001);
+                    assert!((fixture.grows(fixture.right).0 - 0.6).abs() < 0.0001);
+                }
+            }
+        }
     }
 
     #[test]
