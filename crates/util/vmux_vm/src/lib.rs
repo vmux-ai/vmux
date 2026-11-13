@@ -7,6 +7,7 @@ pub use engine::{Engine, EnginePlugin, Failure, Phase};
 pub use process::{Executable, NetworkProxy};
 pub use settings::Settings;
 
+mod batch;
 mod client;
 mod connection;
 mod docker;

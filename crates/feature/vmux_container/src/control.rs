@@ -135,7 +135,7 @@ pub(crate) struct Request {
 pub(crate) struct Finished {
     #[event_target]
     pub(crate) entity: Entity,
-    pub(crate) result: Result<Reply, String>,
+    pub(crate) result: std::result::Result<Reply, String>,
     pub(crate) mutates: bool,
     pub(crate) requester: Entity,
 }
