@@ -12,7 +12,6 @@ impl vmux_ecs::manifest::FeatureManifestSource for Feature {
     const SOURCE: &'static str = include_str!("feature.ron");
 }
 
-pub mod ranking;
 pub mod state;
 #[cfg(ui)]
 pub mod ui;

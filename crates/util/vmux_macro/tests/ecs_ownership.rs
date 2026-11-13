@@ -1,3 +1,4 @@
+use std::cell::{Cell, RefCell};
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -73,6 +74,105 @@ fn canonical_components_and_registered_systems_share_one_owner() {
         policy.boundaries.push(Boundary::fixture(&inventory, key));
     }
     assert!(policy.audit(&inventory).is_empty());
+}
+
+#[test]
+fn entity_events_resolve_through_module_aliases_and_barrel_exports() {
+    let inventory = Inventory::fixture(
+        "mod events { #[derive(EntityEvent)] pub struct Received { entity: Entity } } mod bridge { pub use crate::events::*; } pub use bridge as input; fn receive(event: On<crate::input::Received>) {} struct Root; impl Plugin for Root { fn build(&self, app: &mut App) { app.add_observer(receive); } }",
+    );
+    let event = inventory.key("events|struct:Received");
+    let system = inventory.key("fn:receive");
+    for key in [event, system] {
+        assert!(inventory.canonical(
+            &inventory.entries[&key],
+            &Policy::default(),
+            &mut BTreeSet::new()
+        ));
+    }
+    let mut shadowed = Inventory::default();
+    shadowed.source(
+        "crates/feature/input/src/lib.rs",
+        "extern crate self as input; #[derive(EntityEvent)] pub struct Received { entity:Entity }",
+    );
+    shadowed.source(
+        "crates/feature/consumer/src/lib.rs",
+        "struct Domain { value:String } mod domain { #[derive(EntityEvent)] pub struct Received { value:crate::Domain } } use domain as input; fn receive(event:On<input::Received>) {} struct Root; impl Plugin for Root { fn build(&self, app:&mut App) { app.add_observer(receive); } }",
+    );
+    shadowed.source(
+        "crates/feature/client/src/lib.rs",
+        "fn accepted(event:On<input::Received>) {} struct Root; impl Plugin for Root { fn build(&self, app:&mut App) { app.add_observer(accepted); } }",
+    );
+    shadowed.resolve_usage();
+    let accepted = shadowed.key("fn:accepted");
+    assert!(shadowed.canonical(
+        &shadowed.entries[&accepted],
+        &Policy::default(),
+        &mut BTreeSet::new()
+    ));
+    let system = shadowed.key("fn:receive");
+    assert!(!shadowed.canonical(
+        &shadowed.entries[&system],
+        &Policy::default(),
+        &mut BTreeSet::new()
+    ));
+    let declarations = Inventory::fixture(
+        "struct Domain { value:String } #[derive(EntityEvent)] struct Received { entity:Entity } mod input { #[cfg(target_os=\"linux\")] #[derive(EntityEvent)] pub struct Received { value:crate::Domain } #[cfg(target_os=\"macos\")] #[derive(EntityEvent)] pub struct Received { value:crate::Domain } } pub use input as events; fn receive(event:On<events::Received>) {} struct Root; impl Plugin for Root { fn build(&self, app:&mut App) { app.add_observer(receive); } }",
+    );
+    let system = declarations.key("fn:receive");
+    assert!(!declarations.canonical(
+        &declarations.entries[&system],
+        &Policy::default(),
+        &mut BTreeSet::new()
+    ));
+    let ambiguous = Inventory::fixture(
+        "struct Domain { value:String } mod domain { #[derive(EntityEvent)] pub struct Received { value:crate::Domain } } mod events { #[derive(EntityEvent)] pub struct Received { entity:Entity } } mod bridge { #[cfg(target_os=\"linux\")] pub use crate::domain::Received; #[cfg(target_os=\"macos\")] pub use crate::events::Received; } pub use bridge as input; fn receive(event:On<crate::input::Received>) {} struct Root; impl Plugin for Root { fn build(&self, app:&mut App) { app.add_observer(receive); } }",
+    );
+    let system = ambiguous.key("fn:receive");
+    assert!(!ambiguous.canonical(
+        &ambiguous.entries[&system],
+        &Policy::default(),
+        &mut BTreeSet::new()
+    ));
+    for source in [
+        "#[derive(EntityEvent)] struct Received { entity:Entity }",
+        "#[derive(EntityEvent)] struct Received { entity:Entity } fn receive(event:On<Received>) {} struct Root; impl Plugin for Root { fn build(&self, app:&mut App) { #[cfg(test)] { app.add_observer(receive); } } }",
+    ] {
+        let inventory = Inventory::fixture(source);
+        let key = inventory.key("struct:Received");
+        assert!(!inventory.canonical(
+            &inventory.entries[&key],
+            &Policy::default(),
+            &mut BTreeSet::new()
+        ));
+    }
+}
+
+#[test]
+fn shallow_barrel_probes_do_not_consume_the_recursion_budget() {
+    let mut source = String::from("mod bag {");
+    for index in 0..200 {
+        source.push_str(&format!(
+            "mod a{index:03} {{}} pub use self::a{index:03}::*;"
+        ));
+    }
+    source.push_str("mod zed { #[derive(EntityEvent)] pub struct Received { entity:Entity } } pub use self::zed::*; } use bag::*; fn receive(event:On<Received>) {} struct Root; impl Plugin for Root { fn build(&self, app:&mut App) { app.add_observer(receive); } }");
+    let inventory = Inventory::fixture(&source);
+    let system = inventory.key("fn:receive");
+    assert!(inventory.canonical(
+        &inventory.entries[&system],
+        &Policy::default(),
+        &mut BTreeSet::new()
+    ));
+    let cyclic = Inventory::fixture(
+        "mod inaccessible { #[derive(EntityEvent)] pub struct Received { entity:Entity } } mod one { pub use crate::two::*; } mod two { pub use crate::one::*; } use one::*; fn receive(event:On<Received>) {} struct Root; impl Plugin for Root { fn build(&self, app:&mut App) { app.add_observer(receive); } }",
+    );
+    let system = cyclic.key("fn:receive");
+    assert!(!cyclic.canonical(
+        &cyclic.entries[&system],
+        &Policy::default(),
+        &mut BTreeSet::new()
+    ));
 }
 
 #[test]
@@ -744,6 +844,8 @@ struct Inventory {
     roots: BTreeSet<String>,
     functions: BTreeMap<String, Vec<String>>,
     registered_keys: BTreeSet<String>,
+    lookup_depth: Cell<usize>,
+    root_bindings: RefCell<BTreeMap<(String, String), Option<String>>>,
 }
 
 impl Inventory {
@@ -795,6 +897,7 @@ impl Inventory {
     }
 
     fn source(&mut self, path: &str, source: &str) {
+        self.root_bindings.get_mut().clear();
         if !path.ends_with(".rs") {
             self.script(path, source);
             return;
@@ -1229,32 +1332,76 @@ impl Inventory {
         visiting: &mut BTreeSet<String>,
     ) -> Option<&Declaration> {
         let marker = format!("{namespace}|{reference}");
-        if visiting.len() > 128 || !visiting.insert(marker) {
+        let depth = self.lookup_depth.get();
+        if depth > 128 || !visiting.insert(marker) {
             return None;
         }
+        self.lookup_depth.set(depth + 1);
+        let entry = self.resolve_path(namespace, reference, visiting);
+        self.lookup_depth.set(depth);
+        entry
+    }
+
+    fn resolve_path(
+        &self,
+        namespace: &str,
+        reference: &str,
+        visiting: &mut BTreeSet<String>,
+    ) -> Option<&Declaration> {
         let parts = reference.split("::").collect::<Vec<_>>();
         let first = parts.first().copied()?;
         if first == "crate" {
             let root = namespace.split("::").next()?;
-            return self.symbol(&format!("{root}::{}", parts[1..].join("::")), visiting);
+            return self.resolve(root, &parts[1..].join("::"), visiting);
         }
         if first == "self" {
-            return self.symbol(&format!("{namespace}::{}", parts[1..].join("::")), visiting);
+            return self.resolve(namespace, &parts[1..].join("::"), visiting);
         }
         if first == "super" {
             let parent = namespace.rsplit_once("::")?.0;
             return self.resolve(parent, &parts[1..].join("::"), visiting);
         }
         if parts.len() > 1 && self.roots.contains(first) {
-            let (module, name) = reference.rsplit_once("::")?;
-            return self.resolve(module, name, visiting);
+            let shadowed = self.names.contains_key(first)
+                || self.imports.iter().any(|(scope, imports)| {
+                    imports.modules.contains(first)
+                        || imports
+                            .aliases
+                            .get(first)
+                            .is_some_and(|target| target != "self" || scope != first)
+                });
+            let module = if shadowed {
+                self.root_binding(namespace, first)?
+            } else {
+                first.to_string()
+            };
+            return self.resolve(&module, &parts[1..].join("::"), visiting);
         }
         let mut scope = Some(namespace);
         while let Some(current) = scope {
-            if let Some(entry) = self.symbol(&format!("{current}::{reference}"), visiting) {
+            if self.imports.get(current).is_some_and(|imports| {
+                imports.ambiguous.contains(first) || imports.opaque_modules.contains(first)
+            }) {
+                return None;
+            }
+            let symbol = format!("{current}::{reference}");
+            if self.symbols.contains_key(&symbol) {
+                return self.symbol(&symbol, visiting);
+            }
+            if let Some(entry) = self.symbol(&symbol, visiting) {
                 return Some(entry);
             }
             if let Some(imports) = self.imports.get(current) {
+                if imports.ambiguous.contains(first) || imports.opaque_modules.contains(first) {
+                    return None;
+                }
+                if parts.len() > 1 && imports.modules.contains(first) {
+                    return self.resolve(
+                        &format!("{current}::{first}"),
+                        &parts[1..].join("::"),
+                        visiting,
+                    );
+                }
                 if let Some(target) = imports.aliases.get(first) {
                     let suffix = parts[1..].join("::");
                     let target = if suffix.is_empty() {
@@ -1262,9 +1409,7 @@ impl Inventory {
                     } else {
                         format!("{target}::{suffix}")
                     };
-                    if let Some(entry) = self.resolve(current, &target, visiting) {
-                        return Some(entry);
-                    }
+                    return self.resolve(current, &target, visiting);
                 }
                 if parts.len() > 1 {
                     scope = current.rsplit_once("::").map(|(parent, _)| parent);
@@ -1290,6 +1435,44 @@ impl Inventory {
         self.symbol(reference, visiting)
     }
 
+    fn root_binding(&self, namespace: &str, name: &str) -> Option<String> {
+        let key = (namespace.to_string(), name.to_string());
+        if let Some(binding) = self.root_bindings.borrow().get(&key) {
+            return binding.clone();
+        }
+        let binding = self.lexical_root(namespace, name);
+        self.root_bindings.borrow_mut().insert(key, binding.clone());
+        binding
+    }
+
+    fn lexical_root(&self, namespace: &str, name: &str) -> Option<String> {
+        let mut scope = Some(namespace);
+        while let Some(current) = scope {
+            if let Some(imports) = self.imports.get(current) {
+                if imports.ambiguous.contains(name) || imports.opaque_modules.contains(name) {
+                    return None;
+                }
+                if imports
+                    .aliases
+                    .get(name)
+                    .is_some_and(|target| target == name)
+                {
+                    return Some(name.to_string());
+                }
+                if let Some(module) = self.module_binding(current, name, &mut BTreeSet::new()) {
+                    return Some(module);
+                }
+                if imports.aliases.contains_key(name)
+                    || self.symbols.contains_key(&format!("{current}::{name}"))
+                {
+                    return None;
+                }
+            }
+            scope = current.rsplit_once("::").map(|(parent, _)| parent);
+        }
+        Some(name.to_string())
+    }
+
     fn symbol(&self, symbol: &str, visiting: &mut BTreeSet<String>) -> Option<&Declaration> {
         if let Some(keys) = self.symbols.get(symbol) {
             if keys.len() == 1 {
@@ -1298,7 +1481,11 @@ impl Inventory {
             return None;
         }
         let (namespace, name) = symbol.rsplit_once("::")?;
-        let target = self.imports.get(namespace)?.aliases.get(name)?;
+        let imports = self.imports.get(namespace)?;
+        if imports.ambiguous.contains(name) || imports.opaque_modules.contains(name) {
+            return None;
+        }
+        let target = imports.aliases.get(name)?;
         self.resolve(namespace, target, visiting)
     }
 }
@@ -1507,6 +1694,7 @@ impl Declarations<'_> {
                             "Component"
                                 | "Resource"
                                 | "Event"
+                                | "EntityEvent"
                                 | "Message"
                                 | "Bundle"
                                 | "SystemParam"

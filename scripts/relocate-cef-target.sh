@@ -46,7 +46,7 @@ do
     [[ ! -d "$directory" ]] || cef_fingerprint_directories+=("$directory")
 done
 
-for directory in "${cef_build_directories[@]}"; do
+for directory in ${cef_build_directories[@]+"${cef_build_directories[@]}"}; do
     cache="$directory/out/build/CMakeCache.txt"
     if [[ ! -f "$cache" ]]; then
         continue
@@ -71,13 +71,13 @@ rewrite_file() {
     done
 }
 
-for directory in "${cef_fingerprint_directories[@]}"; do
+for directory in ${cef_fingerprint_directories[@]+"${cef_fingerprint_directories[@]}"}; do
     while IFS= read -r -d '' path; do
         rewrite_file "$path"
     done < <(find "$directory" -type f -name '*.json' -print0)
 done
 
-for directory in "${cef_build_directories[@]}"; do
+for directory in ${cef_build_directories[@]+"${cef_build_directories[@]}"}; do
     while IFS= read -r -d '' path; do
         rewrite_file "$path"
     done < <(
