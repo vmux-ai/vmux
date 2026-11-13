@@ -430,6 +430,11 @@ or persistence; rendering code does not feed a normalized snapshot back as busin
 
 ### ECS ownership boundaries
 
+The UI stylesheet build adapter invokes Tailwind and emits Cargo dependency metadata before
+application composition. `VMUX_SKIP_DX_BUILD` omits stylesheet generation and its source watches
+for headless checks; locale generation remains active. Cargo tracks the flag so normal builds
+restore source watches and regenerate the complete asset bundle when that mode ends.
+
 Every plain adapter names its external interface, canonical input/output, scope/lifetime,
 bounds and cancellation/eviction. Adapters may hold handles, byte cursors, codec scratch and
 read-only output caches; they cannot own parallel normalized vmux state or product policy.

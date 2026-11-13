@@ -4,7 +4,7 @@ description = "vmux — Dioxus WASM UI library (webview components, CEF hooks)"
 version.workspace = true
 edition.workspace = true
 publish = false
-build = "build.rs"
+build = "../../../scripts/ui_build.rs"
 
 [features]
 default = []
