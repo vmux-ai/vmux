@@ -810,6 +810,44 @@ fn bevy_window_reexports_bind_the_pinned_component_without_accepting_shadow_modu
 }
 
 #[test]
+fn registered_systems_borrow_exact_upstream_components_without_approving_local_copies() {
+    for (target, expected) in [("NativeWindow", true), ("Model", false), ("Copy", false)] {
+        let mut inventory = Inventory::default();
+        inventory.source(
+            "patches/bevy_window-0.19.0/src/lib.rs",
+            "pub mod window; pub use window::Window;",
+        );
+        inventory.source(
+            "patches/bevy_window-0.19.0/src/window.rs",
+            "struct Handle; #[derive(Component)] pub struct Window { handle: Handle }",
+        );
+        inventory.source("crates/app/example/src/lib.rs", &format!("use bevy::window::Window as NativeWindow; struct Model {{ value: String }} #[derive(Component)] struct Copy {{ model: Model }} fn inspect(windows: Query<&{target}>) {{}} struct Root; impl Plugin for Root {{ fn build(&self, app:&mut App) {{ app.add_systems(Update, inspect); }} }}"));
+        inventory.resolve_usage();
+        let window = inventory.key("struct:Window");
+        let mut policy = Policy {
+            upstream: vec![Upstream {
+                package: "bevy_window".into(),
+                version: "0.19.0".into(),
+                archive_sha256: String::new(),
+                entries: BTreeMap::from([(
+                    window.clone(),
+                    inventory.entries[&window].fingerprint.clone(),
+                )]),
+            }],
+            ..Default::default()
+        };
+        let inspect = &inventory.entries[&inventory.key("fn:inspect")];
+        assert_eq!(
+            inventory.canonical(inspect, &policy, &mut BTreeSet::new()),
+            expected,
+            "{target}"
+        );
+        policy.upstream[0].entries.insert(window, "changed".into());
+        assert!(!inventory.canonical(inspect, &policy, &mut BTreeSet::new()));
+    }
+}
+
+#[test]
 fn legacy_revision_cannot_be_moved_to_refresh_domain_debt() {
     let policy = Policy {
         revision: "0000000000000000000000000000000000000000".into(),
@@ -2865,9 +2903,11 @@ impl Inventory {
                     if (matches!(entry.kind, Kind::Function | Kind::Alias) || entry.parameter)
                         && field.ecs
                         && self.used(field)
-                        && policy.legacy.iter().any(|legacy| {
+                        && (policy.legacy.iter().any(|legacy| {
                             legacy.key == field.key && legacy.fingerprint == field.fingerprint
-                        }) => {}
+                        }) || policy.upstream.iter().any(|upstream| {
+                            upstream.entries.get(&field.key) == Some(&field.fingerprint)
+                        })) => {}
                 Some(field) if !self.canonical(field, policy, &mut visiting.clone()) => {
                     return false;
                 }
