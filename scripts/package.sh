@@ -74,6 +74,11 @@ if [[ "$PROFILE" == "local" || "${VMUX_CI_FAST_PACKAGE:-}" == "1" ]]; then
 fi
 VMUX_BUILD_PROFILE="$PROFILE" "$ROOT/scripts/cargo-with-cef-cache.sh" "${packager_args[@]}"
 
+if [[ "${VMUX_CI_FAST_PACKAGE:-}" == "1" && ! -d "$VMUX_APP_BUNDLE" ]]; then
+    echo "Fast package did not produce $VMUX_APP_BUNDLE" >&2
+    exit 1
+fi
+
 if [[ ( "$PROFILE" == "local" || "${VMUX_CI_FAST_PACKAGE:-}" == "1" ) && -d "$VMUX_APP_BUNDLE" ]]; then
     if [[ "$PROFILE" == "local" ]]; then
         "$ROOT/scripts/build-title.sh" local "$ROOT" "$VMUX_APP_BUNDLE/Contents/Info.plist" >/dev/null
