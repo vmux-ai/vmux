@@ -3,7 +3,7 @@ use std::io;
 use std::path::Path;
 use std::time::{Duration, Instant};
 
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 
 use crate::http::UnixHttp;
 
@@ -167,7 +167,7 @@ pub enum Operation {
     Remove,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Container {
     pub id: String,
     pub name: String,
@@ -254,13 +254,13 @@ impl Container {
     }
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Dependency {
     pub service: String,
     pub condition: Condition,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub enum Condition {
     Started,
     Healthy,
@@ -361,7 +361,7 @@ struct Health {
     status: String,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 pub struct Port {
     pub host: u16,
     pub guest: u16,

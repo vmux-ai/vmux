@@ -110,12 +110,16 @@ For the desktop workflow, build with `make build-dev`, then open the app with
 (`vmux://vm/docker`) and Containers (`vmux://vm/docker/containers`) have separate
 titles and icons while sharing the same workspace. `vmux://docker/containers`,
 `vmux://docker/` and the older `vmux://containers/` remain compatible.
-VM shows its state, CPU allocation, memory and shared directory, including during
-startup and shutdown. Docker shows its connection and container count. When the daemon
-is unavailable, the same side sheet remains visible with its VM controls. The current
-host retains previously fetched container metadata for inspection during VM shutdown.
-Containers
-created on this daemon appear automatically, including stopped containers and
+Opening a VM, Docker or Containers page starts the VM automatically once per app host,
+after inspecting its current state. Manually stopping it leaves it stopped until another
+Start request; reopening the app allows automatic startup again. While the daemon is
+unavailable, the main area shows a VM illustration and startup progress or a Start button,
+and the hierarchical side sheet remains visible. Once ready, VM shows its state, CPU
+allocation, memory and shared directory; Docker shows its connection and container count.
+Containers uses stacked boxes, while an individual container uses one box.
+The last successful inventory is saved per VM and restored when the app restarts, so known
+containers remain selectable while stopped. Live logs require the daemon.
+Containers created on this daemon appear automatically, including stopped containers and
 Compose groups. Selecting an entry opens its information and live logs. VM shutdown
 and settings belong to the VM row of the side sheet, which follows
 VM, Docker, Containers, Compose groups and their services. Each level links to its page.
