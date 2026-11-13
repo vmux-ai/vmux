@@ -4,10 +4,12 @@ use std::task::Waker;
 
 use bevy_app::{App, Plugin, Update};
 use bevy_ecs::prelude::*;
-use bevy_ecs::system::Commands as WorldCommands;
+use bevy_ecs::system::{Commands as WorldCommands, SystemParam};
 use bevy_tasks::{IoTaskPool, Task, TaskPool, futures_lite::future};
 use serde::{Deserialize, Serialize};
-use vmux_ecs::Cwd;
+use vmux_ecs::{Cwd, OperationState};
+
+use crate::registration::{Persisting, Writing};
 
 use crate::{
     AliasCompleted, AliasRequest, Error, LoadCompleted, LoadRequest, Record, Root, Snapshot,
@@ -328,12 +330,34 @@ fn aliases(
 type ActiveIo<'w, 's> =
     Query<'w, 's, &'static Cwd, Or<(With<ReadTask>, With<AliasTask>, With<WriteTask>)>>;
 
+#[derive(SystemParam)]
+struct FileOwners<'w, 's> {
+    roots: Query<'w, 's, &'static Root>,
+    writes: Query<'w, 's, &'static Writing>,
+    states: Query<'w, 's, &'static OperationState>,
+}
+
+impl FileOwners<'_, '_> {
+    fn operation(&self, ticket: &Ticket) -> Option<Entity> {
+        let root = self.roots.get(ticket.owner).ok()?;
+        let writing = self.writes.get(ticket.owner).ok()?;
+        if root.0 != ticket.directory || writing.ticket != *ticket {
+            return None;
+        }
+        let state = self.states.get(writing.operation).ok()?;
+        if !matches!(state, OperationState::Pending | OperationState::Running) {
+            return None;
+        }
+        Some(writing.operation)
+    }
+}
+
 fn start(
     reads: Query<(Entity, &Cwd, &QueuedRead)>,
     aliases: Query<(Entity, &Cwd, &QueuedAliases)>,
     writes: Query<(Entity, &Cwd, &QueuedWrite)>,
     active: ActiveIo,
-    roots: Query<&Root>,
+    owners: FileOwners,
     wake: Option<Res<FileWake>>,
     mut commands: WorldCommands,
 ) {
@@ -342,7 +366,8 @@ fn start(
         occupied.insert(directory.0.clone());
     }
     for (entity, directory, request) in &reads {
-        if !roots
+        if !owners
+            .roots
             .get(request.ticket.owner)
             .is_ok_and(|root| root.0 == request.ticket.directory)
         {
@@ -356,27 +381,24 @@ fn start(
         commands.entity(entity).remove::<QueuedRead>().insert(task);
     }
     for (entity, directory, request) in &writes {
-        if !roots
-            .get(request.ticket.owner)
-            .is_ok_and(|root| root.0 == request.ticket.directory)
-        {
+        let Some(_) = owners.operation(&request.ticket) else {
             commands.entity(entity).despawn();
             continue;
-        }
+        };
         if !occupied.insert(directory.0.clone()) {
             continue;
         }
         let task = request.start(&directory.0, wake.as_deref().map(|wake| wake.0.clone()));
+        commands
+            .entity(request.ticket.owner)
+            .insert(Persisting(request.ticket.clone()));
         commands.entity(entity).remove::<QueuedWrite>().insert(task);
     }
     for (entity, directory, request) in &aliases {
-        if !roots
-            .get(request.ticket.owner)
-            .is_ok_and(|root| root.0 == request.ticket.directory)
-        {
+        let Some(_) = owners.operation(&request.ticket) else {
             commands.entity(entity).despawn();
             continue;
-        }
+        };
         if !occupied.insert(directory.0.clone()) {
             continue;
         }
@@ -538,11 +560,11 @@ mod tests {
         let before = counter.0.load(Ordering::SeqCst);
         signal.release();
         let deadline = std::time::Instant::now() + std::time::Duration::from_secs(3);
-        while !task.is_finished() {
+        while counter.0.load(Ordering::SeqCst) <= before {
             assert!(std::time::Instant::now() < deadline);
             std::thread::yield_now();
         }
-        assert!(counter.0.load(Ordering::SeqCst) > before);
+        assert!(task.is_finished());
         assert!(wake.poll(&mut task).is_some());
     }
 
@@ -625,6 +647,169 @@ mod tests {
             .next()
             .unwrap();
         assert!(completed.result.is_ok());
+    }
+
+    #[test]
+    fn canceled_queued_write_never_reaches_disk_and_releases_the_root() {
+        let root = tempfile::tempdir().unwrap();
+        let directory = root.path().join("repo");
+        std::fs::create_dir_all(&directory).unwrap();
+        let mut store = Store::at(root.path());
+        store.save("stable", 0, "Before", &directory);
+        let signal = Signal::default();
+        let gate = signal.clone();
+        let blocker = IoTaskPool::get().spawn(async move {
+            gate.await;
+            Err(Error::Unavailable("test IO blocker".into()))
+        });
+        store.app.world_mut().spawn((
+            Cwd(store.root.clone()),
+            ReadTask {
+                ticket: Ticket {
+                    owner: store.owner,
+                    directory: store.root.clone(),
+                    generation: 0,
+                },
+                task: blocker,
+            },
+        ));
+        store.queue("stable", 1, "Canceled", &directory);
+        store.app.update();
+        let operation = store
+            .app
+            .world()
+            .get::<Writing>(store.owner)
+            .unwrap()
+            .operation;
+        assert!(
+            store
+                .app
+                .world_mut()
+                .query::<&QueuedWrite>()
+                .single(store.app.world())
+                .is_ok()
+        );
+        store.app.world_mut().trigger(vmux_ecs::OperationCompleted {
+            entity: operation,
+            result: Err("canceled before IO".into()),
+        });
+        let completed = store.complete(1);
+        signal.release();
+        assert!(completed[0].result.is_err());
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(3);
+        loop {
+            store.app.update();
+            let active = store
+                .app
+                .world_mut()
+                .query_filtered::<Entity, Or<(With<ReadTask>, With<WriteTask>, With<QueuedWrite>)>>(
+                )
+                .iter(store.app.world())
+                .count();
+            if active == 0 {
+                break;
+            }
+            assert!(std::time::Instant::now() < deadline);
+            std::thread::yield_now();
+        }
+        assert_eq!(
+            FileStore::read(&store.root).unwrap().projects["stable"].name,
+            "Before"
+        );
+        assert_eq!(store.snapshot().projects["stable"].name, "Before");
+        store.save("stable", 1, "Next", &directory);
+        assert_eq!(
+            FileStore::read(&store.root).unwrap().projects["stable"].name,
+            "Next"
+        );
+    }
+
+    #[test]
+    fn ended_or_removed_operation_reconciles_started_atomic_io_before_the_next_write() {
+        for removed in [false, true] {
+            let root = tempfile::tempdir().unwrap();
+            let directory = root.path().join("repo");
+            std::fs::create_dir_all(&directory).unwrap();
+            let mut store = Store::at(root.path());
+            store.save("stable", 0, "Before", &directory);
+            store.queue("stable", 1, "Started", &directory);
+            store.app.update();
+            let operation = store
+                .app
+                .world()
+                .get::<Writing>(store.owner)
+                .unwrap()
+                .operation;
+            let task_entity = store
+                .app
+                .world_mut()
+                .query_filtered::<Entity, With<WriteTask>>()
+                .single(store.app.world())
+                .unwrap();
+            let deadline = std::time::Instant::now() + std::time::Duration::from_secs(3);
+            while !store
+                .app
+                .world()
+                .get::<WriteTask>(task_entity)
+                .unwrap()
+                .task
+                .is_finished()
+            {
+                assert!(std::time::Instant::now() < deadline);
+                std::thread::yield_now();
+            }
+            let result = future::block_on(
+                &mut store
+                    .app
+                    .world_mut()
+                    .get_mut::<WriteTask>(task_entity)
+                    .unwrap()
+                    .task,
+            );
+            let signal = Signal::default();
+            let gate = signal.clone();
+            store
+                .app
+                .world_mut()
+                .get_mut::<WriteTask>(task_entity)
+                .unwrap()
+                .task = IoTaskPool::get().spawn(async move {
+                gate.await;
+                result
+            });
+            if removed {
+                store.app.world_mut().despawn(operation);
+            } else {
+                store.app.world_mut().trigger(vmux_ecs::OperationCompleted {
+                    entity: operation,
+                    result: Err("canceled after IO started".into()),
+                });
+            }
+            store.app.update();
+            assert_eq!(store.snapshot().projects["stable"].name, "Before");
+            assert_eq!(
+                FileStore::read(&store.root).unwrap().projects["stable"].name,
+                "Started"
+            );
+            assert!(store.app.world().get::<Writing>(store.owner).is_some());
+            signal.release();
+            assert!(store.complete(1)[0].result.is_ok());
+            assert_eq!(store.snapshot().projects["stable"].name, "Started");
+            assert_eq!(
+                store.app.world().get::<OperationState>(operation),
+                if removed {
+                    None
+                } else {
+                    Some(&OperationState::Failed)
+                }
+            );
+            store.save("stable", 2, "Next", &directory);
+            assert_eq!(store.snapshot().projects["stable"].name, "Next");
+            assert_eq!(
+                FileStore::read(&store.root).unwrap().projects["stable"].name,
+                "Next"
+            );
+        }
     }
 
     #[test]

@@ -542,20 +542,23 @@ builder selects Project explicitly, and Editor requires that core in the composi
 the Profile-root binding, folder selection, UI feedback, Git provisioning, filesystem discovery,
 and Session contributions. Store tickets bind every result to its root, directory, and generation.
 Core request systems validate names, identities, revisions and duplicate checkouts directly against
-Project components. An accepted write is a Root-owned operation whose staged target intent and
-shared values survive removal of the requester. Target IDs stay out of the canonical Project
+Project components. An accepted write uses a Root-owned proposal lease correlated with its public
+operation. The staged target intent and shared values survive removal of the requester or a public
+operation whose native atomic IO has already started. Target IDs stay out of the canonical Project
 identity index until commit. Dispatch projects one immutable persistence snapshot from committed
 entities plus the accepted changes; serialized Record values have no mutation or entity behavior.
 Removal first obtains ticket-bound root-relative path and imported-symlink facts. Project systems stage Hidden
-intents for unregistered aliases on the accepted operation; the filesystem adapter never decides
+intents for unregistered aliases on the accepted proposal; the filesystem adapter never decides
 registration membership or mutates that snapshot. Alias lookup failure leaves committed state intact.
 Filesystem jobs queue by canonical directory. Unstarted jobs are discarded when their owner
 changes; started atomic IO finishes before a replacement root reads that directory. Backend IO
 tasks therefore own their finite lifetime rather than being despawned with a requesting root.
 Pending tasks register the host waker when polled, so publishing completion schedules its consuming
-frame. Missing or terminal accepted operations release the Root write slot and settle any surviving
-requester. Terminal operations retain the shared five-minute lifecycle while staged values and
-alias intents are discarded.
+frame. Missing or terminal unstarted operations release the Root write slot and settle any surviving
+requester. Native jobs validate the live operation ticket before starting. Once atomic persistence
+starts, its operation retains the Root slot and proposal until completion reconciles disk and
+canonical entities, even if the operation has already become terminal. Terminal operations retain
+the shared five-minute lifecycle while staged values and alias intents are discarded.
 
 Editor owns durable collapsed-line preferences through an internal plugin. FileId, Collapsed and
 Revision components belong to file records under a Profile store root. Views share those records;
