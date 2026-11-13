@@ -1,16 +1,16 @@
-use std::collections::{BTreeMap, BTreeSet, HashSet};
+use std::collections::{BTreeSet, HashSet};
 use std::path::{Path, PathBuf};
 
 use bevy_app::{App, Plugin, Update};
 use bevy_ecs::prelude::*;
-use bevy_ecs::system::SystemParam;
-use serde::{Deserialize, Serialize};
+use bevy_ecs::query::Changed as ComponentChanged;
+use bevy_ecs::system::{Commands as WorldCommands, SystemParam};
 use vmux_ecs::{
-    Cwd, IdentityIndexPlugin, Operation, OperationCompleted, OperationPlugin, OperationState,
-    Revision,
+    Cwd, EntityTarget, IdentityIndexPlugin, Operation, OperationCompleted, OperationPlugin,
+    OperationState, OperationTarget, Revision,
 };
 
-use crate::ProjectId;
+use crate::{ProjectId, Record, Snapshot};
 
 pub struct ProjectPlugin;
 
@@ -25,6 +25,8 @@ impl Plugin for ProjectPlugin {
             .add_message::<LoadCompleted>()
             .add_message::<WriteTaskRequest>()
             .add_message::<WriteResult>()
+            .add_message::<AliasRequest>()
+            .add_message::<AliasCompleted>()
             .add_message::<WriteCompleted>()
             .add_message::<ProjectSaved>()
             .add_message::<ProjectChanged>()
@@ -37,7 +39,9 @@ impl Plugin for ProjectPlugin {
             )
             .add_systems(
                 Update,
-                (finish, write, prune).chain().in_set(StoreSet::Write),
+                (aliases, finish, write, dispatch, prune)
+                    .chain()
+                    .in_set(StoreSet::Write),
             );
     }
 }
@@ -74,6 +78,7 @@ struct LoadedDirectory(PathBuf);
 
 #[derive(Component)]
 struct Accepted {
+    operation: Entity,
     owner: Entity,
     directory: PathBuf,
 }
@@ -132,11 +137,48 @@ impl Clock {
 struct Loading(Ticket);
 
 #[derive(Component)]
-struct Writing {
-    ticket: Ticket,
-    requester: Entity,
-    mutation: Mutation,
+pub(super) struct Writing {
+    pub(super) ticket: Ticket,
+    pub(super) operation: Entity,
+    proposal: Entity,
 }
+
+#[derive(Component)]
+pub(super) struct Persisting(pub(super) Ticket);
+
+#[derive(Component)]
+struct Prepared {
+    ticket: Ticket,
+    operation: Entity,
+    requester: Entity,
+}
+
+#[derive(Component)]
+struct Proposal;
+
+#[derive(Component)]
+struct RequestedProject(ProjectId);
+
+#[derive(Component)]
+struct SaveIntent;
+
+#[derive(Component)]
+struct RemoveIntent;
+
+#[derive(Component)]
+struct Archive(bool);
+
+#[derive(Component)]
+struct Dispatched;
+
+#[derive(Component)]
+struct Aliasing;
+
+#[derive(Component)]
+struct AliasesReady;
+
+#[derive(Component)]
+struct HideAlias;
 
 #[derive(Message, Clone)]
 pub struct LoadRequest {
@@ -193,7 +235,18 @@ pub struct WriteCompleted {
 pub struct WriteTaskRequest {
     pub ticket: Ticket,
     pub snapshot: Snapshot,
-    pub removed_directory: Option<PathBuf>,
+}
+
+#[derive(Message)]
+pub struct AliasRequest {
+    pub ticket: Ticket,
+    pub directory: PathBuf,
+}
+
+#[derive(Message)]
+pub struct AliasCompleted {
+    pub ticket: Ticket,
+    pub result: Result<Vec<PathBuf>, Error>,
 }
 
 #[derive(Message)]
@@ -201,6 +254,24 @@ pub struct WriteResult {
     pub ticket: Ticket,
     pub result: Result<BTreeSet<String>, Error>,
 }
+
+type Proposals<'w, 's> = Query<
+    'w,
+    's,
+    (
+        &'static RequestedProject,
+        &'static ChildOf,
+        Option<&'static Name>,
+        Option<&'static Cwd>,
+        Option<&'static Repository>,
+        Option<&'static Revision>,
+        Has<SaveIntent>,
+        Has<RemoveIntent>,
+        Option<&'static Archive>,
+        Option<&'static EntityTarget<Project>>,
+    ),
+    With<Proposal>,
+>;
 
 type Records<'w, 's> = Query<
     'w,
@@ -221,8 +292,10 @@ type Records<'w, 's> = Query<
 pub struct Registrations<'w, 's> {
     roots: RootStatus<'w, 's>,
     records: Records<'w, 's>,
+    projects: Query<'w, 's, (Entity, &'static ChildOf, &'static ProjectId), With<Project>>,
     hidden: Query<'w, 's, (&'static ChildOf, &'static ProjectId), With<Hidden>>,
     archived: Query<'w, 's, (&'static ChildOf, &'static ProjectId), With<Archived>>,
+    unused: Query<'w, 's, Entity, UnusedProjects>,
 }
 
 type RootStatus<'w, 's> = Query<
@@ -245,7 +318,7 @@ type ChangedRoots<'w, 's> = Query<
         Option<&'static Loading>,
         Option<&'static Writing>,
     ),
-    Changed<Root>,
+    ComponentChanged<Root>,
 >;
 type UnloadedRoots = (Without<Loaded>, Without<Loading>, Without<LoadError>);
 type IdleRoots<'w, 's> = Query<
@@ -265,6 +338,13 @@ type UnusedProjects = (
     Without<Hidden>,
     Without<Archived>,
 );
+
+#[derive(SystemParam)]
+struct LifecycleRoots<'w, 's> {
+    changed: ChangedRoots<'w, 's>,
+    unloaded: Query<'w, 's, (Entity, &'static Root), UnloadedRoots>,
+    all: Query<'w, 's, (Entity, &'static Root)>,
+}
 
 impl Registrations<'_, '_> {
     pub fn ready(&self, root: &Path) -> Result<bool, Error> {
@@ -292,12 +372,7 @@ impl Registrations<'_, '_> {
             }
             snapshot.projects.insert(
                 id.0.clone(),
-                Record {
-                    name: name.as_str().to_string(),
-                    directory: directory.0.clone(),
-                    repository: repository.0.clone(),
-                    revision: revision.0,
-                },
+                Record::capture(name, directory, repository, revision),
             );
         }
         for (parent, id) in &self.hidden {
@@ -351,6 +426,53 @@ impl Registrations<'_, '_> {
         selected.map(|(url, _)| url)
     }
 
+    fn entity(&self, owner: Entity, url: &str) -> Result<Option<Entity>, Error> {
+        let mut selected = None;
+        for (entity, parent, id) in &self.projects {
+            if parent.parent() != owner || id.0 != url {
+                continue;
+            }
+            if selected.is_some() {
+                return Err(Error::Duplicate);
+            }
+            selected = Some(entity);
+        }
+        Ok(selected)
+    }
+
+    fn save_target(
+        &self,
+        owner: Entity,
+        project: &ProjectSaved,
+        expected: u64,
+    ) -> Result<Option<Entity>, Error> {
+        let target = self.entity(owner, &project.id.0)?;
+        let (_, root, _, _) = self.roots.get(owner).map_err(|_| Error::NotFound)?;
+        let name = project.name.trim();
+        if name.is_empty() || name.len() > 256 || name.contains(['\0', '\n', '\r']) {
+            return Err(Error::InvalidName);
+        }
+        let current = self
+            .get(&root.0, &project.id.0)
+            .map_or(Revision(0), |(_, _, _, revision)| *revision);
+        if project.root != root.0 || current.0 != expected || current.next().is_none() {
+            return Err(Error::Conflict);
+        }
+        if self.duplicate_directory(owner, &project.id.0, &project.directory) {
+            return Err(Error::Duplicate);
+        }
+        Ok(target)
+    }
+
+    fn duplicate_directory(&self, owner: Entity, url: &str, directory: &Path) -> bool {
+        for (_, parent, id, _, current, _, _) in &self.records {
+            if parent.parent() == owner && id.0 != url && current.0 == directory {
+                return true;
+            }
+        }
+        false
+    }
+
     fn owns(&self, entity: Entity, root: &Path) -> bool {
         self.roots
             .get(entity)
@@ -358,41 +480,12 @@ impl Registrations<'_, '_> {
     }
 }
 
-#[derive(Clone, Default, Serialize, Deserialize)]
-pub struct Snapshot {
-    #[serde(default)]
-    pub projects: BTreeMap<String, Record>,
-    #[serde(default)]
-    pub hidden: BTreeSet<String>,
-    #[serde(default)]
-    pub archived: BTreeSet<String>,
-}
-
-#[derive(Clone, Serialize, Deserialize)]
-pub struct Record {
-    pub name: String,
-    pub directory: PathBuf,
-    pub repository: Option<String>,
-    pub revision: u64,
-}
-
-impl Record {
-    fn bundle(&self) -> impl Bundle {
-        (
-            Registered,
-            Name::new(self.name.clone()),
-            Cwd(self.directory.clone()),
-            Repository(self.repository.clone()),
-            Revision(self.revision),
-        )
-    }
-}
-
 fn cancel(
     accepted: Query<(Entity, &Accepted)>,
+    prepared: Query<(Entity, &Prepared)>,
     roots: Query<&Root>,
     mut completed: MessageWriter<WriteCompleted>,
-    mut commands: Commands,
+    mut commands: WorldCommands,
 ) {
     for (entity, request) in &accepted {
         if roots
@@ -412,23 +505,40 @@ fn cancel(
             result: Err(error),
         });
     }
+    for (entity, pending) in &prepared {
+        if !roots
+            .get(pending.ticket.owner)
+            .is_ok_and(|root| root.0 == pending.ticket.directory)
+        {
+            commands.trigger(OperationCompleted {
+                entity: pending.operation,
+                result: Err("project owner was removed or replaced".into()),
+            });
+            commands.entity(entity).despawn();
+        }
+    }
 }
 
 fn reset(
-    roots: ChangedRoots,
+    roots: LifecycleRoots,
     children: Query<(Entity, &ChildOf), With<Project>>,
-    mut commands: Commands,
+    mut commands: WorldCommands,
 ) {
-    for (entity, root, loaded, loading, writing) in &roots {
+    for (entity, root, loaded, loading, writing) in &roots.changed {
         let changed = loaded.is_some_and(|directory| directory.0 != root.0)
             || loading.is_some_and(|pending| pending.0.directory != root.0)
             || writing.is_some_and(|pending| pending.ticket.directory != root.0);
         if !changed {
             continue;
         }
-        commands
-            .entity(entity)
-            .remove::<(Loaded, LoadedDirectory, LoadError, Loading, Writing)>();
+        commands.entity(entity).remove::<(
+            Loaded,
+            LoadedDirectory,
+            LoadError,
+            Loading,
+            Writing,
+            Persisting,
+        )>();
         for (child, parent) in &children {
             if parent.parent() == entity {
                 commands.entity(child).despawn();
@@ -438,14 +548,14 @@ fn reset(
 }
 
 fn load(
-    roots: Query<(Entity, &Root), UnloadedRoots>,
-    all_roots: Query<(Entity, &Root)>,
+    roots: LifecycleRoots,
     mut clock: ResMut<Clock>,
     mut requests: MessageWriter<LoadRequest>,
-    mut commands: Commands,
+    mut commands: WorldCommands,
 ) {
-    for (owner, root) in &roots {
-        if all_roots
+    for (owner, root) in &roots.unloaded {
+        if roots
+            .all
             .iter()
             .any(|(other, directory)| other != owner && directory.0 == root.0)
         {
@@ -465,7 +575,7 @@ fn load(
 fn restore(
     mut results: MessageReader<LoadCompleted>,
     roots: Query<(&Root, &Loading)>,
-    mut commands: Commands,
+    mut commands: WorldCommands,
 ) {
     for completed in results.read() {
         let Ok((root, pending)) = roots.get(completed.ticket.owner) else {
@@ -495,7 +605,13 @@ fn restore(
                 ChildOf(completed.ticket.owner),
             ));
             if let Some(record) = snapshot.projects.get(&url) {
-                project.insert(record.bundle());
+                project.insert((
+                    Registered,
+                    Name::new(record.name.clone()),
+                    Cwd(record.directory.clone()),
+                    Repository(record.repository.clone()),
+                    Revision(record.revision),
+                ));
             }
             if snapshot.hidden.contains(&url) {
                 project.insert(Hidden);
@@ -515,9 +631,8 @@ fn write(
     requests: Query<(Entity, &WriteRequest, Has<Operation>)>,
     registrations: Registrations,
     mut clock: ResMut<Clock>,
-    mut io: MessageWriter<WriteTaskRequest>,
     mut completed: MessageWriter<WriteCompleted>,
-    mut commands: Commands,
+    mut commands: WorldCommands,
 ) {
     let mut handled = HashSet::new();
     for (owner, root, loaded, error) in &roots {
@@ -528,90 +643,86 @@ fn write(
             if request.root != root.0 || !handled.insert(requester) {
                 continue;
             }
-            if let Err(error) = registrations.ready(&root.0) {
-                commands.entity(requester).remove::<WriteRequest>();
-                commands.trigger(OperationCompleted {
-                    entity: requester,
-                    result: Err(error.to_string()),
-                });
-                completed.write(WriteCompleted {
-                    requester,
-                    result: Err(error),
-                });
-                continue;
-            }
-            let mut snapshot = registrations.snapshot(&root.0);
-            let mut mutation = request.mutation.clone();
-            let mut removed_directory = None;
             commands.entity(requester).remove::<WriteRequest>();
-            let validation = match &mut mutation {
-                Mutation::Save { project, expected } => {
-                    let current = snapshot
-                        .projects
-                        .get(&project.id.0)
-                        .map_or(0, |record| record.revision);
-                    let name = project.name.trim();
-                    if name.is_empty() || name.len() > 256 || name.contains(['\0', '\n', '\r']) {
-                        Err(Error::InvalidName)
-                    } else if project.root != root.0
-                        || current != *expected
-                        || Revision(current).next().is_none()
-                    {
-                        Err(Error::Conflict)
-                    } else if snapshot.projects.iter().any(|(url, record)| {
-                        url != &project.id.0 && record.directory == project.directory
-                    }) {
-                        Err(Error::Duplicate)
-                    } else {
-                        project.name = name.to_string();
-                        project.revision = Revision(current).next().unwrap().0;
-                        snapshot.hidden.remove(&project.id.0);
-                        snapshot.projects.insert(
-                            project.id.0.clone(),
-                            Record {
-                                name: project.name.clone(),
-                                directory: project.directory.clone(),
-                                repository: project.repository.clone(),
-                                revision: project.revision,
-                            },
-                        );
-                        Ok(())
+            let ready = registrations.ready(&root.0);
+            let validation = match ready {
+                Err(error) => Err(error),
+                Ok(_) => match &request.mutation {
+                    Mutation::Save { project, expected } => {
+                        registrations.save_target(owner, project, *expected)
                     }
-                }
-                Mutation::Remove(url) => {
-                    if let Some(record) = snapshot.projects.remove(url) {
-                        removed_directory = Some(record.directory);
-                        snapshot.hidden.insert(url.clone());
+                    Mutation::Remove(url) | Mutation::Archive { url, .. } => {
+                        registrations.entity(owner, url)
                     }
-                    Ok(())
-                }
-                Mutation::Archive { url, archived } => {
-                    if *archived {
-                        snapshot.archived.insert(url.clone());
-                    } else {
-                        snapshot.archived.remove(url);
-                    }
-                    Ok(())
+                },
+            };
+            let target = match validation {
+                Ok(target) => target,
+                Err(error) => {
+                    commands.trigger(OperationCompleted {
+                        entity: requester,
+                        result: Err(error.to_string()),
+                    });
+                    completed.write(WriteCompleted {
+                        requester,
+                        result: Err(error),
+                    });
+                    continue;
                 }
             };
-            if let Err(error) = validation {
-                commands.trigger(OperationCompleted {
-                    entity: requester,
-                    result: Err(error.to_string()),
-                });
-                completed.write(WriteCompleted {
-                    requester,
-                    result: Err(error),
-                });
-                continue;
-            }
             let ticket = clock.ticket(owner, &root.0);
-            io.write(WriteTaskRequest {
-                ticket: ticket.clone(),
-                snapshot,
-                removed_directory,
-            });
+            let accepted = commands
+                .spawn((
+                    Operation::bundle("project.write").unwrap().running(),
+                    OperationTarget::new(owner),
+                    ChildOf(owner),
+                ))
+                .id();
+            let id = match &request.mutation {
+                Mutation::Save { project, .. } => project.id.clone(),
+                Mutation::Remove(url) | Mutation::Archive { url, .. } => ProjectId(url.clone()),
+            };
+            let mut proposal = commands.spawn((
+                Prepared {
+                    ticket: ticket.clone(),
+                    operation: accepted,
+                    requester,
+                },
+                Proposal,
+                RequestedProject(id),
+                ChildOf(owner),
+            ));
+            let lease = proposal.id();
+            if let Some(target) = target {
+                proposal.insert(EntityTarget::<Project>::new(target));
+            }
+            match &request.mutation {
+                Mutation::Save { project, .. } => {
+                    let revision = registrations
+                        .get(&root.0, &project.id.0)
+                        .map_or(Revision(0), |(_, _, _, revision)| *revision)
+                        .next()
+                        .unwrap();
+                    proposal.insert((
+                        SaveIntent,
+                        Name::new(project.name.trim().to_string()),
+                        Cwd(project.directory.clone()),
+                        Repository(project.repository.clone()),
+                        revision,
+                    ));
+                }
+                Mutation::Remove(url) => {
+                    proposal.insert(RemoveIntent);
+                    if let Some((_, directory, _, _)) = registrations.get(&root.0, url) {
+                        proposal.insert(directory.clone());
+                    }
+                }
+                Mutation::Archive { archived, .. } => {
+                    proposal.insert(Archive(*archived));
+                }
+            }
             commands.entity(requester).insert(Accepted {
+                operation: accepted,
                 owner,
                 directory: root.0.clone(),
             });
@@ -620,90 +731,377 @@ fn write(
             }
             commands.entity(owner).insert(Writing {
                 ticket,
-                requester,
-                mutation,
+                operation: accepted,
+                proposal: lease,
             });
             break;
         }
     }
 }
 
-fn prune(projects: Query<Entity, UnusedProjects>, mut commands: Commands) {
-    for entity in &projects {
+fn aliases(
+    mut results: MessageReader<AliasCompleted>,
+    roots: Query<(&Root, &Writing)>,
+    pending: Query<&Prepared, With<Aliasing>>,
+    registrations: Registrations,
+    mut failed: MessageWriter<WriteResult>,
+    mut commands: WorldCommands,
+) {
+    let mut handled = HashSet::new();
+    for result in results.read() {
+        let Ok((root, writing)) = roots.get(result.ticket.owner) else {
+            continue;
+        };
+        if writing.ticket != result.ticket || root.0 != result.ticket.directory {
+            continue;
+        }
+        let Ok(prepared) = pending.get(writing.proposal) else {
+            continue;
+        };
+        if prepared.ticket != result.ticket {
+            continue;
+        }
+        if !handled.insert(writing.operation) {
+            continue;
+        }
+        let paths = match &result.result {
+            Ok(paths) => paths,
+            Err(error) => {
+                failed.write(WriteResult {
+                    ticket: result.ticket.clone(),
+                    result: Err(error.clone()),
+                });
+                continue;
+            }
+        };
+        let mut registered = HashSet::new();
+        for (_, parent, id, ..) in &registrations.records {
+            if parent.parent() == result.ticket.owner {
+                registered.insert(id.0.as_str());
+            }
+        }
+        let mut selected = BTreeSet::new();
+        for path in paths {
+            if path.components().any(|part| {
+                !matches!(
+                    part,
+                    std::path::Component::Normal(_) | std::path::Component::CurDir
+                )
+            }) {
+                continue;
+            }
+            let Some(url) = crate::ProjectRoute::from_path(&root.0, &root.0.join(path)) else {
+                continue;
+            };
+            if registered.contains(url.as_str()) || !selected.insert(url.clone()) {
+                continue;
+            }
+            commands.spawn((
+                HideAlias,
+                RequestedProject(ProjectId(url)),
+                ChildOf(writing.proposal),
+            ));
+        }
+        commands
+            .entity(writing.proposal)
+            .remove::<Aliasing>()
+            .insert(AliasesReady);
+    }
+}
+
+type PendingWrites<'w, 's> = Query<
+    'w,
+    's,
+    (Entity, &'static Prepared, Has<Aliasing>, Has<AliasesReady>),
+    Without<Dispatched>,
+>;
+
+#[derive(SystemParam)]
+struct PreparedWrites<'w, 's> {
+    pending: PendingWrites<'w, 's>,
+    proposals: Proposals<'w, 's>,
+    aliases: Query<'w, 's, (&'static RequestedProject, &'static ChildOf), With<HideAlias>>,
+}
+
+fn dispatch(
+    prepared_writes: PreparedWrites,
+    states: Query<&OperationState>,
+    roots: Query<(&Root, &Writing)>,
+    registrations: Registrations,
+    mut io: MessageWriter<WriteTaskRequest>,
+    mut aliases: MessageWriter<AliasRequest>,
+    mut commands: WorldCommands,
+) {
+    for (proposal, prepared, aliasing, aliases_ready) in &prepared_writes.pending {
+        if !states
+            .get(prepared.operation)
+            .is_ok_and(|state| matches!(state, OperationState::Pending | OperationState::Running))
+        {
+            continue;
+        }
+        let owner = prepared.ticket.owner;
+        let Ok((root, writing)) = roots.get(owner) else {
+            continue;
+        };
+        if writing.operation != prepared.operation
+            || writing.proposal != proposal
+            || writing.ticket != prepared.ticket
+            || root.0 != prepared.ticket.directory
+        {
+            continue;
+        }
+        let Ok((id, parent, name, directory, repository, revision, save, remove, archive, _)) =
+            prepared_writes.proposals.get(proposal)
+        else {
+            continue;
+        };
+        if parent.parent() != owner {
+            continue;
+        }
+        if remove
+            && !aliases_ready
+            && let Some(directory) = directory
+        {
+            if !aliasing {
+                aliases.write(AliasRequest {
+                    ticket: prepared.ticket.clone(),
+                    directory: directory.0.clone(),
+                });
+                commands.entity(proposal).insert(Aliasing);
+            }
+            continue;
+        }
+        let id = &id.0;
+        let mut snapshot = Snapshot::default();
+        for (_, parent, current, name, directory, repository, revision) in &registrations.records {
+            if parent.parent() != owner || ((save || remove) && *current == *id) {
+                continue;
+            }
+            snapshot.projects.insert(
+                current.0.clone(),
+                Record::capture(name, directory, repository, revision),
+            );
+        }
+        for (parent, current) in &registrations.hidden {
+            if parent.parent() == owner && (!save || *current != *id) {
+                snapshot.hidden.insert(current.0.clone());
+            }
+        }
+        for (parent, current) in &registrations.archived {
+            if parent.parent() == owner && (archive.is_none() || *current != *id) {
+                snapshot.archived.insert(current.0.clone());
+            }
+        }
+        if save {
+            let (Some(name), Some(directory), Some(repository), Some(revision)) =
+                (name, directory, repository, revision)
+            else {
+                continue;
+            };
+            snapshot.projects.insert(
+                id.0.clone(),
+                Record::capture(name, directory, repository, revision),
+            );
+        }
+        if remove && directory.is_some() {
+            snapshot.hidden.insert(id.0.clone());
+        }
+        if archive.is_some_and(|archive| archive.0) {
+            snapshot.archived.insert(id.0.clone());
+        }
+        for (alias, parent) in &prepared_writes.aliases {
+            if parent.parent() == proposal {
+                snapshot.hidden.insert(alias.0.0.clone());
+            }
+        }
+        io.write(snapshot.write_request(prepared.ticket.clone()));
+        commands
+            .entity(owner)
+            .insert(Persisting(prepared.ticket.clone()));
+        commands.entity(proposal).insert(Dispatched);
+    }
+}
+
+fn prune(
+    registrations: Registrations,
+    proposals: Query<(Entity, &Prepared)>,
+    states: Query<&OperationState>,
+    roots: Query<(Entity, &Writing, Option<&Persisting>)>,
+    accepted: Query<(Entity, &Accepted)>,
+    mut completed: MessageWriter<WriteCompleted>,
+    mut commands: WorldCommands,
+) {
+    for entity in &registrations.unused {
         commands.entity(entity).despawn();
     }
+    for (owner, writing, _) in &roots {
+        if proposals.get(writing.proposal).is_ok() {
+            continue;
+        }
+        commands.entity(owner).remove::<(Writing, Persisting)>();
+        for (requester, pending) in &accepted {
+            if pending.operation != writing.operation {
+                continue;
+            }
+            let error = Error::Unavailable("accepted project write was removed".into());
+            commands.entity(requester).remove::<Accepted>();
+            commands.trigger(OperationCompleted {
+                entity: requester,
+                result: Err(error.to_string()),
+            });
+            completed.write(WriteCompleted {
+                requester,
+                result: Err(error),
+            });
+        }
+    }
+    for (proposal, prepared) in &proposals {
+        if states
+            .get(prepared.operation)
+            .is_ok_and(|state| matches!(state, OperationState::Pending | OperationState::Running))
+        {
+            continue;
+        }
+        if let Ok((_, writing, Some(persisting))) = roots.get(prepared.ticket.owner)
+            && writing.proposal == proposal
+            && writing.ticket == prepared.ticket
+            && persisting.0 == prepared.ticket
+        {
+            continue;
+        }
+        if let Ok((owner, writing, _)) = roots.get(prepared.ticket.owner)
+            && writing.proposal == proposal
+            && writing.ticket == prepared.ticket
+        {
+            commands.entity(owner).remove::<(Writing, Persisting)>();
+        }
+        for (requester, pending) in &accepted {
+            if pending.operation != prepared.operation {
+                continue;
+            }
+            let error =
+                Error::Unavailable("accepted project write ended before persistence".into());
+            commands.entity(requester).remove::<Accepted>();
+            commands.trigger(OperationCompleted {
+                entity: requester,
+                result: Err(error.to_string()),
+            });
+            completed.write(WriteCompleted {
+                requester,
+                result: Err(error),
+            });
+        }
+        commands.entity(proposal).despawn();
+    }
+}
+
+#[derive(SystemParam)]
+struct WriteEffects<'w> {
+    completed: MessageWriter<'w, WriteCompleted>,
+    saved: MessageWriter<'w, ProjectSaved>,
+    changed: MessageWriter<'w, ProjectChanged>,
 }
 
 fn finish(
     mut results: MessageReader<WriteResult>,
     roots: Query<(&Root, &Writing)>,
+    pending: Query<&Prepared>,
+    proposals: Proposals,
     projects: Query<(Entity, &ChildOf, &ProjectId), With<Project>>,
-    mut completed: MessageWriter<WriteCompleted>,
-    mut saved: MessageWriter<ProjectSaved>,
-    mut changed: MessageWriter<ProjectChanged>,
-    mut commands: Commands,
+    mut effects: WriteEffects,
+    mut commands: WorldCommands,
 ) {
+    let mut handled = HashSet::new();
     for result in results.read() {
-        let Ok((root, pending)) = roots.get(result.ticket.owner) else {
+        let Ok((root, writing)) = roots.get(result.ticket.owner) else {
             continue;
         };
-        if pending.ticket != result.ticket || root.0 != result.ticket.directory {
+        if writing.ticket != result.ticket || root.0 != result.ticket.directory {
             continue;
         }
-        commands.entity(result.ticket.owner).remove::<Writing>();
+        let Ok(prepared) = pending.get(writing.proposal) else {
+            continue;
+        };
+        if prepared.ticket != result.ticket {
+            continue;
+        }
+        let Ok((id, parent, name, directory, repository, revision, save, remove, archive, target)) =
+            proposals.get(writing.proposal)
+        else {
+            continue;
+        };
+        if parent.parent() != result.ticket.owner {
+            continue;
+        }
+        if !handled.insert(writing.operation) {
+            continue;
+        }
+        let id = &id.0;
+        commands
+            .entity(result.ticket.owner)
+            .remove::<(Writing, Persisting)>();
+        let mut outcome = result.result.clone().map(|_| None);
         if let Ok(hidden) = &result.result {
-            let url = match &pending.mutation {
-                Mutation::Save { project, .. } => &project.id.0,
-                Mutation::Remove(url) | Mutation::Archive { url, .. } => url,
-            };
-            let existing = projects
-                .iter()
-                .find(|(_, parent, id)| parent.parent() == result.ticket.owner && &id.0 == url);
+            let existing = target.and_then(|target| projects.get(target.entity()).ok());
+            let existing = existing
+                .filter(|(_, parent, current)| {
+                    parent.parent() == result.ticket.owner && *current == id
+                })
+                .or_else(|| {
+                    projects.iter().find(|(_, parent, current)| {
+                        parent.parent() == result.ticket.owner && *current == id
+                    })
+                });
             let entity = match existing {
                 Some((entity, ..)) => entity,
                 None => commands
-                    .spawn((
-                        Project,
-                        ProjectId(url.clone()),
-                        ChildOf(result.ticket.owner),
-                    ))
+                    .spawn((Project, id.clone(), ChildOf(result.ticket.owner)))
                     .id(),
             };
-            match &pending.mutation {
-                Mutation::Save { project, .. } => {
-                    commands
-                        .entity(entity)
-                        .insert((
-                            Registered,
-                            Name::new(project.name.clone()),
-                            Cwd(project.directory.clone()),
-                            Repository(project.repository.clone()),
-                            Revision(project.revision),
-                        ))
-                        .remove::<Hidden>();
-                    saved.write(project.clone());
-                }
-                Mutation::Remove(_) => {
-                    commands
-                        .entity(entity)
-                        .remove::<(Registered, Name, Cwd, Repository, Revision)>();
-                }
-                Mutation::Archive { archived, .. } => {
-                    if *archived {
-                        commands.entity(entity).insert(Archived);
-                    } else {
-                        commands.entity(entity).remove::<Archived>();
-                    }
+            if save {
+                let (Some(name), Some(directory), Some(repository), Some(revision)) =
+                    (name, directory, repository, revision)
+                else {
+                    continue;
+                };
+                commands
+                    .entity(entity)
+                    .insert((
+                        Registered,
+                        name.clone(),
+                        directory.clone(),
+                        repository.clone(),
+                        *revision,
+                    ))
+                    .remove::<Hidden>();
+                effects.saved.write(ProjectSaved {
+                    root: root.0.clone(),
+                    id: id.clone(),
+                    directory: directory.0.clone(),
+                    name: name.as_str().to_string(),
+                    repository: repository.0.clone(),
+                    revision: revision.0,
+                });
+                outcome = Ok(Some(id.clone()));
+            }
+            if remove {
+                commands
+                    .entity(entity)
+                    .remove::<(Registered, Name, Cwd, Repository, Revision)>();
+            }
+            if let Some(archive) = archive {
+                if archive.0 {
+                    commands.entity(entity).insert(Archived);
+                } else {
+                    commands.entity(entity).remove::<Archived>();
                 }
             }
             for url in hidden {
-                if let Some((entity, ..)) = projects
+                if url == &id.0 {
+                    commands.entity(entity).insert(Hidden);
+                } else if let Some((entity, ..)) = projects
                     .iter()
                     .find(|(_, parent, id)| parent.parent() == result.ticket.owner && &id.0 == url)
-                {
-                    commands.entity(entity).insert(Hidden);
-                } else if let Mutation::Remove(removed) = &pending.mutation
-                    && removed == url
                 {
                     commands.entity(entity).insert(Hidden);
                 } else {
@@ -715,27 +1113,31 @@ fn finish(
                     ));
                 }
             }
-            changed.write(ProjectChanged {
+            effects.changed.write(ProjectChanged {
                 root: root.0.clone(),
             });
         }
-        let result = result.result.clone().map(|_| match &pending.mutation {
-            Mutation::Save { project, .. } => Some(project.id.clone()),
-            Mutation::Remove(_) | Mutation::Archive { .. } => None,
+        commands.entity(writing.proposal).despawn();
+        commands.trigger(OperationCompleted {
+            entity: writing.operation,
+            result: outcome
+                .clone()
+                .map(|_| ())
+                .map_err(|error| error.to_string()),
         });
-        if let Ok(mut requester) = commands.get_entity(pending.requester) {
+        if let Ok(mut requester) = commands.get_entity(prepared.requester) {
             requester.remove::<Accepted>();
             commands.trigger(OperationCompleted {
-                entity: pending.requester,
-                result: result
+                entity: prepared.requester,
+                result: outcome
                     .clone()
                     .map(|_| ())
                     .map_err(|error| error.to_string()),
             });
         }
-        completed.write(WriteCompleted {
-            requester: pending.requester,
-            result,
+        effects.completed.write(WriteCompleted {
+            requester: prepared.requester,
+            result: outcome,
         });
     }
 }

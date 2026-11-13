@@ -1,13 +1,14 @@
 use std::collections::BTreeSet;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use bevy_app::App;
 use bevy_ecs::prelude::*;
 use bevy_ecs::system::SystemState;
 use vmux_ecs::{Operation, OperationState};
 use vmux_project::{
-    Error, LoadCompleted, LoadRequest, Mutation, ProjectId, ProjectSaved, Registrations, Root,
-    Snapshot, WriteCompleted, WriteRequest, WriteResult, WriteTaskRequest,
+    AliasCompleted, AliasRequest, Error, LoadCompleted, LoadRequest, Mutation, ProjectId,
+    ProjectSaved, Registrations, Root, Snapshot, WriteCompleted, WriteRequest, WriteResult,
+    WriteTaskRequest,
 };
 
 struct Consumer(App);
@@ -91,6 +92,168 @@ impl Consumer {
         });
         self.0.update();
     }
+
+    fn alias_requests(&mut self) -> Vec<AliasRequest> {
+        self.0
+            .world_mut()
+            .resource_mut::<Messages<AliasRequest>>()
+            .drain()
+            .collect()
+    }
+
+    fn complete_aliases(&mut self, request: AliasRequest, result: Result<Vec<PathBuf>, Error>) {
+        self.0.world_mut().write_message(AliasCompleted {
+            ticket: request.ticket,
+            result,
+        });
+        self.0.update();
+    }
+
+    fn write_operation(&mut self, owner: Entity) -> Entity {
+        self.0
+            .world_mut()
+            .query::<(Entity, &vmux_ecs::OperationKind, &vmux_ecs::OperationTarget)>()
+            .iter(self.0.world())
+            .find(|(_, kind, target)| kind.as_str() == "project.write" && target.entity() == owner)
+            .unwrap()
+            .0
+    }
+}
+
+#[test]
+fn completed_project_operations_keep_shared_retention_without_proposal_payloads() {
+    let mut consumer = Consumer::new();
+    let owner = consumer.root("/projects");
+    consumer.save("/projects", "Saved", 0);
+    let operation = consumer.write_operation(owner);
+    let request = consumer.requests().pop().unwrap();
+    consumer.complete(request, Ok(BTreeSet::new()));
+    assert_eq!(
+        consumer.0.world().get::<OperationState>(operation),
+        Some(&OperationState::Succeeded)
+    );
+    assert!(consumer.0.world().get::<Operation>(operation).is_some());
+    assert!(consumer.0.world().get::<vmux_ecs::Cwd>(operation).is_none());
+    assert_eq!(
+        consumer.snapshot("/projects").projects["shared-id"].name,
+        "Saved"
+    );
+}
+
+#[test]
+fn a_removed_accepted_operation_releases_the_root_and_settles_its_requester() {
+    let mut consumer = Consumer::new();
+    let owner = consumer.root("/projects");
+    let requester = consumer.save("/projects", "Removed operation", 0);
+    let operation = consumer.write_operation(owner);
+    let request = consumer.requests().pop().unwrap();
+    consumer.0.world_mut().despawn(operation);
+    consumer.0.update();
+    consumer.complete(
+        request,
+        Err(Error::Unavailable("backend canceled before IO".into())),
+    );
+    assert_eq!(
+        consumer.0.world().get::<OperationState>(requester),
+        Some(&OperationState::Failed)
+    );
+    let results: Vec<_> = consumer
+        .0
+        .world_mut()
+        .resource_mut::<Messages<WriteCompleted>>()
+        .drain()
+        .collect();
+    assert_eq!(results.len(), 1);
+    assert!(results[0].result.is_err());
+    consumer.save("/projects", "Next", 0);
+    let request = consumer.requests().pop().unwrap();
+    consumer.complete(request, Ok(BTreeSet::new()));
+    assert_eq!(
+        consumer.snapshot("/projects").projects["shared-id"].name,
+        "Next"
+    );
+}
+
+#[test]
+fn a_terminal_dispatched_operation_reconciles_late_success_without_losing_retention() {
+    let mut consumer = Consumer::new();
+    let owner = consumer.root("/projects");
+    let requester = consumer.save("/projects", "Canceled operation", 0);
+    let operation = consumer.write_operation(owner);
+    let request = consumer.requests().pop().unwrap();
+    let persisted = request.snapshot.clone();
+    consumer
+        .0
+        .world_mut()
+        .trigger(vmux_ecs::OperationCompleted {
+            entity: operation,
+            result: Err("canceled".into()),
+        });
+    consumer.0.update();
+    consumer.complete(request, Ok(BTreeSet::new()));
+    assert_eq!(
+        consumer.0.world().get::<OperationState>(operation),
+        Some(&OperationState::Failed)
+    );
+    assert_eq!(
+        consumer.0.world().get::<OperationState>(requester),
+        Some(&OperationState::Succeeded)
+    );
+    assert!(consumer.0.world().get::<Operation>(operation).is_some());
+    assert_eq!(
+        consumer.snapshot("/projects").projects["shared-id"].name,
+        persisted.projects["shared-id"].name
+    );
+    consumer.save("/projects", "Retry", 1);
+    let request = consumer.requests().pop().unwrap();
+    consumer.complete(request, Ok(BTreeSet::new()));
+    assert_eq!(
+        consumer.snapshot("/projects").projects["shared-id"].name,
+        "Retry"
+    );
+}
+
+#[test]
+fn accepted_removal_keeps_alias_lookup_and_write_independent_of_the_requester() {
+    let mut consumer = Consumer::new();
+    consumer.root("/projects");
+    consumer.save("/projects", "Original", 0);
+    let request = consumer.requests().pop().unwrap();
+    consumer.complete(request, Ok(BTreeSet::new()));
+    let requester = consumer.submit("/projects", Mutation::Remove("shared-id".into()));
+    let alias = consumer.alias_requests().pop().unwrap();
+    assert!(consumer.requests().is_empty());
+    consumer.0.world_mut().despawn(requester);
+    consumer.complete_aliases(
+        alias,
+        Ok(vec![
+            PathBuf::from("imported/source"),
+            PathBuf::from("../escape"),
+            PathBuf::from("/outside"),
+        ]),
+    );
+    let request = consumer.requests().pop().unwrap();
+    assert!(!request.snapshot.projects.contains_key("shared-id"));
+    assert_eq!(
+        request.snapshot.hidden,
+        BTreeSet::from(["shared-id".into(), "vmux://projects/imported/source".into()])
+    );
+    assert!(
+        request
+            .snapshot
+            .hidden
+            .contains("vmux://projects/imported/source")
+    );
+    assert_eq!(
+        consumer.snapshot("/projects").projects["shared-id"].name,
+        "Original"
+    );
+    let hidden = request.snapshot.hidden.clone();
+    consumer.complete(request, Ok(hidden));
+    let committed = consumer.snapshot("/projects");
+    assert!(committed.projects.is_empty());
+    assert!(committed.hidden.contains("vmux://projects/imported/source"));
+    assert!(committed.hidden.contains("shared-id"));
 }
 
 #[test]
@@ -114,6 +277,40 @@ fn duplicate_storage_roots_refuse_writes_before_dispatching_io() {
         .collect();
     assert_eq!(results.len(), 1);
     assert_eq!(results[0].result, Err(Error::Duplicate));
+}
+
+#[test]
+fn replayed_write_completion_commits_one_identity_and_one_result() {
+    let mut consumer = Consumer::new();
+    consumer.root("/projects");
+    let requester = consumer.save("/projects", "Once", 0);
+    let request = consumer.requests().pop().unwrap();
+    for _ in 0..2 {
+        consumer.0.world_mut().write_message(WriteResult {
+            ticket: request.ticket.clone(),
+            result: Ok(BTreeSet::new()),
+        });
+    }
+    consumer.0.update();
+    let index = consumer
+        .0
+        .world()
+        .resource::<vmux_ecs::IdentityIndex<ProjectId>>();
+    assert!(
+        index
+            .entity(&ProjectId("shared-id".into()))
+            .unwrap()
+            .is_some()
+    );
+    let results: Vec<_> = consumer
+        .0
+        .world_mut()
+        .resource_mut::<Messages<WriteCompleted>>()
+        .drain()
+        .collect();
+    assert_eq!(results.len(), 1);
+    assert_eq!(results[0].requester, requester);
+    assert_eq!(results[0].result, Ok(Some(ProjectId("shared-id".into()))));
 }
 
 #[test]

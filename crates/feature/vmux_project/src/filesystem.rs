@@ -4,13 +4,16 @@ use std::task::Waker;
 
 use bevy_app::{App, Plugin, Update};
 use bevy_ecs::prelude::*;
+use bevy_ecs::system::{Commands as WorldCommands, SystemParam};
 use bevy_tasks::{IoTaskPool, Task, TaskPool, futures_lite::future};
 use serde::{Deserialize, Serialize};
-use vmux_ecs::Cwd;
+use vmux_ecs::{Cwd, OperationState};
+
+use crate::registration::Writing;
 
 use crate::{
-    Error, LoadCompleted, LoadRequest, ProjectRoute, Record, Root, Snapshot, StoreSet, Ticket,
-    WriteResult, WriteTaskRequest,
+    AliasCompleted, AliasRequest, Error, LoadCompleted, LoadRequest, Record, Root, Snapshot,
+    StoreSet, Ticket, WriteResult, WriteTaskRequest,
 };
 
 pub struct FilesystemPlugin;
@@ -18,12 +21,17 @@ pub struct FilesystemPlugin;
 impl Plugin for FilesystemPlugin {
     fn build(&self, app: &mut App) {
         IoTaskPool::get_or_init(TaskPool::new);
-        app.configure_sets(Update, FileSet.after(StoreSet::Write))
+        app.add_message::<AliasRequest>()
+            .add_message::<AliasCompleted>()
+            .configure_sets(Update, FileSet.after(StoreSet::Write))
             .add_systems(Update, read.after(StoreSet::Load).before(FileSet))
             .add_systems(Update, write.after(StoreSet::Write).before(FileSet))
+            .add_systems(Update, aliases.after(StoreSet::Write).before(FileSet))
             .add_systems(
                 Update,
-                (finish_reads, finish_writes).chain().before(StoreSet::Load),
+                (finish_reads, finish_aliases, finish_writes)
+                    .chain()
+                    .before(StoreSet::Load),
             )
             .add_systems(Update, start.in_set(FileSet));
     }
@@ -34,6 +42,16 @@ struct FileSet;
 
 #[derive(Resource, Clone)]
 pub struct FileWake(pub Waker);
+
+impl FileWake {
+    fn poll<T>(&self, task: &mut Task<T>) -> Option<T> {
+        let mut context = std::task::Context::from_waker(&self.0);
+        match std::future::Future::poll(std::pin::Pin::new(task), &mut context) {
+            std::task::Poll::Ready(value) => Some(value),
+            std::task::Poll::Pending => None,
+        }
+    }
+}
 
 #[derive(Component)]
 struct QueuedRead {
@@ -59,23 +77,46 @@ impl QueuedRead {
 struct QueuedWrite {
     ticket: Ticket,
     snapshot: Snapshot,
-    removed: Option<PathBuf>,
 }
 
 impl QueuedWrite {
     fn start(&self, directory: &Path, wake: Option<Waker>) -> WriteTask {
         let ticket = self.ticket.clone();
         let root = directory.to_path_buf();
-        let snapshot = self.snapshot.clone();
-        let removed = self.removed.clone();
+        let request = WriteTaskRequest {
+            ticket: ticket.clone(),
+            snapshot: self.snapshot.clone(),
+        };
         let task = IoTaskPool::get().spawn(async move {
-            let result = FileStore::write(snapshot, &root, removed.as_deref());
+            let result = FileStore::write(request, &root);
             if let Some(wake) = wake {
                 wake.wake();
             }
             result
         });
         WriteTask { ticket, task }
+    }
+}
+
+#[derive(Component)]
+struct QueuedAliases {
+    ticket: Ticket,
+    directory: PathBuf,
+}
+
+impl QueuedAliases {
+    fn start(&self, root: &Path, wake: Option<Waker>) -> AliasTask {
+        let ticket = self.ticket.clone();
+        let root = root.to_path_buf();
+        let directory = self.directory.clone();
+        let task = IoTaskPool::get().spawn(async move {
+            let result = FileStore::aliases(&root, &directory);
+            if let Some(wake) = wake {
+                wake.wake();
+            }
+            result
+        });
+        AliasTask { ticket, task }
     }
 }
 
@@ -89,6 +130,12 @@ struct ReadTask {
 struct WriteTask {
     ticket: Ticket,
     task: Task<Result<BTreeSet<String>, Error>>,
+}
+
+#[derive(Component)]
+struct AliasTask {
+    ticket: Ticket,
+    task: Task<Result<Vec<PathBuf>, Error>>,
 }
 
 pub struct FileStore;
@@ -127,14 +174,8 @@ impl FileStore {
         Ok(snapshot)
     }
 
-    pub fn write(
-        mut snapshot: Snapshot,
-        root: &Path,
-        removed_directory: Option<&Path>,
-    ) -> Result<BTreeSet<String>, Error> {
-        if let Some(directory) = removed_directory {
-            Self::hide_directory(&mut snapshot, root, directory)?;
-        }
+    pub fn write(request: WriteTaskRequest, root: &Path) -> Result<BTreeSet<String>, Error> {
+        let snapshot = request.snapshot;
         let hidden = snapshot.hidden.clone();
         let stored = StoredSnapshot {
             projects: snapshot.projects,
@@ -149,12 +190,11 @@ impl FileStore {
         Ok(hidden)
     }
 
-    fn hide_directory(snapshot: &mut Snapshot, root: &Path, directory: &Path) -> Result<(), Error> {
+    fn aliases(root: &Path, directory: &Path) -> Result<Vec<PathBuf>, Error> {
         let directory = vmux_path::PathIdentity::resolve(directory);
-        if let Some(url) = ProjectRoute::from_path(root, directory.as_path())
-            && !snapshot.projects.contains_key(&url)
-        {
-            snapshot.hidden.insert(url);
+        let mut paths = Vec::new();
+        if let Ok(relative) = directory.as_path().strip_prefix(root) {
+            paths.push(relative.to_path_buf());
         }
         let imports = root.join("imported");
         let entries = match std::fs::read_dir(&imports) {
@@ -165,7 +205,7 @@ impl FileStore {
                     std::io::ErrorKind::NotFound | std::io::ErrorKind::NotADirectory
                 ) =>
             {
-                return Ok(());
+                return Ok(paths);
             }
             Err(error) => return Err(Error::Unavailable(error.to_string())),
         };
@@ -183,14 +223,11 @@ impl FileStore {
             if vmux_path::PathIdentity::resolve(&target) != directory {
                 continue;
             }
-            let Some(url) = ProjectRoute::from_path(root, &path) else {
-                continue;
-            };
-            if !snapshot.projects.contains_key(&url) {
-                snapshot.hidden.insert(url);
+            if let Ok(relative) = path.strip_prefix(root) {
+                paths.push(relative.to_path_buf());
             }
         }
-        Ok(())
+        Ok(paths)
     }
 }
 
@@ -215,7 +252,7 @@ fn read(
     mut requests: MessageReader<LoadRequest>,
     roots: Query<(Entity, &Root)>,
     mut completed: MessageWriter<LoadCompleted>,
-    mut commands: Commands,
+    mut commands: WorldCommands,
 ) {
     for request in requests.read() {
         if !roots
@@ -247,7 +284,7 @@ fn read(
 fn write(
     mut requests: MessageReader<WriteTaskRequest>,
     roots: Query<&Root>,
-    mut commands: Commands,
+    mut commands: WorldCommands,
 ) {
     for request in requests.read() {
         if !roots
@@ -262,28 +299,76 @@ fn write(
             QueuedWrite {
                 ticket: request.ticket.clone(),
                 snapshot: request.snapshot.clone(),
-                removed: request.removed_directory.clone(),
             },
         ));
     }
 }
 
-type ActiveIo<'w, 's> = Query<'w, 's, &'static Cwd, Or<(With<ReadTask>, With<WriteTask>)>>;
+fn aliases(
+    mut requests: MessageReader<AliasRequest>,
+    roots: Query<&Root>,
+    mut commands: WorldCommands,
+) {
+    for request in requests.read() {
+        if !roots
+            .get(request.ticket.owner)
+            .is_ok_and(|root| root.0 == request.ticket.directory)
+        {
+            continue;
+        }
+        let root = vmux_path::PathIdentity::resolve(&request.ticket.directory).into_path_buf();
+        commands.spawn((
+            Cwd(root),
+            QueuedAliases {
+                ticket: request.ticket.clone(),
+                directory: request.directory.clone(),
+            },
+        ));
+    }
+}
+
+type ActiveIo<'w, 's> =
+    Query<'w, 's, &'static Cwd, Or<(With<ReadTask>, With<AliasTask>, With<WriteTask>)>>;
+
+#[derive(SystemParam)]
+struct FileOwners<'w, 's> {
+    roots: Query<'w, 's, &'static Root>,
+    writes: Query<'w, 's, &'static Writing>,
+    states: Query<'w, 's, &'static OperationState>,
+    rejected: MessageWriter<'w, WriteResult>,
+}
+
+impl FileOwners<'_, '_> {
+    fn operation(&self, ticket: &Ticket) -> Option<Entity> {
+        let root = self.roots.get(ticket.owner).ok()?;
+        let writing = self.writes.get(ticket.owner).ok()?;
+        if root.0 != ticket.directory || writing.ticket != *ticket {
+            return None;
+        }
+        let state = self.states.get(writing.operation).ok()?;
+        if !matches!(state, OperationState::Pending | OperationState::Running) {
+            return None;
+        }
+        Some(writing.operation)
+    }
+}
 
 fn start(
     reads: Query<(Entity, &Cwd, &QueuedRead)>,
+    aliases: Query<(Entity, &Cwd, &QueuedAliases)>,
     writes: Query<(Entity, &Cwd, &QueuedWrite)>,
     active: ActiveIo,
-    roots: Query<&Root>,
+    mut owners: FileOwners,
     wake: Option<Res<FileWake>>,
-    mut commands: Commands,
+    mut commands: WorldCommands,
 ) {
     let mut occupied = HashSet::new();
     for directory in &active {
         occupied.insert(directory.0.clone());
     }
     for (entity, directory, request) in &reads {
-        if !roots
+        if !owners
+            .roots
             .get(request.ticket.owner)
             .is_ok_and(|root| root.0 == request.ticket.directory)
         {
@@ -297,28 +382,53 @@ fn start(
         commands.entity(entity).remove::<QueuedRead>().insert(task);
     }
     for (entity, directory, request) in &writes {
-        if !roots
-            .get(request.ticket.owner)
-            .is_ok_and(|root| root.0 == request.ticket.directory)
-        {
+        let Some(_) = owners.operation(&request.ticket) else {
+            owners.rejected.write(WriteResult {
+                ticket: request.ticket.clone(),
+                result: Err(Error::Unavailable(
+                    "project write canceled before IO".into(),
+                )),
+            });
+            if let Some(wake) = wake.as_deref() {
+                wake.0.wake_by_ref();
+            }
             commands.entity(entity).despawn();
             continue;
-        }
+        };
         if !occupied.insert(directory.0.clone()) {
             continue;
         }
         let task = request.start(&directory.0, wake.as_deref().map(|wake| wake.0.clone()));
         commands.entity(entity).remove::<QueuedWrite>().insert(task);
     }
+    for (entity, directory, request) in &aliases {
+        let Some(_) = owners.operation(&request.ticket) else {
+            commands.entity(entity).despawn();
+            continue;
+        };
+        if !occupied.insert(directory.0.clone()) {
+            continue;
+        }
+        let task = request.start(&directory.0, wake.as_deref().map(|wake| wake.0.clone()));
+        commands
+            .entity(entity)
+            .remove::<QueuedAliases>()
+            .insert(task);
+    }
 }
 
 fn finish_reads(
     mut tasks: Query<(Entity, &mut ReadTask)>,
     mut results: MessageWriter<LoadCompleted>,
-    mut commands: Commands,
+    wake: Option<Res<FileWake>>,
+    mut commands: WorldCommands,
 ) {
     for (entity, mut task) in &mut tasks {
-        let Some(result) = future::block_on(future::poll_once(&mut task.task)) else {
+        let result = match &wake {
+            Some(wake) => wake.poll(&mut task.task),
+            None => future::block_on(future::poll_once(&mut task.task)),
+        };
+        let Some(result) = result else {
             continue;
         };
         results.write(LoadCompleted {
@@ -332,13 +442,40 @@ fn finish_reads(
 fn finish_writes(
     mut tasks: Query<(Entity, &mut WriteTask)>,
     mut results: MessageWriter<WriteResult>,
-    mut commands: Commands,
+    wake: Option<Res<FileWake>>,
+    mut commands: WorldCommands,
 ) {
     for (entity, mut task) in &mut tasks {
-        let Some(result) = future::block_on(future::poll_once(&mut task.task)) else {
+        let result = match &wake {
+            Some(wake) => wake.poll(&mut task.task),
+            None => future::block_on(future::poll_once(&mut task.task)),
+        };
+        let Some(result) = result else {
             continue;
         };
         results.write(WriteResult {
+            ticket: task.ticket.clone(),
+            result,
+        });
+        commands.entity(entity).despawn();
+    }
+}
+
+fn finish_aliases(
+    mut tasks: Query<(Entity, &mut AliasTask)>,
+    mut results: MessageWriter<AliasCompleted>,
+    wake: Option<Res<FileWake>>,
+    mut commands: WorldCommands,
+) {
+    for (entity, mut task) in &mut tasks {
+        let result = match &wake {
+            Some(wake) => wake.poll(&mut task.task),
+            None => future::block_on(future::poll_once(&mut task.task)),
+        };
+        let Some(result) = result else {
+            continue;
+        };
+        results.write(AliasCompleted {
             ticket: task.ticket.clone(),
             result,
         });
@@ -351,7 +488,7 @@ mod tests {
     use std::path::PathBuf;
     use std::sync::{
         Arc, Mutex,
-        atomic::{AtomicBool, Ordering},
+        atomic::{AtomicBool, AtomicUsize, Ordering},
     };
 
     use super::*;
@@ -365,6 +502,23 @@ mod tests {
         app: App,
         root: PathBuf,
         owner: Entity,
+    }
+
+    struct WakeCounter(AtomicUsize);
+
+    impl WakeCounter {
+        fn host(counter: Arc<Self>) -> FileWake {
+            FileWake(Waker::from(counter))
+        }
+    }
+
+    impl std::task::Wake for WakeCounter {
+        fn wake(self: Arc<Self>) {
+            self.0.fetch_add(1, Ordering::SeqCst);
+        }
+        fn wake_by_ref(self: &Arc<Self>) {
+            self.0.fetch_add(1, Ordering::SeqCst);
+        }
     }
 
     #[derive(Clone, Default)]
@@ -396,6 +550,29 @@ mod tests {
             *waker = Some(context.waker().clone());
             std::task::Poll::Pending
         }
+    }
+
+    #[test]
+    fn pending_io_completion_wakes_the_registered_host_after_publication() {
+        IoTaskPool::get_or_init(TaskPool::new);
+        let counter = Arc::new(WakeCounter(AtomicUsize::new(0)));
+        let wake = WakeCounter::host(counter.clone());
+        let signal = Signal::default();
+        let gate = signal.clone();
+        let mut task = IoTaskPool::get().spawn(async move {
+            gate.await;
+            true
+        });
+        assert!(wake.poll(&mut task).is_none());
+        let before = counter.0.load(Ordering::SeqCst);
+        signal.release();
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(3);
+        while counter.0.load(Ordering::SeqCst) <= before {
+            assert!(std::time::Instant::now() < deadline);
+            std::thread::yield_now();
+        }
+        assert!(task.is_finished());
+        assert!(wake.poll(&mut task).is_some());
     }
 
     #[test]
@@ -480,6 +657,174 @@ mod tests {
     }
 
     #[test]
+    fn canceled_queued_write_never_reaches_disk_and_releases_the_root() {
+        let root = tempfile::tempdir().unwrap();
+        let directory = root.path().join("repo");
+        std::fs::create_dir_all(&directory).unwrap();
+        let mut store = Store::at(root.path());
+        store.save("stable", 0, "Before", &directory);
+        let signal = Signal::default();
+        let gate = signal.clone();
+        let blocker = IoTaskPool::get().spawn(async move {
+            gate.await;
+            Err(Error::Unavailable("test IO blocker".into()))
+        });
+        store.app.world_mut().spawn((
+            Cwd(store.root.clone()),
+            ReadTask {
+                ticket: Ticket {
+                    owner: store.owner,
+                    directory: store.root.clone(),
+                    generation: 0,
+                },
+                task: blocker,
+            },
+        ));
+        store.queue("stable", 1, "Canceled", &directory);
+        store.app.update();
+        let operation = store
+            .app
+            .world()
+            .get::<Writing>(store.owner)
+            .unwrap()
+            .operation;
+        assert!(
+            store
+                .app
+                .world_mut()
+                .query::<&QueuedWrite>()
+                .single(store.app.world())
+                .is_ok()
+        );
+        let counter = Arc::new(WakeCounter(AtomicUsize::new(0)));
+        store
+            .app
+            .insert_resource(WakeCounter::host(counter.clone()));
+        store.app.world_mut().trigger(vmux_ecs::OperationCompleted {
+            entity: operation,
+            result: Err("canceled before IO".into()),
+        });
+        let completed = store.complete(1);
+        assert!(counter.0.load(Ordering::SeqCst) > 0);
+        signal.release();
+        assert!(completed[0].result.is_err());
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(3);
+        loop {
+            store.app.update();
+            let active = store
+                .app
+                .world_mut()
+                .query_filtered::<Entity, Or<(With<ReadTask>, With<WriteTask>, With<QueuedWrite>)>>(
+                )
+                .iter(store.app.world())
+                .count();
+            if active == 0 {
+                break;
+            }
+            assert!(std::time::Instant::now() < deadline);
+            std::thread::yield_now();
+        }
+        assert_eq!(
+            FileStore::read(&store.root).unwrap().projects["stable"].name,
+            "Before"
+        );
+        assert_eq!(store.snapshot().projects["stable"].name, "Before");
+        store.save("stable", 1, "Next", &directory);
+        assert_eq!(
+            FileStore::read(&store.root).unwrap().projects["stable"].name,
+            "Next"
+        );
+    }
+
+    #[test]
+    fn ended_or_removed_operation_reconciles_started_atomic_io_before_the_next_write() {
+        for removed in [false, true] {
+            let root = tempfile::tempdir().unwrap();
+            let directory = root.path().join("repo");
+            std::fs::create_dir_all(&directory).unwrap();
+            let mut store = Store::at(root.path());
+            store.save("stable", 0, "Before", &directory);
+            store.queue("stable", 1, "Started", &directory);
+            store.app.update();
+            let operation = store
+                .app
+                .world()
+                .get::<Writing>(store.owner)
+                .unwrap()
+                .operation;
+            let task_entity = store
+                .app
+                .world_mut()
+                .query_filtered::<Entity, With<WriteTask>>()
+                .single(store.app.world())
+                .unwrap();
+            let deadline = std::time::Instant::now() + std::time::Duration::from_secs(3);
+            while !store
+                .app
+                .world()
+                .get::<WriteTask>(task_entity)
+                .unwrap()
+                .task
+                .is_finished()
+            {
+                assert!(std::time::Instant::now() < deadline);
+                std::thread::yield_now();
+            }
+            let result = future::block_on(
+                &mut store
+                    .app
+                    .world_mut()
+                    .get_mut::<WriteTask>(task_entity)
+                    .unwrap()
+                    .task,
+            );
+            let signal = Signal::default();
+            let gate = signal.clone();
+            store
+                .app
+                .world_mut()
+                .get_mut::<WriteTask>(task_entity)
+                .unwrap()
+                .task = IoTaskPool::get().spawn(async move {
+                gate.await;
+                result
+            });
+            if removed {
+                store.app.world_mut().despawn(operation);
+            } else {
+                store.app.world_mut().trigger(vmux_ecs::OperationCompleted {
+                    entity: operation,
+                    result: Err("canceled after IO started".into()),
+                });
+            }
+            store.app.update();
+            assert_eq!(store.snapshot().projects["stable"].name, "Before");
+            assert_eq!(
+                FileStore::read(&store.root).unwrap().projects["stable"].name,
+                "Started"
+            );
+            assert!(store.app.world().get::<Writing>(store.owner).is_some());
+            signal.release();
+            assert!(store.complete(1)[0].result.is_ok());
+            assert_eq!(store.snapshot().projects["stable"].name, "Started");
+            assert_eq!(
+                store.app.world().get::<OperationState>(operation),
+                if removed {
+                    None
+                } else {
+                    Some(&OperationState::Failed)
+                }
+            );
+            store.save("stable", 2, "Next", &directory);
+            assert_eq!(store.snapshot().projects["stable"].name, "Next");
+            assert_eq!(
+                FileStore::read(&store.root).unwrap().projects["stable"].name,
+                "Next"
+            );
+        }
+    }
+
+    #[test]
     fn a_replacement_root_waits_for_accepted_io_before_restoring_the_same_directory() {
         let root = tempfile::tempdir().unwrap();
         let project = root.path().join("repo");
@@ -503,9 +848,13 @@ mod tests {
                 revision: 1,
             },
         );
+        let request = WriteTaskRequest {
+            ticket: ticket.clone(),
+            snapshot,
+        };
         let task = IoTaskPool::get().spawn(async move {
             gate.await;
-            FileStore::write(snapshot, &directory, None)
+            FileStore::write(request, &directory)
         });
         store
             .app
@@ -835,6 +1184,66 @@ mod tests {
     }
 
     #[test]
+    fn an_accepted_edit_preserves_the_canonical_project_identity_before_commit() {
+        let root = tempfile::tempdir().unwrap();
+        let directory = root.path().join("repo");
+        std::fs::create_dir_all(directory.join(".git")).unwrap();
+        let url = "vmux://projects/stable";
+        let mut store = Store::at(root.path());
+        store.save(url, 0, "Original", &directory);
+        let entity = store.entity(url);
+        store.queue(url, 1, "Edited", &directory);
+
+        store.app.update();
+
+        let index = store
+            .app
+            .world()
+            .resource::<vmux_ecs::IdentityIndex<ProjectId>>();
+        assert_eq!(index.entity(&ProjectId(url.into())).unwrap(), Some(entity));
+        assert_eq!(
+            store.app.world().get::<Name>(entity).unwrap().as_str(),
+            "Original"
+        );
+        assert!(store.complete(1)[0].result.is_ok());
+        assert_eq!(store.entity(url), entity);
+        assert_eq!(
+            store.app.world().get::<Name>(entity).unwrap().as_str(),
+            "Edited"
+        );
+    }
+
+    #[test]
+    fn ambiguous_canonical_project_identity_refuses_mutation_before_io() {
+        let root = tempfile::tempdir().unwrap();
+        let directory = root.path().join("repo");
+        let other = root.path().join("other");
+        std::fs::create_dir_all(directory.join(".git")).unwrap();
+        std::fs::create_dir_all(other.join(".git")).unwrap();
+        let url = "vmux://projects/stable";
+        let mut store = Store::at(root.path());
+        store.save(url, 0, "Original", &directory);
+        let source = std::fs::read(store.root.join(".projects.ron")).unwrap();
+        store.app.world_mut().spawn((
+            crate::Project,
+            Registered,
+            ProjectId(url.into()),
+            Name::new("Duplicate"),
+            Cwd(other),
+            Repository(None),
+            Revision(7),
+            ChildOf(store.owner),
+        ));
+        store.queue(url, 1, "Rejected", &directory);
+
+        assert_eq!(store.complete(1)[0].result, Err(Error::Duplicate));
+        assert_eq!(
+            std::fs::read(store.root.join(".projects.ron")).unwrap(),
+            source
+        );
+    }
+
+    #[test]
     fn failed_persistence_keeps_the_committed_entity() {
         let root = tempfile::tempdir().unwrap();
         let project = root.path().join("repo");
@@ -889,6 +1298,168 @@ mod tests {
             std::fs::read_to_string(project.join("work.txt")).unwrap(),
             "keep"
         );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn removal_hides_relative_aliases_and_preserves_registered_alias_identities() {
+        let root = tempfile::tempdir().unwrap();
+        let project = root.path().join("repo");
+        let other = root.path().join("other");
+        let imports = root.path().join("imported");
+        std::fs::create_dir_all(project.join(".git")).unwrap();
+        std::fs::create_dir_all(other.join(".git")).unwrap();
+        std::fs::create_dir_all(&imports).unwrap();
+        std::os::unix::fs::symlink("../repo", imports.join("relative")).unwrap();
+        std::os::unix::fs::symlink("../repo", imports.join("registered")).unwrap();
+        let url = "vmux://projects/stable";
+        let retained = "vmux://projects/imported/registered";
+        let mut store = Store::at(root.path());
+        store.save(url, 0, "Removed", &project);
+        store.save(retained, 0, "Retained", &other);
+        store.app.world_mut().spawn(WriteRequest {
+            root: store.root.clone(),
+            mutation: Mutation::Remove(url.into()),
+        });
+        assert!(store.complete(1)[0].result.is_ok());
+        drop(store);
+
+        let mut restored = Store::at(root.path());
+        let snapshot = restored.snapshot();
+        assert!(
+            snapshot
+                .hidden
+                .contains("vmux://projects/imported/relative")
+        );
+        assert!(snapshot.hidden.contains("vmux://projects/repo"));
+        assert!(!snapshot.hidden.contains(retained));
+        assert_eq!(snapshot.projects[retained].name, "Retained");
+        assert_eq!(
+            snapshot.projects[retained].directory,
+            other.canonicalize().unwrap()
+        );
+        assert!(project.join(".git").is_dir());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_sole_symlink_root_preserves_alias_hides_after_removal() {
+        let root = tempfile::tempdir().unwrap();
+        let links = tempfile::tempdir().unwrap();
+        let project = root.path().join("repo");
+        let imports = root.path().join("imported");
+        std::fs::create_dir_all(project.join(".git")).unwrap();
+        std::fs::create_dir_all(&imports).unwrap();
+        std::os::unix::fs::symlink("../repo", imports.join("alias")).unwrap();
+        let url = "vmux://projects/stable";
+        let mut store = Store::at(root.path());
+        store.save(url, 0, "Project", &project);
+        let alias = links.path().join("root");
+        std::os::unix::fs::symlink(root.path(), &alias).unwrap();
+        store.app.world_mut().despawn(store.owner);
+        store.root = alias.clone();
+        store.owner = store.app.world_mut().spawn(Root(alias)).id();
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(3);
+        while store.app.world().get::<Loaded>(store.owner).is_none() {
+            store.app.update();
+            assert!(std::time::Instant::now() < deadline);
+            std::thread::yield_now();
+        }
+        store.app.world_mut().spawn(WriteRequest {
+            root: store.root.clone(),
+            mutation: Mutation::Remove(url.into()),
+        });
+        assert!(store.complete(1)[0].result.is_ok());
+        let mut restored = Store::at(root.path());
+        let snapshot = restored.snapshot();
+        for url in [
+            url,
+            "vmux://projects/repo",
+            "vmux://projects/imported/alias",
+        ] {
+            assert!(snapshot.hidden.contains(url));
+        }
+        assert!(snapshot.projects.is_empty());
+        assert!(project.join(".git").is_dir());
+    }
+
+    #[test]
+    fn alias_read_failure_retains_committed_state_and_never_dispatches_a_write() {
+        let root = tempfile::tempdir().unwrap();
+        let directory = root.path().canonicalize().unwrap();
+        let url = "vmux://projects/stable";
+        let mut app = App::new();
+        app.add_plugins(crate::ProjectPlugin);
+        let owner = app.world_mut().spawn(Root(directory.clone())).id();
+        app.update();
+        let load = app
+            .world_mut()
+            .resource_mut::<Messages<LoadRequest>>()
+            .drain()
+            .next()
+            .unwrap();
+        let mut snapshot = Snapshot::default();
+        snapshot.projects.insert(
+            url.into(),
+            Record {
+                name: "Retained".into(),
+                directory: directory.join("repo"),
+                repository: None,
+                revision: 1,
+            },
+        );
+        app.world_mut().write_message(LoadCompleted {
+            ticket: load.ticket,
+            result: Ok(snapshot),
+        });
+        app.update();
+        let project = app
+            .world_mut()
+            .query_filtered::<Entity, With<Registered>>()
+            .single(app.world())
+            .unwrap();
+        let requester = app
+            .world_mut()
+            .spawn(WriteRequest {
+                root: directory,
+                mutation: Mutation::Remove(url.into()),
+            })
+            .id();
+        app.update();
+        let request = app
+            .world_mut()
+            .resource_mut::<Messages<AliasRequest>>()
+            .drain()
+            .next()
+            .unwrap();
+        let error = Error::Unavailable("alias lookup failed".into());
+        app.world_mut().write_message(AliasCompleted {
+            ticket: request.ticket,
+            result: Err(error.clone()),
+        });
+        app.update();
+
+        assert!(app.world().get::<Registered>(project).is_some());
+        assert!(app.world().get::<crate::Hidden>(project).is_none());
+        assert_eq!(
+            app.world().get::<Name>(project).unwrap().as_str(),
+            "Retained"
+        );
+        assert_eq!(app.world().get::<Revision>(project).unwrap().0, 1);
+        assert!(
+            app.world()
+                .resource::<Messages<WriteTaskRequest>>()
+                .is_empty()
+        );
+        let completed = app
+            .world_mut()
+            .resource_mut::<Messages<WriteCompleted>>()
+            .drain()
+            .next()
+            .unwrap();
+        assert_eq!(completed.requester, requester);
+        assert_eq!(completed.result, Err(error));
+        assert!(app.world().get::<Root>(owner).is_some());
     }
 
     #[test]
