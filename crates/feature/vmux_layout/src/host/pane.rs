@@ -39,6 +39,7 @@ use vmux_ecs::manifest::FeaturePlugin;
 use vmux_ecs::{Active, PageMetadata, PageOpenId, PageOpenRequest, PageOpenTarget, PageOpenTask};
 #[cfg(test)]
 use vmux_flex::prelude::*;
+use vmux_flex::{Display, Node, Visibility};
 #[cfg(test)]
 use vmux_history::LastActivatedAt;
 
@@ -55,16 +56,35 @@ pub(super) struct OverlayInput<'w, 's> {
     owners: Query<
         'w,
         's,
-        Option<&'static HostWindow>,
-        (With<vmux_ecs::WindowOverlay>, With<vmux_ecs::KeyboardOwner>),
+        (
+            Option<&'static HostWindow>,
+            Option<&'static Node>,
+            Option<&'static Visibility>,
+            Has<vmux_ecs::KeyboardOwner>,
+            Has<vmux_ecs::OverlayShownInline>,
+        ),
+        With<vmux_ecs::WindowOverlay>,
     >,
 }
 
 impl OverlayInput<'_, '_> {
     fn owns(&self, window: Entity) -> bool {
-        self.owners
-            .iter()
-            .any(|owner| owner.is_none_or(|owner| owner.0 == window))
+        for (owner, node, visibility, keyboard, inline) in &self.owners {
+            if owner.is_some_and(|owner| owner.0 != window) {
+                continue;
+            }
+            if vmux_ecs::OverlayState::resolve(
+                node.map_or(Display::Flex, |node| node.display),
+                visibility.copied().unwrap_or_default(),
+                keyboard,
+                inline,
+            )
+            .owns_input()
+            {
+                return true;
+            }
+        }
+        false
     }
 }
 

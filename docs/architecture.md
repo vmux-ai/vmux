@@ -1230,8 +1230,10 @@ coordinates with the owning window's region.
 
 ---
 
-Window overlays that own keyboard input suppress native pane selection and divider capture
-only for their owning window; an unscoped overlay holds input globally. Suppressed samples are
+Window overlays that own keyboard input or render an inline command bar suppress native pane
+selection and divider capture for their owning window; an unscoped overlay holds input globally.
+Inline presentation retains the originating pane even while its prewarmed view has no keyboard
+owner. A closed prewarmed view does not capture input. Suppressed samples are
 consumed so dismissing an overlay cannot replay its click. Captured dividers keep their axis
 and ordered adjacent pane pair; a topology change cancels capture before changing sizes.
 

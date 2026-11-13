@@ -360,7 +360,7 @@ fn from_pointer(
     splits: Query<(Entity, &PaneSplit, &Children), With<Pane>>,
     active_drags: Query<(Entity, &PaneDrag, &PaneSplit)>,
     layouts: Query<&ComputedNode>,
-    mut nodes: Query<&mut Node>,
+    mut nodes: Query<&mut Node, Without<vmux_ecs::WindowOverlay>>,
     mut pane_sizes: Query<&mut PaneSize>,
     mouse: Res<ButtonInput<MouseButton>>,
     mut was_pressed: Single<&mut PointerPress, With<PointerDevice>>,

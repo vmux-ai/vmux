@@ -755,6 +755,40 @@ mod tests {
     }
 
     #[test]
+    fn inline_command_bar_keeps_its_pane_until_closed() {
+        let mut fixture = HoverFixture::new();
+        let bar = fixture
+            .app
+            .world_mut()
+            .spawn((
+                vmux_ecs::WindowOverlay,
+                vmux_ecs::OverlayShownInline,
+                HostWindow(fixture.window),
+                Node {
+                    display: Display::Flex,
+                    ..default()
+                },
+                Visibility::Hidden,
+            ))
+            .id();
+        fixture.app.update();
+        assert_eq!(fixture.focused().stack, Some(fixture.right_stack));
+        fixture.pointer(Vec2::new(401.0, 225.0), true);
+        fixture.app.update();
+        assert_eq!(fixture.focused().stack, Some(fixture.right_stack));
+        fixture
+            .app
+            .world_mut()
+            .entity_mut(bar)
+            .remove::<vmux_ecs::OverlayShownInline>();
+        fixture.app.update();
+        assert_eq!(fixture.focused().stack, Some(fixture.right_stack));
+        fixture.pointer(Vec2::new(402.0, 225.0), false);
+        fixture.app.update();
+        assert_eq!(fixture.focused().stack, Some(fixture.left_stack));
+    }
+
+    #[test]
     fn overlay_input_preserves_selection_and_consumes_modal_clicks() {
         for scope in 0..4 {
             let mut fixture = HoverFixture::new();
