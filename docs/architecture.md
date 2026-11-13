@@ -454,6 +454,18 @@ stale records fail closed. Existing exact fingerprints are frozen migration debt
 Git provenance, not permanent adapter exceptions; migrations remove them instead of extending
 the baseline. Final acceptance requires no remaining domain debt and a repeated caller/lifecycle
 audit. Structural checks supplement ownership review; they cannot prove business semantics.
+Module aliases and barrel exports resolve through their actual bindings; ambiguous declarations or
+imports fail closed. EntityEvent ownership requires a registered use, and recursion depth is separate
+from the number of shallow lookup probes. Lookup caches live only for one parsed inventory.
+CEF target relocation accepts staged generated artifacts and source/destination cache paths under
+the seed lock. It rewrites only CEF-generated metadata; temporary values drop at invocation end,
+and the owning seed command promotes or discards staging.
+
+
+History query systems rank canonical URL entities from their current VisitCount and LastVisitedAt;
+chronological queries join Visit references directly to URL metadata. Only the requested page is
+copied into HistoryUiState or suggestion output. Deletion accepts only a History page request and
+an existing canonical URL, so a supplied entity ID cannot remove unrelated application state.
 
 ### Plugins
 
