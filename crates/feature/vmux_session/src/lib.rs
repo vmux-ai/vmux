@@ -7,7 +7,7 @@ extern crate self as vmux_session;
 use bevy_app::{App, Plugin};
 
 pub use catalog::{
-    ArchiveState, CatalogSnapshot, ProviderCatalog, ProviderSession, SessionAge, SessionSummary,
+    ArchiveState, CatalogSnapshot, ProviderSession, SessionAge, SessionSummary,
     SessionSummaryProjection, StageSummary,
 };
 #[cfg(host)]
@@ -66,24 +66,33 @@ pub mod ui;
 mod catalog;
 #[cfg(host)]
 mod conversation;
+#[cfg(host)]
+pub mod history;
 mod model;
 #[cfg(host)]
 pub mod mutation;
+#[cfg(host)]
+pub mod provider;
 mod route;
 mod title;
 
 #[cfg(host)]
-pub(crate) struct DomainPlugin;
+pub struct DomainPlugin;
 
 #[cfg(host)]
 impl Plugin for DomainPlugin {
     fn build(&self, app: &mut App) {
+        if !app.is_plugin_added::<provider::Plugin>() {
+            app.add_plugins(provider::Plugin);
+        }
         app.add_plugins((
             model::EntityPlugin,
             model::MetadataPlugin,
             model::StagePlugin,
             catalog::CatalogPlugin,
-            conversation::ConversationPlugin,
         ));
+        if !app.is_plugin_added::<history::Plugin>() {
+            app.add_plugins(history::Plugin);
+        }
     }
 }

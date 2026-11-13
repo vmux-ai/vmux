@@ -792,6 +792,92 @@ fn contract_macros_resolve_imports_after_all_local_shadows_are_known() {
 }
 
 #[test]
+fn service_message_attributes_prove_only_registered_messages_with_owned_fields() {
+    for (source, expected) in [
+        (
+            "#[vmux_api::service_message(Ready)] struct Received { value: u64 } fn receive(messages: MessageReader<Received>) {} struct Root; impl Plugin for Root { fn build(&self, app: &mut App) { app.add_service_message::<Received>().add_systems(Update, receive); } }",
+            true,
+        ),
+        (
+            "use vmux_api::service_message as incoming; #[incoming(Ready)] struct Received { value: u64 } fn receive(messages: MessageReader<Received>) {} struct Root; impl Plugin for Root { fn build(&self, app: &mut App) { app.add_systems(Update, receive); } }",
+            true,
+        ),
+        (
+            "#[vmux_api::service_message(Ready)] struct Received { value: u64 }",
+            false,
+        ),
+        (
+            "struct Domain { rows: Vec<String> } #[vmux_api::service_message(Ready)] struct Received { value: Domain } fn receive(messages: MessageReader<Received>) {} struct Root; impl Plugin for Root { fn build(&self, app: &mut App) { app.add_systems(Update, receive); } }",
+            false,
+        ),
+        (
+            "mod vmux_api { pub use unrelated::service_message; } #[vmux_api::service_message(Ready)] struct Received { value: u64 } fn receive(messages: MessageReader<Received>) {} struct Root; impl Plugin for Root { fn build(&self, app: &mut App) { app.add_systems(Update, receive); } }",
+            false,
+        ),
+    ] {
+        let inventory = Inventory::fixture(source);
+        assert_eq!(
+            inventory.canonical(
+                &inventory.entries[&inventory.key("struct:Received")],
+                &Policy::default(),
+                &mut BTreeSet::new(),
+            ),
+            expected,
+            "{source}",
+        );
+    }
+}
+
+#[test]
+fn query_aliases_borrow_exact_frozen_components_without_approving_plain_models() {
+    for (target, expected) in [("LegacyState", true), ("Model", false), ("Copy", false)] {
+        let inventory = Inventory::fixture(&format!(
+            "use bevy_ecs::prelude::*; struct Model {{ value: String }} #[derive(Component)] struct LegacyState {{ model: Model }} #[derive(Component)] struct Copy {{ model: Model }} type Borrowed<'w,'s> = Query<'w,'s,&'static {target}>; fn read(state: Borrowed) {{}} struct Root; impl Plugin for Root {{ fn build(&self, app: &mut App) {{ app.add_systems(Update, read); }} }}"
+        ));
+        let mut policy = Policy {
+            revision: FROZEN_REVISION.into(),
+            ..Policy::default()
+        };
+        for name in ["struct:Model", "struct:LegacyState"] {
+            let key = inventory.key(name);
+            policy.legacy.push(Legacy {
+                fingerprint: inventory.entries[&key].fingerprint.clone(),
+                key,
+                issue: "VMX-253".into(),
+            });
+        }
+        let read = &inventory.entries[&inventory.key("fn:read")];
+        assert_eq!(
+            inventory.canonical(read, &policy, &mut BTreeSet::new()),
+            expected,
+            "{target}"
+        );
+        policy.legacy[1].fingerprint = "0000000000000000".into();
+        assert!(!inventory.canonical(read, &policy, &mut BTreeSet::new()));
+    }
+}
+
+#[test]
+fn timezone_values_do_not_masquerade_as_local_system_state() {
+    let inventory = Inventory::fixture(
+        "#[derive(Component)] struct State; impl State { fn timestamp(&self) { let timezone = &chrono::Local; } } fn read(state: Query<&State>) {} struct Root; impl Plugin for Root { fn build(&self, app: &mut App) { app.add_systems(Update, read); } }",
+    );
+    assert!(inventory.canonical(
+        &inventory.entries[&inventory.key("impl:State")],
+        &Policy::default(),
+        &mut BTreeSet::new(),
+    ));
+    let local = Inventory::fixture(
+        "fn read(state: Local<u64>) {} struct Root; impl Plugin for Root { fn build(&self, app: &mut App) { app.add_systems(Update, read); } }",
+    );
+    assert!(!local.canonical(
+        &local.entries[&local.key("fn:read")],
+        &Policy::default(),
+        &mut BTreeSet::new(),
+    ));
+}
+
+#[test]
 fn system_state_constructors_require_the_bevy_binding() {
     for (source, expected) in [
         (
@@ -1826,7 +1912,7 @@ impl Inventory {
                     return false;
                 }
                 Some(field)
-                    if (matches!(entry.kind, Kind::Function) || entry.parameter)
+                    if (matches!(entry.kind, Kind::Function | Kind::Alias) || entry.parameter)
                         && field.ecs
                         && self.used(field)
                         && policy.legacy.iter().any(|legacy| {
@@ -2187,6 +2273,7 @@ impl Inventory {
                     | "agent"
                     | "string_id"
                     | "app_plugin"
+                    | "service_message"
             )
         {
             return None;
@@ -2557,6 +2644,8 @@ impl Inventory {
             if kind == "app_plugin" {
                 entry.plugin = true;
                 entry.plugin_children.extend(entry.field_paths.clone());
+            } else if kind == "service_message" {
+                entry.ecs = true;
             } else {
                 entry.contract = true;
                 entry.projection |= matches!(kind.as_str(), "ui_state" | "ui_state_patch");
@@ -3322,6 +3411,15 @@ struct References {
 }
 
 impl<'ast> Visit<'ast> for References {
+    fn visit_type_path(&mut self, value: &'ast syn::TypePath) {
+        self.local |= value
+            .path
+            .segments
+            .last()
+            .is_some_and(|segment| segment.ident == "Local");
+        visit::visit_type_path(self, value);
+    }
+
     fn visit_local(&mut self, local: &'ast syn::Local) {
         if self.include_tests || !Usage::test_only(&local.attrs) {
             visit::visit_local(self, local);
@@ -3398,7 +3496,6 @@ impl<'ast> Visit<'ast> for References {
         self.paths.insert(parts.join("::"));
         if let Some(last) = path.segments.last() {
             let name = last.ident.to_string();
-            self.local |= name == "Local";
             self.names.insert(name);
         }
         visit::visit_path(self, path);

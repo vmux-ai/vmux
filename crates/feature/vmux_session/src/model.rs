@@ -56,7 +56,7 @@ impl Plugin for EntityPlugin {
             .register_stored::<AgentConversationTitle>()
             .register_stored::<TitlePending>()
             .register_stored::<LocalTask>()
-            .init_resource::<ProviderArchiveOperations>()
+            .init_resource::<ArchiveSequence>()
             .init_resource::<ProviderSessionTombstones>()
             .add_message::<CreateRequest>()
             .add_message::<ArchiveRequest>()
@@ -312,6 +312,7 @@ pub struct StageDefinition;
 #[derive(Message, Clone, Debug)]
 pub struct CreateRequest {
     id: SessionId,
+    operation: Option<Entity>,
     pub name: String,
     pub description: String,
     pub cwd: PathBuf,
@@ -330,6 +331,7 @@ impl CreateRequest {
     ) -> Self {
         Self {
             id: SessionId(uuid::Uuid::new_v4().to_string()),
+            operation: None,
             name: name.into(),
             description: description.into(),
             cwd,
@@ -350,6 +352,7 @@ impl CreateRequest {
     ) -> Self {
         Self {
             id: SessionId(uuid::Uuid::new_v4().to_string()),
+            operation: None,
             name: name.into(),
             description: description.into(),
             cwd,
@@ -362,6 +365,11 @@ impl CreateRequest {
 
     pub fn id(&self) -> &SessionId {
         &self.id
+    }
+
+    pub(crate) fn leased(mut self, operation: Entity) -> Self {
+        self.operation = Some(operation);
+        self
     }
 }
 
@@ -448,76 +456,73 @@ pub enum CleanupTarget {
 
 #[cfg(host)]
 #[derive(Resource, Default)]
-pub(crate) struct ProviderArchiveOperations {
-    next_revision: u64,
-    pending: HashMap<ProviderSessionKey, ProviderArchiveOperation>,
-}
+struct ArchiveSequence(u64);
 
 #[cfg(host)]
-struct ProviderArchiveOperation {
-    archived: bool,
-    source_updated_at: i64,
-    revision: u64,
-    in_flight: Option<u64>,
-}
-
-#[cfg(host)]
-impl ProviderArchiveOperations {
-    fn request(&mut self, request: &ProviderArchiveRequest) -> Option<ProviderArchiveWriteRequest> {
-        self.next_revision = self.next_revision.wrapping_add(1).max(1);
-        let revision = self.next_revision;
-        let key = ProviderSessionKey::from_components(&request.kind, &request.id);
-        let operation = self.pending.entry(key).or_insert(ProviderArchiveOperation {
-            archived: request.archived,
-            source_updated_at: request.source_updated_at,
-            revision,
-            in_flight: None,
-        });
-        operation.archived = request.archived;
-        operation.source_updated_at = request.source_updated_at;
-        operation.revision = revision;
-        if operation.in_flight.is_some() {
-            return None;
-        }
-        operation.in_flight = Some(revision);
-        Some(ProviderArchiveWriteRequest {
-            kind: request.kind.clone(),
-            id: request.id.clone(),
-            archived: request.archived,
-            revision,
-        })
+impl ArchiveSequence {
+    fn next(&mut self) -> u64 {
+        self.0 = self.0.wrapping_add(1).max(1);
+        self.0
     }
+}
 
-    fn complete(
-        &mut self,
-        result: &ProviderArchiveCompleted,
-    ) -> Option<ProviderArchiveWriteRequest> {
-        let key = ProviderSessionKey::from_components(&result.kind, &result.id);
-        let operation = self.pending.get_mut(&key)?;
-        if operation.in_flight != Some(result.revision) {
-            return None;
-        }
-        if operation.revision == result.revision {
-            self.pending.remove(&key);
-            return None;
-        }
-        operation.in_flight = Some(operation.revision);
-        Some(ProviderArchiveWriteRequest {
-            kind: result.kind.clone(),
-            id: result.id.clone(),
-            archived: operation.archived,
-            revision: operation.revision,
-        })
+#[cfg(host)]
+#[derive(Component)]
+struct ArchiveWritePending {
+    revision: u64,
+    in_flight: u64,
+}
+
+#[cfg(host)]
+#[derive(SystemParam)]
+pub(crate) struct ArchiveWrites<'w, 's> {
+    pending: Query<
+        'w,
+        's,
+        (
+            &'static ProviderKind,
+            &'static ProviderSessionId,
+            &'static SourceUpdatedAt,
+            Has<ArchivedAt>,
+        ),
+        (With<ProviderArchive>, With<ArchiveWritePending>),
+    >,
+    changed: Query<
+        'w,
+        's,
+        (),
+        (
+            With<ProviderArchive>,
+            With<ArchiveWritePending>,
+            Or<(
+                Changed<ArchiveWritePending>,
+                Changed<SourceUpdatedAt>,
+                Changed<ArchivedAt>,
+            )>,
+        ),
+    >,
+    removed: RemovedComponents<'w, 's, ArchiveWritePending>,
+}
+
+#[cfg(host)]
+impl ArchiveWrites<'_, '_> {
+    pub(crate) fn is_changed(&mut self) -> bool {
+        let removed = self.removed.read().count() > 0;
+        !self.changed.is_empty() || removed
     }
 
     pub(crate) fn archived_at(&self, key: &ProviderSessionKey) -> Option<i64> {
-        self.pending.get(key).map(|operation| {
-            if operation.archived {
-                operation.source_updated_at.max(1)
-            } else {
-                0
+        let mut selected = None;
+        for (kind, id, updated, archived) in &self.pending {
+            if kind != &key.kind || id != &key.id {
+                continue;
             }
-        })
+            if selected.is_some() {
+                return None;
+            }
+            selected = Some(if archived { updated.0.max(1) } else { 0 });
+        }
+        selected
     }
 }
 
@@ -529,6 +534,17 @@ pub struct ProviderSessionTombstones {
 
 #[cfg(host)]
 impl ProviderSessionTombstones {
+    pub fn contains_family(&self, family: &crate::AgentFamily, id: &str) -> bool {
+        for (kind, entries) in &self.entries {
+            if crate::AgentFamily::of(kind.0.strip_prefix("acp:").unwrap_or(&kind.0)) == *family
+                && entries.contains_key(id)
+            {
+                return true;
+            }
+        }
+        false
+    }
+
     pub fn new(keys: impl IntoIterator<Item = ProviderSessionKey>) -> Self {
         let mut tombstones = Self::default();
         for key in keys {
@@ -707,11 +723,31 @@ fn ensure_stages(
 fn create(
     mut requests: MessageReader<CreateRequest>,
     configuration: Res<Configuration>,
+    imports: Query<
+        (&SessionId, &vmux_ecs::Uuid, &vmux_ecs::OperationState),
+        With<crate::provider::Import>,
+    >,
     mut mutations: MessageWriter<crate::mutation::Request>,
 ) {
     for request in requests.read() {
+        let lease = if let Some(operation) = request.operation {
+            let Ok((id, uuid, state)) = imports.get(operation) else {
+                continue;
+            };
+            if id != request.id()
+                || !matches!(
+                    state,
+                    vmux_ecs::OperationState::Pending | vmux_ecs::OperationState::Running
+                )
+            {
+                continue;
+            }
+            Some((operation, uuid.0.clone()))
+        } else {
+            None
+        };
         let now = vmux_ecs::UnixMillis::now().0;
-        mutations.write(crate::mutation::Request::local(
+        let mut mutation = crate::mutation::Request::local(
             request.id.clone(),
             crate::mutation::Mutation::Create(crate::mutation::Creation {
                 name: request.name.clone(),
@@ -723,7 +759,11 @@ fn create(
                 activated_at: request.activated_at.unwrap_or(now),
                 local: request.local,
             }),
-        ));
+        );
+        if let Some((operation, uuid)) = lease {
+            mutation = mutation.leased(operation, uuid);
+        }
+        mutations.write(mutation);
     }
 }
 
@@ -853,10 +893,15 @@ fn archive(
 #[cfg(host)]
 fn archive_provider(
     mut requests: MessageReader<ProviderArchiveRequest>,
-    mut operations: ResMut<ProviderArchiveOperations>,
+    mut sequence: ResMut<ArchiveSequence>,
     index: Res<ExternalIdentityIndex<ProviderKind, ProviderSessionId, ProviderArchive>>,
     mut overrides: Query<
-        (Entity, &mut SourceUpdatedAt, Option<&ArchivedAt>),
+        (
+            Entity,
+            &mut SourceUpdatedAt,
+            Option<&ArchivedAt>,
+            Option<&mut ArchiveWritePending>,
+        ),
         With<ProviderArchive>,
     >,
     mut writes: MessageWriter<ProviderArchiveWriteRequest>,
@@ -879,7 +924,8 @@ fn archive_provider(
             }
         };
         if let Some(entity) = entity {
-            let Ok((_, mut source_updated_at, current_archived_at)) = overrides.get_mut(entity)
+            let Ok((_, mut source_updated_at, current_archived_at, pending)) =
+                overrides.get_mut(entity)
             else {
                 continue;
             };
@@ -889,10 +935,22 @@ fn archive_provider(
             } else if !request.archived && current_archived_at.is_some() {
                 commands.entity(entity).remove::<ArchivedAt>();
             }
-            if request.native
-                && let Some(write) = operations.request(&request)
-            {
-                writes.write(write);
+            if request.native {
+                let revision = sequence.next();
+                if let Some(mut pending) = pending {
+                    pending.revision = revision;
+                } else {
+                    commands.entity(entity).insert(ArchiveWritePending {
+                        revision,
+                        in_flight: revision,
+                    });
+                    writes.write(ProviderArchiveWriteRequest {
+                        kind: request.kind.clone(),
+                        id: request.id.clone(),
+                        archived: request.archived,
+                        revision,
+                    });
+                }
             }
             continue;
         }
@@ -905,10 +963,18 @@ fn archive_provider(
         if request.archived {
             entity.insert(ArchivedAt(next_archived_at));
         }
-        if request.native
-            && let Some(write) = operations.request(&request)
-        {
-            writes.write(write);
+        if request.native {
+            let revision = sequence.next();
+            entity.insert(ArchiveWritePending {
+                revision,
+                in_flight: revision,
+            });
+            writes.write(ProviderArchiveWriteRequest {
+                kind: request.kind.clone(),
+                id: request.id.clone(),
+                archived: request.archived,
+                revision,
+            });
         }
     }
 }
@@ -916,13 +982,51 @@ fn archive_provider(
 #[cfg(host)]
 fn finish_provider_archives(
     mut completed: MessageReader<ProviderArchiveCompleted>,
-    mut operations: ResMut<ProviderArchiveOperations>,
+    mut pending: Query<
+        (
+            Entity,
+            &ProviderKind,
+            &ProviderSessionId,
+            Has<ArchivedAt>,
+            &mut ArchiveWritePending,
+        ),
+        With<ProviderArchive>,
+    >,
     mut writes: MessageWriter<ProviderArchiveWriteRequest>,
+    mut commands: Commands,
 ) {
     for result in completed.read() {
-        if let Some(write) = operations.complete(result) {
-            writes.write(write);
+        let mut matching = None;
+        let mut duplicate = false;
+        for (entity, kind, id, _, _) in &pending {
+            if kind == &result.kind && id == &result.id && matching.replace(entity).is_some() {
+                duplicate = true;
+                break;
+            }
         }
+        if duplicate {
+            continue;
+        }
+        let Some(entity) = matching else {
+            continue;
+        };
+        let Ok((_, kind, id, archived, mut operation)) = pending.get_mut(entity) else {
+            continue;
+        };
+        if operation.in_flight != result.revision {
+            continue;
+        }
+        if operation.revision == result.revision {
+            commands.entity(entity).remove::<ArchiveWritePending>();
+            continue;
+        }
+        operation.in_flight = operation.revision;
+        writes.write(ProviderArchiveWriteRequest {
+            kind: kind.clone(),
+            id: id.clone(),
+            archived,
+            revision: operation.revision,
+        });
     }
 }
 
@@ -1566,6 +1670,133 @@ mod tests {
             .collect::<Vec<_>>();
         assert_eq!(writes.len(), 1);
         assert!(writes[0].archived);
+    }
+
+    #[test]
+    fn native_archive_coalesces_latest_intent_and_ignores_duplicate_completions() {
+        let mut app = App::new();
+        app.add_plugins(crate::DomainPlugin);
+        let kind = ProviderKind("acp:codex".into());
+        let id = ProviderSessionId("provider-session".into());
+        app.world_mut().write_message(ProviderArchiveRequest {
+            kind: kind.clone(),
+            id: id.clone(),
+            archived: true,
+            source_updated_at: 40,
+            native: true,
+        });
+        app.update();
+        let first = app
+            .world_mut()
+            .resource_mut::<Messages<ProviderArchiveWriteRequest>>()
+            .drain()
+            .next()
+            .unwrap();
+        app.world_mut().write_message(ProviderArchiveRequest {
+            kind: kind.clone(),
+            id: id.clone(),
+            archived: false,
+            source_updated_at: 80,
+            native: true,
+        });
+        app.update();
+        assert!(
+            app.world_mut()
+                .resource_mut::<Messages<ProviderArchiveWriteRequest>>()
+                .drain()
+                .next()
+                .is_none()
+        );
+        let completed = ProviderArchiveCompleted {
+            kind: kind.clone(),
+            id: id.clone(),
+            archived: true,
+            revision: first.revision,
+            success: true,
+        };
+        app.world_mut().write_message(completed.clone());
+        app.update();
+        let writes = app
+            .world_mut()
+            .resource_mut::<Messages<ProviderArchiveWriteRequest>>()
+            .drain()
+            .collect::<Vec<_>>();
+        assert_eq!(writes.len(), 1);
+        assert!(!writes[0].archived);
+        assert_ne!(writes[0].revision, first.revision);
+        app.world_mut().write_message(completed);
+        app.world_mut().write_message(ProviderArchiveCompleted {
+            kind,
+            id,
+            archived: false,
+            revision: writes[0].revision,
+            success: true,
+        });
+        app.update();
+        assert!(
+            app.world_mut()
+                .resource_mut::<Messages<ProviderArchiveWriteRequest>>()
+                .drain()
+                .next()
+                .is_none()
+        );
+        let mut overrides = app
+            .world_mut()
+            .query_filtered::<(&SourceUpdatedAt, Has<ArchivedAt>), With<ProviderArchive>>();
+        let (updated, archived) = overrides.single(app.world()).unwrap();
+        assert_eq!(updated.0, 80);
+        assert!(!archived);
+    }
+
+    #[test]
+    fn removing_an_archive_owner_discards_its_late_write_completion() {
+        let mut app = App::new();
+        app.add_plugins(crate::DomainPlugin);
+        let kind = ProviderKind("acp:codex".into());
+        let id = ProviderSessionId("provider-session".into());
+        app.world_mut().write_message(ProviderArchiveRequest {
+            kind: kind.clone(),
+            id: id.clone(),
+            archived: true,
+            source_updated_at: 40,
+            native: true,
+        });
+        app.update();
+        let first = app
+            .world_mut()
+            .resource_mut::<Messages<ProviderArchiveWriteRequest>>()
+            .drain()
+            .next()
+            .unwrap();
+        app.world_mut().write_message(ProviderArchiveRequest {
+            kind: kind.clone(),
+            id: id.clone(),
+            archived: false,
+            source_updated_at: 80,
+            native: true,
+        });
+        app.update();
+        let mut owners = app
+            .world_mut()
+            .query_filtered::<Entity, With<ProviderArchive>>();
+        let owner = owners.single(app.world()).unwrap();
+        app.world_mut().entity_mut(owner).despawn();
+        app.world_mut().write_message(ProviderArchiveCompleted {
+            kind,
+            id,
+            archived: true,
+            revision: first.revision,
+            success: true,
+        });
+        app.update();
+        assert!(
+            app.world_mut()
+                .resource_mut::<Messages<ProviderArchiveWriteRequest>>()
+                .drain()
+                .next()
+                .is_none()
+        );
+        assert_eq!(owners.iter(app.world()).count(), 0);
     }
 
     #[test]

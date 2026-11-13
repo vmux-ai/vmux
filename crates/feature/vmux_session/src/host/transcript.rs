@@ -47,7 +47,8 @@ impl bevy::prelude::Plugin for Plugin {
                 )
                     .chain()
                     .after(ServiceMessageSet)
-                    .after(vmux_session::TranscriptReadySet),
+                    .after(vmux_session::TranscriptReadySet)
+                    .after(vmux_session::history::Ready),
             );
     }
 }

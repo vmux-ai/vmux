@@ -14,9 +14,7 @@ use vmux_api::session::{AssistantBlock, Message};
 use vmux_ecs::{ArchivedAt, CreatedAt, Cwd, Description, LastActivatedAt, Order, Terminal};
 
 #[cfg(host)]
-use crate::model::{
-    ProviderArchiveOperations, ProviderSessionKey, ProviderSessionTombstones, SourceUpdatedAt,
-};
+use crate::model::{ArchiveWrites, ProviderSessionKey, ProviderSessionTombstones, SourceUpdatedAt};
 #[cfg(host)]
 use crate::{
     AgentConversationTitle, AgentFamily, AgentId, ConversationEvent, MessageContent,
@@ -29,29 +27,6 @@ use crate::{
 pub struct CatalogSnapshot {
     pub stages: Vec<StageSummary>,
     pub sessions: Vec<SessionSummary>,
-}
-
-#[derive(Resource, Clone, Debug, PartialEq, Eq)]
-pub struct ProviderCatalog {
-    pub sessions: Vec<ProviderSession>,
-    pub loading: bool,
-}
-
-impl Default for ProviderCatalog {
-    fn default() -> Self {
-        Self {
-            sessions: Vec::new(),
-            loading: true,
-        }
-    }
-}
-
-impl ProviderCatalog {
-    pub fn get(&self, kind: &str, sid: &str) -> Option<&ProviderSession> {
-        self.sessions
-            .iter()
-            .find(|session| session.kind == kind && session.sid == sid)
-    }
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
@@ -68,19 +43,6 @@ pub struct ProviderSession {
     pub conversation_title: String,
     pub last_prompt: String,
     pub archive: Option<ArchiveState>,
-}
-
-impl ProviderSession {
-    pub fn catalog_id(&self) -> String {
-        format!("{}:{}", self.kind, self.sid)
-    }
-
-    pub fn source_updated_at(&self) -> i64 {
-        self.archive
-            .map(ArchiveState::updated_at)
-            .unwrap_or_default()
-            .max(self.updated_at)
-    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -248,7 +210,6 @@ pub(crate) struct CatalogPlugin;
 impl Plugin for CatalogPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<CatalogSnapshot>()
-            .init_resource::<ProviderCatalog>()
             .add_systems(PostUpdate, project.after(crate::model::CanonicalizeSet));
     }
 }
@@ -330,8 +291,8 @@ struct CatalogSources<'w, 's> {
     sessions: SessionCatalog<'w, 's>,
     linked_sessions: LinkedSessions<'w, 's>,
     stages: StageCatalog<'w, 's>,
-    providers: Res<'w, ProviderCatalog>,
-    operations: Res<'w, ProviderArchiveOperations>,
+    providers: crate::provider::Entries<'w, 's>,
+    operations: ArchiveWrites<'w, 's>,
     provider_stages: ProviderStages<'w, 's>,
     provider_archives: ProviderArchives<'w, 's>,
     provider_tombstones: Res<'w, ProviderSessionTombstones>,
@@ -502,8 +463,8 @@ fn project(
         sessions,
         linked_sessions,
         stages,
-        providers,
-        operations,
+        mut providers,
+        mut operations,
         provider_stages,
         provider_archives,
         provider_tombstones,
@@ -611,7 +572,11 @@ fn project(
             last_message: conversation.last_message,
         });
     }
-    let linked_sessions = linked_sessions.values().cloned().collect::<HashSet<_>>();
+    let mut linked_families = HashSet::new();
+    for key in linked_sessions.values() {
+        let family = AgentFamily::of(key.kind.0.strip_prefix("acp:").unwrap_or(&key.kind.0));
+        linked_families.insert((family, key.id.0.clone()));
+    }
     let provider_stages = provider_stages
         .iter()
         .map(|(kind, id, stage, changed_at, source_updated_at)| {
@@ -633,13 +598,20 @@ fn project(
             )
         })
         .collect::<HashMap<_, _>>();
-    for session in &providers.sessions {
-        let key = ProviderSessionKey::new(
-            ProviderKind(session.kind.clone()),
-            ProviderSessionId(session.sid.clone()),
-        );
-        if linked_sessions.contains(&key)
-            || provider_tombstones.contains(&session.kind, &session.sid)
+    for entity in providers.selected() {
+        let Some(session) = providers.record(entity) else {
+            continue;
+        };
+        let archive = session
+            .archive_observed_at
+            .map(|at| match session.archived_at {
+                Some(_) => ArchiveState::Archived(at.0),
+                None => ArchiveState::Active(at.0),
+            });
+        let key = ProviderSessionKey::new(session.kind.clone(), session.id.clone());
+        if linked_families.contains(&(AgentFamily::of(&session.agent.0), session.id.0.clone()))
+            || provider_tombstones
+                .contains_family(&AgentFamily::of(&session.agent.0), &session.id.0)
         {
             continue;
         }
@@ -664,44 +636,42 @@ fn project(
         let archive_override = provider_archives
             .get(&key)
             .filter(|(source_updated_at, _)| {
-                session.archive.is_none()
+                archive.is_none()
                     || *source_updated_at
-                        >= session
-                            .archive
-                            .map(ArchiveState::updated_at)
-                            .unwrap_or_default()
+                        >= archive.map(ArchiveState::updated_at).unwrap_or_default()
             });
         let archived_at = if let Some(pending) = operations.archived_at(&key) {
             pending
         } else if let Some((_, archived_at)) = archive_override {
             archived_at.unwrap_or_default()
         } else {
-            match session.archive {
+            match archive {
                 Some(ArchiveState::Archived(at)) if at > 0 => at,
-                Some(ArchiveState::Archived(_)) => session.updated_at,
+                Some(ArchiveState::Archived(_)) => session.updated_at.0,
                 Some(ArchiveState::Active(_)) | None => 0,
             }
         };
         next.sessions.push(SessionSummary {
-            id: session.catalog_id(),
-            kind: session.kind.clone(),
-            sid: session.sid.clone(),
-            provider_kind: session.kind.clone(),
-            provider_sid: session.sid.clone(),
+            id: format!("{}:{}", session.kind.0, session.id.0),
+            kind: session.kind.0.clone(),
+            sid: session.id.0.clone(),
+            provider_kind: session.kind.0.clone(),
+            provider_sid: session.id.0.clone(),
             managed: false,
-            name: session.name.clone(),
-            description: session.description.clone(),
-            cwd: session.cwd.clone(),
+            name: session.name.as_str().to_string(),
+            description: session.description.0.clone(),
+            cwd: session.cwd.0.to_string_lossy().into_owned(),
             stage,
-            created_at: session.created_at,
-            last_activated_at: session.updated_at,
+            created_at: session.created_at.0,
+            last_activated_at: session.updated_at.0,
             stage_changed_at,
             archived_at,
-            agent: session.agent.clone(),
-            agent_name: AgentFamily::of(&session.agent).name(&session.agent_name),
+            agent: session.agent.0.clone(),
+            agent_name: AgentFamily::of(&session.agent.0)
+                .name(session.agent_name.map_or("", Name::as_str)),
             runtime: "inactive".to_string(),
-            conversation_title: session.conversation_title.clone(),
-            last_prompt: session.last_prompt.clone(),
+            conversation_title: session.conversation_title.0.clone(),
+            last_prompt: session.last_prompt.0.clone(),
             ..Default::default()
         });
     }
@@ -787,6 +757,105 @@ mod tests {
     #[cfg(feature = "app")]
     use moonshine_save::prelude::{LoadWorld, load_on_default_event};
 
+    struct ProviderFixture {
+        source: Entity,
+        payload: ProviderSession,
+    }
+
+    impl ProviderFixture {
+        fn new(app: &mut App, payload: ProviderSession) -> Self {
+            let source = app
+                .world_mut()
+                .spawn((
+                    crate::provider::Source,
+                    crate::provider::Origin::Native,
+                    crate::provider::Capability::Unprobed,
+                    crate::provider::Generation(0),
+                    AgentId(payload.agent.clone()),
+                    Name::new(payload.agent_name.clone()),
+                ))
+                .id();
+            let fixture = Self { source, payload };
+            fixture.send(app);
+            fixture
+        }
+
+        fn send(&self, app: &mut App) {
+            let generation = app
+                .world()
+                .get::<crate::provider::Generation>(self.source)
+                .unwrap()
+                .0
+                + 1;
+            let operation = app
+                .world_mut()
+                .spawn((
+                    crate::provider::Read {
+                        generation,
+                        wire_id: 0,
+                    },
+                    ChildOf(self.source),
+                    vmux_ecs::Operation::bundle("provider catalog")
+                        .unwrap()
+                        .running(),
+                ))
+                .id();
+            app.world_mut().entity_mut(self.source).insert((
+                crate::provider::Generation(generation),
+                vmux_ecs::EntityTarget::<crate::provider::Read>::new(operation),
+            ));
+            app.world_mut().write_message(crate::provider::Received {
+                operation,
+                supported: true,
+                result: Ok(vec![self.payload.clone()]),
+            });
+        }
+    }
+
+    #[test]
+    fn imported_provider_aliases_remain_hidden_without_deleting_entries() {
+        let mut app = App::new();
+        app.add_plugins(DomainPlugin);
+        let _source = ProviderFixture::new(
+            &mut app,
+            ProviderSession {
+                kind: "acp:codex".into(),
+                sid: "same".into(),
+                agent: "codex".into(),
+                name: "External".into(),
+                cwd: "/work".into(),
+                ..Default::default()
+            },
+        );
+        let create =
+            CreateRequest::new("Managed", "", "/work".into(), Some(AgentId("codex".into())));
+        let id = create.id().clone();
+        app.world_mut().write_message(create);
+        app.update();
+        let session = app
+            .world_mut()
+            .query_filtered::<(Entity, &SessionId), With<Session>>()
+            .iter(app.world())
+            .find(|(_, found)| *found == &id)
+            .unwrap()
+            .0;
+        app.world_mut().entity_mut(session).insert((
+            ProviderKind("acp:codex-acp".into()),
+            ProviderSessionId("same".into()),
+        ));
+        app.update();
+        let catalog = app.world().resource::<CatalogSnapshot>();
+        assert_eq!(catalog.sessions.len(), 1);
+        assert!(catalog.sessions[0].managed);
+        assert_eq!(
+            app.world_mut()
+                .query_filtered::<Entity, With<crate::provider::Entry>>()
+                .iter(app.world())
+                .count(),
+            1
+        );
+    }
+
     #[test]
     fn catalog_tracks_session_metadata() {
         let mut app = App::new();
@@ -861,10 +930,9 @@ mod tests {
     fn catalog_applies_provider_stage_override_without_importing_the_session() {
         let mut app = App::new();
         app.add_plugins(DomainPlugin);
-        app.world_mut()
-            .resource_mut::<ProviderCatalog>()
-            .sessions
-            .push(ProviderSession {
+        let _source_fixture = ProviderFixture::new(
+            &mut app,
+            ProviderSession {
                 kind: "codex".into(),
                 sid: "provider-session".into(),
                 agent: "codex-cli".into(),
@@ -872,7 +940,8 @@ mod tests {
                 cwd: "/tmp/project".into(),
                 updated_at: 10,
                 ..Default::default()
-            });
+            },
+        );
         app.update();
 
         app.world_mut()
@@ -903,17 +972,17 @@ mod tests {
     fn provider_removal_hides_the_session_across_source_updates() {
         let mut app = App::new();
         app.add_plugins(DomainPlugin);
-        app.world_mut()
-            .resource_mut::<ProviderCatalog>()
-            .sessions
-            .push(ProviderSession {
+        let mut source_fixture = ProviderFixture::new(
+            &mut app,
+            ProviderSession {
                 kind: "acp:codex".into(),
                 sid: "provider-session".into(),
                 agent: "codex".into(),
                 name: "External task".into(),
                 updated_at: 10,
                 ..Default::default()
-            });
+            },
+        );
         app.update();
         assert_eq!(app.world().resource::<CatalogSnapshot>().sessions.len(), 1);
 
@@ -933,7 +1002,8 @@ mod tests {
                 .is_empty()
         );
 
-        app.world_mut().resource_mut::<ProviderCatalog>().sessions[0].updated_at = 20;
+        source_fixture.payload.updated_at = 20;
+        source_fixture.send(&mut app);
         app.update();
         assert!(
             app.world()
@@ -954,10 +1024,9 @@ mod tests {
         let mut app = App::new();
         app.add_plugins(DomainPlugin);
         app.update();
-        app.world_mut()
-            .resource_mut::<ProviderCatalog>()
-            .sessions
-            .push(ProviderSession {
+        let mut source_fixture = ProviderFixture::new(
+            &mut app,
+            ProviderSession {
                 kind: "acp:codex".into(),
                 sid: "provider-session".into(),
                 agent: "codex".into(),
@@ -966,7 +1035,8 @@ mod tests {
                 updated_at: 10,
                 archive: Some(ArchiveState::Archived(20)),
                 ..Default::default()
-            });
+            },
+        );
         app.world_mut()
             .resource_mut::<Messages<crate::ProviderStageChangeRequest>>()
             .write(crate::ProviderStageChangeRequest {
@@ -981,9 +1051,10 @@ mod tests {
         assert_eq!(session.stage, "in_progress");
         assert_eq!(session.archived_at, 20);
 
-        app.world_mut().resource_mut::<ProviderCatalog>().sessions[0].archive =
-            Some(ArchiveState::Active(30));
-        app.world_mut().resource_mut::<ProviderCatalog>().sessions[0].updated_at = 30;
+        source_fixture.payload.archive = Some(ArchiveState::Active(30));
+        source_fixture.send(&mut app);
+        source_fixture.payload.updated_at = 30;
+        source_fixture.send(&mut app);
         app.update();
 
         let session = &app.world().resource::<CatalogSnapshot>().sessions[0];
@@ -991,8 +1062,8 @@ mod tests {
         assert_eq!(session.archived_at, 0);
         assert!(session.stage_changed_at > 30);
 
-        app.world_mut().resource_mut::<ProviderCatalog>().sessions[0].archive =
-            Some(ArchiveState::Active(101));
+        source_fixture.payload.archive = Some(ArchiveState::Active(101));
+        source_fixture.send(&mut app);
         app.update();
 
         let session = &app.world().resource::<CatalogSnapshot>().sessions[0];
@@ -1005,10 +1076,9 @@ mod tests {
     fn provider_archive_override_is_fallback_until_native_state_catches_up() {
         let mut app = App::new();
         app.add_plugins(DomainPlugin);
-        app.world_mut()
-            .resource_mut::<ProviderCatalog>()
-            .sessions
-            .push(ProviderSession {
+        let mut source_fixture = ProviderFixture::new(
+            &mut app,
+            ProviderSession {
                 kind: "acp:codex".into(),
                 sid: "provider-session".into(),
                 agent: "codex".into(),
@@ -1016,7 +1086,8 @@ mod tests {
                 cwd: "/tmp/project".into(),
                 updated_at: 10,
                 ..Default::default()
-            });
+            },
+        );
         app.update();
 
         app.world_mut()
@@ -1035,8 +1106,8 @@ mod tests {
         assert_eq!(archived.stage, "in_progress");
 
         let native_updated_at = archived.archived_at + 1;
-        let provider = &mut app.world_mut().resource_mut::<ProviderCatalog>().sessions[0];
-        provider.archive = Some(ArchiveState::Active(native_updated_at));
+        source_fixture.payload.archive = Some(ArchiveState::Active(native_updated_at));
+        source_fixture.send(&mut app);
         app.update();
 
         let active = &app.world().resource::<CatalogSnapshot>().sessions[0];
@@ -1048,10 +1119,9 @@ mod tests {
     fn provider_activity_after_archive_returns_to_the_default_stage() {
         let mut app = App::new();
         app.add_plugins(DomainPlugin);
-        app.world_mut()
-            .resource_mut::<ProviderCatalog>()
-            .sessions
-            .push(ProviderSession {
+        let mut source_fixture = ProviderFixture::new(
+            &mut app,
+            ProviderSession {
                 kind: "acp:codex".into(),
                 sid: "provider-session".into(),
                 agent: "codex".into(),
@@ -1059,7 +1129,8 @@ mod tests {
                 cwd: "/tmp/project".into(),
                 updated_at: 10,
                 ..Default::default()
-            });
+            },
+        );
         app.update();
         app.world_mut()
             .resource_mut::<Messages<crate::ProviderStageChangeRequest>>()
@@ -1071,7 +1142,8 @@ mod tests {
             });
         app.update();
         let archived_at = app.world().resource::<CatalogSnapshot>().sessions[0].stage_changed_at;
-        app.world_mut().resource_mut::<ProviderCatalog>().sessions[0].updated_at = archived_at + 1;
+        source_fixture.payload.updated_at = archived_at + 1;
+        source_fixture.send(&mut app);
         app.update();
 
         let session = &app.world().resource::<CatalogSnapshot>().sessions[0];
@@ -1097,10 +1169,9 @@ mod tests {
     fn legacy_provider_stage_uses_transition_time_as_source_fallback() {
         let mut app = App::new();
         app.add_plugins(DomainPlugin);
-        app.world_mut()
-            .resource_mut::<ProviderCatalog>()
-            .sessions
-            .push(ProviderSession {
+        let mut source_fixture = ProviderFixture::new(
+            &mut app,
+            ProviderSession {
                 kind: "acp:codex".into(),
                 sid: "provider-session".into(),
                 agent: "codex".into(),
@@ -1108,7 +1179,8 @@ mod tests {
                 cwd: "/tmp/project".into(),
                 updated_at: 10,
                 ..Default::default()
-            });
+            },
+        );
         app.world_mut().spawn((
             ProviderStage,
             ProviderKind("acp:codex".into()),
@@ -1123,7 +1195,8 @@ mod tests {
         assert_eq!(session.stage, "done");
         assert_eq!(session.stage_changed_at, 20);
 
-        app.world_mut().resource_mut::<ProviderCatalog>().sessions[0].updated_at = 21;
+        source_fixture.payload.updated_at = 21;
+        source_fixture.send(&mut app);
         app.update();
 
         let session = &app.world().resource::<CatalogSnapshot>().sessions[0];
@@ -1135,10 +1208,9 @@ mod tests {
     fn provider_source_timestamp_remains_authoritative() {
         let mut app = App::new();
         app.add_plugins(DomainPlugin);
-        app.world_mut()
-            .resource_mut::<ProviderCatalog>()
-            .sessions
-            .push(ProviderSession {
+        let _source_fixture = ProviderFixture::new(
+            &mut app,
+            ProviderSession {
                 kind: "acp:codex".into(),
                 sid: "provider-session".into(),
                 agent: "codex".into(),
@@ -1146,7 +1218,8 @@ mod tests {
                 cwd: "/tmp/project".into(),
                 updated_at: 150,
                 ..Default::default()
-            });
+            },
+        );
         app.world_mut().spawn((
             ProviderStage,
             ProviderKind("acp:codex".into()),

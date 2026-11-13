@@ -1,5 +1,4 @@
 use bevy_app::{App, Plugin, Update};
-use bevy_ecs::message::MessageCursor;
 use bevy_ecs::prelude::*;
 use bevy_reflect::Reflect;
 pub use vmux_ecs::revision::{BaseRevision, Record, Revision};
@@ -26,7 +25,12 @@ impl Plugin for MutationPlugin {
                     .chain()
                     .in_set(crate::model::MutationSet),
             )
-            .add_systems(Update, (ApplyDeferred, receive).chain().in_set(CommitSet));
+            .add_systems(
+                Update,
+                (ApplyDeferred, receive, ApplyDeferred)
+                    .chain()
+                    .in_set(CommitSet),
+            );
     }
 }
 
@@ -90,6 +94,7 @@ pub struct Request {
     pub session: SessionId,
     pub expected: Option<Revision>,
     pub mutation: Mutation,
+    lease: Option<Entity>,
 }
 
 impl Request {
@@ -99,6 +104,20 @@ impl Request {
             session,
             expected: None,
             mutation,
+            lease: None,
+        }
+    }
+
+    pub(crate) fn leased(mut self, operation: Entity, uuid: String) -> Self {
+        self.lease = Some(operation);
+        self.operation = uuid;
+        self
+    }
+
+    fn creation(&self) -> Option<&Creation> {
+        match &self.mutation {
+            Mutation::Create(created) => Some(created),
+            _ => None,
         }
     }
 }
@@ -107,7 +126,194 @@ impl Command for Request {
     type Out = ();
 
     fn apply(self, world: &mut World) {
-        match commit(&self, world) {
+        let result = 'commit: {
+            if self.operation.trim().is_empty() {
+                break 'commit Err(Rejection::InvalidOperation);
+            }
+            let mut entity = None;
+            for (candidate, id) in world
+                .query_filtered::<(Entity, &SessionId), With<Session>>()
+                .iter(world)
+            {
+                if id != &self.session {
+                    continue;
+                }
+                if entity.replace(candidate).is_some() {
+                    break 'commit Err(Rejection::DuplicateSession);
+                }
+            }
+            let mut committed = None;
+            for (id, revision, mutation, owner) in world
+                .query_filtered::<(&Uuid, &Revision, &Mutation, &ChildOf), With<Record>>()
+                .iter(world)
+            {
+                if id.0 != self.operation {
+                    continue;
+                }
+                if entity != Some(owner.parent())
+                    || mutation != &self.mutation
+                    || committed.is_some()
+                {
+                    break 'commit Err(Rejection::OperationConflict);
+                }
+                committed = Some(*revision);
+            }
+            if let Some(revision) = committed {
+                break 'commit Ok(Committed {
+                    operation: self.operation.clone(),
+                    session: self.session.clone(),
+                    revision,
+                });
+            }
+            if let Some(operation) = self.lease {
+                let mut leases =
+                    bevy_ecs::system::SystemState::<crate::provider::ImportLeases>::new(world);
+                if world.get::<SessionId>(operation) != Some(&self.session)
+                    || !leases
+                        .get(world)
+                        .expect("import lease parameters")
+                        .active(operation)
+                {
+                    break 'commit Err(Rejection::Canceled);
+                }
+            }
+            let current = entity
+                .and_then(|entity| world.get::<Revision>(entity))
+                .copied()
+                .unwrap_or_default();
+            if let Some(expected) = self.expected
+                && expected != current
+            {
+                break 'commit Err(Rejection::Stale {
+                    expected,
+                    actual: current,
+                });
+            }
+            let Some(next) = current.next() else {
+                break 'commit Err(Rejection::RevisionExhausted);
+            };
+            let stage = match self.creation() {
+                Some(created) => Some(&created.stage),
+                None => match &self.mutation {
+                    Mutation::ChangeStage(stage) => Some(stage),
+                    _ => None,
+                },
+            };
+            if let Some(stage) = stage
+                && !world
+                    .query_filtered::<&StageId, With<StageDefinition>>()
+                    .iter(world)
+                    .any(|id| id == stage)
+            {
+                break 'commit Err(Rejection::MissingStage);
+            }
+            let entity = match (self.creation(), entity) {
+                (Some(_), Some(_)) => break 'commit Err(Rejection::SessionExists),
+                (Some(created), None) => {
+                    let mut entity = world.spawn((
+                        Session,
+                        self.session.clone(),
+                        Name::new(created.name.clone()),
+                        Description(created.description.clone()),
+                        Cwd(created.cwd.clone()),
+                        CreatedAt(created.created_at),
+                        LastActivatedAt(created.activated_at),
+                        Stage(created.stage.clone()),
+                        StageChangedAt(created.activated_at),
+                    ));
+                    if created.local {
+                        entity.insert(LocalTask);
+                    }
+                    if let Some(agent) = created.agent.clone() {
+                        entity.insert(agent);
+                    }
+                    entity.id()
+                }
+                (_, Some(entity)) => entity,
+                (_, None) => break 'commit Err(Rejection::MissingSession),
+            };
+            'change: {
+                match &self.mutation {
+                    Mutation::Create(_) => {}
+                    Mutation::Rename(name) => {
+                        world
+                            .entity_mut(entity)
+                            .insert((
+                                Name::new(name.clone()),
+                                AgentConversationTitle(name.clone()),
+                            ))
+                            .remove::<TitlePending>();
+                    }
+                    Mutation::Describe(description) => {
+                        world
+                            .entity_mut(entity)
+                            .insert(Description(description.clone()));
+                    }
+                    Mutation::Summarize { title, description } => {
+                        world
+                            .entity_mut(entity)
+                            .insert((
+                                Name::new(title.clone()),
+                                AgentConversationTitle(title.clone()),
+                                Description(description.clone()),
+                            ))
+                            .remove::<TitlePending>();
+                    }
+                    Mutation::ChangeWorkspace(cwd) => {
+                        world.entity_mut(entity).insert(Cwd(cwd.clone()));
+                    }
+                    Mutation::BindAgent { agent, cwd } => {
+                        world
+                            .entity_mut(entity)
+                            .insert((agent.clone(), Cwd(cwd.clone())));
+                    }
+                    Mutation::ChangeStage(stage) => {
+                        if world
+                            .get::<Stage>(entity)
+                            .is_some_and(|current| current.0 == *stage)
+                        {
+                            break 'change;
+                        }
+                        let previous = world
+                            .get::<StageChangedAt>(entity)
+                            .map(|at| at.0)
+                            .unwrap_or_default();
+                        world.entity_mut(entity).insert((
+                            Stage(stage.clone()),
+                            StageChangedAt(UnixMillis::now().0.max(previous.saturating_add(1))),
+                        ));
+                    }
+                    Mutation::Archive(Some(at)) => {
+                        world.entity_mut(entity).insert(ArchivedAt((*at).max(1)));
+                    }
+                    Mutation::Archive(None) => {
+                        world.entity_mut(entity).remove::<ArchivedAt>();
+                    }
+                }
+            }
+            world.entity_mut(entity).insert(next);
+            let record = Record::bundle(
+                entity,
+                Uuid(self.operation.clone()),
+                current,
+                next,
+                CreatedAt(UnixMillis::now().0),
+            )
+            .unwrap();
+            world.spawn((record, self.mutation.clone()));
+            if matches!(self.mutation, Mutation::Create(_)) {
+                world.trigger(Created {
+                    entity,
+                    id: self.session.clone(),
+                });
+            }
+            Ok(Committed {
+                operation: self.operation.clone(),
+                session: self.session.clone(),
+                revision: next,
+            })
+        };
+        match result {
             Ok(committed) => {
                 world.write_message(committed);
             }
@@ -118,177 +324,6 @@ impl Command for Request {
                     reason,
                 });
             }
-        }
-    }
-}
-
-fn commit(request: &Request, world: &mut World) -> Result<Committed, Rejection> {
-    if request.operation.trim().is_empty() {
-        return Err(Rejection::InvalidOperation);
-    }
-    let mut entity = None;
-    for (candidate, id) in world
-        .query_filtered::<(Entity, &SessionId), With<Session>>()
-        .iter(world)
-    {
-        if id != &request.session {
-            continue;
-        }
-        if entity.replace(candidate).is_some() {
-            return Err(Rejection::DuplicateSession);
-        }
-    }
-    let mut committed = None;
-    for (id, revision, mutation, owner) in world
-        .query_filtered::<(&Uuid, &Revision, &Mutation, &ChildOf), With<Record>>()
-        .iter(world)
-    {
-        if id.0 != request.operation {
-            continue;
-        }
-        if entity != Some(owner.parent()) || mutation != &request.mutation || committed.is_some() {
-            return Err(Rejection::OperationConflict);
-        }
-        committed = Some(*revision);
-    }
-    if let Some(revision) = committed {
-        return Ok(Committed {
-            operation: request.operation.clone(),
-            session: request.session.clone(),
-            revision,
-        });
-    }
-    let current = entity
-        .and_then(|entity| world.get::<Revision>(entity))
-        .copied()
-        .unwrap_or_default();
-    if let Some(expected) = request.expected
-        && expected != current
-    {
-        return Err(Rejection::Stale {
-            expected,
-            actual: current,
-        });
-    }
-    let next = current.next().ok_or(Rejection::RevisionExhausted)?;
-    let stage = match &request.mutation {
-        Mutation::Create(created) => Some(&created.stage),
-        Mutation::ChangeStage(stage) => Some(stage),
-        _ => None,
-    };
-    if let Some(stage) = stage
-        && !world
-            .query_filtered::<&StageId, With<StageDefinition>>()
-            .iter(world)
-            .any(|id| id == stage)
-    {
-        return Err(Rejection::MissingStage);
-    }
-    let entity = match (&request.mutation, entity) {
-        (Mutation::Create(_), Some(_)) => return Err(Rejection::SessionExists),
-        (Mutation::Create(created), None) => {
-            let mut entity = world.spawn((
-                Session,
-                request.session.clone(),
-                Name::new(created.name.clone()),
-                Description(created.description.clone()),
-                Cwd(created.cwd.clone()),
-                CreatedAt(created.created_at),
-                LastActivatedAt(created.activated_at),
-                Stage(created.stage.clone()),
-                StageChangedAt(created.activated_at),
-            ));
-            if created.local {
-                entity.insert(LocalTask);
-            }
-            if let Some(agent) = created.agent.clone() {
-                entity.insert(agent);
-            }
-            entity.id()
-        }
-        (_, Some(entity)) => entity,
-        (_, None) => return Err(Rejection::MissingSession),
-    };
-    change(&request.mutation, world, entity);
-    world.entity_mut(entity).insert(next);
-    let record = Record::bundle(
-        entity,
-        Uuid(request.operation.clone()),
-        current,
-        next,
-        CreatedAt(UnixMillis::now().0),
-    )
-    .unwrap();
-    world.spawn((record, request.mutation.clone()));
-    if matches!(request.mutation, Mutation::Create(_)) {
-        world.trigger(Created {
-            entity,
-            id: request.session.clone(),
-        });
-    }
-    Ok(Committed {
-        operation: request.operation.clone(),
-        session: request.session.clone(),
-        revision: next,
-    })
-}
-
-fn change(mutation: &Mutation, world: &mut World, entity: Entity) {
-    match mutation {
-        Mutation::Create(_) => {}
-        Mutation::Rename(name) => {
-            world
-                .entity_mut(entity)
-                .insert((
-                    Name::new(name.clone()),
-                    AgentConversationTitle(name.clone()),
-                ))
-                .remove::<TitlePending>();
-        }
-        Mutation::Describe(description) => {
-            world
-                .entity_mut(entity)
-                .insert(Description(description.clone()));
-        }
-        Mutation::Summarize { title, description } => {
-            world
-                .entity_mut(entity)
-                .insert((
-                    Name::new(title.clone()),
-                    AgentConversationTitle(title.clone()),
-                    Description(description.clone()),
-                ))
-                .remove::<TitlePending>();
-        }
-        Mutation::ChangeWorkspace(cwd) => {
-            world.entity_mut(entity).insert(Cwd(cwd.clone()));
-        }
-        Mutation::BindAgent { agent, cwd } => {
-            world
-                .entity_mut(entity)
-                .insert((agent.clone(), Cwd(cwd.clone())));
-        }
-        Mutation::ChangeStage(stage) => {
-            if world
-                .get::<Stage>(entity)
-                .is_some_and(|current| current.0 == *stage)
-            {
-                return;
-            }
-            let previous = world
-                .get::<StageChangedAt>(entity)
-                .map(|at| at.0)
-                .unwrap_or_default();
-            world.entity_mut(entity).insert((
-                Stage(stage.clone()),
-                StageChangedAt(UnixMillis::now().0.max(previous.saturating_add(1))),
-            ));
-        }
-        Mutation::Archive(Some(at)) => {
-            world.entity_mut(entity).insert(ArchivedAt((*at).max(1)));
-        }
-        Mutation::Archive(None) => {
-            world.entity_mut(entity).remove::<ArchivedAt>();
         }
     }
 }
@@ -309,6 +344,7 @@ pub struct Rejected {
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Rejection {
+    Canceled,
     InvalidOperation,
     OperationConflict,
     MissingSession,
@@ -322,13 +358,9 @@ pub enum Rejection {
     RevisionExhausted,
 }
 
-fn receive(world: &mut World, mut cursor: Local<MessageCursor<Request>>) {
-    let requests = cursor
-        .read(world.resource::<Messages<Request>>())
-        .cloned()
-        .collect::<Vec<_>>();
-    for request in requests {
-        Command::apply(request, world);
+fn receive(mut requests: MessageReader<Request>, mut commands: Commands) {
+    for request in requests.read() {
+        commands.queue(request.clone());
     }
 }
 
@@ -402,6 +434,7 @@ mod tests {
         ];
         for (base, mutation) in changes.into_iter().enumerate() {
             source.world_mut().write_message(Request {
+                lease: None,
                 operation: format!("operation-{base}"),
                 session: id.clone(),
                 expected: Some(Revision(base as u64)),
@@ -416,6 +449,7 @@ mod tests {
             .iter(source.world())
         {
             replay.push(Request {
+                lease: None,
                 operation: operation.0.clone(),
                 session: id.clone(),
                 expected: Some(Revision(base.0)),
@@ -455,6 +489,7 @@ mod tests {
             .spawn((Session, id.clone(), Name::new("Original")))
             .id();
         let request = Request {
+            lease: None,
             operation: "rename".into(),
             session: id.clone(),
             expected: Some(Revision(0)),
@@ -463,6 +498,7 @@ mod tests {
         app.world_mut().write_message(request.clone());
         app.update();
         app.world_mut().write_message(Request {
+            lease: None,
             operation: "describe".into(),
             session: id.clone(),
             expected: Some(Revision(1)),
@@ -471,6 +507,7 @@ mod tests {
         app.update();
         app.world_mut().write_message(request);
         app.world_mut().write_message(Request {
+            lease: None,
             operation: "stale".into(),
             session: id,
             expected: Some(Revision(0)),

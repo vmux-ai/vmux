@@ -469,6 +469,10 @@ endpoints follow actual production composition. A bounded IO helper may name an 
 adapter record only when current code references that helper and the parent proves its canonical
 endpoint; missing, stale and cyclic parent records are rejected. These links do not authorize a
 parallel normalized catalog or transcript.
+Registered systems and used query aliases may reference actually used, unchanged historical
+ECS components while their owners migrate. Exact fingerprints remain in the fixed provenance
+ledger. This does not classify plain historical models or copies introduced by another component.
+Final acceptance still requires the remaining domain debt to be removed.
 Module aliases and barrel exports resolve through their actual bindings; ambiguous declarations or
 imports fail closed. EntityEvent ownership requires a registered use, and recursion depth is separate
 from the number of shallow lookup probes. Lookup caches live only for one parsed inventory.
@@ -1802,6 +1806,43 @@ Vmux state. Resuming it creates the canonical Session entity, records its `AcpSe
 the provider replay the conversation through `session/load`. Compatibility watches exist only while
 the Sessions page or one of their imported Sessions is present, debounce into one wake, rescan only
 the changed provider, and bound untrusted history traversal.
+ACP registrations materialize transient `provider::Source` entities before a service connection is
+available. Shared agent IDs and names compose with capability and generation; source-child `Read`
+operations own wire IDs, queued requests and deadlines. The registered receiver validates the current
+target and generation before reconciling canonical `Entry` children. Failed requests retain successful
+entries, and unprobed, pending, failed or supported sources all forbid native fallback. Every ACP source
+in the family must be absent or explicitly unsupported to allow it. Removing a source or entry
+invalidates query projections. The ACP receiver keeps no parallel normalized catalog.
+Native catalogs use the same Source and Entry owner. Each bounded file task belongs to a source-child
+Read operation and carries a runtime lease and captured generation. Completion rejects removed owners
+and reconciles one source without waiting for another provider. Codex workers retain only raw ID/date
+lookup hints; missing metadata and unknown archive facts preserve the existing canonical components.
+Archive writes and database refreshes are separate source-child operations. A successful native write
+records its completion on the Source and updates matching Entry components. Catalog and archive reads
+started before that write cannot replace its archive observation; a later read may adopt newer state.
+Provider adoption runs before native activation in `provider::Prepared` and again after native IO
+completion in `provider::Ready`, so final projections observe accepted input in the same update.
+Native scan and archive refresh intents live on the Source rather than in a Runtime-owned queue.
+The public `DomainPlugin` composes the renderer-free Session model, metadata, stages, provider and
+history lifecycles; the native import adapter only publishes intent and translates opening effects.
+An `Import` operation is a Source child with the reserved SessionId, Entry target, generation and
+destination lease. Repeated family/provider-ID requests reuse that reservation and replace its
+destination. In-place opening transfers the destination lease to the Stack before creation; other
+targets open only after the matching creation record commits. Create and mutation requests carry
+the operation lease, so cancellation, removed sources, changed generations and missing destinations
+cannot materialize queued work. Imported Session metadata comes from the canonical Entry, and only
+the native adapter installs the ACP resume identifier.
+Session mutation messages queue their canonical commands through `MessageReader`; the mutation
+schedule flushes commands before and after reception so creation and lease validation complete
+within the same update. The `Request` Command entry point validates and applies the accepted
+`Mutation` directly to canonical entities.
+Native archive write revisions live in `ArchiveWritePending` on the persisted `ProviderArchive`
+entity. A global scalar allocates wire revisions; no separate pending-record registry exists.
+Repeated intents update that entity while its write is in flight. A matching completion sends
+only the latest superseding intent, or removes the pending component. Removing the archive owner
+discards its late completion. Catalog projection borrows those canonical pending facts.
+Removing a native storage Source cancels its active archive writes and acknowledges their wire
+revisions as failed. The adapter wakes the host so canonical pending state can settle promptly.
 Missing history resumes from the catalog owner's original provider ID. Cached continuations keep
 their runtime resume ID. Unsupported or failed loads report an error and keep the Session's identity.
 Empty replays preserve cached history, and failed loads release the loading state.
@@ -1815,8 +1856,37 @@ Claude and legacy chat JSONL share one record decoder and bounded file lookup. C
 uses a small read-only adapter to its installed storage SDK, retaining its chunk cache and
 watching CURRENT plus the active recovery journal. The normal app-server launcher performs
 worktree cleanup, so this adapter imports storage directly and acquires no writer lease.
+Provider reads are operations owned by the canonical Session. `vmux_session::history` accepts
+typed decoder output, validates the operation's owner, provider identity and captured event-change
+fingerprint, then assigns or updates canonical event identities. The worker retains only bounded IO
+and decoder state; it never receives a copied transcript or chooses replay overlap. Source changes
+cancel old reads and discard their file/cursor/watch continuation. Session reconciliation compares
+current canonical history, including assistant grouping, private-prompt display and equivalent tool
+arguments. Retry, local input, event edits, operation replacement and owner removal invalidate late
+results. Cursor/loading completion follows the accepted ECS commit; empty or failed reads preserve
+cached events. Read-only transcript caches are invalidated after adoption so the same frame can
+observe new events. No intermediate conversation record or independently mutable history remains
+between the provider decoder and this ingress contract.
+The public history plugin composes the private conversation owner. Its registered exclusive
+`execute` system drains each Ingress item, builds canonical query capabilities and flushes each
+mutation before the next item; payloads do not invoke another World-mutating engine. Protocol ingress runs in
+`history::Prepare`; native adoption and transcript caching run in `history::Ready`, before
+`TranscriptReadySet`. ACP read completion feeds that same frame between Prepare and Ready.
+Bounded filesystem facts include stable file identity, prefix bytes, length, whole-line cursor,
+and absolute yielded-line/subrecord positions. A persisted `FileHistory` child of the Session,
+qualified by shared provider components, advances generation on replacement or truncation and
+retains it for append. Its state advances only after accepted event materialization. IO cursor reuse
+validates the accepted raw file identity, prefix and length, so a larger replacement cannot skip
+its beginning with an older cursor. `NativeAlias`
+children distinguish external IDs from generation/byte/subrecord file positions; decoder
+subrecords are separate from Assistant block slots. Identified tails use these exact aliases;
+anonymous overlap remains a bounded, ordered fallback for sources without position facts.
+
 Native mutable history entries retain their IDs and update existing events without duplicating
-unchanged entries. ACP tool kind survives replay and updates; names are fallback classification.
+unchanged entries. A grouped native entry may span several canonical Assistant events. Partial
+shrink removes only its unshared imported block slots and remaps aliases; committed operations
+retain their content. Detached slots can grow back under the original event identities. Fully
+retired events keep identities for reactivation while transcript and tail projections exclude them. ACP tool kind survives replay and updates; names are fallback classification.
 ACP sessions withhold startup snapshots until history replay finishes. Compatibility readers leave
 their loading state to the ACP protocol; they read and complete only their own provider-store tasks.
 History loading starts and finishes publish a fresh chat snapshot independently of message

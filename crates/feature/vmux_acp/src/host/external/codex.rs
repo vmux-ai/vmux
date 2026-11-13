@@ -8,7 +8,7 @@ use chrono::{Datelike, Duration, Utc};
 use rusqlite::{Connection, OpenFlags};
 use serde::Deserialize;
 use vmux_api::session::{AgentAttachment, AssistantBlock, Message};
-use vmux_session::{ArchiveState, ProviderSession};
+use vmux_session::{ArchiveState, ProviderSession, SourceUpdatedAt};
 
 use super::{
     BoundedLines, PromptText, Reader as ProviderReader, Timestamp,
@@ -19,7 +19,7 @@ pub(super) struct Reader {
     root: PathBuf,
     index: PathBuf,
     sessions: PathBuf,
-    previous: HashMap<String, ProviderSession>,
+    hints: HashMap<String, i64>,
 }
 
 impl Reader {
@@ -31,13 +31,13 @@ impl Reader {
             root: root.to_path_buf(),
             index: root.join("session_index.jsonl"),
             sessions: root.join("sessions"),
-            previous: HashMap::new(),
+            hints: HashMap::new(),
         }
     }
 
-    pub(super) fn with_previous(mut self, sessions: &[ProviderSession]) -> Self {
-        for session in sessions {
-            self.previous.insert(session.sid.clone(), session.clone());
+    pub(super) fn with_hints(mut self, hints: Vec<(String, i64)>) -> Self {
+        for (id, created_at) in hints {
+            self.hints.insert(id, created_at);
         }
         self
     }
@@ -47,25 +47,27 @@ impl Reader {
         sid: &str,
         created_at: i64,
         cursor: Option<u64>,
+        known: Option<&vmux_session::history::FileFacts>,
     ) -> Result<ReadResult, String> {
         let Some(path) = self.rollout(sid, created_at)? else {
             return Ok(ReadResult {
                 path: None,
-                messages: Vec::new(),
+                history: vmux_session::history::Received::messages(Vec::new(), cursor.is_none()),
+                watch_paths: Vec::new(),
                 cursor: cursor.unwrap_or_default(),
-                tail: cursor.is_none(),
                 complete: true,
             });
         };
-        Self::conversation_file(&path, cursor, FileConversation::TAIL_BYTES)
+        Self::conversation_file(&path, cursor, known, FileConversation::TAIL_BYTES)
     }
 
     pub(super) fn conversation_file(
         path: &Path,
         cursor: Option<u64>,
+        known: Option<&vmux_session::history::FileFacts>,
         tail_bytes: u64,
     ) -> Result<ReadResult, String> {
-        FileConversation::read(path, cursor, tail_bytes, CodexConversationDecoder)
+        FileConversation::read(path, cursor, known, tail_bytes, CodexConversationDecoder)
     }
 
     pub(super) fn archives(&self) -> Result<Option<HashMap<String, ArchiveState>>, String> {
@@ -304,17 +306,14 @@ impl Reader {
         let mut missing = indexed.keys().cloned().collect::<HashSet<_>>();
         let cached_rollouts = self.cached_rollouts(indexed)?;
         for id in indexed.keys() {
-            let Some(previous) = self.previous.get(id) else {
-                continue;
-            };
             let Some(updated_at) = cached_rollouts.get(id) else {
                 continue;
             };
             metadata.insert(
                 id.clone(),
                 CodexMeta {
-                    cwd: previous.cwd.clone(),
-                    created_at: previous.created_at,
+                    cwd: String::new(),
+                    created_at: 0,
                     updated_at: *updated_at,
                 },
             );
@@ -404,11 +403,10 @@ impl Reader {
         let mut directories = HashMap::<PathBuf, HashSet<String>>::new();
         let mut unresolved = HashSet::new();
         for id in indexed.keys() {
-            let Some(previous) = self.previous.get(id) else {
+            let Some(created_at) = self.hints.get(id) else {
                 continue;
             };
-            let Some(created_at) =
-                chrono::DateTime::<Utc>::from_timestamp_millis(previous.created_at)
+            let Some(created_at) = chrono::DateTime::<Utc>::from_timestamp_millis(*created_at)
             else {
                 continue;
             };
@@ -499,8 +497,7 @@ impl ProviderReader for Reader {
             };
             let archive = archives
                 .as_ref()
-                .and_then(|archives| archives.get(&id).copied())
-                .or_else(|| self.previous.get(&id).and_then(|session| session.archive));
+                .and_then(|archives| archives.get(&id).copied());
             sessions.push(ProviderSession {
                 kind: "acp:codex".to_string(),
                 sid: id,
@@ -544,20 +541,12 @@ impl RolloutActivity {
         Some(Self { sid, updated_at })
     }
 
-    pub(super) fn refresh(&self, sessions: &mut [ProviderSession]) -> bool {
-        let Some(session) = sessions.iter_mut().find(|session| session.sid == self.sid) else {
-            return false;
-        };
-        session.updated_at = session.updated_at.max(self.updated_at);
-        true
-    }
-
     pub(super) fn sid(&self) -> &str {
         &self.sid
     }
 
-    pub(super) fn updated_at(&self) -> i64 {
-        self.updated_at
+    pub(super) fn updated_at(&self) -> SourceUpdatedAt {
+        SourceUpdatedAt(self.updated_at)
     }
 }
 
@@ -926,6 +915,52 @@ mod tests {
     }
 
     #[test]
+    fn accepted_file_identity_preserves_append_cursor_and_restarts_replacement_reads() {
+        let fixture = tempfile::tempdir().unwrap();
+        let path = fixture.path().join("history.jsonl");
+        let original = r#"{"type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"original"}]}}
+"#;
+        std::fs::write(&path, original).unwrap();
+        let initial = Reader::conversation_file(&path, None, None, 4096).unwrap();
+        let known = initial.history.file.as_ref().unwrap();
+        let appended = r#"{"type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"appended"}]}}
+"#;
+        std::fs::write(&path, format!("{original}{appended}")).unwrap();
+        let updated =
+            Reader::conversation_file(&path, Some(initial.cursor), Some(known), 4096).unwrap();
+        assert_eq!(updated.messages(), [Message::user("appended")]);
+        let replacement = r#"{"type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"replacement beginning"}]}}
+{"type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"replacement ending"}]}}
+"#;
+        let temporary = fixture.path().join("replacement.jsonl");
+        std::fs::write(&temporary, replacement).unwrap();
+        std::fs::rename(&temporary, &path).unwrap();
+        let replaced = Reader::conversation_file(
+            &path,
+            Some(updated.cursor),
+            updated.history.file.as_ref(),
+            4096,
+        )
+        .unwrap();
+        assert_eq!(
+            replaced.messages(),
+            [
+                Message::user("replacement beginning"),
+                Message::user("replacement ending")
+            ]
+        );
+        std::fs::write(&path, appended).unwrap();
+        let truncated = Reader::conversation_file(
+            &path,
+            Some(replaced.cursor),
+            replaced.history.file.as_ref(),
+            4096,
+        )
+        .unwrap();
+        assert_eq!(truncated.messages(), [Message::user("appended")]);
+    }
+
+    #[test]
     fn codex_reader_joins_the_index_to_rollout_metadata() {
         let fixture = Fixture::new();
         fixture.write(
@@ -974,7 +1009,12 @@ mod tests {
 
         fixture.archive(sid, false, None, 1_760_806_100);
         let active = Reader::at(fixture.path())
-            .with_previous(&archived)
+            .with_hints(
+                archived
+                    .iter()
+                    .map(|entry| (entry.sid.clone(), entry.created_at))
+                    .collect(),
+            )
             .read()
             .unwrap();
 
@@ -1019,9 +1059,14 @@ mod tests {
         );
 
         let messages = Reader::at(fixture.path())
-            .conversation(sid, Timestamp::parse("2026-10-18T16:16:34.454Z"), None)
+            .conversation(
+                sid,
+                Timestamp::parse("2026-10-18T16:16:34.454Z"),
+                None,
+                None,
+            )
             .unwrap()
-            .messages;
+            .messages();
 
         assert_eq!(
             messages,
@@ -1204,11 +1249,17 @@ mod tests {
             ),
         );
 
-        let read = Reader::conversation_file(&fixture.path().join(path), None, 180).unwrap();
+        let read = Reader::conversation_file(&fixture.path().join(path), None, None, 180).unwrap();
 
-        assert!(read.tail);
+        assert!(read.history.tail);
+        let source = std::fs::read_to_string(fixture.path().join(path)).unwrap();
+        let latest_offset = source.rfind(r#"{"type":"response_item""#).unwrap() as u64;
         assert_eq!(
-            read.messages,
+            read.history.file.as_ref().unwrap().positions,
+            [(latest_offset, 0)]
+        );
+        assert_eq!(
+            read.messages(),
             vec![Message::Assistant {
                 blocks: vec![AssistantBlock::Text("latest".into())],
             }]
@@ -1224,17 +1275,17 @@ mod tests {
         let second = r#"{"type":"response_item","payload":{"type":"message","role":"assistant","content":[{"type":"output_text","text":"second"}]}}"#;
         std::fs::write(&path, format!("{first}\n{}", &second[..second.len() / 2])).unwrap();
 
-        let initial = Reader::conversation_file(&path, None, 1024).unwrap();
+        let initial = Reader::conversation_file(&path, None, None, 1024).unwrap();
 
-        assert_eq!(initial.messages, vec![Message::user("first")]);
+        assert_eq!(initial.messages(), vec![Message::user("first")]);
         assert_eq!(initial.cursor, first.len() as u64 + 1);
         std::fs::write(&path, format!("{first}\n{second}\n")).unwrap();
 
-        let appended = Reader::conversation_file(&path, Some(initial.cursor), 1024).unwrap();
+        let appended = Reader::conversation_file(&path, Some(initial.cursor), None, 1024).unwrap();
 
-        assert!(!appended.tail);
+        assert!(!appended.history.tail);
         assert_eq!(
-            appended.messages,
+            appended.messages(),
             vec![Message::Assistant {
                 blocks: vec![AssistantBlock::Text("second".into())],
             }]
@@ -1249,7 +1300,7 @@ mod tests {
         std::fs::create_dir_all(path.parent().unwrap()).unwrap();
         let initial = r#"{"type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"initial"}]}}"#;
         std::fs::write(&path, format!("{initial}\n")).unwrap();
-        let initial = Reader::conversation_file(&path, None, 1024).unwrap();
+        let initial = Reader::conversation_file(&path, None, None, 1024).unwrap();
         let mut content = std::fs::read_to_string(&path).unwrap();
         for index in 0..513 {
             content.push_str(&format!(
@@ -1258,14 +1309,51 @@ mod tests {
         }
         std::fs::write(&path, content).unwrap();
 
-        let first = Reader::conversation_file(&path, Some(initial.cursor), 1024).unwrap();
-        let second = Reader::conversation_file(&path, Some(first.cursor), 1024).unwrap();
+        let first = Reader::conversation_file(&path, Some(initial.cursor), None, 1024).unwrap();
+        let second = Reader::conversation_file(&path, Some(first.cursor), None, 1024).unwrap();
 
-        assert_eq!(first.messages.len(), FileConversation::TAIL_MESSAGES);
+        assert_eq!(first.messages().len(), FileConversation::TAIL_MESSAGES);
         assert!(!first.complete);
-        assert_eq!(second.messages, vec![Message::user("512")]);
+        assert_eq!(second.messages(), vec![Message::user("512")]);
         assert!(second.complete);
         assert_eq!(second.cursor, std::fs::metadata(path).unwrap().len());
+    }
+
+    #[test]
+    fn codex_file_facts_report_real_offsets_after_invalid_records_and_keep_append_identity() {
+        let fixture = Fixture::new();
+        let path = fixture.path().join("sessions/facts.jsonl");
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        let first = r#"{"type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"first"}]}}"#;
+        let second = r#"{"type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"second"}]}}"#;
+        let mut bytes = vec![b'x'; super::super::PROVIDER_LINE_LIMIT];
+        bytes.extend_from_slice(b"\n\xff\n");
+        let first_offset = bytes.len() as u64;
+        bytes.extend_from_slice(first.as_bytes());
+        bytes.push(b'\n');
+        let second_offset = bytes.len() as u64;
+        bytes.extend_from_slice(second.as_bytes());
+        bytes.push(b'\n');
+        std::fs::write(&path, &bytes).unwrap();
+        let initial = Reader::conversation_file(&path, Some(0), None, 1024).unwrap();
+        assert_eq!(
+            initial.messages(),
+            [Message::user("first"), Message::user("second")]
+        );
+        let facts = initial.history.file.as_ref().unwrap();
+        assert_eq!(facts.positions, [(first_offset, 0), (second_offset, 0)]);
+        assert_eq!(facts.cursor, bytes.len() as u64);
+        let identity = facts.identity.clone();
+        let next_offset = bytes.len() as u64;
+        bytes.extend_from_slice(second.as_bytes());
+        bytes.push(b'\n');
+        std::fs::write(&path, &bytes).unwrap();
+        let next = Reader::conversation_file(&path, Some(initial.cursor), None, 1024).unwrap();
+        let facts = next.history.file.as_ref().unwrap();
+        assert_eq!(facts.identity, identity);
+        assert_eq!(facts.positions, [(next_offset, 0)]);
+        assert_eq!(next.messages(), [Message::user("second")]);
+        assert_eq!(facts.cursor, bytes.len() as u64);
     }
 
     #[test]
@@ -1289,7 +1377,7 @@ mod tests {
     }
 
     #[test]
-    fn codex_reader_reuses_known_metadata_when_rollout_still_exists() {
+    fn codex_reader_uses_lookup_hints_when_rollout_still_exists() {
         let fixture = Fixture::new();
         fixture.write(
             "session_index.jsonl",
@@ -1308,12 +1396,11 @@ mod tests {
         };
 
         let sessions = Reader::at(fixture.path())
-            .with_previous(&[previous])
+            .with_hints(vec![(previous.sid, previous.created_at)])
             .read()
             .unwrap();
 
         assert_eq!(sessions.len(), 1);
-        assert_eq!(sessions[0].cwd, "/work/vmux");
         assert_eq!(sessions[0].name, "Updated title");
     }
 
@@ -1333,7 +1420,7 @@ mod tests {
         };
 
         let sessions = Reader::at(fixture.path())
-            .with_previous(&[previous])
+            .with_hints(vec![(previous.sid, previous.created_at)])
             .read()
             .unwrap();
 
@@ -1361,7 +1448,9 @@ mod tests {
             ..Default::default()
         };
 
-        let result = Reader::at(fixture.path()).with_previous(&[previous]).read();
+        let result = Reader::at(fixture.path())
+            .with_hints(vec![(previous.sid, previous.created_at)])
+            .read();
 
         assert!(result.is_err());
     }
