@@ -1821,8 +1821,10 @@ Registered systems expand targets, reject cycles before side effects, inspect de
 and enqueue the exact Docker operation. The socket adapter executes that approved intent and
 returns observations to ECS before readiness decisions. Query views and temporary order indexes
 derive from those canonical entities; the runtime drops its whole world after `Completion`.
-The shared operation deadline bounds dependency waits and failed services do not stop independent
-targets. `BookmarkDefaults` materializes only URL/folder defaults from settings ingress, so bookmark
+The shared operation deadline bounds dependency waits and failed services do not stop independent targets.
+Temporary Docker read failures remain pending within that deadline. A lost Start acknowledgement
+is retried because Docker Start is idempotent and an already-running response is accepted.
+`BookmarkDefaults` materializes only URL/folder defaults from settings ingress, so bookmark
 seeding reads its canonical global configuration without consuming the settings project's registry.
 Pending controls show a spinner and Starting/Stopping/Restarting instead of an inactive play icon.
 Single and group startup expand the selection with dependencies in the same Compose project,
