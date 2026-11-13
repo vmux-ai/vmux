@@ -441,6 +441,86 @@ fn test_only_expressions_and_nested_items_do_not_prove_production_ownership() {
 }
 
 #[test]
+fn owned_constants_resolve_their_qualified_declarations() {
+    let inventory = Inventory::fixture(
+        "mod one { pub const LIMIT: usize = 1; } mod two { pub const LIMIT: usize = 2; } #[derive(Component)] struct State; impl State { fn limit(&self) -> usize { one::LIMIT } } fn read(states: Query<&State>) {} struct Root; impl Plugin for Root { fn build(&self, app: &mut App) { app.add_systems(Update, read); } }",
+    );
+    let mut policy = Policy::default();
+    policy.values.push(ValueOwner {
+        key: inventory.key("one|const:LIMIT"),
+        owner: inventory.key("struct:State"),
+        lifetime: "one canonical capability lookup".into(),
+    });
+    assert!(inventory.canonical(
+        &inventory.entries[&policy.values[0].key],
+        &policy,
+        &mut BTreeSet::new()
+    ));
+    policy.values[0].key = inventory.key("two|const:LIMIT");
+    assert!(!inventory.canonical(
+        &inventory.entries[&policy.values[0].key],
+        &policy,
+        &mut BTreeSet::new()
+    ));
+}
+
+#[test]
+fn plugin_values_exclude_attributed_tuple_members_and_follow_only_struct_constructors() {
+    for (value, expected) in [
+        ("(#[cfg(test)] Child, Empty)", false),
+        ("(#[cfg_attr(not(test),cfg(test))] Child, Empty)", false),
+        ("Child { marker: PhantomData::<Empty> }", true),
+        ("Empty { marker: PhantomData::<Child> }", false),
+    ] {
+        let source = format!(
+            "#[derive(Message)] struct Received; struct Child; impl Plugin for Child {{ fn build(&self, app: &mut App) {{ app.add_message::<Received>(); }} }} struct Empty; impl Plugin for Empty {{ fn build(&self, app: &mut App) {{}} }} struct Root; impl Plugin for Root {{ fn build(&self, app: &mut App) {{ app.add_plugins({value}); }} }}"
+        );
+        let inventory = Inventory::fixture(&source);
+        let mut boundary = Boundary::fixture(&inventory, "struct:Root");
+        boundary.input = format!("ECS: {}", inventory.key("struct:Received"));
+        boundary.output = "external: installed production graph".into();
+        assert_eq!(boundary.references(&inventory), expected, "{value}");
+    }
+}
+
+#[test]
+fn imported_system_aliases_retain_exclusive_constructor_usage() {
+    let inventory = Inventory::fixture(
+        "use bevy_ecs::system::SystemState; use self::read as run; #[derive(Component)] struct State; #[derive(SystemParam)] struct Params { states: Query<&State> } fn read(world: &mut World) { let mut state = SystemState::<Params>::new(world); state.get_mut(world); } struct Root; impl Plugin for Root { fn build(&self, app: &mut App) { app.add_systems(Update, run); } }",
+    );
+    assert!(inventory.canonical(
+        &inventory.entries[&inventory.key("struct:State")],
+        &Policy::default(),
+        &mut BTreeSet::new()
+    ));
+    let inventory = Inventory::fixture(
+        "use bevy_ecs::system::SystemState; #[derive(Component)] struct State; #[derive(SystemParam)] struct Params { states: Query<&State> } fn read(world: &mut World) { let mut state = SystemState::<Params>::new(world); state.get_mut(world); }",
+    );
+    assert!(!inventory.canonical(
+        &inventory.entries[&inventory.key("struct:State")],
+        &Policy::default(),
+        &mut BTreeSet::new()
+    ));
+}
+
+#[test]
+fn possible_test_attributes_do_not_exempt_production_functions() {
+    let inventory =
+        Inventory::fixture("#[cfg_attr(feature = \"debug\", test)] fn unregistered() {}");
+    assert!(!inventory.canonical(
+        &inventory.entries[&inventory.key("fn:unregistered")],
+        &Policy::default(),
+        &mut BTreeSet::new()
+    ));
+    let inventory = Inventory::fixture("#[test] fn unit_test() {}");
+    assert!(inventory.canonical(
+        &inventory.entries[&inventory.key("fn:unit_test")],
+        &Policy::default(),
+        &mut BTreeSet::new()
+    ));
+}
+
+#[test]
 fn test_only_local_initializers_and_match_arms_do_not_compose_plugins() {
     for attribute in ["#[cfg(test)]", "#[cfg_attr(not(test), cfg(test))]"] {
         for body in [
@@ -2042,8 +2122,11 @@ impl Inventory {
             }
         }
         for usage in self.usage.values() {
-            for (namespace, state, reference) in &usage.states {
-                if self.system_state(namespace, state, &mut BTreeSet::new())
+            for (function, namespace, state, reference) in &usage.states {
+                if self
+                    .resolve_function(function, &mut BTreeSet::new())
+                    .is_some_and(|entry| registered.contains(&entry.key))
+                    && self.system_state(namespace, state, &mut BTreeSet::new())
                     && let Some(entry) = self.resolve(namespace, reference, &mut BTreeSet::new())
                 {
                     keys.insert(entry.key.clone());
@@ -2392,7 +2475,7 @@ impl Imports {
 }
 
 impl Declarations<'_> {
-    fn metadata(attributes: &[Attribute]) -> Vec<syn::Meta> {
+    fn metadata(attributes: &[Attribute], possible: bool) -> Vec<syn::Meta> {
         let mut pending = Vec::new();
         for attribute in attributes {
             pending.push(attribute.meta.clone());
@@ -2416,7 +2499,9 @@ impl Declarations<'_> {
             let Ok(expression) = syn::parse2::<syn::Expr>(condition.to_token_stream()) else {
                 continue;
             };
-            if !Configuration(&expression).production() {
+            if possible && !Configuration(&expression).production()
+                || !possible && Configuration(&expression).definite() != Some(true)
+            {
                 continue;
             }
             for nested in items.into_iter().skip(1) {
@@ -2521,11 +2606,10 @@ impl Declarations<'_> {
         let mut ecs = false;
         let mut parameter = false;
         let mut contract_paths = BTreeSet::new();
-        let mut test = false;
-        for attr in Self::metadata(attrs) {
-            if attr.path().is_ident("test") {
-                test = true;
-            }
+        let test = Self::metadata(attrs, false)
+            .iter()
+            .any(|attr| attr.path().is_ident("test"));
+        for attr in Self::metadata(attrs, true) {
             let mut attribute = Vec::new();
             for segment in &attr.path().segments {
                 attribute.push(segment.ident.unraw().to_string());
@@ -2611,7 +2695,10 @@ impl Declarations<'_> {
             dynamic: references.dynamic,
             opaque: references.opaque,
         };
-        if matches!(kind, Kind::Struct | Kind::Enum | Kind::Alias | Kind::Trait) {
+        if matches!(
+            kind,
+            Kind::Struct | Kind::Enum | Kind::Alias | Kind::Trait | Kind::Const
+        ) {
             self.inventory.roots.insert(
                 declaration
                     .namespace
@@ -2625,11 +2712,13 @@ impl Declarations<'_> {
                 .entry(format!("{}::{}", declaration.namespace, declaration.name))
                 .or_default()
                 .push(key.clone());
-            self.inventory
-                .names
-                .entry(declaration.name.clone())
-                .or_default()
-                .push(key.clone());
+            if !matches!(kind, Kind::Const) {
+                self.inventory
+                    .names
+                    .entry(declaration.name.clone())
+                    .or_default()
+                    .push(key.clone());
+            }
         }
         if matches!(kind, Kind::Function) {
             self.inventory
@@ -2933,6 +3022,9 @@ impl<'ast> Visit<'ast> for References {
 
 impl References {
     fn plugin_values(&mut self, value: &syn::Expr) {
+        if !self.include_tests && Usage::test_only(Usage::expression_attributes(value)) {
+            return;
+        }
         match value {
             syn::Expr::Path(value) if value.qself.is_none() => {
                 let mut parts = Vec::new();
@@ -2945,6 +3037,13 @@ impl References {
                 for value in &value.elems {
                     self.plugin_values(value);
                 }
+            }
+            syn::Expr::Struct(value) => {
+                let mut parts = Vec::new();
+                for segment in &value.path.segments {
+                    parts.push(segment.ident.unraw().to_string());
+                }
+                self.plugins.insert(parts.join("::"));
             }
             syn::Expr::Call(value) => self.plugin_values(&value.func),
             syn::Expr::MethodCall(value) => self.plugin_values(&value.receiver),
@@ -2963,7 +3062,8 @@ struct Usage {
     testing: bool,
     plugin: bool,
     registration: bool,
-    states: BTreeSet<(String, String, String)>,
+    states: BTreeSet<(String, String, String, String)>,
+    function: Option<String>,
     namespace: String,
     references: BTreeSet<(String, String)>,
 }
@@ -3191,6 +3291,9 @@ impl<'ast> Visit<'ast> for Usage {
     }
 
     fn visit_item_fn(&mut self, function: &'ast syn::ItemFn) {
+        let previous_function = self
+            .function
+            .replace(format!("{}::{}", self.namespace, function.sig.ident));
         let previous = self.active;
         let previous_registration = self.registration;
         self.registration = !self.testing && function.sig.ident == "main";
@@ -3208,6 +3311,7 @@ impl<'ast> Visit<'ast> for Usage {
             }
         }
         visit::visit_item_fn(self, function);
+        self.function = previous_function;
         self.active = previous;
         self.registration = previous_registration;
     }
@@ -3301,8 +3405,8 @@ impl<'ast> Visit<'ast> for Usage {
     }
 
     fn visit_expr_call(&mut self, value: &'ast syn::ExprCall) {
-        if self.active
-            && !self.testing
+        if !self.testing
+            && self.function.is_some()
             && let syn::Expr::Path(function) = value.func.as_ref()
             && function
                 .path
@@ -3321,8 +3425,12 @@ impl<'ast> Visit<'ast> for Usage {
                         }
                     }
                     for reference in references.paths {
-                        self.states
-                            .insert((self.namespace.clone(), state.join("::"), reference));
+                        self.states.insert((
+                            self.function.as_ref().unwrap().clone(),
+                            self.namespace.clone(),
+                            state.join("::"),
+                            reference,
+                        ));
                     }
                 }
             }
