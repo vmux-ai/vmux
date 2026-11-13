@@ -8,7 +8,7 @@ build = "../../build_cfg_git.rs"
 
 [features]
 default = []
-contracts = ["dep:percent-encoding", "dep:rkyv", "dep:serde_json", "dep:vmux_api", "vmux_ecs/contracts"]
+contracts = ["dep:percent-encoding", "dep:rkyv", "dep:serde_json", "dep:vmux_api", "dep:vmux_project", "vmux_ecs/contracts"]
 geometry = ["dep:vmux_flex", "dep:bevy_transform"]
 store = ["vmux_ecs/store", "dep:moonshine-save"]
 host = [
@@ -16,7 +16,7 @@ host = [
     "dep:vmux_page", "dep:vmux_path", "dep:vmux_ui", "dep:vmux_session", "dep:vmux_git",
     "dep:bevy", "dep:bevy_asset", "dep:bevy_cef", "dep:bevy_cef_core", "dep:libc",
     "dep:raw-window-handle", "dep:rfd", "dep:ron", "dep:sha2", "dep:uuid",
-    "dep:vmux_command", "dep:vmux_history", "dep:vmux_input", "dep:vmux_tool", "dep:vmux_project",
+    "dep:vmux_command", "dep:vmux_history", "dep:vmux_input", "dep:vmux_tool",
     "dep:dioxus", "dep:qrcode",
 ]
 debug = ["host"]

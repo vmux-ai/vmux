@@ -763,7 +763,8 @@ set of crates.io packages. Publishing remains a separate release action.
 `vmux_app` is the composition entry point. Its optional `ecs`, `project`, `flex`, `layout`, and
 `extension` namespaces re-export their existing public types without wrappers. `contracts`
 enables shared wire values and the contracts of selected Project/Layout features; it does not
-install a renderer. Schema macros continue to name their owning crates. Core, jobs, Project,
+install a renderer. Layout wire contracts enable Project contracts for typed project IDs without
+enabling native or renderer adapters. Schema macros continue to name their owning crates. Core, jobs, Project,
 flex geometry, layout topology, and Extension catalog/operations are validated without Profile,
 CEF, Winit, or product UI. `extension-core` exposes the Extension namespace independently;
 `extension` composes its native browser/layout adapters explicitly.
