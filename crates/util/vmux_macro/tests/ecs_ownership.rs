@@ -239,6 +239,19 @@ fn module_directory_exports_keep_their_logical_namespace() {
 }
 
 #[test]
+fn inline_module_path_overrides_block_unproven_descendant_exports() {
+    let mut inventory = Inventory::default();
+    inventory.source("crates/sample/src/lib.rs", "#[path=\"alternate\"] mod facade { mod inner; pub use inner::*; } use facade::*; #[derive(Message)] struct Completed { result:std::result::Result<u64,String> } struct Root; impl Plugin for Root { fn build(&self, app: &mut App) { app.add_message::<Completed>(); } }");
+    inventory.source(
+        "crates/sample/src/alternate/inner.rs",
+        "pub mod std { pub mod result { pub struct Result<T,E> { value:T,error:E } } }",
+    );
+    inventory.resolve_usage();
+    let entry = &inventory.entries[&inventory.key("struct:Completed")];
+    assert!(!inventory.canonical(entry, &Policy::default(), &mut BTreeSet::new()));
+}
+
+#[test]
 fn ui_projection_inputs_require_a_rendering_or_transport_boundary() {
     let mut inventory = Inventory::default();
     inventory.source(
@@ -1696,11 +1709,10 @@ impl<'ast> Visit<'ast> for Declarations<'_> {
                 return;
             }
             Item::Mod(value) => {
-                if value.content.is_none()
-                    && value
-                        .attrs
-                        .iter()
-                        .any(|attribute| Self::path_override(&attribute.meta))
+                if value
+                    .attrs
+                    .iter()
+                    .any(|attribute| Self::path_override(&attribute.meta))
                 {
                     self.inventory
                         .imports
