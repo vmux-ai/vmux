@@ -328,6 +328,27 @@ fn trait_adapter_contracts_follow_the_same_owner_and_module() {
 }
 
 #[test]
+fn qualified_impl_owners_cannot_borrow_another_types_boundary_endpoint() {
+    for source in [
+        "#[vmux_api::ui_event] struct Received { bytes:Vec<u8> } mod one { pub struct Codec; } mod two { pub struct Codec; } impl Drop for one::Codec { fn drop(&mut self) {} } impl two::Codec { fn decode(self) -> Received { Received { bytes:vec![] } } }",
+        "#[vmux_api::ui_event] struct Received { bytes:Vec<u8> } mod one { pub struct Codec; } mod two { pub struct Codec; } use two::Codec as Other; impl Drop for one::Codec { fn drop(&mut self) {} } impl Other { fn decode(self) -> Received { Received { bytes:vec![] } } }",
+    ] {
+        let inventory = Inventory::fixture(source);
+        let mut boundary = Boundary::fixture(&inventory, "impl:Drop for one :: Codec");
+        boundary.input = "external: byte buffer".into();
+        boundary.output = format!("ECS: {}", inventory.key("struct:Received"));
+        assert!(!boundary.references(&inventory));
+    }
+    let inventory = Inventory::fixture(
+        "#[vmux_api::ui_event] struct Received { bytes:Vec<u8> } mod one { pub struct Codec; } use one::Codec as Same; impl Drop for one::Codec { fn drop(&mut self) {} } impl Same { fn decode(self) -> Received { Received { bytes:vec![] } } }",
+    );
+    let mut boundary = Boundary::fixture(&inventory, "impl:Drop for one :: Codec");
+    boundary.input = "external: byte buffer".into();
+    boundary.output = format!("ECS: {}", inventory.key("struct:Received"));
+    assert!(boundary.references(&inventory));
+}
+
+#[test]
 fn path_overridden_module_exports_cannot_establish_standard_type_bindings() {
     for attribute in [
         "#[path=\"implementation.rs\"]",
@@ -742,11 +763,22 @@ impl Boundary {
                     return false;
                 };
                 let mut connected = adapter.references.contains(&entry.name);
+                let owner = match &adapter.owner {
+                    Some(owner) => {
+                        inventory.resolve(&adapter.namespace, owner, &mut BTreeSet::new())
+                    }
+                    None => Some(adapter),
+                };
                 for implementation in inventory.entries.values() {
-                    if implementation.path == adapter.path
-                        && implementation.namespace == adapter.namespace
-                        && implementation.owner.as_deref()
-                            == Some(adapter.owner.as_deref().unwrap_or(adapter.name.as_str()))
+                    let Some(path) = &implementation.owner else {
+                        continue;
+                    };
+                    let Some(implementation_owner) =
+                        inventory.resolve(&implementation.namespace, path, &mut BTreeSet::new())
+                    else {
+                        continue;
+                    };
+                    if owner.is_some_and(|owner| owner.key == implementation_owner.key)
                         && implementation.references.contains(&entry.name)
                     {
                         connected = true;
@@ -1921,8 +1953,12 @@ impl<'ast> Visit<'ast> for Declarations<'_> {
                     None => owner.clone(),
                 };
                 let owner = match value.self_ty.as_ref() {
-                    Type::Path(path) => {
-                        path.path.segments.last().map(|part| part.ident.to_string())
+                    Type::Path(path) if path.qself.is_none() => {
+                        let mut segments = Vec::with_capacity(path.path.segments.len());
+                        for segment in &path.path.segments {
+                            segments.push(segment.ident.unraw().to_string());
+                        }
+                        Some(segments.join("::"))
                     }
                     _ => None,
                 };

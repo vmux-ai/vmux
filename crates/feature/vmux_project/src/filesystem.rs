@@ -389,6 +389,9 @@ fn start(
                     "project write canceled before IO".into(),
                 )),
             });
+            if let Some(wake) = wake.as_deref() {
+                wake.0.wake_by_ref();
+            }
             commands.entity(entity).despawn();
             continue;
         };
@@ -693,11 +696,16 @@ mod tests {
                 .single(store.app.world())
                 .is_ok()
         );
+        let counter = Arc::new(WakeCounter(AtomicUsize::new(0)));
+        store
+            .app
+            .insert_resource(WakeCounter::host(counter.clone()));
         store.app.world_mut().trigger(vmux_ecs::OperationCompleted {
             entity: operation,
             result: Err("canceled before IO".into()),
         });
         let completed = store.complete(1);
+        assert!(counter.0.load(Ordering::SeqCst) > 0);
         signal.release();
         assert!(completed[0].result.is_err());
         let deadline = std::time::Instant::now() + std::time::Duration::from_secs(3);
