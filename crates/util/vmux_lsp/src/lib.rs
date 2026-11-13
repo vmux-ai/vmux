@@ -236,7 +236,20 @@ impl<'a> Capabilities<'a> {
                 Some(_) => true,
                 None => false,
             },
-            "textDocument/semanticTokens/full" => caps.semantic_tokens_provider.is_some(),
+            "textDocument/semanticTokens/full" => {
+                let full = match &caps.semantic_tokens_provider {
+                    Some(lsp_types::SemanticTokensServerCapabilities::SemanticTokensOptions(options)) => &options.full,
+                    Some(lsp_types::SemanticTokensServerCapabilities::SemanticTokensRegistrationOptions(options)) => &options.semantic_tokens_options.full,
+                    None => return false,
+                };
+                matches!(
+                    full,
+                    Some(
+                        lsp_types::SemanticTokensFullOptions::Bool(true)
+                            | lsp_types::SemanticTokensFullOptions::Delta { .. }
+                    )
+                )
+            }
             "textDocument/completion" => caps.completion_provider.is_some(),
             "textDocument/definition" => Self::offered(&caps.definition_provider),
             "textDocument/declaration" => match &caps.declaration_provider {
@@ -848,6 +861,72 @@ mod tests {
                 app.world().get::<OperationState>(new_operation),
                 Some(&OperationState::Succeeded)
             );
+        }
+    }
+
+    #[test]
+    fn full_semantic_requests_require_full_support_in_both_provider_variants() {
+        for registration in [false, true] {
+            for (full, enabled) in [
+                (None, false),
+                (
+                    Some(lsp_types::SemanticTokensFullOptions::Bool(false)),
+                    false,
+                ),
+                (Some(lsp_types::SemanticTokensFullOptions::Bool(true)), true),
+                (
+                    Some(lsp_types::SemanticTokensFullOptions::Delta { delta: Some(true) }),
+                    true,
+                ),
+                (
+                    Some(lsp_types::SemanticTokensFullOptions::Delta { delta: Some(false) }),
+                    true,
+                ),
+                (
+                    Some(lsp_types::SemanticTokensFullOptions::Delta { delta: None }),
+                    true,
+                ),
+            ] {
+                let options = lsp_types::SemanticTokensOptions {
+                    range: Some(true),
+                    full,
+                    ..Default::default()
+                };
+                let provider = if registration {
+                    lsp_types::SemanticTokensServerCapabilities::SemanticTokensRegistrationOptions(
+                        lsp_types::SemanticTokensRegistrationOptions {
+                            semantic_tokens_options: options,
+                            text_document_registration_options: Default::default(),
+                            static_registration_options: Default::default(),
+                        },
+                    )
+                } else {
+                    lsp_types::SemanticTokensServerCapabilities::SemanticTokensOptions(options)
+                };
+                let mut harness = Harness::new();
+                let probe = Probe {
+                    capabilities: ServerCapabilities {
+                        semantic_tokens_provider: Some(provider),
+                        ..Default::default()
+                    },
+                    ..Default::default()
+                };
+                harness
+                    .app
+                    .world_mut()
+                    .entity_mut(harness.servers[0])
+                    .insert(Transport::new(probe.clone()));
+                let mut state =
+                    bevy_ecs::system::SystemState::<Lookup>::new(harness.app.world_mut());
+                let request = state.get_mut(harness.app.world_mut()).unwrap().request(
+                    harness.owners[0],
+                    Path::new("/shared.rs"),
+                    "textDocument/semanticTokens/full",
+                    serde_json::json!({}),
+                );
+                assert_eq!(request.is_some(), enabled);
+                assert_eq!(probe.pending.lock().unwrap().len(), usize::from(enabled));
+            }
         }
     }
 
