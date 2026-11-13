@@ -1405,10 +1405,13 @@ open-buffer snapshots on their Operation and validate the affected buffers befor
 Unversioned edits also require an affected buffer to have been saved or synchronized to the
 originating server at acceptance; a later save does not establish that earlier knowledge.
 Versioned edits reject missing or ambiguous versions.
-Server-origin workspace edits validate the current server before applying or replying. Restart
+Server-origin workspace edits bind both the server entity and the transport UUID stamped before
+the reader starts; replacing a transport on the same entity invalidates queued edits and replies. Restart
 opens the current buffer, including unsaved text. Reload and encoding changes wait for the decoded
-buffer, synchronize it, and then reinitialize metadata. Diagnostics retain their server and the protocol's optional
-version; unversioned notifications cannot prove which edit produced them.
+buffer, synchronize it, and then reinitialize metadata. Diagnostics retain their server, transport UUID, and the protocol's optional version. Native
+adapter input rejects old transport epochs, and replacing a transport clears only its retained
+diagnostics before code-action requests or rendering consume them. Unversioned notifications
+cannot prove which edit produced them.
 Process handles, framing, reader/writer threads, and wire correlation stay in the transport
 adapter. Publishing input or a response, and closing the reader, wakes the reactive runner.
 Package selection, settings, navigation, and rendered projections remain Editor-owned. This
@@ -1418,7 +1421,9 @@ response lifecycle with an independent application. `StartServer` is idempotent 
 or ready. The process adapter receives `LaunchServer` and returns `ServerCompleted` on its
 Operation; the private launch identity also binds that original Operation. A mismatched completion
 is discarded without canceling the current launch. Stop cancels pending startup without
-rewriting completed Operations. Root changes and restart invalidate only that server graph,
+rewriting completed Operations. Terminal or removed launch Operations release their startup
+marker even without a transport completion, allowing a new start without accepting late results.
+Stopped views remain eligible to reopen when their server resumes. Root changes and restart invalidate only that server graph,
 so late startup completion cannot replace a newer transport.
 Documents derive their server identity from `ChildOf`; transport handles and wire correlation
 remain behind `TransportIo`. The application facade's `lsp` selection requires the shared ECS

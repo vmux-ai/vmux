@@ -18,6 +18,7 @@ use std::time::Duration;
 use std::io::BufRead;
 
 pub struct ServerClient {
+    identity: uuid::Uuid,
     child: Mutex<Option<Child>>,
     outgoing: mpsc::Sender<serde_json::Value>,
     pending: PendingMap,
@@ -107,6 +108,12 @@ impl ServerClient {
         let pending: PendingMap = Arc::new(Mutex::new(HashMap::new()));
 
         let (outgoing, out_rx) = mpsc::channel::<serde_json::Value>();
+        let identity = uuid::Uuid::new_v4();
+        let diagnostics = diagnostics.with_transport(identity);
+        let inputs = ServerInputSender {
+            transport: Some(identity),
+            ..inputs
+        };
         let writer = std::thread::spawn(move || {
             let mut w = stdin;
             while let Ok(msg) = out_rx.recv() {
@@ -129,6 +136,7 @@ impl ServerClient {
         });
 
         let mut client = ServerClient {
+            identity,
             child: Mutex::new(Some(child)),
             outgoing,
             pending,
@@ -145,6 +153,11 @@ impl ServerClient {
 
     pub fn provides(&self, method: &str) -> bool {
         self.capabilities.allows(method)
+    }
+
+    pub(crate) fn into_transport(self) -> vmux_lsp::Transport {
+        let identity = self.identity;
+        vmux_lsp::Transport::with_identity(self, identity)
     }
 
     pub fn semantic_legend(&self) -> Option<&crate::lsp::semantic::SemanticLegend> {

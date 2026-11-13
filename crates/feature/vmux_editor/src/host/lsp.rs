@@ -216,12 +216,14 @@ pub struct PathDiagnostics {
     pub diagnostics: Vec<lsp_types::Diagnostic>,
     pub version: Option<i32>,
     pub server: Option<Entity>,
+    pub transport: Option<uuid::Uuid>,
 }
 
 #[derive(Clone)]
 pub struct LspDiagnosticsSender {
     sender: crossbeam_channel::Sender<PathDiagnostics>,
     server: Option<Entity>,
+    transport: Option<uuid::Uuid>,
 }
 
 impl LspDiagnosticsSender {
@@ -231,6 +233,7 @@ impl LspDiagnosticsSender {
             Self {
                 sender,
                 server: None,
+                transport: None,
             },
             LspDiagnosticsInbox(receiver),
         )
@@ -240,11 +243,18 @@ impl LspDiagnosticsSender {
         Self {
             sender: self.sender.clone(),
             server: Some(server),
+            transport: self.transport,
         }
+    }
+
+    pub(crate) fn with_transport(mut self, transport: uuid::Uuid) -> Self {
+        self.transport = Some(transport);
+        self
     }
 
     pub(crate) fn send(&self, mut diagnostics: PathDiagnostics) {
         diagnostics.server = self.server;
+        diagnostics.transport = self.transport;
         let _ = self.sender.send(diagnostics);
     }
 }
@@ -255,6 +265,7 @@ impl Default for LspDiagnosticsSender {
         Self {
             sender,
             server: None,
+            transport: None,
         }
     }
 }

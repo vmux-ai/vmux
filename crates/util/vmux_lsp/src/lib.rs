@@ -161,8 +161,12 @@ pub struct Transport {
 
 impl Transport {
     pub fn new(transport: impl TransportIo) -> Self {
+        Self::with_identity(transport, uuid::Uuid::new_v4())
+    }
+
+    pub fn with_identity(transport: impl TransportIo, identity: uuid::Uuid) -> Self {
         Self {
-            identity: uuid::Uuid::new_v4(),
+            identity,
             io: Arc::new(transport),
         }
     }
@@ -235,9 +239,21 @@ impl<'a> Capabilities<'a> {
             "textDocument/semanticTokens/full" => caps.semantic_tokens_provider.is_some(),
             "textDocument/completion" => caps.completion_provider.is_some(),
             "textDocument/definition" => Self::offered(&caps.definition_provider),
-            "textDocument/declaration" => caps.declaration_provider.is_some(),
-            "textDocument/typeDefinition" => caps.type_definition_provider.is_some(),
-            "textDocument/implementation" => caps.implementation_provider.is_some(),
+            "textDocument/declaration" => match &caps.declaration_provider {
+                Some(lsp_types::DeclarationCapability::Simple(enabled)) => *enabled,
+                Some(_) => true,
+                None => false,
+            },
+            "textDocument/typeDefinition" => match &caps.type_definition_provider {
+                Some(lsp_types::TypeDefinitionProviderCapability::Simple(enabled)) => *enabled,
+                Some(_) => true,
+                None => false,
+            },
+            "textDocument/implementation" => match &caps.implementation_provider {
+                Some(lsp_types::ImplementationProviderCapability::Simple(enabled)) => *enabled,
+                Some(_) => true,
+                None => false,
+            },
             "textDocument/references" => Self::offered(&caps.references_provider),
             "textDocument/documentSymbol" => Self::offered(&caps.document_symbol_provider),
             "textDocument/rename" => Self::offered(&caps.rename_provider),
@@ -345,6 +361,13 @@ impl Lookup<'_, '_> {
 
     pub fn transport(&self, server: Entity) -> Option<&Transport> {
         self.transports.get(server).ok()
+    }
+
+    pub fn transport_current(&self, server: Entity, identity: uuid::Uuid) -> bool {
+        self.server_current(server)
+            && self
+                .transport(server)
+                .is_some_and(|transport| transport.identity() == identity)
     }
 
     pub fn request(
@@ -747,77 +770,106 @@ mod tests {
     }
 
     #[test]
-    fn stopped_startup_completion_cannot_replace_a_new_start_on_the_same_server() {
-        let mut app = App::new();
-        app.add_plugins(LspPlugin);
-        let root = app
-            .world_mut()
-            .spawn((Root, vmux_ecs::Cwd("/one".into())))
-            .id();
-        let server = app
-            .world_mut()
-            .spawn((
-                Server,
-                ServerKey::new("/one", "server"),
-                StartServer,
-                ChildOf(root),
-            ))
-            .id();
-        app.update();
-        let old = app
-            .world_mut()
-            .resource_mut::<Messages<LaunchServer>>()
-            .drain()
-            .next()
-            .unwrap();
-        app.world_mut().write_message(StopServer { server });
-        app.update();
-        app.world_mut().entity_mut(server).insert(StartServer);
-        app.update();
-        let new = app
-            .world_mut()
-            .resource_mut::<Messages<LaunchServer>>()
-            .drain()
-            .next()
-            .unwrap();
-        let old_operation = old.operation;
-        let new_operation = new.operation;
-        app.world_mut()
-            .entity_mut(new_operation)
-            .insert(ServerCompleted::new(
-                old.clone(),
-                Ok(Transport::new(Probe::default())),
-            ));
-        app.update();
-        assert!(app.world().get::<Transport>(server).is_none());
-        assert_eq!(
-            app.world().get::<OperationState>(new_operation),
-            Some(&OperationState::Pending)
-        );
-        let transport = Transport::new(Probe::default());
-        let identity = transport.identity();
-        app.world_mut()
-            .entity_mut(new_operation)
-            .insert(ServerCompleted::new(new, Ok(transport)));
-        app.world_mut()
-            .entity_mut(old_operation)
-            .insert(ServerCompleted::new(
-                old,
-                Ok(Transport::new(Probe::default())),
-            ));
-        app.update();
-        assert_eq!(
-            app.world().get::<Transport>(server).unwrap().identity(),
-            identity
-        );
-        assert_eq!(
-            app.world().get::<OperationState>(old_operation),
-            Some(&OperationState::Canceled)
-        );
-        assert_eq!(
-            app.world().get::<OperationState>(new_operation),
-            Some(&OperationState::Succeeded)
-        );
+    fn canceled_startup_can_retry_without_completion_and_cannot_replace_the_new_start() {
+        for stopped in [false, true] {
+            let mut app = App::new();
+            app.add_plugins(LspPlugin);
+            let root = app
+                .world_mut()
+                .spawn((Root, vmux_ecs::Cwd("/one".into())))
+                .id();
+            let server = app
+                .world_mut()
+                .spawn((
+                    Server,
+                    ServerKey::new("/one", "server"),
+                    StartServer,
+                    ChildOf(root),
+                ))
+                .id();
+            app.update();
+            let old = app
+                .world_mut()
+                .resource_mut::<Messages<LaunchServer>>()
+                .drain()
+                .next()
+                .unwrap();
+            if stopped {
+                app.world_mut().write_message(StopServer { server });
+            } else {
+                app.world_mut()
+                    .entity_mut(old.operation)
+                    .insert(OperationState::Canceled);
+            }
+            app.update();
+            app.world_mut().entity_mut(server).insert(StartServer);
+            app.update();
+            let new = app
+                .world_mut()
+                .resource_mut::<Messages<LaunchServer>>()
+                .drain()
+                .next()
+                .unwrap();
+            let old_operation = old.operation;
+            let new_operation = new.operation;
+            app.world_mut()
+                .entity_mut(new_operation)
+                .insert(ServerCompleted::new(
+                    old.clone(),
+                    Ok(Transport::new(Probe::default())),
+                ));
+            app.update();
+            assert!(app.world().get::<Transport>(server).is_none());
+            assert_eq!(
+                app.world().get::<OperationState>(new_operation),
+                Some(&OperationState::Pending)
+            );
+            let transport = Transport::new(Probe::default());
+            let identity = transport.identity();
+            app.world_mut()
+                .entity_mut(new_operation)
+                .insert(ServerCompleted::new(new, Ok(transport)));
+            app.world_mut()
+                .entity_mut(old_operation)
+                .insert(ServerCompleted::new(
+                    old,
+                    Ok(Transport::new(Probe::default())),
+                ));
+            app.update();
+            assert_eq!(
+                app.world().get::<Transport>(server).unwrap().identity(),
+                identity
+            );
+            assert_eq!(
+                app.world().get::<OperationState>(old_operation),
+                Some(&OperationState::Canceled)
+            );
+            assert_eq!(
+                app.world().get::<OperationState>(new_operation),
+                Some(&OperationState::Succeeded)
+            );
+        }
+    }
+
+    #[test]
+    fn navigation_capabilities_honor_disabled_providers() {
+        for (provider, method) in [
+            ("declarationProvider", "textDocument/declaration"),
+            ("typeDefinitionProvider", "textDocument/typeDefinition"),
+            ("implementationProvider", "textDocument/implementation"),
+        ] {
+            for (value, enabled) in [
+                (serde_json::json!(false), false),
+                (serde_json::json!(true), true),
+                (serde_json::json!({}), true),
+            ] {
+                let mut values = serde_json::Map::new();
+                values.insert(provider.into(), value);
+                let capabilities: ServerCapabilities =
+                    serde_json::from_value(Value::Object(values)).unwrap();
+                assert_eq!(Capabilities::new(&capabilities).provides(method), enabled);
+            }
+        }
     }
 
     #[test]

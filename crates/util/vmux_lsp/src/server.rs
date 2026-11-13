@@ -13,7 +13,7 @@ impl Plugin for ServersPlugin {
             .add_message::<LaunchServer>()
             .add_systems(
                 Update,
-                (reset, restart, stop, accept, finish, poll)
+                (reset, restart, stop, cancel_start, accept, finish, poll)
                     .chain()
                     .in_set(Set::Servers),
             );
@@ -79,7 +79,7 @@ pub struct StopServer {
 }
 
 #[derive(Component)]
-struct Starting;
+struct Starting(Entity);
 
 type RootChanges = (With<Root>, Changed<Cwd>);
 
@@ -192,10 +192,7 @@ fn accept(
                 .insert(ServerFailure("server root is unavailable".into()));
             continue;
         }
-        commands
-            .entity(server)
-            .remove::<(Stopped, ServerFailure)>()
-            .insert(Starting);
+        commands.entity(server).remove::<(Stopped, ServerFailure)>();
         let operation = commands
             .spawn((
                 Operation::bundle("lsp.start").unwrap(),
@@ -203,6 +200,7 @@ fn accept(
                 ChildOf(server),
             ))
             .id();
+        commands.entity(server).insert(Starting(operation));
         let ticket = LaunchTicket {
             operation,
             server,
@@ -218,7 +216,7 @@ type StartingServers = (With<Server>, With<Starting>);
 
 fn finish(
     mut completed: Query<(Entity, &LaunchTicket, &mut ServerCompleted, &OperationState)>,
-    servers: Query<(&ServerKey, &ChildOf), StartingServers>,
+    servers: Query<(&ServerKey, &ChildOf, &Starting), StartingServers>,
     roots: Query<&Cwd, With<Root>>,
     mut commands: Commands,
 ) {
@@ -231,9 +229,13 @@ fn finish(
             continue;
         }
         let current = accepted.operation == operation
-            && servers.get(accepted.server).is_ok_and(|(key, parent)| {
-                key == &accepted.key && parent.parent() == accepted.root
-            })
+            && servers
+                .get(accepted.server)
+                .is_ok_and(|(key, parent, starting)| {
+                    key == &accepted.key
+                        && parent.parent() == accepted.root
+                        && starting.0 == operation
+                })
             && roots
                 .get(accepted.root)
                 .is_ok_and(|path| path.0 == accepted.key.root());
@@ -264,6 +266,22 @@ fn finish(
             }
         }
         commands.entity(operation).remove::<ServerCompleted>();
+    }
+}
+
+fn cancel_start(
+    servers: Query<(Entity, &Starting), With<Server>>,
+    operations: Query<&OperationState>,
+    mut commands: Commands,
+) {
+    for (server, starting) in &servers {
+        if operations
+            .get(starting.0)
+            .is_ok_and(|state| matches!(state, OperationState::Pending | OperationState::Running))
+        {
+            continue;
+        }
+        commands.entity(server).remove::<Starting>();
     }
 }
 

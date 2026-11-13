@@ -236,6 +236,49 @@ fn manifest_metadata_boundaries_require_the_real_interface_and_a_stateless_marke
 }
 
 #[test]
+fn reciprocal_relationship_targets_require_a_used_source() {
+    for (parameter, inverse, expected) in [
+        ("binding: Query<&Binding>", "Binding", true),
+        ("", "Binding", false),
+        ("binding: Query<&Binding>", "Other", false),
+    ] {
+        let inventory = Inventory::fixture(&format!(
+            "#[derive(Component)] #[relationship(relationship_target = Users)] struct Binding(Entity); #[derive(Component)] #[relationship_target(relationship = {inverse})] struct Users(Vec<Entity>); #[derive(Component)] struct Other(Entity); fn read({parameter}) {{}} struct Root; impl Plugin for Root {{ fn build(&self, app: &mut App) {{ app.add_systems(Update, read); }} }}"
+        ));
+        let users = &inventory.entries[&inventory.key("struct:Users")];
+        assert_eq!(
+            inventory.canonical(users, &Policy::default(), &mut BTreeSet::new()),
+            expected
+        );
+    }
+}
+
+#[test]
+fn registered_query_filter_aliases_are_not_plain_tuple_models() {
+    for (alias, argument, expected) in [
+        (
+            "(With<Marker>, Changed<State>)",
+            "state: Query<&State, Scope>",
+            true,
+        ),
+        (
+            "(State, Marker)",
+            "state: Query<&State>, other: Scope",
+            false,
+        ),
+    ] {
+        let inventory = Inventory::fixture(&format!(
+            "#[derive(Component)] struct Marker; #[derive(Component)] struct State {{ value: u32 }} type Scope = {alias}; fn read({argument}) {{}} struct Root; impl Plugin for Root {{ fn build(&self, app: &mut App) {{ app.add_systems(Update, read); }} }}"
+        ));
+        let scope = &inventory.entries[&inventory.key("alias:Scope")];
+        assert_eq!(
+            inventory.canonical(scope, &Policy::default(), &mut BTreeSet::new()),
+            expected
+        );
+    }
+}
+
+#[test]
 fn canonical_components_and_registered_systems_share_one_owner() {
     let inventory = Inventory::fixture(
         "#[derive(Component)] struct Position { x: f32 } impl Position { fn move_by(&mut self, x: f32) { self.x += x; } } fn move_position(mut positions: Query<&mut Position>) {} struct Root; impl Plugin for Root { fn build(&self, app: &mut App) { app.add_systems(Update, move_position); } }",
@@ -1619,6 +1662,8 @@ struct Declaration {
     parameter: bool,
     plugin: bool,
     plugin_children: BTreeSet<String>,
+    relation_target: Option<String>,
+    relation_source: Option<String>,
     contract: bool,
     contract_paths: BTreeSet<String>,
     projection: bool,
@@ -1771,6 +1816,8 @@ impl Inventory {
                 parameter: false,
                 plugin: false,
                 plugin_children: BTreeSet::new(),
+                relation_target: None,
+                relation_source: None,
                 contract: false,
                 contract_paths: BTreeSet::new(),
                 projection: false,
@@ -1875,6 +1922,11 @@ impl Inventory {
                             field.as_str(),
                             "Query"
                                 | "ParamSet"
+                                | "With"
+                                | "Without"
+                                | "Changed"
+                                | "Added"
+                                | "Or"
                                 | "Res"
                                 | "ResMut"
                                 | "Single"
@@ -2651,6 +2703,27 @@ impl Inventory {
                 entry.projection |= matches!(kind.as_str(), "ui_state" | "ui_state_patch");
             }
         }
+        for source in self.entries.values() {
+            if !source.ecs || !keys.contains(&source.key) {
+                continue;
+            }
+            let Some(path) = &source.relation_target else {
+                continue;
+            };
+            let Some(target) = self.resolve(&source.namespace, path, &mut BTreeSet::new()) else {
+                continue;
+            };
+            let Some(inverse) = &target.relation_source else {
+                continue;
+            };
+            if target.ecs
+                && self
+                    .resolve(&target.namespace, inverse, &mut BTreeSet::new())
+                    .is_some_and(|inverse| inverse.key == source.key)
+            {
+                keys.insert(target.key.clone());
+            }
+        }
         self.used_keys = keys;
         self.registered_keys = registered;
     }
@@ -3083,6 +3156,8 @@ impl Declarations<'_> {
         }
         let mut ecs = false;
         let mut parameter = false;
+        let mut relation_target = None;
+        let mut relation_source = None;
         let mut contract_paths = BTreeSet::new();
         let test = Self::metadata(attrs, false)
             .iter()
@@ -3093,6 +3168,32 @@ impl Declarations<'_> {
                 attribute.push(segment.ident.unraw().to_string());
             }
             contract_paths.insert(attribute.join("::"));
+            if (attr.path().is_ident("relationship") || attr.path().is_ident("relationship_target"))
+                && let syn::Meta::List(list) = &attr
+            {
+                let parser =
+                    syn::punctuated::Punctuated::<syn::Meta, syn::Token![,]>::parse_terminated;
+                if let Ok(items) = parser.parse2(list.tokens.clone()) {
+                    for item in items {
+                        let syn::Meta::NameValue(value) = item else {
+                            continue;
+                        };
+                        let syn::Expr::Path(target) = value.value else {
+                            continue;
+                        };
+                        let name = target.path.to_token_stream().to_string().replace(' ', "");
+                        if attr.path().is_ident("relationship")
+                            && value.path.is_ident("relationship_target")
+                        {
+                            relation_target = Some(name);
+                        } else if attr.path().is_ident("relationship_target")
+                            && value.path.is_ident("relationship")
+                        {
+                            relation_source = Some(name);
+                        }
+                    }
+                }
+            }
             if attr.path().is_ident("derive") {
                 let syn::Meta::List(list) = attr else {
                     continue;
@@ -3158,6 +3259,8 @@ impl Declarations<'_> {
             parameter,
             plugin,
             plugin_children: references.plugins,
+            relation_target,
+            relation_source,
             contract: false,
             contract_paths,
             projection: false,

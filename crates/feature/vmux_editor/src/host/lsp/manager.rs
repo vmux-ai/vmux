@@ -609,8 +609,8 @@ impl LspManager<'_, '_> {
         self.lookup.server(key)
     }
 
-    pub(crate) fn server_current(&self, server: Entity) -> bool {
-        self.lookup.server_current(server)
+    pub(crate) fn transport_current(&self, server: Entity, identity: Option<uuid::Uuid>) -> bool {
+        identity.is_some_and(|identity| self.lookup.transport_current(server, identity))
     }
 
     fn client(&self, key: &ServerKey) -> Option<&Transport> {
@@ -1356,7 +1356,7 @@ fn finish_server_starts(
     for (entity, start, mut result) in &mut starts {
         let value = std::mem::replace(&mut result.0, Err("startup result consumed".into()));
         let transport = match value {
-            Ok(value) => value.map(Transport::new),
+            Ok(value) => value.map(ServerClient::into_transport),
             Err(error) => Err(error),
         };
         commands
@@ -1495,11 +1495,12 @@ fn cleanup_documents(manager: LspManager, views: Query<&DocumentBinding>, mut co
     }
 }
 
-type BlockedServers = Or<(With<ServerFailure>, With<Stopped>)>;
+type UnavailableServers<'w, 's> =
+    Query<'w, 's, (&'static ServerKey, Has<Stopped>), Or<(With<ServerFailure>, With<Stopped>)>>;
 
 fn open_documents(
     q: Query<(Entity, &FileView, &Editor), Without<LspOpened>>,
-    failures: Query<&ServerKey, BlockedServers>,
+    unavailable: UnavailableServers,
     registry: Single<&LspRegistry>,
     settings: Res<AppSettings>,
     manager: LspManager,
@@ -1508,8 +1509,13 @@ fn open_documents(
 ) {
     let overrides = server_overrides(&settings);
     let mut failed = HashSet::new();
-    for key in &failures {
-        failed.insert(key.clone());
+    let mut stopped_keys = HashSet::new();
+    for (key, stopped) in &unavailable {
+        if stopped {
+            stopped_keys.insert(key.clone());
+        } else {
+            failed.insert(key.clone());
+        }
     }
     let mut pending_roots = Vec::<(PathBuf, Entity)>::new();
     let mut pending_servers = Vec::<(ServerKey, Entity)>::new();
@@ -1542,6 +1548,9 @@ fn open_documents(
         }
         if failed.contains(&key) {
             commands.entity(entity).insert(LspOpened);
+            continue;
+        }
+        if stopped_keys.contains(&key) {
             continue;
         }
         let Some(client) = manager.client(&key) else {
@@ -2254,6 +2263,7 @@ fn dismiss_code_actions(
 struct LspDiagnostics {
     mapped: Vec<FileDiagnostic>,
     raw: Vec<lsp_types::Diagnostic>,
+    source: Option<(Entity, uuid::Uuid)>,
 }
 
 #[derive(Component, Default)]
@@ -2310,7 +2320,12 @@ impl Plugin for DiagnosticsPlugin {
             .add_observer(binding_removed::<ServerBinding>)
             .add_systems(
                 Update,
-                (drain_diagnostics, drain_lint, emit_diagnostics)
+                (
+                    prune_diagnostics,
+                    drain_diagnostics,
+                    drain_lint,
+                    emit_diagnostics,
+                )
                     .chain()
                     .in_set(DiagnosticsSet)
                     .in_set(vmux_lsp::Set::Diagnostics)
@@ -2322,10 +2337,26 @@ impl Plugin for DiagnosticsPlugin {
 #[derive(SystemSet, Clone, Copy, Debug, PartialEq, Eq, Hash)]
 struct DiagnosticsSet;
 
+fn prune_diagnostics(
+    diagnostics: Query<(Entity, &LspDiagnostics)>,
+    lookup: vmux_lsp::Lookup,
+    mut commands: Commands,
+) {
+    for (entity, diagnostics) in &diagnostics {
+        if diagnostics
+            .source
+            .is_some_and(|(server, identity)| !lookup.transport_current(server, identity))
+        {
+            commands.entity(entity).remove::<LspDiagnostics>();
+        }
+    }
+}
+
 fn drain_diagnostics(
     inbox: Single<&LspDiagnosticsInbox>,
     views: Query<(Entity, &FileView, &Editor, Option<&DocumentBinding>)>,
     documents: Query<(&OpenDoc, &ChildOf)>,
+    lookup: vmux_lsp::Lookup,
     mut commands: Commands,
 ) {
     for PathDiagnostics {
@@ -2333,8 +2364,15 @@ fn drain_diagnostics(
         diagnostics: diags,
         version,
         server,
+        transport,
     } in inbox.drain()
     {
+        if server.is_some_and(|server| {
+            transport.is_none_or(|identity| !lookup.transport_current(server, identity))
+        }) {
+            continue;
+        }
+        let source = server.zip(transport);
         let target = PathIdentity::resolve(&path);
         for (entity, view, edit, binding) in &views {
             if PathIdentity::resolve(&view.path) != target {
@@ -2357,6 +2395,7 @@ fn drain_diagnostics(
             commands.entity(entity).insert(LspDiagnostics {
                 mapped,
                 raw: diags.clone(),
+                source,
             });
         }
     }
@@ -2528,6 +2567,16 @@ mod tests {
     }
 
     impl DocumentFixture {
+        pub(crate) fn replace_transport(&self, world: &mut World) -> uuid::Uuid {
+            let transport = Transport::new(ProbeTransport {
+                replies: std::sync::Arc::new(std::sync::Mutex::new(None)),
+                capabilities: lsp_types::ServerCapabilities::default(),
+            });
+            let identity = transport.identity();
+            world.entity_mut(self.server).insert(transport);
+            identity
+        }
+
         pub(crate) fn synced_to(&self, world: &mut World, owner: Entity, source: &Self) {
             world
                 .entity_mut(self.document)
@@ -2847,6 +2896,49 @@ mod tests {
             other_server
         );
         assert!(fixture.app.world().get::<Transport>(other_server).is_some());
+        let restarted = fixture
+            .app
+            .world()
+            .get::<ServerBinding>(first)
+            .unwrap()
+            .server();
+        fixture
+            .app
+            .world_mut()
+            .write_message(vmux_lsp::StopServer { server: restarted });
+        for _ in 0..3 {
+            fixture.app.update();
+        }
+        assert!(fixture.app.world().get::<Stopped>(restarted).is_some());
+        assert!(fixture.app.world().get::<LspOpened>(first).is_none());
+        fixture
+            .app
+            .world_mut()
+            .entity_mut(restarted)
+            .insert(StartServer);
+        assert_eq!(
+            fixture.message(0, "textDocument/didOpen", 3)["params"]["textDocument"]["text"],
+            "unsaved text\n"
+        );
+        assert_eq!(
+            fixture
+                .app
+                .world()
+                .get::<ServerBinding>(first)
+                .unwrap()
+                .server(),
+            restarted
+        );
+        assert_eq!(
+            fixture
+                .app
+                .world()
+                .get::<ServerBinding>(other)
+                .unwrap()
+                .server(),
+            other_server
+        );
+
         assert_eq!(
             std::fs::read_to_string(fixture.roots[0].join("main.rs")).unwrap(),
             "disk text\n"
@@ -2876,6 +2968,12 @@ mod tests {
                     .world_mut()
                     .spawn((Server, key.clone(), ChildOf(owner)))
                     .id();
+                app.world_mut()
+                    .entity_mut(server)
+                    .insert(Transport::new(ProbeTransport {
+                        replies: std::sync::Arc::new(std::sync::Mutex::new(None)),
+                        capabilities: lsp_types::ServerCapabilities::default(),
+                    }));
                 let document = app
                     .world_mut()
                     .spawn((
@@ -2912,9 +3010,16 @@ mod tests {
             }
         }
 
-        fn publish(&mut self, source: usize, version: Option<i32>, message: &str) {
+        fn queue(&self, source: usize, version: Option<i32>, message: &str) {
             self.sender
                 .scoped(self.servers[source])
+                .with_transport(
+                    self.app
+                        .world()
+                        .get::<Transport>(self.servers[source])
+                        .unwrap()
+                        .identity(),
+                )
                 .send(PathDiagnostics {
                     path: "/workspace/shared.rs".into(),
                     diagnostics: vec![lsp_types::Diagnostic {
@@ -2923,7 +3028,12 @@ mod tests {
                     }],
                     version,
                     server: None,
+                    transport: None,
                 });
+        }
+
+        fn publish(&mut self, source: usize, version: Option<i32>, message: &str) {
+            self.queue(source, version, message);
             self.app.update();
         }
 
@@ -2934,6 +3044,26 @@ mod tests {
                 .and_then(|diagnostics| diagnostics.raw.first())
                 .map(|diagnostic| diagnostic.message.as_str())
         }
+    }
+
+    #[test]
+    fn replacing_a_transport_clears_only_its_retained_diagnostics() {
+        let mut fixture = DiagnosticFixture::new();
+        let document = DocumentFixture {
+            server: fixture.servers[0],
+            document: fixture.documents[0],
+        };
+        document.replace_transport(fixture.app.world_mut());
+        fixture.publish(0, Some(1), "retained old transport");
+        fixture.publish(1, Some(1), "other root");
+        assert_eq!(fixture.message(0), Some("retained old transport"));
+        fixture.queue(0, Some(1), "queued old transport");
+        document.replace_transport(fixture.app.world_mut());
+        fixture.app.update();
+        assert_eq!(fixture.message(0), None);
+        assert_eq!(fixture.message(1), Some("other root"));
+        fixture.publish(0, Some(1), "replacement transport");
+        assert_eq!(fixture.message(0), Some("replacement transport"));
     }
 
     #[test]
@@ -3825,6 +3955,7 @@ mod tests {
             diagnostics: vec![],
             version: None,
             server: None,
+            transport: None,
         });
         app.add_systems(Update, |inbox: Single<&LspDiagnosticsInbox>| {
             drop(inbox.drain());
@@ -3887,6 +4018,7 @@ mod tests {
             diagnostics: vec![diag],
             version: None,
             server: None,
+            transport: None,
         });
         app.update();
 
