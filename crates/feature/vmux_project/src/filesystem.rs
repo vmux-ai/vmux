@@ -9,7 +9,7 @@ use bevy_tasks::{IoTaskPool, Task, TaskPool, futures_lite::future};
 use serde::{Deserialize, Serialize};
 use vmux_ecs::{Cwd, OperationState};
 
-use crate::registration::{Persisting, Writing};
+use crate::registration::Writing;
 
 use crate::{
     AliasCompleted, AliasRequest, Error, LoadCompleted, LoadRequest, Record, Root, Snapshot,
@@ -335,6 +335,7 @@ struct FileOwners<'w, 's> {
     roots: Query<'w, 's, &'static Root>,
     writes: Query<'w, 's, &'static Writing>,
     states: Query<'w, 's, &'static OperationState>,
+    rejected: MessageWriter<'w, WriteResult>,
 }
 
 impl FileOwners<'_, '_> {
@@ -357,7 +358,7 @@ fn start(
     aliases: Query<(Entity, &Cwd, &QueuedAliases)>,
     writes: Query<(Entity, &Cwd, &QueuedWrite)>,
     active: ActiveIo,
-    owners: FileOwners,
+    mut owners: FileOwners,
     wake: Option<Res<FileWake>>,
     mut commands: WorldCommands,
 ) {
@@ -382,6 +383,12 @@ fn start(
     }
     for (entity, directory, request) in &writes {
         let Some(_) = owners.operation(&request.ticket) else {
+            owners.rejected.write(WriteResult {
+                ticket: request.ticket.clone(),
+                result: Err(Error::Unavailable(
+                    "project write canceled before IO".into(),
+                )),
+            });
             commands.entity(entity).despawn();
             continue;
         };
@@ -389,9 +396,6 @@ fn start(
             continue;
         }
         let task = request.start(&directory.0, wake.as_deref().map(|wake| wake.0.clone()));
-        commands
-            .entity(request.ticket.owner)
-            .insert(Persisting(request.ticket.clone()));
         commands.entity(entity).remove::<QueuedWrite>().insert(task);
     }
     for (entity, directory, request) in &aliases {

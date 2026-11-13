@@ -146,9 +146,13 @@ fn a_removed_accepted_operation_releases_the_root_and_settles_its_requester() {
     let owner = consumer.root("/projects");
     let requester = consumer.save("/projects", "Removed operation", 0);
     let operation = consumer.write_operation(owner);
-    consumer.requests();
+    let request = consumer.requests().pop().unwrap();
     consumer.0.world_mut().despawn(operation);
     consumer.0.update();
+    consumer.complete(
+        request,
+        Err(Error::Unavailable("backend canceled before IO".into())),
+    );
     assert_eq!(
         consumer.0.world().get::<OperationState>(requester),
         Some(&OperationState::Failed)
@@ -171,12 +175,13 @@ fn a_removed_accepted_operation_releases_the_root_and_settles_its_requester() {
 }
 
 #[test]
-fn a_terminal_accepted_operation_releases_writing_without_losing_retention() {
+fn a_terminal_dispatched_operation_reconciles_late_success_without_losing_retention() {
     let mut consumer = Consumer::new();
     let owner = consumer.root("/projects");
     let requester = consumer.save("/projects", "Canceled operation", 0);
     let operation = consumer.write_operation(owner);
-    consumer.requests();
+    let request = consumer.requests().pop().unwrap();
+    let persisted = request.snapshot.clone();
     consumer
         .0
         .world_mut()
@@ -185,16 +190,21 @@ fn a_terminal_accepted_operation_releases_writing_without_losing_retention() {
             result: Err("canceled".into()),
         });
     consumer.0.update();
+    consumer.complete(request, Ok(BTreeSet::new()));
     assert_eq!(
         consumer.0.world().get::<OperationState>(operation),
         Some(&OperationState::Failed)
     );
     assert_eq!(
         consumer.0.world().get::<OperationState>(requester),
-        Some(&OperationState::Failed)
+        Some(&OperationState::Succeeded)
     );
     assert!(consumer.0.world().get::<Operation>(operation).is_some());
-    consumer.save("/projects", "Retry", 0);
+    assert_eq!(
+        consumer.snapshot("/projects").projects["shared-id"].name,
+        persisted.projects["shared-id"].name
+    );
+    consumer.save("/projects", "Retry", 1);
     let request = consumer.requests().pop().unwrap();
     consumer.complete(request, Ok(BTreeSet::new()));
     assert_eq!(

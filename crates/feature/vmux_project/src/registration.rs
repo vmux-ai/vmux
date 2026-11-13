@@ -915,6 +915,9 @@ fn dispatch(
             }
         }
         io.write(snapshot.write_request(prepared.ticket.clone()));
+        commands
+            .entity(owner)
+            .insert(Persisting(prepared.ticket.clone()));
         commands.entity(proposal).insert(Dispatched);
     }
 }

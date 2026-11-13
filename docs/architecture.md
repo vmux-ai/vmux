@@ -544,7 +544,7 @@ and Session contributions. Store tickets bind every result to its root, director
 Core request systems validate names, identities, revisions and duplicate checkouts directly against
 Project components. An accepted write uses a Root-owned proposal lease correlated with its public
 operation. The staged target intent and shared values survive removal of the requester or a public
-operation whose native atomic IO has already started. Target IDs stay out of the canonical Project
+operation whose IO request has already been dispatched. Target IDs stay out of the canonical Project
 identity index until commit. Dispatch projects one immutable persistence snapshot from committed
 entities plus the accepted changes; serialized Record values have no mutation or entity behavior.
 Removal first obtains ticket-bound root-relative path and imported-symlink facts. Project systems stage Hidden
@@ -554,10 +554,12 @@ Filesystem jobs queue by canonical directory. Unstarted jobs are discarded when 
 changes; started atomic IO finishes before a replacement root reads that directory. Backend IO
 tasks therefore own their finite lifetime rather than being despawned with a requesting root.
 Pending tasks register the host waker when polled, so publishing completion schedules its consuming
-frame. Missing or terminal unstarted operations release the Root write slot and settle any surviving
-requester. Native jobs validate the live operation ticket before starting. Once atomic persistence
-starts, its operation retains the Root slot and proposal until completion reconciles disk and
-canonical entities, even if the operation has already become terminal. Terminal operations retain
+frame. Missing or terminal operations release unissued work and settle any surviving requester.
+Dispatch leases the Root slot and proposal until the backend acknowledges success or failure,
+even if the public operation has ended or been removed. Native jobs revalidate the operation ticket
+before starting and acknowledge rejected queued work; started atomic persistence reconciles disk
+and canonical entities before releasing the lease. External adapters follow the same acknowledgement
+contract rather than treating removal of an operation as retraction of a dispatched request. Terminal operations retain
 the shared five-minute lifecycle while staged values and alias intents are discarded.
 
 Editor owns durable collapsed-line preferences through an internal plugin. FileId, Collapsed and
