@@ -7,12 +7,14 @@ use crate::stack::Stack;
 #[cfg(test)]
 use crate::tab::Tab;
 use arrangement::ArrangementPlugin;
+use bevy::ecs::system::{Commands, SystemParam};
 use bevy::prelude::*;
 #[cfg(test)]
 use bevy::{
     ecs::{message::Messages, relationship::Relationship},
     window::PrimaryWindow,
 };
+use bevy_cef::prelude::HostWindow;
 use close::ClosePlugin;
 pub use close::{ForcePaneClose, PendingPaneClose};
 use focus::FocusPlugin;
@@ -25,7 +27,7 @@ use open::OpenPlugin;
 use open::{BesideOpenPlugin, DirectionalOpenPlugin};
 pub use open::{OpenBesideRequest, PanePlacement};
 use resize::ResizePlugin;
-pub use resize::{PaneDrag, PaneSize, PaneSplitGaps};
+pub use resize::{PaneDrag, PaneSize, PaneSplitGaps, ResizeGrip};
 pub(crate) use tree::PaneHierarchy;
 use tree::TreePlugin;
 pub use tree::{Pane, PaneSplit, PaneSplitDirection, PaneTree};
@@ -37,6 +39,7 @@ use vmux_ecs::manifest::FeaturePlugin;
 use vmux_ecs::{Active, PageMetadata, PageOpenId, PageOpenRequest, PageOpenTarget, PageOpenTask};
 #[cfg(test)]
 use vmux_flex::prelude::*;
+use vmux_flex::{Display, Node, Visibility};
 #[cfg(test)]
 use vmux_history::LastActivatedAt;
 
@@ -47,6 +50,57 @@ mod identity;
 mod open;
 mod resize;
 mod tree;
+
+#[derive(SystemParam)]
+pub(super) struct OverlayInput<'w, 's> {
+    owners: Query<
+        'w,
+        's,
+        (
+            Option<&'static HostWindow>,
+            Option<&'static Node>,
+            Option<&'static Visibility>,
+            Has<vmux_ecs::KeyboardOwner>,
+            Has<vmux_ecs::OverlayShownInline>,
+        ),
+        With<vmux_ecs::WindowOverlay>,
+    >,
+}
+
+impl OverlayInput<'_, '_> {
+    fn owns(&self, window: Entity) -> bool {
+        for (owner, node, visibility, keyboard, inline) in &self.owners {
+            if owner.is_some_and(|owner| owner.0 != window) {
+                continue;
+            }
+            if vmux_ecs::OverlayState::resolve(
+                node.map_or(Display::Flex, |node| node.display),
+                visibility.copied().unwrap_or_default(),
+                keyboard,
+                inline,
+            )
+            .owns_input()
+            {
+                return true;
+            }
+        }
+        false
+    }
+}
+
+pub(super) struct PointerDevicePlugin;
+
+impl Plugin for PointerDevicePlugin {
+    fn build(&self, app: &mut App) {
+        app.add_systems(Startup, |mut commands: Commands| {
+            commands.spawn((PointerDevice, Name::new("native pointer")));
+        });
+    }
+}
+
+#[derive(Component)]
+#[require(focus::PointerFocus, resize::PointerPress)]
+pub(super) struct PointerDevice;
 
 #[derive(SystemSet, Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub(super) struct ArrangementSet;
@@ -271,6 +325,9 @@ impl PaneStacks<'_, '_> {
         children.iter().find(|&entity| self.stacks.contains(entity))
     }
 }
+
+#[cfg(test)]
+pub(super) static NATIVE_POINTER_TEST: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
 #[cfg(test)]
 mod tests {

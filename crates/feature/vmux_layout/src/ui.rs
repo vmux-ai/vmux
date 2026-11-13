@@ -5,6 +5,7 @@ use self::header::HeaderView;
 use self::side_sheet::SideSheetView;
 use self::state::LayoutUi;
 use dioxus::prelude::*;
+#[cfg(host)]
 pub(crate) use error::ErrorPage;
 use vmux_command::CommandBarPanel;
 use vmux_ui::components::dropdown::Dropdown;

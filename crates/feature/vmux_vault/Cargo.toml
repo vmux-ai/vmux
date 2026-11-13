@@ -33,7 +33,7 @@ ring = "0.17"
 ron = { workspace = true }
 toml = { workspace = true }
 url = { workspace = true }
-vmux_layout = { path = "../vmux_layout" }
+vmux_layout = { path = "../vmux_layout", features = ["host"] }
 vmux_path = { path = "../../util/vmux_path" }
 vmux_profile = { path = "../../util/vmux_profile" }
 vmux_tool = { path = "../vmux_tool" }

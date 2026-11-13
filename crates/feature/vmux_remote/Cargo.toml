@@ -14,7 +14,7 @@ bevy_cef = { workspace = true }
 uuid = { workspace = true }
 vmux_clipboard = { path = "../../util/vmux_clipboard" }
 vmux_ecs = { path = "../../util/vmux_ecs", features = ["host"] }
-vmux_layout = { path = "../vmux_layout" }
+vmux_layout = { path = "../vmux_layout", features = ["host"] }
 vmux_service = { path = "../vmux_service" }
 
 [lints]

@@ -29,6 +29,36 @@ pub(crate) enum CommandBarPointerEvent {
 }
 
 impl NativeBridge {
+    pub fn windowed_page_changed(previous: Vec2, current: Vec2) -> bool {
+        let bridge = BRIDGE.lock().unwrap_or_else(|error| error.into_inner());
+        let previous = bridge
+            .frames
+            .iter()
+            .position(|frame| Self::frame_contains(*frame, previous));
+        let current = bridge
+            .frames
+            .iter()
+            .position(|frame| Self::frame_contains(*frame, current));
+        previous != current
+    }
+
+    pub fn windowed_page_edge_contains(point: Vec2, margin: f32) -> bool {
+        let bridge = BRIDGE.lock().unwrap_or_else(|error| error.into_inner());
+        for frame in &bridge.frames {
+            if !Self::frame_contains(*frame, point) {
+                continue;
+            }
+            let distance = (point.x - frame.left)
+                .min(frame.right() - point.x)
+                .min(point.y - frame.top)
+                .min(frame.bottom() - point.y);
+            if distance <= margin {
+                return true;
+            }
+        }
+        false
+    }
+
     pub fn windowed_page_contains_point(x_px: f32, y_px: f32) -> bool {
         let point = Vec2::new(x_px, y_px);
         BRIDGE

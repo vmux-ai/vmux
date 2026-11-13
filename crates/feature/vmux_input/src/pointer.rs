@@ -8,26 +8,45 @@ use objc2_app_kit::{NSApplication, NSEvent, NSView};
 use raw_window_handle::{HasWindowHandle, RawWindowHandle};
 use std::hint::spin_loop;
 use std::sync::atomic::{AtomicBool, AtomicU8, AtomicU32, AtomicU64, Ordering, fence};
+use vmux_api::input::KeyModifiers;
 
 static SEQUENCE: AtomicU64 = AtomicU64::new(0);
 static X_BITS: AtomicU32 = AtomicU32::new(0);
 static Y_BITS: AtomicU32 = AtomicU32::new(0);
 static BUTTONS: AtomicU8 = AtomicU8::new(0);
+static MODIFIERS: AtomicU8 = AtomicU8::new(0);
 static MOTION_SEQUENCE: AtomicU64 = AtomicU64::new(0);
+static PRESS_SEQUENCE: AtomicU64 = AtomicU64::new(0);
+static PRESS_X_BITS: AtomicU32 = AtomicU32::new(0);
+static PRESS_Y_BITS: AtomicU32 = AtomicU32::new(0);
+static PRESS_MODIFIERS: AtomicU8 = AtomicU8::new(0);
 static WINDOW_GESTURE: AtomicBool = AtomicBool::new(false);
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct NativePointerSnapshot {
     pub sequence: u64,
     pub motion_sequence: u64,
+    pub press_sequence: u64,
+    pub press_position_px: Vec2,
     pub position_px: Vec2,
     pub buttons: NativeMouseButtons,
+    pub modifiers: Option<KeyModifiers>,
+    pub press_modifiers: Option<KeyModifiers>,
 }
 
 pub struct NativePointer;
 
 impl NativePointer {
     pub fn publish(position_px: Vec2, buttons: NativeMouseButtons, motion: bool) {
+        Self::publish_with_modifiers(position_px, buttons, motion, None);
+    }
+
+    pub fn publish_with_modifiers(
+        position_px: Vec2,
+        buttons: NativeMouseButtons,
+        motion: bool,
+        modifiers: Option<KeyModifiers>,
+    ) {
         let writing = loop {
             let current = SEQUENCE.load(Ordering::Acquire);
             if current & 1 != 0 {
@@ -48,8 +67,17 @@ impl NativePointer {
         };
         X_BITS.store(position_px.x.to_bits(), Ordering::Relaxed);
         Y_BITS.store(position_px.y.to_bits(), Ordering::Relaxed);
-        BUTTONS.store(Self::button_bits(buttons), Ordering::Relaxed);
+        let modifier_bits = Self::modifier_bits(modifiers);
+        MODIFIERS.store(modifier_bits, Ordering::Relaxed);
+        let button_bits = Self::button_bits(buttons);
+        let previous_buttons = BUTTONS.swap(button_bits, Ordering::Relaxed);
         let completed = writing.wrapping_add(1);
+        if button_bits & !previous_buttons != 0 {
+            PRESS_SEQUENCE.store(completed, Ordering::Relaxed);
+            PRESS_X_BITS.store(position_px.x.to_bits(), Ordering::Relaxed);
+            PRESS_Y_BITS.store(position_px.y.to_bits(), Ordering::Relaxed);
+            PRESS_MODIFIERS.store(modifier_bits, Ordering::Relaxed);
+        }
         if motion {
             MOTION_SEQUENCE.store(completed, Ordering::Relaxed);
         }
@@ -58,7 +86,7 @@ impl NativePointer {
 
     pub fn publish_buttons(buttons: NativeMouseButtons) {
         if let Some(pointer) = Self::snapshot() {
-            Self::publish(pointer.position_px, buttons, false);
+            Self::publish_with_modifiers(pointer.position_px, buttons, false, pointer.modifiers);
         }
     }
 
@@ -77,15 +105,27 @@ impl NativePointer {
                 f32::from_bits(Y_BITS.load(Ordering::Relaxed)),
             );
             let buttons = Self::buttons_from_bits(BUTTONS.load(Ordering::Relaxed));
+            let modifiers = Self::modifiers_from_bits(MODIFIERS.load(Ordering::Relaxed));
+            let press_modifiers =
+                Self::modifiers_from_bits(PRESS_MODIFIERS.load(Ordering::Relaxed));
             let motion_sequence = MOTION_SEQUENCE.load(Ordering::Relaxed);
+            let press_sequence = PRESS_SEQUENCE.load(Ordering::Relaxed);
+            let press_position_px = Vec2::new(
+                f32::from_bits(PRESS_X_BITS.load(Ordering::Relaxed)),
+                f32::from_bits(PRESS_Y_BITS.load(Ordering::Relaxed)),
+            );
             fence(Ordering::Acquire);
             let after = SEQUENCE.load(Ordering::Relaxed);
             if before == after {
                 return Some(NativePointerSnapshot {
                     sequence: after,
                     motion_sequence,
+                    press_sequence,
+                    press_position_px,
                     position_px,
                     buttons,
+                    modifiers,
+                    press_modifiers,
                 });
             }
         }
@@ -151,6 +191,28 @@ impl NativePointer {
         })
     }
 
+    fn modifier_bits(modifiers: Option<KeyModifiers>) -> u8 {
+        let Some(modifiers) = modifiers else {
+            return 0;
+        };
+        0x80 | u8::from(modifiers.shift)
+            | (u8::from(modifiers.ctrl) << 1)
+            | (u8::from(modifiers.alt) << 2)
+            | (u8::from(modifiers.super_key) << 3)
+    }
+
+    fn modifiers_from_bits(bits: u8) -> Option<KeyModifiers> {
+        if bits & 0x80 == 0 {
+            return None;
+        }
+        Some(KeyModifiers {
+            shift: bits & 1 != 0,
+            ctrl: bits & (1 << 1) != 0,
+            alt: bits & (1 << 2) != 0,
+            super_key: bits & (1 << 3) != 0,
+        })
+    }
+
     fn button_bits(buttons: NativeMouseButtons) -> u8 {
         u8::from(buttons.left) | (u8::from(buttons.right) << 1) | (u8::from(buttons.middle) << 2)
     }
@@ -168,8 +230,11 @@ impl NativePointer {
 mod tests {
     use super::*;
 
+    static POINTER_TEST: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
     #[test]
     fn snapshot_is_coherent() {
+        let _guard = POINTER_TEST.lock().unwrap();
         NativePointer::publish(
             Vec2::new(123.5, 456.25),
             NativeMouseButtons {
@@ -196,6 +261,7 @@ mod tests {
 
     #[test]
     fn button_update_preserves_position_and_motion_sequence() {
+        let _guard = POINTER_TEST.lock().unwrap();
         NativePointer::publish(Vec2::new(10.0, 20.0), NativeMouseButtons::default(), true);
         let before = NativePointer::snapshot().expect("snapshot");
 
@@ -209,5 +275,27 @@ mod tests {
         assert_eq!(after.position_px, before.position_px);
         assert_eq!(after.motion_sequence, before.motion_sequence);
         assert!(after.buttons.left);
+    }
+
+    #[test]
+    fn press_position_survives_release_and_subsequent_motion() {
+        let _guard = POINTER_TEST.lock().unwrap();
+        NativePointer::publish(Vec2::ZERO, NativeMouseButtons::default(), false);
+        NativePointer::publish(
+            Vec2::new(20.0, 40.0),
+            NativeMouseButtons {
+                left: true,
+                ..Default::default()
+            },
+            false,
+        );
+        let pressed = NativePointer::snapshot().unwrap();
+        NativePointer::publish(Vec2::new(80.0, 60.0), NativeMouseButtons::default(), false);
+        NativePointer::publish(Vec2::new(90.0, 70.0), NativeMouseButtons::default(), true);
+        let after = NativePointer::snapshot().unwrap();
+        assert!(!after.buttons.left);
+        assert_eq!(after.press_sequence, pressed.sequence);
+        assert_eq!(after.press_position_px, Vec2::new(20.0, 40.0));
+        assert_eq!(after.position_px, Vec2::new(90.0, 70.0));
     }
 }

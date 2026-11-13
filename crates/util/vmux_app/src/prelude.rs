@@ -19,10 +19,8 @@ pub use vmux_flex::{ComputedNode, FlexPlugin, FlexViewport, LayoutContext, Node,
 #[cfg(feature = "git")]
 pub use vmux_git::GitPlugin;
 #[cfg(feature = "layout")]
-pub use vmux_layout::LayoutPlugin;
-#[cfg(feature = "pane")]
-pub use vmux_pane::{
-    Hierarchy as PaneHierarchy, Pane, PaneId, PanePlugin, PaneSet, PaneSize, PaneSplit,
+pub use vmux_layout::{
+    Hierarchy as PaneHierarchy, LayoutPlugin, Pane, PaneId, PaneSet, PaneSize, PaneSplit,
     PaneSplitDirection, SelectRequest as PaneSelectRequest,
     SelectionChanged as PaneSelectionChanged,
 };

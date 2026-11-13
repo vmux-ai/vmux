@@ -3,12 +3,14 @@ use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
+use bevy::ecs::system::NonSendMarker;
 use bevy::prelude::*;
+use bevy::window::{CursorIcon, SystemCursorIcon};
 use bevy::winit::{EventLoopProxyWrapper, WINIT_WINDOWS, WinitUserEvent};
 use bevy_cef_core::prelude::MessageLoopWakePolicy;
 use objc2_app_kit::{
     NSAnimatablePropertyContainer, NSAnimationContext, NSApp,
-    NSApplicationDidResignActiveNotification, NSEvent, NSEventMask, NSEventModifierFlags,
+    NSApplicationDidResignActiveNotification, NSCursor, NSEvent, NSEventMask, NSEventModifierFlags,
     NSEventPhase, NSEventType, NSView, NSWindowDidEndLiveResizeNotification, NSWindowStyleMask,
     NSWindowWillStartLiveResizeNotification,
 };
@@ -16,6 +18,7 @@ use objc2_foundation::{
     NSNotification, NSNotificationCenter, NSPoint, NSRect, NSSize, NSString, NSUserDefaults,
 };
 use raw_window_handle::{HasWindowHandle, RawWindowHandle};
+use vmux_api::input::KeyModifiers;
 use vmux_flex::prelude::*;
 use vmux_setting::{ResolvedScheme, SystemAppearance};
 
@@ -34,6 +37,10 @@ impl Plugin for RuntimePlatformPlugin {
             .add_systems(Update, activate_app_during_boot)
             .add_systems(Update, grab_key_window_on_pane_hover)
             .add_systems(
+                Update,
+                resize_cursor.after(vmux_layout::PaneSet::AfterSelect),
+            )
+            .add_systems(
                 Startup,
                 (
                     install_input_wake_monitor,
@@ -45,7 +52,7 @@ impl Plugin for RuntimePlatformPlugin {
     }
 }
 
-fn seed(_non_send: bevy::ecs::system::NonSendMarker, mut system: Single<&mut SystemAppearance>) {
+fn seed(_non_send: NonSendMarker, mut system: Single<&mut SystemAppearance>) {
     if system.0.is_some() {
         return;
     }
@@ -175,6 +182,64 @@ fn app_is_frontmost() -> bool {
     NSApp(mtm).isActive()
 }
 
+#[derive(Clone, Copy)]
+struct GripRegion {
+    window: isize,
+    bounds: ComputedNode,
+}
+
+static PANE_GRIP: Mutex<Option<GripRegion>> = Mutex::new(None);
+
+fn resize_cursor(
+    _main_thread: NonSendMarker,
+    windows: Query<&Window>,
+    feedback: Query<(&CursorIcon, &vmux_layout::pane::ResizeGrip)>,
+    focused: vmux_layout::window::FocusedWindow,
+    popup_owners: Query<
+        Option<&bevy_cef::prelude::HostWindow>,
+        (
+            With<vmux_browser::PopupWebview>,
+            With<vmux_ecs::KeyboardOwner>,
+        ),
+    >,
+    mut owned: Local<bool>,
+) {
+    let mut region = None;
+    let mut cursor = None;
+    if app_is_frontmost()
+        && let Some(entity) = focused.entity()
+        && windows.get(entity).is_ok_and(|window| window.focused)
+        && !popup_owners
+            .iter()
+            .any(|owner| owner.is_none_or(|owner| owner.0 == entity))
+        && let Ok((CursorIcon::System(icon), grip)) = feedback.get(entity)
+        && let Some(window) = MacWindow::number(entity)
+    {
+        region = Some(GripRegion {
+            window,
+            bounds: grip.bounds(),
+        });
+        cursor = match icon {
+            #[allow(deprecated)]
+            SystemCursorIcon::ColResize => Some(NSCursor::resizeLeftRightCursor()),
+            #[allow(deprecated)]
+            SystemCursorIcon::RowResize => Some(NSCursor::resizeUpDownCursor()),
+            SystemCursorIcon::Grabbing => Some(NSCursor::closedHandCursor()),
+            _ => None,
+        };
+    }
+    *PANE_GRIP.lock().unwrap_or_else(|error| error.into_inner()) = region;
+    if let Some(cursor) = cursor {
+        cursor.set();
+        *owned = true;
+    } else if *owned {
+        if app_is_frontmost() {
+            NSCursor::arrowCursor().set();
+        }
+        *owned = false;
+    }
+}
+
 fn activate_window(window_entity: Entity) {
     let Some(mtm) = objc2::MainThreadMarker::new() else {
         return;
@@ -203,6 +268,18 @@ fn activate_window(window_entity: Entity) {
 pub(crate) struct MacWindow;
 
 impl MacWindow {
+    fn number(entity: Entity) -> Option<isize> {
+        WINIT_WINDOWS.with_borrow(|windows| {
+            let window = windows.get_window(entity)?;
+            let handle = window.window_handle().ok()?;
+            let RawWindowHandle::AppKit(appkit) = handle.as_raw() else {
+                return None;
+            };
+            let view: &NSView = unsafe { &*appkit.ns_view.as_ptr().cast::<NSView>() };
+            Some(view.window()?.windowNumber())
+        })
+    }
+
     pub(crate) fn ensure_key(window_entity: Entity) -> bool {
         let Some(mtm) = objc2::MainThreadMarker::new() else {
             return false;
@@ -463,6 +540,8 @@ fn install_input_wake_monitor(
     let titlebar_clicks = Arc::new(Mutex::new(TitlebarClicks::default()));
     let window_zoom = Arc::new(Mutex::new(WindowZoom::default()));
     let local_wake = wake.clone();
+    let pane_drag = Arc::new(Mutex::new(None::<isize>));
+    let local_pane_drag = Arc::clone(&pane_drag);
     let local_block = block2::RcBlock::new(move |event: NonNull<NSEvent>| -> *mut NSEvent {
         cef_wake_policy.begin_interaction();
         let ev = unsafe { event.as_ref() };
@@ -560,6 +639,63 @@ fn install_input_wake_monitor(
             HistoryScroll::cancel();
         }
         let location = event_location_in_window_physical_px(ev);
+        let (window_number, scale) = match objc2::MainThreadMarker::new() {
+            Some(marker) => match ev.window(marker) {
+                Some(window) => (
+                    Some(window.windowNumber()),
+                    window.backingScaleFactor() as f32,
+                ),
+                None => (None, 1.0),
+            },
+            None => (None, 1.0),
+        };
+        let pane_capture = match event_type {
+            NSEventType::LeftMouseDown => {
+                let region = *PANE_GRIP.lock().unwrap_or_else(|error| error.into_inner());
+                let capture = region
+                    .filter(|region| {
+                        !capture_window_gesture
+                            && window_number == Some(region.window)
+                            && location
+                                .is_some_and(|(x, y)| region.bounds.contains(Vec2::new(x, y)))
+                    })
+                    .map(|region| region.window);
+                *local_pane_drag
+                    .lock()
+                    .unwrap_or_else(|error| error.into_inner()) = capture;
+                if capture.is_some() {
+                    NSCursor::closedHandCursor().set();
+                }
+                capture.is_some()
+            }
+            NSEventType::LeftMouseDragged => local_pane_drag
+                .lock()
+                .unwrap_or_else(|error| error.into_inner())
+                .is_some_and(|owner| Some(owner) == window_number),
+            NSEventType::LeftMouseUp => local_pane_drag
+                .lock()
+                .unwrap_or_else(|error| error.into_inner())
+                .take()
+                .is_some_and(|owner| Some(owner) == window_number),
+            _ => false,
+        };
+        let page_changed = motion
+            && location.is_some_and(|(x, y)| {
+                let Some(previous) = vmux_input::NativePointer::snapshot() else {
+                    return true;
+                };
+                vmux_browser::NativeBridge::windowed_page_changed(
+                    previous.position_px,
+                    Vec2::new(x, y),
+                )
+            });
+        let near_edge = motion
+            && location.is_some_and(|(x, y)| {
+                vmux_browser::NativeBridge::windowed_page_edge_contains(
+                    Vec2::new(x, y),
+                    vmux_layout::pane::ResizeGrip::minimum_width(scale) * 0.5,
+                )
+            });
         let pointer_position_changed = motion || button_event;
         let was_over_windowed_page = WINDOWED_POINTER_INSIDE.load(Ordering::Relaxed);
         let sampled_over_windowed_page = location
@@ -574,7 +710,18 @@ fn install_input_wake_monitor(
         }
         let buttons = mouse_buttons();
         if pointer_position_changed && let Some((x, y)) = location {
-            vmux_input::NativePointer::publish(Vec2::new(x, y), buttons, motion);
+            let flags = ev.modifierFlags();
+            vmux_input::NativePointer::publish_with_modifiers(
+                Vec2::new(x, y),
+                buttons,
+                motion,
+                Some(KeyModifiers {
+                    shift: flags.contains(NSEventModifierFlags::Shift),
+                    ctrl: flags.contains(NSEventModifierFlags::Control),
+                    alt: flags.contains(NSEventModifierFlags::Option),
+                    super_key: flags.contains(NSEventModifierFlags::Command),
+                }),
+            );
         }
         if motion && event_belongs_to_main_window {
             let interval = if event_type == NSEventType::MouseMoved {
@@ -582,7 +729,14 @@ fn install_input_wake_monitor(
             } else {
                 MOUSE_DRAG_WAKE_INTERVAL
             };
-            if !over_windowed_page || !was_over_windowed_page || !event_window_is_key(ev) {
+            if WindowPointerPolicy::motion_should_wake(
+                event_type != NSEventType::MouseMoved,
+                over_windowed_page,
+                was_over_windowed_page,
+                event_window_is_key(ev),
+            ) || page_changed
+                || near_edge
+            {
                 HOVER_OVER_PANE.store(true, Ordering::Relaxed);
                 local_wake(interval);
             }
@@ -597,13 +751,14 @@ fn install_input_wake_monitor(
         } else {
             local_wake(MOUSE_DRAG_WAKE_INTERVAL);
         }
-        if capture_window_gesture {
+        if capture_window_gesture || pane_capture {
             return std::ptr::null_mut();
         }
         event.as_ptr()
     });
     let global_resize_drag = Arc::clone(&resize_drag);
     let global_wake = wake.clone();
+    let global_pane_drag = Arc::clone(&pane_drag);
     let global_block = block2::RcBlock::new(move |event: NonNull<NSEvent>| {
         let event_type = unsafe { event.as_ref() }.r#type();
         if event_type == NSEventType::LeftMouseDown {
@@ -615,6 +770,10 @@ fn install_input_wake_monitor(
                 .unwrap_or_else(|poisoned| poisoned.into_inner())
                 .take();
             IN_LIVE_RESIZE.store(false, Ordering::Relaxed);
+            global_pane_drag
+                .lock()
+                .unwrap_or_else(|error| error.into_inner())
+                .take();
         }
         vmux_input::NativePointer::publish_buttons(mouse_buttons());
         global_wake(MOUSE_MOVE_WAKE_INTERVAL);

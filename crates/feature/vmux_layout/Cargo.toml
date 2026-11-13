@@ -1,6 +1,6 @@
 [package]
 name = "vmux_layout"
-description = "Bevy layout shell and single CEF layout webview"
+description = "Renderer-independent layout topology and optional Vmux runtime adapters"
 version.workspace = true
 edition.workspace = true
 publish = false
@@ -8,57 +8,66 @@ build = "../../build_cfg_git.rs"
 
 [features]
 default = []
-debug = []
-
-[lib]
-path = "src/lib.rs"
+contracts = ["dep:percent-encoding", "dep:rkyv", "dep:serde_json", "dep:vmux_api", "vmux_ecs/contracts"]
+geometry = ["dep:vmux_flex", "dep:bevy_transform"]
+store = ["vmux_ecs/store", "dep:moonshine-save"]
+host = [
+    "contracts", "geometry", "store", "vmux_ecs/host",
+    "dep:vmux_page", "dep:vmux_path", "dep:vmux_ui", "dep:vmux_session", "dep:vmux_git",
+    "dep:bevy", "dep:bevy_asset", "dep:bevy_cef", "dep:bevy_cef_core", "dep:libc",
+    "dep:raw-window-handle", "dep:rfd", "dep:ron", "dep:sha2", "dep:uuid",
+    "dep:vmux_command", "dep:vmux_history", "dep:vmux_input", "dep:vmux_tool",
+    "dep:dioxus", "dep:qrcode",
+]
+debug = ["host"]
 
 [dependencies]
-percent-encoding = "2"
-rkyv = { workspace = true }
-serde = { workspace = true }
-serde_json = { workspace = true }
-vmux_ecs = { path = "../../util/vmux_ecs", features = ["host"] }
-vmux_page = { path = "../../util/vmux_page" }
-vmux_path = { path = "../../util/vmux_path" }
-vmux_ui = { path = "../../util/vmux_ui", default-features = false }
-vmux_api = { path = "../../util/vmux_api" }
-vmux_session = { path = "../vmux_session", default-features = false }
-vmux_git = { path = "../vmux_git" }
-vmux_pane = { path = "../vmux_pane", features = ["geometry", "contracts"] }
+bevy_app.workspace = true
+bevy_ecs.workspace = true
+bevy_reflect.workspace = true
+serde.workspace = true
+vmux_ecs = { path = "../../util/vmux_ecs" }
+percent-encoding = { version = "2", optional = true }
+rkyv = { workspace = true, optional = true }
+serde_json = { workspace = true, optional = true }
+vmux_page = { path = "../../util/vmux_page", optional = true }
+vmux_path = { path = "../../util/vmux_path", optional = true }
+vmux_ui = { path = "../../util/vmux_ui", default-features = false, optional = true }
+vmux_api = { path = "../../util/vmux_api", optional = true }
+vmux_session = { path = "../vmux_session", default-features = false, optional = true }
+vmux_git = { path = "../vmux_git", optional = true }
+vmux_flex = { path = "../../util/vmux_flex", optional = true }
+bevy_transform = { version = "0.19.0", default-features = false, features = ["std", "bevy-support"], optional = true }
+moonshine-save = { workspace = true, optional = true }
 
 [dev-dependencies]
-serde_json = { workspace = true }
+serde_json.workspace = true
+tempfile = "3"
 
 [target.'cfg(not(target_os = "ios"))'.dependencies]
-bevy = { workspace = true }
-bevy_asset = "0.19.0"
-bevy_cef = { workspace = true }
-bevy_cef_core = { workspace = true }
-bevy_ecs = { workspace = true }
-bevy_reflect = { workspace = true }
-libc = "0.2"
-moonshine-save = { workspace = true }
-raw-window-handle = "0.6"
-rfd = { workspace = true }
-ron = { workspace = true }
-sha2 = "0.10"
-uuid = { workspace = true }
-vmux_command = { path = "../vmux_command" }
-vmux_flex = { path = "../../util/vmux_flex" }
-vmux_history = { path = "../vmux_history" }
-vmux_input = { path = "../vmux_input" }
-vmux_session = { path = "../vmux_session", default-features = false, features = ["app"] }
-vmux_tool = { path = "../vmux_tool" }
+bevy = { workspace = true, optional = true }
+bevy_asset = { version = "0.19.0", optional = true }
+bevy_cef = { workspace = true, optional = true }
+bevy_cef_core = { workspace = true, optional = true }
+libc = { version = "0.2", optional = true }
+raw-window-handle = { version = "0.6", optional = true }
+rfd = { workspace = true, optional = true }
+ron = { workspace = true, optional = true }
+sha2 = { version = "0.10", optional = true }
+uuid = { workspace = true, optional = true }
+vmux_command = { path = "../vmux_command", optional = true }
+vmux_history = { path = "../vmux_history", optional = true }
+vmux_input = { path = "../vmux_input", optional = true }
+vmux_session = { path = "../vmux_session", default-features = false, features = ["app"], optional = true }
+vmux_tool = { path = "../vmux_tool", optional = true }
 
 [target.'cfg(any(target_os = "ios", target_os = "macos"))'.dependencies]
-dioxus = { workspace = true }
-qrcode = { version = "0.14", default-features = false, features = ["svg"] }
-vmux_command = { path = "../vmux_command" }
+dioxus = { workspace = true, optional = true }
+qrcode = { version = "0.14", default-features = false, features = ["svg"], optional = true }
+vmux_command = { path = "../vmux_command", optional = true }
 
 [target.'cfg(not(target_os = "ios"))'.dev-dependencies]
-tempfile = "3"
-tokio = { workspace = true }
+tokio.workspace = true
 dioxus-html = { version = "=0.7.9", features = ["serialize"] }
 dioxus-ssr = "=0.7.9"
 

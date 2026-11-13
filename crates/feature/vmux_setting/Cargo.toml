@@ -31,7 +31,7 @@ vmux_command = { path = "../vmux_command" }
 vmux_ecs = { path = "../../util/vmux_ecs", features = ["host"] }
 vmux_flex = { path = "../../util/vmux_flex" }
 vmux_history = { path = "../vmux_history" }
-vmux_layout = { path = "../vmux_layout" }
+vmux_layout = { path = "../vmux_layout", features = ["host"] }
 vmux_tool = { path = "../vmux_tool" }
 
 [target.'cfg(any(target_os = "ios", target_os = "macos"))'.dependencies]

@@ -1,10 +1,10 @@
+pub use crate::{Hierarchy as PaneHierarchy, Pane, PaneSplit, PaneSplitDirection};
 use bevy::ecs::system::SystemParam;
 use bevy::prelude::*;
 use moonshine_save::prelude::*;
 use vmux_ecs::store::StoreAppExt;
 use vmux_flex::prelude::*;
 use vmux_history::LastActivatedAt;
-pub use vmux_pane::{Hierarchy as PaneHierarchy, Pane, PaneSplit, PaneSplitDirection};
 
 use super::identity::SpawnSeq;
 

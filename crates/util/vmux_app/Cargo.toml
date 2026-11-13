@@ -9,6 +9,7 @@ repository.workspace = true
 
 [features]
 default = []
+contracts = ["ecs", "vmux_ecs/contracts", "vmux_project?/contracts", "vmux_layout?/contracts"]
 conformance = ["extension", "vmux_extension/conformance"]
 cli = [
     "ecs",
@@ -70,25 +71,25 @@ daemon = [
     "dep:vmux_transport",
     "vmux_acp/service",
 ]
-tool = ["dep:vmux_tool"]
+tool = ["layout-runtime", "dep:vmux_tool"]
 capture = ["tool", "dep:vmux_input"]
-bookmark = ["layout", "dep:vmux_bookmark"]
+bookmark = ["layout-runtime", "dep:vmux_bookmark"]
 ecs = ["dep:vmux_ecs"]
 jobs = ["ecs", "vmux_ecs/jobs"]
 flex = ["ecs", "dep:vmux_flex"]
-pane = ["ecs", "dep:vmux_pane"]
 runtime = ["flex", "vmux_flex/window", "vmux_ecs/host"]
 command = ["runtime", "dep:vmux_command"]
 setting = ["runtime", "dep:vmux_setting"]
 session = ["dep:vmux_session"]
-layout = ["command", "setting", "pane", "dep:vmux_layout"]
-browser = ["command", "layout", "dep:vmux_browser"]
+layout = ["ecs", "dep:vmux_layout"]
+layout-runtime = ["layout", "command", "setting", "vmux_layout/host"]
+browser = ["command", "layout-runtime", "dep:vmux_browser"]
 extension-core = ["ecs", "dep:vmux_extension"]
 extension = ["extension-core", "browser", "vmux_extension/host"]
-terminal = ["layout", "service", "dep:vmux_terminal"]
+terminal = ["layout-runtime", "service", "dep:vmux_terminal"]
 project = ["ecs", "dep:vmux_project"]
-editor = ["layout", "project", "dep:vmux_editor"]
-git = ["layout", "dep:vmux_git"]
+editor = ["layout-runtime", "project", "dep:vmux_editor"]
+git = ["layout-runtime", "dep:vmux_git"]
 acp = [
     "command",
     "editor",
@@ -103,14 +104,14 @@ acp = [
 ]
 knowledge = ["runtime", "dep:vmux_knowledge"]
 history = ["runtime", "dep:vmux_history"]
-simulator = ["layout", "dep:vmux_simulator"]
+simulator = ["layout-runtime", "dep:vmux_simulator"]
 shortcut = ["runtime", "dep:vmux_shortcut"]
 team = ["runtime", "dep:vmux_team"]
-space = ["layout", "dep:vmux_space"]
+space = ["layout-runtime", "dep:vmux_space"]
 service = ["runtime", "dep:vmux_service"]
-remote = ["layout", "service", "dep:vmux_remote"]
+remote = ["layout-runtime", "service", "dep:vmux_remote"]
 start = ["runtime", "dep:vmux_start"]
-vault = ["layout", "dep:vmux_vault"]
+vault = ["layout-runtime", "dep:vmux_vault"]
 
 [dependencies]
 bevy_app = { workspace = true }
@@ -147,9 +148,11 @@ tracing = { version = "0.1", optional = true }
 tracing-appender = { version = "0.2", optional = true }
 tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"], optional = true }
 vmux_profile = { path = "../vmux_profile", optional = true }
-vmux_pane = { path = "../../feature/vmux_pane", optional = true }
 vmux_project = { path = "../../feature/vmux_project", optional = true }
 vmux_transport = { path = "../vmux_transport", optional = true }
+
+[dev-dependencies]
+bevy_ecs.workspace = true
 
 [[bin]]
 name = "vmux_service"

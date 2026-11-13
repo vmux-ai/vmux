@@ -27,10 +27,13 @@ use crate::worktree::WorktreePlugin;
 use crate::{Header, LayoutStartupSet, Open, TerminalLayoutSpawnRequest, apply, settings};
 
 #[vmux_page::page]
-pub struct LayoutPlugin;
+pub struct LayoutRuntimePlugin;
 
-impl Plugin for LayoutPlugin {
+impl Plugin for LayoutRuntimePlugin {
     fn build(&self, app: &mut App) {
+        if !app.is_plugin_added::<crate::LayoutPlugin>() {
+            app.add_plugins(crate::LayoutPlugin);
+        }
         #[cfg(ui)]
         {
             app.add_plugins((

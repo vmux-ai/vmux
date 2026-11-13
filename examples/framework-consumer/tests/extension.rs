@@ -3,8 +3,8 @@ use bevy_ecs::prelude::*;
 use bevy_ecs::system::SystemState;
 use vmux_api::extension::ExtToggleRequest;
 use vmux_app::VmuxPlugin;
-use vmux_extension::snapshot::{ExtEntry, Index};
-use vmux_extension::{Catalog, Mutation, Request, Root, Seed, WriteCompleted, WriteTaskRequest};
+use vmux_app::extension::snapshot::{ExtEntry, Index};
+use vmux_app::extension::{Catalog, Mutation, Request, Root, Seed, WriteCompleted, WriteTaskRequest};
 
 #[test]
 fn an_independent_extension_core_keeps_profile_grants_separate_and_commits_after_io() {

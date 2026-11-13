@@ -1,6 +1,15 @@
 pub(super) struct WindowPointerPolicy;
 
 impl WindowPointerPolicy {
+    pub(super) fn motion_should_wake(
+        dragging: bool,
+        over_windowed_page: bool,
+        was_over_windowed_page: bool,
+        key_window: bool,
+    ) -> bool {
+        dragging || !over_windowed_page || !was_over_windowed_page || !key_window
+    }
+
     pub(super) fn windowed_presence(
         pointer_position_changed: bool,
         previous: bool,
@@ -186,6 +195,25 @@ impl WindowZoom {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn native_pane_drag_wakes_while_ordinary_pointer_motion_stays_asleep() {
+        assert!(WindowPointerPolicy::motion_should_wake(
+            true, true, true, true
+        ));
+        assert!(!WindowPointerPolicy::motion_should_wake(
+            false, true, true, true
+        ));
+        for (over, previous, key) in [
+            (false, true, true),
+            (true, false, true),
+            (true, true, false),
+        ] {
+            assert!(WindowPointerPolicy::motion_should_wake(
+                false, over, previous, key
+            ));
+        }
+    }
 
     #[test]
     fn window_resize_detects_edges_and_corners() {

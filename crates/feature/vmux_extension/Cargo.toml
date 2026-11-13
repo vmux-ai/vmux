@@ -28,7 +28,7 @@ vmux_api = { path = "../../util/vmux_api" }
 bevy_app = { workspace = true }
 bevy_ecs = { workspace = true }
 vmux_ecs = { path = "../../util/vmux_ecs", features = ["store"] }
-vmux_layout = { path = "../vmux_layout", optional = true }
+vmux_layout = { path = "../vmux_layout", features = ["host"], optional = true }
 vmux_path = { path = "../../util/vmux_path", optional = true }
 sha2 = { version = "0.10", optional = true }
 

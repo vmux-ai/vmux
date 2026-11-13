@@ -27,7 +27,7 @@ bevy = { workspace = true }
 bevy_cef = { workspace = true }
 ron = { workspace = true }
 vmux_command = { path = "../vmux_command" }
-vmux_layout = { path = "../vmux_layout" }
+vmux_layout = { path = "../vmux_layout", features = ["host"] }
 vmux_session = { path = "../vmux_session" }
 vmux_tool = { path = "../vmux_tool" }
 vmux_space = { path = "../vmux_space" }

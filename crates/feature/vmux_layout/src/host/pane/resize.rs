@@ -1,15 +1,24 @@
-use bevy::{ecs::relationship::Relationship, prelude::*};
+pub use crate::{PaneSize, PaneSplitGaps};
+use bevy::ecs::system::Commands;
+use bevy::window::Window;
+use bevy::{
+    ecs::{relationship::Relationship, system::SystemParam},
+    prelude::*,
+    window::{CursorIcon, SystemCursorIcon},
+};
 use moonshine_save::prelude::*;
 use vmux_api::open_target::PaneDirection;
 use vmux_ecs::store::StoreAppExt;
 use vmux_flex::prelude::*;
 #[cfg(test)]
 use vmux_history::LastActivatedAt;
-pub use vmux_pane::{PaneSize, PaneSplitGaps};
 
 use crate::settings::LayoutSettings;
 
-use super::{Pane, PaneResize, PaneSplit, PaneSplitDirection, ResizeRequest};
+use super::{
+    Pane, PaneResize, PaneSplit, PaneSplitDirection, PointerDevice, PointerDevicePlugin,
+    ResizeRequest,
+};
 #[cfg(test)]
 use crate::stack::Stack;
 use crate::{
@@ -20,15 +29,29 @@ use crate::{
 const MIN_PANE_PX: f32 = 60.0;
 const RESIZE_STEP: f32 = 0.05;
 
+#[derive(SystemSet, Debug, Clone, PartialEq, Eq, Hash)]
+pub(crate) struct PointerResizeSet;
+
+#[derive(Component, Default)]
+pub(super) struct PointerPress(bool);
+
 pub(super) struct ResizePlugin;
 
 impl Plugin for ResizePlugin {
     fn build(&self, app: &mut App) {
+        if !app.is_plugin_added::<PointerDevicePlugin>() {
+            app.add_plugins(PointerDevicePlugin);
+        }
         app.add_message::<ResizeRequest>()
             .register_required_components::<PaneSize, Save>()
             .register_stored::<PaneSize>()
             .add_systems(Update, from_commands.in_set(LayoutRequestSet::Handle))
-            .add_systems(Update, from_pointer)
+            .add_systems(
+                Update,
+                from_pointer
+                    .in_set(PointerResizeSet)
+                    .after(crate::window::WindowFocusSet),
+            )
             .add_systems(PostUpdate, sync_split_gaps);
     }
 }
@@ -37,9 +60,26 @@ impl Plugin for ResizePlugin {
 pub struct PaneDrag {
     previous: Entity,
     next: Entity,
+    direction: PaneSplitDirection,
     start_position: f32,
     previous_grow: f32,
     next_grow: f32,
+}
+
+impl PaneDrag {
+    fn matches(&self, split: &PaneSplit, siblings: impl Iterator<Item = Entity>) -> bool {
+        if self.direction != split.direction {
+            return false;
+        }
+        let mut previous = None;
+        for next in siblings {
+            if previous == Some(self.previous) && next == self.next {
+                return true;
+            }
+            previous = Some(next);
+        }
+        false
+    }
 }
 
 fn from_commands(
@@ -217,39 +257,198 @@ fn resized_pair(pane_grow: f32, sibling_grow: f32, delta: f32, parent_length: f3
     (pane_grow, sibling_grow)
 }
 
+#[derive(Component, Clone, Debug, PartialEq)]
+pub struct ResizeGrip {
+    bounds: ComputedNode,
+    previous_cursor: Option<CursorIcon>,
+}
+
+impl ResizeGrip {
+    pub fn minimum_width(scale: f32) -> f32 {
+        12.0 * scale
+    }
+
+    pub fn bounds(&self) -> ComputedNode {
+        self.bounds
+    }
+
+    pub fn contains(&self, point: Vec2) -> bool {
+        self.bounds.contains(point)
+    }
+
+    fn between(direction: PaneSplitDirection, previous: ComputedNode, next: ComputedNode) -> Self {
+        let scale = previous.scale().max(next.scale());
+        let (mut min, mut max) = match direction {
+            PaneSplitDirection::Row => (
+                Vec2::new(previous.max().x, previous.min().y.min(next.min().y)),
+                Vec2::new(next.min().x, previous.max().y.max(next.max().y)),
+            ),
+            PaneSplitDirection::Column => (
+                Vec2::new(previous.min().x.min(next.min().x), previous.max().y),
+                Vec2::new(previous.max().x.max(next.max().x), next.min().y),
+            ),
+        };
+        match direction {
+            PaneSplitDirection::Row => {
+                let padding = ((Self::minimum_width(scale) - (max.x - min.x)) * 0.5).max(0.0);
+                min.x -= padding;
+                max.x += padding;
+            }
+            PaneSplitDirection::Column => {
+                let padding = ((Self::minimum_width(scale) - (max.y - min.y)) * 0.5).max(0.0);
+                min.y -= padding;
+                max.y += padding;
+            }
+        }
+        Self {
+            bounds: ComputedNode {
+                size: max - min,
+                center: (min + max) * 0.5,
+                inverse_scale_factor: previous.inverse_scale_factor,
+                ..default()
+            },
+            previous_cursor: None,
+        }
+    }
+}
+
+#[derive(SystemParam)]
+struct PointerCursors<'w, 's> {
+    windows:
+        Query<'w, 's, (Option<&'static ResizeGrip>, Option<&'static CursorIcon>), With<Window>>,
+    commands: Commands<'w, 's>,
+}
+
+impl PointerCursors<'_, '_> {
+    fn publish(&mut self, window: Entity, mut grip: ResizeGrip, icon: CursorIcon) {
+        let Ok((current, cursor)) = self.windows.get(window) else {
+            return;
+        };
+        grip.previous_cursor = match current {
+            Some(current) => current.previous_cursor.clone(),
+            None => cursor.cloned(),
+        };
+        if current != Some(&grip) {
+            self.commands.entity(window).insert(grip);
+        }
+        if cursor != Some(&icon) {
+            self.commands.entity(window).insert(icon);
+        }
+    }
+
+    fn release(&mut self, window: Entity) {
+        let Ok((Some(grip), _)) = self.windows.get(window) else {
+            return;
+        };
+        self.commands.entity(window).remove::<ResizeGrip>();
+        if let Some(cursor) = &grip.previous_cursor {
+            self.commands.entity(window).insert(cursor.clone());
+        } else {
+            self.commands.entity(window).remove::<CursorIcon>();
+        }
+    }
+}
+
 fn from_pointer(
-    windows: Query<&Window>,
+    windows: Query<(Entity, &Window)>,
+    mut feedback: PointerCursors,
     focused_window: crate::window::FocusedWindow,
-    splits: Query<(Entity, &PaneSplit, &Children), Without<PaneDrag>>,
-    active_drags: Query<(Entity, &PaneDrag, &PaneSplit)>,
-    child_layouts: Query<&ComputedNode>,
-    parent_layouts: Query<&ComputedNode>,
-    mut nodes: Query<&mut Node>,
+    overlays: super::OverlayInput,
+    hierarchy: crate::window::WindowHierarchy,
+    active_tab: ActiveTabParam,
+    panes: crate::Hierarchy,
+    splits: Query<(Entity, &PaneSplit, &Children), With<Pane>>,
+    active_drags: Query<(Entity, &PaneDrag)>,
+    layouts: Query<&ComputedNode>,
+    mut nodes: Query<&mut Node, Without<vmux_ecs::WindowOverlay>>,
     mut pane_sizes: Query<&mut PaneSize>,
     mouse: Res<ButtonInput<MouseButton>>,
+    mut was_pressed: Single<&mut PointerPress, With<PointerDevice>>,
     mut commands: Commands,
 ) {
-    let Some(window_entity) = focused_window.entity() else {
+    let native = vmux_input::NativePointer::snapshot();
+    let pressed = match native {
+        Some(pointer) => pointer.buttons.left,
+        None => mouse.pressed(MouseButton::Left),
+    };
+    let just_pressed = pressed && !was_pressed.0;
+    was_pressed.0 = pressed;
+    let current_window = focused_window.entity();
+    let blocked = current_window.is_some_and(|window| overlays.owns(window));
+    let tab = active_tab.get();
+    for (entity, window) in &windows {
+        if Some(entity) != current_window || !window.focused || tab.is_none() || blocked {
+            feedback.release(entity);
+        }
+    }
+    for (split, drag) in &active_drags {
+        let current = !blocked
+            && tab.is_some_and(|tab| panes.contains(tab, split))
+            && hierarchy.get(split) == current_window
+            && splits.get(split).is_ok_and(|(_, split, children)| {
+                drag.matches(
+                    split,
+                    children
+                        .iter()
+                        .filter(|child| panes.is_leaf(*child) || splits.contains(*child)),
+                )
+            });
+        if !pressed || !current {
+            commands.entity(split).remove::<PaneDrag>();
+        }
+    }
+    let (Some(window_entity), Some(tab)) = (current_window, tab) else {
         return;
     };
-    let Ok(window) = windows.get(window_entity) else {
+    let Ok((_, window)) = windows.get(window_entity) else {
         return;
     };
-    let Some(position) = window.physical_cursor_position() else {
+    if !window.focused || blocked {
+        for (split, _) in &active_drags {
+            commands.entity(split).remove::<PaneDrag>();
+        }
+        return;
+    }
+    let Some(cursor) = vmux_input::NativePointer::position(window_entity, window) else {
+        feedback.release(window_entity);
         return;
     };
-    let cursor = Vec2::new(position.x, position.y);
-
-    if let Ok((split_entity, drag, split)) = active_drags.single() {
-        if mouse.pressed(MouseButton::Left) {
+    let hit_position = match (just_pressed, native) {
+        (true, Some(pointer)) => pointer.press_position_px,
+        _ => cursor,
+    };
+    if pressed {
+        for (split_entity, drag) in &active_drags {
+            if hierarchy.get(split_entity) != Some(window_entity)
+                || !panes.contains(tab, split_entity)
+            {
+                continue;
+            }
+            let Ok((_, split, children)) = splits.get(split_entity) else {
+                continue;
+            };
+            if !drag.matches(
+                split,
+                children
+                    .iter()
+                    .filter(|child| panes.is_leaf(*child) || splits.contains(*child)),
+            ) {
+                continue;
+            }
+            let (Ok(previous), Ok(next)) = (layouts.get(drag.previous), layouts.get(drag.next))
+            else {
+                commands.entity(split_entity).remove::<PaneDrag>();
+                continue;
+            };
+            let grip = ResizeGrip::between(split.direction, *previous, *next);
+            feedback.publish(window_entity, grip, SystemCursorIcon::Grabbing.into());
             let position = match split.direction {
                 PaneSplitDirection::Row => cursor.x,
                 PaneSplitDirection::Column => cursor.y,
             };
-            let parent_size = parent_layouts
+            let parent_size = layouts
                 .get(split_entity)
-                .map(|layout| layout.size)
-                .unwrap_or(Vec2::ONE);
+                .map_or(Vec2::ONE, |layout| layout.size);
             let parent_length = match split.direction {
                 PaneSplitDirection::Row => parent_size.x,
                 PaneSplitDirection::Column => parent_size.y,
@@ -259,7 +458,6 @@ fn from_pointer(
                 * (drag.previous_grow + drag.next_grow);
             let (previous_grow, next_grow) =
                 resized_pair(drag.previous_grow, drag.next_grow, delta, parent_length);
-
             if let Ok(mut node) = nodes.get_mut(drag.previous) {
                 node.flex_grow = previous_grow;
             }
@@ -272,62 +470,65 @@ fn from_pointer(
             if let Ok(mut size) = pane_sizes.get_mut(drag.next) {
                 size.flex_grow = next_grow;
             }
-        } else {
-            commands.entity(split_entity).remove::<PaneDrag>();
+            return;
         }
+    }
+    if pressed && !just_pressed {
+        feedback.release(window_entity);
         return;
     }
-
-    'splits: for (split_entity, split, children) in &splits {
-        let siblings: Vec<Entity> = children.iter().collect();
-        for index in 0..siblings.len().saturating_sub(1) {
-            let Ok(&previous) = child_layouts.get(siblings[index]) else {
+    for (split_entity, split, children) in &splits {
+        if hierarchy.get(split_entity) != Some(window_entity) || !panes.contains(tab, split_entity)
+        {
+            continue;
+        }
+        let mut siblings = Vec::new();
+        for child in children.iter() {
+            if panes.is_leaf(child) || splits.contains(child) {
+                siblings.push(child);
+            }
+        }
+        for pair in siblings.windows(2) {
+            let (previous_entity, next_entity) = (pair[0], pair[1]);
+            let (Ok(previous), Ok(next)) = (layouts.get(previous_entity), layouts.get(next_entity))
+            else {
                 continue;
             };
-            let Ok(&next) = child_layouts.get(siblings[index + 1]) else {
-                continue;
-            };
-            let (gap_min, gap_max, cross_min, cross_max) = match split.direction {
-                PaneSplitDirection::Row => (
-                    previous.max().x,
-                    next.min().x,
-                    previous.min().y.min(next.min().y),
-                    previous.max().y.max(next.max().y),
-                ),
-                PaneSplitDirection::Column => (
-                    previous.max().y,
-                    next.min().y,
-                    previous.min().x.min(next.min().x),
-                    previous.max().x.max(next.max().x),
-                ),
-            };
-            let (position, cross) = match split.direction {
-                PaneSplitDirection::Row => (cursor.x, cursor.y),
-                PaneSplitDirection::Column => (cursor.y, cursor.x),
-            };
-            if position < gap_min || position > gap_max || cross < cross_min || cross > cross_max {
+            if previous.is_empty() || next.is_empty() {
                 continue;
             }
-            if mouse.just_pressed(MouseButton::Left) {
-                let previous_grow = nodes
-                    .get(siblings[index])
-                    .map(|node| node.flex_grow)
-                    .unwrap_or(1.0);
-                let next_grow = nodes
-                    .get(siblings[index + 1])
-                    .map(|node| node.flex_grow)
-                    .unwrap_or(1.0);
+            let grip = ResizeGrip::between(split.direction, *previous, *next);
+            if !grip.contains(hit_position) {
+                continue;
+            }
+            let icon = if just_pressed {
+                SystemCursorIcon::Grabbing
+            } else {
+                match split.direction {
+                    PaneSplitDirection::Row => SystemCursorIcon::ColResize,
+                    PaneSplitDirection::Column => SystemCursorIcon::RowResize,
+                }
+            };
+            feedback.publish(window_entity, grip, icon.into());
+            if just_pressed {
                 commands.entity(split_entity).insert(PaneDrag {
-                    previous: siblings[index],
-                    next: siblings[index + 1],
-                    start_position: position,
-                    previous_grow,
-                    next_grow,
+                    previous: previous_entity,
+                    next: next_entity,
+                    direction: split.direction,
+                    start_position: match split.direction {
+                        PaneSplitDirection::Row => hit_position.x,
+                        PaneSplitDirection::Column => hit_position.y,
+                    },
+                    previous_grow: nodes
+                        .get(previous_entity)
+                        .map_or(1.0, |node| node.flex_grow),
+                    next_grow: nodes.get(next_entity).map_or(1.0, |node| node.flex_grow),
                 });
             }
-            break 'splits;
+            return;
         }
     }
+    feedback.release(window_entity);
 }
 
 fn sync_split_gaps(
@@ -344,22 +545,28 @@ fn sync_split_gaps(
 
 #[cfg(test)]
 mod tests {
+    use super::super::NATIVE_POINTER_TEST;
     use super::*;
     use crate::tab::Tab;
     use bevy::ecs::message::Messages;
+    use bevy_cef::prelude::HostWindow;
+    use std::sync::MutexGuard;
 
     struct ResizeFixture {
         app: App,
         left: Entity,
         right: Entity,
+        split: Entity,
+        window: Option<Entity>,
+        pointer_guard: Option<MutexGuard<'static, ()>>,
     }
 
     impl ResizeFixture {
         fn new(left_grow: f32, right_grow: f32) -> Self {
             let mut app = App::new();
-            app.add_plugins(MinimalPlugins)
-                .add_message::<ResizeRequest>()
-                .add_systems(Update, from_commands);
+            app.add_plugins((MinimalPlugins, ResizePlugin))
+                .init_resource::<ButtonInput<MouseButton>>()
+                .insert_resource(LayoutSettings::default());
             let tab = app
                 .world_mut()
                 .spawn((Tab::default(), LastActivatedAt::now()))
@@ -380,7 +587,84 @@ mod tests {
                 .id();
             let left = Self::pane(&mut app, split, left_grow, 10);
             let right = Self::pane(&mut app, split, right_grow, 1);
-            Self { app, left, right }
+            Self {
+                app,
+                left,
+                right,
+                split,
+                window: None,
+                pointer_guard: None,
+            }
+        }
+
+        fn native(direction: PaneSplitDirection) -> Self {
+            let guard = NATIVE_POINTER_TEST.lock().unwrap();
+            vmux_input::NativePointer::publish(Vec2::ZERO, Default::default(), false);
+            let mut fixture = Self::new(1.0, 1.0);
+            fixture.pointer_guard = Some(guard);
+            let window = fixture
+                .app
+                .world_mut()
+                .spawn((Window::default(), vmux_ecs::Active))
+                .id();
+            fixture.window = Some(window);
+            let (parent, previous, next) = match direction {
+                PaneSplitDirection::Row => (
+                    Vec2::new(1000.0, 500.0),
+                    Vec2::new(248.0, 250.0),
+                    Vec2::new(752.0, 250.0),
+                ),
+                PaneSplitDirection::Column => (
+                    Vec2::new(500.0, 1000.0),
+                    Vec2::new(250.0, 248.0),
+                    Vec2::new(250.0, 752.0),
+                ),
+            };
+            let size = match direction {
+                PaneSplitDirection::Row => Vec2::new(496.0, 500.0),
+                PaneSplitDirection::Column => Vec2::new(500.0, 496.0),
+            };
+            fixture.app.world_mut().entity_mut(fixture.split).insert((
+                HostWindow(window),
+                Node::default(),
+                PaneSplit { direction },
+                ComputedNode {
+                    size: parent,
+                    center: parent / 2.0,
+                    ..default()
+                },
+            ));
+            fixture
+                .app
+                .world_mut()
+                .entity_mut(fixture.left)
+                .insert(ComputedNode {
+                    size,
+                    center: previous,
+                    ..default()
+                });
+            fixture
+                .app
+                .world_mut()
+                .entity_mut(fixture.right)
+                .insert(ComputedNode {
+                    size,
+                    center: next,
+                    ..default()
+                });
+            fixture
+        }
+
+        fn pointer(&mut self, left: bool, position: Option<Vec2>) {
+            self.app
+                .world_mut()
+                .get_mut::<Window>(self.window.unwrap())
+                .unwrap()
+                .set_physical_cursor_position(position.map(|position| position.as_dvec2()));
+            let mut buttons = vmux_input::NativePointer::snapshot().unwrap().buttons;
+            buttons.left = left;
+            vmux_input::NativePointer::publish(position.unwrap_or_default(), buttons, true);
+            self.app.update();
         }
 
         fn pane(app: &mut App, parent: Entity, flex_grow: f32, activated_at: i64) -> Entity {
@@ -418,6 +702,309 @@ mod tests {
                 self.app.world().get::<Node>(pane).unwrap().flex_grow,
                 self.app.world().get::<PaneSize>(pane).unwrap().flex_grow,
             )
+        }
+    }
+
+    impl Drop for ResizeFixture {
+        fn drop(&mut self) {
+            if self.pointer_guard.is_some() {
+                vmux_input::NativePointer::publish(Vec2::ZERO, Default::default(), false);
+            }
+        }
+    }
+
+    #[test]
+    fn changed_pane_order_or_axis_cancels_capture_without_changing_sizes() {
+        for change in 0..5 {
+            let mut fixture = ResizeFixture::native(PaneSplitDirection::Row);
+            let start = Vec2::new(500.0, 250.0);
+            fixture.pointer(false, Some(start));
+            fixture.pointer(true, Some(start));
+            let previous = fixture.grows(fixture.left);
+            let next = fixture.grows(fixture.right);
+            match change {
+                0 => {
+                    let middle = fixture.app.world_mut().spawn(Pane).id();
+                    fixture
+                        .app
+                        .world_mut()
+                        .entity_mut(fixture.split)
+                        .insert_children(1, &[middle]);
+                }
+                1 => {
+                    fixture
+                        .app
+                        .world_mut()
+                        .entity_mut(fixture.split)
+                        .insert_children(0, &[fixture.right]);
+                }
+                2 => {
+                    fixture
+                        .app
+                        .world_mut()
+                        .entity_mut(fixture.split)
+                        .insert(PaneSplit {
+                            direction: PaneSplitDirection::Column,
+                        });
+                }
+                3 => {
+                    let auxiliary = fixture.app.world_mut().spawn_empty().id();
+                    fixture
+                        .app
+                        .world_mut()
+                        .entity_mut(fixture.split)
+                        .insert_children(1, &[auxiliary]);
+                }
+                4 => {
+                    fixture
+                        .app
+                        .world_mut()
+                        .entity_mut(fixture.split)
+                        .remove::<PaneSplit>();
+                }
+                _ => unreachable!(),
+            }
+            fixture.pointer(true, Some(start));
+            assert_eq!(
+                fixture.app.world().get::<PaneDrag>(fixture.split).is_some(),
+                change == 3
+            );
+            assert_eq!(fixture.grows(fixture.left), previous);
+            assert_eq!(fixture.grows(fixture.right), next);
+            if change != 3 {
+                assert!(
+                    fixture
+                        .app
+                        .world()
+                        .get::<ResizeGrip>(fixture.window.unwrap())
+                        .is_none()
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn overlay_input_blocks_capture_and_cancels_an_existing_drag() {
+        for scope in 0..3 {
+            let mut fixture = ResizeFixture::native(PaneSplitDirection::Row);
+            let start = Vec2::new(500.0, 250.0);
+            fixture.pointer(false, Some(start));
+            let overlay = fixture
+                .app
+                .world_mut()
+                .spawn((vmux_ecs::WindowOverlay, vmux_ecs::KeyboardOwner))
+                .id();
+            if scope != 1 {
+                let window = if scope == 2 {
+                    fixture.app.world_mut().spawn(Window::default()).id()
+                } else {
+                    fixture.window.unwrap()
+                };
+                fixture
+                    .app
+                    .world_mut()
+                    .entity_mut(overlay)
+                    .insert(HostWindow(window));
+            }
+            fixture.pointer(true, Some(start));
+            if scope == 2 {
+                assert!(fixture.app.world().get::<PaneDrag>(fixture.split).is_some());
+                fixture
+                    .app
+                    .world_mut()
+                    .entity_mut(overlay)
+                    .insert(HostWindow(fixture.window.unwrap()));
+                fixture.pointer(true, Some(Vec2::new(600.0, 250.0)));
+            } else {
+                assert!(fixture.app.world().get::<PaneDrag>(fixture.split).is_none());
+                fixture.app.world_mut().entity_mut(overlay).despawn();
+                fixture.pointer(true, Some(Vec2::new(600.0, 250.0)));
+            }
+            assert!(fixture.app.world().get::<PaneDrag>(fixture.split).is_none());
+            assert!(
+                fixture
+                    .app
+                    .world()
+                    .get::<ResizeGrip>(fixture.window.unwrap())
+                    .is_none()
+            );
+            assert_eq!(fixture.grows(fixture.left), (1.0, 1.0));
+            assert_eq!(fixture.grows(fixture.right), (1.0, 1.0));
+        }
+    }
+
+    #[test]
+    fn native_pointer_resizes_each_axis_and_releases_without_a_winit_mouse_event() {
+        for direction in [PaneSplitDirection::Row, PaneSplitDirection::Column] {
+            let mut fixture = ResizeFixture::native(direction);
+            let (start, moved) = match direction {
+                PaneSplitDirection::Row => (Vec2::new(500.0, 250.0), Vec2::new(600.0, 250.0)),
+                PaneSplitDirection::Column => (Vec2::new(250.0, 500.0), Vec2::new(250.0, 600.0)),
+            };
+            fixture.pointer(false, Some(start));
+            fixture.pointer(true, Some(start));
+            assert!(fixture.app.world().get::<PaneDrag>(fixture.split).is_some());
+            assert!(
+                !fixture
+                    .app
+                    .world()
+                    .resource::<ButtonInput<MouseButton>>()
+                    .pressed(MouseButton::Left)
+            );
+            fixture.pointer(true, Some(moved));
+            let previous = fixture.grows(fixture.left);
+            let next = fixture.grows(fixture.right);
+            assert!((previous.0 - 1.2).abs() < 0.0001);
+            assert!((next.0 - 0.8).abs() < 0.0001);
+            assert_eq!(previous.0, previous.1);
+            assert_eq!(next.0, next.1);
+            fixture.pointer(false, None);
+            assert!(fixture.app.world().get::<PaneDrag>(fixture.split).is_none());
+            assert_eq!(fixture.grows(fixture.left), previous);
+        }
+    }
+
+    #[test]
+    fn pointer_cannot_start_a_resize_in_another_window() {
+        let mut fixture = ResizeFixture::native(PaneSplitDirection::Row);
+        let window = fixture.app.world_mut().spawn(Window::default()).id();
+        let split = fixture
+            .app
+            .world_mut()
+            .spawn((
+                Pane,
+                PaneSplit {
+                    direction: PaneSplitDirection::Row,
+                },
+                Node::default(),
+                ComputedNode {
+                    size: Vec2::new(800.0, 500.0),
+                    center: Vec2::new(400.0, 250.0),
+                    ..default()
+                },
+                HostWindow(window),
+            ))
+            .id();
+        let previous = ResizeFixture::pane(&mut fixture.app, split, 1.0, 1);
+        let next = ResizeFixture::pane(&mut fixture.app, split, 1.0, 1);
+        fixture
+            .app
+            .world_mut()
+            .entity_mut(previous)
+            .insert(ComputedNode {
+                size: Vec2::new(396.0, 500.0),
+                center: Vec2::new(198.0, 250.0),
+                ..default()
+            });
+        fixture
+            .app
+            .world_mut()
+            .entity_mut(next)
+            .insert(ComputedNode {
+                size: Vec2::new(396.0, 500.0),
+                center: Vec2::new(602.0, 250.0),
+                ..default()
+            });
+        fixture.pointer(false, Some(Vec2::new(400.0, 250.0)));
+        fixture.pointer(true, Some(Vec2::new(400.0, 250.0)));
+        assert!(fixture.app.world().get::<PaneDrag>(split).is_none());
+        assert_eq!(fixture.grows(previous), (1.0, 1.0));
+        assert_eq!(fixture.grows(next), (1.0, 1.0));
+    }
+
+    #[test]
+    fn divider_capture_uses_the_press_before_motion_in_the_same_frame() {
+        for direction in [PaneSplitDirection::Row, PaneSplitDirection::Column] {
+            for (start, end, captured) in [(500.0, 700.0, true), (470.0, 500.0, false)] {
+                let mut fixture = ResizeFixture::native(direction);
+                let start = match direction {
+                    PaneSplitDirection::Row => Vec2::new(start, 250.0),
+                    PaneSplitDirection::Column => Vec2::new(250.0, start),
+                };
+                let end = match direction {
+                    PaneSplitDirection::Row => Vec2::new(end, 250.0),
+                    PaneSplitDirection::Column => Vec2::new(250.0, end),
+                };
+                fixture.pointer(false, Some(start));
+                let mut buttons = vmux_input::NativePointer::snapshot().unwrap().buttons;
+                buttons.left = true;
+                vmux_input::NativePointer::publish(start, buttons, false);
+                fixture.pointer(true, Some(end));
+                assert_eq!(
+                    fixture.app.world().get::<PaneDrag>(fixture.split).is_some(),
+                    captured
+                );
+                if captured {
+                    fixture.app.update();
+                    assert!((fixture.grows(fixture.left).0 - 1.4).abs() < 0.0001);
+                    assert!((fixture.grows(fixture.right).0 - 0.6).abs() < 0.0001);
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn expanded_grip_previews_capture_and_restores_the_cursor_at_each_scale() {
+        for direction in [PaneSplitDirection::Row, PaneSplitDirection::Column] {
+            for (scale, coordinate, outside) in [(1.0, 505.0, 520.0), (2.0, 510.0, 530.0)] {
+                let mut fixture = ResizeFixture::native(direction);
+                let window = fixture.window.unwrap();
+                fixture
+                    .app
+                    .world_mut()
+                    .entity_mut(window)
+                    .insert(CursorIcon::from(SystemCursorIcon::Pointer));
+                for entity in [fixture.left, fixture.right] {
+                    fixture
+                        .app
+                        .world_mut()
+                        .get_mut::<ComputedNode>(entity)
+                        .unwrap()
+                        .inverse_scale_factor = 1.0 / scale;
+                }
+                let (position, moved, missed, icon) = match direction {
+                    PaneSplitDirection::Row => (
+                        Vec2::new(coordinate, 250.0),
+                        Vec2::new(coordinate + 100.0, 250.0),
+                        Vec2::new(outside, 250.0),
+                        SystemCursorIcon::ColResize,
+                    ),
+                    PaneSplitDirection::Column => (
+                        Vec2::new(250.0, coordinate),
+                        Vec2::new(250.0, coordinate + 100.0),
+                        Vec2::new(250.0, outside),
+                        SystemCursorIcon::RowResize,
+                    ),
+                };
+                fixture.pointer(false, Some(position));
+                assert_eq!(
+                    fixture.app.world().get::<CursorIcon>(window),
+                    Some(&CursorIcon::from(icon))
+                );
+                assert!(fixture.app.world().get::<PaneDrag>(fixture.split).is_none());
+                fixture.pointer(true, Some(position));
+                assert!(fixture.app.world().get::<PaneDrag>(fixture.split).is_some());
+                assert_eq!(
+                    fixture.app.world().get::<CursorIcon>(window),
+                    Some(&CursorIcon::from(SystemCursorIcon::Grabbing))
+                );
+                fixture.pointer(true, Some(moved));
+                assert!(fixture.grows(fixture.left).0 > 1.0);
+                assert!(fixture.grows(fixture.right).0 < 1.0);
+                fixture.pointer(false, None);
+                assert!(fixture.app.world().get::<PaneDrag>(fixture.split).is_none());
+                assert!(fixture.app.world().get::<ResizeGrip>(window).is_none());
+                assert_eq!(
+                    fixture.app.world().get::<CursorIcon>(window),
+                    Some(&CursorIcon::from(SystemCursorIcon::Pointer))
+                );
+                fixture.pointer(false, Some(missed));
+                fixture.pointer(true, Some(missed));
+                assert!(fixture.app.world().get::<PaneDrag>(fixture.split).is_none());
+                fixture.pointer(true, Some(position));
+                assert!(fixture.app.world().get::<PaneDrag>(fixture.split).is_none());
+                assert!(fixture.app.world().get::<ResizeGrip>(window).is_none());
+            }
         }
     }
 

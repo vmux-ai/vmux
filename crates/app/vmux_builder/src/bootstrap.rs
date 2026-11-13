@@ -15,6 +15,7 @@ const SOURCES: &[(&str, &[u8])] = &[
     ("main.rs", include_bytes!("main.rs")),
     ("bootstrap.rs", include_bytes!("bootstrap.rs")),
     ("ci_scope.rs", include_bytes!("ci_scope.rs")),
+    ("consumer.rs", include_bytes!("consumer.rs")),
     ("debug.rs", include_bytes!("debug.rs")),
     ("environment.rs", include_bytes!("environment.rs")),
     ("execution.rs", include_bytes!("execution.rs")),

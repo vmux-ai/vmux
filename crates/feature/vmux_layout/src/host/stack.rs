@@ -5,6 +5,7 @@ use crate::{
     presentation::{Projection, Retiring, Transition},
     tab::{CloseTabRequest, Tab},
 };
+use bevy::ecs::system::Commands;
 use bevy::{
     ecs::{relationship::Relationship, system::SystemParam},
     prelude::*,
@@ -91,6 +92,9 @@ impl Plugin for StackPlugin {
                     .in_set(OpenStartupPageSet)
                     .after(crate::window::WindowShellSet)
                     .after(crate::window::TabLayoutSpawnSet)
+                    .after(LayoutRequestSet::Handle)
+                    .before(crate::active::ActiveSystemSet::Descendants)
+                    .before(ComputeFocusSet)
                     .before(vmux_ecs::PageOpenSet::ResolveTarget),
             );
     }
@@ -437,7 +441,6 @@ fn close_last_stack_in_pane(
                 transition.retire(sibling);
             }
         }
-        transition = transition.reset_tab(tab);
         let replacement = commands
             .spawn((
                 Stack::bundle(),
@@ -1326,6 +1329,32 @@ mod tests {
         root: Entity,
     }
 
+    #[test]
+    fn a_replacement_startup_page_is_selected_and_activated_in_the_creation_frame() {
+        let mut fixture = StackNavigationFixture::new();
+        let original = fixture.stack(fixture.root, 1);
+        fixture.app.update();
+        fixture.app.world_mut().entity_mut(original).despawn();
+        fixture.app.update();
+        let active = focused(&mut fixture.app);
+        let stack = active
+            .stack
+            .expect("the empty pane selects its replacement page immediately");
+        assert_eq!(active.tab, Some(fixture.tab));
+        assert_eq!(active.pane, Some(fixture.root));
+        assert_ne!(stack, original);
+        assert!(fixture.app.world().get::<Active>(stack).is_some());
+        let opened: Vec<_> = fixture
+            .app
+            .world_mut()
+            .resource_mut::<Messages<PageOpenRequest>>()
+            .drain()
+            .collect();
+        assert!(opened.iter().any(
+            |request| matches!(&request.target, PageOpenTarget::Stack(target) if *target == stack)
+        ));
+    }
+
     impl StackNavigationFixture {
         fn new() -> Self {
             let mut app = App::new();
@@ -2094,7 +2123,7 @@ mod tests {
     }
 
     #[test]
-    fn closing_last_stack_resets_workspace_without_hiding_the_current_page() {
+    fn closing_last_stack_keeps_tab_workspace_without_hiding_the_current_page() {
         let mut app = App::new();
         app.add_plugins((
             MinimalPlugins,
@@ -2185,10 +2214,7 @@ mod tests {
         };
         assert_eq!(
             app.world().get::<Transition>(new_stack),
-            Some(
-                &Transition::retiring(original_stack, original_stack, None)
-                    .reset_tab(replacement_tab)
-            )
+            Some(&Transition::retiring(original_stack, original_stack, None))
         );
         app.world_mut().spawn((
             crate::cef::Browser,
@@ -2205,26 +2231,26 @@ mod tests {
         assert!(
             app.world()
                 .get::<crate::tab::TabWorkspace>(replacement_tab)
-                .is_none()
+                .is_some()
         );
         assert!(
             app.world()
                 .get::<crate::tab::TabWorktree>(replacement_tab)
-                .is_none()
+                .is_some()
         );
         assert!(
             app.world()
                 .get::<crate::tab::TabDirDecided>(replacement_tab)
-                .is_none()
+                .is_some()
         );
         assert!(
             app.world()
                 .get::<crate::tab::TabWorktreeUnavailable>(replacement_tab)
-                .is_none()
+                .is_some()
         );
         assert_eq!(
             app.world().get::<Tab>(replacement_tab).unwrap().startup_dir,
-            None
+            Some(worktree.path().to_string_lossy().into_owned())
         );
         let new_pane = app
             .world()
@@ -2750,7 +2776,7 @@ mod tests {
         assert_ne!(replacement, original_stack);
         assert_eq!(
             app.world().get::<Transition>(replacement),
-            Some(&Transition::retiring(original_stack, original_stack, None).reset_tab(tab))
+            Some(&Transition::retiring(original_stack, original_stack, None))
         );
         assert!(app.world().get::<Retiring>(original_stack).is_some());
         let close_requests: Vec<_> = app

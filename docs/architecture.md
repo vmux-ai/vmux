@@ -454,6 +454,12 @@ stale records fail closed. Existing exact fingerprints are frozen migration debt
 Git provenance, not permanent adapter exceptions; migrations remove them instead of extending
 the baseline. Final acceptance requires no remaining domain debt and a repeated caller/lifecycle
 audit. Structural checks supplement ownership review; they cannot prove business semantics.
+Private helpers belong to one production caller, including qualified imports and callback values;
+other-module users cannot silently share that owner. Nested immutable values retain a complete,
+referenced chain to one canonical component. Typed app composition follows its actual plugin
+payloads, stateless manifest sources bind the real `FeatureManifestSource` interface, and test
+mutex metadata checks the complete `Mutex<()>` type outside production configuration. Manifest
+markers cannot retain fields, including zero-sized values and callback pointers.
 Registered exclusive systems prove typed `SystemState` use; used query capabilities propagate
 usage through their nested parameters. Conditional production derives and imported contract
 attributes keep their actual bindings. Foreign framework names cannot borrow an unrelated owned
@@ -634,6 +640,42 @@ The current framework foundation is:
 - platform adapters at the edge.
 
 Vmux is the first complete composition built from that foundation.
+
+The initial SDK is consumed through a reviewed main commit or release tag in Git. Every Vmux
+dependency in an application uses the same revision; mixing revisions can create incompatible
+ECS types even when their names match. The SDK is not currently distributed as a supported
+set of crates.io packages. Publishing remains a separate release action.
+
+`vmux_app` is the composition entry point. Its optional `ecs`, `project`, `flex`, `layout`, and
+`extension` namespaces re-export their existing public types without wrappers. `contracts`
+enables shared wire values and the contracts of selected Project/Layout features; it does not
+install a renderer. Schema macros continue to name their owning crates. Core, jobs, Project,
+flex geometry, layout topology, and Extension catalog/operations are validated without Profile,
+CEF, Winit, or product UI. `extension-core` exposes the Extension namespace independently;
+`extension` composes its native browser/layout adapters explicitly.
+
+The supported Bevy minor is 0.19, as pinned by the consumer lockfile. A Bevy minor change or
+breaking supported API change requires an explicit SDK compatibility update and consumer gate.
+During 0.0.x, pin an exact revision; there is no floating-revision compatibility guarantee.
+Release notes identify breaking changes and replacement APIs. Compatible aliases remain where
+practical; no fixed deprecation window is promised before a stable SDK version.
+Store schema changes remain owned by their feature: retain stable reflected names, version
+persisted contracts, and provide a migration or explicit refusal before accepting incompatible
+data. Wire compatibility follows each protocol's versioned handshake, not a matching crate name.
+
+Native plugins are Rust crates linked at build time. They expose a `Plugin`, own their typed
+components/requests and any `feature.ron`, and package their pages/assets with the host build.
+The host composes IO, permissions, renderer, and runner adapters. An embedded web surface can
+keep its presentation while moving domain behavior into a typed plugin through the existing
+UI contracts; it does not gain arbitrary native access. Dynamic Rust loading and a prebuilt
+generic product host are not supported SDK capabilities yet.
+
+The independent consumer runs from path dependencies and immutable Git dependencies using the
+same behavioral suite. The dependency-free Rust builder owns verification and Git workspace
+preparation; the shell command delegates to it. Neither mode inherits the repository patches or requires vmux-cloud.
+Existing product hosts cover macOS desktop, iOS mobile, and native service/CLI/MCP; these are
+product compositions, not a guarantee that every extracted SDK capability has an adapter on
+every target. Windows, Android, web, game, and spatial SDK hosts remain unverified.
 
 Read contracts belong to a capability rather than a page. A client subscribes to typed resource
 selectors; the host derives and publishes only that selection, and multiple pages share the
@@ -1140,7 +1182,14 @@ Position in the tree defines ownership. Each native window owns a complete tree.
 identify projects; tabs preserve arrangements; splits tile panes; stacks hold page history.
 Global actions resolve through the focused window and then through active descendants.
 
-`vmux_pane` owns the canonical Pane, split, size, identity, and spawn-sequence components without
+`LayoutPlugin` installs the renderer-independent topology and selection core. `LayoutRuntimePlugin`
+composes the product's Window/Profile, interaction, storage, and feature integrations; Browser
+installs the CEF renderer adapter. The facade's `layout` selection enables only the core.
+`layout-runtime` explicitly requires that core, Command, and Setting. Compiling the `host`
+feature makes adapters available without installing them into a core-only application.
+Pane state is an internal part of Layout; there is no separate pane crate or facade feature.
+
+`vmux_layout` owns the canonical Pane, split, size, identity, and spawn-sequence components without
 Window, renderer, or Profile dependencies. Existing reflected paths under
 `vmux_desktop::layout::pane` remain the persistence contract. Its read-only Hierarchy capability
 resolves leaves and neighbors within an explicit root; SelectRequest refuses split targets,
@@ -1152,10 +1201,41 @@ do not require Save by default; the optional pane StorePlugin declares its schem
 Tree/Identity/Resize adapters explicitly retain Workspace save requirements. Native layout keeps
 ID allocation, sequencing, geometry synchronization, pointer/cursor behavior, and close policy.
 
+Pane drag resizing observes the native pointer backend, with Winit button state as a fallback.
+The resize system applies changes to the current window's pane Components and cancels the drag
+on release or lost ownership/focus. Native drag motion wakes the reactive runner even over an
+embedded page; the renderer's mouse event stream is not the authority for a native split drag.
+
+The window's `ResizeGrip` is a projection of the current divider with a minimum width of twelve
+logical pixels; it leaves the rendered gap unchanged. Its `CursorIcon` previews the axis and
+shows a grabbing cursor after capture. The native adapter caches only the window and grip
+geometry, uses classic divider cursors for macOS 13 compatibility, consumes the captured mouse
+sequence, and releases it on mouse-up. Pane Components
+remain the authority for resizing; a drag started in page content cannot acquire a divider later.
+Pointer focus is limited to the current tab and forwards a core `SelectRequest` before activation
+and focus projection, so nested Pane ancestors and the visible Stack agree in the input frame.
+The native pointer snapshot carries event modifiers and press-time modifiers independently of
+Winit keyboard delivery to embedded pages. Holding either Shift key preserves pointer selection
+across hover and clicks; input sampled during the hold is consumed, so releasing Shift does not
+replay it. Control suppresses hover selection while allowing explicit clicks, and directional
+keyboard selection remains available.
+Pane interaction composes one `PointerDevice` entity for the input device. Its `PointerFocus`
+and `PointerPress` Components own accepted input and consumption progress; native mailboxes hold
+only bounded raw samples. This state adds no Resources and is not persisted.
+Empty-tab startup pages are created before descendant activation and focus computation. Closing
+the final page preserves the Tab's workspace and checkout context while its replacement loads.
+
 Only test a window's drag region with coordinates from that window. Never compare child-window
 coordinates with the owning window's region.
 
 ---
+
+Window overlays that own keyboard input or render an inline command bar suppress native pane
+selection and divider capture for their owning window; an unscoped overlay holds input globally.
+Inline presentation retains the originating pane even while its prewarmed view has no keyboard
+owner. A closed prewarmed view does not capture input. Suppressed samples are
+consumed so dismissing an overlay cannot replay its click. Captured dividers keep their axis
+and ordered adjacent pane pair; a topology change cancels capture before changing sizes.
 
 ## Pages, and the trust boundary
 
