@@ -454,6 +454,15 @@ stale records fail closed. Existing exact fingerprints are frozen migration debt
 Git provenance, not permanent adapter exceptions; migrations remove them instead of extending
 the baseline. Final acceptance requires no remaining domain debt and a repeated caller/lifecycle
 audit. Structural checks supplement ownership review; they cannot prove business semantics.
+Registered exclusive systems prove typed `SystemState` use; used query capabilities propagate
+usage through their nested parameters. Conditional production derives and imported contract
+attributes keep their actual bindings. Foreign framework names cannot borrow an unrelated owned
+declaration. Owned plain values may be referenced by the canonical type's scoped methods as well
+as fields; qualified paths identify the declaration, not only its last name. Plugin boundary
+endpoints follow actual production composition. A bounded IO helper may name an exact parent
+adapter record only when current code references that helper and the parent proves its canonical
+endpoint; missing, stale and cyclic parent records are rejected. These links do not authorize a
+parallel normalized catalog or transcript.
 Module aliases and barrel exports resolve through their actual bindings; ambiguous declarations or
 imports fail closed. EntityEvent ownership requires a registered use, and recursion depth is separate
 from the number of shallow lookup probes. Lookup caches live only for one parsed inventory.
