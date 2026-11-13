@@ -23,7 +23,7 @@ use vmux_tool::{
 use self::environment_driver::AcpEnvironment;
 use self::installer_driver::AgentInstaller;
 use self::registry::Registry;
-pub(super) use config::add as add_config;
+pub(super) use config::Plugin as ConfigPlugin;
 pub(super) use registry::add as add_registry;
 
 mod config;

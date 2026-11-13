@@ -70,6 +70,7 @@ impl bevy::prelude::Plugin for InputPlugin {
                 Update,
                 input
                     .after(ServiceMessageSet)
+                    .after(crate::host::model_selection::ModelSelectionSet)
                     .before(vmux_session::TranscriptReadySet),
             )
             .add_observer(auto_allow);
@@ -382,7 +383,7 @@ fn input(
     )>,
     workspace: PromptWorkspace,
     policy: Single<&AcpWorkspacePolicy>,
-    modes: Option<Single<&crate::host::model_selection::AgentModeSelections>>,
+    modes: crate::host::model_selection::AgentPreferences,
     mut service_requests: MessageWriter<ServiceRequest>,
     mut queues: QueuedPrompts,
 ) {
@@ -397,7 +398,7 @@ fn input(
         mut imported,
     ) in &mut q
     {
-        if !spawn_queued || !queues.ready(entity, matches!(*state, RunState::Idle)) {
+        if !modes.ready(crate::host::model_selection::Kind::Modes) || !spawn_queued || !queues.ready(entity, matches!(*state, RunState::Idle)) {
             continue;
         }
         let Some((_, text, attachments)) = queues.take_next(entity) else {
@@ -419,10 +420,9 @@ fn input(
         let workspace_state = workspace.state(entity);
         let context = PromptWorkspace::prompt(&policy, handoff, workspace_state, title_pending);
         let preferred_mode = modes
-            .as_ref()
-            .and_then(|modes| modes.by_agent.get(&agent_id.0))
-            .map(|memory| memory.selected.clone())
-            .filter(|mode| !mode.is_empty());
+            .mode(&agent_id.0)
+            .filter(|mode| !mode.is_empty())
+            .map(str::to_string);
         service_requests.write(ServiceRequest(
             SharedMessage::AgentInput {
                 sid: session_id.0.clone(),
@@ -681,6 +681,146 @@ mod tests {
                 ),
             ]
         );
+    }
+
+    #[test]
+    fn queued_prompts_wait_for_stored_modes_and_use_current_agent_preferences_once() {
+        let directory = tempfile::tempdir().unwrap();
+        std::fs::write(
+            directory.path().join("agent-modes.json"),
+            r#"{"one":{"selected":"auto","modes":[{"id":"auto","name":"Auto"},{"id":"ask","name":"Ask"}]},"two":{"selected":"ask","modes":[]}}"#,
+        )
+        .unwrap();
+        let lock = std::fs::OpenOptions::new()
+            .create(true)
+            .truncate(false)
+            .read(true)
+            .write(true)
+            .open(directory.path().join(".agent-modes.json.lock"))
+            .unwrap();
+        lock.lock().unwrap();
+        let mut app = App::new();
+        app.add_plugins((
+            bevy::app::TaskPoolPlugin::default(),
+            vmux_session::preferences::Plugin,
+            super::Plugin,
+        ));
+        app.world_mut()
+            .write_message(vmux_session::preferences::ProfileRequested(
+                directory.path().to_path_buf(),
+            ));
+        let mut entities = Vec::new();
+        for (agent, sid, text) in [("one", "s1", "first"), ("two", "s2", "second")] {
+            let mut queue = PromptQueue::default();
+            queue.enqueue(text.to_string());
+            entities.push(
+                app.world_mut()
+                    .spawn((
+                        TestSession::bundle(agent, sid, directory.path()),
+                        RunState::Idle,
+                        queue,
+                        AcpSpawnQueued,
+                    ))
+                    .id(),
+            );
+        }
+        app.update();
+        assert_eq!(
+            app.world_mut()
+                .resource_mut::<Messages<ServiceRequest>>()
+                .drain()
+                .count(),
+            0
+        );
+        for entity in &entities {
+            assert_eq!(
+                app.world().get::<PromptQueue>(*entity).unwrap().items.len(),
+                1
+            );
+        }
+        drop(lock);
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+        let mut dispatched = Vec::new();
+        loop {
+            app.update();
+            for ServiceRequest(request) in app
+                .world_mut()
+                .resource_mut::<Messages<ServiceRequest>>()
+                .drain()
+            {
+                let ClientMessage::Shared(SharedMessage::AgentInput {
+                    sid,
+                    text,
+                    preferred_mode,
+                    ..
+                }) = request
+                else {
+                    panic!("unexpected service request: {request:?}");
+                };
+                dispatched.push((sid, text, preferred_mode));
+            }
+            if dispatched.len() == 2 {
+                break;
+            }
+            assert!(
+                std::time::Instant::now() < deadline,
+                "queued prompts did not dispatch"
+            );
+            std::thread::sleep(std::time::Duration::from_millis(1));
+        }
+        dispatched.sort();
+        assert_eq!(
+            dispatched,
+            vec![
+                ("s1".into(), "first".into(), Some("auto".into())),
+                ("s2".into(), "second".into(), Some("ask".into())),
+            ]
+        );
+        for entity in &entities {
+            assert!(
+                app.world()
+                    .get::<PromptQueue>(*entity)
+                    .unwrap()
+                    .items
+                    .is_empty()
+            );
+            assert!(matches!(
+                app.world().get::<RunState>(*entity),
+                Some(RunState::Streaming)
+            ));
+        }
+        app.update();
+        assert_eq!(
+            app.world_mut()
+                .resource_mut::<Messages<ServiceRequest>>()
+                .drain()
+                .count(),
+            0
+        );
+        app.world_mut()
+            .write_message(vmux_session::preferences::RememberMode {
+                agent_id: "one".into(),
+                mode_id: "ask".into(),
+            });
+        app.world_mut()
+            .get_mut::<PromptQueue>(entities[0])
+            .unwrap()
+            .enqueue("next".into());
+        app.world_mut()
+            .entity_mut(entities[0])
+            .insert(RunState::Idle);
+        app.update();
+        let requests = app
+            .world_mut()
+            .resource_mut::<Messages<ServiceRequest>>()
+            .drain()
+            .collect::<Vec<_>>();
+        assert!(matches!(
+            requests.as_slice(),
+            [ServiceRequest(ClientMessage::Shared(SharedMessage::AgentInput {
+                sid, text, preferred_mode: Some(mode), ..
+            }))] if sid == "s1" && text == "next" && mode == "ask"
+        ));
     }
 
     #[test]

@@ -54,6 +54,10 @@ pub mod event;
 #[cfg(feature = "app")]
 pub mod host;
 pub mod queue;
+#[cfg(feature = "preferences")]
+pub mod preferences;
+#[cfg(feature = "preferences")]
+mod preferences_io;
 pub mod run_state;
 #[cfg(feature = "app")]
 pub mod selector;
@@ -91,6 +95,8 @@ impl Plugin for DomainPlugin {
         if !app.is_plugin_added::<QueuePlugin>() {
             app.add_plugins(QueuePlugin);
         }
+        #[cfg(feature = "preferences")]
+        app.add_plugins(preferences::Plugin);
         app.add_plugins((
             model::EntityPlugin,
             model::MetadataPlugin,

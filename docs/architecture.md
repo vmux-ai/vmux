@@ -450,6 +450,20 @@ their ref-scoped dependency cache for the next correction.
 The package adapter rejects fast mode outside non-release pull requests; caches remain scoped by
 GitHub ref, so pull-request caches do not replace main's cache.
 
+Session's optional preferences plugin owns profile roots, model/mode file entities and independent
+agent preference/choice children. AgentId, Selection, SourceUrl and ordered Name/Description choices
+are canonical; JSON records are one-shot filesystem codecs. Preference entities remove AgentId's
+workspace Save requirement because the two existing agent preference JSON files are their only store.
+ACP binds the current profile and consumes scalar selections and one-way menu output without a
+second model/mode registry. The core composes with Bevy App/ECS and shared Jobs without CEF.
+Retained input entities apply current option snapshots before ordered explicit choices. Loading
+cannot lose an early choice or make delayed saved defaults replace an explicit Session selection.
+IO operations capture their file/root/revision, use the shared bounded worker lane and hold an OS
+file lock through atomic completion. Late reads cannot enter another profile. Failed writes retain
+dirty state and retry on later accepted intent or profile activation; idle updates do not resubmit.
+Read and write codecs share a 16 MiB bound. A bounded AppExit effect cancels older queued work,
+waits for started file IO and writes the latest canonical snapshot before process teardown.
+
 Every plain adapter names its external interface, canonical input/output, scope/lifetime,
 bounds and cancellation/eviction. Adapters may hold handles, byte cursors, codec scratch and
 read-only output caches; they cannot own parallel normalized vmux state or product policy.

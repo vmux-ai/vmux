@@ -11,8 +11,7 @@ pub struct AcpPlugin;
 
 impl Plugin for AcpPlugin {
     fn build(&self, app: &mut App) {
-        super::acp::add_config(app);
-        app.add_plugins(super::runtime::Plugin);
+        app.add_plugins((super::acp::ConfigPlugin, super::runtime::Plugin));
         super::command_bar::add(app);
         super::approval::add(app);
         app.add_plugins(super::attach::Plugin);
