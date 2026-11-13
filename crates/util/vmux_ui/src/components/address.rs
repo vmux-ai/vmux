@@ -197,7 +197,7 @@ fn AddressMenu(
         });
         return rsx! { BreadcrumbItem {
             label: AddressLabel(&crumb.entry).text(), title: crumb.entry.title.clone(), active: crumb.active, onclick,
-            leading: rsx! { AddressIcon { entry: crumb.entry.clone(), loading } },
+            leading: rsx! { if !preserve_name || crumb.active { AddressIcon { entry: crumb.entry.clone(), loading } } },
         } };
     }
     let active = open.read().as_ref() == Some(&id);
@@ -217,7 +217,7 @@ fn AddressMenu(
                     if let Some(intent) = &on_open { open_requests.send(intent.clone()); }
                 } else if open.peek().as_ref() == Some(&open_id) { open.set(None); }
             },
-            leading: rsx! { AddressIcon { entry: crumb.entry.clone(), loading } },
+            leading: rsx! { if !preserve_name || crumb.active { AddressIcon { entry: crumb.entry.clone(), loading } } },
             if !crumb.tabs.is_empty() {
                 div { class: "flex gap-1 p-1",
                     for tab in crumb.tabs {
