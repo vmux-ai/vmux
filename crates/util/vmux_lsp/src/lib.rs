@@ -3,8 +3,10 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use bevy_app::{App, Plugin, Update};
+use bevy_ecs::lifecycle::HookContext;
 use bevy_ecs::prelude::*;
 use bevy_ecs::system::SystemParam;
+use bevy_ecs::world::DeferredWorld;
 use lsp_types::ServerCapabilities;
 use serde_json::Value;
 use vmux_ecs::{
@@ -91,8 +93,24 @@ impl ServerKey {
 }
 
 #[derive(Component)]
+#[require(DocumentConnection)]
+#[component(on_add = bind)]
 pub struct Document {
     pub version: i32,
+}
+
+#[derive(Component, Default)]
+struct DocumentConnection(Option<uuid::Uuid>);
+
+fn bind(mut world: DeferredWorld, context: HookContext) {
+    let identity = world
+        .get::<ChildOf>(context.entity)
+        .and_then(|parent| world.get::<Transport>(parent.parent()))
+        .map(Transport::identity);
+    world
+        .get_mut::<DocumentConnection>(context.entity)
+        .unwrap()
+        .0 = identity;
 }
 
 #[derive(Component, Clone, Debug, PartialEq, Eq)]
@@ -300,12 +318,13 @@ impl Stamp {
         let Ok(binding) = lookup.bindings.get(owner) else {
             return false;
         };
-        let Ok((_, _, document, parent)) = lookup.documents.get(self.document) else {
+        let Ok((_, _, document, parent, connection)) = lookup.documents.get(self.document) else {
             return false;
         };
         binding.document() == self.document
             && document.version == self.version
             && parent.parent() == self.server
+            && connection.0 == Some(self.transport)
             && lookup
                 .transports
                 .get(self.server)
@@ -326,6 +345,7 @@ pub struct Lookup<'w, 's> {
             &'static DocumentPath,
             &'static Document,
             &'static ChildOf,
+            &'static DocumentConnection,
         ),
     >,
     bindings: Query<'w, 's, &'static DocumentBinding>,
@@ -352,15 +372,19 @@ impl Lookup<'_, '_> {
 
     pub fn document(&self, owner: Entity, path: &Path) -> Option<Stamp> {
         let entity = self.bindings.get(owner).ok()?.document();
-        let (_, candidate, document, parent) = self.documents.get(entity).ok()?;
+        let (_, candidate, document, parent, connection) = self.documents.get(entity).ok()?;
         if candidate.0 != path || !self.server_current(parent.parent()) {
+            return None;
+        }
+        let identity = self.transport(parent.parent())?.identity;
+        if connection.0 != Some(identity) {
             return None;
         }
         Some(Stamp {
             document: entity,
             server: parent.parent(),
             version: document.version,
-            transport: self.transport(parent.parent())?.identity,
+            transport: identity,
         })
     }
 
@@ -538,6 +562,7 @@ mod tests {
     struct Probe {
         pending: Arc<Mutex<Vec<crossbeam_channel::Sender<Value>>>>,
         canceled: Arc<Mutex<Vec<i64>>>,
+        calls: Arc<Mutex<Vec<(String, Value)>>>,
         capabilities: ServerCapabilities,
     }
 
@@ -548,14 +573,17 @@ mod tests {
     }
 
     impl TransportIo for Probe {
-        fn request(&self, _method: &str, _params: Value) -> WireReply {
+        fn request(&self, method: &str, params: Value) -> WireReply {
+            self.calls.lock().unwrap().push((method.into(), params));
             let (sender, receiver) = crossbeam_channel::unbounded();
             let mut pending = self.pending.lock().unwrap();
             pending.push(sender);
             WireReply::new(pending.len() as i64, receiver)
         }
 
-        fn notify(&self, _method: &str, _params: Value) {}
+        fn notify(&self, method: &str, params: Value) {
+            self.calls.lock().unwrap().push((method.into(), params));
+        }
 
         fn cancel(&self, id: i64) {
             self.canceled.lock().unwrap().push(id);
@@ -579,6 +607,34 @@ mod tests {
     }
 
     impl Harness {
+        fn reopen(&mut self, root: usize, text: &str) {
+            let owner = self.owners[root];
+            if let Some(binding) = self.app.world().get::<DocumentBinding>(owner) {
+                let previous = binding.document();
+                self.app.world_mut().entity_mut(previous).despawn();
+            }
+            let transport = self
+                .app
+                .world()
+                .get::<Transport>(self.servers[root])
+                .unwrap()
+                .clone();
+            transport.did_open("file:///shared.rs", "rust", 1, text);
+            let document = self
+                .app
+                .world_mut()
+                .spawn((
+                    Document { version: 1 },
+                    DocumentPath("/shared.rs".into()),
+                    ChildOf(self.servers[root]),
+                ))
+                .id();
+            self.app
+                .world_mut()
+                .entity_mut(owner)
+                .insert(DocumentBinding::new(document));
+        }
+
         fn new() -> Self {
             let mut app = App::new();
             app.add_plugins(LspPlugin);
@@ -916,6 +972,7 @@ mod tests {
                     .world_mut()
                     .entity_mut(harness.servers[0])
                     .insert(Transport::new(probe.clone()));
+                harness.reopen(0, "semantic input");
                 let mut state =
                     bevy_ecs::system::SystemState::<Lookup>::new(harness.app.world_mut());
                 let request = state.get_mut(harness.app.world_mut()).unwrap().request(
@@ -970,6 +1027,20 @@ mod tests {
                 .world_mut()
                 .entity_mut(harness.servers[0])
                 .insert(Transport::new(replacement.clone()));
+            let mut lookup = bevy_ecs::system::SystemState::<Lookup>::new(harness.app.world_mut());
+            assert!(
+                lookup
+                    .get_mut(harness.app.world_mut())
+                    .unwrap()
+                    .request(
+                        harness.owners[0],
+                        Path::new("/shared.rs"),
+                        "textDocument/definition",
+                        serde_json::json!({}),
+                    )
+                    .is_none()
+            );
+            assert!(replacement.pending.lock().unwrap().is_empty());
             if !completed {
                 harness.probes[0].reply(serde_json::json!({ "result": "old" }));
             }
@@ -986,7 +1057,16 @@ mod tests {
             if !completed {
                 assert_eq!(*harness.probes[0].canceled.lock().unwrap(), vec![1]);
             }
+            harness.reopen(0, "unsaved replacement text");
             let new = harness.request(0);
+            let calls = replacement.calls.lock().unwrap().clone();
+            assert_eq!(calls.len(), 2);
+            assert_eq!(calls[0].0, "textDocument/didOpen");
+            assert_eq!(
+                calls[0].1["textDocument"]["text"],
+                "unsaved replacement text"
+            );
+            assert_eq!(calls[1].0, "textDocument/definition");
             replacement.reply(serde_json::json!({ "result": "replacement" }));
             harness.app.update();
             assert_eq!(

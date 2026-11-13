@@ -2571,6 +2571,7 @@ mod tests {
             let transport = Transport::new(ProbeTransport {
                 replies: std::sync::Arc::new(std::sync::Mutex::new(None)),
                 capabilities: lsp_types::ServerCapabilities::default(),
+                recording: None,
             });
             let identity = transport.identity();
             world.entity_mut(self.server).insert(transport);
@@ -2640,16 +2641,24 @@ mod tests {
         replies:
             std::sync::Arc<std::sync::Mutex<Option<crossbeam_channel::Sender<serde_json::Value>>>>,
         capabilities: lsp_types::ServerCapabilities,
+        recording: Option<std::sync::mpsc::Sender<(String, serde_json::Value)>>,
     }
 
     impl vmux_lsp::TransportIo for ProbeTransport {
-        fn request(&self, _method: &str, _params: serde_json::Value) -> vmux_lsp::WireReply {
+        fn request(&self, method: &str, params: serde_json::Value) -> vmux_lsp::WireReply {
+            if let Some(recording) = &self.recording {
+                let _ = recording.send((method.into(), params));
+            }
             let (sender, receiver) = crossbeam_channel::bounded(1);
             *self.replies.lock().unwrap() = Some(sender);
             vmux_lsp::WireReply::new(1, receiver)
         }
 
-        fn notify(&self, _method: &str, _params: serde_json::Value) {}
+        fn notify(&self, method: &str, params: serde_json::Value) {
+            if let Some(recording) = &self.recording {
+                let _ = recording.send((method.into(), params));
+            }
+        }
 
         fn cancel(&self, _id: i64) {}
 
@@ -2827,6 +2836,113 @@ mod tests {
     }
 
     #[test]
+    fn replacing_a_live_transport_reopens_its_unsaved_document_before_requests() {
+        let mut fixture = RestartFixture::new();
+        fixture.message(0, "textDocument/didOpen", 1);
+        fixture.message(1, "textDocument/didOpen", 1);
+        let owner = fixture.views[0];
+        let other = fixture.views[1];
+        let previous = fixture
+            .app
+            .world()
+            .get::<DocumentBinding>(owner)
+            .unwrap()
+            .document();
+        let other_document = fixture
+            .app
+            .world()
+            .get::<DocumentBinding>(other)
+            .unwrap()
+            .document();
+        let server = fixture
+            .app
+            .world()
+            .get::<ServerBinding>(owner)
+            .unwrap()
+            .server();
+        let text = "unsaved text after transport replacement\n";
+        fixture
+            .app
+            .world_mut()
+            .get_mut::<Editor>(owner)
+            .unwrap()
+            .core
+            .apply(crate::edit::EditCommand::ReplaceText(text.into()));
+        fixture
+            .app
+            .world_mut()
+            .write_message(LspDocumentChangeRequest {
+                path: fixture.roots[0].join("main.rs"),
+                owner,
+                text: Some(text.into()),
+            });
+        fixture.message(0, "textDocument/didChange", 1);
+        assert_eq!(
+            fixture.app.world().get::<LspSynced>(owner).unwrap().0,
+            fixture
+                .app
+                .world()
+                .get::<Editor>(owner)
+                .unwrap()
+                .core
+                .content_version(),
+        );
+        let (recording, captured) = std::sync::mpsc::channel();
+        fixture
+            .app
+            .world_mut()
+            .entity_mut(server)
+            .insert(Transport::new(ProbeTransport {
+                replies: std::sync::Arc::new(std::sync::Mutex::new(None)),
+                capabilities: lsp_types::ServerCapabilities {
+                    folding_range_provider: Some(
+                        lsp_types::FoldingRangeProviderCapability::Simple(true),
+                    ),
+                    ..Default::default()
+                },
+                recording: Some(recording),
+            }));
+        fixture.app.update();
+        let calls: Vec<_> = captured.try_iter().collect();
+        assert_eq!(calls.len(), 2);
+        assert_eq!(calls[0].0, "textDocument/didOpen");
+        assert_eq!(calls[0].1["textDocument"]["text"], text);
+        assert_eq!(calls[1].0, "textDocument/foldingRange");
+        assert!(fixture.app.world().get_entity(previous).is_err());
+        assert_ne!(
+            fixture
+                .app
+                .world()
+                .get::<DocumentBinding>(owner)
+                .unwrap()
+                .document(),
+            previous
+        );
+        assert_eq!(
+            fixture
+                .app
+                .world()
+                .get::<ServerBinding>(owner)
+                .unwrap()
+                .server(),
+            server
+        );
+        assert_eq!(
+            fixture
+                .app
+                .world()
+                .get::<DocumentBinding>(other)
+                .unwrap()
+                .document(),
+            other_document
+        );
+        assert_eq!(
+            std::fs::read_to_string(fixture.roots[0].join("main.rs")).unwrap(),
+            "disk text\n"
+        );
+    }
+
+    #[test]
     fn restarting_a_real_transport_opens_the_unsaved_buffer_and_preserves_another_root() {
         let mut fixture = RestartFixture::new();
         assert_eq!(
@@ -2973,6 +3089,7 @@ mod tests {
                     .insert(Transport::new(ProbeTransport {
                         replies: std::sync::Arc::new(std::sync::Mutex::new(None)),
                         capabilities: lsp_types::ServerCapabilities::default(),
+                        recording: None,
                     }));
                 let document = app
                     .world_mut()
@@ -3053,7 +3170,6 @@ mod tests {
             server: fixture.servers[0],
             document: fixture.documents[0],
         };
-        document.replace_transport(fixture.app.world_mut());
         fixture.publish(0, Some(1), "retained old transport");
         fixture.publish(1, Some(1), "other root");
         assert_eq!(fixture.message(0), Some("retained old transport"));
@@ -3062,6 +3178,44 @@ mod tests {
         fixture.app.update();
         assert_eq!(fixture.message(0), None);
         assert_eq!(fixture.message(1), Some("other root"));
+        assert!(fixture.app.world().get_entity(document.document).is_err());
+        let owner = fixture.views[0];
+        let path = fixture
+            .app
+            .world()
+            .get::<FileView>(owner)
+            .unwrap()
+            .path
+            .clone();
+        let text = fixture
+            .app
+            .world()
+            .get::<Editor>(owner)
+            .unwrap()
+            .core
+            .buffer
+            .text();
+        fixture
+            .app
+            .world()
+            .get::<Transport>(document.server)
+            .unwrap()
+            .did_open(&uri_for(&path).unwrap(), "rust", 1, &text);
+        let reopened = fixture
+            .app
+            .world_mut()
+            .spawn((
+                OpenDoc { version: 1 },
+                DocumentPath(path),
+                ChildOf(document.server),
+            ))
+            .id();
+        fixture.documents[0] = reopened;
+        fixture
+            .app
+            .world_mut()
+            .entity_mut(owner)
+            .insert(DocumentBinding::new(reopened));
         fixture.publish(0, Some(1), "replacement transport");
         assert_eq!(fixture.message(0), Some("replacement transport"));
     }
@@ -3116,6 +3270,7 @@ mod tests {
                     ChildOf(root),
                     Transport::new(ProbeTransport {
                         replies: replies.clone(),
+                        recording: None,
                         capabilities: lsp_types::ServerCapabilities {
                             definition_provider: Some(lsp_types::OneOf::Left(true)),
                             ..Default::default()
@@ -3297,6 +3452,7 @@ mod tests {
                         .entity_mut(fixture.server)
                         .insert(Transport::new(ProbeTransport {
                             replies: fixture.replies.clone(),
+                            recording: None,
                             capabilities: lsp_types::ServerCapabilities::default(),
                         }));
                 }

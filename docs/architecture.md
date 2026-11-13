@@ -454,6 +454,9 @@ stale records fail closed. Existing exact fingerprints are frozen migration debt
 Git provenance, not permanent adapter exceptions; migrations remove them instead of extending
 the baseline. Final acceptance requires no remaining domain debt and a repeated caller/lifecycle
 audit. Structural checks supplement ownership review; they cannot prove business semantics.
+Component lifecycle callbacks belong to their used Component through the actual hook metadata;
+unused components, Resource markers, unrelated attributes and test-only hooks cannot establish
+a runtime owner. Scoped aliases and generic callback paths resolve to their actual function.
 Private helpers belong to one production caller, including qualified imports and callback values;
 other-module users cannot silently share that owner. Nested immutable values retain a complete,
 referenced chain to one canonical component. Typed app composition follows its actual plugin
@@ -1407,7 +1410,11 @@ originating server at acceptance; a later save does not establish that earlier k
 Versioned edits reject missing or ambiguous versions.
 Server-origin workspace edits bind both the server entity and the transport UUID stamped before
 the reader starts; replacing a transport on the same entity invalidates queued edits and replies. Restart
-opens the current buffer, including unsaved text. Reload and encoding changes wait for the decoded
+opens the current buffer, including unsaved text. Each document captures its opening transport
+UUID in a private required Component. Lookup refuses requests as soon as that transport changes;
+the server phase retires its documents before native synchronization, which reopens the current
+buffer before initial metadata requests. Replacing a live transport preserves other roots and
+adds no global Resource. Reload and encoding changes wait for the decoded
 buffer, synchronize it, and then reinitialize metadata. Diagnostics retain their server, transport UUID, and the protocol's optional version. Native
 adapter input rejects old transport epochs, and replacing a transport clears only its retained
 diagnostics before code-action requests or rendering consume them. Unversioned notifications

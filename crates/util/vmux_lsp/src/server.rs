@@ -2,7 +2,7 @@ use bevy_app::{App, Plugin, Update};
 use bevy_ecs::prelude::*;
 use vmux_ecs::{Cwd, Operation, OperationCompleted, OperationState, OperationTarget};
 
-use crate::{Document, Root, Server, ServerKey, Set, Transport};
+use crate::{Document, DocumentConnection, Root, Server, ServerKey, Set, Transport};
 
 pub(crate) struct ServersPlugin;
 
@@ -13,7 +13,16 @@ impl Plugin for ServersPlugin {
             .add_message::<LaunchServer>()
             .add_systems(
                 Update,
-                (reset, restart, stop, cancel_start, accept, finish, poll)
+                (
+                    reset,
+                    restart,
+                    stop,
+                    cancel_start,
+                    accept,
+                    finish,
+                    poll,
+                    retire,
+                )
                     .chain()
                     .in_set(Set::Servers),
             );
@@ -303,5 +312,21 @@ fn poll(
             .entity(server)
             .remove::<Transport>()
             .insert(ServerFailure("language server exited".into()));
+    }
+}
+
+fn retire(
+    documents: Query<(Entity, &DocumentConnection, &ChildOf), With<Document>>,
+    transports: Query<&Transport, With<Server>>,
+    mut commands: Commands,
+) {
+    for (entity, connection, parent) in &documents {
+        let identity = transports
+            .get(parent.parent())
+            .ok()
+            .map(Transport::identity);
+        if connection.0 != identity {
+            commands.entity(entity).despawn();
+        }
     }
 }

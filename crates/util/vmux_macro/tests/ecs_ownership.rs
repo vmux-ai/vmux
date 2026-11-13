@@ -279,6 +279,65 @@ fn registered_query_filter_aliases_are_not_plain_tuple_models() {
 }
 
 #[test]
+fn component_hooks_require_a_used_component_and_real_hook_metadata() {
+    for (derive, metadata, parameter, expected) in [
+        (
+            "Component",
+            "component(on_add = hook)",
+            "state: Query<&State>",
+            true,
+        ),
+        ("Component", "component(on_add = hook)", "", false),
+        (
+            "Resource",
+            "component(on_add = hook)",
+            "state: Res<State>",
+            false,
+        ),
+        (
+            "Component",
+            "unrelated(on_add = hook)",
+            "state: Query<&State>",
+            false,
+        ),
+        (
+            "Component",
+            "component(unrelated = hook)",
+            "state: Query<&State>",
+            false,
+        ),
+        (
+            "Component",
+            "cfg_attr(test, component(on_add = hook))",
+            "state: Query<&State>",
+            false,
+        ),
+        (
+            "Component",
+            "component(on_add = hook::<State>)",
+            "state: Query<&State>",
+            true,
+        ),
+        (
+            "Component",
+            "component(on_add = ::callbacks::capture::<State>)",
+            "state: Query<&State>",
+            false,
+        ),
+    ] {
+        let generics = if metadata.contains("::<") { "<T>" } else { "" };
+        let inventory = Inventory::fixture(&format!(
+            "mod callbacks {{ pub fn capture{generics}(world: bevy_ecs::world::DeferredWorld, context: bevy_ecs::lifecycle::HookContext) {{}} }} use callbacks::capture as hook; #[derive({derive})] #[{metadata}] struct State {{ value: u32 }} fn read({parameter}) {{}} struct Root; impl Plugin for Root {{ fn build(&self, app: &mut App) {{ app.add_systems(Update, read); }} }}"
+        ));
+        let hook = &inventory.entries[&inventory.key("callbacks|fn:capture")];
+        assert_eq!(
+            inventory.canonical(hook, &Policy::default(), &mut BTreeSet::new()),
+            expected
+        );
+    }
+}
+
+#[test]
 fn canonical_components_and_registered_systems_share_one_owner() {
     let inventory = Inventory::fixture(
         "#[derive(Component)] struct Position { x: f32 } impl Position { fn move_by(&mut self, x: f32) { self.x += x; } } fn move_position(mut positions: Query<&mut Position>) {} struct Root; impl Plugin for Root { fn build(&self, app: &mut App) { app.add_systems(Update, move_position); } }",
@@ -1664,6 +1723,7 @@ struct Declaration {
     plugin_children: BTreeSet<String>,
     relation_target: Option<String>,
     relation_source: Option<String>,
+    component_hooks: BTreeSet<String>,
     contract: bool,
     contract_paths: BTreeSet<String>,
     projection: bool,
@@ -1818,6 +1878,7 @@ impl Inventory {
                 plugin_children: BTreeSet::new(),
                 relation_target: None,
                 relation_source: None,
+                component_hooks: BTreeSet::new(),
                 contract: false,
                 contract_paths: BTreeSet::new(),
                 projection: false,
@@ -2724,6 +2785,19 @@ impl Inventory {
                 keys.insert(target.key.clone());
             }
         }
+        for component in self.entries.values() {
+            if !component.ecs || !keys.contains(&component.key) {
+                continue;
+            }
+            for path in &component.component_hooks {
+                if let Some(hook) =
+                    self.function_reference(&component.namespace, path, &mut BTreeSet::new())
+                    && hook.production
+                {
+                    registered.insert(hook.key.clone());
+                }
+            }
+        }
         self.used_keys = keys;
         self.registered_keys = registered;
     }
@@ -3158,6 +3232,8 @@ impl Declarations<'_> {
         let mut parameter = false;
         let mut relation_target = None;
         let mut relation_source = None;
+        let mut component = false;
+        let mut component_hooks = BTreeSet::new();
         let mut contract_paths = BTreeSet::new();
         let test = Self::metadata(attrs, false)
             .iter()
@@ -3168,6 +3244,38 @@ impl Declarations<'_> {
                 attribute.push(segment.ident.unraw().to_string());
             }
             contract_paths.insert(attribute.join("::"));
+            if attr.path().is_ident("component")
+                && let syn::Meta::List(list) = &attr
+            {
+                let parser =
+                    syn::punctuated::Punctuated::<syn::Meta, syn::Token![,]>::parse_terminated;
+                if let Ok(items) = parser.parse2(list.tokens.clone()) {
+                    for item in items {
+                        let syn::Meta::NameValue(value) = item else {
+                            continue;
+                        };
+                        if !value.path.get_ident().is_some_and(|name| {
+                            matches!(
+                                name.to_string().as_str(),
+                                "on_add" | "on_insert" | "on_replace" | "on_remove" | "on_despawn"
+                            )
+                        }) {
+                            continue;
+                        }
+                        let syn::Expr::Path(callback) = value.value else {
+                            continue;
+                        };
+                        if callback.path.leading_colon.is_some() {
+                            continue;
+                        }
+                        let mut path = Vec::new();
+                        for segment in callback.path.segments {
+                            path.push(segment.ident.unraw().to_string());
+                        }
+                        component_hooks.insert(path.join("::"));
+                    }
+                }
+            }
             if (attr.path().is_ident("relationship") || attr.path().is_ident("relationship_target"))
                 && let syn::Meta::List(list) = &attr
             {
@@ -3204,6 +3312,10 @@ impl Declarations<'_> {
                     continue;
                 };
                 for path in paths {
+                    component |= path
+                        .segments
+                        .last()
+                        .is_some_and(|segment| segment.ident == "Component");
                     if path.segments.last().is_some_and(|segment| {
                         matches!(
                             segment.ident.to_string().as_str(),
@@ -3228,6 +3340,9 @@ impl Declarations<'_> {
                     }
                 }
             }
+        }
+        if !component {
+            component_hooks.clear();
         }
         let label = match kind {
             Kind::Struct => "struct",
@@ -3261,6 +3376,7 @@ impl Declarations<'_> {
             plugin_children: references.plugins,
             relation_target,
             relation_source,
+            component_hooks,
             contract: false,
             contract_paths,
             projection: false,
