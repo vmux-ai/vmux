@@ -4,6 +4,8 @@ use std::process::Command;
 
 use quote::ToTokens;
 use serde::{Deserialize, Serialize};
+use syn::ext::IdentExt;
+use syn::parse::Parser;
 use syn::visit::{self, Visit};
 use syn::{Attribute, Item, Type};
 
@@ -146,6 +148,48 @@ fn same_named_components_resolve_within_their_registered_module() {
 }
 
 #[test]
+fn standard_result_does_not_resolve_to_an_unrelated_module_alias() {
+    for source in [
+        "mod unrelated { type Result<T> = T; } #[derive(Message)] struct Completed { result: Result<u64, String> } struct Root; impl Plugin for Root { fn build(&self, app: &mut App) { app.add_message::<Completed>(); } }",
+        "mod unrelated { type Result<T> = T; } #[derive(Message)] struct Completed { result: std::result::Result<u64, String> } struct Root; impl Plugin for Root { fn build(&self, app: &mut App) { app.add_message::<Completed>(); } }",
+        "mod unrelated { type Result<T> = T; } #[derive(Message)] struct Completed { result: core::result::Result<u64, String> } struct Root; impl Plugin for Root { fn build(&self, app: &mut App) { app.add_message::<Completed>(); } }",
+        "mod local { pub struct Other; } use local::*; mod unrelated { type Result<T> = T; } #[derive(Message)] struct Completed { result: std::result::Result<u64, String> } struct Root; impl Plugin for Root { fn build(&self, app: &mut App) { app.add_message::<Completed>(); } }",
+    ] {
+        let inventory = Inventory::fixture(source);
+        let entry = &inventory.entries[&inventory.key("struct:Completed")];
+        assert!(inventory.canonical(entry, &Policy::default(), &mut BTreeSet::new()));
+    }
+    for source in [
+        "struct Result<T, E> { payload: T, error: E } #[derive(Message)] struct Completed { result: Result<u64, String> } struct Root; impl Plugin for Root { fn build(&self, app: &mut App) { app.add_message::<Completed>(); } }",
+        "mod unrelated { type Result<T> = T; } use missing::Result; #[derive(Message)] struct Completed { result: Result<u64, String> } struct Root; impl Plugin for Root { fn build(&self, app: &mut App) { app.add_message::<Completed>(); } }",
+        "mod unrelated { type Result<T> = T; } use missing as std; #[derive(Message)] struct Completed { result: std::result::Result<u64, String> } struct Root; impl Plugin for Root { fn build(&self, app: &mut App) { app.add_message::<Completed>(); } }",
+        "mod unrelated { type Result<T> = T; } mod std { pub mod result {} } #[derive(Message)] struct Completed { result: std::result::Result<u64, String> } struct Root; impl Plugin for Root { fn build(&self, app: &mut App) { app.add_message::<Completed>(); } }",
+        "mod unrelated { type Result<T> = T; } extern crate missing as core; #[derive(Message)] struct Completed { result: core::result::Result<u64, String> } struct Root; impl Plugin for Root { fn build(&self, app: &mut App) { app.add_message::<Completed>(); } }",
+        "mod unrelated { type Result<T> = T; } mod local { pub use missing::Result; } use local::*; #[derive(Message)] struct Completed { result: Result<u64, String> } struct Root; impl Plugin for Root { fn build(&self, app: &mut App) { app.add_message::<Completed>(); } }",
+        "mod one { pub struct Result<T,E> { value: T, error: E } } mod two { pub struct Result<T,E> { value: T, error: E } } use one::*; use two::*; #[derive(Message)] struct Completed { result: Result<u64, String> } struct Root; impl Plugin for Root { fn build(&self, app: &mut App) { app.add_message::<Completed>(); } }",
+        "mod unrelated { type Result<T> = T; } mod local { pub mod std { pub mod result {} } } use local::*; #[derive(Message)] struct Completed { result: std::result::Result<u64, String> } struct Root; impl Plugin for Root { fn build(&self, app: &mut App) { app.add_message::<Completed>(); } }",
+        "mod unrelated { type Result<T> = T; } mod inner { pub mod core { pub mod result {} } } mod outer { pub use super::inner::*; } use outer::*; #[derive(Message)] struct Completed { result: core::result::Result<u64, String> } struct Root; impl Plugin for Root { fn build(&self, app: &mut App) { app.add_message::<Completed>(); } }",
+        "mod unrelated { type Result<T> = T; } mod owner { pub mod inner { pub mod std { pub mod result {} } } } use owner::*; use inner::*; #[derive(Message)] struct Completed { result: std::result::Result<u64, String> } struct Root; impl Plugin for Root { fn build(&self, app: &mut App) { app.add_message::<Completed>(); } }",
+        "mod unrelated { type Result<T> = T; } mod source { pub mod std { pub mod result {} } pub mod bridge { pub use super::*; } } use source::bridge::*; #[derive(Message)] struct Completed { result: std::result::Result<u64, String> } struct Root; impl Plugin for Root { fn build(&self, app: &mut App) { app.add_message::<Completed>(); } }",
+        "mod unrelated { type Result<T> = T; } mod local { pub mod surface { pub mod core { pub mod result {} } } } mod facade { pub use crate::local::*; } use facade::surface::*; #[derive(Message)] struct Completed { result: core::result::Result<u64, String> } struct Root; impl Plugin for Root { fn build(&self, app: &mut App) { app.add_message::<Completed>(); } }",
+        "mod unrelated { type Result<T> = T; } #[derive(Message)] struct Completed<Result: Send + Sync + 'static> { result: Result } struct Root; impl Plugin for Root { fn build(&self, app: &mut App) { app.add_message::<Completed<LegacyDomain>>(); } }",
+        "mod unrelated { type Result<T> = T; } mod one { pub mod inner {} } mod two { pub mod inner { pub mod std { pub mod result {} } } } use one::*; use two::*; use inner::*; #[derive(Message)] struct Completed { result: std::result::Result<u64, String> } struct Root; impl Plugin for Root { fn build(&self, app: &mut App) { app.add_message::<Completed>(); } }",
+        "mod domain { pub struct Result<T,E> { value: T, error: E } } #[cfg(target_os=\"linux\")] use domain::Result; #[cfg(target_os=\"macos\")] use std::result::Result; #[derive(Message)] struct Completed { result: Result<u64,String> } struct Root; impl Plugin for Root { fn build(&self, app: &mut App) { app.add_message::<Completed>(); } }",
+        "mod unrelated { type Result<T> = T; } mod domain { pub mod std { pub mod result {} } } mod neutral {} #[cfg(target_os=\"linux\")] use domain as fixture; #[cfg(target_os=\"macos\")] use neutral as fixture; use fixture::*; #[derive(Message)] struct Completed { result: std::result::Result<u64,String> } struct Root; impl Plugin for Root { fn build(&self, app: &mut App) { app.add_message::<Completed>(); } }",
+        "mod domain { pub mod result { pub struct Result<T,E> { value:T,error:E } } } struct Root; impl Plugin for Root { fn build(&self, app: &mut App) { use domain as std; #[derive(Message)] struct Completed { result:std::result::Result<u64,String> } app.add_message::<Completed>(); } }",
+        "mod owner { pub mod std { pub mod result {} } } use owner::std::{self}; mod unrelated { type Result<T> = T; } #[derive(Message)] struct Completed { result:std::result::Result<u64,String> } struct Root; impl Plugin for Root { fn build(&self, app: &mut App) { app.add_message::<Completed>(); } }",
+        "mod owner { pub mod inner { pub mod std { pub mod result {} } } } use owner::inner::{self}; use inner::*; mod unrelated { type Result<T> = T; } #[derive(Message)] struct Completed { result:std::result::Result<u64,String> } struct Root; impl Plugin for Root { fn build(&self, app: &mut App) { app.add_message::<Completed>(); } }",
+        "mod r#std { pub mod result { pub struct Result<T,E> { value:T,error:E } } } #[derive(Message)] struct Completed { result:std::result::Result<u64,String> } struct Root; impl Plugin for Root { fn build(&self, app: &mut App) { app.add_message::<Completed>(); } }",
+        "mod domain { pub mod result { pub struct Result<T,E> { value:T,error:E } } } use domain as r#std; #[derive(Message)] struct Completed { result:std::result::Result<u64,String> } struct Root; impl Plugin for Root { fn build(&self, app: &mut App) { app.add_message::<Completed>(); } }",
+        "mod unrelated { type Result<T> = T; } #[derive(Message)] struct Completed<r#Result: Send + Sync + 'static> { result:Result } struct Root; impl Plugin for Root { fn build(&self, app: &mut App) { app.add_message::<Completed<LegacyDomain>>(); } }",
+    ] {
+        let inventory = Inventory::fixture(source);
+        let entry = &inventory.entries[&inventory.key("struct:Completed")];
+        assert!(!inventory.canonical(entry, &Policy::default(), &mut BTreeSet::new()));
+    }
+}
+
+#[test]
 fn codec_boundaries_use_their_declared_canonical_endpoint() {
     let inventory = Inventory::fixture(
         "#[vmux_api::ui_event] struct Received { bytes: Vec<u8> } #[vmux_api::ui_state] struct Theme { dark: bool } struct Codec { bytes: Vec<u8> } impl Codec { fn decode(self) -> Received { Received { bytes: self.bytes } } }",
@@ -163,6 +207,52 @@ fn codec_boundaries_use_their_declared_canonical_endpoint() {
         boundary.output = format!("ECS: {}", inventory.key("struct:Theme"));
     }
     assert!(!policy.audit(&inventory).is_empty());
+}
+
+#[test]
+fn path_overridden_module_exports_cannot_establish_standard_type_bindings() {
+    for attribute in [
+        "#[path=\"implementation.rs\"]",
+        "#[cfg_attr(target_os=\"linux\",path=\"implementation.rs\")]",
+        "#[cfg_attr(feature=\"host\",cfg_attr(target_os=\"linux\",path=\"implementation.rs\"))]",
+    ] {
+        let mut inventory = Inventory::default();
+        inventory.source("crates/sample/src/lib.rs", &format!("{attribute} mod adapter; use adapter::*; #[derive(Message)] struct Completed {{ result: std::result::Result<u64,String> }} struct Root; impl Plugin for Root {{ fn build(&self, app: &mut App) {{ app.add_message::<Completed>(); }} }}"));
+        inventory.source("crates/sample/src/adapter.rs", "");
+        inventory.source(
+            "crates/sample/src/implementation.rs",
+            "pub mod std { pub mod result { pub struct Result<T,E> { value:T,error:E } } }",
+        );
+        inventory.resolve_usage();
+        let entry = &inventory.entries[&inventory.key("struct:Completed")];
+        assert!(!inventory.canonical(entry, &Policy::default(), &mut BTreeSet::new()));
+    }
+}
+
+#[test]
+fn module_directory_exports_keep_their_logical_namespace() {
+    let mut inventory = Inventory::default();
+    inventory.source("crates/sample/src/lib.rs", "mod adapter; use adapter::*; #[derive(Message)] struct Completed { result: std::result::Result<u64,String> } struct Root; impl Plugin for Root { fn build(&self, app: &mut App) { app.add_message::<Completed>(); } }");
+    inventory.source(
+        "crates/sample/src/adapter/mod.rs",
+        "pub mod std { pub mod result { pub struct Result<T,E> { value:T,error:E } } }",
+    );
+    inventory.resolve_usage();
+    let entry = &inventory.entries[&inventory.key("struct:Completed")];
+    assert!(!inventory.canonical(entry, &Policy::default(), &mut BTreeSet::new()));
+}
+
+#[test]
+fn inline_module_path_overrides_block_unproven_descendant_exports() {
+    let mut inventory = Inventory::default();
+    inventory.source("crates/sample/src/lib.rs", "#[path=\"alternate\"] mod facade { mod inner; pub use inner::*; } use facade::*; #[derive(Message)] struct Completed { result:std::result::Result<u64,String> } struct Root; impl Plugin for Root { fn build(&self, app: &mut App) { app.add_message::<Completed>(); } }");
+    inventory.source(
+        "crates/sample/src/alternate/inner.rs",
+        "pub mod std { pub mod result { pub struct Result<T,E> { value:T,error:E } } }",
+    );
+    inventory.resolve_usage();
+    let entry = &inventory.entries[&inventory.key("struct:Completed")];
+    assert!(!inventory.canonical(entry, &Policy::default(), &mut BTreeSet::new()));
 }
 
 #[test]
@@ -626,6 +716,7 @@ struct Declaration {
     references: BTreeSet<String>,
     fields: BTreeSet<String>,
     field_paths: BTreeSet<String>,
+    generic_bindings: BTreeSet<String>,
     local: bool,
     dynamic: bool,
     opaque: bool,
@@ -744,6 +835,7 @@ impl Inventory {
                 references: BTreeSet::new(),
                 fields: BTreeSet::new(),
                 field_paths: BTreeSet::new(),
+                generic_bindings: BTreeSet::new(),
                 local: false,
                 dynamic: false,
                 opaque: true,
@@ -862,7 +954,11 @@ impl Inventory {
                     return false;
                 }
                 Some(_) => {}
-                None if self.names.contains_key(name) => return false,
+                None if self.names.contains_key(name)
+                    && !self.standard_result(entry, reference) =>
+                {
+                    return false;
+                }
                 None => {}
             }
         }
@@ -871,6 +967,203 @@ impl Inventory {
 
     fn used(&self, entry: &Declaration) -> bool {
         self.used_keys.contains(&entry.key)
+    }
+
+    fn standard_result(&self, entry: &Declaration, reference: &str) -> bool {
+        let mut parts = Vec::new();
+        for part in reference.split("::") {
+            parts.push(part.strip_prefix("r#").unwrap_or(part));
+        }
+        let reference = parts.join("::");
+        let reference = reference.as_str();
+        if entry.key.split('|').nth(1).is_some_and(|scope| {
+            scope
+                .split("::")
+                .any(|part| part.starts_with("fn ") || part.starts_with("impl "))
+        }) {
+            return false;
+        }
+        let namespace = entry.namespace.as_str();
+        if entry
+            .generic_bindings
+            .contains(reference.split("::").next().unwrap())
+        {
+            return false;
+        }
+        if matches!(reference, "std::result::Result" | "core::result::Result") {
+            return !self.local_binding(namespace, reference.split("::").next().unwrap());
+        }
+        if reference != "Result" {
+            return false;
+        }
+        let mut scope = Some(namespace);
+        while let Some(current) = scope {
+            if self.symbols.contains_key(&format!("{current}::Result"))
+                || self.symbols.contains_key(&format!("{current}::r#Result"))
+            {
+                return false;
+            }
+            if let Some(imports) = self.imports.get(current) {
+                if imports.ambiguous.contains("Result") || imports.modules.contains("Result") {
+                    return false;
+                }
+                if let Some(target) = imports.aliases.get("Result") {
+                    return matches!(
+                        target.as_str(),
+                        "std::result::Result" | "core::result::Result"
+                    ) && !self.local_binding(current, target.split("::").next().unwrap());
+                }
+                for prefix in &imports.globs {
+                    let root = prefix.split("::").next().unwrap();
+                    if matches!(root, "crate" | "self" | "super")
+                        || self.roots.contains(root)
+                        || self.local_binding(current, root)
+                    {
+                        return false;
+                    }
+                }
+            }
+            scope = current.rsplit_once("::").map(|(parent, _)| parent);
+        }
+        true
+    }
+
+    fn local_binding(&self, namespace: &str, name: &str) -> bool {
+        let mut scope = Some(namespace);
+        while let Some(current) = scope {
+            if self.symbols.contains_key(&format!("{current}::{name}"))
+                || self.symbols.contains_key(&format!("{current}::r#{name}"))
+            {
+                return true;
+            }
+            if let Some(imports) = self.imports.get(current)
+                && (imports.aliases.contains_key(name) || imports.modules.contains(name))
+            {
+                return true;
+            }
+            if self.exported_binding(current, name, &mut BTreeSet::new()) {
+                return true;
+            }
+            scope = current.rsplit_once("::").map(|(parent, _)| parent);
+        }
+        false
+    }
+
+    fn exported_binding(
+        &self,
+        namespace: &str,
+        name: &str,
+        visiting: &mut BTreeSet<String>,
+    ) -> bool {
+        if !visiting.insert(format!("binding:{namespace}|{name}")) {
+            return false;
+        }
+        if self.symbols.contains_key(&format!("{namespace}::{name}"))
+            || self.symbols.contains_key(&format!("{namespace}::r#{name}"))
+        {
+            return true;
+        }
+        let Some(imports) = self.imports.get(namespace) else {
+            return false;
+        };
+        if imports.aliases.contains_key(name) || imports.modules.contains(name) {
+            return true;
+        }
+        for prefix in &imports.globs {
+            let Some(source) = self.glob_namespace(namespace, prefix, &mut visiting.clone()) else {
+                let first = prefix.split("::").next().unwrap();
+                if matches!(first, "crate" | "self" | "super")
+                    || self.roots.contains(first)
+                    || self.exported_binding(namespace, first, visiting)
+                {
+                    return true;
+                }
+                continue;
+            };
+            if self.exported_binding(&source, name, visiting) {
+                return true;
+            }
+        }
+        false
+    }
+
+    fn glob_namespace(
+        &self,
+        namespace: &str,
+        prefix: &str,
+        visiting: &mut BTreeSet<String>,
+    ) -> Option<String> {
+        if !visiting.insert(format!("path:{namespace}|{prefix}")) {
+            return None;
+        }
+        let mut parts = prefix.split("::");
+        let first = parts.next()?;
+        let mut current = match first {
+            "crate" => namespace.split("::").next()?.to_string(),
+            "self" => namespace.to_string(),
+            "super" => namespace.rsplit_once("::")?.0.to_string(),
+            _ => {
+                let mut scope = Some(namespace);
+                let mut found = None;
+                while let Some(parent) = scope {
+                    if let Some(module) = self.module_binding(parent, first, visiting) {
+                        found = Some(module);
+                        break;
+                    }
+                    if self.exported_binding(parent, first, &mut visiting.clone()) {
+                        return None;
+                    }
+                    scope = parent.rsplit_once("::").map(|(parent, _)| parent);
+                }
+                match found {
+                    Some(module) => module,
+                    None if self.roots.contains(first) => first.to_string(),
+                    None => return None,
+                }
+            }
+        };
+        for part in parts {
+            if part == "super" {
+                current = current.rsplit_once("::")?.0.to_string();
+            } else {
+                current = self.module_binding(&current, part, visiting)?;
+            }
+        }
+        Some(current)
+    }
+
+    fn module_binding(
+        &self,
+        namespace: &str,
+        name: &str,
+        visiting: &mut BTreeSet<String>,
+    ) -> Option<String> {
+        if !visiting.insert(format!("module:{namespace}|{name}")) {
+            return None;
+        }
+        let imports = self.imports.get(namespace)?;
+        if imports.ambiguous.contains(name) || imports.opaque_modules.contains(name) {
+            return None;
+        }
+        if imports.modules.contains(name) {
+            return Some(format!("{namespace}::{name}"));
+        }
+        if let Some(target) = imports.aliases.get(name) {
+            return self.glob_namespace(namespace, target, visiting);
+        }
+        let mut found = None;
+        for prefix in &imports.globs {
+            let Some(source) = self.glob_namespace(namespace, prefix, &mut visiting.clone()) else {
+                continue;
+            };
+            if let Some(module) = self.module_binding(&source, name, visiting) {
+                if found.as_ref().is_some_and(|previous| *previous != module) {
+                    return None;
+                }
+                found = Some(module);
+            }
+        }
+        found
     }
 
     fn resolve_usage(&mut self) {
@@ -1032,7 +1325,7 @@ impl Namespace {
             module.push(package);
             for part in &parts[source + 1..] {
                 let name = part.trim_end_matches(".rs");
-                if !matches!(name, "lib" | "main") {
+                if !matches!(name, "lib" | "main" | "mod") {
                     module.push(name.into());
                 }
             }
@@ -1041,7 +1334,7 @@ impl Namespace {
         }
         for part in scope {
             if !part.starts_with("fn ") && !part.starts_with("impl ") {
-                module.push(part.clone());
+                module.push(part.strip_prefix("r#").unwrap_or(part).to_string());
             }
         }
         Self(module.join("::"))
@@ -1051,35 +1344,58 @@ impl Namespace {
 #[derive(Default)]
 struct Imports {
     aliases: BTreeMap<String, String>,
+    ambiguous: BTreeSet<String>,
     globs: BTreeSet<String>,
+    modules: BTreeSet<String>,
+    opaque_modules: BTreeSet<String>,
 }
 
 impl Imports {
+    fn bind_alias(&mut self, name: String, target: String) {
+        if self
+            .aliases
+            .get(&name)
+            .is_some_and(|previous| *previous != target)
+        {
+            self.ambiguous.insert(name.clone());
+        }
+        self.aliases.insert(name, target);
+    }
+
     fn add(&mut self, tree: &syn::UseTree, prefix: &str) {
         match tree {
             syn::UseTree::Path(path) => {
                 let prefix = if prefix.is_empty() {
-                    path.ident.to_string()
+                    path.ident.unraw().to_string()
                 } else {
-                    format!("{prefix}::{}", path.ident)
+                    format!("{prefix}::{}", path.ident.unraw())
                 };
                 self.add(&path.tree, &prefix);
             }
             syn::UseTree::Name(name) => {
+                if name.ident == "self" && !prefix.is_empty() {
+                    self.bind_alias(
+                        prefix.rsplit("::").next().unwrap().to_string(),
+                        prefix.to_string(),
+                    );
+                    return;
+                }
                 let target = if prefix.is_empty() {
-                    name.ident.to_string()
+                    name.ident.unraw().to_string()
                 } else {
-                    format!("{prefix}::{}", name.ident)
+                    format!("{prefix}::{}", name.ident.unraw())
                 };
-                self.aliases.insert(name.ident.to_string(), target);
+                self.bind_alias(name.ident.unraw().to_string(), target);
             }
             syn::UseTree::Rename(name) => {
-                let target = if prefix.is_empty() {
-                    name.ident.to_string()
+                let target = if name.ident == "self" && !prefix.is_empty() {
+                    prefix.to_string()
+                } else if prefix.is_empty() {
+                    name.ident.unraw().to_string()
                 } else {
-                    format!("{prefix}::{}", name.ident)
+                    format!("{prefix}::{}", name.ident.unraw())
                 };
-                self.aliases.insert(name.rename.to_string(), target);
+                self.bind_alias(name.rename.unraw().to_string(), target);
             }
             syn::UseTree::Glob(_) => {
                 self.globs.insert(prefix.into());
@@ -1094,6 +1410,28 @@ impl Imports {
 }
 
 impl Declarations<'_> {
+    fn path_override(meta: &syn::Meta) -> bool {
+        if meta.path().segments.len() == 1 && meta.path().segments[0].ident.unraw() == "path" {
+            return true;
+        }
+        let syn::Meta::List(list) = meta else {
+            return false;
+        };
+        if list.path.segments.len() != 1 || list.path.segments[0].ident.unraw() != "cfg_attr" {
+            return false;
+        }
+        let parser = syn::punctuated::Punctuated::<syn::Meta, syn::Token![,]>::parse_terminated;
+        let Ok(attributes) = parser.parse2(list.tokens.clone()) else {
+            return true;
+        };
+        for attribute in attributes.iter().skip(1) {
+            if Self::path_override(attribute) {
+                return true;
+            }
+        }
+        false
+    }
+
     fn add(
         &mut self,
         name: String,
@@ -1105,8 +1443,30 @@ impl Declarations<'_> {
     ) {
         let mut references = References::default();
         let tokens = node.to_token_stream();
+        let mut generic_bindings = BTreeSet::new();
         if let Ok(file) = syn::parse2::<syn::File>(tokens.clone()) {
             references.visit_file(&file);
+            for item in &file.items {
+                let generics = match item {
+                    Item::Struct(value) => &value.generics,
+                    Item::Enum(value) => &value.generics,
+                    Item::Type(value) => &value.generics,
+                    Item::Fn(value) => &value.sig.generics,
+                    Item::Impl(value) => &value.generics,
+                    _ => continue,
+                };
+                for parameter in &generics.params {
+                    match parameter {
+                        syn::GenericParam::Type(value) => {
+                            generic_bindings.insert(value.ident.unraw().to_string());
+                        }
+                        syn::GenericParam::Const(value) => {
+                            generic_bindings.insert(value.ident.unraw().to_string());
+                        }
+                        syn::GenericParam::Lifetime(_) => {}
+                    }
+                }
+            }
         }
         let mut field_names = References::default();
         for field in fields {
@@ -1193,6 +1553,7 @@ impl Declarations<'_> {
             references: references.names,
             fields: field_names.names,
             field_paths: field_names.paths,
+            generic_bindings,
             local: references.local,
             dynamic: references.dynamic,
             opaque: references.opaque,
@@ -1231,6 +1592,14 @@ impl Declarations<'_> {
 impl<'ast> Visit<'ast> for Declarations<'_> {
     fn visit_item(&mut self, item: &'ast Item) {
         match item {
+            Item::ExternCrate(value) => {
+                let name = value.rename.as_ref().map_or(&value.ident, |(_, name)| name);
+                self.inventory
+                    .imports
+                    .entry(Namespace::of(self.path, &self.scope).0)
+                    .or_default()
+                    .bind_alias(name.unraw().to_string(), value.ident.unraw().to_string());
+            }
             Item::Use(value)
                 if !self
                     .scope
@@ -1356,7 +1725,29 @@ impl<'ast> Visit<'ast> for Declarations<'_> {
                 return;
             }
             Item::Mod(value) => {
+                if value
+                    .attrs
+                    .iter()
+                    .any(|attribute| Self::path_override(&attribute.meta))
+                {
+                    self.inventory
+                        .imports
+                        .entry(Namespace::of(self.path, &self.scope).0)
+                        .or_default()
+                        .opaque_modules
+                        .insert(value.ident.unraw().to_string());
+                }
+                self.inventory
+                    .imports
+                    .entry(Namespace::of(self.path, &self.scope).0)
+                    .or_default()
+                    .modules
+                    .insert(value.ident.unraw().to_string());
                 self.scope.push(value.ident.to_string());
+                self.inventory
+                    .imports
+                    .entry(Namespace::of(self.path, &self.scope).0)
+                    .or_default();
                 visit::visit_item(self, item);
                 self.scope.pop();
                 return;
