@@ -1,3 +1,5 @@
+use bevy::prelude::Component;
+
 pub(super) struct WindowPointerPolicy;
 
 impl WindowPointerPolicy {
@@ -8,18 +10,6 @@ impl WindowPointerPolicy {
         key_window: bool,
     ) -> bool {
         dragging || !over_windowed_page || !was_over_windowed_page || !key_window
-    }
-
-    pub(super) fn windowed_presence(
-        pointer_position_changed: bool,
-        previous: bool,
-        sampled: bool,
-    ) -> bool {
-        if pointer_position_changed {
-            sampled
-        } else {
-            previous
-        }
     }
 
     pub(super) fn scroll_should_wake(
@@ -76,8 +66,9 @@ impl ResizeEdges {
     }
 }
 
-#[derive(Clone, Copy, Debug)]
+#[derive(Component, Clone, Copy, Debug, Default)]
 pub(super) struct WindowResizeDrag {
+    pub(super) active: bool,
     pub(super) frame: WindowFrame,
     pub(super) cursor_x: f64,
     pub(super) cursor_y: f64,
@@ -87,7 +78,13 @@ pub(super) struct WindowResizeDrag {
 }
 
 impl WindowResizeDrag {
+    #[cfg(target_os = "macos")]
+    pub(super) const GRIP_PX: f64 = 8.0;
+
     pub(super) fn resized_frame(self, cursor_x: f64, cursor_y: f64) -> WindowFrame {
+        if !self.active {
+            return self.frame;
+        }
         let mut frame = self.frame;
         let delta_x = cursor_x - self.cursor_x;
         let delta_y = cursor_y - self.cursor_y;
@@ -154,7 +151,7 @@ impl TitlebarClick {
     }
 }
 
-#[derive(Default)]
+#[derive(Component, Default)]
 pub(super) struct TitlebarClicks(Option<TitlebarClick>);
 
 impl TitlebarClicks {
@@ -176,7 +173,7 @@ impl TitlebarClicks {
     }
 }
 
-#[derive(Clone, Copy, Debug, Default, PartialEq)]
+#[derive(Component, Clone, Copy, Debug, Default, PartialEq)]
 pub(super) struct WindowZoom(Option<WindowFrame>);
 
 impl WindowZoom {
@@ -253,6 +250,7 @@ mod tests {
     #[test]
     fn corner_resize_updates_both_axes_and_clamps_minimum() {
         let drag = WindowResizeDrag {
+            active: true,
             frame: WindowFrame {
                 x: 100.0,
                 y: 100.0,
@@ -288,14 +286,6 @@ mod tests {
                 height: 120.0,
             }
         );
-    }
-
-    #[test]
-    fn scroll_preserves_windowed_page_pointer_ownership() {
-        assert!(WindowPointerPolicy::windowed_presence(false, true, false));
-        assert!(!WindowPointerPolicy::windowed_presence(false, false, true));
-        assert!(!WindowPointerPolicy::windowed_presence(true, true, false));
-        assert!(WindowPointerPolicy::windowed_presence(true, false, true));
     }
 
     #[test]

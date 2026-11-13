@@ -8,9 +8,7 @@ use vmux_api::input::KeyModifiers;
 use vmux_flex::prelude::*;
 use vmux_history::LastActivatedAt;
 
-use super::{
-    FocusRequest, Pane, PaneDrag, PaneFocus, PaneSplit, PointerDevice, PointerDevicePlugin,
-};
+use super::{FocusRequest, Pane, PaneDrag, PaneFocus, PaneSplit};
 #[cfg(test)]
 use crate::stack::Stack;
 use crate::{
@@ -24,9 +22,6 @@ pub(super) struct FocusPlugin;
 
 impl Plugin for FocusPlugin {
     fn build(&self, app: &mut App) {
-        if !app.is_plugin_added::<PointerDevicePlugin>() {
-            app.add_plugins(PointerDevicePlugin);
-        }
         if !app.is_plugin_added::<vmux_ecs::PrimitivesPlugin>() {
             app.add_plugins(vmux_ecs::PrimitivesPlugin);
         }
@@ -45,12 +40,14 @@ impl Plugin for FocusPlugin {
             .add_systems(PostUpdate, warp_cursor_to_active);
         app.add_systems(
             Update,
-            from_pointer
+            (initialize_pointer, ApplyDeferred, from_pointer)
+                .chain()
                 .after(crate::window::WindowFocusSet)
                 .after(super::resize::PointerResizeSet)
                 .before(crate::PaneSet::Select)
                 .before(crate::active::ActiveSystemSet::Descendants)
-                .before(crate::stack::ComputeFocusSet),
+                .before(crate::stack::ComputeFocusSet)
+                .before(vmux_input::PointerSet::Route),
         );
     }
 }
@@ -151,7 +148,7 @@ fn select(
     }
 }
 
-#[derive(Component)]
+#[derive(Component, Default)]
 pub(super) struct PointerFocus {
     sequence: u64,
     position: Option<Vec2>,
@@ -159,67 +156,29 @@ pub(super) struct PointerFocus {
     modifiers: Option<KeyModifiers>,
 }
 
-impl Default for PointerFocus {
-    fn default() -> Self {
-        Self {
-            sequence: vmux_input::NativePointer::snapshot().map_or(0, |pointer| pointer.sequence),
-            position: None,
-            buttons: 0,
-            modifiers: None,
-        }
-    }
-}
-
 impl PointerFocus {
-    fn sample(
-        &mut self,
-        window_entity: Entity,
-        window: &Window,
-        mouse: &ButtonInput<MouseButton>,
-    ) -> Option<(Vec2, bool, bool)> {
-        #[cfg(target_os = "macos")]
-        let (position, buttons, moved, clicked, modifiers) = {
-            let _ = (window_entity, window, mouse);
-            let pointer = vmux_input::NativePointer::snapshot()?;
-            if pointer.sequence == self.sequence {
-                return None;
-            }
-            let clicked = pointer.press_sequence > self.sequence;
-            let moved = pointer.motion_sequence == pointer.sequence;
-            self.sequence = pointer.sequence;
-            let buttons = u8::from(pointer.buttons.left)
-                | (u8::from(pointer.buttons.right) << 1)
-                | (u8::from(pointer.buttons.middle) << 2);
-            let position = if clicked {
-                pointer.press_position_px
-            } else {
-                pointer.position_px
-            };
-            let modifiers = if clicked {
-                pointer.press_modifiers
-            } else {
-                pointer.modifiers
-            };
-            (position, buttons, moved, clicked, modifiers)
-        };
-        #[cfg(not(target_os = "macos"))]
-        let (position, buttons, moved, clicked, modifiers) = {
-            let _ = self.sequence;
-            let position = vmux_input::NativePointer::position(window_entity, window)?;
-            let buttons = u8::from(mouse.pressed(MouseButton::Left))
-                | (u8::from(mouse.pressed(MouseButton::Right)) << 1)
-                | (u8::from(mouse.pressed(MouseButton::Middle)) << 2);
-            (
-                position,
-                buttons,
-                self.position != Some(position),
-                buttons & !self.buttons != 0,
-                None,
-            )
-        };
+    fn sample(&mut self, pointer: &vmux_input::PointerState) -> Option<(Vec2, bool, bool)> {
+        if pointer.sequence == self.sequence {
+            return None;
+        }
+        let clicked = pointer.press_sequence > self.sequence;
+        let moved = pointer.motion_sequence == pointer.sequence;
+        self.sequence = pointer.sequence;
+        let position = if clicked {
+            pointer.press_position_px
+        } else {
+            pointer.position_px
+        }?;
+        let buttons = u8::from(pointer.buttons.left)
+            | (u8::from(pointer.buttons.right) << 1)
+            | (u8::from(pointer.buttons.middle) << 2);
         self.position = Some(position);
         self.buttons = buttons;
-        self.modifiers = modifiers;
+        self.modifiers = if clicked {
+            pointer.press_modifiers
+        } else {
+            pointer.modifiers
+        };
         Some((position, clicked, moved && buttons == 0))
     }
 
@@ -238,8 +197,17 @@ impl PointerFocus {
     }
 }
 
+fn initialize_pointer(
+    windows: Query<Entity, (With<Window>, Without<PointerFocus>)>,
+    mut commands: Commands,
+) {
+    for window in &windows {
+        commands.entity(window).insert(PointerFocus::default());
+    }
+}
+
 fn from_pointer(
-    windows: Query<&Window>,
+    mut windows: Query<(&Window, &vmux_input::PointerState, &mut PointerFocus)>,
     focused_window: crate::window::FocusedWindow,
     overlays: super::OverlayInput,
     hierarchy: crate::window::WindowHierarchy,
@@ -248,22 +216,21 @@ fn from_pointer(
     active_tab: ActiveTabParam,
     focus: LayoutFocus,
     keys: Res<ButtonInput<KeyCode>>,
-    mouse: Res<ButtonInput<MouseButton>>,
     active_drags: Query<(), With<PaneDrag>>,
-    mut pointer: Single<&mut PointerFocus, With<PointerDevice>>,
     mut selections: MessageWriter<crate::SelectRequest>,
     mut commands: Commands,
 ) {
     let Some(window_entity) = focused_window.entity() else {
         return;
     };
-    let Ok(window) = windows.get(window_entity) else {
+    let Ok((window, input, mut pointer)) = windows.get_mut(window_entity) else {
         return;
     };
-    let Some((position, clicked, moved)) = pointer.sample(window_entity, window, &mouse) else {
+    let Some((position, clicked, moved)) = pointer.sample(input) else {
         return;
     };
-    if !window.focused
+    if input.cancelled
+        || !window.focused
         || overlays.owns(window_entity)
         || !active_drags.is_empty()
         || pointer.held(&keys)
@@ -360,6 +327,8 @@ mod tests {
             let mut app = App::new();
             app.add_plugins((
                 MinimalPlugins,
+                bevy::input::InputPlugin,
+                vmux_input::PointerPlugin,
                 crate::LayoutPlugin,
                 crate::contract::LayoutContractPlugin,
                 crate::host::command::LayoutRequestPlugin,
@@ -368,6 +337,8 @@ mod tests {
                 crate::stack::StackPlugin,
             ))
             .add_message::<crate::tab::CloseTabRequest>()
+            .add_message::<bevy::window::CursorMoved>()
+            .add_message::<bevy::window::WindowFocused>()
             .insert_resource(ButtonInput::<KeyCode>::default())
             .insert_resource(ButtonInput::<MouseButton>::default())
             .insert_resource(crate::settings::LayoutSettings::default());
@@ -612,13 +583,10 @@ mod tests {
         left_branch: Entity,
         right: Entity,
         right_stack: Entity,
-        _pointer_guard: std::sync::MutexGuard<'static, ()>,
     }
 
     impl HoverFixture {
         fn new() -> Self {
-            let guard = super::super::NATIVE_POINTER_TEST.lock().unwrap();
-            vmux_input::NativePointer::publish(Vec2::new(-10.0, -10.0), Default::default(), false);
             let mut fixture = FocusFixture::hover();
             let window = fixture
                 .app
@@ -689,7 +657,6 @@ mod tests {
                 left_branch,
                 right,
                 right_stack,
-                _pointer_guard: guard,
             };
             result.app.update();
             result.pointer(Vec2::new(400.0, 225.0), false);
@@ -715,42 +682,23 @@ mod tests {
             pressed: bool,
             modifiers: Option<KeyModifiers>,
         ) {
-            vmux_input::NativePointer::publish_with_modifiers(
+            let mut input = vmux_input::PointerInput::sample(
+                self.window,
                 position,
                 bevy_cef_core::prelude::NativeMouseButtons {
                     left: pressed,
                     ..default()
                 },
                 !pressed,
-                modifiers,
             );
-            self.app
-                .world_mut()
-                .entity_mut(self.window)
-                .get_mut::<Window>()
-                .unwrap()
-                .set_physical_cursor_position(Some(position.as_dvec2()));
-            let mut mouse = self
-                .app
-                .world_mut()
-                .resource_mut::<ButtonInput<MouseButton>>();
-            if pressed {
-                mouse.press(MouseButton::Left);
-            } else {
-                mouse.release(MouseButton::Left);
-            }
+            input.modifiers = modifiers;
+            self.app.world_mut().write_message(input);
         }
 
         fn focused(&mut self) -> crate::active_pane::ActiveStack {
             let world = self.app.world_mut();
             let mut query = world.query::<&crate::active_pane::ActiveStack>();
             *query.single(world).unwrap()
-        }
-    }
-
-    impl Drop for HoverFixture {
-        fn drop(&mut self) {
-            vmux_input::NativePointer::publish(Vec2::ZERO, Default::default(), false);
         }
     }
 

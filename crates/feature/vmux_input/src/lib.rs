@@ -5,7 +5,10 @@ pub use native_key::{
     ConsumesNativeKey, NativeKey, NativeKeyCapture, NativeKeyClaimSet, NativeKeyInput,
     NativeKeyInputSet, PassesNativeKey,
 };
-pub use pointer::{NativePointer, NativePointerSnapshot};
+pub use pointer::{
+    PointerCapture, PointerInbox, PointerInput, PointerPlugin, PointerSet, PointerState,
+    PointerUpdated, WindowGesture,
+};
 
 pub(crate) struct Feature;
 
@@ -24,6 +27,7 @@ pub struct InputPlugin;
 impl Plugin for InputPlugin {
     fn build(&self, app: &mut App) {
         app.add_plugins((
+            PointerPlugin,
             capture::CapturePlugin,
             bevy_cef::prelude::UiEventPlugin::<(
                 vmux_api::input::KeyStroke,

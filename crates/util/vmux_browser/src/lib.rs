@@ -11,10 +11,10 @@ pub use host::AgentBrowserResolve;
 pub use host::WebviewLoadCompleted;
 pub use host_focus::HostFocusIntent;
 pub use infrastructure::{InfrastructureWebview, PopupWebview, RetiredInfrastructureWebview};
+pub use input::WindowPointerRegions;
 pub use native_bridge::{NativeBridge, NativeHistoryPhase};
 #[cfg(target_os = "macos")]
 pub use native_bridge::{queue_command_bar_pointer_button, queue_command_bar_pointer_move};
-pub use native_layout::NativeLayout;
 pub use navigation::OpenHistoryRequest;
 pub use tool::BrowserToolPlugin;
 use vmux_command::{PendingCommandBarReveal, ReadCommandRequests};
@@ -32,7 +32,7 @@ use vmux_layout::event::{
     WindowDragRegionEvent,
 };
 pub use vmux_layout::{Browser, Loading};
-pub use window_drag::WindowDragRegion;
+pub use window_drag::{WindowDragRegion, WindowDragRegions};
 
 pub(crate) struct Feature;
 
@@ -50,7 +50,6 @@ mod host_focus;
 mod infrastructure;
 mod input;
 mod native_bridge;
-mod native_layout;
 mod navigation;
 mod page;
 mod page_life;

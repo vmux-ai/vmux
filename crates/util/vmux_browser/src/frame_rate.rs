@@ -1,15 +1,12 @@
+use bevy::ecs::system::Commands;
+use bevy::window::Window;
 use bevy::{
-    input::{
-        keyboard::KeyboardInput,
-        mouse::{MouseButton, MouseButtonInput, MouseWheel},
-    },
+    input::{keyboard::KeyboardInput, mouse::MouseWheel},
     prelude::*,
-    window::CursorMoved,
     winit::{EventLoopProxyWrapper, WinitUserEvent},
 };
 use bevy_cef::prelude::*;
 use bevy_cef_core::prelude::MessageLoopWakePolicy;
-use std::sync::atomic::Ordering;
 use vmux_api::BinEvent;
 use vmux_api::command_bar::CommandBarUiState;
 use vmux_ecs::overlay::Overlay;
@@ -17,30 +14,30 @@ use vmux_ecs::overlay::WindowOverlay;
 use vmux_layout::Browser;
 use vmux_layout::{Header, LayoutCef, side_sheet::SideSheet, state::LayoutUiState};
 
-use crate::NativeLayout;
-#[cfg(not(target_os = "macos"))]
-use crate::host::{CefPointerRegions, LayoutHoverRefreshState, LayoutPointerCapture};
 use crate::host::{
-    LAYOUT_INPUT_BURST, LayoutFrameRateState, NATIVE_LAYOUT_POINTER_INSIDE,
-    WindowedHoverRefreshState,
+    CefPointerRegions, LAYOUT_INPUT_BURST, LayoutFrameRateState, LayoutPointerCapture,
 };
+use crate::input::{CefHoverPosition, PointerEffect, WindowPointerRegions};
 use vmux_ecs::KeyboardOwner;
 use vmux_flex::prelude::*;
+use vmux_input::{PointerCapture, PointerSet, PointerState, PointerUpdated};
 pub(crate) struct FrameRatePlugin;
 
 impl Plugin for FrameRatePlugin {
     fn build(&self, app: &mut App) {
-        app.add_observer(request_layout_frame_burst)
+        app.add_message::<PointerUpdated>()
+            .add_observer(request_layout_frame_burst)
             .add_systems(Update, cap_uncapped_webview)
             .add_systems(
                 Last,
                 (
-                    refresh_layout_cef_hover,
+                    refresh_layout_hover,
                     refresh_active_windowed_hover,
                     sync_layout_cef,
                     keep_asset_replies_moving,
                 )
-                    .chain(),
+                    .chain()
+                    .in_set(PointerSet::Publish),
             );
     }
 }
@@ -57,109 +54,61 @@ fn keep_asset_replies_moving(
     }
 }
 
-#[cfg(target_os = "macos")]
-fn refresh_layout_cef_hover(
-    windows: Query<&Window>,
-    focused_window: vmux_layout::window::FocusedWindow,
+fn refresh_layout_hover(
+    mut effects: MessageWriter<PointerEffect>,
+    pointers: Query<(&Window, &PointerState, &PointerCapture)>,
+    mut layouts: Query<(Entity, &HostWindow, &mut CefHoverPosition), With<LayoutCef>>,
+    regions: CefPointerRegions,
+    captures: Query<(), (With<LayoutCef>, LayoutPointerCapture)>,
     suppress: Res<CefSuppressPointerInput>,
-    layout_q: Query<(Entity, &HostWindow), With<LayoutCef>>,
 ) {
-    if suppress.0 {
-        NATIVE_LAYOUT_POINTER_INSIDE.store(false, Ordering::Relaxed);
-        return;
+    for (layout, host, mut hover) in &mut layouts {
+        let Ok((window, pointer, capture)) = pointers.get(host.0) else {
+            continue;
+        };
+        let enabled = !suppress.0
+            && !pointer.cancelled
+            && capture.owner().is_none_or(|owner| owner == layout);
+        let position = pointer
+            .position_px
+            .map(|position| position / window.resolution.scale_factor());
+        let inside = enabled
+            && (capture.owner() == Some(layout)
+                || captures.contains(layout)
+                || pointer
+                    .position_px
+                    .is_some_and(|position| regions.contains(host.0, position)));
+        if hover.inside == inside && hover.position == position {
+            continue;
+        }
+        if (inside || hover.inside)
+            && let Some(position) = position.or(hover.position)
+        {
+            effects.write(PointerEffect::Move {
+                target: layout,
+                buttons: pointer.buttons,
+                position,
+                leave: !inside,
+            });
+        }
+        hover.inside = inside;
+        hover.position = position;
     }
-    let Some(window_entity) = focused_window.entity() else {
-        NATIVE_LAYOUT_POINTER_INSIDE.store(false, Ordering::Relaxed);
-        return;
-    };
-    if !layout_q.iter().any(|(_, host)| host.0 == window_entity) {
-        NATIVE_LAYOUT_POINTER_INSIDE.store(false, Ordering::Relaxed);
-        return;
-    }
-    let Ok(window) = windows.get(window_entity) else {
-        NATIVE_LAYOUT_POINTER_INSIDE.store(false, Ordering::Relaxed);
-        return;
-    };
-    let scale = window.resolution.scale_factor();
-    if !scale.is_finite() || scale <= 0.0 {
-        NATIVE_LAYOUT_POINTER_INSIDE.store(false, Ordering::Relaxed);
-    }
-}
-
-#[cfg(not(target_os = "macos"))]
-fn refresh_layout_cef_hover(
-    browsers: NonSend<Browsers>,
-    buttons: Res<ButtonInput<MouseButton>>,
-    windows: Query<&Window>,
-    focused_window: vmux_layout::window::FocusedWindow,
-    suppress: Res<CefSuppressPointerInput>,
-    layout_q: Query<(Entity, &HostWindow), With<LayoutCef>>,
-    pointer_capture_q: Query<(), (With<LayoutCef>, LayoutPointerCapture)>,
-    cef_regions: CefPointerRegions,
-    mut state: Local<LayoutHoverRefreshState>,
-) {
-    let Some(window_entity) = focused_window.entity() else {
-        NATIVE_LAYOUT_POINTER_INSIDE.store(false, Ordering::Relaxed);
-        *state = LayoutHoverRefreshState::default();
-        return;
-    };
-    let Some(layout) = layout_q
-        .iter()
-        .find_map(|(entity, host)| (host.0 == window_entity).then_some(entity))
-    else {
-        NATIVE_LAYOUT_POINTER_INSIDE.store(false, Ordering::Relaxed);
-        *state = LayoutHoverRefreshState::default();
-        return;
-    };
-    if suppress.0 {
-        NATIVE_LAYOUT_POINTER_INSIDE.store(false, Ordering::Relaxed);
-        state.reset(&browsers, &buttons, layout);
-        return;
-    }
-    let Ok(window) = windows.get(window_entity) else {
-        NATIVE_LAYOUT_POINTER_INSIDE.store(false, Ordering::Relaxed);
-        state.reset(&browsers, &buttons, layout);
-        return;
-    };
-    let scale = window.resolution.scale_factor();
-    if !scale.is_finite() || scale <= 0.0 {
-        NATIVE_LAYOUT_POINTER_INSIDE.store(false, Ordering::Relaxed);
-        state.reset(&browsers, &buttons, layout);
-        return;
-    }
-    let pointer_capture = !pointer_capture_q.is_empty();
-    let Some(cursor_px) = vmux_input::NativePointer::position(window_entity, window) else {
-        state.reset(&browsers, &buttons, layout);
-        return;
-    };
-    let sequence = 0;
-    let position = cursor_px / scale;
-    let in_region = pointer_capture || cef_regions.contains(position);
-    NATIVE_LAYOUT_POINTER_INSIDE.store(in_region, Ordering::Relaxed);
-    let unchanged = state.sequence == sequence
-        && state.position == Some(position)
-        && state.in_region == in_region;
-    if unchanged {
-        return;
-    }
-    if in_region {
-        browsers.send_mouse_move(&layout, buttons.get_pressed(), position, false);
-    } else if state.in_region {
-        browsers.send_mouse_move(&layout, buttons.get_pressed(), position, true);
-    }
-    state.sequence = sequence;
-    state.position = Some(position);
-    state.in_region = in_region;
 }
 
 fn refresh_active_windowed_hover(
-    browsers: NonSend<Browsers>,
-    buttons: Res<ButtonInput<MouseButton>>,
-    windows: Query<&Window>,
+    mut effects: MessageWriter<PointerEffect>,
+    pointers: Query<(&PointerState, &PointerCapture)>,
     focused_window: vmux_layout::window::FocusedWindow,
     overlay: Overlay,
-    active_q: Query<
-        (Entity, &Transform, &ComputedNode, Option<&HostWindow>),
+    mut active_q: Query<
+        (
+            Entity,
+            &Transform,
+            &ComputedNode,
+            Option<&HostWindow>,
+            &mut CefHoverPosition,
+        ),
         (
             With<Browser>,
             With<WebviewWindowed>,
@@ -170,50 +119,43 @@ fn refresh_active_windowed_hover(
             Without<SideSheet>,
         ),
     >,
-    mut state: Local<WindowedHoverRefreshState>,
 ) {
-    if overlay.owns_input() {
-        *state = WindowedHoverRefreshState::default();
-        return;
+    for (entity, transform, frame, host, mut hover) in &mut active_q {
+        let Some(window) = host.map(|host| host.0).or(focused_window.entity()) else {
+            hover.position = None;
+            continue;
+        };
+        let Ok((pointer, capture)) = pointers.get(window) else {
+            hover.position = None;
+            continue;
+        };
+        if overlay.owns_input()
+            || capture.owner().is_some_and(|owner| owner != entity)
+            || transform.scale.x <= 1.0e-3
+            || frame.is_empty()
+        {
+            hover.position = None;
+            continue;
+        }
+        let Some(cursor) = pointer.position_px else {
+            hover.position = None;
+            continue;
+        };
+        let Some(position) = frame.local_point(cursor) else {
+            hover.position = None;
+            continue;
+        };
+        if hover.position == Some(position) {
+            continue;
+        }
+        effects.write(PointerEffect::Move {
+            target: entity,
+            buttons: pointer.buttons,
+            position,
+            leave: false,
+        });
+        hover.position = Some(position);
     }
-    if vmux_input::NativePointer::window_gesture() {
-        *state = WindowedHoverRefreshState::default();
-        return;
-    }
-    let Some((entity, transform, &frame, host_window)) = active_q.iter().next() else {
-        *state = WindowedHoverRefreshState::default();
-        return;
-    };
-    if transform.scale.x <= 1.0e-3 {
-        *state = WindowedHoverRefreshState::default();
-        return;
-    }
-    let Some(window_entity) = host_window.map(|host| host.0).or(focused_window.entity()) else {
-        *state = WindowedHoverRefreshState::default();
-        return;
-    };
-    let Ok(window) = windows.get(window_entity) else {
-        *state = WindowedHoverRefreshState::default();
-        return;
-    };
-    let Some(cursor_px) = vmux_input::NativePointer::position(window_entity, window) else {
-        *state = WindowedHoverRefreshState::default();
-        return;
-    };
-    if frame.is_empty() {
-        *state = WindowedHoverRefreshState::default();
-        return;
-    }
-    let Some(position) = frame.local_point(cursor_px) else {
-        *state = WindowedHoverRefreshState::default();
-        return;
-    };
-    if state.entity == Some(entity) && state.position == Some(position) {
-        return;
-    }
-    browsers.send_mouse_move(&entity, buttons.get_pressed(), position, false);
-    state.entity = Some(entity);
-    state.position = Some(position);
 }
 
 const LAYOUT_IDLE_FRAME_RATE: i32 = 4;
@@ -223,8 +165,12 @@ const PAGE_MAX_FRAME_RATE: i32 = 60;
 fn cap_uncapped_webview(
     uncapped: Query<Entity, (With<WebviewSource>, Without<WebviewMaxFrameRate>)>,
     layouts: Query<Entity, (With<LayoutCef>, Without<LayoutFrameRateState>)>,
+    hover: Query<Entity, (With<Browser>, Without<CefHoverPosition>)>,
     mut commands: Commands,
 ) {
+    for entity in &hover {
+        commands.entity(entity).insert(CefHoverPosition::default());
+    }
     for entity in &uncapped {
         commands
             .entity(entity)
@@ -291,11 +237,10 @@ fn layout_frame_rate(
 }
 
 fn sync_layout_cef(
-    mut cursor_events: MessageReader<CursorMoved>,
-    mut button_events: MessageReader<MouseButtonInput>,
+    mut pointer_events: MessageReader<PointerUpdated>,
     mut wheel_events: MessageReader<MouseWheel>,
     mut key_events: MessageReader<KeyboardInput>,
-    buttons: Res<ButtonInput<MouseButton>>,
+    pointers: Query<(&PointerState, &WindowPointerRegions)>,
     mut layout_q: Query<
         (
             &HostWindow,
@@ -307,27 +252,40 @@ fn sync_layout_cef(
     >,
     focused_window: vmux_layout::window::FocusedWindow,
 ) {
-    let inside = NativeLayout::pointer_is_inside();
-    let pointer = vmux_input::NativePointer::snapshot();
-    let cursor_moved = cursor_events.read().count() > 0;
-    let button_changed = button_events.read().count() > 0;
-    let wheel_changed = wheel_events.read().count() > 0;
-    let key_changed = key_events.read().count() > 0;
+    let events = pointer_events.read().copied().collect::<Vec<_>>();
+    let wheels = wheel_events
+        .read()
+        .map(|event| event.window)
+        .collect::<Vec<_>>();
+    let keys = key_events
+        .read()
+        .map(|event| event.window)
+        .collect::<Vec<_>>();
     let now = std::time::Instant::now();
-    let native_dragging = pointer.is_some_and(|pointer| {
-        pointer.buttons.left || pointer.buttons.right || pointer.buttons.middle
-    });
-    let any_pressed = native_dragging || buttons.get_pressed().next().is_some();
     for (host, mut cap, mut state, owns_keyboard) in &mut layout_q {
         let focused = Some(host.0) == focused_window.entity();
-        let native_changed = focused
-            && pointer.is_some_and(|pointer| {
-                if pointer.sequence == state.native_sequence {
-                    return false;
-                }
+        let (pointer, regions) = match pointers.get(host.0) {
+            Ok(value) => value,
+            Err(_) => continue,
+        };
+        let inside = regions.layout;
+        let button_changed = events
+            .iter()
+            .any(|event| event.window == host.0 && event.previous_buttons != event.buttons);
+        let cursor_moved = events
+            .iter()
+            .any(|event| event.window == host.0 && event.motion);
+        let wheel_changed = wheels.contains(&host.0);
+        let key_changed = keys.contains(&host.0);
+        let any_pressed = pointer.buttons.left || pointer.buttons.right || pointer.buttons.middle;
+        let native_changed = focused && {
+            if pointer.sequence == state.native_sequence {
+                false
+            } else {
                 state.native_sequence = pointer.sequence;
                 true
-            });
+            }
+        };
         let input_changed = native_changed || cursor_moved || button_changed || wheel_changed;
         if focused
             && ((inside || state.dragging_layout) && (button_changed || wheel_changed)

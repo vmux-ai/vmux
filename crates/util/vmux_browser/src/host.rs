@@ -4,13 +4,8 @@ pub(crate) use agent::{
     AgentBrowserPlugin, AgentBrowserScroll, AgentBrowserSnapshot,
 };
 pub use agent_pane::AgentBrowserResolve;
-#[cfg(not(target_os = "macos"))]
-use bevy::input::mouse::MouseButton;
 use bevy::prelude::*;
-#[cfg(not(target_os = "macos"))]
-use bevy_cef::prelude::Browsers;
 use bevy_cef_core::prelude::CommandLineConfig;
-use std::sync::atomic::AtomicBool;
 use std::sync::{LazyLock, Mutex};
 use vmux_command::CommandBarPanelActive;
 use vmux_flex::prelude::*;
@@ -69,29 +64,34 @@ type CefPointerRegionRow<'a> = (
     bool,
 );
 
-type CefPointerRegionQuery<'w, 's> = Query<
-    'w,
-    's,
-    (
-        Option<&'static Header>,
-        Option<&'static SideSheet>,
-        &'static Node,
-        &'static ComputedNode,
-        Option<&'static Visibility>,
-        Has<Open>,
-    ),
-    Or<(With<Header>, With<SideSheet>)>,
->;
-
 #[derive(bevy::ecs::system::SystemParam)]
 pub(crate) struct CefPointerRegions<'w, 's> {
-    rows: CefPointerRegionQuery<'w, 's>,
+    rows: Query<
+        'w,
+        's,
+        (
+            Entity,
+            Option<&'static Header>,
+            Option<&'static SideSheet>,
+            &'static Node,
+            &'static ComputedNode,
+            Option<&'static Visibility>,
+            Has<Open>,
+        ),
+        Or<(With<Header>, With<SideSheet>)>,
+    >,
+    windows: vmux_layout::window::WindowHierarchy<'w, 's>,
 }
 
 impl CefPointerRegions<'_, '_> {
-    pub(crate) fn contains(&self, cursor: Vec2) -> bool {
-        for row in self.rows.iter() {
-            if CefPointerHitRect::from_row(row).contains(cursor) {
+    pub(crate) fn contains(&self, window: Entity, cursor: Vec2) -> bool {
+        for (entity, header, side_sheet, node, rect, visibility, open) in self.rows.iter() {
+            if self.windows.get(entity) != Some(window) {
+                continue;
+            }
+            if CefPointerHitRect::from_row((header, side_sheet, node, rect, visibility, open))
+                .contains(cursor)
+            {
                 return true;
             }
         }
@@ -104,8 +104,6 @@ pub(crate) struct CefPointerHitRect {
     pub(crate) rect: ComputedNode,
     pub(crate) interactive: bool,
 }
-
-pub(crate) static NATIVE_LAYOUT_POINTER_INSIDE: AtomicBool = AtomicBool::new(false);
 
 impl CefPointerHitRect {
     fn from_row(row: CefPointerRegionRow<'_>) -> Self {
@@ -128,40 +126,6 @@ pub(crate) type LayoutPointerCapture = Or<(
     With<CommandBarPanelActive>,
     With<LayoutOverlayActive>,
 )>;
-
-#[cfg(not(target_os = "macos"))]
-#[derive(Default)]
-pub(crate) struct LayoutHoverRefreshState {
-    pub(crate) sequence: u64,
-    pub(crate) position: Option<Vec2>,
-    pub(crate) in_region: bool,
-}
-
-#[cfg(not(target_os = "macos"))]
-impl LayoutHoverRefreshState {
-    pub(crate) fn reset(
-        &mut self,
-        browsers: &Browsers,
-        buttons: &ButtonInput<MouseButton>,
-        layout: Entity,
-    ) {
-        if self.in_region {
-            browsers.send_mouse_move(
-                &layout,
-                buttons.get_pressed(),
-                self.position.unwrap_or_default(),
-                true,
-            );
-        }
-        *self = Self::default();
-    }
-}
-
-#[derive(Default)]
-pub(crate) struct WindowedHoverRefreshState {
-    pub(crate) entity: Option<Entity>,
-    pub(crate) position: Option<Vec2>,
-}
 
 pub(crate) const LAYOUT_INPUT_BURST: std::time::Duration = std::time::Duration::from_millis(250);
 
