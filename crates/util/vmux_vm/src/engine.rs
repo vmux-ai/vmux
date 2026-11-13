@@ -11,7 +11,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::Settings;
 use crate::connection::{ConnectionIssue, ConnectionPlugin};
-use crate::process::{Lease, Process};
+use crate::process::{Executable, Lease, Process};
 
 pub struct EnginePlugin;
 
@@ -135,7 +135,7 @@ impl Launch {
             .local_addr()?
             .port();
         Process::supervised(
-            Command::new(&self.0)
+            Command::new(Executable::named(&self.0, settings, " - Network")?)
                 .arg("network")
                 .arg(settings.directory.join("settings.json"))
                 .arg(ssh_port.to_string()),
@@ -144,11 +144,12 @@ impl Launch {
 
     fn machine(&self, settings: &Settings) -> io::Result<Process> {
         let configuration = settings.directory.join("settings.json");
+        let helper = Executable::named(&self.0, settings, " - Linux")?;
         #[cfg(target_os = "macos")]
-        let mut command = crate::sandbox::Sandbox::command(&self.0, settings, &configuration)?;
+        let mut command = crate::sandbox::Sandbox::command(&helper, settings, &configuration)?;
         #[cfg(not(target_os = "macos"))]
         let mut command = {
-            let mut command = Command::new(&self.0);
+            let mut command = Command::new(helper);
             command.arg("native").arg(configuration);
             command
         };

@@ -1,6 +1,7 @@
 use std::fs::{File, OpenOptions};
-use std::io::{self, Read};
+use std::io::{self, Read, Write};
 use std::os::fd::AsRawFd;
+use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, ExitStatus, Stdio};
 use std::sync::mpsc::{self, TryRecvError};
@@ -13,6 +14,31 @@ use crate::Settings;
 pub struct Executable;
 
 impl Executable {
+    pub(crate) fn named(helper: &Path, settings: &Settings, role: &str) -> io::Result<PathBuf> {
+        let directory = settings.directory.join("helpers");
+        std::fs::create_dir_all(&directory)?;
+        let name = settings
+            .directory
+            .file_name()
+            .and_then(|name| name.to_str())
+            .unwrap_or("Default");
+        let path = directory.join(format!("Vmux VM ({name}){role}"));
+        let source = std::fs::read(helper)?;
+        if std::fs::symlink_metadata(&path)
+            .is_ok_and(|metadata| metadata.is_file() && metadata.permissions().mode() & 0o111 != 0)
+            && std::fs::read(&path).is_ok_and(|cached| cached == source)
+        {
+            return Ok(path);
+        }
+        let mut temporary = tempfile::NamedTempFile::new_in(directory)?;
+        temporary.write_all(&source)?;
+        temporary
+            .as_file()
+            .set_permissions(std::fs::metadata(helper)?.permissions())?;
+        temporary.persist(&path).map_err(io::Error::other)?;
+        Ok(path)
+    }
+
     pub fn find(name: &str) -> io::Result<PathBuf> {
         if let Some(path) = std::env::var_os("PATH") {
             for directory in std::env::split_paths(&path) {
@@ -221,6 +247,26 @@ impl Settings {
 mod tests {
     use super::*;
     use std::os::unix::net::UnixStream;
+
+    #[test]
+    fn named_helpers_remain_executable_and_replace_obsolete_copies() {
+        let directory = tempfile::tempdir().unwrap();
+        let settings = Settings::new(directory.path().join("Docker"), directory.path());
+        let source = directory.path().join("helper");
+        std::fs::write(&source, b"#!/bin/sh\nprintf '%s' \"$0\"\n").unwrap();
+        std::fs::set_permissions(&source, std::fs::Permissions::from_mode(0o755)).unwrap();
+        let helper = Executable::named(&source, &settings, " - Linux").unwrap();
+        std::fs::write(&helper, b"obsolete helper").unwrap();
+        let helper = Executable::named(&source, &settings, " - Linux").unwrap();
+        let result = Command::new(&helper).output().unwrap();
+        assert!(result.status.success());
+        assert_eq!(
+            Path::new(std::str::from_utf8(&result.stdout).unwrap())
+                .file_name()
+                .unwrap(),
+            "Vmux VM (Docker) - Linux"
+        );
+    }
 
     #[test]
     fn dropping_a_stopping_supervised_child_waits_for_its_cleanup() {

@@ -3,6 +3,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
+use proc_macro2::{Delimiter, TokenTree};
 use quote::ToTokens;
 use serde::{Deserialize, Serialize};
 use syn::ext::IdentExt;
