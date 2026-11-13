@@ -461,8 +461,12 @@ cannot lose an early choice or make delayed saved defaults replace an explicit S
 IO operations capture their file/root/revision, use the shared bounded worker lane and hold an OS
 file lock through atomic completion. Late reads cannot enter another profile. Failed writes retain
 dirty state and retry on later accepted intent or profile activation; idle updates do not resubmit.
-Read and write codecs share a 16 MiB bound. A bounded AppExit effect cancels older queued work,
-waits for started file IO and writes the latest canonical snapshot before process teardown.
+An unsuccessful initial read retains queued input and cannot enable replacement writes. Inactive
+roots keep accepted input until reactivation or exit. Read and write codecs share a 16 MiB bound.
+Native file locking retries with cancellation and a two-second limit. On AppExit, registered ECS
+systems cancel older work, read incomplete files, drain file-targeted input through the preference
+owner, and capture the latest canonical snapshot. All exit files share a four-second lock budget;
+failed reads refuse replacement writes and preserve the existing file.
 
 Every plain adapter names its external interface, canonical input/output, scope/lifetime,
 bounds and cancellation/eviction. Adapters may hold handles, byte cursors, codec scratch and

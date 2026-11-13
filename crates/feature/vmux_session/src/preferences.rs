@@ -22,6 +22,7 @@ impl BevyPlugin for Plugin {
             .add_message::<RememberModels>()
             .add_message::<RememberModes>()
             .add_observer(restore)
+            .add_observer(drain)
             .add_observer(select_model)
             .add_observer(select_mode)
             .add_observer(replace_models)
@@ -92,7 +93,7 @@ struct OptionId(String);
 struct Described;
 
 #[derive(Component)]
-struct Queued {
+pub(crate) struct Queued {
     consumed: bool,
 }
 
@@ -105,19 +106,32 @@ pub(crate) struct Loaded {
     pub(crate) content: Content,
 }
 
-#[derive(Component, Message, Event, Clone)]
+#[derive(EntityEvent)]
+pub(crate) struct Drain {
+    #[event_target]
+    pub(crate) file: Entity,
+}
+
+#[derive(EntityEvent)]
+struct Apply<T: Component> {
+    #[event_target]
+    file: Entity,
+    request: T,
+}
+
+#[derive(Component, Message, Clone)]
 pub struct RememberModel {
     pub agent_id: String,
     pub model_id: String,
 }
 
-#[derive(Component, Message, Event, Clone)]
+#[derive(Component, Message, Clone)]
 pub struct RememberMode {
     pub agent_id: String,
     pub mode_id: String,
 }
 
-#[derive(Component, Message, Event, Clone)]
+#[derive(Component, Message, Clone)]
 pub struct RememberModels {
     pub agent_id: String,
     pub url: String,
@@ -125,7 +139,7 @@ pub struct RememberModels {
     pub models: Vec<ModelOptionEntry>,
 }
 
-#[derive(Component, Message, Event, Clone)]
+#[derive(Component, Message, Clone)]
 pub struct RememberModes {
     pub agent_id: String,
     pub url: String,
@@ -390,9 +404,20 @@ impl AgentPreferences<'_, '_> {
 #[derive(SystemParam)]
 struct InputQueue<'w, 's> {
     roots: Query<'w, 's, Entity, (With<Root>, With<Active>)>,
-    files: Query<'w, 's, (Entity, &'static ChildOf, &'static Kind, &'static mut File)>,
+    files: Query<
+        'w,
+        's,
+        (
+            Entity,
+            &'static ChildOf,
+            &'static Kind,
+            &'static mut File,
+            Has<Ready>,
+        ),
+    >,
     pending: Query<'w, 's, (Entity, &'static ChildOf, &'static mut Order), With<Queued>>,
     commands: Commands<'w, 's>,
+    wake: Option<Res<'w, vmux_ecs::jobs::JobWake>>,
 }
 
 impl InputQueue<'_, '_> {
@@ -401,7 +426,7 @@ impl InputQueue<'_, '_> {
     }
     fn push<T: Component>(&mut self, kind: Kind, request: T) {
         let mut target = None;
-        for (entity, parent, candidate, _) in &self.files {
+        for (entity, parent, candidate, _, _) in &self.files {
             if *candidate == kind && self.root() == Some(parent.parent()) {
                 target = Some(entity);
                 break;
@@ -410,7 +435,7 @@ impl InputQueue<'_, '_> {
         let Some(file_entity) = target else {
             return;
         };
-        let Ok((_, _, _, mut file)) = self.files.get_mut(file_entity) else {
+        let Ok((_, _, _, mut file, ready)) = self.files.get_mut(file_entity) else {
             return;
         };
         if file.next_order == u32::MAX {
@@ -434,6 +459,9 @@ impl InputQueue<'_, '_> {
             }
             file.next_order = next_order;
         }
+        if !ready {
+            file.retry_allowed = true;
+        }
         let order = file.next_order;
         file.next_order += 1;
         self.commands.spawn((
@@ -442,6 +470,9 @@ impl InputQueue<'_, '_> {
             Order(order),
             ChildOf(file_entity),
         ));
+        if !ready && let Some(wake) = &self.wake {
+            wake.0.wake_by_ref();
+        }
     }
 }
 
@@ -466,8 +497,18 @@ fn enqueue(
     }
 }
 
-fn consume(
-    preferences: AgentPreferences,
+fn consume(preferences: AgentPreferences, mut commands: Commands) {
+    for (file, parent, _, _, ready) in &preferences.files {
+        if ready.is_some() && preferences.roots.contains(parent.parent()) {
+            commands.trigger(Drain { file });
+        }
+    }
+}
+
+fn drain(
+    event: On<Drain>,
+    files: Query<&ChildOf, (With<File>, With<Ready>)>,
+    roots: Query<(), With<Root>>,
     mut pending: Query<(
         Entity,
         &ChildOf,
@@ -480,25 +521,20 @@ fn consume(
     )>,
     mut commands: Commands,
 ) {
+    let Ok(parent) = files.get(event.file) else {
+        return;
+    };
+    if !roots.contains(parent.parent()) {
+        return;
+    }
     let mut ordered = Vec::new();
     for (entity, parent, order, queued, _, _, models, modes) in &pending {
-        if !queued.consumed {
-            let choice = models.is_none() && modes.is_none();
-            ordered.push((parent.parent(), choice, order.0, entity));
+        if parent.parent() == event.file && !queued.consumed {
+            ordered.push((models.is_none() && modes.is_none(), order.0, entity));
         }
     }
-    ordered.sort_unstable_by_key(|(file, choice, order, _)| (*file, *choice, *order));
-    for (file, _, _, entity) in ordered {
-        let Ok((_, parent, kind, _, ready)) = preferences.files.get(file) else {
-            continue;
-        };
-        if !preferences.roots.contains(parent.parent()) {
-            commands.entity(entity).despawn();
-            continue;
-        }
-        if ready.is_none() || preferences.file(*kind) != Some(file) {
-            continue;
-        }
+    ordered.sort_unstable_by_key(|(choice, order, _)| (*choice, *order));
+    for (_, _, entity) in ordered {
         let Ok((_, _, _, mut queued, model, mode, models, modes)) = pending.get_mut(entity) else {
             continue;
         };
@@ -507,16 +543,28 @@ fn consume(
         }
         queued.consumed = true;
         if let Some(request) = model {
-            commands.trigger(request.clone());
+            commands.trigger(Apply {
+                file: event.file,
+                request: request.clone(),
+            });
         }
         if let Some(request) = mode {
-            commands.trigger(request.clone());
+            commands.trigger(Apply {
+                file: event.file,
+                request: request.clone(),
+            });
         }
         if let Some(request) = models {
-            commands.trigger(request.clone());
+            commands.trigger(Apply {
+                file: event.file,
+                request: request.clone(),
+            });
         }
         if let Some(request) = modes {
-            commands.trigger(request.clone());
+            commands.trigger(Apply {
+                file: event.file,
+                request: request.clone(),
+            });
         }
         commands.entity(entity).despawn();
     }
@@ -524,7 +572,7 @@ fn consume(
 
 #[derive(SystemParam)]
 struct Writes<'w, 's> {
-    roots: Query<'w, 's, Entity, (With<Root>, With<Active>)>,
+    roots: Query<'w, 's, (), With<Root>>,
     files: Query<
         'w,
         's,
@@ -566,19 +614,14 @@ struct Writes<'w, 's> {
 }
 
 impl Writes<'_, '_> {
-    fn root(&self) -> Option<Entity> {
-        self.roots.single().ok()
-    }
-    fn file(&self, kind: Kind) -> Option<Entity> {
-        for (entity, parent, candidate, _, revision) in &self.files {
-            if *candidate == kind
-                && self.root() == Some(parent.parent())
-                && revision.next().is_some()
-            {
-                return Some(entity);
-            }
-        }
-        None
+    fn accepts(&self, file: Entity, kind: Kind) -> bool {
+        self.files
+            .get(file)
+            .is_ok_and(|(_, parent, candidate, _, revision)| {
+                *candidate == kind
+                    && self.roots.contains(parent.parent())
+                    && revision.next().is_some()
+            })
     }
 
     fn agent(&mut self, file: Entity, id: &str) -> Entity {
@@ -745,69 +788,88 @@ impl Writes<'_, '_> {
     }
 }
 
-fn select_model(event: On<RememberModel>, mut writes: Writes) {
-    let Some(file) = writes.file(Kind::Models) else {
-        return;
-    };
-    let entity = writes.agent(file, &event.agent_id);
-    if writes.has_options(entity) && !writes.contains(entity, &event.model_id) {
+fn select_model(event: On<Apply<RememberModel>>, mut writes: Writes) {
+    let file = event.file;
+    if !writes.accepts(file, Kind::Models) {
         return;
     }
-    let changed = writes.update(entity, &event.model_id, None);
+    let entity = writes.agent(file, &event.request.agent_id);
+    if writes.has_options(entity) && !writes.contains(entity, &event.request.model_id) {
+        return;
+    }
+    let changed = writes.update(entity, &event.request.model_id, None);
     writes.accept(file, changed);
 }
 
-fn select_mode(event: On<RememberMode>, mut writes: Writes) {
-    let Some(file) = writes.file(Kind::Modes) else {
-        return;
-    };
-    let entity = writes.agent(file, &event.agent_id);
-    if writes.has_options(entity) && !writes.contains(entity, &event.mode_id) {
+fn select_mode(event: On<Apply<RememberMode>>, mut writes: Writes) {
+    let file = event.file;
+    if !writes.accepts(file, Kind::Modes) {
         return;
     }
-    let changed = writes.update(entity, &event.mode_id, None);
+    let entity = writes.agent(file, &event.request.agent_id);
+    if writes.has_options(entity) && !writes.contains(entity, &event.request.mode_id) {
+        return;
+    }
+    let changed = writes.update(entity, &event.request.mode_id, None);
     writes.accept(file, changed);
 }
 
-fn replace_models(event: On<RememberModels>, mut writes: Writes) {
-    if event.models.is_empty() {
+fn replace_models(event: On<Apply<RememberModels>>, mut writes: Writes) {
+    if event.request.models.is_empty() {
         return;
     }
-    let Some(file) = writes.file(Kind::Models) else {
+    let file = event.file;
+    if !writes.accepts(file, Kind::Models) {
         return;
-    };
-    let entity = writes.agent(file, &event.agent_id);
+    }
+    let entity = writes.agent(file, &event.request.agent_id);
     let previous = writes.selected(entity).to_string();
-    let selected = if event.models.iter().any(|model| model.id == previous) {
+    let selected = if event
+        .request
+        .models
+        .iter()
+        .any(|model| model.id == previous)
+    {
         previous.as_str()
-    } else if event.models.iter().any(|model| model.id == event.selected) {
-        event.selected.as_str()
+    } else if event
+        .request
+        .models
+        .iter()
+        .any(|model| model.id == event.request.selected)
+    {
+        event.request.selected.as_str()
     } else {
-        event.models[0].id.as_str()
+        event.request.models[0].id.as_str()
     };
-    let changed = writes.update(entity, selected, Some(&event.url))
-        | writes.model_options(entity, &event.models);
+    let changed = writes.update(entity, selected, Some(&event.request.url))
+        | writes.model_options(entity, &event.request.models);
     writes.accept(file, changed);
 }
 
-fn replace_modes(event: On<RememberModes>, mut writes: Writes) {
-    if event.modes.is_empty() {
+fn replace_modes(event: On<Apply<RememberModes>>, mut writes: Writes) {
+    if event.request.modes.is_empty() {
         return;
     }
-    let Some(file) = writes.file(Kind::Modes) else {
+    let file = event.file;
+    if !writes.accepts(file, Kind::Modes) {
         return;
-    };
-    let entity = writes.agent(file, &event.agent_id);
+    }
+    let entity = writes.agent(file, &event.request.agent_id);
     let previous = writes.selected(entity).to_string();
-    let selected = if event.modes.iter().any(|mode| mode.id == previous) {
+    let selected = if event.request.modes.iter().any(|mode| mode.id == previous) {
         previous.as_str()
-    } else if event.modes.iter().any(|mode| mode.id == event.selected) {
-        event.selected.as_str()
+    } else if event
+        .request
+        .modes
+        .iter()
+        .any(|mode| mode.id == event.request.selected)
+    {
+        event.request.selected.as_str()
     } else {
-        event.modes[0].id.as_str()
+        event.request.modes[0].id.as_str()
     };
-    let changed = writes.update(entity, selected, Some(&event.url))
-        | writes.mode_options(entity, &event.modes);
+    let changed = writes.update(entity, selected, Some(&event.request.url))
+        | writes.mode_options(entity, &event.request.modes);
     writes.accept(file, changed);
 }
 
@@ -817,7 +879,7 @@ fn restore(event: On<Loaded>, mut writes: Writes) {
         Content::Modes(_) => Kind::Modes,
         Content::Written => return,
     };
-    if writes.file(kind) != Some(event.file) {
+    if !writes.accepts(event.file, kind) {
         return;
     }
     match &event.content {
@@ -1143,5 +1205,214 @@ mod tests {
         drop(lock);
         fixture.settle();
         assert_eq!(fixture.model("one").as_deref(), Some("new"));
+    }
+
+    #[test]
+    fn failed_initial_read_keeps_inputs_and_preserves_other_agents_on_recovery() {
+        let modes = r#"{"one":{"selected":"old","modes":[{"id":"old","name":"Old"},{"id":"new","name":"New"}]},"two":{"selected":"auto","modes":[]}}"#;
+        let mut fixture = Fixture::new(None, Some(modes));
+        let lock = fixture.directory.path().join(".agent-modes.json.lock");
+        std::fs::create_dir(&lock).unwrap();
+        fixture.send(RememberMode {
+            agent_id: "one".into(),
+            mode_id: "new".into(),
+        });
+        let deadline = Instant::now() + Duration::from_secs(5);
+        loop {
+            fixture.app.update();
+            let mut failures = fixture.app.world_mut().query::<&vmux_ecs::OperationError>();
+            if failures.iter(fixture.app.world()).next().is_some() {
+                break;
+            }
+            assert!(
+                Instant::now() < deadline,
+                "initial read failure was not reported"
+            );
+            std::thread::sleep(Duration::from_millis(1));
+        }
+        assert!(fixture.mode("one").is_none());
+        assert_eq!(fixture.stored(Kind::Modes)["two"]["selected"], "auto");
+        let mut queued = fixture.app.world_mut().query::<&RememberMode>();
+        assert_eq!(queued.iter(fixture.app.world()).count(), 1);
+        for _ in 0..5 {
+            fixture.app.update();
+        }
+        assert_eq!(fixture.stored(Kind::Modes)["one"]["selected"], "old");
+        std::fs::remove_dir(&lock).unwrap();
+        fixture.send(RememberMode {
+            agent_id: "one".into(),
+            mode_id: "new".into(),
+        });
+        fixture.settle();
+        assert_eq!(fixture.mode("one").as_deref(), Some("new"));
+        assert_eq!(fixture.mode("two").as_deref(), Some("auto"));
+        assert_eq!(fixture.stored(Kind::Modes)["one"]["selected"], "new");
+        assert_eq!(fixture.stored(Kind::Modes)["two"]["selected"], "auto");
+    }
+
+    #[test]
+    fn quitting_during_initial_loading_applies_retained_choices_before_saving() {
+        let modes = r#"{"one":{"selected":"old","modes":[{"id":"old","name":"Old"},{"id":"new","name":"New"}]},"two":{"selected":"auto","modes":[]}}"#;
+        let mut fixture = Fixture::new(None, Some(modes));
+        let lock = std::fs::OpenOptions::new()
+            .create(true)
+            .truncate(false)
+            .read(true)
+            .write(true)
+            .open(fixture.directory.path().join(".agent-modes.json.lock"))
+            .unwrap();
+        lock.lock().unwrap();
+        fixture.send(RememberMode {
+            agent_id: "one".into(),
+            mode_id: "new".into(),
+        });
+        fixture.app.update();
+        assert!(fixture.mode("one").is_none());
+        let release = std::thread::spawn(move || {
+            std::thread::sleep(Duration::from_millis(50));
+            drop(lock);
+        });
+        fixture.app.world_mut().write_message(AppExit::Success);
+        fixture.app.update();
+        release.join().unwrap();
+        assert_eq!(fixture.stored(Kind::Modes)["one"]["selected"], "new");
+        assert_eq!(fixture.stored(Kind::Modes)["two"]["selected"], "auto");
+    }
+
+    #[test]
+    fn switching_profiles_during_loading_retains_the_original_profiles_choices() {
+        let modes = r#"{"one":{"selected":"old","modes":[{"id":"old","name":"Old"},{"id":"new","name":"New"}]}}"#;
+        let mut fixture = Fixture::new(None, Some(modes));
+        let lock = std::fs::OpenOptions::new()
+            .create(true)
+            .truncate(false)
+            .read(true)
+            .write(true)
+            .open(fixture.directory.path().join(".agent-modes.json.lock"))
+            .unwrap();
+        lock.lock().unwrap();
+        fixture.send(RememberMode {
+            agent_id: "one".into(),
+            mode_id: "new".into(),
+        });
+        fixture.app.update();
+        let other = tempfile::tempdir().unwrap();
+        std::fs::write(
+            other.path().join("agent-modes.json"),
+            r#"{"one":{"selected":"other","modes":[]}}"#,
+        )
+        .unwrap();
+        fixture.send(ProfileRequested(other.path().to_path_buf()));
+        let deadline = Instant::now() + Duration::from_secs(5);
+        loop {
+            fixture.app.update();
+            if fixture.mode("one").as_deref() == Some("other") {
+                break;
+            }
+            assert!(
+                Instant::now() < deadline,
+                "replacement profile did not become ready"
+            );
+            std::thread::sleep(Duration::from_millis(1));
+        }
+        let mut queued = fixture.app.world_mut().query::<&RememberMode>();
+        assert_eq!(queued.iter(fixture.app.world()).count(), 1);
+        drop(lock);
+        fixture.send(ProfileRequested(fixture.directory.path().to_path_buf()));
+        fixture.settle();
+        assert_eq!(fixture.mode("one").as_deref(), Some("new"));
+        assert_eq!(fixture.stored(Kind::Modes)["one"]["selected"], "new");
+    }
+
+    #[test]
+    fn quitting_refuses_an_unavailable_lock_within_a_bounded_wait() {
+        let modes = r#"{"one":{"selected":"old","modes":[]}}"#;
+        let mut fixture = Fixture::new(None, Some(modes));
+        let lock = std::fs::OpenOptions::new()
+            .create(true)
+            .truncate(false)
+            .read(true)
+            .write(true)
+            .open(fixture.directory.path().join(".agent-modes.json.lock"))
+            .unwrap();
+        lock.lock().unwrap();
+        fixture.send(RememberMode {
+            agent_id: "one".into(),
+            mode_id: "new".into(),
+        });
+        fixture.app.update();
+        let release = std::thread::spawn(move || {
+            std::thread::sleep(Duration::from_secs(4));
+            drop(lock);
+        });
+        fixture.app.world_mut().write_message(AppExit::Success);
+        let started = Instant::now();
+        fixture.app.update();
+        assert!(
+            started.elapsed() < Duration::from_secs(3),
+            "exit waited for the unbounded native lock"
+        );
+        assert_eq!(fixture.stored(Kind::Modes)["one"]["selected"], "old");
+        release.join().unwrap();
+    }
+
+    #[test]
+    fn an_inactive_profiles_locks_cannot_starve_the_current_profiles_exit_save() {
+        let models = r#"{"one":{"selected":"old","models":[{"id":"old","name":"Old"},{"id":"new","name":"New"}]}}"#;
+        let modes = r#"{"one":{"selected":"old","modes":[{"id":"old","name":"Old"},{"id":"new","name":"New"}]}}"#;
+        let mut fixture = Fixture::new(Some(models), Some(modes));
+        let mut locks = Vec::new();
+        for kind in [Kind::Models, Kind::Modes] {
+            let lock = std::fs::OpenOptions::new()
+                .create(true)
+                .truncate(false)
+                .read(true)
+                .write(true)
+                .open(
+                    fixture
+                        .directory
+                        .path()
+                        .join(format!(".{}.lock", kind.filename())),
+                )
+                .unwrap();
+            lock.lock().unwrap();
+            locks.push(lock);
+        }
+        fixture.send(RememberModel {
+            agent_id: "one".into(),
+            model_id: "new".into(),
+        });
+        fixture.send(RememberMode {
+            agent_id: "one".into(),
+            mode_id: "new".into(),
+        });
+        fixture.app.update();
+        let other = tempfile::tempdir().unwrap();
+        std::fs::write(other.path().join("agent-modes.json"), modes).unwrap();
+        fixture.send(ProfileRequested(other.path().to_path_buf()));
+        let deadline = Instant::now() + Duration::from_secs(5);
+        loop {
+            fixture.app.update();
+            if fixture.mode("one").as_deref() == Some("old") {
+                break;
+            }
+            assert!(Instant::now() < deadline, "current profile did not load");
+            std::thread::sleep(Duration::from_millis(1));
+        }
+        let release = std::thread::spawn(move || {
+            std::thread::sleep(Duration::from_secs(5));
+            drop(locks);
+        });
+        fixture.send(RememberMode {
+            agent_id: "one".into(),
+            mode_id: "new".into(),
+        });
+        fixture.app.world_mut().write_message(AppExit::Success);
+        fixture.app.update();
+        let stored: serde_json::Value =
+            serde_json::from_slice(&std::fs::read(other.path().join("agent-modes.json")).unwrap())
+                .unwrap();
+        assert_eq!(stored["one"]["selected"], "new");
+        release.join().unwrap();
     }
 }

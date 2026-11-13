@@ -1,9 +1,12 @@
 use bevy_app::{App, AppExit, Last, Plugin as BevyPlugin, PostUpdate, Update};
 use bevy_ecs::prelude::*;
+use bevy_ecs::system::RunSystemOnce;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
+use std::fs::TryLockError;
 use std::io::Read;
 use std::sync::Arc;
+use std::time::{Duration, Instant};
 use vmux_ecs::jobs::{Job, JobOwner, JobPlugin, JobRequest, JobResult, JobSet};
 use vmux_ecs::{
     Active, BaseRevision, EntityTarget, Operation, OperationError, OperationState, Revision,
@@ -11,8 +14,8 @@ use vmux_ecs::{
 use vmux_path::AtomicFile;
 
 use crate::preferences::{
-    AgentPreferences, File, FilePath, Kind, Loaded, ModelSelectionSet, Ready, Root, Selection,
-    SourceUrl,
+    AgentPreferences, Drain, File, FilePath, Kind, Loaded, ModelSelectionSet, Queued, Ready, Root,
+    Selection, SourceUrl,
 };
 use vmux_api::protocol::AcpModeOption;
 use vmux_api::session::ModelOptionEntry;
@@ -30,7 +33,7 @@ impl BevyPlugin for Plugin {
             )
             .add_systems(PostUpdate, (settle, write, retire).chain())
             .add_message::<AppExit>()
-            .add_systems(Last, flush_exit);
+            .add_systems(Last, (flush_exit, ApplyDeferred, flush).chain());
     }
 }
 
@@ -39,6 +42,9 @@ pub(crate) struct SubmitSet;
 
 #[derive(Component)]
 struct Unavailable;
+
+#[derive(Component)]
+struct Finalizing;
 
 #[derive(Clone, Default, Deserialize, Serialize)]
 pub(crate) struct StoredModel {
@@ -140,6 +146,8 @@ struct FileJob {
 }
 
 impl FileJob {
+    const LOCK_TIMEOUT: Duration = Duration::from_secs(2);
+
     fn read(path: &FilePath, kind: Kind) -> Self {
         Self {
             path: path.0.clone(),
@@ -157,6 +165,10 @@ impl FileJob {
     }
 
     fn execute(&self) -> Result<Content, String> {
+        self.execute_until(Instant::now() + Self::LOCK_TIMEOUT)
+    }
+
+    fn execute_until(&self, deadline: Instant) -> Result<Content, String> {
         if vmux_ecs::BlockingCancellation::canceled() {
             return Err("preference IO canceled before dispatch".to_string());
         }
@@ -175,7 +187,7 @@ impl FileJob {
             .write(true)
             .open(lock_path)
             .map_err(|error| error.to_string())?;
-        lock.lock().map_err(|error| error.to_string())?;
+        self.acquire(&lock, deadline.min(Instant::now() + Self::LOCK_TIMEOUT))?;
         if vmux_ecs::BlockingCancellation::canceled() {
             return Err("preference IO canceled before file access".to_string());
         }
@@ -199,6 +211,23 @@ impl FileJob {
             return Err("preference file exceeds the 16 MiB decoder limit".to_string());
         }
         Content::decode(self.kind, &bytes)
+    }
+
+    fn acquire(&self, lock: &std::fs::File, deadline: Instant) -> Result<(), String> {
+        loop {
+            if vmux_ecs::BlockingCancellation::canceled() {
+                return Err("preference IO canceled while waiting for the file lock".to_string());
+            }
+            if Instant::now() >= deadline {
+                return Err("preference file lock timed out".to_string());
+            }
+            match lock.try_lock() {
+                Ok(()) => return Ok(()),
+                Err(TryLockError::Error(error)) => return Err(error.to_string()),
+                Err(TryLockError::WouldBlock) => {}
+            }
+            std::thread::sleep(Duration::from_millis(10));
+        }
     }
 }
 
@@ -242,7 +271,7 @@ fn read(
     mut commands: Commands,
 ) {
     for (entity, parent, kind, path, revision, mut file) in &mut files {
-        if file.pending.is_some() || !roots.contains(parent.parent()) {
+        if file.pending.is_some() || !file.retry_allowed || !roots.contains(parent.parent()) {
             continue;
         }
         let operation = commands
@@ -365,6 +394,7 @@ fn finish(
                         file: target.entity(),
                         content,
                     });
+                    commands.entity(target.entity()).try_remove::<Unavailable>();
                 }
             }
             Ok(Err(error)) | Err(error) => {
@@ -374,9 +404,7 @@ fn finish(
                     commands.entity(operation).insert(failure);
                 }
                 if !ready {
-                    commands
-                        .entity(target.entity())
-                        .insert((Ready, Unavailable));
+                    commands.entity(target.entity()).insert(Unavailable);
                 }
                 tracing::warn!("preference file IO failed: {error}");
             }
@@ -402,37 +430,112 @@ fn settle(
         file.pending = None;
         file.retry_allowed = false;
         if !ready {
-            commands.entity(entity).insert((Ready, Unavailable));
+            commands.entity(entity).insert(Unavailable);
         }
     }
 }
 
-struct ExitFlush {
-    file: Entity,
-    revision: Revision,
-    pending: Option<Entity>,
-    job: FileJob,
+fn flush_exit(
+    mut exits: MessageReader<AppExit>,
+    files: Query<Entity, With<File>>,
+    mut commands: Commands,
+) {
+    if exits.read().next().is_none() {
+        return;
+    }
+    for file in &files {
+        commands.entity(file).insert(Finalizing);
+    }
 }
 
-impl bevy_ecs::system::Command for ExitFlush {
-    type Out = ();
-
-    fn apply(self, world: &mut World) {
-        if world
-            .get::<FilePath>(self.file)
-            .is_none_or(|path| path.0 != self.job.path)
-            || world.get::<Revision>(self.file) != Some(&self.revision)
-        {
-            return;
+fn flush(world: &mut World) {
+    let deadline = Instant::now() + Duration::from_secs(4);
+    let mut files = world
+        .query_filtered::<Entity, (With<File>, With<Finalizing>)>()
+        .iter(world)
+        .collect::<Vec<_>>();
+    files.sort_unstable_by_key(|file| {
+        let active = world
+            .get::<ChildOf>(*file)
+            .is_some_and(|parent| world.get::<Active>(parent.parent()).is_some());
+        let dirty = world.get::<Revision>(*file).map(|revision| revision.0)
+            != world.get::<BaseRevision>(*file).map(|saved| saved.0);
+        (!active, !dirty, world.get::<Ready>(*file).is_none(), *file)
+    });
+    for file in files {
+        world.entity_mut(file).remove::<Finalizing>();
+        if Instant::now() >= deadline {
+            tracing::warn!("preference exit finalization exceeded its lock budget");
+            continue;
         }
-        if let Some(operation) = self.pending {
+        let Some(kind) = world.get::<Kind>(file).copied() else {
+            continue;
+        };
+        let Some(path) = world.get::<FilePath>(file) else {
+            continue;
+        };
+        let read = FileJob::read(path, kind);
+        if let Some(operation) = world.get::<File>(file).and_then(|state| state.pending) {
             world.despawn(operation);
+            world.get_mut::<File>(file).unwrap().pending = None;
         }
-        match self.job.execute() {
+        let queued = world
+            .query_filtered::<&ChildOf, With<Queued>>()
+            .iter(world)
+            .any(|parent| parent.parent() == file);
+        let dirty = world.get::<Revision>(file).map(|revision| revision.0)
+            != world.get::<BaseRevision>(file).map(|saved| saved.0);
+        if !queued && !dirty {
+            continue;
+        }
+        if world.get::<Ready>(file).is_none() {
+            match read.execute_until(deadline) {
+                Ok(content) => {
+                    world.trigger(Loaded { file, content });
+                    world.flush();
+                    world.entity_mut(file).remove::<Unavailable>();
+                }
+                Err(error) => {
+                    world.get_mut::<File>(file).unwrap().retry_allowed = false;
+                    world.entity_mut(file).insert(Unavailable);
+                    tracing::warn!("preference exit read failed: {error}");
+                    continue;
+                }
+            }
+        }
+        world.trigger(Drain { file });
+        world.flush();
+        let (Some(revision), Some(saved)) = (
+            world.get::<Revision>(file).copied(),
+            world.get::<BaseRevision>(file).copied(),
+        ) else {
+            continue;
+        };
+        if revision.0 == saved.0 {
+            continue;
+        }
+        let bytes = match world.run_system_once(move |preferences: AgentPreferences| {
+            Content::encode(&preferences, file, kind)
+        }) {
+            Ok(Ok(bytes)) => bytes,
+            Ok(Err(error)) => {
+                tracing::warn!("preference exit encoding failed: {error}");
+                continue;
+            }
+            Err(error) => {
+                tracing::warn!("preference exit snapshot failed: {error}");
+                continue;
+            }
+        };
+        let Some(path) = world.get::<FilePath>(file) else {
+            continue;
+        };
+        match FileJob::write(path, kind, bytes).execute_until(deadline) {
             Ok(Content::Written) => {
                 world
-                    .entity_mut(self.file)
-                    .insert(BaseRevision(self.revision.0));
+                    .entity_mut(file)
+                    .insert(BaseRevision(revision.0))
+                    .remove::<Unavailable>();
             }
             Ok(_) => {}
             Err(error) => tracing::warn!("preference exit flush failed: {error}"),
@@ -440,36 +543,10 @@ impl bevy_ecs::system::Command for ExitFlush {
     }
 }
 
-fn flush_exit(
-    mut exits: MessageReader<AppExit>,
-    preferences: AgentPreferences,
-    files: Query<(Entity, &Kind, &FilePath, &Revision, &BaseRevision, &File), With<Ready>>,
-    mut commands: Commands,
-) {
-    if exits.read().next().is_none() {
-        return;
-    }
-    for (entity, kind, path, revision, saved, file) in &files {
-        if revision.0 == saved.0 {
-            continue;
-        }
-        match Content::encode(&preferences, entity, *kind) {
-            Ok(bytes) => {
-                commands.queue(ExitFlush {
-                    file: entity,
-                    revision: *revision,
-                    pending: file.pending,
-                    job: FileJob::write(path, *kind, bytes),
-                });
-            }
-            Err(error) => tracing::warn!("preference exit encoding failed: {error}"),
-        }
-    }
-}
-
 fn retire(
     roots: Query<Entity, (With<Root>, Without<Active>)>,
-    files: Query<(&ChildOf, &File, &Revision, &BaseRevision)>,
+    files: Query<(Entity, &ChildOf, &File, &Revision, &BaseRevision)>,
+    queued: Query<&ChildOf, With<Queued>>,
     operations: Query<&ChildOf, With<Operation>>,
     mut commands: Commands,
 ) {
@@ -477,8 +554,11 @@ fn retire(
         if operations.iter().any(|parent| parent.parent() == root) {
             continue;
         }
-        if files.iter().any(|(parent, file, revision, saved)| {
-            parent.parent() == root && (file.pending.is_some() || revision.0 != saved.0)
+        if files.iter().any(|(entity, parent, file, revision, saved)| {
+            parent.parent() == root
+                && (file.pending.is_some()
+                    || revision.0 != saved.0
+                    || queued.iter().any(|parent| parent.parent() == entity))
         }) {
             continue;
         }
