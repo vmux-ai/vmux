@@ -135,6 +135,7 @@ impl Reader {
             root: self.root.clone(),
             params,
             server: self.inputs.server,
+            transport: self.inputs.transport,
         };
         if self.inputs.apply_edits.send(input).is_err() {
             reply.err(ErrorCode::RequestCancelled);
@@ -154,6 +155,7 @@ impl Reader {
             diagnostics: parsed.diagnostics,
             version: parsed.version,
             server: None,
+            transport: None,
         });
     }
 
@@ -209,6 +211,7 @@ mod tests {
                 diagnostics,
                 outgoing,
                 ServerInputSender {
+                    transport: None,
                     apply_edits: apply_edit_tx,
                     logs: log_tx,
                     server: None,

@@ -17,9 +17,9 @@ use std::time::Duration;
 
 use std::io::BufRead;
 
-#[derive(bevy::prelude::Component)]
 pub struct ServerClient {
-    child: Option<Child>,
+    identity: uuid::Uuid,
+    child: Mutex<Option<Child>>,
     outgoing: mpsc::Sender<serde_json::Value>,
     pending: PendingMap,
     next_id: AtomicI64,
@@ -60,46 +60,7 @@ impl Capabilities {
     }
 
     pub fn allows(&self, method: &str) -> bool {
-        let caps = &self.server;
-        match method {
-            "textDocument/hover" => match &caps.hover_provider {
-                Some(lsp_types::HoverProviderCapability::Simple(yes)) => *yes,
-                Some(lsp_types::HoverProviderCapability::Options(_)) => true,
-                None => false,
-            },
-            "textDocument/foldingRange" => match &caps.folding_range_provider {
-                Some(lsp_types::FoldingRangeProviderCapability::Simple(yes)) => *yes,
-                Some(_) => true,
-                None => false,
-            },
-            "textDocument/codeAction" => match &caps.code_action_provider {
-                Some(lsp_types::CodeActionProviderCapability::Simple(yes)) => *yes,
-                Some(lsp_types::CodeActionProviderCapability::Options(_)) => true,
-                None => false,
-            },
-            "textDocument/semanticTokens/full" => caps.semantic_tokens_provider.is_some(),
-            "textDocument/completion" => caps.completion_provider.is_some(),
-            "textDocument/definition" => Self::offered(&caps.definition_provider),
-            "textDocument/declaration" => caps.declaration_provider.is_some(),
-            "textDocument/typeDefinition" => caps.type_definition_provider.is_some(),
-            "textDocument/implementation" => caps.implementation_provider.is_some(),
-            "textDocument/references" => Self::offered(&caps.references_provider),
-            "textDocument/documentSymbol" => Self::offered(&caps.document_symbol_provider),
-            "textDocument/rename" => Self::offered(&caps.rename_provider),
-            "textDocument/formatting" => Self::offered(&caps.document_formatting_provider),
-            "textDocument/rangeFormatting" => {
-                Self::offered(&caps.document_range_formatting_provider)
-            }
-            _ => true,
-        }
-    }
-
-    fn offered<T>(provider: &Option<lsp_types::OneOf<bool, T>>) -> bool {
-        match provider {
-            Some(lsp_types::OneOf::Left(yes)) => *yes,
-            Some(lsp_types::OneOf::Right(_)) => true,
-            None => false,
-        }
+        vmux_lsp::Capabilities::new(&self.server).provides(method)
     }
 }
 
@@ -147,6 +108,12 @@ impl ServerClient {
         let pending: PendingMap = Arc::new(Mutex::new(HashMap::new()));
 
         let (outgoing, out_rx) = mpsc::channel::<serde_json::Value>();
+        let identity = uuid::Uuid::new_v4();
+        let diagnostics = diagnostics.with_transport(identity);
+        let inputs = ServerInputSender {
+            transport: Some(identity),
+            ..inputs
+        };
         let writer = std::thread::spawn(move || {
             let mut w = stdin;
             while let Ok(msg) = out_rx.recv() {
@@ -169,7 +136,8 @@ impl ServerClient {
         });
 
         let mut client = ServerClient {
-            child: Some(child),
+            identity,
+            child: Mutex::new(Some(child)),
             outgoing,
             pending,
             next_id: AtomicI64::new(1),
@@ -185,6 +153,11 @@ impl ServerClient {
 
     pub fn provides(&self, method: &str) -> bool {
         self.capabilities.allows(method)
+    }
+
+    pub(crate) fn into_transport(self) -> vmux_lsp::Transport {
+        let identity = self.identity;
+        vmux_lsp::Transport::with_identity(self, identity)
     }
 
     pub fn semantic_legend(&self) -> Option<&crate::lsp::semantic::SemanticLegend> {
@@ -352,8 +325,13 @@ impl ServerClient {
         );
     }
 
-    pub(crate) fn exited(&mut self) -> bool {
-        match self.child.as_mut() {
+    pub(crate) fn exited(&self) -> bool {
+        match self
+            .child
+            .lock()
+            .unwrap_or_else(|error| error.into_inner())
+            .as_mut()
+        {
             Some(child) => child.try_wait().ok().flatten().is_some(),
             None => true,
         }
@@ -362,7 +340,12 @@ impl ServerClient {
     pub fn shutdown(&mut self) {
         let _ = self.request("shutdown", serde_json::Value::Null, Duration::from_secs(2));
         self.notify("exit", serde_json::json!({}));
-        if let Some(child) = self.child.as_mut() {
+        if let Some(child) = self
+            .child
+            .get_mut()
+            .unwrap_or_else(|error| error.into_inner())
+            .as_mut()
+        {
             let _ = child.kill();
             let _ = child.wait();
         }
@@ -375,7 +358,12 @@ impl Drop for ServerClient {
             .lock()
             .unwrap_or_else(|error| error.into_inner())
             .clear();
-        if let Some(mut child) = self.child.take() {
+        if let Some(mut child) = self
+            .child
+            .get_mut()
+            .unwrap_or_else(|error| error.into_inner())
+            .take()
+        {
             let _ = child.kill();
             bevy::tasks::IoTaskPool::get()
                 .spawn(async move {
@@ -383,6 +371,29 @@ impl Drop for ServerClient {
                 })
                 .detach();
         }
+    }
+}
+
+impl vmux_lsp::TransportIo for ServerClient {
+    fn request(&self, method: &str, params: serde_json::Value) -> vmux_lsp::WireReply {
+        let (id, receiver) = self.send_request(method, params);
+        vmux_lsp::WireReply::new(id, receiver)
+    }
+
+    fn notify(&self, method: &str, params: serde_json::Value) {
+        self.notify(method, params);
+    }
+
+    fn cancel(&self, id: i64) {
+        self.cancel_request(id);
+    }
+
+    fn capabilities(&self) -> &lsp_types::ServerCapabilities {
+        &self.capabilities.server
+    }
+
+    fn exited(&self) -> bool {
+        self.exited()
     }
 }
 

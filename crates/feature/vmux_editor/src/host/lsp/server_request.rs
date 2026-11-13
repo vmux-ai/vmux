@@ -20,6 +20,7 @@ impl Plugin for ServerRequestPlugin {
                     apply_edits: apply_edit_sender.clone(),
                     logs: log_sender.clone(),
                     server: None,
+                    transport: None,
                 },
                 ApplyEditInbox(apply_edit_receiver.clone()),
                 ServerLogInbox(log_receiver.clone()),
@@ -58,6 +59,7 @@ pub struct ServerInputSender {
     pub(crate) apply_edits: crossbeam_channel::Sender<ApplyEditInput>,
     pub(crate) logs: crossbeam_channel::Sender<ServerLogInput>,
     pub(crate) server: Option<Entity>,
+    pub(crate) transport: Option<uuid::Uuid>,
 }
 
 impl ServerInputSender {
@@ -66,6 +68,7 @@ impl ServerInputSender {
             apply_edits: self.apply_edits.clone(),
             logs: self.logs.clone(),
             server: Some(server),
+            transport: self.transport,
         }
     }
 }
@@ -78,6 +81,7 @@ impl Default for ServerInputSender {
             apply_edits,
             logs,
             server: None,
+            transport: None,
         }
     }
 }
@@ -93,6 +97,7 @@ pub struct ApplyEditInput {
     pub root: PathBuf,
     pub params: lsp_types::ApplyWorkspaceEditParams,
     pub server: Option<Entity>,
+    pub transport: Option<uuid::Uuid>,
 }
 
 pub struct ServerLogInput {
@@ -126,18 +131,20 @@ pub struct ServerRequestPending {
     frames: u32,
     since: Instant,
     server: Option<Entity>,
+    transport: Option<uuid::Uuid>,
 }
 
 impl ServerRequestPending {
     const MAX_FRAMES: u32 = 180;
     const MAX_WAIT: Duration = Duration::from_secs(5);
 
-    fn new(reply: ReplyHandle, server: Option<Entity>) -> Self {
+    fn new(reply: ReplyHandle, server: Option<Entity>, transport: Option<uuid::Uuid>) -> Self {
         Self {
             reply,
             frames: 0,
             since: Instant::now(),
             server,
+            transport,
         }
     }
 
@@ -152,6 +159,7 @@ pub struct AwaitingApplyEdit {
     pub root: PathBuf,
     pub params: lsp_types::ApplyWorkspaceEditParams,
     pub server: Option<Entity>,
+    pub transport: Option<uuid::Uuid>,
 }
 
 #[derive(Message)]
@@ -163,11 +171,12 @@ pub struct ServerReply {
 fn spawn_apply_edit_requests(inputs: Single<&ApplyEditInbox>, mut commands: Commands) {
     for input in inputs.0.try_iter() {
         commands.spawn((
-            ServerRequestPending::new(input.reply, input.server),
+            ServerRequestPending::new(input.reply, input.server, input.transport),
             AwaitingApplyEdit {
                 root: input.root,
                 params: input.params,
                 server: input.server,
+                transport: input.transport,
             },
         ));
     }
@@ -196,7 +205,7 @@ fn answer_server_requests(
         };
         if request
             .server
-            .is_some_and(|server| !manager.server_current(server))
+            .is_some_and(|server| !manager.transport_current(server, request.transport))
         {
             request.reply.err(ErrorCode::RequestCancelled);
         } else {
@@ -209,7 +218,7 @@ fn answer_server_requests(
         if answered.contains(&entity)
             || (request
                 .server
-                .is_none_or(|server| manager.server_current(server))
+                .is_none_or(|server| manager.transport_current(server, request.transport))
                 && !request.expired())
         {
             continue;
@@ -247,6 +256,7 @@ mod tests {
                     reply,
                     root: std::path::PathBuf::from("/tmp/project"),
                     server: None,
+                    transport: None,
                     params: lsp_types::ApplyWorkspaceEditParams {
                         label: None,
                         edit: lsp_types::WorkspaceEdit::default(),

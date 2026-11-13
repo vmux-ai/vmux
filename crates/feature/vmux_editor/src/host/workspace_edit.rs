@@ -26,24 +26,10 @@ fn apply_lsp(
     mut commands: Commands,
 ) {
     for (request, awaiting) in &requests {
-        commands.queue(ApplyWorkspaceEdit {
-            request: Some(request),
-            target: None,
-            server: awaiting.server,
-            origin: None,
-            root: awaiting.root.clone(),
-            result: Ok(awaiting.params.edit.clone()),
-        });
+        commands.queue(ApplyWorkspaceEdit::from_server(request, awaiting));
     }
     for rename in renames.read() {
-        commands.queue(ApplyWorkspaceEdit {
-            request: None,
-            target: Some(rename.entity),
-            server: rename.origin.map(|origin| origin.server()),
-            origin: rename.origin,
-            root: rename.root.clone(),
-            result: rename.result.clone(),
-        });
+        commands.queue(ApplyWorkspaceEdit::from_rename(rename));
     }
 }
 
@@ -51,9 +37,39 @@ struct ApplyWorkspaceEdit {
     request: Option<Entity>,
     target: Option<Entity>,
     server: Option<Entity>,
+    transport: Option<uuid::Uuid>,
     origin: Option<crate::lsp::manager::LspOrigin>,
     root: std::path::PathBuf,
     result: Result<lsp_types::WorkspaceEdit, String>,
+}
+
+impl ApplyWorkspaceEdit {
+    fn from_server(
+        request: Entity,
+        awaiting: &crate::lsp::server_request::AwaitingApplyEdit,
+    ) -> Self {
+        Self {
+            request: Some(request),
+            target: None,
+            server: awaiting.server,
+            transport: awaiting.transport,
+            origin: None,
+            root: awaiting.root.clone(),
+            result: Ok(awaiting.params.edit.clone()),
+        }
+    }
+
+    fn from_rename(rename: &crate::lsp::manager::LspRequestedEdit) -> Self {
+        Self {
+            request: None,
+            target: Some(rename.entity),
+            server: rename.origin.map(|origin| origin.server()),
+            transport: None,
+            origin: rename.origin,
+            root: rename.root.clone(),
+            result: rename.result.clone(),
+        }
+    }
 }
 
 impl Command for ApplyWorkspaceEdit {
@@ -71,7 +87,7 @@ impl Command for ApplyWorkspaceEdit {
             Some("document changed since the edit was computed".to_string())
         } else if self
             .server
-            .is_some_and(|server| !edits.manager.server_current(server))
+            .is_some_and(|server| !edits.manager.transport_current(server, self.transport))
             && self.origin.is_none()
         {
             Some("language server instance is no longer current".to_string())
@@ -306,6 +322,7 @@ mod tests {
                     ),
                     root: path.parent().unwrap_or(path).to_path_buf(),
                     server: None,
+                    transport: None,
                     params: lsp_types::ApplyWorkspaceEditParams { label: None, edit },
                 })
                 .unwrap();
@@ -605,6 +622,61 @@ mod tests {
                 std::fs::read_to_string(&target).unwrap(),
                 if mode == 3 { "Xabc\n" } else { "abc\n" }
             );
+        }
+    }
+
+    #[test]
+    fn server_edits_and_replies_refuse_replaced_transports_on_the_same_entity() {
+        for replaced in [false, true] {
+            let temp = tempfile::tempdir().unwrap();
+            let path = temp.path().join("main.rs");
+            std::fs::write(&path, ApplyEdit::BEFORE).unwrap();
+            let (mut app, views) = ApplyEdit::bare(&path, 1);
+            let fixture =
+                crate::lsp::manager::DocumentFixture::open(app.world_mut(), views[0], &path, 1);
+            let identity = fixture.replace_transport(app.world_mut());
+            let (outgoing, sent) = std::sync::mpsc::channel();
+            let inputs = {
+                let world = app.world_mut();
+                let mut senders = world.query::<&crate::lsp::server_request::ServerInputSender>();
+                senders.single(world).unwrap().clone()
+            };
+            inputs
+                .apply_edits
+                .send(crate::lsp::server_request::ApplyEditInput {
+                    reply: crate::lsp::server_request::ReplyHandle::new(
+                        crate::lsp::wire::RequestId::Number(1000),
+                        outgoing,
+                    ),
+                    root: temp.path().into(),
+                    server: Some(fixture.server),
+                    transport: Some(identity),
+                    params: lsp_types::ApplyWorkspaceEditParams {
+                        label: None,
+                        edit: ApplyEdit::renaming(&path),
+                    },
+                })
+                .unwrap();
+            if replaced {
+                fixture.replace_transport(app.world_mut());
+            }
+            let mut edit = ApplyEdit { app, views, sent };
+            edit.app.update();
+            assert_eq!(
+                edit.text(edit.views[0]),
+                if replaced {
+                    ApplyEdit::BEFORE
+                } else {
+                    "1 two 3\n"
+                }
+            );
+            assert_eq!(std::fs::read_to_string(&path).unwrap(), ApplyEdit::BEFORE);
+            let reply = edit.sent.try_recv().unwrap();
+            if replaced {
+                assert_eq!(reply["error"]["code"], -32800);
+            } else {
+                assert_eq!(reply["result"]["applied"], true);
+            }
         }
     }
 

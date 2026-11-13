@@ -454,6 +454,9 @@ stale records fail closed. Existing exact fingerprints are frozen migration debt
 Git provenance, not permanent adapter exceptions; migrations remove them instead of extending
 the baseline. Final acceptance requires no remaining domain debt and a repeated caller/lifecycle
 audit. Structural checks supplement ownership review; they cannot prove business semantics.
+Component lifecycle callbacks belong to their used Component through the actual hook metadata;
+unused components, Resource markers, unrelated attributes and test-only hooks cannot establish
+a runtime owner. Scoped aliases and generic callback paths resolve to their actual function.
 Private helpers belong to one production caller, including qualified imports and callback values;
 other-module users cannot silently share that owner. Nested immutable values retain a complete,
 referenced chain to one canonical component. Typed app composition follows its actual plugin
@@ -1388,8 +1391,11 @@ a language server. The host ships only the visible slice of a file and re-slices
 
 **Language servers.** `EditCore` remains the text editing and undo kernel owned by the `Editor`
 component. Its `content_version` changes on edits and undo/redo, independently of the document's
-LSP protocol version. Editor's private server, document, request, and diagnostics plugins own
-the native LSP lifecycle. A workspace root has shared `Cwd` and `Name`; its server children
+LSP protocol version. The renderer-independent `vmux_lsp` plugin owns server lifecycle and
+accepted requests; Editor's private adapters currently own document synchronization and diagnostics.
+The core owns capability gating and server identity lookup; Editor delegates both through
+`Capabilities` and `Lookup` rather than maintaining separate method tables or identity rules.
+A workspace root has shared `Cwd` and `Name`; its server children
 identify the root, command, and arguments; document children carry their path and accepted
 protocol version. Views bind to those documents, so closing one view preserves other users
 of the document. Removing a root or restarting a server invalidates only its descendants
@@ -1402,14 +1408,36 @@ open-buffer snapshots on their Operation and validate the affected buffers befor
 Unversioned edits also require an affected buffer to have been saved or synchronized to the
 originating server at acceptance; a later save does not establish that earlier knowledge.
 Versioned edits reject missing or ambiguous versions.
-Server-origin workspace edits validate the current server before applying or replying. Restart
-opens the current buffer, including unsaved text. Reload and encoding changes wait for the decoded
-buffer, synchronize it, and then reinitialize metadata. Diagnostics retain their server and the protocol's optional
-version; unversioned notifications cannot prove which edit produced them.
+Server-origin workspace edits bind both the server entity and the transport UUID stamped before
+the reader starts; replacing a transport on the same entity invalidates queued edits and replies. Restart
+opens the current buffer, including unsaved text. Each document captures its opening transport
+UUID in a private required Component. Lookup refuses requests as soon as that transport changes;
+the server phase retires its documents before native synchronization, which reopens the current
+buffer before initial metadata requests. Replacing a live transport preserves other roots and
+adds no global Resource. Reload and encoding changes wait for the decoded
+buffer, synchronize it, and then reinitialize metadata. Diagnostics retain their server, transport UUID, and the protocol's optional version. Native
+adapter input rejects old transport epochs, and replacing a transport clears only its retained
+diagnostics before code-action requests or rendering consume them. Unversioned notifications
+cannot prove which edit produced them.
 Process handles, framing, reader/writer threads, and wire correlation stay in the transport
 adapter. Publishing input or a response, and closing the reader, wakes the reactive runner.
 Package selection, settings, navigation, and rendered projections remain Editor-owned. This
-native lifecycle is not yet a renderer-independent public LSP plugin.
+public `vmux_lsp` core shares the server/document model, ownership relationships, and
+server start/stop/restart, transport completion/failure, and request cancellation, timeout, and
+response lifecycle with an independent application. `StartServer` is idempotent while starting
+or ready. The process adapter receives `LaunchServer` and returns `ServerCompleted` on its
+Operation; the private launch identity also binds that original Operation. A mismatched completion
+is discarded without canceling the current launch. Stop cancels pending startup without
+rewriting completed Operations. Terminal or removed launch Operations release their startup
+marker even without a transport completion, allowing a new start without accepting late results.
+Stopped views remain eligible to reopen when their server resumes. Root changes and restart invalidate only that server graph,
+so late startup completion cannot replace a newer transport.
+Documents derive their server identity from `ChildOf`; transport handles and wire correlation
+remain behind `TransportIo`. The application facade's `lsp` selection requires the shared ECS
+core, and Editor declares that dependency. Server selection and document/process adapters
+remain Editor-owned. Native process initialization remains bounded inside the IO adapter.
+The independent consumer exercises the same server and request lifecycle, including stop,
+restart, transport failure, configuration identity, and concurrent roots, without UI.
 Lifecycle tests use the Rust `vmux_mock_lsp` recorder through real standard-input/output pipes.
 Run them with `cargo test --locked -p vmux_editor` so Cargo builds the registered test server.
 

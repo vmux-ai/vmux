@@ -88,7 +88,8 @@ extension-core = ["ecs", "dep:vmux_extension"]
 extension = ["extension-core", "browser", "vmux_extension/host"]
 terminal = ["layout-runtime", "service", "dep:vmux_terminal"]
 project = ["ecs", "dep:vmux_project"]
-editor = ["layout-runtime", "project", "dep:vmux_editor"]
+lsp = ["ecs", "dep:vmux_lsp"]
+editor = ["layout-runtime", "project", "lsp", "dep:vmux_editor"]
 git = ["layout-runtime", "dep:vmux_git"]
 acp = [
     "command",
@@ -129,6 +130,7 @@ vmux_history = { path = "../../feature/vmux_history", optional = true }
 vmux_input = { path = "../../feature/vmux_input", optional = true }
 vmux_knowledge = { path = "../../feature/vmux_knowledge", optional = true }
 vmux_layout = { path = "../../feature/vmux_layout", optional = true }
+vmux_lsp = { path = "../vmux_lsp", optional = true }
 vmux_mcp = { path = "../vmux_mcp", optional = true }
 vmux_macro = { path = "../vmux_macro" }
 vmux_remote = { path = "../../feature/vmux_remote", optional = true }

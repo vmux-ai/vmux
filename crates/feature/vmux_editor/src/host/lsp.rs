@@ -14,6 +14,8 @@ use crate::lsp::catalog::CatalogSource;
 use crate::lsp::purl::Purl;
 use crate::lsp::target::PlatformTarget;
 
+pub use vmux_lsp::{Document as OpenDoc, ServerKey};
+
 pub mod archive;
 pub mod catalog;
 pub mod client;
@@ -214,12 +216,14 @@ pub struct PathDiagnostics {
     pub diagnostics: Vec<lsp_types::Diagnostic>,
     pub version: Option<i32>,
     pub server: Option<Entity>,
+    pub transport: Option<uuid::Uuid>,
 }
 
 #[derive(Clone)]
 pub struct LspDiagnosticsSender {
     sender: crossbeam_channel::Sender<PathDiagnostics>,
     server: Option<Entity>,
+    transport: Option<uuid::Uuid>,
 }
 
 impl LspDiagnosticsSender {
@@ -229,6 +233,7 @@ impl LspDiagnosticsSender {
             Self {
                 sender,
                 server: None,
+                transport: None,
             },
             LspDiagnosticsInbox(receiver),
         )
@@ -238,11 +243,18 @@ impl LspDiagnosticsSender {
         Self {
             sender: self.sender.clone(),
             server: Some(server),
+            transport: self.transport,
         }
+    }
+
+    pub(crate) fn with_transport(mut self, transport: uuid::Uuid) -> Self {
+        self.transport = Some(transport);
+        self
     }
 
     pub(crate) fn send(&self, mut diagnostics: PathDiagnostics) {
         diagnostics.server = self.server;
+        diagnostics.transport = self.transport;
         let _ = self.sender.send(diagnostics);
     }
 }
@@ -253,6 +265,7 @@ impl Default for LspDiagnosticsSender {
         Self {
             sender,
             server: None,
+            transport: None,
         }
     }
 }
@@ -289,38 +302,6 @@ impl LintDiagnosticsInbox {
     fn drain(&self) -> Vec<PathLintDiagnostics> {
         self.0.try_iter().collect()
     }
-}
-
-#[derive(Component, Clone, Debug, PartialEq, Eq, Hash)]
-pub struct ServerKey {
-    root: PathBuf,
-    command: String,
-    arguments: Vec<String>,
-}
-
-impl ServerKey {
-    pub fn new(root: impl Into<PathBuf>, command: impl Into<String>) -> Self {
-        Self {
-            root: root.into(),
-            command: command.into(),
-            arguments: Vec::new(),
-        }
-    }
-
-    pub fn root(&self) -> &std::path::Path {
-        &self.root
-    }
-
-    pub fn with_arguments(mut self, arguments: Vec<String>) -> Self {
-        self.arguments = arguments;
-        self
-    }
-}
-
-#[derive(Component)]
-pub struct OpenDoc {
-    pub key: ServerKey,
-    pub version: i32,
 }
 
 pub type PendingMap = Arc<Mutex<HashMap<i64, crossbeam_channel::Sender<serde_json::Value>>>>;

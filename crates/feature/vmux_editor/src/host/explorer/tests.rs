@@ -216,6 +216,24 @@ impl ExplorerTree {
 struct ExplorerApp;
 
 impl ExplorerApp {
+    fn wait_for_children(app: &mut App, root: &Path, path: &Path) {
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+        while std::time::Instant::now() < deadline {
+            app.update();
+            let loaded = app
+                .world()
+                .iter_entities()
+                .filter_map(|entity| entity.get::<ExplorerTree>())
+                .find(|tree| tree.answers_for(root))
+                .is_some_and(|tree| tree.children.contains_key(path) && tree.loading.is_empty());
+            if loaded {
+                return;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(1));
+        }
+        panic!("directory load did not finish: {}", path.display());
+    }
+
     fn hidden() -> App {
         Self::with(false)
     }
@@ -236,23 +254,6 @@ impl ExplorerApp {
     }
 }
 
-fn wait_for_children(app: &mut App, root: &Path, path: &Path) {
-    for _ in 0..1000 {
-        app.update();
-        let loaded = app
-            .world()
-            .iter_entities()
-            .filter_map(|entity| entity.get::<ExplorerTree>())
-            .find(|tree| tree.answers_for(root))
-            .is_some_and(|tree| tree.children.contains_key(path));
-        if loaded {
-            return;
-        }
-        std::thread::yield_now();
-    }
-    panic!("directory load did not finish: {}", path.display());
-}
-
 #[test]
 fn init_builds_root_listing_and_marks_dirty() {
     let tmp = git_repo();
@@ -262,7 +263,7 @@ fn init_builds_root_listing_and_marks_dirty() {
         .world_mut()
         .spawn((FileView { path: file }, ExplorerState::default()))
         .id();
-    wait_for_children(&mut app, tmp.path(), tmp.path());
+    ExplorerApp::wait_for_children(&mut app, tmp.path(), tmp.path());
     let tree_of = app.world().get::<UsesExplorerTree>(e).unwrap();
     assert_eq!(
         app.world().get::<ExplorerTree>(tree_of.0).unwrap().root,
@@ -294,7 +295,7 @@ fn a_second_page_on_a_warm_root_reuses_the_loaded_tree() {
             ExplorerState::default(),
         ))
         .id();
-    wait_for_children(&mut app, tmp.path(), &src);
+    ExplorerApp::wait_for_children(&mut app, tmp.path(), &src);
     app.world_mut()
         .entity_mut(first)
         .remove::<ExplorerTreeDirty>();
@@ -338,9 +339,9 @@ fn expansion_outlives_the_page_that_made_it() {
             ExplorerState::default(),
         ))
         .id();
-    wait_for_children(&mut app, tmp.path(), tmp.path());
+    ExplorerApp::wait_for_children(&mut app, tmp.path(), tmp.path());
     toggle(&mut app, first, &src);
-    wait_for_children(&mut app, tmp.path(), &src);
+    ExplorerApp::wait_for_children(&mut app, tmp.path(), &src);
     app.world_mut().entity_mut(first).despawn();
     app.update();
     assert!(
@@ -421,8 +422,8 @@ fn expanding_warms_the_next_level_and_stops_there() {
         ExplorerState::default(),
     ));
 
-    wait_for_children(&mut app, tmp.path(), tmp.path());
-    wait_for_children(&mut app, tmp.path(), &tmp.path().join("src"));
+    ExplorerApp::wait_for_children(&mut app, tmp.path(), tmp.path());
+    ExplorerApp::wait_for_children(&mut app, tmp.path(), &tmp.path().join("src"));
 
     for _ in 0..200 {
         app.update();
@@ -448,10 +449,10 @@ fn toggle_expands_then_collapses_subdir() {
         .world_mut()
         .spawn((FileView { path: file }, ExplorerState::default()))
         .id();
-    wait_for_children(&mut app, tmp.path(), tmp.path());
+    ExplorerApp::wait_for_children(&mut app, tmp.path(), tmp.path());
     let src = tmp.path().join("src");
     toggle(&mut app, e, &src);
-    wait_for_children(&mut app, tmp.path(), &src);
+    ExplorerApp::wait_for_children(&mut app, tmp.path(), &src);
     let tree = ExplorerTree::in_app(&app, tmp.path());
     assert!(tree.expanded.contains(&src));
     assert!(
@@ -478,13 +479,13 @@ fn reveal_current_expands_ancestors_and_focuses_file() {
         .world_mut()
         .spawn((FileView { path: file.clone() }, ExplorerState::default()))
         .id();
-    wait_for_children(&mut app, tmp.path(), tmp.path());
+    ExplorerApp::wait_for_children(&mut app, tmp.path(), tmp.path());
     app.world_mut().trigger(UiInput {
         webview: e,
         payload: ExplorerRevealCurrent,
     });
     let src = tmp.path().join("src");
-    wait_for_children(&mut app, tmp.path(), &src);
+    ExplorerApp::wait_for_children(&mut app, tmp.path(), &src);
     let tree = ExplorerTree::in_app(&app, tmp.path());
     assert!(tree.expanded.contains(tmp.path()));
     assert!(tree.expanded.contains(&src));
@@ -507,12 +508,12 @@ fn repeated_reveal_skips_unchanged_tree_rebuild() {
         .world_mut()
         .spawn((FileView { path: file }, ExplorerState::default()))
         .id();
-    wait_for_children(&mut app, tmp.path(), tmp.path());
+    ExplorerApp::wait_for_children(&mut app, tmp.path(), tmp.path());
     app.world_mut().trigger(UiInput {
         webview: e,
         payload: ExplorerRevealCurrent,
     });
-    wait_for_children(&mut app, tmp.path(), &tmp.path().join("src"));
+    ExplorerApp::wait_for_children(&mut app, tmp.path(), &tmp.path().join("src"));
     app.world_mut().entity_mut(e).remove::<ExplorerTreeDirty>();
     app.world_mut()
         .get_mut::<ExplorerState>(e)
@@ -547,14 +548,14 @@ fn opening_a_file_reveals_it_without_an_explicit_request() {
             ExplorerState::default(),
         ))
         .id();
-    wait_for_children(&mut app, tmp.path(), tmp.path());
+    ExplorerApp::wait_for_children(&mut app, tmp.path(), tmp.path());
     assert!(
         !ExplorerTree::in_app(&app, tmp.path())
             .expanded
             .contains(&src)
     );
     app.world_mut().get_mut::<FileView>(e).unwrap().path = file.clone();
-    wait_for_children(&mut app, tmp.path(), &src);
+    ExplorerApp::wait_for_children(&mut app, tmp.path(), &src);
     assert!(
         ExplorerTree::in_app(&app, tmp.path())
             .expanded
@@ -584,7 +585,7 @@ fn opening_a_file_leaves_a_hidden_explorer_collapsed() {
             ExplorerState::default(),
         ))
         .id();
-    wait_for_children(&mut app, tmp.path(), tmp.path());
+    ExplorerApp::wait_for_children(&mut app, tmp.path(), tmp.path());
     app.world_mut().get_mut::<FileView>(e).unwrap().path = src.join("lib.rs");
     for _ in 0..200 {
         app.update();
@@ -682,10 +683,10 @@ fn only_an_asked_for_reveal_may_take_focus_from_the_editor() {
         ))
         .id();
     SentReveals::watch(&mut app, e);
-    wait_for_children(&mut app, tmp.path(), tmp.path());
+    ExplorerApp::wait_for_children(&mut app, tmp.path(), tmp.path());
     let _ = SentReveals::drain(&mut app);
     app.world_mut().get_mut::<FileView>(e).unwrap().path = src.join("lib.rs");
-    wait_for_children(&mut app, tmp.path(), &src);
+    ExplorerApp::wait_for_children(&mut app, tmp.path(), &src);
     assert_eq!(
         SentReveals::drain(&mut app),
         vec![ExplorerReveal::Followed],
@@ -716,7 +717,7 @@ fn collapse_all_leaves_the_root_expanded_and_nothing_else() {
             ExplorerState::default(),
         ))
         .id();
-    wait_for_children(&mut app, tmp.path(), &src);
+    ExplorerApp::wait_for_children(&mut app, tmp.path(), &src);
     assert!(ExplorerTree::in_app(&app, tmp.path()).expanded.len() > 1);
     app.world_mut().entity_mut(e).remove::<ExplorerTreeDirty>();
     app.world_mut().trigger(UiInput {
@@ -855,12 +856,12 @@ fn panel_open_reveals_current_file() {
             ChildOf(stack),
         ))
         .id();
-    wait_for_children(&mut app, tmp.path(), tmp.path());
+    ExplorerApp::wait_for_children(&mut app, tmp.path(), tmp.path());
     app.world_mut().trigger(UiInput {
         webview: e,
         payload: ExplorerPanelSetVisible { visible: true },
     });
-    wait_for_children(&mut app, tmp.path(), &tmp.path().join("src"));
+    ExplorerApp::wait_for_children(&mut app, tmp.path(), &tmp.path().join("src"));
     assert!(
         app.world()
             .get::<StackExplorerVisibility>(stack)

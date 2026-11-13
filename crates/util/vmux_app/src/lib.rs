@@ -15,6 +15,8 @@ pub use vmux_extension as extension;
 pub use vmux_flex as flex;
 #[cfg(feature = "layout")]
 pub use vmux_layout as layout;
+#[cfg(feature = "lsp")]
+pub use vmux_lsp as lsp;
 #[cfg(feature = "project")]
 pub use vmux_project as project;
 
