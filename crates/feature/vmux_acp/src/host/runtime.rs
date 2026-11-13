@@ -25,28 +25,29 @@ use crate::host::event::{
 use crate::policy::AcpWorkspacePolicy;
 use vmux_session::host::{ImportedConversation, SessionView};
 use vmux_session::{
-    AgentId, ApprovalPolicy, PromptQueue, Route, RunState, Session, SessionId, TitlePending,
+    AgentId, ApprovalPolicy, QueuedPrompts, Route, RunState, Session, SessionId, TitlePending,
 };
 
 #[derive(SystemSet, Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub(super) struct AcpSessionConfigSet;
 
-pub(super) fn add(app: &mut App) {
-    app.add_plugins(FeaturePlugin::<crate::Feature>::default());
-    crate::policy::add(app);
-    crate::host::acp::add_registry(app);
-    crate::host::acp::add(app);
-    app.add_message::<ServiceRequest>()
-        .add_message::<AcpAgentInfo>()
-        .add_message::<AcpWorkspaceChanged>()
-        .add_message::<AcpSessionConfigSnapshot>()
-        .add_message::<AcpSessionConfigSelectionResult>()
-        .add_message::<AcpSessionCreated>()
-        .add_message::<AcpTerminalCreated>()
-        .add_systems(
-            Update,
-            (
-                input.after(ServiceMessageSet),
+pub(super) struct Plugin;
+
+impl bevy::prelude::Plugin for Plugin {
+    fn build(&self, app: &mut App) {
+        app.add_plugins(FeaturePlugin::<crate::Feature>::default());
+        crate::policy::add(app);
+        crate::host::acp::add_registry(app);
+        crate::host::acp::add(app);
+        app.add_plugins(InputPlugin)
+            .add_message::<AcpAgentInfo>()
+            .add_message::<AcpWorkspaceChanged>()
+            .add_message::<AcpSessionConfigSnapshot>()
+            .add_message::<AcpSessionConfigSelectionResult>()
+            .add_message::<AcpSessionCreated>()
+            .add_message::<AcpTerminalCreated>()
+            .add_systems(
+                Update,
                 (
                     info,
                     workspace,
@@ -55,10 +56,24 @@ pub(super) fn add(app: &mut App) {
                     present_process,
                 )
                     .after(ServiceMessageSet),
-            ),
-        )
-        .add_observer(close_on_remove)
-        .add_observer(auto_allow);
+            )
+            .add_observer(close_on_remove);
+    }
+}
+
+struct InputPlugin;
+
+impl bevy::prelude::Plugin for InputPlugin {
+    fn build(&self, app: &mut App) {
+        app.add_message::<ServiceRequest>()
+            .add_systems(
+                Update,
+                input
+                    .after(ServiceMessageSet)
+                    .before(vmux_session::TranscriptReadySet),
+            )
+            .add_observer(auto_allow);
+    }
 }
 
 #[derive(Component, Clone, Debug, Default, PartialEq, Eq)]
@@ -360,7 +375,6 @@ fn input(
         &SessionId,
         &AgentId,
         &mut RunState,
-        &mut PromptQueue,
         Has<AcpSpawnQueued>,
         Has<TitlePending>,
         Option<&mut PendingHandoff>,
@@ -370,26 +384,25 @@ fn input(
     policy: Single<&AcpWorkspacePolicy>,
     modes: Option<Single<&crate::host::model_selection::AgentModeSelections>>,
     mut service_requests: MessageWriter<ServiceRequest>,
+    mut queues: QueuedPrompts,
 ) {
     for (
         entity,
         session_id,
         agent_id,
         mut state,
-        mut queue,
         spawn_queued,
         title_pending,
         mut pending,
         mut imported,
     ) in &mut q
     {
-        if !acp_prompt_dispatch_ready(&state, &queue, spawn_queued) {
+        if !spawn_queued || !queues.ready(entity, matches!(*state, RunState::Idle)) {
             continue;
         }
-        let Some(prompt) = queue.take_next() else {
+        let Some((_, text, attachments)) = queues.take_next(entity) else {
             continue;
         };
-        let text = prompt.text;
         let handoff = pending.as_deref_mut().and_then(|pending| {
             if pending.sent {
                 return None;
@@ -415,17 +428,13 @@ fn input(
                 sid: session_id.0.clone(),
                 text,
                 context,
-                attachments: prompt.attachments,
+                attachments,
                 preferred_mode,
             }
             .into(),
         ));
         *state = RunState::Streaming;
     }
-}
-
-fn acp_prompt_dispatch_ready(state: &RunState, queue: &PromptQueue, spawn_queued: bool) -> bool {
-    spawn_queued && queue.ready(matches!(state, RunState::Idle))
 }
 
 fn close_on_remove(
@@ -465,7 +474,9 @@ mod tests {
     #[test]
     fn auto_approval_targets_requested_session_and_call() {
         let mut app = App::new();
-        app.add_message::<ServiceRequest>().add_observer(auto_allow);
+        app.add_plugins((MinimalPlugins, InputPlugin));
+        app.world_mut()
+            .spawn(crate::policy_driver::PolicyDriver::bundled());
         let mut policy = ApprovalPolicy::default();
         policy.allow("run");
         let session = app
@@ -497,18 +508,179 @@ mod tests {
         ));
     }
 
+    struct DispatchFixture {
+        app: App,
+        session: Entity,
+    }
+
+    impl DispatchFixture {
+        fn new(state: RunState) -> Self {
+            let mut app = App::new();
+            app.add_plugins((MinimalPlugins, vmux_session::QueuePlugin, InputPlugin));
+            app.world_mut()
+                .spawn(crate::policy_driver::PolicyDriver::bundled());
+            let session = app
+                .world_mut()
+                .spawn((
+                    TestSession::bundle("mock", "queue-session", "/tmp"),
+                    vmux_session::PromptQueue::default(),
+                    state,
+                ))
+                .id();
+            Self { app, session }
+        }
+
+        fn enqueue(
+            &mut self,
+            session: Entity,
+            text: &str,
+            media: Vec<vmux_api::protocol::AgentAttachment>,
+        ) {
+            let text = text.to_string();
+            self.app
+                .world_mut()
+                .run_system_once(move |mut queues: QueuedPrompts| {
+                    queues.enqueue(session, text.clone(), media.clone(), false);
+                })
+                .unwrap();
+        }
+
+        fn requests(&mut self) -> Vec<ServiceRequest> {
+            self.app
+                .world_mut()
+                .resource_mut::<Messages<ServiceRequest>>()
+                .drain()
+                .collect()
+        }
+    }
+
     #[test]
     fn queued_prompt_waits_for_acp_spawn_request() {
-        let mut queue = PromptQueue::default();
-        queue.enqueue("hello".to_string());
-
-        assert!(!acp_prompt_dispatch_ready(&RunState::Idle, &queue, false));
-        assert!(acp_prompt_dispatch_ready(&RunState::Idle, &queue, true));
-        assert!(!acp_prompt_dispatch_ready(
-            &RunState::Errored("failed".into()),
-            &queue,
-            true
+        let mut fixture = DispatchFixture::new(RunState::Idle);
+        fixture.enqueue(fixture.session, "first", Vec::new());
+        fixture.enqueue(fixture.session, "second", Vec::new());
+        fixture.app.update();
+        assert!(fixture.requests().is_empty());
+        fixture
+            .app
+            .world_mut()
+            .entity_mut(fixture.session)
+            .insert(AcpSpawnQueued);
+        fixture.app.update();
+        let requests = fixture.requests();
+        assert!(
+            matches!(requests.as_slice(), [ServiceRequest(ClientMessage::Shared(SharedMessage::AgentInput { sid, text, .. }))] if sid == "queue-session" && text == "first")
+        );
+        assert!(matches!(
+            fixture.app.world().get::<RunState>(fixture.session),
+            Some(RunState::Streaming)
         ));
+        fixture.app.update();
+        assert!(fixture.requests().is_empty());
+        *fixture
+            .app
+            .world_mut()
+            .get_mut::<RunState>(fixture.session)
+            .unwrap() = RunState::Idle;
+        fixture.app.update();
+        let requests = fixture.requests();
+        assert!(
+            matches!(requests.as_slice(), [ServiceRequest(ClientMessage::Shared(SharedMessage::AgentInput { text, .. }))] if text == "second")
+        );
+    }
+
+    #[test]
+    fn refused_dispatch_retains_the_prompt_until_the_session_is_rearmed() {
+        let mut fixture = DispatchFixture::new(RunState::Errored(
+            "thread already has an active writer".into(),
+        ));
+        fixture.enqueue(fixture.session, "retained", Vec::new());
+        fixture
+            .app
+            .world_mut()
+            .entity_mut(fixture.session)
+            .insert(AcpSpawnQueued);
+        fixture.app.update();
+        assert!(fixture.requests().is_empty());
+        *fixture
+            .app
+            .world_mut()
+            .get_mut::<RunState>(fixture.session)
+            .unwrap() = RunState::Idle;
+        fixture.app.update();
+        let requests = fixture.requests();
+        assert!(
+            matches!(requests.as_slice(), [ServiceRequest(ClientMessage::Shared(SharedMessage::AgentInput { text, .. }))] if text == "retained")
+        );
+    }
+
+    #[test]
+    fn flushed_dispatch_keeps_attachment_order_and_other_sessions_separate() {
+        let mut fixture = DispatchFixture::new(RunState::Idle);
+        let first = vmux_api::protocol::AgentAttachment {
+            path: "/tmp/first.png".into(),
+            name: "first".into(),
+            mime_type: "image/png".into(),
+            size: 1,
+        };
+        let second = vmux_api::protocol::AgentAttachment {
+            path: "/tmp/second.png".into(),
+            name: "second".into(),
+            mime_type: "image/png".into(),
+            size: 2,
+        };
+        fixture.enqueue(fixture.session, "first", vec![first.clone()]);
+        fixture.enqueue(fixture.session, "second", vec![second.clone()]);
+        let session = fixture.session;
+        assert!(
+            fixture
+                .app
+                .world_mut()
+                .run_system_once(move |mut queues: QueuedPrompts| queues.request_flush(session))
+                .unwrap()
+        );
+        fixture
+            .app
+            .world_mut()
+            .entity_mut(session)
+            .insert(AcpSpawnQueued);
+        let other = fixture
+            .app
+            .world_mut()
+            .spawn((
+                TestSession::bundle("mock", "other", "/tmp"),
+                vmux_session::PromptQueue::default(),
+                RunState::Idle,
+                AcpSpawnQueued,
+            ))
+            .id();
+        fixture.enqueue(other, "third", Vec::new());
+        fixture.app.update();
+        let mut inputs = Vec::new();
+        for request in fixture.requests() {
+            let ServiceRequest(ClientMessage::Shared(SharedMessage::AgentInput {
+                sid,
+                text,
+                attachments,
+                ..
+            })) = request
+            else {
+                panic!("unexpected provider request");
+            };
+            inputs.push((sid, text, attachments));
+        }
+        inputs.sort_by(|left, right| left.0.cmp(&right.0));
+        assert_eq!(
+            inputs,
+            [
+                ("other".into(), "third".into(), Vec::new()),
+                (
+                    "queue-session".into(),
+                    "first\n\nsecond".into(),
+                    vec![first, second]
+                ),
+            ]
+        );
     }
 
     #[test]
@@ -753,7 +925,7 @@ mod tests {
     fn live_acp_identity_updates_only_matching_profile() {
         let mut app = App::new();
         app.add_plugins(bevy::app::TaskPoolPlugin::default());
-        add(&mut app);
+        app.add_plugins(super::Plugin);
         let matching = app
             .world_mut()
             .spawn((
@@ -809,7 +981,7 @@ mod tests {
     fn live_acp_config_state_updates_only_matching_session() {
         let mut app = App::new();
         app.add_plugins(bevy::app::TaskPoolPlugin::default());
-        add(&mut app);
+        app.add_plugins(super::Plugin);
         let matching = app
             .world_mut()
             .spawn(TestSession::bundle("claude", "s1", "/tmp"))
@@ -970,7 +1142,7 @@ mod tests {
     fn plugin_builds_and_runs_without_panic() {
         let mut app = App::new();
         app.add_plugins(bevy::app::TaskPoolPlugin::default());
-        add(&mut app);
+        app.add_plugins(super::Plugin);
         app.world_mut()
             .spawn(TestSession::bundle("vibe-acp", "s1", "/tmp"));
         app.update();

@@ -518,10 +518,21 @@ pub struct RepoInfoCache {
     leases: HashMap<Entity, RepoInfoLease>,
     maintenance_dirty: bool,
     next_gc: Instant,
+    watch_cursor: usize,
     wake: Option<bevy::winit::EventLoopProxy<WinitUserEvent>>,
 }
 
 impl RepoInfoCache {
+    fn evict_inactive(&mut self, watch: &mut GitWatch, active: &HashSet<PathBuf>) {
+        for path in self.inactive_paths(active) {
+            if let Some(targets) = watch.repo_info_subscriptions.remove(&path) {
+                watch.remove_repo_info_owner(&path, &targets);
+                watch.release_targets(&targets);
+            }
+            self.remove(&path);
+        }
+    }
+
     fn new(wake: Option<bevy::winit::EventLoopProxy<WinitUserEvent>>) -> Self {
         Self {
             entries: HashMap::new(),
@@ -532,6 +543,7 @@ impl RepoInfoCache {
             leases: HashMap::new(),
             maintenance_dirty: true,
             next_gc: Instant::now() + REPO_INFO_IDLE_TTL,
+            watch_cursor: 0,
             wake,
         }
     }
@@ -1352,20 +1364,6 @@ impl GitWatch {
         }
     }
 
-    fn evict_inactive_repo_info(
-        &mut self,
-        repo_info: &mut RepoInfoCache,
-        active: &HashSet<PathBuf>,
-    ) {
-        for path in repo_info.inactive_paths(active) {
-            if let Some(targets) = self.repo_info_subscriptions.remove(&path) {
-                self.remove_repo_info_owner(&path, &targets);
-                self.release_targets(&targets);
-            }
-            repo_info.remove(&path);
-        }
-    }
-
     fn subscribe_repo_info(
         &mut self,
         path: &Path,
@@ -1765,7 +1763,6 @@ fn info(
     active_owners: Query<(), ActiveOwner>,
     deadline: Option<Res<GitWatchDeadline>>,
     proxy: Option<Res<EventLoopProxyWrapper>>,
-    mut watch_cursor: Local<usize>,
 ) {
     let repo_info = repo_info.bypass_change_detection();
     let now = Instant::now();
@@ -1787,7 +1784,7 @@ fn info(
         return;
     };
     watch.release_inactive_repo_info(repo_info, &active);
-    watch.evict_inactive_repo_info(repo_info, &active);
+    repo_info.evict_inactive(&mut watch, &active);
     let mut paths: Vec<PathBuf> = repo_info
         .entries
         .iter()
@@ -1799,9 +1796,9 @@ fn info(
     let mut retry_watch = false;
     let pending_watch = paths.len() > REPO_INFO_WATCH_BUDGET;
     if !paths.is_empty() {
-        let start = *watch_cursor % paths.len();
+        let start = repo_info.watch_cursor % paths.len();
         paths.rotate_left(start);
-        *watch_cursor = start + REPO_INFO_WATCH_BUDGET;
+        repo_info.watch_cursor = start + REPO_INFO_WATCH_BUDGET;
     }
     for path in paths.into_iter().take(REPO_INFO_WATCH_BUDGET) {
         let info = repo_info
@@ -2318,7 +2315,7 @@ mod tests {
         assert!(watch.subscribe_repo_info(&stale_path, Some(&stale_info)));
 
         let active = HashSet::from([active_path.clone()]);
-        watch.evict_inactive_repo_info(&mut cache, &active);
+        cache.evict_inactive(&mut watch, &active);
 
         assert!(cache.entries.contains_key(&active_path));
         assert!(!cache.entries.contains_key(&stale_path));

@@ -160,6 +160,19 @@ impl TabWorktreeCheckoutResult {
     }
 }
 
+pub enum BranchSelection {
+    Ready(BranchCheckout),
+    Waiting(BranchWait),
+}
+
+pub struct BranchWait(ManagedCheckoutWait);
+
+impl BranchWait {
+    pub fn is_ready(&self) -> bool {
+        self.0.is_ready()
+    }
+}
+
 pub(crate) struct ManagedCheckoutWait {
     lease: Arc<ManagedCheckoutLease>,
 }
@@ -271,6 +284,9 @@ impl TabWorktreeActivation {
         #[cfg(not(unix))]
         let digest = Sha256::digest(checkout.common_dir.to_string_lossy().as_bytes());
         let hash = format!("{digest:x}");
+        let managed_root = managed_root
+            .canonicalize()
+            .unwrap_or_else(|_| managed_root.to_path_buf());
         managed_root.join(format!("{repository_name}-{}", &hash[..12]))
     }
 
@@ -517,12 +533,14 @@ impl TabWorktreeActivation {
         branch: &str,
         managed_root: &Path,
         wake: Option<EventLoopProxy<WinitUserEvent>>,
-    ) -> Result<Option<BranchCheckout>, String> {
+    ) -> Result<BranchSelection, String> {
         match Self::checkout_branch(base_dir, branch, managed_root)? {
-            TabWorktreeCheckoutResult::Ready(checkout) => Ok(Some(BranchCheckout(*checkout))),
+            TabWorktreeCheckoutResult::Ready(checkout) => {
+                Ok(BranchSelection::Ready(BranchCheckout(*checkout)))
+            }
             TabWorktreeCheckoutResult::Retry(wait) => {
                 wait.subscribe(wake);
-                Ok(None)
+                Ok(BranchSelection::Waiting(BranchWait(wait)))
             }
         }
     }
@@ -1877,7 +1895,7 @@ mod tests {
         let (path, branch) =
             TabWorktreeActivation::plan_worktree(&checkout, managed_root.path(), "feat");
         assert_eq!(branch, "vmux/feat-2");
-        assert!(path.starts_with(managed_root.path()));
+        assert!(path.starts_with(managed_root.path().canonicalize().unwrap()));
         assert!(path.ends_with("feat-2"), "{path:?}");
     }
 

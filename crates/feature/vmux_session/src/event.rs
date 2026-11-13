@@ -297,6 +297,13 @@ pub struct SelectMode {
 #[vmux_api::ui_event]
 pub struct ChatHistoryMoreRequest;
 
+#[vmux_api::ui_event]
+pub struct ChatToolFileOpen {
+    pub url: String,
+    pub width: f64,
+    pub open: Option<vmux_api::open_target::OpenTarget>,
+}
+
 #[vmux_api::contract(Default, Eq)]
 pub struct ChatTranscriptState {
     pub generation: u64,

@@ -827,7 +827,7 @@ impl SessionDetailUiState {
     ) -> Self {
         let id = match Route::parse(&page.url) {
             Some(Route::Session(id)) => id.0,
-            Some(Route::Manager) | None => return Self::default(),
+            Some(Route::Manager | Route::Provider { .. }) | None => return Self::default(),
         };
         let session = catalog
             .sessions
@@ -842,6 +842,7 @@ impl SessionDetailUiState {
             repository,
             stages: catalog.stages.clone(),
             navigation: Navigation::project(catalog, repositories),
+            pending_provider: None,
         }
     }
 }
@@ -1011,7 +1012,11 @@ fn sync_repositories(
         (),
         (
             With<KeyboardOwner>,
-            Or<(Added<SessionCatalogUiStateComponent>, Added<KeyboardOwner>)>,
+            Or<(
+                Added<SessionCatalogView>,
+                Added<SessionDetailView>,
+                Added<KeyboardOwner>,
+            )>,
             Or<(With<SessionCatalogView>, With<SessionDetailView>)>,
         ),
     >,

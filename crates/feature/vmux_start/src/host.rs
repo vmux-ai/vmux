@@ -66,6 +66,9 @@ fn prewarm(mut commands: Commands) {
 #[derive(Component)]
 struct StartWorkSynced;
 
+#[derive(Component)]
+struct GitProjection(Option<vmux_git::worktree::RepoInfo>);
+
 #[derive(Component, Default)]
 struct CommandBarFocusRevision(u64);
 
@@ -278,6 +281,7 @@ fn sync_pages(
             &PageMetadata,
             Has<StartWorkSynced>,
             Has<KeyboardOwner>,
+            Option<&GitProjection>,
         ),
         (
             With<HostsLauncher>,
@@ -286,9 +290,6 @@ fn sync_pages(
     >,
     added_keyboard_targets: Query<(), Added<KeyboardOwner>>,
     mut repo_info: Option<Single<&mut vmux_git::RepoInfoCache>>,
-    mut last_git: Local<
-        std::collections::HashMap<Entity, (String, Option<vmux_git::worktree::RepoInfo>)>,
-    >,
     space_projects: vmux_space::SpaceProjects,
     active_project_rows: Res<vmux_space::ActiveProjectRows>,
     projector: CommandBarProjector,
@@ -322,8 +323,7 @@ fn sync_pages(
         .as_deref()
         .map(|locale| locale.0.clone())
         .unwrap_or_else(Locale::preferred);
-    last_git.retain(|entity, _| starts.contains(*entity));
-    for (e, meta, synced, keyboard_target) in &starts {
+    for (e, meta, synced, keyboard_target, last_git) in &starts {
         if !meta.url.starts_with(StartPlugin::URL) {
             continue;
         }
@@ -348,16 +348,14 @@ fn sync_pages(
                 cache.snapshot(Path::new(&cwd))
             }
         });
-        let git_changed = last_git
-            .get(&e)
-            .is_none_or(|(old_cwd, info)| *old_cwd != cwd || *info != git_info);
+        let git_changed = last_git.is_none_or(|projection| projection.0 != git_info);
         let focus_requested =
             keyboard_target && (!synced || added_keyboard_targets.contains(e) || focus_changed);
         if !changed && synced && !focus_requested && !git_changed && !prompt_context.changed(e, tab)
         {
             continue;
         }
-        last_git.insert(e, (cwd, git_info.clone()));
+        commands.entity(e).insert(GitProjection(git_info.clone()));
         let payload = prompt_context.project(
             &projector,
             &tab_gather,
@@ -458,6 +456,7 @@ fn mark_launcher(
                 HostsLauncher,
                 vmux_command::CommandBarState,
                 StartWorkSynced,
+                GitProjection,
             )>();
         }
     }

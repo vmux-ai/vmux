@@ -65,26 +65,34 @@ impl DiscoveryGate {
     }
 }
 
-#[cfg(target_os = "macos")]
 pub(super) struct ProcessSampler {
     sample_poll: Timer,
     discovery: DiscoveryGate,
-    discovered: bool,
     sampled: bool,
+    #[cfg(target_os = "macos")]
+    discovered: bool,
+    #[cfg(target_os = "macos")]
     local: HashMap<u32, MacLocalProcess>,
+    #[cfg(target_os = "macos")]
     counters: HashMap<u32, ProcessCounter>,
+    #[cfg(not(target_os = "macos"))]
+    system: sysinfo::System,
 }
 
-#[cfg(target_os = "macos")]
 impl Default for ProcessSampler {
     fn default() -> Self {
         Self {
             sample_poll: Timer::new(CPU_WARMUP_INTERVAL, TimerMode::Repeating),
             discovery: DiscoveryGate::default(),
-            discovered: false,
             sampled: false,
+            #[cfg(target_os = "macos")]
+            discovered: false,
+            #[cfg(target_os = "macos")]
             local: HashMap::new(),
+            #[cfg(target_os = "macos")]
             counters: HashMap::new(),
+            #[cfg(not(target_os = "macos"))]
+            system: sysinfo::System::new(),
         }
     }
 }
@@ -400,26 +408,6 @@ fn unix_time() -> u64 {
         .duration_since(std::time::UNIX_EPOCH)
         .unwrap_or_default()
         .as_secs()
-}
-
-#[cfg(not(target_os = "macos"))]
-pub(super) struct ProcessSampler {
-    sample_poll: Timer,
-    discovery: DiscoveryGate,
-    sampled: bool,
-    system: sysinfo::System,
-}
-
-#[cfg(not(target_os = "macos"))]
-impl Default for ProcessSampler {
-    fn default() -> Self {
-        Self {
-            sample_poll: Timer::new(CPU_WARMUP_INTERVAL, TimerMode::Repeating),
-            discovery: DiscoveryGate::default(),
-            sampled: false,
-            system: sysinfo::System::new(),
-        }
-    }
 }
 
 #[cfg(not(target_os = "macos"))]

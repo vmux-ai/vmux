@@ -21,6 +21,300 @@ const UPSTREAM_SETS: &[(&str, &str)] = &[
 ];
 
 #[test]
+fn renderer_helpers_require_a_current_typed_production_parent() {
+    for (attributes, body, expected) in [
+        ("#[component]", "rsx! { Child { text: view.text } }", true),
+        (
+            "#[component] #[cfg(test)]",
+            "rsx! { Child { text: view.text } }",
+            false,
+        ),
+        ("#[component]", "rsx! { div { {view.text} } }", false),
+        (
+            "#[component]",
+            "let Child = view.text; rsx! { div { Child } }",
+            false,
+        ),
+        ("#[test]", "let _ = (view, Child);", false),
+    ] {
+        let inventory = Inventory::fixture(&format!(
+            "#[derive(Message)] struct View {{ text:String }} {attributes} fn Parent(view:View)->Element {{ {body} }} #[component] fn Child(text:String)->Element {{ rsx! {{ div {{ text }} }} }} struct Root; impl Plugin for Root {{ fn build(&self, app:&mut App) {{ app.add_message::<View>(); }} }}"
+        ));
+        let input = format!("ECS: {}", inventory.key("struct:View"));
+        let mut parent = Boundary::fixture(&inventory, "fn:Parent");
+        parent.input = input.clone();
+        parent.output = "external: Dioxus DOM".into();
+        let mut child = Boundary::fixture(&inventory, "fn:Child");
+        child.input = input;
+        child.output = "external: Dioxus DOM".into();
+        child.owner = Some(parent.key.clone());
+        let policy = Policy {
+            boundaries: vec![parent, child.clone()],
+            ..Default::default()
+        };
+        assert_eq!(
+            child.references_from(&inventory, &policy, &mut BTreeSet::new()),
+            expected,
+            "{body}"
+        );
+    }
+}
+
+#[test]
+fn renderer_aliases_keep_the_identity_of_the_mounted_child() {
+    for (binding, expected) in [
+        ("use self::actual::Child as Card;", true),
+        ("use self::unrelated::Child as Card;", false),
+        (
+            "#[cfg(feature=\"one\")] use self::actual::Child as Card; #[cfg(feature=\"two\")] use self::unrelated::Child as Card;",
+            false,
+        ),
+    ] {
+        let mut inventory = Inventory::default();
+        inventory.source("crates/sample/src/lib.rs", &format!("mod actual; mod unrelated; {binding} #[derive(Message)] struct View {{ text:String }} #[component] fn Parent(view:View)->Element {{ rsx! {{ Card {{ text:view.text }} }} }} struct Root; impl Plugin for Root {{ fn build(&self, app:&mut App) {{ app.add_message::<View>(); }} }}"));
+        for name in ["actual", "unrelated"] {
+            inventory.source(
+                &format!("crates/sample/src/{name}.rs"),
+                "#[component] pub fn Child(text:String)->Element { rsx! { div { text } } }",
+            );
+        }
+        inventory.resolve_usage();
+        let mut parent = Boundary::fixture(&inventory, "fn:Parent");
+        parent.input = format!("ECS: {}", inventory.key("struct:View"));
+        parent.output = "external: Dioxus DOM".into();
+        let key = "crates/sample/src/actual.rs||fn:Child".to_string();
+        let mut child = parent.clone();
+        child.key = key.clone();
+        child.fingerprint = inventory.entries[&key].fingerprint.clone();
+        child.owner = Some(parent.key.clone());
+        let policy = Policy {
+            boundaries: vec![parent, child.clone()],
+            ..Default::default()
+        };
+        assert_eq!(
+            child.references_from(&inventory, &policy, &mut BTreeSet::new()),
+            expected,
+            "{binding}"
+        );
+    }
+}
+
+#[test]
+fn renderer_boundaries_follow_rust_expressions_instead_of_literal_text() {
+    for (body, expected) in [
+        ("button { onclick:move |_| emit(Intent { value:1 }) }", true),
+        ("Child { value:Intent { value:1 } }", true),
+        ("div { { read::<Intent>() } }", true),
+        ("if check::<Intent>() { span {} }", true),
+        ("for item in read::<Intent>() { span {} }", true),
+        ("div { ..attrs::<Intent>() }", true),
+        ("div { title:\"{label::<Intent>()}\" }", true),
+        ("div { \"Intent\" }", false),
+        ("div { \"{{Intent}}\" }", false),
+    ] {
+        let inventory = Inventory::fixture(&format!(
+            "#[derive(Message)] struct Intent {{ value:u64 }} #[component] fn Render()->Element {{ rsx! {{ {body} }} }} struct Root; impl Plugin for Root {{ fn build(&self, app:&mut App) {{ app.add_message::<Intent>(); }} }}"
+        ));
+        let mut boundary = Boundary::fixture(&inventory, "fn:Render");
+        boundary.input = format!("ECS: {}", inventory.key("struct:Intent"));
+        boundary.output = "external: mounted DOM".into();
+        assert_eq!(boundary.references(&inventory), expected, "{body}");
+    }
+}
+
+#[test]
+fn adapter_value_endpoints_require_an_actual_used_canonical_owner() {
+    let inventory = Inventory::fixture(
+        "enum State { Active } #[derive(Message)] struct Observed { value:State } #[derive(Message)] struct Unused { value:State } struct Codec; impl Codec { fn decode()->State { State::Active } } struct Root; impl Plugin for Root { fn build(&self, app:&mut App) { app.add_message::<Observed>(); } }",
+    );
+    let key = inventory.key("enum:State");
+    let mut boundary = Boundary::fixture(&inventory, "impl:Codec");
+    boundary.input = "external: provider bytes".into();
+    boundary.output = format!("ECS: {key}");
+    let mut policy = Policy::default();
+    assert!(!boundary.references_from(&inventory, &policy, &mut BTreeSet::new()));
+    policy.values.push(ValueOwner {
+        key,
+        owner: inventory.key("struct:Observed"),
+        lifetime: "one typed ingress observation".into(),
+    });
+    assert!(boundary.references_from(&inventory, &policy, &mut BTreeSet::new()));
+    policy.values[0].owner = inventory.key("struct:Unused");
+    assert!(!boundary.references_from(&inventory, &policy, &mut BTreeSet::new()));
+}
+
+#[test]
+fn adapter_endpoints_follow_nested_values_to_a_used_canonical_owner() {
+    for (registration, expected) in [("app.add_systems(Update, read);", true), ("", false)] {
+        let inventory = Inventory::fixture(&format!(
+            "#[derive(Component)] struct Root {{ source:Source }} struct Source {{ file:File }} struct File; struct Codec; impl Codec {{ fn decode()->File {{ File }} }} fn read(roots:Query<&Root>) {{}} struct Plugin; impl BevyPlugin for Plugin {{ fn build(&self,app:&mut App) {{ {registration} }} }}"
+        ));
+        let mut boundary = Boundary::fixture(&inventory, "impl:Codec");
+        boundary.input = "external: native file bytes".into();
+        boundary.output = format!("ECS: {}", inventory.key("struct:File"));
+        let policy = Policy {
+            values: vec![
+                ValueOwner {
+                    key: inventory.key("struct:Source"),
+                    owner: inventory.key("struct:Root"),
+                    lifetime: "root-owned native source".into(),
+                },
+                ValueOwner {
+                    key: inventory.key("struct:File"),
+                    owner: inventory.key("struct:Source"),
+                    lifetime: "source-owned native file".into(),
+                },
+            ],
+            ..Default::default()
+        };
+        assert_eq!(
+            boundary.references_from(&inventory, &policy, &mut BTreeSet::new()),
+            expected
+        );
+    }
+}
+
+#[test]
+fn pre_world_dom_fixtures_require_a_test_only_framework_component_edge() {
+    for (attributes, body, expected) in [
+        ("#[cfg(test)] #[component]", "rsx! { Child {} }", true),
+        ("#[component]", "rsx! { Child {} }", false),
+        ("#[cfg(test)]", "let _ = Child;", false),
+        ("#[cfg(test)] #[component]", "rsx! { div {} }", false),
+    ] {
+        let mut inventory = Inventory::default();
+        inventory.source("crates/feature/example/src/lib.rs", &format!("{attributes} fn Fixture()->Element {{ {body} }} #[component] fn Child()->Element {{ rsx! {{ div {{}} }} }}"));
+        inventory.resolve_usage();
+        let mut boundary = Boundary::fixture(&inventory, "fn:Fixture");
+        boundary.interface = "Dioxus VirtualDom fixture".into();
+        assert_eq!(boundary.references(&inventory), expected);
+    }
+}
+
+#[test]
+fn current_crate_contracts_preserve_the_declaring_crate_identity() {
+    let mut inventory = Inventory::default();
+    inventory.source("crates/util/vmux_api/src/address.rs", "#[crate::contract] pub struct Address { url:String } #[crate::ui_state] pub struct Snapshot { value:String }");
+    inventory.source(
+        "crates/feature/consumer/src/lib.rs",
+        "#[crate::contract] struct Forged { value:String }",
+    );
+    inventory.resolve_usage();
+    for (name, expected) in [
+        ("struct:Address", true),
+        ("struct:Snapshot", true),
+        ("struct:Forged", false),
+    ] {
+        let key = inventory.key(name);
+        assert_eq!(
+            inventory.canonical(
+                &inventory.entries[&key],
+                &Policy::default(),
+                &mut BTreeSet::new()
+            ),
+            expected,
+            "{name}"
+        );
+    }
+}
+
+#[test]
+fn plugin_boundaries_use_only_their_own_production_system_parameters() {
+    for (registration, expected) in [
+        ("app.add_systems(Update, read);", true),
+        ("#[cfg(test)] { app.add_systems(Update, read); }", false),
+        ("", false),
+    ] {
+        let inventory = Inventory::fixture(&format!(
+            "#[derive(Component)] struct State; fn read(state:Query<&State>) {{}} struct Other; impl Plugin for Other {{ fn build(&self, app:&mut App) {{ app.add_systems(Update, read); }} }} struct Root; impl Plugin for Root {{ fn build(&self, app:&mut App) {{ {registration} }} }}"
+        ));
+        let mut boundary = Boundary::fixture(&inventory, "struct:Root");
+        boundary.input = "external: Bevy App registration".into();
+        boundary.output = format!("ECS: {}", inventory.key("struct:State"));
+        assert_eq!(boundary.references(&inventory), expected, "{registration}");
+    }
+}
+
+#[test]
+fn scheduled_sets_require_a_registered_schedule_edge() {
+    for (registration, expected) in [
+        ("app.add_systems(Update, read.in_set(Phase::Input));", true),
+        (
+            "#[cfg(test)] { app.add_systems(Update, read.in_set(Phase::Input)); }",
+            false,
+        ),
+        ("", false),
+    ] {
+        let inventory = Inventory::fixture(&format!(
+            "#[derive(SystemSet)] enum Phase {{ Input }} fn read() {{}} struct Root; impl Plugin for Root {{ fn build(&self, app:&mut App) {{ {registration} }} }}"
+        ));
+        let key = inventory.key("enum:Phase");
+        assert_eq!(
+            inventory.canonical(
+                &inventory.entries[&key],
+                &Policy::default(),
+                &mut BTreeSet::new()
+            ),
+            expected,
+            "{registration}"
+        );
+    }
+}
+
+#[test]
+fn renderer_owner_chains_reach_the_original_typed_parent() {
+    for (rendered, expected) in [("rsx! { Leaf {} }", true), ("rsx! { div {} }", false)] {
+        let inventory = Inventory::fixture(&format!(
+            "#[derive(Message)] struct State {{ value:String }} #[component] fn Parent(state:State)->Element {{ rsx! {{ Middle {{}} }} }} #[component] fn Middle()->Element {{ {rendered} }} #[component] fn Leaf()->Element {{ rsx! {{ div {{}} }} }} struct Root; impl Plugin for Root {{ fn build(&self, app:&mut App) {{ app.add_message::<State>(); }} }}"
+        ));
+        let mut parent = Boundary::fixture(&inventory, "fn:Parent");
+        parent.input = format!("ECS: {}", inventory.key("struct:State"));
+        parent.output = "external: Dioxus DOM".into();
+        let mut middle = parent.clone();
+        middle.key = inventory.key("fn:Middle");
+        middle.fingerprint = inventory.entries[&middle.key].fingerprint.clone();
+        middle.owner = Some(parent.key.clone());
+        let mut leaf = parent.clone();
+        leaf.key = inventory.key("fn:Leaf");
+        leaf.fingerprint = inventory.entries[&leaf.key].fingerprint.clone();
+        leaf.owner = Some(middle.key.clone());
+        let mut policy = Policy {
+            boundaries: vec![parent, middle, leaf.clone()],
+            ..Default::default()
+        };
+        assert_eq!(
+            leaf.references_from(&inventory, &policy, &mut BTreeSet::new()),
+            expected,
+            "{rendered}"
+        );
+        policy.boundaries[1].fingerprint = "stale".into();
+        assert!(!leaf.references_from(&inventory, &policy, &mut BTreeSet::new()));
+    }
+}
+
+#[test]
+fn io_adapters_can_name_an_actual_canonical_component_owner() {
+    for (registration, expected) in [("app.add_systems(Update, read);", true), ("", false)] {
+        let inventory = Inventory::fixture(&format!(
+            "struct Reader {{ bytes:Vec<u8> }} #[derive(Component)] struct State {{ reader:Reader }} fn read(state:Query<&State>) {{}} struct Root; impl Plugin for Root {{ fn build(&self, app:&mut App) {{ {registration} }} }}"
+        ));
+        let mut boundary = Boundary::fixture(&inventory, "struct:Reader");
+        boundary.owner = Some(inventory.key("struct:State"));
+        boundary.input = format!("ECS: {}", inventory.key("struct:State"));
+        boundary.output = "external: bounded file bytes".into();
+        let policy = Policy {
+            boundaries: vec![boundary.clone()],
+            ..Default::default()
+        };
+        assert_eq!(
+            boundary.references_from(&inventory, &policy, &mut BTreeSet::new()),
+            expected,
+            "{registration}"
+        );
+    }
+}
+
+#[test]
 fn new_declarations_have_canonical_ownership_or_an_explicit_boundary() {
     let root = Workspace::current();
     let source = std::fs::read_to_string(root.0.join("ecs-policy.ron")).expect("ownership policy");
@@ -1404,6 +1698,259 @@ fn deleted_or_modified_legacy_entries_cannot_silently_remain() {
 }
 
 #[test]
+fn dom_fixture_callers_require_the_real_constructor_and_a_production_renderer() {
+    for (import, fixture, call, attributes, expected) in [
+        (
+            "use dioxus::core::VirtualDom;",
+            "#[component] fn Fixture() -> Element { rsx! { View {} } }",
+            "VirtualDom::new(Fixture)",
+            "#[test]",
+            true,
+        ),
+        (
+            "struct VirtualDom;",
+            "#[component] fn Fixture() -> Element { rsx! { View {} } }",
+            "VirtualDom::new(Fixture)",
+            "#[test]",
+            false,
+        ),
+        (
+            "use dioxus::core::VirtualDom;",
+            "fn Fixture() {}",
+            "VirtualDom::new(Fixture)",
+            "#[test]",
+            false,
+        ),
+        (
+            "use dioxus::core::VirtualDom;",
+            "#[component] fn Fixture() -> Element { rsx! { div {} } }",
+            "VirtualDom::new(Fixture)",
+            "#[test]",
+            false,
+        ),
+        (
+            "use dioxus::core::VirtualDom;",
+            "#[component] fn Fixture() -> Element { rsx! { View {} } }",
+            "\"VirtualDom::new(Fixture)\"",
+            "#[test]",
+            false,
+        ),
+        (
+            "use dioxus::core::VirtualDom;",
+            "#[component] fn Fixture() -> Element { rsx! { View {} } }",
+            "VirtualDom::new(Fixture)",
+            "",
+            false,
+        ),
+    ] {
+        let mut inventory = Inventory::default();
+        inventory.source(
+            "crates/feature/example/src/lib.rs",
+            &format!("#[component] fn View() -> Element {{ rsx! {{ div {{}} }} }} #[cfg(test)] mod tests {{ use super::View; {import} {fixture} {attributes} fn mount() {{ {call}; }} }}"),
+        );
+        inventory.resolve_usage();
+        let mut boundary = Boundary::fixture(&inventory, "tests|fn:mount");
+        boundary.interface = "Dioxus VirtualDom fixture".into();
+        assert_eq!(
+            boundary.references(&inventory),
+            expected,
+            "{import}; {fixture}; {call}; {attributes}"
+        );
+    }
+}
+
+#[test]
+fn plugin_adapter_helpers_follow_only_the_owners_registered_systems() {
+    for (system, body, expected) in [
+        ("read", "Reader::bytes();", true),
+        ("unrelated", "Reader::bytes();", false),
+        ("read", "", false),
+    ] {
+        let inventory = Inventory::fixture(&format!(
+            "#[derive(Component)] struct State; struct Reader; fn read(state: Query<&State>) {{ {body} }} fn unrelated(state: Query<&State>) {{}} struct Root; impl Plugin for Root {{ fn build(&self, app: &mut App) {{ app.add_systems(Update, {system}); }} }}"
+        ));
+        let mut parent = Boundary::fixture(&inventory, "impl:Plugin for Root");
+        parent.input = format!("ECS: {}", inventory.key("struct:State"));
+        parent.output = "external: installed native adapter systems".into();
+        let child = Boundary {
+            key: inventory.key("struct:Reader"),
+            owner: Some(parent.key.clone()),
+            fingerprint: inventory.entries[&inventory.key("struct:Reader")]
+                .fingerprint
+                .clone(),
+            ..parent.clone()
+        };
+        let mut policy = Policy::default();
+        policy.boundaries.push(parent);
+        policy.boundaries.push(child.clone());
+        assert_eq!(
+            child.references_from(&inventory, &policy, &mut BTreeSet::new()),
+            expected,
+            "{system}; {body}",
+        );
+    }
+}
+
+#[test]
+fn page_metadata_requires_the_actual_attribute_macro_and_a_typed_input() {
+    for (macro_attribute, local_macro, input, expected) in [
+        ("#[proc_macro_attribute]", "", "Metadata", true),
+        ("", "", "Metadata", false),
+        (
+            "#[proc_macro_attribute]",
+            "mod vmux_page { pub fn page() {} }",
+            "Metadata",
+            false,
+        ),
+        ("#[proc_macro_attribute]", "", "\"Metadata\"", false),
+        ("#[proc_macro_attribute]", "", "Other", false),
+    ] {
+        let mut inventory = Inventory::default();
+        inventory.source(
+            "crates/util/vmux_macro/src/lib.rs",
+            &format!("pub struct MacroPackage; {macro_attribute} pub fn page() {{}}"),
+        );
+        inventory.source(
+            "crates/util/vmux_page/src/lib.rs",
+            "pub struct Page; pub use vmux_macro::page;",
+        );
+        inventory.source(
+            "crates/feature/example/src/lib.rs",
+            &format!("{local_macro} #[vmux_api::ui_state] struct Metadata {{ id: u64 }} struct Other; #[vmux_page::page(component = Root, states = [], takes = {input})] struct Entry;"),
+        );
+        inventory.resolve_usage();
+        assert_eq!(
+            inventory.owner_references(
+                &inventory.entries["crates/feature/example/src/lib.rs||struct:Entry"],
+                &inventory.entries["crates/feature/example/src/lib.rs||struct:Metadata"],
+            ),
+            expected,
+            "{macro_attribute}; {local_macro}; {input}",
+        );
+    }
+}
+
+#[test]
+fn new_source_exports_update_previously_missing_owner_references() {
+    let mut inventory = Inventory::default();
+    inventory.source(
+        "crates/util/example/src/lib.rs",
+        "mod values; mod bridge; use bridge::Value; struct Owner { value: Value }",
+    );
+    inventory.source("crates/util/example/src/values.rs", "pub struct Value;");
+    inventory.resolve_usage();
+    let owner = "crates/util/example/src/lib.rs||struct:Owner";
+    let value = "crates/util/example/src/values.rs||struct:Value";
+    assert!(!inventory.owner_references(&inventory.entries[owner], &inventory.entries[value]));
+    inventory.source(
+        "crates/util/example/src/bridge.rs",
+        "pub use crate::values::Value;",
+    );
+    inventory.resolve_usage();
+    assert!(inventory.owner_references(&inventory.entries[owner], &inventory.entries[value]));
+}
+
+#[test]
+fn fixture_helpers_require_a_current_referenced_boundary_with_the_same_endpoint() {
+    for (attributes, body, stale, other_endpoint, expected) in [
+        ("#[cfg(test)]", "Source::bytes()", false, false, true),
+        ("#[cfg(test)]", "", false, false, false),
+        ("#[cfg(test)]", "Source::bytes()", true, false, false),
+        ("#[cfg(test)]", "Source::bytes()", false, true, false),
+        ("", "Source::bytes()", false, false, false),
+    ] {
+        let inventory = Inventory::fixture(&format!(
+            "#[vmux_api::ui_state] struct State {{ x: u32 }} #[vmux_api::ui_state] struct Other {{ x: u32 }} struct Source; impl Source {{ fn bytes(state: &State) {{}} }} {attributes} struct Harness; {attributes} impl Harness {{ fn run() {{ {body}; }} }}"
+        ));
+        let endpoint = format!("ECS: {}", inventory.key("struct:State"));
+        let mut parent = Boundary::fixture(&inventory, "impl:Source");
+        parent.input = if other_endpoint {
+            format!("ECS: {}", inventory.key("struct:Other"))
+        } else {
+            endpoint.clone()
+        };
+        parent.output = "external: fixture bytes".into();
+        if stale {
+            parent.fingerprint = "stale".into();
+        }
+        let mut child = Boundary::fixture(&inventory, "impl:Harness");
+        child.input = endpoint;
+        child.output = "external: isolated observation".into();
+        let mut policy = Policy::default();
+        policy.boundaries.push(parent);
+        policy.boundaries.push(child.clone());
+        assert_eq!(
+            child.references_from(&inventory, &policy, &mut BTreeSet::new()),
+            expected,
+            "{attributes}; {body}; stale={stale}; other_endpoint={other_endpoint}",
+        );
+    }
+}
+
+#[test]
+fn embedded_scripts_require_a_literal_source_edge_and_a_current_parent_boundary() {
+    for (inclusion, production_consumer, expected) in [
+        ("include_str!(\"fixture.js\")", "", true),
+        ("\"fixture.js\"", "", false),
+        ("include_str!(\"different.js\")", "", false),
+        ("include_str!(\"../fixture.js\")", "", false),
+        (
+            "include_str!(\"fixture.js\")",
+            "macro_rules! include_str { ($path:literal) => { \"unrelated\" } }",
+            false,
+        ),
+        (
+            "include_str!(\"fixture.js\")",
+            "fn run() { include_str!(\"fixture.js\"); }",
+            false,
+        ),
+    ] {
+        let mut inventory = Inventory::fixture(&format!(
+            "#[vmux_api::ui_state] struct State {{ x: u32 }} #[cfg(test)] struct Harness; #[cfg(test)] impl Harness {{ fn run(state: &State) {{ {inclusion}; }} }} {production_consumer}"
+        ));
+        inventory.script("fixture.js", "globalThis.ready = true;");
+        let mut parent = Boundary::fixture(&inventory, "impl:Harness");
+        parent.input = format!("ECS: {}", inventory.key("struct:State"));
+        parent.output = "external: isolated DOM fixture".into();
+        let child = Boundary {
+            key: "fixture.js||script".into(),
+            owner: Some(parent.key.clone()),
+            fingerprint: inventory.entries["fixture.js||script"].fingerprint.clone(),
+            ..parent.clone()
+        };
+        let mut policy = Policy::default();
+        policy.boundaries.push(parent);
+        policy.boundaries.push(child.clone());
+        assert_eq!(
+            child.references_from(&inventory, &policy, &mut BTreeSet::new()),
+            expected,
+            "{inclusion}; {production_consumer}",
+        );
+    }
+}
+
+#[test]
+fn test_only_system_parameters_do_not_change_production_ownership() {
+    for (parameter, expected) in [
+        ("#[cfg(test)] fixture: Res<Recorder>", true),
+        ("fixture: Res<Recorder>", false),
+    ] {
+        let inventory = Inventory::fixture(&format!(
+            "#[derive(Component)] struct State; struct Recorder(Vec<String>); fn project(state: Query<&State>, {parameter}) {{}} struct Root; impl Plugin for Root {{ fn build(&self, app: &mut App) {{ app.add_systems(Update, project); }} }}"
+        ));
+        assert_eq!(
+            inventory.canonical(
+                &inventory.entries[&inventory.key("fn:project")],
+                &Policy::default(),
+                &mut BTreeSet::new(),
+            ),
+            expected,
+            "{parameter}",
+        );
+    }
+}
+
+#[test]
 fn opaque_scripts_and_unparsed_macros_require_explicit_boundaries() {
     let inventory = Inventory::fixture(
         "thread_local! { static STATE: RefCell<Vec<String>> = RefCell::default(); }",
@@ -1541,13 +2088,16 @@ impl Policy {
             if !records.insert(&boundary.key) {
                 errors.push(format!("duplicate policy entry {}", boundary.key));
             }
+            let referenced = boundary.references_from(inventory, self, &mut BTreeSet::new());
             if !inventory.matches(&boundary.key, &boundary.fingerprint)
                 || !boundary.valid()
-                || !boundary.references_from(inventory, self, &mut BTreeSet::new())
+                || !referenced
             {
                 errors.push(format!(
-                    "stale/incomplete adapter boundary {}",
-                    boundary.key
+                    "stale/incomplete adapter boundary {} [current fingerprint: {}; references: {}]",
+                    boundary.key,
+                    inventory.entries.get(&boundary.key).map_or("missing", |entry| entry.fingerprint.as_str()),
+                    referenced
                 ));
             }
         }
@@ -1586,8 +2136,8 @@ impl Policy {
             }
             if !inventory.canonical(entry, self, &mut BTreeSet::new()) {
                 errors.push(format!(
-                    "{}: declare its canonical owner or actual external boundary",
-                    entry.key
+                    "{}: declare its canonical owner or actual external boundary [fingerprint: {}]",
+                    entry.key, entry.fingerprint
                 ));
             }
         }
@@ -1715,23 +2265,22 @@ impl Boundary {
         let Some(mut adapter) = inventory.entries.get(&self.key) else {
             return false;
         };
+        let mut canonical_owner = None;
         if let Some(owner) = &self.owner {
-            let Some(parent) = policy
-                .boundaries
-                .iter()
-                .find(|boundary| boundary.key == *owner)
-            else {
-                return false;
-            };
-            if !parent.valid()
-                || !inventory.matches(&parent.key, &parent.fingerprint)
-                || !parent.references_from(inventory, policy, visiting)
-            {
-                return false;
-            }
             let Some(parent) = inventory.entries.get(owner) else {
                 return false;
             };
+            if adapter.production
+                && !parent.production
+                && (!matches!(adapter.kind, Kind::Script)
+                    || inventory.entries.values().any(|candidate| {
+                        candidate.production
+                            && !candidate.included_sources.is_empty()
+                            && inventory.owner_references(candidate, adapter)
+                    }))
+            {
+                return false;
+            }
             let value = match &adapter.owner {
                 Some(path) => inventory.resolve(&adapter.namespace, path, &mut BTreeSet::new()),
                 None => Some(adapter),
@@ -1739,10 +2288,44 @@ impl Boundary {
             let Some(value) = value else {
                 return false;
             };
-            if !inventory.owner_references(parent, value) {
+            if !inventory.owner_references(parent, value)
+                && !(parent.plugin
+                    && inventory.boundary_references(parent, value, &mut BTreeSet::new()))
+            {
                 return false;
             }
-            adapter = parent;
+            let mut current = owner.as_str();
+            loop {
+                let Some(parent) = inventory.entries.get(current) else {
+                    return false;
+                };
+                let contract = policy
+                    .boundaries
+                    .iter()
+                    .find(|boundary| boundary.key == current);
+                let Some(contract) = contract else {
+                    if !parent.ecs
+                        || !inventory.used(parent)
+                        || !inventory.canonical(parent, policy, &mut BTreeSet::new())
+                    {
+                        return false;
+                    }
+                    canonical_owner = Some(parent.key.clone());
+                    adapter = parent;
+                    break;
+                };
+                if !contract.valid()
+                    || !inventory.matches(&contract.key, &contract.fingerprint)
+                    || !contract.references_from(inventory, policy, &mut visiting.clone())
+                {
+                    return false;
+                }
+                adapter = parent;
+                match contract.owner.as_deref() {
+                    Some(next) => current = next,
+                    None => break,
+                }
+            }
         }
         let mut canonical = false;
         let mut pre_world = 0;
@@ -1751,10 +2334,22 @@ impl Boundary {
                 let Some(entry) = inventory.entries.get(key) else {
                     return false;
                 };
-                if !(entry.contract || entry.ecs && inventory.used(entry)) {
+                let owned_value = policy.values.iter().any(|value| {
+                    value.key == entry.key
+                        && !value.lifetime.trim().is_empty()
+                        && inventory.entries.get(&value.owner).is_some_and(|owner| {
+                            inventory.value_root(owner, policy, &mut BTreeSet::new())
+                                && inventory.owner_references(owner, entry)
+                                && inventory.canonical(owner, policy, &mut BTreeSet::new())
+                        })
+                });
+                if !(entry.contract || entry.ecs && inventory.used(entry) || owned_value) {
                     return false;
                 }
-                if !inventory.boundary_references(adapter, entry, &mut BTreeSet::new()) {
+                if canonical_owner.as_deref() != Some(entry.key.as_str())
+                    && !inventory.boundary_references(adapter, entry, &mut BTreeSet::new())
+                    && !self.fixture_reference(adapter, endpoint, inventory, policy, visiting)
+                {
                     return false;
                 }
                 canonical = true;
@@ -1771,7 +2366,19 @@ impl Boundary {
             return false;
         }
         let path = self.key.split('|').next().unwrap();
-        inventory.manifest_source(adapter)
+        (!adapter.production
+            && self.interface == "Dioxus VirtualDom fixture"
+            && !adapter.local
+            && !adapter.dynamic
+            && !adapter.opaque
+            && ((adapter.renderer
+                && adapter.rendered.iter().any(|path| {
+                    inventory
+                        .resolve(&adapter.namespace, path, &mut BTreeSet::new())
+                        .is_some_and(|child| child.production && child.renderer)
+                }))
+                || adapter.test && inventory.fixture_dom_mount(adapter)))
+            || inventory.manifest_source(adapter)
             || inventory.fixture_lock(adapter)
             || path == "fixture.rs"
             || path.starts_with("crates/util/vmux_macro/")
@@ -1785,6 +2392,44 @@ impl Boundary {
                     | "crates/build_git_env.rs"
                     | "crates/build_platform_cfg.rs"
             )
+    }
+
+    fn fixture_reference(
+        &self,
+        adapter: &Declaration,
+        endpoint: &str,
+        inventory: &Inventory,
+        policy: &Policy,
+        visiting: &BTreeSet<String>,
+    ) -> bool {
+        if adapter.production {
+            return false;
+        }
+        for boundary in &policy.boundaries {
+            if boundary.key == self.key
+                || (boundary.input != endpoint && boundary.output != endpoint)
+                || !inventory.matches(&boundary.key, &boundary.fingerprint)
+                || !boundary.valid()
+            {
+                continue;
+            }
+            let Some(parent) = inventory.entries.get(&boundary.key) else {
+                continue;
+            };
+            let parent = match &parent.owner {
+                Some(owner) => inventory.resolve(&parent.namespace, owner, &mut BTreeSet::new()),
+                None => Some(parent),
+            };
+            let Some(parent) = parent else {
+                continue;
+            };
+            if inventory.owner_references(adapter, parent)
+                && boundary.references_from(inventory, policy, &mut visiting.clone())
+            {
+                return true;
+            }
+        }
+        false
     }
 
     fn fixture(inventory: &Inventory, name: &str) -> Self {
@@ -1854,6 +2499,11 @@ struct Declaration {
     unit_mutex: bool,
     owner: Option<String>,
     reference_paths: BTreeSet<String>,
+    included_sources: BTreeSet<String>,
+    page_inputs: BTreeSet<(String, String)>,
+    dom_mounts: BTreeSet<(String, String)>,
+    rendered: BTreeSet<String>,
+    renderer: bool,
     fields: BTreeSet<String>,
     field_paths: BTreeSet<String>,
     generic_bindings: BTreeSet<String>,
@@ -1907,6 +2557,7 @@ struct Inventory {
     registered_keys: BTreeSet<String>,
     lookup_depth: Cell<usize>,
     root_bindings: RefCell<BTreeMap<(String, String), Option<String>>>,
+    owner_reference_cache: RefCell<BTreeMap<(String, String), bool>>,
 }
 
 impl Inventory {
@@ -1959,6 +2610,7 @@ impl Inventory {
 
     fn source(&mut self, path: &str, source: &str) {
         self.root_bindings.get_mut().clear();
+        self.owner_reference_cache.get_mut().clear();
         if !path.ends_with(".rs") {
             self.script(path, source);
             return;
@@ -1982,6 +2634,7 @@ impl Inventory {
     }
 
     fn script(&mut self, path: &str, source: &str) {
+        self.owner_reference_cache.get_mut().clear();
         let key = format!("{path}||script");
         self.entries.insert(
             key.clone(),
@@ -2013,6 +2666,11 @@ impl Inventory {
                 unit_mutex: false,
                 owner: None,
                 reference_paths: BTreeSet::new(),
+                included_sources: BTreeSet::new(),
+                page_inputs: BTreeSet::new(),
+                dom_mounts: BTreeSet::new(),
+                rendered: BTreeSet::new(),
+                renderer: false,
                 fields: BTreeSet::new(),
                 field_paths: BTreeSet::new(),
                 generic_bindings: BTreeSet::new(),
@@ -2169,6 +2827,68 @@ impl Inventory {
             }
         }
         true
+    }
+
+    fn fixture_dom_mount(&self, adapter: &Declaration) -> bool {
+        for (dom, component) in &adapter.dom_mounts {
+            if !self.fixture_dom_type(&adapter.namespace, dom, &mut BTreeSet::new()) {
+                continue;
+            }
+            let Some(component) =
+                self.function_reference(&adapter.namespace, component, &mut BTreeSet::new())
+            else {
+                continue;
+            };
+            if component.production || !component.renderer {
+                continue;
+            }
+            if component.rendered.iter().any(|path| {
+                self.resolve(&component.namespace, path, &mut BTreeSet::new())
+                    .is_some_and(|child| child.production && child.renderer)
+            }) {
+                return true;
+            }
+        }
+        false
+    }
+
+    fn fixture_dom_type(
+        &self,
+        namespace: &str,
+        path: &str,
+        visiting: &mut BTreeSet<String>,
+    ) -> bool {
+        if !visiting.insert(format!("dom:{namespace}|{path}"))
+            || self
+                .resolve(namespace, path, &mut BTreeSet::new())
+                .is_some()
+        {
+            return false;
+        }
+        if matches!(
+            path,
+            "dioxus::core::VirtualDom" | "dioxus::prelude::VirtualDom" | "dioxus_core::VirtualDom"
+        ) {
+            let root = path.split("::").next().unwrap();
+            return self.root_binding(namespace, root).as_deref() == Some(root)
+                && self.external_root(namespace, root);
+        }
+        let mut scope = Some(namespace);
+        while let Some(namespace) = scope {
+            if let Some(imports) = self.imports.get(namespace) {
+                if imports.ambiguous.contains(path)
+                    || imports.modules.contains(path)
+                    || imports.opaque_modules.contains(path)
+                {
+                    return false;
+                }
+                if let Some(target) = imports.aliases.get(path) {
+                    return self.fixture_dom_type(namespace, target, visiting);
+                }
+            }
+            scope = namespace.rsplit_once("::").map(|(parent, _)| parent);
+        }
+        false
     }
 
     fn fixture_lock(&self, adapter: &Declaration) -> bool {
@@ -2342,6 +3062,18 @@ impl Inventory {
     }
 
     fn owner_references(&self, owner: &Declaration, value: &Declaration) -> bool {
+        let key = (owner.key.clone(), value.key.clone());
+        if let Some(referenced) = self.owner_reference_cache.borrow().get(&key) {
+            return *referenced;
+        }
+        let referenced = self.references_of(owner, value);
+        self.owner_reference_cache
+            .borrow_mut()
+            .insert(key, referenced);
+        referenced
+    }
+
+    fn references_of(&self, owner: &Declaration, value: &Declaration) -> bool {
         let mut candidates = vec![owner];
         for implementation in self.entries.values() {
             if owner.production && !implementation.production {
@@ -2358,6 +3090,78 @@ impl Inventory {
             }
         }
         for candidate in candidates {
+            for (attribute, input) in &candidate.page_inputs {
+                let Some(attribute) =
+                    self.function_reference(&candidate.namespace, attribute, &mut BTreeSet::new())
+                else {
+                    continue;
+                };
+                if attribute.key == "crates/util/vmux_macro/src/lib.rs||fn:page"
+                    && attribute.reference_paths.contains("proc_macro_attribute")
+                    && self
+                        .resolve(&candidate.namespace, input, &mut BTreeSet::new())
+                        .is_some_and(|input| input.key == value.key)
+                {
+                    return true;
+                }
+            }
+            if matches!(value.kind, Kind::Script) {
+                if candidate.included_sources.is_empty() {
+                    continue;
+                }
+                let shadowed = self.local_binding(&candidate.namespace, "include_str")
+                    || self.entries.values().any(|declaration| {
+                        matches!(declaration.kind, Kind::Macro)
+                            && declaration.name == "include_str"
+                            && (candidate.namespace == declaration.namespace
+                                || candidate
+                                    .namespace
+                                    .strip_prefix(&declaration.namespace)
+                                    .is_some_and(|suffix| suffix.starts_with("::")))
+                    });
+                if shadowed {
+                    continue;
+                }
+                for source in &candidate.included_sources {
+                    if Path::new(source).is_absolute() {
+                        continue;
+                    }
+                    let mut path = PathBuf::new();
+                    let mut valid = true;
+                    let included = Path::new(&candidate.path).parent().unwrap().join(source);
+                    for part in included.components() {
+                        match part {
+                            std::path::Component::Normal(part) => path.push(part),
+                            std::path::Component::ParentDir => {
+                                if !path.pop() {
+                                    valid = false;
+                                    break;
+                                }
+                            }
+                            std::path::Component::CurDir => {}
+                            _ => {
+                                valid = false;
+                                break;
+                            }
+                        }
+                    }
+                    if valid && path == Path::new(&value.path) {
+                        return true;
+                    }
+                }
+                continue;
+            }
+            if value.renderer {
+                for path in &candidate.rendered {
+                    if self
+                        .resolve(&candidate.namespace, path, &mut BTreeSet::new())
+                        .is_some_and(|resolved| resolved.key == value.key)
+                    {
+                        return true;
+                    }
+                }
+                continue;
+            }
             for path in &candidate.reference_paths {
                 let mut path = path.as_str();
                 loop {
@@ -2844,7 +3648,11 @@ impl Inventory {
             }
             scope = current.rsplit_once("::").map(|(parent, _)| parent);
         }
-        let root = self.root_binding(namespace, parts[0])?;
+        let root = if parts[0] == "crate" {
+            namespace.split("::").next()?.to_string()
+        } else {
+            self.root_binding(namespace, parts[0])?
+        };
         if root != "vmux_api" && root != "vmux_macro" {
             return None;
         }
@@ -3124,6 +3932,7 @@ impl Inventory {
     }
 
     fn resolve_usage(&mut self) {
+        self.owner_reference_cache.get_mut().clear();
         let mut keys = BTreeSet::new();
         let mut registered = BTreeSet::new();
         for usage in self.usage.values() {
@@ -3424,6 +4233,15 @@ impl Inventory {
                 return self.entries.get(&keys[0]);
             }
             return None;
+        }
+        if let Some(keys) = self.functions.get(symbol) {
+            if keys.len() != 1 {
+                return None;
+            }
+            let entry = self.entries.get(&keys[0])?;
+            if entry.renderer {
+                return Some(entry);
+            }
         }
         let (namespace, name) = symbol.rsplit_once("::")?;
         let imports = self.imports.get(namespace)?;
@@ -3878,6 +4696,14 @@ impl Declarations<'_> {
             unit_mutex: fields.len() == 1 && Declaration::unit_mutex(&fields[0]),
             owner,
             reference_paths: references.paths,
+            included_sources: references.included_sources,
+            page_inputs: references.page_inputs,
+            dom_mounts: references.dom_mounts,
+            rendered: references.rendered,
+            renderer: matches!(kind, Kind::Function)
+                && Self::metadata(attrs, true)
+                    .iter()
+                    .any(|attribute| attribute.path().is_ident("component")),
             fields: field_names.names,
             field_paths: field_names.paths,
             generic_bindings,
@@ -4028,7 +4854,9 @@ impl<'ast> Visit<'ast> for Declarations<'_> {
             Item::Fn(value) => {
                 let mut fields = Vec::new();
                 for argument in &value.sig.inputs {
-                    if let syn::FnArg::Typed(argument) = argument {
+                    if let syn::FnArg::Typed(argument) = argument
+                        && !Usage::test_only(&argument.attrs)
+                    {
                         fields.push(*argument.ty.clone());
                     }
                 }
@@ -4121,9 +4949,89 @@ struct References {
     dynamic: bool,
     opaque: bool,
     paths: BTreeSet<String>,
+    rendered: BTreeSet<String>,
+    included_sources: BTreeSet<String>,
+    page_inputs: BTreeSet<(String, String)>,
+    dom_mounts: BTreeSet<(String, String)>,
 }
 
 impl<'ast> Visit<'ast> for References {
+    fn visit_expr_call(&mut self, expression: &'ast syn::ExprCall) {
+        if let syn::Expr::Path(function) = expression.func.as_ref()
+            && let Some(last) = function.path.segments.last()
+            && matches!(last.ident.to_string().as_str(), "new" | "new_with_props")
+            && let Some(syn::Expr::Path(component)) = expression.args.first()
+        {
+            let mut parts = Vec::new();
+            for segment in &function.path.segments {
+                parts.push(segment.ident.unraw().to_string());
+            }
+            parts.pop();
+            let component = component
+                .path
+                .to_token_stream()
+                .to_string()
+                .replace(' ', "");
+            self.dom_mounts.insert((parts.join("::"), component));
+        }
+        visit::visit_expr_call(self, expression);
+    }
+
+    fn visit_attribute(&mut self, attribute: &'ast Attribute) {
+        if attribute
+            .path()
+            .segments
+            .last()
+            .is_some_and(|segment| segment.ident == "page")
+            && let syn::Meta::List(arguments) = &attribute.meta
+        {
+            let parser = syn::punctuated::Punctuated::<syn::Meta, syn::Token![,]>::parse_terminated;
+            if let Ok(arguments) = parser.parse2(arguments.tokens.clone()) {
+                for argument in arguments {
+                    let syn::Meta::NameValue(argument) = argument else {
+                        continue;
+                    };
+                    if !argument.path.is_ident("takes") {
+                        continue;
+                    }
+                    let syn::Expr::Path(input) = argument.value else {
+                        continue;
+                    };
+                    let attribute = attribute
+                        .path()
+                        .to_token_stream()
+                        .to_string()
+                        .replace(' ', "");
+                    let input = input.path.to_token_stream().to_string().replace(' ', "");
+                    self.page_inputs.insert((attribute, input));
+                }
+            }
+        }
+        visit::visit_attribute(self, attribute);
+    }
+
+    fn visit_fn_arg(&mut self, argument: &'ast syn::FnArg) {
+        let attributes = match argument {
+            syn::FnArg::Receiver(argument) => &argument.attrs,
+            syn::FnArg::Typed(argument) => &argument.attrs,
+        };
+        if self.include_tests || !Usage::test_only(attributes) {
+            visit::visit_fn_arg(self, argument);
+        }
+    }
+
+    fn visit_macro(&mut self, value: &'ast syn::Macro) {
+        if value.path.is_ident("include_str")
+            && let Ok(path) = syn::parse2::<syn::LitStr>(value.tokens.clone())
+        {
+            self.included_sources.insert(path.value());
+        }
+        if value.path.is_ident("rsx") {
+            self.renderer_tokens(value.tokens.clone());
+        }
+        visit::visit_macro(self, value);
+    }
+
     fn visit_type_path(&mut self, value: &'ast syn::TypePath) {
         self.local |= value
             .path
@@ -4388,6 +5296,116 @@ impl References {
         }
     }
 
+    fn path(path: &syn::Path) -> String {
+        let mut parts = Vec::with_capacity(path.segments.len());
+        for segment in &path.segments {
+            parts.push(segment.ident.unraw().to_string());
+        }
+        parts.join("::")
+    }
+
+    fn renderer_tokens(&mut self, tokens: proc_macro2::TokenStream) {
+        let body = syn::parse2::<dioxus_rsx::CallBody>(tokens).expect("valid Dioxus RSX source");
+        self.renderer_nodes(&body.body.roots);
+    }
+
+    fn renderer_nodes(&mut self, nodes: &[dioxus_rsx::BodyNode]) {
+        for node in nodes {
+            match node {
+                dioxus_rsx::BodyNode::Component(component) => {
+                    if component.brace.is_some() {
+                        self.rendered.insert(Self::path(&component.name));
+                    }
+                    if let Some(generics) = &component.generics {
+                        self.visit_angle_bracketed_generic_arguments(generics);
+                    }
+                    for field in &component.fields {
+                        self.renderer_attribute(&field.value);
+                    }
+                    for spread in &component.spreads {
+                        self.visit_expr(&spread.expr);
+                    }
+                    self.renderer_nodes(&component.children.roots);
+                }
+                dioxus_rsx::BodyNode::Element(element) => {
+                    for attribute in &element.raw_attributes {
+                        self.renderer_attribute(&attribute.value);
+                    }
+                    for spread in &element.spreads {
+                        self.visit_expr(&spread.expr);
+                    }
+                    self.renderer_nodes(&element.children);
+                }
+                dioxus_rsx::BodyNode::Text(text) => {
+                    self.renderer_format(&text.input.formatted_input);
+                }
+                dioxus_rsx::BodyNode::RawExpr(value) => {
+                    self.visit_expr(&value.expr.as_expr().expect("valid RSX Rust expression"));
+                }
+                dioxus_rsx::BodyNode::ForLoop(value) => {
+                    self.visit_pat(&value.pat);
+                    self.visit_expr(&value.expr);
+                    self.renderer_nodes(&value.body.roots);
+                }
+                dioxus_rsx::BodyNode::IfChain(value) => self.renderer_condition(value),
+            }
+        }
+    }
+
+    fn renderer_attribute(&mut self, value: &dioxus_rsx::AttributeValue) {
+        match value {
+            dioxus_rsx::AttributeValue::Shorthand(name) => {
+                self.visit_path(&syn::parse2(name.to_token_stream()).expect("RSX shorthand path"));
+            }
+            dioxus_rsx::AttributeValue::AttrExpr(value) => {
+                self.visit_expr(&value.as_expr().expect("valid RSX property expression"));
+            }
+            dioxus_rsx::AttributeValue::EventTokens(value) => {
+                self.visit_expr(
+                    &syn::parse2(value.to_token_stream()).expect("valid RSX event closure"),
+                );
+            }
+            dioxus_rsx::AttributeValue::IfExpr(value) => {
+                self.visit_expr(&value.condition);
+                self.renderer_attribute(&value.then_value);
+                if let Some(value) = &value.else_value {
+                    self.renderer_attribute(value);
+                }
+            }
+            dioxus_rsx::AttributeValue::AttrLiteral(dioxus_rsx::HotLiteral::Fmted(value)) => {
+                self.renderer_format(&value.formatted_input);
+            }
+            dioxus_rsx::AttributeValue::AttrLiteral(_) => {}
+        }
+    }
+
+    fn renderer_condition(&mut self, value: &dioxus_rsx::IfChain) {
+        self.visit_expr(&value.cond);
+        self.renderer_nodes(&value.then_branch.roots);
+        if let Some(value) = &value.else_if_branch {
+            self.renderer_condition(value);
+        }
+        if let Some(value) = &value.else_branch {
+            self.renderer_nodes(&value.roots);
+        }
+    }
+
+    fn renderer_format(&mut self, value: &dioxus_rsx::IfmtInput) {
+        for segment in &value.segments {
+            let dioxus_rsx::Segment::Formatted(segment) = segment else {
+                continue;
+            };
+            match &segment.segment {
+                dioxus_rsx::FormattedSegmentType::Expr(value) => self.visit_expr(value),
+                dioxus_rsx::FormattedSegmentType::Ident(value) => {
+                    self.visit_path(
+                        &syn::parse2(value.to_token_stream()).expect("RSX formatted identifier"),
+                    );
+                }
+            }
+        }
+    }
+
     fn plugin_values(&mut self, value: &syn::Expr) {
         if !self.include_tests && Usage::test_only(Usage::expression_attributes(value)) {
             return;
@@ -4428,6 +5446,8 @@ struct Usage {
     active: bool,
     testing: bool,
     plugin: bool,
+    owner: Option<String>,
+    owners: BTreeMap<(String, String), BTreeSet<String>>,
     registration: bool,
     states: BTreeSet<(String, String, String, String)>,
     function: Option<String>,
@@ -4631,13 +5651,23 @@ impl<'ast> Visit<'ast> for Usage {
 
     fn visit_item_impl(&mut self, implementation: &'ast syn::ItemImpl) {
         let previous = self.plugin;
+        let previous_owner = self.owner.clone();
         self.plugin = implementation.trait_.as_ref().is_some_and(|(_, path, _)| {
             path.segments.last().is_some_and(|part| {
                 matches!(part.ident.to_string().as_str(), "Plugin" | "BevyPlugin")
             })
         });
+        self.owner = if self.plugin {
+            match implementation.self_ty.as_ref() {
+                Type::Path(value) if value.qself.is_none() => Some(References::path(&value.path)),
+                _ => None,
+            }
+        } else {
+            None
+        };
         visit::visit_item_impl(self, implementation);
         self.plugin = previous;
+        self.owner = previous_owner;
     }
 
     fn visit_impl_item_fn(&mut self, function: &'ast syn::ImplItemFn) {
@@ -4711,6 +5741,25 @@ impl<'ast> Visit<'ast> for Usage {
         }
         let method = value.method.to_string();
         if self.registration
+            && matches!(
+                method.as_str(),
+                "configure_sets" | "in_set" | "before" | "after"
+            )
+        {
+            for argument in &value.args {
+                let mut references = References::default();
+                references.visit_expr(argument);
+                for path in references.paths {
+                    self.references
+                        .insert((self.namespace.clone(), path.clone()));
+                    if let Some((owner, _)) = path.rsplit_once("::") {
+                        self.references
+                            .insert((self.namespace.clone(), owner.to_string()));
+                    }
+                }
+            }
+        }
+        if self.registration
             && matches!(method.as_str(), "add_systems" | "add_observer" | "observe")
         {
             for argument in &value.args {
@@ -4725,12 +5774,19 @@ impl<'ast> Visit<'ast> for Usage {
                             .map_or(namespace, |(parent, _)| parent);
                         path = rest;
                     }
-                    if let Some(rest) = path.strip_prefix("crate::") {
+                    let symbol = if let Some(rest) = path.strip_prefix("crate::") {
                         let root = namespace.split("::").next().unwrap();
-                        self.systems.insert(format!("{root}::{rest}"));
+                        format!("{root}::{rest}")
                     } else {
                         let path = path.strip_prefix("self::").unwrap_or(path);
-                        self.systems.insert(format!("{namespace}::{path}"));
+                        format!("{namespace}::{path}")
+                    };
+                    self.systems.insert(symbol.clone());
+                    if let Some(owner) = &self.owner {
+                        self.owners
+                            .entry((self.namespace.clone(), owner.clone()))
+                            .or_default()
+                            .insert(symbol);
                     }
                 }
             }

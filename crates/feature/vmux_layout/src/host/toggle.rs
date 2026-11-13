@@ -6,6 +6,7 @@ use crate::settings::LayoutSettings;
 use crate::side_sheet::{SideSheet, SideSheetPosition};
 use crate::window::VmuxWindow;
 use bevy::prelude::*;
+use bevy::prelude::{Commands, Window};
 use bevy::winit::EventLoopProxyWrapper;
 use bevy_cef::prelude::HostWindow;
 #[cfg(test)]

@@ -36,6 +36,20 @@ assert.equal(opening.frames[1].height, '180px');
 assert.ok(opening.timing.duration > 0 && opening.timing.duration <= 160);
 opening.onfinish();
 assert.equal(details.style.height, '');
+for (let index = 0; index < 5000; index++) {
+  details.dataset.vmuxDisclosureKey = `history:${index}`;
+  click();
+}
+assert.ok(scope.window.__vmuxDisclosures.choices.size < 5000, 'old history choices must be evicted during a long document lifetime');
+assert.equal(scope.window.__vmuxDisclosures.choices.has('history:0'), false);
+assert.equal(scope.window.__vmuxDisclosures.choices.has('history:4999'), true);
+const latest = new Element();
+latest.dataset.vmuxDisclosureKey = 'history:4999';
+latest.open = !details.open;
+latest.matches = selector => selector === 'details[data-vmux-disclosure-key]';
+pendingMutations.push({ type: 'childList', addedNodes: [latest] });
+scope.window.__vmuxDisclosures.flush();
+assert.equal(latest.open, details.open, 'the latest reader choice must survive reparenting after old choices are evicted');
 details.dataset.vmuxDisclosureKey = 'session:one:tool:arguments';
 click();
 click();

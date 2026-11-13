@@ -45,7 +45,7 @@ pub(crate) fn HeaderView() -> Element {
     {
         vmux_ui::animation::Movement::transition("layout-tab-strip");
     }
-    let geometry = layout.use_selector(|ui| ui.layout);
+    let geometry: Memo<Option<crate::event::LayoutGeometry>> = layout.use_selector(|ui| ui.layout);
     let Some(state) = geometry() else {
         return rsx! {};
     };

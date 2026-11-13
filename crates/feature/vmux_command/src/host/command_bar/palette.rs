@@ -176,21 +176,6 @@ type NewPalette<T> = (
     Or<(With<RendersLauncherPanel>, With<HostsLauncher>)>,
     Without<T>,
 );
-type ProjectionRow = (
-    Entity,
-    &'static PaletteOpen,
-    &'static mut PaletteDraftInput,
-    Option<&'static PaletteMenuCursor>,
-    &'static mut PaletteContext,
-    &'static mut PaletteSnapshot,
-    &'static PaletteRowsSnapshot,
-    &'static mut PaletteContributionRows,
-    Has<AgentMenuOpen>,
-    Has<ModelMenuOpen>,
-    Has<PermissionMenuOpen>,
-    Has<ProjectMenuOpen>,
-    Has<BranchMenuOpen>,
-);
 type DetachedPalette = (
     With<PaletteSnapshot>,
     Without<RendersLauncherPanel>,
@@ -783,7 +768,21 @@ fn rows(
 }
 
 fn project(
-    mut palettes: Query<ProjectionRow>,
+    mut palettes: Query<(
+        Entity,
+        &'static PaletteOpen,
+        &'static mut PaletteDraftInput,
+        Option<&'static PaletteMenuCursor>,
+        &'static mut PaletteContext,
+        &'static mut PaletteSnapshot,
+        &'static PaletteRowsSnapshot,
+        &'static mut PaletteContributionRows,
+        Has<AgentMenuOpen>,
+        Has<ModelMenuOpen>,
+        Has<PermissionMenuOpen>,
+        Has<ProjectMenuOpen>,
+        Has<BranchMenuOpen>,
+    )>,
     contributions: Query<(Entity, &CommandBarContribution, Option<&ChildOf>)>,
     locale: Option<Res<ResolvedLocale>>,
     #[cfg(test)] mut builds: Option<ResMut<ProjectionBuilds>>,

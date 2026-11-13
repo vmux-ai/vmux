@@ -10869,11 +10869,13 @@ dependencies = [
 name = "vmux_macro"
 version = "0.0.35"
 dependencies = [
+ "dioxus-rsx",
  "heck 0.5.0",
  "proc-macro2",
  "quote",
  "ron 0.12.1",
  "serde",
+ "serde_json",
  "syn 2.0.117",
 ]
 

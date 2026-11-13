@@ -56,7 +56,6 @@ impl Reader {
                 watch_paths: Vec::new(),
                 cursor: cursor.unwrap_or_default(),
                 complete: true,
-                before: None,
             });
         };
         Self::conversation_file(&path, cursor, known, FileConversation::TAIL_BYTES)
@@ -73,9 +72,10 @@ impl Reader {
 
     pub(super) fn before(
         path: &Path,
-        boundary: super::conversation::HistoryBoundary,
-    ) -> Result<super::conversation::HistoryPage, String> {
-        FileConversation::before(path, boundary, CodexConversationDecoder)
+        boundary: vmux_session::history::Boundary,
+        known: Option<&vmux_session::history::FileFacts>,
+    ) -> Result<ReadResult, String> {
+        FileConversation::before(path, boundary, known, CodexConversationDecoder)
     }
 
     pub(super) fn archives(&self) -> Result<Option<HashMap<String, ArchiveState>>, String> {
@@ -913,22 +913,30 @@ mod tests {
             });
         }
         std::fs::write(&path, body).unwrap();
-        let tail = Reader::conversation_file(&path, None, FileConversation::TAIL_BYTES).unwrap();
-        assert_eq!(tail.messages.len(), 512);
-        let mut actual = tail.messages;
-        let mut before = tail.before;
+        let tail =
+            Reader::conversation_file(&path, None, None, FileConversation::TAIL_BYTES).unwrap();
+        assert_eq!(tail.history.entries.len(), 512);
+        let mut actual = tail.messages();
+        let mut before = tail.history.file.as_ref().and_then(|file| file.before);
         let mut pages = 0;
         while let Some(boundary) = before {
-            let page = Reader::before(&path, boundary).unwrap();
-            assert!(page.before.is_none_or(|next| next < boundary));
+            let page = Reader::before(&path, boundary, None).unwrap();
+            assert!(
+                page.history
+                    .file
+                    .as_ref()
+                    .and_then(|file| file.before)
+                    .is_none_or(|next| next < boundary)
+            );
             let mut prefix = page
-                .records
+                .history
+                .entries
                 .into_iter()
                 .map(|(_, message)| message)
                 .collect::<Vec<_>>();
             prefix.append(&mut actual);
             actual = prefix;
-            before = page.before;
+            before = page.history.file.as_ref().and_then(|file| file.before);
             pages += 1;
         }
         assert_eq!(pages, 2);
@@ -946,14 +954,21 @@ mod tests {
         body.push_str(&serde_json::json!({"type":"response_item", "payload":{"type":"message", "role":"assistant", "content":[{"type":"output_text", "text":"Latest answer"}]}}).to_string());
         body.push('\n');
         std::fs::write(&path, body).unwrap();
-        let tail = Reader::conversation_file(&path, None, FileConversation::TAIL_BYTES).unwrap();
-        let mut before = tail.before;
+        let tail =
+            Reader::conversation_file(&path, None, None, FileConversation::TAIL_BYTES).unwrap();
+        let mut before = tail.history.file.as_ref().and_then(|file| file.before);
         let mut found = Vec::new();
         while let Some(boundary) = before {
-            let page = Reader::before(&path, boundary).unwrap();
-            assert!(page.before.is_none_or(|next| next < boundary));
-            found.extend(page.records.into_iter().map(|(_, message)| message));
-            before = page.before;
+            let page = Reader::before(&path, boundary, None).unwrap();
+            assert!(
+                page.history
+                    .file
+                    .as_ref()
+                    .and_then(|file| file.before)
+                    .is_none_or(|next| next < boundary)
+            );
+            found.extend(page.history.entries.into_iter().map(|(_, message)| message));
+            before = page.history.file.as_ref().and_then(|file| file.before);
         }
         assert_eq!(found, vec![Message::user("First request")]);
     }

@@ -7,11 +7,13 @@ use vmux_api::command_bar::{
     CommandBarUiState, CommandBarWorkspaceSelection, StartGoToBranch, StartSelectWorkspace,
 };
 use vmux_command::CommandBarWorkDirectory;
-use vmux_ecs::launcher::HostsLauncher;
+use vmux_ecs::launcher::{HostsLauncher, WorkspaceSelectionState};
 use vmux_ecs::{Cwd, PageMetadata, UiStateWrite};
 use vmux_git::{GitRuntime, GitTask};
 use vmux_layout::tab::{Tab, TabWorkspace};
-use vmux_layout::worktree::{BranchCheckout, ManagedWorktreeRoot, TabWorktreeActivation};
+use vmux_layout::worktree::{
+    BranchSelection, BranchWait, ManagedWorktreeRoot, TabWorktreeActivation,
+};
 use vmux_ui::i18n::translate;
 
 pub(crate) struct Plugin;
@@ -24,6 +26,8 @@ impl bevy::app::Plugin for Plugin {
             .add_observer(select)
             .add_observer(pick)
             .add_observer(apply)
+            .add_observer(project_selection)
+            .add_observer(clear_selection)
             .add_systems(Update, (pin, release).in_set(Binding))
             .add_systems(
                 Update,
@@ -47,7 +51,8 @@ struct Picker {
 #[derive(Component)]
 struct Selection {
     request: StartGoToBranch,
-    task: Option<GitTask<Result<Option<BranchCheckout>, String>>>,
+    task: Option<GitTask<Result<BranchSelection, String>>>,
+    waiting: Option<BranchWait>,
 }
 
 #[derive(EntityEvent)]
@@ -55,6 +60,38 @@ struct Chosen {
     #[event_target]
     webview: Entity,
     path: PathBuf,
+}
+
+fn project_selection(
+    event: On<Insert, WorkspaceSelectionState>,
+    states: Query<&WorkspaceSelectionState>,
+    mut commands: Commands,
+) {
+    let Ok(state) = states.get(event.entity) else {
+        return;
+    };
+    let projection = match state {
+        WorkspaceSelectionState::Ready => CommandBarWorkspaceSelection::default(),
+        WorkspaceSelectionState::Pending => CommandBarWorkspaceSelection {
+            pending: true,
+            error: String::new(),
+        },
+        WorkspaceSelectionState::Failed(error) => CommandBarWorkspaceSelection {
+            pending: false,
+            error: error.clone(),
+        },
+    };
+    commands.trigger(UiStateWrite::<CommandBarUiState>::from_event(
+        event.entity,
+        &projection,
+    ));
+}
+
+fn clear_selection(event: On<Remove, WorkspaceSelectionState>, mut commands: Commands) {
+    commands.trigger(UiStateWrite::<CommandBarUiState>::from_event(
+        event.entity,
+        &CommandBarWorkspaceSelection::default(),
+    ));
 }
 
 fn pin(
@@ -111,13 +148,12 @@ fn pin(
 fn release(pages: Query<(Entity, &PageMetadata), With<Pinned>>, mut commands: Commands) {
     for (webview, metadata) in &pages {
         if !metadata.url.starts_with(crate::StartPlugin::URL) {
-            commands
-                .entity(webview)
-                .remove::<(Pinned, CommandBarWorkDirectory, Selection)>();
-            commands.trigger(UiStateWrite::<CommandBarUiState>::from_event(
-                webview,
-                &CommandBarWorkspaceSelection::default(),
-            ));
+            commands.entity(webview).remove::<(
+                Pinned,
+                CommandBarWorkDirectory,
+                Selection,
+                WorkspaceSelectionState,
+            )>();
         }
     }
 }
@@ -136,16 +172,13 @@ fn pick(
     }
     let request = &trigger.event().payload;
     if request.checkout.trim().is_empty() && !request.branch.trim().is_empty() {
-        commands.entity(webview).insert(Selection {
-            request: request.clone(),
-            task: None,
-        });
-        commands.trigger(UiStateWrite::<CommandBarUiState>::from_event(
-            webview,
-            &CommandBarWorkspaceSelection {
-                pending: true,
-                error: String::new(),
+        commands.entity(webview).insert((
+            Selection {
+                request: request.clone(),
+                task: None,
+                waiting: None,
             },
+            WorkspaceSelectionState::Pending,
         ));
         return;
     }
@@ -180,21 +213,16 @@ fn apply(
                     Pinned,
                     CommandBarWorkDirectory(path.to_string_lossy().into_owned()),
                 ))
-                .remove::<Selection>();
-            commands.trigger(UiStateWrite::<CommandBarUiState>::from_event(
-                request.webview,
-                &CommandBarWorkspaceSelection::default(),
-            ));
+                .remove::<Selection>()
+                .insert(WorkspaceSelectionState::Ready);
         }
         _ => {
-            commands.entity(request.webview).remove::<Selection>();
-            commands.trigger(UiStateWrite::<CommandBarUiState>::from_event(
-                request.webview,
-                &CommandBarWorkspaceSelection {
-                    pending: false,
-                    error: translate("project-directory-unavailable"),
-                },
-            ));
+            commands
+                .entity(request.webview)
+                .remove::<Selection>()
+                .insert(WorkspaceSelectionState::Failed(translate(
+                    "project-directory-unavailable",
+                )));
         }
     }
 }
@@ -208,6 +236,12 @@ fn prepare(
     for mut selection in &mut selections {
         if selection.task.is_some() {
             continue;
+        }
+        if let Some(waiting) = &selection.waiting {
+            if !waiting.is_ready() {
+                continue;
+            }
+            selection.waiting = None;
         }
         let project = PathBuf::from(&selection.request.project);
         let branch = selection.request.branch.clone();
@@ -236,28 +270,26 @@ fn finish(
             .get(webview)
             .is_ok_and(|page| page.url.starts_with(crate::StartPlugin::URL))
         {
-            commands.entity(webview).remove::<Selection>();
+            commands
+                .entity(webview)
+                .remove::<(Selection, WorkspaceSelectionState)>();
             continue;
         }
         let result = result.unwrap_or_else(|_| Err("Git worktree worker panicked".to_string()));
         match result {
-            Ok(Some(checkout)) => {
+            Ok(BranchSelection::Ready(checkout)) => {
                 let activation = checkout.commit();
                 commands.trigger(Chosen {
                     webview,
                     path: activation.execution_dir,
                 });
             }
-            Ok(None) => {}
+            Ok(BranchSelection::Waiting(waiting)) => selection.waiting = Some(waiting),
             Err(error) => {
-                commands.entity(webview).remove::<Selection>();
-                commands.trigger(UiStateWrite::<CommandBarUiState>::from_event(
-                    webview,
-                    &CommandBarWorkspaceSelection {
-                        pending: false,
-                        error,
-                    },
-                ));
+                commands
+                    .entity(webview)
+                    .remove::<Selection>()
+                    .insert(WorkspaceSelectionState::Failed(error));
             }
         }
     }
@@ -463,6 +495,62 @@ mod tests {
     }
 
     #[test]
+    fn failed_workspace_selection_blocks_only_its_page_until_a_valid_choice() {
+        let mut composers = Composers::new();
+        let original = composers.cwd(composers.first).to_path_buf();
+        let missing = composers.other.path().join("missing");
+        composers.choose(composers.first, &missing);
+        assert_eq!(composers.cwd(composers.first), original);
+        assert!(
+            composers
+                .app
+                .world()
+                .get::<WorkspaceSelectionState>(composers.first)
+                .unwrap()
+                .blocks()
+        );
+        assert!(
+            composers
+                .app
+                .world()
+                .get::<WorkspaceSelectionState>(composers.second)
+                .is_none()
+        );
+        assert!(
+            !composers
+                .app
+                .world()
+                .resource::<Published>()
+                .0
+                .error
+                .is_empty()
+        );
+        let other = composers.other.path().to_path_buf();
+        composers.choose(composers.first, &other);
+        assert!(
+            !composers
+                .app
+                .world()
+                .get::<WorkspaceSelectionState>(composers.first)
+                .unwrap()
+                .blocks()
+        );
+        assert_eq!(
+            composers.cwd(composers.first),
+            other.canonicalize().unwrap()
+        );
+        assert!(
+            composers
+                .app
+                .world()
+                .resource::<Published>()
+                .0
+                .error
+                .is_empty()
+        );
+    }
+
+    #[test]
     fn choosing_a_project_changes_only_that_composer_and_preserves_the_tab_default() {
         let mut composers = Composers::new();
         let other = composers.other.path().to_path_buf();
@@ -524,6 +612,97 @@ mod tests {
             .url = crate::StartPlugin::URL.into();
         composers.app.update();
         assert_eq!(composers.cwd(composers.first), other);
+        assert_eq!(composers.cwd(composers.second), composers.original.path());
+    }
+
+    #[test]
+    fn a_pending_worktree_lease_suspends_the_launcher_io_task_until_ready() {
+        let mut composers = Composers::new();
+        composers.git(&["init", "-q", "-b", "main"]);
+        composers.git(&[
+            "-c",
+            "user.name=Test",
+            "-c",
+            "user.email=test@example.com",
+            "commit",
+            "--allow-empty",
+            "--no-gpg-sign",
+            "-qm",
+            "Initial",
+        ]);
+        composers.git(&["branch", "held"]);
+        let root = composers
+            .app
+            .world()
+            .resource::<ManagedWorktreeRoot>()
+            .0
+            .clone();
+        std::fs::create_dir_all(&root).unwrap();
+        let root = root.join("..").join("worktrees");
+        composers
+            .app
+            .insert_resource(ManagedWorktreeRoot(root.clone()));
+        let held =
+            TabWorktreeActivation::select_branch(composers.original.path(), "held", &root, None)
+                .unwrap();
+        let BranchSelection::Ready(held) = held else {
+            panic!("the initial checkout must be available");
+        };
+        let repository =
+            vmux_git::worktree::CheckoutInfo::try_from(composers.original.path()).unwrap();
+        let checkout = repository
+            .worktree_registrations()
+            .unwrap()
+            .into_iter()
+            .find(|registration| registration.branch.as_deref() == Some("held"))
+            .unwrap()
+            .path;
+        let checkout_path = checkout.to_str().unwrap();
+        composers.git(&["worktree", "remove", "--force", checkout_path]);
+        composers.app.world_mut().trigger(UiInput {
+            webview: composers.first,
+            payload: StartGoToBranch {
+                project: composers.original.path().to_string_lossy().into_owned(),
+                branch: "held".into(),
+                checkout: String::new(),
+            },
+        });
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+        loop {
+            composers.app.update();
+            let selection = composers
+                .app
+                .world()
+                .get::<Selection>(composers.first)
+                .unwrap_or_else(|| {
+                    panic!(
+                        "selection disappeared: {:?}",
+                        composers
+                            .app
+                            .world()
+                            .get::<WorkspaceSelectionState>(composers.first)
+                    );
+                });
+            if selection.waiting.is_some() {
+                break;
+            }
+            assert!(std::time::Instant::now() < deadline);
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        }
+        for _ in 0..16 {
+            composers.app.update();
+            let selection = composers
+                .app
+                .world()
+                .get::<Selection>(composers.first)
+                .unwrap();
+            assert!(selection.waiting.is_some());
+            assert!(selection.task.is_none());
+            assert_eq!(composers.cwd(composers.first), composers.original.path());
+        }
+        let checkout = held.commit();
+        composers.settle(composers.first);
+        assert_eq!(composers.cwd(composers.first), checkout.execution_dir);
         assert_eq!(composers.cwd(composers.second), composers.original.path());
     }
 

@@ -1959,7 +1959,9 @@ mod tests {
                         value: AttributeValue::Text(value),
                         id,
                         ..
-                    } if value == &section_label => Some(*id),
+                    } if value == &section_label && mounted.edits.iter().any(|edit| {
+                        matches!(edit, Mutation::NewEventListener { name, id: listener } if name == "contextmenu" && listener == id)
+                    }) => Some(*id),
                     _ => None,
                 })
                 .expect("the group header must have a context menu");

@@ -416,6 +416,7 @@ fn ActiveWorkspaceBranchChoice(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use dioxus::core::VirtualDom;
     use std::rc::Rc;
     use vmux_ui::transport::{
         BytesListener, HostBinding, PageHost, event_listener::EventListenerError,

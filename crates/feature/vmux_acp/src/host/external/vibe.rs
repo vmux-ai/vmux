@@ -58,9 +58,6 @@ impl Reader {
                 .and_then(serde_json::Value::as_u64)
                 .unwrap_or_default(),
             complete: true,
-            tail: false,
-            before: None,
-            retained_units: 0,
         })
     }
 

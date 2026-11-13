@@ -445,6 +445,63 @@ bounds and cancellation/eviction. Adapters may hold handles, byte cursors, codec
 read-only output caches; they cannot own parallel normalized vmux state or product policy.
 Their `ecs-policy.ron` records are executable review metadata, not a second design document.
 
+Pointer selection enters the shared layout core through `SelectRequest`, including nested panes.
+Window-owned pointer and capture components retain consumed input; native callbacks retain only
+bounded raw samples, native handles and immutable routing hints.
+
+Start pages retain their last published Git result in page-owned `GitProjection` components;
+directory changes are read from canonical workspace context. Launcher `Selection` retains a raw
+worktree lease wait without restarting IO on every update. Managed destination paths normalize
+before lease lookup so alternate path spellings share the same cancellation and adoption scope. Transcript publication timing and
+deferred work belong to Session-owned `PushState` components. View-owned `Binding` children use
+`EntityTarget<Session>` and `ChildOf` to track initialization and disappear with `SessionView`.
+Serialized UI state is produced from those canonical bindings.
+
+Navigation preparation keeps workspace decisions in its registered system. Its scoped
+`TransitionProjection` adapter captures only the current page presentation for rollback and
+publishes empty/loading UI state; it cannot select a workspace or accept navigation.
+
+Transcript rendering retains only DOM key mappings for the currently rendered section, item and
+tool-row members. Each assignment replaces its mappings with the current projected members;
+unmount releases them. They preserve DOM anchors and disclosure identity without changing canonical
+conversation identities. Sticky prompt excerpts extract display text from the current prompt.
+File links encode projected paths and Cwd, and their context menu retains one selected URL per
+mounted menu. Tool output previews decode the external envelope only to display its first line;
+expanded output remains unchanged. Sidebar disclosure and static SVG icon paths belong to their
+mounted rendering adapters. Session-row clicks translate the current projected local/provider ID
+and native mouse gesture into existing page-navigation intent; host routing authorizes the result.
+
+Codex readers retain only bounded metadata hints for physical rollout lookup. Provider Source
+and Entry entities own native archive observations through shared provider IDs, `ArchivedAt` and
+`ArchiveObservedAt`; those observations remain separate from durable `ProviderArchive` user
+overrides. Generation-bound archive operations feed registered `ArchivesReceived` and
+`ArchiveWritten` receivers. They reject older work, preserve values during database failures and
+remove lost entries only after a successful catalog result. No mutable write overlay or cached
+provider row can override a newer canonical observation.
+
+`BlockingRuntime` and `GitRuntime` own bounded native executor pools. Their adapters retain
+only synchronous work queues, per-task result/cancel handles and native wake/context mechanics;
+domain adoption and revision decisions stay in the requesting ECS systems. Pool drop disconnects
+the sender and lets workers drain before exiting. Cancellation participation is counted per
+token, so dropping one of several tokens from a task does not remove its other live membership.
+
+Conversation materialization consumes typed ingress through registered message readers. Scoped
+query capabilities derive event, operation and native-alias lookups from canonical entities;
+those indexes are discarded after each ingress item. Event identities, timestamps, snapshot
+markers and presentation Order stay on event entities. The private exclusive `execute` system
+applies and flushes each mutation before processing the next input, including restored events
+without transient delivery state.
+
+Project pages carry their canonical `ProjectId`. Detail metadata and save updates are projected
+from registered names, directories and revisions. Page-owned choices retain read-only display
+results; current archive membership is applied again during projection. Catalog completions
+validate the page revision, identity and live IPC epoch before consuming their result.
+
+Space repository scans retain only path-bound Git metadata. The registered completion projects
+the current project rows through `ActiveProjectRows`; identity, nested-project filtering,
+deduplication and active selection never run in the background worker. Selection changes during
+a scan therefore use the latest canonical context when its result arrives.
+
 | Interface | Canonical input/output | Lifetime and permitted mechanics |
 |---|---|---|
 | AppKit/winit/CEF/UIKit input | window/surface-bound typed input -> canonical input state; ECS -> immutable native suppression/hit-test output | installed window/adapter generation; bounded raw mailbox, native handles and wake/reentrancy mechanics |
@@ -464,6 +521,21 @@ stale records fail closed. Existing exact fingerprints are frozen migration debt
 Git provenance, not permanent adapter exceptions; migrations remove them instead of extending
 the baseline. Final acceptance requires no remaining domain debt and a repeated caller/lifecycle
 audit. Structural checks supplement ownership review; they cannot prove business semantics.
+Embedded scripts connect to their adapters only through literal `include_str!` source edges.
+Test-only adapters cannot approve scripts consumed by production code, and shadowed macros or
+paths outside the inventoried source tree cannot establish that connection.
+Test-only IO and DOM harness helpers may consume an existing adapter's output only through an
+actual type reference and a current item-specific boundary with the same canonical endpoint.
+Missing, stale, unrelated and cyclic contracts cannot establish that fixture connection; production
+declarations still require their own canonical reference.
+Canonical `PageRegistration` entities retain immutable page descriptors, placement and framework
+reader/component pointers. Native WebView, context-provider and document-script adapters consume
+that registration metadata; their IPC epochs, DOM geometry and callback handles end with the
+mounted document. Page attribute inputs count only through the actual `vmux_page::page` macro and
+its typed `takes` argument. A name, string literal or shadowed macro cannot establish the link.
+Pre-world DOM fixture callers prove an actual Dioxus VirtualDom constructor and a test component
+that renders a production component. Their explicit helper contracts remain bound to that test
+invocation; a fake constructor, literal call text or unrelated renderer cannot establish ownership.
 Component lifecycle callbacks belong to their used Component through the actual hook metadata;
 unused components, Resource markers, unrelated attributes and test-only hooks cannot establish
 a runtime owner. Scoped aliases and generic callback paths resolve to their actual function.
@@ -1937,6 +2009,16 @@ request and emits a typed creation event before navigation. Layout Stacks refere
 entity and may close without deleting it. `vmux://sessions/` opens the manager;
 `vmux://sessions/{session_id}` opens a Session independently of its agent or provider conversation
 identity. Session IDs are encoded as one URL path segment.
+Pending prompts are entities under a Session-owned queue root. Shared Order, PendingPrompt and
+PendingPromptAttachments carry content; QueuedPromptId and consumption/echo markers preserve
+FIFO, cancellation identity and one-time delivery. PromptQueue retains only queue control and
+root provenance. Registered queue observers and scoped system parameters perform mutations;
+the conversation UI receives a one-way snapshot of unconsumed, unacknowledged prompts.
+Accepted Session starts retain their request on an Operation entity until creation commits,
+fails or is canceled. A successful creation appends the first prompt before runtime attachment
+and marks that queued entity as already echoed, so later delivery and replay do not duplicate it.
+Launcher workspace selection likewise lives on the page as WorkspaceSelectionState. Start owns
+the transition and projects its status; Session submission consults that component directly.
 Session creation, metadata, stage, archive, workspace, and agent binding requests converge on one
 typed mutation commit path. It validates unique Session identity and the expected revision before
 changing state, then stores the operation UUID, payload, base revision, and committed revision on
@@ -1974,7 +2056,14 @@ ACP `session/list` is the primary provider catalog. The Sessions page starts eac
 long enough to enumerate its paginated catalog, then stops it; transport failure does not switch data
 sources. A bounded provider-store adapter is used only when no installed ACP owns that agent family
 or the ACP explicitly omits `session/list`. Browsing an external entry does not copy it into durable
-Vmux state. Resume resolves an existing canonical Session before consulting the external catalog,
+Vmux state. `vmux_session::provider::Plugin`, composed by `DomainPlugin`, owns transient Source
+and Entry entities. Sources carry agent family, origin, discovery status and generation; entries
+are their children and compose shared provider IDs, Name, Cwd and timestamps. Catalog, archive
+and import requests retain generation-bound Operation entities. ACP and provider-store adapters
+return typed completions; registered Session systems reconcile canonical entries, preserve the
+last successful catalog on failure and reject stale archive results. Import validates its lease
+again in the mutation commit path, so canceled or replaced navigation cannot create a Session.
+Resume resolves an existing canonical Session before consulting the external catalog,
 so a retained row stays clickable during discovery. Provider identity keeps its row position and
 DOM scope when it becomes managed. Resuming a new entry creates the canonical Session entity,
 records its `AcpSessionId`, and lets
@@ -2057,6 +2146,17 @@ children distinguish external IDs from generation/byte/subrecord file positions;
 subrecords are separate from Assistant block slots. Identified tails use these exact aliases;
 anonymous overlap remains a bounded, ordered fallback for sources without position facts.
 
+Older native history uses the same Session-owned Read operation and Received ingress. A
+Session-owned Window keeps the accepted file generation, earlier byte/subrecord boundary,
+request identity and loading state; Page marks an operation as a prepend. Bounded IO validates
+the accepted file identity and prefix before reading the preceding page. Canonical ingestion
+preserves NativeAlias identities and gives newly discovered older events shared Order components,
+so existing messages, live replies and DOM anchors retain their identities. Failed or stale reads
+release loading without discarding the retry boundary. Visible panes may load history without
+keyboard focus; closing the final view cancels its task. Already cached pages advance automatically
+until new events or the first record is reached. The transcript publishes loading and oldest-page
+status from Window, and persists event order with the conversation.
+
 Native mutable history entries retain their IDs and update existing events without duplicating
 unchanged entries. A grouped native entry may span several canonical Assistant events. Partial
 shrink removes only its unshared imported block slots and remaps aliases; committed operations
@@ -2080,6 +2180,9 @@ Folded tool rows and batches retain their file references, including reads insid
 File links retain the tool's working directory when available and otherwise use the Session's.
 Default file clicks preserve the conversation: a pane at least 1280 CSS pixels wide opens the editor
 to its right, reusing a sibling when present; a narrower or unmeasured pane opens a new Stack.
+The page-root DOM adapter retains only measured width. File clicks send that measurement and
+explicit modifier placement through `ChatToolFileOpen`; the registered host observer chooses
+the destination before forwarding the existing typed open request.
 Modifier gestures and the context menu retain explicit Stack, pane, and tab destinations.
 The file menu lives outside disclosure summaries, so selection cannot activate their click default.
 Disclosure toggles share a leading chevron and a 100 ms content transition, including closure and

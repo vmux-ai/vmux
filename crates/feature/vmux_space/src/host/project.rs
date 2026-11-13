@@ -213,9 +213,7 @@ struct PendingProjectPicker {
     task: Task<Option<std::path::PathBuf>>,
 }
 
-struct ProjectPicker;
-
-impl ProjectPicker {
+impl PendingProjectPicker {
     fn initial_directory(path: &str, projects: &std::path::Path) -> std::path::PathBuf {
         let mut current = if path.trim().is_empty() {
             projects.to_path_buf()
@@ -251,7 +249,7 @@ fn pick(
         .map(std::path::PathBuf::from)
         .unwrap_or_default();
     let task = IoTaskPool::get().spawn(async move {
-        let initial = ProjectPicker::initial_directory(&current_dir, &projects);
+        let initial = PendingProjectPicker::initial_directory(&current_dir, &projects);
         let selected = rfd::AsyncFileDialog::new()
             .set_title(vmux_ui::i18n::translate("agent-project-choose"))
             .set_directory(initial)
@@ -412,15 +410,36 @@ impl ActiveProjectRows {
     }
 }
 
-type ActiveProjectScanResult = (Option<String>, ProjectCatalog);
+type ActiveProjectScanResult = (Option<String>, RepositoryScan);
 
-struct ProjectCatalog {
-    rows: Vec<ProjectRow>,
-    repositories: Vec<ProjectRow>,
+struct RepositoryScan {
+    roots: std::collections::BTreeMap<String, (std::path::PathBuf, std::path::PathBuf)>,
 }
 
-impl ProjectCatalog {
-    fn from_rows(rows: &[ProjectRow]) -> Self {
+impl RepositoryScan {
+    fn read(rows: &[ProjectRow]) -> Self {
+        let mut roots = std::collections::BTreeMap::new();
+        for row in rows {
+            let checkout = CheckoutInfo::try_from(std::path::Path::new(&row.path));
+            let metadata = match checkout {
+                Ok(checkout) => {
+                    let identity = LinkedRepoRoot::find(&checkout.root)
+                        .unwrap_or_else(|| checkout.root.clone());
+                    let identity = identity.canonicalize().unwrap_or(identity);
+                    Some((checkout.root, identity))
+                }
+                Err(_) => None,
+            };
+            if let Some(metadata) = metadata {
+                roots.insert(row.path.clone(), metadata);
+            }
+        }
+        Self { roots }
+    }
+}
+
+impl ActiveProjectRows {
+    fn from_rows(rows: &[ProjectRow], scan: &RepositoryScan) -> Self {
         let mut candidates = Vec::new();
         for row in rows {
             if row.depth != 0
@@ -432,13 +451,11 @@ impl ProjectCatalog {
             {
                 continue;
             }
-            let Ok(checkout) = CheckoutInfo::try_from(std::path::Path::new(&row.path)) else {
+            let Some((checkout, identity)) = scan.roots.get(&row.path) else {
                 candidates.push((None, row.clone()));
                 continue;
             };
-            let identity =
-                LinkedRepoRoot::find(&checkout.root).unwrap_or_else(|| checkout.root.clone());
-            let identity = identity.canonicalize().unwrap_or(identity);
+            let identity = identity.clone();
             let mut projected = row.clone();
             if row.identity.is_empty() || row.identity == row.path {
                 projected.identity = identity.to_string_lossy().into_owned();
@@ -456,7 +473,7 @@ impl ProjectCatalog {
                 }
             }
             if row.identity.is_empty() || row.identity == row.path {
-                projected.path = checkout.root.to_string_lossy().into_owned();
+                projected.path = checkout.to_string_lossy().into_owned();
             } else {
                 projected.path = vmux_path::PathIdentity::resolve(&row.path)
                     .into_path_buf()
@@ -464,7 +481,7 @@ impl ProjectCatalog {
                     .into_owned();
             }
             projected.display_path = vmux_path::DisplayPath::project(&identity);
-            projected.is_worktree = checkout.root != identity;
+            projected.is_worktree = checkout != &identity;
             candidates.push((Some(identity), projected));
         }
         let mut projected = Vec::<(Option<std::path::PathBuf>, ProjectRow)>::new();
@@ -509,7 +526,11 @@ impl ProjectCatalog {
             }
             rows.push(row);
         }
-        Self { rows, repositories }
+        Self {
+            space: None,
+            rows,
+            repositories,
+        }
     }
 }
 
@@ -532,10 +553,14 @@ fn refresh_active_projects(
         && let Some(output) = task.poll()
     {
         scan.task = None;
-        let Ok((scanned_space, catalog)) = output else {
+        let Ok((scanned_space, readings)) = output else {
             scan.requested = true;
             return;
         };
+        let current = space
+            .map(|space| projects.projects_of(space))
+            .unwrap_or_default();
+        let catalog = ActiveProjectRows::from_rows(&current, &readings);
         if scanned_space.as_deref() == space
             && (active.space != scanned_space
                 || active.rows != catalog.rows
@@ -554,14 +579,26 @@ fn refresh_active_projects(
     }
     scan.requested = false;
     let space = space.map(str::to_string);
-    let rows = space
+    let source = space
         .as_deref()
         .map(|space| projects.projects_of(space))
         .unwrap_or_default();
+    let mut rows = Vec::new();
+    for row in source {
+        if row.depth == 0
+            && row.kind == ProjectRowKind::Project
+            && !row.missing
+            && !std::path::Path::new(&row.path)
+                .components()
+                .any(|component| component.as_os_str() == std::ffi::OsStr::new(".git"))
+        {
+            rows.push(row);
+        }
+    }
     let wake = wake.as_deref().map(|wake| (**wake).clone());
     let Some(task) = runtime.spawn(wake, move || {
-        let catalog = ProjectCatalog::from_rows(&rows);
-        (space, catalog)
+        let readings = RepositoryScan::read(&rows);
+        (space, readings)
     }) else {
         scan.requested = true;
         return;
@@ -1339,7 +1376,8 @@ mod tests {
             fixture.row(&non_repository, false),
         ];
 
-        let projection = ProjectCatalog::from_rows(&rows).repositories;
+        let projection =
+            ActiveProjectRows::from_rows(&rows, &RepositoryScan::read(&rows)).repositories;
 
         assert_eq!(
             projection
@@ -1376,7 +1414,8 @@ mod tests {
         let mut row = fixture.row(&fixture.cloud_worktree, true);
         row.identity = "project-identity".into();
         row.label = "Product workspace".into();
-        let projected = ProjectCatalog::from_rows(&[row]).rows;
+        let rows = [row];
+        let projected = ActiveProjectRows::from_rows(&rows, &RepositoryScan::read(&rows)).rows;
         assert_eq!(projected[0].identity, "project-identity");
         assert_eq!(projected[0].label, "Product workspace");
         assert_eq!(
@@ -1403,7 +1442,8 @@ mod tests {
         second.identity = "vmux://projects/backend".to_string();
         second.label = "Product API".to_string();
 
-        let catalog = ProjectCatalog::from_rows(&[first, second]);
+        let rows = [first, second];
+        let catalog = ActiveProjectRows::from_rows(&rows, &RepositoryScan::read(&rows));
         assert_eq!(catalog.rows.len(), 2);
         assert_eq!(catalog.rows[0].label, "Product UI");
         assert_eq!(
@@ -1431,7 +1471,7 @@ mod tests {
             fixture.row(&notes, false),
         ];
 
-        let catalog = ProjectCatalog::from_rows(&rows);
+        let catalog = ActiveProjectRows::from_rows(&rows, &RepositoryScan::read(&rows));
 
         assert_eq!(
             catalog
@@ -1465,7 +1505,7 @@ mod tests {
         child.depth = 1;
         child.kind = ProjectRowKind::Directory;
         source.insert(1, child.clone());
-        let catalog = ProjectCatalog::from_rows(&source);
+        let catalog = ActiveProjectRows::from_rows(&source, &RepositoryScan::read(&source));
         let active = ActiveProjectRows {
             space: Some("work".to_string()),
             rows: catalog.rows,
@@ -1492,7 +1532,7 @@ mod tests {
         let missing = existing.join("github.com/vmux-ai/vmux");
 
         assert_eq!(
-            ProjectPicker::initial_directory(&missing.to_string_lossy(), &existing),
+            PendingProjectPicker::initial_directory(&missing.to_string_lossy(), &existing),
             existing
         );
     }
@@ -1502,7 +1542,10 @@ mod tests {
         let root = tempfile::tempdir().unwrap();
         let projects = root.path().join("projects");
         std::fs::create_dir(&projects).unwrap();
-        assert_eq!(ProjectPicker::initial_directory("", &projects), projects);
+        assert_eq!(
+            PendingProjectPicker::initial_directory("", &projects),
+            projects
+        );
     }
 
     #[test]

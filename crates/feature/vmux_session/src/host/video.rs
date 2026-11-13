@@ -1,11 +1,13 @@
 use std::collections::HashMap;
 use std::fs::File;
 use std::io::{BufRead, BufReader, Read, Write};
-#[cfg(not(unix))]
+#[cfg(not(any(unix, windows)))]
 use std::io::{Seek, SeekFrom};
 use std::net::{TcpListener, TcpStream};
 #[cfg(unix)]
 use std::os::unix::fs::FileExt;
+#[cfg(windows)]
+use std::os::windows::fs::FileExt;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, OnceLock, Weak};
 use std::time::Duration;
@@ -24,6 +26,8 @@ struct Server {
     port: u16,
     files: Arc<Mutex<HashMap<String, Weak<RegisteredFile>>>>,
 }
+
+static SERVER: OnceLock<Result<Server, String>> = OnceLock::new();
 
 impl Source {
     pub(crate) fn open(path: &Path) -> std::io::Result<Self> {
@@ -78,7 +82,6 @@ impl Source {
 
 impl Server {
     fn shared() -> std::io::Result<&'static Self> {
-        static SERVER: OnceLock<Result<Server, String>> = OnceLock::new();
         match SERVER.get_or_init(|| Self::start().map_err(|error| error.to_string())) {
             Ok(server) => Ok(server),
             Err(error) => Err(std::io::Error::other(error.clone())),
@@ -197,7 +200,9 @@ impl Server {
             let capacity = remaining.min(buffer.len() as u64) as usize;
             #[cfg(unix)]
             let count = { source.file.read_at(&mut buffer[..capacity], position)? };
-            #[cfg(not(unix))]
+            #[cfg(windows)]
+            let count = source.file.seek_read(&mut buffer[..capacity], position)?;
+            #[cfg(not(any(unix, windows)))]
             let count = {
                 let mut file = source.file.try_clone()?;
                 file.seek(SeekFrom::Start(position))?;
@@ -275,8 +280,18 @@ mod tests {
     struct Client(url::Url);
 
     impl Client {
+        fn new(source: &Source) -> Self {
+            Self(url::Url::parse(&source.url()).unwrap())
+        }
+
         fn request(&self, method: &str, range: &str) -> String {
             let mut stream = TcpStream::connect(("127.0.0.1", self.0.port().unwrap())).unwrap();
+            stream
+                .set_read_timeout(Some(Duration::from_secs(3)))
+                .unwrap();
+            stream
+                .set_write_timeout(Some(Duration::from_secs(3)))
+                .unwrap();
             write!(
                 stream,
                 "{method} {} HTTP/1.1\r\nHost: 127.0.0.1:{}\r\n{range}\r\n",
@@ -296,7 +311,7 @@ mod tests {
         let path = directory.path().join("clip.mov");
         std::fs::write(&path, b"0123456789").unwrap();
         let source = Source::open(&path).unwrap();
-        let client = Client(url::Url::parse(&source.url()).unwrap());
+        let client = Client::new(&source);
         let partial = client.request("GET", "Range: bytes=3-6\r\n");
         assert!(partial.starts_with("HTTP/1.1 206"));
         assert!(partial.contains("Content-Type: video/quicktime\r\n"));

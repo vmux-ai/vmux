@@ -37,25 +37,31 @@ impl Disclosure {
     }
 
     pub fn runtime() -> String {
-        DISCLOSURE_RUNTIME.replace(
+        Self::RUNTIME.replace(
             "__VMUX_DISCLOSURE_MS__",
             &crate::motion::Motion::CONTENT_MS.to_string(),
         )
     }
-}
-
-const DISCLOSURE_RUNTIME: &str = r#"
+    const RUNTIME: &str = r#"
 (() => {
   if (window.__vmuxDisclosures) return;
   const states = new WeakMap();
   const choices = new Map();
+  const remember = (key, expanded) => {
+    choices.delete(key);
+    choices.set(key, expanded);
+    while (choices.size > 2048) choices.delete(choices.keys().next().value);
+  };
   const restore = node => {
     if (!(node instanceof Element)) return;
     const details = node.matches('details[data-vmux-disclosure-key]') ? [node] : [];
     details.push(...node.querySelectorAll('details[data-vmux-disclosure-key]'));
     for (const element of details) {
       const key = element.dataset.vmuxDisclosureKey;
-      if (key && choices.has(key)) element.open = choices.get(key);
+      if (key && choices.has(key)) {
+        element.open = choices.get(key);
+        remember(key, element.open);
+      }
     }
   };
   const apply = records => {
@@ -76,7 +82,7 @@ const DISCLOSURE_RUNTIME: &str = r#"
     event.preventDefault();
     const previous = states.get(details);
     const expanded = !(previous?.expanded ?? details.open);
-    if (details.dataset.vmuxDisclosureKey) choices.set(details.dataset.vmuxDisclosureKey, expanded);
+    if (details.dataset.vmuxDisclosureKey) remember(details.dataset.vmuxDisclosureKey, expanded);
     const from = details.getBoundingClientRect().height;
     const opacities = new Map([...details.children].map(child => [child, Number(getComputedStyle(child).opacity)]));
     const original = previous?.original ?? { height: details.style.height, overflow: details.style.overflow };
@@ -116,6 +122,7 @@ const DISCLOSURE_RUNTIME: &str = r#"
   });
 })();
 "#;
+}
 
 #[cfg(test)]
 mod tests {

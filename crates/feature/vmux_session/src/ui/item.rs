@@ -24,6 +24,7 @@ use vmux_ui::i18n::{TranslationValue, translate, translate_with};
 use vmux_ui::icon::{LineIcon, LineIconView};
 use vmux_ui::navigation::NavigationGesture;
 
+use super::FilePlacement;
 use super::activity::{ActivityIconView, FileActivityIcon, ToolActivityIcon};
 use crate::activity::{ActivityIcon, ToolPresentation};
 use vmux_ui::clipboard::Clipboard;
@@ -408,10 +409,23 @@ mod disclosure_tests {
     }
 
     #[derive(Default)]
-    struct FileHost(RefCell<Vec<OpenRequest>>);
+    struct FileHost(
+        RefCell<Vec<OpenRequest>>,
+        RefCell<Vec<crate::event::ChatToolFileOpen>>,
+    );
 
     impl PageHost for FileHost {
         fn send(&self, id: &str, bytes: &[u8]) -> Result<(), EventListenerError> {
+            if id == crate::event::ChatToolFileOpen::id() {
+                let request =
+                    rkyv::from_bytes::<crate::event::ChatToolFileOpen, rkyv::rancor::Error>(bytes)
+                        .unwrap();
+                self.0.borrow_mut().push(OpenRequest {
+                    value: request.url.clone(),
+                    open: request.open,
+                });
+                self.1.borrow_mut().push(request);
+            }
             if id == OpenRequest::id() {
                 self.0
                     .borrow_mut()
@@ -649,7 +663,7 @@ mod disclosure_tests {
             let opened = host.0.borrow();
             assert_eq!(opened.len(), 1);
             assert_eq!(opened[0].value, "file:///work/a%20%23%3F.rs");
-            assert_eq!(opened[0].open, Some(target));
+            assert_eq!(opened[0].open, if meta { Some(target) } else { None });
         }
     }
 
@@ -726,7 +740,11 @@ mod disclosure_tests {
             dom.runtime().handle_event("click", event.clone(), link);
             assert!(!event.default_action_enabled());
             assert!(!event.propagates());
-            assert_eq!(host.0.borrow().last().unwrap().open, Some(target));
+            assert_eq!(
+                host.0.borrow().last().unwrap().open,
+                if meta { Some(target) } else { None }
+            );
+            assert_eq!(host.1.borrow().last().unwrap().width, width);
         }
         assert_eq!(host.0.borrow().len(), 5);
     }
@@ -1385,8 +1403,9 @@ fn ToolFileLink(path: String, #[props(default)] read: bool) -> Element {
                         event.prevent_default();
                         event.stop_propagation();
                         let width = placement.map(|placement| *placement.0.peek()).unwrap_or(0.0);
-                        let target = FilePlacement::target(width, NavigationGesture::from_mouse(&event));
-                        let _ = vmux_ui::hooks::send(&OpenRequest { value: clicked_url.clone(), open: Some(target) });
+                        let target = NavigationGesture::from_mouse(&event).open_target();
+                        let open = (target != OpenTarget::InPlace).then_some(target);
+                        let _ = vmux_ui::hooks::send(&crate::event::ChatToolFileOpen { url: clicked_url.clone(), width, open });
                     },
                     oncontextmenu: move |_| {
                         if let Some(menu) = menu {
@@ -1432,37 +1451,6 @@ struct FileMenu(Signal<String>);
 impl FileMenu {
     fn select(mut self, url: String) {
         self.0.set(url);
-    }
-}
-
-#[derive(Clone, Copy)]
-pub(super) struct FilePlacement(Signal<f64>);
-
-impl FilePlacement {
-    pub(super) fn provide() -> Self {
-        let placement = Self(use_signal(|| 0.0));
-        use_context_provider(|| placement)
-    }
-
-    pub(super) fn resize(mut self, data: &ResizeData) {
-        if let Ok(size) = data.get_content_box_size() {
-            self.0.set(size.width);
-        }
-    }
-
-    fn target(width: f64, gesture: NavigationGesture) -> OpenTarget {
-        let requested = gesture.open_target();
-        if requested != OpenTarget::InPlace {
-            return requested;
-        }
-        if width.is_finite() && width >= 1280.0 {
-            return OpenTarget::InPane {
-                direction: PaneDirection::Right,
-                target: PaneTarget::Existing,
-                mode: PaneOpenMode::NewStack,
-            };
-        }
-        OpenTarget::InNewStack
     }
 }
 

@@ -7,7 +7,7 @@ use bevy_app::{App, Plugin as BevyPlugin, Update};
 use bevy_ecs::prelude::*;
 use bevy_ecs::system::SystemParam;
 use vmux_api::session::{AssistantBlock, Message};
-use vmux_ecs::{CreatedAt, EntityTarget};
+use vmux_ecs::{CreatedAt, EntityTarget, Order};
 
 use crate::{
     ConversationEvent, EventIdentity, MessageContent, ProviderKind, ProviderSessionId,
@@ -22,6 +22,7 @@ impl BevyPlugin for Plugin {
             .configure_sets(Update, (Prepare, Ready, TranscriptReadySet).chain())
             .add_message::<Received>()
             .add_message::<Committed>()
+            .add_message::<MoreRequest>()
             .add_systems(Update, cancel.before(Prepare));
     }
 }
@@ -43,6 +44,90 @@ pub struct Read {
 #[derive(Component)]
 pub struct Applied;
 
+#[derive(Component, Clone, Debug)]
+pub struct Window {
+    pub generation: u64,
+    pub request_id: u64,
+    pub has_older: bool,
+    pub loading: bool,
+    before: Option<Boundary>,
+}
+
+impl Window {
+    pub fn begin(&mut self, generation: u64) -> Option<Page> {
+        if self.generation != generation || self.loading || !self.has_older {
+            return None;
+        }
+        let before = self.before?;
+        self.request_id = self.request_id.checked_add(1)?;
+        self.loading = true;
+        Some(Page {
+            generation,
+            request_id: self.request_id,
+            before,
+        })
+    }
+
+    pub fn finish(&mut self, page: Page) {
+        if self.matches(page) {
+            self.loading = false;
+        }
+    }
+
+    pub(super) fn matches(&self, page: Page) -> bool {
+        self.generation == page.generation && self.request_id == page.request_id
+    }
+
+    pub(super) fn pending(&self, page: Page) -> bool {
+        self.matches(page) && self.loading && self.before == Some(page.before)
+    }
+
+    pub(super) fn observe(
+        previous: Option<Self>,
+        generation: u64,
+        before: Option<Boundary>,
+        page: Option<Page>,
+    ) -> Self {
+        if let Some(mut previous) = previous
+            && previous.generation == generation
+        {
+            if page.is_some() {
+                previous.before = before;
+                previous.has_older = before.is_some();
+            } else if let (Some(current), Some(incoming)) = (previous.before, before) {
+                previous.before = Some(current.min(incoming));
+            }
+            return previous;
+        }
+        Self {
+            generation,
+            request_id: 0,
+            has_older: before.is_some(),
+            loading: false,
+            before,
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
+pub struct Boundary {
+    pub byte: u64,
+    pub message: usize,
+}
+
+#[derive(Component, Clone, Copy, Debug)]
+pub struct Page {
+    pub generation: u64,
+    pub request_id: u64,
+    pub before: Boundary,
+}
+
+#[derive(Message, Clone, Debug)]
+pub struct MoreRequest {
+    pub session: SessionId,
+    pub generation: u64,
+}
+
 #[derive(Message, Clone)]
 pub struct Received {
     pub operation: Entity,
@@ -60,6 +145,7 @@ pub struct FileFacts {
     pub length: u64,
     pub cursor: u64,
     pub positions: Vec<(u64, usize)>,
+    pub before: Option<Boundary>,
 }
 
 impl Received {
@@ -115,6 +201,7 @@ pub struct Versions<'w, 's> {
             Ref<'static, EventIdentity>,
             Ref<'static, MessageContent>,
             Ref<'static, CreatedAt>,
+            Option<&'static Order>,
         ),
         (
             With<ConversationEvent>,
@@ -152,6 +239,10 @@ impl Versions<'_, '_> {
             })
     }
 
+    pub fn unchanged(&self, session: Entity, read: &Read) -> bool {
+        self.fingerprint(session) == read.fingerprint
+    }
+
     pub fn has_events(&self, session: Entity) -> bool {
         if let Ok(children) = self.children.get(session) {
             for child in children.iter() {
@@ -167,13 +258,14 @@ impl Versions<'_, '_> {
         let mut fingerprint = DefaultHasher::new();
         if let Ok(children) = self.children.get(session) {
             for child in children.iter() {
-                let Ok((identity, content, created)) = self.events.get(child) else {
+                let Ok((identity, content, created, order)) = self.events.get(child) else {
                     continue;
                 };
                 child.hash(&mut fingerprint);
                 identity.last_changed().get().hash(&mut fingerprint);
                 content.last_changed().get().hash(&mut fingerprint);
                 created.last_changed().get().hash(&mut fingerprint);
+                order.map(|order| order.0).hash(&mut fingerprint);
             }
         }
         fingerprint.finish()
@@ -183,10 +275,10 @@ impl Versions<'_, '_> {
         let mut selected = BinaryHeap::new();
         if let Ok(children) = self.children.get(session) {
             for (position, child) in children.iter().enumerate() {
-                let Ok((identity, _, _)) = self.events.get(child) else {
+                let Ok((identity, _, _, order)) = self.events.get(child) else {
                     continue;
                 };
-                let key = (identity.sequence, position, child);
+                let key = (identity.order(order), position, child);
                 if selected.len() < 512 {
                     selected.push(Reverse(key));
                     continue;
@@ -204,7 +296,7 @@ impl Versions<'_, '_> {
         ordered.sort_by_key(|(sequence, position, _)| (*sequence, *position));
         let mut messages = Vec::with_capacity(ordered.len());
         for (_, _, entity) in ordered {
-            if let Ok((_, content, _)) = self.events.get(entity) {
+            if let Ok((_, content, _, _)) = self.events.get(entity) {
                 messages.push(content.0.clone());
             }
         }
@@ -407,6 +499,33 @@ mod tests {
             operation
         }
 
+        fn page(&mut self) -> (Entity, Page) {
+            let generation = self
+                .app
+                .world()
+                .get::<Window>(self.session)
+                .unwrap()
+                .generation;
+            let page = self
+                .app
+                .world_mut()
+                .get_mut::<Window>(self.session)
+                .unwrap()
+                .begin(generation)
+                .unwrap();
+            let operation = self.operation(false);
+            self.app.world_mut().entity_mut(operation).insert(page);
+            (operation, page)
+        }
+
+        fn transcript(&mut self) -> crate::Transcript {
+            let session = self.session;
+            self.app
+                .world_mut()
+                .run_system_once(move |transcripts: Transcripts| transcripts.get(session))
+                .unwrap()
+        }
+
         fn receive(
             &mut self,
             operation: Entity,
@@ -535,9 +654,414 @@ mod tests {
     }
 
     #[test]
+    fn partial_snapshot_prefix_keeps_its_place_between_new_native_pages() {
+        let messages = (0..1230)
+            .map(|index| Message::user(format!("Request {index}")))
+            .collect::<Vec<_>>();
+        let mut fixture = Fixture::new(messages[..300].to_vec());
+        let facts = FileFacts {
+            identity: "partial-file".into(),
+            prefix: b"prefix".to_vec(),
+            length: 1230,
+            cursor: 1230,
+            positions: (718..1230).map(|offset| (offset, 0)).collect(),
+            before: Some(Boundary {
+                byte: 718,
+                message: 0,
+            }),
+        };
+        let operation = fixture.operation(false);
+        fixture
+            .receive_file(
+                operation,
+                messages[718..]
+                    .iter()
+                    .cloned()
+                    .map(|message| (None, message))
+                    .collect(),
+                true,
+                None,
+                Some(facts.clone()),
+            )
+            .unwrap();
+        let original = fixture.transcript();
+        let (operation, page) = fixture.page();
+        assert_eq!(
+            fixture.receive_file(
+                operation,
+                messages[206..718]
+                    .iter()
+                    .cloned()
+                    .map(|message| (None, message))
+                    .collect(),
+                true,
+                None,
+                Some(FileFacts {
+                    positions: (206..718).map(|offset| (offset, 0)).collect(),
+                    before: Some(Boundary {
+                        byte: 206,
+                        message: 0
+                    }),
+                    ..facts.clone()
+                })
+            ),
+            Ok(true)
+        );
+        fixture
+            .app
+            .world_mut()
+            .get_mut::<Window>(fixture.session)
+            .unwrap()
+            .finish(page);
+        let expanded = fixture.transcript();
+        assert_eq!(expanded.messages.len(), 1230);
+        assert_eq!(expanded.messages, messages);
+        assert_eq!(&expanded.event_ids[..300], &original.event_ids[..300]);
+        let before = fixture
+            .app
+            .world_mut()
+            .query_filtered::<(Entity, &Order), With<ConversationEvent>>()
+            .iter(fixture.app.world())
+            .map(|(entity, order)| (entity, order.0))
+            .collect::<Vec<_>>();
+        let (operation, page) = fixture.page();
+        fixture
+            .receive_file(
+                operation,
+                messages[..206]
+                    .iter()
+                    .cloned()
+                    .map(|message| (None, message))
+                    .collect(),
+                true,
+                None,
+                Some(FileFacts {
+                    positions: (0..206).map(|offset| (offset, 0)).collect(),
+                    before: None,
+                    ..facts
+                }),
+            )
+            .unwrap();
+        fixture
+            .app
+            .world_mut()
+            .get_mut::<Window>(fixture.session)
+            .unwrap()
+            .finish(page);
+        assert_eq!(fixture.transcript(), expanded);
+        for (entity, order) in before {
+            assert_eq!(fixture.app.world().get::<Order>(entity).unwrap().0, order);
+        }
+    }
+
+    #[test]
+    fn a_native_page_can_fill_a_hole_inside_a_cached_assistant_event() {
+        let a = AssistantBlock::Text("A".into());
+        let b = AssistantBlock::Text("B".into());
+        let c = AssistantBlock::Text("C".into());
+        let mut fixture = Fixture::new(vec![
+            Message::user("Request"),
+            Message::Assistant {
+                blocks: vec![a.clone(), c.clone()],
+            },
+        ]);
+        let original = fixture.transcript();
+        let file = FileFacts {
+            identity: "grouped-file".into(),
+            prefix: b"prefix".to_vec(),
+            length: 100,
+            cursor: 100,
+            positions: vec![(20, 0)],
+            before: Some(Boundary {
+                byte: 20,
+                message: 0,
+            }),
+        };
+        let operation = fixture.operation(false);
+        fixture
+            .receive_file(
+                operation,
+                vec![(
+                    None,
+                    Message::Assistant {
+                        blocks: vec![c.clone()],
+                    },
+                )],
+                true,
+                None,
+                Some(file.clone()),
+            )
+            .unwrap();
+        let (operation, page) = fixture.page();
+        let result = fixture.receive_file(
+            operation,
+            vec![
+                (
+                    None,
+                    Message::Assistant {
+                        blocks: vec![a.clone()],
+                    },
+                ),
+                (
+                    None,
+                    Message::Assistant {
+                        blocks: vec![b.clone()],
+                    },
+                ),
+            ],
+            true,
+            None,
+            Some(FileFacts {
+                positions: vec![(10, 0), (15, 0)],
+                before: None,
+                ..file
+            }),
+        );
+        assert_eq!(result, Ok(true));
+        fixture
+            .app
+            .world_mut()
+            .get_mut::<Window>(fixture.session)
+            .unwrap()
+            .finish(page);
+        let full = fixture.transcript();
+        assert_eq!(
+            full.messages,
+            vec![
+                Message::user("Request"),
+                Message::Assistant {
+                    blocks: vec![a, b, c]
+                }
+            ]
+        );
+        assert_eq!(full.event_ids, original.event_ids);
+        fixture.app.world_mut().write_message(SnapshotReceived {
+            session: SessionId::new("canonical"),
+            messages: full.messages.clone(),
+        });
+        fixture.app.update();
+        assert_eq!(fixture.transcript(), full);
+    }
+
+    #[test]
+    fn cached_snapshot_prefix_is_reused_when_loading_native_older_pages() {
+        let messages = (0..1230)
+            .map(|index| Message::user(format!("Request {index}")))
+            .collect::<Vec<_>>();
+        let mut fixture = Fixture::new(messages.clone());
+        let original = fixture.transcript();
+        let facts = FileFacts {
+            identity: "cached-file".into(),
+            prefix: b"prefix".to_vec(),
+            length: 1230,
+            cursor: 1230,
+            positions: (718..1230).map(|offset| (offset, 0)).collect(),
+            before: Some(Boundary {
+                byte: 718,
+                message: 0,
+            }),
+        };
+        let operation = fixture.operation(false);
+        assert_eq!(
+            fixture.receive_file(
+                operation,
+                messages[718..]
+                    .iter()
+                    .cloned()
+                    .map(|message| (None, message))
+                    .collect(),
+                true,
+                None,
+                Some(facts.clone())
+            ),
+            Ok(true)
+        );
+        let (operation, page) = fixture.page();
+        assert_eq!(
+            fixture.receive_file(
+                operation,
+                messages[206..718]
+                    .iter()
+                    .cloned()
+                    .map(|message| (None, message))
+                    .collect(),
+                true,
+                None,
+                Some(FileFacts {
+                    positions: (206..718).map(|offset| (offset, 0)).collect(),
+                    before: Some(Boundary {
+                        byte: 206,
+                        message: 0
+                    }),
+                    ..facts
+                })
+            ),
+            Ok(true)
+        );
+        fixture
+            .app
+            .world_mut()
+            .get_mut::<Window>(fixture.session)
+            .unwrap()
+            .finish(page);
+        assert_eq!(fixture.transcript(), original);
+    }
+
+    #[test]
+    fn older_native_pages_preserve_ids_repeated_prompts_and_live_replies() {
+        let mut fixture = Fixture::new(Vec::new());
+        let file = FileFacts {
+            identity: "stable-file".into(),
+            prefix: b"stable-prefix".to_vec(),
+            length: 100,
+            cursor: 100,
+            positions: vec![(40, 0), (50, 0)],
+            before: Some(Boundary {
+                byte: 40,
+                message: 0,
+            }),
+        };
+        let operation = fixture.operation(false);
+        assert_eq!(
+            fixture.receive_file(
+                operation,
+                vec![
+                    (None, Message::user("Current request")),
+                    (
+                        None,
+                        Message::Assistant {
+                            blocks: vec![AssistantBlock::Text("Current answer".into())]
+                        }
+                    ),
+                ],
+                true,
+                None,
+                Some(file.clone())
+            ),
+            Ok(true)
+        );
+        fixture
+            .app
+            .world_mut()
+            .write_message(ConversationAppendReceived {
+                session: SessionId::new("canonical"),
+                messages: vec![Message::user("Repeated request")],
+            });
+        fixture.app.update();
+        let original = fixture.transcript();
+        let (operation, page) = fixture.page();
+        assert_eq!(
+            fixture.receive_file(
+                operation,
+                vec![
+                    (None, Message::user("Repeated request")),
+                    (
+                        None,
+                        Message::Assistant {
+                            blocks: vec![AssistantBlock::Text("Older answer".into())]
+                        }
+                    ),
+                ],
+                true,
+                None,
+                Some(FileFacts {
+                    positions: vec![(10, 0), (20, 0)],
+                    before: None,
+                    ..file.clone()
+                })
+            ),
+            Ok(true)
+        );
+        fixture
+            .app
+            .world_mut()
+            .get_mut::<Window>(fixture.session)
+            .unwrap()
+            .finish(page);
+        let loaded = fixture.transcript();
+        assert_eq!(
+            loaded.messages,
+            vec![
+                Message::user("Repeated request"),
+                Message::Assistant {
+                    blocks: vec![AssistantBlock::Text("Older answer".into())]
+                },
+                Message::user("Current request"),
+                Message::Assistant {
+                    blocks: vec![AssistantBlock::Text("Current answer".into())]
+                },
+                Message::user("Repeated request"),
+            ]
+        );
+        assert_eq!(&loaded.event_ids[2..], original.event_ids.as_slice());
+        assert!(
+            !fixture
+                .app
+                .world()
+                .get::<Window>(fixture.session)
+                .unwrap()
+                .has_older
+        );
+        let operation = fixture.operation(false);
+        assert_eq!(
+            fixture.receive_file(
+                operation,
+                vec![
+                    (None, Message::user("Repeated request")),
+                    (
+                        None,
+                        Message::Assistant {
+                            blocks: vec![AssistantBlock::Text("Older answer".into())]
+                        }
+                    ),
+                    (None, Message::user("Current request")),
+                    (
+                        None,
+                        Message::Assistant {
+                            blocks: vec![AssistantBlock::Text("Current answer".into())]
+                        }
+                    ),
+                ],
+                true,
+                None,
+                Some(FileFacts {
+                    positions: vec![(10, 0), (20, 0), (40, 0), (50, 0)],
+                    before: None,
+                    ..file
+                })
+            ),
+            Ok(true)
+        );
+        assert_eq!(fixture.transcript(), loaded);
+        fixture
+            .app
+            .world_mut()
+            .write_message(ConversationAppendReceived {
+                session: SessionId::new("canonical"),
+                messages: vec![Message::Assistant {
+                    blocks: vec![AssistantBlock::Text("Live answer".into())],
+                }],
+            });
+        fixture.app.update();
+        let transcript = fixture.transcript();
+        let identity = fixture
+            .app
+            .world_mut()
+            .query::<&EventIdentity>()
+            .iter(fixture.app.world())
+            .find(|identity| Some(&identity.event_id) == transcript.event_ids.last())
+            .unwrap();
+        assert_eq!(identity.reply_to.as_ref(), original.event_ids.last());
+        let expected = transcript.messages;
+        fixture.roundtrip();
+        assert_eq!(fixture.messages(), expected);
+    }
+
+    #[test]
     fn stale_or_malformed_file_reads_cannot_advance_the_accepted_generation() {
         let mut fixture = Fixture::new(Vec::new());
         let facts = FileFacts {
+            before: None,
             identity: "original".into(),
             prefix: b"prefix".to_vec(),
             length: 100,
@@ -558,6 +1082,7 @@ mod tests {
         let stale = fixture.operation(false);
         let current = fixture.operation(false);
         let replacement = FileFacts {
+            before: None,
             identity: "replacement".into(),
             ..facts.clone()
         };
@@ -596,6 +1121,7 @@ mod tests {
                     true,
                     None,
                     Some(FileFacts {
+                        before: None,
                         positions,
                         ..replacement.clone()
                     })
@@ -696,6 +1222,7 @@ mod tests {
             Ok(true)
         );
         let facts = FileFacts {
+            before: None,
             identity: "stable".into(),
             prefix: b"prefix".to_vec(),
             length: 100,
@@ -788,6 +1315,7 @@ mod tests {
             positions.push((number * 10, 0));
         }
         let facts = FileFacts {
+            before: None,
             identity: "inode:1".into(),
             prefix: b"prefix".to_vec(),
             length: 10000,
@@ -814,6 +1342,7 @@ mod tests {
                 true,
                 None,
                 Some(FileFacts {
+                    before: None,
                     identity: "inode:1".into(),
                     prefix: b"prefix appended".to_vec(),
                     length: 11000,
@@ -834,6 +1363,7 @@ mod tests {
                 false,
                 None,
                 Some(FileFacts {
+                    before: None,
                     identity: "inode:1".into(),
                     prefix: b"prefix appended".to_vec(),
                     length: 11000,
@@ -857,6 +1387,7 @@ mod tests {
         ] {
             let operation = fixture.operation(false);
             let facts = FileFacts {
+                before: None,
                 identity: identity.into(),
                 prefix: prefix.as_bytes().to_vec(),
                 length,

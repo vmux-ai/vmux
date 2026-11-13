@@ -1,3 +1,4 @@
+pub use crate::component::{PendingPrompt, PendingPromptAttachments};
 use bevy::prelude::*;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -51,12 +52,6 @@ pub struct PageOpenRequest {
     pub url: String,
     pub request_id: Option<[u8; 16]>,
 }
-
-#[derive(Component, Clone, Debug)]
-pub struct PendingPrompt(pub String);
-
-#[derive(Component, Clone, Debug, Default)]
-pub struct PendingPromptAttachments(pub Vec<vmux_api::protocol::AgentAttachment>);
 
 #[derive(Component, Clone, Debug)]
 pub struct PageOpenTask {

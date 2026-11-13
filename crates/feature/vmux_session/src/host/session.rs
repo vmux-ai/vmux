@@ -33,7 +33,8 @@ use vmux_ecs::{
     PendingPromptAttachments,
 };
 use vmux_session::{
-    AgentConversationTitle, AgentId, CreateRequest, Created, PromptQueue, Route, Session, SessionId,
+    AgentConversationTitle, AgentId, CreateRequest, Created, QueuedPrompts, Route, Session,
+    SessionId,
 };
 
 type ChatUiStateUpdates = UiState<ChatUiState>;
@@ -87,8 +88,15 @@ pub(super) struct ChatHostPlugin;
 #[cfg(host)]
 impl Plugin for ChatHostPlugin {
     fn build(&self, app: &mut App) {
-        app.init_resource::<PendingSessionStarts>()
-            .add_message::<StartRequest>()
+        if !app.is_plugin_added::<crate::QueuePlugin>() {
+            app.add_plugins(crate::QueuePlugin);
+        }
+        if !app.is_plugin_added::<vmux_ecs::OperationPlugin>() {
+            app.add_plugins(vmux_ecs::OperationPlugin);
+        }
+        app.add_message::<StartRequest>()
+            .add_message::<crate::mutation::Request>()
+            .add_message::<crate::mutation::Rejected>()
             .add_message::<vmux_session::ConversationAppendReceived>()
             .add_plugins((
                 AgentProjectionPlugin,
@@ -103,12 +111,19 @@ impl Plugin for ChatHostPlugin {
             .add_observer(submit_from_command_bar)
             .add_systems(
                 Update,
-                (start.before(crate::model::MutationSet), report_tab_identity),
+                (
+                    start.before(crate::model::MutationSet),
+                    track_start
+                        .after(crate::mutation::ReceiveSet)
+                        .before(crate::mutation::CommitSet),
+                    reject_start.after(crate::model::MutationSet),
+                    report_tab_identity,
+                ),
             );
     }
 }
 
-#[derive(Message, Clone, Debug)]
+#[derive(Component, Message, Clone, Debug)]
 pub struct StartRequest {
     create: CreateRequest,
     target: PageOpenTarget,
@@ -141,51 +156,135 @@ impl StartRequest {
     }
 }
 
-#[derive(Resource, Default)]
-struct PendingSessionStarts(std::collections::HashMap<SessionId, PendingSessionStart>);
-
-struct PendingSessionStart {
-    target: PageOpenTarget,
-    prompt: String,
-    attachments: Vec<vmux_api::protocol::AgentAttachment>,
-}
+#[derive(Component)]
+struct CreationOperation(String);
 
 fn start(
     mut requests: MessageReader<StartRequest>,
     mut creates: MessageWriter<CreateRequest>,
-    mut pending: ResMut<PendingSessionStarts>,
+    pending: Query<(Entity, &StartRequest, &vmux_ecs::OperationState)>,
+    mut commands: Commands,
+) {
+    let mut active = std::collections::HashMap::new();
+    for (entity, request, state) in &pending {
+        if matches!(
+            state,
+            vmux_ecs::OperationState::Pending | vmux_ecs::OperationState::Running
+        ) {
+            active.insert(request.create.id().clone(), entity);
+        }
+    }
+    for request in requests.read() {
+        if let Some(entity) = active.get(request.create.id()) {
+            commands.entity(*entity).insert(request.clone());
+        } else {
+            let entity = commands
+                .spawn((
+                    vmux_ecs::Operation::bundle("session.start")
+                        .unwrap()
+                        .running(),
+                    request.clone(),
+                ))
+                .id();
+            active.insert(request.create.id().clone(), entity);
+        }
+        creates.write(request.create.clone());
+    }
+}
+
+fn track_start(
+    mut requests: MessageReader<crate::mutation::Request>,
+    pending: Query<(Entity, &StartRequest, &vmux_ecs::OperationState)>,
+    mut commands: Commands,
 ) {
     for request in requests.read() {
-        pending.0.insert(
-            request.create.id().clone(),
-            PendingSessionStart {
-                target: request.target.clone(),
-                prompt: request.prompt.clone(),
-                attachments: request.attachments.clone(),
-            },
-        );
-        creates.write(request.create.clone());
+        if !matches!(request.mutation, crate::mutation::Mutation::Create(_)) {
+            continue;
+        }
+        for (entity, start, state) in &pending {
+            if start.id() == &request.session
+                && matches!(
+                    state,
+                    vmux_ecs::OperationState::Pending | vmux_ecs::OperationState::Running
+                )
+            {
+                commands
+                    .entity(entity)
+                    .insert(CreationOperation(request.operation.clone()));
+            }
+        }
+    }
+}
+
+fn reject_start(
+    mut rejected: MessageReader<crate::mutation::Rejected>,
+    mut pending: Query<(
+        Entity,
+        &StartRequest,
+        &CreationOperation,
+        &mut vmux_ecs::OperationState,
+    )>,
+    mut commands: Commands,
+) {
+    for rejection in rejected.read() {
+        for (entity, start, operation, mut state) in &mut pending {
+            if start.id() != &rejection.session
+                || operation.0 != rejection.operation
+                || !matches!(
+                    *state,
+                    vmux_ecs::OperationState::Pending | vmux_ecs::OperationState::Running
+                )
+            {
+                continue;
+            }
+            *state = vmux_ecs::OperationState::Failed;
+            commands
+                .entity(entity)
+                .insert(vmux_ecs::OperationError::new(format!("{:?}", rejection.reason)).unwrap());
+        }
     }
 }
 
 fn open_started(
     trigger: On<Created>,
-    mut pending: ResMut<PendingSessionStarts>,
+    sessions: Query<&SessionId, With<Session>>,
+    mut pending: Query<(&StartRequest, &mut vmux_ecs::OperationState)>,
     mut requests: MessageWriter<PageOpenRequest>,
     mut appended: MessageWriter<vmux_session::ConversationAppendReceived>,
+    mut queues: QueuedPrompts,
     mut commands: Commands,
 ) {
-    let Some(created) = pending.0.remove(&trigger.event().id) else {
+    let Ok(id) = sessions.get(trigger.event().entity) else {
         return;
     };
-    let mut queue = PromptQueue::default();
-    let message = queue.enqueue_initial(created.prompt.clone(), created.attachments);
+    if *id != trigger.event().id {
+        return;
+    }
+    let Some((created, mut state)) = pending.iter_mut().find(|(request, state)| {
+        request.id() == id
+            && matches!(
+                **state,
+                vmux_ecs::OperationState::Pending | vmux_ecs::OperationState::Running
+            )
+    }) else {
+        return;
+    };
+    *state = vmux_ecs::OperationState::Succeeded;
+    queues.enqueue(
+        trigger.event().entity,
+        created.prompt.clone(),
+        created.attachments.clone(),
+        true,
+    );
     commands
         .entity(trigger.event().entity)
-        .insert((queue, vmux_session::RunState::default()));
+        .insert(vmux_session::RunState::default());
     appended.write(vmux_session::ConversationAppendReceived {
         session: trigger.event().id.clone(),
-        messages: vec![message],
+        messages: vec![vmux_api::session::Message::user_with_attachments(
+            created.prompt.clone(),
+            created.attachments.clone(),
+        )],
     });
     if let PageOpenTarget::Stack(stack) = &created.target {
         commands
@@ -198,7 +297,7 @@ fn open_started(
             .insert((title, vmux_session::TitlePending));
     }
     requests.write(PageOpenRequest {
-        target: created.target,
+        target: created.target.clone(),
         url: Route::Session(trigger.event().id.clone()).url(),
         request_id: None,
     });
@@ -227,13 +326,9 @@ impl PromptSubmission<'_, '_> {
     fn submit(&mut self, webview: Entity, request: &PromptRequest, target: &PromptTarget) {
         if target.launcher_hosts.contains(webview)
             && target
-                .states
+                .selection_states
                 .get(webview)
-                .ok()
-                .and_then(UiState::current)
-                .is_some_and(|state| {
-                    state.workspace_selection.pending || !state.workspace_selection.error.is_empty()
-                })
+                .is_ok_and(|state| state.blocks())
         {
             return;
         }
@@ -313,8 +408,8 @@ struct PromptTarget<'w, 's> {
     launcher_hosts: Query<'w, 's, (), With<HostsLauncher>>,
     child_of: Query<'w, 's, &'static ChildOf>,
     contributed_pages: ContributedPages<'w, 's>,
+    selection_states: Query<'w, 's, &'static vmux_ecs::launcher::WorkspaceSelectionState>,
     work_directories: Query<'w, 's, &'static vmux_command::CommandBarWorkDirectory>,
-    states: Query<'w, 's, &'static UiState<vmux_api::command_bar::CommandBarUiState>>,
     workspace: Single<'w, 's, &'static CommandBarWorkspaceSnapshot>,
 }
 
@@ -643,6 +738,35 @@ impl ChatTranscriptProjection {
             return false;
         }
         let initialized = self.state.generation != 0;
+        if initialized && tail.total > self.state.total {
+            let mut positions = std::collections::HashMap::new();
+            for (position, item) in self.state.items.iter().enumerate() {
+                for id in item.identity_keys() {
+                    positions.entry(id).or_insert(position as u32);
+                }
+            }
+            let mut shift = None;
+            for (position, item) in tail.items.iter().enumerate() {
+                for id in item.identity_keys() {
+                    if let Some(previous) = positions.get(&id) {
+                        let old = self.state.loaded_start.saturating_add(*previous);
+                        let new = tail.start.saturating_add(position as u32);
+                        if new > old && new - old <= tail.total - self.state.total {
+                            shift = Some(new - old);
+                        }
+                        break;
+                    }
+                }
+                if shift.is_some() {
+                    break;
+                }
+            }
+            if let Some(shift) = shift {
+                self.state.loaded_start = self.state.loaded_start.saturating_add(shift);
+                self.state.request_id = self.state.request_id.wrapping_add(1);
+                self.state.loading = false;
+            }
+        }
         let compatible = initialized
             && tail.total >= self.state.total
             && self.state.loaded_start <= tail.start
@@ -781,8 +905,229 @@ pub struct ChatSynced;
 mod tests {
     use super::*;
     use crate::event::ChatItem;
+    use bevy_ecs::system::RunSystemOnce;
     use vmux_api::protocol::{AgentRequest, AgentRequestId};
     use vmux_ecs::agent::{AgentRequestInput, CommandOrigin};
+
+    struct StartFixture(App);
+
+    impl StartFixture {
+        fn new() -> Self {
+            let mut app = App::new();
+            app.add_plugins((bevy::MinimalPlugins, ChatHostPlugin))
+                .add_message::<CreateRequest>()
+                .add_message::<PageOpenRequest>();
+            Self(app)
+        }
+
+        fn request(&mut self, prompt: &str, stack: Entity) -> (Entity, SessionId) {
+            let request = StartRequest::from_prompt(
+                prompt,
+                std::path::PathBuf::new(),
+                AgentId("mock".into()),
+                PageOpenTarget::Stack(stack),
+                Vec::new(),
+            );
+            let id = request.id().clone();
+            self.0.world_mut().write_message(request);
+            self.0.update();
+            let mut requests = self.0.world_mut().query::<(Entity, &StartRequest)>();
+            let entity = requests
+                .iter(self.0.world())
+                .find(|(_, request)| request.id() == &id)
+                .unwrap()
+                .0;
+            (entity, id)
+        }
+
+        fn created(&mut self, id: &SessionId) -> Entity {
+            let entity = self.0.world_mut().spawn((Session, id.clone())).id();
+            self.0.world_mut().trigger(Created {
+                entity,
+                id: id.clone(),
+            });
+            self.0.world_mut().flush();
+            entity
+        }
+    }
+
+    #[test]
+    fn accepted_starts_keep_independent_prompts_targets_and_one_completion() {
+        let mut fixture = StartFixture::new();
+        let first_stack = fixture.0.world_mut().spawn_empty().id();
+        let second_stack = fixture.0.world_mut().spawn_empty().id();
+        let (first_operation, first_id) = fixture.request("first", first_stack);
+        let (second_operation, second_id) = fixture.request("second", second_stack);
+        let second = fixture.created(&second_id);
+        let first = fixture.created(&first_id);
+        fixture.0.world_mut().trigger(Created {
+            entity: first,
+            id: first_id.clone(),
+        });
+        fixture.0.world_mut().flush();
+        let requests: Vec<_> = fixture
+            .0
+            .world_mut()
+            .resource_mut::<Messages<PageOpenRequest>>()
+            .drain()
+            .collect();
+        assert_eq!(requests.len(), 2);
+        assert!(
+            matches!(&requests[0].target, PageOpenTarget::Stack(target) if *target == second_stack)
+        );
+        assert!(
+            matches!(&requests[1].target, PageOpenTarget::Stack(target) if *target == first_stack)
+        );
+        assert_eq!(
+            fixture
+                .0
+                .world()
+                .get::<vmux_ecs::OperationState>(first_operation),
+            Some(&vmux_ecs::OperationState::Succeeded)
+        );
+        assert_eq!(
+            fixture
+                .0
+                .world()
+                .get::<vmux_ecs::OperationState>(second_operation),
+            Some(&vmux_ecs::OperationState::Succeeded)
+        );
+        let prompts = fixture
+            .0
+            .world_mut()
+            .run_system_once(move |mut queues: QueuedPrompts| {
+                (
+                    queues.take_next(first).unwrap().1,
+                    queues.take_next(second).unwrap().1,
+                )
+            })
+            .unwrap();
+        assert_eq!(prompts, ("first".into(), "second".into()));
+    }
+
+    #[test]
+    fn a_foreign_created_fact_does_not_consume_an_accepted_start() {
+        let mut fixture = StartFixture::new();
+        let stack = fixture.0.world_mut().spawn_empty().id();
+        let (operation, id) = fixture.request("pending", stack);
+        let foreign = fixture
+            .0
+            .world_mut()
+            .spawn((Session, SessionId("foreign".into())))
+            .id();
+        fixture.0.world_mut().trigger(Created {
+            entity: foreign,
+            id: id.clone(),
+        });
+        fixture.0.world_mut().flush();
+        assert_eq!(
+            fixture.0.world().get::<vmux_ecs::OperationState>(operation),
+            Some(&vmux_ecs::OperationState::Running)
+        );
+        assert!(
+            fixture
+                .0
+                .world_mut()
+                .resource_mut::<Messages<PageOpenRequest>>()
+                .drain()
+                .next()
+                .is_none()
+        );
+        fixture.created(&id);
+        assert_eq!(
+            fixture.0.world().get::<vmux_ecs::OperationState>(operation),
+            Some(&vmux_ecs::OperationState::Succeeded)
+        );
+    }
+
+    #[test]
+    fn a_canceled_start_cannot_enqueue_or_open_after_creation() {
+        let mut fixture = StartFixture::new();
+        let stack = fixture.0.world_mut().spawn_empty().id();
+        let (operation, id) = fixture.request("canceled", stack);
+        *fixture
+            .0
+            .world_mut()
+            .get_mut::<vmux_ecs::OperationState>(operation)
+            .unwrap() = vmux_ecs::OperationState::Canceled;
+        fixture.created(&id);
+        let mut prompts = fixture.0.world_mut().query::<&crate::QueuedPrompt>();
+        assert_eq!(prompts.iter(fixture.0.world()).count(), 0);
+        assert!(
+            fixture
+                .0
+                .world_mut()
+                .resource_mut::<Messages<PageOpenRequest>>()
+                .drain()
+                .next()
+                .is_none()
+        );
+    }
+
+    #[test]
+    fn only_the_matching_creation_rejection_marks_the_start_failed() {
+        let mut fixture = StartFixture::new();
+        let stack = fixture.0.world_mut().spawn_empty().id();
+        let (operation, id) = fixture.request("retained", stack);
+        let mut request = crate::mutation::Request::local(
+            id.clone(),
+            crate::mutation::Mutation::Create(crate::mutation::Creation {
+                name: "start".into(),
+                description: String::new(),
+                cwd: std::path::PathBuf::new(),
+                agent: None,
+                stage: crate::StageId("active".into()),
+                created_at: 1,
+                activated_at: 1,
+                local: true,
+            }),
+        );
+        request.operation = "accepted-create".into();
+        fixture.0.world_mut().write_message(request);
+        fixture.0.update();
+        fixture
+            .0
+            .world_mut()
+            .write_message(crate::mutation::Rejected {
+                operation: "other-operation".into(),
+                session: id.clone(),
+                reason: crate::mutation::Rejection::MissingStage,
+            });
+        fixture.0.update();
+        assert_eq!(
+            fixture.0.world().get::<vmux_ecs::OperationState>(operation),
+            Some(&vmux_ecs::OperationState::Running)
+        );
+        fixture
+            .0
+            .world_mut()
+            .write_message(crate::mutation::Rejected {
+                operation: "accepted-create".into(),
+                session: id,
+                reason: crate::mutation::Rejection::MissingStage,
+            });
+        fixture.0.update();
+        assert_eq!(
+            fixture.0.world().get::<vmux_ecs::OperationState>(operation),
+            Some(&vmux_ecs::OperationState::Failed)
+        );
+        assert!(
+            fixture
+                .0
+                .world()
+                .get::<vmux_ecs::OperationError>(operation)
+                .is_some()
+        );
+        assert_eq!(
+            fixture
+                .0
+                .world()
+                .get::<StartRequest>(operation)
+                .unwrap()
+                .prompt,
+            "retained"
+        );
+    }
 
     #[test]
     fn session_views_resolve_the_page_before_runtime_attachment_and_ignore_stale_targets() {
@@ -846,6 +1191,34 @@ mod tests {
     #[derive(Resource, Default)]
     struct Published(ChatUiState);
 
+    #[test]
+    fn canonical_prepend_preserves_the_visible_items_and_generation() {
+        let items = (0..512)
+            .map(|index| ChatItem::User {
+                event_id: format!("event-{index}"),
+                text: format!("Prompt {index}"),
+                context: None,
+                attachments: Vec::new(),
+                created_at_ms: 0,
+            })
+            .collect::<Vec<_>>();
+        let mut projection = ChatTranscriptProjection::default();
+        projection.state.generation = 7;
+        projection.state.total = 512;
+        projection.state.loaded_start = 0;
+        projection.state.items = items.clone();
+        projection.tail_start = 464;
+        projection.tail = items[464..].to_vec();
+        projection.merge_tail(TranscriptTail {
+            items: items[464..].to_vec(),
+            start: 976,
+            total: 1024,
+        });
+        assert_eq!(projection.state.generation, 7);
+        assert_eq!(projection.state.items, items);
+        assert_eq!(projection.state.loaded_start, 512);
+    }
+
     impl Published {
         fn record(trigger: On<vmux_ecs::UiStateWrite<ChatUiState>>, mut published: ResMut<Self>) {
             vmux_api::UiStateProjection::apply(&mut published.0, trigger.event().update().clone());
@@ -857,11 +1230,12 @@ mod tests {
         let mut app = App::new();
         app.add_plugins((
             bevy::prelude::MinimalPlugins,
-            crate::conversation::ConversationPlugin,
+            crate::history::Plugin,
+            crate::QueuePlugin,
+            vmux_ecs::OperationPlugin,
             crate::host::transcript::Plugin,
             vmux_ecs::UiStatePlugin::<ChatUiState>::default(),
         ))
-        .init_resource::<PendingSessionStarts>()
         .init_resource::<Published>()
         .add_message::<StartRequest>()
         .add_message::<CreateRequest>()
@@ -910,10 +1284,13 @@ mod tests {
         app.world_mut().spawn((SessionView, ChildOf(stack)));
         app.update();
 
-        let queue = app.world().get::<PromptQueue>(session).unwrap();
-        assert_eq!(queue.items.len(), 1);
-        assert_eq!(queue.items.front().unwrap().text, "Fix session startup");
-        assert_eq!(queue.items.front().unwrap().attachments.len(), 1);
+        let mut items = app.world_mut().query_filtered::<
+            (&PendingPrompt, &PendingPromptAttachments),
+            With<crate::QueuedPrompt>,
+        >();
+        let (body, media) = items.single(app.world()).unwrap();
+        assert_eq!(body.0, "Fix session startup");
+        assert_eq!(media.0.len(), 1);
         assert_eq!(
             app.world().get::<AgentConversationTitle>(session),
             Some(&AgentConversationTitle("Fix session startup".into()))
@@ -947,9 +1324,8 @@ mod tests {
         assert!(matches!(requests[0].target, PageOpenTarget::Stack(target) if target == stack));
         let prompt = app
             .world_mut()
-            .get_mut::<PromptQueue>(session)
+            .run_system_once(move |mut queues: QueuedPrompts| queues.take_next(session))
             .unwrap()
-            .take_next()
             .unwrap();
         app.update();
         assert!(matches!(
@@ -961,10 +1337,7 @@ mod tests {
             .write_message(vmux_session::SnapshotReceived {
                 session: id,
                 messages: vec![
-                    vmux_api::session::Message::user_with_attachments(
-                        prompt.text,
-                        prompt.attachments,
-                    ),
+                    vmux_api::session::Message::user_with_attachments(prompt.1, prompt.2),
                     vmux_api::session::Message::Assistant {
                         blocks: vec![vmux_api::session::AssistantBlock::Text("Started".into())],
                     },

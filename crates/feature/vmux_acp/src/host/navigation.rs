@@ -39,30 +39,34 @@ type ReadyPageOpen = (
     Without<PageOpenDeferred>,
 );
 
-pub(super) fn add(app: &mut App) {
-    app.init_resource::<vmux_git::GitRuntime>()
-        .add_observer(cleanup)
-        .add_plugins(UiEventPlugin::<(ChatRetrySession,)>::default())
-        .add_observer(retry)
-        .add_systems(Update, swap)
-        .add_systems(
-            Update,
-            (
-                poll_workspace_checks,
-                start_workspace_checks,
-                release_transition,
-                discard_stale_inline_transitions,
-                prepare,
-                open,
+pub(super) struct Plugin;
+
+impl bevy::prelude::Plugin for Plugin {
+    fn build(&self, app: &mut App) {
+        app.init_resource::<vmux_git::GitRuntime>()
+            .add_observer(cleanup)
+            .add_plugins(UiEventPlugin::<(ChatRetrySession,)>::default())
+            .add_observer(retry)
+            .add_systems(Update, swap)
+            .add_systems(
+                Update,
+                (
+                    poll_workspace_checks,
+                    start_workspace_checks,
+                    release_transition,
+                    discard_stale_inline_transitions,
+                    prepare,
+                    open,
+                )
+                    .chain()
+                    .in_set(PageOpenSet::HandleKnownPages)
+                    .after(vmux_layout::warm_page::PrewarmPageOpenSet),
             )
-                .chain()
-                .in_set(PageOpenSet::HandleKnownPages)
-                .after(vmux_layout::warm_page::PrewarmPageOpenSet),
-        )
-        .add_systems(
-            Update,
-            discard_stale_inline_transitions.after(PageOpenSet::Respond),
-        );
+            .add_systems(
+                Update,
+                discard_stale_inline_transitions.after(PageOpenSet::Respond),
+            );
+    }
 }
 
 #[derive(Component)]
@@ -140,27 +144,69 @@ struct WorkspaceCheckTask {
     task: vmux_git::GitTask<bool>,
 }
 
-struct AgentChatTarget {
-    url: String,
-    title: String,
+#[derive(SystemParam)]
+struct TransitionProjection<'w, 's> {
+    views: Query<
+        'w,
+        's,
+        (
+            Option<&'static PageMetadata>,
+            Has<SessionView>,
+            Has<SessionManagerView>,
+            Has<StartInlineTransitionView>,
+            Has<vmux_ecs::launcher::HostsLauncher>,
+            Has<vmux_ecs::page::PageReady>,
+            Option<&'static UiState<ChatUiState>>,
+            Option<&'static UiState<SessionDetailUiState>>,
+            Has<InlineTransitionSnapshot>,
+        ),
+    >,
 }
 
-impl AgentChatTarget {
-    fn parse(url: &str) -> Option<Self> {
-        match Route::parse(url)? {
-            Route::Manager => Some(Self {
-                url: Route::manager_url(url).unwrap_or_else(|| Route::Manager.url()),
-                title: translate("sessions-title"),
-            }),
-            Route::Session(id) => Some(Self {
-                url: Route::Session(id.clone()).url(),
-                title: id.0,
-            }),
-            Route::Provider { .. } => Some(Self {
-                url: url.to_string(),
-                title: translate("sessions-title"),
-            }),
+impl TransitionProjection<'_, '_> {
+    fn capture(&self, view: Entity, commands: &mut Commands) {
+        if let Ok((
+            metadata,
+            session_view,
+            session_manager_view,
+            transition_view,
+            hosts_launcher,
+            page_ready,
+            chat_state,
+            detail_state,
+            snapshot,
+        )) = self.views.get(view)
+            && !snapshot
+        {
+            commands.entity(view).insert(InlineTransitionSnapshot {
+                metadata: metadata.cloned(),
+                session_view,
+                session_manager_view,
+                transition_view,
+                hosts_launcher,
+                page_ready,
+                chat_state: chat_state.map(|state| state.current().cloned()),
+                detail_state: detail_state.map(|state| state.current().cloned()),
+            });
         }
+    }
+
+    fn reset(&self, view: Entity, commands: &mut Commands) {
+        commands.trigger(vmux_ecs::UiStateWrite::<ChatUiState>::from_event(
+            view,
+            &ChatSnapshot {
+                transcript_loading: true,
+                ..Default::default()
+            },
+        ));
+        commands.trigger(vmux_ecs::UiStateWrite::<ChatUiState>::from_event(
+            view,
+            &ChatTranscriptState::default(),
+        ));
+        commands.trigger(vmux_ecs::UiStateWrite::<SessionDetailUiState>::from_event(
+            view,
+            &SessionDetailUiState::default(),
+        ));
     }
 }
 
@@ -185,23 +231,33 @@ fn ancestor_tab_entity(
     }
 }
 
+fn target_metadata(route: &Route, url: &str) -> PageMetadata {
+    match route {
+        Route::Manager => PageMetadata {
+            url: Route::manager_url(url).unwrap_or_else(|| Route::Manager.url()),
+            title: translate("sessions-title"),
+            ..default()
+        },
+        Route::Session(id) => PageMetadata {
+            url: Route::Session(id.clone()).url(),
+            title: id.0.clone(),
+            ..default()
+        },
+        Route::Provider { .. } => PageMetadata {
+            url: url.to_string(),
+            title: translate("sessions-title"),
+            ..default()
+        },
+    }
+}
+
 fn prepare(
     tasks: Query<(Entity, &PageOpenTask), PendingPageOpen>,
     pending: Query<(), With<TabWorktreePending>>,
     transitions: Query<&StartInlineTransition>,
     preparing_views: Query<(Entity, &ChildOf), With<PreparingAgentChatView>>,
     manager_views: Query<(Entity, &ChildOf), With<SessionManagerView>>,
-    view_states: Query<(
-        Option<&PageMetadata>,
-        Has<SessionView>,
-        Has<SessionManagerView>,
-        Has<StartInlineTransitionView>,
-        Has<vmux_ecs::launcher::HostsLauncher>,
-        Has<vmux_ecs::page::PageReady>,
-        Option<&UiState<ChatUiState>>,
-        Option<&UiState<SessionDetailUiState>>,
-        Has<InlineTransitionSnapshot>,
-    )>,
+    projection: TransitionProjection,
     workspace_checks: Query<(), Or<(With<WorkspaceCheckRequest>, With<WorkspaceCheckTask>)>>,
     child_of: Query<&ChildOf>,
     space_hierarchy: vmux_layout::space::SpaceHierarchy,
@@ -243,65 +299,19 @@ fn prepare(
             .is_some_and(|navigation| navigation != task.id);
         if (!preparing_by_stack.contains_key(&task.stack) || transition_is_stale)
             && let Some(view) = transition_view
-            && let Some(target) = AgentChatTarget::parse(&task.url)
         {
-            if let Ok((
-                metadata,
-                session_view,
-                session_manager_view,
-                transition_view,
-                hosts_launcher,
-                page_ready,
-                chat_state,
-                detail_state,
-                snapshot,
-            )) = view_states.get(view)
-                && !snapshot
-            {
-                commands.entity(view).insert(InlineTransitionSnapshot {
-                    metadata: metadata.cloned(),
-                    session_view,
-                    session_manager_view,
-                    transition_view,
-                    hosts_launcher,
-                    page_ready,
-                    chat_state: chat_state.map(|state| state.current().cloned()),
-                    detail_state: detail_state.map(|state| state.current().cloned()),
-                });
-            }
+            projection.capture(view, &mut commands);
+            let metadata = target_metadata(&route, &task.url);
             commands
                 .entity(view)
-                .insert((
-                    PageMetadata {
-                        url: target.url,
-                        title: target.title,
-                        bg_color: None,
-                        ..default()
-                    },
-                    SessionView,
-                    PreparingAgentChatView,
-                ))
+                .insert((metadata, SessionView, PreparingAgentChatView))
                 .remove::<(
                     SessionManagerView,
                     StartInlineTransitionView,
                     vmux_ecs::launcher::HostsLauncher,
                     vmux_ecs::page::PageReady,
                 )>();
-            commands.trigger(vmux_ecs::UiStateWrite::<ChatUiState>::from_event(
-                view,
-                &ChatSnapshot {
-                    transcript_loading: true,
-                    ..Default::default()
-                },
-            ));
-            commands.trigger(vmux_ecs::UiStateWrite::<ChatUiState>::from_event(
-                view,
-                &ChatTranscriptState::default(),
-            ));
-            commands.trigger(vmux_ecs::UiStateWrite::<SessionDetailUiState>::from_event(
-                view,
-                &SessionDetailUiState::default(),
-            ));
+            projection.reset(view, &mut commands);
             commands.entity(task.stack).insert(StartInlineTransition {
                 webview: view,
                 navigation: Some(task.id),
@@ -944,7 +954,7 @@ mod tests {
     #[test]
     fn manager_target_preserves_requested_agent() {
         let url = Route::manager_for_agent(&AgentId("codex".into()));
-        let target = AgentChatTarget::parse(&url).unwrap();
+        let target = target_metadata(&Route::parse(&url).unwrap(), &url);
 
         assert_eq!(target.url, url);
     }
@@ -1178,17 +1188,22 @@ mod tests {
 
     #[test]
     fn runtime_detach_preserves_queued_prompts() {
-        let mut world = World::new();
-        let mut queue = PromptQueue::default();
-        queue.enqueue("keep me".into());
+        let mut app = App::new();
+        app.add_plugins(vmux_session::QueuePlugin);
+        let world = app.world_mut();
         let session = world
             .spawn((
+                Session,
                 vmux_session::RunState::default(),
                 vmux_session::AgentTurnMeta::default(),
-                queue,
+                PromptQueue::default(),
             ))
             .id();
-
+        world
+            .run_system_once(move |mut queues: vmux_session::QueuedPrompts| {
+                queues.enqueue(session, "keep me".into(), Vec::new(), false);
+            })
+            .unwrap();
         world
             .run_system_once(move |mut runtime: SessionRuntime| {
                 runtime.detach(session);
@@ -1196,8 +1211,12 @@ mod tests {
             .unwrap();
         world.flush();
 
-        let queue = world.get::<PromptQueue>(session).unwrap();
-        assert_eq!(queue.items.front().unwrap().text, "keep me");
+        let prompt = world
+            .run_system_once(move |queues: vmux_session::QueuedPromptReads| {
+                queues.visible(session)[0].1.to_string()
+            })
+            .unwrap();
+        assert_eq!(prompt, "keep me");
         assert!(world.get::<vmux_session::RunState>(session).is_none());
         assert!(world.get::<vmux_session::AgentTurnMeta>(session).is_none());
     }
@@ -1236,7 +1255,7 @@ mod tests {
     #[test]
     fn retry_reopens_the_same_session_and_preserves_its_resume_identity() {
         let mut app = App::new();
-        add(&mut app);
+        app.add_plugins(Plugin);
         app.add_message::<vmux_ecs::PageOpenRequest>();
         let session = app
             .world_mut()

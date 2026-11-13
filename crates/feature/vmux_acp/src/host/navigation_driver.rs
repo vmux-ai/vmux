@@ -12,7 +12,7 @@ use vmux_flex::Visibility;
 use vmux_layout::space::FocusedSpace;
 use vmux_layout::tab::{Tab, TabWorkspace};
 use vmux_session::host::{SessionManagerView, SessionView};
-use vmux_session::{AgentConversationTitle, AgentId, PromptQueue, Route, Session, SessionId};
+use vmux_session::{AgentConversationTitle, AgentId, QueuedPrompts, Route, Session, SessionId};
 use vmux_setting::AppSettings;
 use vmux_ui::i18n::translate;
 
@@ -56,7 +56,7 @@ pub(super) struct PageOpener<'w, 's> {
     tabs: Query<'w, 's, &'static mut Tab>,
     workspaces: Query<'w, 's, &'static mut TabWorkspace>,
     handoffs: Query<'w, 's, &'static mut vmux_layout::hosted_page::SurfaceHandoff>,
-    queues: Query<'w, 's, &'static mut PromptQueue>,
+    queues: QueuedPrompts<'w, 's>,
     transcripts: vmux_session::Transcripts<'w, 's>,
     pub(super) commands: Commands<'w, 's>,
     pub(super) settings: Res<'w, AppSettings>,
@@ -490,13 +490,8 @@ impl PageOpener<'_, '_> {
                 .entity(session)
                 .insert((title, vmux_session::TitlePending));
         }
-        if let Ok(mut queue) = self.queues.get_mut(session) {
-            queue.enqueue_with_attachments(prompt, initial_attachments);
-        } else {
-            let mut queue = PromptQueue::default();
-            queue.enqueue_with_attachments(prompt, initial_attachments);
-            self.commands.entity(session).insert(queue);
-        }
+        self.queues
+            .enqueue(session, prompt, initial_attachments, false);
         self.commands
             .entity(stack)
             .remove::<(PendingPrompt, PendingPromptAttachments)>();

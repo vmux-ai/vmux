@@ -497,8 +497,8 @@ fn install_input_wake_monitor(
                 sampled_over_windowed_page,
                 local_window_inputs.was_windowed(source),
                 event_window_is_key(ev),
-            ) || page_changed
-                || near_edge
+                page_changed,
+            ) || near_edge
                 || over_grip
             {
                 local_wake(interval);

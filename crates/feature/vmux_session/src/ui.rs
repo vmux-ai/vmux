@@ -83,7 +83,7 @@ fn PendingSession(kind: String, sid: String) -> Element {
 fn SessionDetail(session_id: String, mut details_open: Signal<bool>) -> Element {
     use_hook(vmux_ui::components::motion::Disclosure::install);
     let chat = use_chat(session_id.clone());
-    let file_placement = item::FilePlacement::provide();
+    let file_placement = FilePlacement::provide();
     let detail =
         vmux_ui::hooks::UiStateBinding::<crate::state::SessionDetailUiState>::use_context();
     let keys = use_chat_keys(chat);
@@ -168,3 +168,19 @@ mod manager_model;
 mod scroll;
 mod state;
 mod transcript;
+
+#[derive(Clone, Copy)]
+pub(super) struct FilePlacement(Signal<f64>);
+
+impl FilePlacement {
+    pub(super) fn provide() -> Self {
+        let placement = Self(use_signal(|| 0.0));
+        use_context_provider(|| placement)
+    }
+
+    pub(super) fn resize(mut self, data: &ResizeData) {
+        if let Ok(size) = data.get_content_box_size() {
+            self.0.set(size.width);
+        }
+    }
+}

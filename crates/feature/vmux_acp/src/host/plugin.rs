@@ -12,10 +12,10 @@ pub struct AcpPlugin;
 impl Plugin for AcpPlugin {
     fn build(&self, app: &mut App) {
         super::acp::add_config(app);
-        super::runtime::add(app);
+        app.add_plugins(super::runtime::Plugin);
         super::command_bar::add(app);
         super::approval::add(app);
-        super::attach::add(app);
+        app.add_plugins(super::attach::Plugin);
         super::attention::add(app);
         app.add_plugins(super::command::Plugin);
         super::continuation::add(app);
@@ -23,7 +23,7 @@ impl Plugin for AcpPlugin {
         super::follow::add(app);
         super::handoff::add(app);
         super::ingress::add(app);
-        super::navigation::add(app);
+        app.add_plugins(super::navigation::Plugin);
         super::tidy::add(app);
         super::toast::add(app);
         app.register_stored::<AcpSessionId>()

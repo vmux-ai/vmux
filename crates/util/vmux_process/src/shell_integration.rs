@@ -1,3 +1,4 @@
+use crate::plugin::ProcessShell;
 use std::collections::VecDeque;
 use std::path::Path;
 
@@ -59,9 +60,9 @@ $env.config.hooks.pre_execution = ($env.config.hooks.pre_execution? | default []
 $env.config.hooks.pre_prompt = ($env.config.hooks.pre_prompt? | default [] | append {|| print -rn $"\u{1b}]133;D;($env.LAST_EXIT_CODE)\u{7}\u{1b}]7;file://localhost($env.PWD | str replace --all '%' '%25' | str replace --all '\' '%5C' | str replace --all '#' '%23' | str replace --all '?' '%3F')\u{7}" })
 "#;
 
-pub(crate) struct ShellIntegration;
+pub(crate) type ShellIntegration = ProcessShell;
 
-impl ShellIntegration {
+impl ProcessShell {
     pub(crate) fn directory_command(command: &str, path: &Path) -> Result<String, String> {
         let path = path.to_str().ok_or("directory path is not UTF-8")?;
         if path.chars().any(char::is_control) {

@@ -999,9 +999,11 @@ fn finish_provider_archives(
         let mut matching = None;
         let mut duplicate = false;
         for (entity, kind, id, _, _) in &pending {
-            if kind == &result.kind && id == &result.id && matching.replace(entity).is_some() {
-                duplicate = true;
-                break;
+            if kind == &result.kind && id == &result.id {
+                if matching.replace(entity).is_some() {
+                    duplicate = true;
+                    break;
+                }
             }
         }
         if duplicate {

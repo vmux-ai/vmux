@@ -33,7 +33,7 @@ pub struct CommandBarUiStatePatch {
     pub workspace_selection: Option<CommandBarWorkspaceSelection>,
 }
 
-#[vmux_api::ui_state(Default, patch = CommandBarUiStatePatch, version = 2)]
+#[vmux_api::ui_state(Default, patch = CommandBarUiStatePatch, version = 3)]
 pub struct CommandBarUiState {
     pub snapshot: CommandBarOpenEvent,
     pub path_completion: Option<PathCompleteResponse>,

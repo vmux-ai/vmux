@@ -117,6 +117,9 @@ struct TabListProjection(TabListState);
 #[derive(Component, Clone, Debug, Default, PartialEq)]
 struct HeaderProjection(HeaderState);
 
+#[derive(Component)]
+struct HeaderSource(Option<Entity>);
+
 #[cfg(test)]
 #[derive(Resource, Default)]
 struct HeaderBuilds(u32);
@@ -1014,6 +1017,7 @@ fn project_header(
             Option<Ref<BookmarkProjection>>,
             Option<Ref<TeamProjection>>,
             Option<&HeaderProjection>,
+            Option<&HeaderSource>,
         ),
         With<LayoutCef>,
     >,
@@ -1021,7 +1025,6 @@ fn project_header(
     routes: Query<&PageManifest>,
     manifests: Query<&FeatureManifest>,
     mut changes: HeaderChanges,
-    mut previous_active: Local<Option<Option<Entity>>>,
     focus: crate::stack::FocusedStack,
     surfaces: StackSurface,
     scope: crate::window::WindowScope,
@@ -1034,10 +1037,10 @@ fn project_header(
     let active = focus
         .stack
         .and_then(|stack| surfaces.incoming(stack).or_else(|| surfaces.current(stack)));
-    let changed = changes.take() || *previous_active != Some(active) || focus.is_changed();
-    *previous_active = Some(active);
-    for (entity, stacks, bookmarks, team, current) in &layouts {
+    let changed = changes.take() || focus.is_changed();
+    for (entity, stacks, bookmarks, team, current, source) in &layouts {
         if current.is_some()
+            && source.is_some_and(|source| source.0 == active)
             && !changed
             && !stacks.as_ref().is_some_and(Ref::is_changed)
             && !bookmarks.as_ref().is_some_and(Ref::is_changed)
@@ -1094,6 +1097,9 @@ fn project_header(
         }
         if current != Some(&next) {
             commands.entity(entity).insert(next);
+        }
+        if source.is_none_or(|source| source.0 != active) {
+            commands.entity(entity).insert(HeaderSource(active));
         }
     }
 }
