@@ -53,7 +53,7 @@ fi
 
 echo "==> Signing $APP_BUNDLE"
 
-find "$APP_BUNDLE/Contents/Frameworks" -type f \( -name "*.dylib" -o -perm +111 \) | while read -r binary; do
+find "$APP_BUNDLE/Contents/Frameworks" -type f \( -name "*.dylib" -o -perm -100 -o -perm -010 -o -perm -001 \) | while read -r binary; do
     file "$binary" | grep -q "Mach-O" || continue
     echo "  Signing: ${binary#$APP_BUNDLE/}"
     codesign --force --verify --verbose \
@@ -87,7 +87,7 @@ find "${NESTED_APP_DIRS[@]}" -name "*.app" -type d | while read -r helper; do
         "$helper"
 done
 
-find "$APP_BUNDLE/Contents/MacOS" -type f -perm +111 | while read -r binary; do
+find "$APP_BUNDLE/Contents/MacOS" -type f \( -perm -100 -o -perm -010 -o -perm -001 \) | while read -r binary; do
     file "$binary" | grep -q "Mach-O" || continue
     name="$(basename "$binary")"
     [ "$name" = "vmux_desktop" ] && continue

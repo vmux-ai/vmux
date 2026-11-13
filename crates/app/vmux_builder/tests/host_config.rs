@@ -288,6 +288,17 @@ fn packaging_projects_selected_assets_and_identity_and_restores_templates_on_fai
             project.script("scripts/inject-cef.sh", "#!/bin/sh\nexit 0\n");
             project.script("bin/file", "#!/bin/sh\nprintf 'Mach-O\\n'\n");
             project.script(
+                "bin/codesign",
+                r#"#!/usr/bin/env python3
+import json,os,pathlib,sys
+with open(os.environ['TEST_SIGN_LOG'],'a') as log:
+    log.write(json.dumps(sys.argv[1:])+'\n')
+if '--display' in sys.argv:
+    pathlib.Path('codesign0').write_text('certificate')
+"#,
+            );
+
+            project.script(
                 "scripts/cargo-with-cef-cache.sh",
                 r#"#!/bin/bash
 set -euo pipefail
@@ -313,10 +324,11 @@ if bundle.exists():
 contents=bundle/'Contents'
 (contents/'MacOS').mkdir(parents=True)
 (contents/'Frameworks').mkdir()
+(contents/'Frameworks/lib-fixture.dylib').write_text('non-executable dylib')
 for executable in ['vmux_desktop','vmux',name+' Service']:
     binary=contents/'MacOS'/executable
     binary.write_text('fixture binary')
-    binary.chmod(0o755)
+    binary.chmod(0o700)
 (contents/'Info.plist').write_bytes((root/'packaging/macos/Info.plist').read_bytes())
 PY
 "#,
@@ -342,6 +354,7 @@ PY
                 .env("EXPECTED_NAMESPACE", namespace)
                 .env("FAIL_PACKAGE", if fail { "1" } else { "0" })
                 .env("SKIP_NOTARIZE", "1")
+                .env("TEST_SIGN_LOG", project.root().join("sign.jsonl"))
                 .output()
                 .unwrap();
             assert_eq!(
@@ -373,7 +386,10 @@ agent=plistlib.load((bundle/'Contents/Library/LaunchAgents'/(namespace+'.service
 assert agent['Label']==namespace+'.service.9999999'
 assert (bundle/agent['BundleProgram']).read_text()=='fixture binary'
 assert agent['AssociatedBundleIdentifiers']==[info['CFBundleIdentifier']]
-"#).arg(bundle).arg(name).arg(namespace).output().unwrap();
+signs=[__import__('json').loads(line) for line in pathlib.Path(sys.argv[4]).read_text().splitlines()]
+assert any('--identifier' in args and namespace+'.cli' in args and str(bundle/'Contents/MacOS/vmux') in args for args in signs)
+assert any(str(bundle/'Contents/Frameworks/lib-fixture.dylib') in args for args in signs)
+"#).arg(bundle).arg(name).arg(namespace).arg(project.root().join("sign.jsonl")).output().unwrap();
             assert!(
                 output.status.success(),
                 "{}",
