@@ -10533,6 +10533,8 @@ dependencies = [
  "percent-encoding",
  "rkyv",
  "serde",
+ "serde_json",
+ "tempfile",
  "url",
  "vmux_api",
  "vmux_ecs",
