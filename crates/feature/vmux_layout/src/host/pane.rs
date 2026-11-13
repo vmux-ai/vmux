@@ -7,7 +7,7 @@ use crate::stack::Stack;
 #[cfg(test)]
 use crate::tab::Tab;
 use arrangement::ArrangementPlugin;
-use bevy::ecs::system::{Commands, SystemParam};
+use bevy::ecs::system::SystemParam;
 use bevy::prelude::*;
 #[cfg(test)]
 use bevy::{
@@ -27,7 +27,7 @@ use open::OpenPlugin;
 use open::{BesideOpenPlugin, DirectionalOpenPlugin};
 pub use open::{OpenBesideRequest, PanePlacement};
 use resize::ResizePlugin;
-pub use resize::{PaneDrag, PaneSize, PaneSplitGaps, ResizeGrip};
+pub use resize::{PaneDrag, PaneSize, PaneSplitGaps, ResizeGrip, ResizeGripMasks};
 pub(crate) use tree::PaneHierarchy;
 use tree::TreePlugin;
 pub use tree::{Pane, PaneSplit, PaneSplitDirection, PaneTree};
@@ -87,20 +87,6 @@ impl OverlayInput<'_, '_> {
         false
     }
 }
-
-pub(super) struct PointerDevicePlugin;
-
-impl Plugin for PointerDevicePlugin {
-    fn build(&self, app: &mut App) {
-        app.add_systems(Startup, |mut commands: Commands| {
-            commands.spawn((PointerDevice, Name::new("native pointer")));
-        });
-    }
-}
-
-#[derive(Component)]
-#[require(focus::PointerFocus, resize::PointerPress)]
-pub(super) struct PointerDevice;
 
 #[derive(SystemSet, Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub(super) struct ArrangementSet;
@@ -325,9 +311,6 @@ impl PaneStacks<'_, '_> {
         children.iter().find(|&entity| self.stacks.contains(entity))
     }
 }
-
-#[cfg(test)]
-pub(super) static NATIVE_POINTER_TEST: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
 #[cfg(test)]
 mod tests {

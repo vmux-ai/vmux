@@ -1,45 +1,36 @@
+use bevy::window::Window;
 use std::ptr::NonNull;
-use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{Duration, Instant};
 
-use bevy::ecs::system::NonSendMarker;
 use bevy::prelude::*;
-use bevy::window::{CursorIcon, SystemCursorIcon};
 use bevy::winit::{EventLoopProxyWrapper, WINIT_WINDOWS, WinitUserEvent};
 use bevy_cef_core::prelude::MessageLoopWakePolicy;
 use objc2_app_kit::{
-    NSAnimatablePropertyContainer, NSAnimationContext, NSApp,
-    NSApplicationDidResignActiveNotification, NSCursor, NSEvent, NSEventMask, NSEventModifierFlags,
-    NSEventPhase, NSEventType, NSView, NSWindowDidEndLiveResizeNotification, NSWindowStyleMask,
+    NSApp, NSApplicationDidResignActiveNotification, NSEvent, NSEventMask, NSEventModifierFlags,
+    NSEventPhase, NSEventType, NSView, NSWindowDidEndLiveResizeNotification,
     NSWindowWillStartLiveResizeNotification,
 };
-use objc2_foundation::{
-    NSNotification, NSNotificationCenter, NSPoint, NSRect, NSSize, NSString, NSUserDefaults,
-};
+use objc2_foundation::{NSNotification, NSNotificationCenter, NSPoint, NSRect, NSSize};
 use raw_window_handle::{HasWindowHandle, RawWindowHandle};
 use vmux_api::input::KeyModifiers;
 use vmux_flex::prelude::*;
 use vmux_setting::{ResolvedScheme, SystemAppearance};
 
-use crate::window_interaction::{
-    TitlebarClick, TitlebarClicks, WindowFrame, WindowPointerPolicy, WindowResizeDrag,
-    WindowTitlebarGesture, WindowZoom,
-};
+use crate::window_interaction::{WindowFrame, WindowPointerPolicy};
 
 pub(super) struct RuntimePlatformPlugin;
 
 impl Plugin for RuntimePlatformPlugin {
     fn build(&self, app: &mut App) {
-        app.add_systems(Startup, seed)
+        app.init_non_send::<NativeInputHandles>()
+            .add_plugins(crate::window_input::WindowInputPlugin)
+            .add_systems(Startup, seed)
             .add_message::<vmux_ecs::overlay::PopupDismissRequest>()
-            .add_systems(First, deactivate)
+            .add_message::<KeyWindowRequest>()
             .add_systems(Update, activate_app_during_boot)
-            .add_systems(Update, grab_key_window_on_pane_hover)
-            .add_systems(
-                Update,
-                resize_cursor.after(vmux_layout::PaneSet::AfterSelect),
-            )
+            .add_systems(Update, (grab_key_window_on_pane_hover, key).chain())
             .add_systems(
                 Startup,
                 (
@@ -52,7 +43,7 @@ impl Plugin for RuntimePlatformPlugin {
     }
 }
 
-fn seed(_non_send: NonSendMarker, mut system: Single<&mut SystemAppearance>) {
+fn seed(_non_send: bevy::ecs::system::NonSendMarker, mut system: Single<&mut SystemAppearance>) {
     if system.0.is_some() {
         return;
     }
@@ -70,30 +61,61 @@ fn seed(_non_send: NonSendMarker, mut system: Single<&mut SystemAppearance>) {
 const MOUSE_MOVE_WAKE_INTERVAL: Duration = Duration::from_millis(33);
 const MOUSE_DRAG_WAKE_INTERVAL: Duration = Duration::from_millis(16);
 
-static INPUT_WAKE_MONITOR_INSTALLED: AtomicBool = AtomicBool::new(false);
-static IN_LIVE_RESIZE: AtomicBool = AtomicBool::new(false);
-static LIVE_RESIZE_MONITOR_INSTALLED: AtomicBool = AtomicBool::new(false);
-static HOVER_OVER_PANE: AtomicBool = AtomicBool::new(false);
-static WINDOWED_POINTER_INSIDE: AtomicBool = AtomicBool::new(false);
-static ACTIVATION_MONITOR_INSTALLED: AtomicBool = AtomicBool::new(false);
-static APP_DEACTIVATED: AtomicBool = AtomicBool::new(false);
+#[derive(Default)]
+struct NativeInputHandles {
+    pointers: Option<vmux_input::PointerInbox>,
+    monitors: Vec<objc2::rc::Retained<objc2::runtime::AnyObject>>,
+    observers: Vec<objc2::rc::Retained<objc2::runtime::AnyObject>>,
+}
 
-fn deactivate(mut dismiss: MessageWriter<vmux_ecs::overlay::PopupDismissRequest>) {
-    if APP_DEACTIVATED.swap(false, Ordering::Relaxed) {
-        dismiss.write_default();
+impl NativeInputHandles {
+    fn observe(
+        &mut self,
+        token: objc2::rc::Retained<
+            objc2::runtime::ProtocolObject<dyn objc2_foundation::NSObjectProtocol>,
+        >,
+    ) {
+        let token = objc2::rc::Retained::into_raw(token) as *mut objc2::runtime::AnyObject;
+        if let Some(token) = unsafe { objc2::rc::Retained::from_raw(token) } {
+            self.observers.push(token);
+        }
     }
 }
 
-fn install_activation_monitor(proxy: Option<Res<EventLoopProxyWrapper>>) {
-    if ACTIVATION_MONITOR_INSTALLED.load(Ordering::Relaxed) {
-        return;
+impl Drop for NativeInputHandles {
+    fn drop(&mut self) {
+        if let Some(pointers) = &self.pointers {
+            pointers.set_native_enabled(false);
+        }
+        for token in &self.monitors {
+            unsafe {
+                NSEvent::removeMonitor(token);
+            }
+        }
+        let center = NSNotificationCenter::defaultCenter();
+        for token in &self.observers {
+            unsafe {
+                center.removeObserver(token);
+            }
+        }
     }
+}
+
+fn install_activation_monitor(
+    proxy: Option<Res<EventLoopProxyWrapper>>,
+    mut handles: NonSendMut<NativeInputHandles>,
+    pointers: Res<vmux_input::PointerInbox>,
+    windows: NonSend<crate::window_input::WindowInputInbox>,
+) {
     let Some(proxy) = proxy else {
         return;
     };
     let proxy = (**proxy).clone();
+    let pointers = pointers.clone();
+    let windows = windows.clone();
     let block = block2::RcBlock::new(move |_notification: NonNull<NSNotification>| {
-        APP_DEACTIVATED.store(true, Ordering::Relaxed);
+        pointers.cancel();
+        windows.deactivate();
         let _ = proxy.send_event(WinitUserEvent::WakeUp);
     });
     let token = unsafe {
@@ -104,8 +126,7 @@ fn install_activation_monitor(proxy: Option<Res<EventLoopProxyWrapper>>) {
             &block,
         )
     };
-    std::mem::forget(token);
-    ACTIVATION_MONITOR_INSTALLED.store(true, Ordering::Relaxed);
+    handles.observe(token);
 }
 
 fn activate_primary_window(
@@ -121,8 +142,9 @@ fn activate_primary_window(
 }
 
 fn grab_key_window_on_pane_hover(
-    windows: Query<(Entity, &Window)>,
-    focused_window: vmux_layout::window::FocusedWindow,
+    mut events: MessageReader<vmux_input::PointerUpdated>,
+    windows: Query<&Window>,
+    hierarchy: vmux_layout::window::WindowHierarchy,
     popup_windows: Query<
         Option<&bevy_cef::prelude::HostWindow>,
         (
@@ -131,48 +153,48 @@ fn grab_key_window_on_pane_hover(
         ),
     >,
     panes: Query<
-        &ComputedNode,
+        (Entity, &ComputedNode),
         (
             With<vmux_layout::pane::Pane>,
             Without<vmux_layout::pane::PaneSplit>,
         ),
     >,
+    mut requests: MessageWriter<KeyWindowRequest>,
 ) {
-    if !HOVER_OVER_PANE.swap(false, Ordering::Relaxed) {
-        return;
-    }
     if !app_is_frontmost() {
         return;
     }
-    let Some(pointer) = vmux_input::NativePointer::snapshot() else {
-        return;
-    };
-    let mut over_pane = false;
-    for node in panes.iter() {
-        if node.contains(pointer.position_px) {
-            over_pane = true;
-            break;
+    for event in events.read() {
+        if !event.motion || event.cancelled {
+            continue;
+        }
+        let Some(position) = event.position_px else {
+            continue;
+        };
+        if !windows.get(event.window).is_ok_and(|window| window.visible) {
+            continue;
+        }
+        if popup_windows
+            .iter()
+            .any(|host| host.is_none_or(|host| host.0 == event.window))
+        {
+            continue;
+        }
+        if panes.iter().any(|(pane, node)| {
+            hierarchy.get(pane) == Some(event.window) && node.contains(position)
+        }) {
+            requests.write(KeyWindowRequest(event.window));
         }
     }
-    if !over_pane {
-        return;
+}
+
+#[derive(Message)]
+struct KeyWindowRequest(Entity);
+
+fn key(mut requests: MessageReader<KeyWindowRequest>) {
+    for request in requests.read() {
+        MacWindow::ensure_key(request.0);
     }
-    let Some(window_entity) = focused_window.entity() else {
-        return;
-    };
-    if popup_windows
-        .iter()
-        .any(|host| host.is_none_or(|host| host.0 == window_entity))
-    {
-        return;
-    }
-    let Ok((_, window)) = windows.get(window_entity) else {
-        return;
-    };
-    if !window.visible {
-        return;
-    }
-    MacWindow::ensure_key(window_entity);
 }
 
 fn app_is_frontmost() -> bool {
@@ -180,64 +202,6 @@ fn app_is_frontmost() -> bool {
         return false;
     };
     NSApp(mtm).isActive()
-}
-
-#[derive(Clone, Copy)]
-struct GripRegion {
-    window: isize,
-    bounds: ComputedNode,
-}
-
-static PANE_GRIP: Mutex<Option<GripRegion>> = Mutex::new(None);
-
-fn resize_cursor(
-    _main_thread: NonSendMarker,
-    windows: Query<&Window>,
-    feedback: Query<(&CursorIcon, &vmux_layout::pane::ResizeGrip)>,
-    focused: vmux_layout::window::FocusedWindow,
-    popup_owners: Query<
-        Option<&bevy_cef::prelude::HostWindow>,
-        (
-            With<vmux_browser::PopupWebview>,
-            With<vmux_ecs::KeyboardOwner>,
-        ),
-    >,
-    mut owned: Local<bool>,
-) {
-    let mut region = None;
-    let mut cursor = None;
-    if app_is_frontmost()
-        && let Some(entity) = focused.entity()
-        && windows.get(entity).is_ok_and(|window| window.focused)
-        && !popup_owners
-            .iter()
-            .any(|owner| owner.is_none_or(|owner| owner.0 == entity))
-        && let Ok((CursorIcon::System(icon), grip)) = feedback.get(entity)
-        && let Some(window) = MacWindow::number(entity)
-    {
-        region = Some(GripRegion {
-            window,
-            bounds: grip.bounds(),
-        });
-        cursor = match icon {
-            #[allow(deprecated)]
-            SystemCursorIcon::ColResize => Some(NSCursor::resizeLeftRightCursor()),
-            #[allow(deprecated)]
-            SystemCursorIcon::RowResize => Some(NSCursor::resizeUpDownCursor()),
-            SystemCursorIcon::Grabbing => Some(NSCursor::closedHandCursor()),
-            _ => None,
-        };
-    }
-    *PANE_GRIP.lock().unwrap_or_else(|error| error.into_inner()) = region;
-    if let Some(cursor) = cursor {
-        cursor.set();
-        *owned = true;
-    } else if *owned {
-        if app_is_frontmost() {
-            NSCursor::arrowCursor().set();
-        }
-        *owned = false;
-    }
 }
 
 fn activate_window(window_entity: Entity) {
@@ -268,18 +232,6 @@ fn activate_window(window_entity: Entity) {
 pub(crate) struct MacWindow;
 
 impl MacWindow {
-    fn number(entity: Entity) -> Option<isize> {
-        WINIT_WINDOWS.with_borrow(|windows| {
-            let window = windows.get_window(entity)?;
-            let handle = window.window_handle().ok()?;
-            let RawWindowHandle::AppKit(appkit) = handle.as_raw() else {
-                return None;
-            };
-            let view: &NSView = unsafe { &*appkit.ns_view.as_ptr().cast::<NSView>() };
-            Some(view.window()?.windowNumber())
-        })
-    }
-
     pub(crate) fn ensure_key(window_entity: Entity) -> bool {
         let Some(mtm) = objc2::MainThreadMarker::new() else {
             return false;
@@ -307,15 +259,6 @@ impl MacWindow {
             window.makeKeyAndOrderFront(None);
             false
         })
-    }
-
-    pub(crate) fn live_resize_active() -> bool {
-        IN_LIVE_RESIZE.load(Ordering::Relaxed)
-    }
-
-    pub(crate) fn pointer_inside_windowed_page() -> bool {
-        vmux_browser::NativeLayout::pointer_is_inside()
-            || WINDOWED_POINTER_INSIDE.load(Ordering::Relaxed)
     }
 }
 
@@ -418,198 +361,58 @@ impl From<WindowFrame> for NSRect {
     }
 }
 
-fn begin_window_resize(event: &NSEvent) -> Option<WindowResizeDrag> {
-    let mtm = objc2::MainThreadMarker::new()?;
-    let window = event.window(mtm)?;
-    let style = window.styleMask();
-    if style.contains(NSWindowStyleMask::FullScreen) {
-        return None;
-    }
-    if !style.contains(NSWindowStyleMask::Resizable) {
-        window.setStyleMask(style | NSWindowStyleMask::Resizable);
-    }
-    let cursor = NSEvent::mouseLocation();
-    let frame = WindowFrame::from(window.frame());
-    let edges = frame.resize_edges(cursor.x, cursor.y, 8.0);
-    if !edges.any() {
-        return None;
-    }
-    let min_size = window.minSize();
-    Some(WindowResizeDrag {
-        frame,
-        cursor_x: cursor.x,
-        cursor_y: cursor.y,
-        min_width: min_size.width.max(1.0),
-        min_height: min_size.height.max(1.0),
-        edges,
-    })
-}
-
-fn update_window_resize(event: &NSEvent, drag: WindowResizeDrag) {
-    let Some(mtm) = objc2::MainThreadMarker::new() else {
-        return;
-    };
-    let Some(window) = event.window(mtm) else {
-        return;
-    };
-    let cursor = NSEvent::mouseLocation();
-    let frame = drag.resized_frame(cursor.x, cursor.y);
-    window.setFrame_display(frame.into(), true);
-}
-
-const TITLEBAR_DOUBLE_CLICK_SLOP_PX: f32 = 8.0;
-
-impl WindowTitlebarGesture {
-    fn capture(
-        event: &NSEvent,
-        clicks: &mut TitlebarClicks,
-        zoom: &mut WindowZoom,
-    ) -> Option<Self> {
-        let mtm = objc2::MainThreadMarker::new()?;
-        let Some((x, y)) = event_location_in_window_physical_px(event) else {
-            clicks.forget();
-            return None;
-        };
-        if !vmux_browser::WindowDragRegion::contains_point(x, y) {
-            clicks.forget();
-            return None;
-        }
-        let window = event.window(mtm)?;
-        let count = clicks.count(
-            TitlebarClick {
-                at: event.timestamp(),
-                x,
-                y,
-            },
-            NSEvent::doubleClickInterval(),
-            TITLEBAR_DOUBLE_CLICK_SLOP_PX,
-        );
-        let gesture = Self::resolve(count, Self::double_click_action().as_deref());
-        match gesture {
-            Self::Drag => window.performWindowDragWithEvent(event),
-            Self::Zoom => zoom.animate(window),
-            Self::Miniaturize => window.miniaturize(None),
-            Self::Ignore => {}
-        }
-        Some(gesture)
-    }
-
-    fn double_click_action() -> Option<String> {
-        let defaults = NSUserDefaults::standardUserDefaults();
-        let behavior = defaults.stringForKey(&NSString::from_str("AppleActionOnDoubleClick"))?;
-        Some(behavior.to_string())
-    }
-}
-
-impl WindowZoom {
-    fn animate(&mut self, window: objc2::rc::Retained<objc2_app_kit::NSWindow>) {
-        let Some(screen) = window.screen() else {
-            return;
-        };
-        let target = self.toggled(
-            WindowFrame::from(window.frame()),
-            WindowFrame::from(screen.visibleFrame()),
-        );
-        let target = target.into();
-        let duration = window.animationResizeTime(target);
-        let changes = block2::RcBlock::new(move |context: NonNull<NSAnimationContext>| {
-            unsafe { context.as_ref() }.setDuration(duration);
-            window.animator().setFrame_display(target, true);
-        });
-        NSAnimationContext::runAnimationGroup(&changes);
-    }
-}
-
 fn install_input_wake_monitor(
     proxy: Option<Res<EventLoopProxyWrapper>>,
     cef_wake_policy: Res<MessageLoopWakePolicy>,
+    pointer_inbox: Res<vmux_input::PointerInbox>,
+    window_inputs: NonSend<crate::window_input::WindowInputInbox>,
+    mut handles: NonSendMut<NativeInputHandles>,
 ) {
     let Some(proxy) = proxy else {
         return;
     };
-    if INPUT_WAKE_MONITOR_INSTALLED.load(Ordering::Relaxed) {
-        return;
-    }
     let cef_wake_policy = cef_wake_policy.clone();
     let proxy = (**proxy).clone();
     let wake = wake_throttle("mouse-wake-throttle", move || {
         let _ = proxy.send_event(WinitUserEvent::WakeUp);
     });
-    let resize_drag = Arc::new(Mutex::new(None::<WindowResizeDrag>));
-    let local_resize_drag = Arc::clone(&resize_drag);
-    let titlebar_clicks = Arc::new(Mutex::new(TitlebarClicks::default()));
-    let window_zoom = Arc::new(Mutex::new(WindowZoom::default()));
+    let local_pointer = pointer_inbox.clone();
+    let local_window_inputs = window_inputs.clone();
     let local_wake = wake.clone();
-    let pane_drag = Arc::new(Mutex::new(None::<isize>));
-    let local_pane_drag = Arc::clone(&pane_drag);
     let local_block = block2::RcBlock::new(move |event: NonNull<NSEvent>| -> *mut NSEvent {
         cef_wake_policy.begin_interaction();
         let ev = unsafe { event.as_ref() };
         let event_type = ev.r#type();
-        let event_belongs_to_main_window = event_belongs_to_main_window_frame(ev);
-        if !event_belongs_to_main_window {
-            titlebar_clicks
-                .lock()
-                .unwrap_or_else(|poisoned| poisoned.into_inner())
-                .forget();
+        let native_window = objc2::MainThreadMarker::new().and_then(|mtm| ev.window(mtm));
+        let direct_source = native_window.as_ref().and_then(|window| {
+            local_pointer.source((&**window as *const objc2_app_kit::NSWindow) as isize)
+        });
+        let mut source = direct_source;
+        let mut parent = native_window;
+        for _ in 0..8 {
+            if source.is_some() {
+                break;
+            }
+            let Some(window) = parent else {
+                break;
+            };
+            parent = window.parentWindow();
+            source = parent.as_ref().and_then(|window| {
+                local_pointer.source((&**window as *const objc2_app_kit::NSWindow) as isize)
+            });
+        }
+        let Some(source) = source else {
             local_wake(MOUSE_DRAG_WAKE_INTERVAL);
             return event.as_ptr();
-        }
-        let mut titlebar_gesture = None;
-        let capture_window_gesture = match event_type {
-            NSEventType::LeftMouseDown => {
-                let drag = begin_window_resize(ev);
-                *local_resize_drag
-                    .lock()
-                    .unwrap_or_else(|poisoned| poisoned.into_inner()) = drag;
-                if drag.is_some() {
-                    IN_LIVE_RESIZE.store(true, Ordering::Relaxed);
-                    true
-                } else {
-                    let mut clicks = titlebar_clicks
-                        .lock()
-                        .unwrap_or_else(|poisoned| poisoned.into_inner());
-                    let mut zoom = window_zoom
-                        .lock()
-                        .unwrap_or_else(|poisoned| poisoned.into_inner());
-                    titlebar_gesture = WindowTitlebarGesture::capture(ev, &mut clicks, &mut zoom);
-                    titlebar_gesture.is_some()
-                }
-            }
-            NSEventType::LeftMouseDragged => {
-                let drag = *local_resize_drag
-                    .lock()
-                    .unwrap_or_else(|poisoned| poisoned.into_inner());
-                if let Some(drag) = drag {
-                    update_window_resize(ev, drag);
-                    true
-                } else {
-                    false
-                }
-            }
-            NSEventType::LeftMouseUp => {
-                let drag = local_resize_drag
-                    .lock()
-                    .unwrap_or_else(|poisoned| poisoned.into_inner())
-                    .take();
-                if let Some(drag) = drag {
-                    update_window_resize(ev, drag);
-                    IN_LIVE_RESIZE.store(false, Ordering::Relaxed);
-                    true
-                } else {
-                    false
-                }
-            }
-            _ => false,
         };
-        if event_type == NSEventType::LeftMouseDown {
-            vmux_input::NativePointer::set_window_gesture(true);
-        } else if event_type == NSEventType::LeftMouseUp {
-            vmux_input::NativePointer::set_window_gesture(false);
-        }
-        if titlebar_gesture == Some(WindowTitlebarGesture::Drag) {
-            vmux_input::NativePointer::set_window_gesture(false);
-        }
+        let location = crate::window_input::WindowInputInbox::physical_position(ev);
+        let capture_window_gesture = direct_source.is_some()
+            && local_window_inputs.suppress(source, ev, location.map(|(x, y)| Vec2::new(x, y)));
+        let token = if direct_source.is_some() {
+            local_window_inputs.queue(source, ev)
+        } else {
+            0
+        };
         let motion = matches!(
             event_type,
             NSEventType::MouseMoved
@@ -638,92 +441,48 @@ fn install_input_wake_monitor(
         ) {
             HistoryScroll::cancel();
         }
-        let location = event_location_in_window_physical_px(ev);
-        let (window_number, scale) = match objc2::MainThreadMarker::new() {
-            Some(marker) => match ev.window(marker) {
-                Some(window) => (
-                    Some(window.windowNumber()),
-                    window.backingScaleFactor() as f32,
-                ),
-                None => (None, 1.0),
-            },
-            None => (None, 1.0),
-        };
-        let pane_capture = match event_type {
-            NSEventType::LeftMouseDown => {
-                let region = *PANE_GRIP.lock().unwrap_or_else(|error| error.into_inner());
-                let capture = region
-                    .filter(|region| {
-                        !capture_window_gesture
-                            && window_number == Some(region.window)
-                            && location
-                                .is_some_and(|(x, y)| region.bounds.contains(Vec2::new(x, y)))
-                    })
-                    .map(|region| region.window);
-                *local_pane_drag
-                    .lock()
-                    .unwrap_or_else(|error| error.into_inner()) = capture;
-                if capture.is_some() {
-                    NSCursor::closedHandCursor().set();
-                }
-                capture.is_some()
+        let pointer_position_changed =
+            motion || button_event || event_type == NSEventType::FlagsChanged;
+        let previous = local_pointer.position(source);
+        let position = location.map(|(x, y)| Vec2::new(x, y));
+        let page_changed = match (previous, position) {
+            (Some(previous), Some(position)) => {
+                vmux_browser::NativeBridge::windowed_page_changed(previous, position)
             }
-            NSEventType::LeftMouseDragged => local_pane_drag
-                .lock()
-                .unwrap_or_else(|error| error.into_inner())
-                .is_some_and(|owner| Some(owner) == window_number),
-            NSEventType::LeftMouseUp => local_pane_drag
-                .lock()
-                .unwrap_or_else(|error| error.into_inner())
-                .take()
-                .is_some_and(|owner| Some(owner) == window_number),
             _ => false,
         };
-        let page_changed = motion
-            && location.is_some_and(|(x, y)| {
-                let Some(previous) = vmux_input::NativePointer::snapshot() else {
-                    return true;
-                };
-                vmux_browser::NativeBridge::windowed_page_changed(
-                    previous.position_px,
-                    Vec2::new(x, y),
-                )
-            });
-        let near_edge = motion
-            && location.is_some_and(|(x, y)| {
-                vmux_browser::NativeBridge::windowed_page_edge_contains(
-                    Vec2::new(x, y),
-                    vmux_layout::pane::ResizeGrip::minimum_width(scale) * 0.5,
-                )
-            });
-        let pointer_position_changed = motion || button_event;
-        let was_over_windowed_page = WINDOWED_POINTER_INSIDE.load(Ordering::Relaxed);
+        let scale = objc2::MainThreadMarker::new()
+            .and_then(|marker| ev.window(marker))
+            .map_or(1.0, |window| window.backingScaleFactor() as f32);
+        let near_edge = position.is_some_and(|position| {
+            vmux_browser::NativeBridge::windowed_page_edge_contains(
+                position,
+                vmux_layout::pane::ResizeGrip::minimum_width(scale) * 0.5,
+            )
+        });
+        let over_grip =
+            position.is_some_and(|position| local_window_inputs.grip_inside(source, position));
         let sampled_over_windowed_page = location
             .is_some_and(|(x, y)| vmux_browser::NativeBridge::windowed_page_contains_point(x, y));
-        let over_windowed_page = WindowPointerPolicy::windowed_presence(
-            pointer_position_changed,
-            was_over_windowed_page,
-            sampled_over_windowed_page,
-        );
-        if pointer_position_changed {
-            WINDOWED_POINTER_INSIDE.store(over_windowed_page, Ordering::Relaxed);
-        }
         let buttons = mouse_buttons();
-        if pointer_position_changed && let Some((x, y)) = location {
+        if pointer_position_changed {
+            let mut input = match location {
+                Some((x, y)) => {
+                    vmux_input::PointerInput::sample(source, Vec2::new(x, y), buttons, motion)
+                }
+                None => vmux_input::PointerInput::buttons(source, buttons),
+            };
+            input.native_token = token;
             let flags = ev.modifierFlags();
-            vmux_input::NativePointer::publish_with_modifiers(
-                Vec2::new(x, y),
-                buttons,
-                motion,
-                Some(KeyModifiers {
-                    shift: flags.contains(NSEventModifierFlags::Shift),
-                    ctrl: flags.contains(NSEventModifierFlags::Control),
-                    alt: flags.contains(NSEventModifierFlags::Option),
-                    super_key: flags.contains(NSEventModifierFlags::Command),
-                }),
-            );
+            input.modifiers = Some(KeyModifiers {
+                shift: flags.contains(NSEventModifierFlags::Shift),
+                ctrl: flags.contains(NSEventModifierFlags::Control),
+                alt: flags.contains(NSEventModifierFlags::Option),
+                super_key: flags.contains(NSEventModifierFlags::Command),
+            });
+            local_pointer.send(input);
         }
-        if motion && event_belongs_to_main_window {
+        if motion {
             let interval = if event_type == NSEventType::MouseMoved {
                 MOUSE_MOVE_WAKE_INTERVAL
             } else {
@@ -731,51 +490,39 @@ fn install_input_wake_monitor(
             };
             if WindowPointerPolicy::motion_should_wake(
                 event_type != NSEventType::MouseMoved,
-                over_windowed_page,
-                was_over_windowed_page,
+                sampled_over_windowed_page,
+                local_window_inputs.was_windowed(source),
                 event_window_is_key(ev),
             ) || page_changed
                 || near_edge
+                || over_grip
             {
-                HOVER_OVER_PANE.store(true, Ordering::Relaxed);
                 local_wake(interval);
             }
         } else if scroll {
-            let wake_for_scroll = WindowPointerPolicy::scroll_should_wake(
-                vmux_browser::NativeLayout::pointer_is_inside(),
+            if WindowPointerPolicy::scroll_should_wake(
+                local_window_inputs.layout_inside(source),
                 sampled_over_windowed_page,
-            );
-            if wake_for_scroll {
+            ) {
                 local_wake(MOUSE_DRAG_WAKE_INTERVAL);
             }
         } else {
             local_wake(MOUSE_DRAG_WAKE_INTERVAL);
         }
-        if capture_window_gesture || pane_capture {
+        if capture_window_gesture {
             return std::ptr::null_mut();
         }
         event.as_ptr()
     });
-    let global_resize_drag = Arc::clone(&resize_drag);
+    let global_pointer = pointer_inbox.clone();
+    let global_window_inputs = window_inputs.clone();
     let global_wake = wake.clone();
-    let global_pane_drag = Arc::clone(&pane_drag);
     let global_block = block2::RcBlock::new(move |event: NonNull<NSEvent>| {
         let event_type = unsafe { event.as_ref() }.r#type();
-        if event_type == NSEventType::LeftMouseDown {
-            vmux_input::NativePointer::set_window_gesture(true);
-        } else if event_type == NSEventType::LeftMouseUp {
-            vmux_input::NativePointer::set_window_gesture(false);
-            global_resize_drag
-                .lock()
-                .unwrap_or_else(|poisoned| poisoned.into_inner())
-                .take();
-            IN_LIVE_RESIZE.store(false, Ordering::Relaxed);
-            global_pane_drag
-                .lock()
-                .unwrap_or_else(|error| error.into_inner())
-                .take();
+        if event_type == NSEventType::LeftMouseUp {
+            global_window_inputs.cancel_captured();
         }
-        vmux_input::NativePointer::publish_buttons(mouse_buttons());
+        global_pointer.release_outside(mouse_buttons());
         global_wake(MOUSE_MOVE_WAKE_INTERVAL);
     });
     let mouse_mask = NSEventMask::MouseMoved
@@ -805,21 +552,23 @@ fn install_input_wake_monitor(
         unsafe { NSEvent::addLocalMonitorForEventsMatchingMask_handler(local_mask, &local_block) };
     let global_token =
         NSEvent::addGlobalMonitorForEventsMatchingMask_handler(global_mask, &global_block);
-    if local_token.is_some() || global_token.is_some() {
-        INPUT_WAKE_MONITOR_INSTALLED.store(true, Ordering::Relaxed);
-        if let Some(token) = local_token {
-            std::mem::forget(token);
-        }
-        if let Some(token) = global_token {
-            std::mem::forget(token);
-        }
+    if let Some(token) = local_token {
+        pointer_inbox.set_native_enabled(true);
+        handles.pointers = Some(pointer_inbox.clone());
+        handles.monitors.push(token);
+    }
+    if let Some(token) = global_token {
+        handles.pointers = Some(pointer_inbox.clone());
+        handles.monitors.push(token);
     }
 }
 
-fn install_live_resize_monitor(proxy: Option<Res<EventLoopProxyWrapper>>) {
-    if LIVE_RESIZE_MONITOR_INSTALLED.load(Ordering::Relaxed) {
-        return;
-    }
+fn install_live_resize_monitor(
+    proxy: Option<Res<EventLoopProxyWrapper>>,
+    pointers: Res<vmux_input::PointerInbox>,
+    window_inputs: NonSend<crate::window_input::WindowInputInbox>,
+    mut handles: NonSendMut<NativeInputHandles>,
+) {
     let Some(proxy) = proxy else {
         return;
     };
@@ -831,13 +580,27 @@ fn install_live_resize_monitor(proxy: Option<Res<EventLoopProxyWrapper>>) {
     };
     let center = NSNotificationCenter::defaultCenter();
     let start_proxy = (**proxy).clone();
-    let start_block = block2::RcBlock::new(move |_n: NonNull<NSNotification>| {
-        IN_LIVE_RESIZE.store(true, Ordering::Relaxed);
+    let start_pointers = pointers.clone();
+    let start_inputs = window_inputs.clone();
+    let start_block = block2::RcBlock::new(move |notification: NonNull<NSNotification>| {
+        if let Some(object) = unsafe { notification.as_ref() }.object()
+            && let Some(window) =
+                start_pointers.source((&*object as *const objc2::runtime::AnyObject) as isize)
+        {
+            start_inputs.queue_resize(window, true);
+        }
         let _ = start_proxy.send_event(WinitUserEvent::WakeUp);
     });
     let end_proxy = (**proxy).clone();
-    let end_block = block2::RcBlock::new(move |_n: NonNull<NSNotification>| {
-        IN_LIVE_RESIZE.store(false, Ordering::Relaxed);
+    let end_pointers = pointers.clone();
+    let end_inputs = window_inputs.clone();
+    let end_block = block2::RcBlock::new(move |notification: NonNull<NSNotification>| {
+        if let Some(object) = unsafe { notification.as_ref() }.object()
+            && let Some(window) =
+                end_pointers.source((&*object as *const objc2::runtime::AnyObject) as isize)
+        {
+            end_inputs.queue_resize(window, false);
+        }
         let _ = end_proxy.send_event(WinitUserEvent::WakeUp);
     });
     let start_token = unsafe {
@@ -851,24 +614,8 @@ fn install_live_resize_monitor(proxy: Option<Res<EventLoopProxyWrapper>>) {
     let end_token = unsafe {
         center.addObserverForName_object_queue_usingBlock(Some(end_name), None, None, &end_block)
     };
-    std::mem::forget(start_token);
-    std::mem::forget(end_token);
-    LIVE_RESIZE_MONITOR_INSTALLED.store(true, Ordering::Relaxed);
-}
-
-fn event_location_in_window_physical_px(event: &NSEvent) -> Option<(f32, f32)> {
-    let mtm = objc2::MainThreadMarker::new()?;
-    let window = event.window(mtm)?;
-    let content = window.contentView()?;
-    let point = content.convertPoint_fromView(event.locationInWindow(), None);
-    let scale = window.backingScaleFactor();
-    let x = point.x * scale;
-    let y = point.y * scale;
-    if x.is_finite() && y.is_finite() {
-        Some((x as f32, y as f32))
-    } else {
-        None
-    }
+    handles.observe(start_token);
+    handles.observe(end_token);
 }
 
 struct HistoryScroll;
@@ -957,15 +704,6 @@ fn event_window_is_key(event: &NSEvent) -> bool {
         return false;
     };
     event.window(mtm).is_some_and(|window| window.isKeyWindow())
-}
-
-fn event_belongs_to_main_window_frame(event: &NSEvent) -> bool {
-    let Some(mtm) = objc2::MainThreadMarker::new() else {
-        return false;
-    };
-    event
-        .window(mtm)
-        .is_some_and(|window| window.canBecomeMainWindow())
 }
 
 fn mouse_buttons() -> bevy_cef_core::prelude::NativeMouseButtons {

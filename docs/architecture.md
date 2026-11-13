@@ -489,6 +489,29 @@ chronological queries join Visit references directly to URL metadata. Only the r
 copied into HistoryUiState or suggestion output. Deletion accepts only a History page request and
 an existing canonical URL, so a supplied entity ID cannot remove unrelated application state.
 
+Pointer input is owned by each Window's `PointerState` and `PointerCapture`. `PointerPlugin`
+drains a 256-sample native mailbox and winit events into ordered `PointerInput`/`PointerUpdated`
+messages before browser routing; an overflow cancels captures instead of losing a release.
+Window entity generations reject retired native origins. Native monitoring is explicit, so a
+standalone input consumer retains winit input. Focus keeps its last consumed motion on the Window;
+pane resize keeps its capture there and applies every press, motion and release in order.
+Browser region/capture and frame-rate decisions query these entities rather than native exports.
+Input materialization and native Window gestures run in PreUpdate. Layout focus and resize run
+in Update after current Window/Space selection; browser routing follows their input decisions.
+CEF pointer effects drain once in Last after region and hover publication. Native splitter masks
+come from the active visible Tab with no owning overlay and include the expanded divider grips.
+Press position and modifiers survive a later release in the same update, including quick clicks
+and Shift suppression; cancellation releases capture even when there is no further position.
+
+AppKit callbacks retain only raw event handles, pending external suppression and read-only
+window/region routing hints. The suppression latch covers native dispatch until the queued down
+materializes; it does not own resize, click or zoom policy. Window-owned resize, titlebar click,
+zoom and drag-token components decide those operations in registered systems, then an adapter
+applies native effects. Completion releases the canonical buttons in the same frame. Handles
+expire after delivery; monitor and notification tokens are removed when their adapter drops.
+Native drag-region exports are keyed by the originating Window; domain hit tests use the canonical
+`WindowDragRegions` query. Input/capture data is transient and never enters workspace persistence.
+
 ### Plugins
 
 One crate, one capability, one `build()`. A plugin bundles its components, systems,
@@ -1221,14 +1244,14 @@ sequence, and releases it on mouse-up. Pane Components
 remain the authority for resizing; a drag started in page content cannot acquire a divider later.
 Pointer focus is limited to the current tab and forwards a core `SelectRequest` before activation
 and focus projection, so nested Pane ancestors and the visible Stack agree in the input frame.
-The native pointer snapshot carries event modifiers and press-time modifiers independently of
+Canonical Window pointer state carries event modifiers and press-time modifiers independently of
 Winit keyboard delivery to embedded pages. Holding either Shift key preserves pointer selection
 across hover and clicks; input sampled during the hold is consumed, so releasing Shift does not
 replay it. Control suppresses hover selection while allowing explicit clicks, and directional
 keyboard selection remains available.
-Pane interaction composes one `PointerDevice` entity for the input device. Its `PointerFocus`
-and `PointerPress` Components own accepted input and consumption progress; native mailboxes hold
-only bounded raw samples. This state adds no Resources and is not persisted.
+Pane interaction stores `PointerFocus` and the resize delivery cursor on each Window; its
+`PointerState` and `PointerCapture` own accepted input and consumption progress. Native mailboxes
+hold only bounded raw samples and published routing hints. This state is not persisted.
 Empty-tab startup pages are created before descendant activation and focus computation. Closing
 the final page preserves the Tab's workspace and checkout context while its replacement loads.
 

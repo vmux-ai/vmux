@@ -40,6 +40,8 @@ mod runtime;
 mod screenshot;
 #[cfg(all(target_os = "macos", feature = "native-glass"))]
 mod splash;
+#[cfg(target_os = "macos")]
+mod window_input;
 
 #[cfg(feature = "tray")]
 mod tray;

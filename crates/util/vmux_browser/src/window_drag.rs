@@ -1,4 +1,6 @@
+use bevy::ecs::system::Commands;
 use bevy::prelude::*;
+use bevy::window::Window;
 use bevy_cef::prelude::{HostWindow, UiInput};
 use std::sync::{LazyLock, Mutex};
 use vmux_ecs::overlay::Overlay;
@@ -27,19 +29,19 @@ static REGIONS: LazyLock<Mutex<PublishedWindowDragRegions>> =
 
 #[derive(Default)]
 struct PublishedWindowDragRegions {
-    allowed: Vec<WindowDragRegion>,
-    blocked: Vec<WindowDragRegion>,
+    allowed: Vec<(Entity, WindowDragRegion)>,
+    blocked: Vec<(Entity, WindowDragRegion)>,
 }
 
 impl PublishedWindowDragRegions {
-    fn contains(&self, x_px: f32, y_px: f32) -> bool {
+    fn contains(&self, window: Entity, x_px: f32, y_px: f32) -> bool {
         self.allowed
             .iter()
-            .any(|region| region.contains(x_px, y_px))
+            .any(|(owner, region)| *owner == window && region.contains(x_px, y_px))
             && !self
                 .blocked
                 .iter()
-                .any(|region| region.contains(x_px, y_px))
+                .any(|(owner, region)| *owner == window && region.contains(x_px, y_px))
     }
 }
 
@@ -52,11 +54,11 @@ pub struct WindowDragRegion {
 }
 
 impl WindowDragRegion {
-    pub fn contains_point(x_px: f32, y_px: f32) -> bool {
+    pub fn contains_point(window: Entity, x_px: f32, y_px: f32) -> bool {
         let published = REGIONS
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner());
-        published.contains(x_px, y_px)
+        published.contains(window, x_px, y_px)
     }
 
     fn from_report(reported: WindowDragRegionEvent, header: ComputedNode) -> Option<Self> {
@@ -134,49 +136,77 @@ fn region(
     reported.update(trigger.event().payload.clone());
 }
 
-fn publish_region(
-    reported: Query<(Entity, &ReportedWindowDragRegions)>,
-    window_q: Query<(Entity, &ComputedNode), With<VmuxWindow>>,
-    hierarchy: WindowHierarchy,
-    focused_window: vmux_layout::window::FocusedWindow,
-    overlay: Overlay,
-    pointer_capture_q: Query<(Entity, &HostWindow), (With<LayoutCef>, LayoutPointerCapture)>,
-    mut last: Local<(Vec<WindowDragRegion>, Vec<WindowDragRegion>)>,
-) {
-    let overlay_owns_input = overlay.owns_input()
-        || pointer_capture_q
-            .iter()
-            .any(|(_, host)| Some(host.0) == focused_window.entity());
-    let mut regions = PublishedWindowDragRegions::default();
-    if !overlay_owns_input {
-        for (entity, viewport) in window_q.iter() {
-            if hierarchy.get(entity) != focused_window.entity() {
+#[derive(bevy::ecs::system::SystemParam)]
+pub struct WindowDragRegions<'w, 's> {
+    reported: Query<'w, 's, (Entity, &'static ReportedWindowDragRegions)>,
+    viewports: Query<'w, 's, (Entity, &'static ComputedNode), With<VmuxWindow>>,
+    hierarchy: WindowHierarchy<'w, 's>,
+    overlay: Overlay<'w, 's>,
+    captures: Query<'w, 's, &'static HostWindow, (With<LayoutCef>, LayoutPointerCapture)>,
+}
+
+impl WindowDragRegions<'_, '_> {
+    pub fn contains(&self, window: Entity, position: Vec2) -> bool {
+        if self.overlay.owns_input() || self.captures.iter().any(|host| host.0 == window) {
+            return false;
+        }
+        let mut allowed = false;
+        for (viewport_entity, viewport) in &self.viewports {
+            if self.hierarchy.get(viewport_entity) != Some(window) {
                 continue;
             }
-            for (webview, reported) in &reported {
-                if hierarchy.get(webview) != focused_window.entity() {
+            for (page, reported) in &self.reported {
+                if self.hierarchy.get(page) != Some(window) {
                     continue;
                 }
-                for reported in reported.0.values() {
-                    if let Some(region) = WindowDragRegion::from_report(reported.clone(), *viewport)
-                    {
-                        if reported.blocked {
-                            regions.blocked.push(region);
-                        } else {
-                            regions.allowed.push(region);
-                        }
+                for report in reported.0.values() {
+                    let Some(region) = WindowDragRegion::from_report(report.clone(), *viewport)
+                    else {
+                        continue;
+                    };
+                    if !region.contains(position.x, position.y) {
+                        continue;
+                    }
+                    if report.blocked {
+                        return false;
+                    }
+                    allowed = true;
+                }
+            }
+        }
+        allowed
+    }
+}
+
+fn publish_region(regions: WindowDragRegions, windows: Query<Entity, With<Window>>) {
+    let mut published = PublishedWindowDragRegions::default();
+    for window in &windows {
+        if regions.overlay.owns_input() || regions.captures.iter().any(|host| host.0 == window) {
+            continue;
+        }
+        for (viewport_entity, viewport) in &regions.viewports {
+            if regions.hierarchy.get(viewport_entity) != Some(window) {
+                continue;
+            }
+            for (page, reported) in &regions.reported {
+                if regions.hierarchy.get(page) != Some(window) {
+                    continue;
+                }
+                for report in reported.0.values() {
+                    let Some(region) = WindowDragRegion::from_report(report.clone(), *viewport)
+                    else {
+                        continue;
+                    };
+                    if report.blocked {
+                        published.blocked.push((window, region));
+                    } else {
+                        published.allowed.push((window, region));
                     }
                 }
             }
-            break;
         }
     }
-    let next = (regions.allowed.clone(), regions.blocked.clone());
-    if *last == next {
-        return;
-    }
-    *last = next;
-    WindowDragRegion::publish(regions);
+    WindowDragRegion::publish(published);
 }
 
 #[cfg(test)]
@@ -314,23 +344,30 @@ mod tests {
 
     #[test]
     fn blocked_regions_override_allowed_regions() {
+        let window = Entity::PLACEHOLDER;
         let regions = PublishedWindowDragRegions {
-            allowed: vec![WindowDragRegion {
-                left_px: 0.0,
-                top_px: 0.0,
-                right_px: 500.0,
-                bottom_px: 40.0,
-            }],
-            blocked: vec![WindowDragRegion {
-                left_px: 100.0,
-                top_px: 0.0,
-                right_px: 300.0,
-                bottom_px: 40.0,
-            }],
+            allowed: vec![(
+                window,
+                WindowDragRegion {
+                    left_px: 0.0,
+                    top_px: 0.0,
+                    right_px: 500.0,
+                    bottom_px: 40.0,
+                },
+            )],
+            blocked: vec![(
+                window,
+                WindowDragRegion {
+                    left_px: 100.0,
+                    top_px: 0.0,
+                    right_px: 300.0,
+                    bottom_px: 40.0,
+                },
+            )],
         };
 
-        assert!(regions.contains(50.0, 20.0));
-        assert!(!regions.contains(200.0, 20.0));
-        assert!(regions.contains(400.0, 20.0));
+        assert!(regions.contains(window, 50.0, 20.0));
+        assert!(!regions.contains(window, 200.0, 20.0));
+        assert!(regions.contains(window, 400.0, 20.0));
     }
 }

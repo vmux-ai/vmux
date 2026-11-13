@@ -1,6 +1,3 @@
-#[cfg(target_os = "macos")]
-use crate::macos::MacWindow;
-
 use bevy::prelude::*;
 #[cfg(feature = "tray")]
 use bevy::tasks::{IoTaskPool, Task, futures_lite::future};
@@ -14,20 +11,6 @@ use std::time::Duration;
 use vmux_api::protocol::ProcessId;
 #[cfg(feature = "tray")]
 use vmux_terminal::{PtyExited, Terminal};
-
-#[cfg(not(target_os = "macos"))]
-struct MacWindow;
-
-#[cfg(not(target_os = "macos"))]
-impl MacWindow {
-    fn live_resize_active() -> bool {
-        false
-    }
-
-    fn pointer_inside_windowed_page() -> bool {
-        false
-    }
-}
 
 pub struct RuntimePlugin;
 
@@ -219,12 +202,21 @@ fn sync_winit_power_mode(
     wake_policy: Option<Res<MessageLoopWakePolicy>>,
     windows: Query<&Window>,
     monitors: Query<&Monitor>,
+    pointers: Query<(
+        &Window,
+        Option<&vmux_input::WindowGesture>,
+        Option<&vmux_browser::WindowPointerRegions>,
+    )>,
 ) {
     let all_hidden = windows.iter().all(|w| !w.visible);
     let any_visible = windows.iter().any(|w| w.visible);
     let any_focused = windows.iter().any(|w| w.visible && w.focused);
-    let live_resize = MacWindow::live_resize_active();
-    let pointer_inside_windowed_page = MacWindow::pointer_inside_windowed_page();
+    let live_resize = pointers.iter().any(|(window, gesture, _)| {
+        window.visible && gesture.is_some_and(|gesture| gesture.live_resize)
+    });
+    let pointer_inside_windowed_page = pointers.iter().any(|(window, _, regions)| {
+        window.focused && regions.is_some_and(|regions| regions.layout || regions.windowed)
+    });
     let next = if all_hidden {
         WakePolicy::hidden()
     } else {
