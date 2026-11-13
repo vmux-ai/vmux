@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 use std::io;
 use std::io::Write;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::time::{Duration, Instant};
 
 use bevy::ecs::system::SystemParam;
@@ -76,8 +76,8 @@ struct SavedInventory {
 }
 
 impl Cache {
-    fn new(directory: &Path) -> Self {
-        Self(directory.join("inventory.json"))
+    fn new(settings: &Settings) -> Self {
+        Self(settings.directory.join("inventory.json"))
     }
 
     fn load(&self) -> io::Result<Vec<DockerContainer>> {
@@ -245,7 +245,7 @@ fn begin(
 ) {
     for (entity, settings, observed, revision, inventory, next, task) in &mut engines {
         let (Some(mut inventory), Some(next)) = (inventory, next) else {
-            let cache = Cache::new(&settings.directory);
+            let cache = Cache::new(settings);
             let wake = Wake::beside(proxy.as_deref());
             commands.entity(entity).insert((
                 Inventory::default(),
@@ -387,7 +387,7 @@ fn begin_save(
     mut commands: Commands,
 ) {
     for (entity, settings, pending) in &engines {
-        let cache = Cache::new(&settings.directory);
+        let cache = Cache::new(settings);
         let containers = pending.0.clone();
         let wake = Wake::beside(proxy.as_deref());
         commands
@@ -570,7 +570,7 @@ mod tests {
         IoTaskPool::get_or_init(|| bevy::tasks::TaskPoolBuilder::new().num_threads(2).build());
         let directory = tempfile::tempdir().unwrap();
         let settings = Settings::new(directory.path(), "/fixtures/shared");
-        let cache = Cache::new(directory.path());
+        let cache = Cache::new(&settings);
         std::fs::write(&cache.0, r#"{"version":1,"containers":[{"id":"aaaaaaaaaaaa","name":"account","image":"account:dev","state":"exited","status":"","project":"vmux-cloud","service":"account","dependencies":[],"ports":[]}]}"#).unwrap();
         let mut app = App::new();
         app.add_plugins(InventoryPlugin);
@@ -646,7 +646,7 @@ mod tests {
     #[test]
     fn cache_save_ignores_only_relative_uptime_and_refuses_unknown_versions() {
         let directory = tempfile::tempdir().unwrap();
-        let cache = Cache::new(directory.path());
+        let cache = Cache::new(&Settings::new(directory.path(), "/fixtures/shared"));
         let mut container = DockerContainer {
             id: "aaaaaaaaaaaa".into(),
             name: "account".into(),

@@ -121,7 +121,7 @@ fn spawn(mut commands: Commands) {
         .join("containers");
     let settings = match Settings::load(&directory.join("settings.json")) {
         Ok(settings) => settings,
-        Err(_) => Settings::new(directory, DefaultShare::path()),
+        Err(_) => Settings::new(directory, EngineView::default_share()),
     };
     let status = Status {
         running: false,
@@ -144,10 +144,8 @@ fn spawn(mut commands: Commands) {
     ));
 }
 
-struct DefaultShare;
-
-impl DefaultShare {
-    fn path() -> PathBuf {
+impl EngineView {
+    fn default_share() -> PathBuf {
         match std::env::var_os("HOME") {
             Some(path) => PathBuf::from(path),
             None => vmux_profile::ProfilePaths::current().projects(),
