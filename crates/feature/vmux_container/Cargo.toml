@@ -17,6 +17,8 @@ vmux_api = { path = "../../util/vmux_api" }
 vmux_page = { path = "../../util/vmux_page" }
 rkyv = { workspace = true }
 serde = { workspace = true }
+serde_json = { workspace = true }
+tempfile = "3"
 url = { workspace = true }
 percent-encoding = "2"
 

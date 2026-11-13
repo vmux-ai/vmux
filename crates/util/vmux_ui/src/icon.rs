@@ -352,6 +352,14 @@ mod wasm {
     #[component]
     pub fn BuiltinIconView(icon: BuiltinIcon, class: String) -> Element {
         match icon {
+            BuiltinIcon::Containers => rsx! { Icon { class,
+                path { d: "M12 1 17 4v6l-5 3-5-3V4l5-3Z" }
+                path { d: "m7 4 5 3 5-3M12 7v6" }
+                path { d: "M6 11 11 14v6l-5 3-5-3v-6l5-3Z" }
+                path { d: "m1 14 5 3 5-3M6 17v6" }
+                path { d: "M18 11 23 14v6l-5 3-5-3v-6l5-3Z" }
+                path { d: "m13 14 5 3 5-3M18 17v6" }
+            } },
             BuiltinIcon::Computer => rsx! { Icon { class,
                 rect { x: "2", y: "3", width: "20", height: "14", rx: "2" }
                 path { d: "M8 21h8m-7-4v4m6-4v4" }

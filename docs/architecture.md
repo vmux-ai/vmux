@@ -1605,10 +1605,10 @@ selection owns bounded log tasks and retains displayed output during refresh.
 The default VM bookmark opens `vmux://vm/` beside Simulator.
 VM (`vmux://vm/`), Docker (`vmux://vm/docker`) and Containers
 (`vmux://vm/docker/containers`) have distinct titles and icons: a monitor containing a
-container, the Docker logo and a container cube.
+container, the Docker logo and three stacked cubes. Individual containers retain one cube.
 They share one document and DOM group, so changing level preserves the workspace.
-VM shows its state, CPU allocation, memory and shared directory, including during startup
-and shutdown. Docker shows its state, socket and container count. Only the Containers
+Once ready, VM shows its state, CPU allocation, memory and shared directory.
+Docker shows its state, socket and container count. Only the Containers
 level shows an empty selection; choosing an entry opens its own Info/Logs route.
 `vmux://docker/containers`, `vmux://docker/` and the legacy `vmux://containers/`
 canonicalize to Containers. Existing default container pins move to the VM entry once,
@@ -1626,12 +1626,24 @@ and collapsed; selection and Info/Logs choices update the page address. Sidebar/
 use the shared 120 ms motion timing, content changes fade in over 100 ms, and service
 startup/shutdown use the shared loading indicator. Reduced-motion preferences disable
 layout and content transitions; layout and selection never wait for them. The side sheet
-and details keep the same layout while the VM is stopped, starting or stopping. VM controls
-remain in the side sheet; progress changes their state without replacing the page.
-Within the host process, inventory retains the last successful container metadata while
-the VM is down. Configuration remains selectable and stopped VM projections mark its
-containers stopped. A new host obtains inventory when Docker starts; live logs require
-the daemon. One root UI-state subscription
+keeps its hierarchy while the VM is stopped, starting or stopping. Its selected Containers
+row includes the expand control inside the same highlight. The main area shows a VM
+illustration with progress or one Start button until Docker is ready. VM stop and settings
+remain on the VM row, without duplicating the central Start button.
+The host marks its engine `Inspected` after its first valid status read. A selected, ready
+VM-family page with `KeyboardOwner` triggers startup once and marks the engine `Opened`;
+running, ready or busy engines are marked without an extra request. Unselected pages do not start
+the VM. `Opened` lasts for the host process, so manual Stop is respected across page
+navigation, while a new host can start automatically again. Failed startup leaves an
+explicit Start retry rather than looping.
+Inventory retains the last successful container metadata while the VM is down, including
+after host restart. `InventoryPlugin` first restores a versioned per-VM `inventory.json`,
+then reconciles daemon snapshots. Only accepted daemon snapshots enqueue `PendingSave`;
+one `SaveTask` writes at a time and pending snapshots coalesce to the latest. The filesystem
+adapter atomically replaces the cache and excludes relative uptime text to avoid writes
+from polling alone. Missing or invalid caches fall back to daemon discovery, and failed
+writes retain live entities. Configuration remains selectable and stopped VM projections
+mark its containers stopped; live logs require the daemon. One root UI-state subscription
 survives these transitions. A thin divider separates the side sheet and details.
 Details remain unselected until the user chooses an entry. The address reads
 `VM → Docker → Containers → group → selected entry → Info/Logs`. VM shutdown and settings

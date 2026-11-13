@@ -8,7 +8,7 @@ use bevy_cef::prelude::{UiEventPlugin, UiInput};
 use vmux_ecs::manifest::FeaturePlugin;
 use vmux_ecs::page::{HostedPage, PageReady};
 use vmux_ecs::wake::Wake;
-use vmux_ecs::{PageMetadata, Revision, UiStatePlugin, UiStateWrite};
+use vmux_ecs::{KeyboardOwner, PageMetadata, Revision, UiStatePlugin, UiStateWrite};
 use vmux_vm::{EngineClient, Phase, Settings, Status};
 
 use crate::ContainerPlugin;
@@ -66,7 +66,10 @@ impl Plugin for ContainerPlugin {
             .add_observer(logs)
             .add_observer(finish)
             .add_systems(Startup, spawn)
-            .add_systems(Update, inspect.in_set(ContainerSet::Inspect))
+            .add_systems(
+                Update,
+                (inspect, autostart).chain().in_set(ContainerSet::Inspect),
+            )
             .add_systems(Update, project.in_set(ContainerSet::Project));
     }
 }
@@ -76,6 +79,12 @@ pub(crate) struct EngineView;
 
 #[derive(Component)]
 pub(crate) struct PageView;
+
+#[derive(Component)]
+struct Inspected;
+
+#[derive(Component)]
+struct Opened;
 
 #[derive(Component)]
 pub(crate) struct Observed(pub(crate) Status);
@@ -119,7 +128,7 @@ fn spawn(mut commands: Commands) {
         docker_ready: false,
         socket: settings.socket(),
         log: settings.log(),
-        phase: Phase::Stopped,
+        phase: Phase::Created,
         failure: None,
     };
     commands.spawn((
@@ -369,6 +378,7 @@ fn inspect(
             };
             if *settings == task.settings && *revision == task.revision {
                 observed.0 = status;
+                commands.entity(entity).insert(Inspected);
             }
             commands.entity(entity).remove::<InspectTask>();
             next.0 = Instant::now() + Duration::from_secs(1);
@@ -388,6 +398,44 @@ fn inspect(
                 drop(wake);
                 status
             }),
+        });
+    }
+}
+
+type UnopenedEngines<'w, 's> = Query<
+    'w,
+    's,
+    (
+        Entity,
+        &'static Settings,
+        &'static Observed,
+        Option<&'static Busy>,
+    ),
+    (With<EngineView>, With<Inspected>, Without<Opened>),
+>;
+
+fn autostart(
+    pages: Query<Entity, (With<PageView>, With<KeyboardOwner>)>,
+    engines: UnopenedEngines,
+    mut commands: Commands,
+) {
+    if !cfg!(all(target_os = "macos", target_arch = "aarch64")) {
+        return;
+    }
+    let Some(page) = pages.iter().next() else {
+        return;
+    };
+    for (entity, settings, observed, busy) in &engines {
+        commands.entity(entity).insert(Opened);
+        if observed.0.running || observed.0.docker_ready || busy.is_some() {
+            continue;
+        }
+        commands.trigger(Request {
+            entity,
+            reply: entity,
+            command: Command::Start,
+            settings: settings.clone(),
+            requester: page,
         });
     }
 }

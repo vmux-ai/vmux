@@ -110,7 +110,9 @@ pub fn Page() -> Element {
     } else {
         Level::Containers
     };
-    let transition = if level == Level::Vm {
+    let transition = if !snapshot.available() {
+        format!("service:{}", snapshot.vm_state())
+    } else if level == Level::Vm {
         "vm".into()
     } else if level == Level::Docker {
         "docker".into()
@@ -147,7 +149,9 @@ pub fn Page() -> Element {
                 }
                 div { class: "flex min-h-0 flex-1 flex-col overflow-hidden",
                     ContentTransition { key: "{transition}", class: "flex min-h-0 flex-1 flex-col overflow-hidden",
-                        if level == Level::Vm {
+                        if !snapshot.available() {
+                            Service {}
+                        } else if level == Level::Vm {
                             Overview { level }
                         } else if level == Level::Docker {
                             Overview { level }
@@ -171,6 +175,39 @@ pub fn Page() -> Element {
 }
 
 #[component]
+fn Service() -> Element {
+    let controls = Controls::current();
+    let snapshot = controls.snapshot();
+    let pending = snapshot.starting
+        || snapshot.stopping
+        || snapshot.phase == "created"
+        || snapshot.phase == "stopping"
+        || (snapshot.running && !snapshot.available());
+    rsx! {
+        div { class: "flex min-h-0 flex-1 items-center justify-center", aria_busy: pending,
+            div { class: "flex flex-col items-center gap-6",
+                VmIllustration {}
+                if pending {
+                    div { class: "flex h-8 items-center gap-2 text-xs text-muted-foreground",
+                        LoadingIcon { class: "size-4" }
+                        span { {translate(if snapshot.stopping || snapshot.phase == "stopping" { "container-service-stopping" } else if snapshot.phase == "created" && !snapshot.starting { "container-phase-created" } else { "container-docker-starting" })} }
+                    }
+                } else if !snapshot.supported && !snapshot.data_directory.is_empty() {
+                    p { class: "max-w-sm px-4 text-center text-xs text-muted-foreground", {translate("container-unsupported")} }
+                } else {
+                    Button {
+                        size: ButtonSize::Sm, disabled: snapshot.busy || snapshot.data_directory.is_empty(),
+                        title: translate("container-start"), aria_label: translate("container-start"),
+                        onclick: move |_| controls.request(Intent::Start),
+                        {translate("container-start-vm")}
+                    }
+                }
+            }
+        }
+    }
+}
+
+#[component]
 fn ContainerSheet(
     selected: String,
     level: Level,
@@ -184,7 +221,7 @@ fn ContainerSheet(
         div { class: "flex h-full min-h-0 flex-col overflow-hidden bg-background font-sans text-xs text-foreground",
             div { class: "flex h-8 shrink-0 items-center gap-1 px-1",
                 LevelLink { value: Level::Vm, selected: level == Level::Vm, onselect: onlevel }
-                EngineToolbar { compact: true, start: true, icon_only: true, onsettings }
+                EngineToolbar { compact: true, start: snapshot.available(), icon_only: true, onsettings }
             }
             div { class: "min-h-0 flex-1 pl-3",
                 div { class: "flex h-8 items-center px-1",
@@ -192,8 +229,10 @@ fn ContainerSheet(
                 }
                 div { class: "min-h-0 pl-3",
                     div { class: "group flex min-h-8 items-center px-1",
-                        LevelLink { value: Level::Containers, selected: level == Level::Containers && selected.is_empty(), onselect: onlevel }
-                        SheetHeaderChevron { expanded: expanded(), label: Level::Containers.label(), subtle: true, onclick: move |_| expanded.set(!expanded()) }
+                        LevelLink {
+                            value: Level::Containers, selected: level == Level::Containers && selected.is_empty(), onselect: onlevel,
+                            trailing: rsx! { SheetHeaderChevron { expanded: expanded(), label: translate(if expanded() { "common-collapse" } else { "common-expand" }), subtle: true, onclick: move |_| expanded.set(!expanded()) } },
+                        }
                     }
                     Collapsible { expanded: expanded(),
                         div { class: "space-y-2 pb-3 pl-2", aria_hidden: !expanded(), inert: (!expanded()).then_some(""),
@@ -222,14 +261,22 @@ fn ContainerSheet(
 }
 
 #[component]
-fn LevelLink(value: Level, selected: bool, onselect: EventHandler<Level>) -> Element {
+fn LevelLink(
+    value: Level,
+    selected: bool,
+    onselect: EventHandler<Level>,
+    #[props(default = rsx! {})] trailing: Element,
+) -> Element {
     let accent = TreeRowAccent::resolve(selected, false).classes();
     rsx! {
-        button {
-            r#type: "button", class: "flex h-7 min-w-0 flex-1 items-center gap-2 rounded-md px-2 text-left text-xs {accent}",
-            aria_label: value.label(), aria_selected: selected, onclick: move |_| onselect.call(value),
-            BuiltinIconView { icon: value.icon(), class: "size-3.5 shrink-0 text-muted-foreground" }
-            span { class: "truncate", {value.label()} }
+        div { class: "group flex h-7 min-w-0 flex-1 items-center rounded-md pr-1 {accent}",
+            button {
+                r#type: "button", class: "flex h-full min-w-0 flex-1 items-center gap-2 px-2 text-left text-xs",
+                aria_label: value.label(), aria_selected: selected, onclick: move |_| onselect.call(value),
+                BuiltinIconView { icon: value.icon(), class: "size-3.5 shrink-0 text-muted-foreground" }
+                span { class: "truncate", {value.label()} }
+            }
+            {trailing}
         }
     }
 }
@@ -281,7 +328,7 @@ fn Header(
         address.fixed.push(AddressCrumb {
             entry: AddressOption {
                 label_key: "container-title".into(),
-                icon: Some(BuiltinIcon::Container),
+                icon: Some(BuiltinIcon::Containers),
                 intent: Some(AddressIntent::Navigate {
                     url: "vmux://vm/docker/containers".into(),
                 }),
@@ -437,7 +484,7 @@ fn EngineToolbar(
     let snapshot = controls.snapshot();
     rsx! {
         div { class: if compact { "flex shrink-0 items-center gap-2" } else { "flex h-8 items-center justify-end gap-2 px-3" },
-            if start && matches!(snapshot.vm_state(), "starting" | "stopping") {
+            if matches!(snapshot.vm_state(), "starting" | "stopping") {
                 StateLabel { state: snapshot.vm_state().to_string() }
             } else if snapshot.running {
                 Button {
@@ -926,7 +973,7 @@ impl Level {
         match self {
             Self::Vm => BuiltinIcon::Computer,
             Self::Docker => BuiltinIcon::Docker,
-            Self::Containers => BuiltinIcon::Container,
+            Self::Containers => BuiltinIcon::Containers,
         }
     }
 
@@ -1070,7 +1117,7 @@ impl ContainerUiState {
         if self.stopping || self.phase == "stopping" {
             return "stopping";
         }
-        if self.starting {
+        if self.starting || self.phase == "created" {
             return "starting";
         }
         if self.phase == "failed" {
@@ -1089,6 +1136,21 @@ impl ContainerUiState {
         (self.ready || (self.running && self.phase == "ready"))
             && !self.stopping
             && self.phase != "stopping"
+    }
+}
+
+#[component]
+fn VmIllustration() -> Element {
+    rsx! {
+        svg { class: "h-28 w-40 text-muted-foreground/50", view_box: "0 0 160 112", fill: "none",
+            role: "img", "aria-label": translate("container-description"),
+            rect { x: "15", y: "8", width: "130", height: "82", rx: "9", fill: "currentColor", fill_opacity: "0.035", stroke: "currentColor", stroke_width: "2" }
+            path { d: "M62 90v14m36-14v14m-48 0h60", stroke: "currentColor", stroke_width: "2", stroke_linecap: "round" }
+            g { class: "text-primary/80", stroke: "currentColor", stroke_width: "1.7", stroke_linejoin: "round",
+                path { d: "m80 24 24 14v28L80 80 56 66V38Z", fill: "currentColor", fill_opacity: "0.07" }
+                path { d: "m56 38 24 14 24-14M80 52v28M68 31l24 14" }
+            }
+        }
     }
 }
 
@@ -1474,7 +1536,7 @@ mod tests {
     }
 
     #[test]
-    fn vm_resources_remain_visible_during_start_and_history_changes_the_overview() {
+    fn start_surface_keeps_the_side_sheet_and_ready_history_changes_the_overview() {
         let mut preview = Preview::new();
         let mut snapshot = ContainerUiState {
             supported: true,
@@ -1495,15 +1557,24 @@ mod tests {
         };
         preview.publish(snapshot.clone());
         let html = preview.address("vmux://vm/");
-        assert!(html.contains(&translate("container-cpus")));
-        assert!(html.contains("/fixtures/shared"));
+        assert!(html.contains(&format!(
+            "aria-label=\"{}\"",
+            translate("schema-side-sheet")
+        )));
+        assert!(html.contains(&format!(
+            "aria-label=\"{}\"",
+            translate("container-description")
+        )));
         assert!(!html.contains(&translate("container-no-selection")));
         assert!(!html.contains("<input"));
         preview.click(&translate("container-start"));
         let html = preview.render();
         assert_eq!(preview.host.starts.get(), 1);
-        assert!(html.contains("/fixtures/shared"));
-        assert!(html.contains(&translate("container-state-starting")));
+        assert!(html.contains(&format!(
+            "aria-label=\"{}\"",
+            translate("schema-side-sheet")
+        )));
+        assert!(html.contains(&translate("container-docker-starting")));
         snapshot.running = true;
         snapshot.ready = true;
         snapshot.phase = "ready".into();
@@ -1624,11 +1695,14 @@ mod tests {
         )));
         let start = translate("container-start");
         assert_eq!(html.matches(&format!("aria-label=\"{start}\"")).count(), 1);
-        assert!(html.contains(&translate("container-cpus")));
+        assert!(html.contains(&format!(
+            "aria-label=\"{}\"",
+            translate("container-description")
+        )));
         preview.click(&start);
         assert_eq!(preview.host.starts.get(), 1);
         let html = preview.render();
-        assert!(html.contains(&translate("container-state-starting")));
+        assert!(html.contains(&translate("container-docker-starting")));
         assert!(!html.contains(&format!("aria-label=\"{start}\"")));
         let mut stale = ContainerUiState {
             supported: true,
@@ -1636,14 +1710,14 @@ mod tests {
             ..Default::default()
         };
         let html = preview.publish(stale.clone());
-        assert!(html.contains(&translate("container-state-starting")));
+        assert!(html.contains(&translate("container-docker-starting")));
         stale.control_revision = 1;
         stale.control_error = "fixture start refused".into();
         stale.error = stale.control_error.clone();
         let html = preview.publish(stale);
         assert!(html.contains("fixture start refused"));
         assert!(html.contains(&format!("aria-label=\"{start}\"")));
-        assert!(!html.contains(&translate("container-state-starting")));
+        assert!(!html.contains(&translate("container-docker-starting")));
     }
 
     #[test]
@@ -1852,7 +1926,7 @@ mod tests {
     }
 
     #[test]
-    fn engine_transitions_keep_the_side_sheet_and_vm_information() {
+    fn engine_transitions_keep_the_side_sheet_while_the_start_surface_changes() {
         let mut preview = Preview::new();
         preview.address("vmux://vm/");
         let mut state = ContainerUiState {
@@ -1877,7 +1951,14 @@ mod tests {
             state.stopping = stopping;
             let html = preview.publish(state.clone());
             assert!(html.contains(&format!("aria-label=\"{toggle}\"")));
-            assert!(html.contains("/fixtures/shared"));
+            if ready && !stopping {
+                assert!(html.contains("/fixtures/shared"));
+            } else {
+                assert!(html.contains(&format!(
+                    "aria-label=\"{}\"",
+                    translate("container-description")
+                )));
+            }
             assert!(!html.contains(&translate("container-no-selection")));
         }
         preview.click(&toggle);

@@ -1,5 +1,7 @@
 use std::collections::HashMap;
 use std::io;
+use std::io::Write;
+use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
 use bevy::ecs::system::SystemParam;
@@ -29,7 +31,7 @@ impl Plugin for InventoryPlugin {
             .add_observer(select)
             .add_systems(
                 Update,
-                (begin, poll, begin_logs, poll_logs)
+                (begin, poll, begin_save, poll_save, begin_logs, poll_logs)
                     .chain()
                     .in_set(ContainerSet::Inventory),
             );
@@ -49,7 +51,69 @@ struct NextPoll(Instant);
 #[derive(Component)]
 struct SnapshotTask {
     revision: Revision,
+    origin: Origin,
     task: Task<io::Result<Vec<DockerContainer>>>,
+}
+
+#[derive(Clone, Copy, PartialEq)]
+enum Origin {
+    Cache,
+    Daemon,
+}
+
+#[derive(Component)]
+struct PendingSave(Vec<DockerContainer>);
+
+#[derive(Component)]
+struct SaveTask(Task<io::Result<()>>);
+
+struct Cache(PathBuf);
+
+#[derive(serde::Serialize, serde::Deserialize)]
+struct SavedInventory {
+    version: u32,
+    containers: Vec<DockerContainer>,
+}
+
+impl Cache {
+    fn new(directory: &Path) -> Self {
+        Self(directory.join("inventory.json"))
+    }
+
+    fn load(&self) -> io::Result<Vec<DockerContainer>> {
+        let bytes = std::fs::read(&self.0)?;
+        let saved: SavedInventory = serde_json::from_slice(&bytes).map_err(io::Error::other)?;
+        if saved.version != 1 {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                "unsupported inventory cache version",
+            ));
+        }
+        Ok(saved.containers)
+    }
+
+    fn save(&self, mut containers: Vec<DockerContainer>) -> io::Result<()> {
+        for container in &mut containers {
+            container.status.clear();
+        }
+        let saved = SavedInventory {
+            version: 1,
+            containers,
+        };
+        let bytes = serde_json::to_vec(&saved).map_err(io::Error::other)?;
+        if std::fs::read(&self.0).is_ok_and(|current| current == bytes) {
+            return Ok(());
+        }
+        let directory = self
+            .0
+            .parent()
+            .ok_or_else(|| io::Error::other("missing inventory cache directory"))?;
+        let mut file = tempfile::NamedTempFile::new_in(directory)?;
+        file.write_all(&bytes)?;
+        file.as_file().sync_data()?;
+        file.persist(&self.0).map_err(|error| error.error)?;
+        Ok(())
+    }
 }
 
 #[derive(Component)]
@@ -181,11 +245,26 @@ fn begin(
 ) {
     for (entity, settings, observed, revision, inventory, next, task) in &mut engines {
         let (Some(mut inventory), Some(next)) = (inventory, next) else {
-            commands
-                .entity(entity)
-                .insert((Inventory::default(), NextPoll(Instant::now())));
+            let cache = Cache::new(&settings.directory);
+            let wake = Wake::beside(proxy.as_deref());
+            commands.entity(entity).insert((
+                Inventory::default(),
+                NextPoll(Instant::now()),
+                SnapshotTask {
+                    revision: *revision,
+                    origin: Origin::Cache,
+                    task: IoTaskPool::get().spawn(async move {
+                        let result = cache.load();
+                        drop(wake);
+                        result
+                    }),
+                },
+            ));
             continue;
         };
+        if task.is_some_and(|task| task.origin == Origin::Cache) {
+            continue;
+        }
         if !observed.0.docker_ready {
             if observed.0.running && observed.0.phase == vmux_vm::Phase::Ready {
                 continue;
@@ -201,6 +280,7 @@ fn begin(
         let wake = Wake::beside(proxy.as_deref());
         commands.entity(entity).insert(SnapshotTask {
             revision: *revision,
+            origin: Origin::Daemon,
             task: IoTaskPool::get().spawn(async move {
                 let result = DockerClient::new(&socket).list();
                 drop(wake);
@@ -229,21 +309,36 @@ fn poll(
             continue;
         };
         commands.entity(entity).remove::<SnapshotTask>();
-        if task.revision != *revision {
+        if task.origin == Origin::Daemon && task.revision != *revision {
             next.0 = Instant::now();
             continue;
         }
-        next.0 = Instant::now() + Duration::from_secs(2);
+        next.0 = if task.origin == Origin::Cache {
+            Instant::now()
+        } else {
+            Instant::now() + Duration::from_secs(2)
+        };
         let containers = match result {
             Ok(containers) => containers,
             Err(error) => {
-                inventory.error = error.to_string();
+                if task.origin == Origin::Cache {
+                    if error.kind() != io::ErrorKind::NotFound {
+                        warn!(%error, "could not restore container inventory");
+                    }
+                } else {
+                    inventory.error = error.to_string();
+                }
                 continue;
             }
         };
         inventory.ready = true;
         inventory.error.clear();
         inventory.revision = task.revision;
+        if task.origin == Origin::Daemon {
+            commands
+                .entity(entity)
+                .insert(PendingSave(containers.clone()));
+        }
         let mut existing = HashMap::new();
         for (entry, id, parent) in &entries {
             if parent.parent() == entity {
@@ -275,6 +370,48 @@ fn poll(
         }
         for entry in existing.into_values() {
             commands.entity(entry).despawn();
+        }
+    }
+}
+
+type PendingSaves<'w, 's> = Query<
+    'w,
+    's,
+    (Entity, &'static Settings, &'static PendingSave),
+    (With<EngineView>, Without<SaveTask>),
+>;
+
+fn begin_save(
+    engines: PendingSaves,
+    proxy: Option<Res<EventLoopProxyWrapper>>,
+    mut commands: Commands,
+) {
+    for (entity, settings, pending) in &engines {
+        let cache = Cache::new(&settings.directory);
+        let containers = pending.0.clone();
+        let wake = Wake::beside(proxy.as_deref());
+        commands
+            .entity(entity)
+            .remove::<PendingSave>()
+            .insert(SaveTask(IoTaskPool::get().spawn(async move {
+                let result = cache.save(containers);
+                drop(wake);
+                result
+            })));
+    }
+}
+
+fn poll_save(
+    mut engines: Query<(Entity, &mut SaveTask), With<EngineView>>,
+    mut commands: Commands,
+) {
+    for (entity, mut task) in &mut engines {
+        let Some(result) = future::block_on(future::poll_once(&mut task.0)) else {
+            continue;
+        };
+        commands.entity(entity).remove::<SaveTask>();
+        if let Err(error) = result {
+            warn!(%error, "could not cache container inventory");
         }
     }
 }
@@ -429,6 +566,114 @@ mod tests {
     use vmux_vm::{Phase, Status};
 
     #[test]
+    fn offline_host_restores_saved_containers_and_fresh_inventory_replaces_the_cache() {
+        IoTaskPool::get_or_init(|| bevy::tasks::TaskPoolBuilder::new().num_threads(2).build());
+        let directory = tempfile::tempdir().unwrap();
+        let settings = Settings::new(directory.path(), "/fixtures/shared");
+        let cache = Cache::new(directory.path());
+        std::fs::write(&cache.0, r#"{"version":1,"containers":[{"id":"aaaaaaaaaaaa","name":"account","image":"account:dev","state":"exited","status":"","project":"vmux-cloud","service":"account","dependencies":[],"ports":[]}]}"#).unwrap();
+        let mut app = App::new();
+        app.add_plugins(InventoryPlugin);
+        let engine = app
+            .world_mut()
+            .spawn((
+                EngineView,
+                settings.clone(),
+                Revision(0),
+                Observed(Status {
+                    running: false,
+                    docker_ready: false,
+                    socket: settings.socket(),
+                    log: settings.log(),
+                    phase: Phase::Stopped,
+                    failure: None,
+                }),
+            ))
+            .id();
+        let deadline = Instant::now() + Duration::from_secs(3);
+        while !app
+            .world()
+            .get::<Inventory>(engine)
+            .is_some_and(|inventory| inventory.ready)
+        {
+            assert!(Instant::now() < deadline);
+            app.update();
+            std::thread::sleep(Duration::from_millis(1));
+        }
+        let rows = app
+            .world_mut()
+            .run_system_once(move |catalog: Catalog| catalog.snapshot(engine))
+            .unwrap();
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].name, "account");
+        assert_eq!(rows[0].project, "vmux-cloud");
+        assert!(app.world().get::<SaveTask>(engine).is_none());
+        app.world_mut().entity_mut(engine).insert((
+            Revision(1),
+            Observed(Status {
+                running: true,
+                docker_ready: false,
+                socket: settings.socket(),
+                log: settings.log(),
+                phase: Phase::Ready,
+                failure: None,
+            }),
+            SnapshotTask {
+                revision: Revision(1),
+                origin: Origin::Daemon,
+                task: IoTaskPool::get().spawn(async { Ok(Vec::new()) }),
+            },
+        ));
+        loop {
+            assert!(Instant::now() < deadline);
+            app.update();
+            let world = app.world();
+            if world.get::<SnapshotTask>(engine).is_none()
+                && world.get::<SaveTask>(engine).is_none()
+                && world.get::<PendingSave>(engine).is_none()
+            {
+                break;
+            }
+            std::thread::sleep(Duration::from_millis(1));
+        }
+        assert!(cache.load().unwrap().is_empty());
+        assert_eq!(
+            app.world().get::<Inventory>(engine).unwrap().revision,
+            Revision(1)
+        );
+    }
+
+    #[test]
+    fn cache_save_ignores_only_relative_uptime_and_refuses_unknown_versions() {
+        let directory = tempfile::tempdir().unwrap();
+        let cache = Cache::new(directory.path());
+        let mut container = DockerContainer {
+            id: "aaaaaaaaaaaa".into(),
+            name: "account".into(),
+            image: "account:dev".into(),
+            state: "running".into(),
+            status: "Up 1 second".into(),
+            project: "vmux-cloud".into(),
+            service: "account".into(),
+            dependencies: Vec::new(),
+            ports: Vec::new(),
+        };
+        cache.save(vec![container.clone()]).unwrap();
+        let before = std::fs::metadata(&cache.0).unwrap().modified().unwrap();
+        container.status = "Up 2 hours".into();
+        cache.save(vec![container.clone()]).unwrap();
+        assert_eq!(
+            std::fs::metadata(&cache.0).unwrap().modified().unwrap(),
+            before
+        );
+        container.image = "account:new".into();
+        cache.save(vec![container]).unwrap();
+        assert_eq!(cache.load().unwrap()[0].image, "account:new");
+        std::fs::write(&cache.0, r#"{"version":99,"containers":[]}"#).unwrap();
+        assert_eq!(cache.load().unwrap_err().kind(), io::ErrorKind::InvalidData);
+    }
+
+    #[test]
     fn stopping_an_engine_retains_known_container_configuration() {
         let mut app = App::new();
         app.add_plugins(InventoryPlugin);
@@ -512,6 +757,7 @@ mod tests {
                 NextPoll(Instant::now()),
                 SnapshotTask {
                     revision: Revision(0),
+                    origin: Origin::Daemon,
                     task: IoTaskPool::get().spawn(async { Ok(Vec::new()) }),
                 },
             ))
@@ -548,6 +794,7 @@ mod tests {
         );
         app.world_mut().entity_mut(engine).insert(SnapshotTask {
             revision: Revision(1),
+            origin: Origin::Daemon,
             task: IoTaskPool::get().spawn(async { Ok(Vec::new()) }),
         });
         while app.world().get::<SnapshotTask>(engine).is_some() {

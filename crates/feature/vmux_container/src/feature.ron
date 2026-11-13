@@ -32,7 +32,7 @@
         owns_subtree: true,
         title: "Containers",
         title_message_id: "container-title",
-        icon: "Container",
+        icon: "Containers",
         keywords: ["containers", "compose"],
         command_bar: true,
         permissions: [

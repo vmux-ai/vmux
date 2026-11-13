@@ -201,7 +201,10 @@ mod profile_tests {
             }
             catalog.sort();
             if tools {
-                assert_eq!(catalog, ["mcp", "remote.pair", "service", "tool"]);
+                assert_eq!(
+                    catalog,
+                    ["container", "mcp", "remote.pair", "service", "tool"]
+                );
             } else {
                 assert!(catalog.is_empty());
             }
