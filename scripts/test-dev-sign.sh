@@ -6,6 +6,7 @@ tmp="$(mktemp -d)"
 trap 'rm -rf "$tmp"' EXIT
 mkdir -p "$tmp/client/scripts" "$tmp/client/packaging/macos" "$tmp/bin" "$tmp/output"
 cp "$root/scripts/sign-dev-mac.sh" "$tmp/client/scripts/"
+cp "$root/scripts/product-host.sh" "$tmp/client/scripts/"
 cp "$root/packaging/macos/VmuxDev.entitlements" "$tmp/client/packaging/macos/"
 printf 'compiled desktop\n' > "$tmp/output/desktop"
 printf 'linker-signed helper\n' > "$tmp/output/helper"
@@ -23,6 +24,14 @@ if [[ " $* " == *' --force '* ]]; then
 fi
 SIGN
 chmod +x "$tmp/bin/"* "$tmp/client/scripts/sign-dev-mac.sh"
+export TEST_PRODUCT_BUILDER="$("$root/scripts/vmux-builder" --print-bin)"
+export TEST_PRODUCT_ROOT="$root"
+export VMUX_HOST_DEV_ENTITLEMENTS="$tmp/client/packaging/macos/VmuxDev.entitlements"
+cat > "$tmp/client/scripts/vmux-builder" <<'PRODUCT'
+#!/usr/bin/env bash
+exec "$TEST_PRODUCT_BUILDER" --root "$TEST_PRODUCT_ROOT" host-config
+PRODUCT
+chmod +x "$tmp/client/scripts/vmux-builder"
 export PATH="$tmp/bin:$PATH"
 export APP_BINARY="$tmp/output/desktop"
 export HELPER_BINARY="$tmp/output/helper"

@@ -37,6 +37,7 @@ fixture="$tmp/checkout with spaces"
 target="$fixture/output with spaces"
 mkdir -p "$fixture/scripts" "$fixture/packaging/macos" "$target/debug/deps" "$tmp/bin"
 cp "$root/scripts/bundle-dev.sh" "$root/scripts/cargo-target-paths.sh" "$root/scripts/build-title.sh" "$fixture/scripts/"
+cp "$root/scripts/product-host.sh" "$fixture/scripts/"
 cp "$root/packaging/macos/Info.plist" "$root/packaging/macos/usage-descriptions.plist" \
     "$root/packaging/macos/VmuxDev.entitlements" "$root/packaging/macos/Vmux.icns" "$fixture/packaging/macos/"
 printf '[workspace.package]\nversion = "0.1.2"\n' > "$fixture/Cargo.toml"
@@ -74,6 +75,15 @@ cat > "$tmp/bin/install_name_tool" <<'INSTALL'
 printf '%s\n' "$*" >> "$TEST_LINK_LOG"
 INSTALL
 chmod +x "$tmp/bin/"* "$fixture/scripts/"*.sh
+export TEST_PRODUCT_BUILDER="$("$root/scripts/vmux-builder" --print-bin)"
+export TEST_PRODUCT_ROOT="$root"
+export VMUX_HOST_DEV_ENTITLEMENTS="$fixture/packaging/macos/VmuxDev.entitlements"
+export VMUX_HOST_USAGE_DESCRIPTIONS="$fixture/packaging/macos/usage-descriptions.plist"
+cat > "$fixture/scripts/vmux-builder" <<'PRODUCT'
+#!/usr/bin/env bash
+exec "$TEST_PRODUCT_BUILDER" --root "$TEST_PRODUCT_ROOT" host-config
+PRODUCT
+chmod +x "$fixture/scripts/vmux-builder"
 export PATH="$tmp/bin:$PATH"
 export CARGO_TARGET_DIR="$target"
 export APPLE_SIGNING_IDENTITY='fixture identity'
