@@ -358,7 +358,7 @@ fn from_pointer(
     active_tab: ActiveTabParam,
     panes: crate::Hierarchy,
     splits: Query<(Entity, &PaneSplit, &Children), With<Pane>>,
-    active_drags: Query<(Entity, &PaneDrag, &PaneSplit)>,
+    active_drags: Query<(Entity, &PaneDrag)>,
     layouts: Query<&ComputedNode>,
     mut nodes: Query<&mut Node, Without<vmux_ecs::WindowOverlay>>,
     mut pane_sizes: Query<&mut PaneSize>,
@@ -381,7 +381,7 @@ fn from_pointer(
             feedback.release(entity);
         }
     }
-    for (split, drag, _) in &active_drags {
+    for (split, drag) in &active_drags {
         let current = !blocked
             && tab.is_some_and(|tab| panes.contains(tab, split))
             && hierarchy.get(split) == current_window
@@ -404,7 +404,7 @@ fn from_pointer(
         return;
     };
     if !window.focused || blocked {
-        for (split, _, _) in &active_drags {
+        for (split, _) in &active_drags {
             commands.entity(split).remove::<PaneDrag>();
         }
         return;
@@ -418,13 +418,13 @@ fn from_pointer(
         _ => cursor,
     };
     if pressed {
-        for (split_entity, drag, split) in &active_drags {
+        for (split_entity, drag) in &active_drags {
             if hierarchy.get(split_entity) != Some(window_entity)
                 || !panes.contains(tab, split_entity)
             {
                 continue;
             }
-            let Ok((_, _, children)) = splits.get(split_entity) else {
+            let Ok((_, split, children)) = splits.get(split_entity) else {
                 continue;
             };
             if !drag.matches(
@@ -715,7 +715,7 @@ mod tests {
 
     #[test]
     fn changed_pane_order_or_axis_cancels_capture_without_changing_sizes() {
-        for change in 0..4 {
+        for change in 0..5 {
             let mut fixture = ResizeFixture::native(PaneSplitDirection::Row);
             let start = Vec2::new(500.0, 250.0);
             fixture.pointer(false, Some(start));
@@ -754,6 +754,13 @@ mod tests {
                         .world_mut()
                         .entity_mut(fixture.split)
                         .insert_children(1, &[auxiliary]);
+                }
+                4 => {
+                    fixture
+                        .app
+                        .world_mut()
+                        .entity_mut(fixture.split)
+                        .remove::<PaneSplit>();
                 }
                 _ => unreachable!(),
             }
