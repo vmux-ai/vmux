@@ -4,6 +4,7 @@ use std::process::Command;
 
 use quote::ToTokens;
 use serde::{Deserialize, Serialize};
+use syn::ext::IdentExt;
 use syn::parse::Parser;
 use syn::visit::{self, Visit};
 use syn::{Attribute, Item, Type};
@@ -178,6 +179,9 @@ fn standard_result_does_not_resolve_to_an_unrelated_module_alias() {
         "mod domain { pub mod result { pub struct Result<T,E> { value:T,error:E } } } struct Root; impl Plugin for Root { fn build(&self, app: &mut App) { use domain as std; #[derive(Message)] struct Completed { result:std::result::Result<u64,String> } app.add_message::<Completed>(); } }",
         "mod owner { pub mod std { pub mod result {} } } use owner::std::{self}; mod unrelated { type Result<T> = T; } #[derive(Message)] struct Completed { result:std::result::Result<u64,String> } struct Root; impl Plugin for Root { fn build(&self, app: &mut App) { app.add_message::<Completed>(); } }",
         "mod owner { pub mod inner { pub mod std { pub mod result {} } } } use owner::inner::{self}; use inner::*; mod unrelated { type Result<T> = T; } #[derive(Message)] struct Completed { result:std::result::Result<u64,String> } struct Root; impl Plugin for Root { fn build(&self, app: &mut App) { app.add_message::<Completed>(); } }",
+        "mod r#std { pub mod result { pub struct Result<T,E> { value:T,error:E } } } #[derive(Message)] struct Completed { result:std::result::Result<u64,String> } struct Root; impl Plugin for Root { fn build(&self, app: &mut App) { app.add_message::<Completed>(); } }",
+        "mod domain { pub mod result { pub struct Result<T,E> { value:T,error:E } } } use domain as r#std; #[derive(Message)] struct Completed { result:std::result::Result<u64,String> } struct Root; impl Plugin for Root { fn build(&self, app: &mut App) { app.add_message::<Completed>(); } }",
+        "mod unrelated { type Result<T> = T; } #[derive(Message)] struct Completed<r#Result: Send + Sync + 'static> { result:Result } struct Root; impl Plugin for Root { fn build(&self, app: &mut App) { app.add_message::<Completed<LegacyDomain>>(); } }",
     ] {
         let inventory = Inventory::fixture(source);
         let entry = &inventory.entries[&inventory.key("struct:Completed")];
@@ -966,6 +970,12 @@ impl Inventory {
     }
 
     fn standard_result(&self, entry: &Declaration, reference: &str) -> bool {
+        let mut parts = Vec::new();
+        for part in reference.split("::") {
+            parts.push(part.strip_prefix("r#").unwrap_or(part));
+        }
+        let reference = parts.join("::");
+        let reference = reference.as_str();
         if entry.key.split('|').nth(1).is_some_and(|scope| {
             scope
                 .split("::")
@@ -988,7 +998,9 @@ impl Inventory {
         }
         let mut scope = Some(namespace);
         while let Some(current) = scope {
-            if self.symbols.contains_key(&format!("{current}::Result")) {
+            if self.symbols.contains_key(&format!("{current}::Result"))
+                || self.symbols.contains_key(&format!("{current}::r#Result"))
+            {
                 return false;
             }
             if let Some(imports) = self.imports.get(current) {
@@ -1019,7 +1031,9 @@ impl Inventory {
     fn local_binding(&self, namespace: &str, name: &str) -> bool {
         let mut scope = Some(namespace);
         while let Some(current) = scope {
-            if self.symbols.contains_key(&format!("{current}::{name}")) {
+            if self.symbols.contains_key(&format!("{current}::{name}"))
+                || self.symbols.contains_key(&format!("{current}::r#{name}"))
+            {
                 return true;
             }
             if let Some(imports) = self.imports.get(current)
@@ -1044,7 +1058,9 @@ impl Inventory {
         if !visiting.insert(format!("binding:{namespace}|{name}")) {
             return false;
         }
-        if self.symbols.contains_key(&format!("{namespace}::{name}")) {
+        if self.symbols.contains_key(&format!("{namespace}::{name}"))
+            || self.symbols.contains_key(&format!("{namespace}::r#{name}"))
+        {
             return true;
         }
         let Some(imports) = self.imports.get(namespace) else {
@@ -1318,7 +1334,7 @@ impl Namespace {
         }
         for part in scope {
             if !part.starts_with("fn ") && !part.starts_with("impl ") {
-                module.push(part.clone());
+                module.push(part.strip_prefix("r#").unwrap_or(part).to_string());
             }
         }
         Self(module.join("::"))
@@ -1350,9 +1366,9 @@ impl Imports {
         match tree {
             syn::UseTree::Path(path) => {
                 let prefix = if prefix.is_empty() {
-                    path.ident.to_string()
+                    path.ident.unraw().to_string()
                 } else {
-                    format!("{prefix}::{}", path.ident)
+                    format!("{prefix}::{}", path.ident.unraw())
                 };
                 self.add(&path.tree, &prefix);
             }
@@ -1365,21 +1381,21 @@ impl Imports {
                     return;
                 }
                 let target = if prefix.is_empty() {
-                    name.ident.to_string()
+                    name.ident.unraw().to_string()
                 } else {
-                    format!("{prefix}::{}", name.ident)
+                    format!("{prefix}::{}", name.ident.unraw())
                 };
-                self.bind_alias(name.ident.to_string(), target);
+                self.bind_alias(name.ident.unraw().to_string(), target);
             }
             syn::UseTree::Rename(name) => {
                 let target = if name.ident == "self" && !prefix.is_empty() {
                     prefix.to_string()
                 } else if prefix.is_empty() {
-                    name.ident.to_string()
+                    name.ident.unraw().to_string()
                 } else {
-                    format!("{prefix}::{}", name.ident)
+                    format!("{prefix}::{}", name.ident.unraw())
                 };
-                self.bind_alias(name.rename.to_string(), target);
+                self.bind_alias(name.rename.unraw().to_string(), target);
             }
             syn::UseTree::Glob(_) => {
                 self.globs.insert(prefix.into());
@@ -1395,13 +1411,13 @@ impl Imports {
 
 impl Declarations<'_> {
     fn path_override(meta: &syn::Meta) -> bool {
-        if meta.path().is_ident("path") {
+        if meta.path().segments.len() == 1 && meta.path().segments[0].ident.unraw() == "path" {
             return true;
         }
         let syn::Meta::List(list) = meta else {
             return false;
         };
-        if !list.path.is_ident("cfg_attr") {
+        if list.path.segments.len() != 1 || list.path.segments[0].ident.unraw() != "cfg_attr" {
             return false;
         }
         let parser = syn::punctuated::Punctuated::<syn::Meta, syn::Token![,]>::parse_terminated;
@@ -1442,10 +1458,10 @@ impl Declarations<'_> {
                 for parameter in &generics.params {
                     match parameter {
                         syn::GenericParam::Type(value) => {
-                            generic_bindings.insert(value.ident.to_string());
+                            generic_bindings.insert(value.ident.unraw().to_string());
                         }
                         syn::GenericParam::Const(value) => {
-                            generic_bindings.insert(value.ident.to_string());
+                            generic_bindings.insert(value.ident.unraw().to_string());
                         }
                         syn::GenericParam::Lifetime(_) => {}
                     }
@@ -1582,7 +1598,7 @@ impl<'ast> Visit<'ast> for Declarations<'_> {
                     .imports
                     .entry(Namespace::of(self.path, &self.scope).0)
                     .or_default()
-                    .bind_alias(name.to_string(), value.ident.to_string());
+                    .bind_alias(name.unraw().to_string(), value.ident.unraw().to_string());
             }
             Item::Use(value)
                 if !self
@@ -1719,14 +1735,14 @@ impl<'ast> Visit<'ast> for Declarations<'_> {
                         .entry(Namespace::of(self.path, &self.scope).0)
                         .or_default()
                         .opaque_modules
-                        .insert(value.ident.to_string());
+                        .insert(value.ident.unraw().to_string());
                 }
                 self.inventory
                     .imports
                     .entry(Namespace::of(self.path, &self.scope).0)
                     .or_default()
                     .modules
-                    .insert(value.ident.to_string());
+                    .insert(value.ident.unraw().to_string());
                 self.scope.push(value.ident.to_string());
                 self.inventory
                     .imports
