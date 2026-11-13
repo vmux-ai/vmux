@@ -253,12 +253,13 @@ assert (service/'MacOS/Atlas & Co Service').read_text() == 'fixture service'
 with (service/'Info.plist').open('rb') as source: info=plistlib.load(source)
 assert info['CFBundleIdentifier']=='org.example.atlas.service.abc1234'
 assert info['CFBundleDisplayName']=='Atlas & Co Service'
+assert (service/'Resources'/(info['CFBundleIconFile']+'.icns')).read_bytes()==pathlib.Path(sys.argv[2]).read_bytes()
 with (bundle/'Contents/Library/LaunchAgents/org.example.atlas.service.plist').open('rb') as source: launch=plistlib.load(source)
 assert launch['Label']==info['CFBundleIdentifier']
 assert (bundle/launch['BundleProgram']).is_file()
 assert launch['AssociatedBundleIdentifiers']==['org.example.atlas.desktop.abc1234']
 assert launch['StandardOutPath']=='/tmp/org-example-atlas-service.log'
-"#).arg(&bundle).output().unwrap();
+"#).arg(&bundle).arg(project.root().join("packaging/macos/Vmux.icns")).output().unwrap();
     assert!(
         output.status.success(),
         "{}",
