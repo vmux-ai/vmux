@@ -767,8 +767,10 @@ fn rows(
     }
 }
 
-fn project(
-    mut palettes: Query<(
+type ProjectionTargets<'w, 's> = Query<
+    'w,
+    's,
+    (
         Entity,
         &'static PaletteOpen,
         &'static mut PaletteDraftInput,
@@ -782,7 +784,11 @@ fn project(
         Has<PermissionMenuOpen>,
         Has<ProjectMenuOpen>,
         Has<BranchMenuOpen>,
-    )>,
+    ),
+>;
+
+fn project(
+    mut palettes: ProjectionTargets,
     contributions: Query<(Entity, &CommandBarContribution, Option<&ChildOf>)>,
     locale: Option<Res<ResolvedLocale>>,
     #[cfg(test)] mut builds: Option<ResMut<ProjectionBuilds>>,

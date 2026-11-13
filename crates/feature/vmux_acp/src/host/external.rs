@@ -2648,27 +2648,26 @@ fn commit_conversations(
         let current = pending
             .get(session)
             .is_ok_and(|pending| pending.entity() == operation);
-        if let Some(page) = page {
-            if let Ok(mut window) = windows.get_mut(session) {
-                let owns =
-                    window.generation == page.generation && window.request_id == page.request_id;
-                if current || pending.get(session).is_err() {
-                    window.finish(*page);
-                }
-                if current
-                    && owns
-                    && matches!(completed.result, Ok(true))
-                    && window.has_older
-                    && read.is_some_and(|read| {
-                        versions.matches(session, read) && versions.unchanged(session, read)
-                    })
-                    && let Ok(id) = sessions.get(session)
-                {
-                    more.write(vmux_session::history::MoreRequest {
-                        session: id.clone(),
-                        generation: window.generation,
-                    });
-                }
+        if let Some(page) = page
+            && let Ok(mut window) = windows.get_mut(session)
+        {
+            let owns = window.generation == page.generation && window.request_id == page.request_id;
+            if current || pending.get(session).is_err() {
+                window.finish(*page);
+            }
+            if current
+                && owns
+                && matches!(completed.result, Ok(true))
+                && window.has_older
+                && read.is_some_and(|read| {
+                    versions.matches(session, read) && versions.unchanged(session, read)
+                })
+                && let Ok(id) = sessions.get(session)
+            {
+                more.write(vmux_session::history::MoreRequest {
+                    session: id.clone(),
+                    generation: window.generation,
+                });
             }
         }
         if !current {

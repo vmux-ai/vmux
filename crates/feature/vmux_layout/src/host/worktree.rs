@@ -63,7 +63,7 @@ pub struct TabWorktreeActivation {
     pub ready: TabWorktreeReady,
 }
 
-pub struct BranchCheckout(TabWorktreeCheckout);
+pub struct BranchCheckout(Box<TabWorktreeCheckout>);
 
 impl BranchCheckout {
     pub fn commit(self) -> TabWorktreeActivation {
@@ -536,7 +536,7 @@ impl TabWorktreeActivation {
     ) -> Result<BranchSelection, String> {
         match Self::checkout_branch(base_dir, branch, managed_root)? {
             TabWorktreeCheckoutResult::Ready(checkout) => {
-                Ok(BranchSelection::Ready(BranchCheckout(*checkout)))
+                Ok(BranchSelection::Ready(BranchCheckout(checkout)))
             }
             TabWorktreeCheckoutResult::Retry(wait) => {
                 wait.subscribe(wake);

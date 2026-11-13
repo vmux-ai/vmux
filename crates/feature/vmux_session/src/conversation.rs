@@ -1662,10 +1662,10 @@ impl EventMaterializer<'_, '_> {
         }
         let cursor = index.native_positions.entry(session).or_default();
         for (entity, _, target) in &bindings {
-            if let Some(position) = index.unit_positions.get(&(*entity, *target)) {
-                if (*page_limit).is_none_or(|before| *position < before) {
-                    *cursor = (*cursor).max(position + 1);
-                }
+            if let Some(position) = index.unit_positions.get(&(*entity, *target))
+                && (*page_limit).is_none_or(|before| *position < before)
+            {
+                *cursor = (*cursor).max(position + 1);
             }
         }
         for (entity, _, target) in &bindings {

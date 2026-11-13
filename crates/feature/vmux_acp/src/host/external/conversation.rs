@@ -24,117 +24,6 @@ pub(super) struct ReadResult {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn a_page_aligned_with_the_first_prompt_keeps_it_through_ignored_records() {
-        let directory = tempfile::tempdir().unwrap();
-        let path = directory.path().join("history.jsonl");
-        let prompt = "{\"role\":\"user\",\"content\":\"First prompt\"}\n";
-        let answer = "{\"role\":\"assistant\",\"content\":\"Latest answer\"}\n";
-        let head = "{\"isMeta\":true,\"padding\":\"";
-        let end = "\"}\n";
-        let filler = "x"
-            .repeat(FileConversation::TAIL_BYTES as usize - prompt.len() - head.len() - end.len());
-        std::fs::write(&path, format!("{{}}\n{prompt}{head}{filler}{end}{answer}")).unwrap();
-        let mut read =
-            FileConversation::read(&path, None, None, FileConversation::TAIL_BYTES, ChatDecoder)
-                .unwrap();
-        let mut found = read.messages();
-        while let Some(boundary) = read.history.file.as_ref().and_then(|file| file.before) {
-            read = FileConversation::before(&path, boundary, None, ChatDecoder).unwrap();
-            found.extend(read.messages());
-        }
-        assert!(found.contains(&Message::user("First prompt")));
-    }
-
-    #[test]
-    fn an_incremental_chunk_boundary_keeps_a_partial_jsonl_message() {
-        let directory = tempfile::tempdir().unwrap();
-        let path = directory.path().join("history.jsonl");
-        std::fs::write(&path, "{\"role\":\"user\",\"content\":\"Original\"}\n").unwrap();
-        let original =
-            FileConversation::read(&path, None, None, FileConversation::TAIL_BYTES, ChatDecoder)
-                .unwrap();
-        let expected = "A normal message crossing the bounded read window".repeat(8);
-        let record = format!(
-            "{{\"role\":\"user\",\"content\":{}}}\n",
-            serde_json::to_string(&expected).unwrap()
-        );
-        let mut file = std::fs::OpenOptions::new()
-            .append(true)
-            .open(&path)
-            .unwrap();
-        file.write_all(&vec![b'x'; FileConversation::TAIL_BYTES as usize - 65])
-            .unwrap();
-        file.write_all(b"\n").unwrap();
-        file.write_all(record.as_bytes()).unwrap();
-        file.write_all(b"{\"role\":\"assistant\",\"content\":\"Final answer\"}\n")
-            .unwrap();
-        drop(file);
-        let mut read = original;
-        let mut messages = Vec::new();
-        for _ in 0..4 {
-            let next = FileConversation::read(
-                &path,
-                Some(read.cursor),
-                read.history.file.as_ref(),
-                FileConversation::TAIL_BYTES,
-                ChatDecoder,
-            )
-            .unwrap();
-            messages.extend(next.messages());
-            assert!(next.cursor > read.cursor);
-            let complete = next.complete;
-            read = next;
-            if complete {
-                break;
-            }
-        }
-        assert!(read.complete);
-        assert_eq!(
-            messages,
-            [
-                Message::user(expected),
-                Message::Assistant {
-                    blocks: vec![AssistantBlock::Text("Final answer".into())]
-                }
-            ]
-        );
-    }
-
-    #[test]
-    fn a_large_append_keeps_reading_from_the_accepted_cursor() {
-        let directory = tempfile::tempdir().unwrap();
-        let path = directory.path().join("history.jsonl");
-        std::fs::write(&path, "{\"role\":\"user\",\"content\":\"Original\"}\n").unwrap();
-        let original =
-            FileConversation::read(&path, None, None, FileConversation::TAIL_BYTES, ChatDecoder)
-                .unwrap();
-        let mut file = std::fs::OpenOptions::new().write(true).open(&path).unwrap();
-        let length = original.cursor + PROVIDER_READ_LIMIT as u64 + 1024;
-        file.set_len(length).unwrap();
-        file.seek(SeekFrom::Start(original.cursor)).unwrap();
-        file.write_all(b"{\"role\":\"user\",\"content\":\"New request\"}\n")
-            .unwrap();
-        file.seek(SeekFrom::Start(length - 1)).unwrap();
-        file.write_all(b"\n").unwrap();
-        let read = FileConversation::read(
-            &path,
-            Some(original.cursor),
-            original.history.file.as_ref(),
-            FileConversation::TAIL_BYTES,
-            ChatDecoder,
-        )
-        .unwrap();
-        assert!(!read.history.tail);
-        assert_eq!(read.messages(), [Message::user("New request")]);
-        assert!(read.cursor > original.cursor && read.cursor < length);
-    }
-}
-
-#[cfg(test)]
 impl ReadResult {
     pub(super) fn messages(&self) -> Vec<Message> {
         let mut messages = Vec::with_capacity(self.history.entries.len());
@@ -918,5 +807,116 @@ impl<'a> JsonText<'a> {
             serde_json::Value::Number(_) | serde_json::Value::Bool(_) => self.0.to_string(),
             serde_json::Value::Null => String::new(),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_page_aligned_with_the_first_prompt_keeps_it_through_ignored_records() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("history.jsonl");
+        let prompt = "{\"role\":\"user\",\"content\":\"First prompt\"}\n";
+        let answer = "{\"role\":\"assistant\",\"content\":\"Latest answer\"}\n";
+        let head = "{\"isMeta\":true,\"padding\":\"";
+        let end = "\"}\n";
+        let filler = "x"
+            .repeat(FileConversation::TAIL_BYTES as usize - prompt.len() - head.len() - end.len());
+        std::fs::write(&path, format!("{{}}\n{prompt}{head}{filler}{end}{answer}")).unwrap();
+        let mut read =
+            FileConversation::read(&path, None, None, FileConversation::TAIL_BYTES, ChatDecoder)
+                .unwrap();
+        let mut found = read.messages();
+        while let Some(boundary) = read.history.file.as_ref().and_then(|file| file.before) {
+            read = FileConversation::before(&path, boundary, None, ChatDecoder).unwrap();
+            found.extend(read.messages());
+        }
+        assert!(found.contains(&Message::user("First prompt")));
+    }
+
+    #[test]
+    fn an_incremental_chunk_boundary_keeps_a_partial_jsonl_message() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("history.jsonl");
+        std::fs::write(&path, "{\"role\":\"user\",\"content\":\"Original\"}\n").unwrap();
+        let original =
+            FileConversation::read(&path, None, None, FileConversation::TAIL_BYTES, ChatDecoder)
+                .unwrap();
+        let expected = "A normal message crossing the bounded read window".repeat(8);
+        let record = format!(
+            "{{\"role\":\"user\",\"content\":{}}}\n",
+            serde_json::to_string(&expected).unwrap()
+        );
+        let mut file = std::fs::OpenOptions::new()
+            .append(true)
+            .open(&path)
+            .unwrap();
+        file.write_all(&vec![b'x'; FileConversation::TAIL_BYTES as usize - 65])
+            .unwrap();
+        file.write_all(b"\n").unwrap();
+        file.write_all(record.as_bytes()).unwrap();
+        file.write_all(b"{\"role\":\"assistant\",\"content\":\"Final answer\"}\n")
+            .unwrap();
+        drop(file);
+        let mut read = original;
+        let mut messages = Vec::new();
+        for _ in 0..4 {
+            let next = FileConversation::read(
+                &path,
+                Some(read.cursor),
+                read.history.file.as_ref(),
+                FileConversation::TAIL_BYTES,
+                ChatDecoder,
+            )
+            .unwrap();
+            messages.extend(next.messages());
+            assert!(next.cursor > read.cursor);
+            let complete = next.complete;
+            read = next;
+            if complete {
+                break;
+            }
+        }
+        assert!(read.complete);
+        assert_eq!(
+            messages,
+            [
+                Message::user(expected),
+                Message::Assistant {
+                    blocks: vec![AssistantBlock::Text("Final answer".into())]
+                }
+            ]
+        );
+    }
+
+    #[test]
+    fn a_large_append_keeps_reading_from_the_accepted_cursor() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("history.jsonl");
+        std::fs::write(&path, "{\"role\":\"user\",\"content\":\"Original\"}\n").unwrap();
+        let original =
+            FileConversation::read(&path, None, None, FileConversation::TAIL_BYTES, ChatDecoder)
+                .unwrap();
+        let mut file = std::fs::OpenOptions::new().write(true).open(&path).unwrap();
+        let length = original.cursor + PROVIDER_READ_LIMIT as u64 + 1024;
+        file.set_len(length).unwrap();
+        file.seek(SeekFrom::Start(original.cursor)).unwrap();
+        file.write_all(b"{\"role\":\"user\",\"content\":\"New request\"}\n")
+            .unwrap();
+        file.seek(SeekFrom::Start(length - 1)).unwrap();
+        file.write_all(b"\n").unwrap();
+        let read = FileConversation::read(
+            &path,
+            Some(original.cursor),
+            original.history.file.as_ref(),
+            FileConversation::TAIL_BYTES,
+            ChatDecoder,
+        )
+        .unwrap();
+        assert!(!read.history.tail);
+        assert_eq!(read.messages(), [Message::user("New request")]);
+        assert!(read.cursor > original.cursor && read.cursor < length);
     }
 }

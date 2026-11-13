@@ -2288,10 +2288,10 @@ impl Boundary {
             let Some(value) = value else {
                 return false;
             };
-            if !inventory.owner_references(parent, value)
-                && !(parent.plugin
-                    && inventory.boundary_references(parent, value, &mut BTreeSet::new()))
-            {
+            let referenced = inventory.owner_references(parent, value)
+                || parent.plugin
+                    && inventory.boundary_references(parent, value, &mut BTreeSet::new());
+            if !referenced {
                 return false;
             }
             let mut current = owner.as_str();
