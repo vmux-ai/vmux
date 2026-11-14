@@ -168,7 +168,18 @@ impl Workspace {
     fn select(&self, files: &[PathBuf]) -> Selection {
         let mut selected = BTreeSet::new();
         let mut lean = false;
+        let mut policy = false;
         for file in files {
+            if file == Path::new("ecs-policy.ron") {
+                if !self.packages.iter().any(|package| {
+                    package.name == "vmux_macro"
+                        && package.directory == Path::new("crates/util/vmux_macro")
+                }) {
+                    return self.full();
+                }
+                policy = true;
+                continue;
+            }
             if Selection::documentation(file) {
                 continue;
             }
@@ -186,7 +197,7 @@ impl Workspace {
             lean |= owner.name == "vmux_desktop";
             selected.insert(owner.name.clone());
         }
-        if selected.is_empty() {
+        if selected.is_empty() && !policy {
             return self.full();
         }
         loop {
@@ -201,6 +212,9 @@ impl Workspace {
             if !added {
                 break;
             }
+        }
+        if policy {
+            selected.insert("vmux_macro".into());
         }
         let mut lint = BTreeSet::new();
         for package in &self.packages {
@@ -309,6 +323,59 @@ mod tests {
             )
             .unwrap()
         }
+    }
+
+    #[test]
+    fn policy_ledger_inputs_do_not_expand_the_production_dependency_graph() {
+        let mut workspace = Workspace::fixture();
+        workspace.packages.push(Package {
+            name: "vmux_macro".into(),
+            directory: "crates/util/vmux_macro".into(),
+            dependencies: BTreeSet::new(),
+        });
+        for package in &mut workspace.packages {
+            if package.name == "unrelated" {
+                package.dependencies.insert("vmux_macro".into());
+            }
+        }
+        let policy = workspace.select(&["ecs-policy.ron".into()]);
+        assert_eq!(policy.packages, BTreeSet::from(["vmux_macro".into()]));
+        assert_eq!(policy.lint, policy.packages);
+        assert!(!policy.workspace);
+        assert!(!policy.lean);
+        let feature = workspace.select(&[
+            "ecs-policy.ron".into(),
+            "crates/feature/leaf/src/lib.rs".into(),
+        ]);
+        assert_eq!(
+            feature.packages,
+            BTreeSet::from([
+                "app".into(),
+                "consumer".into(),
+                "leaf".into(),
+                "vmux_desktop".into(),
+                "vmux_macro".into(),
+            ])
+        );
+        assert_eq!(feature.lint, feature.packages);
+        assert!(!feature.workspace);
+        assert!(!feature.lean);
+        for path in ["crates/util/vmux_macro/src/lib.rs", "other-policy.ron"] {
+            let selection = workspace.select(&["ecs-policy.ron".into(), path.into()]);
+            assert!(selection.workspace, "{path}");
+            assert!(selection.lean, "{path}");
+        }
+        assert!(
+            Workspace::fixture()
+                .select(&["ecs-policy.ron".into()])
+                .workspace
+        );
+        for package in &mut workspace.packages {
+            if package.name == "vmux_macro" {
+                package.directory = "crates/feature/foreign-policy".into();
+            }
+        }
+        assert!(workspace.select(&["ecs-policy.ron".into()]).workspace);
     }
 
     #[test]

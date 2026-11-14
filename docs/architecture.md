@@ -2408,7 +2408,10 @@ directories. Pushes and pull requests save Rust dependency caches within their o
 feature-branch updates reuse their branch cache without overwriting the main baseline.
 Renames include both package owners. Manifests, lockfiles, build scripts,
 CI configuration, shared API/ECS/macros/composition, and unmapped changes require the full
-workspace. Scope discovery errors fail the test gate rather than skipping tests. Builder
+workspace. The exact ownership ledger is a policy-test input; it adds `vmux_macro` after
+production dependency traversal, preserving affected feature scope and the mandatory ownership
+gate. A missing policy package or an unknown file still requires the full suite.
+Scope discovery errors fail the test gate rather than skipping tests. Builder
 fixtures and repository source conventions always run. Lean desktop checks and tests run for
 direct desktop changes and full suites. Main code changes, manual CI, and the daily CI schedule
 run the full suite; the schedule leaves macOS packaging to the nightly workflow.
