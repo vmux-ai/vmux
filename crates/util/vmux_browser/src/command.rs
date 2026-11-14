@@ -62,8 +62,8 @@ use vmux_api::open_target::{OpenTarget, PaneDirection};
 
 pub(crate) struct CommandPlugin;
 
-impl Plugin for CommandPlugin {
-    fn build(&self, app: &mut App) {
+impl bevy::prelude::Plugin for CommandPlugin {
+    fn build(&self, app: &mut bevy::prelude::App) {
         #[cfg(test)]
         app.add_plugins(FeaturePlugin::<crate::Feature>::default());
         if !app.is_plugin_added::<vmux_command::CommandRuntimePlugin>() {
@@ -82,6 +82,7 @@ impl Plugin for CommandPlugin {
             .add_observer(header_forward)
             .add_observer(header_reload)
             .add_observer(header_stop)
+            .add_observer(stop_loading)
             .add_observer(header_address_focus)
             .add_observer(side_sheet_stack_activate)
             .add_observer(side_sheet_stack_close)
@@ -97,6 +98,7 @@ impl Plugin for CommandPlugin {
             .add_systems(
                 Update,
                 (
+                    initialize_gestures,
                     handle_navigation_requests,
                     handle_open_requests,
                     handle_zoom_requests,
@@ -572,24 +574,29 @@ impl BrowserRequestTarget<'_, '_> {
     }
 }
 
-#[derive(Default)]
-struct GestureCooldown {
-    stacks: std::collections::HashMap<Entity, std::time::Instant>,
-}
+#[derive(Component, Default)]
+struct HistoryGestureCooldown(Option<std::time::Instant>);
 
-impl GestureCooldown {
-    fn accepts(&mut self, stack: Entity, now: std::time::Instant) -> bool {
-        self.stacks
-            .retain(|_, last| now.duration_since(*last) < std::time::Duration::from_millis(650));
-        if self
-            .stacks
-            .get(&stack)
-            .is_some_and(|last| now.duration_since(*last) < std::time::Duration::from_millis(650))
+impl HistoryGestureCooldown {
+    fn accepts(&mut self, now: std::time::Instant) -> bool {
+        if let Some(last) = self.0
+            && now.saturating_duration_since(last) < std::time::Duration::from_millis(650)
         {
             return false;
         }
-        self.stacks.insert(stack, now);
+        self.0 = Some(now);
         true
+    }
+}
+
+fn initialize_gestures(
+    stacks: Query<Entity, (With<Stack>, Without<HistoryGestureCooldown>)>,
+    mut commands: Commands,
+) {
+    for stack in &stacks {
+        commands
+            .entity(stack)
+            .insert(HistoryGestureCooldown::default());
     }
 }
 
@@ -609,8 +616,7 @@ fn handle_navigation_requests(
     histories: crate::navigation::NavigationHistory,
     mut host_history_steps: MessageWriter<HostHistoryStep>,
     mut commands: Commands,
-    mut gestures: Local<GestureCooldown>,
-    browsers: Option<NonSend<Browsers>>,
+    mut gestures: Query<&mut HistoryGestureCooldown, With<Stack>>,
 ) {
     for request in navigation_requests.read() {
         if let NavigationTarget::Surface(webview) = request.target
@@ -633,9 +639,16 @@ fn handle_navigation_requests(
                 request.operation,
                 NavigationOperation::Back | NavigationOperation::Forward
             )
-            && (is_terminal || !gestures.accepts(active, std::time::Instant::now()))
         {
-            continue;
+            if is_terminal {
+                continue;
+            }
+            let Ok(mut gesture) = gestures.get_mut(active) else {
+                continue;
+            };
+            if !gesture.accepts(std::time::Instant::now()) {
+                continue;
+            }
         }
         match request.operation {
             NavigationOperation::Back => {
@@ -680,9 +693,6 @@ fn handle_navigation_requests(
             }
             NavigationOperation::Stop => {
                 let loading = surfaces.incoming(active).unwrap_or(webview);
-                if let Some(browsers) = &browsers {
-                    browsers.stop_loading_webview(&loading);
-                }
                 commands.trigger(StopLoadingRequested { webview: loading });
                 commands
                     .trigger(vmux_layout::hosted_page::SurfaceCancelRequest { webview: loading });
@@ -695,6 +705,12 @@ fn handle_navigation_requests(
 pub(crate) struct StopLoadingRequested {
     #[event_target]
     pub webview: Entity,
+}
+
+fn stop_loading(request: On<StopLoadingRequested>, browsers: Option<NonSend<Browsers>>) {
+    if let Some(browsers) = browsers {
+        browsers.stop_loading_webview(&request.webview);
+    }
 }
 
 fn handle_open_requests(
@@ -1357,6 +1373,109 @@ mod tests {
             self.app.update();
             self.app.update();
         }
+    }
+
+    #[test]
+    fn one_message_batch_accepts_only_one_history_gesture_per_stack() {
+        let mut arrow = NavArrow::over_a_hosted_page();
+        for operation in [
+            NavigationOperation::Back,
+            NavigationOperation::Back,
+            NavigationOperation::Forward,
+        ] {
+            arrow
+                .app
+                .world_mut()
+                .write_message(NavigationRequest::surface(arrow.view, operation));
+        }
+        arrow.app.update();
+        arrow.app.update();
+        assert!(arrow.walked_back());
+        assert!(arrow.cef_navigations().is_empty());
+    }
+
+    #[test]
+    fn history_gesture_cooldowns_do_not_cross_stack_owners() {
+        let mut arrow = NavArrow::over_a_hosted_page();
+        let other = arrow.another_hosted_page();
+        for view in [arrow.view, other] {
+            arrow
+                .app
+                .world_mut()
+                .write_message(NavigationRequest::surface(view, NavigationOperation::Back));
+        }
+        arrow.app.update();
+        arrow.app.update();
+        assert!(arrow.walked_back());
+        assert!(
+            arrow
+                .app
+                .world()
+                .get::<HostHistory>(other)
+                .unwrap()
+                .can_go_forward()
+        );
+        assert!(arrow.cef_navigations().is_empty());
+    }
+
+    #[test]
+    fn toolbar_navigation_bypasses_the_gesture_cooldown() {
+        let mut arrow = NavArrow::over_a_hosted_page();
+        arrow.swiped_back(arrow.view);
+        arrow
+            .app
+            .world_mut()
+            .trigger(UiInput::<HeaderForwardRequest> {
+                webview: Entity::PLACEHOLDER,
+                payload: HeaderForwardRequest,
+            });
+        arrow.app.update();
+        arrow.app.update();
+        assert!(!arrow.walked_back());
+        assert!(
+            arrow
+                .app
+                .world()
+                .get::<HostHistory>(arrow.view)
+                .unwrap()
+                .can_go_back()
+        );
+    }
+
+    #[test]
+    fn expired_history_gesture_cooldown_allows_the_next_direction() {
+        let mut arrow = NavArrow::over_a_hosted_page();
+        arrow.swiped_back(arrow.view);
+        let stack = arrow
+            .app
+            .world()
+            .get::<ChildOf>(arrow.view)
+            .unwrap()
+            .parent();
+        arrow
+            .app
+            .world_mut()
+            .get_mut::<HistoryGestureCooldown>(stack)
+            .unwrap()
+            .0 = Some(std::time::Instant::now() - std::time::Duration::from_millis(650));
+        arrow
+            .app
+            .world_mut()
+            .write_message(NavigationRequest::surface(
+                arrow.view,
+                NavigationOperation::Forward,
+            ));
+        arrow.app.update();
+        arrow.app.update();
+        assert!(!arrow.walked_back());
+        assert!(
+            arrow
+                .app
+                .world()
+                .get::<HostHistory>(arrow.view)
+                .unwrap()
+                .can_go_back()
+        );
     }
 
     #[test]
