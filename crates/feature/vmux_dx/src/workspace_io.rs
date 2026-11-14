@@ -1,6 +1,5 @@
-use std::fs::{self, File};
+use std::fs::File;
 use std::io::Read;
-use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
@@ -27,8 +26,8 @@ impl MetadataFile {
         Ok(Some(configuration.clone().try_into()?))
     }
 
-    pub fn feature(&self) -> Result<(PathBuf, FeatureManifest)> {
-        Ok((self.0.canonicalize()?, ron::from_str(&self.text()?)?))
+    pub fn feature(&self) -> Result<FeatureManifest> {
+        Ok(ron::from_str(&self.text()?)?)
     }
 
     fn text(&self) -> Result<String> {
@@ -57,41 +56,15 @@ pub struct Definition {
     pub cargo: Option<PathBuf>,
 }
 
-pub struct Cache(pub PathBuf);
-
-impl Cache {
-    pub fn prepare(self, provider: &crate::workspace::Provider) -> Result<PathBuf> {
-        let mut path = provider.root.clone();
-        for component in self.0.strip_prefix(&provider.root)?.components() {
-            path.push(component);
-            if fs::symlink_metadata(&path).is_ok_and(|metadata| metadata.file_type().is_symlink()) {
-                return Err("Workspace provider cache cannot use symlinks".into());
-            }
-        }
-        fs::create_dir_all(self.0.parent().ok_or("Missing provider cache parent")?)?;
-        Ok(self.0)
-    }
-}
-
 #[derive(Component, Clone)]
 pub struct Executable(Arc<Prepared>);
 
 impl Executable {
-    pub fn snapshot(source: &Path) -> Result<Self> {
-        let metadata = fs::symlink_metadata(source)?;
-        if !metadata.is_file()
-            || metadata.len() > 64 * 1024 * 1024
-            || metadata.permissions().mode() & 0o111 == 0
-        {
-            return Err("Workspace provider build produced no bounded executable".into());
-        }
-        let temporary = Temporary::create(&std::env::temp_dir(), ".vmux-workspace-provider")?;
-        let path = temporary.path().join("provider");
-        fs::copy(source, &path)?;
-        Ok(Self(Arc::new(Prepared {
+    pub fn new(path: PathBuf, temporary: Arc<Temporary>) -> Self {
+        Self(Arc::new(Prepared {
             path,
             _temporary: temporary,
-        })))
+        }))
     }
 
     pub fn path(&self) -> &Path {
@@ -101,5 +74,5 @@ impl Executable {
 
 struct Prepared {
     path: PathBuf,
-    _temporary: Temporary,
+    _temporary: Arc<Temporary>,
 }

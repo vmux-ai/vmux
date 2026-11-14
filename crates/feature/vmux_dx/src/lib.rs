@@ -20,6 +20,8 @@ use work::{Outcome, Work};
 mod ci_native;
 mod ci_scope;
 mod consumer;
+mod debug;
+mod debug_io;
 mod environment;
 mod execution;
 mod local;
@@ -57,11 +59,22 @@ enum Stage {
 
 impl bevy_app::Plugin for Plugin {
     fn build(&self, app: &mut App) {
+        if !app
+            .world()
+            .contains_resource::<vmux_ecs::blocking::BlockingRuntime>()
+        {
+            app.insert_resource(vmux_ecs::blocking::BlockingRuntime::new(
+                vmux_ecs::blocking::BlockingPool::new("vmux-dx-short", 0, 0),
+                vmux_ecs::blocking::BlockingPool::new("vmux-dx-long", 0, 0),
+                vmux_ecs::blocking::BlockingPool::new("vmux-dx-process", 1, 16),
+            ));
+        }
         app.add_plugins((
             FeaturePlugin::<Feature>::default(),
             updates::Plugin,
             workspace::Plugin,
             repository_selection::Plugin,
+            debug::Plugin,
         ))
         .configure_sets(
             Update,
@@ -168,7 +181,7 @@ enum AdmissionPhase {
     Ready,
 }
 
-#[derive(Component)]
+#[derive(Component, Clone)]
 struct Settings(Environment);
 
 #[derive(Component)]
@@ -246,7 +259,6 @@ type Inputs<'w, 's> = Query<
         &'static Storage,
         Option<&'static Lease>,
         Option<&'static workspace::Executable>,
-        Option<&'static local::Target>,
         &'static OperationState,
     ),
     (With<Planned>, Without<CliResult>),
@@ -326,19 +338,35 @@ fn accept(requests: Incoming, providers: Query<&workspace::Provider>, mut comman
             commands.entity(entity).insert(CliResult::default());
             continue;
         }
-        let resolved = match provider {
+        let resolved: Result<Checkout> = match provider {
             Some(provider) => {
                 let target = provider
                     .root
                     .join(".build-tools/providers")
                     .join(&provider.package);
-                workspace_io::Cache(target)
-                    .prepare(provider)
-                    .map(|target| Checkout {
-                        root: provider.root.clone(),
-                        target,
-                        build_target: Some(env!("VMUX_DX_HOST_TARGET").into()),
-                    })
+                let mut path = provider.root.clone();
+                let mut refused = false;
+                for component in target.strip_prefix(&provider.root).unwrap().components() {
+                    path.push(component);
+                    if std::fs::symlink_metadata(&path)
+                        .is_ok_and(|metadata| metadata.file_type().is_symlink())
+                    {
+                        refused = true;
+                        break;
+                    }
+                }
+                if refused {
+                    Err("Workspace provider cache cannot use symlinks".into())
+                } else {
+                    match std::fs::create_dir_all(target.parent().unwrap()) {
+                        Ok(()) => Ok(Checkout {
+                            root: provider.root.clone(),
+                            target,
+                            build_target: Some(env!("VMUX_DX_HOST_TARGET").into()),
+                        }),
+                        Err(error) => Err(error.into()),
+                    }
+                }
             }
             None => match resolved_context {
                 Some(checkout) => Ok(checkout.clone()),
@@ -1219,16 +1247,21 @@ fn start(
     completed: Query<Entity, With<Completed>>,
     operations: Inputs,
     mailbox: Res<Mailbox>,
+    reads: Query<&OperationState, With<repository_io::Read>>,
     mut commands: Commands,
 ) {
-    if !running.is_empty() {
+    if !running.is_empty()
+        || reads
+            .iter()
+            .any(|state| matches!(state, OperationState::Pending | OperationState::Running))
+    {
         return;
     }
     for (entity, work, parent, predecessor, attempt) in &steps {
         if predecessor.is_some_and(|previous| !completed.contains(previous.0)) {
             continue;
         }
-        let Ok((checkout, settings, storage, lease, executable, local, state)) =
+        let Ok((checkout, settings, storage, lease, executable, state)) =
             operations.get(parent.parent())
         else {
             continue;
@@ -1236,16 +1269,71 @@ fn start(
         if *state != OperationState::Running {
             continue;
         }
-        if matches!(work, Work::LocalLaunch) && local.is_none() {
+        if matches!(work, Work::WorkspaceAcquire)
+            && let Err(error) = storage.guard()
+        {
+            commands
+                .entity(parent.parent())
+                .insert((OperationState::Failed, CliResult(Err(error.to_string()))));
             continue;
+        }
+        let request = match work {
+            Work::Codesign => Some(debug::Request::Identity { print: false }),
+            Work::ClearReady => Some(debug::Request::Clear),
+            Work::SignDebug => Some(debug::Request::Sign),
+            Work::BundleDebug => Some(debug::Request::Bundle),
+            Work::PublishDebug => Some(debug::Request::Publish),
+            Work::Run(profile, platform) => Some(debug::Request::Run {
+                profile: profile.clone(),
+                platform: platform.clone(),
+            }),
+            Work::Stop => Some(debug::Request::Stop),
+            Work::WorkspaceCompile(package, binary, manifest) => {
+                Some(debug::Request::ProviderCompile {
+                    package: package.clone(),
+                    binary: binary.clone(),
+                    manifest: manifest.clone(),
+                })
+            }
+            Work::WorkspaceSnapshot(binary) => Some(debug::Request::ProviderSnapshot {
+                binary: binary.clone(),
+            }),
+            Work::WorkspaceInvoke(arguments) => Some(debug::Request::ProviderInvoke {
+                arguments: arguments.clone(),
+            }),
+            Work::Internal(task, _) if task == "ensure-signing" => {
+                Some(debug::Request::Identity { print: true })
+            }
+            Work::Internal(task, _) if task == "debug-sign" => Some(debug::Request::Sign),
+            Work::Internal(task, _) if task == "debug-bundle" => Some(debug::Request::Bundle),
+            _ => None,
+        };
+        if let Some(request) = request {
+            let mut captured_settings = settings.clone();
+            if let Some(executable) = executable {
+                captured_settings
+                    .0
+                    .set("VMUX_DX_PROVIDER_EXECUTABLE", executable.path().as_os_str());
+            }
+            commands.entity(entity).insert((
+                request,
+                debug::Captured {
+                    root: parent.parent(),
+                    attempt: attempt.0,
+                },
+                checkout.clone(),
+                captured_settings,
+                debug::Lease(lease.map(|lease| lease.0.clone())),
+                Running,
+                OperationState::Running,
+            ));
+            mailbox.wake.unpark();
+            break;
         }
         let checkout = checkout.clone();
         let mut environment = settings.0.clone();
         if let Some(executable) = executable {
             environment.set("VMUX_DX_PROVIDER_EXECUTABLE", executable.path().as_os_str());
-        }
-        if let Some(local) = local {
-            environment.set("VMUX_DX_LOCAL_APP", local.0.as_os_str());
         }
         let storage = storage.clone();
         let lease = lease.map(|lease| lease.0.clone());
@@ -1283,56 +1371,6 @@ fn receive(mailbox: Res<Mailbox>, mut messages: MessageWriter<Completion>) {
     }
 }
 
-type Selections<'w, 's> = Query<
-    'w,
-    's,
-    (Entity, &'static local::Selection, &'static Children),
-    (
-        With<local::Inspected>,
-        Without<local::Target>,
-        Without<CliResult>,
-    ),
->;
-
-fn select_local(operations: Selections, entries: Query<&local::Entry>, mut commands: Commands) {
-    for (entity, selection, children) in &operations {
-        let prefix = format!("{} (", selection.product);
-        let mut latest = None;
-        for child in children.iter() {
-            let Ok(entry) = entries.get(child) else {
-                continue;
-            };
-            if !entry.directory || entry.symlink {
-                continue;
-            }
-            let Some(name) = entry.path.file_name().and_then(|name| name.to_str()) else {
-                continue;
-            };
-            if !name.starts_with(&prefix) || !name.ends_with(").app") {
-                continue;
-            }
-            if latest.is_none_or(|previous: &local::Entry| entry.modified > previous.modified) {
-                latest = Some(entry);
-            }
-        }
-        match latest {
-            Some(entry) => {
-                commands
-                    .entity(entity)
-                    .insert(local::Target(entry.path.clone()));
-            }
-            None => {
-                commands.entity(entity).insert((
-                    OperationState::Failed,
-                    CliResult(Err(
-                        "No completed local app; run vmux build -p local first".into()
-                    )),
-                ));
-            }
-        }
-    }
-}
-
 fn cancel(
     signals: Option<Res<signals::Signals>>,
     mut operations: Cancellations,
@@ -1357,18 +1395,18 @@ fn cancel(
 
 fn collect(
     mut completions: MessageReader<Completion>,
-    steps: Query<(&ChildOf, &Attempt), With<Running>>,
-    mut operations: Query<(&mut Settings, &mut OperationState), With<Accepted>>,
+    steps: Query<(&ChildOf, &Attempt, &Work), With<Running>>,
+    mut operations: Query<(&mut Settings, &mut OperationState, &Storage), With<Accepted>>,
     mut commands: Commands,
 ) {
     for completion in completions.read() {
-        let Ok((parent, attempt)) = steps.get(completion.entity) else {
+        let Ok((parent, attempt, work)) = steps.get(completion.entity) else {
             continue;
         };
         if attempt.0 != completion.attempt {
             continue;
         }
-        let Ok((mut settings, mut state)) = operations.get_mut(parent.parent()) else {
+        let Ok((mut settings, mut state, storage)) = operations.get_mut(parent.parent()) else {
             continue;
         };
         if *state == OperationState::Canceled {
@@ -1378,15 +1416,23 @@ fn collect(
                 .insert((Completed, OperationState::Canceled));
             continue;
         }
+        if matches!(work, Work::WorkspaceAcquire)
+            && completion.result.is_ok()
+            && let Err(error) = storage.guard()
+        {
+            *state = OperationState::Failed;
+            commands
+                .entity(completion.entity)
+                .remove::<Running>()
+                .insert((Completed, OperationState::Failed));
+            commands
+                .entity(parent.parent())
+                .insert(CliResult(Err(error.to_string())));
+            continue;
+        }
         match &completion.result {
             Ok(outcome) => {
                 match outcome {
-                    Outcome::LocalEntries(entries) => {
-                        for entry in entries {
-                            commands.spawn((entry.clone(), Completed, ChildOf(parent.parent())));
-                        }
-                        commands.entity(parent.parent()).insert(local::Inspected);
-                    }
                     Outcome::Executable(executable) => {
                         commands
                             .entity(parent.parent())

@@ -83,7 +83,10 @@ impl Checkout {
 
 #[cfg(test)]
 mod tests {
+    use crate::debug_io::{Guard, Task};
+    use crate::repository_io::Read;
     use std::process::Command;
+    use vmux_ecs::jobs::JobRequest;
 
     use super::*;
 
@@ -107,9 +110,24 @@ mod tests {
                     branch: branch.map(OsString::from),
                 })
                 .id();
-            app.update();
-            if let Some(checkout) = app.world().get::<Checkout>(entity) {
-                return Ok(checkout.clone());
+            let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+            loop {
+                app.update();
+                if let Some(checkout) = app.world().get::<Checkout>(entity) {
+                    return Ok(checkout.clone());
+                }
+                if app
+                    .world()
+                    .get::<vmux_ecs::cli::CliResult>(entity)
+                    .is_some()
+                {
+                    break;
+                }
+                assert!(
+                    std::time::Instant::now() < deadline,
+                    "repository selection did not complete"
+                );
+                std::thread::park_timeout(std::time::Duration::from_millis(10));
             }
             Err(app
                 .world()
@@ -227,6 +245,89 @@ mod tests {
             self.git(&["worktree", "add", "-b", branch, path.to_str().unwrap()]);
             path.canonicalize().unwrap()
         }
+    }
+
+    #[test]
+    fn removing_the_request_cancels_its_git_process_without_blocking_the_schedule() {
+        let fixture = Fixture::new();
+        let mut app = bevy_app::App::new();
+        app.add_plugins(crate::repository_selection::Plugin);
+        let request = app
+            .world_mut()
+            .spawn(crate::repository_selection::Input {
+                path: fixture.root.clone(),
+                branch: Some("main".into()),
+            })
+            .id();
+        app.update();
+        let job = app
+            .world_mut()
+            .query_filtered::<Entity, With<Read>>()
+            .single(app.world())
+            .unwrap();
+        let read = Read {
+            root: fixture.root.clone(),
+            arguments: vec!["-c", "alias.wait=!echo $$ > read-started; sleep 2", "wait"],
+        };
+        let (guard, flight) = Guard::new(
+            None,
+            Vec::new(),
+            app.world().resource::<vmux_ecs::jobs::JobWake>().0.clone(),
+        );
+        app.world_mut().entity_mut(job).insert((
+            read.clone(),
+            flight,
+            JobRequest(Task { job: read, guard }),
+        ));
+        app.update();
+        let started = fixture.root.join("read-started");
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(3);
+        while !started.exists() {
+            assert!(
+                std::time::Instant::now() < deadline,
+                "Git read never started"
+            );
+            std::thread::park_timeout(std::time::Duration::from_millis(10));
+        }
+        let process: i32 = fs::read_to_string(started).unwrap().trim().parse().unwrap();
+        let update = std::time::Instant::now();
+        app.update();
+        assert!(
+            update.elapsed() < std::time::Duration::from_millis(250),
+            "Git read blocked the ECS schedule"
+        );
+        app.world_mut().despawn(request);
+        app.update();
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(1);
+        while unsafe { libc::kill(process, 0) } == 0 {
+            assert!(
+                std::time::Instant::now() < deadline,
+                "Git process survived its owner removal"
+            );
+            std::thread::park_timeout(std::time::Duration::from_millis(10));
+        }
+        assert!(app.world().get_entity(job).is_err());
+    }
+
+    #[test]
+    fn submodule_primary_checkout_is_resolved_from_its_git_directory() {
+        let fixture = Fixture::cloud();
+        let source = fixture.client(&fixture.directory.path().join("source"), "client-primary");
+        fixture.git(&[
+            "-c",
+            "protocol.file.allow=always",
+            "submodule",
+            "add",
+            source.to_str().unwrap(),
+            "client",
+        ]);
+        assert_eq!(
+            fixture
+                .resolve(&fixture.root, Some(OsStr::new("client-primary")))
+                .unwrap()
+                .root,
+            fixture.root.join("client").canonicalize().unwrap()
+        );
     }
 
     #[test]

@@ -40,8 +40,6 @@ pub enum Work {
     Css,
     FlattenWeb,
     Run(String, String),
-    LocalEntries,
-    LocalLaunch,
     Stop,
     Simulator,
     Reset,
@@ -55,6 +53,7 @@ pub enum Work {
     CliCompile,
     CliPackage(bool),
     WorkspaceCompile(String, String, std::path::PathBuf),
+    WorkspaceSnapshot(String),
     WorkspaceAcquire,
     WorkspaceInvoke(Vec<OsString>),
 }
@@ -89,8 +88,6 @@ impl Work {
             Self::Css => "Build stylesheet",
             Self::FlattenWeb => "Publish web artifact",
             Self::Run(_, _) => "Run artifact",
-            Self::LocalEntries => "Read completed local artifact entries",
-            Self::LocalLaunch => "Launch selected local artifact",
             Self::Stop => "Stop development service",
             Self::Simulator => "Prepare simulator",
             Self::Reset => "Reset layout files",
@@ -104,6 +101,7 @@ impl Work {
             Self::CliCompile => "Build standalone release CLI",
             Self::CliPackage(_) => "Verify and package standalone release CLI",
             Self::WorkspaceCompile(_, _, _) => "Build workspace CLI provider",
+            Self::WorkspaceSnapshot(_) => "Publish workspace CLI executable snapshot",
             Self::WorkspaceInvoke(_) => "Run workspace CLI provider",
         }
     }
@@ -120,17 +118,14 @@ impl Work {
         let mut native = Native::new(checkout, environment.clone());
         match self {
             Self::WorkspaceAcquire => {
-                storage.guard()?;
                 let lease = Arc::new(TargetLock::acquire(&checkout.root, &checkout.target)?);
-                storage.guard()?;
                 return Ok(Outcome::Lease(lease));
             }
-            Self::WorkspaceCompile(package, binary, cargo) => {
-                return Ok(Outcome::Executable(
-                    native.workspace_compile(package, binary, cargo)?,
-                ));
+            Self::WorkspaceCompile(_, _, _)
+            | Self::WorkspaceSnapshot(_)
+            | Self::WorkspaceInvoke(_) => {
+                return Err("Workspace commands require their registered ECS systems".into());
             }
-            Self::WorkspaceInvoke(arguments) => native.workspace_invoke(arguments)?,
             Self::Acquire => {
                 let owner = std::env::var("VMUX_TARGET_LOCK_OWNER_PID")
                     .ok()
@@ -160,7 +155,6 @@ impl Work {
                 }
             }
             Self::Native => native.ensure_native()?,
-            Self::Codesign => return Ok(Outcome::Identity(native.identity()?)),
             Self::Helper => native.helper()?,
             Self::PackageTools => native.package_tools()?,
             Self::Dioxus(platform) => {
@@ -180,20 +174,13 @@ impl Work {
             }
             Self::Tool(program, args) => native.tool(program, args)?,
             Self::Cargo(args) => native.cargo(args)?,
-            Self::ClearReady => native.clear_ready()?,
-            Self::SignDebug => native.sign_debug()?,
-            Self::BundleDebug => native.bundle_debug()?,
-            Self::PublishDebug => {
-                native.publish_debug()?;
-                let name = if cfg!(target_os = "macos") {
-                    "Vmux Dev.app"
-                } else {
-                    "vmux_desktop"
-                };
-                return Ok(Outcome::Artifacts(vec![
-                    checkout.directory("debug").join(name),
-                ]));
-            }
+            Self::Codesign
+            | Self::ClearReady
+            | Self::SignDebug
+            | Self::BundleDebug
+            | Self::PublishDebug
+            | Self::Run(_, _)
+            | Self::Stop => return Err("Debug work requires its registered ECS systems".into()),
             Self::Package(profile) => return Ok(Outcome::Artifacts(native.package(profile)?)),
             Self::ResourcesIos => native.resources_ios()?,
             Self::ReleaseIos => {
@@ -207,12 +194,6 @@ impl Work {
             Self::VerifyIos(signed) => native.verify_ios(*signed)?,
             Self::Css => native.css()?,
             Self::FlattenWeb => native.flatten_web()?,
-            Self::Run(profile, platform) => native.run(profile, platform)?,
-            Self::LocalEntries => return Ok(Outcome::LocalEntries(native.local_entries()?)),
-            Self::LocalLaunch => native.launch_local(std::path::Path::new(
-                environment.required("VMUX_DX_LOCAL_APP")?,
-            ))?,
-            Self::Stop => native.stop()?,
             Self::Simulator => native.simulator()?,
             Self::Reset => native.reset_layout()?,
             Self::Doctor => native.doctor()?,
@@ -249,8 +230,8 @@ impl Work {
     }
 }
 
+#[derive(Clone)]
 pub enum Outcome {
-    LocalEntries(Vec<crate::local::Entry>),
     Executable(crate::workspace::Executable),
     Done,
     Lease(Arc<TargetLock>),

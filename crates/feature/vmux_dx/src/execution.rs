@@ -88,7 +88,7 @@ impl Execution {
             if let Some(status) = child.try_wait()? {
                 return Ok(status);
             }
-            if Signals::check().is_err() {
+            if Signals::check().is_err() || vmux_ecs::blocking::BlockingCancellation::canceled() {
                 Signals::terminate_group(child.id());
                 return child.wait();
             }
@@ -119,7 +119,7 @@ impl Execution {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Failure {
     code: i32,
     message: String,
@@ -145,7 +145,7 @@ impl Failure {
         }
     }
 
-    fn status(status: ExitStatus) -> Self {
+    pub(crate) fn status(status: ExitStatus) -> Self {
         let code = match status.code() {
             Some(code) => code,
             None => 128 + status.signal().unwrap_or(1),

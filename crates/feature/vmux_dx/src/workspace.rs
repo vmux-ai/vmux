@@ -318,17 +318,24 @@ fn resolve(
             failure.0 = Some("Workspace provider Cargo manifest escapes its workspace".into());
             return;
         }
-        let (path, feature) = match MetadataFile(provider.root.join(&manifest.0)).feature() {
-            Ok(value) => value,
+        let path = match provider.root.join(&manifest.0).canonicalize() {
+            Ok(path) => path,
             Err(error) => {
                 failure.0 = Some(error.to_string());
                 return;
             }
         };
-        if !path.starts_with(&provider.root) {
+        if !path.starts_with(&provider.root) || !path.is_file() {
             failure.0 = Some("Workspace provider manifest escapes its workspace".into());
             return;
         }
+        let feature = match MetadataFile(path).feature() {
+            Ok(feature) => feature,
+            Err(error) => {
+                failure.0 = Some(error.to_string());
+                return;
+            }
+        };
         provider.cargo = cargo;
         commands
             .entity(entity)
@@ -476,6 +483,7 @@ fn validate(
 
 #[derive(SystemParam)]
 struct Catalog<'w, 's> {
+    children: Query<'w, 's, &'static Children>,
     commands: Query<
         'w,
         's,
@@ -493,17 +501,19 @@ struct Catalog<'w, 's> {
 impl Catalog<'_, '_> {
     fn command(&self, entity: Entity) -> CliCommandManifest {
         let (_, command, name, _, _) = self.commands.get(entity).unwrap();
-        let mut children = self
-            .commands
-            .iter()
-            .filter(|(_, _, _, _, parent)| parent.parent() == entity)
-            .collect::<Vec<_>>();
+        let mut children = Vec::new();
+        let mut declarations = Vec::new();
+        if let Ok(owned) = self.children.get(entity) {
+            for child in owned.iter() {
+                if let Ok(command) = self.commands.get(child) {
+                    children.push(command);
+                }
+                if let Ok(argument) = self.arguments.get(child) {
+                    declarations.push(argument);
+                }
+            }
+        }
         children.sort_by_key(|(_, _, _, order, _)| order.0);
-        let mut declarations = self
-            .arguments
-            .iter()
-            .filter(|(_, _, parent)| parent.parent() == entity)
-            .collect::<Vec<_>>();
         declarations.sort_by_key(|(_, order, _)| order.0);
         let mut arguments = Vec::new();
         for (argument, _, _) in declarations {
@@ -527,11 +537,14 @@ impl Catalog<'_, '_> {
 
 fn project(providers: Query<Entity, With<Validated>>, catalog: Catalog, mut commands: Commands) {
     for provider in &providers {
-        let mut roots = catalog
-            .commands
-            .iter()
-            .filter(|(_, _, _, _, parent)| parent.parent() == provider)
-            .collect::<Vec<_>>();
+        let mut roots = Vec::new();
+        if let Ok(children) = catalog.children.get(provider) {
+            for child in children.iter() {
+                if let Ok(command) = catalog.commands.get(child) {
+                    roots.push(command);
+                }
+            }
+        }
         roots.sort_by_key(|(_, _, _, order, _)| order.0);
         let mut feature = FeatureManifest::parse("()");
         let mut cli: CliManifest = ron::from_str("(commands: [])").unwrap();
@@ -583,16 +596,28 @@ fn route(
         }
         path.reverse();
         let mut arguments = Vec::new();
+        let mut trailing = Vec::new();
         let mut known = BTreeSet::new();
         for command in path {
             let (_, _, name, _, _) = catalog.commands.get(command).unwrap();
             arguments.push(OsString::from(name.as_str()));
-            let mut declarations = catalog
-                .arguments
-                .iter()
-                .filter(|(_, _, parent)| parent.parent() == command)
-                .collect::<Vec<_>>();
-            declarations.sort_by_key(|(_, order, _)| order.0);
+            let mut declarations = Vec::new();
+            if let Ok(children) = catalog.children.get(command) {
+                for child in children.iter() {
+                    if let Ok(argument) = catalog.arguments.get(child) {
+                        declarations.push(argument);
+                    }
+                }
+            }
+            declarations.sort_by_key(|(argument, order, _)| {
+                if argument.0.trailing {
+                    (2, 0, order.0)
+                } else if let Some(index) = argument.0.index {
+                    (1, index as u32, order.0)
+                } else {
+                    (0, 0, order.0)
+                }
+            });
             for (argument, _, _) in declarations {
                 let argument = &argument.0;
                 known.insert(argument.id.as_str());
@@ -601,8 +626,7 @@ fn route(
                 };
                 if argument.trailing {
                     if !values.is_empty() {
-                        arguments.push("--".into());
-                        arguments.extend(values.iter().cloned());
+                        trailing.extend(values.iter().cloned());
                     }
                     continue;
                 }
@@ -618,6 +642,10 @@ fn route(
                     arguments.extend(values.iter().cloned());
                 }
             }
+        }
+        if !trailing.is_empty() {
+            arguments.push("--".into());
+            arguments.extend(trailing);
         }
         if invocation
             .arguments

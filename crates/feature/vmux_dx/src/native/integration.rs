@@ -33,10 +33,6 @@ impl Native {
             "install-dioxus" => self.install_dioxus(),
             "install-binaryen" => self.binaryen(),
             "install-tailwindcss" => self.tailwind(),
-            "ensure-signing" => {
-                println!("{}", self.identity()?);
-                Ok(())
-            }
             "verify-web-bundle" => {
                 let path = args
                     .first()
@@ -55,8 +51,6 @@ impl Native {
             "ios-release" => self.ios_release(),
             "ios-upload" => self.ios_upload(),
             "ios-verify" => self.verify_ios(args.iter().any(|arg| arg == "--signed")),
-            "debug-sign" => self.sign_debug(),
-            "debug-bundle" => self.bundle_debug(),
             "extension-conformance" => self.conformance(),
             "setup-hooks" => self.hooks(),
             "target-seed-key" => {

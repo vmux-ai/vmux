@@ -4,23 +4,34 @@ use std::path::PathBuf;
 
 use bevy_app::{App, Update};
 use bevy_ecs::prelude::*;
-use vmux_ecs::Order;
-use vmux_ecs::cli::{CliInvocation, CliResult};
+use vmux_ecs::cli::{CliInvocation, CliResult, CliWake};
+use vmux_ecs::jobs::{JobOwner, JobPlugin, JobRequest, JobResult, JobSet, JobWake};
+use vmux_ecs::{Cwd, Operation, OperationState, Order};
 
 use crate::Completed;
+use crate::debug_io::{Flight, Task};
 use crate::repository::Checkout;
-use crate::repository_io::Repository;
+use crate::repository_io::Read;
+use crate::signals::Signals;
 
 pub struct Plugin;
 
 impl bevy_app::Plugin for Plugin {
     fn build(&self, app: &mut App) {
-        app.add_systems(
-            Update,
-            (request, seed, locate, inspect, choose, finish)
-                .chain()
-                .in_set(Stage::Resolve),
-        );
+        if !app.world().contains_resource::<JobWake>() {
+            app.insert_resource(JobWake(std::sync::Arc::new(CliWake::current()).into()));
+        }
+        app.add_plugins(JobPlugin::<Task<Read>>::default())
+            .configure_sets(Update, Stage::Resolve.in_set(JobSet::Apply))
+            .add_systems(
+                Update,
+                (
+                    request, seed, locate, inspect, cancel, collect, schedule, normalize, discover,
+                    settle, choose, finish,
+                )
+                    .chain()
+                    .in_set(Stage::Resolve),
+            );
     }
 }
 
@@ -37,9 +48,6 @@ pub struct Input {
 
 #[derive(Component)]
 struct Seeded;
-
-#[derive(Component)]
-struct Folder(PathBuf);
 
 #[derive(Component)]
 struct Directory {
@@ -113,7 +121,7 @@ fn seed(requests: Seeding, mut commands: Commands) {
         let mut order = 0;
         loop {
             commands.spawn((
-                Folder(path.clone()),
+                Cwd(path.clone()),
                 Directory {
                     client: path.join("crates/app/vmux_cli/Cargo.toml").is_file(),
                     cloud: path.join(".gitmodules").is_file() && path.join("Cargo.toml").is_file(),
@@ -162,89 +170,443 @@ fn locate(
     }
 }
 
+#[derive(Component)]
+struct Scanned;
+
+#[derive(Component)]
+struct Scan {
+    cloud: bool,
+    nested: bool,
+    owner: Entity,
+}
+
+#[derive(Component)]
+struct Listed;
+
+#[derive(Component)]
+struct Common(PathBuf);
+
+#[derive(Component)]
+struct RootSetting(Option<PathBuf>);
+
+#[derive(Component)]
+struct Normalized;
+
+#[derive(Component)]
+struct Origin(Entity);
+
+#[derive(Component, Clone, Copy, PartialEq, Eq)]
+enum Field {
+    Worktrees,
+    Common,
+    Root,
+}
+
 type Inspecting<'w, 's> = Query<
     'w,
     's,
     (Entity, &'static Input, &'static Location),
-    (Without<Inspected>, Without<CliResult>),
+    (Without<Scanned>, Without<CliResult>),
 >;
 
-fn inspect(
-    requests: Inspecting,
-    directories: Query<(&Folder, &Directory)>,
-    mut commands: Commands,
-) {
+fn inspect(requests: Inspecting, directories: Query<(&Cwd, &Directory)>, mut commands: Commands) {
     for (entity, input, location) in &requests {
-        let (folder, directory) = directories.get(location.0).unwrap();
         if input.branch.is_none() {
-            commands.entity(entity).insert(Inspected);
+            commands.entity(entity).insert((Scanned, Inspected));
             continue;
         }
-        let roots = match Repository(folder.0.clone()).worktrees() {
-            Ok(records) => records,
+        let (cwd, directory) = directories.get(location.0).unwrap();
+        commands.spawn((
+            Operation::bundle("dx.repository.scan").unwrap().running(),
+            Cwd(cwd.0.clone()),
+            Scan {
+                cloud: directory.cloud,
+                nested: false,
+                owner: entity,
+            },
+            ChildOf(entity),
+        ));
+        commands.entity(entity).insert(Scanned);
+    }
+}
+
+type CancelingReads<'w, 's> =
+    Query<'w, 's, (&'static ChildOf, &'static mut OperationState), (With<Read>, Without<Scan>)>;
+
+type Unresolved<'w, 's> = Query<
+    'w,
+    's,
+    Entity,
+    (
+        With<Input>,
+        Without<Checkout>,
+        Without<crate::Accepted>,
+        Without<CliResult>,
+    ),
+>;
+
+fn cancel(
+    requests: Unresolved,
+    mut scans: Query<(Entity, &Scan, &mut OperationState), Without<Read>>,
+    mut reads: CancelingReads,
+    flights: Query<&Flight>,
+    mut commands: Commands,
+) {
+    let Some(signal) = Signals::pending() else {
+        return;
+    };
+    for entity in &requests {
+        if !Signals::active() && !flights.iter().any(Flight::pending) {
+            commands
+                .entity(entity)
+                .insert(CliResult(Ok((128 + signal) as u8)));
+        }
+        for (scan_entity, scan, mut state) in &mut scans {
+            if scan.owner != entity {
+                continue;
+            }
+            *state = OperationState::Canceled;
+            for (parent, mut state) in &mut reads {
+                if parent.parent() == scan_entity {
+                    *state = OperationState::Canceled;
+                }
+            }
+        }
+    }
+}
+
+type Scheduling<'w, 's> = Query<
+    'w,
+    's,
+    (
+        Entity,
+        &'static Scan,
+        &'static Cwd,
+        &'static ChildOf,
+        Option<&'static Listed>,
+        Option<&'static Common>,
+    ),
+    (Without<RootSetting>, Without<Completed>),
+>;
+
+fn schedule(
+    scans: Scheduling,
+    requests: Query<Entity, (With<Input>, Without<CliResult>)>,
+    reads: Query<&OperationState, With<Read>>,
+    running: Query<Entity, With<crate::Running>>,
+    wake: Res<JobWake>,
+    mut commands: Commands,
+) {
+    if Signals::pending().is_some()
+        || !running.is_empty()
+        || reads
+            .iter()
+            .any(|state| matches!(state, OperationState::Pending | OperationState::Running))
+    {
+        return;
+    }
+    for (entity, scan, cwd, parent, listed, common) in &scans {
+        if parent.parent() != scan.owner || !requests.contains(scan.owner) {
+            continue;
+        }
+        let (field, arguments) = if listed.is_none() {
+            (
+                Field::Worktrees,
+                vec!["worktree", "list", "--porcelain", "-z"],
+            )
+        } else if common.is_none() {
+            (
+                Field::Common,
+                vec!["rev-parse", "--path-format=absolute", "--git-common-dir"],
+            )
+        } else {
+            (
+                Field::Root,
+                vec!["config", "--local", "--get", "core.worktree"],
+            )
+        };
+        let read = Read {
+            root: cwd.0.clone(),
+            arguments,
+        };
+        let (task, flight) = Task::new(read.clone(), None, Vec::new(), wake.0.clone());
+        commands.spawn((
+            Operation::bundle("dx.repository.read").unwrap(),
+            field,
+            JobRequest(task),
+            flight,
+            read,
+            ChildOf(entity),
+        ));
+        wake.0.wake_by_ref();
+        break;
+    }
+}
+
+type Receipts<'w, 's> = Query<
+    'w,
+    's,
+    (
+        Entity,
+        &'static Field,
+        &'static JobResult<Task<Read>>,
+        &'static JobOwner<Task<Read>>,
+        &'static ChildOf,
+    ),
+    Without<Completed>,
+>;
+
+fn collect(
+    receipts: Receipts,
+    scans: Query<(&Scan, &ChildOf)>,
+    requests: Query<Entity, (With<Input>, Without<CliResult>)>,
+    mut commands: Commands,
+) {
+    for (entity, field, result, owner, parent) in &receipts {
+        if Signals::pending().is_some() {
+            commands
+                .entity(entity)
+                .insert((Completed, OperationState::Canceled));
+            continue;
+        }
+        let Ok((scan, request)) = scans.get(parent.parent()) else {
+            continue;
+        };
+        if !owner.accepts(Some(parent))
+            || request.parent() != scan.owner
+            || !requests.contains(scan.owner)
+        {
+            commands
+                .entity(entity)
+                .insert((Completed, OperationState::Canceled));
+            continue;
+        }
+        let report = match &result.0 {
+            Ok(report) => report,
             Err(error) => {
                 commands
+                    .entity(scan.owner)
+                    .insert(CliResult(Err(error.clone())));
+                commands
                     .entity(entity)
-                    .insert(CliResult(Err(error.to_string())));
+                    .insert((Completed, OperationState::Failed));
                 continue;
             }
         };
-        let mut seen = BTreeSet::new();
-        for record in roots {
-            let path = record.path;
-            commands.spawn((
-                Folder(path.clone()),
-                Worktree {
-                    branch: record.branch,
-                    cloud: directory.cloud,
-                },
-                ChildOf(entity),
-                Completed,
-            ));
-            if !directory.cloud {
+        let output = match &report.result {
+            Ok(output) => output,
+            Err(error) => {
+                commands
+                    .entity(scan.owner)
+                    .insert(CliResult(Err(error.clone())));
+                commands
+                    .entity(entity)
+                    .insert((Completed, OperationState::Failed));
                 continue;
             }
-            let client = path.join("client");
-            if !client.join(".git").exists() {
+        };
+        let missing = *field == Field::Root && output.status.code() == Some(1);
+        if !(output.status.success() || missing) {
+            commands.entity(scan.owner).insert(CliResult(Err(format!(
+                "Git repository read failed: {}: {}",
+                output.status,
+                String::from_utf8_lossy(&output.stderr)
+            ))));
+            commands
+                .entity(entity)
+                .insert((Completed, OperationState::Failed));
+            continue;
+        }
+        let text = match std::str::from_utf8(&output.stdout) {
+            Ok(text) => text,
+            Err(error) => {
+                commands
+                    .entity(scan.owner)
+                    .insert(CliResult(Err(error.to_string())));
+                commands
+                    .entity(entity)
+                    .insert((Completed, OperationState::Failed));
                 continue;
             }
-            match Repository(client).worktrees() {
-                Ok(records) => {
-                    for record in records {
-                        if !record.path.join(".git").exists() {
-                            continue;
-                        }
-                        let path = match record.path.canonicalize() {
-                            Ok(path) => path,
-                            Err(error) => {
-                                commands
-                                    .entity(entity)
-                                    .insert(CliResult(Err(error.to_string())));
-                                break;
-                            }
-                        };
-                        if seen.insert(path.clone()) {
-                            commands.spawn((
-                                Folder(path),
-                                Worktree {
-                                    branch: record.branch,
-                                    cloud: false,
-                                },
-                                ChildOf(entity),
-                                Completed,
-                            ));
-                        }
+        };
+        match field {
+            Field::Worktrees => {
+                let mut path = None;
+                let mut branch = None;
+                for value in text.split('\0') {
+                    if let Some(value) = value.strip_prefix("worktree ") {
+                        path = Some(PathBuf::from(value));
+                    } else if let Some(value) = value.strip_prefix("branch refs/heads/") {
+                        branch = Some(OsString::from(value));
+                    } else if value.is_empty()
+                        && let Some(path) = path.take()
+                    {
+                        commands.spawn((
+                            Cwd(path),
+                            Worktree {
+                                branch: branch.take(),
+                                cloud: scan.cloud,
+                            },
+                            Origin(parent.parent()),
+                            ChildOf(scan.owner),
+                            Completed,
+                        ));
                     }
                 }
+                commands.entity(parent.parent()).insert(Listed);
+            }
+            Field::Common => {
+                commands
+                    .entity(parent.parent())
+                    .insert(Common(PathBuf::from(text.trim())));
+            }
+            Field::Root => {
+                let root = if output.status.success() {
+                    Some(PathBuf::from(text.trim()))
+                } else {
+                    None
+                };
+                commands.entity(parent.parent()).insert(RootSetting(root));
+            }
+        }
+        commands
+            .entity(entity)
+            .insert((Completed, OperationState::Succeeded))
+            .remove::<JobResult<Task<Read>>>();
+    }
+}
+
+fn normalize(
+    scans: Query<(Entity, &Scan, &Common, &RootSetting), Without<Normalized>>,
+    mut worktrees: Query<(Entity, &mut Cwd, &Origin), With<Worktree>>,
+    mut commands: Commands,
+) {
+    for (entity, scan, common, setting) in &scans {
+        let primary = match &setting.0 {
+            Some(path) => match common.0.join(path).canonicalize() {
+                Ok(path) => Some(path),
                 Err(error) => {
                     commands
-                        .entity(entity)
+                        .entity(scan.owner)
                         .insert(CliResult(Err(error.to_string())));
-                    break;
+                    continue;
+                }
+            },
+            None => None,
+        };
+        for (candidate, mut cwd, origin) in &mut worktrees {
+            if origin.0 != entity {
+                continue;
+            }
+            if let Some(primary) = &primary
+                && cwd.0 == common.0
+            {
+                cwd.0 = primary.clone();
+            }
+            if scan.nested {
+                if !cwd.0.join(".git").exists() {
+                    commands.entity(candidate).despawn();
+                    continue;
+                }
+                match cwd.0.canonicalize() {
+                    Ok(path) => cwd.0 = path,
+                    Err(error) => {
+                        commands
+                            .entity(scan.owner)
+                            .insert(CliResult(Err(error.to_string())));
+                        break;
+                    }
                 }
             }
         }
-        commands.entity(entity).insert(Inspected);
+        commands.entity(entity).insert(Normalized);
+    }
+}
+
+type Discovering<'w, 's> = Query<
+    'w,
+    's,
+    (Entity, &'static Scan, &'static ChildOf),
+    (With<Normalized>, Without<Completed>),
+>;
+
+fn discover(
+    scans: Discovering,
+    known: Query<(&Cwd, &Scan)>,
+    worktrees: Query<(&Cwd, &Origin), With<Worktree>>,
+    requests: Query<Entity, (With<Input>, Without<CliResult>)>,
+    wake: Res<JobWake>,
+    mut commands: Commands,
+) {
+    for (entity, scan, parent) in &scans {
+        if parent.parent() != scan.owner || !requests.contains(scan.owner) {
+            commands
+                .entity(entity)
+                .insert((Completed, OperationState::Canceled));
+            continue;
+        }
+        let mut paths = BTreeSet::new();
+        for (cwd, previous) in &known {
+            if previous.owner == scan.owner {
+                paths.insert(cwd.0.clone());
+            }
+        }
+        if scan.cloud {
+            for (cwd, origin) in &worktrees {
+                if origin.0 != entity {
+                    continue;
+                }
+                let client = cwd.0.join("client");
+                if !client.join(".git").exists() || !paths.insert(client.clone()) {
+                    continue;
+                }
+                commands.spawn((
+                    Operation::bundle("dx.repository.scan").unwrap().running(),
+                    Cwd(client),
+                    Scan {
+                        cloud: false,
+                        nested: true,
+                        owner: scan.owner,
+                    },
+                    ChildOf(scan.owner),
+                ));
+                wake.0.wake_by_ref();
+            }
+        }
+        commands
+            .entity(entity)
+            .insert((Completed, OperationState::Succeeded));
+    }
+}
+
+type Settling<'w, 's> = Query<
+    'w,
+    's,
+    (Entity, &'static Children),
+    (With<Scanned>, Without<Inspected>, Without<CliResult>),
+>;
+
+fn settle(
+    requests: Settling,
+    completed: Query<Entity, (With<Scan>, With<Completed>)>,
+    scans: Query<Entity, With<Scan>>,
+    worktrees: Query<(Entity, &Cwd, &Worktree, &ChildOf)>,
+    mut commands: Commands,
+) {
+    for (request, children) in &requests {
+        if children
+            .iter()
+            .any(|child| scans.contains(child) && !completed.contains(child))
+        {
+            continue;
+        }
+        let mut paths = BTreeSet::new();
+        for (entity, cwd, worktree, parent) in &worktrees {
+            if parent.parent() == request && !worktree.cloud && !paths.insert(cwd.0.clone()) {
+                commands.entity(entity).despawn();
+            }
+        }
+        commands.entity(request).insert(Inspected);
     }
 }
 
@@ -257,9 +619,12 @@ type Choosing<'w, 's> = Query<
 
 fn choose(
     requests: Choosing,
-    worktrees: Query<(Entity, &Folder, &Worktree, &ChildOf)>,
+    worktrees: Query<(Entity, &Cwd, &Worktree, &ChildOf)>,
     mut commands: Commands,
 ) {
+    if Signals::pending().is_some() {
+        return;
+    }
     for (request, input, location) in &requests {
         let Some(name) = &input.branch else {
             commands.entity(request).insert(Choice(location.0));
@@ -313,7 +678,10 @@ fn choose(
 type Finishing<'w, 's> =
     Query<'w, 's, (Entity, &'static Choice), (Without<Checkout>, Without<CliResult>)>;
 
-fn finish(requests: Finishing, folders: Query<&Folder>, mut commands: Commands) {
+fn finish(requests: Finishing, folders: Query<&Cwd>, mut commands: Commands) {
+    if Signals::pending().is_some() {
+        return;
+    }
     for (entity, choice) in &requests {
         let mut root = folders.get(choice.0).unwrap().0.clone();
         if !root.join("crates/app/vmux_cli/Cargo.toml").is_file() {
