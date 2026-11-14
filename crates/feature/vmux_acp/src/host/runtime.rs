@@ -70,6 +70,7 @@ impl bevy::prelude::Plugin for InputPlugin {
                 Update,
                 input
                     .after(ServiceMessageSet)
+                    .after(crate::host::model_selection::ModelSelectionSet)
                     .before(vmux_session::TranscriptReadySet),
             )
             .add_observer(auto_allow);
@@ -369,6 +370,12 @@ fn present_process(
     }
 }
 
+#[derive(Component)]
+pub(super) struct PreferencesBlocked {
+    file: Entity,
+    error: String,
+}
+
 fn input(
     mut q: Query<(
         Entity,
@@ -379,12 +386,14 @@ fn input(
         Has<TitlePending>,
         Option<&mut PendingHandoff>,
         Option<&mut ImportedConversation>,
+        Option<&PreferencesBlocked>,
     )>,
     workspace: PromptWorkspace,
     policy: Single<&AcpWorkspacePolicy>,
-    modes: Option<Single<&crate::host::model_selection::AgentModeSelections>>,
+    modes: crate::host::model_selection::AgentPreferences,
     mut service_requests: MessageWriter<ServiceRequest>,
     mut queues: QueuedPrompts,
+    mut commands: Commands,
 ) {
     for (
         entity,
@@ -395,8 +404,34 @@ fn input(
         title_pending,
         mut pending,
         mut imported,
+        blocked,
     ) in &mut q
     {
+        let kind = crate::host::model_selection::Kind::Modes;
+        if let Some(blocked) = blocked {
+            if modes.file(kind) != Some(blocked.file) {
+                continue;
+            }
+            if modes.ready(kind) {
+                if matches!(&*state, RunState::Errored(error) if *error == blocked.error) {
+                    *state = RunState::Idle;
+                }
+                commands.entity(entity).remove::<PreferencesBlocked>();
+            }
+        }
+        if !modes.ready(kind) {
+            if spawn_queued
+                && queues.ready(entity, matches!(*state, RunState::Idle))
+                && let Some((file, error)) = modes.load_error(kind)
+            {
+                *state = RunState::Errored(error.to_string());
+                commands.entity(entity).insert(PreferencesBlocked {
+                    file,
+                    error: error.to_string(),
+                });
+            }
+            continue;
+        }
         if !spawn_queued || !queues.ready(entity, matches!(*state, RunState::Idle)) {
             continue;
         }
@@ -419,10 +454,9 @@ fn input(
         let workspace_state = workspace.state(entity);
         let context = PromptWorkspace::prompt(&policy, handoff, workspace_state, title_pending);
         let preferred_mode = modes
-            .as_ref()
-            .and_then(|modes| modes.by_agent.get(&agent_id.0))
-            .map(|memory| memory.selected.clone())
-            .filter(|mode| !mode.is_empty());
+            .mode(&agent_id.0)
+            .filter(|mode| !mode.is_empty())
+            .map(str::to_string);
         service_requests.write(ServiceRequest(
             SharedMessage::AgentInput {
                 sid: session_id.0.clone(),
@@ -511,12 +545,23 @@ mod tests {
     struct DispatchFixture {
         app: App,
         session: Entity,
+        _directory: tempfile::TempDir,
     }
 
     impl DispatchFixture {
         fn new(state: RunState) -> Self {
             let mut app = App::new();
-            app.add_plugins((MinimalPlugins, vmux_session::QueuePlugin, InputPlugin));
+            let directory = tempfile::tempdir().unwrap();
+            app.add_plugins((
+                MinimalPlugins,
+                vmux_session::QueuePlugin,
+                vmux_session::preferences::Plugin,
+                InputPlugin,
+            ));
+            app.world_mut()
+                .write_message(vmux_session::preferences::ProfileRequested(
+                    directory.path().to_path_buf(),
+                ));
             app.world_mut()
                 .spawn(crate::policy_driver::PolicyDriver::bundled());
             let session = app
@@ -527,7 +572,31 @@ mod tests {
                     state,
                 ))
                 .id();
-            Self { app, session }
+            let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+            loop {
+                app.update();
+                if app
+                    .world_mut()
+                    .run_system_once(
+                        |preferences: crate::host::model_selection::AgentPreferences| {
+                            preferences.ready(crate::host::model_selection::Kind::Modes)
+                        },
+                    )
+                    .unwrap()
+                {
+                    break;
+                }
+                assert!(
+                    std::time::Instant::now() < deadline,
+                    "dispatch preferences did not load"
+                );
+                std::thread::sleep(std::time::Duration::from_millis(1));
+            }
+            Self {
+                app,
+                session,
+                _directory: directory,
+            }
         }
 
         fn enqueue(
@@ -681,6 +750,160 @@ mod tests {
                 ),
             ]
         );
+    }
+
+    #[test]
+    fn queued_prompts_wait_for_stored_modes_and_use_current_agent_preferences_once() {
+        let directory = tempfile::tempdir().unwrap();
+        std::fs::write(
+            directory.path().join("agent-modes.json"),
+            r#"{"one":{"selected":"auto","modes":[{"id":"auto","name":"Auto"},{"id":"ask","name":"Ask"}]},"two":{"selected":"ask","modes":[]}}"#,
+        )
+        .unwrap();
+        let lock = std::fs::OpenOptions::new()
+            .create(true)
+            .truncate(false)
+            .read(true)
+            .write(true)
+            .open(directory.path().join(".agent-modes.json.lock"))
+            .unwrap();
+        lock.lock().unwrap();
+        let mut app = App::new();
+        app.add_plugins((
+            bevy::app::TaskPoolPlugin::default(),
+            vmux_session::preferences::Plugin,
+            vmux_session::QueuePlugin,
+            super::Plugin,
+        ));
+        app.world_mut()
+            .write_message(vmux_session::preferences::ProfileRequested(
+                directory.path().to_path_buf(),
+            ));
+        let mut entities = Vec::new();
+        for (agent, sid, text) in [("one", "s1", "first"), ("two", "s2", "second")] {
+            let entity = app
+                .world_mut()
+                .spawn((
+                    TestSession::bundle(agent, sid, directory.path()),
+                    RunState::Idle,
+                    AcpSpawnQueued,
+                ))
+                .id();
+            let text = text.to_string();
+            app.world_mut()
+                .run_system_once(move |mut queues: QueuedPrompts| {
+                    queues.enqueue(entity, text.clone(), Vec::new(), false)
+                })
+                .unwrap();
+            entities.push(entity);
+        }
+        app.update();
+        assert_eq!(
+            app.world_mut()
+                .resource_mut::<Messages<ServiceRequest>>()
+                .drain()
+                .count(),
+            0
+        );
+        for entity in &entities {
+            assert_eq!(
+                app.world_mut()
+                    .run_system_once({
+                        let entity = *entity;
+                        move |rows: vmux_session::QueuedPromptReads| rows.visible(entity).len()
+                    })
+                    .unwrap(),
+                1
+            );
+        }
+        drop(lock);
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+        let mut dispatched = Vec::new();
+        loop {
+            app.update();
+            for ServiceRequest(request) in app
+                .world_mut()
+                .resource_mut::<Messages<ServiceRequest>>()
+                .drain()
+            {
+                let ClientMessage::Shared(SharedMessage::AgentInput {
+                    sid,
+                    text,
+                    preferred_mode,
+                    ..
+                }) = request
+                else {
+                    panic!("unexpected service request: {request:?}");
+                };
+                dispatched.push((sid, text, preferred_mode));
+            }
+            if dispatched.len() == 2 {
+                break;
+            }
+            assert!(
+                std::time::Instant::now() < deadline,
+                "queued prompts did not dispatch"
+            );
+            std::thread::sleep(std::time::Duration::from_millis(1));
+        }
+        dispatched.sort();
+        assert_eq!(
+            dispatched,
+            vec![
+                ("s1".into(), "first".into(), Some("auto".into())),
+                ("s2".into(), "second".into(), Some("ask".into())),
+            ]
+        );
+        for entity in &entities {
+            assert!(
+                app.world_mut()
+                    .run_system_once({
+                        let entity = *entity;
+                        move |rows: vmux_session::QueuedPromptReads| rows.visible(entity).is_empty()
+                    })
+                    .unwrap()
+            );
+            assert!(matches!(
+                app.world().get::<RunState>(*entity),
+                Some(RunState::Streaming)
+            ));
+        }
+        app.update();
+        assert_eq!(
+            app.world_mut()
+                .resource_mut::<Messages<ServiceRequest>>()
+                .drain()
+                .count(),
+            0
+        );
+        app.world_mut()
+            .write_message(vmux_session::preferences::RememberMode {
+                agent_id: "one".into(),
+                mode_id: "ask".into(),
+            });
+        app.world_mut()
+            .run_system_once({
+                let entity = entities[0];
+                move |mut queues: QueuedPrompts| {
+                    queues.enqueue(entity, "next".into(), Vec::new(), false)
+                }
+            })
+            .unwrap();
+        app.world_mut()
+            .entity_mut(entities[0])
+            .insert(RunState::Idle);
+        app.update();
+        let requests = app
+            .world_mut()
+            .resource_mut::<Messages<ServiceRequest>>()
+            .drain()
+            .collect::<Vec<_>>();
+        assert!(matches!(
+            requests.as_slice(),
+            [ServiceRequest(ClientMessage::Shared(SharedMessage::AgentInput {
+                sid, text, preferred_mode: Some(mode), ..
+            }))] if sid == "s1" && text == "next" && mode == "ask"
+        ));
     }
 
     #[test]
@@ -1146,5 +1369,109 @@ mod tests {
         app.world_mut()
             .spawn(TestSession::bundle("vibe-acp", "s1", "/tmp"));
         app.update();
+    }
+
+    #[test]
+    fn mode_load_failure_is_visible_and_retry_dispatches_the_retained_prompt_once() {
+        let directory = tempfile::tempdir().unwrap();
+        std::fs::write(directory.path().join("agent-modes.json"), "{").unwrap();
+        let mut app = App::new();
+        app.add_plugins((
+            bevy::app::TaskPoolPlugin::default(),
+            vmux_session::QueuePlugin,
+            vmux_session::preferences::Plugin,
+            super::Plugin,
+        ));
+        app.world_mut()
+            .write_message(vmux_session::preferences::ProfileRequested(
+                directory.path().to_path_buf(),
+            ));
+        let session = app
+            .world_mut()
+            .spawn((
+                TestSession::bundle("one", "load-error", directory.path()),
+                RunState::Idle,
+                vmux_session::PromptQueue::default(),
+                AcpSpawnQueued,
+            ))
+            .id();
+        app.world_mut()
+            .run_system_once(move |mut queues: QueuedPrompts| {
+                queues.enqueue(session, "retained".into(), Vec::new(), false);
+            })
+            .unwrap();
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+        loop {
+            app.update();
+            if matches!(
+                app.world().get::<RunState>(session),
+                Some(RunState::Errored(_))
+            ) {
+                break;
+            }
+            assert!(
+                std::time::Instant::now() < deadline,
+                "mode loading failure did not reach session state"
+            );
+            std::thread::sleep(std::time::Duration::from_millis(1));
+        }
+        assert_eq!(
+            app.world_mut()
+                .run_system_once(move |queues: vmux_session::QueuedPromptReads| {
+                    queues.visible(session).len()
+                })
+                .unwrap(),
+            1
+        );
+        assert_eq!(
+            app.world_mut()
+                .resource_mut::<Messages<ServiceRequest>>()
+                .drain()
+                .count(),
+            0
+        );
+        std::fs::write(
+            directory.path().join("agent-modes.json"),
+            r#"{"one":{"selected":"ask","modes":[]}}"#,
+        )
+        .unwrap();
+        app.world_mut()
+            .write_message(vmux_session::preferences::RetryPreferences {
+                kind: vmux_session::preferences::Kind::Modes,
+            });
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+        let requests = loop {
+            app.update();
+            let requests = app
+                .world_mut()
+                .resource_mut::<Messages<ServiceRequest>>()
+                .drain()
+                .collect::<Vec<_>>();
+            if !requests.is_empty() {
+                break requests;
+            }
+            assert!(
+                std::time::Instant::now() < deadline,
+                "retained prompt did not recover after preference retry"
+            );
+            std::thread::sleep(std::time::Duration::from_millis(1));
+        };
+        assert!(
+            matches!(requests.as_slice(), [ServiceRequest(ClientMessage::Shared(SharedMessage::AgentInput { sid, text, preferred_mode: Some(mode), .. }))] if sid == "load-error" && text == "retained" && mode == "ask")
+        );
+        assert!(app.world().get::<PreferencesBlocked>(session).is_none());
+        assert!(
+            app.world_mut()
+                .run_system_once(move |queues: QueuedPrompts| queues.empty(session))
+                .unwrap()
+        );
+        app.update();
+        assert_eq!(
+            app.world_mut()
+                .resource_mut::<Messages<ServiceRequest>>()
+                .drain()
+                .count(),
+            0
+        );
     }
 }

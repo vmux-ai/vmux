@@ -44,6 +44,7 @@ pub(super) struct Plugin;
 impl bevy::prelude::Plugin for Plugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<vmux_git::GitRuntime>()
+            .add_message::<vmux_session::preferences::RetryPreferences>()
             .add_observer(cleanup)
             .add_plugins(UiEventPlugin::<(ChatRetrySession,)>::default())
             .add_observer(retry)
@@ -78,6 +79,7 @@ fn retry(
     targets: Query<&EntityTarget<Session>>,
     sessions: Query<&SessionId, With<Session>>,
     mut opens: MessageWriter<vmux_ecs::PageOpenRequest>,
+    mut preferences: MessageWriter<vmux_session::preferences::RetryPreferences>,
     mut commands: Commands,
 ) {
     let Ok(parent) = views.get(trigger.event().webview) else {
@@ -89,11 +91,18 @@ fn retry(
     let Ok(id) = sessions.get(target.entity()) else {
         return;
     };
+    for kind in [
+        vmux_session::preferences::Kind::Models,
+        vmux_session::preferences::Kind::Modes,
+    ] {
+        preferences.write(vmux_session::preferences::RetryPreferences { kind });
+    }
     commands
         .entity(target.entity())
         .remove::<(
             crate::host::acp::AcpLaunchStarted,
             crate::host::acp::AcpSpawnQueued,
+            crate::host::runtime::PreferencesBlocked,
         )>()
         .insert(RetryRequested);
     opens.write(vmux_ecs::PageOpenRequest {
@@ -1255,7 +1264,7 @@ mod tests {
     #[test]
     fn retry_reopens_the_same_session_and_preserves_its_resume_identity() {
         let mut app = App::new();
-        app.add_plugins(Plugin);
+        app.add_plugins(super::Plugin);
         app.add_message::<vmux_ecs::PageOpenRequest>();
         let session = app
             .world_mut()
