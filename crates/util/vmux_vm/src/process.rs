@@ -66,10 +66,12 @@ pub(crate) struct Process(Child, bool);
 
 impl Process {
     pub(crate) fn spawn(command: &mut Command) -> io::Result<Self> {
+        vmux_spawn::Descriptors::isolate(command)?;
         Ok(Self(command.stdin(Stdio::null()).spawn()?, false))
     }
 
     pub(crate) fn supervised(command: &mut Command) -> io::Result<Self> {
+        vmux_spawn::Descriptors::isolate(command)?;
         Ok(Self(command.stdin(Stdio::piped()).spawn()?, true))
     }
 
@@ -142,7 +144,9 @@ pub struct NetworkProxy;
 impl NetworkProxy {
     pub fn run(settings: Settings, ssh_port: u16) -> io::Result<()> {
         let _lease = Lease::named(&settings.directory, "network.lock")?;
-        let child = Command::new(Executable::find("gvproxy")?)
+        let mut command = Command::new(Executable::find("gvproxy")?);
+        vmux_spawn::Descriptors::isolate(&mut command)?;
+        let child = command
             .arg("-ssh-port")
             .arg(ssh_port.to_string())
             .arg("-listen-vfkit")

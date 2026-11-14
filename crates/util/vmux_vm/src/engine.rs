@@ -78,7 +78,12 @@ pub struct Failure(pub String);
 pub(crate) struct State {
     pub(crate) phase: Phase,
     pub(crate) failure: Option<String>,
+    #[serde(default)]
+    pub(crate) owner: Option<PathBuf>,
 }
+
+#[derive(Component)]
+struct ApplicationOwner(PathBuf);
 
 #[derive(Component)]
 struct Published(State);
@@ -122,8 +127,12 @@ impl Runtime {
             ScheduleRunnerPlugin::run_loop(Duration::from_millis(50)),
             EnginePlugin,
         ));
-        app.world_mut()
+        let mut engine = app
+            .world_mut()
             .spawn((Engine::bundle(settings, helper), ResultSink(sender)));
+        if let Some(owner) = std::env::var_os("VMUX_ENGINE_OWNER") {
+            engine.insert(ApplicationOwner(PathBuf::from(owner)));
+        }
         app.run();
         receiver.recv().map_err(io::Error::other)?
     }
@@ -396,12 +405,13 @@ type PublishedEngines<'w, 's> = Query<
         Option<&'static Failure>,
         Option<&'static ConnectionIssue>,
         Option<&'static Published>,
+        Option<&'static ApplicationOwner>,
     ),
     (With<Engine>, With<Lease>),
 >;
 
 fn publish(engines: PublishedEngines, mut commands: Commands) {
-    for (entity, settings, phase, failure, issue, previous) in &engines {
+    for (entity, settings, phase, failure, issue, previous, owner) in &engines {
         let failure = match failure {
             Some(failure) => Some(failure.0.clone()),
             None => issue.map(|issue| issue.0.clone()),
@@ -409,6 +419,7 @@ fn publish(engines: PublishedEngines, mut commands: Commands) {
         let state = State {
             phase: *phase,
             failure,
+            owner: owner.map(|owner| owner.0.clone()),
         };
         if previous.is_some_and(|previous| previous.0 == state) {
             continue;

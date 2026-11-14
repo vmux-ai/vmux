@@ -34,4 +34,6 @@ vmux_ui = { path = "../../util/vmux_ui", default-features = false }
 workspace = true
 
 [dev-dependencies]
+serde_json = { workspace = true }
+tempfile = "3"
 dioxus-ssr = "=0.7.9"

@@ -11540,6 +11540,7 @@ dependencies = [
  "tar",
  "tempfile",
  "url",
+ "vmux_spawn",
 ]
 
 [[package]]

@@ -17,6 +17,7 @@ serde_json = { workspace = true }
 tar = "0.4"
 tempfile = "3"
 url = { workspace = true }
+vmux_spawn = { path = "../vmux_spawn" }
 
 [target.'cfg(all(target_os = "macos", target_arch = "aarch64"))'.dependencies]
 libloading = "0.8"

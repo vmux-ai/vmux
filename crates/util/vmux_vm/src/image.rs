@@ -9,6 +9,7 @@ use flate2::read::GzDecoder;
 use ring::digest::{Context, SHA256};
 
 use crate::Settings;
+use crate::client::Preparation;
 
 pub(crate) struct GuestImage;
 
@@ -16,24 +17,26 @@ impl GuestImage {
     const URL: &str = "https://dl-cdn.alpinelinux.org/alpine/v3.24/releases/aarch64/alpine-minirootfs-3.24.4-aarch64.tar.gz";
     const SHA256: &str = "4b14c18f7e90a063b61462ea1462a5732c154bf6adad594974fe6487cd98a8de";
 
-    pub(crate) fn prepare(settings: &Settings) -> io::Result<()> {
+    pub(crate) fn prepare(settings: &Settings, preparation: &Preparation<'_>) -> io::Result<()> {
+        preparation.check()?;
         if !settings.rootfs().join(".vmux-image").exists() {
             let archive = settings.directory.join("alpine.tar.gz");
             if !archive.exists() {
                 let temporary = tempfile::NamedTempFile::new_in(&settings.directory)?;
-                let status = Command::new("curl")
-                    .args([
-                        "--fail",
-                        "--location",
-                        "--proto",
-                        "=https",
-                        "--max-time",
-                        "180",
-                        "--output",
-                    ])
-                    .arg(temporary.path())
-                    .arg(Self::URL)
-                    .status()?;
+                let status = preparation.run(
+                    Command::new("curl")
+                        .args([
+                            "--fail",
+                            "--location",
+                            "--proto",
+                            "=https",
+                            "--max-time",
+                            "180",
+                            "--output",
+                        ])
+                        .arg(temporary.path())
+                        .arg(Self::URL),
+                )?;
                 if !status.success() {
                     return Err(io::Error::other(format!("download guest image: {status}")));
                 }
@@ -41,14 +44,17 @@ impl GuestImage {
                 temporary.persist(&archive).map_err(io::Error::other)?;
             }
             Self::verify(File::open(&archive)?, Self::SHA256)?;
+            preparation.check()?;
             let staging = tempfile::tempdir_in(&settings.directory)?;
             let mut tar = tar::Archive::new(GzDecoder::new(File::open(archive)?));
             tar.set_preserve_permissions(true);
             tar.unpack(staging.path())?;
+            preparation.check()?;
             std::fs::write(staging.path().join(".vmux-image"), Self::SHA256)?;
             std::fs::rename(staging.path(), settings.rootfs())?;
         }
         let init = settings.rootfs().join("sbin/vmux-init");
+        preparation.check()?;
         std::fs::write(&init, include_str!("guest-init.sh"))?;
         let control = settings.rootfs().join("sbin/vmux-control");
         std::fs::write(&control, include_str!("guest-control.sh"))?;
