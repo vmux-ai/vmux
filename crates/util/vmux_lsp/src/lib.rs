@@ -7,6 +7,7 @@ use bevy_ecs::lifecycle::HookContext;
 use bevy_ecs::prelude::*;
 use bevy_ecs::system::SystemParam;
 use bevy_ecs::world::DeferredWorld;
+use diagnostics::Ticket;
 use lsp_types::ServerCapabilities;
 use serde_json::Value;
 use vmux_ecs::{
@@ -387,6 +388,7 @@ pub struct Lookup<'w, 's> {
     >,
     bindings: Query<'w, 's, (&'static DocumentBinding, &'static BindingGeneration)>,
     diagnostics: Query<'w, 's, &'static Diagnostics>,
+    diagnostic_tickets: Query<'w, 's, &'static Ticket>,
     diagnostic_paths: Query<'w, 's, &'static DiagnosticPath>,
 }
 
@@ -397,8 +399,11 @@ impl Lookup<'_, '_> {
 
     pub fn diagnostics(&self, owner: Entity) -> Option<&Diagnostics> {
         let (binding, _) = self.bindings.get(owner).ok()?;
-        let diagnostics = self.diagnostics.get(binding.document()).ok()?;
-        diagnostics.current(self).then_some(diagnostics)
+        let ticket = self.diagnostic_tickets.get(binding.document()).ok()?;
+        if !ticket.current(self) {
+            return None;
+        }
+        self.diagnostics.get(binding.document()).ok()
     }
 
     pub fn server(&self, key: &ServerKey) -> Option<Entity> {

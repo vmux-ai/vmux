@@ -1693,7 +1693,8 @@ buffer before initial metadata requests. Replacing a live transport preserves ot
 adds no global Resource. Reload and encoding changes wait for the decoded
 buffer, synchronize it, and then reinitialize metadata. Diagnostics retain their server, transport
 UUID, and the protocol's optional version. Protocol ingress captures the live document/version before synchronization, rejects old transport
-epochs and keeps diagnostics on the canonical document. Replacing a transport clears only its retained
+epochs and keeps the diagnostic list and its publication Ticket as separate Components on the
+canonical document. Lookup validates the Ticket before exposing the list. Replacing a transport clears only its retained
 diagnostics before code-action requests or rendering consume them. Unversioned notifications
 cannot prove which edit produced them. Native receipt reconciliation materializes an alternate
 DiagnosticPath from filesystem identity when a view uses an alias. Core ingress prefers an exact

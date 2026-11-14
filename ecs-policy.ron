@@ -11937,7 +11937,6 @@
     (key: "crates/feature/vmux_dx/src/updates.rs||enum:Completion", owner: "crates/feature/vmux_dx/src/updates.rs||struct:Receipt", lifetime: "one bounded native completion correlated to its update child entity and attempt"),
     (key: "crates/feature/vmux_editor/src/host/lsp/manager.rs||struct:LspOrigin", owner: "crates/feature/vmux_editor/src/host/lsp/manager.rs||struct:LspRequestedEdit", lifetime: "immutable owner and shared core Stamp through one accepted Editor effect"),
     (key: "crates/util/vmux_lsp/src/diagnostics.rs||struct:ReceivedDiagnostics", owner: "crates/util/vmux_lsp/src/diagnostics.rs||struct:DiagnosticsInbox", lifetime: "one raw LSP wire envelope in the scoped IO mailbox"),
-    (key: "crates/util/vmux_lsp/src/diagnostics.rs||struct:Ticket", owner: "crates/util/vmux_lsp/src/diagnostics.rs||struct:Diagnostics", lifetime: "immutable connection/document/version ticket for one canonical protocol diagnostic publication"),
  ], upstream: [
     (package: "bevy_cef", version: "0.5.2", archive_sha256: "2ed50adc61d6cd487cd04b0da14799bcf7adfafbfe7f46f5af010d1c795228d0", entries: {
         "patches/bevy_cef-0.5.2/src/common/components.rs||enum:WebviewSource": "26055a2015a488dc",

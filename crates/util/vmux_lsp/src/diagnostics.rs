@@ -83,8 +83,8 @@ impl DiagnosticsInbox {
 #[component(immutable)]
 pub struct DiagnosticPath(pub PathBuf);
 
-#[derive(Clone)]
-struct Ticket {
+#[derive(Component, Clone)]
+pub(crate) struct Ticket {
     document: Entity,
     server: Entity,
     version: i32,
@@ -132,7 +132,7 @@ impl Ticket {
         None
     }
 
-    fn current(&self, lookup: &Lookup) -> bool {
+    pub(crate) fn current(&self, lookup: &Lookup) -> bool {
         let Ok((_, _, document, parent, connection)) = lookup.documents.get(self.document) else {
             return false;
         };
@@ -150,23 +150,11 @@ impl Ticket {
 }
 
 #[derive(Component)]
-pub struct Diagnostics {
-    ticket: Ticket,
-    diagnostics: Vec<lsp_types::Diagnostic>,
-}
+pub struct Diagnostics(Vec<lsp_types::Diagnostic>);
 
 impl Diagnostics {
     pub fn items(&self) -> &[lsp_types::Diagnostic] {
-        &self.diagnostics
-    }
-    pub fn document(&self) -> Entity {
-        self.ticket.document
-    }
-    pub fn version(&self) -> i32 {
-        self.ticket.version
-    }
-    pub(crate) fn current(&self, lookup: &Lookup) -> bool {
-        self.ticket.current(lookup)
+        &self.0
     }
 }
 
@@ -202,10 +190,10 @@ fn receive(inboxes: Query<&DiagnosticsInbox>, lookup: Lookup, mut commands: Comm
     }
 }
 
-fn prune(diagnostics: Query<(Entity, &Diagnostics)>, lookup: Lookup, mut commands: Commands) {
-    for (entity, diagnostics) in &diagnostics {
-        if !diagnostics.current(&lookup) {
-            commands.entity(entity).remove::<Diagnostics>();
+fn prune(tickets: Query<(Entity, &Ticket)>, lookup: Lookup, mut commands: Commands) {
+    for (entity, ticket) in &tickets {
+        if !ticket.current(&lookup) {
+            commands.entity(entity).remove::<(Diagnostics, Ticket)>();
         }
     }
 }
@@ -229,12 +217,10 @@ fn apply(
                 .version
                 .is_none_or(|version| version == pending.ticket.version)
         {
-            commands
-                .entity(pending.ticket.document)
-                .insert(Diagnostics {
-                    ticket: pending.ticket.clone(),
-                    diagnostics: std::mem::take(&mut pending.diagnostics),
-                });
+            commands.entity(pending.ticket.document).insert((
+                pending.ticket.clone(),
+                Diagnostics(std::mem::take(&mut pending.diagnostics)),
+            ));
         }
         commands.entity(entity).despawn();
     }

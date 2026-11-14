@@ -2245,20 +2245,19 @@ fn drain_diagnostics(
         let Ok(diagnostics) = diagnostics.get(binding.document()) else {
             continue;
         };
-        if lookup.document(owner, &view.path).is_none() || lookup.diagnostics(owner).is_none() {
+        let Some(stamp) = lookup.document(owner, &view.path) else {
+            continue;
+        };
+        if lookup.diagnostics(owner).is_none() {
             continue;
         }
         if synced.get(owner).is_ok_and(|synced| {
-            synced.0 != editor.core.content_version() || synced.1 != diagnostics.version()
+            synced.0 != editor.core.content_version() || synced.1 != stamp.version
         }) {
             commands.entity(owner).remove::<LspDiagnostics>();
             continue;
         }
-        let source = (
-            diagnostics.document(),
-            diagnostics.version(),
-            editor.core.content_version(),
-        );
+        let source = (stamp.document, stamp.version, editor.core.content_version());
         if !diagnostics.is_changed()
             && previous.is_some_and(|previous| previous.source == Some(source))
         {
