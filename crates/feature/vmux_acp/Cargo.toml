@@ -75,6 +75,9 @@ app = [
 path = "src/lib.rs"
 
 [dependencies]
+bevy_ecs = { workspace = true, optional = true }
+vmux_ecs = { path = "../../util/vmux_ecs", optional = true, default-features = false, features = ["contracts"] }
+vmux_session = { path = "../vmux_session", default-features = false, optional = true }
 bevy_app = { workspace = true, optional = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
@@ -89,7 +92,6 @@ vmux_spawn = { path = "../../util/vmux_spawn", optional = true }
 base64 = { version = "0.22", optional = true }
 bevy = { workspace = true, optional = true }
 bevy_cef = { workspace = true, optional = true }
-bevy_ecs = { workspace = true, optional = true }
 bevy_reflect = { workspace = true, optional = true }
 chrono = { workspace = true, optional = true }
 notify = { workspace = true, optional = true }
@@ -108,7 +110,6 @@ toml = { workspace = true, optional = true }
 tempfile = { version = "3", optional = true }
 uuid = { workspace = true, optional = true }
 url = { workspace = true, optional = true }
-vmux_ecs = { path = "../../util/vmux_ecs", optional = true, default-features = false, features = ["contracts"] }
 vmux_editor = { path = "../vmux_editor", optional = true }
 vmux_flex = { path = "../../util/vmux_flex", optional = true }
 vmux_git = { path = "../vmux_git", optional = true }
@@ -118,7 +119,6 @@ vmux_mcp = { path = "../../util/vmux_mcp", optional = true }
 vmux_path = { path = "../../util/vmux_path", optional = true }
 vmux_process = { path = "../../util/vmux_process", optional = true }
 vmux_transport = { path = "../../util/vmux_transport", optional = true }
-vmux_session = { path = "../vmux_session", default-features = false, optional = true }
 vmux_setting = { path = "../vmux_setting", optional = true }
 vmux_space = { path = "../vmux_space", optional = true }
 vmux_team = { path = "../vmux_team", optional = true }
