@@ -3558,7 +3558,34 @@ mod tests {
     fn closing_the_last_history_view_cancels_its_pending_page() {
         let mut fixture = PagingFixture::new(1230);
         let tail = fixture.transcript();
+        let mut releases = Vec::new();
+        let mut blockers = Vec::new();
+        for _ in 0..2 {
+            let (started_tx, started_rx) = mpsc::sync_channel(1);
+            let (release_tx, release_rx) = mpsc::sync_channel(1);
+            blockers.push(
+                fixture
+                    .app
+                    .world()
+                    .resource::<BlockingRuntime>()
+                    .spawn_long(None, move || {
+                        started_tx.send(()).unwrap();
+                        let _ = release_rx.recv_timeout(Duration::from_secs(5));
+                    })
+                    .unwrap(),
+            );
+            started_rx.recv_timeout(Duration::from_secs(2)).unwrap();
+            releases.push(release_tx);
+        }
         fixture.request();
+        assert!(
+            fixture
+                .app
+                .world()
+                .get::<vmux_session::history::Window>(fixture.session)
+                .unwrap()
+                .loading
+        );
         fixture.app.world_mut().despawn(fixture.view);
         fixture.app.update();
         assert!(
@@ -3586,6 +3613,10 @@ mod tests {
                 .count(),
             0
         );
+        for release in releases {
+            let _ = release.send(());
+        }
+        drop(blockers);
     }
 
     struct FailedReadFixture {

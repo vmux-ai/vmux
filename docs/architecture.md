@@ -498,6 +498,10 @@ replacement writes. File jobs correlate revision acknowledgements, verify the cu
 under a cancellable lock and perform atomic replacement. Exit re-reads the file after canceling older
 work before publishing the latest canonical snapshot within the shared lock budget.
 
+Tests that replace profile HOME/TMPDIR run their existing production-plugin oracle in a named
+child test process. The parent test runner keeps its environment; temporary homes and child output
+end with that fixture invocation.
+
 Every plain adapter names its external interface, canonical input/output, scope/lifetime,
 bounds and cancellation/eviction. Adapters may hold handles, byte cursors, codec scratch and
 read-only output caches; they cannot own parallel normalized vmux state or product policy.

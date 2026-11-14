@@ -1226,6 +1226,9 @@ mod tests {
 
     #[test]
     fn explicit_workspace_saves_wait_for_runtime_restore_commit() {
+        if HomeEnvGuard::isolated() {
+            return;
+        }
         let mut fixture = WorkspaceSaveFixture::new("explicit-waits-for-restore");
         fixture
             .app
@@ -1349,6 +1352,9 @@ mod tests {
 
     #[test]
     fn duplicate_restored_ids_are_rejected_before_live_state_is_replaced() {
+        if HomeEnvGuard::isolated() {
+            return;
+        }
         for kind in ["space", "pane", "session"] {
             let mut fixture = WorkspaceRestoreFixture::new("duplicate-restored-id");
             let live = fixture.app.world_mut().spawn(SpaceId("shared".into())).id();
@@ -1388,6 +1394,9 @@ mod tests {
 
     #[test]
     fn validated_ids_are_scoped_to_the_snapshot_and_then_request_layout_restore() {
+        if HomeEnvGuard::isolated() {
+            return;
+        }
         let mut fixture = WorkspaceRestoreFixture::new("valid-restored-id");
         fixture.app.world_mut().spawn(SpaceId("shared".into()));
         fixture.load(bevy_world_serialization::DynamicWorld {
@@ -1428,6 +1437,9 @@ mod tests {
 
     #[test]
     fn failed_materialization_removes_partial_entities_and_preserves_the_store() {
+        if HomeEnvGuard::isolated() {
+            return;
+        }
         let mut fixture = WorkspaceRestoreFixture::new("failed-materialization");
         fixture.app.register_type::<Unspawnable>();
         let live = fixture
@@ -1521,6 +1533,9 @@ mod tests {
 
     #[test]
     fn exit_flushes_pending_workspace_changes_before_debounce() {
+        if HomeEnvGuard::isolated() {
+            return;
+        }
         let mut fixture = WorkspaceSaveFixture::new("exit-flushes-pending-layout");
         fixture
             .app
@@ -1541,6 +1556,9 @@ mod tests {
 
     #[test]
     fn workspace_claims_stack_pages_without_claiming_another_roots_shared_data() {
+        if HomeEnvGuard::isolated() {
+            return;
+        }
         let mut fixture = WorkspaceSaveFixture::new("scoped-workspace-pages");
         let stack = fixture
             .app
@@ -1611,6 +1629,9 @@ mod tests {
 
     #[test]
     fn exit_waits_for_pending_write_and_saves_the_latest_workspace() {
+        if HomeEnvGuard::isolated() {
+            return;
+        }
         let mut fixture = WorkspaceSaveFixture::new("exit-drains-pending-layout");
         let (sender, result) = mpsc::channel();
         let pending = fixture.path.clone();
@@ -1652,6 +1673,9 @@ mod tests {
 
     #[test]
     fn clean_workspaces_do_not_write_periodic_snapshots() {
+        if HomeEnvGuard::isolated() {
+            return;
+        }
         let mut fixture = WorkspaceSaveFixture::new("clean-periodic-autosave");
         fixture
             .app
@@ -1668,6 +1692,9 @@ mod tests {
 
     #[test]
     fn failed_restore_without_a_backup_cannot_be_overwritten_by_automatic_or_explicit_saves() {
+        if HomeEnvGuard::isolated() {
+            return;
+        }
         let mut fixture = WorkspaceSaveFixture::new("unprotected-restore");
         vmux_path::AtomicFile::write(&fixture.path, b"original failed restore").unwrap();
         fixture
@@ -1696,6 +1723,9 @@ mod tests {
 
     #[test]
     fn debounce_and_periodic_deadlines_write_one_snapshot() {
+        if HomeEnvGuard::isolated() {
+            return;
+        }
         let mut fixture = WorkspaceSaveFixture::new("coalesced-autosave");
 
         fixture.app.update();
@@ -1711,6 +1741,9 @@ mod tests {
 
     #[test]
     fn failed_workspace_writes_retry_after_storage_recovers_without_another_edit() {
+        if HomeEnvGuard::isolated() {
+            return;
+        }
         let mut fixture = WorkspaceSaveFixture::new("failed-autosave-retry");
         std::fs::create_dir_all(&fixture.path).unwrap();
         fixture.app.update();
@@ -1746,6 +1779,9 @@ mod tests {
 
     #[test]
     fn restored_timestamp_only_session_children_are_removed_without_losing_conversation_content() {
+        if HomeEnvGuard::isolated() {
+            return;
+        }
         let mut fixture = WorkspaceSaveFixture::new("empty-session-children");
         std::fs::write(&fixture.path, "original workspace snapshot").unwrap();
         let session = fixture.app.world_mut().spawn(vmux_session::Session).id();
@@ -1878,6 +1914,9 @@ mod tests {
 
     #[test]
     fn background_serialization_keeps_input_available_and_preserves_edits_made_during_a_write() {
+        if HomeEnvGuard::isolated() {
+            return;
+        }
         let mut fixture = WorkspaceSaveFixture::new("background-save");
         std::fs::write(&fixture.path, "previous complete snapshot").unwrap();
         let gate = std::sync::Arc::new(SerializationGate::default());
@@ -1981,6 +2020,9 @@ mod tests {
 
     #[test]
     fn unchanged_saved_names_do_not_restart_autosave() {
+        if HomeEnvGuard::isolated() {
+            return;
+        }
         let _home = HomeEnvGuard::use_temp_home("saved-name-autosave");
         let mut app = App::new();
         app.add_plugins(MinimalPlugins)
@@ -2138,7 +2180,38 @@ mod tests {
     }
 
     impl HomeEnvGuard {
+        fn isolated() -> bool {
+            let thread = std::thread::current();
+            let name = thread.name().expect("test harness thread has no name");
+            if std::env::var("VMUX_STORE_TEST_CHILD").as_deref() == Ok(name) {
+                return false;
+            }
+            let home = tempfile::tempdir().expect("isolated test home");
+            let output =
+                std::process::Command::new(std::env::current_exe().expect("test executable"))
+                    .args(["--exact", name, "--nocapture", "--test-threads=1"])
+                    .env("VMUX_STORE_TEST_CHILD", name)
+                    .env_remove("VMUX_DATA_DIR")
+                    .env("HOME", home.path())
+                    .env("TMPDIR", home.path())
+                    .output()
+                    .expect("isolated test child");
+            assert!(
+                output.status.success(),
+                "isolated test failed: {}\n{}",
+                String::from_utf8_lossy(&output.stdout),
+                String::from_utf8_lossy(&output.stderr)
+            );
+            true
+        }
+
         fn use_temp_home(name: &str) -> Self {
+            let thread = std::thread::current();
+            assert_eq!(
+                std::env::var("VMUX_STORE_TEST_CHILD").ok().as_deref(),
+                thread.name(),
+                "home fixture requires an isolated test subprocess"
+            );
             let guard = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
             let old_home = std::env::var_os("HOME");
             let old_tmpdir = std::env::var_os("TMPDIR");
@@ -2526,6 +2599,9 @@ mod tests {
 
     #[test]
     fn custom_save_writes_schema_version_next_to_saved_store() {
+        if HomeEnvGuard::isolated() {
+            return;
+        }
         let _home = HomeEnvGuard::use_temp_home("custom-save-schema-version");
         let dir = tempfile::tempdir().expect("tempdir");
         let path = dir.path().join("custom-store.ron");
@@ -2789,6 +2865,9 @@ mod tests {
 
     #[test]
     fn newer_store_schema_is_preserved_and_startup_refused() {
+        if HomeEnvGuard::isolated() {
+            return;
+        }
         let _home = HomeEnvGuard::use_temp_home("newer-store-is-preserved-on-startup");
         let store = WorkspaceStorePath::default();
         let newer = (STORE_SCHEMA_VERSION + 1).to_string();
@@ -2809,6 +2888,9 @@ mod tests {
 
     #[test]
     fn incompatible_store_is_backed_up_before_starting_a_new_workspace() {
+        if HomeEnvGuard::isolated() {
+            return;
+        }
         let _home = HomeEnvGuard::use_temp_home("incompatible-store-is-backed-up-on-startup");
         let store = WorkspaceStorePath::default();
         let original = store_body_with_key("vmux_desktop::ghost::DoesNotExist");
@@ -2844,6 +2926,9 @@ mod tests {
 
     #[test]
     fn missing_older_and_invalid_schema_versions_recover_without_overwriting_backups() {
+        if HomeEnvGuard::isolated() {
+            return;
+        }
         let _home = HomeEnvGuard::use_temp_home("older-workspace-schema-backups");
         let store = WorkspaceStorePath::default();
         for (sequence, version) in [None, Some("3"), Some("invalid")].into_iter().enumerate() {
@@ -2886,6 +2971,9 @@ mod tests {
 
     #[test]
     fn failed_schema_backup_refuses_startup_without_removing_the_original_store() {
+        if HomeEnvGuard::isolated() {
+            return;
+        }
         let _home = HomeEnvGuard::use_temp_home("failed-workspace-schema-backup");
         let store = WorkspaceStorePath::default();
         let original = "(resources: {}, entities: {})";
@@ -2910,6 +2998,9 @@ mod tests {
 
     #[test]
     fn truncated_and_invalid_registered_components_recover_from_current_schema_stores() {
+        if HomeEnvGuard::isolated() {
+            return;
+        }
         let _home = HomeEnvGuard::use_temp_home("invalid-current-workspace-store");
         let store = WorkspaceStorePath::default();
         let invalid_component = store_body_with_key("bevy_ecs::name::Name");
@@ -2944,6 +3035,9 @@ mod tests {
 
     #[test]
     fn failed_schema_writes_retry_instead_of_reporting_a_saved_workspace() {
+        if HomeEnvGuard::isolated() {
+            return;
+        }
         let mut fixture = WorkspaceSaveFixture::new("failed-workspace-schema-write");
         let version = WorkspaceStorePath(fixture.path.clone()).version();
         std::fs::create_dir(&version).unwrap();
@@ -2978,6 +3072,9 @@ mod tests {
 
     #[test]
     fn auto_save_system_skips_save_without_space() {
+        if HomeEnvGuard::isolated() {
+            return;
+        }
         let mut fixture = WorkspaceSaveFixture::new("auto-save-system-skips-without-space");
         let spaces = fixture
             .app
