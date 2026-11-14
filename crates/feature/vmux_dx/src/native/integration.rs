@@ -14,8 +14,8 @@ impl Native {
                 println!("{}", self.product()?.json());
                 Ok(())
             }
-            "package-binaries" => self.package_binaries(),
-            "before-package" => self.before_package(),
+            "package-binaries" | "before-package" | "finalize-package" | "verify-web-bundle"
+            | "verify-bundle" => Err("Packaging requires its registered ECS systems".into()),
             "install-cef" => self.install_cef(),
             "build-cef" => self.build_cef(),
             "cef-manifest" => self.cef_manifest(
@@ -32,20 +32,6 @@ impl Native {
             "install-dioxus" => self.install_dioxus(),
             "install-binaryen" => self.binaryen(),
             "install-tailwindcss" => self.tailwind(),
-            "verify-web-bundle" => {
-                let path = args
-                    .first()
-                    .map(PathBuf::from)
-                    .unwrap_or(self.checkout.root.join("crates/util/vmux_ui/dist"));
-                self.verify_web(&path)
-            }
-            "verify-bundle" => {
-                let path = args
-                    .first()
-                    .map(PathBuf::from)
-                    .ok_or("Missing app bundle path")?;
-                self.verify_bundle(&path)
-            }
             "ios-resources" => self.resources_ios(),
             "ios-release" => self.ios_release(),
             "ios-upload" => self.ios_upload(),

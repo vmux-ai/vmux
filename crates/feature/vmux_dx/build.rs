@@ -11,9 +11,9 @@ fn main() {
         .ancestors()
         .nth(3)
         .unwrap();
-    let key = source::Source::key(root).expect("DX compiler inputs");
+    let key = source::Source::key(root, || false).expect("DX compiler inputs");
     println!("cargo:rustc-env=VMUX_DX_SOURCE_KEY={key}");
-    for path in source::Source::paths(root).expect("DX compiler paths") {
+    for path in source::Source::paths(root, &|| false).expect("DX compiler paths") {
         println!("cargo:rerun-if-changed={}", path.display());
     }
     for (group, name) in [

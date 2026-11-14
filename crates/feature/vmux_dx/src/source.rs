@@ -1,4 +1,6 @@
 use std::fs;
+use std::io::Read;
+use std::os::unix::fs::OpenOptionsExt;
 use std::path::{Path, PathBuf};
 
 use sha2::{Digest, Sha256};
@@ -6,8 +8,15 @@ use sha2::{Digest, Sha256};
 pub struct Source;
 
 impl Source {
-    pub fn paths(root: &Path) -> std::io::Result<Vec<PathBuf>> {
+    pub fn paths(root: &Path, canceled: &impl Fn() -> bool) -> std::io::Result<Vec<PathBuf>> {
+        if canceled() {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::Interrupted,
+                "CLI bootstrap canceled",
+            ));
+        };
         let mut paths = vec![root.join("Cargo.toml"), root.join("Cargo.lock")];
+        let mut directories = 0usize;
         for name in [
             "vmux_dx",
             "vmux_cli",
@@ -23,7 +32,13 @@ impl Source {
             };
             let directory = root.join("crates").join(group).join(name);
             paths.push(directory.join("Cargo.toml"));
-            Self::files(&directory.join("src"), &mut paths)?;
+            Self::files(
+                &directory.join("src"),
+                &mut paths,
+                0,
+                &mut directories,
+                canceled,
+            )?;
             let build = directory.join("build.rs");
             if build.is_file() {
                 paths.push(build);
@@ -46,12 +61,36 @@ impl Source {
         Ok(paths)
     }
 
-    fn files(path: &Path, paths: &mut Vec<PathBuf>) -> std::io::Result<()> {
+    fn files(
+        path: &Path,
+        paths: &mut Vec<PathBuf>,
+        depth: usize,
+        directories: &mut usize,
+        canceled: &impl Fn() -> bool,
+    ) -> std::io::Result<()> {
+        if canceled() {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::Interrupted,
+                "CLI bootstrap canceled",
+            ));
+        };
+        *directories += 1;
+        if depth >= 32 || *directories > 8192 || paths.len() > 8192 {
+            return Err(std::io::Error::other(
+                "CLI source tree exceeds its traversal bound",
+            ));
+        }
         for entry in fs::read_dir(path)? {
+            if canceled() {
+                return Err(std::io::Error::new(
+                    std::io::ErrorKind::Interrupted,
+                    "CLI bootstrap canceled",
+                ));
+            };
             let entry = entry?;
             let kind = entry.file_type()?;
             if kind.is_dir() {
-                Self::files(&entry.path(), paths)?;
+                Self::files(&entry.path(), paths, depth + 1, directories, canceled)?;
             } else if kind.is_file()
                 && matches!(
                     entry.path().extension().and_then(|value| value.to_str()),
@@ -59,14 +98,26 @@ impl Source {
                 )
             {
                 paths.push(entry.path());
+                if paths.len() > 8192 {
+                    return Err(std::io::Error::other(
+                        "CLI source tree exceeds its entry bound",
+                    ));
+                }
             }
         }
         Ok(())
     }
 
-    pub fn key(root: &Path) -> std::io::Result<String> {
+    pub fn key(root: &Path, canceled: impl Fn() -> bool) -> std::io::Result<String> {
         let mut hash = Sha256::new();
-        for path in Self::paths(root)? {
+        let mut total = 0usize;
+        for path in Self::paths(root, &canceled)? {
+            if canceled() {
+                return Err(std::io::Error::new(
+                    std::io::ErrorKind::Interrupted,
+                    "CLI bootstrap canceled",
+                ));
+            }
             hash.update(
                 path.strip_prefix(root)
                     .unwrap()
@@ -74,7 +125,38 @@ impl Source {
                     .as_encoded_bytes(),
             );
             hash.update([0]);
-            hash.update(fs::read(path)?);
+            let file = fs::OpenOptions::new()
+                .read(true)
+                .custom_flags(libc::O_NONBLOCK | libc::O_NOFOLLOW)
+                .open(path)?;
+            if !file.metadata()?.is_file() {
+                return Err(std::io::Error::other(
+                    "CLI compiler input must be a regular file",
+                ));
+            }
+            let mut file = file.take(16 * 1024 * 1024 + 1);
+            let mut size = 0usize;
+            let mut bytes = [0u8; 65536];
+            loop {
+                if canceled() {
+                    return Err(std::io::Error::new(
+                        std::io::ErrorKind::Interrupted,
+                        "CLI bootstrap canceled",
+                    ));
+                }
+                let count = file.read(&mut bytes)?;
+                if count == 0 {
+                    break;
+                }
+                size += count;
+                total += count;
+                if size > 16 * 1024 * 1024 || total > 64 * 1024 * 1024 {
+                    return Err(std::io::Error::other(
+                        "CLI compiler input exceeds its byte bound",
+                    ));
+                }
+                hash.update(&bytes[..count]);
+            }
             hash.update([0]);
         }
         Ok(format!("{:x}", hash.finalize()))

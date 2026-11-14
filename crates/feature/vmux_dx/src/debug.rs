@@ -1072,7 +1072,7 @@ type Finishing<'w, 's> = Query<
     (
         Entity,
         &'static Captured,
-        Option<&'static mut Complete>,
+        Option<&'static Complete>,
         Option<&'static Failed>,
     ),
     (With<Request>, With<Released>, Without<Sent>),
@@ -5114,28 +5114,33 @@ type Releasing<'w, 's> = Query<
 
 fn release(
     requests: Releasing,
+    roots: Query<&Root>,
     results: Query<(Entity, &ChildOf), With<Io>>,
-    flights: Query<&Flight>,
+    flights: Query<(&Root, &Flight)>,
     dropped: Query<(), With<OutputsDropped>>,
     mut commands: Commands,
 ) {
-    if Signals::active() || flights.iter().any(Flight::pending) {
-        return;
-    }
     for entity in &requests {
         if dropped.contains(entity) {
             continue;
-        }
+        };
+        let Ok(owner) = roots.get(entity) else {
+            continue;
+        };
+        if flights
+            .iter()
+            .any(|(root, flight)| root.0 == owner.0 && flight.pending())
+        {
+            continue;
+        };
         commands.entity(entity).remove::<Lease>();
-    }
-    for (entity, parent) in &results {
-        if requests.contains(parent.parent()) && !dropped.contains(parent.parent()) {
-            commands
-                .entity(entity)
-                .remove::<(TemporaryValue, ProcessValue, PendingValue, AcquiredLock)>();
+        for (result, parent) in &results {
+            if parent.parent() == entity {
+                commands
+                    .entity(result)
+                    .remove::<(TemporaryValue, ProcessValue, PendingValue, AcquiredLock)>();
+            }
         }
-    }
-    for entity in &requests {
         commands.entity(entity).insert(OutputsDropped);
     }
 }
@@ -5221,21 +5226,20 @@ fn forget_cleanups(witnesses: Drained, mut commands: Commands) {
 }
 
 fn finish(
-    mut requests: Finishing,
+    requests: Finishing,
     parents: Query<&ChildOf>,
     flights: Query<(&Root, &Flight)>,
     mut completions: MessageWriter<Completion>,
     wake: Res<JobWake>,
     mut commands: Commands,
 ) {
-    for (entity, captured, complete, failed) in &mut requests {
+    for (entity, captured, complete, failed) in &requests {
         if complete.is_none() && failed.is_none() {
             continue;
         }
-        if failed.is_some() && Signals::active()
-            || flights
-                .iter()
-                .any(|(root, flight)| root.0 == captured.root && flight.pending())
+        if flights
+            .iter()
+            .any(|(root, flight)| root.0 == captured.root && flight.pending())
         {
             continue;
         }
@@ -5244,12 +5248,12 @@ fn finish(
             .is_ok_and(|parent| parent.parent() == captured.root);
         let result = match failed {
             Some(failed) => Err(failed.0.clone()),
-            None if current => Ok(std::mem::replace(&mut complete.unwrap().0, Outcome::Done)),
+            None if current => Ok(complete.unwrap().0.clone()),
             None => Err(Failure::message("Development step ownership changed")),
         };
         completions.write(Completion {
             entity,
-            root: captured.root,
+            context: captured.root,
             attempt: captured.attempt,
             result,
         });
@@ -5276,10 +5280,12 @@ mod tests {
         root: PathBuf,
         target: PathBuf,
         operation: Entity,
+        _permit: crate::testing::Permit,
     }
 
     impl Fixture {
         fn new() -> Self {
+            let permit = crate::testing::Permit::acquire();
             let directory = tempfile::tempdir().unwrap();
             let root = directory.path().canonicalize().unwrap();
             let target = root.join("target");
@@ -5327,19 +5333,13 @@ mod tests {
             environment.set("VMUX_BUILD_STORAGE_WARN_GIB", "0");
             environment.set("PATH", format!("{}:/usr/bin:/bin", bin.display()));
             environment.set("TEST_ROOT", root.as_os_str());
-            let storage = Storage::new(
-                root.clone(),
-                target.clone(),
-                Policy::configured(&environment).unwrap(),
-            )
-            .unwrap();
+            let storage = Storage::new(Policy::configured(&environment).unwrap());
             let mut app = App::new();
             app.add_plugins(crate::Plugin);
             let operation = app
                 .world_mut()
                 .spawn((
                     crate::Accepted,
-                    crate::Planned,
                     checkout,
                     Settings(environment),
                     storage,
@@ -5347,6 +5347,7 @@ mod tests {
                 ))
                 .id();
             Self {
+                _permit: permit,
                 _directory: directory,
                 app,
                 root,
@@ -5724,7 +5725,20 @@ exit 0
             .unwrap()
             .0
             .set("RUSTC", rustc.as_os_str());
+        let other = fixture.app.world_mut().spawn(OperationState::Running).id();
+        let (held, flight) = Task::new(
+            ReadFile(fixture.root.join("held-input")),
+            None,
+            Vec::new(),
+            std::task::Waker::noop().clone(),
+        );
+        fixture.app.world_mut().spawn((Root(other), flight.clone()));
         assert_eq!(fixture.run(Stop), 0);
+        assert!(
+            flight.pending(),
+            "Stop released an unrelated native operation"
+        );
+        drop(held);
         let stopped = fs::read_to_string(fixture.root.join("stopped")).unwrap();
         let mut lines = stopped.lines();
         assert_eq!(lines.next(), Some("service stop"));

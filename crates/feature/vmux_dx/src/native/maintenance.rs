@@ -1,10 +1,7 @@
 use std::ffi::OsStr;
-use std::fs;
-use std::path::PathBuf;
 
 use super::Native;
 use crate::Result;
-use crate::processes::Processes;
 
 impl Native {
     pub fn simulator(&self) -> Result<()> {
@@ -76,60 +73,5 @@ impl Native {
                 OsStr::new(&device),
             ],
         )
-    }
-
-    pub fn reset_layout(&self) -> Result<()> {
-        let base = if cfg!(target_os = "macos") {
-            self.home()?.join("Library/Application Support/Vmux")
-        } else {
-            std::env::temp_dir().join("Vmux")
-        };
-        let profile = self
-            .environment
-            .get("VMUX_BUILD_PROFILE")
-            .unwrap_or(OsStr::new("dev"));
-        let path = PathBuf::from(self.get(
-            "VMUX_DATA_DIR",
-            if profile == "dev" {
-                base.join("dev")
-            } else {
-                base.clone()
-            },
-        ));
-        if !path.is_dir() {
-            return Ok(());
-        }
-        if Processes::capture()?.uses(&path) {
-            return Err("Layout files are in use; quit that build before resetting".into());
-        }
-        let suffix = self.text("date", &[OsStr::new("+%Y%m%d-%H%M%S")])?;
-        for name in ["store.ron", "store.version"] {
-            let source = path.join(name);
-            if !source.is_file() {
-                continue;
-            }
-            if profile != "dev" {
-                fs::rename(
-                    &source,
-                    path.join(format!("{name}.cleanup-{}", suffix.trim())),
-                )?;
-            } else {
-                fs::remove_file(source)?;
-            }
-        }
-        let profiles = path.join("profiles");
-        if profiles.is_dir() {
-            for entry in fs::read_dir(profiles)? {
-                let session = entry?.path().join("session.ron");
-                if session.is_file() {
-                    fs::remove_file(session)?;
-                }
-            }
-        }
-        if profile == "dev" && path.join("logs").is_dir() {
-            fs::remove_dir_all(path.join("logs"))?;
-        }
-        println!("Layout reset: {}", path.display());
-        Ok(())
     }
 }

@@ -58,6 +58,16 @@ Filesystem, network, process, and native API calls sit behind adapters. Handlers
 
 Development commands use the same model. Signing, bundle preparation, artifact checks, and provider execution advance through scoped systems. Each operation owns its accepted inputs, job order, and IO lifetime in Bevy. Canceling or retiring work waits for process and file cleanup before the CLI returns. Results from a replaced input, attempt, or owner are discarded, and independent operations can continue after that cleanup.
 
+Storage, layout reset, tool bootstrap, and packaging also advance through registered systems.
+Native process observations become canonical entities before cleanup decisions. Storage protection
+preserves active builds, runtime libraries, and prepared artifacts while reclaiming eligible caches.
+
+Desktop packaging owns its callbacks, CEF preparation, signing, and notarization in Bevy.
+Standalone CLI releases use the same ordered publication journal. Keychain cleanup and publication
+survive removal of the original step, and accepted root and attempt identity reject late receipts.
+The CLI waits for native IO, keychain restoration, and rollback to drain before returning. Failed
+cleanup retains and reports private recovery paths; source manifests remain unchanged.
+
 Target-lock acquisition is a scoped IO job. Inheritance uses the actual parent-process contract, so checkout configuration cannot bypass exclusion. An acquired lock stays with its step until ownership validation transfers it to the operation; canceled or discarded receipts release it after IO drains.
 
 The repository's policy checks test these relationships. Ownership is inferred from the code; local `ecs-policy.ron` files carry migration debt and the exceptions the checker cannot infer. Read the feature's types, handlers, and tests first, and use a policy file when a check points to one.
