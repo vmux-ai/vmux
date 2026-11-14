@@ -66,6 +66,15 @@ impl ProductMetadata {
             ("VMUX_HOST_SERVICE_NAME", format!("{name} Service")),
             ("VMUX_HOST_SERVICE_BUNDLE", format!("{name} Service.app")),
             ("VMUX_HOST_BUNDLE_ID", format!("{namespace}.desktop")),
+            ("VMUX_HOST_MOBILE_ID", format!("{namespace}.mobile")),
+            (
+                "VMUX_HOST_REMOTE_DATA_NAME",
+                if custom {
+                    format!("{namespace} Remote")
+                } else {
+                    "Vmux Remote".into()
+                },
+            ),
             ("VMUX_HOST_SERVICE_ID", format!("{namespace}.service")),
             (
                 "VMUX_HOST_AGENT_PLIST",
@@ -119,6 +128,23 @@ impl ProductMetadata {
             (
                 "VMUX_HOST_DMG_BACKGROUND",
                 "packaging/macos/dmg-background.png",
+            ),
+            (
+                "VMUX_HOST_MOBILE_ICON",
+                "packaging/ios/Assets.xcassets/AppIcon.appiconset/AppIcon-1024.png",
+            ),
+            ("VMUX_HOST_MOBILE_PLIST", "packaging/ios/Info.plist"),
+            (
+                "VMUX_HOST_MOBILE_LAUNCH",
+                "packaging/ios/LaunchScreen.storyboard",
+            ),
+            (
+                "VMUX_HOST_MOBILE_PRIVACY",
+                "packaging/ios/PrivacyInfo.xcprivacy",
+            ),
+            (
+                "VMUX_HOST_MOBILE_ENTITLEMENTS",
+                "packaging/ios/Vmux.entitlements",
             ),
         ] {
             let path = Self::input(input, key, default);
@@ -174,6 +200,11 @@ impl ProductMetadata {
                     | "VMUX_HOST_DEV_ENTITLEMENTS"
                     | "VMUX_HOST_USAGE_DESCRIPTIONS"
                     | "VMUX_HOST_DMG_BACKGROUND"
+                    | "VMUX_HOST_MOBILE_ICON"
+                    | "VMUX_HOST_MOBILE_PLIST"
+                    | "VMUX_HOST_MOBILE_LAUNCH"
+                    | "VMUX_HOST_MOBILE_PRIVACY"
+                    | "VMUX_HOST_MOBILE_ENTITLEMENTS"
             ) {
                 println!("cargo::rerun-if-changed={value}");
             }

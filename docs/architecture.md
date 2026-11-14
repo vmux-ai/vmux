@@ -98,7 +98,16 @@ overrides before compiling each namespace, so one configured checkout cannot con
 Custom data/configuration and runtime paths derive from the namespace,
 even when two hosts share a display name. Changing product identity never imports Vmux data or
 credentials. `examples/host-consumer` exercises the explicit host facade without a renderer;
-its native credential calls retain the desktop-process access restriction. The default SDK
+its native credential calls retain the desktop-process access restriction.
+Mobile bundle identity, selected icon/storyboard/privacy/entitlement assets and the signed IPA
+consume the same metadata. The existing connection entity owns a StoredCredentials path
+capability; alternate products cannot restore the Vmux pairing file. ScanRequest flows through
+the existing pairing Plugin before its platform-specific `open` method performs bounded camera IO. Its scan system uses Bevy's NonSendMarker
+to run UIKit presentation on the mobile runner's main thread without adding a Resource.
+AppBody is the mounted Dioxus root and
+renders the product title/header alongside its existing pairing, team and session projections.
+Provisioning mismatch refuses compilation; signing exit restores the original keychain search
+list and releases temporary signing state. The default SDK
 consumer continues to omit Profile. Future Windows, web, game, and spatial profiles are not
 supported presets.
 

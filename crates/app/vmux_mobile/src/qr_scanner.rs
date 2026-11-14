@@ -1,7 +1,10 @@
+#[cfg(not(target_os = "ios"))]
+pub use platform::UnsupportedScanner as ScannerSupport;
 pub use platform::*;
 
 #[cfg(target_os = "ios")]
 mod platform {
+    use crate::pairing::ScanRequest;
     use std::cell::{Cell, RefCell};
     use std::ptr;
 
@@ -254,7 +257,10 @@ mod platform {
     pub struct ScannerSupport(Option<String>);
 
     impl ScannerSupport {
-        pub fn detect() -> Self {
+        pub fn detect(request: &ScanRequest) -> Self {
+            if !request.permitted() {
+                return Self(Some(translate("mobile-qr-camera-unavailable")));
+            }
             let Some(media_type) = (unsafe { AVMediaTypeVideo }) else {
                 return Self(Some(translate("mobile-qr-camera-unavailable")));
             };
@@ -276,44 +282,49 @@ mod platform {
         }
     }
 
-    pub fn open() -> Result<(), String> {
-        if ACTIVE.get() || REQUESTING.get() {
-            return Ok(());
-        }
-        let marker = MainThreadMarker::new()
-            .ok_or_else(|| "QR scanner must be opened from the main thread.".to_string())?;
-        let media_type =
-            unsafe { AVMediaTypeVideo }.ok_or_else(|| translate("mobile-qr-camera-unavailable"))?;
-
-        match unsafe { AVCaptureDevice::authorizationStatusForMediaType(media_type) } {
-            AVAuthorizationStatus::Authorized => present(marker),
-            AVAuthorizationStatus::Denied | AVAuthorizationStatus::Restricted => {
-                present_denied(marker)
+    impl ScanRequest {
+        pub(crate) fn open(&self) -> Result<(), String> {
+            if !self.permitted() {
+                return Err(translate("mobile-qr-camera-unavailable"));
             }
-            _ => {
-                REQUESTING.set(true);
-                let handler = RcBlock::new(move |granted: Bool| {
-                    DispatchQueue::main().exec_async(move || {
-                        REQUESTING.set(false);
-                        let Some(marker) = MainThreadMarker::new() else {
-                            return;
-                        };
-                        let outcome = if granted.as_bool() {
-                            present(marker)
-                        } else {
-                            present_denied(marker)
-                        };
-                        if let Err(message) = outcome {
-                            report(Err(message));
-                        }
-                    });
-                });
-                unsafe {
-                    AVCaptureDevice::requestAccessForMediaType_completionHandler(
-                        media_type, &handler,
-                    );
+            if ACTIVE.get() || REQUESTING.get() {
+                return Ok(());
+            }
+            let marker = MainThreadMarker::new()
+                .ok_or_else(|| "QR scanner must be opened from the main thread.".to_string())?;
+            let media_type = unsafe { AVMediaTypeVideo }
+                .ok_or_else(|| translate("mobile-qr-camera-unavailable"))?;
+
+            match unsafe { AVCaptureDevice::authorizationStatusForMediaType(media_type) } {
+                AVAuthorizationStatus::Authorized => present(marker),
+                AVAuthorizationStatus::Denied | AVAuthorizationStatus::Restricted => {
+                    present_denied(marker)
                 }
-                Ok(())
+                _ => {
+                    REQUESTING.set(true);
+                    let handler = RcBlock::new(move |granted: Bool| {
+                        DispatchQueue::main().exec_async(move || {
+                            REQUESTING.set(false);
+                            let Some(marker) = MainThreadMarker::new() else {
+                                return;
+                            };
+                            let outcome = if granted.as_bool() {
+                                present(marker)
+                            } else {
+                                present_denied(marker)
+                            };
+                            if let Err(message) = outcome {
+                                report(Err(message));
+                            }
+                        });
+                    });
+                    unsafe {
+                        AVCaptureDevice::requestAccessForMediaType_completionHandler(
+                            media_type, &handler,
+                        );
+                    }
+                    Ok(())
+                }
             }
         }
     }
@@ -407,14 +418,18 @@ mod platform {
 mod platform {
     use vmux_ui::i18n::translate;
 
+    use crate::pairing::ScanRequest;
     use crate::runtime::RuntimeHandle;
 
     pub fn install(_: &dioxus::mobile::DesktopContext, _: RuntimeHandle) {}
 
-    pub struct ScannerSupport(Option<String>);
+    pub struct UnsupportedScanner(Option<String>);
 
-    impl ScannerSupport {
-        pub fn detect() -> Self {
+    impl UnsupportedScanner {
+        pub fn detect(request: &ScanRequest) -> Self {
+            if !request.permitted() {
+                return Self(Some(translate("mobile-qr-camera-unavailable")));
+            }
             Self(Some(translate("mobile-qr-unsupported-platform")))
         }
 
@@ -423,7 +438,12 @@ mod platform {
         }
     }
 
-    pub fn open() -> Result<(), String> {
-        Err(translate("mobile-qr-unsupported-platform"))
+    impl ScanRequest {
+        pub(crate) fn open(&self) -> Result<(), String> {
+            if !self.permitted() {
+                return Err(translate("mobile-qr-camera-unavailable"));
+            }
+            Err(translate("mobile-qr-unsupported-platform"))
+        }
     }
 }

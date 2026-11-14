@@ -10,6 +10,7 @@ use crate::temporary::Temporary;
 
 impl Native {
     pub fn ios_release(&mut self) -> Result<()> {
+        let product = self.product()?;
         let team = self
             .environment
             .required("APPLE_TEAM_ID")?
@@ -72,7 +73,9 @@ impl Native {
             "-",
         ]);
         let identifier = Execution::new(inspect).output(Some(&profile_xml))?.stdout;
-        if std::str::from_utf8(&identifier)?.trim() != format!("{team}.ai.vmux.mobile") {
+        if std::str::from_utf8(&identifier)?.trim()
+            != format!("{team}.{}", product.value("VMUX_HOST_MOBILE_ID"))
+        {
             return Err("Provisioning profile does not match the selected application".into());
         }
         self.tool(
@@ -92,10 +95,26 @@ impl Native {
         self.resources_ios()?;
         let app = self.ios_bundle();
         self.copy(&profile, &app.join("embedded.mobileprovision"))?;
-        let entitlements = temporary.path().join("Vmux.entitlements");
-        let template =
-            fs::read_to_string(self.checkout.root.join("packaging/ios/Vmux.entitlements"))?;
-        fs::write(&entitlements, template.replace("{{TEAM_ID}}", &team))?;
+        let entitlements = temporary.path().join("host.entitlements");
+        let mut projected =
+            plist::Value::from_file(product.value("VMUX_HOST_MOBILE_ENTITLEMENTS"))?;
+        Self::project_mobile_entitlements(
+            &mut projected,
+            &team,
+            product.value("VMUX_HOST_MOBILE_ID"),
+        );
+        let values = projected
+            .as_dictionary_mut()
+            .ok_or("Mobile entitlements must be a dictionary")?;
+        values.insert(
+            "application-identifier".into(),
+            format!("{team}.{}", product.value("VMUX_HOST_MOBILE_ID")).into(),
+        );
+        values.insert(
+            "com.apple.developer.team-identifier".into(),
+            team.clone().into(),
+        );
+        projected.to_file_xml(&entitlements)?;
         let mut sign = self.command("codesign");
         sign.args([
             "--force",
@@ -132,7 +151,10 @@ impl Native {
             .ok_or("Missing workspace version")?;
         let out = app.parent().unwrap().join("ipa");
         fs::create_dir_all(&out)?;
-        let ipa = out.join(format!("Vmux_{version}_aarch64.ipa"));
+        let ipa = out.join(format!(
+            "{}_{version}_aarch64.ipa",
+            product.value("VMUX_HOST_NAME")
+        ));
         let payload = temporary.path().join("Payload");
         fs::create_dir(&payload)?;
         self.run_command(
@@ -149,9 +171,41 @@ impl Native {
         Ok(())
     }
 
+    fn project_mobile_entitlements(value: &mut plist::Value, team: &str, identifier: &str) {
+        match value {
+            plist::Value::String(value) => {
+                for (token, replacement) in [
+                    ("{{TEAM_ID}}", team.to_string()),
+                    ("{{BUNDLE_ID}}", identifier.to_string()),
+                    ("$(AppIdentifierPrefix)", format!("{team}.")),
+                    ("$(TeamIdentifierPrefix)", format!("{team}.")),
+                    ("$(PRODUCT_BUNDLE_IDENTIFIER)", identifier.to_string()),
+                ] {
+                    *value = value.replace(token, &replacement);
+                }
+            }
+            plist::Value::Array(values) => {
+                for value in values {
+                    Self::project_mobile_entitlements(value, team, identifier);
+                }
+            }
+            plist::Value::Dictionary(values) => {
+                for (_, value) in values.iter_mut() {
+                    Self::project_mobile_entitlements(value, team, identifier);
+                }
+            }
+            _ => {}
+        }
+    }
+
     pub fn ios_upload(&self) -> Result<()> {
+        let product = self.product()?;
         let directory = self.checkout.target.join("dx/vmux_mobile/release/ios/ipa");
-        let ipa = directory.join(format!("Vmux_{}_aarch64.ipa", self.workspace_version()?));
+        let ipa = directory.join(format!(
+            "{}_{}_aarch64.ipa",
+            product.value("VMUX_HOST_NAME"),
+            self.workspace_version()?
+        ));
         if !ipa.is_file() {
             return Err("No IPA was produced for the current version".into());
         }
@@ -185,16 +239,30 @@ impl Native {
     }
 
     pub fn resources_ios(&self) -> Result<()> {
+        let product = self.product()?;
         let app = self.ios_bundle();
         if !app.join("Info.plist").is_file() {
             return Err("iOS build produced no bundle Info.plist".into());
         }
         let packaging = self.checkout.root.join("packaging/ios");
         let stage = Temporary::create(&std::env::temp_dir(), "vmux-ios-assets")?;
+        let catalog = stage.path().join("Assets.xcassets");
+        self.run_command(
+            "cp",
+            &[
+                OsStr::new("-R"),
+                packaging.join("Assets.xcassets").as_os_str(),
+                catalog.as_os_str(),
+            ],
+        )?;
+        self.copy(
+            &PathBuf::from(product.value("VMUX_HOST_MOBILE_ICON")),
+            &catalog.join("AppIcon.appiconset/AppIcon-1024.png"),
+        )?;
         let mut actool = self.command("xcrun");
         actool
             .arg("actool")
-            .arg(packaging.join("Assets.xcassets"))
+            .arg(&catalog)
             .arg("--compile")
             .arg(stage.path())
             .args([
@@ -214,7 +282,7 @@ impl Native {
         let mut ibtool = self.command("xcrun");
         ibtool
             .arg("ibtool")
-            .arg(packaging.join("LaunchScreen.storyboard"))
+            .arg(product.value("VMUX_HOST_MOBILE_LAUNCH"))
             .arg("--compile")
             .arg(app.join("LaunchScreen.storyboardc"))
             .args([
@@ -237,7 +305,7 @@ impl Native {
             }
         }
         self.copy(
-            &packaging.join("PrivacyInfo.xcprivacy"),
+            &PathBuf::from(product.value("VMUX_HOST_MOBILE_PRIVACY")),
             &app.join("PrivacyInfo.xcprivacy"),
         )?;
         let manifest: toml::Table =
@@ -249,17 +317,48 @@ impl Native {
             .and_then(toml::Value::as_str)
             .ok_or("Missing workspace version")?;
         let plist = app.join("Info.plist");
-        self.plist(
-            &plist,
-            &format!("Set :CFBundleShortVersionString {version}"),
-        )?;
-        self.plist(
-            &plist,
-            &format!(
-                "Set :CFBundleVersion {}",
-                self.get("VMUX_IOS_BUILD_NUMBER", "1").to_string_lossy()
+        let mut info = plist::Value::from_file(&plist)?;
+        let selected = plist::Value::from_file(product.value("VMUX_HOST_MOBILE_PLIST"))?;
+        let template = selected
+            .as_dictionary()
+            .ok_or("Mobile Info.plist must be a dictionary")?;
+        let values = info
+            .as_dictionary_mut()
+            .ok_or("Bundle Info.plist must be a dictionary")?;
+        for (key, value) in template {
+            values.insert(key.clone(), value.clone());
+        }
+        for (key, value) in [
+            (
+                "CFBundleIdentifier",
+                product.value("VMUX_HOST_MOBILE_ID").to_string(),
             ),
-        )?;
+            ("CFBundleName", product.value("VMUX_HOST_NAME").to_string()),
+            (
+                "CFBundleDisplayName",
+                product.value("VMUX_HOST_NAME").to_string(),
+            ),
+            ("CFBundleShortVersionString", version.to_string()),
+            (
+                "CFBundleVersion",
+                self.get("VMUX_IOS_BUILD_NUMBER", "1")
+                    .to_string_lossy()
+                    .into_owned(),
+            ),
+        ] {
+            values.insert(key.into(), value.into());
+        }
+        if let Some(plist::Value::Array(types)) = values.get_mut("CFBundleURLTypes") {
+            for entry in types {
+                if let Some(entry) = entry.as_dictionary_mut() {
+                    entry.insert(
+                        "CFBundleURLName".into(),
+                        product.value("VMUX_HOST_MOBILE_ID").into(),
+                    );
+                }
+            }
+        }
+        info.to_file_xml(&plist)?;
         let sdk = self.text(
             "xcrun",
             &[
@@ -311,6 +410,7 @@ impl Native {
     }
 
     pub fn verify_ios(&self, signed: bool) -> Result<()> {
+        let product = self.product()?;
         let app = if signed && !self.environment.present("VMUX_IOS_APP_BUNDLE") {
             self.checkout
                 .target
@@ -342,7 +442,9 @@ impl Native {
         }
         let plist = app.join("Info.plist");
         for (key, expected) in [
-            ("CFBundleIdentifier", "ai.vmux.mobile"),
+            ("CFBundleIdentifier", product.value("VMUX_HOST_MOBILE_ID")),
+            ("CFBundleName", product.value("VMUX_HOST_NAME")),
+            ("CFBundleDisplayName", product.value("VMUX_HOST_NAME")),
             (
                 "CFBundleIcons:CFBundlePrimaryIcon:CFBundleIconName",
                 "AppIcon",

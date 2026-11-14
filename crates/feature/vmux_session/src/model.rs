@@ -17,10 +17,10 @@ use vmux_ecs::CreatedAt;
 use vmux_ecs::store::StoreAppExt;
 #[cfg(host)]
 use vmux_ecs::{
-    ActivateRequest, EntityTarget, ExternalIdentityIndex, ExternalIdentityIndexPlugin,
+    ActivateRequest, ArchivedAt, EntityTarget, ExternalIdentityIndex, ExternalIdentityIndexPlugin,
     ExternalIdentityIndexSet, LastActivatedAt, Order, PageMetadata,
 };
-use vmux_ecs::{ArchivedAt, Cwd, Description};
+use vmux_ecs::{Cwd, Description};
 
 #[cfg(host)]
 use crate::{AgentConversationTitle, TitlePending};
