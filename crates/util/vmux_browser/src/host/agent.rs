@@ -672,6 +672,7 @@ mod opening_tests {
             app.add_plugins((
                 MinimalPlugins,
                 vmux_ecs::PrimitivesPlugin,
+                vmux_ecs::UiStatePlugin::<vmux_layout::state::LayoutUiState>::with_post_update_flush(),
                 BrowserOpenPlugin,
             ))
             .insert_non_send(bevy_cef::prelude::Browsers::default());
@@ -951,6 +952,9 @@ mod opening_tests {
         ] {
             let mut app = App::new();
             app.add_plugins((MinimalPlugins, vmux_ecs::PrimitivesPlugin))
+                .add_plugins(vmux_ecs::UiStatePlugin::<
+                    vmux_layout::state::LayoutUiState,
+                >::with_post_update_flush())
                 .add_plugins(BrowserOpenPlugin)
                 .insert_non_send(bevy_cef::prelude::Browsers::default())
                 .add_message::<AgentRequestMessage<AgentOpenBrowser>>()

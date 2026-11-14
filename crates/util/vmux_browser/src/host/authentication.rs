@@ -5,7 +5,7 @@ use bevy::{
 use bevy_cef::prelude::{Browsers, HostWindow, JsEmitEventPlugin, Receive, UiEventPlugin, UiInput};
 use vmux_api::PageIcon;
 use vmux_api::browser::{BrowserModalBoundsRequest, BrowserModalCloseRequest, BrowserModalState};
-use vmux_ecs::{EntityTarget, PageMetadata, UiStatePlugin, UiStateWriter};
+use vmux_ecs::{EntityTarget, PageMetadata, UiStateWriter};
 use vmux_flex::prelude::Visibility;
 use vmux_layout::state::LayoutUiState;
 use vmux_session::host::{SessionView, SessionViews};
@@ -21,7 +21,6 @@ impl bevy::prelude::Plugin for Plugin {
         app.add_message::<Open>()
             .add_message::<crate::WebviewLoadCompleted>()
             .init_resource::<bevy_cef::prelude::IpcEventRawBuffer>()
-            .add_plugins(UiStatePlugin::<LayoutUiState>::default())
             .add_plugins(UiEventPlugin::<(
                 BrowserModalBoundsRequest,
                 BrowserModalCloseRequest,
@@ -32,7 +31,11 @@ impl bevy::prelude::Plugin for Plugin {
             .add_observer(dismiss)
             .add_systems(
                 Update,
-                (open, dispose, publish)
+                (
+                    open,
+                    dispose,
+                    publish.run_if(any_with_component::<vmux_layout::LayoutCef>),
+                )
                     .chain()
                     .after(vmux_ecs::agent::AgentRequestApplySet),
             )
