@@ -31,9 +31,21 @@ impl Environment {
     }
 
     pub fn current() -> Self {
-        Self {
+        let mut environment = Self {
             values: std::env::vars_os().collect(),
+        };
+        for name in [
+            "GIT_DIR",
+            "GIT_WORK_TREE",
+            "GIT_INDEX_FILE",
+            "GIT_OBJECT_DIRECTORY",
+            "GIT_ALTERNATE_OBJECT_DIRECTORIES",
+            "GIT_COMMON_DIR",
+            "GIT_PREFIX",
+        ] {
+            environment.remove(name);
         }
+        environment
     }
 
     pub fn load(&mut self, root: &Path) -> Result<()> {
