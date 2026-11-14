@@ -45,6 +45,7 @@ impl Project {
             "scripts/vmux-builder",
             "scripts/cargo-target-paths.sh",
             "scripts/product-host.sh",
+            "scripts/build-title.sh",
             "scripts/build-mac-release.sh",
             "crates/build_product.rs",
             "packaging/macos/Vmux.icns",

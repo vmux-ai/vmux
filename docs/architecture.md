@@ -90,7 +90,9 @@ capability limits, and update endpoints consume that identity. Custom hosts defa
 media capabilities and no Vmux update endpoints. Per-origin permissions and update checks
 stay with their existing ECS owners; product metadata adds no runtime Resources.
 Packaging consumes the same build metadata; host binaries must be built and packaged from
-the same product inputs. Custom data/configuration and runtime paths derive from the namespace,
+the same product inputs. Compiled window/menu and packaged bundle titles use the accepted product
+name and the same local/dev source label; release titles retain the product name alone.
+Custom data/configuration and runtime paths derive from the namespace,
 even when two hosts share a display name. Changing product identity never imports Vmux data or
 credentials. `examples/host-consumer` exercises the explicit host facade without a renderer;
 its native credential calls retain the desktop-process access restriction. The default SDK

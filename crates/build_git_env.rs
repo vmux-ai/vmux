@@ -3,6 +3,7 @@ use std::process::Command;
 
 pub fn emit() {
     println!("cargo::rerun-if-env-changed=VMUX_TARGET_DESTINATION");
+    println!("cargo::rerun-if-env-changed=VMUX_HOST_NAME");
     let identity = BuildIdentity::read();
     println!("cargo::rustc-env=VMUX_GIT_HASH={}", identity.hash);
     println!("cargo::rustc-env=VMUX_GIT_BRANCH={}", identity.branch);
@@ -43,6 +44,7 @@ pub fn emit() {
 struct BuildIdentity {
     hash: String,
     branch: String,
+    name: String,
 }
 
 impl BuildIdentity {
@@ -51,6 +53,7 @@ impl BuildIdentity {
             hash: git_stdout(&["rev-parse", "--short=7", "HEAD"])
                 .unwrap_or_else(|| "unknown".to_string()),
             branch: git_stdout(&["symbolic-ref", "--quiet", "--short", "HEAD"]).unwrap_or_default(),
+            name: std::env::var("VMUX_HOST_NAME").unwrap_or_else(|_| "Vmux".to_string()),
         }
     }
 
@@ -61,10 +64,10 @@ impl BuildIdentity {
             &self.branch
         };
         match profile {
-            "release" => "Vmux".to_string(),
-            "local" => format!("Vmux ({source})"),
-            "dev" => format!("Vmux Dev ({source})"),
-            other => format!("Vmux ({other})"),
+            "release" => self.name.clone(),
+            "local" => format!("{} ({source})", self.name),
+            "dev" => format!("{} Dev ({source})", self.name),
+            other => format!("{} ({other})", self.name),
         }
     }
 }

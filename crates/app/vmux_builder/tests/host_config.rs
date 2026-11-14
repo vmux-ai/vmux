@@ -7,6 +7,60 @@ use support::Project;
 pub mod support;
 
 #[test]
+fn compiled_and_packaged_titles_keep_the_product_name_and_source_label() {
+    let project = Project::create();
+    fs::copy(
+        project.repo().join("crates/build_git_env.rs"),
+        project.root().join("build_git_env.rs"),
+    )
+    .unwrap();
+    project.script(
+        "check-titles.py",
+        r#"import os,pathlib,plistlib,subprocess
+root=pathlib.Path.cwd()
+for key in ['GIT_DIR','GIT_WORK_TREE','GIT_INDEX_FILE','GIT_COMMON_DIR']:
+    os.environ.pop(key,None)
+subprocess.run(['/usr/bin/git','init','--initial-branch=title-fixture'],check=True,capture_output=True)
+(root/'title.rs').write_text('mod build_git_env;\nfn main() { build_git_env::emit(); }\n')
+subprocess.run(['rustc','--edition=2024','title.rs','-o','title-emit'],check=True)
+for name in [None,'Atlas "Lab" & Co']:
+    for profile in ['release','dev','local','review']:
+        env=os.environ.copy()
+        env['VMUX_BUILD_PROFILE']=profile
+        if name is None:
+            env.pop('VMUX_HOST_NAME',None)
+        else:
+            env['VMUX_HOST_NAME']=name
+        product=name or 'Vmux'
+        expected=product
+        if profile!='release':
+            expected+=(' Dev' if profile=='dev' else '')+' ('+('title-fixture' if profile in ['dev','local'] else profile)+')'
+        output=subprocess.check_output([str(root/'title-emit')],env=env,text=True)
+        prefix='cargo::rustc-env=VMUX_BUILD_TITLE='
+        compiled=next(line[len(prefix):] for line in output.splitlines() if line.startswith(prefix))
+        plist=root/'title.plist'
+        plist.write_bytes(plistlib.dumps({'Unrelated':'retained'}))
+        packaged=subprocess.check_output(['bash','scripts/build-title.sh',profile,str(root),str(plist)],env=env,text=True).strip()
+        info=plistlib.loads(plist.read_bytes())
+        assert compiled==packaged==expected,(name,profile,compiled,packaged,expected)
+        assert info['CFBundleName']==info['CFBundleDisplayName']==expected
+        assert info['Unrelated']=='retained'
+        assert 'cargo::rerun-if-env-changed=VMUX_HOST_NAME' in output.splitlines()
+"#,
+    );
+    let output = project
+        .command("python3")
+        .arg("check-titles.py")
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+}
+
+#[test]
 fn host_metadata_round_trips_shell_and_json_metacharacters_without_execution() {
     let project = Project::create();
     project.script(
