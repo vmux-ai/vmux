@@ -209,7 +209,7 @@ fn dispose(mut host: AuthenticationHost) {
                     .sessions
                     .get(session.entity())
                     .is_ok_and(|(pending, state)| {
-                        pending && matches!(state, Some(RunState::AuthenticationRequired { .. }))
+                        pending && !matches!(state, Some(RunState::Errored(_)))
                     })
         })
         .map(|(entity, _, parent, ..)| (entity, parent.parent()))

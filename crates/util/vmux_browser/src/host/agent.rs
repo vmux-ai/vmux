@@ -515,6 +515,9 @@ impl OpenResolver<'_, '_> {
         url: &str,
         source: Option<&str>,
     ) -> Result<Option<super::authentication::Open>, String> {
+        if !cfg!(target_os = "macos") {
+            return Ok(None);
+        }
         let Some(source) = source else {
             return Ok(None);
         };
@@ -651,6 +654,7 @@ mod opening_tests {
     use super::*;
     use vmux_layout::active_pane::ActiveStack;
 
+    #[cfg(target_os = "macos")]
     struct ModalFixture {
         app: App,
         window: Entity,
@@ -661,6 +665,7 @@ mod opening_tests {
         request_id: String,
     }
 
+    #[cfg(target_os = "macos")]
     impl ModalFixture {
         fn new() -> Self {
             let mut app = App::new();
@@ -761,6 +766,7 @@ mod opening_tests {
     }
 
     #[test]
+    #[cfg(target_os = "macos")]
     fn sign_in_requests_in_one_frame_keep_only_the_latest_modal() {
         let mut fixture = ModalFixture::new();
         fixture.request("https://example.test/auth?attempt=1");
@@ -786,6 +792,7 @@ mod opening_tests {
     }
 
     #[test]
+    #[cfg(target_os = "macos")]
     fn setup_sign_in_opens_a_source_window_modal_without_replacing_the_conversation() {
         let mut fixture = ModalFixture::new();
         let url = "https://example.test/auth?state=%2B%2F&challenge=a+b";
@@ -845,6 +852,38 @@ mod opening_tests {
     }
 
     #[test]
+    #[cfg(target_os = "macos")]
+    fn setup_sign_in_stays_open_during_preparation_and_closes_on_failure() {
+        let mut fixture = ModalFixture::new();
+        *fixture
+            .app
+            .world_mut()
+            .get_mut::<vmux_session::RunState>(fixture.session)
+            .unwrap() = vmux_session::RunState::Preparing;
+        let popup = fixture.open("https://example.test/auth");
+        fixture.app.update();
+        assert!(fixture.app.world().get_entity(popup).is_ok());
+        *fixture
+            .app
+            .world_mut()
+            .get_mut::<vmux_session::RunState>(fixture.session)
+            .unwrap() = vmux_session::RunState::AuthenticationRequired {
+            methods: Vec::new(),
+            pending: true,
+        };
+        fixture.app.update();
+        assert!(fixture.app.world().get_entity(popup).is_ok());
+        *fixture
+            .app
+            .world_mut()
+            .get_mut::<vmux_session::RunState>(fixture.session)
+            .unwrap() = vmux_session::RunState::Errored("setup cancelled".into());
+        fixture.app.update();
+        assert!(fixture.app.world().get_entity(popup).is_err());
+    }
+
+    #[test]
+    #[cfg(target_os = "macos")]
     fn modal_bounds_and_close_intents_are_scoped_to_the_current_window_and_request() {
         let mut fixture = ModalFixture::new();
         let old = fixture.open("https://example.test/auth?attempt=1");
@@ -935,6 +974,11 @@ mod opening_tests {
                     vmux_session::SessionId(source.into()),
                 ))
                 .id();
+            if !cfg!(target_os = "macos") {
+                app.world_mut()
+                    .entity_mut(session)
+                    .insert(vmux_session::SetupPending);
+            }
             let stack = app.world_mut().spawn((Stack::bundle(), ChildOf(pane))).id();
             app.world_mut().entity_mut(stack).insert((
                 vmux_ecs::EntityTarget::<vmux_session::Session>::new(session),
