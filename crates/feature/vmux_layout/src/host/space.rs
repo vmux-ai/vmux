@@ -70,6 +70,35 @@ impl Space {
 #[require(Save)]
 pub struct SpaceId(pub String);
 
+impl SpaceId {
+    pub fn normalized(input: &str) -> Self {
+        let mut segments = Vec::new();
+        for segment in input.split('/') {
+            let mut output = String::new();
+            let mut pending_dash = false;
+            for character in segment.chars().flat_map(char::to_lowercase) {
+                if character.is_ascii_alphanumeric() {
+                    if pending_dash && !output.is_empty() {
+                        output.push('-');
+                    }
+                    output.push(character);
+                    pending_dash = false;
+                } else if !output.is_empty() {
+                    pending_dash = true;
+                }
+            }
+            if !output.is_empty() {
+                segments.push(output);
+            }
+        }
+        if segments.is_empty() {
+            Self("space".into())
+        } else {
+            Self(segments.join("/"))
+        }
+    }
+}
+
 #[derive(Component, Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct CurrentSpace;
 

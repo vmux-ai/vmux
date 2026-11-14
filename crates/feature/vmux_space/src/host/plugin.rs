@@ -1,5 +1,7 @@
+use bevy::prelude::{Commands, MessageWriter, On, Query, Res, With};
 use bevy::{ecs::message::MessageReader, prelude::*};
 use bevy_cef::prelude::*;
+use std::option::Option;
 #[cfg(test)]
 use vmux_command::CommandManifest;
 use vmux_command::{
@@ -36,6 +38,7 @@ use vmux_setting::{AppSettings, SettingsLoadSet, SettingsSaveRequest};
 
 use super::SpacesUiStateUpdates;
 use super::agent::SpaceAgentPlugin;
+use super::identity::SpaceIdentity;
 use super::spaces::{SpaceSelection, Spaces, SpacesPageSnapshot};
 use crate::event::{
     ProjectActivateRequest, ProjectForgetRequest, ProjectPickerRequest, SpaceAttachRequest,
@@ -43,7 +46,7 @@ use crate::event::{
     SpaceFormOpenRequest, SpaceFormRegenerateRequest, SpaceFormState, SpaceOpenPageRequest,
     SpaceRenameRequest, SpaceRow, SpacesListEvent, SpacesUiState,
 };
-use crate::model::SpaceRecord;
+use crate::model::BOOTSTRAP_SPACE_ID;
 use vmux_api::command_bar::{CommandBarPicker, OpenRequest as CommandBarOpenUrlRequest};
 use vmux_ui::i18n::{Locale, TranslationValue, translate, translate_with};
 
@@ -151,12 +154,20 @@ fn ensure_bootstrap(
     spaces: Query<(), With<Space>>,
     restore: Query<&WorkspaceRestore>,
     profile: vmux_ecs::profile::CurrentProfile,
+    identity: SpaceIdentity,
     mut commands: Commands,
 ) {
     if !spaces.is_empty() || restore.single().is_ok_and(|restore| restore.store_present) {
         return;
     }
-    commands.spawn(SpaceRecord::bootstrap_for(profile.label().unwrap_or("Personal")).bundle());
+    commands.spawn((
+        Space,
+        SpaceId(BOOTSTRAP_SPACE_ID.into()),
+        Name::new(identity.suggested(&[])),
+        vmux_layout::profile::Profile {
+            name: profile.label().unwrap_or("Personal").to_string(),
+        },
+    ));
 }
 
 #[vmux_command::command(message)]
@@ -415,15 +426,11 @@ fn reset_sent(
 
 fn open_form(
     trigger: On<UiInput<SpaceFormOpenRequest>>,
-    spaces: Query<&Name, With<Space>>,
+    identity: SpaceIdentity,
     mut commands: Commands,
 ) {
     let suggestion = if trigger.event().payload.space_id.is_none() {
-        let existing = spaces
-            .iter()
-            .map(|name| name.as_str().to_string())
-            .collect::<std::collections::HashSet<_>>();
-        SpaceRecord::suggested_planet_name(&existing)
+        identity.suggested(&[])
     } else {
         String::new()
     };
@@ -472,20 +479,14 @@ fn edit_form(
 
 fn regenerate_form(
     trigger: On<UiInput<SpaceFormRegenerateRequest>>,
-    spaces: Query<&Name, With<Space>>,
+    identity: SpaceIdentity,
     mut forms: Query<&mut SpaceForm>,
     mut commands: Commands,
 ) {
     let Ok(mut form) = forms.get_mut(trigger.event().webview) else {
         return;
     };
-    let mut existing = spaces
-        .iter()
-        .map(|name| name.as_str().to_string())
-        .collect::<std::collections::HashSet<_>>();
-    existing.insert(form.0.draft.clone());
-    existing.insert(form.0.suggestion.clone());
-    let suggestion = SpaceRecord::suggested_planet_name(&existing);
+    let suggestion = identity.suggested(&[&form.0.draft, &form.0.suggestion]);
     form.0.draft.clone_from(&suggestion);
     form.0.suggestion = suggestion;
     commands.trigger(UiStateWrite::<SpacesUiState>::from_event(
@@ -1080,6 +1081,7 @@ fn attach(
 
 fn create(
     trigger: On<UiInput<SpaceCreateRequest>>,
+    identity: SpaceIdentity,
     graph: SpaceGraph,
     space_window: SpaceWindow,
     mut layout_requests: MessageWriter<TabLayoutSpawnRequest>,
@@ -1089,23 +1091,13 @@ fn create(
     let Some((window, main)) = space_window.for_webview(trigger.event().webview) else {
         return;
     };
-    let existing: std::collections::HashSet<String> = graph
-        .spaces
-        .iter()
-        .map(|(_, id, _, _, _)| id.0.clone())
-        .collect();
-    let existing_names: std::collections::HashSet<String> = graph
-        .rows
-        .iter()
-        .map(|(_, _, name, _, _, _, _)| name.as_str().to_string())
-        .collect();
     let requested_name = trigger.event().payload.name.trim();
     let name = if requested_name.is_empty() {
-        SpaceRecord::suggested_planet_name(&existing_names)
+        identity.suggested(&[])
     } else {
         requested_name.to_string()
     };
-    let id = SpaceRecord::unique_id(&existing, &name);
+    let id = identity.unique(&name).0;
     let order = graph
         .spaces
         .iter()
@@ -1145,6 +1137,7 @@ fn create(
 
 fn handle_open_in_new(
     mut reader: MessageReader<OpenRequest>,
+    identity: SpaceIdentity,
     graph: SpaceGraph,
     space_window: SpaceWindow,
     settings: Option<Res<AppSettings>>,
@@ -1157,18 +1150,8 @@ fn handle_open_in_new(
             continue;
         };
 
-        let existing: std::collections::HashSet<String> = graph
-            .spaces
-            .iter()
-            .map(|(_, sid, _, _, _)| sid.0.clone())
-            .collect();
-        let existing_names: std::collections::HashSet<String> = graph
-            .rows
-            .iter()
-            .map(|(_, _, name, _, _, _, _)| name.as_str().to_string())
-            .collect();
-        let name = SpaceRecord::suggested_planet_name(&existing_names);
-        let id = SpaceRecord::unique_id(&existing, &name);
+        let name = identity.suggested(&[]);
+        let id = identity.unique(&name).0;
         let order = graph
             .spaces
             .iter()
@@ -1243,7 +1226,6 @@ fn respond_spaces_spawn(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::model::SpaceRecord;
     use bevy::ecs::system::RunSystemOnce;
     use vmux_layout::settings::{
         FocusRingSettings, LayoutSettings, PaneSettings, SideSheetSettings, WindowSettings,
@@ -1299,14 +1281,6 @@ mod tests {
         }
     }
 
-    fn work_space_record() -> SpaceRecord {
-        SpaceRecord {
-            id: "work".to_string(),
-            name: "Work".to_string(),
-            profile: "Personal".to_string(),
-        }
-    }
-
     #[test]
     fn registers_spaces_host_before_cef_embedded_hosts_are_read() {
         let mut app = App::new();
@@ -1321,6 +1295,305 @@ mod tests {
 
         let entry = hosts.entry_for_host("spaces").unwrap();
         assert_eq!(entry.default_document, "spaces/index.html");
+    }
+
+    struct IdentityFixture {
+        app: App,
+        window: Entity,
+        main: Entity,
+        webview: Entity,
+    }
+
+    impl IdentityFixture {
+        fn new() -> Self {
+            let mut app = App::new();
+            app.add_plugins((MinimalPlugins, SpacePlugin))
+                .add_message::<TabLayoutSpawnRequest>()
+                .add_message::<SettingsSaveRequest>()
+                .add_message::<PageOpenRequest>()
+                .insert_resource(test_settings());
+            app.world_mut().insert_non_send(Browsers::default());
+            let window = app.world_mut().spawn((Window::default(), Active)).id();
+            let root = app.world_mut().spawn(HostWindow(window)).id();
+            let main = app.world_mut().spawn((Main, ChildOf(root))).id();
+            let webview = app.world_mut().spawn(HostWindow(window)).id();
+            Self {
+                app,
+                window,
+                main,
+                webview,
+            }
+        }
+
+        fn with_projects(active: &str, projects: Vec<SpaceProject>) -> Self {
+            let mut fixture = Self::new();
+            let mut settings = test_settings();
+            settings.spaces.insert(
+                "work".into(),
+                SpaceOverrides {
+                    projects,
+                    active_project: Some(active.into()),
+                    ..Default::default()
+                },
+            );
+            fixture.app.insert_resource(settings);
+            fixture.app.world_mut().spawn((
+                Space,
+                SpaceId("work".into()),
+                Name::new("Work"),
+                vmux_layout::profile::Profile {
+                    name: "Personal".into(),
+                },
+                CurrentSpace,
+            ));
+            fixture
+        }
+
+        fn request<T: Send + Sync + 'static>(&mut self, payload: T) {
+            self.app.world_mut().trigger(UiInput {
+                webview: Entity::PLACEHOLDER,
+                payload,
+            });
+            self.app.world_mut().flush();
+        }
+
+        fn project_state(&self) -> (Vec<String>, Option<String>) {
+            let space = self
+                .app
+                .world()
+                .resource::<AppSettings>()
+                .space("work")
+                .expect("space");
+            (
+                space
+                    .projects
+                    .iter()
+                    .map(|project| project.path.clone())
+                    .collect(),
+                space.active_project.clone(),
+            )
+        }
+
+        fn create(&mut self, name: &str) {
+            self.app.world_mut().trigger(UiInput {
+                webview: self.webview,
+                payload: SpaceCreateRequest { name: name.into() },
+            });
+            self.app.world_mut().flush();
+        }
+
+        fn rows(&mut self) -> Vec<(String, String)> {
+            let mut rows = Vec::new();
+            let world = self.app.world_mut();
+            for (id, name) in world
+                .query_filtered::<(&SpaceId, &Name), With<Space>>()
+                .iter(world)
+            {
+                rows.push((id.0.clone(), name.as_str().into()));
+            }
+            rows.sort();
+            rows
+        }
+    }
+
+    #[test]
+    fn creation_uses_canonical_global_ids_and_preserves_nested_namespaces() {
+        let mut fixture = IdentityFixture::new();
+        fixture.app.world_mut().spawn((
+            Space,
+            SpaceId("org-name/repo".into()),
+            Name::new("existing"),
+        ));
+        fixture.app.world_mut().spawn((
+            Space,
+            SpaceId("org-name/repo-2".into()),
+            Name::new("existing suffix"),
+        ));
+        fixture.create("Org Name/Repo!");
+        fixture.create("a//b/");
+        fixture.create("!!!");
+        fixture.create("Client A!");
+        fixture.create("Client A!");
+        assert_eq!(
+            fixture.rows(),
+            [
+                ("a/b".into(), "a/b".into()),
+                ("client-a".into(), "client-a".into()),
+                ("client-a-2".into(), "client-a-2".into()),
+                ("org-name/repo".into(), "existing".into()),
+                ("org-name/repo-2".into(), "existing suffix".into()),
+                ("org-name/repo-3".into(), "org-name/repo-3".into()),
+                ("space".into(), "space".into()),
+            ]
+        );
+        let world = fixture.app.world_mut();
+        let (entity, id, parent) = world
+            .query_filtered::<(Entity, &SpaceId, &ChildOf), (With<Space>, With<Active>)>()
+            .single(world)
+            .unwrap();
+        assert_eq!(id.0, "client-a-2");
+        assert_eq!(parent.parent(), fixture.main);
+        let requests = world.resource::<bevy::ecs::message::Messages<TabLayoutSpawnRequest>>();
+        let mut cursor = requests.get_cursor();
+        let request = cursor.read(requests).last().unwrap();
+        assert_eq!(request.space, entity);
+        assert_eq!(request.primary_window, fixture.window);
+    }
+
+    #[test]
+    fn creation_uses_the_new_identity_for_startup_overrides() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().to_string_lossy().to_string();
+        let mut fixture = IdentityFixture::new();
+        fixture
+            .app
+            .world_mut()
+            .resource_mut::<AppSettings>()
+            .spaces
+            .insert(
+                "work-2".into(),
+                SpaceOverrides {
+                    startup_dir: Some(path.clone()),
+                    ..Default::default()
+                },
+            );
+        fixture.create("Work");
+        fixture.create("Work");
+        let requests = fixture
+            .app
+            .world()
+            .resource::<bevy::ecs::message::Messages<TabLayoutSpawnRequest>>();
+        let mut cursor = requests.get_cursor();
+        let request = cursor.read(requests).last().unwrap();
+        assert_eq!(request.startup_dir.as_deref(), Some(directory.path()));
+    }
+
+    #[test]
+    fn open_in_new_space_uses_registered_creation_and_the_requested_url() {
+        let mut fixture = IdentityFixture::new();
+        fixture.app.world_mut().write_message(OpenRequest {
+            url: Some("https://example.com/requested".into()),
+        });
+        fixture.app.world_mut().run_schedule(Update);
+        assert_eq!(fixture.rows().len(), 1);
+        let world = fixture.app.world_mut();
+        let (space, parent) = world
+            .query_filtered::<(Entity, &ChildOf), (With<Space>, With<Active>)>()
+            .single(world)
+            .unwrap();
+        assert_eq!(parent.parent(), fixture.main);
+        let requests = world.resource::<bevy::ecs::message::Messages<TabLayoutSpawnRequest>>();
+        let mut cursor = requests.get_cursor();
+        let request = cursor.read(requests).last().unwrap();
+        assert_eq!(request.space, space);
+        assert_eq!(request.primary_window, fixture.window);
+        assert!(
+            matches!(&request.content, TabLayoutSpawnContent::Url { url, .. } if url == "https://example.com/requested")
+        );
+    }
+
+    #[test]
+    fn form_regeneration_excludes_canonical_names_and_current_drafts() {
+        let mut fixture = IdentityFixture::new();
+        for name in [
+            "mercury", "venus", "earth", "mars", "jupiter", "saturn", "uranus", "neptune", "ceres",
+            "pluto", "haumea", "makemake", "eris",
+        ] {
+            fixture
+                .app
+                .world_mut()
+                .spawn((Space, SpaceId(name.into()), Name::new(name)));
+        }
+        fixture.app.world_mut().trigger(UiInput {
+            webview: fixture.webview,
+            payload: SpaceFormOpenRequest {
+                space_id: None,
+                draft: String::new(),
+            },
+        });
+        fixture.app.world_mut().flush();
+        for _ in 0..20 {
+            let previous = fixture
+                .app
+                .world()
+                .get::<SpaceForm>(fixture.webview)
+                .unwrap()
+                .0
+                .clone();
+            fixture.app.world_mut().trigger(UiInput {
+                webview: fixture.webview,
+                payload: SpaceFormRegenerateRequest,
+            });
+            fixture.app.world_mut().flush();
+            let next = &fixture
+                .app
+                .world()
+                .get::<SpaceForm>(fixture.webview)
+                .unwrap()
+                .0;
+            assert_ne!(next.suggestion, previous.suggestion);
+            assert_ne!(next.suggestion, previous.draft);
+            assert_eq!(next.draft, next.suggestion);
+            let name = next.suggestion.clone();
+            assert!(!fixture.rows().iter().any(|(_, existing)| existing == &name));
+        }
+    }
+
+    #[test]
+    fn bootstrap_preserves_profile_identity_and_refuses_existing_or_restored_spaces() {
+        if std::env::var_os("VMUX_SPACE_BOOTSTRAP_ORACLE").is_none() {
+            let directory = tempfile::tempdir().unwrap();
+            let output = std::process::Command::new(std::env::current_exe().unwrap())
+                .args(["--exact", "host::plugin::tests::bootstrap_preserves_profile_identity_and_refuses_existing_or_restored_spaces", "--nocapture"])
+                .env("VMUX_SPACE_BOOTSTRAP_ORACLE", "1")
+                .env("VMUX_TEST", "1")
+                .env("VMUX_DATA_DIR", directory.path())
+                .output().unwrap();
+            assert!(
+                output.status.success(),
+                "{}\n{}",
+                String::from_utf8_lossy(&output.stdout),
+                String::from_utf8_lossy(&output.stderr)
+            );
+            return;
+        }
+        for case in 0..3 {
+            let mut fixture = IdentityFixture::new();
+            fixture.app.world_mut().spawn((
+                vmux_ecs::profile::ActiveProfile(vmux_ecs::profile::Profile::current()),
+                vmux_ecs::profile::ProfileDirectories(vmux_ecs::profile::ProfilePaths::current()),
+                Name::new("Team"),
+            ));
+            if case == 1 {
+                fixture
+                    .app
+                    .world_mut()
+                    .spawn((Space, SpaceId("saved".into()), Name::new("Saved")));
+            } else if case == 2 {
+                fixture.app.add_systems(
+                    Startup,
+                    (|mut restore: Single<&mut WorkspaceRestore>| {
+                        restore.store_present = true;
+                    })
+                    .after(LayoutStartupSet::Store)
+                    .before(ensure_bootstrap),
+                );
+            }
+            fixture.app.world_mut().run_schedule(Startup);
+            match case {
+                0 => {
+                    let world = fixture.app.world_mut();
+                    let (id, profile) = world
+                        .query_filtered::<(&SpaceId, &vmux_layout::profile::Profile), With<Space>>()
+                        .single(world)
+                        .unwrap();
+                    assert_eq!(id.0, "space-1");
+                    assert_eq!(profile.name, "Team");
+                }
+                1 => assert_eq!(fixture.rows(), [("saved".into(), "Saved".into())]),
+                _ => assert!(fixture.rows().is_empty()),
+            }
+        }
     }
 
     #[test]
@@ -1358,7 +1631,15 @@ mod tests {
             .add_systems(Update, update_effective_startup);
         let space = app
             .world_mut()
-            .spawn((work_space_record().bundle(), CurrentSpace))
+            .spawn((
+                Space,
+                SpaceId("work".into()),
+                Name::new("Work"),
+                vmux_layout::profile::Profile {
+                    name: "Personal".into(),
+                },
+                CurrentSpace,
+            ))
             .id();
 
         app.update();
@@ -1519,7 +1800,15 @@ mod tests {
         app.add_plugins(MinimalPlugins).insert_resource(settings);
         let space = app
             .world_mut()
-            .spawn((work_space_record().bundle(), CurrentSpace))
+            .spawn((
+                Space,
+                SpaceId("work".into()),
+                Name::new("Work"),
+                vmux_layout::profile::Profile {
+                    name: "Personal".into(),
+                },
+                CurrentSpace,
+            ))
             .id();
         let tab = app.world_mut().spawn((Tab::default(), ChildOf(space))).id();
 
@@ -1590,57 +1879,9 @@ mod tests {
         );
     }
 
-    fn project_request_app(active: &str, projects: Vec<SpaceProject>) -> App {
-        let mut settings = test_settings();
-        settings.spaces.insert(
-            "work".into(),
-            SpaceOverrides {
-                projects,
-                active_project: Some(active.to_string()),
-                ..Default::default()
-            },
-        );
-        let mut app = App::new();
-        app.add_plugins(MinimalPlugins)
-            .add_message::<SettingsSaveRequest>()
-            .insert_resource(settings)
-            .add_observer(project_activate)
-            .add_observer(project_forget);
-        app.world_mut().spawn((
-            SpaceRecord {
-                id: "work".into(),
-                name: "Work".into(),
-                profile: "Personal".into(),
-            }
-            .bundle(),
-            CurrentSpace,
-        ));
-        app
-    }
-
-    fn run_project_request<T: Send + Sync + 'static>(app: &mut App, request: T) {
-        app.world_mut().trigger(UiInput {
-            webview: Entity::PLACEHOLDER,
-            payload: request,
-        });
-        app.update();
-    }
-
-    fn space_state(app: &App) -> (Vec<String>, Option<String>) {
-        let space = app
-            .world()
-            .resource::<AppSettings>()
-            .space("work")
-            .expect("space");
-        (
-            space.projects.iter().map(|p| p.path.clone()).collect(),
-            space.active_project.clone(),
-        )
-    }
-
     #[test]
     fn activating_a_project_moves_only_the_space_default() {
-        let mut app = project_request_app(
+        let mut fixture = IdentityFixture::with_projects(
             "/repo/alpha",
             vec![
                 SpaceProject::at("/repo/alpha"),
@@ -1650,7 +1891,9 @@ mod tests {
         let tabs: Vec<Entity> = ["/repo/alpha", "/repo/beta"]
             .iter()
             .map(|dir| {
-                app.world_mut()
+                fixture
+                    .app
+                    .world_mut()
                     .spawn(Tab {
                         startup_dir: Some((*dir).to_string()),
                         ..Default::default()
@@ -1661,27 +1904,28 @@ mod tests {
         let before: Vec<Option<String>> = tabs
             .iter()
             .map(|tab| {
-                app.world()
+                fixture
+                    .app
+                    .world()
                     .get::<Tab>(*tab)
                     .and_then(|t| t.startup_dir.clone())
             })
             .collect();
 
-        run_project_request(
-            &mut app,
-            ProjectActivateRequest {
-                path: "/repo/beta".into(),
-                branch: String::new(),
-                checkout: String::new(),
-                pane_id: None,
-            },
-        );
+        fixture.request(ProjectActivateRequest {
+            path: "/repo/beta".into(),
+            branch: String::new(),
+            checkout: String::new(),
+            pane_id: None,
+        });
 
-        assert_eq!(space_state(&app).1.as_deref(), Some("/repo/beta"));
+        assert_eq!(fixture.project_state().1.as_deref(), Some("/repo/beta"));
         let after: Vec<Option<String>> = tabs
             .iter()
             .map(|tab| {
-                app.world()
+                fixture
+                    .app
+                    .world()
                     .get::<Tab>(*tab)
                     .and_then(|t| t.startup_dir.clone())
             })
@@ -1714,31 +1958,36 @@ mod tests {
                 ..Default::default()
             },
         );
-        let mut app = App::new();
-        app.add_plugins(MinimalPlugins)
-            .add_message::<SettingsSaveRequest>()
-            .insert_resource(settings)
-            .add_observer(project_activate);
-        app.world_mut()
+        let mut fixture = IdentityFixture::new();
+        fixture.app.insert_resource(settings);
+        fixture
+            .app
+            .world_mut()
             .spawn((Space, SpaceId("work".into()), CurrentSpace));
-        let other = app.world_mut().spawn((Space, SpaceId("other".into()))).id();
-        let tab = app.world_mut().spawn((Tab::default(), ChildOf(other))).id();
-        let pane = app
+        let other = fixture
+            .app
+            .world_mut()
+            .spawn((Space, SpaceId("other".into())))
+            .id();
+        let tab = fixture
+            .app
+            .world_mut()
+            .spawn((Tab::default(), ChildOf(other)))
+            .id();
+        let pane = fixture
+            .app
             .world_mut()
             .spawn((vmux_layout::pane::Pane, ChildOf(tab)))
             .id();
 
-        run_project_request(
-            &mut app,
-            ProjectActivateRequest {
-                path: "/repo/other-b".into(),
-                branch: String::new(),
-                checkout: String::new(),
-                pane_id: Some(pane.to_bits()),
-            },
-        );
+        fixture.request(ProjectActivateRequest {
+            path: "/repo/other-b".into(),
+            branch: String::new(),
+            checkout: String::new(),
+            pane_id: Some(pane.to_bits()),
+        });
 
-        let settings = app.world().resource::<AppSettings>();
+        let settings = fixture.app.world().resource::<AppSettings>();
         assert_eq!(
             settings.space("work").unwrap().active_project.as_deref(),
             Some("/repo/work")
@@ -1751,7 +2000,7 @@ mod tests {
 
     #[test]
     fn forgetting_the_active_project_falls_back_to_one_that_remains() {
-        let mut app = project_request_app(
+        let mut fixture = IdentityFixture::with_projects(
             "/repo/beta",
             vec![
                 SpaceProject::at("/repo/alpha"),
@@ -1759,34 +2008,29 @@ mod tests {
             ],
         );
 
-        run_project_request(
-            &mut app,
-            ProjectForgetRequest {
-                path: "/repo/beta".into(),
-            },
-        );
+        fixture.request(ProjectForgetRequest {
+            path: "/repo/beta".into(),
+        });
 
         assert_eq!(
-            space_state(&app),
+            fixture.project_state(),
             (vec!["/repo/alpha".to_string()], Some("/repo/alpha".into()))
         );
     }
 
     #[test]
     fn activating_a_project_the_space_does_not_hold_is_ignored() {
-        let mut app = project_request_app("/repo/alpha", vec![SpaceProject::at("/repo/alpha")]);
+        let mut fixture =
+            IdentityFixture::with_projects("/repo/alpha", vec![SpaceProject::at("/repo/alpha")]);
 
-        run_project_request(
-            &mut app,
-            ProjectActivateRequest {
-                path: "/repo/elsewhere".into(),
-                branch: String::new(),
-                checkout: String::new(),
-                pane_id: None,
-            },
-        );
+        fixture.request(ProjectActivateRequest {
+            path: "/repo/elsewhere".into(),
+            branch: String::new(),
+            checkout: String::new(),
+            pane_id: None,
+        });
 
-        assert_eq!(space_state(&app).1.as_deref(), Some("/repo/alpha"));
+        assert_eq!(fixture.project_state().1.as_deref(), Some("/repo/alpha"));
     }
 
     #[test]

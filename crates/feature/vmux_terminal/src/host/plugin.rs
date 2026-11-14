@@ -50,8 +50,6 @@ use vmux_session::Session;
 use vmux_setting::SpaceOverrides;
 use vmux_setting::{AppSettings, TerminalTheme};
 use vmux_space::model::BOOTSTRAP_SPACE_ID;
-#[cfg(test)]
-use vmux_space::model::SpaceRecord;
 
 use crate::launch::TerminalLaunch;
 
@@ -2110,14 +2108,21 @@ mod tests {
     use CopyModeKey as K;
     use bevy::ecs::message::Messages;
 
-    fn spawn_active_space(app: &mut App, record: &SpaceRecord) {
-        app.world_mut()
-            .spawn((record.bundle(), vmux_layout::space::CurrentSpace));
-    }
-
     struct PageOpenFixture;
 
     impl PageOpenFixture {
+        fn active_space(app: &mut App) {
+            app.world_mut().spawn((
+                vmux_layout::space::Space,
+                vmux_layout::space::SpaceId(BOOTSTRAP_SPACE_ID.into()),
+                Name::new("earth"),
+                vmux_layout::profile::Profile {
+                    name: "Personal".into(),
+                },
+                vmux_layout::space::CurrentSpace,
+            ));
+        }
+
         fn spawn(app: &mut App, stack: Entity, url: &str) -> Entity {
             let id = PageOpenId::new();
             app.world_mut()
@@ -2394,7 +2399,7 @@ mod tests {
         app.add_plugins(MinimalPlugins)
             .insert_resource(test_settings())
             .add_systems(Update, handle_page_open);
-        spawn_active_space(&mut app, &SpaceRecord::bootstrap());
+        PageOpenFixture::active_space(&mut app);
 
         let stack = app.world_mut().spawn(Stack::bundle()).id();
         let task = PageOpenFixture::spawn(&mut app, stack, "vmux://terminal");
@@ -2418,7 +2423,7 @@ mod tests {
         app.add_plugins(MinimalPlugins)
             .insert_resource(test_settings())
             .add_systems(Update, handle_page_open);
-        spawn_active_space(&mut app, &SpaceRecord::bootstrap());
+        PageOpenFixture::active_space(&mut app);
 
         let previous_metadata = PageMetadata {
             url: "vmux://projects/".into(),
@@ -2462,10 +2467,9 @@ mod tests {
     #[test]
     fn open_terminal_page_uses_per_space_startup_dir() {
         let dir = tempfile::tempdir().unwrap();
-        let record = SpaceRecord::bootstrap();
         let mut settings = test_settings();
         settings.spaces.insert(
-            record.id.clone(),
+            BOOTSTRAP_SPACE_ID.to_string(),
             SpaceOverrides {
                 startup_url: None,
                 startup_dir: Some(dir.path().to_string_lossy().into()),
@@ -2477,7 +2481,7 @@ mod tests {
         app.add_plugins(MinimalPlugins)
             .insert_resource(settings)
             .add_systems(Update, handle_page_open);
-        spawn_active_space(&mut app, &record);
+        PageOpenFixture::active_space(&mut app);
 
         let stack = app.world_mut().spawn(Stack::bundle()).id();
         PageOpenFixture::spawn(&mut app, stack, "vmux://terminal");
@@ -2493,12 +2497,11 @@ mod tests {
 
     #[test]
     fn open_terminal_page_without_workspace_uses_shell_default() {
-        let record = SpaceRecord::bootstrap();
         let mut app = App::new();
         app.add_plugins(MinimalPlugins)
             .insert_resource(test_settings())
             .add_systems(Update, handle_page_open);
-        spawn_active_space(&mut app, &record);
+        PageOpenFixture::active_space(&mut app);
 
         let stack = app.world_mut().spawn(Stack::bundle()).id();
         PageOpenFixture::spawn(&mut app, stack, "vmux://terminal");
@@ -2516,10 +2519,9 @@ mod tests {
     fn open_terminal_page_prefers_ancestor_tab_startup_dir() {
         let space_dir = tempfile::tempdir().unwrap();
         let tab_dir = tempfile::tempdir().unwrap();
-        let record = SpaceRecord::bootstrap();
         let mut settings = test_settings();
         settings.spaces.insert(
-            record.id.clone(),
+            BOOTSTRAP_SPACE_ID.to_string(),
             SpaceOverrides {
                 startup_url: None,
                 startup_dir: Some(space_dir.path().to_string_lossy().into()),
@@ -2531,7 +2533,7 @@ mod tests {
         app.add_plugins(MinimalPlugins)
             .insert_resource(settings)
             .add_systems(Update, handle_page_open);
-        spawn_active_space(&mut app, &record);
+        PageOpenFixture::active_space(&mut app);
 
         let tab = app
             .world_mut()
@@ -2558,10 +2560,9 @@ mod tests {
     #[test]
     fn open_terminal_page_rejects_invalid_ancestor_tab_startup_dir() {
         let fallback_dir = tempfile::tempdir().unwrap();
-        let record = SpaceRecord::bootstrap();
         let mut settings = test_settings();
         settings.spaces.insert(
-            record.id.clone(),
+            BOOTSTRAP_SPACE_ID.to_string(),
             SpaceOverrides {
                 startup_url: None,
                 startup_dir: Some(fallback_dir.path().to_string_lossy().into()),
@@ -2573,7 +2574,7 @@ mod tests {
         app.add_plugins(MinimalPlugins)
             .insert_resource(settings)
             .add_systems(Update, handle_page_open);
-        spawn_active_space(&mut app, &record);
+        PageOpenFixture::active_space(&mut app);
 
         let tab = app
             .world_mut()
@@ -2600,10 +2601,9 @@ mod tests {
     #[test]
     fn layout_terminal_rejects_invalid_ancestor_tab_startup_dir() {
         let fallback_dir = tempfile::tempdir().unwrap();
-        let record = SpaceRecord::bootstrap();
         let mut settings = test_settings();
         settings.spaces.insert(
-            record.id.clone(),
+            BOOTSTRAP_SPACE_ID.to_string(),
             SpaceOverrides {
                 startup_url: None,
                 startup_dir: Some(fallback_dir.path().to_string_lossy().into()),
@@ -2616,7 +2616,7 @@ mod tests {
             .add_message::<TerminalLayoutSpawnRequest>()
             .insert_resource(settings)
             .add_systems(Update, spawn_layout_requested_content);
-        spawn_active_space(&mut app, &record);
+        PageOpenFixture::active_space(&mut app);
 
         let tab = app
             .world_mut()
