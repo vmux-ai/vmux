@@ -54,7 +54,7 @@ impl Tooling {
                 "vmux_cli",
                 "--no-default-features",
                 "--features",
-                "dx",
+                "dx,ci-syntax",
                 "--target-dir",
             ])
             .arg(&target);

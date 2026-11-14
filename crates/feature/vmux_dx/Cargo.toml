@@ -7,8 +7,11 @@ publish = false
 
 [features]
 runtime-cli = []
+ci-syntax = ["dep:proc-macro2", "dep:syn"]
 
 [dependencies]
+proc-macro2 = { version = "1", features = ["span-locations"], optional = true }
+syn = { version = "2", features = ["full", "visit"], optional = true }
 plist = "1"
 bevy_app = { workspace = true }
 bevy_ecs = { workspace = true }

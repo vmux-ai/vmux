@@ -448,6 +448,11 @@ or persistence; rendering code does not feed a normalized snapshot back as busin
 
 ### ECS ownership boundaries
 
+The DX `Work::NativeInputs` step owns its Git comparison and disposable Cargo/module/syntax
+projections. Compiler predicates and token spans only translate external build inputs into CI
+output; they do not retain product state. Existing cancellable subprocess execution bounds reads,
+and every projection drops before the step completes.
+
 Record serialization owns only immutable schema metadata, scoped JSON records, and write
 receipts. The Schema resource registers stateless component/relationship codec pointers;
 record request/result components retain received or captured values until materialization,
@@ -2485,6 +2490,20 @@ notarization. Feature-branch pushes start the same affected checks before a PR e
 same packaging filter and fast non-release app bundle. Each runner checks out a temporary merge
 of the captured base and head and verifies its Git tree before compiling. An existing PR selects
 its actual base branch, including stacked PRs; otherwise the default branch supplies the base.
+
+Feature CI parses changed Rust files with `vmux ci-native` and the optional `ci-syntax`
+feature. The development CLI enables this feature; ordinary product builds need not link the syntax
+parser. The classifier compares original
+Rust tokens after removing syntax nodes proven disabled with `test=false`; unknown cfg predicates
+remain in the comparison. `cfg_attr` payloads are inspected recursively, and platform/feature `cfg!`
+predicates retain the containing test body. Cargo library roots and enclosing module declarations
+must also prove Linux test coverage; unsupported module paths or uncertain context retain native
+validation. Changed platform- or feature-conditioned tests retain native validation.
+Portable test edits and their documentation/ownership-ledger updates skip macOS/iOS app jobs while
+Linux formatting, Clippy, affected Rust tests and ownership policy still run. New/deleted files,
+parse failures, source file mode/type changes, the source-embedding development CLI, build scripts,
+manifests and non-Rust inputs retain native checks. Missing comparison
+history fails selection. Main, manual and scheduled validation retain their existing scopes.
 
 Successful branch CI records the exact head, base and merged tree only after Linux, macOS, iOS,
 and any affected website checks pass. A same-repository, non-release PR may reuse that evidence

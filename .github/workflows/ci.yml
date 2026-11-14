@@ -151,6 +151,9 @@ jobs:
       - name: Clippy
         run: VMUX_SKIP_DX_BUILD=1 cargo clippy ${{ steps.scope.outputs.lint_args }} --all-targets -- -D warnings
 
+      - name: Clippy CI syntax classifier
+        run: cargo clippy --locked -p vmux_dx --features ci-syntax --all-targets -- -D warnings
+
       - name: Clippy lean desktop features
         if: steps.scope.outputs.lean == 'true'
         run: VMUX_SKIP_DX_BUILD=1 cargo clippy -p vmux_desktop --lib --no-default-features -- -D warnings
@@ -221,8 +224,8 @@ jobs:
       - name: Test build preparation and source ownership
         run: |
           node --test scripts/ci-preflight.test.js
-          cargo test --locked -p vmux_dx --lib
-          cargo test --locked -p vmux_cli --no-default-features --features dx --test dx
+          cargo test --locked -p vmux_dx --features ci-syntax --lib
+          cargo test --locked -p vmux_cli --no-default-features --features dx,ci-syntax --test dx
           cargo test --locked -p vmux_macro --test source_conventions --test ecs_ownership
 
   test-sdk-path:
@@ -302,9 +305,9 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       website: ${{ steps.filter.outputs.website }}
-      macos: ${{ github.event_name != 'schedule' && (github.event_name == 'workflow_dispatch' || steps.filter.outputs.macos == 'true') }}
-      macos_package: ${{ steps.filter.outputs.macos_package }}
-      ios: ${{ github.event_name != 'schedule' && (github.event_name == 'workflow_dispatch' || steps.filter.outputs.ios == 'true') }}
+      macos: ${{ github.event_name != 'schedule' && (github.event_name == 'workflow_dispatch' || steps.filter.outputs.macos == 'true') && steps.native.outputs.native != 'false' }}
+      macos_package: ${{ steps.filter.outputs.macos_package == 'true' && steps.native.outputs.native != 'false' }}
+      ios: ${{ github.event_name != 'schedule' && (github.event_name == 'workflow_dispatch' || steps.filter.outputs.ios == 'true') && steps.native.outputs.native != 'false' }}
       code: ${{ github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' || steps.filter.outputs.code == 'true' }}
     steps:
       - uses: actions/checkout@v5
@@ -402,6 +405,22 @@ jobs:
               - '!crates/app/vmux_desktop/**'
               - '!crates/util/vmux_native/**'
               - '!patches/**'
+
+      - uses: ./.github/actions/setup-rust
+        if: >-
+          needs.plan.outputs.base != '' &&
+          (github.event_name == 'pull_request' || needs.plan.outputs.feature == 'true') &&
+          (steps.filter.outputs.macos == 'true' || steps.filter.outputs.ios == 'true')
+
+      - name: Classify native build inputs
+        id: native
+        if: >-
+          needs.plan.outputs.base != '' &&
+          (github.event_name == 'pull_request' || needs.plan.outputs.feature == 'true') &&
+          (steps.filter.outputs.macos == 'true' || steps.filter.outputs.ios == 'true')
+        env:
+          VMUX_CI_BASE: ${{ needs.plan.outputs.base }}
+        run: vmux ci-native >> "$GITHUB_OUTPUT"
 
   deps-rust:
     name: Deps (rust)
