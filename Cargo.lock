@@ -10275,6 +10275,7 @@ dependencies = [
  "agent-client-protocol",
  "base64 0.22.1",
  "bevy",
+ "bevy_app",
  "bevy_cef",
  "bevy_ecs",
  "bevy_reflect",

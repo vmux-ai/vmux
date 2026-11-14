@@ -1,5 +1,5 @@
 use bevy::prelude::*;
-use vmux_api::protocol::{AcpSessionConfig, ApprovalDecision, ClientMessage, SharedMessage};
+use vmux_api::protocol::{AcpSessionConfig, ClientMessage, SharedMessage};
 #[cfg(test)]
 use vmux_ecs::Cwd;
 #[cfg(test)]
@@ -20,13 +20,11 @@ use crate::AcpSessionId;
 use crate::host::acp::AcpSpawnQueued;
 use crate::host::event::{
     AcpAgentInfo, AcpSessionConfigSelectionResult, AcpSessionConfigSnapshot, AcpSessionCreated,
-    AcpTerminalCreated, AcpWorkspaceChanged, AgentApprovalRequest,
+    AcpTerminalCreated, AcpWorkspaceChanged,
 };
 use crate::policy::AcpWorkspacePolicy;
 use vmux_session::host::{ImportedConversation, SessionView};
-use vmux_session::{
-    AgentId, ApprovalPolicy, QueuedPrompts, Route, RunState, Session, SessionId, TitlePending,
-};
+use vmux_session::{AgentId, QueuedPrompts, Route, RunState, Session, SessionId, TitlePending};
 
 #[derive(SystemSet, Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub(super) struct AcpSessionConfigSet;
@@ -65,15 +63,13 @@ struct InputPlugin;
 
 impl bevy::prelude::Plugin for InputPlugin {
     fn build(&self, app: &mut App) {
-        app.add_message::<ServiceRequest>()
-            .add_systems(
-                Update,
-                input
-                    .after(ServiceMessageSet)
-                    .after(crate::host::model_selection::ModelSelectionSet)
-                    .before(vmux_session::TranscriptReadySet),
-            )
-            .add_observer(auto_allow);
+        app.add_message::<ServiceRequest>().add_systems(
+            Update,
+            input
+                .after(ServiceMessageSet)
+                .after(crate::host::model_selection::ModelSelectionSet)
+                .before(vmux_session::TranscriptReadySet),
+        );
     }
 }
 
@@ -296,27 +292,6 @@ fn selection(
     }
 }
 
-fn auto_allow(
-    trigger: On<AgentApprovalRequest>,
-    sessions: Query<(&SessionId, &ApprovalPolicy), With<Session>>,
-    mut service_requests: MessageWriter<ServiceRequest>,
-) {
-    let request = trigger.event();
-    let Ok((session_id, policy)) = sessions.get(request.session) else {
-        return;
-    };
-    if !policy.allows(&request.name) {
-        return;
-    }
-    service_requests.write(ServiceRequest(ClientMessage::Shared(
-        SharedMessage::AgentApprove {
-            sid: session_id.0.clone(),
-            call_id: request.call_id.clone(),
-            decision: ApprovalDecision::AllowAlways,
-        },
-    )));
-}
-
 #[allow(clippy::type_complexity)]
 fn session(
     mut reader: MessageReader<AcpSessionCreated>,
@@ -503,43 +478,6 @@ mod tests {
                 ProcessAnchor(ProcessId::new()),
             )
         }
-    }
-
-    #[test]
-    fn auto_approval_targets_requested_session_and_call() {
-        let mut app = App::new();
-        app.add_plugins((MinimalPlugins, InputPlugin));
-        app.world_mut()
-            .spawn(crate::policy_driver::PolicyDriver::bundled());
-        let mut policy = ApprovalPolicy::default();
-        policy.allow("run");
-        let session = app
-            .world_mut()
-            .spawn((TestSession::bundle("claude", "s1", "/tmp"), policy))
-            .id();
-        app.world_mut().trigger(AgentApprovalRequest {
-            session,
-            call_id: "call-1".into(),
-            name: "run".into(),
-        });
-        app.update();
-        let requests = app
-            .world_mut()
-            .resource_mut::<Messages<ServiceRequest>>()
-            .drain()
-            .collect::<Vec<_>>();
-
-        assert!(matches!(
-            requests.as_slice(),
-            [ServiceRequest(ClientMessage::Shared(SharedMessage::AgentApprove {
-                sid,
-                call_id,
-                decision,
-            }))]
-                if sid == "s1"
-                    && call_id == "call-1"
-                    && *decision == ApprovalDecision::AllowAlways
-        ));
     }
 
     struct DispatchFixture {

@@ -79,13 +79,6 @@ pub struct AcpTerminalCreated {
 }
 
 #[derive(Event, Clone, Debug)]
-pub struct AgentApprovalRequest {
-    pub session: Entity,
-    pub call_id: String,
-    pub name: String,
-}
-
-#[derive(Event, Clone, Debug)]
 pub struct AgentApprovalReply {
     pub session: Entity,
     pub call_id: String,

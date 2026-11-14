@@ -8,7 +8,9 @@ publish = false
 
 [features]
 default = ["app"]
+approvals = ["dep:bevy_app", "dep:bevy_ecs", "dep:vmux_ecs", "dep:vmux_session", "vmux_ecs/jobs"]
 service = [
+    "vmux_ecs/host",
     "dep:vmux_spawn",
     "dep:agent-client-protocol",
     "dep:base64",
@@ -27,6 +29,8 @@ service = [
     "dep:vmux_transport",
 ]
 app = [
+    "approvals",
+    "vmux_ecs/host",
     "dep:base64",
     "dep:bevy",
     "dep:bevy_cef",
@@ -71,6 +75,7 @@ app = [
 path = "src/lib.rs"
 
 [dependencies]
+bevy_app = { workspace = true, optional = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 rkyv = { workspace = true }
@@ -103,7 +108,7 @@ toml = { workspace = true, optional = true }
 tempfile = { version = "3", optional = true }
 uuid = { workspace = true, optional = true }
 url = { workspace = true, optional = true }
-vmux_ecs = { path = "../../util/vmux_ecs", optional = true, features = ["host"] }
+vmux_ecs = { path = "../../util/vmux_ecs", optional = true, default-features = false, features = ["contracts"] }
 vmux_editor = { path = "../vmux_editor", optional = true }
 vmux_flex = { path = "../../util/vmux_flex", optional = true }
 vmux_git = { path = "../vmux_git", optional = true }

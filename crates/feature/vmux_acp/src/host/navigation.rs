@@ -799,7 +799,6 @@ impl SessionRuntime<'_, '_> {
             crate::host::acp::AcpSpawnQueued,
             crate::host::runtime::AcpSessionConfigState,
             crate::host::toast::ErrorSurfaced,
-            vmux_session::ApprovalPolicy,
             vmux_session::RunState,
             vmux_session::AgentTurnMeta,
             ImportedConversation,
@@ -1129,7 +1128,6 @@ mod tests {
                 AcpSessionId("acp-session".into()),
                 vmux_ecs::ProcessAnchor(vmux_ecs::ProcessId::new()),
                 crate::host::acp::AcpLaunchStarted,
-                vmux_session::ApprovalPolicy::default(),
                 vmux_session::RunState::default(),
                 vmux_session::AgentTurnMeta::default(),
                 PromptQueue::default(),
@@ -1166,7 +1164,6 @@ mod tests {
                 .get::<crate::host::acp::AcpLaunchStarted>(session)
                 .is_none()
         );
-        assert!(world.get::<vmux_session::ApprovalPolicy>(session).is_none());
         assert!(world.get::<vmux_session::RunState>(session).is_none());
         assert!(world.get::<vmux_session::AgentTurnMeta>(session).is_none());
         assert!(world.get::<PromptQueue>(session).is_none());

@@ -19,7 +19,7 @@ use vmux_session::event::{
     ChatBranch, ChatBranchesRequest, ChatGoToBranch, ChatSelectWorkspace, ComposerContext,
 };
 use vmux_session::host::{ChatBranchesProjection, ChatComposerContext, SessionView};
-use vmux_session::{ApprovalPolicy, Route, Session, SessionId};
+use vmux_session::{ApprovalCount, Route, Session, SessionId};
 
 pub(super) struct SpaceComposerPlugin;
 
@@ -42,7 +42,12 @@ impl Plugin for SpaceComposerPlugin {
             .add_observer(chat_go_to_branch)
             .add_systems(
                 Update,
-                (push_context_to_page.after(index), drain_branch_reads),
+                (
+                    push_context_to_page
+                        .after(index)
+                        .after(vmux_session::ApprovalProjectionSet),
+                    drain_branch_reads,
+                ),
             );
     }
 }
@@ -67,7 +72,7 @@ struct ComposerProjection<'w, 's> {
             Entity,
             &'static SessionId,
             Option<&'static Cwd>,
-            Option<&'static ApprovalPolicy>,
+            Option<&'static ApprovalCount>,
         ),
         With<Session>,
     >,
@@ -133,7 +138,7 @@ impl ComposerProjection<'_, '_> {
         &self,
         stack: Entity,
         cwd: Option<&Cwd>,
-        policy: Option<&ApprovalPolicy>,
+        policy: Option<&ApprovalCount>,
     ) -> ComposerContextInput {
         let mut current = stack;
         let mut tab_dir = None;
@@ -158,9 +163,7 @@ impl ComposerProjection<'_, '_> {
             workspace_selected: workspace_selected || cwd.is_some(),
             worktree,
             can_manage_workspace: cwd.is_some(),
-            auto_allow_count: policy
-                .map(|policy| u32::try_from(policy.auto.len()).unwrap_or(u32::MAX))
-                .unwrap_or_default(),
+            auto_allow_count: policy.map(|policy| policy.0).unwrap_or_default(),
             projects: Vec::new(),
         }
     }
