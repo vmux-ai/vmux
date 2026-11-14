@@ -25,6 +25,7 @@ vmux_ecs = { path = "../../util/vmux_ecs", features = ["cli"] }
 vmux_dx = { path = "../../feature/vmux_dx", optional = true }
 
 [dev-dependencies]
+libc = "0.2"
 plist = "1"
 serde_json = { workspace = true }
 assert_cmd = "2"

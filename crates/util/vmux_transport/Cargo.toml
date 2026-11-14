@@ -6,6 +6,10 @@ edition.workspace = true
 description = "Transport contract between Vmux clients, the relay and a desktop"
 publish = false
 
+[features]
+default = ["service"]
+service = ["dep:vmux_api", "dep:vmux_profile"]
+
 [dependencies]
 bytes = { workspace = true }
 quinn = { workspace = true }
@@ -19,8 +23,8 @@ tokio = { workspace = true }
 tracing = "0.1"
 serde = { workspace = true }
 serde_json = { workspace = true }
-vmux_api = { path = "../vmux_api" }
-vmux_profile = { path = "../vmux_profile" }
+vmux_api = { path = "../vmux_api", optional = true }
+vmux_profile = { path = "../vmux_profile", optional = true }
 
 [dev-dependencies]
 quinn = { workspace = true }

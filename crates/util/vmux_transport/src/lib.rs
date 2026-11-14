@@ -7,5 +7,5 @@ pub use quic::{
 pub mod device;
 pub mod framing;
 pub mod quic;
-#[cfg(host)]
+#[cfg(all(host, feature = "service"))]
 pub mod service;

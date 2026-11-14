@@ -24,6 +24,7 @@ mod keychain;
 mod maintenance;
 mod package;
 mod release;
+mod workspace;
 
 pub struct Native {
     checkout: Checkout,

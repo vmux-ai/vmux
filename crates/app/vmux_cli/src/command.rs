@@ -6,7 +6,7 @@ use std::time::Duration;
 use bevy_app::{App, AppExit, First, Last, Plugin, PreUpdate};
 use bevy_ecs::prelude::*;
 use clap::error::ErrorKind;
-use vmux_ecs::cli::{CliInvocation, CliResult, CliWake};
+use vmux_ecs::cli::{CliInvocation, CliResult, CliSet, CliWake};
 use vmux_ecs::manifest::FeatureManifest;
 
 use catalog::CliCatalog;
@@ -19,10 +19,10 @@ pub struct CliRuntimePlugin;
 
 impl Plugin for CliRuntimePlugin {
     fn build(&self, app: &mut App) {
-        app.set_runner(CliRunner::run)
-            .add_systems(First, collect_catalog)
-            .add_systems(PreUpdate, parse_arguments)
-            .add_systems(Last, exit_with_result);
+        app.add_systems(First, collect_catalog)
+            .add_systems(PreUpdate, parse_arguments.in_set(CliSet::Parse))
+            .add_systems(Last, exit_with_result)
+            .set_runner(CliRunner::run);
     }
 }
 

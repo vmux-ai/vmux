@@ -549,26 +549,15 @@ impl Native {
             return Execution::new(command).run();
         }
         if profile != "dev" {
-            let name = if profile == "local" {
-                format!(
-                    "{} ({}).app",
-                    self.product()?.value("VMUX_HOST_NAME"),
-                    self.text(
-                        "git",
-                        &[
-                            OsStr::new("rev-parse"),
-                            OsStr::new("--short=7"),
-                            OsStr::new("HEAD")
-                        ]
-                    )?
-                    .trim()
-                )
-            } else {
-                format!("{}.app", self.product()?.value("VMUX_HOST_NAME"))
-            };
-            let app = self.checkout.directory("release").join(name);
+            let product = self.product()?;
+            let name = product.value("VMUX_HOST_NAME");
+            let directory = self.checkout.directory("release");
+            let app = directory.join(format!("{name}.app"));
+            if !app.is_dir() {
+                return Err("No completed app; run vmux build first".into());
+            }
             self.verify_signature(&app)?;
-            return self.run_command("open", &[app.as_os_str()]);
+            return self.launch(&app);
         }
         self.ready()?;
         if cfg!(target_os = "macos") {
@@ -577,19 +566,55 @@ impl Native {
                 self.product()?.value("VMUX_HOST_NAME")
             ));
             self.verify_signature(&app)?;
-            let mut command = self.command("open");
-            for key in ["VMUX_PROFILE", "VMUX_TEST", "VMUX_DATA_DIR"] {
-                if let Some(value) = self.environment.get(key) {
-                    command
-                        .arg("--env")
-                        .arg(format!("{key}={}", value.to_string_lossy()));
-                }
-            }
-            command.arg(app);
-            return Execution::new(command).run();
+            return self.launch(&app);
         }
         let mut command = self.command(self.checkout.directory("debug").join("vmux_desktop"));
         command.env_remove("CEF_PATH");
+        Execution::new(command).run()
+    }
+
+    pub fn local_entries(&self) -> Result<Vec<crate::local::Entry>> {
+        let directory = self.checkout.directory("release");
+        let mut entries = Vec::new();
+        if !directory.is_dir() {
+            return Ok(entries);
+        }
+        for entry in fs::read_dir(directory)? {
+            if entries.len() >= 4096 {
+                return Err("Local artifact directory exceeds its metadata bounds".into());
+            }
+            let entry = entry?;
+            let metadata = fs::symlink_metadata(entry.path())?;
+            entries.push(crate::local::Entry {
+                path: entry.path(),
+                modified: metadata.modified()?,
+                directory: metadata.is_dir(),
+                symlink: metadata.file_type().is_symlink(),
+            });
+        }
+        Ok(entries)
+    }
+
+    pub fn launch_local(&self, app: &Path) -> Result<()> {
+        self.verify_signature(app)?;
+        self.launch(app)
+    }
+
+    fn launch(&self, app: &Path) -> Result<()> {
+        let mut command = self.command("open");
+        for key in [
+            "VMUX_PROFILE",
+            "VMUX_TEST",
+            "VMUX_DATA_DIR",
+            "VMUX_REMOTE_RELAY_URL",
+        ] {
+            if let Some(value) = self.environment.get(key) {
+                command
+                    .arg("--env")
+                    .arg(format!("{key}={}", value.to_string_lossy()));
+            }
+        }
+        command.arg(app);
         Execution::new(command).run()
     }
 
