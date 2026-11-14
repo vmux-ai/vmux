@@ -1,4 +1,5 @@
 use bevy::prelude::*;
+use bevy::tasks::{IoTaskPool, Task, futures_lite::future};
 use bevy_cef::prelude::UiInput;
 use vmux_api::input::KeyStroke;
 use vmux_api::protocol::AgentCommandResult;
@@ -23,6 +24,10 @@ impl Plugin for CommandPlugin {
         if !app.is_plugin_added::<CommandRuntimePlugin>() {
             app.add_plugins(CommandRuntimePlugin);
         }
+        if !app.is_plugin_added::<vmux_ecs::wake::WakePlugin>() {
+            app.add_plugins(vmux_ecs::wake::WakePlugin);
+        }
+        app.init_resource::<Settle>();
         app.add_agent_request::<AgentInvokeCommand>()
             .add_plugins((UiStatePlugin, crate::CommandToolPlugin))
             .add_observer(resolve)
@@ -115,26 +120,60 @@ fn invoke(
 }
 
 const COMMAND_SETTLE_WINDOW: std::time::Duration = std::time::Duration::from_millis(150);
+const SETTLE_FRAME_INTERVAL: std::time::Duration = std::time::Duration::from_millis(16);
+
+#[derive(Resource, Default)]
+struct Settle {
+    until: Option<std::time::Instant>,
+    timer: Option<Task<()>>,
+}
+
+impl Settle {
+    fn begin(&mut self, now: std::time::Instant) {
+        self.until = Some(now + COMMAND_SETTLE_WINDOW);
+    }
+
+    fn schedule(&mut self, now: std::time::Instant, wake: std::task::Waker) {
+        let Some(until) = self.until else {
+            return;
+        };
+        let deadline = (now + SETTLE_FRAME_INTERVAL).min(until);
+        self.timer = Some(IoTaskPool::get().spawn(async move {
+            std::thread::sleep(deadline.saturating_duration_since(std::time::Instant::now()));
+            wake.wake();
+        }));
+    }
+}
 
 fn wake(
-    mut settle: Local<Option<std::time::Instant>>,
+    mut settle: ResMut<Settle>,
     mut reader: MessageReader<CommandInvocation>,
-    proxy: Option<Res<bevy::winit::EventLoopProxyWrapper>>,
+    wake: Option<Res<vmux_ecs::JobWake>>,
 ) {
+    let now = std::time::Instant::now();
     if reader.read().count() > 0 {
-        *settle = Some(std::time::Instant::now());
+        settle.begin(now);
     }
-    let Some(since) = *settle else {
+    let Some(until) = settle.until else {
         return;
     };
-    if since.elapsed() >= COMMAND_SETTLE_WINDOW {
-        *settle = None;
+    if now >= until {
+        settle.until = None;
+        settle.timer = None;
         return;
     }
-    let Some(proxy) = proxy else {
+    let Some(wake) = wake else {
+        settle.until = None;
+        settle.timer = None;
         return;
     };
-    let _ = (**proxy).send_event(bevy::winit::WinitUserEvent::WakeUp);
+    if let Some(timer) = &mut settle.timer {
+        if future::block_on(future::poll_once(timer)).is_none() {
+            return;
+        }
+        settle.timer = None;
+    }
+    settle.schedule(now, wake.0.clone());
 }
 
 fn log(mut reader: MessageReader<CommandInvocation>, profiles: Query<(&Profile, Has<User>)>) {
@@ -160,6 +199,63 @@ mod tests {
 
     use super::*;
     use crate::host::shortcut_driver::{Binding, Modifiers, Shortcut, Source, When};
+
+    #[derive(Default)]
+    struct SettleWake(std::sync::atomic::AtomicUsize);
+
+    impl SettleWake {
+        fn new(app: &mut App) -> std::sync::Arc<Self> {
+            let observed = std::sync::Arc::new(Self::default());
+            app.insert_resource(vmux_ecs::JobWake(std::task::Waker::from(observed.clone())));
+            observed
+        }
+    }
+
+    impl std::task::Wake for SettleWake {
+        fn wake(self: std::sync::Arc<Self>) {
+            self.0.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        }
+    }
+
+    #[test]
+    fn command_settlement_wakes_on_paced_timers_and_then_becomes_idle() {
+        let mut app = Seam::app();
+        let observed = SettleWake::new(&mut app);
+        app.world_mut()
+            .write_message(CommandInvocation::new(Entity::PLACEHOLDER, "settle-test"));
+        app.update();
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(1);
+        while observed.0.load(std::sync::atomic::Ordering::SeqCst) == 0 {
+            assert!(
+                std::time::Instant::now() < deadline,
+                "settlement timer never woke"
+            );
+            std::thread::sleep(std::time::Duration::from_millis(2));
+        }
+        assert_eq!(observed.0.load(std::sync::atomic::Ordering::SeqCst), 1);
+        while app.world().resource::<Settle>().until.is_some() {
+            assert!(
+                std::time::Instant::now() < deadline,
+                "settlement did not finish"
+            );
+            app.update();
+            std::thread::sleep(std::time::Duration::from_millis(2));
+        }
+        std::thread::sleep(std::time::Duration::from_millis(20));
+        let finished = observed.0.load(std::sync::atomic::Ordering::SeqCst);
+        assert!(
+            finished < 20,
+            "settlement requested {finished} unpaced updates"
+        );
+        for _ in 0..10 {
+            app.update();
+        }
+        std::thread::sleep(std::time::Duration::from_millis(20));
+        assert_eq!(
+            observed.0.load(std::sync::atomic::Ordering::SeqCst),
+            finished
+        );
+    }
 
     const CTRL: Modifiers = Modifiers {
         ctrl: true,

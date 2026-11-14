@@ -1806,6 +1806,11 @@ Details remain unselected until the user chooses an entry. Selected addresses fo
 The full Docker name remains available on hover. Info and Logs use distinct line icons.
 Breadcrumbs without sibling choices navigate directly without opening an empty menu.
 Stable breadcrumb slots animate measured position changes and short entry/exit transitions.
+VM pages declare one canonical address scope. Logical navigation within it retains the feature's
+trail until its next projection, so the header never inserts a generic Containers fallback.
+DOM mutations coalesce into one animation-frame measurement; unchanged positions keep their
+running motion, and retained crumbs keep full opacity when labels change. Command settlement
+uses an ECS-owned deadline and paced timer wakes instead of waking on every update.
 Leaving DOM copies are inert, remove duplicate identities, and disappear after the bounded
 layout duration. Unmount releases observers and animations; reduced motion disables them.
 The workspace and details retain their mounted DOM during navigation; the content entrance

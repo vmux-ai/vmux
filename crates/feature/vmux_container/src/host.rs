@@ -168,7 +168,10 @@ fn page_ready(
     {
         return;
     }
-    commands.entity(entity).insert(PageView);
+    commands.entity(entity).insert((
+        PageView,
+        vmux_ecs::address::AddressScope::subtree(ContainerPlugin::URL),
+    ));
     if revision.is_none() {
         commands
             .entity(entity)
