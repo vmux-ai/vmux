@@ -2,6 +2,7 @@ use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::sync::mpsc;
 
+use bevy::ecs::system::Commands;
 use bevy::prelude::*;
 use bevy::tasks::{IoTaskPool, Task, futures_lite::future};
 use bevy_cef::prelude::*;
@@ -525,7 +526,7 @@ fn drain_file_changes(
 fn reload_changed_files(
     files: Query<(Entity, &FileView, Option<&Editor>), With<FileReloadRequested>>,
     browsers: NonSend<Browsers>,
-    mut lsp_changes: Option<MessageWriter<crate::lsp::manager::LspDocumentChangeRequest>>,
+    mut lsp_changes: Option<MessageWriter<vmux_lsp::CloseDocument>>,
     mut commands: Commands,
 ) {
     for (entity, file, edit) in &files {
@@ -578,10 +579,9 @@ fn reload_changed_files(
             .remove::<FileInitialMetaSent>()
             .remove::<crate::lsp::manager::LintRan>();
         if let Some(lsp_changes) = lsp_changes.as_mut() {
-            lsp_changes.write(crate::lsp::manager::LspDocumentChangeRequest {
+            lsp_changes.write(vmux_lsp::CloseDocument {
                 owner: entity,
                 path: file.path.clone(),
-                text: None,
             });
         }
     }

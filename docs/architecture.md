@@ -1682,13 +1682,20 @@ a language server. The host ships only the visible slice of a file and re-slices
 **Language servers.** `EditCore` remains the text editing and undo kernel owned by the `Editor`
 component. Its `content_version` changes on edits and undo/redo, independently of the document's
 LSP protocol version. The renderer-independent `vmux_lsp` plugin owns server lifecycle and
-accepted requests; Editor's private adapters currently own document synchronization and diagnostics.
+accepted requests, document synchronization and canonical protocol diagnostics. Editor's adapters
+prepare current buffers and project protocol diagnostics into native UI coordinates.
 The core owns capability gating and server identity lookup; Editor delegates both through
 `Capabilities` and `Lookup` rather than maintaining separate method tables or identity rules.
 A workspace root has shared `Cwd` and `Name`; its server children
 identify the root, command, and arguments; document children carry their path and accepted
 protocol version. Views bind to those documents, so closing one view preserves other users
-of the document. Removing a root or restarting a server invalidates only its descendants
+of the document. Binding insertion renews an owner generation carried by request Stamps;
+close/reopen onto a shared document cannot restore that owner's old requests. Typed open/change/close
+intents run in the Documents phase, with owner revision receipts returned after wire notification.
+Closing a pending path cancels its open intent when the owner is unbound or bound to another
+document. Closing the bound document preserves a same-frame reopen intent; unrelated paths are unchanged.
+The core retains only a closed document's path/version until the connection ends, preventing protocol
+version reuse on reopen. Active wire text is canonical document state and is discarded on close. Removing a root or restarting a server invalidates only its descendants
 and bindings. Requests use shared Operations and retain their document identity, server
 instance, version, and target view. Cancellation and stale results cannot restore a terminal
 operation or reach a replacement document. The buffer's opaque change token survives queued
@@ -1705,10 +1712,17 @@ UUID in a private required Component. Lookup refuses requests as soon as that tr
 the server phase retires its documents before native synchronization, which reopens the current
 buffer before initial metadata requests. Replacing a live transport preserves other roots and
 adds no global Resource. Reload and encoding changes wait for the decoded
-buffer, synchronize it, and then reinitialize metadata. Diagnostics retain their server, transport UUID, and the protocol's optional version. Native
-adapter input rejects old transport epochs, and replacing a transport clears only its retained
+buffer, synchronize it, and then reinitialize metadata. Diagnostics retain their server, transport
+UUID, and the protocol's optional version. Protocol ingress captures the live document/version before synchronization, rejects old transport
+epochs and keeps the diagnostic list and its publication Ticket as separate Components on the
+canonical document. Lookup validates the Ticket before exposing the list. Replacing a transport clears only its retained
 diagnostics before code-action requests or rendering consume them. Unversioned notifications
-cannot prove which edit produced them.
+cannot prove which edit produced them. Native receipt reconciliation materializes an alternate
+DiagnosticPath from filesystem identity when a view uses an alias. Core ingress prefers an exact
+opened URI, then a unique alternate path. Retained publications recheck that resolution, rejecting
+changed aliases, new competing aliases and new exact-path owners.
+Close removes the alternate path with active text; the core performs no filesystem lookup. Each dirty Editor view owns its 150 ms synchronization
+interval in a required Component; flushing or removing that view releases the interval.
 Process handles, framing, reader/writer threads, and wire correlation stay in the transport
 adapter. Publishing input or a response, and closing the reader, wakes the reactive runner.
 Package selection, settings, navigation, and rendered projections remain Editor-owned. This

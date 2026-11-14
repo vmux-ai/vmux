@@ -34,16 +34,21 @@ use crate::lsp::registry::{LspRegistry, ServerSpec};
 use crate::lsp::server_request::ServerInputSender;
 use crate::lsp::{
     LintDiagnosticsInbox, LintDiagnosticsSender, LspDiagnosticsInbox, LspDiagnosticsSender,
-    OpenDoc, PathDiagnostics, ServerKey, store,
+    OpenDoc, ServerKey, store,
 };
 
 use lsp_types::GotoDefinitionResponse::*;
 use lsp_types::{HoverContents, MarkedString};
 
 #[cfg(test)]
+use crate::lsp::PathDiagnostics;
+#[cfg(test)]
 pub(crate) use tests::DocumentFixture;
 
 pub use vmux_lsp::RestartServer as LspRestartRequest;
+pub(crate) use vmux_lsp::{
+    ChangeDocument as LspDocumentChangeRequest, CloseDocument as LspDocumentCloseRequest,
+};
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub(crate) struct LspLine(String);
@@ -207,41 +212,20 @@ impl LspPendingRequest {
 
 #[derive(Clone, Copy)]
 struct RequestStamp {
-    document: Entity,
-    server: Entity,
-    version: i32,
+    core: vmux_lsp::Stamp,
     buffer: uuid::Uuid,
-    transport: Option<uuid::Uuid>,
 }
 
 impl RequestStamp {
     fn current(&self, owner: Entity, manager: &LspManager) -> bool {
         manager
-            .documents
-            .get(self.document)
-            .is_ok_and(|(_, path, doc, parent)| {
-                manager
-                    .views
-                    .get(owner)
-                    .is_ok_and(|view| view.path == path.0)
-                    && doc.version == self.version
-                    && parent.parent() == self.server
-                    && manager.servers.contains(self.server)
-            })
-            && manager
-                .bindings
-                .get(owner)
-                .is_ok_and(|binding| binding.document() == self.document)
+            .views
+            .get(owner)
+            .is_ok_and(|view| manager.lookup.document(owner, &view.path) == Some(self.core))
             && manager
                 .editors
                 .get(owner)
                 .is_ok_and(|(_, editor)| editor.core.content_version() == self.buffer)
-            && manager
-                .clients
-                .get(self.server)
-                .ok()
-                .map(Transport::identity)
-                == self.transport
     }
 }
 
@@ -269,7 +253,7 @@ impl LspOrigin {
     }
 
     pub(crate) fn server(&self) -> Entity {
-        self.stamp.server
+        self.stamp.core.server
     }
 }
 
@@ -366,7 +350,6 @@ pub struct LspRequestedEdit {
 #[derive(bevy::ecs::system::SystemParam)]
 pub struct LspManager<'w, 's> {
     servers: Query<'w, 's, (Entity, &'static ServerKey), With<Server>>,
-    clients: Query<'w, 's, &'static Transport>,
     documents: Query<
         'w,
         's,
@@ -424,19 +407,6 @@ impl Job for StartJob {
     }
 }
 
-#[derive(Message)]
-pub(crate) struct LspDocumentChangeRequest {
-    pub(crate) path: PathBuf,
-    pub(crate) owner: Entity,
-    pub(crate) text: Option<String>,
-}
-
-#[derive(Message)]
-pub(crate) struct LspDocumentCloseRequest {
-    pub(crate) path: PathBuf,
-    pub(crate) owner: Entity,
-}
-
 fn uri_for(path: &Path) -> Option<String> {
     url::Url::from_file_path(path).ok().map(|u| u.to_string())
 }
@@ -477,12 +447,11 @@ impl LspManager<'_, '_> {
                 .map(|binding| binding.document());
             let mut source_known = !editor.core.dirty;
             if let Some(document) = document
-                && let Ok((_, _, _, parent)) = self.documents.get(document)
+                && let Ok((_, _, document_state, parent)) = self.documents.get(document)
                 && parent.parent() == source
-                && self
-                    .synced
-                    .get(owner)
-                    .is_ok_and(|synced| synced.0 == editor.core.content_version())
+                && self.synced.get(owner).is_ok_and(|synced| {
+                    synced.0 == editor.core.content_version() && synced.1 == document_state.version
+                })
             {
                 source_known = true;
             }
@@ -586,25 +555,6 @@ impl LspManager<'_, '_> {
         Some(self.servers.get(parent.parent()).ok()?.1)
     }
 
-    fn document_for_server(&self, key: &ServerKey, path: &Path) -> Option<Entity> {
-        let mut found = None;
-        for (entity, document_path, _, parent) in &self.documents {
-            if document_path.0 != path
-                || !self
-                    .servers
-                    .get(parent.parent())
-                    .is_ok_and(|(_, current)| current == key)
-            {
-                continue;
-            }
-            if found.is_some() {
-                return None;
-            }
-            found = Some(entity);
-        }
-        found
-    }
-
     fn server_entity(&self, key: &ServerKey) -> Option<Entity> {
         self.lookup.server(key)
     }
@@ -621,18 +571,17 @@ impl LspManager<'_, '_> {
         if self.unsent.contains(owner) {
             return None;
         }
-        let document = self.bindings.get(owner).ok()?.document();
-        let doc = self.document_for(owner, path)?;
+        let core = self.lookup.document(owner, path)?;
+        if self
+            .synced
+            .get(owner)
+            .is_ok_and(|synced| synced.1 != core.version)
+        {
+            return None;
+        }
         Some(RequestStamp {
-            document,
-            server: self.documents.get(document).ok()?.3.parent(),
-            version: doc.version,
+            core,
             buffer: self.editors.get(owner).ok()?.1.core.content_version(),
-            transport: self
-                .clients
-                .get(self.documents.get(document).ok()?.3.parent())
-                .ok()
-                .map(Transport::identity),
         })
     }
 
@@ -723,7 +672,7 @@ impl LspManager<'_, '_> {
             }
         }
         let stamp = self.request_stamp(entity, path)?;
-        let buffers = self.request_buffers(&kind, stamp.server);
+        let buffers = self.request_buffers(&kind, stamp.core.server);
         let request = self.lookup.request(entity, path, method, params)?;
         Some(LspPendingRequest {
             request,
@@ -892,7 +841,7 @@ impl LspManager<'_, '_> {
             }
         }
         let stamp = self.request_stamp(entity, path)?;
-        let buffers = self.request_buffers(&kind, stamp.server);
+        let buffers = self.request_buffers(&kind, stamp.core.server);
         let request = self.lookup.request(entity, path, method, params)?;
         Some(LspPendingRequest {
             request,
@@ -1261,10 +1210,10 @@ fn ref_display(path: &Path, line: u32) -> String {
 pub struct LspOpened;
 
 #[derive(Component)]
-struct LspInitialized;
+struct LspInitialized(i32);
 
 #[derive(Component)]
-struct LspSynced(uuid::Uuid);
+struct LspSynced(uuid::Uuid, i32);
 
 fn server_overrides(settings: &AppSettings) -> ServerOverrides {
     settings
@@ -1366,91 +1315,6 @@ fn finish_server_starts(
     }
 }
 
-fn change_documents(
-    mut requests: MessageReader<LspDocumentChangeRequest>,
-    bindings: Query<&DocumentBinding>,
-    mut documents: Query<(&DocumentPath, &mut OpenDoc, &ChildOf)>,
-    clients: Query<&Transport>,
-    views: Query<(Entity, &DocumentBinding, Option<&Editor>)>,
-    mut commands: Commands,
-) {
-    let mut ordered = Vec::new();
-    let mut newest = HashMap::new();
-    for request in requests.read() {
-        newest.insert(request.owner, ordered.len());
-        ordered.push(request);
-    }
-    for (index, request) in ordered.into_iter().enumerate() {
-        if newest.get(&request.owner) != Some(&index) {
-            continue;
-        }
-        let Ok(binding) = bindings.get(request.owner) else {
-            continue;
-        };
-        let entity = binding.document();
-        let Ok((path, mut document, parent)) = documents.get_mut(entity) else {
-            continue;
-        };
-        if path.0 != request.path {
-            continue;
-        }
-        let Some(uri) = uri_for(&request.path) else {
-            continue;
-        };
-        let text = match &request.text {
-            Some(text) => text.clone(),
-            None => {
-                let Ok((_, _, Some(editor))) = views.get(request.owner) else {
-                    continue;
-                };
-                editor.core.buffer.text()
-            }
-        };
-        let Some(version) = document.version.checked_add(1) else {
-            continue;
-        };
-        document.version = version;
-        if let Ok(client) = clients.get(parent.parent()) {
-            client.did_change(&uri, version, &text);
-        }
-        for (view, binding, editor) in &views {
-            if binding.document() != entity {
-                continue;
-            }
-            commands.entity(view).remove::<LspInitialized>();
-            if view == request.owner
-                && let Some(editor) = editor
-            {
-                commands
-                    .entity(view)
-                    .insert(LspSynced(editor.core.content_version()));
-            }
-        }
-    }
-}
-
-fn close_documents(
-    mut requests: MessageReader<LspDocumentCloseRequest>,
-    bindings: Query<&DocumentBinding>,
-    documents: Query<&DocumentPath>,
-    mut commands: Commands,
-) {
-    for request in requests.read() {
-        let Ok(binding) = bindings.get(request.owner) else {
-            continue;
-        };
-        if !documents
-            .get(binding.document())
-            .is_ok_and(|path| path.0 == request.path)
-        {
-            continue;
-        }
-        commands
-            .entity(request.owner)
-            .remove::<(DocumentBinding, LspOpened, LspInitialized, LspDiagnostics)>();
-    }
-}
-
 fn refresh_bindings(
     views: Query<(
         Entity,
@@ -1481,20 +1345,6 @@ fn refresh_bindings(
     }
 }
 
-fn cleanup_documents(manager: LspManager, views: Query<&DocumentBinding>, mut commands: Commands) {
-    for (entity, path, _, parent) in &manager.documents {
-        if views.iter().any(|binding| binding.document() == entity) {
-            continue;
-        }
-        if let Some(uri) = uri_for(&path.0)
-            && let Ok(client) = manager.clients.get(parent.parent())
-        {
-            client.did_close(&uri);
-        }
-        commands.entity(entity).despawn();
-    }
-}
-
 type UnavailableServers<'w, 's> =
     Query<'w, 's, (&'static ServerKey, Has<Stopped>), Or<(With<ServerFailure>, With<Stopped>)>>;
 
@@ -1519,7 +1369,6 @@ fn open_documents(
     }
     let mut pending_roots = Vec::<(PathBuf, Entity)>::new();
     let mut pending_servers = Vec::<(ServerKey, Entity)>::new();
-    let mut pending_documents = Vec::<(ServerKey, PathBuf, Entity)>::new();
     for (entity, view, editor) in &q {
         let Some(extension) = view
             .path
@@ -1553,7 +1402,7 @@ fn open_documents(
         if stopped_keys.contains(&key) {
             continue;
         }
-        let Some(client) = manager.client(&key) else {
+        let Some(_client) = manager.client(&key) else {
             let mut pending = None;
             for (candidate, server) in &pending_servers {
                 if *candidate == key {
@@ -1608,48 +1457,69 @@ fn open_documents(
             }
             continue;
         };
-        let mut document = manager.document_for_server(&key, &view.path);
-        for (pending_key, path, candidate) in &pending_documents {
-            if *pending_key == key && *path == view.path {
-                document = Some(*candidate);
-                break;
-            }
+        if editor.core.buffer.path != view.path {
+            continue;
         }
-        let document = match document {
-            Some(document) => document,
-            None => {
-                let Some(uri) = uri_for(&view.path) else {
-                    commands.entity(entity).insert(LspOpened);
-                    continue;
-                };
-                if editor.core.buffer.path != view.path {
-                    continue;
-                }
-                if editor.core.buffer.rope.len_bytes() as u64 > LSP_MAX_BYTES {
-                    commands.entity(entity).insert(LspOpened);
-                    continue;
-                }
-                let text = editor.core.buffer.text();
-                client.did_open(&uri, &spec.language_id, 1, &text);
-                let server = manager.server_entity(&key).unwrap();
-                let document = commands
-                    .spawn((
-                        DocumentPath(view.path.clone()),
-                        OpenDoc { version: 1 },
-                        ChildOf(server),
-                        Name::new(view.path.to_string_lossy().into_owned()),
-                    ))
-                    .id();
-                pending_documents.push((key.clone(), view.path.clone(), document));
-                document
-            }
-        };
+        if editor.core.buffer.rope.len_bytes() as u64 > LSP_MAX_BYTES {
+            commands.entity(entity).insert(LspOpened);
+            continue;
+        }
+        let server = manager.server_entity(&key).unwrap();
         commands.entity(entity).insert((
-            DocumentBinding::new(document),
-            ServerBinding::new(manager.server_entity(&key).unwrap()),
-            LspOpened,
-            LspSynced(editor.core.content_version()),
+            ServerBinding::new(server),
+            vmux_lsp::OpenDocument {
+                server,
+                path: view.path.clone(),
+                language: spec.language_id,
+                text: editor.core.buffer.text(),
+                revision: Some(editor.core.content_version()),
+            },
         ));
+    }
+}
+
+fn acknowledge_documents(
+    views: Query<(Entity, &FileView, &Editor, &vmux_lsp::DocumentApplied)>,
+    lookup: vmux_lsp::Lookup,
+    mut commands: Commands,
+) {
+    for (owner, view, editor, applied) in &views {
+        if applied.revision == Some(editor.core.content_version())
+            && lookup.document(owner, &view.path).is_some_and(|stamp| {
+                stamp.document == applied.document && stamp.version == applied.version
+            })
+        {
+            let path = PathIdentity::resolve(&view.path).into_path_buf();
+            if path == view.path {
+                commands
+                    .entity(applied.document)
+                    .remove::<vmux_lsp::DiagnosticPath>();
+            } else {
+                commands
+                    .entity(applied.document)
+                    .insert(vmux_lsp::DiagnosticPath(path));
+            }
+            commands.entity(owner).insert((
+                LspOpened,
+                LspSynced(editor.core.content_version(), applied.version),
+            ));
+        }
+        commands.entity(owner).remove::<vmux_lsp::DocumentApplied>();
+    }
+}
+
+fn refresh_metadata(
+    views: Query<(Entity, &DocumentBinding, &LspInitialized)>,
+    documents: Query<&OpenDoc>,
+    mut commands: Commands,
+) {
+    for (owner, binding, initialized) in &views {
+        if !documents
+            .get(binding.document())
+            .is_ok_and(|document| document.version == initialized.0)
+        {
+            commands.entity(owner).remove::<LspInitialized>();
+        }
     }
 }
 
@@ -1673,16 +1543,24 @@ type SyncReadyViews<'w, 's> = Query<
 
 fn sync_ready_buffers(
     views: SyncReadyViews,
+    focused: Query<(), With<vmux_ecs::KeyboardOwner>>,
+    lookup: vmux_lsp::Lookup,
     mut requests: MessageWriter<LspDocumentChangeRequest>,
 ) {
     for (owner, view, editor, synced) in &views {
-        if synced.0 == editor.core.content_version() || editor.core.buffer.path != view.path {
+        let current = lookup.document(owner, &view.path);
+        let refocused =
+            focused.contains(owner) && current.is_some_and(|stamp| stamp.version != synced.1);
+        if (synced.0 == editor.core.content_version() && !refocused)
+            || editor.core.buffer.path != view.path
+        {
             continue;
         }
         requests.write(LspDocumentChangeRequest {
             owner,
             path: view.path.clone(),
-            text: Some(editor.core.buffer.text()),
+            text: editor.core.buffer.text(),
+            revision: Some(editor.core.content_version()),
         });
     }
 }
@@ -1709,7 +1587,9 @@ fn initialize_views(
         {
             commands.spawn(request.bundle());
         }
-        commands.entity(entity).insert(LspInitialized);
+        commands.entity(entity).insert(LspInitialized(
+            manager.document_for(entity, &fv.path).unwrap().version,
+        ));
     }
 }
 
@@ -2071,25 +1951,27 @@ impl Plugin for ManagerPlugin {
         )
         .add_message::<LspRestartRequest>()
         .add_message::<LspCodeActionRequest>()
-        .add_message::<LspDocumentChangeRequest>()
-        .add_message::<LspDocumentCloseRequest>()
+        .add_systems(
+            Update,
+            (refresh_bindings, sync_ready_buffers, open_documents)
+                .chain()
+                .after(vmux_lsp::Set::Servers)
+                .before(vmux_lsp::Set::Documents)
+                .after(JobSet::Apply),
+        )
         .add_systems(
             Update,
             (
-                close_documents,
-                refresh_bindings,
-                sync_ready_buffers,
-                change_documents,
-                open_documents,
+                acknowledge_documents,
+                refresh_metadata,
                 initialize_views,
-                cleanup_documents,
                 lint_on_open,
                 publish_status,
             )
                 .chain()
                 .in_set(DocumentSet)
-                .in_set(vmux_lsp::Set::Documents)
-                .after(JobSet::Apply),
+                .after(vmux_lsp::Set::Documents)
+                .before(vmux_lsp::Set::Diagnostics),
         );
     }
 }
@@ -2262,8 +2144,7 @@ fn dismiss_code_actions(
 #[derive(Component, Default)]
 struct LspDiagnostics {
     mapped: Vec<FileDiagnostic>,
-    raw: Vec<lsp_types::Diagnostic>,
-    source: Option<(Entity, uuid::Uuid)>,
+    source: Option<(Entity, i32, uuid::Uuid)>,
 }
 
 #[derive(Component, Default)]
@@ -2328,7 +2209,7 @@ impl Plugin for DiagnosticsPlugin {
                 )
                     .chain()
                     .in_set(DiagnosticsSet)
-                    .in_set(vmux_lsp::Set::Diagnostics)
+                    .after(vmux_lsp::Set::Diagnostics)
                     .after(DocumentSet),
             );
     }
@@ -2342,62 +2223,53 @@ fn prune_diagnostics(
     lookup: vmux_lsp::Lookup,
     mut commands: Commands,
 ) {
-    for (entity, diagnostics) in &diagnostics {
-        if diagnostics
-            .source
-            .is_some_and(|(server, identity)| !lookup.transport_current(server, identity))
-        {
+    for (entity, _) in &diagnostics {
+        if lookup.diagnostics(entity).is_none() {
             commands.entity(entity).remove::<LspDiagnostics>();
         }
     }
 }
 
 fn drain_diagnostics(
-    inbox: Single<&LspDiagnosticsInbox>,
-    views: Query<(Entity, &FileView, &Editor, Option<&DocumentBinding>)>,
-    documents: Query<(&OpenDoc, &ChildOf)>,
+    views: Query<(Entity, &FileView, &Editor, Option<&LspDiagnostics>)>,
+    bindings: Query<&DocumentBinding>,
+    diagnostics: Query<Ref<vmux_lsp::Diagnostics>>,
+    synced: Query<&LspSynced>,
     lookup: vmux_lsp::Lookup,
     mut commands: Commands,
 ) {
-    for PathDiagnostics {
-        path,
-        diagnostics: diags,
-        version,
-        server,
-        transport,
-    } in inbox.drain()
-    {
-        if server.is_some_and(|server| {
-            transport.is_none_or(|identity| !lookup.transport_current(server, identity))
-        }) {
+    for (owner, view, editor, previous) in &views {
+        let Ok(binding) = bindings.get(owner) else {
+            continue;
+        };
+        let Ok(diagnostics) = diagnostics.get(binding.document()) else {
+            continue;
+        };
+        let Some(stamp) = lookup.document(owner, &view.path) else {
+            continue;
+        };
+        if lookup.diagnostics(owner).is_none() {
             continue;
         }
-        let source = server.zip(transport);
-        let target = PathIdentity::resolve(&path);
-        for (entity, view, edit, binding) in &views {
-            if PathIdentity::resolve(&view.path) != target {
-                continue;
-            }
-            if version.is_some() || server.is_some() {
-                let Some(binding) = binding else { continue };
-                let Ok((document, parent)) = documents.get(binding.document()) else {
-                    continue;
-                };
-                if version.is_some_and(|version| version != document.version)
-                    || server.is_some_and(|server| server != parent.parent())
-                {
-                    continue;
-                }
-            }
-            let mapped = LspDiagnostics::map(&diags, |line| {
-                LspLine::from_rope(&edit.core.buffer.rope, line)
-            });
-            commands.entity(entity).insert(LspDiagnostics {
-                mapped,
-                raw: diags.clone(),
-                source,
-            });
+        if synced.get(owner).is_ok_and(|synced| {
+            synced.0 != editor.core.content_version() || synced.1 != stamp.version
+        }) {
+            commands.entity(owner).remove::<LspDiagnostics>();
+            continue;
         }
+        let source = (stamp.document, stamp.version, editor.core.content_version());
+        if !diagnostics.is_changed()
+            && previous.is_some_and(|previous| previous.source == Some(source))
+        {
+            continue;
+        }
+        let mapped = LspDiagnostics::map(diagnostics.items(), |line| {
+            LspLine::from_rope(&editor.core.buffer.rope, line)
+        });
+        commands.entity(owner).insert(LspDiagnostics {
+            mapped,
+            source: Some(source),
+        });
     }
 }
 
@@ -2428,14 +2300,14 @@ pub struct LspCodeActionRequest {
 
 fn request_code_actions(
     mut reader: MessageReader<LspCodeActionRequest>,
-    diagnostics: Query<&LspDiagnostics>,
     manager: LspManager,
     mut commands: Commands,
 ) {
     for request in reader.read() {
-        let diagnostics = diagnostics
-            .get(request.entity)
-            .map(|diagnostics| diagnostics.raw.as_slice())
+        let diagnostics = manager
+            .lookup
+            .diagnostics(request.entity)
+            .map(vmux_lsp::Diagnostics::items)
             .unwrap_or_default();
         let request = manager.code_actions(
             request.entity,
@@ -2579,13 +2451,18 @@ mod tests {
         }
 
         pub(crate) fn synced_to(&self, world: &mut World, owner: Entity, source: &Self) {
-            world
-                .entity_mut(self.document)
-                .insert(ChildOf(source.server));
+            let protocol_version = world.get::<OpenDoc>(self.document).unwrap().version;
+            world.entity_mut(self.document).remove::<OpenDoc>().insert((
+                ChildOf(source.server),
+                OpenDoc {
+                    version: protocol_version,
+                },
+            ));
             let version = world.get::<Editor>(owner).unwrap().core.content_version();
-            world
-                .entity_mut(owner)
-                .insert((ServerBinding::new(source.server), LspSynced(version)));
+            world.entity_mut(owner).insert((
+                ServerBinding::new(source.server),
+                LspSynced(version, protocol_version),
+            ));
         }
 
         pub(crate) fn open(world: &mut World, owner: Entity, path: &Path, version: i32) -> Self {
@@ -2597,7 +2474,14 @@ mod tests {
                 .spawn((WorkspaceRoot, vmux_ecs::Cwd(directory.clone())))
                 .id();
             let key = ServerKey::new(directory, "fixture-server");
-            let server = world.spawn((Server, key.clone(), ChildOf(root))).id();
+            let transport = Transport::new(ProbeTransport {
+                replies: Default::default(),
+                capabilities: Default::default(),
+                recording: None,
+            });
+            let server = world
+                .spawn((Server, key.clone(), transport, ChildOf(root)))
+                .id();
             let document = world
                 .spawn((
                     DocumentPath(path.into()),
@@ -2615,7 +2499,7 @@ mod tests {
             let mut state = bevy::ecs::system::SystemState::<LspManager>::new(world);
             let manager = state.get_mut(world).unwrap();
             let stamp = manager.request_stamp(owner, path).unwrap();
-            let snapshot = manager.buffer_snapshot(stamp.server);
+            let snapshot = manager.buffer_snapshot(stamp.core.server);
             let operation = world
                 .spawn((Operation::bundle("lsp.test.edit").unwrap(), snapshot))
                 .id();
@@ -2784,6 +2668,137 @@ mod tests {
     }
 
     #[test]
+    #[cfg(unix)]
+    fn resolved_diagnostic_paths_reach_views_opened_through_a_file_alias() {
+        let mut fixture = RestartFixture::new();
+        let path = fixture.roots[0].join("main.rs");
+        let alias = fixture.roots[0].join("linked.rs");
+        std::os::unix::fs::symlink(&path, &alias).unwrap();
+        let owner = fixture.views[0];
+        fixture.app.world_mut().entity_mut(owner).insert((
+            FileView {
+                path: alias.clone(),
+            },
+            Editor::new(
+                EditCore::new(
+                    alias.clone(),
+                    "Rust".into(),
+                    "disk text\n",
+                    EditMode::Normal,
+                ),
+                HighlightCache::plain(&alias),
+                crate::fold::FoldState::default(),
+            ),
+        ));
+        assert_eq!(
+            fixture.message(0, "textDocument/didOpen", 1)["params"]["textDocument"]["uri"],
+            DocumentPath(alias).uri().unwrap()
+        );
+        let server = fixture
+            .app
+            .world()
+            .get::<ServerBinding>(owner)
+            .unwrap()
+            .server();
+        let transport = fixture
+            .app
+            .world()
+            .get::<Transport>(server)
+            .unwrap()
+            .identity();
+        let sender = {
+            let mut contexts = fixture.app.world_mut().query::<&LspContext>();
+            contexts
+                .single(fixture.app.world())
+                .unwrap()
+                .diagnostics
+                .scoped(server)
+                .with_transport(transport)
+        };
+        sender.send(PathDiagnostics {
+            path: PathIdentity::resolve(&path).into_path_buf(),
+            diagnostics: vec![lsp_types::Diagnostic {
+                message: "resolved diagnostic".into(),
+                ..Default::default()
+            }],
+            version: Some(1),
+            server: None,
+            transport: None,
+        });
+        fixture.app.update();
+        assert_eq!(
+            fixture
+                .app
+                .world()
+                .get::<LspDiagnostics>(owner)
+                .unwrap()
+                .mapped[0]
+                .message,
+            "resolved diagnostic"
+        );
+    }
+
+    #[test]
+    fn dirty_buffers_synchronize_before_shared_documents_and_metadata_in_the_same_frame() {
+        let mut fixture = RestartFixture::new();
+        fixture.message(0, "textDocument/didOpen", 1);
+        fixture.message(1, "textDocument/didOpen", 1);
+        fixture
+            .app
+            .add_plugins(crate::host::language::LanguagePlugin)
+            .insert_resource(bevy::time::TimeUpdateStrategy::ManualDuration(
+                std::time::Duration::from_millis(150),
+            ));
+        let owner = fixture.views[0];
+        let document = fixture
+            .app
+            .world()
+            .get::<DocumentBinding>(owner)
+            .unwrap()
+            .document();
+        let previous = fixture
+            .app
+            .world()
+            .get::<OpenDoc>(document)
+            .unwrap()
+            .version;
+        let path = fixture.roots[0].join("main.rs");
+        fixture.app.world_mut().entity_mut(owner).insert((
+            Editor::new(
+                EditCore::new(
+                    path.clone(),
+                    "Rust".into(),
+                    "edited buffer\n",
+                    EditMode::Normal,
+                ),
+                HighlightCache::plain(&path),
+                crate::fold::FoldState::default(),
+            ),
+            LspEditDirty,
+        ));
+        fixture.app.update();
+        assert_eq!(
+            fixture
+                .app
+                .world()
+                .get::<OpenDoc>(document)
+                .unwrap()
+                .version,
+            previous + 1
+        );
+        assert_eq!(
+            fixture.app.world().get::<LspInitialized>(owner).unwrap().0,
+            previous + 1
+        );
+        let change = fixture.message(0, "textDocument/didChange", 1);
+        assert_eq!(
+            change["params"]["contentChanges"][0]["text"],
+            "edited buffer\n"
+        );
+        assert_eq!(std::fs::read_to_string(path).unwrap(), "disk text\n");
+    }
+
+    #[test]
     fn decoded_reload_resynchronizes_before_initial_metadata_requests() {
         for utf16 in [false, true] {
             let mut fixture = RestartFixture::new();
@@ -2806,10 +2821,9 @@ mod tests {
             fixture
                 .app
                 .world_mut()
-                .write_message(LspDocumentChangeRequest {
+                .write_message(LspDocumentCloseRequest {
                     owner,
                     path: path.clone(),
-                    text: None,
                 });
             fixture.app.update();
             let decoded = crate::host::encoding::DecodedText::read(&path).unwrap();
@@ -2823,7 +2837,7 @@ mod tests {
                     crate::fold::FoldState::default(),
                 ));
             assert_eq!(
-                fixture.message(0, "textDocument/didChange", 1)["params"]["contentChanges"][0]["text"],
+                fixture.message(0, "textDocument/didOpen", 2)["params"]["textDocument"]["text"],
                 text
             );
             assert_eq!(
@@ -2868,13 +2882,21 @@ mod tests {
             .unwrap()
             .core
             .apply(crate::edit::EditCommand::ReplaceText(text.into()));
+        let revision = fixture
+            .app
+            .world()
+            .get::<Editor>(owner)
+            .unwrap()
+            .core
+            .content_version();
         fixture
             .app
             .world_mut()
             .write_message(LspDocumentChangeRequest {
                 path: fixture.roots[0].join("main.rs"),
                 owner,
-                text: Some(text.into()),
+                text: text.into(),
+                revision: Some(revision),
             });
         fixture.message(0, "textDocument/didChange", 1);
         assert_eq!(
@@ -2973,13 +2995,21 @@ mod tests {
             .apply(crate::edit::EditCommand::ReplaceText(
                 "unsaved text\n".into(),
             ));
+        let revision = fixture
+            .app
+            .world()
+            .get::<Editor>(first)
+            .unwrap()
+            .core
+            .content_version();
         fixture
             .app
             .world_mut()
             .write_message(LspDocumentChangeRequest {
                 path: fixture.roots[0].join("main.rs"),
                 owner: first,
-                text: Some("unsaved text\n".into()),
+                text: "unsaved text\n".into(),
+                revision: Some(revision),
             });
         assert_eq!(
             fixture.message(0, "textDocument/didChange", 1)["params"]["contentChanges"][0]["text"],
@@ -3155,10 +3185,11 @@ mod tests {
         }
 
         fn message(&self, view: usize) -> Option<&str> {
+            let binding = self.app.world().get::<DocumentBinding>(self.views[view])?;
             self.app
                 .world()
-                .get::<LspDiagnostics>(self.views[view])
-                .and_then(|diagnostics| diagnostics.raw.first())
+                .get::<vmux_lsp::Diagnostics>(binding.document())
+                .and_then(|diagnostics| diagnostics.items().first())
                 .map(|diagnostic| diagnostic.message.as_str())
         }
     }
@@ -3236,7 +3267,7 @@ mod tests {
             .unwrap()
             .version = 2;
         fixture.publish(0, Some(1), "stale");
-        assert_eq!(fixture.message(0), Some("one"));
+        assert_eq!(fixture.message(0), None);
         fixture.publish(0, Some(2), "fresh");
         assert_eq!(fixture.message(0), Some("fresh"));
         fixture.publish(0, None, "unversioned");
@@ -3342,11 +3373,13 @@ mod tests {
                 )
             };
             let sender = self.replies.lock().unwrap().take().unwrap();
-            let transport = self
-                .app
-                .world()
-                .get::<Transport>(self.server)
-                .map(Transport::identity);
+            let mut lookup =
+                bevy::ecs::system::SystemState::<vmux_lsp::Lookup>::new(self.app.world_mut());
+            let core = lookup
+                .get_mut(self.app.world_mut())
+                .unwrap()
+                .document(self.view, Path::new("/workspace/file.rs"))
+                .unwrap();
             let entity = self
                 .app
                 .world_mut()
@@ -3356,13 +3389,7 @@ mod tests {
                         projection: LspRequestOperation {
                             target: self.view,
                             kind: ReqKind::Definition,
-                            stamp: RequestStamp {
-                                document: self.document,
-                                server: self.server,
-                                version: 1,
-                                buffer,
-                                transport,
-                            },
+                            stamp: RequestStamp { core, buffer },
                         },
                         buffers: Some(buffers),
                     }
@@ -3523,13 +3550,13 @@ mod tests {
                     fixture
                         .app
                         .world_mut()
-                        .entity_mut(origin.stamp.document)
+                        .entity_mut(origin.stamp.core.document)
                         .despawn();
                     fixture.message(0, "textDocument/didOpen", 2);
                 }
                 3 => {
                     fixture.app.world_mut().write_message(LspRestartRequest {
-                        server: origin.stamp.server,
+                        server: origin.stamp.core.server,
                     });
                     fixture.message(0, "textDocument/didOpen", 2);
                 }
@@ -4114,7 +4141,7 @@ mod tests {
             transport: None,
         });
         app.add_systems(Update, |inbox: Single<&LspDiagnosticsInbox>| {
-            drop(inbox.drain());
+            inbox.drain().for_each(drop);
         });
         app.update();
         assert!(probe.is_empty());
@@ -4136,9 +4163,38 @@ mod tests {
         let path = PathBuf::from("/tmp/vmux_lsp_editor.rs");
         let mut app = App::new();
         let (outbox, inbox) = LspDiagnosticsSender::channel();
-        app.add_plugins(MinimalPlugins)
-            .add_systems(Update, drain_diagnostics);
+        app.add_plugins((MinimalPlugins, vmux_lsp::LspPlugin, DiagnosticsPlugin))
+            .insert_non_send(Browsers::default());
         app.world_mut().spawn(inbox);
+        let (_, lint) = LintDiagnosticsSender::channel();
+        app.world_mut().spawn(lint);
+        let root = app
+            .world_mut()
+            .spawn((WorkspaceRoot, vmux_ecs::Cwd("/tmp".into())))
+            .id();
+        let transport = Transport::new(ProbeTransport {
+            replies: Default::default(),
+            capabilities: Default::default(),
+            recording: None,
+        });
+        let identity = transport.identity();
+        let server = app
+            .world_mut()
+            .spawn((
+                Server,
+                ServerKey::new("/tmp", "test-server"),
+                transport,
+                ChildOf(root),
+            ))
+            .id();
+        let document = app
+            .world_mut()
+            .spawn((
+                DocumentPath(path.clone()),
+                OpenDoc { version: 1 },
+                ChildOf(server),
+            ))
+            .id();
 
         let core = EditCore::new(
             path.clone(),
@@ -4152,6 +4208,8 @@ mod tests {
             .spawn((
                 FileView { path: path.clone() },
                 Editor::new(core, hl, crate::fold::FoldState::default()),
+                DocumentBinding::new(document),
+                ServerBinding::new(server),
             ))
             .id();
 
@@ -4169,13 +4227,16 @@ mod tests {
             message: "boom".into(),
             ..Default::default()
         };
-        outbox.send(PathDiagnostics {
-            path: path.clone(),
-            diagnostics: vec![diag],
-            version: None,
-            server: None,
-            transport: None,
-        });
+        outbox
+            .scoped(server)
+            .with_transport(identity)
+            .send(PathDiagnostics {
+                path: path.clone(),
+                diagnostics: vec![diag],
+                version: None,
+                server: None,
+                transport: None,
+            });
         app.update();
 
         let mapped = &app

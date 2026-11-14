@@ -286,7 +286,7 @@ mod tests {
                 }]
             }
         }));
-        let q = h.diagnostics.drain();
+        let q: Vec<_> = h.diagnostics.drain().collect();
         assert_eq!(q.len(), 1);
         assert_eq!(q[0].path, PathBuf::from("/tmp/main.rs"));
         assert_eq!(q[0].diagnostics[0].message, "boom");
@@ -296,7 +296,7 @@ mod tests {
             "method": "textDocument/publishDiagnostics",
             "params": { "uri": "file:///tmp/main.rs", "version": 7, "diagnostics": [] }
         }));
-        let versioned = h.diagnostics.drain();
+        let versioned: Vec<_> = h.diagnostics.drain().collect();
         assert_eq!(versioned.len(), 1);
         assert_eq!(versioned[0].path, PathBuf::from("/tmp/main.rs"));
         assert_eq!(versioned[0].version, Some(7));
@@ -323,7 +323,7 @@ mod tests {
         let h = Harness::start();
         h.reader
             .dispatch(json!({"method": "telemetry/event", "params": {}}));
-        assert!(h.diagnostics.drain().is_empty());
+        assert!(h.diagnostics.drain().next().is_none());
         assert!(
             h.sent.try_recv().is_err(),
             "a notification is never answered"
