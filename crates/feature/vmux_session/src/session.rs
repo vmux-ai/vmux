@@ -1,5 +1,3 @@
-use std::collections::HashSet;
-
 use bevy_ecs::prelude::*;
 use bevy_reflect::Reflect;
 use moonshine_save::prelude::Save;
@@ -37,43 +35,8 @@ pub struct TranscriptLoading;
 #[type_path = "vmux_session"]
 pub struct TitlePending;
 
-#[derive(Component, Clone, Debug, Default, Serialize, Deserialize, Reflect)]
-#[reflect(Component)]
-pub struct ApprovalPolicy {
-    pub auto: HashSet<String>,
-}
+#[derive(Component, Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct ApprovalCount(pub u32);
 
-impl ApprovalPolicy {
-    pub fn allow(&mut self, tool: &str) {
-        self.auto.insert(Self::tool_key(tool));
-    }
-
-    pub fn allows(&self, tool: &str) -> bool {
-        self.auto.contains(&Self::tool_key(tool))
-    }
-
-    pub fn tool_key(tool: &str) -> String {
-        tool.trim()
-            .to_ascii_lowercase()
-            .split(|character: char| {
-                character.is_ascii_whitespace() || matches!(character, '-' | '.' | ':' | '_')
-            })
-            .filter(|part| !part.is_empty())
-            .collect::<Vec<_>>()
-            .join("_")
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn approval_policy_normalizes_agent_tool_identifiers() {
-        let mut policy = ApprovalPolicy::default();
-        policy.allow("mcp__vmux__run");
-
-        assert!(policy.allows("mcp.vmux.run"));
-        assert!(!policy.allows("mcp.other.run"));
-    }
-}
+#[derive(SystemSet, Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub struct ApprovalProjectionSet;

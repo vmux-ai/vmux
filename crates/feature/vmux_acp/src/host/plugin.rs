@@ -13,7 +13,7 @@ impl Plugin for AcpPlugin {
     fn build(&self, app: &mut App) {
         app.add_plugins((super::acp::ConfigPlugin, super::runtime::Plugin));
         super::command_bar::add(app);
-        super::approval::add(app);
+        app.add_plugins(super::approval::Plugin);
         app.add_plugins(super::attach::Plugin);
         super::attention::add(app);
         app.add_plugins(super::command::Plugin);
@@ -21,7 +21,7 @@ impl Plugin for AcpPlugin {
         app.add_plugins(super::external::Plugin);
         super::follow::add(app);
         super::handoff::add(app);
-        super::ingress::add(app);
+        app.add_plugins(super::ingress::Plugin);
         app.add_plugins(super::navigation::Plugin);
         super::tidy::add(app);
         super::toast::add(app);

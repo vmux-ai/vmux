@@ -35,7 +35,9 @@ pub use queue::{
 };
 pub use route::Route;
 pub use run_state::{AgentTurnMeta, Failure, FailureKind, RunState};
-pub use session::{AgentConversationTitle, ApprovalPolicy, TitlePending, TranscriptLoading};
+pub use session::{
+    AgentConversationTitle, ApprovalCount, ApprovalProjectionSet, TitlePending, TranscriptLoading,
+};
 pub use title::ConversationTitle;
 pub use vmux_api::session::SessionId;
 

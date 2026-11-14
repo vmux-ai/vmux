@@ -4,7 +4,7 @@ mod plugin;
 
 mod acp;
 mod approval;
-mod approval_driver;
+mod approval_io;
 mod attach;
 mod attach_driver;
 mod attention;

@@ -17,6 +17,8 @@ impl vmux_ecs::manifest::FeatureManifestSource for Feature {
 
 #[cfg(all(host, feature = "service"))]
 mod acp;
+#[cfg(feature = "approvals")]
+mod approval;
 #[cfg(all(host, feature = "service"))]
 mod broker_driver;
 #[cfg(all(host, feature = "app"))]

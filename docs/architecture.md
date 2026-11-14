@@ -472,6 +472,17 @@ stay unconsumed; explicit Session retry rearms preference IO, and successful loa
 the matching preference block before dispatch. Registered enqueue systems own order compaction
 and retained-request creation; each typed registration selects its canonical file kind.
 
+ACP approvals use a renderer-independent core with File roots, Agent and Scope children and
+individual Grant entities. Accepted consent Operations retain their captured agent/directory until
+scope resolution commits a grant; only current Session bindings authorize automatic replies. Scope
+names retain the existing JSON namespace keys. The native adapter publishes repository and directory
+facts; the core chooses repository, directory or a Session-only transient scope. ApprovalCount is a
+one-way composer display projection and never an authorization source.
+Approval JSON records exist only at bounded codec ingress/egress. Initial read failure refuses
+replacement writes. File jobs correlate revision acknowledgements, verify the current file fingerprint
+under a cancellable lock and perform atomic replacement. Exit re-reads the file after canceling older
+work before publishing the latest canonical snapshot within the shared lock budget.
+
 Every plain adapter names its external interface, canonical input/output, scope/lifetime,
 bounds and cancellation/eviction. Adapters may hold handles, byte cursors, codec scratch and
 read-only output caches; they cannot own parallel normalized vmux state or product policy.

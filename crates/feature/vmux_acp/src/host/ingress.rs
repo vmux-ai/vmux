@@ -1,8 +1,8 @@
 use crate::host::event::{
     AcpAgentInfo, AcpSessionConfigSelectionResult, AcpSessionConfigSnapshot, AcpSessionCreated,
-    AcpTerminalCreated, AcpWorkspaceChanged, AgentApprovalRequest, AgentApprovalResolved,
-    AgentDelta, AgentMessagesSnapshot, AgentRequestInput, AgentRunStatusChanged,
-    AgentToolCallRequest, CommandOrigin,
+    AcpTerminalCreated, AcpWorkspaceChanged, AgentApprovalResolved, AgentDelta,
+    AgentMessagesSnapshot, AgentRequestInput, AgentRunStatusChanged, AgentToolCallRequest,
+    CommandOrigin,
 };
 use bevy::prelude::*;
 use vmux_api::protocol::{AgentRunStatus, ClientMessage, JsonValue};
@@ -28,41 +28,45 @@ struct InboundAgentAwaitingApproval {
     args: JsonValue,
 }
 
-pub(super) fn add(app: &mut App) {
-    app.add_service_message::<InboundAgentRequest>()
-        .add_service_message::<AgentToolCallRequest>()
-        .add_service_message::<AgentDelta>()
-        .add_service_message::<AgentRunStatusChanged>()
-        .add_service_message::<InboundAgentAwaitingApproval>()
-        .add_service_message::<AgentApprovalResolved>()
-        .add_service_message::<AgentMessagesSnapshot>()
-        .add_service_message::<AcpAgentInfo>()
-        .add_service_message::<AcpWorkspaceChanged>()
-        .add_service_message::<AcpSessionConfigSnapshot>()
-        .add_service_message::<AcpSessionConfigSelectionResult>()
-        .add_service_message::<AcpSessionCreated>()
-        .add_service_message::<AcpTerminalCreated>()
-        .add_message::<ServiceRequest>()
-        .add_message::<AgentCommandResponse>()
-        .add_message::<AgentRequestInput>()
-        .add_message::<SnapshotReceived>()
-        .add_systems(
-            Update,
-            (
-                subscribe_commands,
+pub(super) struct Plugin;
+
+impl bevy::prelude::Plugin for Plugin {
+    fn build(&self, app: &mut App) {
+        app.add_message::<ServiceRequest>()
+            .add_message::<AgentCommandResponse>()
+            .add_message::<AgentRequestInput>()
+            .add_message::<SnapshotReceived>()
+            .add_systems(
+                Update,
                 (
-                    route_requests,
-                    route_approval_requests,
-                    project_deltas,
-                    route_messages,
-                    project_statuses,
-                    project_approval_resolutions,
-                )
-                    .chain()
-                    .in_set(ServiceMessageSet),
-            ),
-        )
-        .add_systems(Last, forward_command_responses);
+                    subscribe_commands,
+                    (
+                        route_requests,
+                        route_approval_requests,
+                        project_deltas,
+                        route_messages,
+                        project_statuses,
+                        project_approval_resolutions,
+                    )
+                        .chain()
+                        .in_set(ServiceMessageSet),
+                ),
+            )
+            .add_systems(Last, forward_command_responses)
+            .add_service_message::<InboundAgentRequest>()
+            .add_service_message::<AgentToolCallRequest>()
+            .add_service_message::<AgentDelta>()
+            .add_service_message::<AgentRunStatusChanged>()
+            .add_service_message::<InboundAgentAwaitingApproval>()
+            .add_service_message::<AgentApprovalResolved>()
+            .add_service_message::<AgentMessagesSnapshot>()
+            .add_service_message::<AcpAgentInfo>()
+            .add_service_message::<AcpWorkspaceChanged>()
+            .add_service_message::<AcpSessionConfigSnapshot>()
+            .add_service_message::<AcpSessionConfigSelectionResult>()
+            .add_service_message::<AcpSessionCreated>()
+            .add_service_message::<AcpTerminalCreated>();
+    }
 }
 
 fn route_messages(
@@ -132,13 +136,12 @@ fn route_requests(
 
 fn route_approval_requests(
     mut inbound: MessageReader<InboundAgentAwaitingApproval>,
-    mut sessions: Query<(Entity, &SessionId, &mut RunState), With<Session>>,
-    mut commands: Commands,
+    mut sessions: Query<(&SessionId, &mut RunState), With<Session>>,
 ) {
     for inbound in inbound.read() {
         let args = serde_json::Value::try_from(&inbound.args)
             .unwrap_or_else(|_| serde_json::Value::Object(serde_json::Map::new()));
-        for (session, session_id, mut state) in &mut sessions {
+        for (session_id, mut state) in &mut sessions {
             if session_id.0 != inbound.sid {
                 continue;
             }
@@ -147,11 +150,6 @@ fn route_approval_requests(
                 name: inbound.name.clone(),
                 args: args.clone(),
             };
-            commands.trigger(AgentApprovalRequest {
-                session,
-                call_id: inbound.call_id.clone(),
-                name: inbound.name.clone(),
-            });
         }
     }
 }
@@ -251,7 +249,7 @@ mod tests {
     fn routes_agent_requests_without_terminal_ownership() {
         let mut app = App::new();
         app.add_plugins(MinimalPlugins);
-        add(&mut app);
+        app.add_plugins(super::Plugin);
         let request_id = AgentRequestId([7; 16]);
         app.world_mut()
             .write_message(ServiceInbound(ServiceMessage::AgentRequest {
@@ -277,7 +275,7 @@ mod tests {
     fn message_snapshot_finishes_transcript_loading() {
         let mut app = App::new();
         app.add_plugins(MinimalPlugins);
-        add(&mut app);
+        app.add_plugins(super::Plugin);
         let session = app
             .world_mut()
             .spawn((
@@ -313,7 +311,7 @@ mod tests {
     fn empty_snapshot_preserves_persisted_transcript() {
         let mut app = App::new();
         app.add_plugins(MinimalPlugins);
-        add(&mut app);
+        app.add_plugins(super::Plugin);
         let session_id = SessionId("session-1".into());
         let session = app
             .world_mut()
@@ -358,7 +356,7 @@ mod tests {
     fn failed_resume_releases_loading_and_reports_the_error() {
         let mut app = App::new();
         app.add_plugins(MinimalPlugins);
-        add(&mut app);
+        app.add_plugins(super::Plugin);
         let session = app
             .world_mut()
             .spawn((
