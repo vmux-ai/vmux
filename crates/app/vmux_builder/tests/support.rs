@@ -160,6 +160,10 @@ printf 'library\n' > "$CARGO_TARGET_DIR/debug/deps/current.dylib"
             "VMUX_BUILD_STORAGE_ROOT",
             "CARGO_BUILD_TARGET",
             "RUSTC",
+            "GIT_DIR",
+            "GIT_WORK_TREE",
+            "GIT_INDEX_FILE",
+            "GIT_COMMON_DIR",
         ] {
             command.env_remove(key);
         }

@@ -510,7 +510,7 @@ import pathlib,plistlib,sys
 bundle=pathlib.Path(sys.argv[1]); name=sys.argv[2]; namespace=sys.argv[3]; suffix=sys.argv[5]
 identity_suffix='.9999999' if suffix else ''
 info=plistlib.load((bundle/'Contents/Info.plist').open('rb'))
-assert info['CFBundleDisplayName']==name+suffix
+assert info['CFBundleDisplayName']==name+suffix,(info['CFBundleDisplayName'],name+suffix)
 assert info['CFBundleIdentifier']==namespace+'.desktop'+identity_suffix
 agent=plistlib.load((bundle/'Contents/Library/LaunchAgents'/(namespace+'.service.plist')).open('rb'))
 assert agent['Label']==namespace+'.service'+identity_suffix
