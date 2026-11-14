@@ -655,8 +655,11 @@ jobs:
       - name: Configure fast PR package build
         if: github.event_name == 'pull_request' && env.IS_RELEASE_PR != '1'
         run: |
-          echo "VMUX_CI_FAST_PACKAGE=1" >> "$GITHUB_ENV"
-          echo "RUSTFLAGS=${RUSTFLAGS:+$RUSTFLAGS }-C opt-level=1 -C codegen-units=16 -C lto=off" >> "$GITHUB_ENV"
+          {
+            echo "VMUX_CI_FAST_PACKAGE=1"
+            echo "CARGO_PROFILE_RELEASE_LTO=off"
+            echo "RUSTFLAGS=${RUSTFLAGS:+$RUSTFLAGS }-C opt-level=1 -C codegen-units=16"
+          } >> "$GITHUB_ENV"
 
       - uses: ./.github/actions/setup-macos
         with:

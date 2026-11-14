@@ -444,6 +444,9 @@ CI runs policy, public SDK, immutable Git SDK, headless profiles and affected cr
 separate runners, and the Test gate requires every applicable result. Non-release pull requests
 compile the same package features with faster compiler flags and produce a signed app bundle for
 the startup check. Release preparation keeps its normal optimization, DMG and notarization path.
+Fast packages disable LTO in Cargo's release profile so dependencies contain native objects rather
+than linker-plugin bitcode that Apple's linker may not understand. Failed fast package jobs retain
+their ref-scoped dependency cache for the next correction.
 The package adapter rejects fast mode outside non-release pull requests; caches remain scoped by
 GitHub ref, so pull-request caches do not replace main's cache.
 

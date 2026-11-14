@@ -22,6 +22,7 @@ runs:
       with:
         shared-key: ${{ inputs.cache-key }}
         save-if: ${{ github.ref == 'refs/heads/main' || github.event_name == 'pull_request' }}
+      cache-on-failure: ${{ env.VMUX_CI_FAST_PACKAGE == '1' }}
 
     - name: Cache cargo binaries
       if: inputs.packaging == 'true'
