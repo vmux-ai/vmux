@@ -14,6 +14,10 @@ class Fixture {
     this.git('config', 'user.name', 'Fixture');
     this.git('config', 'user.email', 'fixture@example.com');
     this.git('config', 'commit.gpgsign', 'false');
+    for (const file of ['.github/workflows/ci.yml', '.github/actions/prepare-ci/action.yml', 'scripts/ci-preflight.js']) {
+      fs.mkdirSync(path.dirname(path.join(this.root, file)), { recursive: true });
+      fs.writeFileSync(path.join(this.root, file), 'fixture execution definition\n');
+    }
     fs.writeFileSync(path.join(this.root, 'Cargo.toml'), '[workspace.package]\nversion = "1.0.0"\n');
     this.commit('initial');
     this.git('checkout', '-b', 'feature');
@@ -147,6 +151,21 @@ test('fork PRs and version changes always execute normal PR checks', async (t) =
   assert.equal(release.outputs.receipt, '');
 });
 
+test('matching Git trees cannot reuse a run executed with an older CI definition', async (t) => {
+  for (const file of ['.github/workflows/ci.yml', '.github/actions/prepare-ci/action.yml', 'scripts/ci-preflight.js']) {
+    const fixture = new Fixture(t);
+    fs.writeFileSync(path.join(fixture.root, file), 'updated base execution definition\n');
+    fixture.base = fixture.commit('update base CI');
+    fixture.tree = fixture.git('rev-parse', 'HEAD^{tree}');
+    fixture.context.payload.pull_request.base.sha = fixture.base;
+    fixture.context.sha = fixture.base;
+    fixture.artifacts = [{ name: Preflight.artifact({ ...fixture.identity, base: fixture.base, tree: fixture.tree }), expired: false }];
+    assert.equal((await fixture.preflight.plan()).reuse, '');
+    assert.equal(fixture.outputs.reusable, 'false');
+    assert.equal(fixture.outputs.receipt, '');
+  }
+});
+
 test('a push plans against an existing stacked PR base', async (t) => {
   const fixture = new Fixture(t);
   fixture.context.eventName = 'push';
@@ -185,7 +204,8 @@ test('prepared checkouts compile the merged code from both branches', (t) => {
   fixture.git('checkout', '--detach', fixture.head);
   assert.equal(fs.existsSync(path.join(fixture.root, 'base.txt')), false);
   const env = { VMUX_CI_HEAD: fixture.head, VMUX_CI_BASE: fixture.base, VMUX_CI_TREE: fixture.tree };
-  Preflight.checkout(env, fixture.root);
+  const commit = Preflight.checkout(env, fixture.root);
+  assert.equal(commit, fixture.git('rev-parse', 'HEAD'));
   assert.equal(fixture.git('rev-parse', 'HEAD^{tree}'), fixture.tree);
   assert.equal(fs.readFileSync(path.join(fixture.root, 'base.txt'), 'utf8'), 'base\n');
   assert.equal(fs.readFileSync(path.join(fixture.root, 'feature.txt'), 'utf8'), 'feature\n');
@@ -246,7 +266,7 @@ test('waiting is bounded and API errors cannot grant reuse', async (t) => {
 test('recording requires every applicable result and exact input identity', (t) => {
   const fixture = new Fixture(t);
   const results = {
-    plan: { result: 'success', outputs: { ...fixture.identity, feature: 'true', release: 'false', reuse: '', receipt: Preflight.artifact(fixture.identity) } },
+    plan: { result: 'success', outputs: { ...fixture.identity, feature: 'true', release: 'false', reusable: 'true', reuse: '', receipt: Preflight.artifact(fixture.identity) } },
     changes: { result: 'success', outputs: { website: 'false' } },
     lint: { result: 'success' }, test: { result: 'success' },
     'build-macos': { result: 'success' }, 'build-ios': { result: 'success' }, website: { result: 'skipped' },
@@ -266,6 +286,7 @@ test('recording requires every applicable result and exact input identity', (t) 
     (r) => { r.plan.outputs.reuse = '42'; },
     (r) => { r.plan.outputs.feature = 'false'; },
     (r) => { r.plan.outputs.release = 'true'; },
+    (r) => { r.plan.outputs.reusable = 'false'; },
     (r) => { r.plan.outputs.receipt = 'other'; },
   ]) {
     const invalid = structuredClone(results);
@@ -298,7 +319,23 @@ class Workflow {
     if (!expression.startsWith('${{')) return expression;
     return Function('github', 'needs', `return (${expression.slice(3, -2)});`)({ event_name: event }, { plan: { outputs: { feature } } });
   }
+
+  filterRef(base, commit) {
+    const filter = this.jobs.changes.steps.find((step) => step.uses === 'dorny/paths-filter@v4');
+    return Function('needs', 'steps', `return (${filter.with.ref.slice(3, -2)});`)({ plan: { outputs: { base } } }, { prepared: { outputs: { commit } } });
+  }
 }
+
+test('change detection receives a local merge object ID accepted by paths-filter', (t) => {
+  const fixture = new Fixture(t);
+  const commit = Preflight.checkout({ VMUX_CI_HEAD: fixture.head, VMUX_CI_BASE: fixture.base, VMUX_CI_TREE: fixture.tree }, fixture.root);
+  const workflow = new Workflow();
+  const ref = workflow.filterRef(fixture.base, commit);
+  assert.match(ref, /^[a-f0-9]{40}$/);
+  assert.equal(fixture.git('cat-file', '-t', ref), 'commit');
+  assert.deepEqual(fixture.git('diff', '--name-only', fixture.base, ref).split('\n'), ['feature.txt']);
+  assert.equal(workflow.filterRef('', commit), '');
+});
 
 test('branch evidence cannot satisfy required PR checks before merge-tree verification', () => {
   const workflow = new Workflow();

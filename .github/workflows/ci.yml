@@ -36,6 +36,7 @@ jobs:
       tree: ${{ steps.plan.outputs.tree }}
       feature: ${{ steps.plan.outputs.feature }}
       release: ${{ steps.plan.outputs.release }}
+      reusable: ${{ steps.plan.outputs.reusable }}
       reuse: ${{ steps.plan.outputs.reuse }}
       receipt: ${{ steps.plan.outputs.receipt }}
     steps:
@@ -49,7 +50,7 @@ jobs:
             const Preflight = require('./scripts/ci-preflight.js');
             await new Preflight({ github, context, core }).plan();
       - name: Publish preflight input identity
-        if: steps.plan.outputs.feature == 'true' && steps.plan.outputs.release == 'false'
+        if: steps.plan.outputs.feature == 'true' && steps.plan.outputs.reusable == 'true'
         uses: actions/upload-artifact@v6
         with:
           name: inputs-${{ steps.plan.outputs.receipt }}
@@ -303,6 +304,7 @@ jobs:
           ref: ${{ needs.plan.outputs.head }}
 
       - uses: ./.github/actions/prepare-ci
+        id: prepared
         with:
           head: ${{ needs.plan.outputs.head }}
           base: ${{ needs.plan.outputs.base }}
@@ -312,7 +314,7 @@ jobs:
         id: filter
         with:
           base: ${{ needs.plan.outputs.base || github.event.repository.default_branch }}
-          ref: ${{ needs.plan.outputs.base && 'HEAD' || '' }}
+          ref: ${{ needs.plan.outputs.base && steps.prepared.outputs.commit || '' }}
           predicate-quantifier: 'some-with-excludes'
           filters: |
             code:
@@ -1004,7 +1006,7 @@ jobs:
     needs: [plan, changes, lint, test, build-macos, build-ios, website]
     if: >-
       always() && needs.plan.result == 'success' && needs.plan.outputs.feature == 'true' &&
-      needs.plan.outputs.release == 'false' && needs.lint.result == 'success' &&
+      needs.plan.outputs.reusable == 'true' && needs.lint.result == 'success' &&
       needs.test.result == 'success' && needs.build-macos.result == 'success' &&
       needs.build-ios.result == 'success'
     steps:

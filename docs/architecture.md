@@ -2367,6 +2367,8 @@ its actual base branch, including stacked PRs; otherwise the default branch supp
 Successful branch CI records the exact head, base and merged tree only after Linux, macOS, iOS,
 and any affected website checks pass. A same-repository, non-release PR may reuse that evidence
 from the same workflow and branch; the required gates still run and verify planning succeeded.
+The branch workflow, checkout action and preflight adapter must also match their merged-tree
+versions, because a push executes the branch workflow even when the base changed its CI definition.
 Branch evidence uses separate check names, so it cannot satisfy PR merge requirements before
 the PR verifies its own merge tree and captured base.
 Branch CI publishes its input identity before starting checks. Planning joins an active run with
