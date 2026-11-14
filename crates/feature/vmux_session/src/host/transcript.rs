@@ -65,6 +65,7 @@ impl bevy::prelude::Plugin for Plugin {
 
 #[derive(Component, Default)]
 struct PushState {
+    context: [bool; 7],
     last: Option<std::time::Instant>,
     pending: bool,
 }
@@ -141,7 +142,7 @@ struct ChatProjection {
 
 type ChangedSession = (
     Entity,
-    &'static AgentId,
+    Ref<'static, AgentId>,
     Ref<'static, Name>,
     Ref<'static, RunState>,
     Option<Ref<'static, AgentTurnMeta>>,
@@ -292,6 +293,7 @@ fn push_to_page(mut world: PushWorld, mut pushes: Query<&mut PushState>, mut com
         };
         let conversation_changed = children.is_changed() || changed_transcripts.contains(&session);
         let context_changed = user_moved
+            || agent_id.is_changed()
             || loading_changes.contains(&session)
             || name.is_changed()
             || state.is_changed()
@@ -321,6 +323,15 @@ fn push_to_page(mut world: PushWorld, mut pushes: Query<&mut PushState>, mut com
         };
         let now = std::time::Instant::now();
         let choice = world.choices.get(webview).ok();
+        let context = [
+            turn_meta.is_some(),
+            profile.is_some(),
+            imported.is_some(),
+            title.is_some(),
+            user_profile.is_some(),
+            meta.is_some(),
+            choice.is_some(),
+        ];
         let initialized = world
             .bindings
             .iter()
@@ -331,6 +342,7 @@ fn push_to_page(mut world: PushWorld, mut pushes: Query<&mut PushState>, mut com
             && !push.pending
             && initialized
             && world.synced.contains(webview)
+            && context == push.context
             && !meta.as_ref().is_some_and(|meta| meta.is_changed())
             && !choice.as_ref().is_some_and(|choice| choice.is_changed())
             && let Ok((transcript, mut snapshot, attachments)) = world.chat_views.get_mut(webview)
@@ -367,7 +379,7 @@ fn push_to_page(mut world: PushWorld, mut pushes: Query<&mut PushState>, mut com
         };
         let mut projection = world.transcripts.read(session, |conversation| {
             ChatProjection::new(
-                agent_id,
+                &agent_id,
                 &conversation.messages,
                 &conversation.created_at,
                 &state,
@@ -438,6 +450,7 @@ fn push_to_page(mut world: PushWorld, mut pushes: Query<&mut PushState>, mut com
                 Binding,
             ));
         }
+        push.context = context;
         push.last = Some(now);
     }
 }
@@ -1010,6 +1023,74 @@ mod tests {
                 .unwrap()
                 .last_changed(),
             revision
+        );
+        app.world_mut().entity_mut(view).insert(PendingAgentChoice {
+            session_entity: session,
+            question: "Choose an agent".into(),
+            options: vec!["one".into()],
+        });
+        app.world_mut().entity_mut(stack).insert(PageMetadata {
+            icon: vmux_api::PageIcon::favicon("https://example.invalid/agent.svg"),
+            ..Default::default()
+        });
+        app.world_mut()
+            .run_system_once(move |mut queues: vmux_session::QueuedPrompts| {
+                queues.enqueue(session, "with context".into(), Vec::new(), false);
+            })
+            .unwrap();
+        app.update();
+        let state = &app.world().resource::<Published>().0.snapshot;
+        assert!(!state.choice_question.is_empty());
+        assert!(!state.agent_icon.is_empty());
+        app.world_mut()
+            .entity_mut(view)
+            .remove::<PendingAgentChoice>();
+        app.world_mut().entity_mut(stack).remove::<PageMetadata>();
+        app.world_mut()
+            .run_system_once(move |mut queues: vmux_session::QueuedPrompts| {
+                queues.enqueue(session, "without context".into(), Vec::new(), false);
+            })
+            .unwrap();
+        app.update();
+        let state = &app.world().resource::<Published>().0.snapshot;
+        assert!(state.choice_question.is_empty());
+        assert!(state.choice_options.is_empty());
+        assert!(state.agent_icon.is_empty());
+        app.world_mut().entity_mut(session).insert((
+            Profile::registry("Canonical agent", "codex"),
+            AgentConversationTitle("Stored title".into()),
+        ));
+        app.world_mut()
+            .run_system_once(move |mut queues: vmux_session::QueuedPrompts| {
+                queues.enqueue(session, "with profile".into(), Vec::new(), false);
+            })
+            .unwrap();
+        app.update();
+        let state = &app.world().resource::<Published>().0.snapshot;
+        assert_eq!(state.agent_name, "Canonical agent");
+        assert_eq!(state.conversation_title, "Stored title");
+        app.world_mut()
+            .entity_mut(session)
+            .remove::<(Profile, AgentConversationTitle)>();
+        app.world_mut()
+            .run_system_once(move |mut queues: vmux_session::QueuedPrompts| {
+                queues.enqueue(session, "without profile".into(), Vec::new(), false);
+            })
+            .unwrap();
+        app.update();
+        let state = &app.world().resource::<Published>().0.snapshot;
+        assert!(state.agent_name.is_empty());
+        assert_eq!(state.conversation_title, "Queue test");
+        app.world_mut().get_mut::<AgentId>(session).unwrap().0 = "other".into();
+        app.world_mut()
+            .run_system_once(move |mut queues: vmux_session::QueuedPrompts| {
+                queues.enqueue(session, "with another agent".into(), Vec::new(), false);
+            })
+            .unwrap();
+        app.update();
+        assert_eq!(
+            app.world().resource::<Published>().0.snapshot.agent_id,
+            "other"
         );
     }
 
