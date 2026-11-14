@@ -2577,6 +2577,9 @@ notarization. Feature-branch pushes start the same affected checks before a PR e
 same packaging filter and fast non-release app bundle. Each runner checks out a temporary merge
 of the captured base and head and verifies its Git tree before compiling. An existing PR selects
 its actual base branch, including stacked PRs; otherwise the default branch supplies the base.
+PR planning reads that base from the immutable synthetic merge commit and verifies its head parent.
+When the target advanced beyond the event payload, both base commits must belong to the target
+branch ancestry before the exact merged tree can supply reusable CI evidence.
 
 Feature CI parses changed Rust files with `vmux ci-native` and the optional `ci-syntax`
 feature. The development CLI enables this feature; ordinary product builds need not link the syntax
