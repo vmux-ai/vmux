@@ -1939,11 +1939,12 @@ React-style, in one atomic transaction.
 
 Workspace extensions are declarations in `workspace.metadata.vmux.dx.providers`: a command
 name, Cargo package/binary, optional Cargo manifest, and a workspace-contained RON CLI
-manifest. The DX root loads bounded input before collecting the CLI catalog and creates
-canonical `Provider` entities with a CLI-only `FeatureManifest` projection. Namespaces cannot
+manifest. The workspace plugin loads bounded input before collecting the CLI catalog and
+creates canonical `Provider`, command and argument entities. `FeatureManifest` is their
+CLI-only projection; dispatch reads the canonical declarations after `CliSet::Parse`. Namespaces cannot
 overlap built-in or other provider commands. Explicit declared names select the minimal CLI
 host; help uses metadata without compiling or invoking the provider. Accepted typed arguments
-are reconstructed at the native boundary with their OS values and forwarded-option delimiter.
+are reconstructed by the routing system with their OS values and forwarded-option delimiter.
 Compile/invoke work uses the existing operation/attempt/predecessor systems. Cargo runs in a
 validated locked cache, then a bounded regular executable is snapshotted before the lease is
 released. The operation owns that temporary executable through invocation and cancellation.
@@ -1951,6 +1952,12 @@ Long-lived providers therefore do not block compilation for another invocation. 
 their descendants in the inherited provider process group so cancellation reaches the tree.
 No public package depends on a provider workspace. A provider can use an independent Cargo
 workspace, allowing developer bootstrap without product dependencies.
+
+Repository selection materializes ancestor directories and raw Git worktree records before
+registered systems choose the checkout. Exact cloud branches precede exact client branches,
+then directory aliases; equal-ranked matches are refused. Local launches materialize bounded
+filesystem entries before an ECS system selects the newest completed product bundle. Git,
+metadata files, cache preparation and executable snapshots remain bounded external adapters.
 
 `vmux_transport` keeps its local service adapter behind the default-enabled `service` Cargo
 feature. Disabling default features exposes device/framing/QUIC contracts without the optional

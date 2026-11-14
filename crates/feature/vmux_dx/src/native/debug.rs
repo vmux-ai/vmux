@@ -552,39 +552,7 @@ impl Native {
             let product = self.product()?;
             let name = product.value("VMUX_HOST_NAME");
             let directory = self.checkout.directory("release");
-            let app = if profile == "local" {
-                let mut latest = None;
-                if directory.is_dir() {
-                    for entry in fs::read_dir(&directory)? {
-                        let entry = entry?;
-                        let filename = entry.file_name();
-                        let Some(filename) = filename.to_str() else {
-                            continue;
-                        };
-                        if !filename.starts_with(&format!("{name} ("))
-                            || !filename.ends_with(").app")
-                        {
-                            continue;
-                        }
-                        let metadata = fs::symlink_metadata(entry.path())?;
-                        if !metadata.is_dir() || metadata.file_type().is_symlink() {
-                            continue;
-                        }
-                        let modified = metadata.modified()?;
-                        if latest
-                            .as_ref()
-                            .is_none_or(|(_, previous)| modified > *previous)
-                        {
-                            latest = Some((entry.path(), modified));
-                        }
-                    }
-                }
-                latest
-                    .ok_or("No completed local app; run vmux build -p local first")?
-                    .0
-            } else {
-                directory.join(format!("{name}.app"))
-            };
+            let app = directory.join(format!("{name}.app"));
             if !app.is_dir() {
                 return Err("No completed app; run vmux build first".into());
             }
@@ -603,6 +571,33 @@ impl Native {
         let mut command = self.command(self.checkout.directory("debug").join("vmux_desktop"));
         command.env_remove("CEF_PATH");
         Execution::new(command).run()
+    }
+
+    pub fn local_entries(&self) -> Result<Vec<crate::local::Entry>> {
+        let directory = self.checkout.directory("release");
+        let mut entries = Vec::new();
+        if !directory.is_dir() {
+            return Ok(entries);
+        }
+        for entry in fs::read_dir(directory)? {
+            if entries.len() >= 4096 {
+                return Err("Local artifact directory exceeds its metadata bounds".into());
+            }
+            let entry = entry?;
+            let metadata = fs::symlink_metadata(entry.path())?;
+            entries.push(crate::local::Entry {
+                path: entry.path(),
+                modified: metadata.modified()?,
+                directory: metadata.is_dir(),
+                symlink: metadata.file_type().is_symlink(),
+            });
+        }
+        Ok(entries)
+    }
+
+    pub fn launch_local(&self, app: &Path) -> Result<()> {
+        self.verify_signature(app)?;
+        self.launch(app)
     }
 
     fn launch(&self, app: &Path) -> Result<()> {

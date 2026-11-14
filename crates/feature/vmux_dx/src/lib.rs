@@ -2,10 +2,10 @@ use std::ffi::OsString;
 use std::sync::{Arc, Mutex, mpsc};
 use std::thread;
 
-use bevy_app::{App, AppExit, PreStartup, Update};
+use bevy_app::{App, Update};
 use bevy_ecs::prelude::*;
 use vmux_ecs::cli::{CliInvocation, CliResult};
-use vmux_ecs::manifest::{FeatureManifest, FeatureManifestSource, FeaturePlugin};
+use vmux_ecs::manifest::{FeatureManifestSource, FeaturePlugin};
 use vmux_ecs::{CreatedAt, Cwd, Operation, OperationState};
 
 use environment::Environment;
@@ -21,6 +21,7 @@ mod ci_scope;
 mod consumer;
 mod environment;
 mod execution;
+mod local;
 mod native;
 mod policy;
 mod processes;
@@ -29,6 +30,8 @@ mod processes;
 mod product;
 mod profile;
 pub mod repository;
+mod repository_io;
+mod repository_selection;
 mod signals;
 mod source;
 mod storage;
@@ -39,36 +42,59 @@ mod update_io;
 pub mod updates;
 mod work;
 mod workspace;
+mod workspace_io;
 
 pub type Result<T> = std::result::Result<T, Box<dyn std::error::Error + Send + Sync>>;
 
 pub struct Plugin;
 
+#[derive(SystemSet, Debug, Clone, PartialEq, Eq, Hash)]
+enum Stage {
+    Initialize,
+    Execute,
+}
+
 impl bevy_app::Plugin for Plugin {
     fn build(&self, app: &mut App) {
-        app.add_plugins((FeaturePlugin::<Feature>::default(), updates::Plugin))
-            .insert_resource(Mailbox::new())
-            .add_message::<Completion>()
-            .add_systems(PreStartup, load)
-            .add_systems(
-                Update,
-                (accept, receive, cancel, collect, start, finish).chain(),
-            );
+        app.add_plugins((
+            FeaturePlugin::<Feature>::default(),
+            updates::Plugin,
+            workspace::Plugin,
+            repository_selection::Plugin,
+        ))
+        .configure_sets(
+            Update,
+            (
+                Stage::Initialize,
+                repository_selection::Stage::Resolve,
+                Stage::Execute,
+            )
+                .chain(),
+        )
+        .add_systems(Update, initialize.in_set(Stage::Initialize))
+        .insert_resource(Mailbox::new())
+        .add_message::<Completion>()
+        .add_systems(
+            Update,
+            (
+                accept,
+                plan,
+                receive,
+                cancel,
+                collect,
+                select_local,
+                start,
+                finish,
+            )
+                .chain()
+                .in_set(Stage::Execute),
+        );
     }
 }
 
 impl Plugin {
-    pub fn selected(mut arguments: impl Iterator<Item = OsString>) -> bool {
-        let Some(name) = arguments.next() else {
-            return false;
-        };
-        let manifest = FeatureManifest::of::<Feature>();
-        for command in manifest.cli.unwrap().commands {
-            if name == command.name.as_str() {
-                return true;
-            }
-        }
-        workspace::Provider::selected(&name, arguments)
+    pub fn selected(arguments: impl Iterator<Item = OsString>) -> bool {
+        workspace::Host::selected(arguments.collect())
     }
 }
 
@@ -127,8 +153,17 @@ struct Completion {
     result: std::result::Result<Outcome, Failure>,
 }
 
-type Incoming<'w, 's> =
-    Query<'w, 's, (Entity, &'static CliInvocation), (Without<Accepted>, Without<CliResult>)>;
+type Incoming<'w, 's> = Query<
+    'w,
+    's,
+    (
+        Entity,
+        &'static CliInvocation,
+        Option<&'static workspace::Dispatch>,
+        Option<&'static Checkout>,
+    ),
+    (Without<Accepted>, Without<CliResult>),
+>;
 type Pending<'w, 's> = Query<
     'w,
     's,
@@ -150,6 +185,7 @@ type Inputs<'w, 's> = Query<
         &'static Storage,
         Option<&'static Lease>,
         Option<&'static workspace::Executable>,
+        Option<&'static local::Target>,
         &'static OperationState,
     ),
     Without<CliResult>,
@@ -163,69 +199,37 @@ type Finishing<'w, 's> = Query<
     (With<Accepted>, Without<CliResult>),
 >;
 
-fn load(
-    features: Query<&FeatureManifest>,
-    mut exits: MessageWriter<AppExit>,
-    mut commands: Commands,
-) {
-    let providers = match workspace::Provider::discover(std::env::args_os().skip(1)) {
-        Ok(providers) => providers,
-        Err(error) => {
-            eprintln!("vmux: workspace CLI metadata: {error}");
-            exits.write(AppExit::error());
-            return;
+fn initialize(requests: Incoming, signals: Option<Res<signals::Signals>>, mut commands: Commands) {
+    if signals.is_some() {
+        return;
+    }
+    for (entity, invocation, dispatch, _) in &requests {
+        if invocation.is("dx.help")
+            || invocation.is("dx.update")
+            || !invocation.command.starts_with("dx.") && dispatch.is_none()
+        {
+            continue;
         }
-    };
-    let mut names = std::collections::BTreeSet::new();
-    let mut identifiers = Vec::new();
-    for feature in &features {
-        if let Some(cli) = &feature.cli {
-            for command in &cli.commands {
-                names.insert(command.name.clone());
-                let mut pending = vec![command];
-                while let Some(command) = pending.pop() {
-                    identifiers.push(command.id.as_str());
-                    pending.extend(command.commands.iter());
-                }
+        match signals::Signals::install() {
+            Ok(scope) => {
+                commands.insert_resource(scope);
+                return;
+            }
+            Err(error) => {
+                commands
+                    .entity(entity)
+                    .insert(CliResult(Err(error.to_string())));
             }
         }
     }
-    for (index, (provider, manifest)) in providers.iter().enumerate() {
-        let name = manifest.cli.as_ref().unwrap().commands[0].name.clone();
-        if !names.insert(name.clone()) {
-            eprintln!("vmux: workspace CLI command duplicates {name}");
-            exits.write(AppExit::error());
-            return;
-        }
-        if identifiers.iter().any(|id| provider.owns(id))
-            || providers[..index]
-                .iter()
-                .any(|(previous, _)| provider.overlaps(previous))
-        {
-            eprintln!("vmux: workspace CLI namespace overlaps a registered command");
-            exits.write(AppExit::error());
-            return;
-        }
-    }
-    for (provider, manifest) in providers {
-        let name = manifest.cli.as_ref().unwrap().commands[0].name.clone();
-        commands.spawn((Name::new(name), provider, manifest));
-    }
 }
 
-fn accept(
-    requests: Incoming,
-    providers: Query<(&workspace::Provider, &FeatureManifest)>,
-    signals: Option<Res<signals::Signals>>,
-    mut commands: Commands,
-) {
-    for (entity, invocation) in &requests {
+fn accept(requests: Incoming, providers: Query<&workspace::Provider>, mut commands: Commands) {
+    for (entity, invocation, dispatch, resolved_context) in &requests {
         if invocation.is("dx.update") {
             continue;
         }
-        let provider = providers
-            .iter()
-            .find(|(provider, _)| provider.owns(&invocation.command));
+        let provider = dispatch.and_then(|dispatch| providers.get(dispatch.provider).ok());
         if !invocation.command.starts_with("dx.") && provider.is_none() {
             continue;
         }
@@ -236,34 +240,24 @@ fn accept(
             commands.entity(entity).insert(CliResult::default());
             continue;
         }
-        if signals.is_none() {
-            match signals::Signals::install() {
-                Ok(scope) => {
-                    commands.insert_resource(scope);
-                }
-                Err(error) => {
-                    commands
-                        .entity(entity)
-                        .insert(CliResult(Err(error.to_string())));
-                    continue;
-                }
-            }
-        }
-        let path = match invocation.value_os("root") {
-            Some(path) => std::path::PathBuf::from(path),
-            None => match std::env::current_dir() {
-                Ok(path) => path,
-                Err(error) => {
-                    commands
-                        .entity(entity)
-                        .insert(CliResult(Err(error.to_string())));
-                    continue;
-                }
-            },
-        };
         let resolved = match provider {
-            Some((provider, _)) => provider.checkout(),
-            None => Checkout::resolve(&path, invocation.value_os("branch")),
+            Some(provider) => {
+                let target = provider
+                    .root
+                    .join(".build-tools/providers")
+                    .join(&provider.package);
+                workspace_io::Cache(target)
+                    .prepare(provider)
+                    .map(|target| Checkout {
+                        root: provider.root.clone(),
+                        target,
+                        build_target: Some(env!("VMUX_DX_HOST_TARGET").into()),
+                    })
+            }
+            None => match resolved_context {
+                Some(checkout) => Ok(checkout.clone()),
+                None => continue,
+            },
         };
         let mut checkout = match resolved {
             Ok(checkout) => checkout,
@@ -353,31 +347,21 @@ fn accept(
                 continue;
             }
         };
-        let plan = match provider {
-            Some((provider, manifest)) => {
-                provider.arguments(manifest, invocation).map(|arguments| {
-                    vec![
-                        Work::WorkspaceAcquire,
-                        Work::WorkspaceCompile(
-                            provider.package.clone(),
-                            provider.binary.clone(),
-                            provider.cargo.clone(),
-                        ),
-                        Work::WorkspaceInvoke(arguments),
-                    ]
-                })
-            }
-            None => Work::plan(invocation),
-        };
-        let steps = match plan {
-            Ok(steps) => steps,
-            Err(error) => {
-                commands
-                    .entity(entity)
-                    .insert(CliResult(Err(error.to_string())));
-                continue;
-            }
-        };
+        if invocation.is("dx.run")
+            && invocation.value("platform").unwrap_or("desktop") == "desktop"
+            && invocation.value("profile") == Some("local")
+        {
+            let product = match environment.product(&checkout.root) {
+                Ok(product) => product.value("VMUX_HOST_NAME").to_owned(),
+                Err(error) => {
+                    commands
+                        .entity(entity)
+                        .insert(CliResult(Err(error.to_string())));
+                    continue;
+                }
+            };
+            commands.entity(entity).insert(local::Selection { product });
+        }
         commands.entity(entity).insert((
             Accepted,
             Operation::bundle(&invocation.command).unwrap().running(),
@@ -388,6 +372,281 @@ fn accept(
             storage,
             Settings(environment),
         ));
+    }
+}
+
+#[derive(Component)]
+struct Planned;
+
+type Planning<'w, 's> = Query<
+    'w,
+    's,
+    (
+        Entity,
+        &'static CliInvocation,
+        Option<&'static workspace::Dispatch>,
+    ),
+    (With<Accepted>, Without<Planned>, Without<CliResult>),
+>;
+
+fn plan(operations: Planning, providers: Query<&workspace::Provider>, mut commands: Commands) {
+    for (entity, invocation, dispatch) in &operations {
+        let profile = invocation.value("profile").unwrap_or("dev");
+        let platform = invocation.value("platform").unwrap_or("desktop");
+        let mut forwarded = invocation
+            .arguments
+            .get("forward")
+            .cloned()
+            .unwrap_or_default();
+        let mut steps = Vec::new();
+        if let Some(dispatch) = dispatch {
+            let Ok(provider) = providers.get(dispatch.provider) else {
+                continue;
+            };
+            steps.extend([
+                Work::WorkspaceAcquire,
+                Work::WorkspaceCompile(
+                    provider.package.clone(),
+                    provider.binary.clone(),
+                    provider.cargo.clone(),
+                ),
+                Work::WorkspaceInvoke(dispatch.arguments.clone()),
+            ]);
+        } else {
+            match invocation.command.as_str() {
+                "dx.build" => {
+                    steps.extend([Work::Check, Work::Acquire, Work::Seed, Work::Preflight]);
+                    match platform {
+                        "desktop" if profile == "dev" => {
+                            steps.extend([
+                                Work::Native,
+                                Work::Tailwind,
+                                Work::Codesign,
+                                Work::Helper,
+                                Work::ClearReady,
+                            ]);
+                            steps.push(Work::cargo(&["build", "-p", "vmux_cli"]));
+                            steps.push(Work::cargo(&[
+                                "build",
+                                "-p",
+                                "vmux_app",
+                                "--bin",
+                                "vmux_service",
+                                "--features",
+                                "service-daemon",
+                            ]));
+                            let mut args = if cfg!(target_os = "macos") {
+                                vec!["rustc", "-p", "vmux_desktop", "--bin", "vmux_desktop"]
+                            } else {
+                                vec!["build", "-p", "vmux_desktop"]
+                            }
+                            .into_iter()
+                            .map(OsString::from)
+                            .collect::<Vec<_>>();
+                            args.extend(["--no-default-features".into(), "--features".into()]);
+                            args.push(
+                                invocation
+                                    .value_os("features")
+                                    .unwrap_or(std::ffi::OsStr::new("dev,full"))
+                                    .to_owned(),
+                            );
+                            args.append(&mut forwarded);
+                            if cfg!(target_os = "macos") {
+                                args.extend(
+                                    ["--", "-C", "link-arg=-Wl,-headerpad,1000"]
+                                        .map(OsString::from),
+                                );
+                            }
+                            steps.push(Work::Cargo(args));
+                            if cfg!(target_os = "macos") {
+                                steps.extend([Work::SignDebug, Work::BundleDebug]);
+                            }
+                            steps.push(Work::PublishDebug);
+                        }
+                        "desktop" => {
+                            steps.extend([
+                                Work::Native,
+                                Work::Tailwind,
+                                Work::PackageTools,
+                                Work::Codesign,
+                                Work::Package(profile.into()),
+                            ]);
+                        }
+                        "ios" if profile == "release" => {
+                            steps.extend([Work::Dioxus("ios".into()), Work::ReleaseIos]);
+                        }
+                        "ios" | "android" => {
+                            steps.push(Work::Dioxus(platform.into()));
+                            let mut args = vec![
+                                "build".into(),
+                                format!("--{platform}").into(),
+                                "-p".into(),
+                                "vmux_mobile".into(),
+                            ];
+                            if profile != "dev" {
+                                args.push("--release".into());
+                            }
+                            args.append(&mut forwarded);
+                            steps.push(Work::Tool("dx".into(), args));
+                            if platform == "ios" {
+                                steps.extend([Work::ResourcesIos, Work::VerifyIos(false)]);
+                            }
+                        }
+                        "web" => {
+                            steps.extend([
+                                Work::Dioxus(platform.into()),
+                                Work::Binaryen,
+                                Work::Tailwind,
+                                Work::Css,
+                            ]);
+                            let mut args = vec!["build".into(), "--platform".into(), "web".into()];
+                            if profile != "dev" {
+                                args.extend(["--ssg".into(), "--release".into()]);
+                            }
+                            args.append(&mut forwarded);
+                            steps.push(Work::Tool("dx".into(), args));
+                            if profile != "dev" {
+                                steps.push(Work::FlattenWeb);
+                            }
+                        }
+                        _ => {
+                            commands.entity(entity).insert((
+                                OperationState::Failed,
+                                CliResult(Err("Unsupported build platform".into())),
+                            ));
+                            continue;
+                        }
+                    }
+                    steps.push(Work::Finish(profile.into()));
+                }
+                "dx.run" => {
+                    steps.push(Work::Acquire);
+                    if platform != "desktop" {
+                        steps.push(Work::Dioxus(platform.into()));
+                        if platform == "web" {
+                            steps.extend([Work::Binaryen, Work::Tailwind, Work::Css]);
+                        }
+                        if platform == "ios" {
+                            steps.push(Work::Simulator);
+                        }
+                    }
+                    if platform == "desktop" && profile == "local" {
+                        steps.extend([Work::LocalEntries, Work::LocalLaunch]);
+                    } else {
+                        steps.push(Work::Run(profile.into(), platform.into()));
+                    }
+                }
+                "dx.stop" => steps.push(Work::Stop),
+                "dx.reset-layout" => steps.push(Work::Reset),
+                "dx.test" => {
+                    steps.extend([Work::Acquire, Work::Seed]);
+                    let mut args = vec![
+                        "test".into(),
+                        "--workspace".into(),
+                        "--exclude".into(),
+                        "bevy_cef_core".into(),
+                    ];
+                    if profile != "dev" {
+                        args.push("--release".into());
+                    }
+                    if let Some(features) = invocation.value_os("features") {
+                        args.extend(["--features".into(), features.to_owned()]);
+                    }
+                    args.append(&mut forwarded);
+                    steps.push(Work::Cargo(args));
+                }
+                "dx.lint" => {
+                    steps.extend([Work::Acquire, Work::Seed]);
+                    steps.push(Work::cargo(&["fmt", "--all", "--", "--check"]));
+                    let mut args = vec![
+                        "clippy".into(),
+                        "--workspace".into(),
+                        "--all-targets".into(),
+                    ];
+                    if profile != "dev" {
+                        args.push("--release".into());
+                    }
+                    if let Some(features) = invocation.value_os("features") {
+                        args.extend(["--features".into(), features.to_owned()]);
+                    }
+                    args.append(&mut forwarded);
+                    args.extend(["--".into(), "-D".into(), "warnings".into()]);
+                    steps.push(Work::Cargo(args));
+                }
+                "dx.doctor" => steps.push(Work::Doctor),
+                "dx.setup" => {
+                    if platform == "desktop" {
+                        steps.extend([
+                            Work::Check,
+                            Work::Acquire,
+                            Work::Native,
+                            Work::Tailwind,
+                            Work::PackageTools,
+                            Work::Codesign,
+                            Work::Helper,
+                        ]);
+                    } else {
+                        steps.push(Work::Dioxus(platform.into()));
+                        if platform == "web" {
+                            steps.extend([Work::Binaryen, Work::Tailwind]);
+                        }
+                    }
+                }
+                "dx.cache.status" => steps.push(Work::Status),
+                "dx.cache.clean" => {
+                    steps.extend([Work::Acquire, Work::Clean(invocation.flag("apply"))])
+                }
+                "dx.ci-scope" => steps.push(Work::Scope(forwarded)),
+                "dx.ci-native" => steps.push(Work::NativeInputs(forwarded)),
+                "dx.framework-consumer" => steps.extend([Work::Acquire, Work::Consumer(forwarded)]),
+                "dx.internal" => {
+                    let Some(task) = invocation.value("task") else {
+                        commands.entity(entity).insert((
+                            OperationState::Failed,
+                            CliResult(Err("Missing integration task".into())),
+                        ));
+                        continue;
+                    };
+                    if task == "cli-release" {
+                        let preview = match forwarded.as_slice() {
+                            [] => false,
+                            [value] if value == "preview" => true,
+                            _ => {
+                                commands.entity(entity).insert((
+                                    OperationState::Failed,
+                                    CliResult(Err(
+                                        "cli-release accepts only an optional preview channel"
+                                            .into(),
+                                    )),
+                                ));
+                                continue;
+                            }
+                        };
+                        steps.extend([
+                            Work::Check,
+                            Work::Acquire,
+                            Work::Preflight,
+                            Work::CliCompile,
+                            Work::CliPackage(preview),
+                            Work::Finish("release".into()),
+                        ]);
+                    } else {
+                        if task == "cargo" {
+                            steps.extend([Work::Acquire, Work::Seed]);
+                        }
+                        steps.push(Work::Internal(task.into(), forwarded));
+                    }
+                }
+                _ => {
+                    commands.entity(entity).insert((
+                        OperationState::Failed,
+                        CliResult(Err("Unknown development command".into())),
+                    ));
+                    continue;
+                }
+            }
+        }
+        commands.entity(entity).insert(Planned);
         let mut previous = None;
         for work in steps {
             let mut step = commands.spawn((
@@ -421,7 +680,7 @@ fn start(
         if predecessor.is_some_and(|previous| !completed.contains(previous.0)) {
             continue;
         }
-        let Ok((checkout, settings, storage, lease, executable, state)) =
+        let Ok((checkout, settings, storage, lease, executable, local, state)) =
             operations.get(parent.parent())
         else {
             continue;
@@ -429,10 +688,16 @@ fn start(
         if *state == OperationState::Canceled {
             continue;
         }
+        if matches!(work, Work::LocalLaunch) && local.is_none() {
+            continue;
+        }
         let checkout = checkout.clone();
         let mut environment = settings.0.clone();
         if let Some(executable) = executable {
             environment.set("VMUX_DX_PROVIDER_EXECUTABLE", executable.path().as_os_str());
+        }
+        if let Some(local) = local {
+            environment.set("VMUX_DX_LOCAL_APP", local.0.as_os_str());
         }
         let storage = storage.clone();
         let lease = lease.map(|lease| lease.0.clone());
@@ -467,6 +732,56 @@ fn receive(mailbox: Res<Mailbox>, mut messages: MessageWriter<Completion>) {
     let receiver = mailbox.receiver.lock().unwrap();
     while let Ok(completion) = receiver.try_recv() {
         messages.write(completion);
+    }
+}
+
+type Selections<'w, 's> = Query<
+    'w,
+    's,
+    (Entity, &'static local::Selection, &'static Children),
+    (
+        With<local::Inspected>,
+        Without<local::Target>,
+        Without<CliResult>,
+    ),
+>;
+
+fn select_local(operations: Selections, entries: Query<&local::Entry>, mut commands: Commands) {
+    for (entity, selection, children) in &operations {
+        let prefix = format!("{} (", selection.product);
+        let mut latest = None;
+        for child in children.iter() {
+            let Ok(entry) = entries.get(child) else {
+                continue;
+            };
+            if !entry.directory || entry.symlink {
+                continue;
+            }
+            let Some(name) = entry.path.file_name().and_then(|name| name.to_str()) else {
+                continue;
+            };
+            if !name.starts_with(&prefix) || !name.ends_with(").app") {
+                continue;
+            }
+            if latest.is_none_or(|previous: &local::Entry| entry.modified > previous.modified) {
+                latest = Some(entry);
+            }
+        }
+        match latest {
+            Some(entry) => {
+                commands
+                    .entity(entity)
+                    .insert(local::Target(entry.path.clone()));
+            }
+            None => {
+                commands.entity(entity).insert((
+                    OperationState::Failed,
+                    CliResult(Err(
+                        "No completed local app; run vmux build -p local first".into()
+                    )),
+                ));
+            }
+        }
     }
 }
 
@@ -518,6 +833,12 @@ fn collect(
         match &completion.result {
             Ok(outcome) => {
                 match outcome {
+                    Outcome::LocalEntries(entries) => {
+                        for entry in entries {
+                            commands.spawn((entry.clone(), Completed, ChildOf(parent.parent())));
+                        }
+                        commands.entity(parent.parent()).insert(local::Inspected);
+                    }
                     Outcome::Executable(executable) => {
                         commands
                             .entity(parent.parent())

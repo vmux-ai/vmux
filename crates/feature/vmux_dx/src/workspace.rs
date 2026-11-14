@@ -1,208 +1,600 @@
-use std::ffi::{OsStr, OsString};
-use std::fs::{self, File};
-use std::io::Read;
-use std::os::unix::fs::PermissionsExt;
-use std::path::{Path, PathBuf};
-use std::sync::Arc;
+use std::collections::BTreeSet;
+use std::ffi::OsString;
+use std::path::PathBuf;
 
+use bevy_app::{App, AppExit, PreStartup, PreUpdate};
 use bevy_ecs::prelude::*;
-use serde::Deserialize;
-use vmux_ecs::cli::{CliCommandManifest, CliInvocation};
+use bevy_ecs::system::SystemParam;
+use vmux_ecs::cli::{
+    CliArgumentManifest, CliCommandManifest, CliInvocation, CliManifest, CliResult, CliSet,
+};
 use vmux_ecs::manifest::FeatureManifest;
+use vmux_ecs::{Active, Order};
 
-use crate::Result;
-use crate::repository::Checkout;
-use crate::temporary::Temporary;
+pub use crate::workspace_io::Executable;
+use crate::workspace_io::MetadataFile;
 
-#[derive(Component, Clone)]
+pub struct Plugin;
+
+impl bevy_app::Plugin for Plugin {
+    fn build(&self, app: &mut App) {
+        if !app.world().contains_resource::<Input>() {
+            app.insert_resource(Input(std::env::args_os().skip(1).collect()));
+        }
+        app.init_resource::<Admission>()
+            .init_resource::<Failure>()
+            .add_systems(
+                PreStartup,
+                (
+                    seed,
+                    inspect,
+                    choose,
+                    admit,
+                    resolve,
+                    materialize,
+                    validate,
+                    project,
+                    report,
+                )
+                    .chain(),
+            )
+            .add_systems(PreUpdate, route.after(CliSet::Parse));
+    }
+}
+
+pub struct Host;
+
+impl Host {
+    pub fn selected(arguments: Vec<OsString>) -> bool {
+        let mut app = App::new();
+        app.insert_resource(Input(arguments))
+            .insert_resource(Probe)
+            .add_plugins(Plugin);
+        app.world_mut()
+            .spawn(FeatureManifest::of::<crate::Feature>());
+        app.update();
+        app.world().resource::<Admission>().0
+    }
+}
+
+#[derive(Resource)]
+struct Input(Vec<OsString>);
+
+#[derive(Resource)]
+struct Probe;
+
+#[derive(Resource, Default)]
+struct Admission(bool);
+
+#[derive(Resource, Default)]
+struct Failure(Option<String>);
+
+#[derive(Component)]
+struct Directory(PathBuf);
+
+#[derive(Component)]
+struct Configured;
+
+#[derive(Component)]
+struct GitBoundary;
+
+#[derive(Component)]
+struct InspectionError(String);
+
+#[derive(Component)]
+struct Chosen;
+
+#[derive(Component)]
 pub struct Provider {
     pub root: PathBuf,
     pub package: String,
     pub binary: String,
     pub cargo: PathBuf,
-    prefix: String,
 }
 
-impl Provider {
-    pub fn selected(name: &OsStr, arguments: impl Iterator<Item = OsString>) -> bool {
-        match Self::definitions(arguments) {
-            Ok(Some((_, declaration))) => declaration
-                .providers
-                .iter()
-                .any(|provider| OsStr::new(&provider.name) == name),
-            _ => false,
+#[derive(Component)]
+struct ManifestPath(PathBuf);
+
+#[derive(Component)]
+struct RawFeature;
+
+#[derive(Component)]
+struct DefaultCommand(Option<String>);
+
+#[derive(Component)]
+struct Command {
+    id: String,
+    about: Option<String>,
+    hidden: bool,
+    required: bool,
+    provider: Entity,
+}
+
+#[derive(Component)]
+struct Argument(CliArgumentManifest);
+
+#[derive(Component)]
+struct Validated;
+
+#[derive(Component)]
+pub struct Dispatch {
+    pub provider: Entity,
+    pub arguments: Vec<OsString>,
+}
+
+fn seed(input: Res<Input>, mut failure: ResMut<Failure>, mut commands: Commands) {
+    let mut root = match std::env::current_dir() {
+        Ok(root) => root,
+        Err(error) => {
+            failure.0 = Some(error.to_string());
+            return;
+        }
+    };
+    let mut arguments = input.0.iter();
+    while let Some(argument) = arguments.next() {
+        if argument == "--" {
+            break;
+        }
+        if argument == "--root" {
+            let Some(path) = arguments.next() else {
+                failure.0 = Some("--root requires a path".into());
+                return;
+            };
+            root = path.into();
+        } else if let Some(path) = argument
+            .to_str()
+            .and_then(|value| value.strip_prefix("--root="))
+        {
+            root = path.into();
         }
     }
-
-    pub fn discover(
-        arguments: impl Iterator<Item = OsString>,
-    ) -> Result<Vec<(Self, FeatureManifest)>> {
-        let Some((root, declaration)) = Self::definitions(arguments)? else {
-            return Ok(Vec::new());
-        };
-        let mut providers = Vec::new();
-        for definition in declaration.providers {
-            providers.push(Self::read(&root, definition)?);
+    let mut root = match root.canonicalize() {
+        Ok(root) => root,
+        Err(error) => {
+            failure.0 = Some(error.to_string());
+            return;
         }
-        Ok(providers)
+    };
+    let mut order = 0;
+    loop {
+        commands.spawn((Directory(root.clone()), Order(order)));
+        if !root.pop() {
+            break;
+        }
+        order += 1;
     }
+}
 
-    fn definitions(
-        arguments: impl Iterator<Item = OsString>,
-    ) -> Result<Option<(PathBuf, Declaration)>> {
-        let mut root = std::env::current_dir()?;
-        let mut arguments = arguments;
-        while let Some(argument) = arguments.next() {
-            if argument == "--" {
-                break;
-            }
-            if argument == "--root" {
-                root = PathBuf::from(arguments.next().ok_or("--root requires a path")?);
-            } else if let Some(value) = argument
-                .to_str()
-                .and_then(|value| value.strip_prefix("--root="))
-            {
-                root = PathBuf::from(value);
-            }
+fn inspect(directories: Query<(Entity, &Directory, &Order)>, mut commands: Commands) {
+    let mut ordered = directories.iter().collect::<Vec<_>>();
+    ordered.sort_by_key(|(_, _, order)| order.0);
+    for (entity, directory, _) in ordered {
+        let boundary = directory.0.join(".git").exists();
+        if boundary {
+            commands.entity(entity).insert(GitBoundary);
         }
-        root = root.canonicalize()?;
-        loop {
-            let cargo = root.join("Cargo.toml");
-            if cargo.is_file() {
-                let value: toml::Value = toml::from_str(&Self::text(&cargo)?)?;
-                if let Some(configuration) = value
-                    .get("workspace")
-                    .and_then(|value| value.get("metadata"))
-                    .and_then(|value| value.get("vmux"))
-                    .and_then(|value| value.get("dx"))
-                {
-                    let declaration: Declaration = configuration.clone().try_into()?;
+        let cargo = directory.0.join("Cargo.toml");
+        if cargo.is_file() {
+            match MetadataFile(cargo).cargo() {
+                Ok(Some(declaration)) => {
+                    commands.entity(entity).insert(Configured);
                     if declaration.providers.len() > 16 {
-                        return Err("Workspace declares too many CLI providers".into());
+                        commands.entity(entity).insert(InspectionError(
+                            "Workspace declares too many CLI providers".into(),
+                        ));
+                        break;
                     }
-                    return Ok(Some((root, declaration)));
+                    for (index, definition) in declaration.providers.into_iter().enumerate() {
+                        commands.spawn((
+                            Name::new(definition.name),
+                            Order(index as u32),
+                            ChildOf(entity),
+                            Provider {
+                                root: directory.0.clone(),
+                                package: definition.package,
+                                binary: definition.binary,
+                                cargo: definition.cargo.unwrap_or_else(|| "Cargo.toml".into()),
+                            },
+                            ManifestPath(definition.manifest),
+                        ));
+                    }
+                    break;
+                }
+                Ok(None) => {}
+                Err(error) => {
+                    commands
+                        .entity(entity)
+                        .insert(InspectionError(error.to_string()));
+                    break;
                 }
             }
-            if root.join(".git").exists() {
-                return Ok(None);
+        }
+        if boundary {
+            break;
+        }
+    }
+}
+
+type Directories<'w, 's> = Query<
+    'w,
+    's,
+    (
+        Entity,
+        &'static Order,
+        Option<&'static Configured>,
+        Option<&'static GitBoundary>,
+        Option<&'static InspectionError>,
+    ),
+>;
+
+fn choose(
+    directories: Directories,
+    providers: Query<(Entity, &ChildOf), With<Provider>>,
+    mut failure: ResMut<Failure>,
+    mut commands: Commands,
+) {
+    if failure.0.is_some() {
+        return;
+    }
+    let mut ordered = directories.iter().collect::<Vec<_>>();
+    ordered.sort_by_key(|(_, order, _, _, _)| order.0);
+    for (entity, _, configured, boundary, error) in ordered {
+        if let Some(error) = error {
+            failure.0 = Some(error.0.clone());
+            return;
+        }
+        if configured.is_some() {
+            commands.entity(entity).insert(Chosen);
+            for (provider, parent) in &providers {
+                if parent.parent() == entity {
+                    commands.entity(provider).insert(Active);
+                }
             }
-            if !root.pop() {
-                return Ok(None);
+            return;
+        }
+        if boundary.is_some() {
+            return;
+        }
+    }
+}
+
+fn admit(
+    input: Res<Input>,
+    providers: Query<&Name, (With<Provider>, With<Active>)>,
+    features: Query<&FeatureManifest>,
+    mut admission: ResMut<Admission>,
+) {
+    let Some(name) = input.0.first() else {
+        return;
+    };
+    for candidate in &providers {
+        if std::ffi::OsStr::new(candidate.as_str()) == name {
+            admission.0 = true;
+            return;
+        }
+    }
+    for feature in &features {
+        if let Some(cli) = &feature.cli {
+            for candidate in &cli.commands {
+                if std::ffi::OsStr::new(&candidate.name) == name {
+                    admission.0 = true;
+                    return;
+                }
             }
         }
     }
+}
 
-    fn read(root: &Path, definition: Definition) -> Result<(Self, FeatureManifest)> {
-        for name in [&definition.package, &definition.binary] {
-            if name.is_empty()
-                || name.len() > 128
-                || !name
+fn resolve(
+    probe: Option<Res<Probe>>,
+    mut providers: Query<(Entity, &mut Provider, &ManifestPath), With<Active>>,
+    mut failure: ResMut<Failure>,
+    mut commands: Commands,
+) {
+    if probe.is_some() || failure.0.is_some() {
+        return;
+    }
+    for (entity, mut provider, manifest) in &mut providers {
+        for value in [&provider.package, &provider.binary] {
+            if value.is_empty()
+                || value.len() > 128
+                || !value
                     .bytes()
                     .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_'))
             {
-                return Err("Workspace provider package and binary must be Cargo names".into());
+                failure.0 =
+                    Some("Workspace provider package and binary must be Cargo names".into());
+                return;
             }
         }
-        let path = root.join(definition.manifest).canonicalize()?;
-        if !path.starts_with(root) {
-            return Err("Workspace provider manifest escapes its workspace".into());
+        let cargo = match provider.root.join(&provider.cargo).canonicalize() {
+            Ok(path) => path,
+            Err(error) => {
+                failure.0 = Some(error.to_string());
+                return;
+            }
+        };
+        if !cargo.starts_with(&provider.root) || !cargo.is_file() {
+            failure.0 = Some("Workspace provider Cargo manifest escapes its workspace".into());
+            return;
         }
-        let cargo = root
-            .join(definition.cargo.unwrap_or_else(|| "Cargo.toml".into()))
-            .canonicalize()?;
-        if !cargo.starts_with(root) || !cargo.is_file() {
-            return Err("Workspace provider Cargo manifest escapes its workspace".into());
+        let (path, feature) = match MetadataFile(provider.root.join(&manifest.0)).feature() {
+            Ok(value) => value,
+            Err(error) => {
+                failure.0 = Some(error.to_string());
+                return;
+            }
+        };
+        if !path.starts_with(&provider.root) {
+            failure.0 = Some("Workspace provider manifest escapes its workspace".into());
+            return;
         }
-        let mut manifest: FeatureManifest = ron::from_str(&Self::text(&path)?)?;
-        let cli = manifest
-            .cli
-            .take()
-            .ok_or("Workspace provider requires a CLI manifest")?;
-        if cli.default.is_some() || cli.commands.len() != 1 {
-            return Err("Workspace provider must export one command and no default".into());
+        provider.cargo = cargo;
+        commands
+            .entity(entity)
+            .insert((RawFeature, feature))
+            .remove::<ManifestPath>();
+    }
+}
+
+type Sources<'w, 's> =
+    Query<'w, 's, (Entity, &'static FeatureManifest), (With<RawFeature>, With<Active>)>;
+
+fn materialize(sources: Sources, mut failure: ResMut<Failure>, mut commands: Commands) {
+    if failure.0.is_some() {
+        return;
+    }
+    for (provider, raw) in &sources {
+        let Some(cli) = &raw.cli else {
+            failure.0 = Some("Workspace provider requires a CLI manifest".into());
+            return;
+        };
+        commands
+            .entity(provider)
+            .insert(DefaultCommand(cli.default.clone()))
+            .remove::<(RawFeature, FeatureManifest)>();
+        let mut pending = Vec::new();
+        for (order, command) in cli.commands.iter().cloned().enumerate() {
+            pending.push((provider, order as u32, command));
         }
-        let command = &cli.commands[0];
-        if command.name != definition.name {
-            return Err("Workspace provider command differs from its declared name".into());
-        }
-        if command.id.is_empty() || command.name.is_empty() {
-            return Err("Workspace provider command requires a name and namespace".into());
-        }
-        if command.id == "dx" || command.id.starts_with("dx.") {
-            return Err("Workspace provider cannot use the built-in DX namespace".into());
-        }
-        let prefix = command.id.clone();
-        let mut pending = vec![command];
         let mut count = 0;
-        while let Some(command) = pending.pop() {
+        while let Some((parent, order, command)) = pending.pop() {
             count += 1;
             if count > 128 || command.arguments.len() > 64 {
-                return Err("Workspace provider CLI manifest exceeds its bounds".into());
+                failure.0 = Some("Workspace provider CLI manifest exceeds its bounds".into());
+                return;
             }
-            if command.name.is_empty() || command.id.is_empty() {
-                return Err("Workspace provider command requires a name and namespace".into());
+            let entity = commands
+                .spawn((
+                    Name::new(command.name),
+                    Order(order),
+                    ChildOf(parent),
+                    Command {
+                        id: command.id,
+                        about: command.about,
+                        hidden: command.hidden,
+                        required: command.subcommand_required,
+                        provider,
+                    },
+                ))
+                .id();
+            for (order, argument) in command.arguments.into_iter().enumerate() {
+                commands.spawn((Argument(argument), Order(order as u32), ChildOf(entity)));
             }
-            if command.id != prefix && !command.id.starts_with(&format!("{prefix}.")) {
-                return Err("Workspace provider command escapes its namespace".into());
-            }
-            for child in &command.commands {
-                pending.push(child);
+            for (order, child) in command.commands.into_iter().enumerate() {
+                pending.push((entity, order as u32, child));
             }
         }
-        let mut projection = FeatureManifest::parse("()");
-        projection.cli = Some(cli);
-        Ok((
-            Self {
-                root: root.to_owned(),
-                package: definition.package,
-                binary: definition.binary,
-                cargo,
-                prefix,
-            },
-            projection,
-        ))
     }
+}
 
-    fn text(path: &Path) -> Result<String> {
-        let mut text = String::new();
-        File::open(path)?
-            .take(1024 * 1024 + 1)
-            .read_to_string(&mut text)?;
-        if text.len() > 1024 * 1024 {
-            return Err("Workspace CLI metadata exceeds 1 MiB".into());
+type Validating<'w, 's> =
+    Query<'w, 's, (Entity, &'static Name, &'static DefaultCommand), (With<Provider>, With<Active>)>;
+
+fn validate(
+    probe: Option<Res<Probe>>,
+    providers: Validating,
+    declarations: Query<(&Command, &Name, &ChildOf)>,
+    features: Query<&FeatureManifest>,
+    mut failure: ResMut<Failure>,
+    mut commands: Commands,
+) {
+    if probe.is_some() || failure.0.is_some() {
+        return;
+    }
+    let mut names = BTreeSet::new();
+    let mut identifiers = Vec::new();
+    for feature in &features {
+        if let Some(cli) = &feature.cli {
+            let mut pending = cli.commands.iter().collect::<Vec<_>>();
+            for command in &cli.commands {
+                names.insert(command.name.as_str());
+            }
+            while let Some(command) = pending.pop() {
+                identifiers.push(command.id.as_str());
+                pending.extend(command.commands.iter());
+            }
         }
-        Ok(text)
     }
-
-    pub fn owns(&self, command: &str) -> bool {
-        command == self.prefix || command.starts_with(&format!("{}.", self.prefix))
-    }
-
-    pub fn overlaps(&self, other: &Self) -> bool {
-        self.owns(&other.prefix) || other.owns(&self.prefix)
-    }
-
-    pub fn arguments(
-        &self,
-        manifest: &FeatureManifest,
-        invocation: &CliInvocation,
-    ) -> Result<Vec<OsString>> {
-        if !self.owns(&invocation.command) {
-            return Err("Workspace provider does not own this command".into());
+    let mut namespaces = Vec::<String>::new();
+    let mut ids = BTreeSet::new();
+    for (provider, name, default) in &providers {
+        let roots = declarations
+            .iter()
+            .filter(|(_, _, parent)| parent.parent() == provider)
+            .collect::<Vec<_>>();
+        if default.0.is_some() || roots.len() != 1 {
+            failure.0 = Some("Workspace provider must export one command and no default".into());
+            return;
         }
-        let cli = manifest
-            .cli
-            .as_ref()
-            .ok_or("Workspace provider has no CLI manifest")?;
-        let mut route = Vec::new();
-        if !Self::route(&cli.commands[0], &invocation.command, &mut route) {
-            return Err("Workspace provider command is not declared".into());
+        let (root, root_name, _) = roots[0];
+        if root_name != name || !names.insert(name.as_str()) {
+            failure.0 = Some("Workspace provider command differs from its declared name or duplicates another command".into());
+            return;
         }
+        if root.id.is_empty() || root.id == "dx" || root.id.starts_with("dx.") {
+            failure.0 = Some("Workspace provider cannot use the built-in DX namespace".into());
+            return;
+        }
+        let prefix = format!("{}.", root.id);
+        for other in &namespaces {
+            if root.id == *other
+                || root.id.starts_with(&format!("{other}."))
+                || other.starts_with(&prefix)
+            {
+                failure.0 = Some("Workspace CLI namespaces overlap".into());
+                return;
+            }
+        }
+        if identifiers
+            .iter()
+            .any(|id| *id == root.id || id.starts_with(&prefix))
+        {
+            failure.0 = Some("Workspace CLI namespace overlaps a registered command".into());
+            return;
+        }
+        for (command, name, _) in &declarations {
+            if command.provider != provider {
+                continue;
+            }
+            if name.as_str().is_empty()
+                || command.id.is_empty()
+                || !ids.insert(command.id.as_str())
+                || command.id != root.id && !command.id.starts_with(&prefix)
+            {
+                failure.0 =
+                    Some("Workspace provider command escapes or duplicates its namespace".into());
+                return;
+            }
+        }
+        namespaces.push(root.id.clone());
+    }
+    for (provider, _, _) in &providers {
+        commands.entity(provider).insert(Validated);
+    }
+}
+
+#[derive(SystemParam)]
+struct Catalog<'w, 's> {
+    commands: Query<
+        'w,
+        's,
+        (
+            Entity,
+            &'static Command,
+            &'static Name,
+            &'static Order,
+            &'static ChildOf,
+        ),
+    >,
+    arguments: Query<'w, 's, (&'static Argument, &'static Order, &'static ChildOf)>,
+}
+
+impl Catalog<'_, '_> {
+    fn command(&self, entity: Entity) -> CliCommandManifest {
+        let (_, command, name, _, _) = self.commands.get(entity).unwrap();
+        let mut children = self
+            .commands
+            .iter()
+            .filter(|(_, _, _, _, parent)| parent.parent() == entity)
+            .collect::<Vec<_>>();
+        children.sort_by_key(|(_, _, _, order, _)| order.0);
+        let mut declarations = self
+            .arguments
+            .iter()
+            .filter(|(_, _, parent)| parent.parent() == entity)
+            .collect::<Vec<_>>();
+        declarations.sort_by_key(|(_, order, _)| order.0);
         let mut arguments = Vec::new();
-        let mut known = std::collections::BTreeSet::new();
-        for command in route {
-            arguments.push(command.name.clone().into());
-            for argument in &command.arguments {
+        for (argument, _, _) in declarations {
+            arguments.push(argument.0.clone());
+        }
+        let mut commands = Vec::new();
+        for (child, _, _, _, _) in children {
+            commands.push(self.command(child));
+        }
+        CliCommandManifest {
+            id: command.id.clone(),
+            name: name.as_str().into(),
+            about: command.about.clone(),
+            hidden: command.hidden,
+            subcommand_required: command.required,
+            arguments,
+            commands,
+        }
+    }
+}
+
+fn project(providers: Query<Entity, With<Validated>>, catalog: Catalog, mut commands: Commands) {
+    for provider in &providers {
+        let mut roots = catalog
+            .commands
+            .iter()
+            .filter(|(_, _, _, _, parent)| parent.parent() == provider)
+            .collect::<Vec<_>>();
+        roots.sort_by_key(|(_, _, _, order, _)| order.0);
+        let mut feature = FeatureManifest::parse("()");
+        let mut cli: CliManifest = ron::from_str("(commands: [])").unwrap();
+        for (root, _, _, _, _) in roots {
+            cli.commands.push(catalog.command(root));
+        }
+        feature.cli = Some(cli);
+        commands.entity(provider).insert(feature);
+    }
+}
+
+fn report(probe: Option<Res<Probe>>, failure: Res<Failure>, mut exits: MessageWriter<AppExit>) {
+    if probe.is_some() {
+        return;
+    }
+    if let Some(error) = &failure.0 {
+        eprintln!("vmux: workspace CLI metadata: {error}");
+        exits.write(AppExit::error());
+    }
+}
+
+type Incoming<'w, 's> =
+    Query<'w, 's, (Entity, &'static CliInvocation), (Without<Dispatch>, Without<CliResult>)>;
+
+fn route(
+    requests: Incoming,
+    providers: Query<Entity, With<Validated>>,
+    catalog: Catalog,
+    mut commands: Commands,
+) {
+    for (entity, invocation) in &requests {
+        let Some((selected, declaration, _, _, _)) =
+            catalog.commands.iter().find(|(_, command, _, _, _)| {
+                command.id == invocation.command && providers.contains(command.provider)
+            })
+        else {
+            continue;
+        };
+        let provider = declaration.provider;
+        let mut path = vec![selected];
+        let mut current = selected;
+        loop {
+            let (_, _, _, _, parent) = catalog.commands.get(current).unwrap();
+            if parent.parent() == provider {
+                break;
+            }
+            current = parent.parent();
+            path.push(current);
+        }
+        path.reverse();
+        let mut arguments = Vec::new();
+        let mut known = BTreeSet::new();
+        for command in path {
+            let (_, _, name, _, _) = catalog.commands.get(command).unwrap();
+            arguments.push(OsString::from(name.as_str()));
+            let mut declarations = catalog
+                .arguments
+                .iter()
+                .filter(|(_, _, parent)| parent.parent() == command)
+                .collect::<Vec<_>>();
+            declarations.sort_by_key(|(_, order, _)| order.0);
+            for (argument, _, _) in declarations {
+                let argument = &argument.0;
                 known.insert(argument.id.as_str());
                 let Some(values) = invocation.arguments.get(&argument.id) else {
                     continue;
@@ -227,93 +619,77 @@ impl Provider {
                 }
             }
         }
-        for key in invocation.arguments.keys() {
-            if !known.contains(key.as_str()) {
-                return Err("Workspace provider argument is not declared".into());
-            }
-        }
-        Ok(arguments)
-    }
-
-    fn route<'a>(
-        command: &'a CliCommandManifest,
-        id: &str,
-        route: &mut Vec<&'a CliCommandManifest>,
-    ) -> bool {
-        route.push(command);
-        if command.id == id {
-            return true;
-        }
-        for child in &command.commands {
-            if Self::route(child, id, route) {
-                return true;
-            }
-        }
-        route.pop();
-        false
-    }
-
-    pub fn checkout(&self) -> Result<Checkout> {
-        let mut path = self.root.clone();
-        for part in [".build-tools", "providers", &self.package] {
-            path.push(part);
-            if fs::symlink_metadata(&path).is_ok_and(|metadata| metadata.file_type().is_symlink()) {
-                return Err("Workspace provider cache cannot use symlinks".into());
-            }
-        }
-        fs::create_dir_all(
-            path.parent()
-                .ok_or("Missing workspace provider cache parent")?,
-        )?;
-        Ok(Checkout {
-            root: self.root.clone(),
-            target: path,
-            build_target: Some(env!("VMUX_DX_HOST_TARGET").into()),
-        })
-    }
-}
-
-#[derive(Deserialize)]
-struct Declaration {
-    providers: Vec<Definition>,
-}
-
-#[derive(Deserialize)]
-struct Definition {
-    name: String,
-    package: String,
-    binary: String,
-    manifest: PathBuf,
-    cargo: Option<PathBuf>,
-}
-
-#[derive(Component, Clone)]
-pub struct Executable(Arc<Prepared>);
-
-impl Executable {
-    pub fn snapshot(source: &Path) -> Result<Self> {
-        let metadata = fs::symlink_metadata(source)?;
-        if !metadata.is_file()
-            || metadata.len() > 64 * 1024 * 1024
-            || metadata.permissions().mode() & 0o111 == 0
+        if invocation
+            .arguments
+            .keys()
+            .any(|key| !known.contains(key.as_str()))
         {
-            return Err("Workspace provider build produced no bounded executable".into());
+            commands.entity(entity).insert(CliResult(Err(
+                "Workspace provider argument is not declared".into(),
+            )));
+            continue;
         }
-        let temporary = Temporary::create(&std::env::temp_dir(), ".vmux-workspace-provider")?;
-        let path = temporary.path().join("provider");
-        fs::copy(source, &path)?;
-        Ok(Self(Arc::new(Prepared {
-            path,
-            _temporary: temporary,
-        })))
-    }
-
-    pub fn path(&self) -> &Path {
-        &self.0.path
+        commands.entity(entity).insert(Dispatch {
+            provider,
+            arguments,
+        });
     }
 }
 
-struct Prepared {
-    path: PathBuf,
-    _temporary: Temporary,
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn routing_reads_canonical_argument_entities_instead_of_the_manifest_projection() {
+        let directory = tempfile::tempdir().unwrap();
+        std::fs::write(directory.path().join("Cargo.toml"), "[workspace]\nmembers = []\n[workspace.metadata.vmux.dx]\nproviders = [{name='tools',package='tools',binary='tools',manifest='cli.ron'}]\n").unwrap();
+        std::fs::write(
+            directory.path().join("cli.ron"),
+            r#"(cli: Some((commands: [
+                (id: "tools", name: "tools", commands: [
+                    (id: "tools.echo", name: "echo", arguments: [
+                        (id: "value", long: Some("original")),
+                    ]),
+                ]),
+            ])))"#,
+        )
+        .unwrap();
+        let mut app = App::new();
+        app.insert_resource(Input(vec![
+            "tools".into(),
+            "--root".into(),
+            directory.path().as_os_str().into(),
+        ]))
+        .add_plugins(Plugin);
+        app.update();
+        {
+            let mut arguments = app.world_mut().query::<&mut Argument>();
+            for mut argument in arguments.iter_mut(app.world_mut()) {
+                if argument.0.id == "value" {
+                    argument.0.long = Some("changed".into());
+                }
+            }
+        }
+        let entity = app
+            .world_mut()
+            .spawn(CliInvocation {
+                command: "tools.echo".into(),
+                arguments: std::collections::BTreeMap::from([(
+                    "value".into(),
+                    vec!["payload".into()],
+                )]),
+            })
+            .id();
+        app.update();
+        assert_eq!(
+            app.world().get::<Dispatch>(entity).unwrap().arguments,
+            vec![
+                OsString::from("tools"),
+                "echo".into(),
+                "--changed".into(),
+                "payload".into()
+            ]
+        );
+    }
 }
