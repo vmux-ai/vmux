@@ -10269,6 +10269,21 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0b928f33d975fc6ad9f86c8f283853ad26bdd5b10b7f1542aa2fa15e2289105a"
 
 [[package]]
+name = "vmux_account"
+version = "0.0.35"
+dependencies = [
+ "bevy_app",
+ "bevy_ecs",
+ "rusqlite",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "uuid",
+ "vmux_ecs",
+ "vmux_profile",
+]
+
+[[package]]
 name = "vmux_acp"
 version = "0.0.35"
 dependencies = [
@@ -10349,6 +10364,7 @@ dependencies = [
  "tracing",
  "tracing-appender",
  "tracing-subscriber",
+ "vmux_account",
  "vmux_acp",
  "vmux_bookmark",
  "vmux_browser",
@@ -11324,6 +11340,8 @@ dependencies = [
  "ron 0.12.1",
  "serde",
  "serde_json",
+ "uuid",
+ "vmux_account",
  "vmux_api",
  "vmux_command",
  "vmux_ecs",

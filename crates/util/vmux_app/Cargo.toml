@@ -76,6 +76,9 @@ tool = ["layout-runtime", "dep:vmux_tool"]
 capture = ["tool", "dep:vmux_input"]
 bookmark = ["layout-runtime", "dep:vmux_bookmark"]
 ecs = ["dep:vmux_ecs"]
+account = ["ecs", "dep:bevy_ecs", "dep:vmux_account"]
+account-local = ["account", "vmux_account/local"]
+profile-account = ["account-local", "runtime"]
 jobs = ["ecs", "vmux_ecs/jobs"]
 flex = ["ecs", "dep:vmux_flex"]
 runtime = ["flex", "vmux_flex/window", "vmux_ecs/host"]
@@ -108,7 +111,7 @@ knowledge = ["runtime", "dep:vmux_knowledge"]
 history = ["runtime", "dep:vmux_history"]
 simulator = ["layout-runtime", "dep:vmux_simulator"]
 shortcut = ["runtime", "dep:vmux_shortcut"]
-team = ["runtime", "dep:vmux_team"]
+team = ["runtime", "profile-account", "dep:vmux_team"]
 space = ["layout-runtime", "dep:vmux_space"]
 service = ["runtime", "dep:vmux_service"]
 remote = ["layout-runtime", "service", "dep:vmux_remote"]
@@ -118,6 +121,7 @@ vault = ["layout-runtime", "dep:vmux_vault"]
 [dependencies]
 bevy_app = { workspace = true }
 bevy_ecs = { workspace = true, optional = true }
+vmux_account = { path = "../../feature/vmux_account", optional = true }
 vmux_acp = { path = "../../feature/vmux_acp", default-features = false, optional = true }
 vmux_bookmark = { path = "../../feature/vmux_bookmark", optional = true }
 vmux_browser = { path = "../vmux_browser", optional = true }

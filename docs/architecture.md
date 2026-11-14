@@ -453,6 +453,13 @@ projections. Compiler predicates and token spans only translate external build i
 output; they do not retain product state. Existing cancellable subprocess execution bounds reads,
 and every projection drops before the step completes.
 
+Account local IO boundaries consume root-owned immutable load/write requests and publish bounded
+SQLite/file observations or durable receipts. They perform serialization, locks, atomic generation
+checks and empty-directory compensation only. Profile selection, names, imports and reconciliation
+remain in registered catalog/mutation systems. Stateless Bevy plugin installation, native SQLite
+jobs, rollback guards and Team DOM/input adapters have item-specific policy records. Test fixtures
+own isolated App/data roots rather than a second product model.
+
 Record serialization owns only immutable schema metadata, scoped JSON records, and write
 receipts. The Schema resource registers stateless component/relationship codec pointers;
 record request/result components retain received or captured values until materialization,
@@ -2453,6 +2460,24 @@ do not reflow through a zero-width column. Stack presentation rectangles interpo
 moves and resize and are consumed by both hosted child placement and native windowed frames.
 Sidebar rows preserve their identity and animate from their previous DOM rectangles.
 Ready Git pages retry checkout-context publication when parent or slot binding arrives late.
+
+`vmux_account` owns local Account/Profile identity, the typed Profile-to-Account ownership
+relationship, import and create/rename lifecycles, and durable name revisions. Its renderer-free
+core composes the shared record plugin with catalog and mutation plugins. Shared ProfileId and
+ProfileLabel remain available below host-only code: directory IDs retain their existing paths,
+while Uuid identifies durable entities. vmux_app composes the optional local adapter and a
+runtime binding plugin; Team emits typed intents and projects canonical labels, including
+Space labels after restoration and refresh. Signing in and uploading remain separate later
+capabilities.
+
+The local adapter stores versioned Record JSON and receipts in accounts.sqlite under the
+existing shared data directory. Transactions guard the store generation and operation identity;
+concurrent hosts cannot overwrite a newer accepted graph. Legacy directories and display_name
+files seed missing records without renaming or deleting them. Canonical names change only after
+commit. Owned jobs, pending proposals and request correlations expire with their roots; failures
+preserve prior data and form drafts. Replayed operations return original receipts and refresh
+current data without reverting later edits. The Team form remains open during saves, preserves
+new input and rejects stale completions from a previous form/account.
 
 `vmux_profile` owns profile identity and filesystem locations. Tool inventory is a separate
 capability in `vmux_tool`; consumers depend on it directly instead of reaching through a

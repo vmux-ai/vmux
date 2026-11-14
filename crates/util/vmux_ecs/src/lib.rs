@@ -61,6 +61,7 @@ pub use primitives::PrimitivesPlugin;
 pub use process_id::ProcessId;
 #[cfg(all(host, feature = "host"))]
 pub use process_id::ProcessPresentationRequest;
+pub use profile_identity::{ProfileId, ProfileLabel};
 pub use revision::{BaseRevision, Revision};
 #[cfg(all(host, feature = "host"))]
 pub use ui_state::{UiState, UiStateFlushSet, UiStatePlugin, UiStateWrite, UiStateWriter};
@@ -115,6 +116,7 @@ mod primitives;
 pub mod process_id;
 #[cfg(all(host, feature = "host"))]
 pub mod profile;
+mod profile_identity;
 #[cfg(feature = "records")]
 pub mod record;
 #[cfg(feature = "cli")]

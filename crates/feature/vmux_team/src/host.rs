@@ -1,24 +1,24 @@
 use bevy::ecs::system::SystemParam;
 use bevy::prelude::*;
-use bevy::tasks::{IoTaskPool, Task, futures_lite::future};
+use bevy_app::Plugin;
 use bevy_cef::prelude::{UiEventPlugin, UiInput};
 
 use vmux_api::avatar::AvatarSpec;
 use vmux_api::protocol::{AgentCommandResult, AgentListTeam};
 use vmux_api::space::SpacesUiState;
 use vmux_ecs::agent::{
-    AgentCommandResponse, AgentRequestAppExt, AgentRequestMessage, AgentRequestRouteSet,
+    AgentCommandResponse, AgentReply, AgentRequestAppExt, AgentRequestMessage, AgentRequestRouteSet,
 };
 use vmux_ecs::event::team::{
     ProfileRow, TeamMemberFocusRequest, TeamMemberRow, TeamOpenRequest, TeamProfileCreateRequest,
-    TeamProfileForm, TeamProfileFormCloseRequest, TeamProfileFormInputRequest,
-    TeamProfileFormOpenRequest, TeamProfileSwitchRequest, TeamProfileUpdateRequest, TeamUiState,
+    TeamProfileError, TeamProfileForm, TeamProfileFormCloseRequest, TeamProfileFormInputRequest,
+    TeamProfileFormOpenRequest, TeamProfileSwitchRequest, TeamProfileUpdateRequest,
+    TeamProfilesRetryRequest, TeamUiState,
 };
 use vmux_ecs::notify::AgentDoneUnseen;
 use vmux_ecs::page::PageReady;
 use vmux_ecs::profile::{
-    ActiveProfile, Profile as StoredProfile, ProfileCatalog, ProfileId, ProfileLabel,
-    ProfileRecord, SessionEnvironment,
+    ActiveProfile, Profile as StoredProfile, ProfileId, ProfileLabel, SessionEnvironment,
 };
 use vmux_ecs::team::{Agent, Profile, Tester, User};
 use vmux_ecs::{ActivateRequest, Active, EntityTarget, PageMetadata};
@@ -34,6 +34,8 @@ use vmux_session::{RunState, Session};
 use vmux_space::Spaces;
 
 use crate::projection::TeamStateProjection;
+use uuid::Uuid;
+use vmux_account::{CreateRequest, MutationCompleted, RenameRequest};
 
 #[vmux_page::page]
 pub struct TeamPlugin;
@@ -49,17 +51,7 @@ impl Plugin for TeamPlugin {
             crate::TeamToolPlugin,
         ))
         .add_agent_request::<AgentRenameProfile>()
-        .add_systems(Startup, spawn_user_profile)
-        .add_systems(
-            Update,
-            (
-                rename_from_agent.after(AgentRequestRouteSet),
-                create_profile,
-                rename_profile,
-                finish_profile_create,
-                finish_profile_rename,
-            ),
-        );
+        .add_systems(Startup, spawn_user_profile);
     }
 }
 
@@ -67,11 +59,16 @@ struct ProjectionPlugin;
 
 impl Plugin for ProjectionPlugin {
     fn build(&self, app: &mut App) {
-        app.add_agent_request::<AgentListTeam>()
-            .add_plugins(UiStatePlugin::<TeamUiState>::default())
+        app.add_plugins(UiStatePlugin::<TeamUiState>::default())
             .add_observer(replay)
-            .add_systems(Update, (sync_user_profile_name, project, publish).chain())
-            .add_systems(Update, list.after(AgentRequestRouteSet));
+            .add_systems(
+                Update,
+                (sync_profiles, sync_user_profile_name, project, publish)
+                    .chain()
+                    .after(vmux_account::Set::Publish),
+            )
+            .add_systems(Update, list.after(AgentRequestRouteSet))
+            .add_agent_request::<AgentListTeam>();
     }
 }
 
@@ -80,8 +77,6 @@ struct IntentPlugin;
 impl Plugin for IntentPlugin {
     fn build(&self, app: &mut App) {
         app.add_message::<ProfileSwitchRequested>()
-            .add_message::<ProfileCreateRequest>()
-            .add_message::<ProfileRenameRequest>()
             .add_plugins(UiEventPlugin::<(
                 TeamOpenRequest,
                 TeamMemberFocusRequest,
@@ -91,6 +86,7 @@ impl Plugin for IntentPlugin {
                 TeamProfileFormOpenRequest,
                 TeamProfileFormInputRequest,
                 TeamProfileFormCloseRequest,
+                TeamProfilesRetryRequest,
             )>::default())
             .add_observer(open_request)
             .add_observer(member_focus_request)
@@ -99,7 +95,13 @@ impl Plugin for IntentPlugin {
             .add_observer(profile_update_request)
             .add_observer(open_form)
             .add_observer(edit_form)
-            .add_observer(close_form);
+            .add_observer(close_form)
+            .add_observer(retry_profiles)
+            .add_systems(Update, rename_from_agent.after(AgentRequestRouteSet))
+            .add_systems(
+                Update,
+                (complete_profile, complete_agent).after(vmux_account::Set::Reply),
+            );
     }
 }
 
@@ -112,23 +114,6 @@ pub struct ProfileSwitchRequested {
 pub struct AgentRenameProfile {
     pub name: String,
 }
-
-#[derive(Message, Clone)]
-struct ProfileCreateRequest {
-    name: String,
-}
-
-#[derive(Message, Clone)]
-struct ProfileRenameRequest {
-    profile_id: String,
-    name: String,
-}
-
-#[derive(Component)]
-struct ProfileCreateTask(Task<Result<ProfileRecord, String>>);
-
-#[derive(Component)]
-struct ProfileRenameTask(Task<Result<ProfileRecord, String>>);
 
 #[derive(Component, Default)]
 struct Team;
@@ -459,12 +444,38 @@ fn member_focus_request(
 
 fn profile_create_request(
     trigger: On<UiInput<TeamProfileCreateRequest>>,
-    mut requests: MessageWriter<ProfileCreateRequest>,
+    binding: AccountBinding,
+    mut forms: Query<&mut ProfileFormState>,
+    pending: Query<(), With<PendingProfile>>,
+    mut requests: MessageWriter<CreateRequest>,
+    mut commands: Commands,
 ) {
-    let name = trigger.event().payload.name.trim().to_string();
-    if !name.is_empty() {
-        requests.write(ProfileCreateRequest { name });
+    let view = trigger.event().webview;
+    if pending.contains(view) || forms.get(view).is_ok_and(|form| form.0.pending) {
+        return;
     }
+    let Some(root) = binding.root() else {
+        if let Ok(mut form) = forms.get_mut(view) {
+            form.0.error = Some(TeamProfileError::Unavailable);
+        }
+        return;
+    };
+    let id = Uuid::new_v4();
+    let name = trigger.event().payload.name.trim().to_string();
+    if let Ok(mut form) = forms.get_mut(view) {
+        form.0.pending = true;
+        form.0.error = None;
+    }
+    commands.entity(view).insert(PendingProfile {
+        root,
+        id,
+        submitted: name.clone(),
+    });
+    requests.write(CreateRequest {
+        root,
+        operation_id: id,
+        name,
+    });
 }
 
 fn profile_switch_request(
@@ -487,11 +498,38 @@ fn profile_switch_request(
 
 fn profile_update_request(
     trigger: On<UiInput<TeamProfileUpdateRequest>>,
-    mut requests: MessageWriter<ProfileRenameRequest>,
+    binding: AccountBinding,
+    mut forms: Query<&mut ProfileFormState>,
+    pending: Query<(), With<PendingProfile>>,
+    mut requests: MessageWriter<RenameRequest>,
+    mut commands: Commands,
 ) {
-    requests.write(ProfileRenameRequest {
-        profile_id: trigger.event().payload.profile_id.clone(),
-        name: trigger.event().payload.name.clone(),
+    let view = trigger.event().webview;
+    if pending.contains(view) || forms.get(view).is_ok_and(|form| form.0.pending) {
+        return;
+    }
+    let Some((root, profile_id)) = binding.profile(&trigger.event().payload.profile_id) else {
+        if let Ok(mut form) = forms.get_mut(view) {
+            form.0.error = Some(TeamProfileError::Unavailable);
+        }
+        return;
+    };
+    let id = Uuid::new_v4();
+    let name = trigger.event().payload.name.trim().to_string();
+    if let Ok(mut form) = forms.get_mut(view) {
+        form.0.pending = true;
+        form.0.error = None;
+    }
+    commands.entity(view).insert(PendingProfile {
+        root,
+        id,
+        submitted: name.clone(),
+    });
+    requests.write(RenameRequest {
+        root,
+        operation_id: id,
+        profile_id,
+        name,
     });
 }
 
@@ -501,7 +539,10 @@ fn open_form(trigger: On<UiInput<TeamProfileFormOpenRequest>>, mut commands: Com
         .insert(ProfileFormState(TeamProfileForm {
             profile_id: trigger.event().payload.profile_id.clone(),
             draft: trigger.event().payload.draft.clone(),
-        }));
+            pending: false,
+            error: None,
+        }))
+        .remove::<PendingProfile>();
 }
 
 fn edit_form(
@@ -512,138 +553,221 @@ fn edit_form(
         return;
     };
     form.0.draft.clone_from(&trigger.event().payload.draft);
+    form.0.error = None;
 }
 
 fn close_form(trigger: On<UiInput<TeamProfileFormCloseRequest>>, mut commands: Commands) {
     commands
         .entity(trigger.event().webview)
-        .remove::<ProfileFormState>();
+        .remove::<ProfileFormState>()
+        .remove::<PendingProfile>();
+}
+
+fn retry_profiles(
+    _trigger: On<UiInput<TeamProfilesRetryRequest>>,
+    roots: Query<Entity, (With<vmux_account::Root>, With<Active>)>,
+    mut requests: MessageWriter<vmux_account::RetryRequest>,
+) {
+    if let Ok(root) = roots.single() {
+        requests.write(vmux_account::RetryRequest(root));
+    }
+}
+
+#[derive(Component)]
+struct PendingProfile {
+    root: Entity,
+    id: Uuid,
+    submitted: String,
+}
+
+#[derive(Component)]
+struct PendingAgent {
+    root: Entity,
+    id: Uuid,
+    reply: AgentReply,
+}
+
+#[derive(SystemParam)]
+struct AccountBinding<'w, 's> {
+    roots: Query<
+        'w,
+        's,
+        Entity,
+        (
+            With<vmux_account::Root>,
+            With<Active>,
+            With<vmux_ecs::Ready>,
+        ),
+    >,
+    accounts: Query<'w, 's, &'static ChildOf, With<vmux_account::Account>>,
+    profiles: Query<
+        'w,
+        's,
+        (
+            &'static vmux_ecs::Uuid,
+            &'static ProfileId,
+            &'static Name,
+            &'static vmux_account::Owner,
+        ),
+        With<vmux_account::Profile>,
+    >,
+}
+
+impl AccountBinding<'_, '_> {
+    fn root(&self) -> Option<Entity> {
+        self.roots.single().ok()
+    }
+
+    fn profile(&self, directory: &str) -> Option<(Entity, Uuid)> {
+        let root = self.root()?;
+        for (id, profile_id, _, owner) in &self.profiles {
+            if profile_id.0 != directory {
+                continue;
+            }
+            let parent = self.accounts.get(owner.0).ok()?;
+            if parent.parent() == root {
+                return Some((root, id.0.parse().ok()?));
+            }
+        }
+        None
+    }
+
+    fn label(&self, root: Entity, directory: &str) -> Option<&str> {
+        if self.root()? != root {
+            return None;
+        }
+        for (_, profile_id, name, owner) in &self.profiles {
+            if profile_id.0 != directory {
+                continue;
+            }
+            let parent = self.accounts.get(owner.0).ok()?;
+            if parent.parent() == root {
+                return Some(name.as_str());
+            }
+        }
+        None
+    }
 }
 
 fn rename_from_agent(
     mut requests: MessageReader<AgentRequestMessage<AgentRenameProfile>>,
     active: Query<&ActiveProfile>,
-    mut renames: MessageWriter<ProfileRenameRequest>,
+    binding: AccountBinding,
+    mut renames: MessageWriter<RenameRequest>,
     mut responses: MessageWriter<AgentCommandResponse>,
+    mut commands: Commands,
 ) {
-    let Ok(active) = active.single() else {
-        return;
-    };
-    let profile_id = active.0.clone().into_id();
+    let Ok(active) = active.single() else { return };
     for request in requests.read() {
-        renames.write(ProfileRenameRequest {
-            profile_id: profile_id.clone(),
+        let Some((root, profile_id)) = binding.profile(active.0.id()) else {
+            responses.write(
+                request
+                    .reply
+                    .response(AgentCommandResult::Error("Profiles are unavailable".into())),
+            );
+            continue;
+        };
+        let id = Uuid::new_v4();
+        commands.spawn((
+            PendingAgent {
+                root,
+                id,
+                reply: request.reply,
+            },
+            ChildOf(root),
+        ));
+        renames.write(RenameRequest {
+            root,
+            operation_id: id,
+            profile_id,
             name: request.payload.name.clone(),
         });
-        responses.write(request.reply.ok());
     }
 }
 
-fn create_profile(
-    mut requests: MessageReader<ProfileCreateRequest>,
-    profiles: Query<&ProfileCatalog>,
+fn complete_profile(
+    mut events: MessageReader<MutationCompleted>,
+    mut views: Query<(Entity, &PendingProfile, Option<&mut ProfileFormState>)>,
+    binding: AccountBinding,
+    mut switches: MessageWriter<ProfileSwitchRequested>,
     mut commands: Commands,
 ) {
-    let Ok(profiles) = profiles.single() else {
-        return;
-    };
-    for request in requests.read() {
-        let profiles = profiles.0.clone();
-        let name = request.name.clone();
-        commands.spawn((
-            Name::new("Create profile"),
-            ProfileCreateTask(
-                IoTaskPool::get().spawn(async move {
-                    profiles.create(&name).map_err(|error| error.to_string())
-                }),
-            ),
-        ));
-    }
-}
-
-fn rename_profile(
-    mut requests: MessageReader<ProfileRenameRequest>,
-    profiles: Query<&ProfileCatalog>,
-    mut commands: Commands,
-) {
-    let Ok(profiles) = profiles.single() else {
-        return;
-    };
-    for request in requests.read() {
-        let profiles = profiles.0.clone();
-        let profile = StoredProfile::named(&request.profile_id);
-        let name = request.name.clone();
-        commands.spawn((
-            Name::new("Rename profile"),
-            ProfileRenameTask(IoTaskPool::get().spawn(async move {
-                profiles
-                    .rename(&profile, &name)
-                    .map_err(|error| error.to_string())
-            })),
-        ));
-    }
-}
-
-fn finish_profile_create(
-    mut tasks: Query<(Entity, &mut ProfileCreateTask)>,
-    mut profile_switches: MessageWriter<ProfileSwitchRequested>,
-    mut commands: Commands,
-) {
-    for (entity, mut task) in &mut tasks {
-        let Some(result) = future::block_on(future::poll_once(&mut task.0)) else {
-            continue;
-        };
-        commands.entity(entity).despawn();
-        match result {
-            Ok(record) => {
-                let profile_id = record.profile.into_id();
-                commands.spawn((
-                    ProfileLabel,
-                    ProfileId(profile_id.clone()),
-                    Name::new(record.name),
-                ));
-                profile_switches.write(ProfileSwitchRequested { profile_id });
-            }
-            Err(error) => bevy::log::warn!("profile create failed: {error}"),
-        }
-    }
-}
-
-fn finish_profile_rename(
-    mut tasks: Query<(Entity, &mut ProfileRenameTask)>,
-    user: Query<Entity, With<User>>,
-    mut space_profiles: Query<&mut SpaceProfile, With<Space>>,
-    mut profile_labels: Query<(&ProfileId, &mut Name), With<ProfileLabel>>,
-    mut commands: Commands,
-) {
-    for (entity, mut task) in &mut tasks {
-        let Some(result) = future::block_on(future::poll_once(&mut task.0)) else {
-            continue;
-        };
-        commands.entity(entity).despawn();
-        let record = match result {
-            Ok(record) => record,
-            Err(error) => {
-                bevy::log::warn!("profile update failed: {error}");
+    for event in events.read() {
+        for (entity, pending, form) in &mut views {
+            if pending.id != event.operation_id || pending.root != event.root {
                 continue;
             }
-        };
-        let profile_id = record.profile.id().to_string();
-        for (id, mut label) in &mut profile_labels {
-            if id.0 == profile_id {
-                *label = Name::new(record.name.clone());
+            commands.entity(entity).remove::<PendingProfile>();
+            if let Some(mut form) = form {
+                form.0.pending = false;
+                match &event.result {
+                    Ok(_) if form.0.draft.trim() == pending.submitted => {
+                        commands.entity(entity).remove::<ProfileFormState>();
+                    }
+                    Ok(_) => {
+                        form.0.error = None;
+                    }
+                    Err(failure) => {
+                        form.0.error = Some(match failure {
+                            vmux_account::Failure::InvalidName => TeamProfileError::InvalidName,
+                            vmux_account::Failure::Conflict => TeamProfileError::Conflict,
+                            vmux_account::Failure::UnknownProfile
+                            | vmux_account::Failure::NotReady => TeamProfileError::Unavailable,
+                            _ => TeamProfileError::SaveFailed,
+                        });
+                    }
+                }
+            }
+            if event.created
+                && event.result.is_ok()
+                && binding.root() == Some(event.root)
+                && let Some(directory) = &event.directory_id
+            {
+                switches.write(ProfileSwitchRequested {
+                    profile_id: directory.clone(),
+                });
             }
         }
-        if !record.active {
-            continue;
+    }
+}
+
+fn complete_agent(
+    mut events: MessageReader<MutationCompleted>,
+    agents: Query<(Entity, &PendingAgent)>,
+    mut responses: MessageWriter<AgentCommandResponse>,
+    mut commands: Commands,
+) {
+    for event in events.read() {
+        for (entity, pending) in &agents {
+            if pending.id != event.operation_id || pending.root != event.root {
+                continue;
+            }
+            let result = match &event.result {
+                Ok(_) => AgentCommandResult::Ok,
+                Err(error) => {
+                    AgentCommandResult::Error(format!("Profile update failed: {error:?}"))
+                }
+            };
+            responses.write(pending.reply.response(result));
+            commands.entity(entity).despawn();
         }
-        for mut profile in &mut space_profiles {
-            profile.name.clone_from(&record.name);
-        }
-        if let Ok(entity) = user.single() {
-            commands
-                .entity(entity)
-                .insert(Profile::user_named(record.name));
+    }
+}
+
+fn sync_profiles(
+    active: Query<&ActiveProfile>,
+    binding: AccountBinding,
+    mut space_profiles: Query<&mut SpaceProfile, With<Space>>,
+) {
+    let (Ok(active), Some(root)) = (active.single(), binding.root()) else {
+        return;
+    };
+    let Some(name) = binding.label(root, active.0.id()) else {
+        return;
+    };
+    for mut profile in &mut space_profiles {
+        if profile.name != name {
+            profile.name = name.to_string();
         }
     }
 }
@@ -723,6 +847,65 @@ mod tests {
         app.update();
 
         assert_eq!(app.world().get::<Profile>(user).unwrap().name, "Personal");
+    }
+
+    #[test]
+    fn space_profile_labels_follow_restored_and_refreshed_canonical_names() {
+        let mut app = App::new();
+        app.add_plugins(ProjectionPlugin);
+        let root = app
+            .world_mut()
+            .spawn((vmux_account::Root, Active, vmux_ecs::Ready))
+            .id();
+        let account = app
+            .world_mut()
+            .spawn((vmux_account::Account, ChildOf(root)))
+            .id();
+        app.world_mut()
+            .spawn(ActiveProfile(StoredProfile::named("personal")));
+        let canonical = app
+            .world_mut()
+            .spawn((
+                vmux_account::Profile,
+                vmux_ecs::Uuid(Uuid::new_v4().to_string()),
+                ProfileId("personal".into()),
+                Name::new("Restored"),
+                vmux_account::Owner(account),
+            ))
+            .id();
+        let space = app
+            .world_mut()
+            .spawn((
+                Space,
+                SpaceProfile {
+                    name: "Legacy".into(),
+                },
+            ))
+            .id();
+        app.update();
+        assert_eq!(
+            app.world().get::<SpaceProfile>(space).unwrap().name,
+            "Restored"
+        );
+        app.world_mut()
+            .entity_mut(canonical)
+            .insert(Name::new("Refreshed"));
+        let later = app
+            .world_mut()
+            .spawn((
+                Space,
+                SpaceProfile {
+                    name: "Legacy".into(),
+                },
+            ))
+            .id();
+        app.update();
+        for entity in [space, later] {
+            assert_eq!(
+                app.world().get::<SpaceProfile>(entity).unwrap().name,
+                "Refreshed"
+            );
+        }
     }
 
     #[test]
