@@ -58,15 +58,36 @@ impl Checkout {
         }
         let cloud = root.join(".gitmodules").is_file();
         if let Some(branch) = branch {
-            let mut candidates = Self::worktrees(&root)?;
+            let candidates = Self::worktrees(&root)?;
             if cloud {
-                if let Some(selected) = Self::select(&candidates, branch)? {
+                if let Some(selected) = Self::exact(&candidates, branch)? {
                     root = selected;
                 } else {
-                    let client = root.join("client");
-                    candidates = Self::worktrees(&client)?;
-                    root = Self::select(&candidates, branch)?
-                        .ok_or("Branch has no worktree; create its worktree explicitly first")?;
+                    let mut clients = Vec::new();
+                    let mut seen = std::collections::BTreeSet::new();
+                    for candidate in &candidates {
+                        let client = candidate.path.join("client");
+                        if !client.join(".git").exists() {
+                            continue;
+                        }
+                        for mut worktree in Self::worktrees(&client)? {
+                            if !worktree.path.join(".git").exists() {
+                                continue;
+                            }
+                            worktree.path = worktree.path.canonicalize()?;
+                            if seen.insert(worktree.path.clone()) {
+                                clients.push(worktree);
+                            }
+                        }
+                    }
+                    root = match Self::exact(&clients, branch)? {
+                        Some(selected) => Some(selected),
+                        None => match Self::alias(&candidates, branch)? {
+                            Some(selected) => Some(selected),
+                            None => Self::alias(&clients, branch)?,
+                        },
+                    }
+                    .ok_or("Branch has no worktree; create its worktree explicitly first")?;
                 }
             } else {
                 root = Self::select(&candidates, branch)?
@@ -143,6 +164,13 @@ impl Checkout {
     }
 
     fn select(worktrees: &[Worktree], name: &OsStr) -> Result<Option<PathBuf>> {
+        match Self::exact(worktrees, name)? {
+            Some(path) => Ok(Some(path)),
+            None => Self::alias(worktrees, name),
+        }
+    }
+
+    fn exact(worktrees: &[Worktree], name: &OsStr) -> Result<Option<PathBuf>> {
         let mut exact = None;
         for worktree in worktrees {
             if worktree.branch.as_deref() == Some(name)
@@ -151,9 +179,10 @@ impl Checkout {
                 return Err("Branch matches multiple worktrees".into());
             }
         }
-        if exact.is_some() {
-            return Ok(exact);
-        }
+        Ok(exact)
+    }
+
+    fn alias(worktrees: &[Worktree], name: &OsStr) -> Result<Option<PathBuf>> {
         let mut alias = None;
         for worktree in worktrees {
             if worktree.path.file_name() == Some(name)
@@ -242,6 +271,67 @@ mod tests {
     }
 
     impl Fixture {
+        fn cloud() -> Self {
+            let fixture = Self::new();
+            fs::remove_dir_all(fixture.root.join("crates")).unwrap();
+            fs::write(fixture.root.join(".gitmodules"), "").unwrap();
+            fs::write(
+                fixture.root.join("Cargo.toml"),
+                "[workspace]\nmembers = []\n",
+            )
+            .unwrap();
+            fixture.git(&["add", "-A"]);
+            fixture.git(&[
+                "-c",
+                "user.name=Fixture",
+                "-c",
+                "user.email=fixture@example.invalid",
+                "-c",
+                "commit.gpgsign=false",
+                "commit",
+                "-m",
+                "Cloud fixture",
+            ]);
+            fixture
+        }
+
+        fn client(&self, cloud: &Path, branch: &str) -> PathBuf {
+            let client = cloud.join("client");
+            fs::create_dir_all(client.join("crates/app/vmux_cli")).unwrap();
+            fs::write(
+                client.join("crates/app/vmux_cli/Cargo.toml"),
+                "[package]\nname = \"vmux_cli\"\n",
+            )
+            .unwrap();
+            for arguments in [
+                vec!["init", "-b", branch],
+                vec!["add", "."],
+                vec![
+                    "-c",
+                    "user.name=Fixture",
+                    "-c",
+                    "user.email=fixture@example.invalid",
+                    "-c",
+                    "commit.gpgsign=false",
+                    "commit",
+                    "-m",
+                    "Client fixture",
+                ],
+            ] {
+                let output = Command::new("git")
+                    .arg("-C")
+                    .arg(&client)
+                    .args(arguments)
+                    .output()
+                    .unwrap();
+                assert!(
+                    output.status.success(),
+                    "{}",
+                    String::from_utf8_lossy(&output.stderr)
+                );
+            }
+            client.canonicalize().unwrap()
+        }
         fn new() -> Self {
             let directory = tempfile::tempdir().unwrap();
             let root = directory.path().join("repository");
@@ -287,6 +377,72 @@ mod tests {
             self.git(&["worktree", "add", "-b", branch, path.to_str().unwrap()]);
             path.canonicalize().unwrap()
         }
+    }
+
+    #[test]
+    fn cloud_selection_discovers_client_branches_in_other_cloud_worktrees() {
+        let fixture = Fixture::cloud();
+        fixture.client(&fixture.root, "client-main");
+        let cloud = fixture.worktree("cloud-topic", "different-cloud-directory");
+        let client = fixture.client(&cloud, "client-topic");
+        assert_eq!(
+            Checkout::resolve(&fixture.root, Some(OsStr::new("client-topic")))
+                .unwrap()
+                .root,
+            client
+        );
+        let standalone = client.join(".worktrees/standalone-directory");
+        let output = Command::new("git")
+            .arg("-C")
+            .arg(&client)
+            .args(["worktree", "add", "-b", "client-standalone"])
+            .arg(&standalone)
+            .output()
+            .unwrap();
+        assert!(output.status.success());
+        assert_eq!(
+            Checkout::resolve(&fixture.root, Some(OsStr::new("client-standalone")))
+                .unwrap()
+                .root,
+            standalone.canonicalize().unwrap()
+        );
+    }
+
+    #[test]
+    fn cloud_branch_precedes_client_branch_and_client_branch_precedes_directory_alias() {
+        let fixture = Fixture::cloud();
+        let client = fixture.client(&fixture.root, "navigation");
+        fixture.worktree("other", "navigation");
+        assert_eq!(
+            Checkout::resolve(&fixture.root, Some(OsStr::new("navigation")))
+                .unwrap()
+                .root,
+            client
+        );
+        let selected = fixture.worktree("navigation", "cloud-priority");
+        let selected_client = fixture.client(&selected, "unrelated-client-name");
+        assert_eq!(
+            Checkout::resolve(&fixture.root, Some(OsStr::new("navigation")))
+                .unwrap()
+                .root,
+            selected_client
+        );
+    }
+
+    #[test]
+    fn ambiguous_client_branches_across_cloud_worktrees_are_refused() {
+        let fixture = Fixture::cloud();
+        fixture.client(&fixture.root, "client-main");
+        for (branch, directory) in [("first", "first-cloud"), ("second", "second-cloud")] {
+            let cloud = fixture.worktree(branch, directory);
+            fixture.client(&cloud, "shared-client-branch");
+        }
+        assert!(
+            Checkout::resolve(&fixture.root, Some(OsStr::new("shared-client-branch")))
+                .unwrap_err()
+                .to_string()
+                .contains("multiple")
+        );
     }
 
     #[test]

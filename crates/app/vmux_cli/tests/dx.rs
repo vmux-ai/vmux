@@ -5,6 +5,221 @@ use predicates::prelude::*;
 #[cfg(unix)]
 use std::os::unix::fs::PermissionsExt;
 
+#[cfg(not(feature = "runtime"))]
+struct WorkspaceFixture {
+    _directory: tempfile::TempDir,
+    root: std::path::PathBuf,
+}
+
+#[cfg(not(feature = "runtime"))]
+impl WorkspaceFixture {
+    fn new() -> Self {
+        let directory = tempfile::tempdir().unwrap();
+        let root = directory.path().join("workspace with spaces");
+        std::fs::create_dir_all(root.join("bin")).unwrap();
+        let fixture = Self {
+            _directory: directory,
+            root,
+        };
+        std::fs::write(fixture.root.join("Cargo.toml"), "[workspace]\nmembers = []\n[workspace.metadata.vmux.dx]\nproviders = [{name = 'fixtures', package = 'fixture-provider', binary = 'provider-bin', manifest = 'provider.ron'}]\n").unwrap();
+        fixture.manifest("fixtures", "fixture");
+        fixture.tool("cargo", "target=\nhost=\nwhile [ $# -gt 0 ]; do case \"$1\" in --target-dir) shift; target=$1;; --target) shift; host=$1;; esac; shift; done\nmkdir -p \"$target/$host/debug\"\ncp \"$VMUX_WORKSPACE_TEST_ROOT/provider-template\" \"$target/$host/debug/provider-bin\"\nchmod 755 \"$target/$host/debug/provider-bin\"\nprintf 'compiled\\n' >> \"$VMUX_WORKSPACE_TEST_ROOT/compiled\"\n");
+        std::fs::write(fixture.root.join("provider-template"), "#!/bin/sh\nif [ \"$2\" = hold ]; then printf '%s' \"$$\" > \"$VMUX_WORKSPACE_TEST_ROOT/started\"; exec sleep 60; fi\nprintf '%s\\n' \"$@\"\n").unwrap();
+        std::fs::set_permissions(
+            fixture.root.join("provider-template"),
+            std::fs::Permissions::from_mode(0o755),
+        )
+        .unwrap();
+        fixture
+    }
+
+    fn manifest(&self, name: &str, id: &str) {
+        std::fs::write(
+            self.root.join("provider.ron"),
+            format!(
+                r#"(
+            cli: Some((commands: [(
+                id: "{id}", name: "{name}", subcommand_required: true,
+                arguments: [(id: "root", long: Some("root"), global: true)],
+                commands: [(
+                    id: "{id}.echo", name: "echo",
+                    arguments: [(id: "forward", index: Some(1), trailing: true)],
+                ), (id: "{id}.hold", name: "hold")],
+            )])),
+        )"#
+            ),
+        )
+        .unwrap();
+    }
+
+    fn tool(&self, name: &str, body: &str) {
+        let path = self.root.join("bin").join(name);
+        std::fs::write(&path, format!("#!/bin/sh\nset -eu\n{body}")).unwrap();
+        std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o755)).unwrap();
+    }
+
+    fn command(&self) -> std::process::Command {
+        let mut command = std::process::Command::new(env!("CARGO_BIN_EXE_vmux"));
+        command
+            .current_dir(&self.root)
+            .env(
+                "PATH",
+                format!(
+                    "{}:{}",
+                    self.root.join("bin").display(),
+                    std::env::var("PATH").unwrap()
+                ),
+            )
+            .env("VMUX_WORKSPACE_TEST_ROOT", &self.root)
+            .env("VMUX_BUILD_STORAGE_MIN_GIB", "0")
+            .env("VMUX_BUILD_STORAGE_WARN_GIB", "0");
+        command
+    }
+
+    fn run(&self, arguments: &[&str]) -> Command {
+        let mut command = Command::from_std(self.command());
+        command
+            .args(arguments)
+            .timeout(std::time::Duration::from_secs(30));
+        command
+    }
+}
+
+#[cfg(not(feature = "runtime"))]
+struct WorkspaceChild(std::process::Child);
+
+#[cfg(not(feature = "runtime"))]
+impl Drop for WorkspaceChild {
+    fn drop(&mut self) {
+        if self.0.try_wait().ok().flatten().is_some() {
+            return;
+        }
+        unsafe {
+            libc::kill(self.0.id() as i32, libc::SIGINT);
+        }
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(3);
+        while std::time::Instant::now() < deadline {
+            if self.0.try_wait().ok().flatten().is_some() {
+                return;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(20));
+        }
+        let _ = self.0.kill();
+        let _ = self.0.wait();
+    }
+}
+
+#[test]
+#[cfg(not(feature = "runtime"))]
+fn workspace_help_uses_the_declared_manifest_without_building_the_provider() {
+    let fixture = WorkspaceFixture::new();
+    fixture
+        .run(&["fixtures", "--help"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("echo"));
+    assert!(!fixture.root.join("compiled").exists());
+}
+
+#[test]
+#[cfg(not(feature = "runtime"))]
+fn workspace_arguments_keep_spaces_and_forwarded_tool_options_without_shell_evaluation() {
+    let fixture = WorkspaceFixture::new();
+    let literal = "$(touch unexpected)";
+    fixture
+        .run(&[
+            "fixtures",
+            "--root",
+            fixture.root.to_str().unwrap(),
+            "echo",
+            "--",
+            "two words",
+            literal,
+            "--option",
+            "--root",
+            "/forwarded-path-must-not-select-a-provider",
+        ])
+        .assert()
+        .success()
+        .stdout(format!(
+            "fixtures\n--root\n{}\necho\n--\ntwo words\n{literal}\n--option\n--root\n/forwarded-path-must-not-select-a-provider\n",
+            fixture.root.display()
+        ));
+    assert!(!fixture.root.join("unexpected").exists());
+}
+
+#[test]
+#[cfg(not(feature = "runtime"))]
+fn workspace_compile_failure_preserves_its_status_and_prevents_invocation() {
+    let fixture = WorkspaceFixture::new();
+    fixture.tool("cargo", "exit 23\n");
+    fixture
+        .run(&["fixtures", "echo"])
+        .assert()
+        .code(23)
+        .stdout("");
+    assert!(!fixture.root.join("compiled").exists());
+}
+
+#[test]
+#[cfg(not(feature = "runtime"))]
+fn workspace_provider_cannot_claim_the_builtin_dx_namespace() {
+    let fixture = WorkspaceFixture::new();
+    fixture.manifest("fixtures", "dx.external");
+    fixture.run(&["fixtures", "echo"]).assert().failure();
+    assert!(!fixture.root.join("compiled").exists());
+}
+
+#[test]
+#[cfg(not(feature = "runtime"))]
+fn running_workspace_provider_does_not_hold_its_compile_cache_lock() {
+    let fixture = WorkspaceFixture::new();
+    let mut command = fixture.command();
+    command.args(["fixtures", "hold"]);
+    let mut child = WorkspaceChild(command.spawn().unwrap());
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(20);
+    while !fixture.root.join("started").exists() {
+        if std::time::Instant::now() > deadline {
+            child.0.kill().unwrap();
+            panic!("provider never started");
+        }
+        std::thread::sleep(std::time::Duration::from_millis(20));
+    }
+    fixture
+        .run(&["fixtures", "echo"])
+        .timeout(std::time::Duration::from_secs(10))
+        .assert()
+        .success()
+        .stdout("fixtures\necho\n");
+    unsafe {
+        libc::kill(child.0.id() as i32, libc::SIGINT);
+    }
+    let status = child.0.wait().unwrap();
+    assert_eq!(status.code(), Some(130));
+}
+
+#[test]
+#[cfg(not(feature = "runtime"))]
+fn workspace_provider_interprets_its_own_dotenv_after_root_selection() {
+    let fixture = WorkspaceFixture::new();
+    std::fs::write(
+        fixture.root.join(".env"),
+        "VMUX_WORKSPACE_PRIVATE_VALUE=must-not-be-preloaded\n",
+    )
+    .unwrap();
+    std::fs::write(
+        fixture.root.join("provider-template"),
+        "#!/bin/sh\nprintf '%s' \"${VMUX_WORKSPACE_PRIVATE_VALUE-absent}\"\n",
+    )
+    .unwrap();
+    fixture
+        .run(&["fixtures", "echo"])
+        .env_remove("VMUX_WORKSPACE_PRIVATE_VALUE")
+        .assert()
+        .success()
+        .stdout("absent");
+}
+
 #[test]
 fn development_help_exposes_the_agreed_options_and_excludes_internal_integrations() {
     Command::cargo_bin("vmux")
@@ -595,6 +810,71 @@ done
         }
         command
     }
+}
+
+#[test]
+#[cfg(target_os = "macos")]
+fn local_run_opens_the_newest_completed_product_bundle_and_forwards_test_environment() {
+    let fixture = Fixture::new();
+    let release = fixture.target.join("release");
+    std::fs::create_dir_all(&release).unwrap();
+    for (name, timestamp) in [
+        ("Vmux (older).app", 1),
+        ("Vmux (newer).app", 2),
+        ("Vmux.app", 3),
+        ("Other (newest).app", 4),
+    ] {
+        let app = release.join(name);
+        std::fs::create_dir_all(app.join("Contents/MacOS")).unwrap();
+        std::fs::write(app.join("Contents/MacOS/vmux_desktop"), "fixture").unwrap();
+        std::fs::File::open(&app)
+            .unwrap()
+            .set_times(std::fs::FileTimes::new().set_modified(
+                std::time::SystemTime::UNIX_EPOCH + std::time::Duration::from_secs(timestamp),
+            ))
+            .unwrap();
+    }
+    std::os::unix::fs::symlink(release.join("Vmux.app"), release.join("Vmux (symlink).app"))
+        .unwrap();
+    fixture.script(
+        "open",
+        "#!/bin/sh\nprintf '%s\\0' \"$@\" > \"$TEST_OPEN_LOG\"\n",
+    );
+    let data = fixture.directory.path().join("copied store");
+    std::fs::write(fixture.root.join(".env"), "VMUX_PROFILE=from-file\nVMUX_DATA_DIR=/file-data-must-not-win\nVMUX_REMOTE_RELAY_URL=https://production.invalid:443\n").unwrap();
+    fixture
+        .command()
+        .args(["run", "-p", "local"])
+        .env("VMUX_PROFILE", "work")
+        .env_remove("VMUX_TEST")
+        .env("VMUX_DATA_DIR", &data)
+        .env("VMUX_REMOTE_RELAY_URL", "https://localhost:8787")
+        .assert()
+        .success();
+    let output = std::fs::read(fixture.root.join("open.log")).unwrap();
+    let actual = output
+        .split(|byte| *byte == 0)
+        .filter(|value| !value.is_empty())
+        .map(|value| std::str::from_utf8(value).unwrap().to_owned())
+        .collect::<Vec<_>>();
+    assert_eq!(
+        actual,
+        vec![
+            "--env".to_owned(),
+            "VMUX_PROFILE=work".into(),
+            "--env".into(),
+            format!("VMUX_DATA_DIR={}", data.display()),
+            "--env".into(),
+            "VMUX_REMOTE_RELAY_URL=https://localhost:8787".into(),
+            release
+                .join("Vmux (newer).app")
+                .canonicalize()
+                .unwrap()
+                .display()
+                .to_string(),
+        ]
+    );
+    assert!(!fixture.root.join("build.log").exists());
 }
 
 #[test]

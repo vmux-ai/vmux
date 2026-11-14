@@ -53,6 +53,9 @@ pub enum Work {
     Internal(String, Vec<OsString>),
     CliCompile,
     CliPackage(bool),
+    WorkspaceCompile(String, String, std::path::PathBuf),
+    WorkspaceAcquire,
+    WorkspaceInvoke(Vec<OsString>),
 }
 
 impl Work {
@@ -278,7 +281,7 @@ impl Work {
 
     pub fn name(&self) -> &'static str {
         match self {
-            Self::Acquire => "Acquire target lock",
+            Self::Acquire | Self::WorkspaceAcquire => "Acquire target lock",
             Self::Check | Self::Preflight => "Check build storage",
             Self::Seed => "Seed target cache",
             Self::Finish(_) => "Finish build storage",
@@ -313,6 +316,8 @@ impl Work {
             Self::Internal(_, _) => "Run external integration",
             Self::CliCompile => "Build standalone release CLI",
             Self::CliPackage(_) => "Verify and package standalone release CLI",
+            Self::WorkspaceCompile(_, _, _) => "Build workspace CLI provider",
+            Self::WorkspaceInvoke(_) => "Run workspace CLI provider",
         }
     }
 
@@ -327,6 +332,18 @@ impl Work {
         let _lease = lease;
         let mut native = Native::new(checkout, environment.clone());
         match self {
+            Self::WorkspaceAcquire => {
+                storage.guard()?;
+                let lease = Arc::new(TargetLock::acquire(&checkout.root, &checkout.target)?);
+                storage.guard()?;
+                return Ok(Outcome::Lease(lease));
+            }
+            Self::WorkspaceCompile(package, binary, cargo) => {
+                return Ok(Outcome::Executable(
+                    native.workspace_compile(package, binary, cargo)?,
+                ));
+            }
+            Self::WorkspaceInvoke(arguments) => native.workspace_invoke(arguments)?,
             Self::Acquire => {
                 let owner = std::env::var("VMUX_TARGET_LOCK_OWNER_PID")
                     .ok()
@@ -442,6 +459,7 @@ impl Work {
 }
 
 pub enum Outcome {
+    Executable(crate::workspace::Executable),
     Done,
     Lease(Arc<TargetLock>),
     Identity(String),

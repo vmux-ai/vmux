@@ -1937,6 +1937,27 @@ React-style, in one atomic transaction.
 
 ### Development commands
 
+Workspace extensions are declarations in `workspace.metadata.vmux.dx.providers`: a command
+name, Cargo package/binary, optional Cargo manifest, and a workspace-contained RON CLI
+manifest. The DX root loads bounded input before collecting the CLI catalog and creates
+canonical `Provider` entities with a CLI-only `FeatureManifest` projection. Namespaces cannot
+overlap built-in or other provider commands. Explicit declared names select the minimal CLI
+host; help uses metadata without compiling or invoking the provider. Accepted typed arguments
+are reconstructed at the native boundary with their OS values and forwarded-option delimiter.
+Compile/invoke work uses the existing operation/attempt/predecessor systems. Cargo runs in a
+validated locked cache, then a bounded regular executable is snapshotted before the lease is
+released. The operation owns that temporary executable through invocation and cancellation.
+Long-lived providers therefore do not block compilation for another invocation. Providers keep
+their descendants in the inherited provider process group so cancellation reaches the tree.
+No public package depends on a provider workspace. A provider can use an independent Cargo
+workspace, allowing developer bootstrap without product dependencies.
+
+`vmux_transport` keeps its local service adapter behind the default-enabled `service` Cargo
+feature. Disabling default features exposes device/framing/QUIC contracts without the optional
+application API/profile dependencies. This is a transport boundary, not a second application
+composition.
+
+
 The CLI's release updater is an independent `vmux_dx::updates::Plugin` composed
 before product startup and alongside DX for explicit `update` requests. Accepted
 operations own `Request`, `Installation`, persisted `Preferences`, and `Release`.
@@ -1980,7 +2001,10 @@ during a long compilation.
 
 Debug uses full desktop features, Bevy dynamic linking, no LTO, and incremental
 compilation. `build` prepares and signs; `run` verifies the completed artifacts and
-never compiles or kills an existing app. Signature input/output stamps preserve unchanged
+never compiles or kills an existing app. Local launch selects the newest completed local
+product bundle independently of subsequent Git commits. Explicit runtime data/profile/relay
+environment values take precedence over dotenv and are passed to dev and local GUI launches.
+Signature input/output stamps preserve unchanged
 bundled executables and daemon identity. A failed build invalidates its debug readiness
 stamp and launch alias. Local/release packages use an isolated output directory and raw
 packager configuration; source manifests and plists are never rewritten. Publication

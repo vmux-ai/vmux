@@ -64,6 +64,13 @@ impl Environment {
                 .is_some_and(|byte| byte.is_ascii_alphabetic() || byte == b'_')
                 && bytes.all(|byte| byte.is_ascii_alphanumeric() || byte == b'_');
             if valid {
+                if matches!(
+                    key,
+                    "VMUX_PROFILE" | "VMUX_TEST" | "VMUX_DATA_DIR" | "VMUX_REMOTE_RELAY_URL"
+                ) && self.get(key).is_some()
+                {
+                    continue;
+                }
                 self.set(key, value);
             }
         }

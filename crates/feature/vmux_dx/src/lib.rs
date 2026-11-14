@@ -2,7 +2,7 @@ use std::ffi::OsString;
 use std::sync::{Arc, Mutex, mpsc};
 use std::thread;
 
-use bevy_app::{App, Update};
+use bevy_app::{App, AppExit, PreStartup, Update};
 use bevy_ecs::prelude::*;
 use vmux_ecs::cli::{CliInvocation, CliResult};
 use vmux_ecs::manifest::{FeatureManifest, FeatureManifestSource, FeaturePlugin};
@@ -38,6 +38,7 @@ mod tooling;
 mod update_io;
 pub mod updates;
 mod work;
+mod workspace;
 
 pub type Result<T> = std::result::Result<T, Box<dyn std::error::Error + Send + Sync>>;
 
@@ -48,6 +49,7 @@ impl bevy_app::Plugin for Plugin {
         app.add_plugins((FeaturePlugin::<Feature>::default(), updates::Plugin))
             .insert_resource(Mailbox::new())
             .add_message::<Completion>()
+            .add_systems(PreStartup, load)
             .add_systems(
                 Update,
                 (accept, receive, cancel, collect, start, finish).chain(),
@@ -66,7 +68,7 @@ impl Plugin {
                 return true;
             }
         }
-        false
+        workspace::Provider::selected(&name, arguments)
     }
 }
 
@@ -147,6 +149,7 @@ type Inputs<'w, 's> = Query<
         &'static Settings,
         &'static Storage,
         Option<&'static Lease>,
+        Option<&'static workspace::Executable>,
         &'static OperationState,
     ),
     Without<CliResult>,
@@ -160,12 +163,70 @@ type Finishing<'w, 's> = Query<
     (With<Accepted>, Without<CliResult>),
 >;
 
-fn accept(requests: Incoming, signals: Option<Res<signals::Signals>>, mut commands: Commands) {
+fn load(
+    features: Query<&FeatureManifest>,
+    mut exits: MessageWriter<AppExit>,
+    mut commands: Commands,
+) {
+    let providers = match workspace::Provider::discover(std::env::args_os().skip(1)) {
+        Ok(providers) => providers,
+        Err(error) => {
+            eprintln!("vmux: workspace CLI metadata: {error}");
+            exits.write(AppExit::error());
+            return;
+        }
+    };
+    let mut names = std::collections::BTreeSet::new();
+    let mut identifiers = Vec::new();
+    for feature in &features {
+        if let Some(cli) = &feature.cli {
+            for command in &cli.commands {
+                names.insert(command.name.clone());
+                let mut pending = vec![command];
+                while let Some(command) = pending.pop() {
+                    identifiers.push(command.id.as_str());
+                    pending.extend(command.commands.iter());
+                }
+            }
+        }
+    }
+    for (index, (provider, manifest)) in providers.iter().enumerate() {
+        let name = manifest.cli.as_ref().unwrap().commands[0].name.clone();
+        if !names.insert(name.clone()) {
+            eprintln!("vmux: workspace CLI command duplicates {name}");
+            exits.write(AppExit::error());
+            return;
+        }
+        if identifiers.iter().any(|id| provider.owns(id))
+            || providers[..index]
+                .iter()
+                .any(|(previous, _)| provider.overlaps(previous))
+        {
+            eprintln!("vmux: workspace CLI namespace overlaps a registered command");
+            exits.write(AppExit::error());
+            return;
+        }
+    }
+    for (provider, manifest) in providers {
+        let name = manifest.cli.as_ref().unwrap().commands[0].name.clone();
+        commands.spawn((Name::new(name), provider, manifest));
+    }
+}
+
+fn accept(
+    requests: Incoming,
+    providers: Query<(&workspace::Provider, &FeatureManifest)>,
+    signals: Option<Res<signals::Signals>>,
+    mut commands: Commands,
+) {
     for (entity, invocation) in &requests {
         if invocation.is("dx.update") {
             continue;
         }
-        if !invocation.command.starts_with("dx.") {
+        let provider = providers
+            .iter()
+            .find(|(provider, _)| provider.owns(&invocation.command));
+        if !invocation.command.starts_with("dx.") && provider.is_none() {
             continue;
         }
         if invocation.is("dx.help") {
@@ -200,7 +261,11 @@ fn accept(requests: Incoming, signals: Option<Res<signals::Signals>>, mut comman
                 }
             },
         };
-        let mut checkout = match Checkout::resolve(&path, invocation.value_os("branch")) {
+        let resolved = match provider {
+            Some((provider, _)) => provider.checkout(),
+            None => Checkout::resolve(&path, invocation.value_os("branch")),
+        };
+        let mut checkout = match resolved {
             Ok(checkout) => checkout,
             Err(error) => {
                 commands
@@ -210,7 +275,9 @@ fn accept(requests: Incoming, signals: Option<Res<signals::Signals>>, mut comman
             }
         };
         let mut environment = Environment::current();
-        if let Err(error) = environment.load(&checkout.root) {
+        if provider.is_none()
+            && let Err(error) = environment.load(&checkout.root)
+        {
             commands
                 .entity(entity)
                 .insert(CliResult(Err(error.to_string())));
@@ -237,22 +304,28 @@ fn accept(requests: Incoming, signals: Option<Res<signals::Signals>>, mut comman
                 checkout.root.join("website/target").as_os_str(),
             );
         }
-        if let Err(error) = checkout.configure(
-            environment.get("CARGO_TARGET_DIR"),
-            environment.get("CARGO_BUILD_TARGET"),
-        ) {
+        if provider.is_none()
+            && let Err(error) = checkout.configure(
+                environment.get("CARGO_TARGET_DIR"),
+                environment.get("CARGO_BUILD_TARGET"),
+            )
+        {
             commands
                 .entity(entity)
                 .insert(CliResult(Err(error.to_string())));
             continue;
         }
-        if let Err(error) = tooling::Tooling::ensure(&checkout, &environment) {
+        if provider.is_none()
+            && let Err(error) = tooling::Tooling::ensure(&checkout, &environment)
+        {
             commands
                 .entity(entity)
                 .insert(CliResult(Err(error.to_string())));
             continue;
         }
-        environment.set("CARGO_TARGET_DIR", checkout.target.as_os_str());
+        if provider.is_none() {
+            environment.set("CARGO_TARGET_DIR", checkout.target.as_os_str());
+        }
         if let Some(profile) = invocation.value("profile") {
             environment.set("VMUX_BUILD_PROFILE", profile);
         } else if !environment.present("VMUX_BUILD_PROFILE") {
@@ -280,7 +353,23 @@ fn accept(requests: Incoming, signals: Option<Res<signals::Signals>>, mut comman
                 continue;
             }
         };
-        let steps = match Work::plan(invocation) {
+        let plan = match provider {
+            Some((provider, manifest)) => {
+                provider.arguments(manifest, invocation).map(|arguments| {
+                    vec![
+                        Work::WorkspaceAcquire,
+                        Work::WorkspaceCompile(
+                            provider.package.clone(),
+                            provider.binary.clone(),
+                            provider.cargo.clone(),
+                        ),
+                        Work::WorkspaceInvoke(arguments),
+                    ]
+                })
+            }
+            None => Work::plan(invocation),
+        };
+        let steps = match plan {
             Ok(steps) => steps,
             Err(error) => {
                 commands
@@ -332,7 +421,8 @@ fn start(
         if predecessor.is_some_and(|previous| !completed.contains(previous.0)) {
             continue;
         }
-        let Ok((checkout, settings, storage, lease, state)) = operations.get(parent.parent())
+        let Ok((checkout, settings, storage, lease, executable, state)) =
+            operations.get(parent.parent())
         else {
             continue;
         };
@@ -340,7 +430,10 @@ fn start(
             continue;
         }
         let checkout = checkout.clone();
-        let environment = settings.0.clone();
+        let mut environment = settings.0.clone();
+        if let Some(executable) = executable {
+            environment.set("VMUX_DX_PROVIDER_EXECUTABLE", executable.path().as_os_str());
+        }
         let storage = storage.clone();
         let lease = lease.map(|lease| lease.0.clone());
         let work = work.clone();
@@ -425,6 +518,12 @@ fn collect(
         match &completion.result {
             Ok(outcome) => {
                 match outcome {
+                    Outcome::Executable(executable) => {
+                        commands
+                            .entity(parent.parent())
+                            .insert(executable.clone())
+                            .remove::<Lease>();
+                    }
                     Outcome::Done => {}
                     Outcome::Lease(lease) => {
                         commands

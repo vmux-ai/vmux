@@ -2,6 +2,10 @@
 mod source;
 
 fn main() {
+    println!(
+        "cargo:rustc-env=VMUX_DX_HOST_TARGET={}",
+        std::env::var("TARGET").unwrap()
+    );
     println!("cargo:rerun-if-env-changed=VMUX_UPDATE_PUBLIC_KEY");
     let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
         .ancestors()
