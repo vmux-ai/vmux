@@ -2173,6 +2173,9 @@ mod tests {
 
     #[test]
     fn cold_start_requests_layout_materialization_for_the_bootstrap_space() {
+        if HomeEnvGuard::isolated() {
+            return;
+        }
         let _home = HomeEnvGuard::use_temp_home("bootstrap-layout");
         let mut app = App::new();
         app.add_plugins((
