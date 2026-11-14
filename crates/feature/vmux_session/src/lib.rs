@@ -53,11 +53,11 @@ pub mod activity;
 pub mod event;
 #[cfg(feature = "app")]
 pub mod host;
-pub mod queue;
 #[cfg(feature = "preferences")]
 pub mod preferences;
 #[cfg(feature = "preferences")]
 mod preferences_io;
+pub mod queue;
 pub mod run_state;
 #[cfg(feature = "app")]
 pub mod selector;

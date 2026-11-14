@@ -420,7 +420,8 @@ fn input(
             }
         }
         if !modes.ready(kind) {
-            if spawn_queued && queues.ready(entity, matches!(*state, RunState::Idle))
+            if spawn_queued
+                && queues.ready(entity, matches!(*state, RunState::Idle))
                 && let Some((file, error)) = modes.load_error(kind)
             {
                 *state = RunState::Errored(error.to_string());
@@ -544,12 +545,23 @@ mod tests {
     struct DispatchFixture {
         app: App,
         session: Entity,
+        _directory: tempfile::TempDir,
     }
 
     impl DispatchFixture {
         fn new(state: RunState) -> Self {
             let mut app = App::new();
-            app.add_plugins((MinimalPlugins, vmux_session::QueuePlugin, InputPlugin));
+            let directory = tempfile::tempdir().unwrap();
+            app.add_plugins((
+                MinimalPlugins,
+                vmux_session::QueuePlugin,
+                vmux_session::preferences::Plugin,
+                InputPlugin,
+            ));
+            app.world_mut()
+                .write_message(vmux_session::preferences::ProfileRequested(
+                    directory.path().to_path_buf(),
+                ));
             app.world_mut()
                 .spawn(crate::policy_driver::PolicyDriver::bundled());
             let session = app
@@ -560,7 +572,31 @@ mod tests {
                     state,
                 ))
                 .id();
-            Self { app, session }
+            let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+            loop {
+                app.update();
+                if app
+                    .world_mut()
+                    .run_system_once(
+                        |preferences: crate::host::model_selection::AgentPreferences| {
+                            preferences.ready(crate::host::model_selection::Kind::Modes)
+                        },
+                    )
+                    .unwrap()
+                {
+                    break;
+                }
+                assert!(
+                    std::time::Instant::now() < deadline,
+                    "dispatch preferences did not load"
+                );
+                std::thread::sleep(std::time::Duration::from_millis(1));
+            }
+            Self {
+                app,
+                session,
+                _directory: directory,
+            }
         }
 
         fn enqueue(
@@ -736,6 +772,7 @@ mod tests {
         app.add_plugins((
             bevy::app::TaskPoolPlugin::default(),
             vmux_session::preferences::Plugin,
+            vmux_session::QueuePlugin,
             super::Plugin,
         ));
         app.world_mut()
@@ -744,18 +781,21 @@ mod tests {
             ));
         let mut entities = Vec::new();
         for (agent, sid, text) in [("one", "s1", "first"), ("two", "s2", "second")] {
-            let mut queue = PromptQueue::default();
-            queue.enqueue(text.to_string());
-            entities.push(
-                app.world_mut()
-                    .spawn((
-                        TestSession::bundle(agent, sid, directory.path()),
-                        RunState::Idle,
-                        queue,
-                        AcpSpawnQueued,
-                    ))
-                    .id(),
-            );
+            let entity = app
+                .world_mut()
+                .spawn((
+                    TestSession::bundle(agent, sid, directory.path()),
+                    RunState::Idle,
+                    AcpSpawnQueued,
+                ))
+                .id();
+            let text = text.to_string();
+            app.world_mut()
+                .run_system_once(move |mut queues: QueuedPrompts| {
+                    queues.enqueue(entity, text.clone(), Vec::new(), false)
+                })
+                .unwrap();
+            entities.push(entity);
         }
         app.update();
         assert_eq!(
@@ -767,7 +807,12 @@ mod tests {
         );
         for entity in &entities {
             assert_eq!(
-                app.world().get::<PromptQueue>(*entity).unwrap().items.len(),
+                app.world_mut()
+                    .run_system_once({
+                        let entity = *entity;
+                        move |rows: vmux_session::QueuedPromptReads| rows.visible(entity).len()
+                    })
+                    .unwrap(),
                 1
             );
         }
@@ -811,11 +856,12 @@ mod tests {
         );
         for entity in &entities {
             assert!(
-                app.world()
-                    .get::<PromptQueue>(*entity)
+                app.world_mut()
+                    .run_system_once({
+                        let entity = *entity;
+                        move |rows: vmux_session::QueuedPromptReads| rows.visible(entity).is_empty()
+                    })
                     .unwrap()
-                    .items
-                    .is_empty()
             );
             assert!(matches!(
                 app.world().get::<RunState>(*entity),
@@ -836,9 +882,13 @@ mod tests {
                 mode_id: "ask".into(),
             });
         app.world_mut()
-            .get_mut::<PromptQueue>(entities[0])
-            .unwrap()
-            .enqueue("next".into());
+            .run_system_once({
+                let entity = entities[0];
+                move |mut queues: QueuedPrompts| {
+                    queues.enqueue(entity, "next".into(), Vec::new(), false)
+                }
+            })
+            .unwrap();
         app.world_mut()
             .entity_mut(entities[0])
             .insert(RunState::Idle);
