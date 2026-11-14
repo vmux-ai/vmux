@@ -19,12 +19,20 @@ const VAULT_REMOTE_SYNC_INTERVAL: Duration = Duration::from_secs(30);
 
 impl Plugin for RuntimePlugin {
     fn build(&self, app: &mut App) {
-        app.add_systems(Startup, spawn).add_systems(
-            Update,
-            (drain_watch, start_scan, drain_scan, queue_auto_sync)
-                .chain()
-                .in_set(RuntimeSet),
-        );
+        app.add_message::<Notification>()
+            .add_systems(Startup, spawn)
+            .add_systems(
+                Update,
+                (
+                    receive,
+                    drain_watch,
+                    start_scan,
+                    drain_scan,
+                    queue_auto_sync,
+                )
+                    .chain()
+                    .in_set(RuntimeSet),
+            );
 
         if let Some(watch) = VaultWatch::new(app) {
             app.insert_non_send(watch);
@@ -34,11 +42,14 @@ impl Plugin for RuntimePlugin {
 
 struct VaultWatch {
     _watcher: RecommendedWatcher,
-    rx: mpsc::Receiver<notify::Result<notify::Event>>,
+    rx: mpsc::Receiver<Notification>,
     debounce_tx: mpsc::Sender<()>,
     ready_rx: mpsc::Receiver<()>,
     remote_rx: mpsc::Receiver<()>,
 }
+
+#[derive(Message)]
+struct Notification(Vec<std::path::PathBuf>);
 
 impl VaultWatch {
     fn new(app: &App) -> Option<Self> {
@@ -51,13 +62,7 @@ impl VaultWatch {
             .map(|wrapper| (**wrapper).clone());
         let debounce_wake = watch_wake.clone();
         let remote_wake = watch_wake.clone();
-        let mut watcher = match notify::recommended_watcher(move |result| {
-            if watch_tx.send(result).is_ok()
-                && let Some(wake) = &watch_wake
-            {
-                let _ = wake.send_event(bevy::winit::WinitUserEvent::WakeUp);
-            }
-        }) {
+        let mut watcher = match notify::recommended_watcher(Self::callback(watch_tx, watch_wake)) {
             Ok(watcher) => watcher,
             Err(error) => {
                 warn!("Vault watcher init failed: {error}");
@@ -120,6 +125,25 @@ impl VaultWatch {
             ready_rx,
             remote_rx,
         })
+    }
+
+    fn callback(
+        sender: mpsc::Sender<Notification>,
+        wake: Option<bevy::winit::EventLoopProxy<bevy::winit::WinitUserEvent>>,
+    ) -> impl FnMut(notify::Result<notify::Event>) + Send + 'static {
+        move |result| {
+            if !Self::requests_sync(&result) {
+                return;
+            }
+            let Ok(event) = result else {
+                return;
+            };
+            if sender.send(Notification(event.paths)).is_ok()
+                && let Some(wake) = &wake
+            {
+                let _ = wake.send_event(bevy::winit::WinitUserEvent::WakeUp);
+            }
+        }
     }
 
     fn requests_sync(result: &notify::Result<notify::Event>) -> bool {
@@ -212,9 +236,19 @@ fn drain_scan(
     }
 }
 
+fn receive(watcher: Option<NonSend<VaultWatch>>, mut notifications: MessageWriter<Notification>) {
+    let Some(watcher) = watcher else {
+        return;
+    };
+    for notification in watcher.rx.try_iter() {
+        notifications.write(notification);
+    }
+}
+
 fn drain_watch(
     watcher: Option<NonSendMut<VaultWatch>>,
     mut registry: Query<(&mut VaultRegistry, &mut VaultAutoSync)>,
+    mut notifications: MessageReader<Notification>,
 ) {
     let Some(watcher) = watcher else {
         return;
@@ -227,8 +261,11 @@ fn drain_watch(
         auto_sync.remote_check = true;
     }
     let mut changed = false;
-    for result in watcher.rx.try_iter() {
-        changed |= VaultWatch::requests_sync(&result);
+    let storage = VaultStorage::current();
+    for notification in notifications.read() {
+        for path in &notification.0 {
+            changed |= storage.manages(path);
+        }
     }
     if !changed {
         if watcher.ready_rx.try_iter().next().is_some() {
@@ -395,19 +432,46 @@ mod tests {
     }
 
     #[test]
-    fn vault_backup_watcher_ignores_runtime_and_access_events() {
+    fn vault_notifications_queue_only_managed_changes() {
         let root = VaultStorage::current().root().to_path_buf();
+        let (sender, receiver) = mpsc::channel();
+        let mut callback = VaultWatch::callback(sender, None);
+        for path in [
+            "projects/repo/target/debug/object.o",
+            "workspace/repo/file.rs",
+            "profiles/personal/store.ron",
+            ".git/index.lock",
+            "knowledge/.DS_Store",
+        ] {
+            callback(Ok(notify::Event::new(notify::EventKind::Modify(
+                notify::event::ModifyKind::Any,
+            ))
+            .add_path(root.join(path))));
+        }
+        callback(Ok(notify::Event::new(notify::EventKind::Access(
+            notify::event::AccessKind::Any,
+        ))
+        .add_path(root.join("knowledge/note.md"))));
+        assert!(matches!(
+            receiver.try_recv(),
+            Err(mpsc::TryRecvError::Empty)
+        ));
         let knowledge =
             notify::Event::new(notify::EventKind::Modify(notify::event::ModifyKind::Any))
                 .add_path(root.join("knowledge/note.md"));
-        let runtime = notify::Event::new(notify::EventKind::Modify(notify::event::ModifyKind::Any))
-            .add_path(root.join("workspace/repo/file.rs"));
-        let access = notify::Event::new(notify::EventKind::Access(notify::event::AccessKind::Any))
-            .add_path(root.join("tools/tools.toml"));
-
-        assert!(VaultWatch::requests_sync(&Ok(knowledge)));
-        assert!(!VaultWatch::requests_sync(&Ok(runtime)));
-        assert!(!VaultWatch::requests_sync(&Ok(access)));
+        callback(Ok(knowledge.clone()));
+        assert_eq!(receiver.try_recv().unwrap().0, knowledge.paths);
+        let moved = notify::Event::new(notify::EventKind::Modify(notify::event::ModifyKind::Name(
+            notify::event::RenameMode::Both,
+        )))
+        .add_path(root.join("projects/import/note.md"))
+        .add_path(root.join("knowledge/imported.md"));
+        callback(Ok(moved.clone()));
+        assert_eq!(receiver.try_recv().unwrap().0, moved.paths);
+        assert!(matches!(
+            receiver.try_recv(),
+            Err(mpsc::TryRecvError::Empty)
+        ));
     }
 
     #[test]
