@@ -171,6 +171,13 @@ fn initialize(
 }
 
 impl WindowedFocus {
+    fn release(&self, previous: Option<Entity>, selected: Option<Entity>) -> Option<Entity> {
+        if self.surface == previous || previous == selected {
+            return None;
+        }
+        previous
+    }
+
     fn target(
         &mut self,
         intent: HostFocusIntent,
@@ -210,25 +217,26 @@ fn apply_windowed(
         ),
         _ => (false, None),
     };
+    let active_window = focused_window.entity();
+    let selected = match intent {
+        HostFocusIntent::Windowed(surface) if active_window.is_some() && has_browser => {
+            Some(surface)
+        }
+        _ => None,
+    };
     let mut focus_target = None;
     for (window, mut focus) in &mut windows {
         let previous = focus.surface;
-        let target = if Some(window) == focused_window.entity() {
+        let target = if Some(window) == active_window {
             focus.target(intent, has_browser, has_native_focus)
         } else {
             focus.target(HostFocusIntent::WinitHost, false, None)
         };
-        if let Some(webview) = target {
-            if previous != Some(webview)
-                && let Some(previous) = previous
-            {
-                browsers.set_windowed_focus(&previous, false);
-            }
-            focus_target = Some(webview);
-        } else if focus.surface != previous
-            && let Some(previous) = previous
-        {
+        if let Some(previous) = focus.release(previous, selected) {
             browsers.set_windowed_focus(&previous, false);
+        }
+        if let Some(webview) = target {
+            focus_target = Some(webview);
         }
     }
     if let Some(webview) = focus_target {
@@ -275,6 +283,39 @@ mod tests {
                 .find_map(|entity| entity.get::<KeyboardContext>().copied())
                 .unwrap()
         }
+    }
+
+    #[test]
+    fn transferring_a_surface_between_windows_keeps_its_native_first_responder() {
+        let mut app = FocusFixture::app();
+        let previous_window = app.world_mut().spawn(Window::default()).id();
+        let selected_window = app.world_mut().spawn(Window::default()).id();
+        let surface = app.world_mut().spawn_empty().id();
+        app.update();
+        let mut native_focus = Some(surface);
+        let observed_focus = native_focus == Some(surface);
+        let mut previous = app
+            .world_mut()
+            .get_mut::<WindowedFocus>(previous_window)
+            .unwrap();
+        previous.target(HostFocusIntent::Windowed(surface), true, None);
+        let old_surface = previous.surface;
+        previous.target(HostFocusIntent::WinitHost, false, None);
+        if previous.release(old_surface, Some(surface)) == native_focus {
+            native_focus = None;
+        }
+        let mut selected = app
+            .world_mut()
+            .get_mut::<WindowedFocus>(selected_window)
+            .unwrap();
+        if let Some(surface) = selected.target(
+            HostFocusIntent::Windowed(surface),
+            true,
+            Some(observed_focus),
+        ) {
+            native_focus = Some(surface);
+        }
+        assert_eq!(native_focus, Some(surface));
     }
 
     #[test]
