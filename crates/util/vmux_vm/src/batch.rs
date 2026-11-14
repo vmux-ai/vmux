@@ -502,7 +502,7 @@ fn order(mut roots: Roots, rows: Rows, mut commands: Commands) {
 }
 
 fn inspect(roots: Roots, rows: Rows, mut commands: Commands) {
-    let Ok((root, stage, endpoint, _, _, _)) = roots.single() else {
+    let Ok((root, stage, endpoint, _, deadline, _)) = roots.single() else {
         return;
     };
     if *stage != Stage::Execute {
@@ -518,6 +518,9 @@ fn inspect(roots: Roots, rows: Rows, mut commands: Commands) {
         return;
     };
     for (target, _) in &links.0 {
+        if Instant::now() >= deadline.0 {
+            return;
+        }
         let Ok((_, _, poll, failure)) = rows.observations.get(*target) else {
             continue;
         };

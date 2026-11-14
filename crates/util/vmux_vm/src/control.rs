@@ -43,6 +43,7 @@ struct Request(Task<io::Result<UnixStream>>);
 
 impl Request {
     fn read(mut stream: UnixStream) -> io::Result<UnixStream> {
+        stream.set_nonblocking(false)?;
         stream.set_read_timeout(Some(Duration::from_secs(2)))?;
         stream.set_write_timeout(Some(Duration::from_secs(2)))?;
         let mut bytes = [0; 5];
@@ -141,5 +142,24 @@ fn receive(
             ));
             pending += 1;
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_fragmented_stop_frame_is_read_after_accepting_a_nonblocking_socket() {
+        let (stream, mut client) = UnixStream::pair().unwrap();
+        stream.set_nonblocking(true).unwrap();
+        let worker = std::thread::spawn(move || {
+            std::thread::sleep(Duration::from_millis(10));
+            client.write_all(b"ST").unwrap();
+            std::thread::sleep(Duration::from_millis(10));
+            client.write_all(b"OP\n").unwrap();
+        });
+        Request::read(stream).unwrap();
+        worker.join().unwrap();
     }
 }

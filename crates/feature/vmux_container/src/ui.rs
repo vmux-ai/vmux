@@ -212,7 +212,7 @@ fn ContainerSheet(
                 LevelLink { value: Level::Vm, selected: level == Level::Vm, onselect: onlevel }
                 EngineToolbar { compact: true, start: snapshot.available(), icon_only: true, onsettings }
             }
-            div { class: "min-h-0 flex-1 pl-3",
+            div { class: "min-h-0 flex-1 overflow-y-auto pl-3",
                 div { class: "flex h-8 items-center px-1",
                     LevelLink { value: Level::Docker, selected: level == Level::Docker, onselect: onlevel }
                 }
@@ -516,17 +516,18 @@ fn EngineToolbar(
         div { class: if compact { "flex shrink-0 items-center gap-2" } else { "flex h-8 items-center justify-end gap-2 px-3" },
             if matches!(snapshot.vm_state(), "starting" | "stopping") {
                 StateLabel { state: snapshot.vm_state().to_string() }
-            } else if snapshot.running {
+            }
+            if snapshot.starting || (snapshot.running && !snapshot.stopping) {
                 Button {
                     size: if icon_only { ButtonSize::Icon } else { ButtonSize::Xs }, variant: ButtonVariant::Ghost,
                     class: if icon_only { "p-0" } else { "h-7 gap-2 whitespace-nowrap px-1.5" },
                     title: translate("container-stop"), aria_label: translate("container-stop"),
-                    disabled: controls.engine_busy(),
+                    disabled: controls.engine_busy() && !snapshot.starting,
                     onclick: move |_| controls.request(Intent::Stop),
                     LineIconView { icon: LineIcon::Pause, class: "size-3.5" }
                     if !icon_only { span { {translate("container-stop-vm")} } }
                 }
-            } else if start {
+            } else if start && !snapshot.stopping {
                 Button {
                     size: if icon_only { ButtonSize::Icon } else { ButtonSize::Xs }, variant: ButtonVariant::Ghost,
                     class: if icon_only { "p-0" } else { "h-7 gap-2 whitespace-nowrap px-1.5" },
@@ -653,6 +654,7 @@ fn ContainerRow(
                 span { class: "text-[10px] text-muted-foreground", {translate(if entry.state == "starting" { "container-state-starting" } else if entry.state == "stopping" { "container-phase-stopping" } else { "container-state-restarting" })} }
             } else {
                 div { class: "pointer-events-none absolute right-1 top-1/2 -translate-y-1/2 rounded-md bg-background opacity-0 transition-opacity group-hover:pointer-events-auto group-hover:opacity-100 group-focus-within:pointer-events-auto group-focus-within:opacity-100",
+                    onkeydown: move |event| event.stop_propagation(),
                     OperationButton {
                         ids: vec![operation_id], operation: if running { ContainerOperation::Stop } else { ContainerOperation::Start },
                         label: translate(if running { "container-stop-container" } else { "container-start-container" }),
@@ -1231,12 +1233,18 @@ impl Controls {
 
     fn request(mut self, intent: Intent) {
         let replace = matches!(intent, Intent::Stop)
-            && self
-                .pending
-                .peek()
-                .as_ref()
-                .is_some_and(|pending| matches!(pending.intent, Intent::Containers { .. }));
-        if (!replace && self.pending.peek().is_some()) || self.state.peek().busy {
+            && (self.state.peek().starting
+                || self.pending.peek().as_ref().is_some_and(|pending| {
+                    matches!(
+                        pending.intent,
+                        Intent::Start
+                            | Intent::Containers {
+                                operation: ContainerOperation::Start,
+                                ..
+                            }
+                    )
+                }));
+        if !replace && (self.pending.peek().is_some() || self.state.peek().busy) {
             return;
         }
         self.error.set(String::new());
@@ -1323,7 +1331,10 @@ impl Intent {
         }
         match self {
             Self::Start => snapshot.starting = true,
-            Self::Stop => snapshot.stopping = true,
+            Self::Stop => {
+                snapshot.starting = false;
+                snapshot.stopping = true;
+            }
             Self::Containers { ids, operation } => {
                 if *operation == ContainerOperation::Start && !snapshot.available() {
                     snapshot.starting = true;
@@ -1568,6 +1579,27 @@ mod tests {
             );
             self.render();
         }
+    }
+
+    #[test]
+    fn the_vm_pause_control_cancels_start_before_the_host_answers() {
+        let mut preview = Preview::new();
+        preview.publish(ContainerUiState {
+            supported: true,
+            phase: "stopped".into(),
+            data_directory: "/fixtures/data".into(),
+            ..Default::default()
+        });
+        preview.address("vmux://vm/");
+        preview.click(&translate("container-start"));
+        assert_eq!(preview.host.starts.get(), 1);
+        preview.click(&translate("container-stop"));
+        assert_eq!(preview.host.stops.get(), 1);
+        assert!(
+            preview
+                .render()
+                .contains(&translate("container-phase-stopping"))
+        );
     }
 
     #[test]

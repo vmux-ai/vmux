@@ -10,6 +10,7 @@ pub(crate) struct PortForwarder {
     docker: UnixHttp,
     network: UnixHttp,
     active: BTreeSet<PublishedPort>,
+    pending: BTreeSet<PublishedPort>,
 }
 
 impl PortForwarder {
@@ -18,6 +19,7 @@ impl PortForwarder {
             docker: UnixHttp::new(docker),
             network: UnixHttp::new(network),
             active: BTreeSet::new(),
+            pending: BTreeSet::new(),
         }
     }
 
@@ -30,6 +32,12 @@ impl PortForwarder {
             .require_success()?;
         let observed = PublishedPort::from_forwarders(&body)?;
         self.active.retain(|port| observed.contains(port));
+        for port in &self.pending {
+            if observed.contains(port) {
+                self.active.insert(port.clone());
+            }
+        }
+        self.pending.clear();
         for port in &published {
             if observed.contains(port) {
                 self.active.insert(port.clone());
@@ -69,12 +77,14 @@ impl PortForwarder {
                 "protocol": port.protocol,
             }))
             .map_err(io::Error::other)?;
+            self.pending.insert(port.clone());
             match self
                 .network
                 .post("/services/forwarder/expose", &request)
                 .and_then(|response| response.require_success())
             {
                 Ok(_) => {
+                    self.pending.remove(&port);
                     self.active.insert(port);
                 }
                 Err(error) => {
@@ -208,6 +218,7 @@ mod tests {
         active: BTreeSet<u16>,
         conflict: Option<u16>,
         lose_removal: bool,
+        lose_addition: bool,
         additions: Vec<u16>,
         removals: Vec<u16>,
     }
@@ -264,6 +275,7 @@ mod tests {
                     }
                     Err(error) => panic!("{error}"),
                 };
+                stream.set_nonblocking(false).unwrap();
                 stream
                     .set_read_timeout(Some(Duration::from_secs(2)))
                     .unwrap();
@@ -323,6 +335,10 @@ mod tests {
                         if state.conflict == Some(port) || !state.active.insert(port) {
                             status = 500;
                         }
+                        if state.lose_addition {
+                            state.lose_addition = false;
+                            continue;
+                        }
                     }
                     b"proxy result".to_vec()
                 };
@@ -344,6 +360,28 @@ mod tests {
                 thread.join().unwrap();
             }
         }
+    }
+
+    #[test]
+    fn lost_exposure_acknowledgement_is_retired_after_the_container_disappears() {
+        let backend = Backend::new();
+        {
+            let mut state = backend.state.lock().unwrap();
+            state.published.insert(8080);
+            state.lose_addition = true;
+        }
+        let mut forwarder = backend.forwarder();
+        assert_eq!(
+            forwarder.refresh().unwrap_err().kind(),
+            io::ErrorKind::UnexpectedEof
+        );
+        backend.state.lock().unwrap().published.clear();
+        forwarder.refresh().unwrap();
+        forwarder.refresh().unwrap();
+        let state = backend.state.lock().unwrap();
+        assert!(state.active.is_empty());
+        assert_eq!(state.additions, [8080]);
+        assert_eq!(state.removals, [8080]);
     }
 
     #[test]

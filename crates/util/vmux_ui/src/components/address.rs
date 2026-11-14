@@ -180,14 +180,20 @@ fn AddressMenu(
     #[props(default)] preserve_name: bool,
     #[props(default)] navigate_on_click: bool,
 ) -> Element {
-    if !crumb
+    let direct = !crumb
         .options
         .iter()
         .any(|option| option.intent.is_some() && option.intent != crumb.entry.intent)
         && crumb.tabs.is_empty()
         && crumb.on_open.is_none()
-        && crumb.on_more.is_none()
-    {
+        && crumb.on_more.is_none();
+    let direct_id = id.clone();
+    use_effect(use_reactive!(|(direct, direct_id)| {
+        if direct && open.peek().as_ref() == Some(&direct_id) {
+            open.set(None);
+        }
+    }));
+    if direct {
         let intent = crumb.entry.intent.clone();
         let onclick = intent.map(|intent| {
             EventHandler::new(move |_| {

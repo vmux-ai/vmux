@@ -1,5 +1,5 @@
 use bevy::prelude::*;
-use bevy::tasks::{IoTaskPool, Task, futures_lite::future};
+use bevy::tasks::{IoTaskPool, Task};
 use bevy_cef::prelude::UiInput;
 use vmux_api::input::KeyStroke;
 use vmux_api::protocol::AgentCommandResult;
@@ -168,7 +168,12 @@ fn wake(
         return;
     };
     if let Some(timer) = &mut settle.timer {
-        if future::block_on(future::poll_once(timer)).is_none() {
+        if std::future::Future::poll(
+            std::pin::Pin::new(timer),
+            &mut std::task::Context::from_waker(&wake.0),
+        )
+        .is_pending()
+        {
             return;
         }
         settle.timer = None;
@@ -233,13 +238,21 @@ mod tests {
             std::thread::sleep(std::time::Duration::from_millis(2));
         }
         assert_eq!(observed.0.load(std::sync::atomic::Ordering::SeqCst), 1);
+        let mut consumed = 0;
         while app.world().resource::<Settle>().until.is_some() {
             assert!(
                 std::time::Instant::now() < deadline,
                 "settlement did not finish"
             );
+            while observed.0.load(std::sync::atomic::Ordering::SeqCst) == consumed {
+                assert!(
+                    std::time::Instant::now() < deadline,
+                    "settlement completion lost its wake"
+                );
+                std::thread::sleep(std::time::Duration::from_millis(2));
+            }
+            consumed = observed.0.load(std::sync::atomic::Ordering::SeqCst);
             app.update();
-            std::thread::sleep(std::time::Duration::from_millis(2));
         }
         std::thread::sleep(std::time::Duration::from_millis(20));
         let finished = observed.0.load(std::sync::atomic::Ordering::SeqCst);

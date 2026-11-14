@@ -5,7 +5,7 @@ use bevy::winit::EventLoopProxyWrapper;
 use bevy_app::{App, AppExit, Last, Plugin, Update};
 use bevy_ecs::name::Name;
 use bevy_ecs::prelude::*;
-use bevy_tasks::{IoTaskPool, Task, TaskPoolBuilder, futures_lite::future};
+use bevy_tasks::{IoTaskPool, Task, TaskPoolBuilder};
 use vmux_ecs::service::{Restarting, ShutdownSet};
 use vmux_ecs::wake::Wake;
 use vmux_ecs::{Operation, OperationCompleted, OperationPlugin, OperationState, OperationTarget};
@@ -26,6 +26,9 @@ impl Plugin for ControlPlugin {
         });
         if !app.is_plugin_added::<OperationPlugin>() {
             app.add_plugins(OperationPlugin);
+        }
+        if !app.is_plugin_added::<vmux_ecs::wake::WakePlugin>() {
+            app.add_plugins(vmux_ecs::wake::WakePlugin);
         }
         app.add_observer(request)
             .init_resource::<Lifetime>()
@@ -193,12 +196,15 @@ pub(crate) enum Reply {
 }
 
 #[derive(Component)]
-pub(crate) struct Busy(Command);
+pub(crate) struct Busy {
+    command: Command,
+    operation: Entity,
+}
 
 impl Busy {
     pub(crate) fn starting(&self) -> bool {
         matches!(
-            self.0,
+            self.command,
             Command::Start(_)
                 | Command::Containers {
                     operation: ContainerOperation::Start,
@@ -207,7 +213,7 @@ impl Busy {
         )
     }
     pub(crate) fn stopping(&self) -> bool {
-        matches!(self.0, Command::Stop)
+        matches!(self.command, Command::Stop)
     }
 }
 
@@ -223,22 +229,34 @@ struct RequestKind(Command);
 #[derive(Component)]
 struct ControlTask(Task<io::Result<Reply>>);
 
+#[derive(Component)]
+struct RequestOwner(Owner);
+
 fn request(
     trigger: On<Request>,
-    busy: Query<(), With<Busy>>,
+    busy: Query<&Busy>,
+    owners: Query<&RequestOwner>,
     proxy: Option<Res<EventLoopProxyWrapper>>,
     lifetime: Res<Lifetime>,
     mut commands: Commands,
 ) {
     let request = trigger.event();
-    if request.command.mutates() && busy.contains(request.entity) {
-        commands.trigger(Finished {
-            entity: request.reply,
-            result: Err("An engine operation is already running".into()),
-            mutates: true,
-            requester: request.requester,
-        });
-        return;
+    if request.command.mutates()
+        && let Ok(busy) = busy.get(request.entity)
+    {
+        if matches!(request.command, Command::Stop) && busy.starting() {
+            if let Ok(owner) = owners.get(busy.operation) {
+                owner.0.cancel();
+            }
+        } else {
+            commands.trigger(Finished {
+                entity: request.reply,
+                result: Err("An engine operation is already running".into()),
+                mutates: true,
+                requester: request.requester,
+            });
+            return;
+        }
     }
     let helper = match std::env::current_exe() {
         Ok(path) => path.with_file_name("vmux_vm"),
@@ -264,17 +282,13 @@ fn request(
             return;
         }
     };
-    if request.command.mutates() {
-        commands
-            .entity(request.entity)
-            .insert(Busy(request.command.clone()));
-    }
     let kind = request.command.clone();
     let work = kind.clone();
     let settings = request.settings.clone();
-    let owner = lifetime.owner.clone();
+    let owner = lifetime.owner.operation();
+    let request_owner = owner.clone();
     let wake = Wake::beside(proxy.as_deref());
-    commands
+    let operation = commands
         .spawn((
             Name::new(kind.name()),
             operation,
@@ -282,13 +296,21 @@ fn request(
             ReplyTarget(request.reply),
             RequestedBy(request.requester),
             RequestKind(kind),
+            RequestOwner(request_owner),
             ControlTask(IoTaskPool::get().spawn(async move {
                 let result = work.execute(settings, &helper, &owner);
                 drop(wake);
                 result
             })),
         ))
-        .insert(OperationState::Running);
+        .insert(OperationState::Running)
+        .id();
+    if request.command.mutates() {
+        commands.entity(request.entity).insert(Busy {
+            command: request.command.clone(),
+            operation,
+        });
+    }
 }
 
 type RunningOperations<'w, 's> = Query<
@@ -304,13 +326,30 @@ type RunningOperations<'w, 's> = Query<
     ),
 >;
 
-fn poll(mut operations: RunningOperations, mut commands: Commands) {
+fn poll(
+    mut operations: RunningOperations,
+    busy: Query<&Busy>,
+    wake: Option<Res<vmux_ecs::JobWake>>,
+    mut commands: Commands,
+) {
+    let waker = wake
+        .as_ref()
+        .map_or(std::task::Waker::noop(), |wake| &wake.0);
+    let mut context = std::task::Context::from_waker(waker);
     for (entity, target, reply, kind, requester, mut task) in &mut operations {
-        let Some(result) = future::block_on(future::poll_once(&mut task.0)) else {
+        let std::task::Poll::Ready(result) =
+            std::future::Future::poll(std::pin::Pin::new(&mut task.0), &mut context)
+        else {
             continue;
         };
-        commands.entity(entity).remove::<ControlTask>();
-        if kind.0.mutates() {
+        commands
+            .entity(entity)
+            .remove::<(ControlTask, RequestOwner)>();
+        let current = !kind.0.mutates()
+            || busy
+                .get(target.entity())
+                .is_ok_and(|busy| busy.operation == entity);
+        if kind.0.mutates() && current {
             commands.entity(target.entity()).remove::<Busy>();
         }
         let result = result.map_err(|error| error.to_string());
@@ -322,6 +361,9 @@ fn poll(mut operations: RunningOperations, mut commands: Commands) {
             entity,
             result: completion,
         });
+        if !current {
+            continue;
+        }
         commands.trigger(Finished {
             entity: reply.0,
             result,
@@ -336,6 +378,67 @@ mod tests {
     use super::*;
     use std::io::Write;
     use std::time::Duration;
+
+    #[test]
+    fn stop_supersedes_start_without_accepting_its_old_completion() {
+        let directory = tempfile::tempdir().unwrap();
+        let mut settings = Settings::new(directory.path().join("engine"), directory.path());
+        settings.validate().unwrap();
+        let lease = std::fs::File::create(settings.directory.join("start.lock")).unwrap();
+        lease.lock().unwrap();
+        let mut app = App::new();
+        app.add_plugins(ControlPlugin);
+        let target = app.world_mut().spawn_empty().id();
+        let owner = app.world().resource::<Lifetime>().owner.operation();
+        let status = EngineClient::new(settings.clone()).status();
+        let old = app
+            .world_mut()
+            .spawn((
+                Operation::bundle("container.start").unwrap(),
+                OperationTarget::new(target),
+                ReplyTarget(target),
+                RequestedBy(target),
+                RequestKind(Command::Start(Ownership::Application)),
+                RequestOwner(owner.clone()),
+                ControlTask(IoTaskPool::get().spawn(async move { Ok(Reply::Started(status)) })),
+            ))
+            .insert(OperationState::Running)
+            .id();
+        app.world_mut().entity_mut(target).insert(Busy {
+            command: Command::Start(Ownership::Application),
+            operation: old,
+        });
+        app.world_mut().trigger(Request {
+            entity: target,
+            reply: target,
+            requester: target,
+            command: Command::Stop,
+            settings: settings.clone(),
+        });
+        app.world_mut().flush();
+        let replacement = app.world().get::<Busy>(target).unwrap().operation;
+        assert_ne!(replacement, old);
+        let error = EngineClient::new(settings)
+            .start_owned(Path::new("unused"), &owner)
+            .unwrap_err();
+        assert_eq!(error.kind(), io::ErrorKind::Interrupted);
+        let deadline = std::time::Instant::now() + Duration::from_secs(2);
+        while app.world().get::<ControlTask>(old).is_some() {
+            assert!(std::time::Instant::now() < deadline);
+            app.update();
+            std::thread::sleep(Duration::from_millis(1));
+        }
+        assert_eq!(
+            app.world().get::<Busy>(target).unwrap().operation,
+            replacement
+        );
+        drop(lease);
+        while app.world().get::<Busy>(target).is_some() {
+            assert!(std::time::Instant::now() < deadline);
+            app.update();
+            std::thread::sleep(Duration::from_millis(1));
+        }
+    }
 
     #[test]
     fn application_cancellation_cannot_cancel_an_independent_cli_start() {
@@ -414,6 +517,7 @@ mod tests {
                             Err(error) => panic!("accept shutdown: {error}"),
                         }
                     };
+                    stream.set_nonblocking(false).unwrap();
                     stream
                         .set_read_timeout(Some(Duration::from_secs(2)))
                         .unwrap();

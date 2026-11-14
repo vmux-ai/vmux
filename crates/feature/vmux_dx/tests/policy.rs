@@ -1097,6 +1097,75 @@ fn io_results_require_a_proven_standard_library_binding() {
 }
 
 #[test]
+fn query_data_fields_are_valid_registered_boundary_endpoints() {
+    let inventory = Inventory::fixture(
+        "use bevy_ecs::prelude::*; use bevy_app::{App,Plugin}; use bevy_ecs::query::QueryData; #[derive(Component)] struct Position { x:f32 } #[derive(QueryData)] struct View { position:&'static Position } fn read(rows:Query<View>) {} struct Root; impl Plugin for Root { fn build(&self,app:&mut App) { app.add_systems(Update,read); } }",
+    );
+    let mut boundary = Boundary::fixture(&inventory, "fn:read");
+    boundary.input = format!("ECS: {}", inventory.key("struct:Position"));
+    boundary.output = "external: observed positions".into();
+    assert!(boundary.references_from(&inventory, &Policy::default(), &mut BTreeSet::new()));
+}
+
+#[test]
+fn binary_child_namespaces_do_not_depend_on_source_order() {
+    for reverse in [false, true] {
+        let mut sources = [
+            (
+                "crates/util/fixture/src/bin/alpha.rs",
+                "use bevy_ecs::prelude::*; #[derive(Component)] pub struct State { value:u32 }",
+            ),
+            (
+                "crates/util/fixture/src/bin/zeta.rs",
+                "use bevy_app::App; use bevy_ecs::prelude::*; mod alpha; fn read(rows:Query<&alpha::State>) {} fn main() { let mut app=App::new(); app.add_systems(Update,read); }",
+            ),
+        ];
+        if reverse {
+            sources.reverse();
+        }
+        let mut inventory = Inventory::default();
+        for (path, source) in sources {
+            inventory.source(path, source);
+        }
+        inventory.resolve_usage();
+        assert!(inventory.canonical(
+            &inventory.entries[&inventory.key("struct:State")],
+            &Policy::default(),
+            &mut BTreeSet::new()
+        ));
+    }
+}
+
+#[test]
+fn a_nested_bin_directory_preserves_ordinary_child_module_resolution() {
+    let mut inventory = Inventory::default();
+    for (path, source) in [
+        (
+            "crates/util/fixture/src/lib.rs",
+            "use bevy_app::{App,Plugin}; use bevy_ecs::prelude::*; mod tools; fn read(rows:Query<&tools::bin::worker::state::State>) {} struct Root; impl Plugin for Root { fn build(&self,app:&mut App) { app.add_systems(Update,read); } }",
+        ),
+        ("crates/util/fixture/src/tools.rs", "pub mod bin;"),
+        ("crates/util/fixture/src/tools/bin.rs", "pub mod worker;"),
+        (
+            "crates/util/fixture/src/tools/bin/worker.rs",
+            "pub mod state;",
+        ),
+        (
+            "crates/util/fixture/src/tools/bin/worker/state.rs",
+            "use bevy_ecs::prelude::*; #[derive(Component)] pub struct State { value:u32 }",
+        ),
+    ] {
+        inventory.source(path, source);
+    }
+    inventory.resolve_usage();
+    assert!(inventory.canonical(
+        &inventory.entries[&inventory.key("struct:State")],
+        &Policy::default(),
+        &mut BTreeSet::new()
+    ));
+}
+
+#[test]
 fn query_data_is_owned_only_through_registered_queries() {
     for (registered, suffix) in [(true, "struct:View"), (false, "struct:Unused")] {
         let source = if registered {
@@ -3268,6 +3337,8 @@ impl Declaration {
 
 #[derive(Default)]
 struct Inventory {
+    sources: BTreeMap<String, String>,
+    resolved_namespaces: BTreeMap<String, BTreeSet<String>>,
     entries: BTreeMap<String, Declaration>,
     usage: BTreeMap<String, Usage>,
     names: BTreeMap<String, Vec<String>>,
@@ -3344,6 +3415,7 @@ impl Inventory {
     }
 
     fn source(&mut self, path: &str, source: &str) {
+        self.sources.insert(path.into(), source.into());
         self.root_bindings.get_mut().clear();
         self.owner_reference_cache.get_mut().clear();
         if !path.ends_with(".rs") {
@@ -3370,7 +3442,11 @@ impl Inventory {
 
     fn namespace(&self, path: &str, scope: &[String]) -> Namespace {
         let original = Namespace::of(path, scope);
-        let Some(candidates) = self.module_namespaces.get(path) else {
+        let Some(candidates) = self
+            .resolved_namespaces
+            .get(path)
+            .or_else(|| self.module_namespaces.get(path))
+        else {
             return original;
         };
         if candidates.len() != 1 {
@@ -4086,7 +4162,7 @@ impl Inventory {
                         | "bevy::ecs::prelude"
                         | "bevy::prelude"
                 ),
-                "With" | "Without" | "Added" | "Changed" | "Or" | "Has" => matches!(
+                "With" | "Without" | "Added" | "Changed" | "Or" | "Has" | "QueryData" => matches!(
                     prefix,
                     "bevy_ecs::query"
                         | "bevy_ecs::prelude"
@@ -4192,8 +4268,9 @@ impl Inventory {
                             .and_then(|path| {
                                 self.framework_handle(&entry.namespace, path, &mut BTreeSet::new())
                             })
-                            .as_deref()
-                            == Some("SystemParam");
+                            .is_some_and(|kind| {
+                                matches!(kind.as_str(), "SystemParam" | "QueryData")
+                            });
                     if (parameter || matches!(entry.kind, Kind::Alias))
                         && self.used(entry)
                         && entry.production
@@ -4735,6 +4812,27 @@ impl Inventory {
     }
 
     fn resolve_usage(&mut self) {
+        if self.usage.iter().any(|(path, usage)| {
+            path.ends_with(".rs") && usage.namespace != self.namespace(path, &[]).0
+        }) {
+            let sources = std::mem::take(&mut self.sources);
+            let mut bindings = std::mem::take(&mut self.module_namespaces);
+            for _ in 0..=sources.len() {
+                let mut inventory = Self {
+                    resolved_namespaces: bindings.clone(),
+                    ..Default::default()
+                };
+                for (path, source) in &sources {
+                    inventory.source(path, source);
+                }
+                let stable = inventory.module_namespaces == bindings;
+                bindings = inventory.module_namespaces.clone();
+                *self = inventory;
+                if stable {
+                    break;
+                }
+            }
+        }
         self.owner_reference_cache.get_mut().clear();
         let mut keys = BTreeSet::new();
         let mut registered = BTreeSet::new();
@@ -5780,7 +5878,12 @@ impl<'ast> Visit<'ast> for Declarations<'_> {
                     if !matches!(
                         file.file_name().and_then(|name| name.to_str()),
                         Some("lib.rs" | "main.rs" | "mod.rs")
-                    ) && directory.file_name().and_then(|name| name.to_str()) != Some("bin")
+                    ) && !(directory.file_name().and_then(|name| name.to_str()) == Some("bin")
+                        && directory
+                            .parent()
+                            .and_then(Path::file_name)
+                            .and_then(|name| name.to_str())
+                            == Some("src"))
                     {
                         directory.push(file.file_stem().unwrap());
                     }

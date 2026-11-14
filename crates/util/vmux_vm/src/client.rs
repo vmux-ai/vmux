@@ -27,6 +27,7 @@ pub struct EngineClient {
 pub struct Owner {
     scope: PathBuf,
     cancelled: Arc<AtomicBool>,
+    lifetime: Option<Arc<AtomicBool>>,
 }
 
 pub(crate) struct Preparation<'a> {
@@ -75,6 +76,15 @@ impl Owner {
         Self {
             scope: Self::normalize(scope),
             cancelled: Arc::new(AtomicBool::new(false)),
+            lifetime: None,
+        }
+    }
+
+    pub fn operation(&self) -> Self {
+        Self {
+            scope: self.scope.clone(),
+            cancelled: Arc::new(AtomicBool::new(false)),
+            lifetime: Some(self.lifetime.as_ref().unwrap_or(&self.cancelled).clone()),
         }
     }
 
@@ -94,7 +104,12 @@ impl Owner {
     }
 
     fn check(&self) -> io::Result<()> {
-        if self.cancelled.load(Ordering::Acquire) {
+        if self.cancelled.load(Ordering::Acquire)
+            || self
+                .lifetime
+                .as_ref()
+                .is_some_and(|token| token.load(Ordering::Acquire))
+        {
             return Err(io::Error::new(
                 io::ErrorKind::Interrupted,
                 "application VM startup cancelled",
@@ -235,11 +250,36 @@ impl EngineClient {
     }
 
     pub fn stop(&self) -> io::Result<()> {
-        if !self.status().running {
-            return Ok(());
-        }
-        self.request_stop()?;
         let deadline = Instant::now() + Duration::from_secs(75);
+        let status = self.status();
+        if status.running
+            && let Err(error) = self.request_stop()
+            && !(matches!(
+                error.kind(),
+                io::ErrorKind::NotFound | io::ErrorKind::ConnectionRefused
+            ) && (matches!(status.phase, Phase::Created | Phase::NetworkStarting)
+                || !self.status().running))
+        {
+            return Err(error);
+        }
+        let _start = match self.wait_start(deadline) {
+            Ok(lock) => lock,
+            Err(error) if error.kind() == io::ErrorKind::NotFound && !self.status().running => {
+                return Ok(());
+            }
+            Err(error) => return Err(error),
+        };
+        self.stop_running(deadline)
+    }
+
+    fn stop_running(&self, deadline: Instant) -> io::Result<()> {
+        let status = self.status();
+        if !status.running {
+            return self.wait_retired();
+        }
+        if status.phase != Phase::Stopping {
+            self.request_stop()?;
+        }
         while self.status().running {
             if Instant::now() >= deadline {
                 return Err(io::Error::new(
@@ -254,17 +294,7 @@ impl EngineClient {
 
     pub fn stop_owned(&self, owner: &Owner) -> io::Result<()> {
         let deadline = Instant::now() + Duration::from_secs(75);
-        let _start = loop {
-            match self.lock_named("start.lock") {
-                Ok(lock) => break lock,
-                Err(error)
-                    if error.kind() == io::ErrorKind::WouldBlock && Instant::now() < deadline =>
-                {
-                    std::thread::sleep(Duration::from_millis(25));
-                }
-                Err(error) => return Err(error),
-            }
-        };
+        let _start = self.wait_start(deadline)?;
         let bytes = match std::fs::read(self.settings.directory.join("engine-state.json")) {
             Ok(bytes) => bytes,
             Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(()),
@@ -275,7 +305,7 @@ impl EngineClient {
             return Ok(());
         }
         if self.status().running {
-            return self.stop();
+            return self.stop_running(deadline);
         }
         if let Err(error) = crate::process::Lease::retired(&self.settings.directory) {
             if error.kind() != io::ErrorKind::WouldBlock {
@@ -285,6 +315,20 @@ impl EngineClient {
             self.wait_retired()?;
         }
         Ok(())
+    }
+
+    fn wait_start(&self, deadline: Instant) -> io::Result<File> {
+        loop {
+            match self.lock_named("start.lock") {
+                Ok(lock) => return Ok(lock),
+                Err(error)
+                    if error.kind() == io::ErrorKind::WouldBlock && Instant::now() < deadline =>
+                {
+                    std::thread::sleep(Duration::from_millis(25));
+                }
+                Err(error) => return Err(error),
+            }
+        }
     }
 
     pub(crate) fn request_stop(&self) -> io::Result<()> {
@@ -339,6 +383,18 @@ impl EngineClient {
                 owner.check()?;
             }
             let status = self.status();
+            if (child.is_none() && !status.running)
+                || (status.running
+                    && matches!(
+                        status.phase,
+                        Phase::Stopping | Phase::Stopped | Phase::Failed
+                    ))
+            {
+                return Err(io::Error::other(format!(
+                    "container engine stopped during startup; see {}",
+                    self.settings.log().display()
+                )));
+            }
             if status.docker_ready {
                 match std::fs::remove_file(self.settings.directory.join("data.new")) {
                     Ok(()) => {}
@@ -424,6 +480,54 @@ impl EngineClient {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn stopping_before_the_first_start_is_idempotent() {
+        let directory = tempfile::tempdir().unwrap();
+        let settings = Settings::new(directory.path().join("uninitialized"), directory.path());
+        let client = EngineClient::new(settings);
+        client.stop().unwrap();
+        client.stop().unwrap();
+    }
+
+    #[test]
+    fn waiting_for_an_existing_supervisor_returns_when_it_has_stopped() {
+        let directory = tempfile::tempdir().unwrap();
+        let mut settings = Settings::new(directory.path().join("engine"), directory.path());
+        settings.validate().unwrap();
+        let owner = Owner::new(directory.path().join("profile"));
+        let interrupt = owner.clone();
+        let worker = std::thread::spawn(move || {
+            std::thread::sleep(Duration::from_millis(100));
+            interrupt.cancel();
+        });
+        let error = EngineClient::new(settings)
+            .wait_ready(None, Some(&owner))
+            .unwrap_err();
+        assert_ne!(error.kind(), io::ErrorKind::Interrupted);
+        assert!(error.to_string().contains("stopped during startup"));
+        worker.join().unwrap();
+    }
+
+    #[test]
+    fn cancelling_one_operation_preserves_its_profile_and_quit_cancels_later_operations() {
+        let directory = tempfile::tempdir().unwrap();
+        let profile = Owner::new(directory.path().join("profile"));
+        let first = profile.operation();
+        first.cancel();
+        assert_eq!(
+            first.check().unwrap_err().kind(),
+            io::ErrorKind::Interrupted
+        );
+        profile.check().unwrap();
+        let second = profile.operation();
+        second.check().unwrap();
+        profile.cancel();
+        assert_eq!(
+            second.check().unwrap_err().kind(),
+            io::ErrorKind::Interrupted
+        );
+    }
 
     #[test]
     fn split_shutdown_acknowledgements_are_read_as_one_frame() {

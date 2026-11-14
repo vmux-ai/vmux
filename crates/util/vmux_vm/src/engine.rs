@@ -50,6 +50,7 @@ impl Engine {
             settings,
             Launch(helper),
             Phase::Created,
+            Deadline(Instant::now() + Duration::from_secs(240)),
         )
     }
 }
@@ -88,6 +89,17 @@ struct ApplicationOwner(PathBuf);
 
 #[derive(Component)]
 struct Published(State);
+
+impl Published {
+    fn write(&self, settings: &Settings) -> io::Result<()> {
+        let bytes = serde_json::to_vec(&self.0).map_err(io::Error::other)?;
+        let file = tempfile::NamedTempFile::new_in(&settings.directory)?;
+        std::fs::write(file.path(), bytes)?;
+        file.persist(settings.directory.join("engine-state.json"))
+            .map_err(io::Error::other)?;
+        Ok(())
+    }
+}
 
 #[derive(SystemSet, Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub(crate) enum EngineSet {
@@ -170,11 +182,22 @@ impl Launch {
     }
 }
 
-fn initialize(
-    mut engines: Query<(Entity, &mut Settings, &mut Phase, &Launch), With<Engine>>,
-    mut commands: Commands,
-) {
-    for (entity, mut settings, mut phase, launcher) in &mut engines {
+type InitializingEngines<'w, 's> = Query<
+    'w,
+    's,
+    (
+        Entity,
+        &'static mut Settings,
+        &'static mut Phase,
+        &'static Launch,
+        &'static Deadline,
+        Option<&'static ApplicationOwner>,
+    ),
+    With<Engine>,
+>;
+
+fn initialize(mut engines: InitializingEngines, mut commands: Commands) {
+    for (entity, mut settings, mut phase, launcher, deadline, owner) in &mut engines {
         if *phase != Phase::Created {
             continue;
         }
@@ -185,6 +208,11 @@ fn initialize(
         }
         let lease = match Lease::acquire(&settings.directory) {
             Ok(lease) => lease,
+            Err(error)
+                if error.kind() == io::ErrorKind::WouldBlock && Instant::now() < deadline.0 =>
+            {
+                continue;
+            }
             Err(error) => {
                 *phase = Phase::Failed;
                 commands.entity(entity).insert(Failure(error.to_string()));
@@ -207,6 +235,19 @@ fn initialize(
             commands.entity(entity).insert(Failure(error.to_string()));
             continue;
         }
+        let published = Published(State {
+            phase: Phase::NetworkStarting,
+            failure: None,
+            owner: owner.map(|owner| owner.0.clone()),
+        });
+        if let Err(error) = published.write(&settings) {
+            *phase = Phase::Failed;
+            commands
+                .entity(entity)
+                .insert(Failure(format!("publish VM ownership: {error}")));
+            continue;
+        }
+        commands.entity(entity).insert(published);
         match launcher.network(&settings) {
             Ok(process) => {
                 *phase = Phase::NetworkStarting;
@@ -404,7 +445,7 @@ type PublishedEngines<'w, 's> = Query<
     (
         Entity,
         &'static Settings,
-        &'static Phase,
+        &'static mut Phase,
         Option<&'static Failure>,
         Option<&'static ConnectionIssue>,
         Option<&'static Published>,
@@ -413,36 +454,31 @@ type PublishedEngines<'w, 's> = Query<
     (With<Engine>, With<Lease>),
 >;
 
-fn publish(engines: PublishedEngines, mut commands: Commands) {
-    for (entity, settings, phase, failure, issue, previous, owner) in &engines {
-        let failure = match failure {
+fn publish(mut engines: PublishedEngines, mut commands: Commands) {
+    for (entity, settings, mut phase, failure, issue, previous, owner) in &mut engines {
+        let message = match failure {
             Some(failure) => Some(failure.0.clone()),
             None => issue.map(|issue| issue.0.clone()),
         };
         let state = State {
             phase: *phase,
-            failure,
+            failure: message,
             owner: owner.map(|owner| owner.0.clone()),
         };
         if previous.is_some_and(|previous| previous.0 == state) {
             continue;
         }
-        let bytes = match serde_json::to_vec(&state) {
-            Ok(bytes) => bytes,
-            Err(_) => continue,
-        };
-        let file = match tempfile::NamedTempFile::new_in(&settings.directory) {
-            Ok(file) => file,
-            Err(_) => continue,
-        };
-        if std::fs::write(file.path(), bytes).is_err()
-            || file
-                .persist(settings.directory.join("engine-state.json"))
-                .is_err()
-        {
+        let published = Published(state);
+        if let Err(error) = published.write(settings) {
+            if !matches!(*phase, Phase::Stopped | Phase::Failed) {
+                *phase = Phase::Stopping;
+            }
+            if failure.is_none() {
+                commands.entity(entity).insert(Failure(error.to_string()));
+            }
             continue;
         }
-        commands.entity(entity).insert(Published(state));
+        commands.entity(entity).insert(published);
     }
 }
 
@@ -540,6 +576,45 @@ mod tests {
             processes.iter(self.app.world()).next().is_none()
                 && self.app.world().get::<Lease>(self.engine).is_none()
         }
+    }
+
+    #[test]
+    fn startup_retries_a_probe_lease_and_requires_ownership_publication_before_launch() {
+        let directory = tempfile::tempdir().unwrap();
+        let mut settings = Settings::new(directory.path().join("engine"), directory.path());
+        settings.validate().unwrap();
+        std::fs::create_dir(settings.directory.join("engine-state.json")).unwrap();
+        let lease = Lease::acquire(&settings.directory).unwrap();
+        let mut app = App::new();
+        app.add_plugins(EnginePlugin);
+        let engine = app
+            .world_mut()
+            .spawn((
+                Engine::bundle(settings, PathBuf::from("unused")),
+                ApplicationOwner(directory.path().join("profile")),
+            ))
+            .id();
+        app.update();
+        assert_eq!(*app.world().get::<Phase>(engine).unwrap(), Phase::Created);
+        assert!(app.world().get::<Failure>(engine).is_none());
+        drop(lease);
+        app.update();
+        assert_eq!(*app.world().get::<Phase>(engine).unwrap(), Phase::Failed);
+        assert!(
+            app.world()
+                .get::<Failure>(engine)
+                .unwrap()
+                .0
+                .contains("publish VM ownership")
+        );
+        assert!(
+            app.world_mut()
+                .query::<&Process>()
+                .iter(app.world())
+                .next()
+                .is_none()
+        );
+        assert!(app.world().get::<Lease>(engine).is_none());
     }
 
     #[test]
