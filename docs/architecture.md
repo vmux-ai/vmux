@@ -514,6 +514,20 @@ Pointer selection enters the shared layout core through `SelectRequest`, includi
 Window-owned pointer and capture components retain consumed input; native callbacks retain only
 bounded raw samples, native handles and immutable routing hints.
 
+The Browser command plugin owns each Stack's `HistoryGestureCooldown`; requests in one message
+batch advance the same timestamp, while toolbar and keyboard commands bypass gesture suppression.
+The Navigation plugin records visits against that Stack's `LastRecordedVisit` after metadata
+synchronization. Metadata-only changes do not add visits; returning to a URL after another visit does.
+Both components are transient and disappear with their Stack.
+Host focus retains applied surface and layout handoff state in each Window's `WindowedFocus`.
+The macOS child plugin keeps `KeyWindowHandoff` on that Window and releases held keys only after
+AppKit confirms its first-responder handoff. Switching windows clears the old pending acknowledgement
+and native surface focus; CEF/AppKit handles remain native adapters, without parallel focus ownership.
+CEF loading cancellation consumes the targeted `StopLoadingRequested` only for one synchronous
+native call. AppKit outcomes last for one first-responder call; its owning Window keeps the pending
+acknowledgement. Framework plugin installation and isolated Bevy fixtures are App-scoped adapters,
+with state owned by that world's entities and released when the App drops.
+
 Start pages retain their last published Git result in page-owned `GitProjection` components;
 directory changes are read from canonical workspace context. Launcher `Selection` retains a raw
 worktree lease wait without restarting IO on every update. Managed destination paths normalize

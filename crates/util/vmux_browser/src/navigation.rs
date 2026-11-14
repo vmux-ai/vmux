@@ -114,26 +114,30 @@ fn drain_committed(
     }
 }
 
+#[derive(Component)]
+struct LastRecordedVisit(String);
+
 fn record_visits(
-    changed_tabs: Query<(Entity, &PageMetadata), (With<Stack>, Changed<PageMetadata>)>,
-    mut last_urls: Local<std::collections::HashMap<u64, String>>,
-    mut commands: Commands,
+    changed_tabs: Query<
+        (Entity, &PageMetadata, Option<&LastRecordedVisit>),
+        (With<Stack>, bevy::prelude::Changed<PageMetadata>),
+    >,
+    mut commands: bevy::prelude::Commands,
 ) {
-    for (entity, meta) in &changed_tabs {
+    for (entity, meta, previous) in &changed_tabs {
         if meta.url.is_empty() || meta.url == "about:blank" {
             continue;
         }
 
-        let key = entity.to_bits();
-        let is_new = last_urls
-            .get(&key)
-            .map(|prev| prev != &meta.url)
-            .unwrap_or(true);
-
-        if is_new {
-            last_urls.insert(key, meta.url.clone());
-            commands.spawn((Visit, meta.clone(), CreatedAt::now()));
+        if let Some(previous) = previous
+            && previous.0 == meta.url
+        {
+            continue;
         }
+        commands
+            .entity(entity)
+            .insert(LastRecordedVisit(meta.url.clone()));
+        commands.spawn((Visit, meta.clone(), CreatedAt::now()));
     }
 }
 
@@ -394,6 +398,106 @@ fn navigate(
                 service_requests.write(response);
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod visit_tests {
+    use super::*;
+
+    struct Visits {
+        app: App,
+        stack: Entity,
+        page: Entity,
+    }
+
+    impl Visits {
+        fn new() -> Self {
+            let mut app = App::new();
+            let (_, receiver) = async_channel::unbounded();
+            app.add_plugins((MinimalPlugins, NavigationPlugin))
+                .insert_resource(WebviewCommittedNavigationReceiver(receiver))
+                .add_message::<PageOpenRequest>()
+                .add_message::<vmux_layout::BrowserNavigateRequest>()
+                .add_message::<vmux_layout::BrowserGoBackRequest>()
+                .add_message::<vmux_layout::BrowserGoForwardRequest>()
+                .add_message::<vmux_layout::OpenInNewStackRequest>()
+                .add_message::<vmux_layout::active_pane::ActivatePane>();
+            let stack = app.world_mut().spawn(Stack::bundle()).id();
+            let page = app
+                .world_mut()
+                .spawn((Browser, PageMetadata::default(), ChildOf(stack)))
+                .id();
+            app.world_mut()
+                .entity_mut(stack)
+                .insert(vmux_layout::page_slot::Current::new(
+                    Some(page),
+                    PageMetadata::default(),
+                ));
+            Self { app, stack, page }
+        }
+
+        fn navigate(&mut self, url: &str, title: &str) {
+            self.app
+                .world_mut()
+                .entity_mut(self.page)
+                .insert(PageMetadata {
+                    url: url.to_string(),
+                    title: title.to_string(),
+                    ..default()
+                });
+            self.app.update();
+        }
+
+        fn urls(&mut self) -> Vec<String> {
+            let mut visits = self
+                .app
+                .world_mut()
+                .query_filtered::<&PageMetadata, With<Visit>>();
+            let mut urls = Vec::new();
+            for visit in visits.iter(self.app.world()) {
+                urls.push(visit.url.clone());
+            }
+            urls.sort();
+            urls
+        }
+    }
+
+    #[test]
+    fn visit_recording_follows_url_transitions_and_ignores_metadata_updates() {
+        let mut visits = Visits::new();
+        visits.navigate("", "");
+        visits.navigate("about:blank", "Empty");
+        visits.navigate("https://a.example/", "A");
+        visits.navigate("https://a.example/", "A renamed");
+        visits.navigate("https://b.example/", "B");
+        visits.navigate("https://a.example/", "A returned");
+        assert_eq!(
+            visits.urls(),
+            [
+                "https://a.example/",
+                "https://a.example/",
+                "https://b.example/"
+            ]
+        );
+    }
+
+    #[test]
+    fn replacing_a_stack_drops_its_visit_cursor() {
+        let mut visits = Visits::new();
+        visits.navigate("https://a.example/", "A");
+        visits.app.world_mut().despawn(visits.stack);
+        visits.stack = visits.app.world_mut().spawn(Stack::bundle()).id();
+        visits.page = visits
+            .app
+            .world_mut()
+            .spawn((Browser, ChildOf(visits.stack)))
+            .id();
+        visits.app.world_mut().entity_mut(visits.stack).insert(
+            vmux_layout::page_slot::Current::new(Some(visits.page), PageMetadata::default()),
+        );
+        visits.navigate("https://a.example/", "A reopened");
+        assert_eq!(visits.urls(), ["https://a.example/", "https://a.example/"]);
     }
 }
 
