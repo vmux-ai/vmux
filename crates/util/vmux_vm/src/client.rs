@@ -239,7 +239,7 @@ impl EngineClient {
             return Ok(());
         }
         self.request_stop()?;
-        let deadline = Instant::now() + Duration::from_secs(60);
+        let deadline = Instant::now() + Duration::from_secs(75);
         while self.status().running {
             if Instant::now() >= deadline {
                 return Err(io::Error::new(
@@ -290,10 +290,11 @@ impl EngineClient {
     pub(crate) fn request_stop(&self) -> io::Result<()> {
         let mut control = UnixStream::connect(self.settings.control_socket())?;
         control.set_read_timeout(Some(Duration::from_secs(2)))?;
+        control.set_write_timeout(Some(Duration::from_secs(2)))?;
         control.write_all(b"STOP\n")?;
-        let mut reply = [0; 16];
-        let read = control.read(&mut reply)?;
-        if &reply[..read] != b"STOPPING\n" {
+        let mut reply = [0; 9];
+        control.read_exact(&mut reply)?;
+        if &reply != b"STOPPING\n" {
             return Err(io::Error::other("VM refused shutdown"));
         }
         Ok(())
@@ -423,6 +424,25 @@ impl EngineClient {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn split_shutdown_acknowledgements_are_read_as_one_frame() {
+        let directory = tempfile::tempdir().unwrap();
+        let mut settings = Settings::new(directory.path().join("engine"), directory.path());
+        settings.validate().unwrap();
+        let listener = std::os::unix::net::UnixListener::bind(settings.control_socket()).unwrap();
+        let worker = std::thread::spawn(move || {
+            let (mut stream, _) = listener.accept().unwrap();
+            let mut request = [0; 5];
+            stream.read_exact(&mut request).unwrap();
+            assert_eq!(&request, b"STOP\n");
+            stream.write_all(b"STOP").unwrap();
+            std::thread::sleep(Duration::from_millis(10));
+            stream.write_all(b"PING\n").unwrap();
+        });
+        EngineClient::new(settings).request_stop().unwrap();
+        worker.join().unwrap();
+    }
 
     #[test]
     fn cancelling_preparation_kills_and_reaps_an_in_progress_child() {

@@ -113,7 +113,7 @@ brew "slp/krun/gvproxy"
 ```
 
 ```sh
-make build-container-engine
+vmux build
 ./target/debug/vmux container start --data /tmp/vmux-container --shared "$PWD"
 docker --host unix:///tmp/vmux-container/docker.sock compose up
 ./target/debug/vmux container status --data /tmp/vmux-container
@@ -125,8 +125,8 @@ are forwarded to macOS localhost. Images and volumes survive VM restart on the
 dedicated data disk; the selected project directory is shared at the same path
 inside Linux. `container logs` reads the engine and guest logs.
 
-For the desktop workflow, build with `make build-dev`, then open the app with
-`make run-dev`. The default VM bookmark opens `vmux://vm/`. VM, Docker
+For the desktop workflow, build with `vmux build`, then open the app with
+`vmux run`. The default VM bookmark opens `vmux://vm/`. VM, Docker
 (`vmux://vm/docker`) and Containers (`vmux://vm/docker/containers`) have separate
 titles and icons while sharing the same workspace. `vmux://docker/containers`,
 `vmux://docker/` and the older `vmux://containers/` remain compatible.

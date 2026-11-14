@@ -21,7 +21,8 @@ use crate::inventory::{Catalog, Inventory, InventoryPlugin, Output};
 
 impl Plugin for ContainerPlugin {
     fn build(&self, app: &mut App) {
-        app.add_plugins(FeaturePlugin::<crate::Feature>::default())
+        app.init_resource::<Source>()
+            .add_plugins(FeaturePlugin::<crate::Feature>::default())
             .add_plugins((
                 Self::MANIFEST
                     .plugin()
@@ -115,33 +116,64 @@ struct LastError(String);
 #[derive(Component, Default)]
 struct ConfigurationRevision(u64);
 
-fn spawn(mut commands: Commands) {
-    let directory = vmux_profile::ProfilePaths::current()
-        .shared_data()
-        .join("containers");
-    let settings = match Settings::load(&directory.join("settings.json")) {
-        Ok(settings) => settings,
-        Err(_) => Settings::new(directory, EngineView::default_share()),
+#[derive(Resource)]
+struct Source(PathBuf);
+
+impl Default for Source {
+    fn default() -> Self {
+        Self(
+            vmux_profile::ProfilePaths::current()
+                .shared_data()
+                .join("containers/settings.json"),
+        )
+    }
+}
+
+fn spawn(source: Res<Source>, mut commands: Commands) {
+    let directory = source
+        .0
+        .parent()
+        .expect("VM configuration parent")
+        .to_path_buf();
+    let (settings, error) = match Settings::load(&source.0) {
+        Ok(settings) => (Some(settings), String::new()),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => (
+            Some(Settings::new(
+                directory.clone(),
+                EngineView::default_share(),
+            )),
+            String::new(),
+        ),
+        Err(error) => (
+            None,
+            format!("load VM configuration {}: {error}", source.0.display()),
+        ),
     };
     let status = Status {
         running: false,
         docker_ready: false,
-        socket: settings.socket(),
-        log: settings.log(),
-        phase: Phase::Created,
-        failure: None,
+        socket: directory.join("docker.sock"),
+        log: directory.join("engine.log"),
+        phase: if settings.is_some() {
+            Phase::Created
+        } else {
+            Phase::Failed
+        },
+        failure: (!error.is_empty()).then_some(error.clone()),
     };
-    commands.spawn((
+    let mut entity = commands.spawn((
         Name::new("Container engine view"),
         EngineView,
-        settings,
         Observed(status),
         NextInspection(Instant::now()),
         Logs::default(),
-        LastError::default(),
+        LastError(error),
         ConfigurationRevision::default(),
         Revision::default(),
     ));
+    if let Some(settings) = settings {
+        entity.insert(settings);
+    }
 }
 
 impl EngineView {
@@ -207,7 +239,7 @@ fn start(
     commands.trigger(Request {
         entity,
         reply: entity,
-        command: Command::Start,
+        command: Command::Start(crate::control::Ownership::Application),
         settings: settings.clone(),
         requester: event.webview,
     });
@@ -434,7 +466,7 @@ fn autostart(
         commands.trigger(Request {
             entity,
             reply: entity,
-            command: Command::Start,
+            command: Command::Start(crate::control::Ownership::Application),
             settings: settings.clone(),
             requester: page,
         });
@@ -445,7 +477,7 @@ type ProjectedEngines<'w, 's> = Query<
     'w,
     's,
     (
-        &'static Settings,
+        Option<&'static Settings>,
         &'static Observed,
         &'static Logs,
         &'static LastError,
@@ -504,10 +536,14 @@ fn project(
         ready: observed.0.docker_ready,
         busy: busy.is_some(),
         phase: phase.into(),
-        data_directory: settings.directory.to_string_lossy().into_owned(),
-        shared_directory: settings.shared_directory.to_string_lossy().into_owned(),
-        cpus: settings.cpus,
-        memory_mib: settings.memory_mib,
+        data_directory: settings
+            .map(|settings| settings.directory.to_string_lossy().into_owned())
+            .unwrap_or_default(),
+        shared_directory: settings
+            .map(|settings| settings.shared_directory.to_string_lossy().into_owned())
+            .unwrap_or_default(),
+        cpus: settings.map_or(0, |settings| settings.cpus),
+        memory_mib: settings.map_or(0, |settings| settings.memory_mib),
         socket: observed.0.socket.to_string_lossy().into_owned(),
         error: if error.0.is_empty() {
             observed.0.failure.clone().unwrap_or_default()
@@ -536,11 +572,9 @@ fn project(
         let mut snapshot = snapshot.clone();
         snapshot.control_revision = completed.0;
         snapshot.control_error = page_error.0.clone();
-        snapshot.error = if page_error.0.is_empty() {
-            observed.0.failure.clone().unwrap_or_default()
-        } else {
-            page_error.0.clone()
-        };
+        if !page_error.0.is_empty() {
+            snapshot.error = page_error.0.clone();
+        }
         if let Some(output) = output {
             snapshot.log_id = output.id.clone();
             snapshot.container_logs = output.text.clone();
@@ -559,6 +593,83 @@ fn project(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn unreadable_configuration_is_visible_and_cannot_start_or_overwrite_an_engine() {
+        let directory = tempfile::tempdir().unwrap();
+        let config = directory.path().join("settings.json");
+        let bytes = b"invalid persisted settings";
+        std::fs::write(&config, bytes).unwrap();
+        let mut app = App::new();
+        app.add_plugins(ContainerPlugin)
+            .insert_resource(Source(config.clone()));
+        app.world_mut().run_schedule(Startup);
+        let page = app
+            .world_mut()
+            .spawn((
+                PageView,
+                PageMetadata {
+                    url: crate::Containers::URL.into(),
+                    ..Default::default()
+                },
+                Revision::default(),
+                LastError::default(),
+                KeyboardOwner,
+                PageReady {},
+                BinIpcSurfaceGeneration(1),
+                BinIpcNavigationRevision(1),
+                BinIpcEpoch(1),
+            ))
+            .id();
+        let mut browsers = Browsers::default();
+        browsers.set_externally_hosted(page);
+        app.world_mut().insert_non_send(browsers);
+        app.world_mut().spawn(UiEventPermissions {
+            url: crate::Containers::URL,
+            owns_subtree: true,
+            permissions: &[ContainerUiState::PERMISSION],
+        });
+        for _ in 0..5 {
+            app.world_mut().run_schedule(Update);
+            app.world_mut().run_schedule(Last);
+        }
+        let state = app
+            .world()
+            .get::<vmux_ecs::UiState<ContainerUiState>>(page)
+            .unwrap()
+            .current()
+            .unwrap();
+        assert!(state.error.contains("load VM configuration"));
+        assert!(state.data_directory.is_empty());
+        app.world_mut().trigger(UiInput {
+            webview: page,
+            payload: ContainerStartRequest {},
+        });
+        app.world_mut().trigger(UiInput {
+            webview: page,
+            payload: crate::event::ContainerCommandRequest {
+                ids: vec!["aaaaaaaaaaaa".into()],
+                operation: crate::event::ContainerOperation::Start,
+            },
+        });
+        app.world_mut().run_schedule(Update);
+        app.world_mut().run_schedule(Last);
+        assert!(
+            app.world_mut()
+                .query_filtered::<&Settings, With<EngineView>>()
+                .iter(app.world())
+                .next()
+                .is_none()
+        );
+        assert!(
+            app.world_mut()
+                .query::<&vmux_ecs::Operation>()
+                .iter(app.world())
+                .next()
+                .is_none()
+        );
+        assert_eq!(std::fs::read(config).unwrap(), bytes);
+    }
     use bevy_cef::prelude::{
         BinHostEmitEvent, BinIpcEpoch, BinIpcNavigationRevision, BinIpcSurfaceGeneration, Browsers,
     };

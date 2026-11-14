@@ -340,6 +340,16 @@ mod tests {
     enum Reply {
         Stalled,
         Http(String),
+        Delayed(Duration, String),
+    }
+
+    impl Reply {
+        fn delayed(self, duration: Duration) -> Self {
+            match self {
+                Self::Http(body) => Self::Delayed(duration, body),
+                other => other,
+            }
+        }
     }
 
     impl Daemon {
@@ -376,6 +386,10 @@ mod tests {
                     match reply {
                         Reply::Stalled => thread::sleep(Duration::from_millis(2100)),
                         Reply::Http(reply) => stream.write_all(reply.as_bytes()).unwrap(),
+                        Reply::Delayed(duration, reply) => {
+                            thread::sleep(duration);
+                            stream.write_all(reply.as_bytes()).unwrap();
+                        }
                     }
                     requests.push(String::from_utf8(request).unwrap());
                 }
@@ -414,6 +428,86 @@ mod tests {
         assert_eq!(
             daemon.request().lines().next(),
             Some("GET /containers/json?all=1 HTTP/1.0")
+        );
+    }
+
+    #[test]
+    fn all_dependency_replicas_must_start_and_become_ready_before_the_service() {
+        let inventory = r#"[{"Id":"aaaaaaaaaaaa","Names":["/app"],"Labels":{"com.docker.compose.project":"stack","com.docker.compose.service":"app","com.docker.compose.depends_on":"db:service_healthy:false"},"Image":"test-image","State":"created"},{"Id":"bbbbbbbbbbbb","Names":["/db-1"],"Labels":{"com.docker.compose.project":"stack","com.docker.compose.service":"db"},"Image":"test-image","State":"created"},{"Id":"cccccccccccc","Names":["/db-2"],"Labels":{"com.docker.compose.project":"stack","com.docker.compose.service":"db"},"Image":"test-image","State":"created"},{"Id":"dddddddddddd","Names":["/other-db"],"Labels":{"com.docker.compose.project":"other","com.docker.compose.service":"db"},"Image":"test-image","State":"created"}]"#;
+        let healthy =
+            r#"{"State":{"Running":true,"Status":"running","Health":{"Status":"healthy"}}}"#;
+        let failed =
+            r#"{"State":{"Running":true,"Status":"running","Health":{"Status":"unhealthy"}}}"#;
+        for ready in [true, false] {
+            let mut replies = vec![
+                Daemon::reply(200, inventory),
+                Daemon::reply(204, ""),
+                Daemon::reply(204, ""),
+                Daemon::reply(200, healthy),
+                Daemon::reply(200, if ready { healthy } else { failed }),
+            ];
+            if ready {
+                replies.push(Daemon::reply(204, ""));
+            }
+            let daemon = Daemon::new(replies);
+            let result =
+                Client::new(&daemon.settings.socket()).start_many(&["aaaaaaaaaaaa".into()]);
+            assert_eq!(result.is_ok(), ready);
+            if let Err(error) = result {
+                assert!(error.to_string().contains("db-2"));
+            }
+            let requests = daemon.response.join().unwrap();
+            let mut starts = Vec::new();
+            for request in requests {
+                if let Some(line) = request.lines().next() {
+                    if line.starts_with("POST ") {
+                        starts.push(line.to_string());
+                    }
+                }
+            }
+            let expected = if ready {
+                vec![
+                    "POST /containers/bbbbbbbbbbbb/start HTTP/1.0",
+                    "POST /containers/cccccccccccc/start HTTP/1.0",
+                    "POST /containers/aaaaaaaaaaaa/start HTTP/1.0",
+                ]
+            } else {
+                vec![
+                    "POST /containers/bbbbbbbbbbbb/start HTTP/1.0",
+                    "POST /containers/cccccccccccc/start HTTP/1.0",
+                ]
+            };
+            assert_eq!(starts, expected);
+        }
+    }
+
+    #[test]
+    fn start_retry_waits_for_current_dependency_readiness_after_a_lost_reply() {
+        let inventory = r#"[{"Id":"aaaaaaaaaaaa","Names":["/app"],"Labels":{"com.docker.compose.project":"stack","com.docker.compose.service":"app","com.docker.compose.depends_on":"db:service_healthy:false"},"Image":"test-image","State":"created"},{"Id":"bbbbbbbbbbbb","Names":["/db"],"Labels":{"com.docker.compose.project":"stack","com.docker.compose.service":"db"},"Image":"test-image","State":"created"}]"#;
+        let healthy =
+            r#"{"State":{"Running":true,"Status":"running","Health":{"Status":"healthy"}}}"#;
+        let starting =
+            r#"{"State":{"Running":true,"Status":"running","Health":{"Status":"starting"}}}"#;
+        let daemon = Daemon::new(vec![
+            Daemon::reply(200, inventory),
+            Daemon::reply(204, ""),
+            Daemon::reply(200, healthy),
+            Reply::Http(String::new()),
+            Daemon::reply(200, starting).delayed(Duration::from_millis(300)),
+            Daemon::reply(200, healthy),
+            Daemon::reply(304, ""),
+        ]);
+        Client::new(&daemon.settings.socket())
+            .start_many(&["aaaaaaaaaaaa".into()])
+            .unwrap();
+        let requests = daemon.response.join().unwrap();
+        assert_eq!(
+            requests[5].lines().next(),
+            Some("GET /containers/bbbbbbbbbbbb/json HTTP/1.0")
+        );
+        assert_eq!(
+            requests[6].lines().next(),
+            Some("POST /containers/aaaaaaaaaaaa/start HTTP/1.0")
         );
     }
 

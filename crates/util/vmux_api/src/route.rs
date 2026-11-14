@@ -122,12 +122,15 @@ impl VmuxRoute {
     }
 
     pub fn in_subtree(&self, root: &Self) -> bool {
-        let candidate = self.clone().canonicalized();
-        if candidate.host() != root.host() {
+        self.has_prefix(root) || self.canonicalized().has_prefix(&root.canonicalized())
+    }
+
+    fn has_prefix(&self, root: &Self) -> bool {
+        if self.host() != root.host() {
             return false;
         }
         let root_path = root.path().trim_end_matches('/');
-        let path = candidate.path().trim_end_matches('/');
+        let path = self.path().trim_end_matches('/');
         path == root_path
             || path
                 .strip_prefix(root_path)
@@ -344,6 +347,9 @@ mod tests {
         assert!(!containers.matches("vmux://kubernetes/pods"));
         assert!(containers.matches("vmux://vm/docker/containers/groups/cloud/info"));
         assert!(containers.matches("vmux://docker/containers/groups/cloud/info"));
+        let legacy = RoutePattern::new("vmux://docker/containers", true);
+        assert!(legacy.matches("vmux://vm/docker/containers/groups/cloud/info"));
+        assert!(legacy.matches("vmux://docker/containers/groups/cloud/info"));
         assert!(!containers.matches("vmux://vm/kubernetes/containers"));
 
         let subtree = RoutePattern::new("https://example.com/tools/", true);

@@ -331,19 +331,23 @@ fn link(mut roots: Roots, rows: Rows, mut commands: Commands) {
         let mut links = Vec::new();
         if !row.project.0.is_empty() {
             for dependency in &incoming.0 {
-                let mut target = None;
-                let mut earliest = usize::MAX;
+                let mut targets = Vec::new();
                 for candidate in &rows.entries {
                     if candidate.parent.parent() == root
                         && candidate.project.0 == row.project.0
                         && candidate.service.0 == dependency.service
-                        && candidate.source.0 < earliest
                     {
-                        target = Some(candidate.entity);
-                        earliest = candidate.source.0;
+                        targets.push((candidate.source.0, candidate.entity));
                     }
                 }
-                if let Some(target) = target {
+                if targets.is_empty() {
+                    commands.entity(row.entity).insert(Failure(format!(
+                        "{}: required dependency {} is missing from project {}",
+                        row.name, dependency.service, row.project.0
+                    )));
+                }
+                targets.sort_by_key(|(source, _)| *source);
+                for (_, target) in targets {
                     links.push((target, dependency.condition));
                 }
             }
@@ -449,6 +453,14 @@ fn order(mut roots: Roots, rows: Rows, mut commands: Commands) {
             && row.rank.is_none()
             && let Some(position) = row.position
         {
+            if let Ok((_, _, _, Some(failure))) = rows.observations.get(row.entity) {
+                commands.entity(root).insert(Completion(Err((
+                    io::ErrorKind::NotFound,
+                    failure.0.clone(),
+                ))));
+                *stage = Stage::Done;
+                return;
+            }
             pending.push((position.0, row.entity));
         }
     }
@@ -552,6 +564,7 @@ fn advance(roots: Roots, rows: Rows, mut commands: Commands) {
     let Ok(row) = rows.entries.get(candidate) else {
         return;
     };
+    commands.entity(candidate).remove::<Effect>();
     let Some(links) = row.links else {
         return;
     };
@@ -578,18 +591,22 @@ fn advance(roots: Roots, rows: Rows, mut commands: Commands) {
             Ok(true) => {}
             Ok(false) if Instant::now() < deadline.0 => return,
             Ok(false) => {
-                commands.entity(candidate).insert((
-                    Finished,
-                    Failure(format!(
-                        "dependency {name}: container dependency did not become ready"
-                    )),
-                ));
+                commands
+                    .entity(candidate)
+                    .insert((
+                        Finished,
+                        Failure(format!(
+                            "dependency {name}: container dependency did not become ready"
+                        )),
+                    ))
+                    .remove::<RetryAt>();
                 return;
             }
             Err(error) => {
                 commands
                     .entity(candidate)
-                    .insert((Finished, Failure(error)));
+                    .insert((Finished, Failure(error)))
+                    .remove::<RetryAt>();
                 return;
             }
         }
@@ -666,4 +683,54 @@ fn finish(mut roots: Roots, rows: Rows, mut commands: Commands) {
     };
     commands.entity(root).insert(Completion(result));
     *stage = Stage::Done;
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn missing_required_dependency_is_refused_before_execution() {
+        let mut app = App::new();
+        app.add_plugins(BatchPlugin);
+        let root = app
+            .world_mut()
+            .spawn((
+                Scope,
+                Stage::Ingest,
+                Endpoint(Client::new(std::path::Path::new("/missing/docker.sock"))),
+                Requested(vec!["aaaaaaaaaaaa".into()]),
+                Deadline(Instant::now() + Duration::from_secs(1)),
+                Sequence::default(),
+            ))
+            .id();
+        app.world_mut().write_message(Container {
+            id: "aaaaaaaaaaaa".into(),
+            name: "app".into(),
+            image: String::new(),
+            state: "created".into(),
+            status: String::new(),
+            project: "stack".into(),
+            service: "app".into(),
+            dependencies: vec![Dependency {
+                service: "db".into(),
+                condition: Condition::Healthy,
+            }],
+            ports: Vec::new(),
+        });
+        app.update();
+        let completion = app.world().get::<Completion>(root).unwrap();
+        let Err((kind, message)) = &completion.0 else {
+            panic!("missing required dependency was accepted");
+        };
+        assert_eq!(*kind, io::ErrorKind::NotFound);
+        assert!(message.contains("required dependency db"));
+        assert!(
+            app.world_mut()
+                .query::<&Effect>()
+                .iter(app.world())
+                .next()
+                .is_none()
+        );
+    }
 }

@@ -11,16 +11,19 @@ use serde::{Deserialize, Serialize};
 
 use crate::Settings;
 use crate::connection::{ConnectionIssue, ConnectionPlugin};
+use crate::control::ControlPlugin;
 use crate::process::{Executable, Lease, Process};
 
 pub struct EnginePlugin;
 
 impl Plugin for EnginePlugin {
     fn build(&self, app: &mut App) {
-        app.add_plugins(ConnectionPlugin)
+        app.add_plugins((ConnectionPlugin, ControlPlugin))
             .configure_sets(
                 Update,
                 (
+                    EngineSet::Prepare,
+                    EngineSet::Control,
                     EngineSet::Launch,
                     EngineSet::Connect,
                     EngineSet::Observe,
@@ -29,10 +32,8 @@ impl Plugin for EnginePlugin {
                     .chain(),
             )
             .add_systems(PostUpdate, (publish, release).chain())
-            .add_systems(
-                Update,
-                (initialize, launch).chain().in_set(EngineSet::Launch),
-            )
+            .add_systems(Update, initialize.in_set(EngineSet::Prepare))
+            .add_systems(Update, launch.in_set(EngineSet::Launch))
             .add_systems(Update, observe.in_set(EngineSet::Observe))
             .add_systems(Update, (retire, finish).chain().in_set(EngineSet::Retire));
     }
@@ -90,6 +91,8 @@ struct Published(State);
 
 #[derive(SystemSet, Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub(crate) enum EngineSet {
+    Prepare,
+    Control,
     Launch,
     Connect,
     Observe,

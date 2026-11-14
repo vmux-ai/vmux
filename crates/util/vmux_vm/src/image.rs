@@ -1,8 +1,7 @@
 use std::fmt::Write;
-use std::fs::{File, OpenOptions};
+use std::fs::File;
 use std::io::{self, Read};
-#[cfg(unix)]
-use std::os::unix::fs::PermissionsExt;
+use std::os::unix::fs::MetadataExt;
 use std::process::Command;
 
 use flate2::read::GzDecoder;
@@ -10,6 +9,7 @@ use ring::digest::{Context, SHA256};
 
 use crate::Settings;
 use crate::client::Preparation;
+use crate::root::Root;
 
 pub(crate) struct GuestImage;
 
@@ -53,25 +53,50 @@ impl GuestImage {
             std::fs::write(staging.path().join(".vmux-image"), Self::SHA256)?;
             std::fs::rename(staging.path(), settings.rootfs())?;
         }
-        let init = settings.rootfs().join("sbin/vmux-init");
         preparation.check()?;
-        std::fs::write(&init, include_str!("guest-init.sh"))?;
-        let control = settings.rootfs().join("sbin/vmux-control");
-        std::fs::write(&control, include_str!("guest-control.sh"))?;
-        #[cfg(unix)]
-        {
-            std::fs::set_permissions(init, std::fs::Permissions::from_mode(0o755))?;
-            std::fs::set_permissions(control, std::fs::Permissions::from_mode(0o755))?;
+        let root = Root::open(settings)?;
+        root.write(
+            "sbin/vmux-init",
+            include_str!("guest-init.sh").as_bytes(),
+            0o755,
+        )?;
+        root.write(
+            "sbin/vmux-control",
+            include_str!("guest-control.sh").as_bytes(),
+            0o755,
+        )?;
+        Self::prepare_disk(settings, preparation)?;
+        Ok(())
+    }
+
+    fn prepare_disk(settings: &Settings, preparation: &Preparation<'_>) -> io::Result<()> {
+        preparation.check()?;
+        let marker = settings.directory.join("data.new");
+        match std::fs::metadata(settings.disk()) {
+            Ok(metadata) if metadata.len() > 0 => {
+                if metadata.blocks() == 0 && !marker.exists() {
+                    let mut pending = tempfile::NamedTempFile::new_in(&settings.directory)?;
+                    std::io::Write::write_all(&mut pending, b"new")?;
+                    pending.as_file().sync_all()?;
+                    pending.persist(marker).map_err(io::Error::other)?;
+                }
+                return Ok(());
+            }
+            Ok(_) => {}
+            Err(error) if error.kind() == io::ErrorKind::NotFound => {}
+            Err(error) => return Err(error),
         }
-        if !settings.disk().exists() {
-            let disk = OpenOptions::new()
-                .create_new(true)
-                .write(true)
-                .open(settings.disk())?;
-            disk.set_len(settings.disk_gib * 1024 * 1024 * 1024)?;
-            disk.sync_all()?;
-            std::fs::write(settings.directory.join("data.new"), b"new")?;
-        }
+        let disk = tempfile::NamedTempFile::new_in(&settings.directory)?;
+        disk.as_file()
+            .set_len(settings.disk_gib * 1024 * 1024 * 1024)?;
+        disk.as_file().sync_all()?;
+        let mut pending = tempfile::NamedTempFile::new_in(&settings.directory)?;
+        std::io::Write::write_all(&mut pending, b"new")?;
+        pending.as_file().sync_all()?;
+        preparation.check()?;
+        pending.persist(marker).map_err(io::Error::other)?;
+        preparation.check()?;
+        disk.persist(settings.disk()).map_err(io::Error::other)?;
         Ok(())
     }
 
@@ -102,6 +127,47 @@ impl GuestImage {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn disk_initialization_failure_publishes_nothing_and_retry_recovers() {
+        let directory = tempfile::tempdir().unwrap();
+        let mut settings = Settings::new(directory.path().join("engine"), directory.path());
+        settings.disk_gib = 1;
+        settings.validate().unwrap();
+        let marker = settings.directory.join("data.new");
+        std::fs::create_dir(&marker).unwrap();
+        assert!(GuestImage::prepare_disk(&settings, &Preparation::new(None)).is_err());
+        assert!(!settings.disk().exists());
+        std::fs::remove_dir(&marker).unwrap();
+        GuestImage::prepare_disk(&settings, &Preparation::new(None)).unwrap();
+        assert_eq!(
+            std::fs::metadata(settings.disk()).unwrap().len(),
+            1024 * 1024 * 1024
+        );
+        assert_eq!(std::fs::read(marker).unwrap(), b"new");
+    }
+
+    #[test]
+    fn disk_preparation_repairs_empty_legacy_disks_and_preserves_existing_data() {
+        let directory = tempfile::tempdir().unwrap();
+        let mut settings = Settings::new(directory.path().join("engine"), directory.path());
+        settings.disk_gib = 1;
+        settings.validate().unwrap();
+        std::fs::write(settings.disk(), b"").unwrap();
+        GuestImage::prepare_disk(&settings, &Preparation::new(None)).unwrap();
+        assert_eq!(
+            std::fs::metadata(settings.disk()).unwrap().len(),
+            1024 * 1024 * 1024
+        );
+        std::fs::write(settings.disk(), b"existing disk contents").unwrap();
+        std::fs::remove_file(settings.directory.join("data.new")).unwrap();
+        GuestImage::prepare_disk(&settings, &Preparation::new(None)).unwrap();
+        assert_eq!(
+            std::fs::read(settings.disk()).unwrap(),
+            b"existing disk contents"
+        );
+        assert!(!settings.directory.join("data.new").exists());
+    }
 
     #[test]
     fn corrupted_guest_image_is_refused_before_extraction() {

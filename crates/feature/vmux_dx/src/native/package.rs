@@ -18,6 +18,7 @@ impl Native {
         for name in [
             "Contents/MacOS/vmux_desktop",
             "Contents/MacOS/vmux",
+            "Contents/MacOS/vmux_vm",
             "Contents/Frameworks/vmux_desktop Helper.app/Contents/MacOS/vmux_desktop Helper",
             "Contents/Frameworks/vmux_desktop Helper.app/Contents/Resources/Vmux.icns",
             "Contents/Frameworks/vmux_desktop Helper (Renderer).app/Contents/MacOS/vmux_desktop Helper (Renderer)",
@@ -330,7 +331,7 @@ impl Native {
         } else {
             desktop.extend(["--features".into(), "vmux_desktop/package".into()]);
         }
-        self.cargo(&["build", "-p", "vmux_cli", "--release"].map(Into::into))?;
+        self.cargo(&["build", "-p", "vmux_cli", "-p", "vmux_vm", "--release"].map(Into::into))?;
         self.cargo(&desktop)?;
         for args in [
             vec![
@@ -688,7 +689,13 @@ impl Native {
             .args(["--force", "--verify", "--sign"])
             .arg(self.environment.required("APPLE_SIGNING_IDENTITY")?)
             .args(["--options", "runtime", "--entitlements"])
-            .arg(product.value("VMUX_HOST_ENTITLEMENTS"));
+            .arg(if path.file_name() == Some(OsStr::new("vmux_vm")) {
+                self.checkout
+                    .root
+                    .join("crates/util/vmux_vm/hypervisor.entitlements")
+            } else {
+                PathBuf::from(product.value("VMUX_HOST_ENTITLEMENTS"))
+            });
         if let Some(keychain) = self.environment.get("CODESIGN_KEYCHAIN") {
             command.arg("--keychain").arg(keychain);
         }

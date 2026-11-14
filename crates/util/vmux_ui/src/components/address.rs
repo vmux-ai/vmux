@@ -81,6 +81,7 @@ pub fn AddressTrail(
                 },
                 requests: requests.clone(), open,
                 navigate_on_click: current_is_parent,
+              }
             }
             for (index, crumb) in state.fixed.iter().enumerate() {
                 span { key: "fixed-{index}", class: "flex min-w-0 shrink items-center gap-1",
@@ -473,7 +474,7 @@ mod tests {
             state: PageAddress {
                 owner: 17, revision: 9, url: "vmux://projects/one".into(),
                 current: AddressOption { label: "Projects".into(), intent: Some(AddressIntent::Navigate { url: "vmux://projects/".into() }), ..Default::default() },
-                views: vec![AddressOption { label: "All projects".into(), intent: Some(AddressIntent::Navigate { url: "vmux://projects/".into() }), ..Default::default() }],
+                views: vec![AddressOption { label: "All projects".into(), intent: Some(AddressIntent::Navigate { url: "vmux://projects/".into() }), ..Default::default() }, AddressOption { label: "Recent projects".into(), intent: Some(AddressIntent::Navigate { url: "vmux://projects/recent".into() }), ..Default::default() }],
                 ..Default::default()
             }
         } }

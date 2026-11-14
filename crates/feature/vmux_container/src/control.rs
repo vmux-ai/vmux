@@ -71,7 +71,7 @@ fn shutdown(
 
 #[derive(Clone)]
 pub(crate) enum Command {
-    Start,
+    Start(Ownership),
     Stop,
     Status,
     Logs,
@@ -82,10 +82,16 @@ pub(crate) enum Command {
     },
 }
 
+#[derive(Clone, Copy)]
+pub(crate) enum Ownership {
+    Independent,
+    Application,
+}
+
 impl Command {
     fn name(&self) -> &'static str {
         match self {
-            Self::Start => "container.start",
+            Self::Start(_) => "container.start",
             Self::Stop => "container.stop",
             Self::Status => "container.status",
             Self::Logs => "container.logs",
@@ -101,7 +107,10 @@ impl Command {
     fn execute(self, settings: Settings, helper: &Path, owner: &Owner) -> io::Result<Reply> {
         let mut client = EngineClient::new(settings.clone());
         match self {
-            Self::Start => Ok(Reply::Started(client.start_owned(helper, owner)?)),
+            Self::Start(Ownership::Independent) => Ok(Reply::Started(client.start(helper)?)),
+            Self::Start(Ownership::Application) => {
+                Ok(Reply::Started(client.start_owned(helper, owner)?))
+            }
             Self::Stop => {
                 client.stop()?;
                 Ok(Reply::Stopped(client.status()))
@@ -190,7 +199,7 @@ impl Busy {
     pub(crate) fn starting(&self) -> bool {
         matches!(
             self.0,
-            Command::Start
+            Command::Start(_)
                 | Command::Containers {
                     operation: ContainerOperation::Start,
                     ..
@@ -327,6 +336,40 @@ mod tests {
     use super::*;
     use std::io::Write;
     use std::time::Duration;
+
+    #[test]
+    fn application_cancellation_cannot_cancel_an_independent_cli_start() {
+        let directory = tempfile::tempdir().unwrap();
+        let mut settings = Settings::new(directory.path().join("engine"), directory.path());
+        settings.cpus = 0;
+        let owner = Owner::new(directory.path().join("profile"));
+        owner.cancel();
+        let application = Command::Start(Ownership::Application).execute(
+            settings.clone(),
+            Path::new("unused helper"),
+            &owner,
+        );
+        let Err(application) = application else {
+            panic!("cancelled application start was accepted");
+        };
+        assert_eq!(application.kind(), io::ErrorKind::Interrupted);
+        let independent = Command::Start(Ownership::Independent).execute(
+            settings,
+            Path::new("unused helper"),
+            &owner,
+        );
+        let Err(independent) = independent else {
+            panic!("invalid resource configuration was accepted");
+        };
+        assert_eq!(
+            independent.kind(),
+            if cfg!(all(target_os = "macos", target_arch = "aarch64")) {
+                io::ErrorKind::InvalidInput
+            } else {
+                io::ErrorKind::Unsupported
+            }
+        );
+    }
 
     #[test]
     fn quitting_a_restarted_gui_stops_configured_owned_engines_without_a_new_start() {

@@ -212,7 +212,7 @@ impl ParentWatch {
                 }
                 let deadline = Instant::now() + Duration::from_secs(60);
                 while Instant::now() < deadline {
-                    let _ = crate::EngineClient::new(settings.clone()).request_stop();
+                    let _ = crate::control::GuestControl::stop(&settings);
                     std::thread::sleep(Duration::from_secs(1));
                 }
                 std::process::exit(1);

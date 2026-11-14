@@ -10,12 +10,14 @@ pub use settings::Settings;
 mod batch;
 mod client;
 mod connection;
+mod control;
 mod docker;
 mod engine;
 mod http;
 mod image;
 mod ports;
 mod process;
+mod root;
 mod settings;
 mod ssh;
 

@@ -443,7 +443,7 @@ fn plan(operations: Planning, providers: Query<&workspace::Provider>, mut comman
                                 Work::Helper,
                                 Work::ClearReady,
                             ]);
-                            steps.push(Work::cargo(&["build", "-p", "vmux_cli"]));
+                            steps.push(Work::cargo(&["build", "-p", "vmux_cli", "-p", "vmux_vm"]));
                             steps.push(Work::cargo(&[
                                 "build",
                                 "-p",

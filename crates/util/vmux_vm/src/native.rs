@@ -1,7 +1,6 @@
 use std::ffi::CString;
-use std::io::{self, BufRead, BufReader, Write};
+use std::io::{self, Write};
 use std::os::unix::ffi::OsStrExt;
-use std::os::unix::net::{UnixListener, UnixStream};
 use std::path::{Path, PathBuf};
 
 use libloading::Library;
@@ -21,7 +20,6 @@ impl Context {
         let _lease = Lease::named(&settings.directory, "machine.lock")?;
         let mut context = Self::new()?;
         context.configure(&settings)?;
-        context.listen(&settings)?;
         ParentWatch::monitor(settings.clone())?;
         let enter = context.function::<unsafe extern "C" fn(u32) -> i32>(b"krun_start_enter\0")?;
         context.consumed = true;
@@ -196,38 +194,6 @@ impl Context {
         )
     }
 
-    fn listen(&self, settings: &Settings) -> io::Result<()> {
-        let listener = UnixListener::bind(settings.control_socket())?;
-        let guest_control = settings.guest_control();
-        std::thread::Builder::new()
-            .name("vmux-vm-control".into())
-            .spawn(move || {
-                for connection in listener.incoming() {
-                    let Ok(mut connection) = connection else {
-                        continue;
-                    };
-                    let _ = connection.set_read_timeout(Some(std::time::Duration::from_secs(2)));
-                    let mut line = String::new();
-                    let mut reader = BufReader::new(&mut connection);
-                    let request = reader.read_line(&mut line);
-                    if request.is_err() || line.len() > 32 || line != "STOP\n" {
-                        let _ = connection.write_all(b"INVALID\n");
-                        continue;
-                    }
-                    let forwarded = Self::stop_guest(&guest_control);
-                    match forwarded {
-                        Ok(()) => {
-                            let _ = connection.write_all(b"STOPPING\n");
-                        }
-                        Err(_) => {
-                            let _ = connection.write_all(b"FAILED\n");
-                        }
-                    }
-                }
-            })?;
-        Ok(())
-    }
-
     fn kernel_image(&self, settings: &Settings) -> io::Result<PathBuf> {
         let firmware = unsafe { Library::new(&self.firmware) }.map_err(io::Error::other)?;
         let load = unsafe {
@@ -259,19 +225,6 @@ impl Context {
         temporary.as_file().sync_all()?;
         temporary.persist(&path).map_err(io::Error::other)?;
         Ok(path)
-    }
-
-    fn stop_guest(path: &Path) -> io::Result<()> {
-        let mut stream = UnixStream::connect(path)?;
-        stream.set_read_timeout(Some(std::time::Duration::from_secs(2)))?;
-        stream.set_write_timeout(Some(std::time::Duration::from_secs(2)))?;
-        stream.write_all(b"STOP\n")?;
-        let mut reply = String::new();
-        BufReader::new(stream).read_line(&mut reply)?;
-        if reply != "STOPPING\n" {
-            return Err(io::Error::other("guest refused shutdown"));
-        }
-        Ok(())
     }
 
     fn path(&self, name: &[u8], path: &Path) -> io::Result<()> {

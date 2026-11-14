@@ -1,10 +1,12 @@
 use std::io;
 use std::os::unix::fs::PermissionsExt;
-use std::process::Command;
+use std::path::Path;
+use std::process::{Command, Stdio};
 
 use crate::Settings;
 use crate::client::Preparation;
 use crate::http::UnixHttp;
+use crate::root::Root;
 
 pub(crate) struct Ssh;
 
@@ -13,7 +15,18 @@ impl Ssh {
         preparation.check()?;
         let key = settings.directory.join("ssh-key");
         let public = settings.directory.join("ssh-key.pub");
-        if !key.exists() || !public.exists() {
+        let derived = tempfile::NamedTempFile::new_in(&settings.directory)?;
+        if key.exists() {
+            let metadata = std::fs::symlink_metadata(&key)?;
+            if !metadata.is_file() {
+                return Err(io::Error::new(
+                    io::ErrorKind::InvalidInput,
+                    "engine SSH key is not a regular file",
+                ));
+            }
+            std::fs::set_permissions(&key, std::fs::Permissions::from_mode(0o600))?;
+        }
+        if !Self::derive(&key, &derived, preparation)? {
             let staging = tempfile::tempdir_in(&settings.directory)?;
             let staged_key = staging.path().join("ssh-key");
             let status = preparation.run(
@@ -28,28 +41,48 @@ impl Ssh {
                         "vmux-container",
                         "-f",
                     ])
-                    .arg(&staged_key),
+                    .arg(&staged_key)
+                    .stdin(Stdio::null()),
             )?;
             if !status.success() {
                 return Err(io::Error::other(format!("create engine SSH key: {status}")));
             }
             preparation.check()?;
-            std::fs::rename(staging.path().join("ssh-key.pub"), &public)?;
             std::fs::rename(staged_key, &key)?;
+            derived.as_file().set_len(0)?;
+            if !Self::derive(&key, &derived, preparation)? {
+                return Err(io::Error::other("derive engine SSH public key"));
+            }
         }
-        let authorized = settings.rootfs().join("root/.ssh");
         preparation.check()?;
-        std::fs::create_dir_all(&authorized)?;
-        std::fs::copy(public, authorized.join("authorized_keys"))?;
+        derived.as_file().sync_all()?;
+        derived.persist(&public).map_err(io::Error::other)?;
+        preparation.check()?;
+        let root = Root::open(settings)?;
+        root.directory("root/.ssh", 0o700)?;
+        root.write("root/.ssh/authorized_keys", &std::fs::read(public)?, 0o600)?;
         std::fs::set_permissions(&key, std::fs::Permissions::from_mode(0o600))?;
-        std::fs::set_permissions(&authorized, std::fs::Permissions::from_mode(0o700))?;
-        std::fs::set_permissions(
-            authorized.join("authorized_keys"),
-            std::fs::Permissions::from_mode(0o600),
-        )?;
-        std::fs::create_dir_all(settings.rootfs().join("etc/ssh"))?;
-        std::fs::write(settings.rootfs().join("etc/ssh/sshd_config"), b"Port 22\nListenAddress 192.168.127.2\nPermitRootLogin prohibit-password\nPasswordAuthentication no\nKbdInteractiveAuthentication no\nPubkeyAuthentication yes\nAuthorizedKeysFile /run/vmux-authorized-keys\nAllowUsers root\n")?;
+        root.write("etc/ssh/sshd_config", b"Port 22\nListenAddress 192.168.127.2\nPermitRootLogin prohibit-password\nPasswordAuthentication no\nKbdInteractiveAuthentication no\nPubkeyAuthentication yes\nAuthorizedKeysFile /run/vmux-authorized-keys\nAllowUsers root\n", 0o600)?;
         Ok(())
+    }
+
+    fn derive(
+        key: &Path,
+        output: &tempfile::NamedTempFile,
+        preparation: &Preparation<'_>,
+    ) -> io::Result<bool> {
+        if !key.exists() {
+            return Ok(false);
+        }
+        let status = preparation.run(
+            Command::new("ssh-keygen")
+                .args(["-y", "-P", "", "-f"])
+                .arg(key)
+                .stdin(Stdio::null())
+                .stdout(output.reopen()?)
+                .stderr(Stdio::null()),
+        )?;
+        Ok(status.success())
     }
 
     pub(crate) fn forward(settings: &Settings) -> io::Result<()> {
@@ -76,10 +109,36 @@ mod tests {
     use super::*;
 
     #[test]
+    fn mismatched_public_keys_are_repaired_without_rotating_a_valid_private_key() {
+        let directory = tempfile::tempdir().unwrap();
+        let mut settings = Settings::new(directory.path().join("engine"), directory.path());
+        settings.validate().unwrap();
+        std::fs::create_dir(settings.rootfs()).unwrap();
+        Ssh::prepare(&settings, &Preparation::new(None)).unwrap();
+        let private = std::fs::read(settings.directory.join("ssh-key")).unwrap();
+        let public = std::fs::read(settings.directory.join("ssh-key.pub")).unwrap();
+        std::fs::write(settings.directory.join("ssh-key.pub"), b"stale public key").unwrap();
+        Ssh::prepare(&settings, &Preparation::new(None)).unwrap();
+        assert_eq!(
+            std::fs::read(settings.directory.join("ssh-key")).unwrap(),
+            private
+        );
+        assert_eq!(
+            std::fs::read(settings.directory.join("ssh-key.pub")).unwrap(),
+            public
+        );
+        assert_eq!(
+            std::fs::read(settings.rootfs().join("root/.ssh/authorized_keys")).unwrap(),
+            public
+        );
+    }
+
+    #[test]
     fn preparation_recovers_from_an_incomplete_key_pair() {
         let temp = tempfile::tempdir().unwrap();
         let mut settings = Settings::new(temp.path().join("engine"), temp.path());
         settings.validate().unwrap();
+        std::fs::create_dir(settings.rootfs()).unwrap();
         let key = settings.directory.join("ssh-key");
         std::fs::write(&key, "incomplete private key").unwrap();
         Ssh::prepare(&settings, &Preparation::new(None)).unwrap();

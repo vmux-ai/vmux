@@ -27,7 +27,7 @@ fn request(
 ) {
     for (entity, invocation) in &invocations {
         let command = match invocation.command.as_str() {
-            "container.start" => Command::Start,
+            "container.start" => Command::Start(crate::control::Ownership::Independent),
             "container.stop" => Command::Stop,
             "container.status" => Command::Status,
             "container.logs" => Command::Logs,

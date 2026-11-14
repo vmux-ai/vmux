@@ -87,7 +87,13 @@ impl Native {
         if let Some(parent) = destination.parent() {
             fs::create_dir_all(parent)?;
         }
-        fs::copy(source, destination)?;
+        let parent = destination
+            .parent()
+            .ok_or("Copy destination has no parent")?;
+        let temporary = crate::temporary::Temporary::create(parent, ".vmux-copy")?;
+        let staged = temporary.path().join("file");
+        fs::copy(source, &staged)?;
+        fs::rename(staged, destination)?;
         Ok(())
     }
 

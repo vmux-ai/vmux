@@ -3,7 +3,7 @@ use std::ffi::OsStr;
 use std::fs;
 use std::os::unix::fs::{PermissionsExt, symlink};
 use std::os::unix::process::CommandExt;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use crate::Result;
 use crate::execution::Execution;
@@ -194,7 +194,13 @@ impl Native {
             .args(["--force", "--sign"])
             .arg(self.environment.required("APPLE_SIGNING_IDENTITY")?)
             .args(["--options", "runtime", "--entitlements"])
-            .arg(product.value("VMUX_HOST_DEV_ENTITLEMENTS"));
+            .arg(if path.file_name() == Some(OsStr::new("vmux_vm")) {
+                self.checkout
+                    .root
+                    .join("crates/util/vmux_vm/hypervisor.entitlements")
+            } else {
+                PathBuf::from(product.value("VMUX_HOST_DEV_ENTITLEMENTS"))
+            });
         if let Some(keychain) = self.environment.get("CODESIGN_KEYCHAIN") {
             command.arg("--keychain").arg(keychain);
         }
@@ -269,6 +275,11 @@ impl Native {
             .framework()?
             .join("Libraries/bevy_cef_debug_render_process");
         let binary = self.checkout.directory("debug").join("vmux_desktop");
+        let machine = self.checkout.directory("debug").join("vmux_vm");
+        let entitlements = self
+            .checkout
+            .root
+            .join("crates/util/vmux_vm/hypervisor.entitlements");
         for (path, id) in [
             (
                 &helper,
@@ -281,9 +292,17 @@ impl Native {
                 &binary,
                 format!("{}.dev", product.value("VMUX_HOST_BUNDLE_ID")),
             ),
+            (
+                &machine,
+                format!("{}.dev.vm", product.value("VMUX_HOST_NAMESPACE")),
+            ),
         ] {
+            let mut sources: Vec<&Path> = vec![path];
+            if path == &machine {
+                sources.push(&entitlements);
+            }
             let stamp = path.with_extension("dev-signed");
-            let inputs = format!("{}\n{id}", self.signing_inputs(&[path])?);
+            let inputs = format!("{}\n{id}", self.signing_inputs(&sources)?);
             if self.signature_current(&stamp, &inputs, path, path)? {
                 continue;
             }
@@ -293,7 +312,7 @@ impl Native {
             }
             self.sign(path, Some(&id))?;
             self.verify_signature(path)?;
-            let inputs = format!("{}\n{id}", self.signing_inputs(&[path])?);
+            let inputs = format!("{}\n{id}", self.signing_inputs(&sources)?);
             self.record_signature(&stamp, &inputs, path)?;
         }
         Ok(())
@@ -361,6 +380,7 @@ impl Native {
             &contents.join("Resources/tray.png"),
         )?;
         self.copy(&debug.join("vmux"), &contents.join("MacOS/vmux"))?;
+        self.copy(&debug.join("vmux_vm"), &contents.join("MacOS/vmux_vm"))?;
         let service = contents
             .join("Library/LoginItems")
             .join(product.value("VMUX_HOST_SERVICE_BUNDLE"));
@@ -404,6 +424,7 @@ impl Native {
             self.signing_inputs(&[
                 &debug.join("vmux_desktop"),
                 &contents.join("MacOS/vmux"),
+                &contents.join("MacOS/vmux_vm"),
                 &plist,
                 &contents.join("Resources/Vmux.icns"),
                 &service_stamp
@@ -468,7 +489,7 @@ impl Native {
         let debug = self.checkout.directory("debug");
         let mut stamp = format!("{}\n", self.checkout.root.display());
         let mut paths = Vec::new();
-        for name in ["vmux", "vmux_service", "vmux_desktop"] {
+        for name in ["vmux", "vmux_vm", "vmux_service", "vmux_desktop"] {
             let path = debug.join(name);
             if fs::metadata(&path)?.permissions().mode() & 0o111 == 0 {
                 return Err(format!("Missing executable: {name}").into());
@@ -478,6 +499,7 @@ impl Native {
         if cfg!(target_os = "macos") {
             let name = format!("{} Dev.app", self.product()?.value("VMUX_HOST_NAME"));
             paths.push(debug.join(&name).join("Contents/MacOS/vmux_desktop"));
+            paths.push(debug.join(&name).join("Contents/MacOS/vmux_vm"));
             let alias = self.checkout.directory("release").join(&name);
             fs::create_dir_all(alias.parent().unwrap())?;
             if fs::symlink_metadata(&alias).is_ok() {
@@ -514,7 +536,7 @@ impl Native {
             }
             count += 1;
         }
-        if count != if cfg!(target_os = "macos") { 4 } else { 3 } {
+        if count != if cfg!(target_os = "macos") { 6 } else { 4 } {
             return Err("Incomplete readiness stamp".into());
         }
         Ok(())

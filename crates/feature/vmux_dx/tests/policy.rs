@@ -3,7 +3,6 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
-use proc_macro2::{Delimiter, TokenTree};
 use quote::ToTokens;
 use serde::{Deserialize, Serialize};
 use syn::ext::IdentExt;
@@ -1147,6 +1146,142 @@ fn a_binary_import_cannot_replace_its_library_export() {
         &Policy::default(),
         &mut BTreeSet::new()
     ));
+}
+
+#[test]
+fn binary_module_ownership_requires_the_declared_source_and_one_crate_context() {
+    for (source, shared, accepted) in [
+        ("state.rs", false, true),
+        ("different.rs", false, false),
+        ("state.rs", true, false),
+    ] {
+        let mut inventory = Inventory::default();
+        if shared {
+            inventory.source(
+                "crates/util/fixture/src/lib.rs",
+                "mod state; pub use state::State;",
+            );
+        }
+        inventory.source("crates/util/fixture/src/main.rs", "use bevy_app::App; use bevy_ecs::prelude::*; mod state; fn read(rows:Query<&state::State>) {} fn main() { let mut app=App::new(); app.add_systems(Update,read); }");
+        inventory.source(
+            &format!("crates/util/fixture/src/{source}"),
+            "use bevy_ecs::prelude::*; #[derive(Component)] pub struct State { value:u32 }",
+        );
+        inventory.resolve_usage();
+        let key = inventory.key("struct:State");
+        assert_eq!(
+            inventory.canonical(
+                &inventory.entries[&key],
+                &Policy::default(),
+                &mut BTreeSet::new()
+            ),
+            accepted,
+            "{source}, shared={shared}"
+        );
+    }
+}
+
+#[test]
+fn ambiguous_module_files_cannot_prove_ownership_through_a_unique_symbol() {
+    let mut inventory = Inventory::default();
+    inventory.source("crates/util/fixture/src/main.rs", "use bevy_app::App; use bevy_ecs::prelude::*; mod state; fn read(rows:Query<&state::State>) {} fn main() { let mut app=App::new(); app.add_systems(Update,read); }");
+    inventory.source(
+        "crates/util/fixture/src/state.rs",
+        "use bevy_ecs::prelude::*; #[derive(Component)] pub struct State { value:u32 }",
+    );
+    inventory.source("crates/util/fixture/src/state/mod.rs", "pub struct Other;");
+    inventory.resolve_usage();
+    let key = inventory.key("struct:State");
+    assert!(!inventory.canonical(
+        &inventory.entries[&key],
+        &Policy::default(),
+        &mut BTreeSet::new()
+    ));
+}
+
+#[test]
+fn module_resolution_preserves_named_binary_roots_and_raw_inline_names() {
+    for raw in [false, true] {
+        let mut inventory = Inventory::default();
+        if raw {
+            inventory.source("crates/util/fixture/src/main.rs", "use bevy_app::App; use bevy_ecs::prelude::*; mod r#async { pub mod state; } fn read(rows:Query<&r#async::state::State>) {} fn main() { let mut app=App::new(); app.add_systems(Update,read); }");
+            inventory.source(
+                "crates/util/fixture/src/async/state.rs",
+                "use bevy_ecs::prelude::*; #[derive(Component)] pub struct State { value:u32 }",
+            );
+        } else {
+            inventory.source("crates/util/fixture/src/bin/example.rs", "use bevy_app::App; use bevy_ecs::prelude::*; #[derive(Component)] struct State { value:u32 } fn read(rows:Query<&crate::State>) {} fn main() { let mut app=App::new(); app.add_systems(Update,read); }");
+        }
+        inventory.resolve_usage();
+        let key = inventory.key("struct:State");
+        assert!(
+            inventory.canonical(
+                &inventory.entries[&key],
+                &Policy::default(),
+                &mut BTreeSet::new()
+            ),
+            "raw={raw}"
+        );
+    }
+}
+
+#[test]
+fn module_barrel_reexports_can_revisit_a_completed_prefix_without_a_false_cycle() {
+    let mut inventory = Inventory::default();
+    inventory.source("crates/util/fixture/src/lib.rs", "use bevy_app::{App,Plugin}; use bevy_ecs::prelude::*; mod host; pub use host::{stack,active_pane}; fn read(rows:Query<&stack::State>) {} struct Root; impl Plugin for Root { fn build(&self,app:&mut App) { app.add_systems(Update,read); } }");
+    inventory.source(
+        "crates/util/fixture/src/host.rs",
+        "pub mod stack; pub mod active_pane;",
+    );
+    inventory.source(
+        "crates/util/fixture/src/host/stack.rs",
+        "pub use crate::active_pane::State;",
+    );
+    inventory.source(
+        "crates/util/fixture/src/host/active_pane.rs",
+        "use bevy_ecs::prelude::*; #[derive(Component)] pub struct State { value:u32 }",
+    );
+    inventory.resolve_usage();
+    let key = inventory.key("struct:State");
+    assert!(inventory.canonical(
+        &inventory.entries[&key],
+        &Policy::default(),
+        &mut BTreeSet::new()
+    ));
+}
+
+#[test]
+fn adapter_owner_values_require_a_used_canonical_root_and_real_field_edges() {
+    for (field, registered, accepted) in [
+        ("page:Page", true, true),
+        ("value:u32", true, false),
+        ("page:Page", false, false),
+    ] {
+        let registration = if registered {
+            "app.add_systems(Update, read);"
+        } else {
+            ""
+        };
+        let inventory = Inventory::fixture(&format!(
+            "#[derive(Component)] struct Root {{ {field} }} struct Page {{ value:u32 }} impl Page {{ fn render(&self) {{ let _codec=Codec; }} }} struct Codec; fn read(rows:Query<&Root>) {{}} struct PluginRoot; impl Plugin for PluginRoot {{ fn build(&self,app:&mut App) {{ {registration} }} }}"
+        ));
+        let mut boundary = Boundary::fixture(&inventory, "struct:Codec");
+        boundary.owner = Some(inventory.key("struct:Page"));
+        boundary.input = format!("ECS: {}", inventory.key("struct:Root"));
+        boundary.output = "external: scoped native codec output".into();
+        let mut policy = Policy::default();
+        policy.values.push(ValueOwner {
+            key: inventory.key("struct:Page"),
+            owner: inventory.key("struct:Root"),
+            lifetime: "immutable page metadata retained by the root entity".into(),
+        });
+        policy.boundaries.push(boundary.clone());
+        assert_eq!(
+            boundary.references_from(&inventory, &policy, &mut BTreeSet::new()),
+            accepted,
+            "{field}, registered={registered}"
+        );
+    }
 }
 
 #[test]
@@ -2852,7 +2987,11 @@ impl Boundary {
                 return false;
             }
             let mut current = owner.as_str();
+            let mut owners = BTreeSet::new();
             loop {
+                if !owners.insert(current.to_string()) {
+                    return false;
+                }
                 let Some(parent) = inventory.entries.get(current) else {
                     return false;
                 };
@@ -2861,6 +3000,19 @@ impl Boundary {
                     .iter()
                     .find(|boundary| boundary.key == current);
                 let Some(contract) = contract else {
+                    if let Some(value) = policy.values.iter().find(|value| value.key == current) {
+                        let Some(owner) = inventory.entries.get(&value.owner) else {
+                            return false;
+                        };
+                        if value.lifetime.trim().is_empty()
+                            || !inventory.owner_references(owner, parent)
+                            || !inventory.value_root(owner, policy, &mut BTreeSet::new())
+                        {
+                            return false;
+                        }
+                        current = &value.owner;
+                        continue;
+                    }
                     if !parent.ecs
                         || !inventory.used(parent)
                         || !inventory.canonical(parent, policy, &mut BTreeSet::new())
@@ -3121,6 +3273,7 @@ struct Inventory {
     names: BTreeMap<String, Vec<String>>,
     symbols: BTreeMap<String, Vec<String>>,
     imports: BTreeMap<String, Imports>,
+    module_namespaces: BTreeMap<String, BTreeSet<String>>,
     used_keys: BTreeSet<String>,
     roots: BTreeSet<String>,
     functions: BTreeMap<String, Vec<String>>,
@@ -3141,8 +3294,20 @@ impl Inventory {
     }
 
     fn walk(&mut self, root: &Path, directory: &Path) {
+        let mut paths = Vec::new();
         for item in std::fs::read_dir(directory).expect("ownership source directory") {
-            let path = item.expect("ownership directory entry").path();
+            paths.push(item.expect("ownership directory entry").path());
+        }
+        paths.sort_by_key(|path| {
+            let order = match path.file_name().and_then(|name| name.to_str()) {
+                Some("lib.rs" | "mod.rs") => 0,
+                Some("main.rs") => 1,
+                _ if path.is_dir() => 3,
+                _ => 2,
+            };
+            (order, path.clone())
+        });
+        for path in paths {
             if path.is_dir() {
                 if matches!(
                     path.file_name().and_then(|name| name.to_str()),
@@ -3188,7 +3353,7 @@ impl Inventory {
         let file = syn::parse_file(source).unwrap_or_else(|error| panic!("{path}: {error}"));
         let mut usage = Usage {
             testing: path.contains("/tests/"),
-            namespace: Namespace::of(path, &[]).0,
+            namespace: self.namespace(path, &[]).0,
             ..Usage::default()
         };
         usage.visit_file(&file);
@@ -3201,6 +3366,19 @@ impl Inventory {
             production: true,
         }
         .visit_file(&file);
+    }
+
+    fn namespace(&self, path: &str, scope: &[String]) -> Namespace {
+        let original = Namespace::of(path, scope);
+        let Some(candidates) = self.module_namespaces.get(path) else {
+            return original;
+        };
+        if candidates.len() != 1 {
+            return original;
+        }
+        let root = Namespace::of(path, &[]).0;
+        let suffix = original.0.strip_prefix(&root).unwrap();
+        Namespace(format!("{}{suffix}", candidates.first().unwrap()))
     }
 
     fn script(&mut self, path: &str, source: &str) {
@@ -4462,6 +4640,8 @@ impl Inventory {
         prefix: &str,
         visiting: &mut BTreeSet<String>,
     ) -> Option<String> {
+        let mut scoped = visiting.clone();
+        let visiting = &mut scoped;
         if !visiting.insert(format!("path:{namespace}|{prefix}")) {
             return None;
         }
@@ -4507,6 +4687,8 @@ impl Inventory {
         name: &str,
         visiting: &mut BTreeSet<String>,
     ) -> Option<String> {
+        let mut scoped = visiting.clone();
+        let visiting = &mut scoped;
         if !visiting.insert(format!("module:{namespace}|{name}")) {
             return None;
         }
@@ -4515,6 +4697,23 @@ impl Inventory {
             return None;
         }
         if imports.modules.contains(name) {
+            if let Some(paths) = imports.module_sources.get(name) {
+                let mut bound = None;
+                for path in paths {
+                    let Some(source) = self.usage.get(path) else {
+                        continue;
+                    };
+                    let candidates = self.module_namespaces.get(path)?;
+                    if candidates.len() != 1
+                        || candidates.first() != Some(&source.namespace)
+                        || bound.is_some()
+                    {
+                        return None;
+                    }
+                    bound = Some(source.namespace.clone());
+                }
+                return bound;
+            }
             return Some(format!("{namespace}::{name}"));
         }
         if let Some(target) = imports.aliases.get(name) {
@@ -4689,6 +4888,27 @@ impl Inventory {
         reference: &str,
         visiting: &mut BTreeSet<String>,
     ) -> Option<&Declaration> {
+        let reference = reference
+            .split("::")
+            .map(|part| part.strip_prefix("r#").unwrap_or(part))
+            .collect::<Vec<_>>()
+            .join("::");
+        let reference = reference.as_str();
+        let mut scope = namespace;
+        while let Some((parent, name)) = scope.rsplit_once("::") {
+            if self
+                .imports
+                .get(parent)
+                .is_some_and(|imports| imports.modules.contains(name))
+                && self
+                    .module_binding(parent, name, &mut BTreeSet::new())
+                    .as_deref()
+                    != Some(scope)
+            {
+                return None;
+            }
+            scope = parent;
+        }
         let marker = format!("{namespace}|{reference}");
         let depth = self.lookup_depth.get();
         if depth > 128 || !visiting.insert(marker) {
@@ -4748,6 +4968,15 @@ impl Inventory {
             }) {
                 return None;
             }
+            if parts.len() > 1
+                && self
+                    .imports
+                    .get(current)
+                    .is_some_and(|imports| imports.modules.contains(first))
+            {
+                let module = self.module_binding(current, first, visiting)?;
+                return self.resolve(&module, &parts[1..].join("::"), visiting);
+            }
             let symbol = format!("{current}::{reference}");
             if self.symbols.contains_key(&symbol) {
                 return self.symbol(&symbol, visiting);
@@ -4760,11 +4989,8 @@ impl Inventory {
                     return None;
                 }
                 if parts.len() > 1 && imports.modules.contains(first) {
-                    return self.resolve(
-                        &format!("{current}::{first}"),
-                        &parts[1..].join("::"),
-                        visiting,
-                    );
+                    let module = self.module_binding(current, first, visiting)?;
+                    return self.resolve(&module, &parts[1..].join("::"), visiting);
                 }
                 if let Some(target) = imports.aliases.get(first) {
                     let suffix = parts[1..].join("::");
@@ -4892,7 +5118,12 @@ impl Namespace {
                 package.push_str(binary.trim_end_matches(".rs"));
             }
             module.push(package);
-            for part in &parts[source + 1..] {
+            let start = if parts.get(source + 1) == Some(&"bin") {
+                source + 3
+            } else {
+                source + 1
+            };
+            for part in &parts[start..] {
                 let name = part.trim_end_matches(".rs");
                 if !matches!(name, "lib" | "main" | "mod") {
                     module.push(name.into());
@@ -4916,6 +5147,7 @@ struct Imports {
     ambiguous: BTreeSet<String>,
     globs: BTreeSet<String>,
     modules: BTreeSet<String>,
+    module_sources: BTreeMap<String, Vec<String>>,
     opaque_modules: BTreeSet<String>,
 }
 
@@ -5263,7 +5495,7 @@ impl Declarations<'_> {
         let declaration = Declaration {
             key: key.clone(),
             path: self.path.into(),
-            namespace: Namespace::of(self.path, &self.scope).0,
+            namespace: self.inventory.namespace(self.path, &self.scope).0,
             name,
             kind,
             fingerprint: Declaration::fingerprint(&tokens.to_string()),
@@ -5375,7 +5607,7 @@ impl<'ast> Visit<'ast> for Declarations<'_> {
                 let name = value.rename.as_ref().map_or(&value.ident, |(_, name)| name);
                 self.inventory
                     .imports
-                    .entry(Namespace::of(self.path, &self.scope).0)
+                    .entry(self.inventory.namespace(self.path, &self.scope).0)
                     .or_default()
                     .bind_alias(name.unraw().to_string(), value.ident.unraw().to_string());
             }
@@ -5385,7 +5617,7 @@ impl<'ast> Visit<'ast> for Declarations<'_> {
                     .iter()
                     .any(|scope| scope.starts_with("fn ") || scope.starts_with("impl ")) =>
             {
-                let namespace = Namespace::of(self.path, &self.scope).0;
+                let namespace = self.inventory.namespace(self.path, &self.scope).0;
                 self.inventory
                     .imports
                     .entry(namespace)
@@ -5488,7 +5720,7 @@ impl<'ast> Visit<'ast> for Declarations<'_> {
                     &fields,
                     None,
                 );
-                let namespace = Namespace::of(self.path, &self.scope).0;
+                let namespace = self.inventory.namespace(self.path, &self.scope).0;
                 let symbol = format!("{namespace}::{}", value.sig.ident);
                 let key = self.inventory.functions[&symbol].last().unwrap();
                 self.inventory.entries.get_mut(key).unwrap().private =
@@ -5530,21 +5762,64 @@ impl<'ast> Visit<'ast> for Declarations<'_> {
                 {
                     self.inventory
                         .imports
-                        .entry(Namespace::of(self.path, &self.scope).0)
+                        .entry(self.inventory.namespace(self.path, &self.scope).0)
                         .or_default()
                         .opaque_modules
                         .insert(value.ident.unraw().to_string());
                 }
+                let namespace = self.inventory.namespace(self.path, &self.scope).0;
+                let name = value.ident.unraw().to_string();
+                if value.content.is_none()
+                    && !value
+                        .attrs
+                        .iter()
+                        .any(|attribute| Self::path_override(&attribute.meta))
+                {
+                    let file = Path::new(self.path);
+                    let mut directory = file.parent().unwrap().to_path_buf();
+                    if !matches!(
+                        file.file_name().and_then(|name| name.to_str()),
+                        Some("lib.rs" | "main.rs" | "mod.rs")
+                    ) && directory.file_name().and_then(|name| name.to_str()) != Some("bin")
+                    {
+                        directory.push(file.file_stem().unwrap());
+                    }
+                    for scope in &self.scope {
+                        if let Ok(name) = syn::parse_str::<syn::Ident>(scope) {
+                            directory.push(name.unraw().to_string());
+                        }
+                    }
+                    let paths = [
+                        directory.join(format!("{name}.rs")),
+                        directory.join(&name).join("mod.rs"),
+                    ]
+                    .into_iter()
+                    .map(|path| path.to_str().unwrap().to_string())
+                    .collect::<Vec<_>>();
+                    for path in &paths {
+                        self.inventory
+                            .module_namespaces
+                            .entry(path.clone())
+                            .or_default()
+                            .insert(format!("{namespace}::{name}"));
+                    }
+                    self.inventory
+                        .imports
+                        .entry(namespace.clone())
+                        .or_default()
+                        .module_sources
+                        .insert(name.clone(), paths);
+                }
                 self.inventory
                     .imports
-                    .entry(Namespace::of(self.path, &self.scope).0)
+                    .entry(namespace)
                     .or_default()
                     .modules
-                    .insert(value.ident.unraw().to_string());
+                    .insert(name);
                 self.scope.push(value.ident.to_string());
                 self.inventory
                     .imports
-                    .entry(Namespace::of(self.path, &self.scope).0)
+                    .entry(self.inventory.namespace(self.path, &self.scope).0)
                     .or_default();
                 visit::visit_item(self, item);
                 self.scope.pop();
@@ -5559,7 +5834,6 @@ impl<'ast> Visit<'ast> for Declarations<'_> {
 
 #[derive(Default)]
 struct References {
-    included: BTreeSet<String>,
     include_tests: bool,
     plugins: BTreeSet<String>,
     registered_systems: BTreeSet<(String, String)>,

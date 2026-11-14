@@ -7,6 +7,7 @@ use bevy_tasks::{IoTaskPool, Task, TaskPoolBuilder, futures_lite::future};
 
 use crate::Settings;
 use crate::client::EngineClient;
+use crate::control::GuestControl;
 use crate::engine::{Deadline, Engine, EngineSet, Failure, ForcedShutdown, Machine, Phase};
 use crate::ports::PortForwarder;
 use crate::process::Process;
@@ -271,7 +272,7 @@ fn shutdown(
         }
         let settings = settings.clone();
         commands.entity(entity).insert(StopTask(
-            IoTaskPool::get().spawn(async move { EngineClient::new(settings).request_stop() }),
+            IoTaskPool::get().spawn(async move { GuestControl::stop(&settings) }),
         ));
     }
 }
@@ -279,6 +280,63 @@ fn shutdown(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn accepted_stop_retires_an_unresponsive_guest_after_the_shutdown_deadline() {
+        let directory = tempfile::tempdir().unwrap();
+        let mut settings = Settings::new(directory.path().join("engine"), directory.path());
+        settings.validate().unwrap();
+        let lease = crate::process::Lease::acquire(&settings.directory).unwrap();
+        let mut app = App::new();
+        app.add_plugins(crate::EnginePlugin);
+        let engine = app
+            .world_mut()
+            .spawn((Engine, settings.clone(), Phase::Ready, lease))
+            .id();
+        let mut process = std::process::Command::new("sleep");
+        process.arg("60");
+        app.world_mut().spawn((
+            Name::new("Unresponsive test VM"),
+            Machine,
+            ChildOf(engine),
+            Process::spawn(&mut process).unwrap(),
+        ));
+        app.update();
+        let client = std::thread::spawn(move || crate::EngineClient::new(settings).request_stop());
+        let deadline = Instant::now() + Duration::from_secs(3);
+        while app.world().get::<Phase>(engine) != Some(&Phase::Stopping) {
+            assert!(
+                Instant::now() < deadline,
+                "stop request was not adopted by the supervisor"
+            );
+            app.update();
+            std::thread::sleep(Duration::from_millis(1));
+        }
+        client.join().unwrap().unwrap();
+        app.world_mut()
+            .get_mut::<StopWindow>(engine)
+            .unwrap()
+            .deadline = Instant::now() - Duration::from_secs(1);
+        loop {
+            app.update();
+            if app.world().get::<crate::process::Lease>(engine).is_none() {
+                break;
+            }
+            assert!(
+                Instant::now() < deadline,
+                "unresponsive guest retained its VM lease"
+            );
+            std::thread::sleep(Duration::from_millis(1));
+        }
+        assert_eq!(app.world().get::<Phase>(engine), Some(&Phase::Failed));
+        assert!(
+            app.world_mut()
+                .query::<&Process>()
+                .iter(app.world())
+                .next()
+                .is_none()
+        );
+    }
     use crate::EnginePlugin;
 
     #[test]
