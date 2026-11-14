@@ -115,6 +115,8 @@ mod primitives;
 pub mod process_id;
 #[cfg(all(host, feature = "host"))]
 pub mod profile;
+#[cfg(feature = "records")]
+pub mod record;
 #[cfg(feature = "cli")]
 mod registry;
 pub mod revision;

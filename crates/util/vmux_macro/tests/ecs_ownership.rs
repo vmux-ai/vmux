@@ -1389,6 +1389,46 @@ fn system_state_constructors_require_the_bevy_binding() {
 }
 
 #[test]
+fn cached_exclusive_system_parameters_require_registered_bevy_ownership() {
+    for (binding, registration, expected) in [
+        (
+            "use bevy_ecs::system::SystemState;",
+            "app.add_systems(Update, read);",
+            true,
+        ),
+        (
+            "use bevy_ecs::system::SystemState as Cached;",
+            "app.add_systems(Update, read);",
+            true,
+        ),
+        (
+            "struct SystemState<T>(PhantomData<T>);",
+            "app.add_systems(Update, read);",
+            false,
+        ),
+        ("use bevy_ecs::system::SystemState;", "", false),
+    ] {
+        let parameter = if binding.contains("as Cached") {
+            "Cached"
+        } else {
+            "SystemState"
+        };
+        let inventory = Inventory::fixture(&format!(
+            "use bevy_ecs::prelude::*; {binding} #[derive(Component)] struct State; #[derive(Resource)] struct Settings; fn read(world: &mut World, cached: &mut {parameter}<(Query<&State>, Res<Settings>)>) {{ let _ = cached.get(world); }} struct Root; impl Plugin for Root {{ fn build(&self, app: &mut App) {{ {registration} }} }}"
+        ));
+        assert_eq!(
+            inventory.canonical(
+                &inventory.entries[&inventory.key("fn:read")],
+                &Policy::default(),
+                &mut BTreeSet::new(),
+            ),
+            expected,
+            "{binding} {registration}"
+        );
+    }
+}
+
+#[test]
 fn production_configuration_keeps_unknown_platform_and_feature_branches() {
     for (condition, expected) in [
         ("not(feature = \"host\")", true),
@@ -3412,7 +3452,7 @@ impl Inventory {
                     "bevy_app" | "bevy_app::prelude" | "bevy::app" | "bevy::prelude"
                 ),
                 "Query" | "Single" | "Res" | "ResMut" | "NonSend" | "NonSendMut" | "ParamSet"
-                | "SystemParam" => {
+                | "SystemParam" | "SystemState" => {
                     matches!(
                         prefix,
                         "bevy_ecs::system"
@@ -3562,7 +3602,8 @@ impl Inventory {
                     return false;
                 };
                 let allowed = match handle.as_str() {
-                    "Query" | "Single" | "Res" | "ResMut" | "NonSend" | "NonSendMut" | "On" => true,
+                    "Query" | "Single" | "Res" | "ResMut" | "NonSend" | "NonSendMut" | "On"
+                    | "SystemState" => true,
                     "With" | "Without" | "Added" | "Changed" | "Or" | "Has" | "Ref" | "Mut" => {
                         inside
                     }
@@ -3578,7 +3619,10 @@ impl Inventory {
                 let syn::PathArguments::AngleBracketed(arguments) = &segment.arguments else {
                     return false;
                 };
-                let component = !matches!(handle.as_str(), "Query" | "Single" | "ParamSet");
+                let component = !matches!(
+                    handle.as_str(),
+                    "Query" | "Single" | "ParamSet" | "SystemState"
+                );
                 for argument in &arguments.args {
                     let syn::GenericArgument::Type(value) = argument else {
                         continue;
