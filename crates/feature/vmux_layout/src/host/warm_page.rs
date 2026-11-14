@@ -3,6 +3,7 @@ use std::time::Duration;
 
 use bevy::ecs::system::SystemParam;
 use bevy::prelude::*;
+use bevy::prelude::{Changed, Commands};
 use bevy::winit::EventLoopProxyWrapper;
 use bevy_cef::prelude::{CefSystems, HostWindow, UiInput};
 use vmux_ecs::KeyboardOwner;
@@ -18,18 +19,19 @@ use vmux_flex::prelude::*;
 
 pub struct PrewarmPagesPlugin;
 
-impl Plugin for PrewarmPagesPlugin {
-    fn build(&self, app: &mut App) {
+impl bevy::prelude::Plugin for PrewarmPagesPlugin {
+    fn build(&self, app: &mut bevy::prelude::App) {
         app.init_resource::<DeadlineScheduler>()
+            .add_observer(cancel)
             .add_systems(
                 Update,
-                handle_registered_page_open
-                    .in_set(PageOpenSet::HandleKnownPages)
+                open.in_set(PageOpenSet::HandleKnownPages)
                     .in_set(PrewarmPageOpenSet),
             )
             .add_systems(
                 Update,
-                maintain_registered_page_pools
+                reconcile
+                    .after(PageOpenSet::HandleKnownPages)
                     .after(PrewarmPageOpenSet)
                     .before(CefSystems::CreateAndResize),
             );
@@ -40,7 +42,7 @@ impl Plugin for PrewarmPagesPlugin {
 pub struct PrewarmPageOpenSet;
 
 #[derive(Component)]
-#[require(vmux_ecs::page::PrewarmedPage)]
+#[require(vmux_ecs::page::PrewarmedPage, Reservation)]
 pub struct WarmPageSpare {
     url: &'static str,
 }
@@ -50,31 +52,37 @@ pub struct RendererPool<'w, 's> {
     spares: Query<
         'w,
         's,
-        (Entity, &'static WarmPageSpare),
+        (Entity, &'static WarmPageSpare, &'static mut Reservation),
         (
             With<PageReady>,
             Without<crate::hosted_page::SurfaceHandoffFailed>,
         ),
     >,
     windows: crate::window::WindowHierarchy<'w, 's>,
-    claimed: Local<'s, HashSet<Entity>>,
+    requests: Query<'w, 's, &'static PageOpenTask>,
+    navigations: Query<'w, 's, &'static PageNavigation>,
     commands: Commands<'w, 's>,
 }
 
 impl RendererPool<'_, '_> {
-    pub fn take(&mut self, url: &str, stack: Entity) -> Option<Entity> {
-        self.claimed.retain(|entity| self.spares.contains(*entity));
-        let window = self.windows.get(stack);
-        for (entity, spare) in &self.spares {
-            if spare.url != url
-                || self.claimed.contains(&entity)
-                || self.windows.get(entity) != window
-            {
+    pub fn take(&mut self, url: &str, request: Entity) -> Option<Entity> {
+        let task = self.requests.get(request).ok()?;
+        if !self
+            .navigations
+            .get(task.stack)
+            .is_ok_and(|navigation| navigation.matches(task.id))
+        {
+            return None;
+        }
+        let window = self.windows.get(task.stack);
+        for (entity, spare, mut reservation) in &mut self.spares {
+            if spare.url != url || reservation.0.is_some() || self.windows.get(entity) != window {
                 continue;
             }
-            self.claimed.insert(entity);
+            reservation.0 = Some(request);
             self.commands.entity(entity).remove::<(
                 WarmPageSpare,
+                Reservation,
                 vmux_ecs::page::PrewarmedPage,
                 crate::hosted_page::SurfacePaintReady,
                 crate::hosted_page::SurfacePresentationReady,
@@ -87,113 +95,74 @@ impl RendererPool<'_, '_> {
     }
 }
 
+#[derive(Component, Default)]
+struct Reservation(Option<Entity>);
+
 #[derive(Component)]
+#[require(PoolRetry)]
 struct WarmPagePoolNode {
     url: &'static str,
 }
 
-#[derive(Default)]
-struct WarmPageRetries(HashMap<&'static str, WarmPageRetry>);
-
-struct WarmPageRetry {
+#[derive(Component, Default)]
+struct PoolRetry {
     failures: u32,
-    after: Duration,
+    after: Option<Duration>,
 }
 
-impl WarmPageRetries {
-    fn failed(&mut self, url: &'static str, now: Duration) {
-        let retry = self.0.entry(url).or_insert(WarmPageRetry {
-            failures: 0,
-            after: now,
-        });
-        retry.failures = retry.failures.saturating_add(1);
-        let shift = retry.failures.saturating_sub(1).min(4);
-        retry.after = now + Duration::from_millis(100 * (1_u64 << shift));
+impl PoolRetry {
+    fn failed(&mut self, now: Duration) {
+        self.failures = self.failures.saturating_add(1);
+        let shift = self.failures.saturating_sub(1).min(4);
+        self.after = Some(now + Duration::from_millis(100 * (1_u64 << shift)));
     }
 
-    fn waiting(&self, url: &'static str, now: Duration) -> Option<Duration> {
-        let retry = self.0.get(url)?;
-        (now < retry.after).then_some(retry.after)
+    fn waiting(&self, now: Duration) -> Option<Duration> {
+        let after = self.after?;
+        (now < after).then_some(after)
     }
 
-    fn any_due(&self, now: Duration) -> bool {
-        self.0.values().any(|retry| now >= retry.after)
+    fn due(&self, now: Duration) -> bool {
+        self.after.is_some_and(|after| now >= after)
     }
 
-    fn succeeded(&mut self, url: &'static str) {
-        self.0.remove(url);
-    }
-
-    fn retain(&mut self, desired: &HashMap<&str, usize>) -> Vec<&'static str> {
-        let removed = self
-            .0
-            .keys()
-            .copied()
-            .filter(|url| !desired.contains_key(*url))
-            .collect::<Vec<_>>();
-        self.0.retain(|url, _| desired.contains_key(*url));
-        removed
+    fn succeeded(&mut self) {
+        *self = Self::default();
     }
 }
 
 #[derive(SystemParam)]
-struct WarmPagePoolRetry<'w, 's> {
+struct PoolWake<'w> {
     time: Res<'w, Time>,
     scheduler: Option<Res<'w, DeadlineScheduler>>,
     proxy: Option<Res<'w, EventLoopProxyWrapper>>,
-    retries: Local<'s, WarmPageRetries>,
 }
 
-impl WarmPagePoolRetry<'_, '_> {
+impl PoolWake<'_> {
     fn now(&self) -> Duration {
         self.time.elapsed()
     }
 
-    fn any_due(&self, now: Duration) -> bool {
-        self.retries.any_due(now)
-    }
-
-    fn failed(&mut self, url: &'static str, now: Duration) {
-        self.retries.failed(url, now);
-        if let Some(after) = self.retries.waiting(url, now) {
-            self.schedule(url, after, now);
-        }
-    }
-
-    fn waiting(&self, url: &'static str, now: Duration) -> bool {
-        let Some(after) = self.retries.waiting(url, now) else {
-            return false;
-        };
-        self.schedule(url, after, now);
-        true
-    }
-
-    fn succeeded(&mut self, url: &'static str) {
-        self.retries.succeeded(url);
-        self.cancel(url);
-    }
-
-    fn retain(&mut self, desired: &HashMap<&str, usize>) {
-        for url in self.retries.retain(desired) {
-            self.cancel(url);
-        }
-    }
-
-    fn schedule(&self, url: &'static str, after: Duration, now: Duration) {
-        let Some(scheduler) = self.scheduler.as_deref() else {
-            return;
-        };
-        scheduler.schedule(
-            DeadlineOwner::Prewarm(url),
-            std::time::Instant::now() + after.saturating_sub(now),
-            self.proxy.as_deref(),
-        );
-    }
-
-    fn cancel(&self, url: &'static str) {
+    fn schedule(&self, pool: Entity, after: Duration, now: Duration) {
         if let Some(scheduler) = self.scheduler.as_deref() {
-            scheduler.cancel(DeadlineOwner::Prewarm(url));
+            scheduler.schedule(
+                DeadlineOwner::Prewarm(pool),
+                std::time::Instant::now() + after.saturating_sub(now),
+                self.proxy.as_deref(),
+            );
         }
+    }
+
+    fn cancel(&self, pool: Entity) {
+        if let Some(scheduler) = self.scheduler.as_deref() {
+            scheduler.cancel(DeadlineOwner::Prewarm(pool));
+        }
+    }
+}
+
+fn cancel(removed: On<Remove, WarmPagePoolNode>, scheduler: Option<Res<DeadlineScheduler>>) {
+    if let Some(scheduler) = scheduler {
+        scheduler.cancel(DeadlineOwner::Prewarm(removed.entity));
     }
 }
 
@@ -216,15 +185,15 @@ struct WarmPagePoolChanges<'w, 's> {
         ),
     >,
     removed_spares: RemovedComponents<'w, 's, WarmPageSpare>,
-    initialized: Local<'s, bool>,
+    removed_pools: RemovedComponents<'w, 's, WarmPagePoolNode>,
 }
 
 impl WarmPagePoolChanges<'_, '_> {
     fn dirty(&mut self, retry_due: bool) -> bool {
         let page_removed = self.removed_pages.read().count() > 0;
         let spare_removed = self.removed_spares.read().count() > 0;
-        let dirty = !*self.initialized
-            || !self.changed_pages.is_empty()
+        let pool_removed = self.removed_pools.read().count() > 0;
+        !self.changed_pages.is_empty()
             || !self.changed_pool_nodes.is_empty()
             || !self.changed_windows.is_empty()
             || !self.changed_layout_ready.is_empty()
@@ -233,27 +202,20 @@ impl WarmPagePoolChanges<'_, '_> {
             || !self.changed_failures.is_empty()
             || retry_due
             || page_removed
-            || spare_removed;
-        *self.initialized = true;
-        dirty
+            || spare_removed
+            || pool_removed
     }
 }
 
 type PendingPageOpen = (Without<PageOpenHandled>, Without<PageOpenError>);
 
-fn handle_registered_page_open(
+fn open(
     pages: Query<&PrewarmPage>,
     metadata: PageMetadataCatalog,
     tasks: Query<(Entity, &PageOpenTask), PendingPageOpen>,
     navigations: Query<&PageNavigation>,
     histories: Query<(), With<HostHistory>>,
-    spares: Query<
-        (Entity, &WarmPageSpare),
-        (
-            With<PageReady>,
-            Without<crate::hosted_page::SurfaceHandoffFailed>,
-        ),
-    >,
+    mut renderers: RendererPool,
     children: Query<&Children>,
     mut hosted_pages: ParamSet<(
         Query<
@@ -274,10 +236,6 @@ fn handle_registered_page_open(
         return;
     }
     let pages = pages.iter().collect::<Vec<_>>();
-    let mut available: HashMap<&str, Vec<Entity>> = HashMap::new();
-    for (entity, spare) in &spares {
-        available.entry(spare.url).or_default().push(entity);
-    }
     let mut handled_stacks = HashSet::new();
 
     for (entity, task) in &tasks {
@@ -380,7 +338,7 @@ fn handle_registered_page_open(
                     .entity(*surface)
                     .try_insert(crate::hosted_page::SurfaceBlocked);
             }
-            if let Some(spare) = available.get_mut(page.url).and_then(Vec::pop) {
+            if let Some(spare) = renderers.take(page.url, entity) {
                 if let Ok(mut page_metadata) = hosted_pages.p1().get_mut(spare) {
                     *page_metadata = next.clone();
                 }
@@ -436,10 +394,10 @@ fn handle_registered_page_open(
     }
 }
 
-fn maintain_registered_page_pools(
+fn reconcile(
     pages: Query<&PrewarmPage>,
     metadata: PageMetadataCatalog,
-    pool_nodes: Query<(Entity, &WarmPagePoolNode)>,
+    mut pool_nodes: Query<(Entity, &WarmPagePoolNode, &mut PoolRetry)>,
     vmux_windows: Query<(Entity, &HostWindow), With<VmuxWindow>>,
     focused_window: crate::window::FocusedWindow,
     layout_ready: Query<(), (With<LayoutCef>, With<PageReady>)>,
@@ -449,15 +407,13 @@ fn maintain_registered_page_pools(
         Has<crate::hosted_page::SurfaceHandoffFailed>,
         Has<PageReady>,
     )>,
-    mut retry: WarmPagePoolRetry,
+    wake: PoolWake,
     mut changes: WarmPagePoolChanges,
     mut commands: Commands,
 ) {
-    let now = retry.now();
-    if !changes.dirty(retry.any_due(now)) {
-        return;
-    }
-    if layout_ready.is_empty() {
+    let now = wake.now();
+    let retry_due = pool_nodes.iter().any(|(_, _, retry)| retry.due(now));
+    if !changes.dirty(retry_due) || layout_ready.is_empty() {
         return;
     }
     let Some(window) = focused_window
@@ -471,55 +427,83 @@ fn maintain_registered_page_pools(
     else {
         return;
     };
-    let desired = pages
-        .iter()
-        .filter(|page| page.pool_size > 0 && !page.url.is_empty())
-        .map(|page| (page.url, page.pool_size))
-        .collect::<HashMap<_, _>>();
-    retry.retain(&desired);
-    let mut removed_urls = HashSet::new();
-    for (entity, node) in &pool_nodes {
-        if desired.get(node.url).copied().unwrap_or(0) == 0 {
-            removed_urls.insert(node.url);
+    let mut desired = HashMap::new();
+    for page in &pages {
+        if page.pool_size > 0 && !page.url.is_empty() {
+            desired.insert(page.url, page.pool_size);
+        }
+    }
+    for (entity, node, _) in &pool_nodes {
+        if !desired.contains_key(node.url) {
+            wake.cancel(entity);
             commands.entity(entity).try_despawn();
         }
     }
-    let mut retained = HashMap::<&str, usize>::new();
-    let failed_urls = spares
-        .iter()
-        .filter_map(|(_, spare, failed, _)| failed.then_some(spare.url))
-        .collect::<HashSet<_>>();
-    for (entity, spare, failed, ready) in &spares {
-        if failed {
-            retry.failed(spare.url, now);
+    for (entity, spare, _, _) in &spares {
+        if !desired.contains_key(spare.url) {
             commands.entity(entity).try_despawn();
-            continue;
         }
-        if ready && !failed_urls.contains(spare.url) {
-            retry.succeeded(spare.url);
-        }
-        let count = retained.entry(spare.url).or_default();
-        let limit = desired.get(spare.url).copied().unwrap_or(0);
-        if removed_urls.contains(spare.url) || *count >= limit {
-            commands.entity(entity).try_despawn();
-            continue;
-        }
-        *count += 1;
     }
+    let mut processed = HashSet::new();
     let mut remaining = 1;
     for page in &pages {
-        if page.pool_size == 0 || page.url.is_empty() {
+        let Some(&limit) = desired.get(page.url) else {
+            continue;
+        };
+        if !processed.insert(page.url) {
             continue;
         }
-        let node = pool_node_for(page.url, window, &pool_nodes, &mut commands);
-        let count = retained.get(page.url).copied().unwrap_or(0);
-        for _ in count..page.pool_size {
-            if retry.waiting(page.url, now) {
-                break;
+        let mut existing = pool_nodes
+            .iter_mut()
+            .find(|(_, node, _)| node.url == page.url);
+        let fresh = existing.is_none();
+        let node = match existing.as_ref() {
+            Some((entity, _, _)) => *entity,
+            None => commands
+                .spawn((
+                    WarmPagePoolNode { url: page.url },
+                    Node {
+                        width: Val::Px(0.0),
+                        height: Val::Px(0.0),
+                        position_type: PositionType::Absolute,
+                        ..default()
+                    },
+                    Visibility::Hidden,
+                    ChildOf(window),
+                ))
+                .id(),
+        };
+        let mut initial = PoolRetry::default();
+        let retry = match existing.as_mut() {
+            Some((_, _, retry)) => &mut **retry,
+            None => &mut initial,
+        };
+        let failed = spares
+            .iter()
+            .any(|(_, spare, failed, _)| spare.url == page.url && failed);
+        let mut retained = 0;
+        for (entity, spare, failure, ready) in &spares {
+            if spare.url != page.url {
+                continue;
             }
-            if remaining == 0 {
-                return;
+            if failure {
+                retry.failed(now);
+                commands.entity(entity).try_despawn();
+                continue;
             }
+            if ready && !failed {
+                retry.succeeded();
+                wake.cancel(node);
+            }
+            if retained >= limit {
+                commands.entity(entity).try_despawn();
+            } else {
+                retained += 1;
+            }
+        }
+        if let Some(after) = retry.waiting(now) {
+            wake.schedule(node, after, now);
+        } else if retained < limit && remaining > 0 {
             remaining -= 1;
             let page_metadata = metadata.metadata_for(page.url, &page.title);
             let webview = commands
@@ -533,33 +517,10 @@ fn maintain_registered_page_pools(
                 .entity(webview)
                 .insert((WarmPageSpare { url: page.url }, ChildOf(node)));
         }
+        if fresh {
+            commands.entity(node).insert(initial);
+        }
     }
-}
-
-fn pool_node_for(
-    url: &'static str,
-    window: Entity,
-    pool_nodes: &Query<(Entity, &WarmPagePoolNode)>,
-    commands: &mut Commands,
-) -> Entity {
-    pool_nodes
-        .iter()
-        .find_map(|(entity, node)| (node.url == url).then_some(entity))
-        .unwrap_or_else(|| {
-            commands
-                .spawn((
-                    WarmPagePoolNode { url },
-                    Node {
-                        width: Val::Px(0.0),
-                        height: Val::Px(0.0),
-                        position_type: PositionType::Absolute,
-                        ..default()
-                    },
-                    Visibility::Hidden,
-                    ChildOf(window),
-                ))
-                .id()
-        })
 }
 
 #[cfg(test)]
@@ -601,13 +562,30 @@ mod tests {
             .world_mut()
             .spawn((WarmPageSpare { url: "file://" }, ChildOf(root_a)))
             .id();
+        let mut requests = Vec::new();
+        for stack in [stack_a, stack_b] {
+            let id = PageOpenId::new();
+            app.world_mut()
+                .entity_mut(stack)
+                .insert(PageNavigation::new(id));
+            requests.push(
+                app.world_mut()
+                    .spawn(PageOpenTask {
+                        id,
+                        stack,
+                        url: "file://".into(),
+                        request_id: None,
+                    })
+                    .id(),
+            );
+        }
         let claims = app
             .world_mut()
-            .run_system_once(move |mut pool: RendererPool| {
+            .run_system_once(move |mut pools: ParamSet<(RendererPool, RendererPool)>| {
                 [
-                    pool.take("file://", stack_a),
-                    pool.take("file://", stack_a),
-                    pool.take("file://", stack_b),
+                    pools.p0().take("file://", requests[0]),
+                    pools.p1().take("file://", requests[0]),
+                    pools.p1().take("file://", requests[1]),
                 ]
             })
             .unwrap();
@@ -652,7 +630,7 @@ mod tests {
         app.init_resource::<ReadyEvents>()
             .add_plugins(MinimalPlugins)
             .add_observer(record_ready)
-            .add_systems(Update, handle_registered_page_open);
+            .add_plugins(PrewarmPagesPlugin);
         app.world_mut().spawn(PrewarmPage::host(
             "history",
             "vmux://history/",
@@ -780,7 +758,7 @@ mod tests {
         app.init_resource::<ReadyEvents>()
             .add_plugins(MinimalPlugins)
             .add_observer(record_ready)
-            .add_systems(Update, handle_registered_page_open);
+            .add_plugins(PrewarmPagesPlugin);
         app.world_mut().spawn(PrewarmPage::host(
             "projects",
             "vmux://projects/",
@@ -853,7 +831,7 @@ mod tests {
         app.init_resource::<ReadyEvents>()
             .add_plugins(MinimalPlugins)
             .add_observer(record_ready)
-            .add_systems(Update, handle_registered_page_open);
+            .add_plugins(PrewarmPagesPlugin);
         app.world_mut()
             .spawn(PrewarmPage::host("git", "git://", "Git", 1));
         let previous_navigation = PageOpenId::new();
@@ -935,7 +913,7 @@ mod tests {
     fn latest_same_frame_registered_open_is_the_only_task_claimed() {
         let mut app = App::new();
         app.add_plugins(MinimalPlugins)
-            .add_systems(Update, handle_registered_page_open);
+            .add_plugins(PrewarmPagesPlugin);
         app.world_mut()
             .spawn(PrewarmPage::host("git", "git://", "Git", 0));
         let stale = PageOpenId::new();
@@ -975,7 +953,7 @@ mod tests {
     fn registered_page_without_pool_opens_cold() {
         let mut app = App::new();
         app.add_plugins(MinimalPlugins)
-            .add_systems(Update, handle_registered_page_open);
+            .add_plugins(PrewarmPagesPlugin);
         app.world_mut().spawn(PrewarmPage::host(
             "history",
             "vmux://history/",
@@ -1016,7 +994,7 @@ mod tests {
     fn exact_prewarm_leaves_descendant_routes_for_their_owner() {
         let mut app = App::new();
         app.add_plugins(MinimalPlugins)
-            .add_systems(Update, handle_registered_page_open);
+            .add_plugins(PrewarmPagesPlugin);
         app.world_mut()
             .spawn(PrewarmPage::exact("vmux://sessions/", "Sessions", 1));
         let stack = app.world_mut().spawn_empty().id();
@@ -1040,7 +1018,7 @@ mod tests {
     fn exact_prewarm_keeps_a_descendant_surface_while_activating_its_spare() {
         let mut app = App::new();
         app.add_plugins(MinimalPlugins)
-            .add_systems(Update, handle_registered_page_open);
+            .add_plugins(PrewarmPagesPlugin);
         app.world_mut()
             .spawn(PrewarmPage::exact("vmux://sessions/", "Sessions", 1));
         let stack = app.world_mut().spawn_empty().id();
@@ -1099,7 +1077,7 @@ mod tests {
     fn registered_pools_fill_for_every_page() {
         let mut app = App::new();
         app.add_plugins(MinimalPlugins)
-            .add_systems(Update, maintain_registered_page_pools);
+            .add_plugins(PrewarmPagesPlugin);
         let window = app.world_mut().spawn_empty().id();
         app.world_mut().spawn((VmuxWindow, HostWindow(window)));
         app.world_mut().spawn((LayoutCef, PageReady {}));
@@ -1132,7 +1110,7 @@ mod tests {
     fn registered_pool_removes_excess_and_unregistered_spares() {
         let mut app = App::new();
         app.add_plugins(MinimalPlugins)
-            .add_systems(Update, maintain_registered_page_pools);
+            .add_plugins(PrewarmPagesPlugin);
         let window = app.world_mut().spawn_empty().id();
         app.world_mut().spawn((VmuxWindow, HostWindow(window)));
         app.world_mut().spawn((LayoutCef, PageReady {}));
@@ -1193,7 +1171,7 @@ mod tests {
     fn failed_spare_is_removed_before_replacement() {
         let mut app = App::new();
         app.add_plugins(MinimalPlugins)
-            .add_systems(Update, maintain_registered_page_pools);
+            .add_plugins(PrewarmPagesPlugin);
         let window = app.world_mut().spawn_empty().id();
         app.world_mut().spawn((VmuxWindow, HostWindow(window)));
         app.world_mut().spawn((LayoutCef, PageReady {}));
@@ -1227,7 +1205,7 @@ mod tests {
     fn ready_spare_does_not_cancel_a_sibling_failure_backoff() {
         let mut app = App::new();
         app.add_plugins(MinimalPlugins)
-            .add_systems(Update, maintain_registered_page_pools);
+            .add_plugins(PrewarmPagesPlugin);
         let window = app.world_mut().spawn_empty().id();
         app.world_mut().spawn((VmuxWindow, HostWindow(window)));
         app.world_mut().spawn((LayoutCef, PageReady {}));
@@ -1257,5 +1235,290 @@ mod tests {
                 .count(),
             1
         );
+    }
+    struct PoolFixture {
+        app: App,
+        registration: Entity,
+    }
+
+    impl PoolFixture {
+        fn new() -> Self {
+            let mut app = App::new();
+            app.add_plugins((MinimalPlugins, PrewarmPagesPlugin))
+                .insert_resource(bevy::time::TimeUpdateStrategy::ManualDuration(
+                    Duration::ZERO,
+                ));
+            app.world_mut()
+                .resource_mut::<Time<bevy::time::Virtual>>()
+                .set_max_delta(Duration::from_secs(10));
+            let window = app.world_mut().spawn_empty().id();
+            app.world_mut().spawn((VmuxWindow, HostWindow(window)));
+            app.world_mut().spawn((LayoutCef, PageReady {}));
+            let registration = app
+                .world_mut()
+                .spawn(PrewarmPage::host("git", "git://", "Git", 1))
+                .id();
+            app.update();
+            app.update();
+            Self { app, registration }
+        }
+
+        fn spare(&mut self) -> Option<Entity> {
+            self.app
+                .world_mut()
+                .query_filtered::<Entity, With<WarmPageSpare>>()
+                .iter(self.app.world())
+                .next()
+        }
+
+        fn fail(&mut self) {
+            let spare = self.spare().expect("pool produced no spare");
+            self.app
+                .world_mut()
+                .entity_mut(spare)
+                .insert(crate::hosted_page::SurfaceHandoffFailed);
+            self.advance(0);
+            assert!(self.app.world().get_entity(spare).is_err());
+        }
+
+        fn advance(&mut self, milliseconds: u64) {
+            self.app
+                .insert_resource(bevy::time::TimeUpdateStrategy::ManualDuration(
+                    Duration::from_millis(milliseconds),
+                ));
+            self.app.update();
+        }
+
+        fn register_again(&mut self) {
+            self.app.world_mut().despawn(self.registration);
+            self.advance(0);
+            self.registration = self
+                .app
+                .world_mut()
+                .spawn(PrewarmPage::host("git", "git://", "Git", 1))
+                .id();
+            self.advance(0);
+        }
+    }
+
+    #[test]
+    fn pool_replacement_obeys_exponential_backoff_and_caps_the_delay() {
+        let mut fixture = PoolFixture::new();
+        for delay in [100, 200, 400, 800, 1600, 1600] {
+            fixture.fail();
+            assert!(fixture.spare().is_none());
+            fixture.advance(delay - 1);
+            assert!(fixture.spare().is_none());
+            fixture.advance(1);
+            assert!(fixture.spare().is_some());
+        }
+    }
+
+    #[test]
+    fn recreating_a_pool_drops_its_previous_retry_state() {
+        let mut fixture = PoolFixture::new();
+        fixture.fail();
+        fixture.advance(100);
+        fixture.fail();
+        fixture.register_again();
+        assert!(fixture.spare().is_some());
+        fixture.fail();
+        fixture.advance(99);
+        assert!(fixture.spare().is_none());
+        fixture.advance(1);
+        assert!(fixture.spare().is_some());
+    }
+
+    #[test]
+    fn a_stale_request_cannot_reserve_a_ready_renderer() {
+        let mut app = App::new();
+        app.add_plugins((MinimalPlugins, PrewarmPagesPlugin));
+        let current = PageOpenId::new();
+        let stack = app.world_mut().spawn(PageNavigation::new(current)).id();
+        let stale = app
+            .world_mut()
+            .spawn(PageOpenTask {
+                id: PageOpenId::new(),
+                stack,
+                url: "file://".into(),
+                request_id: None,
+            })
+            .id();
+        let valid = app
+            .world_mut()
+            .spawn(PageOpenTask {
+                id: current,
+                stack,
+                url: "file://".into(),
+                request_id: None,
+            })
+            .id();
+        let spare = app
+            .world_mut()
+            .spawn((WarmPageSpare { url: "file://" }, PageReady {}))
+            .id();
+        let claims = app
+            .world_mut()
+            .run_system_once(move |mut pool: RendererPool| {
+                [pool.take("file://", stale), pool.take("file://", valid)]
+            })
+            .unwrap();
+        assert_eq!(claims, [None, Some(spare)]);
+    }
+
+    #[test]
+    fn registered_open_keeps_another_windows_ready_spare() {
+        let mut app = App::new();
+        app.add_plugins((MinimalPlugins, PrewarmPagesPlugin));
+        app.world_mut().spawn(PrewarmPage::host(
+            "history",
+            "vmux://history/",
+            "History",
+            1,
+        ));
+        let a = app.world_mut().spawn_empty().id();
+        let b = app.world_mut().spawn_empty().id();
+        let root_a = app.world_mut().spawn(HostWindow(a)).id();
+        let root_b = app.world_mut().spawn(HostWindow(b)).id();
+        let id = PageOpenId::new();
+        let stack = app
+            .world_mut()
+            .spawn((PageNavigation::new(id), ChildOf(root_a)))
+            .id();
+        let foreign = app
+            .world_mut()
+            .spawn((
+                WarmPageSpare {
+                    url: "vmux://history/",
+                },
+                PageReady {},
+                ChildOf(root_b),
+            ))
+            .id();
+        let task = app
+            .world_mut()
+            .spawn(PageOpenTask {
+                id,
+                stack,
+                url: "vmux://history/recent".into(),
+                request_id: None,
+            })
+            .id();
+        app.update();
+        assert!(app.world().get::<PageOpenHandled>(task).is_some());
+        assert_eq!(
+            app.world().get::<ChildOf>(foreign).unwrap().parent(),
+            root_b
+        );
+        assert!(app.world().get::<WarmPageSpare>(foreign).is_some());
+        let children = app.world().get::<Children>(stack).unwrap();
+        assert!(!children.contains(&foreign));
+        assert_eq!(children.len(), 1);
+    }
+    #[test]
+    fn removing_an_empty_retry_pool_replenishes_in_the_remaining_window() {
+        let mut fixture = PoolFixture::new();
+        let b = fixture.app.world_mut().spawn_empty().id();
+        let root_b = fixture
+            .app
+            .world_mut()
+            .spawn((VmuxWindow, HostWindow(b)))
+            .id();
+        fixture.advance(0);
+        fixture.fail();
+        let pool = fixture
+            .app
+            .world_mut()
+            .query_filtered::<Entity, With<WarmPagePoolNode>>()
+            .single(fixture.app.world())
+            .unwrap();
+        let root_a = fixture.app.world().get::<ChildOf>(pool).unwrap().parent();
+        fixture.app.world_mut().despawn(root_a);
+        fixture.advance(0);
+        let replacement = fixture
+            .spare()
+            .expect("remaining window received no replacement renderer");
+        let new_pool = fixture
+            .app
+            .world()
+            .get::<ChildOf>(replacement)
+            .unwrap()
+            .parent();
+        assert_eq!(
+            fixture
+                .app
+                .world()
+                .get::<ChildOf>(new_pool)
+                .unwrap()
+                .parent(),
+            root_b
+        );
+        fixture.fail();
+        fixture.advance(99);
+        assert!(fixture.spare().is_none());
+        fixture.advance(1);
+        assert!(fixture.spare().is_some());
+    }
+    #[test]
+    fn shrinking_capacity_does_not_evict_a_renderer_claimed_in_the_same_frame() {
+        let mut fixture = PoolFixture::new();
+        fixture
+            .app
+            .world_mut()
+            .entity_mut(fixture.registration)
+            .insert(PrewarmPage::renderer("git://", "Git", 2));
+        fixture.advance(0);
+        let spares = fixture
+            .app
+            .world_mut()
+            .query_filtered::<Entity, With<WarmPageSpare>>()
+            .iter(fixture.app.world())
+            .collect::<Vec<_>>();
+        assert_eq!(spares.len(), 2);
+        let ready = spares[1];
+        let pool = fixture.app.world().get::<ChildOf>(ready).unwrap().parent();
+        let root = fixture.app.world().get::<ChildOf>(pool).unwrap().parent();
+        fixture
+            .app
+            .world_mut()
+            .entity_mut(ready)
+            .insert(PageReady {});
+        let id = PageOpenId::new();
+        let stack = fixture
+            .app
+            .world_mut()
+            .spawn((PageNavigation::new(id), ChildOf(root)))
+            .id();
+        let request = fixture
+            .app
+            .world_mut()
+            .spawn(PageOpenTask {
+                id,
+                stack,
+                url: "git://".into(),
+                request_id: None,
+            })
+            .id();
+        fixture.app.add_systems(
+            Update,
+            (move |mut pool: RendererPool, mut commands: Commands| {
+                if let Some(renderer) = pool.take("git://", request) {
+                    commands.entity(renderer).insert(ChildOf(stack));
+                }
+            })
+            .in_set(PageOpenSet::HandleKnownPages),
+        );
+        fixture
+            .app
+            .world_mut()
+            .entity_mut(fixture.registration)
+            .insert(PrewarmPage::renderer("git://", "Git", 1));
+        fixture.advance(0);
+        assert!(fixture.app.world().get_entity(ready).is_ok());
+        assert_eq!(
+            fixture.app.world().get::<ChildOf>(ready).unwrap().parent(),
+            stack
+        );
+        assert!(fixture.app.world().get::<WarmPageSpare>(ready).is_none());
     }
 }

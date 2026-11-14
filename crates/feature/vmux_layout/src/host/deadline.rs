@@ -17,7 +17,7 @@ pub(super) enum DeadlineOwner {
     PaneZoomAnimation(Entity),
     StackAnimation(Entity),
     PageSlot(Entity),
-    Prewarm(&'static str),
+    Prewarm(Entity),
     Presentation(Entity),
 }
 
@@ -27,6 +27,7 @@ struct ScheduledDeadline {
     owners: HashMap<DeadlineOwner, std::time::Instant>,
     proxy: Option<EventLoopProxy<WinitUserEvent>>,
     worker_started: bool,
+    stopped: bool,
 }
 
 impl DeadlineScheduler {
@@ -84,6 +85,9 @@ impl DeadlineScheduler {
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner());
         loop {
+            if state.stopped {
+                return;
+            }
             let Some(deadline) = state.deadlines.keys().next().copied() else {
                 state = wake
                     .wait(state)
@@ -130,6 +134,23 @@ impl DeadlineScheduler {
     }
 }
 
+impl Drop for DeadlineScheduler {
+    fn drop(&mut self) {
+        let (shared, wake) = &*self.state;
+        let mut state = shared
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        if !state.worker_started || Arc::strong_count(&self.state) != 2 {
+            return;
+        }
+        state.stopped = true;
+        state.deadlines.clear();
+        state.owners.clear();
+        state.proxy = None;
+        wake.notify_all();
+    }
+}
+
 impl ScheduledDeadline {
     fn remove(&mut self, owner: DeadlineOwner) {
         let Some(deadline) = self.owners.remove(&owner) else {
@@ -142,5 +163,27 @@ impl ScheduledDeadline {
         if owners.is_empty() {
             self.deadlines.remove(&deadline);
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn dropping_the_last_scheduler_releases_its_waiting_native_worker() {
+        let scheduler = DeadlineScheduler::default();
+        let shared = scheduler.state.clone();
+        shared.0.lock().unwrap().worker_started = true;
+        let (finished, completion) = std::sync::mpsc::channel();
+        let worker = std::thread::spawn(move || {
+            DeadlineScheduler::run(shared);
+            finished.send(()).unwrap();
+        });
+        drop(scheduler);
+        completion
+            .recv_timeout(std::time::Duration::from_secs(1))
+            .unwrap();
+        worker.join().unwrap();
     }
 }

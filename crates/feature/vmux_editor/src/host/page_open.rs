@@ -330,7 +330,7 @@ fn handle_file(
                         .try_insert(vmux_layout::hosted_page::SurfaceBlocked);
                 }
                 let renderer = if workspace == vmux_ecs::WorkspaceKind::Editor {
-                    renderers.take("file://", task.stack)
+                    renderers.take("file://", entity)
                 } else {
                     None
                 };
