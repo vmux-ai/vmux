@@ -226,7 +226,7 @@ fn plugin_boundaries_use_only_their_own_production_system_parameters() {
         ("", false),
     ] {
         let inventory = Inventory::fixture(&format!(
-            "#[derive(Component)] struct State; fn read(state:Query<&State>) {{}} struct Other; impl Plugin for Other {{ fn build(&self, app:&mut App) {{ app.add_systems(Update, read); }} }} struct Root; impl Plugin for Root {{ fn build(&self, app:&mut App) {{ {registration} }} }}"
+            "use bevy_ecs::prelude::*; use bevy_app::{{App, Plugin}}; #[derive(Component)] struct State; fn read(state:Query<&State>) {{}} struct Other; impl Plugin for Other {{ fn build(&self, app:&mut App) {{ app.add_systems(Update, read); }} }} struct Root; impl Plugin for Root {{ fn build(&self, app:&mut App) {{ {registration} }} }}"
         ));
         let mut boundary = Boundary::fixture(&inventory, "struct:Root");
         boundary.input = "external: Bevy App registration".into();
@@ -1767,7 +1767,7 @@ fn plugin_adapter_helpers_follow_only_the_owners_registered_systems() {
         ("read", "", false),
     ] {
         let inventory = Inventory::fixture(&format!(
-            "#[derive(Component)] struct State; struct Reader; fn read(state: Query<&State>) {{ {body} }} fn unrelated(state: Query<&State>) {{}} struct Root; impl Plugin for Root {{ fn build(&self, app: &mut App) {{ app.add_systems(Update, {system}); }} }}"
+            "use bevy_ecs::prelude::*; use bevy_app::{{App, Plugin}}; #[derive(Component)] struct State; struct Reader; fn read(state: Query<&State>) {{ {body} }} fn unrelated(state: Query<&State>) {{}} struct Root; impl Plugin for Root {{ fn build(&self, app: &mut App) {{ app.add_systems(Update, {system}); }} }}"
         ));
         let mut parent = Boundary::fixture(&inventory, "impl:Plugin for Root");
         parent.input = format!("ECS: {}", inventory.key("struct:State"));
