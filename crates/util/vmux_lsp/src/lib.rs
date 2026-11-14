@@ -14,7 +14,9 @@ use vmux_ecs::{
     OperationTargetRevision,
 };
 
-pub use diagnostics::{Diagnostics, DiagnosticsInbox, DiagnosticsSender, ReceivedDiagnostics};
+pub use diagnostics::{
+    DiagnosticPath, Diagnostics, DiagnosticsInbox, DiagnosticsSender, ReceivedDiagnostics,
+};
 pub use document::{ChangeDocument, CloseDocument, DocumentApplied, DocumentFailure, OpenDocument};
 pub use server::{
     LaunchServer, RestartServer, ServerCompleted, ServerFailure, StartServer, StopServer, Stopped,
@@ -385,6 +387,7 @@ pub struct Lookup<'w, 's> {
     >,
     bindings: Query<'w, 's, (&'static DocumentBinding, &'static BindingGeneration)>,
     diagnostics: Query<'w, 's, &'static Diagnostics>,
+    diagnostic_paths: Query<'w, 's, &'static DiagnosticPath>,
 }
 
 impl Lookup<'_, '_> {
@@ -1008,6 +1011,137 @@ mod tests {
         );
         assert!(harness.app.world().get::<DocumentBinding>(second).is_none());
         assert!(harness.probes[1].calls.lock().unwrap().is_empty());
+    }
+
+    #[test]
+    fn diagnostic_paths_prefer_exact_documents_and_retire_changed_or_ambiguous_aliases() {
+        let mut harness = Harness::new();
+        let sender = harness.diagnostics(0);
+        let document = harness
+            .app
+            .world()
+            .get::<DocumentBinding>(harness.owners[0])
+            .unwrap()
+            .document();
+        harness
+            .app
+            .world_mut()
+            .entity_mut(document)
+            .insert(DiagnosticPath("/physical/shared.rs".into()));
+        sender.send(ReceivedDiagnostics {
+            path: "/physical/shared.rs".into(),
+            diagnostics: vec![lsp_types::Diagnostic {
+                message: "alternate".into(),
+                ..Default::default()
+            }],
+            version: Some(1),
+            server: None,
+            transport: None,
+        });
+        harness.app.update();
+        assert_eq!(
+            harness
+                .app
+                .world()
+                .get::<Diagnostics>(document)
+                .unwrap()
+                .items()[0]
+                .message,
+            "alternate"
+        );
+        harness
+            .app
+            .world_mut()
+            .entity_mut(document)
+            .insert(DiagnosticPath("/changed/shared.rs".into()));
+        harness.app.update();
+        assert!(harness.app.world().get::<Diagnostics>(document).is_none());
+        let exact_owner = harness
+            .app
+            .world_mut()
+            .spawn(OpenDocument {
+                server: harness.servers[0],
+                path: "/physical/shared.rs".into(),
+                language: "rust".into(),
+                text: "current".into(),
+                revision: None,
+            })
+            .id();
+        harness.app.update();
+        let exact = harness
+            .app
+            .world()
+            .get::<DocumentBinding>(exact_owner)
+            .unwrap()
+            .document();
+        harness
+            .app
+            .world_mut()
+            .entity_mut(document)
+            .insert(DiagnosticPath("/physical/shared.rs".into()));
+        sender.send(ReceivedDiagnostics {
+            path: "/physical/shared.rs".into(),
+            diagnostics: vec![lsp_types::Diagnostic {
+                message: "exact".into(),
+                ..Default::default()
+            }],
+            version: Some(1),
+            server: None,
+            transport: None,
+        });
+        harness.app.update();
+        assert_eq!(
+            harness
+                .app
+                .world()
+                .get::<Diagnostics>(exact)
+                .unwrap()
+                .items()[0]
+                .message,
+            "exact"
+        );
+        assert!(harness.app.world().get::<Diagnostics>(document).is_none());
+        harness.app.world_mut().write_message(CloseDocument {
+            owner: exact_owner,
+            path: "/physical/shared.rs".into(),
+        });
+        let alias_owner = harness
+            .app
+            .world_mut()
+            .spawn(OpenDocument {
+                server: harness.servers[0],
+                path: "/second-alias.rs".into(),
+                language: "rust".into(),
+                text: "current".into(),
+                revision: None,
+            })
+            .id();
+        harness.app.update();
+        let alias = harness
+            .app
+            .world()
+            .get::<DocumentBinding>(alias_owner)
+            .unwrap()
+            .document();
+        harness
+            .app
+            .world_mut()
+            .entity_mut(alias)
+            .insert(DiagnosticPath("/physical/shared.rs".into()));
+        sender.send(ReceivedDiagnostics {
+            path: "/physical/shared.rs".into(),
+            diagnostics: vec![lsp_types::Diagnostic {
+                message: "ambiguous".into(),
+                ..Default::default()
+            }],
+            version: Some(1),
+            server: None,
+            transport: None,
+        });
+        harness.app.update();
+        assert!(harness.app.world().get::<Diagnostics>(document).is_none());
+        assert!(harness.app.world().get::<Diagnostics>(alias).is_none());
+        assert!(harness.app.world().get::<Diagnostics>(exact).is_none());
     }
 
     #[test]

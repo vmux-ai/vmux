@@ -1489,6 +1489,16 @@ fn acknowledge_documents(
                 stamp.document == applied.document && stamp.version == applied.version
             })
         {
+            let path = PathIdentity::resolve(&view.path).into_path_buf();
+            if path == view.path {
+                commands
+                    .entity(applied.document)
+                    .remove::<vmux_lsp::DiagnosticPath>();
+            } else {
+                commands
+                    .entity(applied.document)
+                    .insert(vmux_lsp::DiagnosticPath(path));
+            }
             commands.entity(owner).insert((
                 LspOpened,
                 LspSynced(editor.core.content_version(), applied.version),
@@ -2656,6 +2666,77 @@ mod tests {
                 std::thread::sleep(std::time::Duration::from_millis(5));
             }
         }
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn resolved_diagnostic_paths_reach_views_opened_through_a_file_alias() {
+        let mut fixture = RestartFixture::new();
+        let path = fixture.roots[0].join("main.rs");
+        let alias = fixture.roots[0].join("linked.rs");
+        std::os::unix::fs::symlink(&path, &alias).unwrap();
+        let owner = fixture.views[0];
+        fixture.app.world_mut().entity_mut(owner).insert((
+            FileView {
+                path: alias.clone(),
+            },
+            Editor::new(
+                EditCore::new(
+                    alias.clone(),
+                    "Rust".into(),
+                    "disk text\n",
+                    EditMode::Normal,
+                ),
+                HighlightCache::plain(&alias),
+                crate::fold::FoldState::default(),
+            ),
+        ));
+        assert_eq!(
+            fixture.message(0, "textDocument/didOpen", 1)["params"]["textDocument"]["uri"],
+            DocumentPath(alias).uri().unwrap()
+        );
+        let server = fixture
+            .app
+            .world()
+            .get::<ServerBinding>(owner)
+            .unwrap()
+            .server();
+        let transport = fixture
+            .app
+            .world()
+            .get::<Transport>(server)
+            .unwrap()
+            .identity();
+        let sender = {
+            let mut contexts = fixture.app.world_mut().query::<&LspContext>();
+            contexts
+                .single(fixture.app.world())
+                .unwrap()
+                .diagnostics
+                .scoped(server)
+                .with_transport(transport)
+        };
+        sender.send(PathDiagnostics {
+            path: PathIdentity::resolve(&path).into_path_buf(),
+            diagnostics: vec![lsp_types::Diagnostic {
+                message: "resolved diagnostic".into(),
+                ..Default::default()
+            }],
+            version: Some(1),
+            server: None,
+            transport: None,
+        });
+        fixture.app.update();
+        assert_eq!(
+            fixture
+                .app
+                .world()
+                .get::<LspDiagnostics>(owner)
+                .unwrap()
+                .mapped[0]
+                .message,
+            "resolved diagnostic"
+        );
     }
 
     #[test]

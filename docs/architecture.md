@@ -1695,7 +1695,10 @@ buffer, synchronize it, and then reinitialize metadata. Diagnostics retain their
 UUID, and the protocol's optional version. Protocol ingress captures the live document/version before synchronization, rejects old transport
 epochs and keeps diagnostics on the canonical document. Replacing a transport clears only its retained
 diagnostics before code-action requests or rendering consume them. Unversioned notifications
-cannot prove which edit produced them. Each dirty Editor view owns its 150 ms synchronization
+cannot prove which edit produced them. Native receipt reconciliation materializes an alternate
+DiagnosticPath from filesystem identity when a view uses an alias. Core ingress prefers an exact
+opened URI, then a unique alternate path, and retained publications reject changed alternate facts.
+Close removes the alternate path with active text; the core performs no filesystem lookup. Each dirty Editor view owns its 150 ms synchronization
 interval in a required Component; flushing or removing that view releases the interval.
 Process handles, framing, reader/writer threads, and wire correlation stay in the transport
 adapter. Publishing input or a response, and closing the reader, wakes the reactive runner.

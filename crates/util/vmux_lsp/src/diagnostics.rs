@@ -79,12 +79,17 @@ impl DiagnosticsInbox {
     }
 }
 
-#[derive(Clone, Copy)]
+#[derive(Component)]
+#[component(immutable)]
+pub struct DiagnosticPath(pub PathBuf);
+
+#[derive(Clone)]
 struct Ticket {
     document: Entity,
     server: Entity,
     version: i32,
     transport: Uuid,
+    alternate: Option<PathBuf>,
 }
 
 impl Ticket {
@@ -92,22 +97,39 @@ impl Ticket {
         if !lookup.transport_current(server, transport) {
             return None;
         }
-        let mut found = None;
-        for (entity, candidate, document, parent, connection) in &lookup.documents {
-            if candidate.0 != path || parent.parent() != server || connection.0 != Some(transport) {
-                continue;
+        for exact in [true, false] {
+            let mut found = None;
+            for (entity, candidate, document, parent, connection) in &lookup.documents {
+                if parent.parent() != server || connection.0 != Some(transport) {
+                    continue;
+                }
+                let matches = if exact {
+                    candidate.0 == path
+                } else {
+                    lookup
+                        .diagnostic_paths
+                        .get(entity)
+                        .is_ok_and(|alternate| alternate.0 == path)
+                };
+                if !matches {
+                    continue;
+                }
+                if found.is_some() {
+                    return None;
+                }
+                found = Some(Self {
+                    document: entity,
+                    server,
+                    version: document.version,
+                    transport,
+                    alternate: (!exact).then(|| path.to_path_buf()),
+                });
             }
             if found.is_some() {
-                return None;
+                return found;
             }
-            found = Some(Self {
-                document: entity,
-                server,
-                version: document.version,
-                transport,
-            });
         }
-        found
+        None
     }
 
     fn current(&self, lookup: &Lookup) -> bool {
@@ -118,6 +140,12 @@ impl Ticket {
             && parent.parent() == self.server
             && connection.0 == Some(self.transport)
             && lookup.transport_current(self.server, self.transport)
+            && self.alternate.as_ref().is_none_or(|path| {
+                lookup
+                    .diagnostic_paths
+                    .get(self.document)
+                    .is_ok_and(|alternate| alternate.0 == *path)
+            })
     }
 }
 
@@ -204,7 +232,7 @@ fn apply(
             commands
                 .entity(pending.ticket.document)
                 .insert(Diagnostics {
-                    ticket: pending.ticket,
+                    ticket: pending.ticket.clone(),
                     diagnostics: std::mem::take(&mut pending.diagnostics),
                 });
         }

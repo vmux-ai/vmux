@@ -126,7 +126,10 @@ fn cleanup(documents: Unowned, transports: Query<&Transport>, mut commands: Comm
         {
             transport.did_close(&uri);
         }
-        commands.entity(entity).remove::<Contents>().insert(Closed);
+        commands
+            .entity(entity)
+            .remove::<(Contents, crate::DiagnosticPath)>()
+            .insert(Closed);
     }
 }
 
