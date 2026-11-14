@@ -4801,7 +4801,6 @@
     (key: "crates/feature/vmux_layout/src/host/hosted_page.rs||fn:cancel", fingerprint: "a2e9a6361e91bf30", issue: "VMX-253"),
     (key: "crates/feature/vmux_layout/src/host/hosted_page.rs||fn:finish_handoffs", fingerprint: "3c1e7ea2c19494dc", issue: "VMX-253"),
     (key: "crates/feature/vmux_layout/src/host/hosted_page.rs||fn:handoff_state_changed", fingerprint: "73d11f5a431fdb02", issue: "VMX-253"),
-    (key: "crates/feature/vmux_layout/src/host/hosted_page.rs||fn:open", fingerprint: "c3fffd883fa802c4", issue: "VMX-253"),
     (key: "crates/feature/vmux_layout/src/host/hosted_page.rs||fn:open_traversed_history", fingerprint: "c35c95d888a46e7d", issue: "VMX-253"),
     (key: "crates/feature/vmux_layout/src/host/hosted_page.rs||fn:record_history", fingerprint: "bd764bd807954c33", issue: "VMX-253"),
     (key: "crates/feature/vmux_layout/src/host/hosted_page.rs||fn:retire_surfaces", fingerprint: "1477a0879a3c13aa", issue: "VMX-253"),

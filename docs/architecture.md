@@ -1808,6 +1808,9 @@ Breadcrumbs without sibling choices navigate directly without opening an empty m
 Stable breadcrumb slots animate measured position changes and short entry/exit transitions.
 VM pages declare one canonical address scope. Logical navigation within it retains the feature's
 trail until its next projection, so the header never inserts a generic Containers fallback.
+VM, Docker and Containers also declare the same page placement group. Hosted navigation uses
+that canonical reuse policy when choosing the rendering surface, preserving its entity and
+shared native DOM for both parent-to-child and child-to-parent moves.
 DOM mutations coalesce into one animation-frame measurement; unchanged positions keep their
 running motion, and retained crumbs keep full opacity when labels change. Command settlement
 uses an ECS-owned deadline and paced timer wakes instead of waking on every update.
