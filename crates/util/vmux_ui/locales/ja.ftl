@@ -1144,3 +1144,8 @@ media-permission-devices = { $kind ->
     [6] マイクと画面
     [7] カメラ、マイク、画面
     }
+
+team-profile-invalid-name = 名前を1〜256文字で入力してください。
+team-profiles-unavailable = プロファイルを利用できません。読み込みを再試行してください。
+team-profile-conflict = 別の更新が保存されました。変更を適用するには、もう一度保存してください。
+team-profile-save-failed = プロファイルを保存できませんでした。もう一度お試しください。

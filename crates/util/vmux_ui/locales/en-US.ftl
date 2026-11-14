@@ -1152,3 +1152,8 @@ media-permission-devices = { $kind ->
     [6] microphone and screen
     [7] camera, microphone, and screen
     }
+
+team-profile-invalid-name = Enter a name between 1 and 256 characters.
+team-profiles-unavailable = Profiles are unavailable. Retry loading them.
+team-profile-conflict = Another update was saved. Save again to apply your change.
+team-profile-save-failed = Could not save the profile. Try again.

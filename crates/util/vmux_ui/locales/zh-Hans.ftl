@@ -1161,3 +1161,8 @@ media-permission-devices = { $kind ->
     [6] 麦克风和屏幕
     [7] 摄像头、麦克风和屏幕
     }
+
+team-profile-invalid-name = 请输入 1 到 256 个字符的名称。
+team-profiles-unavailable = 个人资料暂不可用。请重新加载。
+team-profile-conflict = 另一个更新已保存。请再次保存以应用你的更改。
+team-profile-save-failed = 无法保存个人资料。请重试。

@@ -1,0 +1,26 @@
+[package]
+name = "vmux_account"
+description = "Local-first account and profile ownership"
+version.workspace = true
+edition.workspace = true
+publish = false
+
+[features]
+default = []
+local = ["dep:rusqlite"]
+
+[dependencies]
+bevy_app = { workspace = true }
+bevy_ecs = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+uuid = { workspace = true }
+vmux_ecs = { path = "../../util/vmux_ecs", features = ["records", "jobs"] }
+vmux_profile = { path = "../../util/vmux_profile" }
+rusqlite = { workspace = true, optional = true }
+
+[dev-dependencies]
+tempfile = "3"
+
+[lints]
+workspace = true

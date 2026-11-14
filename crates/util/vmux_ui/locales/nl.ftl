@@ -1164,3 +1164,8 @@ media-permission-devices = { $kind ->
     [6] de microfoon en het scherm
     [7] de camera, microfoon en het scherm
     }
+
+team-profile-invalid-name = Voer een naam van 1 tot 256 tekens in.
+team-profiles-unavailable = Profielen zijn niet beschikbaar. Probeer ze opnieuw te laden.
+team-profile-conflict = Er is een andere wijziging opgeslagen. Sla opnieuw op om jouw wijziging toe te passen.
+team-profile-save-failed = Het profiel kon niet worden opgeslagen. Probeer het opnieuw.

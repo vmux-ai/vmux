@@ -1161,3 +1161,8 @@ media-permission-devices = { $kind ->
     [6] 마이크와 화면
     [7] 카메라, 마이크 및 화면
     }
+
+team-profile-invalid-name = 1~256자의 이름을 입력하세요.
+team-profiles-unavailable = 프로필을 사용할 수 없습니다. 다시 불러오세요.
+team-profile-conflict = 다른 변경 사항이 저장되었습니다. 변경 사항을 적용하려면 다시 저장하세요.
+team-profile-save-failed = 프로필을 저장할 수 없습니다. 다시 시도하세요.

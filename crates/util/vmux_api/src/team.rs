@@ -1,4 +1,4 @@
-#[vmux_api::ui_state(Default, Eq, version = 2)]
+#[vmux_api::ui_state(Default, Eq, version = 3)]
 pub struct TeamUiState {
     pub members: Vec<TeamMemberRow>,
     #[serde(default)]
@@ -15,6 +15,18 @@ pub struct TeamUiState {
 pub struct TeamProfileForm {
     pub profile_id: Option<String>,
     pub draft: String,
+    #[serde(default)]
+    pub pending: bool,
+    #[serde(default)]
+    pub error: Option<TeamProfileError>,
+}
+
+#[vmux_api::contract(Eq)]
+pub enum TeamProfileError {
+    InvalidName,
+    Unavailable,
+    Conflict,
+    SaveFailed,
 }
 
 #[vmux_api::contract(Default, Eq)]
@@ -97,6 +109,9 @@ pub struct TeamProfileFormInputRequest {
 
 #[vmux_api::ui_event]
 pub struct TeamProfileFormCloseRequest;
+
+#[vmux_api::ui_event]
+pub struct TeamProfilesRetryRequest;
 
 #[cfg(test)]
 mod tests {

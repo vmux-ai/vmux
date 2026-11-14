@@ -1,10 +1,11 @@
+use bevy_app::{App, Plugin};
+use bevy_ecs::prelude::{Commands, Query};
 use std::path::Path;
 
-use crate::Active;
 use bevy::ecs::system::SystemParam;
 use bevy::prelude::*;
-use bevy::tasks::{IoTaskPool, Task, futures_lite::future};
 
+pub use crate::{ProfileId, ProfileLabel};
 use vmux_profile::mcp_credentials::{McpCredentialAccess, McpCredentialStorage};
 pub use vmux_profile::*;
 
@@ -12,8 +13,7 @@ pub struct ProfilePlugin;
 
 impl Plugin for ProfilePlugin {
     fn build(&self, app: &mut App) {
-        app.add_systems(PreStartup, (queue_migration, migrate, spawn).chain())
-            .add_systems(Update, finish);
+        app.add_systems(PreStartup, (queue_migration, migrate, spawn).chain());
     }
 }
 
@@ -37,8 +37,7 @@ fn migrate(jobs: Query<(Entity, &ProfileMigrationJob)>, mut commands: Commands) 
 fn spawn(mut commands: bevy::prelude::Commands) {
     let profile = Profile::current();
     let paths = ProfilePaths::current();
-    let catalog = ProfileCatalog(ProfileStore::current());
-    let label = catalog.0.active_label();
+    let label = ProfileStore::current().active_label();
     let credentials = McpCredentials {
         access: McpCredentialAccess::default(),
         storage: McpCredentialStorage::at(profile.clone(), paths.clone()),
@@ -57,32 +56,6 @@ fn spawn(mut commands: bevy::prelude::Commands) {
             active.insert(ProjectsRootFailure(error));
         }
     }
-
-    let loader = catalog.0.clone();
-    commands.spawn((
-        Name::new("Profiles"),
-        catalog,
-        ProfileListTask(IoTaskPool::get().spawn(async move { loader.profiles() })),
-    ));
-}
-
-fn finish(mut tasks: Query<(Entity, &mut ProfileListTask)>, mut commands: Commands) {
-    for (entity, mut task) in &mut tasks {
-        let Some(records) = future::block_on(future::poll_once(&mut task.0)) else {
-            continue;
-        };
-        commands.entity(entity).remove::<ProfileListTask>();
-        for record in records {
-            let mut profile = commands.spawn((
-                ProfileLabel,
-                ProfileId(record.profile.into_id()),
-                Name::new(record.name),
-            ));
-            if record.active {
-                profile.insert(Active);
-            }
-        }
-    }
 }
 
 #[derive(Component, Clone, Debug, PartialEq, Eq)]
@@ -90,9 +63,6 @@ pub struct ActiveProfile(pub Profile);
 
 #[derive(Component, Clone, Debug)]
 pub struct ProfileDirectories(pub ProfilePaths);
-
-#[derive(Component, Clone, Debug)]
-pub struct ProfileCatalog(pub ProfileStore);
 
 #[derive(Component, Clone, Debug)]
 pub struct McpCredentials {
@@ -160,12 +130,3 @@ impl Projects<'_, '_> {
         self.path().is_ok_and(|root| path.starts_with(root))
     }
 }
-
-#[derive(Component)]
-struct ProfileListTask(Task<Vec<ProfileRecord>>);
-
-#[derive(Component, Clone, Debug, PartialEq, Eq)]
-pub struct ProfileId(pub String);
-
-#[derive(Component, Clone, Copy, Debug, Default)]
-pub struct ProfileLabel;
