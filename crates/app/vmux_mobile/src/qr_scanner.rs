@@ -282,47 +282,49 @@ mod platform {
         }
     }
 
-    pub fn open(request: &ScanRequest) -> Result<(), String> {
-        if !request.permitted() {
-            return Err(translate("mobile-qr-camera-unavailable"));
-        }
-        if ACTIVE.get() || REQUESTING.get() {
-            return Ok(());
-        }
-        let marker = MainThreadMarker::new()
-            .ok_or_else(|| "QR scanner must be opened from the main thread.".to_string())?;
-        let media_type =
-            unsafe { AVMediaTypeVideo }.ok_or_else(|| translate("mobile-qr-camera-unavailable"))?;
-
-        match unsafe { AVCaptureDevice::authorizationStatusForMediaType(media_type) } {
-            AVAuthorizationStatus::Authorized => present(marker),
-            AVAuthorizationStatus::Denied | AVAuthorizationStatus::Restricted => {
-                present_denied(marker)
+    impl ScanRequest {
+        pub(crate) fn open(&self) -> Result<(), String> {
+            if !self.permitted() {
+                return Err(translate("mobile-qr-camera-unavailable"));
             }
-            _ => {
-                REQUESTING.set(true);
-                let handler = RcBlock::new(move |granted: Bool| {
-                    DispatchQueue::main().exec_async(move || {
-                        REQUESTING.set(false);
-                        let Some(marker) = MainThreadMarker::new() else {
-                            return;
-                        };
-                        let outcome = if granted.as_bool() {
-                            present(marker)
-                        } else {
-                            present_denied(marker)
-                        };
-                        if let Err(message) = outcome {
-                            report(Err(message));
-                        }
-                    });
-                });
-                unsafe {
-                    AVCaptureDevice::requestAccessForMediaType_completionHandler(
-                        media_type, &handler,
-                    );
+            if ACTIVE.get() || REQUESTING.get() {
+                return Ok(());
+            }
+            let marker = MainThreadMarker::new()
+                .ok_or_else(|| "QR scanner must be opened from the main thread.".to_string())?;
+            let media_type = unsafe { AVMediaTypeVideo }
+                .ok_or_else(|| translate("mobile-qr-camera-unavailable"))?;
+
+            match unsafe { AVCaptureDevice::authorizationStatusForMediaType(media_type) } {
+                AVAuthorizationStatus::Authorized => present(marker),
+                AVAuthorizationStatus::Denied | AVAuthorizationStatus::Restricted => {
+                    present_denied(marker)
                 }
-                Ok(())
+                _ => {
+                    REQUESTING.set(true);
+                    let handler = RcBlock::new(move |granted: Bool| {
+                        DispatchQueue::main().exec_async(move || {
+                            REQUESTING.set(false);
+                            let Some(marker) = MainThreadMarker::new() else {
+                                return;
+                            };
+                            let outcome = if granted.as_bool() {
+                                present(marker)
+                            } else {
+                                present_denied(marker)
+                            };
+                            if let Err(message) = outcome {
+                                report(Err(message));
+                            }
+                        });
+                    });
+                    unsafe {
+                        AVCaptureDevice::requestAccessForMediaType_completionHandler(
+                            media_type, &handler,
+                        );
+                    }
+                    Ok(())
+                }
             }
         }
     }
@@ -436,10 +438,12 @@ mod platform {
         }
     }
 
-    pub fn open(request: &ScanRequest) -> Result<(), String> {
-        if !request.permitted() {
-            return Err(translate("mobile-qr-camera-unavailable"));
+    impl ScanRequest {
+        pub(crate) fn open(&self) -> Result<(), String> {
+            if !self.permitted() {
+                return Err(translate("mobile-qr-camera-unavailable"));
+            }
+            Err(translate("mobile-qr-unsupported-platform"))
         }
-        Err(translate("mobile-qr-unsupported-platform"))
     }
 }

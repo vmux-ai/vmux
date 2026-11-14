@@ -136,10 +136,6 @@ impl ScanRequest {
         qr_scanner::ScannerSupport::detect(&Self).unavailable()
     }
 
-    fn open(&self) -> Result<(), String> {
-        qr_scanner::open(self)
-    }
-
     pub(crate) fn permitted(&self) -> bool {
         vmux_app::host::Product::camera()
     }

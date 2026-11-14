@@ -102,7 +102,7 @@ its native credential calls retain the desktop-process access restriction.
 Mobile bundle identity, selected icon/storyboard/privacy/entitlement assets and the signed IPA
 consume the same metadata. The existing connection entity owns a StoredCredentials path
 capability; alternate products cannot restore the Vmux pairing file. ScanRequest flows through
-the existing pairing Plugin before bounded camera IO. Its scan system uses Bevy's NonSendMarker
+the existing pairing Plugin before its platform-specific `open` method performs bounded camera IO. Its scan system uses Bevy's NonSendMarker
 to run UIKit presentation on the mobile runner's main thread without adding a Resource.
 AppBody is the mounted Dioxus root and
 renders the product title/header alongside its existing pairing, team and session projections.
