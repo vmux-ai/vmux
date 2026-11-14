@@ -76,7 +76,7 @@ impl GuestImage {
             Ok(metadata) if metadata.len() > 0 => {
                 if metadata.blocks() == 0 && !marker.exists() {
                     let mut pending = tempfile::NamedTempFile::new_in(&settings.directory)?;
-                    std::io::Write::write_all(&mut pending, b"new")?;
+                    io::Write::write_all(&mut pending, b"new")?;
                     pending.as_file().sync_all()?;
                     pending.persist(marker).map_err(io::Error::other)?;
                 }
@@ -91,7 +91,7 @@ impl GuestImage {
             .set_len(settings.disk_gib * 1024 * 1024 * 1024)?;
         disk.as_file().sync_all()?;
         let mut pending = tempfile::NamedTempFile::new_in(&settings.directory)?;
-        std::io::Write::write_all(&mut pending, b"new")?;
+        io::Write::write_all(&mut pending, b"new")?;
         pending.as_file().sync_all()?;
         preparation.check()?;
         pending.persist(marker).map_err(io::Error::other)?;

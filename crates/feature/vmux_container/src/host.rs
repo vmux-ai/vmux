@@ -593,6 +593,10 @@ fn project(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use bevy_cef::prelude::{
+        BinHostEmitEvent, BinIpcEpoch, BinIpcNavigationRevision, BinIpcSurfaceGeneration, Browsers,
+    };
+    use vmux_api::{BinEvent, UiEventPermissions};
 
     #[test]
     fn unreadable_configuration_is_visible_and_cannot_start_or_overwrite_an_engine() {
@@ -670,11 +674,6 @@ mod tests {
         );
         assert_eq!(std::fs::read(config).unwrap(), bytes);
     }
-    use bevy_cef::prelude::{
-        BinHostEmitEvent, BinIpcEpoch, BinIpcNavigationRevision, BinIpcSurfaceGeneration, Browsers,
-    };
-    use vmux_api::{BinEvent, UiEventPermissions};
-
     #[derive(Resource, Default)]
     struct Delivery {
         writes: usize,

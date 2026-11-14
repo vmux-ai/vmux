@@ -4,6 +4,8 @@ use assert_cmd::Command;
 #[cfg(not(feature = "runtime"))]
 use assert_cmd::assert::OutputAssertExt;
 use predicates::prelude::*;
+#[cfg(target_os = "macos")]
+use std::io::Read;
 #[cfg(unix)]
 use std::os::unix::fs::PermissionsExt;
 
@@ -1109,7 +1111,6 @@ fn packaged_artifacts_are_verified_before_publication_and_failed_builds_preserve
 #[test]
 #[cfg(target_os = "macos")]
 fn debug_vm_helpers_are_verified_and_rebundling_preserves_open_executables() {
-    use std::io::Read;
     let fixture = Fixture::new();
     fixture.command().args(["build"]).assert().success();
     let debug = fixture.target.join("debug");

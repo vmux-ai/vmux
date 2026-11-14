@@ -280,6 +280,7 @@ fn shutdown(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::EnginePlugin;
 
     #[test]
     fn accepted_stop_retires_an_unresponsive_guest_after_the_shutdown_deadline() {
@@ -288,7 +289,7 @@ mod tests {
         settings.validate().unwrap();
         let lease = crate::process::Lease::acquire(&settings.directory).unwrap();
         let mut app = App::new();
-        app.add_plugins(crate::EnginePlugin);
+        app.add_plugins(EnginePlugin);
         let engine = app
             .world_mut()
             .spawn((Engine, settings.clone(), Phase::Ready, lease))
@@ -337,8 +338,6 @@ mod tests {
                 .is_none()
         );
     }
-    use crate::EnginePlugin;
-
     #[test]
     fn transient_port_reads_preserve_the_last_forwarding_result() {
         for (kind, previous, expected) in [
