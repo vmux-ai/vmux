@@ -87,6 +87,22 @@ fn host_metadata_round_trips_native_arguments_and_refuses_invalid_identity() {
 }
 
 #[test]
+#[cfg(unix)]
+fn installed_tailwind_pin_is_recognized_when_ci_defaults_to_ansi_colors() {
+    let fixture = Fixture::new();
+    fixture.script("tailwindcss", "#!/bin/sh\nif [ -n \"${CI:-}\" ] && [ -z \"${NO_COLOR:-}\" ]; then\n  printf '\\033[34mv4.2.4\\033[39m\\n'\nelse\n  printf 'tailwindcss v4.2.4\\n'\nfi\n");
+    fixture
+        .command()
+        .args(["internal", "install-tailwindcss"])
+        .env("CI", "true")
+        .env("GITHUB_ACTIONS", "true")
+        .env_remove("NO_COLOR")
+        .assert()
+        .success();
+    assert!(!fixture.root.join("build.log").exists());
+}
+
+#[test]
 #[cfg(target_os = "macos")]
 fn custom_packages_preserve_product_identity_assets_and_service_namespace() {
     let fixture = Fixture::new();

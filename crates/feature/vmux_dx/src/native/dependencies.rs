@@ -39,7 +39,7 @@ impl Native {
 
     fn installed_with(&self, program: &OsStr, version: &str, option: &str) -> bool {
         let mut command = self.command(program);
-        command.arg(option);
+        command.arg(option).env("NO_COLOR", "1");
         let output = Execution::new(command).output_any(None);
         match output {
             Ok(output) if output.status.success() => String::from_utf8_lossy(&output.stdout)
