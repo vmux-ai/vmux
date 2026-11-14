@@ -1,0 +1,26 @@
+name: Prepare CI checkout
+description: Validate and check out the exact planned base/head merge tree
+outputs:
+  commit:
+    description: Verified local checkout commit
+    value: ${{ steps.checkout.outputs.commit }}
+inputs:
+  head:
+    required: true
+    description: Branch commit
+  base:
+    required: false
+    description: Target branch commit
+  tree:
+    required: false
+    description: Expected merged Git tree
+runs:
+  using: composite
+  steps:
+    - id: checkout
+      shell: bash
+      env:
+        VMUX_CI_HEAD: ${{ inputs.head }}
+        VMUX_CI_BASE: ${{ inputs.base }}
+        VMUX_CI_TREE: ${{ inputs.tree }}
+      run: node scripts/ci-preflight.js checkout

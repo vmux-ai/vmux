@@ -447,8 +447,8 @@ the startup check. Release preparation keeps its normal optimization, DMG and no
 Fast packages disable LTO in Cargo's release profile so dependencies contain native objects rather
 than linker-plugin bitcode that Apple's linker may not understand. Failed fast package jobs retain
 their ref-scoped dependency cache for the next correction.
-The package adapter rejects fast mode outside non-release pull requests; caches remain scoped by
-GitHub ref, so pull-request caches do not replace main's cache.
+The package adapter limits fast mode to non-release pull requests and feature-branch preflights;
+caches remain scoped by GitHub ref, so branch and pull-request caches do not replace main's cache.
 
 Every plain adapter names its external interface, canonical input/output, scope/lifetime,
 bounds and cancellation/eviction. Adapters may hold handles, byte cursors, codec scratch and
@@ -2359,15 +2359,31 @@ to native adapters, application composition,
 dependency manifests, lockfiles, toolchains, build scripts, and packaging. Other feature PRs
 require the macOS checks without a release build or DMG. Main pushes and manual CI runs retain
 full packaging and startup validation; nightly and release workflows retain signing and
-notarization. New PR commits cancel superseded CI runs without canceling main builds.
+notarization. Feature-branch pushes start the same affected checks before a PR exists, with the
+same packaging filter and fast non-release app bundle. Each runner checks out a temporary merge
+of the captured base and head and verifies its Git tree before compiling. An existing PR selects
+its actual base branch, including stacked PRs; otherwise the default branch supplies the base.
+
+Successful branch CI records the exact head, base and merged tree only after Linux, macOS, iOS,
+and any affected website checks pass. A same-repository, non-release PR may reuse that evidence
+from the same workflow and branch; the required gates still run and verify planning succeeded.
+The branch workflow, checkout action and preflight adapter must also match their merged-tree
+versions, because a push executes the branch workflow even when the base changed its CI definition.
+Branch evidence uses separate check names, so it cannot satisfy PR merge requirements before
+the PR verifies its own merge tree and captured base.
+Branch CI publishes its input identity before starting checks. Planning joins an active run with
+matching inputs for at most 85 minutes instead of launching duplicate builds, and does not wait
+for a run against another base. A joined failure or cancellation fails the PR; missing, expired,
+stale or incomplete evidence starts normal checks. Forks and release PRs always run normal checks. Each event cancels
+its own superseded feature runs without cancelling the branch run a PR is joining or main builds.
 
 `vmux_builder ci-scope` compares a PR with its merge base and selects changed workspace
 packages plus their transitive reverse dependencies, including optional, build, and test
 dependencies. Formatting and Clippy use the same selection while excluding vendored patches.
 Formatting runs before Linux SDK preparation in its own job. Linux Cargo checks share a
 version-validated CEF SDK cache through `CEF_PATH` rather than downloading copies into build
-directories. Pull requests restore Rust dependency caches, while only main saves them, keeping
-per-PR cache entries from evicting the shared baseline.
+directories. Pushes and pull requests save Rust dependency caches within their own GitHub ref;
+feature-branch updates reuse their branch cache without overwriting the main baseline.
 Renames include both package owners. Manifests, lockfiles, build scripts,
 CI configuration, shared API/ECS/macros/composition, and unmapped changes require the full
 workspace. Scope discovery errors fail the test gate rather than skipping tests. Builder

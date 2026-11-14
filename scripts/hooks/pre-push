@@ -5,6 +5,7 @@ root="$(git rev-parse --show-toplevel)"
 cd "$root"
 
 echo "pre-push: formatting, diff, and source conventions"
+node --test scripts/ci-preflight.test.js
 cargo test -p vmux_builder
 cargo fmt --all -- --check
 git diff --check

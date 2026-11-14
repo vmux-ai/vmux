@@ -4,7 +4,7 @@ on:
   pull_request:
   push:
     branches:
-      - main
+      - "**"
     paths-ignore:
       - 'Casks/**'
       - 'website/public/updates.json'
@@ -14,23 +14,68 @@ on:
 
 permissions:
   contents: read
+  actions: read
+  pull-requests: read
 
 concurrency:
-  group: ci-${{ github.event.pull_request.number || github.ref }}
-  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+  group: ci-${{ github.event_name }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' || (github.event_name == 'push' && github.ref_name != github.event.repository.default_branch) }}
 
 env:
   CARGO_TERM_COLOR: always
   DX_HOME: ${{ github.workspace }}/.dx
 
 jobs:
+  plan:
+    name: Plan CI and reuse preflight
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    outputs:
+      head: ${{ steps.plan.outputs.head }}
+      base: ${{ steps.plan.outputs.base }}
+      tree: ${{ steps.plan.outputs.tree }}
+      feature: ${{ steps.plan.outputs.feature }}
+      release: ${{ steps.plan.outputs.release }}
+      reusable: ${{ steps.plan.outputs.reusable }}
+      reuse: ${{ steps.plan.outputs.reuse }}
+      receipt: ${{ steps.plan.outputs.receipt }}
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+      - uses: actions/github-script@v8
+        id: plan
+        with:
+          script: |
+            const Preflight = require('./scripts/ci-preflight.js');
+            await new Preflight({ github, context, core }).plan();
+      - name: Publish preflight input identity
+        if: steps.plan.outputs.feature == 'true' && steps.plan.outputs.reusable == 'true'
+        uses: actions/upload-artifact@v6
+        with:
+          name: inputs-${{ steps.plan.outputs.receipt }}
+          path: ci-preflight-inputs.json
+          if-no-files-found: error
+          retention-days: 7
+
   cef-version:
     name: Resolve CEF version
+    needs: [plan]
+    if: needs.plan.outputs.reuse == ''
     runs-on: ubuntu-latest
     outputs:
       version: ${{ steps.resolve.outputs.version }}
     steps:
       - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+          ref: ${{ needs.plan.outputs.head }}
+
+      - uses: ./.github/actions/prepare-ci
+        with:
+          head: ${{ needs.plan.outputs.head }}
+          base: ${{ needs.plan.outputs.base }}
+          tree: ${{ needs.plan.outputs.tree }}
 
       - name: Resolve cef crate version from Cargo.lock
         id: resolve
@@ -47,12 +92,19 @@ jobs:
   format-rust:
     name: Format (rust)
     runs-on: ubuntu-latest
-    needs: [changes]
+    needs: [plan, changes]
     if: needs.changes.outputs.code == 'true'
     steps:
       - uses: actions/checkout@v5
         with:
           fetch-depth: 0
+          ref: ${{ needs.plan.outputs.head }}
+
+      - uses: ./.github/actions/prepare-ci
+        with:
+          head: ${{ needs.plan.outputs.head }}
+          base: ${{ needs.plan.outputs.base }}
+          tree: ${{ needs.plan.outputs.tree }}
 
       - uses: ./.github/actions/setup-rust
         with:
@@ -61,7 +113,7 @@ jobs:
       - name: Select Rust format scope
         id: scope
         env:
-          VMUX_CI_BASE: ${{ github.event_name == 'pull_request' && github.event.pull_request.base.sha || '' }}
+          VMUX_CI_BASE: ${{ needs.plan.outputs.base }}
         run: ./scripts/vmux-builder ci-scope >> "$GITHUB_OUTPUT"
 
       - name: Check formatting
@@ -70,12 +122,19 @@ jobs:
   lint-rust:
     name: Lint (rust)
     runs-on: ubuntu-latest
-    needs: [cef-version, changes]
+    needs: [plan, cef-version, changes]
     if: needs.changes.outputs.code == 'true'
     steps:
       - uses: actions/checkout@v5
         with:
           fetch-depth: 0
+          ref: ${{ needs.plan.outputs.head }}
+
+      - uses: ./.github/actions/prepare-ci
+        with:
+          head: ${{ needs.plan.outputs.head }}
+          base: ${{ needs.plan.outputs.base }}
+          tree: ${{ needs.plan.outputs.tree }}
 
       - uses: ./.github/actions/setup-linux
         with:
@@ -86,7 +145,7 @@ jobs:
       - name: Select Rust check scope
         id: scope
         env:
-          VMUX_CI_BASE: ${{ github.event_name == 'pull_request' && github.event.pull_request.base.sha || '' }}
+          VMUX_CI_BASE: ${{ needs.plan.outputs.base }}
         run: ./scripts/vmux-builder ci-scope >> "$GITHUB_OUTPUT"
 
       - name: Clippy
@@ -99,12 +158,19 @@ jobs:
   test-rust:
     name: Test (rust)
     runs-on: ubuntu-latest
-    needs: [cef-version, changes]
+    needs: [plan, cef-version, changes]
     if: needs.changes.outputs.code == 'true'
     steps:
       - uses: actions/checkout@v5
         with:
           fetch-depth: 0
+          ref: ${{ needs.plan.outputs.head }}
+
+      - uses: ./.github/actions/prepare-ci
+        with:
+          head: ${{ needs.plan.outputs.head }}
+          base: ${{ needs.plan.outputs.base }}
+          tree: ${{ needs.plan.outputs.tree }}
 
       - uses: ./.github/actions/setup-linux
         with:
@@ -114,7 +180,7 @@ jobs:
       - name: Select Rust test scope
         id: scope
         env:
-          VMUX_CI_BASE: ${{ github.event_name == 'pull_request' && github.event.pull_request.base.sha || '' }}
+          VMUX_CI_BASE: ${{ needs.plan.outputs.base }}
         run: ./scripts/vmux-builder ci-scope >> "$GITHUB_OUTPUT"
 
       - name: Run tests
@@ -128,19 +194,27 @@ jobs:
   test-policy:
     name: Test build and ownership policy
     runs-on: ubuntu-latest
-    needs: [changes]
+    needs: [plan, changes]
     if: needs.changes.outputs.code == 'true'
     steps:
       - uses: actions/checkout@v5
         with:
           fetch-depth: 0
+          ref: ${{ needs.plan.outputs.head }}
+
+      - uses: ./.github/actions/prepare-ci
+        with:
+          head: ${{ needs.plan.outputs.head }}
+          base: ${{ needs.plan.outputs.base }}
+          tree: ${{ needs.plan.outputs.tree }}
       - uses: ./.github/actions/setup-rust
       - uses: Swatinem/rust-cache@v2
         with:
           shared-key: policy
-          save-if: ${{ github.ref == 'refs/heads/main' || github.event_name == 'pull_request' }}
+          save-if: ${{ github.event_name == 'push' || github.event_name == 'pull_request' }}
       - name: Test build preparation and source ownership
         run: |
+          node --test scripts/ci-preflight.test.js
           cargo test --locked -p vmux_builder
           bash scripts/test-dev-bundle.sh --fixture
           bash scripts/test-dev-sign.sh
@@ -149,12 +223,19 @@ jobs:
   test-sdk-path:
     name: Test public SDK from an independent workspace
     runs-on: ubuntu-latest
-    needs: [changes, cef-version]
+    needs: [plan, changes, cef-version]
     if: needs.changes.outputs.code == 'true'
     steps:
       - uses: actions/checkout@v5
         with:
           fetch-depth: 0
+          ref: ${{ needs.plan.outputs.head }}
+
+      - uses: ./.github/actions/prepare-ci
+        with:
+          head: ${{ needs.plan.outputs.head }}
+          base: ${{ needs.plan.outputs.base }}
+          tree: ${{ needs.plan.outputs.tree }}
       - uses: ./.github/actions/setup-linux
         with:
           cache-key: sdk-path
@@ -164,12 +245,19 @@ jobs:
   test-sdk-git:
     name: Test SDK from immutable Git dependencies
     runs-on: ubuntu-latest
-    needs: [changes, cef-version]
+    needs: [plan, changes, cef-version]
     if: needs.changes.outputs.code == 'true'
     steps:
       - uses: actions/checkout@v5
         with:
           fetch-depth: 0
+          ref: ${{ needs.plan.outputs.head }}
+
+      - uses: ./.github/actions/prepare-ci
+        with:
+          head: ${{ needs.plan.outputs.head }}
+          base: ${{ needs.plan.outputs.base }}
+          tree: ${{ needs.plan.outputs.tree }}
       - uses: ./.github/actions/setup-linux
         with:
           cache-key: sdk-git
@@ -179,12 +267,19 @@ jobs:
   test-headless:
     name: Test headless application profiles
     runs-on: ubuntu-latest
-    needs: [changes, cef-version]
+    needs: [plan, changes, cef-version]
     if: needs.changes.outputs.code == 'true'
     steps:
       - uses: actions/checkout@v5
         with:
           fetch-depth: 0
+          ref: ${{ needs.plan.outputs.head }}
+
+      - uses: ./.github/actions/prepare-ci
+        with:
+          head: ${{ needs.plan.outputs.head }}
+          base: ${{ needs.plan.outputs.base }}
+          tree: ${{ needs.plan.outputs.tree }}
       - uses: ./.github/actions/setup-linux
         with:
           cache-key: headless
@@ -193,6 +288,8 @@ jobs:
 
   changes:
     name: Detect Changes
+    needs: [plan]
+    if: needs.plan.outputs.reuse == ''
     runs-on: ubuntu-latest
     outputs:
       website: ${{ steps.filter.outputs.website }}
@@ -202,10 +299,22 @@ jobs:
       code: ${{ github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' || steps.filter.outputs.code == 'true' }}
     steps:
       - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+          ref: ${{ needs.plan.outputs.head }}
+
+      - uses: ./.github/actions/prepare-ci
+        id: prepared
+        with:
+          head: ${{ needs.plan.outputs.head }}
+          base: ${{ needs.plan.outputs.base }}
+          tree: ${{ needs.plan.outputs.tree }}
       - uses: dorny/paths-filter@v4
         if: github.event_name != 'schedule'
         id: filter
         with:
+          base: ${{ needs.plan.outputs.base || github.event.repository.default_branch }}
+          ref: ${{ needs.plan.outputs.base && steps.prepared.outputs.commit || '' }}
           predicate-quantifier: 'some-with-excludes'
           filters: |
             code:
@@ -293,10 +402,19 @@ jobs:
   deps-rust:
     name: Deps (rust)
     runs-on: ubuntu-latest
-    needs: [changes]
+    needs: [plan, changes]
     if: needs.changes.outputs.code == 'true'
     steps:
       - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+          ref: ${{ needs.plan.outputs.head }}
+
+      - uses: ./.github/actions/prepare-ci
+        with:
+          head: ${{ needs.plan.outputs.head }}
+          base: ${{ needs.plan.outputs.base }}
+          tree: ${{ needs.plan.outputs.tree }}
 
       - uses: ./.github/actions/setup-rust
 
@@ -380,10 +498,19 @@ jobs:
   ios-build:
     name: Build iOS App
     runs-on: macos-latest
-    needs: [changes]
+    needs: [plan, changes]
     if: needs.changes.outputs.ios == 'true'
     steps:
       - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+          ref: ${{ needs.plan.outputs.head }}
+
+      - uses: ./.github/actions/prepare-ci
+        with:
+          head: ${{ needs.plan.outputs.head }}
+          base: ${{ needs.plan.outputs.base }}
+          tree: ${{ needs.plan.outputs.tree }}
 
       - uses: ./.github/actions/setup-ios
         with:
@@ -436,19 +563,29 @@ jobs:
           FORBIDDEN
 
   lint:
-    name: Lint
+    name: ${{ github.event_name == 'push' && needs.plan.outputs.feature == 'true' && 'Preflight Lint' || 'Lint' }}
     runs-on: ubuntu-latest
-    needs: [changes, format-rust, lint-rust, deps-rust]
+    needs: [plan, changes, format-rust, lint-rust, deps-rust]
     if: always()
     steps:
       - name: Gate
         env:
+          PLAN: ${{ needs.plan.result }}
+          PREFLIGHT: ${{ needs.plan.outputs.reuse }}
           CHANGES: ${{ needs.changes.result }}
           CODE: ${{ needs.changes.outputs.code }}
           FORMAT: ${{ needs.format-rust.result }}
           RESULT: ${{ needs.lint-rust.result }}
           DEPS: ${{ needs.deps-rust.result }}
         run: |
+          if [ "$PLAN" != "success" ]; then
+            echo "::error::CI planning did not succeed ($PLAN)"
+            exit 1
+          fi
+          if [ -n "$PREFLIGHT" ]; then
+            echo "Reused verified branch CI run $PREFLIGHT"
+            exit 0
+          fi
           if [ "$CHANGES" != "success" ]; then
             echo "::error::Detect Changes did not succeed ($CHANGES)"
             exit 1
@@ -468,13 +605,15 @@ jobs:
           echo "Lint gate ok (code=$CODE format=$FORMAT rust=$RESULT deps=$DEPS)"
 
   test:
-    name: Test
+    name: ${{ github.event_name == 'push' && needs.plan.outputs.feature == 'true' && 'Preflight Test' || 'Test' }}
     runs-on: ubuntu-latest
-    needs: [changes, test-rust, test-policy, test-sdk-path, test-sdk-git, test-headless]
+    needs: [plan, changes, test-rust, test-policy, test-sdk-path, test-sdk-git, test-headless]
     if: always()
     steps:
       - name: Gate
         env:
+          PLAN: ${{ needs.plan.result }}
+          PREFLIGHT: ${{ needs.plan.outputs.reuse }}
           CHANGES: ${{ needs.changes.result }}
           CODE: ${{ needs.changes.outputs.code }}
           RUST_TEST: ${{ needs.test-rust.result }}
@@ -483,6 +622,14 @@ jobs:
           SDK_GIT: ${{ needs.test-sdk-git.result }}
           HEADLESS: ${{ needs.test-headless.result }}
         run: |
+          if [ "$PLAN" != "success" ]; then
+            echo "::error::CI planning did not succeed ($PLAN)"
+            exit 1
+          fi
+          if [ -n "$PREFLIGHT" ]; then
+            echo "Reused verified branch CI run $PREFLIGHT"
+            exit 0
+          fi
           if [ "$CHANGES" != "success" ]; then
             echo "::error::Detect Changes did not succeed ($CHANGES)"
             exit 1
@@ -499,19 +646,29 @@ jobs:
           echo "Test gate ok (code=$CODE)"
 
   build-macos:
-    name: Build macOS
+    name: ${{ github.event_name == 'push' && needs.plan.outputs.feature == 'true' && 'Preflight Build macOS' || 'Build macOS' }}
     runs-on: ubuntu-latest
-    needs: [changes, check-mac, build-mac]
+    needs: [plan, changes, check-mac, build-mac]
     if: always()
     steps:
       - name: Gate
         env:
+          PLAN: ${{ needs.plan.result }}
+          PREFLIGHT: ${{ needs.plan.outputs.reuse }}
           CHANGES: ${{ needs.changes.result }}
           MACOS: ${{ needs.changes.outputs.macos }}
-          PACKAGE: ${{ github.event_name != 'pull_request' || needs.changes.outputs.macos_package == 'true' }}
+          PACKAGE: ${{ !(github.event_name == 'pull_request' || needs.plan.outputs.feature == 'true') || needs.changes.outputs.macos_package == 'true' }}
           CHECK: ${{ needs.check-mac.result }}
           RESULT: ${{ needs.build-mac.result }}
         run: |
+          if [ "$PLAN" != "success" ]; then
+            echo "::error::CI planning did not succeed ($PLAN)"
+            exit 1
+          fi
+          if [ -n "$PREFLIGHT" ]; then
+            echo "Reused verified branch CI run $PREFLIGHT"
+            exit 0
+          fi
           if [ "$CHANGES" != "success" ]; then
             echo "::error::Detect Changes did not succeed ($CHANGES)"
             exit 1
@@ -530,17 +687,27 @@ jobs:
           echo "Build macOS gate ok (macos=$MACOS package=$PACKAGE check=$CHECK build=$RESULT)"
 
   build-ios:
-    name: Build iOS
+    name: ${{ github.event_name == 'push' && needs.plan.outputs.feature == 'true' && 'Preflight Build iOS' || 'Build iOS' }}
     runs-on: ubuntu-latest
-    needs: [changes, ios-build]
+    needs: [plan, changes, ios-build]
     if: always()
     steps:
       - name: Gate
         env:
+          PLAN: ${{ needs.plan.result }}
+          PREFLIGHT: ${{ needs.plan.outputs.reuse }}
           CHANGES: ${{ needs.changes.result }}
           IOS: ${{ needs.changes.outputs.ios }}
           RESULT: ${{ needs.ios-build.result }}
         run: |
+          if [ "$PLAN" != "success" ]; then
+            echo "::error::CI planning did not succeed ($PLAN)"
+            exit 1
+          fi
+          if [ -n "$PREFLIGHT" ]; then
+            echo "Reused verified branch CI run $PREFLIGHT"
+            exit 0
+          fi
           if [ "$CHANGES" != "success" ]; then
             echo "::error::Detect Changes did not succeed ($CHANGES)"
             exit 1
@@ -553,11 +720,20 @@ jobs:
 
   website:
     name: Website Build
-    needs: changes
+    needs: [plan, changes]
     if: needs.changes.outputs.website == 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+          ref: ${{ needs.plan.outputs.head }}
+
+      - uses: ./.github/actions/prepare-ci
+        with:
+          head: ${{ needs.plan.outputs.head }}
+          base: ${{ needs.plan.outputs.base }}
+          tree: ${{ needs.plan.outputs.tree }}
 
       - uses: ./.github/actions/setup-web
         with:
@@ -569,13 +745,22 @@ jobs:
 
   check-mac:
     name: Check macOS
-    needs: [changes, cef-version]
-    if: needs.changes.outputs.macos == 'true' && github.event_name == 'pull_request' && needs.changes.outputs.macos_package != 'true'
+    needs: [plan, changes, cef-version]
+    if: needs.changes.outputs.macos == 'true' && (github.event_name == 'pull_request' || needs.plan.outputs.feature == 'true') && needs.changes.outputs.macos_package != 'true'
     runs-on: macos-latest
     env:
       VMUX_CEF_SDK_CACHE: ${{ github.workspace }}/.cache/cef-sdk
     steps:
       - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+          ref: ${{ needs.plan.outputs.head }}
+
+      - uses: ./.github/actions/prepare-ci
+        with:
+          head: ${{ needs.plan.outputs.head }}
+          base: ${{ needs.plan.outputs.base }}
+          tree: ${{ needs.plan.outputs.tree }}
 
       - uses: ./.github/actions/setup-macos
         with:
@@ -594,8 +779,8 @@ jobs:
 
   build-mac:
     name: Build macOS App
-    needs: [changes, cef-version]
-    if: needs.changes.outputs.macos == 'true' && (github.event_name != 'pull_request' || needs.changes.outputs.macos_package == 'true')
+    needs: [plan, changes, cef-version]
+    if: needs.changes.outputs.macos == 'true' && (!(github.event_name == 'pull_request' || needs.plan.outputs.feature == 'true') || needs.changes.outputs.macos_package == 'true')
     runs-on: macos-latest
     permissions:
       contents: write
@@ -606,6 +791,13 @@ jobs:
       - uses: actions/checkout@v5
         with:
           fetch-depth: 0
+          ref: ${{ needs.plan.outputs.head }}
+
+      - uses: ./.github/actions/prepare-ci
+        with:
+          head: ${{ needs.plan.outputs.head }}
+          base: ${{ needs.plan.outputs.base }}
+          tree: ${{ needs.plan.outputs.tree }}
 
       - name: Detect release PR + idempotency
         id: relprep
@@ -653,17 +845,18 @@ jobs:
           fi
 
       - name: Configure fast PR package build
-        if: github.event_name == 'pull_request' && env.IS_RELEASE_PR != '1'
+        if: (github.event_name == 'pull_request' || needs.plan.outputs.feature == 'true') && needs.plan.outputs.release != 'true' && env.IS_RELEASE_PR != '1'
         run: |
           {
             echo "VMUX_CI_FAST_PACKAGE=1"
+            echo "VMUX_CI_PREFLIGHT=${{ needs.plan.outputs.feature }}"
             echo "CARGO_PROFILE_RELEASE_LTO=off"
             echo "RUSTFLAGS=${RUSTFLAGS:+$RUSTFLAGS }-C opt-level=1 -C codegen-units=16"
           } >> "$GITHUB_ENV"
 
       - uses: ./.github/actions/setup-macos
         with:
-          cache-key: ${{ github.event_name == 'pull_request' && env.IS_RELEASE_PR != '1' && 'build-mac-pr' || 'build-mac' }}
+          cache-key: ${{ (github.event_name == 'pull_request' || needs.plan.outputs.feature == 'true') && needs.plan.outputs.release != 'true' && env.IS_RELEASE_PR != '1' && 'build-mac-pr' || 'build-mac' }}
           cef-version: ${{ needs.cef-version.outputs.version }}
 
       - name: Check lean macOS desktop features
@@ -806,3 +999,27 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: ./scripts/update-release-metadata.sh --check
+
+  record-preflight:
+    name: Record preflight
+    runs-on: ubuntu-latest
+    needs: [plan, changes, lint, test, build-macos, build-ios, website]
+    if: >-
+      always() && needs.plan.result == 'success' && needs.plan.outputs.feature == 'true' &&
+      needs.plan.outputs.reusable == 'true' && needs.lint.result == 'success' &&
+      needs.test.result == 'success' && needs.build-macos.result == 'success' &&
+      needs.build-ios.result == 'success'
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: ${{ needs.plan.outputs.head }}
+      - name: Validate results and record input identity
+        env:
+          VMUX_CI_RESULTS: ${{ toJSON(needs) }}
+        run: node scripts/ci-preflight.js record
+      - uses: actions/upload-artifact@v6
+        with:
+          name: ${{ needs.plan.outputs.receipt }}
+          path: ci-preflight.json
+          if-no-files-found: error
+          retention-days: 7
