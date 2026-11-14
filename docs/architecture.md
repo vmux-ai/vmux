@@ -440,6 +440,16 @@ that actual Bevy Plugin, then verified SystemParam, Query/Res/On and alias borro
 dependencies, unrelated registrations, test-only fields and owned Component/Resource copies cannot
 supply that edge. This strengthens connection evidence without making legacy state canonical.
 
+CI runs policy, public SDK, immutable Git SDK, headless profiles and affected crate tests on
+separate runners, and the Test gate requires every applicable result. Non-release pull requests
+compile the same package features with faster compiler flags and produce a signed app bundle for
+the startup check. Release preparation keeps its normal optimization, DMG and notarization path.
+Fast packages disable LTO in Cargo's release profile so dependencies contain native objects rather
+than linker-plugin bitcode that Apple's linker may not understand. Failed fast package jobs retain
+their ref-scoped dependency cache for the next correction.
+The package adapter rejects fast mode outside non-release pull requests; caches remain scoped by
+GitHub ref, so pull-request caches do not replace main's cache.
+
 Every plain adapter names its external interface, canonical input/output, scope/lifetime,
 bounds and cancellation/eviction. Adapters may hold handles, byte cursors, codec scratch and
 read-only output caches; they cannot own parallel normalized vmux state or product policy.

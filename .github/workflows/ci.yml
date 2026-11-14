@@ -117,30 +117,79 @@ jobs:
           VMUX_CI_BASE: ${{ github.event_name == 'pull_request' && github.event.pull_request.base.sha || '' }}
         run: ./scripts/vmux-builder ci-scope >> "$GITHUB_OUTPUT"
 
-      - name: Test Rust build preparation and storage lifecycle
-        run: |
-          cargo test -p vmux_builder
-          bash scripts/test-dev-bundle.sh --fixture
-          bash scripts/test-dev-sign.sh
-
-      - name: Test workspace source conventions
-        run: cargo test --locked -p vmux_macro --test source_conventions --test ecs_ownership
-
-      - name: Test the public framework from an independent Cargo workspace
-        run: bash scripts/test-framework-consumer.sh
-
-      - name: Test headless application profiles
-        run: VMUX_SKIP_DX_BUILD=1 cargo test --locked -p vmux_app --no-default-features --features daemon,mcp --lib
-
-      - name: Test the SDK from immutable Git dependencies
-        run: bash scripts/test-framework-consumer.sh --git
-
       - name: Run tests
         run: VMUX_SKIP_DX_BUILD=1 cargo test --locked ${{ steps.scope.outputs.args }}
 
       - name: Test lean desktop features
         if: steps.scope.outputs.lean == 'true'
         run: VMUX_SKIP_DX_BUILD=1 cargo test -p vmux_desktop --lib --no-default-features disabled_features::tests
+
+
+  test-policy:
+    name: Test build and ownership policy
+    runs-on: ubuntu-latest
+    needs: [changes]
+    if: needs.changes.outputs.code == 'true'
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+      - uses: ./.github/actions/setup-rust
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: policy
+          save-if: ${{ github.ref == 'refs/heads/main' || github.event_name == 'pull_request' }}
+      - name: Test build preparation and source ownership
+        run: |
+          cargo test --locked -p vmux_builder
+          bash scripts/test-dev-bundle.sh --fixture
+          bash scripts/test-dev-sign.sh
+          cargo test --locked -p vmux_macro --test source_conventions --test ecs_ownership
+
+  test-sdk-path:
+    name: Test public SDK from an independent workspace
+    runs-on: ubuntu-latest
+    needs: [changes, cef-version]
+    if: needs.changes.outputs.code == 'true'
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+      - uses: ./.github/actions/setup-linux
+        with:
+          cache-key: sdk-path
+          cef-version: ${{ needs.cef-version.outputs.version }}
+      - run: bash scripts/test-framework-consumer.sh
+
+  test-sdk-git:
+    name: Test SDK from immutable Git dependencies
+    runs-on: ubuntu-latest
+    needs: [changes, cef-version]
+    if: needs.changes.outputs.code == 'true'
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+      - uses: ./.github/actions/setup-linux
+        with:
+          cache-key: sdk-git
+          cef-version: ${{ needs.cef-version.outputs.version }}
+      - run: bash scripts/test-framework-consumer.sh --git
+
+  test-headless:
+    name: Test headless application profiles
+    runs-on: ubuntu-latest
+    needs: [changes, cef-version]
+    if: needs.changes.outputs.code == 'true'
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+      - uses: ./.github/actions/setup-linux
+        with:
+          cache-key: headless
+          cef-version: ${{ needs.cef-version.outputs.version }}
+      - run: VMUX_SKIP_DX_BUILD=1 cargo test --locked -p vmux_app --no-default-features --features daemon,mcp --lib
 
   changes:
     name: Detect Changes
@@ -421,24 +470,33 @@ jobs:
   test:
     name: Test
     runs-on: ubuntu-latest
-    needs: [changes, test-rust]
+    needs: [changes, test-rust, test-policy, test-sdk-path, test-sdk-git, test-headless]
     if: always()
     steps:
       - name: Gate
         env:
           CHANGES: ${{ needs.changes.result }}
           CODE: ${{ needs.changes.outputs.code }}
-          RESULT: ${{ needs.test-rust.result }}
+          RUST_TEST: ${{ needs.test-rust.result }}
+          POLICY: ${{ needs.test-policy.result }}
+          SDK_PATH: ${{ needs.test-sdk-path.result }}
+          SDK_GIT: ${{ needs.test-sdk-git.result }}
+          HEADLESS: ${{ needs.test-headless.result }}
         run: |
           if [ "$CHANGES" != "success" ]; then
             echo "::error::Detect Changes did not succeed ($CHANGES)"
             exit 1
           fi
-          if [ "$CODE" = "true" ] && [ "$RESULT" != "success" ]; then
-            echo "::error::Test (rust) result: $RESULT"
-            exit 1
+          if [ "$CODE" = "true" ]; then
+            for ci_check in RUST_TEST POLICY SDK_PATH SDK_GIT HEADLESS; do
+              ci_result="${!ci_check}"
+              if [ "$ci_result" != "success" ]; then
+                echo "::error::$ci_check result: $ci_result"
+                exit 1
+              fi
+            done
           fi
-          echo "Test gate ok (code=$CODE rust=$RESULT)"
+          echo "Test gate ok (code=$CODE)"
 
   build-macos:
     name: Build macOS
@@ -594,9 +652,18 @@ jobs:
             fi
           fi
 
+      - name: Configure fast PR package build
+        if: github.event_name == 'pull_request' && env.IS_RELEASE_PR != '1'
+        run: |
+          {
+            echo "VMUX_CI_FAST_PACKAGE=1"
+            echo "CARGO_PROFILE_RELEASE_LTO=off"
+            echo "RUSTFLAGS=${RUSTFLAGS:+$RUSTFLAGS }-C opt-level=1 -C codegen-units=16"
+          } >> "$GITHUB_ENV"
+
       - uses: ./.github/actions/setup-macos
         with:
-          cache-key: build-mac
+          cache-key: ${{ github.event_name == 'pull_request' && env.IS_RELEASE_PR != '1' && 'build-mac-pr' || 'build-mac' }}
           cef-version: ${{ needs.cef-version.outputs.version }}
 
       - name: Check lean macOS desktop features
@@ -637,8 +704,8 @@ jobs:
               ;;
           esac
 
-          HOME="$(mktemp -d)"
-          export HOME
+          VMUX_DATA_DIR="$(mktemp -d)"
+          export VMUX_DATA_DIR
           log="$(mktemp)"
           "$bin" >"$log" 2>&1 &
           pid=$!
@@ -662,8 +729,20 @@ jobs:
           cat "$log" || true
           exit $rc
 
+      - name: Archive PR app bundle
+        if: env.PREP_DONE != '1' && env.VMUX_CI_FAST_PACKAGE == '1'
+        run: tar -C target/release -czf target/release/Vmux-pr.app.tar.gz Vmux.app
+
+      - name: Upload PR app artifact
+        if: env.PREP_DONE != '1' && env.VMUX_CI_FAST_PACKAGE == '1'
+        uses: actions/upload-artifact@v6
+        with:
+          name: Vmux-${{ github.sha }}.app
+          path: target/release/Vmux-pr.app.tar.gz
+          retention-days: 7
+
       - name: Upload .dmg artifact
-        if: env.PREP_DONE != '1' && env.IS_RELEASE_PR != '1'
+        if: env.PREP_DONE != '1' && env.IS_RELEASE_PR != '1' && env.VMUX_CI_FAST_PACKAGE != '1'
         uses: actions/upload-artifact@v6
         with:
           name: Vmux-${{ github.sha }}.dmg
