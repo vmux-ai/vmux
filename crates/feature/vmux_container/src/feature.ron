@@ -8,6 +8,7 @@
         icon: "Computer",
         keywords: ["containers", "docker", "linux", "vm", "engine"],
         command_bar: true,
+        placement: Some((group: "vm", reuse: Group)),
         permissions: [
             "PageAddressPublish", "PageAddressRequest", "PageAddressUiState", "PageReady", "ThemeUiState", "OpenRequest",
             "ContainerUiState", "ContainerStartRequest", "ContainerStopRequest", "ContainerLogsRequest",
@@ -21,6 +22,7 @@
         icon: "Docker",
         keywords: ["docker", "engine"],
         command_bar: true,
+        placement: Some((group: "vm", reuse: Group)),
         permissions: [
             "PageAddressPublish", "PageAddressRequest", "PageAddressUiState", "PageReady", "ThemeUiState", "OpenRequest",
             "ContainerUiState", "ContainerStartRequest", "ContainerStopRequest", "ContainerLogsRequest",
@@ -35,6 +37,7 @@
         icon: "Containers",
         keywords: ["containers", "compose"],
         command_bar: true,
+        placement: Some((group: "vm", reuse: Group)),
         permissions: [
             "PageAddressPublish", "PageAddressRequest", "PageAddressUiState", "PageReady", "ThemeUiState", "OpenRequest",
             "ContainerUiState", "ContainerStartRequest", "ContainerStopRequest", "ContainerLogsRequest",
