@@ -104,7 +104,7 @@ fn prewarm(mut commands: Commands) {
         vmux_ui::i18n::translate("sessions-title"),
         1,
     ));
-    commands.spawn(PrewarmPage::exact(
+    commands.spawn(PrewarmPage::renderer(
         crate::Route::SETUP_URL,
         vmux_ui::i18n::translate("onboarding-setup"),
         1,

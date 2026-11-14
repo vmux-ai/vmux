@@ -58,6 +58,7 @@ pub(super) struct PageOpener<'w, 's> {
     tabs: Query<'w, 's, &'static mut Tab>,
     workspaces: Query<'w, 's, &'static mut TabWorkspace>,
     handoffs: Query<'w, 's, &'static mut vmux_layout::hosted_page::SurfaceHandoff>,
+    renderer_pool: vmux_layout::warm_page::RendererPool<'w, 's>,
     queues: QueuedPrompts<'w, 's>,
     transcripts: vmux_session::Transcripts<'w, 's>,
     pub(super) commands: Commands<'w, 's>,
@@ -378,10 +379,17 @@ impl PageOpener<'_, '_> {
                     .entity(*surface)
                     .try_insert(vmux_layout::hosted_page::SurfaceBlocked);
             }
+            let handoff = self.new_handoff(previous, task.id);
+            if let Some(view) = self.renderer_pool.take(url, stack) {
+                self.commands
+                    .entity(view)
+                    .insert((handoff, ChildOf(stack), Visibility::Hidden));
+                return view;
+            }
             self.commands
                 .spawn((
                     vmux_layout::Browser::hosted_page(url, title),
-                    self.new_handoff(previous, task.id),
+                    handoff,
                     ChildOf(stack),
                 ))
                 .insert(Visibility::Hidden)

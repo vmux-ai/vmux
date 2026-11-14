@@ -861,6 +861,181 @@ mod tests {
     use super::*;
     use crate::host::acp::registry::Distribution;
 
+    struct SetupRouting {
+        app: App,
+        stack: Entity,
+        spare: Entity,
+    }
+
+    impl SetupRouting {
+        fn new(ready: bool) -> Self {
+            let mut registration = App::new();
+            registration.add_plugins(vmux_session::SessionPlugin);
+            registration.world_mut().run_schedule(bevy::app::PreStartup);
+            let pools: Vec<_> = registration
+                .world_mut()
+                .query::<&vmux_ecs::page::PrewarmPage>()
+                .iter(registration.world())
+                .cloned()
+                .collect();
+            let mut app = App::new();
+            app.add_plugins((
+                MinimalPlugins,
+                vmux_session::DomainPlugin,
+                vmux_ecs::UiStatePlugin::<ChatUiState>::default(),
+                vmux_ecs::UiStatePlugin::<SessionDetailUiState>::default(),
+                vmux_layout::warm_page::PrewarmPagesPlugin,
+                super::Plugin,
+                super::super::attach::Plugin,
+            ))
+            .insert_resource(AppSettings::default())
+            .add_message::<SwapStackSession>()
+            .add_message::<vmux_ecs::PageOpenRequest>();
+            let pool_count = pools.len();
+            for pool in pools {
+                app.world_mut().spawn(pool);
+            }
+            let host = app.world_mut().spawn_empty().id();
+            let shell = app
+                .world_mut()
+                .spawn((
+                    vmux_layout::window::VmuxWindow,
+                    bevy_cef::prelude::HostWindow(host),
+                ))
+                .id();
+            app.world_mut().spawn((
+                vmux_layout::cef::LayoutCef,
+                vmux_ecs::page::PageReady {},
+                ChildOf(shell),
+            ));
+            let stack = app.world_mut().spawn(ChildOf(shell)).id();
+            for _ in 0..pool_count {
+                app.update();
+            }
+            let spare = app
+                .world_mut()
+                .query_filtered::<
+                    (Entity, &PageMetadata),
+                    With<vmux_layout::warm_page::WarmPageSpare>,
+                >()
+                .iter(app.world())
+                .find(|(_, metadata)| metadata.url == Route::Setup.url())
+                .unwrap()
+                .0;
+            if ready {
+                app.world_mut()
+                    .entity_mut(spare)
+                    .insert(vmux_ecs::page::PageReady {});
+            }
+            Self { app, stack, spare }
+        }
+
+        fn open(&mut self) -> Entity {
+            let id = vmux_ecs::PageOpenId::new();
+            self.app
+                .world_mut()
+                .entity_mut(self.stack)
+                .insert(vmux_ecs::PageNavigation::new(id));
+            let task = self
+                .app
+                .world_mut()
+                .spawn(PageOpenTask {
+                    id,
+                    stack: self.stack,
+                    url: Route::Setup.url(),
+                    request_id: None,
+                })
+                .id();
+            self.app.update();
+            self.app.update();
+            task
+        }
+
+        fn view(&mut self) -> Entity {
+            self.app
+                .world_mut()
+                .query::<(Entity, &ChildOf, &PageMetadata)>()
+                .iter(self.app.world())
+                .find(|(_, parent, metadata)| {
+                    parent.parent() == self.stack && metadata.url == Route::Setup.url()
+                })
+                .unwrap()
+                .0
+        }
+    }
+
+    #[test]
+    fn selecting_an_agent_attaches_the_session_in_the_reused_setup_page() {
+        let mut fixture = SetupRouting::new(true);
+        fixture.open();
+        let view = fixture.view();
+        assert_eq!(view, fixture.spare);
+        fixture
+            .app
+            .world_mut()
+            .entity_mut(view)
+            .insert(vmux_session::host::SetupView);
+        fixture
+            .app
+            .world_mut()
+            .spawn(registry_agent("mistral-vibe", "Mistral Vibe", None));
+        let session = fixture
+            .app
+            .world_mut()
+            .spawn((
+                Session,
+                SessionId("vibe-setup".into()),
+                Name::new("New session"),
+                Cwd(PathBuf::from("/tmp")),
+                AgentId("mistral-vibe".into()),
+                vmux_session::SetupPending,
+                PromptQueue::default(),
+            ))
+            .id();
+        fixture.app.world_mut().entity_mut(fixture.stack).insert((
+            EntityTarget::<Session>::new(session),
+            vmux_session::host::SetupTarget,
+        ));
+        let task = fixture.open();
+        assert!(fixture.app.world().get::<PageOpenHandled>(task).is_some());
+        assert!(
+            fixture
+                .app
+                .world()
+                .get::<vmux_ecs::ProcessAnchor>(session)
+                .is_some()
+        );
+        assert!(matches!(
+            fixture.app.world().get::<vmux_session::RunState>(session),
+            Some(vmux_session::RunState::Preparing)
+        ));
+        assert_eq!(fixture.view(), view);
+        assert!(fixture.app.world().get::<SessionView>(view).is_some());
+        assert_eq!(
+            fixture.app.world().get::<PageMetadata>(view).unwrap().url,
+            "vmux://start/onboarding/agent"
+        );
+        assert_eq!(
+            fixture.app.world().get::<PageMetadata>(view).unwrap().title,
+            "Setup Agent"
+        );
+        assert!(
+            fixture
+                .app
+                .world_mut()
+                .run_system_once(move |queues: vmux_session::QueuedPrompts| queues.empty(session))
+                .unwrap()
+        );
+    }
+
+    #[test]
+    fn setup_opens_a_cold_page_when_its_prewarmed_renderer_is_not_ready() {
+        let mut fixture = SetupRouting::new(false);
+        let task = fixture.open();
+        assert!(fixture.app.world().get::<PageOpenHandled>(task).is_some());
+        assert_ne!(fixture.view(), fixture.spare);
+    }
+
     #[derive(Resource)]
     struct CaptureTarget(Entity);
 

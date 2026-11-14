@@ -94,7 +94,11 @@ fn attach(
         };
         let page_metadata = PageMetadata {
             url: url.clone(),
-            title: session_name.clone(),
+            title: if setup {
+                vmux_ui::i18n::translate("onboarding-setup")
+            } else {
+                session_name.clone()
+            },
             bg_color: None,
             icon: icon.clone(),
         };

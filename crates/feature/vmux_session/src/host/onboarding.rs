@@ -45,6 +45,7 @@ fn sync_views(
             &ChildOf,
             Has<SetupView>,
             Has<super::SessionView>,
+            Has<vmux_ecs::page::PrewarmedPage>,
         ),
         With<vmux_ecs::page::HostsPage>,
     >,
@@ -72,7 +73,7 @@ fn sync_views(
             id.0 == draft.session_id && agent.is_some_and(|agent| agent.0 == draft.agent_id)
         })
     });
-    for (view, mut metadata, parent, setup, session_view) in &mut views {
+    for (view, mut metadata, parent, setup, session_view, prewarmed) in &mut views {
         if crate::Route::parse(&metadata.url) != Some(crate::Route::Setup) {
             if setup {
                 commands.entity(view).remove::<SetupView>();
@@ -81,6 +82,9 @@ fn sync_views(
         }
         if !setup {
             commands.entity(view).insert(SetupView);
+        }
+        if prewarmed {
+            continue;
         }
         let stack = parent.parent();
         let desired = desired.filter(|(session, ..)| {
@@ -424,7 +428,7 @@ fn connect(
             Has<super::SessionView>,
             Option<&crate::onboarding::KeyPending>,
         ),
-        With<SetupView>,
+        (With<SetupView>, Without<vmux_ecs::page::PrewarmedPage>),
     >,
     targets: Query<(), With<SetupTarget>>,
     mut state: Query<(&mut Draft, &Catalog)>,
@@ -729,6 +733,83 @@ mod tests {
                 session,
             }
         }
+    }
+
+    #[test]
+    fn prewarmed_setup_pages_receive_state_without_binding_a_session() {
+        let mut setup = Setup::new();
+        let parent = setup.app.world_mut().spawn_empty().id();
+        let warm = setup
+            .app
+            .world_mut()
+            .spawn((
+                vmux_ecs::page::HostsPage,
+                vmux_ecs::page::PrewarmedPage,
+                ChildOf(parent),
+                vmux_ecs::PageMetadata {
+                    url: crate::Route::Setup.url(),
+                    ..Default::default()
+                },
+            ))
+            .id();
+        setup.app.update();
+        assert!(
+            setup
+                .app
+                .world()
+                .get::<vmux_ecs::EntityTarget<crate::Session>>(parent)
+                .is_none()
+        );
+        assert!(
+            setup
+                .app
+                .world()
+                .get::<super::super::SessionView>(warm)
+                .is_none()
+        );
+        assert!(
+            setup
+                .app
+                .world()
+                .get::<vmux_ecs::UiState<OnboardingUiState>>(warm)
+                .is_some()
+        );
+    }
+
+    #[test]
+    fn prewarmed_setup_pages_cannot_choose_an_agent() {
+        let mut app = App::new();
+        app.add_plugins(Plugin);
+        app.update();
+        let owner = app
+            .world_mut()
+            .query_filtered::<Entity, With<Draft>>()
+            .single(app.world())
+            .unwrap();
+        app.world_mut()
+            .get_mut::<Catalog>(owner)
+            .unwrap()
+            .0
+            .push(AgentOption {
+                id: "mistral-vibe".into(),
+                ..Default::default()
+            });
+        let parent = app.world_mut().spawn_empty().id();
+        let warm = app
+            .world_mut()
+            .spawn((SetupView, vmux_ecs::page::PrewarmedPage, ChildOf(parent)))
+            .id();
+        app.world_mut().trigger(UiInput {
+            webview: warm,
+            payload: OnboardingConnect {
+                agent_id: "mistral-vibe".into(),
+            },
+        });
+        app.world_mut().flush();
+        let draft = app.world().get::<Draft>(owner).unwrap();
+        assert!(!draft.setup_started);
+        assert!(draft.agent_id.is_empty());
+        assert_eq!(app.world().resource::<Messages<StartRequest>>().len(), 0);
     }
 
     #[test]

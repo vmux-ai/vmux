@@ -2219,6 +2219,10 @@ change retains the same SessionDetail scope. Setup views never receive collectio
 authority. Browser sign-in resolves its source by the Stack's Session target rather than its URL.
 Session binding and name projection preserve the setup topic and guide title. Only the setup
 controller advances the view to its ordinary Session route after the agent becomes usable.
+The setup pool warms only the renderer; it never completes a navigation request. ACP navigation
+claims a ready renderer on first entry or opens cold, then attaches a bound setup Session in the
+existing view. Generic page reuse must not complete that request before ACP attachment starts.
+Prewarmed setup views receive catalog state but cannot bind, navigate or start a Session.
 
 Dioxus renders the transition in CSS against reserved welcome geometry: the existing visual guide
 moves up and the composer moves down, while the choice area opens above its input. The native
@@ -2230,6 +2234,7 @@ entirely; an HTML boolean attribute containing the false string would still bloc
 pointer input, and focus.
 Start, setup, and ordinary conversation turns reuse MessageFrame, ChoiceOptions, ComposerNotice,
 and DisabledComposer from `vmux_ui`. WelcomeLayout supplies the same centered and docked geometry.
+Compact primary choices keep their geometry on press and use a themed background response.
 The setup instruction appears inside the existing guide message rather than repeating its header;
 guide and composer docking share one curve while details and choices enter with a small delayed fade.
 Inline handoff capture copies only the mounted page's projections and presentation markers once.
