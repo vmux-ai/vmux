@@ -5,6 +5,11 @@ edition.workspace = true
 description = "Vmux command-line interface"
 publish = false
 
+[features]
+default = ["runtime", "dx"]
+runtime = ["dep:tokio", "dep:vmux_app", "vmux_ecs/host"]
+dx = ["dep:vmux_dx"]
+
 [[bin]]
 name = "vmux"
 path = "src/main.rs"
@@ -13,14 +18,19 @@ path = "src/main.rs"
 bevy_app = { workspace = true }
 bevy_ecs = { workspace = true }
 clap = { version = "4", features = ["string"] }
-tokio = { workspace = true }
-vmux_app = { path = "../../util/vmux_app", features = ["cli"] }
-vmux_ecs = { path = "../../util/vmux_ecs", features = ["host"] }
+tokio = { workspace = true, optional = true }
+vmux_app = { path = "../../util/vmux_app", features = ["cli"], optional = true }
+vmux_ecs = { path = "../../util/vmux_ecs", features = ["cli"] }
+vmux_dx = { path = "../../feature/vmux_dx", optional = true }
 
 [dev-dependencies]
+plist = "1"
+serde_json = { workspace = true }
 assert_cmd = "2"
 predicates = "3"
 tempfile = "3"
+semver = "1"
+toml = { workspace = true }
 
 [lints]
 workspace = true

@@ -158,6 +158,10 @@ impl ProductMetadata {
         self.values.get(key).expect("accepted host metadata key")
     }
 
+    pub fn values(&self) -> &BTreeMap<&'static str, String> {
+        &self.values
+    }
+
     pub fn emit(&self) {
         for (key, value) in &self.values {
             println!("cargo::rerun-if-env-changed={key}");

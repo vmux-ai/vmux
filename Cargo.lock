@@ -10446,10 +10446,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "vmux_builder"
-version = "0.0.35"
-
-[[package]]
 name = "vmux_cli"
 version = "0.0.35"
 dependencies = [
@@ -10457,10 +10453,15 @@ dependencies = [
  "bevy_app",
  "bevy_ecs",
  "clap",
+ "plist",
  "predicates",
+ "semver",
+ "serde_json",
  "tempfile",
  "tokio",
+ "toml",
  "vmux_app",
+ "vmux_dx",
  "vmux_ecs",
 ]
 
@@ -10569,6 +10570,22 @@ dependencies = [
  "vmux_terminal",
  "vmux_tool",
  "vmux_ui",
+]
+
+[[package]]
+name = "vmux_dx"
+version = "0.0.35"
+dependencies = [
+ "bevy_app",
+ "bevy_ecs",
+ "plist",
+ "ron 0.12.1",
+ "serde",
+ "serde_json",
+ "sha2",
+ "tempfile",
+ "toml",
+ "vmux_ecs",
 ]
 
 [[package]]

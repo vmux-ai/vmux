@@ -40,14 +40,17 @@ jobs:
           echo "CEF_VERSION=$version" >> "$GITHUB_ENV"
           echo "version=$version" >> "$GITHUB_OUTPUT"
 
+      - uses: ./.github/actions/setup-rust
+
       - name: Set preview version
         run: |
           set -euo pipefail
           base=$(grep -m1 '^version' Cargo.toml | sed 's/.*"\(.*\)".*/\1/')
           date=$(date -u +%Y%m%d)
-          version=$(./scripts/nightly-version.sh "$base" "$date" "$GITHUB_RUN_NUMBER" "$GITHUB_RUN_ATTEMPT")
+          version=$(vmux internal nightly-version -- "$base" "$date" "$GITHUB_RUN_NUMBER" "$GITHUB_RUN_ATTEMPT")
           sed -i '' "s/^version = \"${base}\"$/version = \"${version}\"/" Cargo.toml
           grep -q "^version = \"${version}\"$" Cargo.toml
+          cargo update --workspace --offline
           echo "NIGHTLY_DATE=$date" >> "$GITHUB_ENV"
           echo "NIGHTLY_VERSION=$version" >> "$GITHUB_ENV"
 
@@ -65,7 +68,7 @@ jobs:
           APPLE_APP_PASSWORD: ${{ secrets.APPLE_APP_PASSWORD }}
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
           VMUX_UPDATE_PUBLIC_KEY: ${{ secrets.VMUX_UPDATE_PUBLIC_KEY }}
-        run: ./scripts/build-mac-release.sh
+        run: vmux build -p release
 
       - name: Create preview assets
         env:

@@ -2473,7 +2473,13 @@ impl Boundary {
             || inventory.fixture_lock(adapter)
             || path == "fixture.rs"
             || path.starts_with("crates/util/vmux_macro/")
-            || path.starts_with("crates/app/vmux_builder/")
+            || matches!(
+                path,
+                "crates/feature/vmux_dx/build.rs"
+                    | "crates/feature/vmux_dx/src/source.rs"
+                    | "crates/app/vmux_cli/tests/dx.rs"
+            )
+            || !adapter.production && path == "crates/feature/vmux_dx/src/repository.rs"
             || path.starts_with("scripts/")
             || path.starts_with("website/")
             || matches!(

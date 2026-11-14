@@ -58,23 +58,23 @@ runs:
 
     - name: Install CEF framework
       shell: bash
-      run: ./scripts/install-cef.sh
+      run: vmux internal install-cef
 
     - name: Install dioxus-cli
       if: inputs.packaging == 'true'
       shell: bash
-      run: ./scripts/install-dioxus-cli.sh
+      run: vmux internal install-dioxus
 
     - name: Install binaryen
       if: inputs.packaging == 'true'
       shell: bash
-      run: ./scripts/install-dioxus-binaryen.sh
+      run: vmux internal install-binaryen
 
     - name: Install package tools
       if: inputs.packaging == 'true'
       shell: bash
-      run: ./scripts/install-package-tools.sh
+      run: vmux internal install-package-tools
 
     - name: Install tailwindcss
       shell: bash
-      run: TAILWINDCSS_INSTALL_DIR="$HOME/.local/bin" ./scripts/install-tailwindcss.sh
+      run: TAILWINDCSS_INSTALL_DIR="$HOME/.local/bin" vmux internal install-tailwindcss

@@ -6,10 +6,9 @@ on:
     paths:
       - "website/**"
       - "scripts/install.sh"
-      - "scripts/install-dioxus-cli.sh"
-      - "scripts/install-dioxus-binaryen.sh"
-      - "scripts/install-tailwindcss.sh"
       - "rust-toolchain.toml"
+      - "crates/feature/vmux_dx/**"
+      - "crates/app/vmux_cli/**"
       - "tool-versions.env"
       - ".github/actions/setup-rust/action.yml"
       - ".github/actions/setup-web/action.yml"

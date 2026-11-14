@@ -1,0 +1,452 @@
+use std::collections::HashSet;
+use std::ffi::OsString;
+use std::fs;
+use std::path::{Path, PathBuf};
+use std::process::Command;
+
+use crate::Result;
+use crate::environment::Environment;
+use crate::execution::Execution;
+use crate::temporary::Temporary;
+
+pub struct Consumer {
+    root: PathBuf,
+    target: PathBuf,
+    environment: Environment,
+}
+
+impl Consumer {
+    pub fn new(
+        root: PathBuf,
+        target: Option<PathBuf>,
+        mut environment: Environment,
+    ) -> Result<Self> {
+        let root = root.canonicalize()?;
+        let target = target.or_else(|| std::env::var_os("CARGO_TARGET_DIR").map(PathBuf::from));
+        let target = match target {
+            Some(target) if target.is_absolute() => target,
+            Some(target) => root.join(target),
+            None => root.join("target"),
+        };
+        environment.set("CARGO_TARGET_DIR", target.as_os_str());
+        Ok(Self {
+            root,
+            target,
+            environment,
+        })
+    }
+
+    pub fn run(&self, args: &[OsString]) -> Result<()> {
+        let host = args.iter().any(|arg| arg == "--host");
+        let git = args.iter().any(|arg| arg == "--git");
+        if args.len() != usize::from(host) + usize::from(git) {
+            return Err("usage: framework-consumer [--host] [--git]".into());
+        }
+        if host && !git {
+            return self.host(&self.root.join("examples/host-consumer"), None);
+        }
+        if !git {
+            self.core()?;
+            return self.workspace(
+                &self.root.join("examples/framework-consumer"),
+                "framework-consumer",
+                None,
+            );
+        }
+        let revision = self
+            .environment
+            .get("VMUX_SDK_REVISION")
+            .unwrap_or(std::ffi::OsStr::new("HEAD"))
+            .to_string_lossy();
+        let revision = self.git(&["rev-parse", "--verify", &format!("{revision}^{{commit}}")])?;
+        let repository = match self.environment.get("VMUX_SDK_REPOSITORY") {
+            Some(repository) => repository.to_string_lossy().into_owned(),
+            None => format!(
+                "file://{}",
+                self.git(&["rev-parse", "--path-format=absolute", "--git-common-dir"])?
+            ),
+        };
+        let temporary = Temporary::create(&std::env::temp_dir(), "vmux-git-consumer")?;
+        let source = self.root.join(if host {
+            "examples/host-consumer"
+        } else {
+            "examples/framework-consumer"
+        });
+        if !host {
+            Directory::copy(&source.join("src"), &temporary.path().join("src"))?;
+        }
+        Directory::copy(&source.join("tests"), &temporary.path().join("tests"))?;
+        fs::copy(
+            source.join("Cargo.lock"),
+            temporary.path().join("Cargo.lock"),
+        )?;
+        let manifest = GitManifest::pin(
+            &fs::read_to_string(source.join("Cargo.toml"))?,
+            &repository,
+            &revision,
+        )?;
+        fs::write(temporary.path().join("Cargo.toml"), manifest)?;
+        let mut command = self.cargo(&["metadata", "--format-version", "1"]);
+        command
+            .arg("--manifest-path")
+            .arg(temporary.path().join("Cargo.toml"));
+        Execution::new(command).output(None)?;
+        if host {
+            return self.host(temporary.path(), Some(&revision));
+        }
+        self.workspace(temporary.path(), "framework-git-consumer", Some(&revision))
+    }
+
+    fn host(&self, directory: &Path, revision: Option<&str>) -> Result<()> {
+        let manifest = directory.join("Cargo.toml");
+        let target = self.target.join(if revision.is_some() {
+            "host-git-consumer"
+        } else {
+            "host-consumer"
+        });
+        for (name, namespace) in [
+            ("Vmux", "ai.vmux"),
+            ("Atlas", "org.example.atlas"),
+            ("Atlas", "net.example.atlas"),
+        ] {
+            let mut command = self.cargo(&["test", "--locked"]);
+            command
+                .arg("--manifest-path")
+                .arg(&manifest)
+                .arg("--target-dir")
+                .arg(&target);
+            for key in self.environment.names() {
+                if key
+                    .to_str()
+                    .is_some_and(|key| key.starts_with("VMUX_HOST_"))
+                {
+                    command.env_remove(key);
+                }
+            }
+            command
+                .env_remove("VMUX_DATA_DIR")
+                .env_remove("VMUX_TEST")
+                .env("VMUX_BUILD_PROFILE", "dev")
+                .env("VMUX_PROFILE", "host-probe")
+                .env("VMUX_HOST_NAME", name)
+                .env("VMUX_HOST_NAMESPACE", namespace)
+                .env("EXPECTED_NAMESPACE", namespace);
+            Execution::new(command).run()?;
+        }
+        let mut command = self.cargo(&["tree", "--locked", "--prefix", "none", "--format", "{p}"]);
+        command.arg("--manifest-path").arg(&manifest);
+        let output = Execution::new(command).output(None)?;
+        Graph::host(&String::from_utf8(output.stdout)?)?;
+        if let Some(revision) = revision {
+            GitLock::check(&fs::read_to_string(directory.join("Cargo.lock"))?, revision)?;
+            println!("Host consumer uses one immutable Git SDK revision");
+        }
+        println!("Host consumer keeps product namespaces isolated without renderer dependencies");
+        Ok(())
+    }
+
+    fn core(&self) -> Result<()> {
+        for (package, features, lib) in [
+            ("vmux_ecs", "", true),
+            ("vmux_ecs", "contracts", true),
+            ("vmux_ecs", "store", true),
+            ("vmux_ecs", "jobs", true),
+            ("vmux_project", "contracts,filesystem", true),
+            ("vmux_extension", "filesystem", true),
+            ("vmux_flex", "", false),
+            ("vmux_flex", "window", true),
+            ("vmux_layout", "", true),
+            ("vmux_layout", "contracts,geometry", true),
+            ("vmux_layout", "store", true),
+        ] {
+            let mut command =
+                self.cargo(&["test", "--locked", "-p", package, "--no-default-features"]);
+            if !features.is_empty() {
+                command.args(["--features", features]);
+            }
+            if lib {
+                command.arg("--lib");
+            }
+            Execution::new(command).run()?;
+        }
+        Ok(())
+    }
+
+    fn workspace(&self, directory: &Path, target: &str, revision: Option<&str>) -> Result<()> {
+        let manifest = directory.join("Cargo.toml");
+        let mut command = self.cargo(&["test", "--locked"]);
+        command
+            .arg("--manifest-path")
+            .arg(&manifest)
+            .arg("--target-dir")
+            .arg(self.target.join(target));
+        Execution::new(command).run()?;
+        let mut command = self.cargo(&["tree", "--locked", "--prefix", "none", "--format", "{p}"]);
+        command.arg("--manifest-path").arg(&manifest);
+        let output = Execution::new(command).output(None)?;
+        Graph::check(&String::from_utf8(output.stdout)?)?;
+        if let Some(revision) = revision {
+            GitLock::check(&fs::read_to_string(directory.join("Cargo.lock"))?, revision)?;
+            println!("All SDK packages use the same immutable Git revision");
+        }
+        println!("Framework consumer uses the public core without Profile or UI dependencies");
+        Ok(())
+    }
+
+    fn cargo(&self, args: &[&str]) -> Command {
+        let mut command = self.environment.command(
+            self.environment
+                .get("CARGO_BIN")
+                .unwrap_or(std::ffi::OsStr::new("cargo")),
+            &self.root,
+        );
+        command.current_dir(&self.root).args(args);
+        command
+    }
+
+    fn git(&self, args: &[&str]) -> Result<String> {
+        let mut command = self.environment.command("git", &self.root);
+        command.current_dir(&self.root).args(args);
+        let output = Execution::new(command).output(None)?;
+        Ok(String::from_utf8(output.stdout)?.trim().to_owned())
+    }
+}
+
+struct Directory;
+
+impl Directory {
+    fn copy(source: &Path, destination: &Path) -> Result<()> {
+        fs::create_dir(destination)?;
+        for entry in fs::read_dir(source)? {
+            let entry = entry?;
+            let target = destination.join(entry.file_name());
+            if entry.file_type()?.is_dir() {
+                Self::copy(&entry.path(), &target)?;
+            } else {
+                fs::copy(entry.path(), target)?;
+            }
+        }
+        Ok(())
+    }
+}
+
+struct GitManifest;
+
+impl GitManifest {
+    fn pin(source: &str, repository: &str, revision: &str) -> Result<String> {
+        let repository = Self::quoted(repository);
+        let revision = Self::quoted(revision);
+        let mut result = String::new();
+        let mut pinned = 0;
+        for line in source.lines() {
+            let Some((name, value)) = line.split_once('=') else {
+                result.push_str(line);
+                result.push('\n');
+                continue;
+            };
+            if !name.trim().starts_with("vmux_") {
+                result.push_str(line);
+                result.push('\n');
+                continue;
+            }
+            let Some(path) = value.trim().strip_prefix("{ path = \"") else {
+                return Err(format!(
+                    "SDK dependency {} must be an inline path dependency",
+                    name.trim()
+                )
+                .into());
+            };
+            let Some((_, rest)) = path.split_once('"') else {
+                return Err("Invalid SDK path dependency".into());
+            };
+            result.push_str(&format!(
+                "{}= {{ git = {repository}, rev = {revision}{rest}\n",
+                name
+            ));
+            pinned += 1;
+        }
+        if pinned == 0 {
+            return Err("The consumer must declare SDK dependencies".into());
+        }
+        Ok(result)
+    }
+
+    fn quoted(value: &str) -> String {
+        let mut result = String::from("\"");
+        for character in value.chars() {
+            match character {
+                '"' => result.push_str("\\\""),
+                '\\' => result.push_str("\\\\"),
+                '\n' => result.push_str("\\n"),
+                '\r' => result.push_str("\\r"),
+                '\t' => result.push_str("\\t"),
+                other => result.push(other),
+            }
+        }
+        result.push('"');
+        result
+    }
+}
+
+struct Graph;
+
+impl Graph {
+    fn check(tree: &str) -> Result<()> {
+        Self::packages(
+            tree,
+            &[
+                "vmux_app",
+                "vmux_ecs",
+                "vmux_project",
+                "vmux_extension",
+                "vmux_flex",
+                "vmux_layout",
+            ],
+            &[
+                "bevy",
+                "bevy_cef",
+                "bevy_cef_core",
+                "bevy_winit",
+                "vmux_profile",
+                "vmux_editor",
+                "vmux_ui",
+                "vmux_pane",
+                "wry",
+            ],
+        )
+    }
+
+    fn host(tree: &str) -> Result<()> {
+        Self::packages(
+            tree,
+            &["vmux_app", "vmux_profile"],
+            &[
+                "bevy",
+                "bevy_cef",
+                "bevy_cef_core",
+                "bevy_winit",
+                "vmux_ecs",
+                "vmux_editor",
+                "vmux_ui",
+                "vmux_layout",
+                "vmux_service",
+                "vmux_browser",
+                "wry",
+            ],
+        )
+    }
+
+    fn packages(tree: &str, required: &[&str], forbidden: &[&str]) -> Result<()> {
+        let mut packages = HashSet::new();
+        for line in tree.lines() {
+            if let Some(package) = line.split_whitespace().next() {
+                packages.insert(package);
+            }
+        }
+        for required in required {
+            if !packages.contains(required) {
+                return Err(format!("The consumer must exercise SDK package {required}").into());
+            }
+        }
+        for forbidden in forbidden {
+            if packages.contains(forbidden) {
+                return Err(format!(
+                    "Framework consumer links native application dependency {forbidden}"
+                )
+                .into());
+            }
+        }
+        Ok(())
+    }
+}
+
+struct GitLock;
+
+impl GitLock {
+    fn check(lock: &str, revision: &str) -> Result<()> {
+        let mut name = None;
+        let mut source = None;
+        for line in lock.lines().chain(std::iter::once("[[package]]")) {
+            if line == "[[package]]" {
+                if let Some(name) = name.take() {
+                    Self::package(name, source.take(), revision)?;
+                }
+            } else if let Some(value) = line
+                .strip_prefix("name = \"")
+                .and_then(|value| value.strip_suffix('"'))
+            {
+                name = Some(value);
+            } else if let Some(value) = line
+                .strip_prefix("source = \"")
+                .and_then(|value| value.strip_suffix('"'))
+            {
+                source = Some(value);
+            }
+        }
+        Ok(())
+    }
+
+    fn package(name: &str, source: Option<&str>, revision: &str) -> Result<()> {
+        if name.starts_with("vmux_")
+            && !source.is_some_and(|source| {
+                source.starts_with("git+") && source.ends_with(&format!("#{revision}"))
+            })
+        {
+            return Err(
+                format!("SDK package {name} is not pinned to the tested Git revision").into(),
+            );
+        }
+        Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn pinning_preserves_features_and_refuses_unsupported_sdk_dependencies() {
+        let manifest = "vmux_app = { path = \"../app\", features = [\"ecs\", \"project\"] }\n";
+        assert_eq!(
+            GitManifest::pin(manifest, "file:///repo", "revision").unwrap(),
+            "vmux_app = { git = \"file:///repo\", rev = \"revision\", features = [\"ecs\", \"project\"] }\n"
+        );
+        assert!(GitManifest::pin("vmux_app = \"1\"\n", "file:///repo", "revision").is_err());
+    }
+
+    #[test]
+    fn graph_refuses_native_packages_even_with_the_complete_sdk_surface() {
+        let graph = "vmux_app v1\nvmux_ecs v1\nvmux_project v1\nvmux_extension v1\nvmux_flex v1\nvmux_layout v1\n";
+        assert!(Graph::check(graph).is_ok());
+        assert!(Graph::check(&format!("{graph}bevy_cef v1\n")).is_err());
+    }
+
+    #[test]
+    fn explicit_host_graph_keeps_renderer_and_product_runners_optional() {
+        let graph = "vmux_app v1\nvmux_profile v1\nbevy_app v1\nbevy_ecs v1\n";
+        assert!(Graph::host(graph).is_ok());
+        assert!(Graph::host("vmux_app v1\n").is_err());
+        for native in [
+            "bevy_cef",
+            "vmux_browser",
+            "vmux_layout",
+            "vmux_editor",
+            "vmux_service",
+            "vmux_ecs",
+        ] {
+            assert!(
+                Graph::host(&format!("{graph}{native} v1\n")).is_err(),
+                "{native}"
+            );
+        }
+        assert!(Graph::check(graph).is_err());
+    }
+
+    #[test]
+    fn git_lock_refuses_path_sources_and_mixed_sdk_revisions() {
+        let lock = "[[package]]\nname = \"vmux_app\"\nsource = \"git+file:///repo#revision\"\n";
+        assert!(GitLock::check(lock, "revision").is_ok());
+        assert!(GitLock::check(lock, "other").is_err());
+        assert!(GitLock::check("[[package]]\nname = \"vmux_app\"\n", "revision").is_err());
+    }
+}

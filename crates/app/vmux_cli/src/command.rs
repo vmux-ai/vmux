@@ -77,7 +77,7 @@ fn collect_catalog(
             command.name
         );
     }
-    let default = default.expect("one default CLI command must be registered");
+    let default = default.unwrap_or_else(|| "dx.help".into());
     for entity in &processes {
         commands.entity(entity).insert(CliCatalog {
             default: default.clone(),
@@ -104,11 +104,12 @@ fn parse_arguments(
                     error.kind(),
                     ErrorKind::DisplayHelp | ErrorKind::DisplayVersion
                 );
+                let code = error.exit_code() as u8;
                 let _ = error.print();
                 exits.write(if success {
                     AppExit::Success
                 } else {
-                    AppExit::error()
+                    AppExit::Error(NonZero::new(code).unwrap_or(NonZero::<u8>::MIN))
                 });
                 commands.entity(entity).despawn();
             }

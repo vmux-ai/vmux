@@ -22,11 +22,13 @@ jobs:
         with:
           persist-credentials: false
 
+      - uses: ./.github/actions/setup-rust
+
       - name: Build pinned CEF
         id: build
         env:
           CEF_BUILD_DIR: ${{ runner.temp }}/vmux-cef-build
-        run: ./scripts/build-cef.sh
+        run: vmux internal build-cef
 
       - name: Attest artifact provenance
         uses: actions/attest-build-provenance@v3
@@ -41,9 +43,9 @@ jobs:
           METADATA: ${{ steps.build.outputs.metadata }}
         run: |
           set -euo pipefail
-          tag="$(./scripts/cef-manifest.sh artifact_tag)"
-          cef_version="$(./scripts/cef-manifest.sh cef_version)"
-          patch_revision="$(./scripts/cef-manifest.sh patch_revision)"
+          tag="$(vmux internal cef-manifest -- artifact_tag)"
+          cef_version="$(vmux internal cef-manifest -- cef_version)"
+          patch_revision="$(vmux internal cef-manifest -- patch_revision)"
           if ! gh release view "$tag" >/dev/null 2>&1; then
             gh release create "$tag" \
               --target "$GITHUB_SHA" \

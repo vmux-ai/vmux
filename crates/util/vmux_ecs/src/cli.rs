@@ -52,6 +52,8 @@ pub struct CliCommandManifest {
     pub commands: Vec<CliCommandManifest>,
     #[serde(default)]
     pub subcommand_required: bool,
+    #[serde(default)]
+    pub hidden: bool,
 }
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Eq)]
@@ -73,6 +75,10 @@ pub struct CliArgumentManifest {
     pub flag: bool,
     #[serde(default)]
     pub index: Option<usize>,
+    #[serde(default)]
+    pub trailing: bool,
+    #[serde(default)]
+    pub global: bool,
 }
 
 #[derive(Clone, Component, Debug)]
