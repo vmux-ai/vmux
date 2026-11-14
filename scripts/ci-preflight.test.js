@@ -302,6 +302,8 @@ class Workflow {
   constructor() {
     const file = path.join(__dirname, '../.github/workflows/ci.yml');
     this.jobs = JSON.parse(execFileSync('ruby', ['-rjson', '-ryaml', '-e', 'puts JSON.generate(YAML.load_file(ARGV[0])["jobs"])', file], { encoding: 'utf8' }));
+    const filter = this.jobs.changes.steps.find((step) => step.id === 'filter');
+    this.filters = JSON.parse(execFileSync('ruby', ['-rjson', '-ryaml', '-e', 'puts JSON.generate(YAML.load(STDIN.read))'], { input: filter.with.filters, encoding: 'utf8' }));
   }
 
   gate(name, env) {
@@ -309,9 +311,29 @@ class Workflow {
   }
 
   selected(name, event, feature, macos, packaging, reuse = '') {
+    return this.lane(name, event, feature, { macos, macos_package: packaging }, reuse);
+  }
+
+  lane(name, event, feature, changes, reuse = '') {
     const github = { event_name: event };
-    const needs = { plan: { outputs: { feature, reuse } }, changes: { outputs: { macos, macos_package: packaging } } };
+    const outputs = {};
+    for (const [key, value] of Object.entries(changes)) outputs[key] = String(value);
+    const needs = { plan: { outputs: { feature, reuse } }, changes: { outputs } };
     return Function('github', 'needs', `return (${this.jobs[name].if});`)(github, needs);
+  }
+
+  ready(name, results) {
+    return this.jobs[name].needs.every((dependency) => results[dependency] === 'success');
+  }
+
+  paths(files) {
+    const outputs = {};
+    for (const [name, patterns] of Object.entries(this.filters)) {
+      const include = patterns.filter((pattern) => !pattern.startsWith('!'));
+      const exclude = patterns.filter((pattern) => pattern.startsWith('!'));
+      outputs[name] = String(files.some((file) => include.some((pattern) => path.matchesGlob(file, pattern)) && !exclude.some((pattern) => path.matchesGlob(file, pattern.slice(1)))));
+    }
+    return outputs;
   }
 
   name(name, event, feature) {
@@ -325,12 +347,13 @@ class Workflow {
     return Function('needs', 'steps', `return (${filter.with.ref.slice(3, -2)});`)({ plan: { outputs: { base } } }, { prepared: { outputs: { commit } } });
   }
 
-  changes(event, feature, base, native) {
+  changes(event, feature, base, native, filter = { macos: 'true', macos_package: 'true', macos_tooling: 'true', ios: 'true', code: 'true' }, lean = 'true') {
     const github = { event_name: event };
     const needs = { plan: { outputs: { feature, base } } };
     const steps = {
-      filter: { outputs: { macos: 'true', macos_package: 'true', ios: 'true', code: 'true' } },
+      filter: { outputs: filter },
       native: { outputs: { native } },
+      scope: { outputs: { lean } },
     };
     const classify = this.jobs.changes.steps.find((step) => step.id === 'native');
     if (!Function('github', 'needs', 'steps', `return (${classify.if});`)(github, needs, steps)) steps.native.outputs.native = '';
@@ -348,6 +371,7 @@ test('portable test changes skip native jobs while Rust checks and full validati
     const changes = workflow.changes(event, feature, base, 'false');
     assert.equal(changes.macos, false);
     assert.equal(changes.macos_package, false);
+    assert.equal(changes.macos_tooling, false);
     assert.equal(changes.ios, false);
     assert.equal(changes.code, true);
     assert.equal(workflow.selected('build-mac', event, feature, String(changes.macos), String(changes.macos_package)), false);
@@ -363,6 +387,58 @@ test('portable test changes skip native jobs while Rust checks and full validati
   const missing = workflow.changes('pull_request', 'false', 'base', '');
   assert.equal(missing.macos, true);
   assert.equal(missing.ios, true);
+});
+
+test('platform path routing keeps iOS tooling and CLI fixtures out of desktop packaging', () => {
+  const workflow = new Workflow();
+  for (const [file, macos, packaging, tooling, ios] of [
+    ['crates/app/vmux_mobile/src/main.rs', false, false, false, true],
+    ['crates/feature/vmux_dx/src/native/ios.rs', false, false, true, true],
+    ['crates/app/vmux_cli/tests/dx.rs', false, false, true, false],
+    ['crates/app/vmux_cli/tests/tool.rs', true, true, true, true],
+    ['crates/app/vmux_cli/tests/fixtures/mobile.rs', true, true, true, true],
+    ['crates/build_product.rs', true, true, true, true],
+    ['crates/app/vmux_desktop/src/main.rs', true, true, false, false],
+    ['crates/util/vmux_profile/src/product.rs', true, false, true, true],
+  ]) {
+    const changes = workflow.changes('pull_request', 'false', 'base', 'true', workflow.paths([file]), 'false');
+    assert.equal(changes.macos, macos, file);
+    assert.equal(changes.macos_package, packaging, file);
+    assert.equal(changes.macos_tooling, tooling, file);
+    assert.equal(changes.ios, ios, file);
+    assert.equal(workflow.lane('test-mac-tooling', 'pull_request', 'false', changes), tooling, file);
+    assert.equal(workflow.lane('build-mac', 'pull_request', 'false', changes), macos && packaging, file);
+  }
+  const mixed = workflow.changes('pull_request', 'false', 'base', 'true', workflow.paths([
+    'crates/app/vmux_cli/tests/dx.rs', 'crates/app/vmux_desktop/src/main.rs',
+  ]));
+  assert.equal(mixed.macos_package, true);
+  assert.equal(mixed.macos_tooling, true);
+  assert.equal(workflow.lane('build-mac', 'pull_request', 'false', mixed), true);
+});
+
+test('macOS tooling failures cannot hide behind an intentionally skipped desktop build', () => {
+  const workflow = new Workflow();
+  const valid = { PLAN: 'success', PREFLIGHT: '', CHANGES: 'success', MACOS: 'false', PACKAGE: 'false', CHECK: 'skipped', RESULT: 'skipped', TOOLING: 'true', TOOLING_TEST: 'success' };
+  assert.equal(workflow.gate('build-macos', valid).status, 0);
+  for (const result of ['failure', 'cancelled', 'skipped']) {
+    assert.equal(workflow.gate('build-macos', { ...valid, TOOLING_TEST: result }).status, 1, result);
+  }
+  assert.equal(workflow.gate('build-macos', { ...valid, TOOLING: 'false', TOOLING_TEST: 'skipped' }).status, 0);
+});
+
+test('lean desktop tests can start before full tests and remain a required Test gate', () => {
+  const workflow = new Workflow();
+  const prerequisites = { plan: 'success', changes: 'success', 'cef-version': 'success', 'test-rust': 'in_progress' };
+  assert.equal(workflow.ready('test-lean', prerequisites), true);
+  assert.equal(workflow.lane('test-lean', 'pull_request', 'false', { code: 'true', lean: 'true' }), true);
+  assert.equal(workflow.lane('test-lean', 'pull_request', 'false', { code: 'true', lean: 'false' }), false);
+  const valid = { PLAN: 'success', PREFLIGHT: '', CHANGES: 'success', CODE: 'true', RUST_TEST: 'success', POLICY: 'success', SDK_PATH: 'success', SDK_GIT: 'success', HEADLESS: 'success', LEAN: 'true', LEAN_TEST: 'success' };
+  assert.equal(workflow.gate('test', valid).status, 0);
+  for (const result of ['failure', 'cancelled', 'skipped']) {
+    assert.equal(workflow.gate('test', { ...valid, LEAN_TEST: result }).status, 1, result);
+  }
+  assert.equal(workflow.gate('test', { ...valid, LEAN: 'false', LEAN_TEST: 'skipped' }).status, 0);
 });
 
 test('change detection receives a local merge object ID accepted by paths-filter', (t) => {
