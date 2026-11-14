@@ -73,7 +73,7 @@ runs:
     - uses: Swatinem/rust-cache@v2
       with:
         shared-key: ${{ inputs.cache-key }}
-        save-if: ${{ github.ref == 'refs/heads/main' || github.event_name == 'pull_request' }}
+        save-if: ${{ github.event_name == 'push' || github.event_name == 'pull_request' }}
 
     - name: Use a shared Linux CEF SDK
       shell: bash
