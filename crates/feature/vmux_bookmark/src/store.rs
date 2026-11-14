@@ -581,7 +581,7 @@ mod tests {
             "vmux_header::system::PageMetadata": (
                 title: "Saved bookmark",
                 url: "vmux://containers/",
-                icon: Builtin(Container),
+                icon: Builtin(UnsupportedFutureIcon),
                 bg_color: None,
             ),
         }) })"#;
