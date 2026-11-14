@@ -322,9 +322,65 @@ assert launch['StandardOutPath']=='/tmp/org-example-atlas-service.log'
 }
 
 #[test]
+fn fast_packaging_refuses_release_local_and_unverified_branches_before_mutating_templates() {
+    for (profile, event, branch, preflight, release) in [
+        ("local", "pull_request", "host-config", "true", "0"),
+        ("release", "pull_request", "host-config", "true", "1"),
+        ("release", "push", "host-config", "false", "0"),
+        ("release", "push", "main", "true", "0"),
+        ("release", "push", "master", "true", "0"),
+        ("release", "push", "release/next", "true", "0"),
+        ("release", "workflow_dispatch", "host-config", "true", "0"),
+    ] {
+        let project = Project::create();
+        for file in [
+            "crates/app/vmux_desktop/Cargo.toml",
+            "packaging/macos/Info.plist",
+            "scripts/package.sh",
+        ] {
+            let target = project.root().join(file);
+            fs::create_dir_all(target.parent().unwrap()).unwrap();
+            fs::copy(project.repo().join(file), target).unwrap();
+        }
+        project.script(
+            "scripts/cargo-with-cef-cache.sh",
+            "#!/bin/sh\ntouch packager-called\nexit 99\n",
+        );
+        let cargo = project.root().join("crates/app/vmux_desktop/Cargo.toml");
+        let plist = project.root().join("packaging/macos/Info.plist");
+        let original_cargo = fs::read(&cargo).unwrap();
+        let original_plist = fs::read(&plist).unwrap();
+        let output = project
+            .command("bash")
+            .arg("scripts/package.sh")
+            .arg(profile)
+            .env("VMUX_HOST_NAME", "Atlas")
+            .env("VMUX_HOST_NAMESPACE", "org.example.atlas")
+            .env("VMUX_CI_FAST_PACKAGE", "1")
+            .env("GITHUB_EVENT_NAME", event)
+            .env("GITHUB_REF", format!("refs/heads/{branch}"))
+            .env("VMUX_CI_PREFLIGHT", preflight)
+            .env("IS_RELEASE_PR", release)
+            .output()
+            .unwrap();
+        assert_eq!(output.status.code(), Some(1));
+        assert!(!project.root().join("packager-called").exists());
+        assert_eq!(fs::read(&cargo).unwrap(), original_cargo);
+        assert_eq!(fs::read(&plist).unwrap(), original_plist);
+    }
+}
+
+#[test]
 fn packaging_projects_selected_assets_and_identity_and_restores_templates_on_failure() {
     for custom in [false, true] {
-        for fail in [false, true] {
+        for (event, fail) in [
+            ("local", false),
+            ("local", true),
+            ("pull_request", false),
+            ("pull_request", true),
+            ("push", false),
+            ("push", true),
+        ] {
             let project = Project::create();
             for file in [
                 "Cargo.toml",
@@ -358,15 +414,18 @@ if '--display' in sys.argv:
                 r#"#!/bin/bash
 set -euo pipefail
 CARGO_PACKAGER_FORMAT=app bash scripts/before-each-package.sh
-python3 - <<'PY'
-import json,os,pathlib,plistlib,tomllib,shutil
+python3 - "$@" <<'PY'
+import json,os,pathlib,plistlib,tomllib,shutil,sys
 root=pathlib.Path.cwd()
 with (root/'crates/app/vmux_desktop/Cargo.toml').open('rb') as source:
     metadata=tomllib.load(source)['package']['metadata']['packager']
 name=os.environ['EXPECTED_NAME']
 namespace=os.environ['EXPECTED_NAMESPACE']
-assert metadata['product-name']==name+' (9999999)'
-assert metadata['identifier']==namespace+'.desktop.9999999'
+suffix=os.environ['EXPECTED_SUFFIX']
+assert metadata['product-name']==name+suffix
+assert metadata['identifier']==namespace+'.desktop'+('.9999999' if suffix else '')
+if not suffix:
+    assert sys.argv[1:]==['packager','--release','--formats','app'],sys.argv
 assert pathlib.Path(metadata['icons'][0]).is_file()
 assert pathlib.Path(metadata['macos']['entitlements']).is_file()
 assert pathlib.Path(metadata['macos']['info-plist-path']).is_file()
@@ -398,15 +457,32 @@ PY
             let plist = project.root().join("packaging/macos/Info.plist");
             let original_cargo = fs::read(&cargo).unwrap();
             let original_plist = fs::read(&plist).unwrap();
-            let output = project
-                .command(env!("CARGO_BIN_EXE_vmux_builder"))
-                .arg("--root")
-                .arg(project.root())
-                .arg("prepare-local")
+            let suffix = if event == "local" { " (9999999)" } else { "" };
+            let mut command = if event == "local" {
+                let mut command = project.command(env!("CARGO_BIN_EXE_vmux_builder"));
+                command
+                    .arg("--root")
+                    .arg(project.root())
+                    .arg("prepare-local");
+                command
+            } else {
+                let mut command = project.command("bash");
+                command
+                    .arg("scripts/package.sh")
+                    .arg("release")
+                    .env("VMUX_CI_FAST_PACKAGE", "1")
+                    .env("GITHUB_EVENT_NAME", event)
+                    .env("GITHUB_REF", "refs/heads/host-config")
+                    .env("VMUX_CI_PREFLIGHT", "true")
+                    .env("IS_RELEASE_PR", "0");
+                command
+            };
+            let output = command
                 .env("VMUX_HOST_NAME", name)
                 .env("VMUX_HOST_NAMESPACE", namespace)
                 .env("EXPECTED_NAME", name)
                 .env("EXPECTED_NAMESPACE", namespace)
+                .env("EXPECTED_SUFFIX", suffix)
                 .env("FAIL_PACKAGE", if fail { "1" } else { "0" })
                 .env("SKIP_NOTARIZE", "1")
                 .env("TEST_SIGN_LOG", project.root().join("sign.jsonl"))
@@ -420,9 +496,7 @@ PY
             );
             assert_eq!(fs::read(&cargo).unwrap(), original_cargo);
             assert_eq!(fs::read(&plist).unwrap(), original_plist);
-            let bundle = project
-                .target()
-                .join(format!("release/{name} (9999999).app"));
+            let bundle = project.target().join(format!("release/{name}{suffix}.app"));
             if fail {
                 assert!(!bundle.exists());
                 continue;
@@ -433,19 +507,20 @@ PY
             );
             let output = project.command("python3").arg("-c").arg(r#"
 import pathlib,plistlib,sys
-bundle=pathlib.Path(sys.argv[1]); name=sys.argv[2]; namespace=sys.argv[3]
+bundle=pathlib.Path(sys.argv[1]); name=sys.argv[2]; namespace=sys.argv[3]; suffix=sys.argv[5]
+identity_suffix='.9999999' if suffix else ''
 info=plistlib.load((bundle/'Contents/Info.plist').open('rb'))
-assert info['CFBundleDisplayName']==name+' (9999999)'
-assert info['CFBundleIdentifier']==namespace+'.desktop.9999999'
+assert info['CFBundleDisplayName']==name+suffix
+assert info['CFBundleIdentifier']==namespace+'.desktop'+identity_suffix
 agent=plistlib.load((bundle/'Contents/Library/LaunchAgents'/(namespace+'.service.plist')).open('rb'))
-assert agent['Label']==namespace+'.service.9999999'
+assert agent['Label']==namespace+'.service'+identity_suffix
 assert (bundle/agent['BundleProgram']).read_text()=='fixture binary'
 assert agent['AssociatedBundleIdentifiers']==[info['CFBundleIdentifier']]
 signs=[__import__('json').loads(line) for line in pathlib.Path(sys.argv[4]).read_text().splitlines()]
 assert any('--identifier' in args and namespace+'.cli' in args and str(bundle/'Contents/MacOS/vmux') in args for args in signs)
 assert any(str(bundle/'Contents/Frameworks/lib-fixture.dylib') in args for args in signs)
 assert any(str(bundle/'Contents/Library/LoginItems'/(name+' Service.app')) in args for args in signs)
-"#).arg(bundle).arg(name).arg(namespace).arg(project.root().join("sign.jsonl")).output().unwrap();
+"#).arg(bundle).arg(name).arg(namespace).arg(project.root().join("sign.jsonl")).arg(suffix).output().unwrap();
             assert!(
                 output.status.success(),
                 "{}",
