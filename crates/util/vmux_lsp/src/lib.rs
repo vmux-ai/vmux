@@ -1019,6 +1019,159 @@ mod tests {
     }
 
     #[test]
+    fn closing_a_pending_replacement_preserves_the_existing_binding_and_other_pending_paths() {
+        for cancel_replacement in [true, false] {
+            let mut harness = Harness::new();
+            let owner = harness.owners[0];
+            let original = harness
+                .app
+                .world()
+                .get::<DocumentBinding>(owner)
+                .unwrap()
+                .document();
+            let waiting = harness
+                .app
+                .world_mut()
+                .spawn((
+                    Server,
+                    ServerKey::new("/one", "waiting"),
+                    ChildOf(harness.roots[0]),
+                ))
+                .id();
+            harness
+                .app
+                .world_mut()
+                .entity_mut(owner)
+                .insert(OpenDocument {
+                    server: waiting,
+                    path: "/replacement.rs".into(),
+                    language: "rust".into(),
+                    text: "replacement".into(),
+                    revision: None,
+                });
+            harness.app.update();
+            harness.app.world_mut().write_message(CloseDocument {
+                owner,
+                path: if cancel_replacement {
+                    "/replacement.rs"
+                } else {
+                    "/unrelated.rs"
+                }
+                .into(),
+            });
+            harness.app.update();
+            let probe = Probe::default();
+            harness
+                .app
+                .world_mut()
+                .entity_mut(waiting)
+                .insert(Transport::new(probe.clone()));
+            harness.app.update();
+            let binding = harness.app.world().get::<DocumentBinding>(owner).unwrap();
+            if cancel_replacement {
+                assert_eq!(binding.document(), original);
+                assert!(probe.calls.lock().unwrap().is_empty());
+            } else {
+                assert_eq!(
+                    harness
+                        .app
+                        .world()
+                        .get::<DocumentPath>(binding.document())
+                        .unwrap()
+                        .0,
+                    PathBuf::from("/replacement.rs")
+                );
+                let calls = probe.calls.lock().unwrap();
+                assert_eq!(calls.len(), 1);
+                assert_eq!(calls[0].0, "textDocument/didOpen");
+                assert_eq!(calls[0].1["textDocument"]["uri"], "file:///replacement.rs");
+            }
+        }
+    }
+
+    #[test]
+    fn retained_alias_diagnostics_expire_when_a_competing_document_opens() {
+        for exact in [false, true] {
+            let mut harness = Harness::new();
+            let owner = harness.owners[0];
+            let document = harness
+                .app
+                .world()
+                .get::<DocumentBinding>(owner)
+                .unwrap()
+                .document();
+            harness
+                .app
+                .world_mut()
+                .entity_mut(document)
+                .insert(DiagnosticPath("/physical/shared.rs".into()));
+            let sender = harness.diagnostics(0);
+            sender.send(ReceivedDiagnostics {
+                path: "/physical/shared.rs".into(),
+                diagnostics: vec![lsp_types::Diagnostic {
+                    message: "accepted".into(),
+                    ..Default::default()
+                }],
+                version: Some(1),
+                server: None,
+                transport: None,
+            });
+            harness.app.update();
+            assert_eq!(
+                harness
+                    .app
+                    .world()
+                    .get::<Diagnostics>(document)
+                    .unwrap()
+                    .items()[0]
+                    .message,
+                "accepted"
+            );
+            let competitor = harness
+                .app
+                .world_mut()
+                .spawn(OpenDocument {
+                    server: harness.servers[0],
+                    path: if exact {
+                        "/physical/shared.rs"
+                    } else {
+                        "/competitor.rs"
+                    }
+                    .into(),
+                    language: "rust".into(),
+                    text: "competitor".into(),
+                    revision: None,
+                })
+                .id();
+            harness.app.update();
+            if !exact {
+                let competing_document = harness
+                    .app
+                    .world()
+                    .get::<DocumentBinding>(competitor)
+                    .unwrap()
+                    .document();
+                harness
+                    .app
+                    .world_mut()
+                    .entity_mut(competing_document)
+                    .insert(DiagnosticPath("/physical/shared.rs".into()));
+            }
+            let mut state = bevy_ecs::system::SystemState::<Lookup>::new(harness.app.world_mut());
+            assert!(
+                state
+                    .get_mut(harness.app.world_mut())
+                    .unwrap()
+                    .diagnostics(owner)
+                    .is_none()
+            );
+            harness.app.update();
+            assert!(harness.app.world().get::<Diagnostics>(document).is_none());
+            assert!(harness.app.world().get::<Ticket>(document).is_none());
+        }
+    }
+
+    #[test]
     fn diagnostic_paths_prefer_exact_documents_and_retire_changed_or_ambiguous_aliases() {
         let mut harness = Harness::new();
         let sender = harness.diagnostics(0);

@@ -1672,7 +1672,8 @@ protocol version. Views bind to those documents, so closing one view preserves o
 of the document. Binding insertion renews an owner generation carried by request Stamps;
 close/reopen onto a shared document cannot restore that owner's old requests. Typed open/change/close
 intents run in the Documents phase, with owner revision receipts returned after wire notification.
-Closing an unbound document cancels an open intent waiting for its server connection.
+Closing a pending path cancels its open intent when the owner is unbound or bound to another
+document. Closing the bound document preserves a same-frame reopen intent; unrelated paths are unchanged.
 The core retains only a closed document's path/version until the connection ends, preventing protocol
 version reuse on reopen. Active wire text is canonical document state and is discarded on close. Removing a root or restarting a server invalidates only its descendants
 and bindings. Requests use shared Operations and retain their document identity, server
@@ -1698,7 +1699,8 @@ canonical document. Lookup validates the Ticket before exposing the list. Replac
 diagnostics before code-action requests or rendering consume them. Unversioned notifications
 cannot prove which edit produced them. Native receipt reconciliation materializes an alternate
 DiagnosticPath from filesystem identity when a view uses an alias. Core ingress prefers an exact
-opened URI, then a unique alternate path, and retained publications reject changed alternate facts.
+opened URI, then a unique alternate path. Retained publications recheck that resolution, rejecting
+changed aliases, new competing aliases and new exact-path owners.
 Close removes the alternate path with active text; the core performs no filesystem lookup. Each dirty Editor view owns its 150 ms synchronization
 interval in a required Component; flushing or removing that view releases the interval.
 Process handles, framing, reader/writer threads, and wire correlation stay in the transport

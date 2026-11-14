@@ -136,16 +136,20 @@ impl Ticket {
         let Ok((_, _, document, parent, connection)) = lookup.documents.get(self.document) else {
             return false;
         };
-        document.version == self.version
-            && parent.parent() == self.server
-            && connection.0 == Some(self.transport)
-            && lookup.transport_current(self.server, self.transport)
-            && self.alternate.as_ref().is_none_or(|path| {
-                lookup
-                    .diagnostic_paths
-                    .get(self.document)
-                    .is_ok_and(|alternate| alternate.0 == *path)
-            })
+        if document.version != self.version
+            || parent.parent() != self.server
+            || connection.0 != Some(self.transport)
+            || !lookup.transport_current(self.server, self.transport)
+        {
+            return false;
+        }
+        let Some(path) = &self.alternate else {
+            return true;
+        };
+        let Some(current) = Self::capture(lookup, self.server, path, self.transport) else {
+            return false;
+        };
+        current.document == self.document
     }
 }
 

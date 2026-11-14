@@ -89,6 +89,14 @@ fn close(
             continue;
         };
         if path.0 != request.path {
+            if openings
+                .get(request.owner)
+                .is_ok_and(|opening| opening.path == request.path)
+            {
+                commands
+                    .entity(request.owner)
+                    .remove::<(OpenDocument, DocumentFailure)>();
+            }
             continue;
         }
         commands
