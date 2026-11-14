@@ -2,11 +2,14 @@ use std::collections::HashSet;
 
 use bevy::ecs::system::SystemParam;
 use bevy::prelude::*;
+use bevy_cef::prelude::HostWindow;
 use vmux_api::bookmark::{
     BookmarkFolderChoice, BookmarkFolderRow, BookmarkNode, BookmarkRow, BookmarkStateEvent,
 };
 use vmux_api::space::ProjectRowKind;
 use vmux_ecs::event::team::{TeamMemberRow, TeamUiState};
+use vmux_ecs::manifest::FeatureManifest;
+use vmux_ecs::page::{AddressContribution, PageManifest};
 use vmux_ecs::{Description, EntityTarget, PageMetadata};
 use vmux_session::{RunState, Session, Stage, StageDefinition, StageId};
 
@@ -113,6 +116,13 @@ struct TabListProjection(TabListState);
 
 #[derive(Component, Clone, Debug, Default, PartialEq)]
 struct HeaderProjection(HeaderState);
+
+#[derive(Component)]
+struct HeaderSource(Option<Entity>);
+
+#[cfg(test)]
+#[derive(Resource, Default)]
+struct HeaderBuilds(u32);
 
 #[derive(Component, Clone, Debug, Default, PartialEq)]
 struct TabStripProjection(TabStripState);
@@ -379,7 +389,10 @@ impl ActiveWorkspaceProject {
                 continue;
             }
             let existing = choices.iter_mut().find(|held| {
-                held.display_path == project.display_path && held.label == project.label
+                if !held.identity.is_empty() && !project.identity.is_empty() {
+                    return held.identity == project.identity;
+                }
+                held.display_path == project.display_path
             });
             if let Some(existing) = existing {
                 if project.is_active && !existing.is_active {
@@ -946,23 +959,76 @@ fn capture_tab_list(trigger: On<vmux_ecs::UiStateWrite<LayoutUiState>>, mut comm
         .insert(TabListProjection(tabs.clone()));
 }
 
+#[derive(SystemParam)]
+struct HeaderChanges<'w, 's> {
+    sources: Query<
+        'w,
+        's,
+        (),
+        Or<(
+            Changed<AddressContribution>,
+            Changed<PageMetadata>,
+            Changed<PageManifest>,
+            Changed<FeatureManifest>,
+            Changed<ChildOf>,
+            Changed<HostWindow>,
+        )>,
+    >,
+    addresses: RemovedComponents<'w, 's, AddressContribution>,
+    metadata: RemovedComponents<'w, 's, PageMetadata>,
+    routes: RemovedComponents<'w, 's, PageManifest>,
+    manifests: RemovedComponents<'w, 's, FeatureManifest>,
+    parents: RemovedComponents<'w, 's, ChildOf>,
+    windows: RemovedComponents<'w, 's, HostWindow>,
+    stacks: RemovedComponents<'w, 's, StackProjection>,
+    bookmarks: RemovedComponents<'w, 's, BookmarkProjection>,
+    team: RemovedComponents<'w, 's, TeamProjection>,
+}
+
+impl HeaderChanges<'_, '_> {
+    fn take(&mut self) -> bool {
+        let addresses = self.addresses.read().count() > 0;
+        let metadata = self.metadata.read().count() > 0;
+        let routes = self.routes.read().count() > 0;
+        let manifests = self.manifests.read().count() > 0;
+        let parents = self.parents.read().count() > 0;
+        let windows = self.windows.read().count() > 0;
+        let stacks = self.stacks.read().count() > 0;
+        let bookmarks = self.bookmarks.read().count() > 0;
+        let team = self.team.read().count() > 0;
+        !self.sources.is_empty()
+            || addresses
+            || metadata
+            || routes
+            || manifests
+            || parents
+            || windows
+            || stacks
+            || bookmarks
+            || team
+    }
+}
+
 fn project_header(
     layouts: Query<
         (
             Entity,
-            Option<&StackProjection>,
-            Option<&BookmarkProjection>,
-            Option<&TeamProjection>,
+            Option<Ref<StackProjection>>,
+            Option<Ref<BookmarkProjection>>,
+            Option<Ref<TeamProjection>>,
             Option<&HeaderProjection>,
+            Option<&HeaderSource>,
         ),
         With<LayoutCef>,
     >,
-    addresses: Query<(Entity, &vmux_ecs::page::AddressContribution, &PageMetadata)>,
-    routes: Query<&vmux_ecs::page::PageManifest>,
-    manifests: Query<&vmux_ecs::manifest::FeatureManifest>,
+    addresses: Query<(Entity, &AddressContribution, &PageMetadata)>,
+    routes: Query<&PageManifest>,
+    manifests: Query<&FeatureManifest>,
+    mut changes: HeaderChanges,
     focus: crate::stack::FocusedStack,
     surfaces: StackSurface,
     scope: crate::window::WindowScope,
+    #[cfg(test)] mut builds: Option<ResMut<HeaderBuilds>>,
     mut commands: Commands,
 ) {
     let empty_stacks = StackNavigationState::default();
@@ -971,14 +1037,33 @@ fn project_header(
     let active = focus
         .stack
         .and_then(|stack| surfaces.incoming(stack).or_else(|| surfaces.current(stack)));
-    for (entity, stacks, bookmarks, team, current) in &layouts {
+    let changed = changes.take() || focus.is_changed();
+    for (entity, stacks, bookmarks, team, current, source) in &layouts {
+        if current.is_some()
+            && source.is_some_and(|source| source.0 == active)
+            && !changed
+            && !stacks.as_ref().is_some_and(Ref::is_changed)
+            && !bookmarks.as_ref().is_some_and(Ref::is_changed)
+            && !team.as_ref().is_some_and(Ref::is_changed)
+        {
+            continue;
+        }
+        #[cfg(test)]
+        if let Some(builds) = builds.as_deref_mut() {
+            builds.0 += 1;
+        }
         let stacks = stacks
+            .as_ref()
             .map(|projection| &projection.0)
             .unwrap_or(&empty_stacks);
         let bookmarks = bookmarks
+            .as_ref()
             .map(|projection| &projection.0)
             .unwrap_or(&empty_bookmarks);
-        let team = team.map(|projection| &projection.0).unwrap_or(&empty_team);
+        let team = team
+            .as_ref()
+            .map(|projection| &projection.0)
+            .unwrap_or(&empty_team);
         let mut next = HeaderProjection(HeaderState::from_projections(stacks, bookmarks, team));
         for (owner, address, metadata) in &addresses {
             if !scope.contains(entity, owner) {
@@ -1013,13 +1098,16 @@ fn project_header(
         if current != Some(&next) {
             commands.entity(entity).insert(next);
         }
+        if source.is_none_or(|source| source.0 != active) {
+            commands.entity(entity).insert(HeaderSource(active));
+        }
     }
 }
 
 fn address_request(
     event: On<bevy_cef::prelude::UiInput<vmux_api::address::PageAddressRequest>>,
     layouts: Query<&HeaderProjection, With<LayoutCef>>,
-    addresses: Query<(&vmux_ecs::page::AddressContribution, &PageMetadata)>,
+    addresses: Query<(&AddressContribution, &PageMetadata)>,
     focus: crate::stack::FocusedStack,
     surfaces: StackSurface,
     scope: crate::window::WindowScope,
@@ -1194,6 +1282,153 @@ fn publish_bookmark_ui(
 mod tests {
     use super::*;
     use bevy::ecs::system::RunSystemOnce;
+
+    struct HeaderPages {
+        app: App,
+        layout: Entity,
+        stack: Entity,
+        first: Entity,
+        second: Entity,
+    }
+
+    impl HeaderPages {
+        fn new() -> Self {
+            let mut app = App::new();
+            app.add_plugins(LayoutUiProjectionPlugin)
+                .init_resource::<HeaderBuilds>();
+            let layout = app.world_mut().spawn(LayoutCef).id();
+            let stack = app.world_mut().spawn_empty().id();
+            let mut pages = Self {
+                app,
+                layout,
+                stack,
+                first: Entity::PLACEHOLDER,
+                second: Entity::PLACEHOLDER,
+            };
+            pages.first = pages.add("First");
+            pages.second = pages.add("Second");
+            pages.app.world_mut().spawn(
+                crate::active_pane::ActiveStack {
+                    stack: Some(stack),
+                    ..Default::default()
+                }
+                .local_bundle(),
+            );
+            pages.show(pages.first);
+            pages.app.update();
+            pages
+        }
+
+        fn add(&mut self, label: &str) -> Entity {
+            let metadata = PageMetadata {
+                url: "vmux://sessions/example".into(),
+                ..Default::default()
+            };
+            let page = self
+                .app
+                .world_mut()
+                .spawn((Browser, metadata.clone(), ChildOf(self.stack)))
+                .id();
+            self.app
+                .world_mut()
+                .entity_mut(page)
+                .insert(AddressContribution(vmux_api::address::PageAddress {
+                    owner: page.to_bits(),
+                    url: metadata.url,
+                    current: vmux_api::address::AddressOption {
+                        label: label.into(),
+                        ..Default::default()
+                    },
+                    ..Default::default()
+                }));
+            page
+        }
+
+        fn show(&mut self, page: Entity) {
+            let metadata = self.app.world().get::<PageMetadata>(page).unwrap().clone();
+            self.app
+                .world_mut()
+                .entity_mut(self.stack)
+                .insert(crate::page_slot::Current::new(Some(page), metadata));
+        }
+
+        fn address(&self) -> Option<&vmux_api::address::PageAddress> {
+            self.app
+                .world()
+                .get::<HeaderProjection>(self.layout)
+                .unwrap()
+                .0
+                .address
+                .as_ref()
+        }
+
+        fn builds(&self) -> u32 {
+            self.app.world().resource::<HeaderBuilds>().0
+        }
+    }
+
+    #[test]
+    fn scrolling_does_not_rebuild_stable_header_choices_but_page_changes_do() {
+        let mut pages = HeaderPages::new();
+        assert_eq!(pages.address().unwrap().current.label, "First");
+        let builds = pages.builds();
+        pages.app.world_mut().spawn((
+            Session,
+            vmux_session::SessionId("viewed".into()),
+            Name::new("Viewed"),
+            vmux_session::event::ChatViewport {
+                top: 500,
+                ..Default::default()
+            },
+        ));
+        pages.app.update();
+        pages.app.update();
+        assert_eq!(pages.builds(), builds);
+        pages.show(pages.second);
+        pages.app.update();
+        assert_eq!(pages.address().unwrap().current.label, "Second");
+        assert_eq!(pages.builds(), builds + 1);
+        pages
+            .app
+            .world_mut()
+            .get_mut::<AddressContribution>(pages.second)
+            .unwrap()
+            .0
+            .current
+            .label = "Renamed".into();
+        pages.app.update();
+        assert_eq!(pages.address().unwrap().current.label, "Renamed");
+        pages
+            .app
+            .world_mut()
+            .entity_mut(pages.second)
+            .remove::<AddressContribution>();
+        pages.app.update();
+        assert!(pages.address().is_none());
+    }
+
+    #[test]
+    fn header_catalog_changes_and_removals_invalidate_the_cached_choices() {
+        let mut pages = HeaderPages::new();
+        let catalog = pages
+            .app
+            .world_mut()
+            .spawn(FeatureManifest::parse(
+                r#"(pages: [
+            (url: "vmux://tools/", title: "Tools", icon: "Toolbox", bookmark: Some(1)),
+        ])"#,
+            ))
+            .id();
+        pages.app.update();
+        assert_eq!(pages.address().unwrap().views[0].label, "Tools");
+        pages
+            .app
+            .world_mut()
+            .entity_mut(catalog)
+            .remove::<FeatureManifest>();
+        pages.app.update();
+        assert!(pages.address().unwrap().views.is_empty());
+    }
 
     #[derive(Resource, Default)]
     struct SessionProjectionChanges(u32);

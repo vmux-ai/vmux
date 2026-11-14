@@ -671,6 +671,9 @@ agent-tool-explored = Esplorato
 agent-tool-explore-read = Letto { $path }
 agent-tool-explore-search = Cerca { $query } in { $path }
 agent-tool-explore-list = Elenca { $path }
+agent-tool-open-in-pane-right = Apri nel pannello a destra
+agent-tool-open-in-stack = Apri in un nuovo stack
+agent-tool-open-in-tab = Apri in una nuova scheda
 agent-thinking = Ragionamento
 agent-subagent = Sottoagente
 agent-prompt = Prompt
@@ -1125,3 +1128,24 @@ project-new-repository = Repository vuoto
 project-local-folder = Cartella locale
 project-github-repository = Repository GitHub
 project-edit-conflict = Il progetto è cambiato. Riapri il modulo per riprovare.
+
+agent-video-play = Riproduci video
+
+command-toggle-url-bar = Layout > Layout > Mostra o nascondi barra degli indirizzi
+
+project-rename = Rinomina progetto
+project-all = Tutti i progetti
+project-remove = Rimuovi progetto
+project-remove-description = Rimuovi dall’elenco dei progetti. I file locali vengono conservati.
+
+agent-tool-slept = Ha atteso
+
+project-directory-unavailable = La directory del progetto non è disponibile
+
+session-turn-view-prompt = Mostra richiesta
+session-turn-view-response = Mostra risposta
+agent-incoming-message = Messaggio dell’agente
+
+schema-focus-follows-mouse = Il focus segue il mouse
+
+terminal-directory-input-pending = Termina o annulla il comando o l’immissione corrente prima di cambiare directory.

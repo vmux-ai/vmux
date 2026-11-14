@@ -37,7 +37,10 @@ pub fn CommandBarPanel() -> Element {
                 onmousedown: move |event| event.stop_propagation(),
                 div {
                     id: "command-bar-shell",
-                    class: "relative flex w-full flex-col overflow-hidden rounded-2xl border border-foreground/15 bg-popover shadow-[0_24px_80px_-16px_rgb(0_0_0_/_55%),0_8px_24px_rgb(0_0_0_/_25%)]",
+                    "data-vmux-popup-kind": "command",
+                    "data-vmux-popup-activation": format!("{:?}", state().snapshot.open_id),
+                    style: vmux_ui::components::popup::Surface::style(),
+                    class: "relative flex w-full flex-col overflow-hidden rounded-2xl border border-foreground/15 bg-popover shadow-[0_24px_80px_-16px_rgb(0_0_0_/_55%),0_8px_24px_rgb(0_0_0_/_25%)] animate-[vmux-popup-in_var(--vmux-motion-ms)_ease-out_forwards] motion-reduce:animate-none",
                     div {
                         class: "flex min-h-0 flex-1 flex-col",
                         CommandPalette {

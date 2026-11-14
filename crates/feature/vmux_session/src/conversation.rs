@@ -12,9 +12,11 @@ use vmux_api::session::{
     MemberKind, MemberRole, Message,
 };
 use vmux_ecs::store::StoreAppExt;
-use vmux_ecs::{CreatedAt, EntityTarget, IdentityIndex, IdentityIndexPlugin, IdentityIndexSet};
+use vmux_ecs::{
+    CreatedAt, EntityTarget, IdentityIndex, IdentityIndexPlugin, IdentityIndexSet, Order,
+};
 
-use crate::history::{Applied, Committed, FileFacts, Read, Received, Versions};
+use crate::history::{Applied, Committed, FileFacts, Page, Read, Received, Versions};
 use crate::{
     AgentId, ProviderKind, ProviderSessionId, ProviderSessionKey, RunState, Session, SessionId,
 };
@@ -56,6 +58,7 @@ impl Plugin for ConversationPlugin {
         .register_stored::<Retired>()
         .register_stored::<ProviderKind>()
         .register_stored::<ProviderSessionId>()
+        .register_stored::<Order>()
         .add_systems(
             Update,
             (ensure, sync_agent)
@@ -239,6 +242,7 @@ pub(super) struct FileHistory {
 impl FileHistory {
     pub(super) fn facts(&self) -> FileFacts {
         FileFacts {
+            before: None,
             identity: self.identity.clone(),
             prefix: self.prefix.clone(),
             length: self.length,
@@ -393,12 +397,22 @@ enum Ingress {
         entries: Vec<(Option<String>, Message)>,
         updated_at: i64,
         file: Option<FileFacts>,
+        page: Option<Page>,
     },
 }
 
 #[derive(SystemParam)]
 struct AcceptedReads<'w, 's> {
-    reads: Query<'w, 's, (&'static ChildOf, &'static Read, Has<Applied>)>,
+    reads: Query<
+        'w,
+        's,
+        (
+            &'static ChildOf,
+            &'static Read,
+            Has<Applied>,
+            Option<&'static Page>,
+        ),
+    >,
     sessions: Query<
         'w,
         's,
@@ -415,8 +429,8 @@ struct AcceptedReads<'w, 's> {
 }
 
 impl AcceptedReads<'_, '_> {
-    fn read(&self, operation: Entity) -> Option<(Entity, Read)> {
-        let (parent, read, applied) = self.reads.get(operation).ok()?;
+    fn read(&self, operation: Entity) -> Option<(Entity, Read, Option<Page>)> {
+        let (parent, read, applied, page) = self.reads.get(operation).ok()?;
         if applied {
             return None;
         }
@@ -433,7 +447,7 @@ impl AcceptedReads<'_, '_> {
         if read.failed && !matches!(state, Some(RunState::Errored(_))) {
             return None;
         }
-        Some((entity, read.clone()))
+        Some((entity, read.clone(), page.copied()))
     }
 }
 
@@ -441,20 +455,24 @@ impl AcceptedReads<'_, '_> {
 pub struct Transcript {
     pub messages: Vec<Message>,
     pub created_at: Vec<u64>,
+    pub event_ids: Vec<EventId>,
 }
 
 impl Transcript {
-    fn from_items(mut items: Vec<(u64, Message, u64)>) -> Self {
-        items.sort_by_key(|(sequence, _, _)| *sequence);
+    fn from_items(mut items: Vec<((bool, u64), Message, u64, EventId)>) -> Self {
+        items.sort_by_key(|(sequence, _, _, _)| *sequence);
         let mut messages = Vec::with_capacity(items.len());
         let mut created_at = Vec::with_capacity(items.len());
-        for (_, message, timestamp) in items {
+        let mut event_ids = Vec::with_capacity(items.len());
+        for (_, message, timestamp, event_id) in items {
             messages.push(message);
             created_at.push(timestamp);
+            event_ids.push(event_id);
         }
         Self {
             messages,
             created_at,
+            event_ids,
         }
     }
 }
@@ -462,7 +480,7 @@ impl Transcript {
 #[derive(Component, Default)]
 pub(super) struct TranscriptCache {
     transcript: Transcript,
-    order: Vec<(Entity, u64)>,
+    order: Vec<(Entity, (bool, u64))>,
     indices: bevy_ecs::entity::EntityHashMap<usize>,
 }
 
@@ -476,6 +494,7 @@ pub struct Transcripts<'w, 's> {
             &'static EventIdentity,
             &'static MessageContent,
             &'static CreatedAt,
+            Option<&'static Order>,
         ),
         (With<ConversationEvent>, Without<Retired>),
     >,
@@ -503,11 +522,12 @@ impl Transcripts<'_, '_> {
             .into_iter()
             .flat_map(|children| children.iter())
             .filter_map(|child| {
-                let (identity, content, created_at) = self.events.get(child).ok()?;
+                let (identity, content, created_at, order) = self.events.get(child).ok()?;
                 Some((
-                    identity.sequence,
+                    identity.order(order),
                     content.0.clone(),
                     created_at.0.max(0) as u64,
+                    identity.event_id.clone(),
                 ))
             })
             .collect();
@@ -526,6 +546,7 @@ type ChangedTranscriptEvents<'w, 's> = Query<
             Changed<EventIdentity>,
             Changed<MessageContent>,
             Changed<CreatedAt>,
+            Changed<Order>,
         )>,
     ),
 >;
@@ -539,6 +560,7 @@ struct TranscriptEvents<'w, 's> {
             &'static EventIdentity,
             &'static MessageContent,
             &'static CreatedAt,
+            Option<&'static Order>,
         ),
         (With<ConversationEvent>, Without<Retired>),
     >,
@@ -549,42 +571,46 @@ impl TranscriptEvents<'_, '_> {
         let mut items = children
             .iter()
             .filter_map(|entity| {
-                let (identity, content, created_at) = self.events.get(entity).ok()?;
+                let (identity, content, created_at, order) = self.events.get(entity).ok()?;
                 Some((
                     entity,
-                    identity.sequence,
+                    identity.order(order),
                     content.0.clone(),
                     created_at.0.max(0) as u64,
+                    identity.event_id.clone(),
                 ))
             })
             .collect::<Vec<_>>();
-        items.sort_by_key(|(_, sequence, _, _)| *sequence);
+        items.sort_by_key(|(_, sequence, _, _, _)| *sequence);
         cache.order.clear();
         cache.indices.clear();
         cache.transcript.messages.clear();
         cache.transcript.created_at.clear();
+        cache.transcript.event_ids.clear();
         cache.order.reserve(items.len());
         cache.indices.reserve(items.len());
         cache.transcript.messages.reserve(items.len());
         cache.transcript.created_at.reserve(items.len());
-        for (entity, sequence, message, created_at) in items {
+        cache.transcript.event_ids.reserve(items.len());
+        for (entity, sequence, message, created_at, event_id) in items {
             cache.indices.insert(entity, cache.order.len());
             cache.order.push((entity, sequence));
             cache.transcript.messages.push(message);
             cache.transcript.created_at.push(created_at);
+            cache.transcript.event_ids.push(event_id);
         }
     }
 
     fn membership(&self, cache: &TranscriptCache, children: &Children) -> bool {
         let mut count = 0;
         for entity in children.iter() {
-            let Ok((identity, _, _)) = self.events.get(entity) else {
+            let Ok((identity, _, _, order)) = self.events.get(entity) else {
                 continue;
             };
             let Some(position) = cache.indices.get(&entity).copied() else {
                 return false;
             };
-            if cache.order[position].1 != identity.sequence {
+            if cache.order[position].1 != identity.order(order) {
                 return false;
             }
             count += 1;
@@ -596,14 +622,15 @@ impl TranscriptEvents<'_, '_> {
         let Some(index) = cache.indices.get(&entity).copied() else {
             return false;
         };
-        let Ok((identity, content, created_at)) = self.events.get(entity) else {
+        let Ok((identity, content, created_at, order)) = self.events.get(entity) else {
             return false;
         };
-        if cache.order[index].1 != identity.sequence {
+        if cache.order[index].1 != identity.order(order) {
             return false;
         }
         cache.transcript.messages[index].clone_from(&content.0);
         cache.transcript.created_at[index] = created_at.0.max(0) as u64;
+        cache.transcript.event_ids[index].clone_from(&identity.event_id);
         true
     }
 }
@@ -648,6 +675,13 @@ fn cache_transcripts(
 }
 
 impl EventIdentity {
+    pub(super) fn order(&self, history: Option<&Order>) -> (bool, u64) {
+        match history {
+            Some(order) => (false, u64::from(order.0)),
+            None => (true, self.sequence),
+        }
+    }
+
     fn from_event(event: &SerializedEvent) -> Self {
         Self {
             event_id: event.event_id.clone(),
@@ -817,7 +851,19 @@ fn execute(world: &mut World) {
                 entries,
                 updated_at,
                 file,
+                page,
             } => {
+                if let Some(page) = page
+                    && !world
+                        .get::<crate::history::Window>(session)
+                        .is_some_and(|window| window.pending(page))
+                {
+                    world.write_message(Committed {
+                        operation,
+                        result: Ok(false),
+                    });
+                    continue;
+                }
                 let mut file_sources = SystemState::<FileSources>::new(world);
                 let file_state = if let Some(facts) = &file {
                     let prepared = file_sources
@@ -836,6 +882,17 @@ fn execute(world: &mut World) {
                 } else {
                     None
                 };
+                if let Some(page) = page
+                    && file_state
+                        .as_ref()
+                        .is_none_or(|(_, state)| state.generation != page.generation)
+                {
+                    world.write_message(Committed {
+                        operation,
+                        result: Ok(false),
+                    });
+                    continue;
+                }
                 let mut identified = Vec::with_capacity(entries.len());
                 for (position, (external, message)) in entries.into_iter().enumerate() {
                     let identity = if let Some(external) = external {
@@ -901,14 +958,108 @@ fn execute(world: &mut World) {
                 } else {
                     vmux_ecs::UnixMillis::now().0.max(0) as u64
                 };
+                let original: HashSet<_> = index.events.values().copied().collect();
+                let mut page_limit = None;
+                let mut right_anchor = None;
+                if let (Some(page), Some((_, state))) = (page, &file_state) {
+                    let mut first = None;
+                    for ((owner, source, alias, _), bindings) in &index.native_aliases {
+                        if *owner != session || source != &read.source {
+                            continue;
+                        }
+                        let NativeAlias::File {
+                            generation,
+                            offset,
+                            subrecord,
+                        } = alias
+                        else {
+                            continue;
+                        };
+                        let position = (*offset, *subrecord);
+                        if *generation != state.generation
+                            || position < (page.before.byte, page.before.message)
+                            || first.is_some_and(|first| first < position)
+                        {
+                            continue;
+                        }
+                        for (entity, _, slot) in bindings {
+                            if let Some(position_in_units) =
+                                index.unit_positions.get(&(*entity, *slot))
+                                && (first != Some(position)
+                                    || page_limit.is_none_or(|limit| *position_in_units < limit))
+                            {
+                                first = Some(position);
+                                page_limit = Some(*position_in_units);
+                                right_anchor = Some(*entity);
+                            }
+                        }
+                    }
+                    page_limit = Some(
+                        page_limit.unwrap_or_else(|| index.units.get(&session).map_or(0, Vec::len)),
+                    );
+                    index.native_positions.insert(session, 0);
+                    index.latest_users.remove(&session);
+                }
+                let mut incoming = Vec::new();
                 for (external, message) in entries {
-                    writer
+                    let bindings = writer
                         .get_mut(world)
                         .expect("canonical materializer")
-                        .native(&mut index, &read, external.as_ref(), &message, timestamp);
+                        .native(
+                            &mut index,
+                            &read,
+                            external.as_ref(),
+                            &message,
+                            timestamp,
+                            &mut page_limit,
+                        );
+                    if page.is_some() {
+                        for (entity, _, _) in bindings {
+                            if incoming.last() != Some(&entity) {
+                                incoming.push(entity);
+                            }
+                            if matches!(message, Message::User { .. }) {
+                                index.latest_users.insert(
+                                    session,
+                                    (
+                                        index.event_order[&entity],
+                                        index.identities[&entity].event_id.clone(),
+                                    ),
+                                );
+                            }
+                        }
+                    }
                     writer.apply(world);
                 }
+                if page.is_some() && incoming.iter().any(|entity| !original.contains(entity)) {
+                    let Some(orders) = index.page_order(&original, &incoming, right_anchor) else {
+                        world.write_message(Committed {
+                            operation,
+                            result: Err("history order exhausted".into()),
+                        });
+                        continue;
+                    };
+                    for (entity, order) in orders {
+                        if world.get::<Order>(entity) != Some(&order) {
+                            world.entity_mut(entity).insert(order);
+                        }
+                    }
+                }
                 if let Some((entity, state)) = file_state {
+                    let previous = if entity.is_some() {
+                        world.get::<crate::history::Window>(session).cloned()
+                    } else {
+                        None
+                    };
+                    let before = file.as_ref().and_then(|file| file.before);
+                    world
+                        .entity_mut(session)
+                        .insert(crate::history::Window::observe(
+                            previous,
+                            state.generation,
+                            before,
+                            page,
+                        ));
                     if let Some(entity) = entity {
                         world.entity_mut(entity).insert(state);
                     } else {
@@ -939,11 +1090,11 @@ fn accept(
         if reads
             .reads
             .get(request.operation)
-            .is_ok_and(|(_, _, applied)| applied)
+            .is_ok_and(|(_, _, applied, _)| applied)
         {
             continue;
         }
-        let Some((session, read)) = reads.read(request.operation) else {
+        let Some((session, read, page)) = reads.read(request.operation) else {
             committed.write(Committed {
                 operation: request.operation,
                 result: Ok(false),
@@ -1006,6 +1157,7 @@ fn accept(
             entries,
             updated_at: request.updated_at,
             file: request.file.clone(),
+            page,
         });
     }
 }
@@ -1034,6 +1186,7 @@ struct SessionHistory<'w, 's> {
             &'static MessageContent,
             &'static CreatedAt,
             Has<SnapshotEvent>,
+            Option<&'static Order>,
             Option<&'static ProviderKind>,
             Option<&'static ProviderSessionId>,
         ),
@@ -1043,6 +1196,7 @@ struct SessionHistory<'w, 's> {
         'w,
         's,
         (
+            Entity,
             &'static ChildOf,
             &'static Name,
             &'static NativeAlias,
@@ -1079,8 +1233,10 @@ impl SessionHistory<'_, '_> {
             latest_sequences: HashMap::new(),
             latest_users: HashMap::new(),
             native_aliases: HashMap::new(),
+            native_entities: HashMap::new(),
             native_bound: HashSet::new(),
             identities: HashMap::new(),
+            event_order: HashMap::new(),
             native_positions: HashMap::new(),
             event_owners: HashMap::new(),
             units: HashMap::new(),
@@ -1102,8 +1258,16 @@ impl SessionHistory<'_, '_> {
                     .insert(session, ProviderSessionKey::from_components(kind, provider));
             }
             for child in children.into_iter().flat_map(|children| children.iter()) {
-                let Ok((entity, identity, message, timestamp, from_snapshot, kind, provider)) =
-                    self.existing.get(child)
+                let Ok((
+                    entity,
+                    identity,
+                    message,
+                    timestamp,
+                    from_snapshot,
+                    order,
+                    kind,
+                    provider,
+                )) = self.existing.get(child)
                 else {
                     continue;
                 };
@@ -1136,7 +1300,7 @@ impl SessionHistory<'_, '_> {
                         _ => slots.push((entity, None)),
                     }
                 }
-                index.record_sequence(session, identity, &message.0);
+                index.record_sequence(session, identity, &message.0, order);
                 if from_snapshot {
                     index.snapshot_events.entry(session).or_default().insert(
                         identity.event_id.clone(),
@@ -1149,19 +1313,25 @@ impl SessionHistory<'_, '_> {
             return index;
         }
         for slots in index.units.values_mut() {
-            slots.sort_by_key(|(entity, slot)| (index.identities[entity].sequence, *slot));
+            slots.sort_by_key(|(entity, slot)| (index.event_order[entity], *slot));
         }
         for slots in index.units.values() {
             for (position, slot) in slots.iter().enumerate() {
                 index.unit_positions.insert(*slot, position);
             }
         }
-        for (parent, name, alias, kind, provider, source_slot, target_slot) in &self.aliases {
+        for (record, parent, name, alias, kind, provider, source_slot, target_slot) in &self.aliases
+        {
             let entity = parent.parent();
             let Some(session) = index.event_owners.get(&entity).copied() else {
                 continue;
             };
             let source = ProviderSessionKey::from_components(kind, provider);
+            index
+                .native_entities
+                .entry((session, source.clone(), *alias, name.as_str().to_string()))
+                .or_default()
+                .push(record);
             let source_slot = source_slot.map(|slot| slot.0);
             let target_slot = target_slot.map(|slot| slot.0);
             index
@@ -1211,13 +1381,15 @@ struct EventIndex {
     timestamps: HashMap<Entity, CreatedAt>,
     snapshot_events: HashMap<Entity, HashMap<EventId, (Entity, Option<ClientOpId>)>>,
     latest_sequences: HashMap<Entity, u64>,
-    latest_users: HashMap<Entity, (u64, EventId)>,
+    latest_users: HashMap<Entity, ((bool, u64), EventId)>,
     native_aliases: HashMap<
         (Entity, ProviderSessionKey, NativeAlias, String),
         Vec<(Entity, Option<usize>, Option<usize>)>,
     >,
+    native_entities: HashMap<(Entity, ProviderSessionKey, NativeAlias, String), Vec<Entity>>,
     native_bound: HashSet<Entity>,
     identities: HashMap<Entity, EventIdentity>,
+    event_order: HashMap<Entity, (bool, u64)>,
     native_positions: HashMap<Entity, usize>,
     event_owners: HashMap<Entity, Entity>,
     units: HashMap<Entity, Vec<(Entity, Option<usize>)>>,
@@ -1233,21 +1405,133 @@ struct EventIndex {
 }
 
 impl EventIndex {
+    fn page_order(
+        &self,
+        original: &HashSet<Entity>,
+        incoming: &[Entity],
+        right: Option<Entity>,
+    ) -> Option<Vec<(Entity, Order)>> {
+        let mut ordered = original.iter().copied().collect::<Vec<_>>();
+        ordered.sort_by_key(|entity| self.event_order[entity]);
+        for rebuild in [false, true] {
+            let mut ranks = HashMap::new();
+            let mut changes = Vec::new();
+            let mut pending = Vec::new();
+            for entity in &ordered {
+                let (plain, order) = self.event_order[entity];
+                if !rebuild && !plain {
+                    ranks.insert(*entity, order as u32);
+                } else {
+                    pending.push(*entity);
+                }
+            }
+            if !pending.is_empty() {
+                let base = ranks.values().copied().max().map_or(u32::MAX / 4, |last| {
+                    last.saturating_add(1).max(u32::MAX / 4)
+                });
+                let step = u64::from(u32::MAX - base) / (pending.len() as u64 + 1) / 2;
+                if step == 0 {
+                    continue;
+                }
+                for (position, entity) in pending.into_iter().enumerate() {
+                    let rank =
+                        u32::try_from(u64::from(base) + (position as u64 + 1) * step).ok()?;
+                    ranks.insert(entity, rank);
+                    changes.push((entity, Order(rank)));
+                }
+            }
+            let mut new = Vec::new();
+            let mut seen = HashSet::new();
+            let mut failed = false;
+            let mut previous = None;
+            for anchor in incoming.iter().copied().chain(right) {
+                if !original.contains(&anchor) {
+                    if seen.insert(anchor) {
+                        new.push(anchor);
+                    }
+                    continue;
+                }
+                if !new.is_empty() {
+                    let next = *ranks.get(&anchor)?;
+                    let left = previous
+                        .and_then(|entity| ranks.get(&entity).copied())
+                        .or_else(|| {
+                            ordered
+                                .iter()
+                                .position(|entity| *entity == anchor)
+                                .and_then(|position| position.checked_sub(1))
+                                .and_then(|position| ranks.get(&ordered[position]).copied())
+                        });
+                    let Some(start) = next.checked_sub(new.len() as u32) else {
+                        failed = true;
+                        break;
+                    };
+                    if left.is_some_and(|left| start <= left) {
+                        failed = true;
+                        break;
+                    }
+                    for (position, entity) in new.drain(..).enumerate() {
+                        changes.push((entity, Order(start + position as u32)));
+                    }
+                }
+                previous = Some(anchor);
+            }
+            if !failed && !new.is_empty() && right.is_none() {
+                let start = if previous.is_some() {
+                    ranks
+                        .values()
+                        .copied()
+                        .max()
+                        .unwrap_or(u32::MAX / 2)
+                        .checked_add(1)
+                } else {
+                    ranks
+                        .values()
+                        .copied()
+                        .min()
+                        .unwrap_or(u32::MAX / 2)
+                        .checked_sub(new.len() as u32)
+                };
+                if let Some(start) = start
+                    && start.checked_add(new.len() as u32).is_some()
+                {
+                    for (position, entity) in new.drain(..).enumerate() {
+                        changes.push((entity, Order(start + position as u32)));
+                    }
+                }
+            }
+            if !failed && new.is_empty() {
+                return Some(changes);
+            }
+        }
+        None
+    }
+
     fn session(&self, id: &SessionId) -> Option<Entity> {
         self.sessions.get(id).copied()
     }
 
-    fn record_sequence(&mut self, session: Entity, identity: &EventIdentity, message: &Message) {
+    fn record_sequence(
+        &mut self,
+        session: Entity,
+        identity: &EventIdentity,
+        message: &Message,
+        order: Option<&Order>,
+    ) {
         let sequence = self.latest_sequences.entry(session).or_default();
         *sequence = (*sequence).max(identity.sequence);
+        let position = identity.order(order);
+        if let Some(entity) = self.events.get(&(session, identity.event_id.clone())) {
+            self.event_order.insert(*entity, position);
+        }
         if matches!(message, Message::User { .. })
             && self
                 .latest_users
                 .get(&session)
-                .is_none_or(|(latest, _)| *latest <= identity.sequence)
+                .is_none_or(|(latest, _)| *latest <= position)
         {
             self.latest_users
-                .insert(session, (identity.sequence, identity.event_id.clone()));
+                .insert(session, (position, identity.event_id.clone()));
         }
     }
 }
@@ -1264,19 +1548,6 @@ struct EventMaterializer<'w, 's> {
     commands: Commands<'w, 's>,
     existing: Query<'w, 's, &'static mut MessageContent, With<ConversationEvent>>,
     targets: Query<'w, 's, (Entity, &'static ChildOf, &'static TargetBlock)>,
-    native_records: Query<
-        'w,
-        's,
-        (
-            Entity,
-            &'static ChildOf,
-            &'static Name,
-            &'static NativeAlias,
-            &'static ProviderKind,
-            &'static ProviderSessionId,
-        ),
-        With<NativeAlias>,
-    >,
     replay_records: Query<
         'w,
         's,
@@ -1301,9 +1572,10 @@ impl EventMaterializer<'_, '_> {
         identity: Option<&(NativeAlias, String)>,
         message: &Message,
         created_at: u64,
-    ) {
+        page_limit: &mut Option<usize>,
+    ) -> Vec<(Entity, Option<usize>, Option<usize>)> {
         let Some(session) = index.session(&read.session) else {
-            return;
+            return Vec::new();
         };
         let key = identity.map(|(alias, id)| (session, read.source.clone(), *alias, id.clone()));
         let mut bindings = key
@@ -1318,11 +1590,30 @@ impl EventMaterializer<'_, '_> {
                 .get(&session)
                 .copied()
                 .unwrap_or_default();
-            if let Some((found, next)) =
-                self.match_units(index, (session, Some(&read.source), after, true), message)
-            {
+            let before =
+                (*page_limit).unwrap_or_else(|| index.units.get(&session).map_or(0, Vec::len));
+            if let Some((found, next)) = self.match_units(
+                index,
+                (session, Some(&read.source), after..before, true),
+                message,
+            ) {
                 bindings = found;
                 index.native_positions.insert(session, next);
+            }
+        }
+        if bindings.is_empty()
+            && let Some(before) = *page_limit
+        {
+            let after = index
+                .native_positions
+                .get(&session)
+                .copied()
+                .unwrap_or_default();
+            if let Some((spliced, next_before)) =
+                self.splice_page(index, session, after, before, message)
+            {
+                bindings = spliced;
+                *page_limit = Some(next_before);
             }
         }
         if bindings.is_empty() {
@@ -1371,7 +1662,9 @@ impl EventMaterializer<'_, '_> {
         }
         let cursor = index.native_positions.entry(session).or_default();
         for (entity, _, target) in &bindings {
-            if let Some(position) = index.unit_positions.get(&(*entity, *target)) {
+            if let Some(position) = index.unit_positions.get(&(*entity, *target))
+                && (*page_limit).is_none_or(|before| *position < before)
+            {
                 *cursor = (*cursor).max(position + 1);
             }
         }
@@ -1388,16 +1681,12 @@ impl EventMaterializer<'_, '_> {
         if let Some(key) = key
             && (!index.native_aliases.contains_key(&key) || previous != bindings)
         {
-            for (alias, parent, name, source_alias, kind, provider) in &self.native_records {
-                if name.as_str() == key.3
-                    && source_alias == &key.2
-                    && kind == &key.1.kind
-                    && provider == &key.1.id
-                    && index.event_owners.get(&parent.parent()) == Some(&session)
-                {
+            if let Some(aliases) = index.native_entities.remove(&key) {
+                for alias in aliases {
                     self.commands.entity(alias).despawn();
                 }
             }
+            let mut entities = Vec::new();
             for (entity, source_slot, target_slot) in &bindings {
                 let mut alias = self.commands.spawn((
                     key.2,
@@ -1412,24 +1701,125 @@ impl EventMaterializer<'_, '_> {
                 if let Some(slot) = target_slot {
                     alias.insert(TargetBlock(*slot));
                 }
+                entities.push(alias.id());
             }
-            index.native_aliases.insert(key, bindings);
+            index.native_entities.insert(key.clone(), entities);
+            index.native_aliases.insert(key, bindings.clone());
         }
+        bindings
+    }
+
+    fn splice_page(
+        &mut self,
+        index: &mut EventIndex,
+        session: Entity,
+        after: usize,
+        before: usize,
+        message: &Message,
+    ) -> Option<(Vec<(Entity, Option<usize>, Option<usize>)>, usize)> {
+        let Message::Assistant { blocks: inserted } = message else {
+            return None;
+        };
+        if inserted.is_empty() || after == 0 || after > before {
+            return None;
+        }
+        let units = index.units.get(&session)?;
+        let (entity, Some(left)) = *units.get(after - 1)? else {
+            return None;
+        };
+        let (right, Some(at)) = *units.get(after)? else {
+            return None;
+        };
+        let boundary = *units.get(before)?;
+        if entity != right || left.checked_add(1) != Some(at) || self.protected.contains(entity) {
+            return None;
+        }
+        let mut crossing = Vec::new();
+        for (key, aliases) in &index.replay_aliases {
+            let left = aliases.iter().any(|(current, _, target)| {
+                *current == entity && target.is_some_and(|target| target < at)
+            });
+            let right = aliases.iter().any(|(current, _, target)| {
+                *current == entity && target.is_some_and(|target| target >= at)
+            });
+            if left && right {
+                crossing.push(key.clone());
+            }
+        }
+        let mapping = {
+            let mut content = self.existing.get_mut(entity).ok()?;
+            let Message::Assistant { blocks } = &mut content.0 else {
+                return None;
+            };
+            let mapping = (0..blocks.len())
+                .map(|slot| {
+                    Some(if slot < at {
+                        slot
+                    } else {
+                        slot + inserted.len()
+                    })
+                })
+                .collect::<Vec<_>>();
+            blocks.splice(at..at, inserted.iter().cloned());
+            mapping
+        };
+        self.remap(index, entity, &mapping);
+        for key in crossing {
+            index.replay_aliases.remove(&key);
+            for (alias, parent, record, kind, provider) in &self.replay_records {
+                let source = match (kind, provider) {
+                    (Some(kind), Some(provider)) => {
+                        Some(ProviderSessionKey::from_components(kind, provider))
+                    }
+                    (None, None) => None,
+                    _ => continue,
+                };
+                if record.0 == key.2
+                    && source == key.1
+                    && index.event_owners.get(&parent.parent()) == Some(&key.0)
+                {
+                    self.commands.entity(alias).despawn();
+                }
+            }
+        }
+        let boundary = if boundary.0 == entity {
+            (
+                entity,
+                boundary
+                    .1
+                    .and_then(|slot| mapping.get(slot).copied().flatten()),
+            )
+        } else {
+            boundary
+        };
+        let next_before = *index.unit_positions.get(&boundary)?;
+        let bindings = (0..inserted.len())
+            .map(|source| (entity, Some(source), Some(at + source)))
+            .collect();
+        Some((bindings, next_before))
     }
 
     fn match_units(
         &self,
         index: &EventIndex,
-        selection: (Entity, Option<&ProviderSessionKey>, usize, bool),
+        selection: (
+            Entity,
+            Option<&ProviderSessionKey>,
+            std::ops::Range<usize>,
+            bool,
+        ),
         message: &Message,
     ) -> Option<(Vec<(Entity, Option<usize>, Option<usize>)>, usize)> {
-        let (session, source, after, unclaimed) = selection;
+        let (session, source, range, unclaimed) = selection;
         let candidates = index.units.get(&session)?;
         let incoming = MessageContent::slots(message);
         if incoming.is_empty() {
             return None;
         }
-        for start in after..candidates.len() {
+        for start in range.clone() {
+            if start + incoming.len() > range.end {
+                break;
+            }
             let Some(window) = candidates.get(start..start + incoming.len()) else {
                 break;
             };
@@ -1790,7 +2180,7 @@ impl EventMaterializer<'_, '_> {
         for slot in 0..length {
             slots.push((entity, Some(slot)));
         }
-        slots.sort_by_key(|(entity, slot)| (index.identities[entity].sequence, *slot));
+        slots.sort_by_key(|(entity, slot)| (index.event_order[entity], *slot));
         index
             .unit_positions
             .retain(|(entity, _), _| index.event_owners.get(entity) != Some(&session));
@@ -1853,7 +2243,7 @@ impl EventMaterializer<'_, '_> {
                 if let Some(session) = index.event_owners.get(entity).copied() {
                     let units = index.units.entry(session).or_default();
                     units.push((*entity, Some(slot)));
-                    units.sort_by_key(|(entity, slot)| (index.identities[entity].sequence, *slot));
+                    units.sort_by_key(|(entity, slot)| (index.event_order[entity], *slot));
                     index
                         .unit_positions
                         .retain(|(entity, _), _| index.event_owners.get(entity) != Some(&session));
@@ -1888,7 +2278,12 @@ impl EventMaterializer<'_, '_> {
                 .unwrap_or_default();
             if let Some((found, next)) = self.match_units(
                 index,
-                (session, source.as_ref(), after, false),
+                (
+                    session,
+                    source.as_ref(),
+                    after..index.units.get(&session).map_or(0, Vec::len),
+                    false,
+                ),
                 &event.message,
             ) {
                 bindings = found;
@@ -2108,7 +2503,14 @@ impl EventMaterializer<'_, '_> {
         index
             .events
             .insert((session, event.event_id.clone()), entity);
-        index.record_sequence(session, &identity, &event.message);
+        let order = index.event_order.get(&entity).and_then(|(native, order)| {
+            if *native {
+                None
+            } else {
+                u32::try_from(*order).ok().map(Order)
+            }
+        });
+        index.record_sequence(session, &identity, &event.message, order.as_ref());
         if let Some(client_op_id) = event.client_op_id.clone() {
             index.operations.insert((session, client_op_id), entity);
         }

@@ -668,6 +668,9 @@ agent-tool-explored = 已探索
 agent-tool-explore-read = 讀取 { $path }
 agent-tool-explore-search = 在 { $path } 中搜尋 { $query }
 agent-tool-explore-list = 列出 { $path }
+agent-tool-open-in-pane-right = 在右側窗格開啟
+agent-tool-open-in-stack = 在新堆疊開啟
+agent-tool-open-in-tab = 在新分頁開啟
 agent-thinking = 思考中
 agent-subagent = 子 agent
 agent-prompt = 提示
@@ -1122,3 +1125,24 @@ project-new-repository = 空儲存庫
 project-local-folder = 本機資料夾
 project-github-repository = GitHub 儲存庫
 project-edit-conflict = 專案已變更。請重新開啟編輯畫面。
+
+agent-video-play = 播放影片
+
+command-toggle-url-bar = Layout > 版面配置 > 切換網址列
+
+project-rename = 重新命名專案
+project-all = 所有專案
+project-remove = 移除專案
+project-remove-description = 從專案清單中移除。保留本機檔案。
+
+agent-tool-slept = 已等待
+
+project-directory-unavailable = 專案目錄無法使用
+
+session-turn-view-prompt = 檢視提示
+session-turn-view-response = 檢視回覆
+agent-incoming-message = 代理訊息
+
+schema-focus-follows-mouse = 焦點跟隨滑鼠
+
+terminal-directory-input-pending = 變更目錄前，請完成或取消目前的命令或輸入。

@@ -12,6 +12,131 @@ use vmux_ui::icon::{BuiltinIconView, LineIcon, LineIconView};
 use super::dashboard::Split;
 use super::state::GitPageState;
 use crate::event::{GitRepositoryPickerRequest, GitRepositoryRequest};
+use crate::state::{GitPageControllerState, GitPageSnapshot, GitPanel};
+
+#[derive(Clone, PartialEq)]
+pub(super) enum RepositoryEmpty {
+    WorkingTree,
+    Branch { comparison: String },
+    Commits,
+    Stashes,
+}
+
+impl RepositoryEmpty {
+    pub(super) fn of(
+        snapshot: &GitPageSnapshot,
+        controller: &GitPageControllerState,
+    ) -> Option<Self> {
+        let repository = snapshot.repository.as_ref()?;
+        if snapshot.loading || !snapshot.message.is_empty() || !controller.commit_pending.is_empty()
+        {
+            return None;
+        }
+        match controller.focused_panel {
+            GitPanel::Files if repository.files.is_empty() => Some(Self::WorkingTree),
+            GitPanel::Branches
+                if !snapshot.branch_files_loading
+                    && snapshot.branch_files_error.is_empty()
+                    && !controller.selected_branch.is_empty()
+                    && snapshot.branch_files_reference == controller.selected_branch
+                    && snapshot.branch_files_total == 0
+                    && snapshot.branch_files.is_empty()
+                    && snapshot.branch_diff_paths.is_empty()
+                    && !snapshot.branch_files_has_more =>
+            {
+                let comparison = if snapshot.branch_files_base_ref.is_empty() {
+                    controller.selected_branch.clone()
+                } else {
+                    format!(
+                        "{}…{}",
+                        snapshot.branch_files_base_ref, controller.selected_branch
+                    )
+                };
+                Some(Self::Branch { comparison })
+            }
+            GitPanel::Commits
+                if repository.commits.is_empty()
+                    && snapshot.commits.loaded
+                    && !snapshot.commits.loading
+                    && !snapshot.commits.failed =>
+            {
+                Some(Self::Commits)
+            }
+            GitPanel::Stash
+                if repository.stashes.is_empty()
+                    && snapshot.stashes.loaded
+                    && !snapshot.stashes.loading
+                    && !snapshot.stashes.failed =>
+            {
+                Some(Self::Stashes)
+            }
+            _ => None,
+        }
+    }
+
+    fn title(&self) -> String {
+        translate(match self {
+            Self::WorkingTree => "git-repository-clean",
+            Self::Branch { .. } => "git-no-changes",
+            Self::Commits => "git-no-commits",
+            Self::Stashes => "git-no-stashes",
+        })
+    }
+
+    fn icon(&self) -> LineIcon {
+        match self {
+            Self::WorkingTree => LineIcon::Check,
+            Self::Branch { .. } => LineIcon::GitBranch,
+            Self::Commits => LineIcon::GitCommit,
+            Self::Stashes => LineIcon::Archive,
+        }
+    }
+}
+
+#[component]
+pub(super) fn RepositoryEmptyView(state: RepositoryEmpty) -> Element {
+    rsx! {
+        section { class: "flex min-h-0 flex-1 flex-col items-center justify-center gap-3 px-6 py-12 text-center",
+            LineIconView { icon: state.icon(), class: "size-6 text-muted-foreground" }
+            h2 { class: "text-base font-medium text-foreground", {state.title()} }
+            if let RepositoryEmpty::Branch { comparison } = state {
+                p { class: "max-w-full truncate font-mono text-xs text-muted-foreground", "{comparison}" }
+            }
+        }
+    }
+}
+
+#[cfg(test)]
+mod repository_empty_tests {
+    use super::*;
+
+    #[test]
+    fn empty_branch_waits_for_the_requested_comparison_to_finish() {
+        let mut snapshot = GitPageSnapshot {
+            repository: Some(crate::event::GitRepositorySnapshot::loading(
+                &GitRepositoryRequest::at("/repo"),
+            )),
+            ..Default::default()
+        };
+        let controller = GitPageControllerState {
+            focused_panel: GitPanel::Branches,
+            selected_branch: "topic".into(),
+            ..Default::default()
+        };
+        assert!(RepositoryEmpty::of(&snapshot, &controller).is_none());
+        snapshot.branch_files_reference = "topic".into();
+        snapshot.branch_files_loading = true;
+        assert!(RepositoryEmpty::of(&snapshot, &controller).is_none());
+        snapshot.branch_files_loading = false;
+        snapshot.loading = false;
+        assert!(matches!(
+            RepositoryEmpty::of(&snapshot, &controller),
+            Some(RepositoryEmpty::Branch { .. })
+        ));
+        snapshot.branch_files_has_more = true;
+        assert!(RepositoryEmpty::of(&snapshot, &controller).is_none());
+    }
+}
 
 #[component]
 pub(super) fn EmptyRepository() -> Element {
@@ -152,19 +277,9 @@ fn GitLoadingSkeleton() -> Element {
                         Skeleton { class: "h-7 w-16 rounded-md bg-foreground/[0.055]" }
                     }
                     section { class: "min-h-0 min-w-0 flex-1 overflow-hidden bg-transparent pb-2.5 pr-2.5",
-                    div { class: "flex h-full min-h-0 flex-col gap-3 overflow-hidden",
-                        for (path_width, rows) in [("w-52", 8usize), ("w-44", 5usize)] {
-                            div { class: "flex min-h-44 flex-col overflow-hidden rounded-lg bg-foreground/[0.025]",
-                                div { class: "flex h-9 shrink-0 items-center gap-2 px-3",
-                                    LineIconView { icon: LineIcon::File, class: "size-3.5 shrink-0 text-muted-foreground" }
-                                    Skeleton { class: "h-3 {path_width} bg-foreground/[0.06]" }
-                                }
-                                div { class: "flex flex-col gap-2 px-3 py-3",
-                                    for index in 0..rows {
-                                        Skeleton { class: if index % 3 == 1 { "h-3 w-9/12 bg-foreground/[0.045]" } else { "h-3 w-full bg-foreground/[0.045]" } }
-                                    }
-                                }
-                            }
+                    div { class: "flex flex-col gap-1.5 px-3 py-3", aria_busy: true,
+                        for width in ["w-3/5", "w-[54%]", "w-[57%]", "w-3/4"] {
+                            Skeleton { class: "h-2.5 {width} rounded-sm bg-foreground/[0.055]" }
                         }
                     }
                     }

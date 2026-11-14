@@ -21,6 +21,7 @@ mod cwd;
 mod key;
 mod plugin;
 mod project;
+mod restored;
 mod snapshot_updater;
 mod spaces;
 mod store;

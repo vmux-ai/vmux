@@ -671,6 +671,9 @@ agent-tool-explored = استكشف
 agent-tool-explore-read = قرأ { $path }
 agent-tool-explore-search = بحث عن { $query } في { $path }
 agent-tool-explore-list = قائمة { $path }
+agent-tool-open-in-pane-right = فتح في اللوحة اليمنى
+agent-tool-open-in-stack = فتح في مكدس جديد
+agent-tool-open-in-tab = فتح في علامة تبويب جديدة
 agent-thinking = يفكّر
 agent-subagent = وكيل فرعي
 agent-prompt = المطالبة
@@ -1125,3 +1128,24 @@ project-new-repository = مستودع فارغ
 project-local-folder = مجلد محلي
 project-github-repository = مستودع GitHub
 project-edit-conflict = تغيّر هذا المشروع. أعد فتح المحرر للمحاولة مرة أخرى.
+
+agent-video-play = تشغيل الفيديو
+
+command-toggle-url-bar = Layout > التخطيط > تبديل شريط العنوان
+
+project-rename = إعادة تسمية المشروع
+project-all = كل المشاريع
+project-remove = إزالة المشروع
+project-remove-description = إزالة من قائمة المشاريع. يتم الاحتفاظ بالملفات المحلية.
+
+agent-tool-slept = انتظر
+
+project-directory-unavailable = مجلد المشروع غير متاح
+
+session-turn-view-prompt = عرض الطلب
+session-turn-view-response = عرض الرد
+agent-incoming-message = رسالة من الوكيل
+
+schema-focus-follows-mouse = التركيز يتبع الفأرة
+
+terminal-directory-input-pending = أكمل الأمر أو الإدخال الحالي أو ألغِه قبل تغيير المجلد.

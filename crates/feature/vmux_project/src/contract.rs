@@ -3,6 +3,8 @@ use crate::ProjectId;
 #[vmux_api::contract(Default, Eq)]
 pub struct ProjectEntry {
     pub id: ProjectId,
+    #[serde(default)]
+    pub identity: String,
     pub name: String,
     pub source: String,
     pub path: String,
@@ -21,11 +23,14 @@ pub struct ProjectEntry {
 
 impl ProjectEntry {
     pub fn identity_seed(&self) -> &str {
-        if !self.path.trim().is_empty() {
-            return &self.path;
+        if !self.identity.is_empty() {
+            return &self.identity;
         }
         if !self.id.0.trim().is_empty() {
             return &self.id.0;
+        }
+        if !self.path.trim().is_empty() {
+            return &self.path;
         }
         if !self.url.trim().is_empty() {
             return &self.url;
@@ -62,6 +67,8 @@ pub enum ProjectView {
 #[vmux_api::contract(Default, Eq)]
 pub struct ProjectDetailView {
     pub id: ProjectId,
+    #[serde(default)]
+    pub identity: String,
     pub name: String,
     pub path: String,
     pub choices: Vec<ProjectEntry>,
@@ -78,6 +85,21 @@ pub struct ProjectUiState {
 
 #[cfg(host)]
 impl ProjectUiState {
+    pub fn identified(mut self) -> Self {
+        let entries = match &mut self.view {
+            ProjectView::Catalog(catalog) => &mut catalog.entries,
+            ProjectView::Detail(detail) => {
+                detail.identity = detail.id.0.clone();
+                &mut detail.choices
+            }
+            ProjectView::Loading | ProjectView::Error(_) => return self,
+        };
+        for entry in entries {
+            entry.identity = entry.id.0.clone();
+        }
+        self
+    }
+
     pub fn choices(&self) -> Vec<ProjectEntry> {
         match &self.view {
             ProjectView::Catalog(catalog) => catalog.entries.clone(),

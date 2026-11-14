@@ -14,8 +14,6 @@ pub use archive::{
 };
 #[cfg(feature = "jobs")]
 pub use blocking::{BlockingCancellation, BlockingPool, BlockingRuntime, BlockingTask};
-#[cfg(feature = "contracts")]
-pub use component::ProcessAnchor;
 pub use component::{
     ActivateRequest, Active, ArchivedAt, Bookmark, BookmarkOrder, Collapsed, CollectionView,
     CreatedAt, Cwd, Description, EffectiveStartupUrl, EntityTarget, Folder, HostShell,
@@ -23,6 +21,8 @@ pub use component::{
     RegistrationOrder, Terminal, TransitionType, UnixMillis, Url, Uuid, Visit, VisitCount,
     VisitedUrl, WindowFullscreen, WindowFullscreenSet,
 };
+#[cfg(feature = "contracts")]
+pub use component::{PendingPrompt, PendingPromptAttachments, ProcessAnchor};
 pub use external_identity::{
     ExternalIdentity, ExternalIdentityIndex, ExternalIdentityIndexPlugin, ExternalIdentityIndexSet,
 };
@@ -55,7 +55,6 @@ pub use page_metadata::{PageIdentity, PageMetadata};
 pub use page_open::{
     CefPageAttachRequest, PageNavigation, PageOpenDeferred, PageOpenError, PageOpenHandled,
     PageOpenId, PageOpenRequest, PageOpenSet, PageOpenTarget, PageOpenTask, PageTransition,
-    PendingPrompt, PendingPromptAttachments,
 };
 pub use primitives::PrimitivesPlugin;
 #[cfg(feature = "contracts")]

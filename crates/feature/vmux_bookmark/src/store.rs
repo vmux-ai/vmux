@@ -471,6 +471,45 @@ mod tests {
     use super::*;
 
     #[test]
+    fn unsupported_icons_do_not_prevent_saved_bookmarks_from_loading() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("bookmarks.ron");
+        let body = r#"(resources: {}, entities: { 1: (components: {
+            "vmux_ecs::Pin": (),
+            "vmux_ecs::Uuid": ("retained"),
+            "vmux_ecs::BookmarkOrder": (0),
+            "vmux_header::system::PageMetadata": (
+                title: "Saved bookmark",
+                url: "vmux://containers/",
+                icon: Builtin(Container),
+                bg_color: None,
+            ),
+        }) })"#;
+        std::fs::write(&path, body).unwrap();
+        let mut app = App::new();
+        app.add_plugins((
+            MinimalPlugins,
+            bevy::asset::AssetPlugin::default(),
+            vmux_ecs::PrimitivesPlugin,
+        ))
+        .add_plugins(SchemaPlugin::<BookmarkStore>::default())
+        .insert_resource(OfferedBookmarkDefaults::default())
+        .add_observer(load_on::<LoadWorld<BookmarkFilter>>);
+        let load = BookmarkStorePath(path.clone()).load().unwrap();
+        app.world_mut().commands().trigger_load(load);
+        app.update();
+        app.update();
+        let mut pins = app
+            .world_mut()
+            .query_filtered::<(&Uuid, &PageMetadata), With<Pin>>();
+        let (id, metadata) = pins.single(app.world()).unwrap();
+        assert_eq!(id.0, "retained");
+        assert_eq!(metadata.url, "vmux://containers/");
+        assert!(metadata.icon.is_none());
+        assert_eq!(std::fs::read_to_string(path).unwrap(), body);
+    }
+
+    #[test]
     fn failed_bookmark_write_retries_after_storage_recovers_without_a_new_edit() {
         let directory = tempfile::tempdir().unwrap();
         let path = directory.path().join("bookmarks.ron");

@@ -19,7 +19,6 @@ pub fn AddressTrail(
     state: PageAddress,
     #[props(default)] onpopup: Option<EventHandler<bool>>,
     #[props(default)] dismiss_revision: u64,
-    #[props(default)] loading: bool,
 ) -> Element {
     let mut open = use_signal(|| None::<String>);
     let mut observed_dismiss = use_signal(|| dismiss_revision);
@@ -48,6 +47,7 @@ pub fn AddressTrail(
     let measurement_open = use_signal(|| None::<String>);
     let visible = PathVisibility::start(&state.paths, available(), &widths.read());
     let requests = AddressSender::new(&state);
+    let current_is_parent = matches!(&state.current.intent, Some(AddressIntent::Navigate { url }) if url.trim_end_matches('/') != state.document_url().trim_end_matches('/'));
     rsx! {
         nav {
             class: "relative flex h-7 min-w-0 flex-1 items-center gap-1 text-xs",
@@ -60,7 +60,7 @@ pub fn AddressTrail(
                     ..Default::default()
                 },
                 requests: requests.clone(), open,
-                loading,
+                navigate_on_click: current_is_parent,
             }
             for (index, crumb) in state.fixed.iter().enumerate() {
                 span { key: "fixed-{index}", class: "flex min-w-0 shrink items-center gap-1",
@@ -154,7 +154,7 @@ fn AddressMenu(
     requests: AddressSender,
     mut open: Signal<Option<String>>,
     #[props(default)] preserve_name: bool,
-    #[props(default)] loading: bool,
+    #[props(default)] navigate_on_click: bool,
 ) -> Element {
     if crumb.options.is_empty()
         && crumb.tabs.is_empty()
@@ -163,7 +163,7 @@ fn AddressMenu(
         && crumb.entry.intent.is_none()
     {
         return rsx! { span { class: "flex h-7 min-w-0 items-center gap-1", title: crumb.entry.title.clone(),
-            AddressIcon { entry: crumb.entry.clone(), loading }
+            AddressIcon { entry: crumb.entry.clone() }
             span { class: "truncate", {AddressLabel(&crumb.entry).text()} }
         } };
     }
@@ -174,9 +174,26 @@ fn AddressMenu(
     let open_requests = requests.clone();
     let more_requests = requests.clone();
     let more = crumb.on_more.clone();
+    let on_primary = if navigate_on_click {
+        let intent = crumb.entry.intent.clone();
+        let navigation = requests.clone();
+        intent.map(|intent| {
+            EventHandler::new(move |()| {
+                open.set(None);
+                navigation.send(intent.clone());
+            })
+        })
+    } else {
+        None
+    };
+    let terminal_directory = matches!(
+        &crumb.on_open,
+        Some(AddressIntent::TerminalDirectories { .. })
+    );
     rsx! {
         BreadcrumbDropdown {
             open_mode,
+            on_primary,
             label: AddressLabel(&crumb.entry).text(), title: crumb.entry.title.clone(), open: active, active: crumb.active, truncate: !preserve_name,
             on_open_change: move |active| {
                 if active {
@@ -184,7 +201,7 @@ fn AddressMenu(
                     if let Some(intent) = &on_open { open_requests.send(intent.clone()); }
                 } else if open.peek().as_ref() == Some(&open_id) { open.set(None); }
             },
-            leading: rsx! { if !preserve_name || crumb.active { AddressIcon { entry: crumb.entry.clone(), loading } } },
+            leading: rsx! { if !preserve_name || crumb.active { AddressIcon { entry: crumb.entry.clone() } } },
             if !crumb.tabs.is_empty() {
                 div { class: "flex gap-1 p-1",
                     for tab in crumb.tabs {
@@ -218,7 +235,13 @@ fn AddressMenu(
                 {
                     let requests = requests.clone();
                     let intent = entry.intent.clone();
+                    let title = if terminal_directory && intent.is_none() {
+                        translate("terminal-directory-input-pending")
+                    } else {
+                        entry.title.clone()
+                    };
                     rsx! { DropdownOption {
+                        title,
                         key: "{entry.identity}-{entry.path}-{entry.intent:?}",
                         label: AddressLabel(&entry).text(), selected: intent.is_some() && entry.intent == crumb.entry.intent,
                         disabled: intent.is_none(),
@@ -233,10 +256,7 @@ fn AddressMenu(
 }
 
 #[component]
-fn AddressIcon(entry: AddressOption, #[props(default)] loading: bool) -> Element {
-    if loading {
-        return rsx! { crate::components::progress::LoadingIcon {} };
-    }
+fn AddressIcon(entry: AddressOption) -> Element {
     if !entry.identity.is_empty() {
         return rsx! { IdentityOrb { seed: entry.identity, alt: entry.label, class: "size-4".to_string() } };
     }
@@ -321,6 +341,7 @@ impl PathVisibility {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::transport::HostBinding;
     use crate::transport::{
         BytesListener, HostPayload, HostScope, PageHost, event_listener::EventListenerError,
     };
@@ -374,6 +395,60 @@ mod tests {
         }
         button { id: format!("dismiss-{}", "address"), onclick: move |_| dismissed += 1, "Dismiss" }
         }
+    }
+
+    #[component]
+    fn ParentTrail() -> Element {
+        rsx! { AddressTrail {
+            state: PageAddress {
+                owner: 17, revision: 9, url: "vmux://projects/one".into(),
+                current: AddressOption { label: "Projects".into(), intent: Some(AddressIntent::Navigate { url: "vmux://projects/".into() }), ..Default::default() },
+                views: vec![AddressOption { label: "All projects".into(), intent: Some(AddressIntent::Navigate { url: "vmux://projects/".into() }), ..Default::default() }],
+                ..Default::default()
+            }
+        } }
+    }
+
+    #[test]
+    fn parent_breadcrumb_click_navigates_even_when_its_hover_menu_is_open() {
+        dioxus::html::set_event_converter(Box::new(SerializedHtmlEventConverter));
+        let probe = Rc::new(TrailProbe::default());
+        let mut dom = VirtualDom::new(ParentTrail);
+        dom.provide_root_context(HostBinding(probe.clone()));
+        let initial = dom.rebuild_to_vec();
+        let trigger = initial
+            .edits
+            .iter()
+            .find_map(|edit| match edit {
+                Mutation::SetAttribute {
+                    name: "aria-expanded",
+                    id,
+                    ..
+                } => Some(*id),
+                _ => None,
+            })
+            .unwrap();
+        dom.runtime().handle_event(
+            "mouseenter",
+            Event::new(
+                EventData::Mouse(SerializedMouseData::default()).into_any(),
+                false,
+            ),
+            trigger,
+        );
+        dom.render_immediate_to_vec();
+        dom.runtime().handle_event(
+            "click",
+            Event::new(
+                EventData::Mouse(SerializedMouseData::default()).into_any(),
+                true,
+            ),
+            trigger,
+        );
+        dom.render_immediate_to_vec();
+        assert!(
+            matches!(probe.requests.borrow().as_slice(), [PageAddressRequest { owner: 17, revision: 9, url, intent: AddressIntent::Navigate { url: target } }] if url == "vmux://projects/one" && target == "vmux://projects/")
+        );
     }
 
     #[test]

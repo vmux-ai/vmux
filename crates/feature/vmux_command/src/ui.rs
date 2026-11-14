@@ -79,12 +79,8 @@ pub fn CommandPalette(props: PaletteProps) -> Element {
 
     use_effect(move || {
         let opened = state();
-        if input.refocus(opened.open_id) {
-            if is_start {
-                PromptFocus::end(PROMPT_INPUT_ID);
-            } else {
-                CommandBarField::focus(&opened);
-            }
+        if !is_start && input.refocus(opened.open_id) {
+            CommandBarField::focus(&opened);
         }
     });
 
@@ -206,7 +202,10 @@ pub fn CommandPalette(props: PaletteProps) -> Element {
         .map(AgentAccent::for_agent);
     let start_accent = accent.unwrap_or_else(|| AgentAccent::for_agent(""));
     let start_prompt_attachments = palette_data.composer_attachments.clone();
-    let start_submission_enabled = !q.trim().is_empty() || !attachments.is_empty();
+    let workspace_selection = tree().workspace_selection;
+    let start_submission_enabled = (!q.trim().is_empty() || !attachments.is_empty())
+        && !workspace_selection.pending
+        && workspace_selection.error.is_empty();
     let chips = ComposerChips::build(&composer, state_val.open_id);
     let opened_menu = ComposerMenuView::kind(projection.menus);
 
@@ -456,6 +455,11 @@ pub fn CommandPalette(props: PaletteProps) -> Element {
         div { class: "relative",
             if is_start {
                 {start_menus}
+                if !workspace_selection.error.is_empty() {
+                    div { role: "alert", class: "px-3 pb-2 text-xs text-destructive",
+                        "{workspace_selection.error}"
+                    }
+                }
                 PromptComposer {
                     shared_transition: true,
                     value: q.clone(),
@@ -712,4 +716,296 @@ pub struct PaletteProps {
     pub surface: CommandPaletteSurface,
     pub on_close: EventHandler<()>,
     pub on_activity: EventHandler<()>,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::{cell::RefCell, rc::Rc};
+    use vmux_api::command_bar::{CommandBarFocusEffect, CommandBarOpenEvent};
+    use vmux_api::{BinEvent, UiStateFrame};
+    use vmux_ui::transport::{
+        BytesListener, HostBinding, HostScope, PageHost, event_listener::EventListenerError,
+    };
+
+    #[component]
+    fn StartFocusFixture() -> Element {
+        let state = use_command_bar_ui();
+        rsx! { CommandPalette {
+            state,
+            surface: CommandPaletteSurface::Start,
+            on_close: move |_| {},
+            on_activity: move |_| {},
+        } }
+    }
+
+    #[derive(Default)]
+    struct FocusHost {
+        listeners: RefCell<Vec<BytesListener>>,
+        focused: RefCell<Vec<String>>,
+    }
+
+    impl PageHost for FocusHost {
+        fn send(&self, _: &str, _: &[u8]) -> Result<(), EventListenerError> {
+            Ok(())
+        }
+
+        fn listen(&self, id: &str, listener: BytesListener) -> Result<(), EventListenerError> {
+            if id == CommandBarUiState::id() {
+                self.listeners.borrow_mut().push(listener);
+            }
+            Ok(())
+        }
+
+        fn focus_element(&self, element_id: &str) {
+            self.focused.borrow_mut().push(element_id.to_string());
+        }
+    }
+
+    impl FocusHost {
+        fn receive(&self, bytes: &[u8]) {
+            for listener in &mut *self.listeners.borrow_mut() {
+                listener(bytes);
+            }
+        }
+
+        fn publish(&self, open_id: u64, focus: u64) {
+            let frame = UiStateFrame::<
+                CommandBarUiState,
+                vmux_api::command_bar::CommandBarUiStatePatch,
+            >::Snapshot(CommandBarUiState {
+                snapshot: CommandBarOpenEvent {
+                    open_id: vmux_api::command_bar::OpenId(open_id),
+                    ..Default::default()
+                },
+                palette: CommandPaletteUiState {
+                    open_id: vmux_api::command_bar::OpenId(open_id),
+                    ..Default::default()
+                },
+                focus: CommandBarFocusEffect { revision: focus },
+                ..Default::default()
+            });
+            let bytes = rkyv::to_bytes::<rkyv::rancor::Error>(&frame).unwrap();
+            self.receive(&bytes);
+        }
+    }
+
+    struct FocusPage {
+        host: Rc<FocusHost>,
+        dom: VirtualDom,
+    }
+
+    impl FocusPage {
+        fn new() -> Self {
+            let host = Rc::new(FocusHost::default());
+            let _scope = HostScope::enter(host.clone());
+            let mut dom = VirtualDom::new(StartFocusFixture);
+            dom.provide_root_context(HostBinding(host.clone()));
+            dom.rebuild_in_place();
+            dom.render_immediate_to_vec();
+            dom.render_immediate_to_vec();
+            Self { host, dom }
+        }
+
+        fn publish(&mut self, open_id: u64, focus: u64) {
+            let _scope = HostScope::enter(self.host.clone());
+            self.host.publish(open_id, focus);
+            self.dom.render_immediate_to_vec();
+            self.dom.render_immediate_to_vec();
+        }
+
+        #[cfg(host)]
+        fn receive(&mut self, bytes: &[u8]) {
+            let _scope = HostScope::enter(self.host.clone());
+            self.host.receive(bytes);
+            self.dom.render_immediate_to_vec();
+            self.dom.render_immediate_to_vec();
+        }
+    }
+
+    #[test]
+    fn prewarmed_start_does_not_focus_without_a_host_focus_request() {
+        let mut selected = FocusPage::new();
+        let mut spare = FocusPage::new();
+        selected.publish(1, 0);
+        spare.publish(2, 0);
+        assert!(
+            spare.host.focused.borrow().is_empty(),
+            "prewarming cannot claim the composer caret"
+        );
+        assert!(selected.host.focused.borrow().is_empty());
+        selected.publish(1, 1);
+        assert_eq!(*selected.host.focused.borrow(), [PROMPT_INPUT_ID]);
+        spare.publish(3, 0);
+        assert!(
+            spare.host.focused.borrow().is_empty(),
+            "a new spare cannot take focus from the selected Start"
+        );
+    }
+
+    #[cfg(host)]
+    mod replay {
+        use super::*;
+        use bevy::prelude::*;
+        use bevy_cef::prelude::{
+            BinHostEmitEvent, BinIpcEpoch, BinIpcNavigationRevision, BinIpcSurfaceGeneration,
+            Browsers, UiInput,
+        };
+        use vmux_ecs::{UiStatePlugin, UiStateWrite};
+
+        #[derive(Resource, Default)]
+        struct Emitted(Vec<(Entity, Vec<u8>)>);
+
+        impl Emitted {
+            fn record(event: On<BinHostEmitEvent>, mut emitted: ResMut<Self>) {
+                if event.id() == CommandBarUiState::id() {
+                    event.mark_delivered();
+                    emitted.0.push((event.webview(), event.payload().to_vec()));
+                }
+            }
+
+            fn take(&mut self, view: Entity) -> Vec<u8> {
+                let position = self
+                    .0
+                    .iter()
+                    .rposition(|(target, _)| *target == view)
+                    .unwrap();
+                self.0.remove(position).1
+            }
+        }
+
+        struct Cache {
+            app: App,
+        }
+
+        impl Cache {
+            fn new() -> Self {
+                let mut app = App::new();
+                app.add_plugins((
+                    MinimalPlugins,
+                    UiStatePlugin::<CommandBarUiState>::default(),
+                ))
+                .insert_non_send(Browsers::default())
+                .init_resource::<Emitted>()
+                .add_observer(Emitted::record);
+                app.world_mut().spawn(vmux_api::UiEventPermissions {
+                    url: "vmux://start/",
+                    owns_subtree: false,
+                    permissions: &[CommandBarUiState::PERMISSION],
+                });
+                Self { app }
+            }
+
+            fn page(&mut self) -> Entity {
+                let view = self
+                    .app
+                    .world_mut()
+                    .spawn((
+                        vmux_ecs::PageMetadata {
+                            url: "vmux://start/".into(),
+                            ..Default::default()
+                        },
+                        BinIpcSurfaceGeneration(1),
+                        BinIpcNavigationRevision(1),
+                        BinIpcEpoch(1),
+                    ))
+                    .id();
+                self.app
+                    .world_mut()
+                    .non_send_mut::<Browsers>()
+                    .set_externally_hosted(view);
+                view
+            }
+
+            fn take(&mut self, view: Entity) -> Vec<u8> {
+                self.app.world_mut().resource_mut::<Emitted>().take(view)
+            }
+        }
+
+        #[test]
+        fn reopening_start_keeps_workspace_data_without_replaying_another_pages_focus() {
+            let mut cache = Cache::new();
+            let first = cache.page();
+            let state = CommandBarUiState {
+                snapshot: CommandBarOpenEvent {
+                    open_id: vmux_api::command_bar::OpenId(1),
+                    ..Default::default()
+                },
+                palette: CommandPaletteUiState {
+                    open_id: vmux_api::command_bar::OpenId(1),
+                    projection: vmux_api::command_bar::CommandPaletteProjection {
+                        query: "kept draft".into(),
+                        composer: vmux_api::command_bar::CommandPaletteComposer {
+                            cwd: "/project".into(),
+                            ..Default::default()
+                        },
+                        ..Default::default()
+                    },
+                    ..Default::default()
+                },
+                focus: CommandBarFocusEffect { revision: 9 },
+                ..Default::default()
+            };
+            cache
+                .app
+                .world_mut()
+                .trigger(UiStateWrite::<CommandBarUiState>::from_event(
+                    first,
+                    &vmux_api::command_bar::CommandBarUiStatePatch {
+                        snapshot: Some(Box::new(state.snapshot)),
+                        palette: Some(Box::new(state.palette)),
+                        focus: Some(state.focus),
+                        ..Default::default()
+                    },
+                ));
+            cache.app.update();
+            let mut selected = FocusPage::new();
+            selected.receive(&cache.take(first));
+            assert_eq!(
+                selected.host.focused.borrow().len(),
+                1,
+                "live focus must still be delivered"
+            );
+            cache.app.world_mut().despawn(first);
+            let reopened = cache.page();
+            cache.app.world_mut().trigger(UiInput {
+                webview: reopened,
+                payload: vmux_api::PageReady {},
+            });
+            cache.app.update();
+            cache.app.update();
+            let bytes = cache.take(reopened);
+            let frame = rkyv::from_bytes::<
+                UiStateFrame<CommandBarUiState, vmux_api::command_bar::CommandBarUiStatePatch>,
+                rkyv::rancor::Error,
+            >(&bytes)
+            .unwrap();
+            let UiStateFrame::Snapshot(restored) = frame else {
+                panic!("cache restoration must provide a snapshot");
+            };
+            assert_eq!(restored.palette.projection.query, "kept draft");
+            assert_eq!(restored.palette.projection.composer.cwd, "/project");
+            let mut spare = FocusPage::new();
+            spare.receive(&bytes);
+            assert!(
+                spare.host.focused.borrow().is_empty(),
+                "a cached Start cannot claim another page's caret"
+            );
+            cache
+                .app
+                .world_mut()
+                .trigger(UiStateWrite::<CommandBarUiState>::from_event(
+                    reopened,
+                    &CommandBarFocusEffect { revision: 1 },
+                ));
+            cache.app.update();
+            spare.receive(&cache.take(reopened));
+            assert_eq!(
+                *spare.host.focused.borrow(),
+                [PROMPT_INPUT_ID],
+                "a new page's first focus request cannot be shadowed by cached revision 9"
+            );
+            assert_eq!(selected.host.focused.borrow().len(), 1);
+        }
+    }
 }

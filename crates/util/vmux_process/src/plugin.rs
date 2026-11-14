@@ -61,7 +61,7 @@ impl Plugin for ProcessPlugin {
 struct ProcessDriver(SyncCell<Process>);
 
 #[derive(Component, Clone)]
-struct ProcessShell(String);
+pub(crate) struct ProcessShell(String);
 
 #[derive(Component, Clone)]
 struct ProcessDirectory(String);

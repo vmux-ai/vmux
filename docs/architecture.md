@@ -445,6 +445,63 @@ bounds and cancellation/eviction. Adapters may hold handles, byte cursors, codec
 read-only output caches; they cannot own parallel normalized vmux state or product policy.
 Their `ecs-policy.ron` records are executable review metadata, not a second design document.
 
+Pointer selection enters the shared layout core through `SelectRequest`, including nested panes.
+Window-owned pointer and capture components retain consumed input; native callbacks retain only
+bounded raw samples, native handles and immutable routing hints.
+
+Start pages retain their last published Git result in page-owned `GitProjection` components;
+directory changes are read from canonical workspace context. Launcher `Selection` retains a raw
+worktree lease wait without restarting IO on every update. Managed destination paths normalize
+before lease lookup so alternate path spellings share the same cancellation and adoption scope. Transcript publication timing and
+deferred work belong to Session-owned `PushState` components. View-owned `Binding` children use
+`EntityTarget<Session>` and `ChildOf` to track initialization and disappear with `SessionView`.
+Serialized UI state is produced from those canonical bindings.
+
+Navigation preparation keeps workspace decisions in its registered system. Its scoped
+`TransitionProjection` adapter captures only the current page presentation for rollback and
+publishes empty/loading UI state; it cannot select a workspace or accept navigation.
+
+Transcript rendering retains only DOM key mappings for the currently rendered section, item and
+tool-row members. Each assignment replaces its mappings with the current projected members;
+unmount releases them. They preserve DOM anchors and disclosure identity without changing canonical
+conversation identities. Sticky prompt excerpts extract display text from the current prompt.
+File links encode projected paths and Cwd, and their context menu retains one selected URL per
+mounted menu. Tool output previews decode the external envelope only to display its first line;
+expanded output remains unchanged. Sidebar disclosure and static SVG icon paths belong to their
+mounted rendering adapters. Session-row clicks translate the current projected local/provider ID
+and native mouse gesture into existing page-navigation intent; host routing authorizes the result.
+
+Codex readers retain only bounded metadata hints for physical rollout lookup. Provider Source
+and Entry entities own native archive observations through shared provider IDs, `ArchivedAt` and
+`ArchiveObservedAt`; those observations remain separate from durable `ProviderArchive` user
+overrides. Generation-bound archive operations feed registered `ArchivesReceived` and
+`ArchiveWritten` receivers. They reject older work, preserve values during database failures and
+remove lost entries only after a successful catalog result. No mutable write overlay or cached
+provider row can override a newer canonical observation.
+
+`BlockingRuntime` and `GitRuntime` own bounded native executor pools. Their adapters retain
+only synchronous work queues, per-task result/cancel handles and native wake/context mechanics;
+domain adoption and revision decisions stay in the requesting ECS systems. Pool drop disconnects
+the sender and lets workers drain before exiting. Cancellation participation is counted per
+token, so dropping one of several tokens from a task does not remove its other live membership.
+
+Conversation materialization consumes typed ingress through registered message readers. Scoped
+query capabilities derive event, operation and native-alias lookups from canonical entities;
+those indexes are discarded after each ingress item. Event identities, timestamps, snapshot
+markers and presentation Order stay on event entities. The private exclusive `execute` system
+applies and flushes each mutation before processing the next input, including restored events
+without transient delivery state.
+
+Project pages carry their canonical `ProjectId`. Detail metadata and save updates are projected
+from registered names, directories and revisions. Page-owned choices retain read-only display
+results; current archive membership is applied again during projection. Catalog completions
+validate the page revision, identity and live IPC epoch before consuming their result.
+
+Space repository scans retain only path-bound Git metadata. The registered completion projects
+the current project rows through `ActiveProjectRows`; identity, nested-project filtering,
+deduplication and active selection never run in the background worker. Selection changes during
+a scan therefore use the latest canonical context when its result arrives.
+
 | Interface | Canonical input/output | Lifetime and permitted mechanics |
 |---|---|---|
 | AppKit/winit/CEF/UIKit input | window/surface-bound typed input -> canonical input state; ECS -> immutable native suppression/hit-test output | installed window/adapter generation; bounded raw mailbox, native handles and wake/reentrancy mechanics |
@@ -464,6 +521,21 @@ stale records fail closed. Existing exact fingerprints are frozen migration debt
 Git provenance, not permanent adapter exceptions; migrations remove them instead of extending
 the baseline. Final acceptance requires no remaining domain debt and a repeated caller/lifecycle
 audit. Structural checks supplement ownership review; they cannot prove business semantics.
+Embedded scripts connect to their adapters only through literal `include_str!` source edges.
+Test-only adapters cannot approve scripts consumed by production code, and shadowed macros or
+paths outside the inventoried source tree cannot establish that connection.
+Test-only IO and DOM harness helpers may consume an existing adapter's output only through an
+actual type reference and a current item-specific boundary with the same canonical endpoint.
+Missing, stale, unrelated and cyclic contracts cannot establish that fixture connection; production
+declarations still require their own canonical reference.
+Canonical `PageRegistration` entities retain immutable page descriptors, placement and framework
+reader/component pointers. Native WebView, context-provider and document-script adapters consume
+that registration metadata; their IPC epochs, DOM geometry and callback handles end with the
+mounted document. Page attribute inputs count only through the actual `vmux_page::page` macro and
+its typed `takes` argument. A name, string literal or shadowed macro cannot establish the link.
+Pre-world DOM fixture callers prove an actual Dioxus VirtualDom constructor and a test component
+that renders a production component. Their explicit helper contracts remain bound to that test
+invocation; a fake constructor, literal call text or unrelated renderer cannot establish ownership.
 Component lifecycle callbacks belong to their used Component through the actual hook metadata;
 unused components, Resource markers, unrelated attributes and test-only hooks cannot establish
 a runtime owner. Scoped aliases and generic callback paths resolve to their actual function.
@@ -605,6 +677,8 @@ entities plus the accepted changes; serialized Record values have no mutation or
 Removal first obtains ticket-bound root-relative path and imported-symlink facts. Project systems stage Hidden
 intents for unregistered aliases on the accepted proposal; the filesystem adapter never decides
 registration membership or mutates that snapshot. Alias lookup failure leaves committed state intact.
+The core routes attach selected external directories through managed aliases. Editor enriches
+Project display identity from Profile settings while preserving names at saved revisions.
 Filesystem jobs queue by canonical directory. Unstarted jobs are discarded when their owner
 changes; started atomic IO finishes before a replacement root reads that directory. Backend IO
 tasks therefore own their finite lifetime rather than being despawned with a requesting root.
@@ -689,7 +763,8 @@ set of crates.io packages. Publishing remains a separate release action.
 `vmux_app` is the composition entry point. Its optional `ecs`, `project`, `flex`, `layout`, and
 `extension` namespaces re-export their existing public types without wrappers. `contracts`
 enables shared wire values and the contracts of selected Project/Layout features; it does not
-install a renderer. Schema macros continue to name their owning crates. Core, jobs, Project,
+install a renderer. Layout wire contracts enable Project contracts for typed project IDs without
+enabling native or renderer adapters. Schema macros continue to name their owning crates. Core, jobs, Project,
 flex geometry, layout topology, and Extension catalog/operations are validated without Profile,
 CEF, Winit, or product UI. `extension-core` exposes the Extension namespace independently;
 `extension` composes its native browser/layout adapters explicitly.
@@ -762,6 +837,8 @@ The macOS desktop bundle is a regular application, with Dock and app-switcher pr
 opening it from another app's fullscreen Space returns to its own window's desktop Space.
 Only the embedded Service bundle uses `LSUIElement` for background operation, including in
 debug builds.
+Debug and local application names identify the source branch, falling back to the commit when
+detached. Release names remain `Vmux`.
 
 With native Glass installed, only its backdrop window casts the focus shadow; the transparent
 content window disables its own shadow to avoid a doubled outline. Systems without native Glass
@@ -781,6 +858,17 @@ Space IDs are global identities. Every window may attach its own `Space` view fo
 selecting a space that is not attached creates a fresh local tab and pane tree. Names, project
 settings, and history are shared by ID, while tabs, panes, focus, expansion, side sheets, and
 other layout state remain local to each window. Only the primary window's views persist.
+Bookmark cards start expanded. Their explicit open or closed choice is stored on the Space view,
+shared across its panes and tabs, and restored with the primary window's workspace.
+The side-sheet project selector opens on right-click as well as hover and offers the Projects
+collection directly. Its names and management requests use registered Project IDs. Renaming and
+removal share the Project store, while existing Tab directories and local files remain intact.
+The catalog renders registered Project records rather than inferring projects from directories.
+Workspace directory history only associates with existing registered Project IDs and never
+creates a Project or supplies catalog entries. Project creation requires an explicit add, create,
+import, or clone request. Legacy page URLs resolve to
+the registered identity where available. A missing local folder does not remove the Project or
+prevent opening its metadata page.
 
 Each feature has one `feature.ron`. It is the static source of truth for the interfaces that
 feature publishes:
@@ -799,14 +887,24 @@ surface and leaves `Current` untouched. Request IDs reject acknowledgements from
 Layout projections observe `Current` changes even when the requested metadata stays the same, so
 committing a presented surface clears the side sheet's pending-page indication immediately.
 Scroll and scroll-end events use asynchronous native delivery, coalesced to the latest position per
-element and event kind within one animation frame. Keyboard and pointer events retain synchronous
+element and event kind within one animation frame. Session wheel, touch, and scroll notifications
+share a 200 ms cadence; continuous input needs one host notification per gesture except at the
+upper history boundary. Native scrolling and sticky previews remain independent of host updates.
+Scroll-end flushes immediately, and a following keyboard or pointer event synchronously flushes
+the pending viewport position before navigation. These events retain synchronous
 replies for cancellation; queued scroll events are discarded when their document or interpreter
 changes, so native round trips cannot pause scrolling or affect a replaced page.
 The selected tab's favicon spinner follows the page after 150 ms of continued loading, avoiding
-brief flashes on fast local reloads without delaying the page. Reload then becomes a stop button;
+brief flashes on fast local reloads without delaying the page. Address breadcrumbs retain their
+normal page icons while loading. Reload then becomes a stop button;
 stopping cancels browser loading and rolls an uncommitted handoff back to its retained page.
 Inactive restored pages do not animate the selected page's controls. A selected Start page requests
 composer focus again when its document becomes ready, including a reused prewarmed page.
+Its first presented frame also requests composer focus for the selected launcher; hidden prewarmed
+pages and launchers transitioning into a Session cannot claim it. Start does not claim opening focus
+from palette initialization; host focus effects assign it to the selected composer.
+Command-bar snapshots retain drafts and workspace data while discarding focus effects before
+caching or replay, so another Start cannot inherit a caret claim or a larger focus revision.
 Loading feedback includes the reload revision and page URL in its identity, so a completed delay
 cannot light up the next reload of the same stack. External-page address rows keep their origin
 pill and text; their favicon remains in the tab.
@@ -938,9 +1036,11 @@ lifecycle in the current Stack so its Session target and runtime follow the sele
 Code bookmarks resolve their directory from the active worktree, owning project, or cwd and open
 its README or entry file; directory favicons identify the Code page. Layout and address state flush before native
 presentation in the same frame; the final flush retains updates arriving later.
-Project rows carry an identity separate from their checkout path. Space cards, composer chips,
-project pages and Session metadata use that identity for identicons; branch icons use the branch
-name consistently. Moving a Project between worktrees preserves its icon.
+Projects persist a stable ID and a shared display name; their directory and current checkout
+are attachments. Legacy path records acquire one ID shared across Spaces. Renaming updates every
+reference without changing cwd. Space cards and project pages use the ID for identicons; branch
+icons use the branch name. External directories open through managed imported links, including
+worktrees with a `.git` file; removing an imported link never removes its source directory.
 Spaces use their immutable Space ID for the same identicon in lists, menus and cards. Renaming
 changes only the display name, preserving tab membership and the icon. Commit selections use the
 full object ID for identicons in both the URL trail and its menu. An unselected Commits view picks
@@ -951,9 +1051,15 @@ remain available across project navigation, and completing a catalog refresh pre
 view rather than replacing it with the Project list.
 Search and page controls share `page::PageToolbarRow`, a 32 px row. Collection sidebars use the
 same default width as Code's file tree; their search and navigation icons share a 12 px left inset.
+Sidebar search rows and their adjacent toolbar reserve 44 px for consistent vertical spacing.
+Shared page sidebars collapse to a 40 px icon rail while keeping navigation interactive.
+Tools, Settings, Sessions and Projects use the same icon column; labels and counts fade away,
+and hover titles identify collapsed entries. The mounted search retains its draft and becomes inert.
 `manager::ManagerSearch` fills that row with 13 px text and a subtle focus surface, retaining its
 width and height during input. Editor tabs remain beside the sidebar search. The sidebar's scroll
-region starts below it. Filter menus use the shared popover layer and may extend beyond the
+region starts below it. A parent collection breadcrumb navigates back to its collection on click while retaining its
+hover switch menu; the current item remains a selector. Terminal parent-folder choices display an up arrow and the folder name.
+Filter menus use the shared popover layer and may extend beyond the
 sidebar without changing the search row, editor tabs, or content positions.
 Git's initial skeleton and loaded dashboard share the same split layout, sidebar width and
 toolbar rows; loading does not add a second breadcrumb header inside the page.
@@ -963,6 +1069,11 @@ discard old requests; effects observe the navigation revision and reissue their 
 Ordinary input remains blocked until the surface is interactive.
 Tab presses and Stack card clicks select immediately; host projection reconciles their local
 selection. Earlier acknowledgements cannot replace a newer pending selection.
+Zen retains a compact tab and Stack strip. The URL row has an independent visibility command.
+Header height, sidebar width, padding and their separating gap share one transition from current
+geometry; native window buttons follow the retained header. URL-only toggles preserve the rest
+of the layout, including unfinished transitions.
+
 UI motion is feedback rather than a completion condition. Selection, URL, focus, and the target
 layout commit in the input frame; no request waits for an animation, and fresh input supersedes
 an in-flight transition from its current visual state. Native layout and shared UI animations
@@ -971,22 +1082,77 @@ a 160 ms ceiling enforced at DOM animation transport boundaries. Reduced motion 
 state changes without visual interpolation. Same-document navigation and input-epoch changes
 retain in-flight edits and existing component scopes. The current document acknowledges a frame
 by its unique sequence after identity resynchronization, while old input and DOM requests remain
-rejected. Actual document replacement or failed edits still rebuild the document. Page replacement
-does not animate the whole surface or translate a shared composer; shared sidebar rows stay in
-place when page selection changes. Session detail-panel visibility belongs to the page shell,
+rejected. Actual document replacement or failed edits still rebuild the document. Start and Session
+pages share one native document surface; replacing their page root moves the shared composer from
+its previous rectangle into its final dock position within the layout motion budget. The layout,
+input identity, and first frame commit immediately, with no interpolation for reduced motion.
+The composer handoff follows root replacement even when frame identity has already resynchronized.
+Its browser regression test requires Chrome or Chromium (selectable with `CHROME_BIN`) and checks
+native geometry and animation completion alongside the protocol probes.
+Submitting on Start immediately appends the initial user message to the local conversation and
+queues the same payload for agent delivery. Service snapshots reconcile that message by its stable
+conversation event identity. The first transcript update binds the Session viewport before page
+readiness, so agent startup and response latency never hide an accepted prompt behind a skeleton.
+Shared sidebar rows stay in place when page selection changes. Session detail-panel visibility belongs to the page shell,
 and its geometry remains reserved while the selected session loads.
 Session viewports remember their scroll position and loaded-history start on the owning Session.
+History requests resolve that Session from the page URL before a runtime attaches. Input at the
+top boundary requests another history page even when no scroll event can fire. Initial tails retain
+any saved prompt preceding their first assistant turn, giving its sticky preview that context.
+Selecting a provider row navigates immediately to a pending Session page. Its source identity is
+encoded inside one URL segment, so it survives workspace restoration. That page keeps discovery
+active and resolves native and installed-agent aliases by family before importing the canonical
+Session. Metadata failure leaves a themed route back to the collection; navigating away cancels
+the pending activation.
+Readonly provider histories retain a backward cursor separately from the forward append cursor.
+The host requests bounded earlier pages even when the current messages form only one assistant
+turn. Prefix events use the common `Order` component while existing event IDs and server sequences
+remain intact. Source requests stay pending until the conversation confirms the prepend. Empty
+and already-cached chunks advance the cursor without producing duplicate messages.
 A floating composer overlaps the transcript's lower edge, with an input-inert surface gradient.
-Transcript end padding keeps the latest message clear of the composer and its fade.
+Transcript end padding keeps the latest message clear of the composer and its fade. Sessions owned
+by another client keep the disabled composer visible beneath its ownership notice, retaining its draft.
+Each prompt and its assistant turns share a section in that scroll surface. A compact sticky header
+shows that section's saved prompt after its start scrolls out of view; the next section replaces it.
+The preview reuses the normal user bubble and avatar over a fading surface background. Assistant
+responses stay in the transcript. The preview link pauses automatic following and returns to the
+original prompt. Existing item IDs remain scroll anchors; section keys survive earlier history so disclosure scopes
+stay mounted. Header visibility changes opacity without moving messages. Hidden previews are inert and
+excluded from accessibility.
+Source event IDs also identify individual turn rows and tools. A prepend preserves those row
+anchors even inside the same turn; tool batches retain their existing key, and reader-selected
+disclosure states are restored before scroll correction when a tool is reparented.
+Codex delegation results remain agent activity, retaining the original event identity and cached
+record. Their explicit input is an expandable agent message; it cannot become a user bubble or
+sticky prompt. Internal instructions remain hidden.
+`StickySections` shares one intersection observer per scroll
+surface, observes added history, and disconnects removed surfaces; it does not poll or rerender on scroll.
+The scroll surface has no top inset while pinned; initial spacing belongs to its content. Header
+projections rebuild only when their inputs, active surface, catalog, or ownership change. Completed
+Session transitions release the hidden launcher and its palette rather than rebuilding it on scroll.
+Pane clicks select their Stack through `ActivateRequest`, propagating selection through every
+ancestor before active branches and `ActiveStack` are computed in the same input frame.
+`layout.pane.focus_follows_mouse` controls hover selection; clicks ignore hover locks and cooldowns.
+Pointer hit testing is limited to the current Tab, and dragging does not change pane selection.
+Native pointer snapshots retain press coordinates across release so short clicks survive frame coalescing.
+macOS input routing hit-tests the actual native view before consulting cached layout pointer flags.
+Crossing between native page frames wakes layout once; pointer motion within a native page stays asleep.
+Scrolls delivered to a `WKWebView` do not request Bevy frames or start a CEF interaction burst;
+the page's bounded viewport notifications provide the host updates it needs.
+Closed command panels skip palette projection; reopening them resumes the normal composer projection.
+Transcript projection indexes tool call IDs and parent relationships once per turn rather than
+rescanning its blocks for every tool and result. Space, Session, project, branch, and Stack rows share one icon column;
+the internal Session UUID does not consume another sidebar line.
 A revisit restores that history window and reader position; the first visit follows the tail.
 Initial tail following remains active until user scroll input. Placeholder and zero-height scroll
 events neither finish placement nor replace the remembered reader position.
 Viewport updates validate the originating page URL and Session ID; where a canonical Session ID
 is available, transcript readiness is bound to it. These viewport records are transient.
-Discrete tabs and search widths change immediately. Removing a tab retains an inert, identifier-free
-copy of that specific tab for an 80 ms fade. Remaining tabs move from their previous rectangles
-within the 160 ms budget, while selection and the actual layout update immediately. Reduced motion
-skips both effects. A cached Stack returning from a hidden,
+Discrete tabs and search widths change immediately. New tabs fade into their final position;
+removal retains an inert, identifier-free copy for an 80 ms fade, including when the last tab removes
+the strip itself. Reordered and remaining tabs move from their previous rectangles, and selection
+interpolates the tab surface. All effects fit within 160 ms while actual layout and selection update
+immediately. Reduced motion skips the effects. A cached Stack returning from a hidden,
 zero-size frame restores its final rectangle immediately. Collapsible content may interpolate height
 within the shared layout budget. The editor sidebar keeps one panel icon in both states.
 Its width, short slide, and opacity use the
@@ -1407,13 +1573,19 @@ Each exposes the same two surfaces: a **broadcast channel** of updates, and a po
 **Terminal.** `portable_pty` opens the PTY and spawns the shell; a reader thread pumps its
 output through `alacritty_terminal`'s VTE engine into a cell grid. Each poll diffs the grid
 by row hash and broadcasts only the **changed lines**. The page applies each patch to
-per-row signals, so only those lines repaint. The daemon also owns what should outlive a
+per-row signals, so only those lines repaint. Measured cell and viewport dimensions are replayed
+when a retained page changes its host binding; unchanged geometry does not resend on ordinary renders.
+Native sizing uses the page's explicit viewport dimensions without requiring a CEF size component.
+The daemon also owns what should outlive a
 frame: OSC 133 command tracking, per-shell integration, copy-mode motions.
 OSC 7 reports the shell's current directory through the same process subscription used by local
 and remote terminals, independently of the launch directory. The Terminal breadcrumb shows that
 directory and lists alternatives through the daemon. Choosing a directory sends a shell-escaped
 `cd` only after the daemon verifies an empty prompt, unchanged directory and no intervening input;
 running commands and input in progress reject the request instead of queuing it for later.
+Nushell's generated init disables its built-in OSC 133 source before installing vmux hooks,
+so each command produces one pair of lifecycle events. Ctrl+L redraws without changing prompt readiness.
+Ctrl+C restores directory switching at the next prompt only when no newer input or queued command remains.
 Host input is one ordered ECS entity per write, related to its terminal until the process is
 ready. Multiple producers cannot overwrite one another through a singleton mailbox.
 
@@ -1479,7 +1651,11 @@ ACP enqueue work and only project completed results. Their repository discovery,
 aggregation, directory reads and path resolution use one bounded worker runtime with separate
 interactive and mutating-operation lanes. Repository refreshes are single-flight per checkout,
 inactive views release their watches and tasks, and watcher bursts coalesce into invalidations; the
-watcher never runs a Git command or filters paths synchronously. Each Git child process drains
+watcher never runs a Git command or filters paths synchronously.
+Git watch paths are registered in batches, with four repository subscriptions per maintenance pass,
+so an initial catalog cannot register every watch before returning to input. Session repository
+projection resolves each distinct working directory once per update.
+Each Git child process drains
 stdin, stdout and stderr concurrently, has bounded output and a timeout, and is terminated when its
 operation entity is discarded. Short metadata commands avoid a fixed wait; process polling backs
 off only while a command remains running. Catalogs and diffs page at their source, so opening a page cannot
@@ -1494,6 +1670,8 @@ older batches. Demand uses the actual visible range rather than the larger rende
 generation checks discard requests from replaced sources while allowing background revisions
 to advance without invalidating a path-specific request.
 File, staged-only, dirty-buffer and submodule comparisons share the disk-spooled review source.
+Uninitialized submodule directories never resolve as their parent repository during recursive
+branch reads. Loading diffs reserve multiple file cards with hunk-shaped placeholders.
 Syntax state and already generated lines are retained, while colors are generated only through
 the requested viewport and cancellation stops further work. Collapsed unchanged ranges use the
 same full-width hunk row and line-number gutter as the diff, with separate upward and downward
@@ -1832,6 +2010,16 @@ request and emits a typed creation event before navigation. Layout Stacks refere
 entity and may close without deleting it. `vmux://sessions/` opens the manager;
 `vmux://sessions/{session_id}` opens a Session independently of its agent or provider conversation
 identity. Session IDs are encoded as one URL path segment.
+Pending prompts are entities under a Session-owned queue root. Shared Order, PendingPrompt and
+PendingPromptAttachments carry content; QueuedPromptId and consumption/echo markers preserve
+FIFO, cancellation identity and one-time delivery. PromptQueue retains only queue control and
+root provenance. Registered queue observers and scoped system parameters perform mutations;
+the conversation UI receives a one-way snapshot of unconsumed, unacknowledged prompts.
+Accepted Session starts retain their request on an Operation entity until creation commits,
+fails or is canceled. A successful creation appends the first prompt before runtime attachment
+and marks that queued entity as already echoed, so later delivery and replay do not duplicate it.
+Launcher workspace selection likewise lives on the page as WorkspaceSelectionState. Start owns
+the transition and projects its status; Session submission consults that component directly.
 Session creation, metadata, stage, archive, workspace, and agent binding requests converge on one
 typed mutation commit path. It validates unique Session identity and the expected revision before
 changing state, then stores the operation UUID, payload, base revision, and committed revision on
@@ -1843,6 +2031,12 @@ their own contracts.
 Conversation events persist their identities, contents, timestamps, and source markers with the
 Session. Restore displays that history before runtime attachment; provider replay reconciles the
 same event identities without duplicating cached messages.
+
+Session video attachments and video paths in user text hydrate into render-only media URLs.
+The original prompt and persisted attachments remain unchanged. Each page retains registered
+file handles with opaque capabilities; dropping the final owner revokes access. A loopback
+endpoint streams bounded chunks and implements GET, HEAD and byte ranges for seeking. Paused
+video frames provide thumbnails, and playback starts only from the user control.
 
 `vmux_acp` attaches transient runtime and ACP capability state to Session entities and owns the
 provider-owned `AcpSessionId`, its persistence, and the single runtime detach path used by cleanup
@@ -1863,7 +2057,17 @@ ACP `session/list` is the primary provider catalog. The Sessions page starts eac
 long enough to enumerate its paginated catalog, then stops it; transport failure does not switch data
 sources. A bounded provider-store adapter is used only when no installed ACP owns that agent family
 or the ACP explicitly omits `session/list`. Browsing an external entry does not copy it into durable
-Vmux state. Resuming it creates the canonical Session entity, records its `AcpSessionId`, and lets
+Vmux state. `vmux_session::provider::Plugin`, composed by `DomainPlugin`, owns transient Source
+and Entry entities. Sources carry agent family, origin, discovery status and generation; entries
+are their children and compose shared provider IDs, Name, Cwd and timestamps. Catalog, archive
+and import requests retain generation-bound Operation entities. ACP and provider-store adapters
+return typed completions; registered Session systems reconcile canonical entries, preserve the
+last successful catalog on failure and reject stale archive results. Import validates its lease
+again in the mutation commit path, so canceled or replaced navigation cannot create a Session.
+Resume resolves an existing canonical Session before consulting the external catalog,
+so a retained row stays clickable during discovery. Provider identity keeps its row position and
+DOM scope when it becomes managed. Resuming a new entry creates the canonical Session entity,
+records its `AcpSessionId`, and lets
 the provider replay the conversation through `session/load`. Compatibility watches exist only while
 the Sessions page or one of their imported Sessions is present, debounce into one wake, rescan only
 the changed provider, and bound untrusted history traversal.
@@ -1943,6 +2147,17 @@ children distinguish external IDs from generation/byte/subrecord file positions;
 subrecords are separate from Assistant block slots. Identified tails use these exact aliases;
 anonymous overlap remains a bounded, ordered fallback for sources without position facts.
 
+Older native history uses the same Session-owned Read operation and Received ingress. A
+Session-owned Window keeps the accepted file generation, earlier byte/subrecord boundary,
+request identity and loading state; Page marks an operation as a prepend. Bounded IO validates
+the accepted file identity and prefix before reading the preceding page. Canonical ingestion
+preserves NativeAlias identities and gives newly discovered older events shared Order components,
+so existing messages, live replies and DOM anchors retain their identities. Failed or stale reads
+release loading without discarding the retry boundary. Visible panes may load history without
+keyboard focus; closing the final view cancels its task. Already cached pages advance automatically
+until new events or the first record is reached. The transcript publishes loading and oldest-page
+status from Window, and persists event order with the conversation.
+
 Native mutable history entries retain their IDs and update existing events without duplicating
 unchanged entries. A grouped native entry may span several canonical Assistant events. Partial
 shrink removes only its unshared imported block slots and remaps aliases; committed operations
@@ -1957,8 +2172,25 @@ Scrolling away from the bottom pauses following; input that leaves the viewport 
 keeps it pinned, and returning to the bottom resumes it. Older history is requested only after
 the initial scroll has settled. The latest tool batch stays expanded until every call has a result
 and subsequent assistant text arrives; earlier batches remain folded. Tool rows share native
-Claude/Vibe name classification and summarize wrapped Codex command batches as Ran, Explored,
-or Edited. Exploration exposes Read, Search, and List steps from the actual shell commands.
+Claude/Vibe name classification and summarize wrapped Codex command batches as Read, Ran,
+Explored, or Edited. Parsed exploration steps stay inside the call details. Output summaries show
+the first nonempty output line and retain the full text for expansion. Guardian rows report Codex's
+automatic action authorization checks and use a shield/check icon even when ACP classifies them
+as Think; ordinary thinking retains its brain icon.
+Folded tool rows and batches retain their file references, including reads inside Codex wrappers.
+File links retain the tool's working directory when available and otherwise use the Session's.
+Default file clicks preserve the conversation: a pane at least 1280 CSS pixels wide opens the editor
+to its right, reusing a sibling when present; a narrower or unmeasured pane opens a new Stack.
+The page-root DOM adapter retains only measured width. File clicks send that measurement and
+explicit modifier placement through `ChatToolFileOpen`; the registered host observer chooses
+the destination before forwarding the existing typed open request.
+Modifier gestures and the context menu retain explicit Stack, pane, and tab destinations.
+The file menu lives outside disclosure summaries, so selection cannot activate their click default.
+Disclosure toggles share a leading chevron and a 100 ms content transition, including closure and
+interrupted motion. SVG strokes share one path with each segment's origin reset, preserving relative
+move commands without overlapping opacity. Git body placeholders retain file headers and use four
+short bars. Workspace selection remains available when the current page has no assigned project.
+
 Session page roots install typed state listeners once. Child components read
 `UiStateBinding<T>::use_context` and selectors, so replacing a manager or detail subtree preserves
 the subscription and its retained state. Removing `SessionManagerView` immediately removes the
@@ -1972,6 +2204,8 @@ the root snapshot and listener error state; selectors still subscribe only to th
 
 The Session manager publishes only to its active page and leases Git metadata for every displayed
 repository while that page remains active.
+Focused pages retain those leases while their surface is being presented; losing both focus and
+presentation releases the watches without repeatedly restarting the filesystem watcher.
 Its first discovery reserves a skeleton in one persistent scroll surface until rows are available.
 Each provider publishes its completed catalog without waiting for other providers. Partial updates
 keep existing rows and append new identities; a completed discovery can remove
@@ -1989,9 +2223,23 @@ the refusal; a successful retry or an already-populated transcript discards a la
 Retry preserves its provider identity and replaces only the failed local runtime.
 Failed conversations release their transcript skeleton.
 Composer workspace context resolves the Session named by the page URL even before runtime attachment
-has bound the Stack. Unpublished context is retried after the first ready frame, so a late binding
-cannot leave project and branch controls as placeholders. Branch menus enqueue their checkout reads
+has bound the Stack. Its compact project and branch chips show that Session's working directory and
+uses the stored project name. Project and branch retain the standard separate composer chips.
+Existing Sessions expose this context without changing their workspace.
+Start's `workspace::Plugin` pins the transient `CommandBarWorkDirectory` on each attached launcher page
+from its pane or Tab default. It never adds the persisted `Cwd` component or `Save` to a page, and
+prewarmed pages wait for a Tab before binding. Project and branch choices update that page, preserving
+other composers and the Tab default. `Binding` orders
+directory selection before Start's payload projection; `CommandBarWorkspaceSelection` carries pending
+work and failures through `CommandBarUiState`. Branch preparation reuses the layout feature's managed
+checkout lifecycle and discards abandoned results. Failed choices retain the previous directory;
+pending or failed selections refuse submission. Submission uses the launcher's own Stack and pinned
+directory, even when another pane is active. Leaving Start releases the pin. Unpublished context is retried after
+the first ready frame. Branch menus enqueue their checkout reads
 through `vmux_git::GitRuntime` and finish empty results rather than leaving a loading request open.
+Stored orphan pages containing only directory, route metadata, and a parent link are discarded before
+ownership validation; other malformed records still refuse restoration. Unknown persisted builtin
+icons fall back in memory without discarding Bookmark or workspace records.
 Project dashboards and resume suggestions use the same catalog stage and staleness projection.
 Embedded Session groups show five entries at a time, with stale groups initially collapsed.
 Resume suggestions restrict host contributions to the visible entries, so keyboard selection
@@ -2034,6 +2282,10 @@ visible row immediately before DOM edits and restores its position before paint,
 replay an earlier scroll position over fresh input. A resize observer schedules following at browser
 frames instead of writing layout from its notification loop. Any upward reading movement stops
 following; only the actual bottom resumes it.
+
+Detail panels overlay narrow pages and sit beside wide transcripts, with their toggle kept clear
+of prompt avatars. Pane-divider dragging reads native cursor and button state in its owning window,
+and drag events wake layout updates even over hosted pages.
 
 Session failures with a useful remedy occupy a light notification strip in the composer's outer
 frame. The dark composer keeps its draft and metadata inside that frame. Busy sessions disable

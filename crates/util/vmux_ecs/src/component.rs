@@ -3,6 +3,14 @@ use bevy_reflect::{Reflect, std_traits::ReflectDefault};
 use std::path::PathBuf;
 use web_time::{SystemTime, UNIX_EPOCH};
 
+#[cfg(feature = "contracts")]
+#[derive(Component, Clone, Debug)]
+pub struct PendingPrompt(pub String);
+
+#[cfg(feature = "contracts")]
+#[derive(Component, Clone, Debug, Default)]
+pub struct PendingPromptAttachments(pub Vec<vmux_api::protocol::AgentAttachment>);
+
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, PartialOrd, Ord)]
 pub struct UnixMillis(pub i64);
 

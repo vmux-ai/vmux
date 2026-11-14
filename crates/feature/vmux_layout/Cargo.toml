@@ -8,7 +8,7 @@ build = "../../build_cfg_git.rs"
 
 [features]
 default = []
-contracts = ["dep:percent-encoding", "dep:rkyv", "dep:serde_json", "dep:vmux_api", "vmux_ecs/contracts"]
+contracts = ["dep:percent-encoding", "dep:rkyv", "dep:serde_json", "dep:vmux_api", "dep:vmux_project", "vmux_ecs/contracts"]
 geometry = ["dep:vmux_flex", "dep:bevy_transform"]
 store = ["vmux_ecs/store", "dep:moonshine-save"]
 host = [
@@ -36,6 +36,7 @@ vmux_ui = { path = "../../util/vmux_ui", default-features = false, optional = tr
 vmux_api = { path = "../../util/vmux_api", optional = true }
 vmux_session = { path = "../vmux_session", default-features = false, optional = true }
 vmux_git = { path = "../vmux_git", optional = true }
+vmux_project = { path = "../vmux_project", features = ["contracts"], optional = true }
 vmux_flex = { path = "../../util/vmux_flex", optional = true }
 bevy_transform = { version = "0.19.0", default-features = false, features = ["std", "bevy-support"], optional = true }
 moonshine-save = { workspace = true, optional = true }

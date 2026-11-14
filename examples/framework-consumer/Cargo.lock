@@ -2725,6 +2725,7 @@ dependencies = [
  "serde_json",
  "vmux_api",
  "vmux_ecs",
+ "vmux_project",
 ]
 
 [[package]]

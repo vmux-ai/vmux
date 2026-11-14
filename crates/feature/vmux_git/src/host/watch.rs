@@ -168,8 +168,16 @@ fn page_subscriptions_changed(
         || watch.is_some_and(|watch| watch.retry_due(Instant::now()))
 }
 
-fn repo_info_maintenance_needed(repo_info: Single<&RepoInfoCache>) -> bool {
+fn repo_info_maintenance_needed(
+    repo_info: Single<&RepoInfoCache>,
+    active: Query<(), ActivatedOwner>,
+    mut removed_presented: RemovedComponents<PagePresented>,
+    mut removed_focused: RemovedComponents<vmux_ecs::KeyboardOwner>,
+) -> bool {
     repo_info.maintenance_needed(Instant::now())
+        || !active.is_empty()
+        || removed_presented.read().next().is_some()
+        || removed_focused.read().next().is_some()
 }
 
 fn initialize(world: &mut World) {
@@ -266,9 +274,43 @@ enum GitFileWatcher {
 }
 
 impl GitFileWatcher {
-    fn watch(&mut self, path: &Path, mode: RecursiveMode) -> notify::Result<()> {
+    fn watch_targets(
+        &mut self,
+        targets: &[GitWatchTarget],
+        previous: &[GitWatchTarget],
+    ) -> notify::Result<()> {
+        if targets.is_empty() {
+            return Ok(());
+        }
         match self {
-            Self::Recommended(watcher) => watcher.watch(path, mode),
+            Self::Recommended(watcher) => {
+                let mut paths = watcher.paths_mut();
+                let mut added: Vec<&Path> = Vec::new();
+                for target in targets {
+                    let mode = if target.recursive {
+                        RecursiveMode::Recursive
+                    } else {
+                        RecursiveMode::NonRecursive
+                    };
+                    if let Err(error) = paths.add(&target.path, mode) {
+                        for path in &added {
+                            let _ = paths.remove(path);
+                        }
+                        for target in previous {
+                            let mode = if target.recursive {
+                                RecursiveMode::Recursive
+                            } else {
+                                RecursiveMode::NonRecursive
+                            };
+                            let _ = paths.add(&target.path, mode);
+                        }
+                        let _ = paths.commit();
+                        return Err(error);
+                    }
+                    added.push(target.path.as_path());
+                }
+                paths.commit()
+            }
             #[cfg(test)]
             Self::Test => Ok(()),
         }
@@ -456,11 +498,15 @@ struct RepoInfoLease {
     active_only: bool,
 }
 
+type ActiveOwner = Or<(With<PagePresented>, With<vmux_ecs::KeyboardOwner>)>;
+type ActivatedOwner = Or<(Added<PagePresented>, Added<vmux_ecs::KeyboardOwner>)>;
+
 const REPO_INFO_IDLE_TTL: Duration = Duration::from_secs(300);
 const WATCH_RETRY_DELAY: Duration = Duration::from_secs(1);
 const REPO_INFO_OWNER_PATH_LIMIT: usize = 256;
 const REPO_INFO_CACHE_CAPACITY: usize = 1024;
 const REPO_INFO_LOAD_BUDGET: usize = 16;
+const REPO_INFO_WATCH_BUDGET: usize = 4;
 
 #[derive(Component)]
 pub struct RepoInfoCache {
@@ -472,10 +518,21 @@ pub struct RepoInfoCache {
     leases: HashMap<Entity, RepoInfoLease>,
     maintenance_dirty: bool,
     next_gc: Instant,
+    watch_cursor: usize,
     wake: Option<bevy::winit::EventLoopProxy<WinitUserEvent>>,
 }
 
 impl RepoInfoCache {
+    fn evict_inactive(&mut self, watch: &mut GitWatch, active: &HashSet<PathBuf>) {
+        for path in self.inactive_paths(active) {
+            if let Some(targets) = watch.repo_info_subscriptions.remove(&path) {
+                watch.remove_repo_info_owner(&path, &targets);
+                watch.release_targets(&targets);
+            }
+            self.remove(&path);
+        }
+    }
+
     fn new(wake: Option<bevy::winit::EventLoopProxy<WinitUserEvent>>) -> Self {
         Self {
             entries: HashMap::new(),
@@ -486,6 +543,7 @@ impl RepoInfoCache {
             leases: HashMap::new(),
             maintenance_dirty: true,
             next_gc: Instant::now() + REPO_INFO_IDLE_TTL,
+            watch_cursor: 0,
             wake,
         }
     }
@@ -1181,24 +1239,21 @@ impl GitWatch {
             );
             return false;
         }
-        let mut acquired = Vec::new();
+        let missing = targets
+            .iter()
+            .filter(|target| !self.watch_references.contains_key(*target))
+            .cloned()
+            .collect::<Vec<_>>();
+        let previous = self.watch_references.keys().cloned().collect::<Vec<_>>();
+        if self.watcher.watch_targets(&missing, &previous).is_err() {
+            return false;
+        }
         for target in targets {
             if let Some(references) = self.watch_references.get_mut(target) {
                 *references += 1;
-                acquired.push(target.clone());
                 continue;
             }
-            let mode = if target.recursive {
-                RecursiveMode::Recursive
-            } else {
-                RecursiveMode::NonRecursive
-            };
-            if self.watcher.watch(&target.path, mode).is_err() {
-                self.release_targets(&acquired);
-                return false;
-            }
             self.watch_references.insert(target.clone(), 1);
-            acquired.push(target.clone());
         }
         true
     }
@@ -1306,20 +1361,6 @@ impl GitWatch {
             if let Some(entry) = repo_info.entries.get_mut(&path) {
                 entry.watch_attempted = false;
             }
-        }
-    }
-
-    fn evict_inactive_repo_info(
-        &mut self,
-        repo_info: &mut RepoInfoCache,
-        active: &HashSet<PathBuf>,
-    ) {
-        for path in repo_info.inactive_paths(active) {
-            if let Some(targets) = self.repo_info_subscriptions.remove(&path) {
-                self.remove_repo_info_owner(&path, &targets);
-                self.release_targets(&targets);
-            }
-            repo_info.remove(&path);
         }
     }
 
@@ -1719,14 +1760,14 @@ fn info(
     watch: Option<NonSendMut<GitWatch>>,
     mut repo_info: Single<&mut RepoInfoCache>,
     entities: Query<(), ()>,
-    presented_owners: Query<(), With<PagePresented>>,
+    active_owners: Query<(), ActiveOwner>,
     deadline: Option<Res<GitWatchDeadline>>,
     proxy: Option<Res<EventLoopProxyWrapper>>,
 ) {
     let repo_info = repo_info.bypass_change_detection();
     let now = Instant::now();
     repo_info.leases.retain(|owner, lease| {
-        entities.contains(*owner) && (!lease.active_only || presented_owners.contains(*owner))
+        entities.contains(*owner) && (!lease.active_only || active_owners.contains(*owner))
     });
     let active = repo_info
         .leases
@@ -1743,8 +1784,8 @@ fn info(
         return;
     };
     watch.release_inactive_repo_info(repo_info, &active);
-    watch.evict_inactive_repo_info(repo_info, &active);
-    let paths: Vec<PathBuf> = repo_info
+    repo_info.evict_inactive(&mut watch, &active);
+    let mut paths: Vec<PathBuf> = repo_info
         .entries
         .iter()
         .filter_map(|(path, entry)| {
@@ -1753,7 +1794,13 @@ fn info(
         })
         .collect();
     let mut retry_watch = false;
-    for path in paths {
+    let pending_watch = paths.len() > REPO_INFO_WATCH_BUDGET;
+    if !paths.is_empty() {
+        let start = repo_info.watch_cursor % paths.len();
+        paths.rotate_left(start);
+        repo_info.watch_cursor = start + REPO_INFO_WATCH_BUDGET;
+    }
+    for path in paths.into_iter().take(REPO_INFO_WATCH_BUDGET) {
         let info = repo_info
             .entries
             .get(&path)
@@ -1767,6 +1814,9 @@ fn info(
     repo_info.schedule_next_gc(&active, now);
     if retry_watch {
         repo_info.next_gc = repo_info.next_gc.min(now + WATCH_RETRY_DELAY);
+    }
+    if pending_watch && !retry_watch {
+        repo_info.next_gc = repo_info.next_gc.min(now + Duration::from_millis(16));
     }
     repo_info.maintenance_dirty = false;
     schedule_repo_info_deadline(deadline.as_deref(), proxy.as_deref(), repo_info);
@@ -1794,6 +1844,51 @@ mod tests {
 
     use super::*;
     use crate::host::repository::test_repo;
+
+    #[test]
+    fn failed_watch_batches_preserve_previously_registered_files() {
+        let retained = tempfile::tempdir().unwrap();
+        let added = tempfile::tempdir().unwrap();
+        let (sender, receiver) = mpsc::channel();
+        let watcher = notify::recommended_watcher(move |event: notify::Result<notify::Event>| {
+            if let Ok(event) = event {
+                let _ = sender.send(event.paths);
+            }
+        })
+        .unwrap();
+        let mut watcher = GitFileWatcher::Recommended(watcher);
+        let previous = GitWatchTarget {
+            path: retained.path().to_path_buf(),
+            recursive: true,
+            kind: GitWatchKind::Worktree,
+        };
+        watcher
+            .watch_targets(std::slice::from_ref(&previous), &[])
+            .unwrap();
+        let targets = [
+            GitWatchTarget {
+                path: added.path().to_path_buf(),
+                recursive: true,
+                kind: GitWatchKind::Worktree,
+            },
+            GitWatchTarget {
+                path: added.path().join("missing"),
+                recursive: true,
+                kind: GitWatchKind::Worktree,
+            },
+        ];
+        assert!(watcher.watch_targets(&targets, &[previous]).is_err());
+        std::fs::write(retained.path().join("retained.txt"), "changed").unwrap();
+        let deadline = Instant::now() + Duration::from_secs(3);
+        loop {
+            let paths = receiver
+                .recv_timeout(deadline.saturating_duration_since(Instant::now()))
+                .expect("the original file watch must survive a failed batch");
+            if paths.iter().any(|path| path.ends_with("retained.txt")) {
+                break;
+            }
+        }
+    }
 
     #[test]
     fn git_watch_targets_cover_index_and_refs() {
@@ -2115,6 +2210,69 @@ mod tests {
     }
 
     #[test]
+    fn focused_pages_retain_repo_watches_until_they_lose_focus_and_presentation() {
+        let repository = test_repo::init();
+        let path = PathIdentity::resolve(repository.path()).into_path_buf();
+        let loaded = super::super::worktree::RepoInfo::read(&path).unwrap();
+        let mut app = App::new();
+        app.add_plugins((MinimalPlugins, WatchPlugin));
+        app.update();
+        app.insert_non_send(GitWatch::test());
+        let owner = app.world_mut().spawn(vmux_ecs::KeyboardOwner).id();
+        let cache = app
+            .world_mut()
+            .query_filtered::<Entity, With<RepoInfoCache>>()
+            .single(app.world())
+            .unwrap();
+        app.world_mut()
+            .get_mut::<RepoInfoCache>(cache)
+            .unwrap()
+            .entries
+            .insert(
+                path.clone(),
+                RepoInfoCacheEntry {
+                    info: Some(loaded),
+                    loaded: true,
+                    dirty: false,
+                    branches_dirty: false,
+                    watch_attempted: false,
+                    last_accessed: Instant::now(),
+                    pending: None,
+                },
+            );
+        for _ in 0..3 {
+            app.world_mut()
+                .get_mut::<RepoInfoCache>(cache)
+                .unwrap()
+                .observe_active(owner, &path);
+            app.update();
+            assert!(
+                app.world()
+                    .non_send::<GitWatch>()
+                    .repo_info_subscriptions
+                    .contains_key(&path)
+            );
+            assert!(
+                app.world()
+                    .get::<RepoInfoCache>(cache)
+                    .unwrap()
+                    .leases
+                    .contains_key(&owner)
+            );
+        }
+        app.world_mut()
+            .entity_mut(owner)
+            .remove::<vmux_ecs::KeyboardOwner>();
+        app.update();
+        assert!(
+            !app.world()
+                .non_send::<GitWatch>()
+                .repo_info_subscriptions
+                .contains_key(&path)
+        );
+    }
+
+    #[test]
     fn inactive_repo_info_entries_release_their_watch_targets() {
         let active_repo = test_repo::init();
         let stale_repo = test_repo::init();
@@ -2157,7 +2315,7 @@ mod tests {
         assert!(watch.subscribe_repo_info(&stale_path, Some(&stale_info)));
 
         let active = HashSet::from([active_path.clone()]);
-        watch.evict_inactive_repo_info(&mut cache, &active);
+        cache.evict_inactive(&mut watch, &active);
 
         assert!(cache.entries.contains_key(&active_path));
         assert!(!cache.entries.contains_key(&stale_path));

@@ -1,6 +1,6 @@
 #![allow(non_snake_case)]
 
-use self::agent::ChatHeader;
+use self::agent::DetailsToggle;
 use self::approval::ChatApprovalDock;
 use self::composer::ChatDock;
 use self::item::MD_CSS;
@@ -12,6 +12,7 @@ use dioxus::prelude::*;
 pub use manager::SessionCollection;
 
 mod activity;
+mod conversation;
 mod format;
 
 #[vmux_page::page(
@@ -20,12 +21,14 @@ mod format;
     subtree,
     preserve_title,
     no_favicon,
+    document_url = "vmux://start/",
     takes = vmux_ecs::PageMetadata
 )]
 pub(crate) struct ChatPage;
 
 #[component]
 pub fn Page() -> Element {
+    vmux_ui::hooks::use_theme();
     vmux_ui::hooks::use_ui_state::<crate::state::ChatUiState>();
     vmux_ui::hooks::use_ui_state::<crate::state::SessionCatalogUiState>();
     vmux_ui::hooks::use_ui_state::<crate::state::SessionDetailUiState>();
@@ -38,6 +41,7 @@ pub fn Page() -> Element {
             let session_id = id.0;
             rsx! { SessionDetail { key: "{session_id}", session_id, details_open } }
         }
+        Some(vmux_session::Route::Provider { kind, sid }) => rsx! { PendingSession { kind, sid } },
         None => {
             let session_id = String::new();
             rsx! { SessionDetail { key: "{session_id}", session_id, details_open } }
@@ -46,8 +50,40 @@ pub fn Page() -> Element {
 }
 
 #[component]
+fn PendingSession(kind: String, sid: String) -> Element {
+    let detail =
+        vmux_ui::hooks::UiStateBinding::<crate::state::SessionDetailUiState>::use_context();
+    let failed = detail
+        .state
+        .read()
+        .pending_provider
+        .as_ref()
+        .is_some_and(|provider| provider.kind == kind && provider.sid == sid && provider.failed);
+    rsx! {
+        main { class: "session-chat-page flex h-dvh flex-col overflow-hidden bg-background text-foreground",
+            div { class: "mx-auto w-full max-w-3xl px-3 pt-3 sm:px-4 md:px-6",
+                if failed {
+                    vmux_ui::components::notice::Notice {
+                        message: vmux_ui::i18n::translate("sessions-history-unavailable"),
+                        kind: vmux_ui::components::notice::NoticeKind::Warning,
+                        actions: rsx! { vmux_ui::components::button::Button {
+                            onclick: move |_| vmux_ui::navigation::PageNavigation::replace(vmux_session::Route::Manager.url()),
+                            {vmux_ui::i18n::translate("sessions-title")}
+                        } },
+                    }
+                } else {
+                    transcript::TranscriptSkeleton {}
+                }
+            }
+        }
+    }
+}
+
+#[component]
 fn SessionDetail(session_id: String, mut details_open: Signal<bool>) -> Element {
+    use_hook(vmux_ui::components::motion::Disclosure::install);
     let chat = use_chat(session_id.clone());
+    let file_placement = FilePlacement::provide();
     let detail =
         vmux_ui::hooks::UiStateBinding::<crate::state::SessionDetailUiState>::use_context();
     let keys = use_chat_keys(chat);
@@ -70,8 +106,10 @@ fn SessionDetail(session_id: String, mut details_open: Signal<bool>) -> Element 
     let details_available = details.is_some();
 
     rsx! {
+        item::ToolFileMenu {
         main {
             class: "session-chat-page relative isolate flex h-dvh flex-col overflow-hidden bg-background text-foreground outline-none",
+            onresize: move |event: Event<ResizeData>| file_placement.resize(&event.data()),
             style: "--agent-accent:{accent.css};",
             tabindex: "-1",
             onkeydown: move |event| {
@@ -81,14 +119,14 @@ fn SessionDetail(session_id: String, mut details_open: Signal<bool>) -> Element 
                 keys.on_root_keydown(event);
             },
             style { dangerous_inner_html: MD_CSS }
+            DetailsToggle {
+                details_available,
+                details_open: details_open(),
+                on_details_toggle: move |_| details_open.set(!details_open()),
+            }
             div { class: "flex min-h-0 flex-1 overflow-hidden",
-                section { class: "flex min-w-0 flex-1 flex-col",
-                    ChatHeader {
-                        details_available,
-                        details_open: details_open(),
-                        on_details_toggle: move |_| details_open.set(!details_open()),
-                    }
-                    ChatTranscript { chat }
+                section { class: "relative flex min-w-0 flex-1 flex-col",
+                    ChatTranscript { chat, reserve_details_toggle: !details_open() }
                     div {
                         class: "relative isolate z-20 -mt-8 before:pointer-events-none before:absolute before:inset-x-0 before:-top-12 before:bottom-0 before:-z-10 before:bg-[linear-gradient(to_bottom,transparent,var(--background)_3rem)]",
                         ChatApprovalDock { chat }
@@ -97,9 +135,9 @@ fn SessionDetail(session_id: String, mut details_open: Signal<bool>) -> Element 
                 }
                 div {
                     class: if details_open() {
-                        "hidden h-full min-h-0 shrink-0 overflow-hidden opacity-100 transition-[width,opacity,transform] duration-200 ease-out motion-reduce:transition-none lg:flex lg:w-[19rem] lg:translate-x-0"
+                        "visible absolute inset-y-0 right-0 z-40 flex h-full min-h-0 w-[min(19rem,100%)] shrink-0 overflow-hidden bg-background opacity-100 transition-[width,opacity,transform,visibility] duration-200 ease-out motion-reduce:transition-none lg:static lg:w-[19rem] lg:translate-x-0"
                     } else {
-                        "pointer-events-none hidden h-full min-h-0 shrink-0 translate-x-3 overflow-hidden opacity-0 transition-[width,opacity,transform] duration-200 ease-out motion-reduce:transition-none lg:flex lg:w-0"
+                        "invisible pointer-events-none absolute inset-y-0 right-0 z-40 flex h-full min-h-0 w-[min(19rem,100%)] shrink-0 translate-x-full overflow-hidden bg-background opacity-0 transition-[width,opacity,transform,visibility] duration-200 ease-out motion-reduce:transition-none lg:static lg:w-0 lg:translate-x-3"
                     },
                     aria_hidden: (!details_open()).to_string(),
                     if let Some((session, repository, stages)) = details {
@@ -113,6 +151,7 @@ fn SessionDetail(session_id: String, mut details_open: Signal<bool>) -> Element 
                     }
                 }
             }
+        }
         }
     }
 }
@@ -129,3 +168,19 @@ mod manager_model;
 mod scroll;
 mod state;
 mod transcript;
+
+#[derive(Clone, Copy)]
+pub(super) struct FilePlacement(Signal<f64>);
+
+impl FilePlacement {
+    pub(super) fn provide() -> Self {
+        let placement = Self(use_signal(|| 0.0));
+        use_context_provider(|| placement)
+    }
+
+    pub(super) fn resize(mut self, data: &ResizeData) {
+        if let Ok(size) = data.get_content_box_size() {
+            self.0.set(size.width);
+        }
+    }
+}

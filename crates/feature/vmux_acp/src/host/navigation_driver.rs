@@ -12,7 +12,7 @@ use vmux_flex::Visibility;
 use vmux_layout::space::FocusedSpace;
 use vmux_layout::tab::{Tab, TabWorkspace};
 use vmux_session::host::{SessionManagerView, SessionView};
-use vmux_session::{AgentConversationTitle, AgentId, PromptQueue, Route, Session, SessionId};
+use vmux_session::{AgentConversationTitle, AgentId, QueuedPrompts, Route, Session, SessionId};
 use vmux_setting::AppSettings;
 use vmux_ui::i18n::translate;
 
@@ -56,7 +56,7 @@ pub(super) struct PageOpener<'w, 's> {
     tabs: Query<'w, 's, &'static mut Tab>,
     workspaces: Query<'w, 's, &'static mut TabWorkspace>,
     handoffs: Query<'w, 's, &'static mut vmux_layout::hosted_page::SurfaceHandoff>,
-    queues: Query<'w, 's, &'static mut PromptQueue>,
+    queues: QueuedPrompts<'w, 's>,
     transcripts: vmux_session::Transcripts<'w, 's>,
     pub(super) commands: Commands<'w, 's>,
     pub(super) settings: Res<'w, AppSettings>,
@@ -147,6 +147,10 @@ impl PageOpener<'_, '_> {
             Route::Manager => {
                 let url = Route::manager_url(&task.url).unwrap_or_else(|| Route::Manager.url());
                 self.open_manager(task, transition_webview, &url);
+                Ok(PageOpenCompletion::Complete)
+            }
+            Route::Provider { .. } => {
+                self.open_provider(task, transition_webview);
                 Ok(PageOpenCompletion::Complete)
             }
             Route::Session(id) => {
@@ -336,6 +340,40 @@ impl PageOpener<'_, '_> {
         ));
     }
 
+    fn open_provider(&mut self, task: &PageOpenTask, transition_webview: Option<Entity>) {
+        let title = translate("sessions-title");
+        self.retarget_handoff(transition_webview, task.id);
+        let view = transition_webview.unwrap_or_else(|| {
+            let previous = self.previous_surfaces(task.stack, None);
+            for surface in &previous {
+                self.commands
+                    .entity(*surface)
+                    .try_insert(vmux_layout::hosted_page::SurfaceBlocked);
+            }
+            self.commands
+                .spawn((
+                    vmux_layout::Browser::hosted_page(&task.url, &title),
+                    self.new_handoff(previous, task.id),
+                    SessionView,
+                    ChildOf(task.stack),
+                ))
+                .insert(Visibility::Hidden)
+                .id()
+        });
+        self.commands
+            .entity(view)
+            .remove::<SessionManagerView>()
+            .insert((
+                PageMetadata {
+                    url: task.url.clone(),
+                    title,
+                    bg_color: None,
+                    icon: default(),
+                },
+                SessionView,
+            ));
+    }
+
     fn open_session_view(
         &mut self,
         task: &PageOpenTask,
@@ -452,13 +490,8 @@ impl PageOpener<'_, '_> {
                 .entity(session)
                 .insert((title, vmux_session::TitlePending));
         }
-        if let Ok(mut queue) = self.queues.get_mut(session) {
-            queue.enqueue_with_attachments(prompt, initial_attachments);
-        } else {
-            let mut queue = PromptQueue::default();
-            queue.enqueue_with_attachments(prompt, initial_attachments);
-            self.commands.entity(session).insert(queue);
-        }
+        self.queues
+            .enqueue(session, prompt, initial_attachments, false);
         self.commands
             .entity(stack)
             .remove::<(PendingPrompt, PendingPromptAttachments)>();

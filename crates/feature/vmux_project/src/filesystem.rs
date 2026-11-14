@@ -1024,6 +1024,17 @@ mod tests {
     }
 
     #[test]
+    fn existing_folders_require_explicit_project_registration() {
+        let root = tempfile::tempdir().unwrap();
+        let directory = root.path().join("folder-name");
+        std::fs::create_dir_all(directory.join(".git")).unwrap();
+        let mut store = Store::at(root.path());
+        assert!(store.snapshot().projects.is_empty());
+        store.save("vmux://projects/identity", 0, "Logical project", &directory);
+        assert_eq!(store.snapshot().projects.len(), 1);
+    }
+
+    #[test]
     fn existing_ron_registrations_restore_into_project_components() {
         let root = tempfile::tempdir().unwrap();
         let directory = root.path().join("repo");

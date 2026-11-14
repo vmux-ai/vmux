@@ -1,6 +1,56 @@
 pub struct ProjectRoute;
 
 impl ProjectRoute {
+    #[cfg(feature = "filesystem")]
+    pub fn attach(
+        root: &std::path::Path,
+        directory: &std::path::Path,
+    ) -> Result<String, crate::Error> {
+        std::fs::create_dir_all(root)
+            .map_err(|error| crate::Error::Unavailable(error.to_string()))?;
+        let root = root
+            .canonicalize()
+            .map_err(|error| crate::Error::Unavailable(error.to_string()))?;
+        let selected = directory
+            .canonicalize()
+            .map_err(|error| crate::Error::Unavailable(error.to_string()))?;
+        if !selected.is_dir() {
+            return Err(crate::Error::InvalidName);
+        }
+        if let Some(url) = Self::from_path(&root, &selected) {
+            return Ok(url);
+        }
+        let imports = root.join("imported");
+        std::fs::create_dir_all(&imports)
+            .map_err(|error| crate::Error::Unavailable(error.to_string()))?;
+        let name = selected
+            .file_name()
+            .and_then(|name| name.to_str())
+            .ok_or(crate::Error::InvalidName)?;
+        for suffix in 1..=999 {
+            let candidate = if suffix == 1 {
+                imports.join(name)
+            } else {
+                imports.join(format!("{name}-{suffix}"))
+            };
+            if candidate.canonicalize().ok().as_deref() == Some(&selected) {
+                return Self::from_path(&root, &candidate).ok_or(crate::Error::InvalidName);
+            }
+            if std::fs::symlink_metadata(&candidate).is_ok() {
+                continue;
+            }
+            #[cfg(unix)]
+            std::os::unix::fs::symlink(&selected, &candidate)
+                .map_err(|error| crate::Error::Unavailable(error.to_string()))?;
+            #[cfg(not(unix))]
+            return Err(crate::Error::Unavailable(
+                "directory attachments are unavailable on this platform".to_string(),
+            ));
+            return Self::from_path(&root, &candidate).ok_or(crate::Error::InvalidName);
+        }
+        Err(crate::Error::Duplicate)
+    }
+
     pub const ROOT: &'static str = "vmux://projects/";
 
     pub fn is_page(value: &str) -> bool {
@@ -15,6 +65,35 @@ impl ProjectRoute {
 #[cfg(all(test, feature = "filesystem", unix))]
 mod tests {
     use super::*;
+
+    #[test]
+    fn directory_attachments_open_managed_external_and_worktree_paths() {
+        let root = tempfile::tempdir().unwrap();
+        let external = tempfile::tempdir().unwrap();
+        let managed = root.path().join("managed");
+        std::fs::create_dir(&managed).unwrap();
+        let worktree = external.path().join("worktree");
+        std::fs::create_dir(&worktree).unwrap();
+        std::fs::write(
+            worktree.join(".git"),
+            "gitdir: /tmp/repository/worktrees/test",
+        )
+        .unwrap();
+        for path in [&managed, &worktree, &external.path().to_path_buf()] {
+            let url = ProjectRoute::attach(root.path(), path).unwrap();
+            assert_eq!(
+                ProjectRoute::resolve(&url, root.path()).unwrap().unwrap(),
+                path.canonicalize().unwrap()
+            );
+            assert_eq!(ProjectRoute::attach(root.path(), path).unwrap(), url);
+        }
+        assert_eq!(
+            std::fs::read_dir(root.path().join("imported"))
+                .unwrap()
+                .count(),
+            2
+        );
+    }
 
     #[test]
     fn route_round_trips_a_project_path() {

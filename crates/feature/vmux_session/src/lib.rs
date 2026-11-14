@@ -16,6 +16,8 @@ pub use conversation::{
     MaterializedEvent, Member, MessageContent, MessageDelivery, OperationCommitted,
     OperationReceived, SnapshotReceived, Transcript, TranscriptReadySet, Transcripts,
 };
+#[cfg(host)]
+pub use history::{MoreRequest as ConversationHistoryMoreRequest, Window as ConversationHistory};
 #[cfg(feature = "app")]
 pub use host::SessionPlugin;
 #[cfg(host)]
@@ -28,12 +30,12 @@ pub use model::{
     ProviderStageChangeRequest, RenameRequest, Session, SessionDuplicate, SourceUpdatedAt, Stage,
     StageChangeRequest, StageChangedAt, StageDefinition, StageId,
 };
+pub use queue::{
+    PromptQueue, QueuePlugin, QueuedPrompt, QueuedPromptId, QueuedPromptReads, QueuedPrompts,
+};
 pub use route::Route;
 pub use run_state::{AgentTurnMeta, Failure, FailureKind, RunState};
-pub use session::{
-    AgentConversationTitle, ApprovalPolicy, PromptQueue, QueuedPrompt, TitlePending,
-    TranscriptLoading,
-};
+pub use session::{AgentConversationTitle, ApprovalPolicy, TitlePending, TranscriptLoading};
 pub use title::ConversationTitle;
 pub use vmux_api::session::SessionId;
 
@@ -51,6 +53,7 @@ pub mod activity;
 pub mod event;
 #[cfg(feature = "app")]
 pub mod host;
+pub mod queue;
 pub mod run_state;
 #[cfg(feature = "app")]
 pub mod selector;
@@ -84,6 +87,9 @@ impl Plugin for DomainPlugin {
     fn build(&self, app: &mut App) {
         if !app.is_plugin_added::<provider::Plugin>() {
             app.add_plugins(provider::Plugin);
+        }
+        if !app.is_plugin_added::<QueuePlugin>() {
+            app.add_plugins(QueuePlugin);
         }
         app.add_plugins((
             model::EntityPlugin,

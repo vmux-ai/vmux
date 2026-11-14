@@ -5203,10 +5203,21 @@ dependencies = [
 ]
 
 [[package]]
-name = "inotify-sys"
-version = "0.1.5"
+name = "inotify"
+version = "0.11.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e05c02b5e89bff3b946cedeca278abc628fe811e604f027c45a8aa3cf793d0eb"
+checksum = "4cc00ea907cab49550b7da656f80ebb97be1b997d931fbcd28d39734e17ce592"
+dependencies = [
+ "bitflags 2.11.1",
+ "inotify-sys",
+ "libc",
+]
+
+[[package]]
+name = "inotify-sys"
+version = "0.1.8"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "c033f80b2c113cdf91ab7a33faa9cbc014726dcad99880c8609af2a370edf37d"
 dependencies = [
  "libc",
 ]
@@ -5887,6 +5898,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "50b7e5b27aa02a74bac8c3f23f448f8d87ff11f92d3aac1a6ed369ee08cc56c1"
 dependencies = [
  "libc",
+ "log",
  "wasi 0.11.1+wasi-snapshot-preview1",
  "windows-sys 0.61.2",
 ]
@@ -6213,13 +6225,41 @@ dependencies = [
  "crossbeam-channel",
  "filetime",
  "fsevent-sys",
- "inotify",
+ "inotify 0.9.6",
  "kqueue",
  "libc",
  "log",
  "mio 0.8.11",
  "walkdir",
  "windows-sys 0.48.0",
+]
+
+[[package]]
+name = "notify"
+version = "8.2.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "c41a04a5f59df9322cc657286dd2d79f90816119b22c5f847607c850110205ab"
+dependencies = [
+ "bitflags 2.11.1",
+ "inotify 0.11.5",
+ "kqueue",
+ "libc",
+ "log",
+ "mio 1.2.0",
+ "notify-types",
+ "objc2-core-foundation",
+ "objc2-core-services",
+ "walkdir",
+ "windows-sys 0.61.2",
+]
+
+[[package]]
+name = "notify-types"
+version = "2.3.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "8c491a384baf9fec20df565cdb8138a12809d4c7439763b566eb8114c5d59979"
+dependencies = [
+ "bitflags 2.11.1",
 ]
 
 [[package]]
@@ -6552,6 +6592,16 @@ dependencies = [
  "objc2-core-audio-types",
  "objc2-core-foundation",
  "objc2-core-video",
+]
+
+[[package]]
+name = "objc2-core-services"
+version = "0.3.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "583300ad934cba24ff5292aee751ecc070f7ca6b39a574cc21b7b5e588e06a0b"
+dependencies = [
+ "libc",
+ "objc2-core-foundation",
 ]
 
 [[package]]
@@ -10235,7 +10285,7 @@ dependencies = [
  "image",
  "mockito",
  "moonshine-save",
- "notify",
+ "notify 6.1.1",
  "reqwest",
  "rfd 0.15.4",
  "rkyv",
@@ -10466,7 +10516,7 @@ dependencies = [
  "image",
  "libc",
  "muda 0.19.2",
- "notify",
+ "notify 6.1.1",
  "objc2 0.6.4",
  "objc2-app-kit 0.3.2",
  "objc2-av-foundation",
@@ -10574,7 +10624,7 @@ dependencies = [
  "image",
  "lsp-types",
  "moonshine-save",
- "notify",
+ "notify 6.1.1",
  "percent-encoding",
  "pulldown-cmark",
  "regex",
@@ -10673,7 +10723,7 @@ dependencies = [
  "dioxus",
  "dioxus-ssr",
  "libc",
- "notify",
+ "notify 8.2.2",
  "percent-encoding",
  "rfd 0.15.4",
  "rkyv",
@@ -10742,7 +10792,7 @@ dependencies = [
  "bevy_ecs",
  "bevy_reflect",
  "moonshine-save",
- "notify",
+ "notify 6.1.1",
  "rkyv",
  "serde",
  "serde_json",
@@ -10795,6 +10845,7 @@ dependencies = [
  "vmux_input",
  "vmux_page",
  "vmux_path",
+ "vmux_project",
  "vmux_session",
  "vmux_tool",
  "vmux_ui",
@@ -10818,11 +10869,13 @@ dependencies = [
 name = "vmux_macro"
 version = "0.0.35"
 dependencies = [
+ "dioxus-rsx",
  "heck 0.5.0",
  "proc-macro2",
  "quote",
  "ron 0.12.1",
  "serde",
+ "serde_json",
  "syn 2.0.117",
 ]
 
@@ -11078,12 +11131,13 @@ dependencies = [
  "bevy_ecs",
  "dioxus",
  "dioxus-ssr",
- "notify",
+ "notify 6.1.1",
  "rkyv",
  "ron 0.12.1",
  "serde",
  "serde_json",
  "tempfile",
+ "uuid",
  "vmux_api",
  "vmux_command",
  "vmux_ecs",
@@ -11160,6 +11214,7 @@ dependencies = [
  "serde",
  "serde_json",
  "tempfile",
+ "uuid",
  "vmux_api",
  "vmux_command",
  "vmux_ecs",
@@ -11169,6 +11224,7 @@ dependencies = [
  "vmux_layout",
  "vmux_page",
  "vmux_path",
+ "vmux_project",
  "vmux_session",
  "vmux_setting",
  "vmux_tool",
@@ -11193,10 +11249,12 @@ dependencies = [
  "bevy_ecs",
  "dioxus",
  "dioxus-primitives",
+ "moonshine-save",
  "rfd 0.15.4",
  "rkyv",
  "serde",
  "serde_json",
+ "tempfile",
  "vmux_api",
  "vmux_command",
  "vmux_ecs",
@@ -11370,7 +11428,7 @@ dependencies = [
  "bevy_ecs",
  "chrono",
  "dioxus",
- "notify",
+ "notify 6.1.1",
  "parking_lot",
  "rfd 0.15.4",
  "ring",

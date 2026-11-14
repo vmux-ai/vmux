@@ -174,7 +174,11 @@ impl PageMessage {
                     self.outbox.set_title(title);
                 }
             }
-            PageReport::Favicon(href) => self.outbox.set_favicon(href),
+            PageReport::Favicon(href) => {
+                if self.page.get().favicon {
+                    self.outbox.set_favicon(href);
+                }
+            }
             PageReport::Interaction => self.lifecycle.update(LifecycleUpdate::PageInteracted),
             PageReport::History(direction) => self
                 .lifecycle
@@ -296,6 +300,10 @@ mod tests {
     }
 
     static TEST_PAGE: Page = Page::pane("vmux://test/", TestPage);
+    static SESSION_PAGE: Page = Page::pane("vmux://sessions/", TestPage)
+        .served_from("vmux://start/")
+        .without_favicon()
+        .preserving_host_title();
 
     fn emitted(id: &str) -> String {
         let envelope = BinIpcEnvelope::new(id, &[]);
@@ -395,6 +403,26 @@ mod tests {
                 LifecycleUpdate::HistoryRequested(HistoryDirection::Forward),
             ],
         );
+    }
+
+    #[test]
+    fn a_shared_document_cannot_replace_the_sessions_host_metadata() {
+        let outbox = Rc::new(RecordedOutbox::default());
+        let lifecycle = Rc::new(TestLifecycle);
+        let message = PageMessage::new(
+            Rc::new(Cell::new(&SESSION_PAGE)),
+            outbox.clone(),
+            Rc::new(Cell::new(1)),
+            Rc::new(Cell::new(1)),
+            Rc::new(Cell::new(false)),
+            PendingReads::new(lifecycle.clone()),
+            Rc::new(TestWake),
+            lifecycle,
+        );
+        message.receive("vmux://start/", "1:1:title:Start");
+        message.receive("vmux://start/", "1:1:favicon:vmux://start/favicon.svg");
+        assert!(outbox.titles.borrow().is_empty());
+        assert!(outbox.favicons.borrow().is_empty());
     }
 
     #[test]

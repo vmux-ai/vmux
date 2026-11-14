@@ -11,7 +11,7 @@ use std::time::Duration;
 use std::time::UNIX_EPOCH;
 
 use vmux_api::session::{AssistantBlock, Message, ToolKind};
-use vmux_session::history::{FileFacts, Received};
+use vmux_session::history::{Boundary as HistoryBoundary, FileFacts, Received};
 
 use super::{BoundedLines, PROVIDER_LINE_LIMIT, PROVIDER_READ_LIMIT};
 
@@ -477,17 +477,20 @@ impl FileConversation {
                 && physical_length >= known.length
                 && prefix.starts_with(&known.prefix)
         });
-        let incremental = cursor.filter(|cursor| {
-            unchanged
-                && *cursor <= length
-                && length.saturating_sub(*cursor) <= PROVIDER_READ_LIMIT as u64
-        });
+        let incremental = cursor.filter(|cursor| unchanged && *cursor <= length);
         let tail = incremental.is_none();
         let start = incremental.unwrap_or_else(|| length.saturating_sub(tail_bytes));
+        let end = if tail {
+            length
+        } else {
+            start.saturating_add(Self::TAIL_BYTES).min(length)
+        };
+        let start_aligned = Self::line_boundary(&mut file, start)?;
+        let end_aligned = Self::line_boundary(&mut file, end)?;
         file.seek(SeekFrom::Start(start))
             .map_err(|error| error.to_string())?;
-        let mut reader = BufReader::new(file.take(length.saturating_sub(start)));
-        let skipped = if tail && start > 0 {
+        let mut reader = BufReader::new(file.take(end.saturating_sub(start)));
+        let skipped = if start > 0 && !start_aligned {
             reader
                 .skip_until(b'\n')
                 .map_err(|error| error.to_string())? as u64
@@ -497,11 +500,18 @@ impl FileConversation {
         let base = start.saturating_add(skipped);
         let mut messages = VecDeque::new();
         let mut lines = BoundedLines::new(reader);
+        let mut discarded = false;
+        let mut partial_start = None;
         while let Some(line) = lines.next() {
             let position = base.saturating_add(lines.line_start() as u64);
+            if !end_aligned && base.saturating_add(lines.consumed() as u64) == end {
+                partial_start = Some(position);
+                break;
+            }
             for (subrecord, message) in decoder.messages(&line).into_iter().enumerate() {
                 if tail && messages.len() == Self::TAIL_MESSAGES {
                     messages.pop_front();
+                    discarded = true;
                 }
                 messages.push_back((message, (position, subrecord)));
             }
@@ -512,15 +522,32 @@ impl FileConversation {
         let cursor = if tail {
             length
         } else {
-            base.saturating_add(lines.consumed() as u64).min(length)
+            partial_start.unwrap_or_else(|| base.saturating_add(lines.consumed() as u64).min(end))
         };
         let mut history = Received::messages(Vec::new(), tail);
+        let before = if tail && (discarded || start > 0) {
+            messages
+                .front()
+                .map(|(_, (byte, message))| HistoryBoundary {
+                    byte: *byte,
+                    message: *message,
+                })
+                .or_else(|| {
+                    (start > 0).then_some(HistoryBoundary {
+                        byte: start,
+                        message: 0,
+                    })
+                })
+        } else {
+            None
+        };
         let mut positions = Vec::with_capacity(messages.len());
         for (message, position) in messages {
             history.entries.push((None, message));
             positions.push(position);
         }
         history.file = Some(FileFacts {
+            before,
             identity,
             prefix,
             length: physical_length,
@@ -534,6 +561,171 @@ impl FileConversation {
             cursor,
             complete: cursor == length,
         })
+    }
+
+    pub(super) fn before(
+        path: &Path,
+        boundary: vmux_session::history::Boundary,
+        known: Option<&FileFacts>,
+        mut decoder: impl Decoder,
+    ) -> Result<ReadResult, String> {
+        let mut file = File::open(path).map_err(|error| error.to_string())?;
+        let metadata = file.metadata().map_err(|error| error.to_string())?;
+        let length = metadata.len();
+        let identity = Self::identity(path, &metadata)?;
+        let mut prefix = Vec::new();
+        Read::by_ref(&mut file)
+            .take(4096)
+            .read_to_end(&mut prefix)
+            .map_err(|error| error.to_string())?;
+        if boundary.byte > length
+            || known.is_some_and(|known| {
+                known.identity != identity
+                    || length < known.length
+                    || !prefix.starts_with(&known.prefix)
+            })
+        {
+            return Err("provider history changed during pagination".into());
+        }
+        let end = if boundary.message > 0 {
+            file.seek(SeekFrom::Start(boundary.byte))
+                .map_err(|error| error.to_string())?;
+            let mut line = Vec::new();
+            let size = BufReader::new(Read::by_ref(&mut file).take(PROVIDER_LINE_LIMIT as u64 + 1))
+                .read_until(b'\n', &mut line)
+                .map_err(|error| error.to_string())?;
+            boundary.byte.saturating_add(size as u64).min(length)
+        } else {
+            boundary.byte
+        };
+        let mut position = end;
+        let mut scanned = 0u64;
+        let mut line = Vec::new();
+        let mut oversized = false;
+        let mut ignore = boundary.message == 0 && !Self::line_boundary(&mut file, boundary.byte)?;
+        let mut records = VecDeque::new();
+        let mut block = [0u8; 64 * 1024];
+        'scan: while position > 0 {
+            let start = position.saturating_sub(block.len() as u64);
+            let count = (position - start) as usize;
+            file.seek(SeekFrom::Start(start))
+                .map_err(|error| error.to_string())?;
+            file.read_exact(&mut block[..count])
+                .map_err(|error| error.to_string())?;
+            for index in (0..count).rev() {
+                let at = start + index as u64;
+                scanned += 1;
+                position = at;
+                if block[index] == b'\n' {
+                    if !ignore && !oversized && !line.is_empty() {
+                        line.reverse();
+                        if let Ok(text) = std::str::from_utf8(&line) {
+                            let messages = decoder.messages(text);
+                            for (message, content) in messages.into_iter().enumerate().rev() {
+                                let record = HistoryBoundary {
+                                    byte: at + 1,
+                                    message,
+                                };
+                                if record < boundary {
+                                    records.push_front((record, content));
+                                    if records.len() == Self::TAIL_MESSAGES {
+                                        break 'scan;
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    line.clear();
+                    oversized = false;
+                    ignore = false;
+                    if scanned >= Self::TAIL_BYTES {
+                        break 'scan;
+                    }
+                } else if !ignore && !oversized {
+                    if line.len() == PROVIDER_LINE_LIMIT {
+                        line.clear();
+                        oversized = true;
+                    } else {
+                        line.push(block[index]);
+                    }
+                }
+                if scanned >= Self::TAIL_BYTES && (ignore || oversized) {
+                    break 'scan;
+                }
+            }
+        }
+        if position == 0
+            && !ignore
+            && !oversized
+            && !line.is_empty()
+            && records.len() < Self::TAIL_MESSAGES
+        {
+            line.reverse();
+            if let Ok(text) = std::str::from_utf8(&line) {
+                for (message, content) in decoder.messages(text).into_iter().enumerate().rev() {
+                    let record = HistoryBoundary { byte: 0, message };
+                    if record < boundary {
+                        records.push_front((record, content));
+                        if records.len() == Self::TAIL_MESSAGES {
+                            break;
+                        }
+                    }
+                }
+            }
+        }
+        let before = if records.len() == Self::TAIL_MESSAGES {
+            records
+                .front()
+                .map(|(position, _)| *position)
+                .filter(|position| position.byte != 0 || position.message != 0)
+        } else if position > 0 {
+            Some(records.front().map_or(
+                HistoryBoundary {
+                    byte: position,
+                    message: 0,
+                },
+                |(position, _)| *position,
+            ))
+        } else {
+            None
+        };
+        if before.is_some_and(|before| before >= boundary) {
+            return Err("provider history pagination did not advance".into());
+        }
+        let mut history = Received::messages(Vec::new(), true);
+        let mut positions = Vec::with_capacity(records.len());
+        for (position, message) in records {
+            history.entries.push((None, message));
+            positions.push((position.byte, position.message));
+        }
+        let cursor = known.map_or(length, |known| known.cursor);
+        history.file = Some(FileFacts {
+            identity,
+            prefix,
+            length,
+            cursor,
+            positions,
+            before,
+        });
+        Ok(ReadResult {
+            path: Some(path.to_path_buf()),
+            history,
+            watch_paths: Vec::new(),
+            cursor,
+            complete: true,
+        })
+    }
+
+    fn line_boundary(file: &mut File, position: u64) -> Result<bool, String> {
+        if position == 0 {
+            return Ok(true);
+        }
+        file.seek(SeekFrom::Start(position - 1))
+            .map_err(|error| error.to_string())?;
+        let mut byte = [0];
+        file.read_exact(&mut byte)
+            .map_err(|error| error.to_string())?;
+        Ok(byte[0] == b'\n')
     }
 
     fn identity(path: &Path, metadata: &Metadata) -> Result<String, String> {
@@ -615,5 +807,116 @@ impl<'a> JsonText<'a> {
             serde_json::Value::Number(_) | serde_json::Value::Bool(_) => self.0.to_string(),
             serde_json::Value::Null => String::new(),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_page_aligned_with_the_first_prompt_keeps_it_through_ignored_records() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("history.jsonl");
+        let prompt = "{\"role\":\"user\",\"content\":\"First prompt\"}\n";
+        let answer = "{\"role\":\"assistant\",\"content\":\"Latest answer\"}\n";
+        let head = "{\"isMeta\":true,\"padding\":\"";
+        let end = "\"}\n";
+        let filler = "x"
+            .repeat(FileConversation::TAIL_BYTES as usize - prompt.len() - head.len() - end.len());
+        std::fs::write(&path, format!("{{}}\n{prompt}{head}{filler}{end}{answer}")).unwrap();
+        let mut read =
+            FileConversation::read(&path, None, None, FileConversation::TAIL_BYTES, ChatDecoder)
+                .unwrap();
+        let mut found = read.messages();
+        while let Some(boundary) = read.history.file.as_ref().and_then(|file| file.before) {
+            read = FileConversation::before(&path, boundary, None, ChatDecoder).unwrap();
+            found.extend(read.messages());
+        }
+        assert!(found.contains(&Message::user("First prompt")));
+    }
+
+    #[test]
+    fn an_incremental_chunk_boundary_keeps_a_partial_jsonl_message() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("history.jsonl");
+        std::fs::write(&path, "{\"role\":\"user\",\"content\":\"Original\"}\n").unwrap();
+        let original =
+            FileConversation::read(&path, None, None, FileConversation::TAIL_BYTES, ChatDecoder)
+                .unwrap();
+        let expected = "A normal message crossing the bounded read window".repeat(8);
+        let record = format!(
+            "{{\"role\":\"user\",\"content\":{}}}\n",
+            serde_json::to_string(&expected).unwrap()
+        );
+        let mut file = std::fs::OpenOptions::new()
+            .append(true)
+            .open(&path)
+            .unwrap();
+        file.write_all(&vec![b'x'; FileConversation::TAIL_BYTES as usize - 65])
+            .unwrap();
+        file.write_all(b"\n").unwrap();
+        file.write_all(record.as_bytes()).unwrap();
+        file.write_all(b"{\"role\":\"assistant\",\"content\":\"Final answer\"}\n")
+            .unwrap();
+        drop(file);
+        let mut read = original;
+        let mut messages = Vec::new();
+        for _ in 0..4 {
+            let next = FileConversation::read(
+                &path,
+                Some(read.cursor),
+                read.history.file.as_ref(),
+                FileConversation::TAIL_BYTES,
+                ChatDecoder,
+            )
+            .unwrap();
+            messages.extend(next.messages());
+            assert!(next.cursor > read.cursor);
+            let complete = next.complete;
+            read = next;
+            if complete {
+                break;
+            }
+        }
+        assert!(read.complete);
+        assert_eq!(
+            messages,
+            [
+                Message::user(expected),
+                Message::Assistant {
+                    blocks: vec![AssistantBlock::Text("Final answer".into())]
+                }
+            ]
+        );
+    }
+
+    #[test]
+    fn a_large_append_keeps_reading_from_the_accepted_cursor() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("history.jsonl");
+        std::fs::write(&path, "{\"role\":\"user\",\"content\":\"Original\"}\n").unwrap();
+        let original =
+            FileConversation::read(&path, None, None, FileConversation::TAIL_BYTES, ChatDecoder)
+                .unwrap();
+        let mut file = std::fs::OpenOptions::new().write(true).open(&path).unwrap();
+        let length = original.cursor + PROVIDER_READ_LIMIT as u64 + 1024;
+        file.set_len(length).unwrap();
+        file.seek(SeekFrom::Start(original.cursor)).unwrap();
+        file.write_all(b"{\"role\":\"user\",\"content\":\"New request\"}\n")
+            .unwrap();
+        file.seek(SeekFrom::Start(length - 1)).unwrap();
+        file.write_all(b"\n").unwrap();
+        let read = FileConversation::read(
+            &path,
+            Some(original.cursor),
+            original.history.file.as_ref(),
+            FileConversation::TAIL_BYTES,
+            ChatDecoder,
+        )
+        .unwrap();
+        assert!(!read.history.tail);
+        assert_eq!(read.messages(), [Message::user("New request")]);
+        assert!(read.cursor > original.cursor && read.cursor < length);
     }
 }

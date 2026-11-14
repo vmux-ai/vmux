@@ -671,6 +671,9 @@ agent-tool-explored = Explorou
 agent-tool-explore-read = Leu { $path }
 agent-tool-explore-search = Buscar { $query } em { $path }
 agent-tool-explore-list = Listar { $path }
+agent-tool-open-in-pane-right = Abrir no painel à direita
+agent-tool-open-in-stack = Abrir em uma nova pilha
+agent-tool-open-in-tab = Abrir em uma nova aba
 agent-thinking = Pensando
 agent-subagent = Subagente
 agent-prompt = Prompt
@@ -1125,3 +1128,24 @@ project-new-repository = Repositório vazio
 project-local-folder = Pasta local
 project-github-repository = Repositório do GitHub
 project-edit-conflict = Este projeto mudou. Abra o editor novamente.
+
+agent-video-play = Reproduzir vídeo
+
+command-toggle-url-bar = Layout > Layout > Alternar barra de endereço
+
+project-rename = Renomear projeto
+project-all = Todos os projetos
+project-remove = Remover projeto
+project-remove-description = Remover da lista de projetos. Os arquivos locais são mantidos.
+
+agent-tool-slept = Aguardou
+
+project-directory-unavailable = O diretório do projeto está indisponível
+
+session-turn-view-prompt = Ver solicitação
+session-turn-view-response = Ver resposta
+agent-incoming-message = Mensagem do agente
+
+schema-focus-follows-mouse = O foco segue o mouse
+
+terminal-directory-input-pending = Conclua ou cancele o comando ou a entrada atual antes de mudar de diretório.

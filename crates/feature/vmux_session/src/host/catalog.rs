@@ -827,7 +827,7 @@ impl SessionDetailUiState {
     ) -> Self {
         let id = match Route::parse(&page.url) {
             Some(Route::Session(id)) => id.0,
-            Some(Route::Manager) | None => return Self::default(),
+            Some(Route::Manager | Route::Provider { .. }) | None => return Self::default(),
         };
         let session = catalog
             .sessions
@@ -842,6 +842,7 @@ impl SessionDetailUiState {
             repository,
             stages: catalog.stages.clone(),
             navigation: Navigation::project(catalog, repositories),
+            pending_provider: None,
         }
     }
 }
@@ -1011,7 +1012,11 @@ fn sync_repositories(
         (),
         (
             With<KeyboardOwner>,
-            Or<(Added<SessionCatalogUiStateComponent>, Added<KeyboardOwner>)>,
+            Or<(
+                Added<SessionCatalogView>,
+                Added<SessionDetailView>,
+                Added<KeyboardOwner>,
+            )>,
             Or<(With<SessionCatalogView>, With<SessionDetailView>)>,
         ),
     >,
@@ -1027,19 +1032,28 @@ fn sync_repositories(
     }
     if let Some(cache) = cache.as_mut() {
         let cache = cache.bypass_change_detection();
-        let paths = catalog
-            .sessions
-            .iter()
-            .filter(|session| !session.cwd.is_empty())
-            .map(|session| PathBuf::from(&session.cwd))
-            .collect::<Vec<_>>();
+        let mut paths = Vec::new();
+        let mut unique = HashSet::new();
+        for session in &catalog.sessions {
+            if !session.cwd.is_empty() && unique.insert(&session.cwd) {
+                paths.push(PathBuf::from(&session.cwd));
+            }
+        }
         for owner in &active {
             cache.observe_active_paths(owner, paths.iter().cloned());
         }
     }
     let mut sessions = Vec::with_capacity(catalog.sessions.len());
+    let mut directories: HashMap<(&str, bool), SessionRepository> = HashMap::new();
     let projects_root = projects.path().ok();
     for session in &catalog.sessions {
+        let key = (session.cwd.as_str(), session.managed);
+        if let Some(repository) = directories.get(&key) {
+            let mut repository = repository.clone();
+            repository.id = session.id.clone();
+            sessions.push(repository);
+            continue;
+        }
         let path = Path::new(&session.cwd);
         let info = cache
             .as_mut()
@@ -1070,6 +1084,7 @@ fn sync_repositories(
                     .unwrap_or_default(),
             },
         };
+        directories.insert(key, repository.clone());
         sessions.push(repository);
     }
     let next = SessionRepositories {

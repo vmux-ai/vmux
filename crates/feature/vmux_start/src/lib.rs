@@ -22,6 +22,9 @@ mod host;
 #[cfg(host)]
 mod branches;
 
+#[cfg(host)]
+mod workspace;
+
 pub mod roster;
 
 #[cfg(host)]

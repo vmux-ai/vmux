@@ -1,9 +1,8 @@
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
 use bevy::ecs::system::SystemParam;
 use bevy::prelude::*;
-use bevy::tasks::{IoTaskPool, Task, futures_lite::future};
-use bevy_cef::prelude::{UiEventPlugin, UiInput};
+use bevy_cef::prelude::UiInput;
 use vmux_api::chat::{SlashCommand, SlashCommandEntry};
 use vmux_api::command_bar::{CommandBarOpenEvent, CommandBarPromptContext, OpenId};
 use vmux_api::open_target::OpenTarget;
@@ -13,12 +12,11 @@ use vmux_command::{
     ContributedPage,
 };
 use vmux_command::{CommandBarOpenProjection, CommandBarProjector};
-use vmux_ecs::KeyboardOwner;
 use vmux_ecs::PageMetadata;
 use vmux_ecs::manifest::FeaturePlugin;
+use vmux_ecs::{KeyboardOwner, PagePresented};
 use vmux_ui::i18n::Locale;
 
-use crate::event::StartSelectWorkspace;
 use vmux_ecs::launcher::{HostsLauncher, InlineTransitionRequested};
 use vmux_layout::settings::ResolvedLocale;
 use vmux_layout::tab::{Tab, TabWorkspace, TabWorktree};
@@ -41,19 +39,18 @@ impl Plugin for StartPlugin {
         .add_systems(Startup, prewarm)
         .add_systems(
             Update,
-            (mark_launcher, begin_inline, ApplyDeferred, sync_pages).chain(),
+            (
+                mark_launcher.before(crate::workspace::Binding),
+                begin_inline,
+                ApplyDeferred,
+                sync_pages.after(crate::workspace::Binding),
+            )
+                .chain(),
         );
-        app.add_plugins(UiEventPlugin::<(
-            StartSelectWorkspace,
-            vmux_api::command_bar::StartGoToBranch,
-        )>::default())
-            .add_observer(select_workspace)
-            .add_observer(go_to_branch)
-            .add_observer(apply_chosen_project)
+        app.add_plugins((crate::workspace::Plugin, crate::branches::Plugin))
             .add_observer(focus_command_bar)
             .add_observer(focus_ready)
-            .add_plugins(crate::branches::Plugin)
-            .add_systems(Update, finish_workspace_pickers);
+            .add_systems(PostUpdate, focus_presented);
     }
 }
 
@@ -68,6 +65,9 @@ fn prewarm(mut commands: Commands) {
 
 #[derive(Component)]
 struct StartWorkSynced;
+
+#[derive(Component)]
+struct GitProjection(Option<vmux_git::worktree::RepoInfo>);
 
 #[derive(Component, Default)]
 struct CommandBarFocusRevision(u64);
@@ -85,14 +85,10 @@ struct CommandBarFocusRequested {
     webview: Entity,
 }
 
-#[derive(Component)]
-struct PendingStartWorkspacePicker {
-    tab: Entity,
-    task: Task<Option<(PathBuf, bool)>>,
-}
-
 #[derive(SystemParam)]
 struct StartPromptContext<'w, 's> {
+    directories: Query<'w, 's, Ref<'static, vmux_command::CommandBarWorkDirectory>>,
+    parents: Query<'w, 's, &'static ChildOf>,
     tabs: Query<
         'w,
         's,
@@ -132,8 +128,23 @@ impl StartPromptContext<'_, '_> {
         }
     }
 
-    fn changed(&self, tab: Option<Entity>) -> bool {
-        if self.context.is_changed()
+    fn tab(&self, webview: Entity) -> Option<Entity> {
+        let mut current = webview;
+        for _ in 0..32 {
+            if self.tabs.contains(current) {
+                return Some(current);
+            }
+            current = self.parents.get(current).ok()?.parent();
+        }
+        None
+    }
+
+    fn changed(&self, webview: Entity, tab: Option<Entity>) -> bool {
+        if self
+            .directories
+            .get(webview)
+            .is_ok_and(|cwd| cwd.is_changed())
+            || self.context.is_changed()
             || self.pages.is_changed()
             || self.projects.is_changed()
             || self.work.is_changed()
@@ -150,7 +161,10 @@ impl StartPromptContext<'_, '_> {
         })
     }
 
-    fn cwd(&self, tab: Option<Entity>) -> String {
+    fn cwd(&self, webview: Entity, tab: Option<Entity>) -> String {
+        if let Ok(cwd) = self.directories.get(webview) {
+            return cwd.0.clone();
+        }
         let Some(tab) = tab else {
             return String::new();
         };
@@ -169,21 +183,16 @@ impl StartPromptContext<'_, '_> {
 
     fn context(
         &self,
+        webview: Entity,
         tab: Option<Entity>,
         info: Option<&vmux_git::worktree::RepoInfo>,
     ) -> CommandBarPromptContext {
-        let Some(tab) = tab else {
-            return Self::unrooted();
-        };
-        let Ok((_, _, worktree)) = self.tabs.get(tab) else {
-            return Self::unrooted();
-        };
-        let cwd = self.cwd(Some(tab));
+        let cwd = self.cwd(webview, tab);
         if cwd.is_empty() {
             return Self::unrooted();
         }
         let path = Path::new(&cwd);
-        let is_git_repo = info.is_some() || worktree.is_some() || path.join(".git").exists();
+        let is_git_repo = info.is_some() || path.join(".git").exists();
         let named = match info {
             Some(info) => info.project_name(),
             None => path
@@ -198,10 +207,7 @@ impl StartPromptContext<'_, '_> {
             is_git_repo,
             is_worktree: info.is_some_and(|info| info.is_worktree),
             branch: info.map(|info| info.branch.clone()).unwrap_or_default(),
-            base_ref: worktree
-                .as_ref()
-                .map(|worktree| worktree.base_ref.clone())
-                .unwrap_or_default(),
+            base_ref: info.map(|info| info.base_ref.clone()).unwrap_or_default(),
             uncommitted: info.map(|info| info.uncommitted).unwrap_or(0),
             ahead: info.map(|info| info.ahead).unwrap_or(0),
             projects: Vec::new(),
@@ -214,8 +220,9 @@ impl StartPromptContext<'_, '_> {
         projector: &CommandBarProjector,
         tabs: &TabGather,
         active_tab: Option<Entity>,
+        webview: Entity,
         git: Option<&vmux_git::worktree::RepoInfo>,
-        projects: Vec<vmux_api::space::ProjectRow>,
+        mut projects: Vec<vmux_api::space::ProjectRow>,
         locale: &Locale,
     ) -> CommandBarOpenEvent {
         let context_label = self.context.label.clone();
@@ -232,198 +239,17 @@ impl StartPromptContext<'_, '_> {
             tabs: tab_rows,
             target: Some(OpenTarget::InPlace),
         });
-        payload.prompt_context = self.context(active_tab, git);
+        payload.prompt_context = self.context(webview, active_tab, git);
+        let directory = git
+            .map(|info| info.project_root().to_string_lossy().into_owned())
+            .unwrap_or_else(|| payload.prompt_context.cwd.clone());
+        let selected = vmux_api::space::ProjectRow::for_directory(&projects, &directory)
+            .map(|project| project.path.clone());
+        for project in &mut projects {
+            project.is_active = selected.as_ref() == Some(&project.path);
+        }
         payload.prompt_context.projects = projects;
         payload
-    }
-}
-
-fn select_workspace(
-    trigger: On<UiInput<StartSelectWorkspace>>,
-    child_of: Query<&ChildOf>,
-    tabs: Query<(), With<Tab>>,
-    pending: Query<&PendingStartWorkspacePicker>,
-    projects: vmux_ecs::profile::Projects,
-    proxy: Option<Res<bevy::winit::EventLoopProxyWrapper>>,
-    mut commands: Commands,
-) {
-    let mut current = trigger.event().webview;
-    let tab = loop {
-        if tabs.contains(current) {
-            break Some(current);
-        }
-        let Ok(parent) = child_of.get(current) else {
-            break None;
-        };
-        current = parent.parent();
-    };
-    let Some(tab) = tab else {
-        return;
-    };
-    if pending.iter().any(|picker| picker.tab == tab) {
-        return;
-    }
-    let wake = proxy.as_deref().map(|proxy| (**proxy).clone());
-    let initial_dir = projects
-        .path()
-        .ok()
-        .map(Path::to_path_buf)
-        .or_else(|| {
-            PathBuf::from(&trigger.event().payload.current_dir)
-                .canonicalize()
-                .ok()
-                .filter(|path| path.is_dir())
-        })
-        .or_else(|| std::env::current_dir().ok().filter(|path| path.is_dir()))
-        .or_else(|| std::env::var_os("HOME").map(PathBuf::from))
-        .filter(|path| path.is_dir())
-        .unwrap_or_else(|| PathBuf::from("/"));
-    let task = IoTaskPool::get().spawn(async move {
-        let selected = rfd::AsyncFileDialog::new()
-            .set_title("Choose existing project")
-            .set_directory(initial_dir)
-            .pick_folder()
-            .await
-            .map(|handle| handle.path().to_path_buf());
-        let result = if let Some(path) = selected {
-            let initialize_git = if path.join(".git").exists() {
-                false
-            } else {
-                matches!(
-                    rfd::AsyncMessageDialog::new()
-                        .set_title("Initialize Git repository?")
-                        .set_description(
-                            "This project is not a Git repository. Initialize Git now?",
-                        )
-                        .set_buttons(rfd::MessageButtons::YesNo)
-                        .show()
-                        .await,
-                    rfd::MessageDialogResult::Yes
-                )
-            };
-            Some((path, initialize_git))
-        } else {
-            None
-        };
-        if let Some(wake) = wake {
-            let _ = wake.send_event(bevy::winit::WinitUserEvent::WakeUp);
-        }
-        result
-    });
-    commands.spawn(PendingStartWorkspacePicker { tab, task });
-}
-
-fn finish_workspace_pickers(
-    mut pending: Query<(Entity, &mut PendingStartWorkspacePicker)>,
-    mut commands: Commands,
-) {
-    for (entity, mut picker) in &mut pending {
-        let Some(selected) = future::block_on(future::poll_once(&mut picker.task)) else {
-            continue;
-        };
-        if let Some((path, initialize_git)) = selected
-            && let Ok(path) = path.canonicalize()
-            && path.is_dir()
-        {
-            if initialize_git {
-                let _ = vmux_git::worktree::CheckoutInfo::initialize(&path);
-            }
-            commands.trigger(ChosenProject {
-                tab: picker.tab,
-                path,
-                worktree: None,
-            });
-        }
-        commands.entity(entity).despawn();
-    }
-}
-
-fn go_to_branch(
-    trigger: On<UiInput<vmux_api::command_bar::StartGoToBranch>>,
-    child_of: Query<&ChildOf>,
-    tab_query: Query<(), With<Tab>>,
-    mut commands: Commands,
-) {
-    let mut current = trigger.event().webview;
-    let tab = loop {
-        if tab_query.contains(current) {
-            break Some(current);
-        }
-        let Ok(parent) = child_of.get(current) else {
-            break None;
-        };
-        current = parent.parent();
-    };
-    let Some(tab) = tab else {
-        return;
-    };
-    let evt = &trigger.event().payload;
-    let checkout = evt.checkout.trim();
-    if !checkout.is_empty() {
-        let Ok(path) = PathBuf::from(checkout).canonicalize() else {
-            return;
-        };
-        commands.trigger(ChosenProject {
-            tab,
-            path,
-            worktree: None,
-        });
-        return;
-    }
-    let Ok(root) = PathBuf::from(&evt.project).canonicalize() else {
-        return;
-    };
-    let worktree = (!evt.branch.trim().is_empty()).then(|| TabWorktree {
-        repo_root: root.to_string_lossy().into_owned(),
-        checkout_dir: String::new(),
-        branch: evt.branch.clone(),
-        base_ref: String::new(),
-    });
-    commands.trigger(ChosenProject {
-        tab,
-        path: root,
-        worktree,
-    });
-}
-
-#[derive(EntityEvent)]
-struct ChosenProject {
-    #[event_target]
-    tab: Entity,
-    path: PathBuf,
-    worktree: Option<TabWorktree>,
-}
-
-fn apply_chosen_project(
-    trigger: On<ChosenProject>,
-    mut tabs: Query<&mut Tab>,
-    mut commands: Commands,
-) {
-    let request = trigger.event();
-    let Ok(mut tab) = tabs.get_mut(request.tab) else {
-        return;
-    };
-    let dir = request.path.to_string_lossy().into_owned();
-    tab.startup_dir = Some(dir.clone());
-    if vmux_layout::worktree::WorktreeName::is_generated(&tab.name)
-        && let Some(name) = request.path.file_name().and_then(|name| name.to_str())
-        && !name.is_empty()
-    {
-        tab.name = name.to_string();
-    }
-    let mut entity = commands.entity(request.tab);
-    entity
-        .insert((
-            TabWorkspace { project_dir: dir },
-            vmux_layout::tab::TabDirDecided,
-        ))
-        .remove::<(
-            TabWorktree,
-            vmux_layout::worktree::TabWorktreeReady,
-            vmux_layout::tab::TabWorktreeUnavailable,
-        )>();
-    if let Some(worktree) = &request.worktree {
-        entity.insert(worktree.clone());
     }
 }
 
@@ -455,6 +281,7 @@ fn sync_pages(
             &PageMetadata,
             Has<StartWorkSynced>,
             Has<KeyboardOwner>,
+            Option<&GitProjection>,
         ),
         (
             With<HostsLauncher>,
@@ -463,7 +290,6 @@ fn sync_pages(
     >,
     added_keyboard_targets: Query<(), Added<KeyboardOwner>>,
     mut repo_info: Option<Single<&mut vmux_git::RepoInfoCache>>,
-    mut last_git: Local<(String, Option<vmux_git::worktree::RepoInfo>)>,
     space_projects: vmux_space::SpaceProjects,
     active_project_rows: Res<vmux_space::ActiveProjectRows>,
     projector: CommandBarProjector,
@@ -477,21 +303,6 @@ fn sync_pages(
         mut removed_models,
         mut removed_modes,
     ) = contributions;
-    let cwd = prompt_context.cwd(tab_gather.active_tab.get());
-    let observer = starts.iter().find_map(|(entity, metadata, _, active)| {
-        (active && metadata.url.starts_with(StartPlugin::URL)).then_some(entity)
-    });
-    let git_info = observer.and_then(|observer| {
-        repo_info.as_mut().and_then(|cache| {
-            let cache = cache.bypass_change_detection();
-            if cwd.is_empty() {
-                cache.release(observer);
-                return None;
-            }
-            cache.observe_active(observer, Path::new(&cwd))
-        })
-    });
-    let git_changed = last_git.0 != cwd || last_git.1 != git_info;
     let focus_changed = focused.is_changed();
     let page_removed = removed_pages.read().count() > 0;
     let command_removed = removed_commands.read().count() > 0;
@@ -506,41 +317,54 @@ fn sync_pages(
         || mode_removed;
     let changed = contributions_changed
         || focus_changed
-        || prompt_context.changed(tab_gather.active_tab.get())
         || active_project_rows.is_changed()
-        || git_changed
         || locale.as_ref().is_some_and(|locale| locale.is_changed());
     let locale = locale
         .as_deref()
         .map(|locale| locale.0.clone())
         .unwrap_or_else(Locale::preferred);
-    let targets: Vec<(Entity, bool)> = starts
-        .iter()
-        .filter_map(|(e, meta, synced, keyboard_target)| {
-            if !meta.url.starts_with(StartPlugin::URL) {
+    for (e, meta, synced, keyboard_target, last_git) in &starts {
+        if !meta.url.starts_with(StartPlugin::URL) {
+            continue;
+        }
+        let tab = prompt_context.tab(e);
+        if !keyboard_target && synced && !changed && !prompt_context.changed(e, tab) {
+            if let Some(cache) = repo_info.as_mut() {
+                cache.bypass_change_detection().release(e);
+            }
+            continue;
+        }
+        let cwd = prompt_context.cwd(e, tab);
+        let git_info = repo_info.as_mut().and_then(|cache| {
+            let cache = cache.bypass_change_detection();
+            if cwd.is_empty() {
+                cache.release(e);
                 return None;
             }
-            let focus_requested =
-                keyboard_target && (!synced || added_keyboard_targets.contains(e) || focus_changed);
-            (changed || !synced || focus_requested).then_some((e, focus_requested))
-        })
-        .collect();
-    if targets.is_empty() {
-        return;
-    }
-    if git_changed {
-        *last_git = (cwd.clone(), git_info.clone());
-    }
-    let active_tab = tab_gather.active_tab.get().unwrap_or(Entity::PLACEHOLDER);
-    let payload = prompt_context.project(
-        &projector,
-        &tab_gather,
-        tab_gather.active_tab.get(),
-        git_info.as_ref(),
-        space_projects.selector_rows(active_tab, &active_project_rows),
-        &locale,
-    );
-    for (e, focus_requested) in targets {
+            if keyboard_target {
+                cache.observe_active(e, Path::new(&cwd))
+            } else {
+                cache.release(e);
+                cache.snapshot(Path::new(&cwd))
+            }
+        });
+        let git_changed = last_git.is_none_or(|projection| projection.0 != git_info);
+        let focus_requested =
+            keyboard_target && (!synced || added_keyboard_targets.contains(e) || focus_changed);
+        if !changed && synced && !focus_requested && !git_changed && !prompt_context.changed(e, tab)
+        {
+            continue;
+        }
+        commands.entity(e).insert(GitProjection(git_info.clone()));
+        let payload = prompt_context.project(
+            &projector,
+            &tab_gather,
+            tab,
+            e,
+            git_info.as_ref(),
+            space_projects.selector_rows(e, &active_project_rows),
+            &locale,
+        );
         commands.trigger(vmux_ecs::UiStateWrite::<
             vmux_api::command_bar::CommandBarUiState,
         >::from_event(e, &payload));
@@ -573,6 +397,25 @@ fn focus_ready(
     }
 }
 
+type PresentedLauncher = (
+    With<HostsLauncher>,
+    With<KeyboardOwner>,
+    With<PagePresented>,
+    Without<crate::StartInlineTransitionView>,
+    Or<(Added<KeyboardOwner>, Added<PagePresented>)>,
+);
+
+fn focus_presented(
+    starts: Query<(Entity, &PageMetadata), PresentedLauncher>,
+    mut commands: Commands,
+) {
+    for (webview, metadata) in &starts {
+        if metadata.url.starts_with(StartPlugin::URL) {
+            commands.trigger(CommandBarFocusRequested { webview });
+        }
+    }
+}
+
 fn focus_command_bar(
     trigger: On<CommandBarFocusRequested>,
     mut revisions: Query<&mut CommandBarFocusRevision>,
@@ -594,14 +437,27 @@ fn focus_command_bar(
 }
 
 fn mark_launcher(
-    starts: Query<(Entity, &PageMetadata), Without<HostsLauncher>>,
+    starts: Query<(
+        Entity,
+        &PageMetadata,
+        Has<HostsLauncher>,
+        Has<StartWorkSynced>,
+        Has<crate::StartInlineTransitionView>,
+    )>,
     mut commands: Commands,
 ) {
-    for (entity, meta) in starts.iter() {
-        if meta.url.starts_with(StartPlugin::URL) {
+    for (entity, meta, launcher, synced, transitioning) in starts.iter() {
+        if meta.url.starts_with(StartPlugin::URL) && !launcher {
             commands
                 .entity(entity)
                 .try_insert((HostsLauncher, vmux_command::CommandBarState::default()));
+        } else if !meta.url.starts_with(StartPlugin::URL) && synced && !transitioning {
+            commands.entity(entity).remove::<(
+                HostsLauncher,
+                vmux_command::CommandBarState,
+                StartWorkSynced,
+                GitProjection,
+            )>();
         }
     }
 }
@@ -682,6 +538,36 @@ mod tests {
     }
 
     #[test]
+    fn completed_session_transitions_release_the_hidden_launcher() {
+        let mut app = App::new();
+        app.add_plugins((bevy::prelude::MinimalPlugins, StartPlugin))
+            .insert_non_send(bevy_cef::prelude::Browsers::default());
+        let page = app
+            .world_mut()
+            .spawn((
+                HostsLauncher,
+                StartWorkSynced,
+                crate::StartInlineTransitionView,
+                PageMetadata {
+                    url: "vmux://sessions/failed-resume".into(),
+                    ..Default::default()
+                },
+            ))
+            .id();
+        app.world_mut().run_schedule(Update);
+        assert!(app.world().get::<HostsLauncher>(page).is_some());
+        app.world_mut()
+            .entity_mut(page)
+            .remove::<crate::StartInlineTransitionView>();
+        app.world_mut().run_schedule(Update);
+        assert!(app.world().get::<HostsLauncher>(page).is_none());
+        assert!(app.world().get::<StartWorkSynced>(page).is_none());
+        app.world_mut().get_mut::<PageMetadata>(page).unwrap().url = StartPlugin::URL.into();
+        app.world_mut().run_schedule(Update);
+        assert!(app.world().get::<HostsLauncher>(page).is_some());
+    }
+
+    #[test]
     #[cfg(ui)]
     fn start_page_allows_keyboard_routing() {
         let mut app = App::new();
@@ -720,6 +606,37 @@ mod tests {
                 .is_some(),
             "the surviving half of the transition still applies"
         );
+    }
+
+    #[test]
+    fn presented_start_reclaims_prompt_focus_once_without_focusing_prewarmed_pages() {
+        let mut app = App::new();
+        app.add_plugins((MinimalPlugins, StartPlugin))
+            .insert_non_send(bevy_cef::prelude::Browsers::default())
+            .init_resource::<EmittedIds>()
+            .add_observer(capture_state);
+        let metadata = PageMetadata {
+            url: StartPlugin::URL.to_string(),
+            ..Default::default()
+        };
+        let selected = app
+            .world_mut()
+            .spawn((
+                HostsLauncher,
+                StartWorkSynced,
+                KeyboardOwner,
+                metadata.clone(),
+            ))
+            .id();
+        app.world_mut()
+            .spawn((HostsLauncher, PagePresented, metadata));
+        app.update();
+        app.world_mut().resource_mut::<EmittedIds>().0.clear();
+        app.world_mut().entity_mut(selected).insert(PagePresented);
+        app.update();
+        assert_eq!(app.world().resource::<EmittedIds>().0, [("focus", 1)]);
+        app.update();
+        assert_eq!(app.world().resource::<EmittedIds>().0, [("focus", 1)]);
     }
 
     #[test]

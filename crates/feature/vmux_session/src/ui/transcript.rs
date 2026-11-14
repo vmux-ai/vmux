@@ -1,20 +1,26 @@
 use super::agent::AgentBanner;
-use super::item::ChatItemRow;
+use super::conversation::{Keys, Section, Turn};
+use super::item::UserAttachment;
 use super::state::Chat;
 use crate::event::{ChatCancelQueuedPrompt, ChatClearQueue, ChatResume};
 use dioxus::prelude::*;
+use std::{cell::RefCell, rc::Rc};
 use vmux_api::prompt_media::ChatAttachment;
 use vmux_ui::agent_accent::AgentAccent;
 use vmux_ui::components::skeleton::Skeleton;
 use vmux_ui::hooks::send;
 use vmux_ui::i18n::{TranslationValue, translate, translate_with};
-use vmux_ui::scroll::ScrollPreload;
 
 #[component]
 fn QueuedAttachments(attachments: Vec<ChatAttachment>) -> Element {
     let mut thumbs = Vec::new();
     let mut plain = Vec::new();
+    let mut videos = Vec::new();
     for attachment in attachments {
+        if attachment.mime_type.starts_with("video/") && !attachment.media_url.is_empty() {
+            videos.push(attachment);
+            continue;
+        }
         match attachment.preview_data_url.is_empty() {
             true => plain.push(attachment.name),
             false => thumbs.push((
@@ -25,6 +31,13 @@ fn QueuedAttachments(attachments: Vec<ChatAttachment>) -> Element {
         }
     }
     rsx! {
+        if !videos.is_empty() {
+            div { class: "mt-1 flex flex-wrap gap-2",
+                for attachment in videos {
+                    UserAttachment { attachment, onload: move |_| {} }
+                }
+            }
+        }
         if !thumbs.is_empty() {
             div { class: "mt-1 flex flex-wrap gap-1.5",
                 for (path , name , preview) in thumbs {
@@ -49,7 +62,12 @@ fn QueuedAttachments(attachments: Vec<ChatAttachment>) -> Element {
 }
 
 #[component]
-pub(super) fn ChatTranscript(chat: Chat) -> Element {
+pub(super) fn ChatTranscript(
+    chat: Chat,
+    #[props(default)] reserve_details_toggle: bool,
+) -> Element {
+    use_hook(vmux_ui::scroll::StickySections::install);
+    let section_keys = use_hook(|| Rc::new(RefCell::new(Keys::default())));
     let mut scroll_container = chat.transcript.scroll_container;
     let at_bottom = chat.transcript.at_bottom;
     let transcript = chat.transcript.current();
@@ -57,22 +75,23 @@ pub(super) fn ChatTranscript(chat: Chat) -> Element {
         chat.status() != "errored" && (chat.transcript_loading() || !chat.transcript.ready());
     let loaded_start = transcript.loaded_start;
     let history_loading = transcript.loading;
+    let has_older = transcript.has_older;
     let items = transcript.items;
-    let item_count = items.len();
     let initial_scroll = chat.transcript.initial_scroll();
     let placement_pending = !transcript_loading && !items.is_empty() && initial_scroll.is_empty();
-    let handoff_source = chat.handoff.source();
-    let handoff_truncated = chat.handoff.truncated();
-    let agent = chat.agent();
-    let agent_name = chat.header_name();
-    let icon = chat.identity.icon();
-    let agent_avatar = (!icon.is_empty()).then_some(icon);
-    let agent_color = chat.accent().css;
-    let user_name = chat.user.name();
-    let user_color = chat.user.color();
+    let latest_index = loaded_start as usize + items.len().saturating_sub(1);
+    let mut turns = Turn::group(items, loaded_start as usize);
+    let bottom_padding = if chat.in_use() { "pb-12" } else { "pb-20" };
+    let toggle_space = if reserve_details_toggle {
+        "[&_.chat-user-bubble]:pr-10"
+    } else {
+        ""
+    };
+    section_keys.borrow_mut().assign(&mut turns);
     rsx! {
         div {
             id: "chat-scroll",
+            "data-vmux-sticky-container": "",
             "data-vmux-initial-scroll": initial_scroll,
             "data-vmux-presentation-pending": placement_pending.then_some(""),
             "data-vmux-follow-scroll": at_bottom().to_string(),
@@ -83,23 +102,14 @@ pub(super) fn ChatTranscript(chat: Chat) -> Element {
                     chat.transcript.follow();
                 }
             },
-            class: "relative z-10 flex-1 overflow-y-auto overscroll-contain px-3 pb-20 pt-3 outline-none sm:px-4 md:px-6",
+            class: "relative z-10 flex-1 overflow-y-auto overscroll-contain scroll-pt-12 px-3 {bottom_padding} {toggle_space} outline-none sm:px-4 md:px-6",
             tabindex: "0",
-            onwheel: move |_| chat.transcript.note_scroll_input(),
-            ontouchmove: move |_| chat.transcript.note_scroll_input(),
-            onscroll: move |e: Event<ScrollData>| {
-                if e.client_height() <= 0 {
-                    return;
-                }
-                let top = e.scroll_top() as i32;
-                let dist = e.scroll_height() - top - e.client_height();
-                chat.transcript.observe_scroll(top, dist, e.client_height());
-                if ScrollPreload::HISTORY.reached_start(&e) {
-                    chat.transcript.request_history();
-                }
-            },
+            onwheel: move |_| chat.transcript.scroll_input(),
+            ontouchmove: move |_| chat.transcript.scroll_input(),
+            onscroll: move |event: Event<ScrollData>| chat.transcript.scrolled(&event),
+            onscrollend: move |event: Event<ScrollData>| chat.transcript.scrolled(&event),
             div {
-                class: "mx-auto flex min-h-full w-full max-w-3xl flex-col gap-5",
+                class: "mx-auto flex min-h-full w-full max-w-3xl flex-col gap-5 pt-3",
                 style: transcript_loading.then_some("height:100%;"),
                 onresize: move |_| {
                     if *chat.transcript.initial_follow.peek() || *at_bottom.peek() {
@@ -108,40 +118,17 @@ pub(super) fn ChatTranscript(chat: Chat) -> Element {
                 },
                 if transcript_loading {
                     TranscriptSkeleton {}
-                } else if loaded_start > 0 {
+                } else if loaded_start > 0 || has_older {
                     HistorySentinel { loading: history_loading }
                 }
                 if !transcript_loading && chat.installing_splash() {
                     InstallIntro { chat, detail: chat.install_detail() }
-                } else if !transcript_loading && items.is_empty() && chat.status() == "idle" {
+                } else if !transcript_loading && turns.is_empty() && chat.status() == "idle" {
                     ReadyIntro { chat }
                 }
                 if !transcript_loading {
-                    for (i , item) in items.iter().cloned().enumerate() {
-                        div {
-                            key: "{loaded_start as usize + i}",
-                            id: "chat-item-{loaded_start as usize + i}",
-                            "data-vmux-scroll-anchor": "",
-                            ChatItemRow {
-                                absolute_index: loaded_start as usize + i,
-                                item,
-                                agent_id: agent.clone(),
-                                agent_name: agent_name.clone(),
-                                agent_avatar: agent_avatar.clone(),
-                                agent_color: agent_color.clone(),
-                                user_name: user_name.clone(),
-                                user_color: user_color.clone(),
-                                latest: i + 1 == item_count,
-                                on_media_load: move |_| {
-                                    if *at_bottom.peek() {
-                                        chat.transcript.follow();
-                                    }
-                                },
-                            }
-                        }
-                        if !handoff_source.is_empty() && chat.handoff.boundary(loaded_start as usize + i) {
-                            HandoffDivider { source: handoff_source.clone(), truncated: handoff_truncated }
-                        }
+                    for turn in turns {
+                        Section { key: "{turn.key()}", turn, latest_index, chat }
                     }
                 }
                 div {
@@ -180,7 +167,7 @@ fn HistorySentinel(loading: bool) -> Element {
 }
 
 #[component]
-fn TranscriptSkeleton() -> Element {
+pub(super) fn TranscriptSkeleton() -> Element {
     rsx! {
         div { class: "flex min-h-full shrink-0 flex-col justify-end gap-5 px-1 py-1", "data-vmux-loading-surface": "",
             div { class: "ml-auto flex w-2/3 items-start justify-end gap-3",
@@ -235,7 +222,7 @@ fn ReadyIntro(chat: Chat) -> Element {
 }
 
 #[component]
-fn HandoffDivider(source: String, truncated: bool) -> Element {
+pub(super) fn HandoffDivider(source: String, truncated: bool) -> Element {
     rsx! {
         div { class: "flex items-center gap-2 py-1 text-xs text-muted-foreground",
             span { class: "h-px flex-1 bg-foreground/10" }

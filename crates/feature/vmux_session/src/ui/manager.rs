@@ -1062,7 +1062,7 @@ fn SessionGroupContents(
             div { class: "{items_class}",
                 for session in sessions.into_iter().take(visible) {
                     SessionItem {
-                        key: "{session.id}",
+                        key: "{RowIdentity::of(&session).key()}",
                         view,
                         repository: repository_index.read().get(&session.id).cloned(),
                         repository_ready,
@@ -1265,9 +1265,9 @@ pub(super) fn SessionMetaPanel(
 ) -> Element {
     let presentation = SessionPresentation::new(&session, repository, &stages, &session.stage);
     rsx! {
-        aside { class: "flex h-full min-h-0 w-[19rem] shrink-0 flex-col border-l border-foreground/[0.06] bg-background/35",
-            header { class: "flex h-12 shrink-0 items-center px-5",
-                h2 { class: "text-xs font-semibold text-foreground/90", {translate("editor-properties")} }
+        aside { class: "flex h-full min-h-0 w-full max-w-[19rem] shrink-0 flex-col bg-background",
+            header { class: "flex h-12 shrink-0 items-center pl-5 pr-12",
+                h2 { class: "min-w-0 truncate text-xs font-semibold text-foreground/90", {translate("editor-properties")} }
             }
             div { class: "min-h-0 flex-1 overflow-y-auto px-5 pb-5",
                 SessionDescription { session: session.clone() }
@@ -1959,7 +1959,9 @@ mod tests {
                         value: AttributeValue::Text(value),
                         id,
                         ..
-                    } if value == &section_label => Some(*id),
+                    } if value == &section_label && mounted.edits.iter().any(|edit| {
+                        matches!(edit, Mutation::NewEventListener { name, id: listener } if name == "contextmenu" && listener == id)
+                    }) => Some(*id),
                     _ => None,
                 })
                 .expect("the group header must have a context menu");

@@ -37,11 +37,14 @@ class Item {
 }
 
 class MovementProbe {
-  constructor(reduced = false) {
+  constructor(reduced = false, operation = 'close') {
+    this.operation = operation;
+    this.containerPresent = operation !== 'first';
     this.a = new Item('tab-a', 100);
     this.b = new Item('tab-b', 312);
     this.c = new Item('tab-c', 524);
     this.plus = new Item('new-tab-button', 736);
+    this.d = new Item('tab-d', 736);
     this.b.children = [new Item('close-b', 312)];
     this.container = {
       children: [this.a, this.b, this.c, this.plus],
@@ -49,13 +52,22 @@ class MovementProbe {
       querySelectorAll() { return this.children.filter(child => child.dataset.vmuxMotionItem || child.dataset.vmuxStackRow); },
       appendChild(child) { child.parent = this; this.children.push(child); },
     };
+    this.body = {
+      children: [],
+      appendChild(child) { child.parent = this; this.children.push(child); },
+    };
+    if (operation === 'last') {
+      this.container.children = [this.a, this.plus];
+      this.plus.left = 312;
+    }
     let polls = 0;
     const probe = this;
     const scope = {
       document: {
         title: '', head: {}, addEventListener() {}, querySelector: () => null,
         querySelectorAll: () => [], getSelection: () => ({ isCollapsed: true }),
-        getElementById: id => id === 'tabs' ? probe.container : null,
+        getElementById: id => id === 'tabs' && probe.containerPresent ? probe.container : null,
+        body: probe.body,
       },
       addEventListener() {}, TextEncoder, TextDecoder, Uint8Array, DataView, ArrayBuffer,
       Map, Set, WeakMap, WeakSet, Promise, Element: Item, HTMLInputElement: class {}, HTMLTextAreaElement: class {},
@@ -66,9 +78,26 @@ class MovementProbe {
       atob: value => Buffer.from(value, 'base64').toString('binary'),
       ipc: { postMessage() {} }, __vmuxFrameCapability: '777',
       interpreter: { root: {}, sendSerializedEvent() {}, run_from_bytes() {
-        probe.container.children = [probe.a, probe.c, probe.plus];
-        probe.c.left = 312;
-        probe.plus.left = 524;
+        if (operation === 'add') {
+          probe.container.children = [probe.a, probe.b, probe.c, probe.d, probe.plus];
+          probe.plus.left = 948;
+        } else if (operation === 'first') {
+          probe.containerPresent = true;
+          probe.container.children = [probe.a, probe.plus];
+          probe.plus.left = 312;
+        } else if (operation === 'last') {
+          probe.containerPresent = false;
+          probe.container.children = [];
+        } else if (operation === 'reorder') {
+          probe.container.children = [probe.c, probe.a, probe.b, probe.plus];
+          probe.c.left = 100;
+          probe.a.left = 312;
+          probe.b.left = 524;
+        } else {
+          probe.container.children = [probe.a, probe.c, probe.plus];
+          probe.c.left = 312;
+          probe.plus.left = 524;
+        }
       } },
       fetch: async () => {
         if (++polls === 1) return this.response(412);
@@ -126,4 +155,29 @@ class MovementProbe {
   assert.equal(reduced.c.left, 312);
   assert.equal(reduced.c.animations.length, 0);
   assert.deepEqual(reduced.container.children.map(child => child.origin), ['tab-a', 'tab-c', 'new-tab-button']);
+  const added = new MovementProbe(false, 'add');
+  await added.close();
+  assert.equal(added.d.left, 736, 'the inserted tab must occupy its final position immediately');
+  assert.equal(added.d.animations[0].frames[0].opacity, 0);
+  assert.equal(added.d.animations[0].frames[1].opacity, 1);
+  assert.equal(added.plus.animations[0].frames[0].transform, 'translate(-212px, 0px)');
+  const first = new MovementProbe(false, 'first');
+  await first.close();
+  assert.equal(first.containerPresent, true);
+  assert.equal(first.a.animations[0].frames[0].opacity, 0, 'the first tab must enter even without a previous strip');
+  const last = new MovementProbe(false, 'last');
+  await last.close();
+  assert.equal(last.containerPresent, false, 'closing the last tab must update layout immediately');
+  const lastGhost = last.body.children.find(child => child.origin === 'tab-a');
+  assert.ok(lastGhost, 'the last tab must keep fading after its strip is removed');
+  assert.equal(lastGhost.inert, true);
+  assert.equal(lastGhost.animations[0].frames[1].opacity, 0);
+  lastGhost.animations[0].finish();
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(last.body.children.some(child => child.origin === 'tab-a'), false);
+  const reordered = new MovementProbe(false, 'reorder');
+  await reordered.close();
+  assert.equal(reordered.c.left, 100);
+  assert.equal(reordered.c.animations[0].frames[0].transform, 'translate(424px, 0px)');
+  assert.equal(reordered.a.animations[0].frames[0].transform, 'translate(-212px, 0px)');
 })().catch(error => { console.error(error); process.exitCode = 1; });

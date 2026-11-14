@@ -74,6 +74,19 @@ pub struct LauncherDismissRequest;
 #[derive(Component, Clone, Copy, Debug)]
 pub struct HostsLauncher;
 
+#[derive(Component, Clone, Debug)]
+pub enum WorkspaceSelectionState {
+    Ready,
+    Pending,
+    Failed(String),
+}
+
+impl WorkspaceSelectionState {
+    pub fn blocks(&self) -> bool {
+        !matches!(self, Self::Ready)
+    }
+}
+
 #[derive(Message, Clone, Copy, Debug)]
 pub struct InlineTransitionRequested {
     pub stack: Entity,

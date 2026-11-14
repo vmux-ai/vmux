@@ -104,6 +104,27 @@ mod tests {
     }
 
     #[test]
+    fn sticky_reference_navigation_stops_following_before_jumping() {
+        let probe = Rc::new(RefCell::new(None));
+        let mut dom = VirtualDom::new_with_props(
+            InitialTranscript,
+            InitialTranscriptProps {
+                probe: probe.clone(),
+            },
+        );
+        dom.rebuild_to_vec();
+        let (mut root, transcript) = probe.borrow().unwrap();
+        dom.runtime().in_scope(ScopeId::ROOT, || {
+            root.write().snapshot.transcript_loading = false;
+            transcript.reveal("chat-item-0");
+            assert!(!*transcript.initial_follow.peek());
+            assert!(!*transcript.at_bottom.peek());
+            transcript.observe_scroll(500, 100, 800);
+            assert!(!*transcript.at_bottom.peek());
+        });
+    }
+
+    #[test]
     fn small_upward_scroll_stops_following_until_the_actual_bottom() {
         let moved = Observation {
             top: 995,

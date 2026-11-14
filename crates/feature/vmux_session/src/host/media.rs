@@ -61,7 +61,13 @@ struct ChatAttachmentTask {
     webview: Entity,
     delivery: ChatAttachmentDelivery,
     paths: Vec<String>,
-    task: Task<Vec<ChatAttachment>>,
+    task: Task<AttachmentResult>,
+}
+
+#[derive(Default)]
+struct AttachmentResult {
+    attachments: Vec<ChatAttachment>,
+    videos: std::collections::HashMap<String, super::video::Source>,
 }
 
 #[derive(Clone, Copy)]
@@ -88,13 +94,34 @@ impl AttachmentTasks<'_, '_> {
         let wake = vmux_ecs::wake::Wake::beside(self.proxy.as_deref());
         let task = IoTaskPool::get().spawn(async move {
             let _wake = wake;
-            paths
-                .into_iter()
-                .filter_map(match delivery {
-                    ChatAttachmentDelivery::Hydrated => chat_attachment_preview,
-                    ChatAttachmentDelivery::Selected => chat_attachment,
-                })
-                .collect()
+            let mut result = AttachmentResult::default();
+            for path in paths {
+                if matches!(delivery, ChatAttachmentDelivery::Hydrated)
+                    && vmux_api::media::MediaKind::from_path(&path.to_string_lossy())
+                        == Some(vmux_api::media::MediaKind::Video)
+                {
+                    let local = super::video::Source::path(&path.to_string_lossy());
+                    let Some(mut attachment) = chat_attachment(local.clone()) else {
+                        continue;
+                    };
+                    let Ok(source) = super::video::Source::open(&local) else {
+                        continue;
+                    };
+                    attachment.path = path.to_string_lossy().into_owned();
+                    attachment.media_url = source.url();
+                    result.videos.insert(attachment.path.clone(), source);
+                    result.attachments.push(attachment);
+                    continue;
+                }
+                let attachment = match delivery {
+                    ChatAttachmentDelivery::Hydrated => chat_attachment_preview(path),
+                    ChatAttachmentDelivery::Selected => chat_attachment(path),
+                };
+                if let Some(attachment) = attachment {
+                    result.attachments.push(attachment);
+                }
+            }
+            result
         });
         self.commands.spawn(ChatAttachmentTask {
             webview,
@@ -386,9 +413,15 @@ impl ChatAttachmentProjection {
     pub fn hydrate_transcript(&self, state: &mut ChatTranscriptState) -> bool {
         let mut changed = false;
         for item in &mut state.items {
-            let ChatItem::User { attachments, .. } = item else {
+            let ChatItem::User {
+                text, attachments, ..
+            } = item
+            else {
                 continue;
             };
+            let previous = attachments.len();
+            vmux_api::prompt_media::PromptMediaPaths::append_videos(text, attachments);
+            changed |= previous != attachments.len();
             changed |= self.hydrate(attachments);
         }
         changed
@@ -397,6 +430,12 @@ impl ChatAttachmentProjection {
     pub fn hydrate_snapshot(&self, snapshot: &mut ChatSnapshot) -> bool {
         let mut changed = false;
         for prompt in &mut snapshot.queued {
+            let previous = prompt.attachments.len();
+            vmux_api::prompt_media::PromptMediaPaths::append_videos(
+                &prompt.text,
+                &mut prompt.attachments,
+            );
+            changed |= previous != prompt.attachments.len();
             changed |= self.hydrate(&mut prompt.attachments);
         }
         changed
@@ -425,19 +464,19 @@ impl ChatAttachmentProjection {
     fn hydrate(&self, attachments: &mut [ChatAttachment]) -> bool {
         let mut changed = false;
         for attachment in attachments {
-            if !attachment.preview_data_url.is_empty() {
-                continue;
-            }
             let Some(preview) = self.previews.get(&attachment.path) else {
                 continue;
             };
-            if preview.preview_data_url.is_empty() {
-                continue;
+            if attachment.preview_data_url.is_empty() && !preview.preview_data_url.is_empty() {
+                attachment
+                    .preview_data_url
+                    .clone_from(&preview.preview_data_url);
+                changed = true;
             }
-            attachment
-                .preview_data_url
-                .clone_from(&preview.preview_data_url);
-            changed = true;
+            if attachment.media_url.is_empty() && !preview.media_url.is_empty() {
+                attachment.media_url.clone_from(&preview.media_url);
+                changed = true;
+            }
         }
         changed
     }
@@ -446,19 +485,19 @@ impl ChatAttachmentProjection {
         let previews = &self.previews;
         let mut changed = false;
         for attachment in &mut self.selected {
-            if !attachment.preview_data_url.is_empty() {
-                continue;
-            }
             let Some(preview) = previews.get(&attachment.path) else {
                 continue;
             };
-            if preview.preview_data_url.is_empty() {
-                continue;
+            if attachment.preview_data_url.is_empty() && !preview.preview_data_url.is_empty() {
+                attachment
+                    .preview_data_url
+                    .clone_from(&preview.preview_data_url);
+                changed = true;
             }
-            attachment
-                .preview_data_url
-                .clone_from(&preview.preview_data_url);
-            changed = true;
+            if attachment.media_url.is_empty() && !preview.media_url.is_empty() {
+                attachment.media_url.clone_from(&preview.media_url);
+                changed = true;
+            }
         }
         changed
     }
@@ -470,8 +509,10 @@ impl ChatAttachmentProjection {
         seen: &mut std::collections::HashSet<String>,
     ) {
         for attachment in attachments {
-            if !attachment.mime_type.starts_with("image/")
+            if !(attachment.mime_type.starts_with("image/")
+                || attachment.mime_type.starts_with("video/"))
                 || !attachment.preview_data_url.is_empty()
+                || !attachment.media_url.is_empty()
                 || self.resolved.contains(&attachment.path)
                 || self.pending.contains(&attachment.path)
                 || !seen.insert(attachment.path.clone())
@@ -530,6 +571,7 @@ fn chat_attachment(path: PathBuf) -> Option<ChatAttachment> {
         mime_type,
         size: metadata.len(),
         preview_data_url: String::new(),
+        media_url: String::new(),
     })
 }
 
@@ -964,12 +1006,14 @@ fn drain_attachment_tasks(
     mut attachment_tasks: AttachmentTasks,
 ) {
     for (entity, mut pending) in &mut tasks {
-        let Some(attachments) = future::block_on(future::poll_once(&mut pending.task)) else {
+        let Some(result) = future::block_on(future::poll_once(&mut pending.task)) else {
             continue;
         };
+        let attachments = result.attachments;
         if let Ok((mut projection, mut focus, mut transcript, mut snapshot)) =
             projections.get_mut(pending.webview)
         {
+            projection.videos.extend(result.videos);
             match pending.delivery {
                 ChatAttachmentDelivery::Selected => {
                     let incoming = ChatAttachments { attachments };
@@ -1033,7 +1077,10 @@ fn drain_attachment_tasks(
             if matches!(pending.delivery, ChatAttachmentDelivery::Selected) {
                 let paths = attachments
                     .iter()
-                    .filter(|attachment| attachment.mime_type.starts_with("image/"))
+                    .filter(|attachment| {
+                        attachment.mime_type.starts_with("image/")
+                            || attachment.mime_type.starts_with("video/")
+                    })
                     .map(|attachment| PathBuf::from(&attachment.path))
                     .collect();
                 attachment_tasks.spawn(pending.webview, ChatAttachmentDelivery::Hydrated, paths);
@@ -1120,6 +1167,52 @@ mod tests {
     use super::*;
 
     #[test]
+    fn video_paths_in_user_text_hydrate_without_modifying_the_prompt() {
+        let mut projection = ChatAttachmentProjection::default();
+        let original = r"inspect /tmp/Screen\ Recording.mov";
+        let mut transcript = ChatTranscriptState {
+            items: vec![ChatItem::User {
+                event_id: String::new(),
+                text: original.into(),
+                context: None,
+                attachments: Vec::new(),
+                created_at_ms: 0,
+            }],
+            ..Default::default()
+        };
+        let mut snapshot = ChatSnapshot::default();
+        assert!(projection.hydrate_transcript(&mut transcript));
+        let paths = projection.hydration_paths(&transcript, &snapshot);
+        assert_eq!(paths, vec!["/tmp/Screen Recording.mov"]);
+        projection.start_hydration(&paths);
+        projection.finish_hydration(
+            &paths,
+            &[ChatAttachment {
+                path: paths[0].clone(),
+                mime_type: "video/mp4".into(),
+                media_url: "http://127.0.0.1:12345/video".into(),
+                ..Default::default()
+            }],
+        );
+        assert!(projection.hydrate_transcript(&mut transcript));
+        let ChatItem::User {
+            text, attachments, ..
+        } = &transcript.items[0]
+        else {
+            panic!();
+        };
+        assert_eq!(text, original);
+        assert_eq!(attachments[0].media_url, "http://127.0.0.1:12345/video");
+        assert!(!projection.hydrate_transcript(&mut transcript));
+        projection.hydrate_snapshot(&mut snapshot);
+        assert!(
+            projection
+                .hydration_paths(&transcript, &snapshot)
+                .is_empty()
+        );
+    }
+
+    #[test]
     fn media_projection_rejects_stale_results() {
         let mut projection = ChatMediaProjection::default();
         let stale = projection.start(Some("old".into())).unwrap().0;
@@ -1186,6 +1279,7 @@ mod tests {
             mime_type: "image/png".into(),
             size: 4,
             preview_data_url: String::new(),
+            media_url: String::new(),
         };
         let mut projection = ChatAttachmentProjection::default();
         assert!(projection.merge_selected(&ChatAttachments {
@@ -1193,6 +1287,7 @@ mod tests {
         }));
         let mut transcript = ChatTranscriptState {
             items: vec![ChatItem::User {
+                event_id: String::new(),
                 text: "inspect".into(),
                 context: None,
                 attachments: vec![image.clone()],

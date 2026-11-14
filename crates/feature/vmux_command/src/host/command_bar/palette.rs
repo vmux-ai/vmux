@@ -176,21 +176,6 @@ type NewPalette<T> = (
     Or<(With<RendersLauncherPanel>, With<HostsLauncher>)>,
     Without<T>,
 );
-type ProjectionRow = (
-    Entity,
-    &'static PaletteOpen,
-    &'static mut PaletteDraftInput,
-    Option<&'static PaletteMenuCursor>,
-    &'static mut PaletteContext,
-    &'static mut PaletteSnapshot,
-    &'static PaletteRowsSnapshot,
-    &'static mut PaletteContributionRows,
-    Has<AgentMenuOpen>,
-    Has<ModelMenuOpen>,
-    Has<PermissionMenuOpen>,
-    Has<ProjectMenuOpen>,
-    Has<BranchMenuOpen>,
-);
 type DetachedPalette = (
     With<PaletteSnapshot>,
     Without<RendersLauncherPanel>,
@@ -202,6 +187,10 @@ struct PaletteRowsSnapshot(PaletteRows);
 
 #[derive(Component, Clone, Debug, Default, PartialEq, Eq)]
 struct PaletteContributionRows(Vec<Entity>);
+
+#[cfg(test)]
+#[derive(Resource, Default)]
+struct ProjectionBuilds(u32);
 
 struct PaletteRuntime;
 
@@ -751,6 +740,9 @@ fn rows(
     )>,
 ) {
     for (opened, input, snapshot, mut projected) in &mut palettes {
+        if !input.start && !opened.0.open_id.is_open() {
+            continue;
+        }
         if input.open_id != opened.0.open_id || snapshot.0.open_id != opened.0.open_id {
             continue;
         }
@@ -775,10 +767,31 @@ fn rows(
     }
 }
 
+type ProjectionTargets<'w, 's> = Query<
+    'w,
+    's,
+    (
+        Entity,
+        &'static PaletteOpen,
+        &'static mut PaletteDraftInput,
+        Option<&'static PaletteMenuCursor>,
+        &'static mut PaletteContext,
+        &'static mut PaletteSnapshot,
+        &'static PaletteRowsSnapshot,
+        &'static mut PaletteContributionRows,
+        Has<AgentMenuOpen>,
+        Has<ModelMenuOpen>,
+        Has<PermissionMenuOpen>,
+        Has<ProjectMenuOpen>,
+        Has<BranchMenuOpen>,
+    ),
+>;
+
 fn project(
-    mut palettes: Query<ProjectionRow>,
+    mut palettes: ProjectionTargets,
     contributions: Query<(Entity, &CommandBarContribution, Option<&ChildOf>)>,
     locale: Option<Res<ResolvedLocale>>,
+    #[cfg(test)] mut builds: Option<ResMut<ProjectionBuilds>>,
 ) {
     for (
         target,
@@ -796,6 +809,13 @@ fn project(
         branch_menu,
     ) in &mut palettes
     {
+        if !input.start && !opened.0.open_id.is_open() {
+            continue;
+        }
+        #[cfg(test)]
+        if let Some(builds) = builds.as_deref_mut() {
+            builds.0 += 1;
+        }
         let current = snapshot.bypass_change_detection();
         if input.open_id != opened.0.open_id || current.0.open_id != opened.0.open_id {
             continue;
@@ -1112,6 +1132,56 @@ mod tests {
         assert_eq!(
             snapshot.0.projection.composer.agents[0].url,
             "vmux://sessions/?agent=codex-acp"
+        );
+    }
+
+    #[test]
+    fn closed_panels_stop_building_palettes_and_reopening_restores_the_composer() {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins)
+            .init_resource::<bevy_cef::prelude::BinIpcEventRawBuffer>()
+            .init_resource::<ProjectionBuilds>()
+            .add_plugins(PalettePlugin);
+        let page = app.world_mut().spawn(RendersLauncherPanel).id();
+        app.update();
+        assert_eq!(app.world().resource::<ProjectionBuilds>().0, 0);
+        let mut opened = CommandBarOpenEvent {
+            open_id: OpenId(1),
+            pages: vec![CommandBarPage {
+                url: "vmux://sessions/?agent=codex".into(),
+                title: "Codex".into(),
+                prompt_target: true,
+                ..Default::default()
+            }],
+            ..Default::default()
+        };
+        app.world_mut()
+            .trigger(UiStateWrite::<CommandBarUiState>::from_event(page, &opened));
+        app.update();
+        let builds = app.world().resource::<ProjectionBuilds>().0;
+        assert!(builds > 0);
+        app.world_mut()
+            .trigger(UiStateWrite::<CommandBarUiState>::from_event(
+                page,
+                &CommandBarOpenEvent::default(),
+            ));
+        app.update();
+        app.update();
+        assert_eq!(app.world().resource::<ProjectionBuilds>().0, builds);
+        opened.open_id = OpenId(2);
+        app.world_mut()
+            .trigger(UiStateWrite::<CommandBarUiState>::from_event(page, &opened));
+        app.update();
+        assert_eq!(
+            app.world()
+                .get::<PaletteSnapshot>(page)
+                .unwrap()
+                .0
+                .projection
+                .composer
+                .agents[0]
+                .title,
+            "Codex"
         );
     }
 

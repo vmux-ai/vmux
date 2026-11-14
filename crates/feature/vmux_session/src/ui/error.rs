@@ -53,7 +53,6 @@ pub(super) fn ChatFeedback(chat: Chat, #[props(default = rsx! {})] children: Ele
             Notice {
                 attached: true,
                 message: translate("sessions-busy-detail"),
-                kind: NoticeKind::Info,
                 actions: rsx! {
                     Button { size: ButtonSize::Xs, variant: ButtonVariant::Ghost,
                         aria_label: translate("common-retry"),

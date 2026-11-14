@@ -653,6 +653,9 @@ agent-tool-explored = 調査
 agent-tool-explore-read = 読み取り: { $path }
 agent-tool-explore-search = { $path } で { $query } を検索
 agent-tool-explore-list = 一覧: { $path }
+agent-tool-open-in-pane-right = 右側のペインで開く
+agent-tool-open-in-stack = 新しいスタックで開く
+agent-tool-open-in-tab = 新しいタブで開く
 agent-thinking = 思考中
 agent-subagent = サブエージェント
 agent-prompt = プロンプト
@@ -1105,3 +1108,24 @@ project-new-repository = 空のリポジトリ
 project-local-folder = ローカルフォルダ
 project-github-repository = GitHub リポジトリ
 project-edit-conflict = Project が更新されました。編集画面を開き直してください。
+
+agent-video-play = 動画を再生
+
+command-toggle-url-bar = Layout > レイアウト > URLバーを切り替え
+
+project-rename = プロジェクト名を変更
+project-all = すべてのプロジェクト
+project-remove = プロジェクトを削除
+project-remove-description = プロジェクト一覧から外します。ローカルファイルは保持されます。
+
+agent-tool-slept = 待機した
+
+project-directory-unavailable = プロジェクトのディレクトリにアクセスできません
+
+session-turn-view-prompt = プロンプトを表示
+session-turn-view-response = 応答を表示
+agent-incoming-message = エージェントからのメッセージ
+
+schema-focus-follows-mouse = マウス位置に合わせてペインを選択
+
+terminal-directory-input-pending = ディレクトリを変更するには、コマンドや入力を完了するか、Ctrl+Cで中止してください。

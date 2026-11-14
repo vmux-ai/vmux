@@ -166,6 +166,36 @@ pub struct AgentAttachment {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct AgentPromptEnvelope<'a>(&'a str);
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct AgentDelegationEnvelope<'a>(&'a str);
+
+impl<'a> AgentDelegationEnvelope<'a> {
+    pub fn new(output: &'a str) -> Self {
+        Self(output)
+    }
+
+    pub fn input(self) -> Option<&'a str> {
+        let body = self
+            .0
+            .trim()
+            .strip_prefix("<codex_delegation>")?
+            .strip_suffix("</codex_delegation>")?
+            .trim();
+        let (source, body) = body.split_once("</source_thread_id>")?;
+        if source.strip_prefix("<source_thread_id>")?.trim().is_empty() {
+            return None;
+        }
+        let input = body
+            .trim()
+            .strip_prefix("<input>")?
+            .strip_suffix("</input>")?;
+        if input.trim().is_empty() {
+            return None;
+        }
+        Some(input)
+    }
+}
+
 const PRIVATE_CONTEXT_PREFIX: &str = "<vmux_handoff_context>";
 const PRIVATE_CONTEXT_PROMPT_MARKER: &str = "\n\nCurrent user prompt:\n";
 const PRIVATE_CONTEXT_LENGTH_PREFIX: &str = "Context bytes: ";

@@ -143,7 +143,9 @@ impl ComposerProjection<'_, '_> {
             if let Ok((tab, workspace, managed)) = self.tabs.get(current) {
                 tab_dir = tab.startup_dir.as_ref().map(std::path::PathBuf::from);
                 workspace_selected = workspace.is_some() || tab.startup_dir.is_some();
-                worktree = managed.cloned();
+                if cwd.is_none_or(|cwd| tab_dir.as_ref() == Some(&cwd.0)) {
+                    worktree = managed.cloned();
+                }
                 break;
             }
             let Ok(parent) = self.child_of.get(current) else {
@@ -223,9 +225,14 @@ impl ComposerContextInput {
                     .map(|worktree| worktree.branch.clone())
             })
             .unwrap_or_default();
-        let workspace_name = match info {
-            Some(info) => info.project_name(),
-            None => self
+        let directory = info
+            .map(|info| info.project_root().to_string_lossy().into_owned())
+            .unwrap_or_else(|| self.cwd.to_string_lossy().into_owned());
+        let project = ProjectRow::for_directory(&self.projects, &directory);
+        let workspace_name = match (project, info) {
+            (Some(project), _) => project.label.clone(),
+            (_, Some(info)) => info.project_name(),
+            (_, None) => self
                 .cwd
                 .file_name()
                 .map(|name| name.to_string_lossy().into_owned())
@@ -582,11 +589,17 @@ mod tests {
             })
             .id();
         page.app.world_mut().entity_mut(stack).insert(ChildOf(tab));
+        page.app.world_mut().entity_mut(tab).insert(TabWorktree {
+            branch: "unrelated-tab-branch".into(),
+            ..Default::default()
+        });
         page.bind(session_root.path());
         page.app.update();
 
         assert_eq!(page.context().cwd, session_root.path().to_string_lossy());
         assert!(page.context().workspace_selected);
+        assert!(page.context().branch.is_empty());
+        assert!(!page.context().is_worktree);
     }
 
     #[test]

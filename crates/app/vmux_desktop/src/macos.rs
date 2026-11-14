@@ -7,6 +7,7 @@ use std::time::{Duration, Instant};
 use bevy::prelude::*;
 use bevy::winit::{EventLoopProxyWrapper, WINIT_WINDOWS, WinitUserEvent};
 use bevy_cef_core::prelude::MessageLoopWakePolicy;
+use objc2::runtime::{AnyClass, NSObjectProtocol};
 use objc2_app_kit::{
     NSApp, NSApplicationDidResignActiveNotification, NSEvent, NSEventMask, NSEventModifierFlags,
     NSEventPhase, NSEventType, NSView, NSWindowDidEndLiveResizeNotification,
@@ -380,7 +381,6 @@ fn install_input_wake_monitor(
     let local_window_inputs = window_inputs.clone();
     let local_wake = wake.clone();
     let local_block = block2::RcBlock::new(move |event: NonNull<NSEvent>| -> *mut NSEvent {
-        cef_wake_policy.begin_interaction();
         let ev = unsafe { event.as_ref() };
         let event_type = ev.r#type();
         let native_window = objc2::MainThreadMarker::new().and_then(|mtm| ev.window(mtm));
@@ -404,6 +404,11 @@ fn install_input_wake_monitor(
         let Some(source) = source else {
             local_wake(MOUSE_DRAG_WAKE_INTERVAL);
             return event.as_ptr();
+        };
+        let scroll = event_type == NSEventType::ScrollWheel;
+        let native_webview = WindowInput(ev).targets_webview();
+        if !scroll || !native_webview {
+            cef_wake_policy.begin_interaction();
         };
         let location = crate::window_input::WindowInputInbox::physical_position(ev);
         let capture_window_gesture = direct_source.is_some()
@@ -429,7 +434,6 @@ fn install_input_wake_monitor(
                 | NSEventType::OtherMouseDown
                 | NSEventType::OtherMouseUp
         );
-        let scroll = event_type == NSEventType::ScrollWheel;
         if scroll {
             HistoryScroll::record(ev);
         } else if matches!(
@@ -493,8 +497,8 @@ fn install_input_wake_monitor(
                 sampled_over_windowed_page,
                 local_window_inputs.was_windowed(source),
                 event_window_is_key(ev),
-            ) || page_changed
-                || near_edge
+                page_changed,
+            ) || near_edge
                 || over_grip
             {
                 local_wake(interval);
@@ -503,6 +507,7 @@ fn install_input_wake_monitor(
             if WindowPointerPolicy::scroll_should_wake(
                 local_window_inputs.layout_inside(source),
                 sampled_over_windowed_page,
+                native_webview,
             ) {
                 local_wake(MOUSE_DRAG_WAKE_INTERVAL);
             }
@@ -560,6 +565,37 @@ fn install_input_wake_monitor(
     if let Some(token) = global_token {
         handles.pointers = Some(pointer_inbox.clone());
         handles.monitors.push(token);
+    }
+}
+
+struct WindowInput<'a>(&'a NSEvent);
+
+impl WindowInput<'_> {
+    fn targets_webview(&self) -> bool {
+        let Some(marker) = objc2::MainThreadMarker::new() else {
+            return false;
+        };
+        let Some(window) = self.0.window(marker) else {
+            return false;
+        };
+        let Some(root) = window.contentView() else {
+            return false;
+        };
+        let Some(class) = AnyClass::get(c"WKWebView") else {
+            return false;
+        };
+        let position = match unsafe { root.superview() } {
+            Some(parent) => parent.convertPoint_fromView(self.0.locationInWindow(), None),
+            None => self.0.locationInWindow(),
+        };
+        let mut target = root.hitTest(position);
+        while let Some(view) = target {
+            if view.isKindOfClass(class) {
+                return true;
+            }
+            target = unsafe { view.superview() };
+        }
+        false
     }
 }
 

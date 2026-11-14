@@ -321,7 +321,9 @@ impl Composer {
         }
         let models = SelectedAgentModels::find(&state.agent_models, &agent_url);
         let modes = SelectedAgentModes::find(&state.agent_modes, &agent_url);
-        let active_project = context.projects.iter().find(|project| project.is_active);
+        let active_project =
+            vmux_api::space::ProjectRow::for_directory(&context.projects, &context.cwd)
+                .or_else(|| context.projects.iter().find(|project| project.is_active));
         let workspace_label = if let Some(project) = active_project {
             project.label.clone()
         } else if !context.workspace_name.is_empty() {
@@ -348,9 +350,15 @@ impl Composer {
             context.branch.clone()
         };
         let branch_title = if context.branch.is_empty() {
-            "Git repository".to_string()
+            translate("composer-git-repository")
         } else {
-            format!("Branch {}", context.branch)
+            vmux_ui::i18n::translate_with(
+                "composer-branch-name",
+                &[(
+                    "branch",
+                    vmux_ui::i18n::TranslationValue::String(&context.branch),
+                )],
+            )
         };
         let worktree_title = if context.base_ref.is_empty() {
             "Linked worktree".to_string()
@@ -1322,6 +1330,7 @@ mod tests {
             mime_type: "image/png".into(),
             size: 12,
             preview_data_url: String::new(),
+            media_url: String::new(),
         }];
 
         let submitted = palette.submit_start(&attached);
@@ -1349,6 +1358,7 @@ mod tests {
             mime_type: "image/png".into(),
             size: 12,
             preview_data_url: String::new(),
+            media_url: String::new(),
         }];
 
         let submitted = palette.submit_start(&attached);
@@ -1544,10 +1554,10 @@ mod tests {
     }
 
     #[test]
-    fn the_composer_prefers_the_active_project_over_the_working_directory() {
+    fn the_composer_labels_its_working_directory_even_when_another_project_is_active() {
         let mut state = Launcher::state();
         state.prompt_context = CommandBarPromptContext {
-            cwd: "/tmp/scratch".into(),
+            cwd: "/work/one/src".into(),
             workspace_name: "scratch".into(),
             projects: vec![
                 ProjectRow {
@@ -1566,11 +1576,12 @@ mod tests {
             ..CommandBarPromptContext::default()
         };
         let palette = PaletteState::start(&state, PaletteDraft::typed("fix it"));
-        assert_eq!(palette.composer.project, "/work/two");
-        assert_eq!(palette.composer.workspace_label, "two");
+        assert_eq!(palette.composer.cwd, "/work/one/src");
+        assert_eq!(palette.composer.project, "/work/one");
+        assert_eq!(palette.composer.workspace_label, "one");
         assert_eq!(
             palette.composer.workspace_title,
-            "Choose project · /work/two"
+            "Choose project · /work/one"
         );
 
         state.prompt_context = CommandBarPromptContext {

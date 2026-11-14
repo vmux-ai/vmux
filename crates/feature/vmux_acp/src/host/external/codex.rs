@@ -70,6 +70,14 @@ impl Reader {
         FileConversation::read(path, cursor, known, tail_bytes, CodexConversationDecoder)
     }
 
+    pub(super) fn before(
+        path: &Path,
+        boundary: vmux_session::history::Boundary,
+        known: Option<&vmux_session::history::FileFacts>,
+    ) -> Result<ReadResult, String> {
+        FileConversation::before(path, boundary, known, CodexConversationDecoder)
+    }
+
     pub(super) fn archives(&self) -> Result<Option<HashMap<String, ArchiveState>>, String> {
         let Some(path) = self.state_database()? else {
             return Ok(None);
@@ -877,6 +885,93 @@ mod tests {
     #[cfg(unix)]
     use std::os::unix::fs::symlink;
 
+    #[test]
+    fn bounded_initial_tail_backfills_every_message_through_the_first_prompt() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("history.jsonl");
+        let mut body = String::new();
+        let mut expected = Vec::new();
+        for index in 0..1230 {
+            let (role, text) = if index == 0 {
+                ("user", "First request".to_string())
+            } else {
+                ("assistant", format!("Answer {index}"))
+            };
+            let content_kind = if role == "user" {
+                "input_text"
+            } else {
+                "output_text"
+            };
+            body.push_str(&serde_json::json!({"type":"response_item", "payload":{"type":"message", "role":role, "content":[{"type":content_kind, "text":text}]}}).to_string());
+            body.push('\n');
+            expected.push(if index == 0 {
+                Message::user(text)
+            } else {
+                Message::Assistant {
+                    blocks: vec![vmux_api::session::AssistantBlock::Text(text)],
+                }
+            });
+        }
+        std::fs::write(&path, body).unwrap();
+        let tail =
+            Reader::conversation_file(&path, None, None, FileConversation::TAIL_BYTES).unwrap();
+        assert_eq!(tail.history.entries.len(), 512);
+        let mut actual = tail.messages();
+        let mut before = tail.history.file.as_ref().and_then(|file| file.before);
+        let mut pages = 0;
+        while let Some(boundary) = before {
+            let page = Reader::before(&path, boundary, None).unwrap();
+            assert!(
+                page.history
+                    .file
+                    .as_ref()
+                    .and_then(|file| file.before)
+                    .is_none_or(|next| next < boundary)
+            );
+            let mut prefix = page
+                .history
+                .entries
+                .into_iter()
+                .map(|(_, message)| message)
+                .collect::<Vec<_>>();
+            prefix.append(&mut actual);
+            actual = prefix;
+            before = page.history.file.as_ref().and_then(|file| file.before);
+            pages += 1;
+        }
+        assert_eq!(pages, 2);
+        assert_eq!(actual, expected);
+    }
+
+    #[test]
+    fn oversized_middle_record_does_not_hide_an_older_prompt() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("history.jsonl");
+        let mut body = serde_json::json!({"type":"response_item", "payload":{"type":"message", "role":"user", "content":[{"type":"input_text", "text":"First request"}]}}).to_string();
+        body.push('\n');
+        body.push_str(&"x".repeat((FileConversation::TAIL_BYTES + 1024) as usize));
+        body.push('\n');
+        body.push_str(&serde_json::json!({"type":"response_item", "payload":{"type":"message", "role":"assistant", "content":[{"type":"output_text", "text":"Latest answer"}]}}).to_string());
+        body.push('\n');
+        std::fs::write(&path, body).unwrap();
+        let tail =
+            Reader::conversation_file(&path, None, None, FileConversation::TAIL_BYTES).unwrap();
+        let mut before = tail.history.file.as_ref().and_then(|file| file.before);
+        let mut found = Vec::new();
+        while let Some(boundary) = before {
+            let page = Reader::before(&path, boundary, None).unwrap();
+            assert!(
+                page.history
+                    .file
+                    .as_ref()
+                    .and_then(|file| file.before)
+                    .is_none_or(|next| next < boundary)
+            );
+            found.extend(page.history.entries.into_iter().map(|(_, message)| message));
+            before = page.history.file.as_ref().and_then(|file| file.before);
+        }
+        assert_eq!(found, vec![Message::user("First request")]);
+    }
     struct Fixture {
         root: tempfile::TempDir,
     }

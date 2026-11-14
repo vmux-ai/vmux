@@ -7,7 +7,7 @@ use vmux_ui::navigation::{NavigationGesture, PageNavigation};
 
 use crate::SessionId;
 use crate::event::{
-    ProviderSessionTarget, ResumeSession, SessionsArchive, SessionsCleanup, SessionsRestoreDeleted,
+    ProviderSessionTarget, SessionsArchive, SessionsCleanup, SessionsRestoreDeleted,
     SessionsStageChange,
 };
 use crate::route::Route;
@@ -225,7 +225,6 @@ pub(super) struct ResumeTarget {
     id: String,
     kind: String,
     sid: String,
-    cwd: String,
     managed: bool,
 }
 
@@ -235,7 +234,6 @@ impl From<&SessionSummary> for ResumeTarget {
             id: session.id.clone(),
             kind: session.kind.clone(),
             sid: session.sid.clone(),
-            cwd: session.cwd.clone(),
             managed: session.managed,
         }
     }
@@ -248,12 +246,14 @@ impl ResumeTarget {
             PageNavigation::gesture(Route::Session(SessionId(self.id.clone())).url(), gesture);
             return;
         }
-        let _ = send(&ResumeSession {
-            kind: self.kind.clone(),
-            sid: self.sid.clone(),
-            cwd: self.cwd.clone(),
-            open: Some(gesture.open_target()),
-        });
+        PageNavigation::gesture(
+            Route::Provider {
+                kind: self.kind.clone(),
+                sid: self.sid.clone(),
+            }
+            .url(),
+            gesture,
+        );
     }
 }
 

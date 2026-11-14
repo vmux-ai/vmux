@@ -183,6 +183,9 @@ impl TabDrag {
     }
 
     pub(crate) fn listeners(self) -> Vec<Attribute> {
+        if self.state.read().is_none() {
+            return Vec::new();
+        }
         let mut advancing = self;
         let mut finishing = self;
         let mut cancelling = self;

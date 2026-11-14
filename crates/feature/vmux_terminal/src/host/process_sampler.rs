@@ -25,6 +25,8 @@ pub(super) struct LocalProcess {
 const DISCOVERY_POLL_INTERVAL_SECONDS: f32 = 300.0;
 const DISCOVERY_REQUEST_MIN_INTERVAL: Duration = Duration::from_secs(2);
 const PROCESS_TREE_LIMIT: usize = 4096;
+const SAMPLE_INTERVAL: Duration = Duration::from_secs(5);
+const CPU_WARMUP_INTERVAL: Duration = Duration::from_millis(250);
 
 struct DiscoveryGate {
     poll: Timer,
@@ -63,26 +65,34 @@ impl DiscoveryGate {
     }
 }
 
-#[cfg(target_os = "macos")]
 pub(super) struct ProcessSampler {
     sample_poll: Timer,
     discovery: DiscoveryGate,
-    discovered: bool,
     sampled: bool,
+    #[cfg(target_os = "macos")]
+    discovered: bool,
+    #[cfg(target_os = "macos")]
     local: HashMap<u32, MacLocalProcess>,
+    #[cfg(target_os = "macos")]
     counters: HashMap<u32, ProcessCounter>,
+    #[cfg(not(target_os = "macos"))]
+    system: sysinfo::System,
 }
 
-#[cfg(target_os = "macos")]
 impl Default for ProcessSampler {
     fn default() -> Self {
         Self {
-            sample_poll: Timer::from_seconds(5.0, TimerMode::Repeating),
+            sample_poll: Timer::new(CPU_WARMUP_INTERVAL, TimerMode::Repeating),
             discovery: DiscoveryGate::default(),
-            discovered: false,
             sampled: false,
+            #[cfg(target_os = "macos")]
+            discovered: false,
+            #[cfg(target_os = "macos")]
             local: HashMap::new(),
+            #[cfg(target_os = "macos")]
             counters: HashMap::new(),
+            #[cfg(not(target_os = "macos"))]
+            system: sysinfo::System::new(),
         }
     }
 }
@@ -108,6 +118,11 @@ impl ProcessSampler {
         self.sample_poll.reset();
         let mut snapshot = self.snapshot(service_roots);
         snapshot.cpu_ready = self.sampled;
+        self.sample_poll.set_duration(if self.sampled {
+            SAMPLE_INTERVAL
+        } else {
+            CPU_WARMUP_INTERVAL
+        });
         self.sampled = true;
         Some(snapshot)
     }
@@ -396,26 +411,6 @@ fn unix_time() -> u64 {
 }
 
 #[cfg(not(target_os = "macos"))]
-pub(super) struct ProcessSampler {
-    sample_poll: Timer,
-    discovery: DiscoveryGate,
-    sampled: bool,
-    system: sysinfo::System,
-}
-
-#[cfg(not(target_os = "macos"))]
-impl Default for ProcessSampler {
-    fn default() -> Self {
-        Self {
-            sample_poll: Timer::from_seconds(5.0, TimerMode::Repeating),
-            discovery: DiscoveryGate::default(),
-            sampled: false,
-            system: sysinfo::System::new(),
-        }
-    }
-}
-
-#[cfg(not(target_os = "macos"))]
 impl ProcessSampler {
     pub fn refresh(
         &mut self,
@@ -450,6 +445,11 @@ impl ProcessSampler {
         );
         let mut snapshot = monitored.snapshot(&self.system);
         snapshot.cpu_ready = self.sampled;
+        self.sample_poll.set_duration(if self.sampled {
+            SAMPLE_INTERVAL
+        } else {
+            CPU_WARMUP_INTERVAL
+        });
         self.sampled = true;
         Some(snapshot)
     }

@@ -1,5 +1,8 @@
+use base64::Engine;
 use std::cell::RefCell;
+use std::collections::HashMap;
 use std::collections::HashSet;
+use std::rc::Rc;
 
 use dioxus::prelude::*;
 use vmux_api::chat::{
@@ -7,13 +10,21 @@ use vmux_api::chat::{
     ChatSubagentSummary, ChatToolArgument, ChatToolArgumentValue, ChatToolArguments, ChatToolCall,
     ChatToolChild, ChatToolChildCall, ChatTurn, ChatTurnRow, ExploreStep, WORKING_VERB_IDS,
 };
+use vmux_api::command_bar::OpenRequest;
+use vmux_api::open_target::{OpenTarget, PaneDirection, PaneOpenMode, PaneTarget};
 use vmux_api::prompt_media::ChatAttachment;
+use vmux_api::protocol::{AgentDelegationEnvelope, AgentPromptEnvelope};
 use vmux_ui::components::avatar::{AgentThumbnail, Avatar};
 use vmux_ui::components::code::ShellCode;
+use vmux_ui::components::context_menu::{
+    ContextMenu, ContextMenuContent, ContextMenuItem, ContextMenuTrigger,
+};
 use vmux_ui::file_icon::{FilePath, TypeIcon};
 use vmux_ui::i18n::{TranslationValue, translate, translate_with};
 use vmux_ui::icon::{LineIcon, LineIconView};
+use vmux_ui::navigation::NavigationGesture;
 
+use super::FilePlacement;
 use super::activity::{ActivityIconView, FileActivityIcon, ToolActivityIcon};
 use crate::activity::{ActivityIcon, ToolPresentation};
 use vmux_ui::clipboard::Clipboard;
@@ -27,11 +38,18 @@ pub fn UserBubble(
     avatar_color: String,
     #[props(default)] copy_text: String,
     #[props(default)] created_at_ms: u64,
+    #[props(default)] compact: bool,
     #[props(extends = GlobalAttributes)] attributes: Vec<Attribute>,
     children: Element,
 ) -> Element {
+    let presentation = if compact {
+        ""
+    } else {
+        "chat-message-enter [contain-intrinsic-size:auto_160px] [contain:layout_paint_style] [content-visibility:auto]"
+    };
+    let padding = if compact { "py-2" } else { "py-3" };
     rsx! {
-        div { class: "chat-message-enter chat-user-bubble group flex w-full flex-row-reverse items-start justify-start gap-3 px-1 py-1 text-sm [contain-intrinsic-size:auto_160px] [contain:layout_paint_style] [content-visibility:auto]", "data-vmux-scroll-layout": "", ..attributes,
+        div { class: "{presentation} chat-user-bubble group flex w-full flex-row-reverse items-start justify-start gap-3 px-1 py-1 text-sm", "data-vmux-scroll-layout": (!compact).then_some(""), ..attributes,
             Avatar {
                 src: None,
                 seed: avatar_name.clone(),
@@ -40,8 +58,8 @@ pub fn UserBubble(
                 class: "mt-1 h-6 w-6 text-[8px]".to_string(),
             }
             div { class: "relative min-w-0 max-w-[80%] flex-none",
-                div { class: "flex min-w-0 flex-col gap-2 rounded-2xl bg-foreground/[0.045] px-4 py-3 text-left", {children} }
-                MessageMeta { text: copy_text, created_at_ms, right: true }
+                div { class: "flex min-w-0 flex-col gap-2 rounded-2xl bg-foreground/[0.045] px-4 {padding} text-left", {children} }
+                if !compact { MessageMeta { text: copy_text, created_at_ms, right: true } }
             }
         }
     }
@@ -55,11 +73,17 @@ pub fn AssistantTurn(
     avatar_background: String,
     #[props(default)] copy_text: String,
     #[props(default)] created_at_ms: u64,
+    #[props(default)] compact: bool,
     #[props(extends = GlobalAttributes)] attributes: Vec<Attribute>,
     children: Element,
 ) -> Element {
+    let presentation = if compact {
+        ""
+    } else {
+        "chat-message-enter [contain-intrinsic-size:auto_160px] [contain:layout_paint_style] [content-visibility:auto]"
+    };
     rsx! {
-        div { class: "chat-message-enter chat-assistant-turn group flex w-full gap-3 px-1 py-1 [contain-intrinsic-size:auto_160px] [contain:layout_paint_style] [content-visibility:auto]", "data-vmux-scroll-layout": "", ..attributes,
+        div { class: "{presentation} chat-assistant-turn group flex w-full gap-3 px-1 py-1", "data-vmux-scroll-layout": (!compact).then_some(""), ..attributes,
             AgentThumbnail {
                 src: avatar_src,
                 seed: agent_id,
@@ -68,9 +92,9 @@ pub fn AssistantTurn(
                 class: "mt-0.5 h-6 w-6 text-[8px]".to_string(),
             }
             div { class: "relative min-w-0 flex-1",
-                div { class: "mb-1 text-xs font-medium text-muted-foreground", "{name}" }
+                if !compact { div { class: "mb-1 text-xs font-medium text-muted-foreground", "{name}" } }
                 div { class: "flex min-w-0 flex-col gap-2.5", {children} }
-                MessageMeta { text: copy_text, created_at_ms }
+                if !compact { MessageMeta { text: copy_text, created_at_ms } }
             }
         }
     }
@@ -184,9 +208,12 @@ pub fn ChatItemRow(
             context,
             attachments,
             created_at_ms,
-        } => rsx! {
+            ..
+        } => {
+            let mut attachments = attachments.clone();
+            vmux_api::prompt_media::PromptMediaPaths::append_videos(text, &mut attachments);
+            rsx! {
             UserBubble {
-                key: "{key}",
                 avatar_name: user_name,
                 avatar_color: user_color,
                 copy_text: text.clone(),
@@ -194,6 +221,7 @@ pub fn ChatItemRow(
                 if let Some(context) = context {
                     details { class: "disclosure user-context-panel rounded-xl border",
                         summary { class: "flex cursor-pointer select-none items-center gap-2 px-2.5 py-2 text-xs list-none [&::-webkit-details-marker]:hidden",
+                            DisclosureIcon {}
                             span { class: "flex h-5 w-5 shrink-0 items-center justify-center text-muted-foreground/75",
                                 LineIconView { icon: LineIcon::Shield, class: "h-3 w-3" }
                             }
@@ -205,7 +233,6 @@ pub fn ChatItemRow(
                                     &[("count", TranslationValue::Number(context.len() as i64))],
                                 )}
                             }
-                            DisclosureIcon {}
                         }
                         pre { class: "user-context-content max-h-72 overflow-auto whitespace-pre-wrap rounded-lg px-3 py-2.5 font-mono text-[11px] leading-relaxed text-muted-foreground", "{context}" }
                     }
@@ -224,7 +251,8 @@ pub fn ChatItemRow(
                     }
                 }
             }
-        },
+            }
+        }
         ChatItem::Turn(turn) => rsx! {
             TurnView {
                 turn_index: key,
@@ -240,7 +268,50 @@ pub fn ChatItemRow(
 }
 
 #[component]
-fn UserAttachment(attachment: ChatAttachment, onload: EventHandler<()>) -> Element {
+pub(super) fn UserAttachment(attachment: ChatAttachment, onload: EventHandler<()>) -> Element {
+    let mut playing = use_signal(|| false);
+    let mut started = use_signal(|| false);
+    let mut failed = use_signal(|| false);
+    let media_id = use_hook(|| format!("chat-video-{}", uuid::Uuid::new_v4()));
+    if attachment.mime_type.starts_with("video/") && !failed() {
+        let play_id = media_id.clone();
+        return rsx! {
+            figure {
+                key: "message-attachment-{attachment.path}",
+                class: "w-96 max-w-full min-w-0 overflow-hidden rounded-xl bg-background/50",
+                div { class: "relative aspect-video w-full",
+                    video {
+                        id: media_id,
+                        src: (!attachment.media_url.is_empty()).then(|| format!("{}#t=0.001", attachment.media_url)),
+                        preload: "metadata",
+                        playsinline: true,
+                        controls: started(),
+                        class: "h-full w-full object-contain",
+                        onloadeddata: move |_| onload.call(()),
+                        onplay: move |_| { started.set(true); playing.set(true); },
+                        onpause: move |_| playing.set(false),
+                        onended: move |_| playing.set(false),
+                        onerror: move |_| { failed.set(true); onload.call(()); },
+                    }
+                    if !playing() {
+                        button {
+                            r#type: "button",
+                            class: "absolute inset-0 flex cursor-pointer items-center justify-center bg-black/10",
+                            aria_label: translate("agent-video-play"),
+                            disabled: attachment.media_url.is_empty(),
+                            onclick: move |_| vmux_ui::media::MediaElement::with_id(&play_id).toggle_playback(),
+                            span { class: "flex size-12 items-center justify-center rounded-full bg-black/60 text-white backdrop-blur-sm transition-transform hover:scale-105 motion-reduce:transition-none",
+                                svg { class: "size-6", view_box: "0 0 24 24", fill: "currentColor", "aria-hidden": "true",
+                                    path { d: "M8 5v14l11-7z" }
+                                }
+                            }
+                        }
+                    }
+                }
+                figcaption { class: "truncate px-3 py-2 text-xs text-muted-foreground", ToolFileLink { path: attachment.path.clone() } }
+            }
+        };
+    }
     let preview_data_url = &attachment.preview_data_url;
     if attachment.mime_type.starts_with("image/") && !preview_data_url.is_empty() {
         return rsx! {
@@ -264,7 +335,7 @@ fn UserAttachment(attachment: ChatAttachment, onload: EventHandler<()>) -> Eleme
             key: "message-attachment-{attachment.path}",
             class: "flex min-w-32 max-w-64 items-center gap-2 rounded-xl bg-foreground/[0.06] px-3 py-2 ring-1 ring-inset ring-foreground/10",
             span { class: "font-mono text-[10px] font-semibold tracking-wide text-muted-foreground", "{FilePath(&attachment.name).extension_label()}" }
-            span { class: "truncate text-xs text-muted-foreground", "{attachment.name}" }
+            span { class: "truncate text-xs text-muted-foreground", ToolFileLink { path: attachment.path.clone() } }
         }
     }
 }
@@ -279,6 +350,490 @@ struct ToolDisclosure<'a> {
 #[cfg(test)]
 mod disclosure_tests {
     use super::*;
+    use dioxus::core::{AttributeValue, Mutation};
+    use dioxus::prelude::Event as UiEvent;
+    use dioxus_html::{
+        Code, EventData, Key, Location, Modifiers, SerializedHtmlEventConverter,
+        SerializedKeyboardData, SerializedMouseData, SerializedResizeData,
+    };
+    use std::rc::Rc;
+    use vmux_api::BinEvent;
+    use vmux_ui::transport::{
+        BytesListener, HostBinding, PageHost, event_listener::EventListenerError,
+    };
+
+    #[component]
+    fn VideoAttachmentFixture() -> Element {
+        rsx! { UserAttachment {
+            attachment: ChatAttachment {
+                path: "/tmp/clip.mov".into(),
+                name: "clip.mov".into(),
+                mime_type: "video/mp4".into(),
+                media_url: "http://127.0.0.1:12345/capability".into(),
+                ..Default::default()
+            },
+            onload: move |_| {},
+        } }
+    }
+
+    #[test]
+    fn video_attachment_has_a_preview_play_button_and_no_autoplay() {
+        let mut dom = VirtualDom::new(VideoAttachmentFixture);
+        dom.rebuild_in_place();
+        let html = dioxus_ssr::render(&dom);
+        assert!(html.contains("<video"));
+        assert!(html.contains("src=\"http://127.0.0.1:12345/capability#t=0.001\""));
+        assert!(html.contains(&translate("agent-video-play")));
+        assert!(!html.contains("autoplay"));
+    }
+
+    #[component]
+    fn PastedVideoFixture() -> Element {
+        rsx! { ChatItemRow {
+            absolute_index: 0,
+            item: ChatItem::User { event_id: String::new(), text: r"inspect /tmp/Screen\ Recording.mov".into(), context: None, attachments: Vec::new(), created_at_ms: 0 },
+            agent_id: String::new(), agent_name: String::new(), agent_avatar: None, agent_color: String::new(),
+            user_name: "Junichi".to_string(), user_color: "#888888".to_string(),
+            on_media_load: move |_| {},
+        } }
+    }
+
+    #[test]
+    fn pasted_video_reserves_its_preview_before_host_hydration() {
+        let mut dom = VirtualDom::new(PastedVideoFixture);
+        dom.rebuild_in_place();
+        let html = dioxus_ssr::render(&dom);
+        assert!(html.contains("<video"));
+        assert!(html.contains("disabled"));
+        assert!(html.contains(r"inspect /tmp/Screen\ Recording.mov"));
+    }
+
+    #[derive(Default)]
+    struct FileHost(
+        RefCell<Vec<OpenRequest>>,
+        RefCell<Vec<crate::event::ChatToolFileOpen>>,
+    );
+
+    impl PageHost for FileHost {
+        fn send(&self, id: &str, bytes: &[u8]) -> Result<(), EventListenerError> {
+            if id == crate::event::ChatToolFileOpen::id() {
+                let request =
+                    rkyv::from_bytes::<crate::event::ChatToolFileOpen, rkyv::rancor::Error>(bytes)
+                        .unwrap();
+                self.0.borrow_mut().push(OpenRequest {
+                    value: request.url.clone(),
+                    open: request.open,
+                });
+                self.1.borrow_mut().push(request);
+            }
+            if id == OpenRequest::id() {
+                self.0
+                    .borrow_mut()
+                    .push(rkyv::from_bytes::<OpenRequest, rkyv::rancor::Error>(bytes).unwrap());
+            }
+            Ok(())
+        }
+
+        fn listen(&self, _: &str, _: BytesListener) -> Result<(), EventListenerError> {
+            Ok(())
+        }
+    }
+
+    #[test]
+    fn read_only_exploration_stays_inside_the_expandable_call_details() {
+        let arguments = ChatToolArguments::Raw("cat /work/skills/caveman/SKILL.md".into());
+        let mut call = VirtualDom::new_with_props(
+            ToolCall,
+            ToolCallProps {
+                call: ChatToolCall {
+                    kind: vmux_api::chat::ChatToolKind::Command,
+                    arguments: arguments.clone(),
+                    ..Default::default()
+                },
+            },
+        );
+        call.rebuild_in_place();
+        let mut child = VirtualDom::new_with_props(
+            ToolChildCall,
+            ToolChildCallProps {
+                call: ChatToolChildCall {
+                    kind: vmux_api::chat::ChatToolKind::Command,
+                    arguments,
+                    ..Default::default()
+                },
+            },
+        );
+        child.rebuild_in_place();
+        for dom in [&call, &child] {
+            let html = dioxus_ssr::render(dom);
+            let summary = html
+                .split("<summary")
+                .nth(1)
+                .unwrap()
+                .split("</summary>")
+                .next()
+                .unwrap();
+            assert!(summary.contains(&translate("agent-tool-read-files")));
+            assert!(summary.contains("caveman/SKILL.md"));
+            let (details, following) = html.split_once("</details>").unwrap();
+            let read = translate_with(
+                "agent-tool-explore-read",
+                &[("path", TranslationValue::String("caveman/SKILL.md"))],
+            );
+            assert!(details.contains(&read));
+            assert!(!following.contains(&read));
+        }
+    }
+
+    #[test]
+    fn inter_agent_output_is_labelled_as_agent_message_and_keeps_its_input_expandable() {
+        let input = AgentPromptEnvelope::compose(
+            "Review the next PR\nKeep the existing branch.",
+            Some("private project instructions"),
+        );
+        let content = format!(
+            "<codex_delegation><source_thread_id>peer</source_thread_id><input>{input}</input></codex_delegation>"
+        );
+        let mut dom = VirtualDom::new_with_props(
+            StandaloneToolResult,
+            StandaloneToolResultProps {
+                result_key: 0,
+                content,
+                is_error: false,
+            },
+        );
+        dom.rebuild_in_place();
+        let html = dioxus_ssr::render(&dom);
+        assert!(html.contains(&translate("agent-incoming-message")));
+        assert!(html.contains("Review the next PR\nKeep the existing branch."));
+        assert!(!html.contains("codex_delegation"));
+        assert!(!html.contains("private project instructions"));
+        assert!(!html.contains("chat-user-bubble"));
+    }
+
+    #[test]
+    fn output_summaries_preview_one_line_and_keep_the_full_output_expandable() {
+        for error in [false, true] {
+            let content = "\nFirst result\nSecond result".to_string();
+            let mut nested = VirtualDom::new_with_props(
+                NestedToolResult,
+                NestedToolResultProps {
+                    result_key: 0,
+                    content: content.clone(),
+                    is_error: error,
+                },
+            );
+            nested.rebuild_in_place();
+            let mut standalone = VirtualDom::new_with_props(
+                StandaloneToolResult,
+                StandaloneToolResultProps {
+                    result_key: 0,
+                    content,
+                    is_error: error,
+                },
+            );
+            standalone.rebuild_in_place();
+            for dom in [&nested, &standalone] {
+                let html = dioxus_ssr::render(dom);
+                let summary = html
+                    .split("<summary")
+                    .nth(1)
+                    .unwrap()
+                    .split("</summary>")
+                    .next()
+                    .unwrap();
+                assert!(summary.contains("First result"));
+                assert!(!summary.contains("Second result"));
+                let full = html
+                    .split("<pre")
+                    .nth(1)
+                    .unwrap()
+                    .split("</pre>")
+                    .next()
+                    .unwrap();
+                assert!(full.contains("First result\nSecond result"));
+            }
+        }
+        let content = "Script completed\nWall time 0.2 seconds\nOutput:\n{\"exit_code\":0,\"output\":\"Actual output\\nRemaining output\"}";
+        assert_eq!(OutputPreview::new(content).0, "Actual output");
+        assert_eq!(OutputPreview::new("Script completed\n\nclean").0, "clean");
+        assert_eq!(
+            OutputPreview::new("Script completed successfully\n\nDetails").0,
+            "Script completed successfully"
+        );
+        assert_eq!(
+            OutputPreview::new("First line\n\nSecond line").0,
+            "First line"
+        );
+    }
+
+    #[test]
+    fn folded_reads_and_batches_keep_clickable_file_names() {
+        let path = "/work/skills/caveman/SKILL.md";
+        let call = ChatToolCall {
+            kind: vmux_api::chat::ChatToolKind::ReadFile,
+            arguments: ChatToolArguments::Raw(format!(
+                "text(await tools.exec_command({{cmd: \"cat {path}\"}}));"
+            )),
+            ..Default::default()
+        };
+        let mut row = VirtualDom::new_with_props(ToolCall, ToolCallProps { call: call.clone() });
+        row.rebuild_in_place();
+        let mut batch = VirtualDom::new_with_props(
+            FinishedToolCalls,
+            FinishedToolCallsProps {
+                calls: vec![call],
+                open: false,
+                identity: String::new(),
+            },
+        );
+        batch.rebuild_in_place();
+        for dom in [&row, &batch] {
+            let html = dioxus_ssr::render(dom);
+            let summary = html
+                .split("<summary")
+                .nth(1)
+                .unwrap()
+                .split("</summary>")
+                .next()
+                .unwrap();
+            assert!(summary.contains("caveman/SKILL.md"));
+            assert!(summary.contains("href=\"file:///work/skills/caveman/SKILL.md\""));
+        }
+    }
+
+    #[test]
+    fn file_references_resolve_relative_paths_and_preserve_editor_locations() {
+        let file = FileReference::new("src/a #?.rs", "/work/p root");
+        assert_eq!(
+            file.url.as_deref(),
+            Some("file:///work/p%20root/src/a%20%23%3F.rs")
+        );
+        assert_eq!(file.label, "src/a #?.rs");
+        let file = FileReference::new("file:///work/src/main.rs#L9", "/work");
+        assert_eq!(file.url.as_deref(), Some("file:///work/src/main.rs#L9"));
+        assert_eq!(file.label, "src/main.rs");
+        assert!(FileReference::new("src/main.rs", "").url.is_none());
+        assert!(
+            FileReference::new("https://example.com/main.rs", "/work")
+                .url
+                .is_none()
+        );
+    }
+
+    #[test]
+    fn file_clicks_send_native_open_requests_without_toggling_the_disclosure() {
+        dioxus_html::set_event_converter(Box::new(SerializedHtmlEventConverter));
+        for (meta, shift, target) in [
+            (false, false, OpenTarget::InNewStack),
+            (true, false, OpenTarget::InNewStack),
+            (true, true, OpenTarget::InNewTab),
+        ] {
+            let host = Rc::new(FileHost::default());
+            let mut dom = VirtualDom::new_with_props(
+                ToolFileLink,
+                ToolFileLinkProps {
+                    path: "/work/a #?.rs".into(),
+                    read: false,
+                },
+            );
+            dom.provide_root_context(HostBinding(host.clone()));
+            let edits = dom.rebuild_to_vec();
+            let link = edits
+                .edits
+                .iter()
+                .find_map(|edit| match edit {
+                    Mutation::SetAttribute {
+                        name: "href",
+                        value: AttributeValue::Text(url),
+                        id,
+                        ..
+                    } if url == "file:///work/a%20%23%3F.rs" => Some(*id),
+                    _ => None,
+                })
+                .unwrap();
+            let mut data = serde_json::to_value(SerializedMouseData::default()).unwrap();
+            data["meta_key"] = meta.into();
+            data["shift_key"] = shift.into();
+            let mouse = serde_json::from_value::<SerializedMouseData>(data).unwrap();
+            let event = UiEvent::new(EventData::Mouse(mouse).into_any(), true);
+            dom.runtime().handle_event("click", event.clone(), link);
+            assert!(!event.default_action_enabled());
+            assert!(!event.propagates());
+            let opened = host.0.borrow();
+            assert_eq!(opened.len(), 1);
+            assert_eq!(opened[0].value, "file:///work/a%20%23%3F.rs");
+            assert_eq!(opened[0].open, if meta { Some(target) } else { None });
+        }
+    }
+
+    #[component]
+    fn ResponsiveFileLink() -> Element {
+        let placement = FilePlacement::provide();
+        rsx! {
+            main {
+                onresize: move |event: UiEvent<ResizeData>| placement.resize(&event.data()),
+                ToolFileLink { path: "/work/main.rs" }
+            }
+        }
+    }
+
+    #[test]
+    fn file_clicks_adapt_to_pane_resizing_and_keep_modifier_destinations() {
+        dioxus_html::set_event_converter(Box::new(SerializedHtmlEventConverter));
+        let host = Rc::new(FileHost::default());
+        let mut dom = VirtualDom::new(ResponsiveFileLink);
+        dom.provide_root_context(HostBinding(host.clone()));
+        let edits = dom.rebuild_to_vec();
+        let resize = edits
+            .edits
+            .iter()
+            .find_map(|edit| match edit {
+                Mutation::NewEventListener { name, id } if name == "resize" => Some(*id),
+                _ => None,
+            })
+            .unwrap();
+        let link = edits
+            .edits
+            .iter()
+            .find_map(|edit| match edit {
+                Mutation::SetAttribute {
+                    name: "href",
+                    value: AttributeValue::Text(url),
+                    id,
+                    ..
+                } if url == "file:///work/main.rs" => Some(*id),
+                _ => None,
+            })
+            .unwrap();
+        for (width, meta, shift, target) in [
+            (800.0, false, false, OpenTarget::InNewStack),
+            (
+                1600.0,
+                false,
+                false,
+                OpenTarget::InPane {
+                    direction: PaneDirection::Right,
+                    target: PaneTarget::Existing,
+                    mode: PaneOpenMode::NewStack,
+                },
+            ),
+            (900.0, false, false, OpenTarget::InNewStack),
+            (1600.0, true, false, OpenTarget::InNewStack),
+            (1600.0, true, true, OpenTarget::InNewTab),
+        ] {
+            let size = dioxus_html::geometry::PixelsSize::new(width, 900.0);
+            dom.runtime().handle_event(
+                "resize",
+                UiEvent::new(
+                    EventData::Resize(SerializedResizeData::new(size, size)).into_any(),
+                    true,
+                ),
+                resize,
+            );
+            dom.render_immediate_to_vec();
+            let mut data = serde_json::to_value(SerializedMouseData::default()).unwrap();
+            data["meta_key"] = meta.into();
+            data["shift_key"] = shift.into();
+            let mouse = serde_json::from_value::<SerializedMouseData>(data).unwrap();
+            let event = UiEvent::new(EventData::Mouse(mouse).into_any(), true);
+            dom.runtime().handle_event("click", event.clone(), link);
+            assert!(!event.default_action_enabled());
+            assert!(!event.propagates());
+            assert_eq!(
+                host.0.borrow().last().unwrap().open,
+                if meta { Some(target) } else { None }
+            );
+            assert_eq!(host.1.borrow().last().unwrap().width, width);
+        }
+        assert_eq!(host.0.borrow().len(), 5);
+    }
+
+    #[test]
+    fn file_context_menu_opens_the_editor_in_the_chosen_container() {
+        dioxus_html::set_event_converter(Box::new(SerializedHtmlEventConverter));
+        for (index, target) in [
+            OpenTarget::InPane {
+                direction: PaneDirection::Right,
+                target: PaneTarget::NewSplit,
+                mode: PaneOpenMode::NewStack,
+            },
+            OpenTarget::InNewStack,
+            OpenTarget::InNewTab,
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            let host = Rc::new(FileHost::default());
+            let mut dom = VirtualDom::new(MenuFileLink);
+            dom.provide_root_context(HostBinding(host.clone()));
+            let edits = dom.rebuild_to_vec();
+            let trigger = edits
+                .edits
+                .iter()
+                .find_map(|edit| match edit {
+                    Mutation::SetAttribute {
+                        name: "href",
+                        value: AttributeValue::Text(url),
+                        id,
+                        ..
+                    } if url == "file:///work/main.rs" => Some(*id),
+                    _ => None,
+                })
+                .unwrap();
+            dom.runtime().handle_event(
+                "contextmenu",
+                UiEvent::new(
+                    EventData::Mouse(SerializedMouseData::default()).into_any(),
+                    true,
+                ),
+                trigger,
+            );
+            let opened = dom.render_immediate_to_vec();
+            let html = dioxus_ssr::render(&dom);
+            let (row, popup) = html.split_once("</details>").unwrap();
+            assert!(!row.contains("role=\"menu\""));
+            assert!(popup.contains("role=\"menu\""));
+            let buttons = opened
+                .edits
+                .iter()
+                .filter_map(|edit| match edit {
+                    Mutation::NewEventListener { name, id } if name == "pointerenter" => Some(*id),
+                    _ => None,
+                })
+                .collect::<Vec<_>>();
+            assert_eq!(buttons.len(), 3);
+            dom.runtime().handle_event(
+                "keydown",
+                UiEvent::new(
+                    EventData::Keyboard(SerializedKeyboardData::new(
+                        Key::Enter,
+                        Code::Enter,
+                        Location::Standard,
+                        false,
+                        Modifiers::empty(),
+                        false,
+                    ))
+                    .into_any(),
+                    true,
+                ),
+                buttons[index],
+            );
+            let opened = host.0.borrow();
+            assert_eq!(opened.len(), 1);
+            assert_eq!(opened[0].value, "file:///work/main.rs");
+            assert_eq!(opened[0].open, Some(target));
+        }
+    }
+
+    #[component]
+    fn MenuFileLink() -> Element {
+        rsx! {
+            ToolFileMenu {
+                details { summary { ToolFileLink { path: "/work/main.rs" } } }
+            }
+        }
+    }
 
     #[test]
     fn command_rows_show_exploration_steps_and_real_commands_instead_of_the_wrapper() {
@@ -431,6 +986,13 @@ pub fn TurnView(
     agent_color: String,
     #[props(default)] latest: bool,
 ) -> Element {
+    let row_keys = use_hook(|| Rc::new(RefCell::new(RowKeys::default())));
+    let mut ids = use_signal(|| Rc::<[String]>::from(turn.block_ids.clone()));
+    if ids.peek().as_ref() != turn.block_ids.as_slice() {
+        ids.set(Rc::from(turn.block_ids.clone()));
+    }
+    use_context_provider(|| BlockIdentity(ids));
+    let stable_keys = row_keys.borrow_mut().assign(&turn.rows, &turn.block_ids);
     let key = turn_index;
     let turn = &turn;
     let tools = ToolDisclosure::new(turn, latest);
@@ -473,7 +1035,6 @@ pub fn TurnView(
     });
     rsx! {
         div {
-            key: "{key}",
             class: "flex w-full flex-col gap-2 [contain-intrinsic-size:auto_180px] [content-visibility:auto]",
             "data-vmux-scroll-layout": "",
             if !turn.rows.is_empty() || turn.running || duration_label.is_some() {
@@ -484,9 +1045,11 @@ pub fn TurnView(
                     avatar_background: agent_color,
                     copy_text: turn.copy_text.clone(),
                     created_at_ms: turn.created_at_ms,
-                    for row in turn.rows.iter().cloned() {
-                        TurnBlock {
-                            key: "{row.index()}",
+                    for (row, identity) in turn.rows.iter().cloned().zip(stable_keys) {
+                        TurnRow {
+                            key: "{identity}",
+                            identity,
+                            turn_index: key,
                             streaming: live_text_index == Some(row.index()),
                             expanded: tools.expanded(&row),
                             row,
@@ -506,14 +1069,103 @@ pub fn TurnView(
     }
 }
 
+#[derive(Clone, Copy)]
+struct BlockIdentity(Signal<Rc<[String]>>);
+
+impl BlockIdentity {
+    fn source(index: u32) -> Option<String> {
+        let identity = try_consume_context::<Self>()?;
+        identity
+            .0
+            .read()
+            .get(index as usize)
+            .filter(|id| !id.is_empty())
+            .cloned()
+    }
+
+    fn key(index: u32) -> String {
+        Self::source(index).unwrap_or_else(|| index.to_string())
+    }
+
+    fn anchor(index: u32, kind: &str) -> String {
+        let id = Self::key(index);
+        let encoded = base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(id);
+        format!("chat-{kind}-{encoded}")
+    }
+
+    fn disclosure(index: u32, kind: &str) -> String {
+        Self::source(index)
+            .map(|id| format!("{id}:{kind}"))
+            .unwrap_or_default()
+    }
+}
+
+#[derive(Default)]
+struct RowKeys(HashMap<String, String>);
+
+impl RowKeys {
+    fn assign(&mut self, rows: &[ChatTurnRow], ids: &[String]) -> Vec<String> {
+        let mut next = HashMap::new();
+        let mut keys = Vec::new();
+        for row in rows {
+            let indices = match row {
+                ChatTurnRow::FinishedTools { calls, .. } => {
+                    calls.iter().map(|call| call.index).collect::<Vec<_>>()
+                }
+                _ => vec![row.index()],
+            };
+            let mut members = Vec::new();
+            for index in indices {
+                let id = ids
+                    .get(index as usize)
+                    .filter(|id| !id.is_empty())
+                    .cloned()
+                    .unwrap_or_else(|| index.to_string());
+                members.push(id);
+            }
+            let key = members
+                .iter()
+                .find_map(|id| self.0.get(id))
+                .cloned()
+                .unwrap_or_else(|| members[0].clone());
+            for id in members {
+                next.insert(id, key.clone());
+            }
+            keys.push(key);
+        }
+        self.0 = next;
+        keys
+    }
+}
+
+#[component]
+fn TurnRow(
+    identity: String,
+    row: ChatTurnRow,
+    turn_index: usize,
+    streaming: bool,
+    expanded: bool,
+) -> Element {
+    let encoded = base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(&identity);
+    let id = if identity.parse::<usize>().is_ok() {
+        format!("chat-row-{turn_index}-{encoded}")
+    } else {
+        format!("chat-row-{encoded}")
+    };
+    rsx! {
+        div { id, "data-vmux-scroll-anchor": "",
+            TurnBlock { identity, row, turn_index, streaming, expanded }
+        }
+    }
+}
+
 const ROW_SUMMARY: &str = "flex min-h-6 cursor-pointer select-none items-center gap-2 list-none [&::-webkit-details-marker]:hidden";
 
 #[component]
 fn DisclosureIcon() -> Element {
     rsx! {
-        span {
-            class: "disclosure-icon relative inline-block h-3 w-3 shrink-0 text-muted-foreground",
-            aria_hidden: "true",
+        span { class: "disclosure-icon flex size-3 shrink-0 items-center justify-center text-muted-foreground", aria_hidden: "true",
+            LineIconView { icon: LineIcon::ChevronDown, class: "size-3" }
         }
     }
 }
@@ -668,21 +1320,209 @@ fn ToolArguments(arguments: ChatToolArguments) -> Element {
 }
 
 #[component]
-fn FinishedToolCalls(calls: Vec<ChatToolCall>, open: bool) -> Element {
+fn FinishedToolCalls(
+    calls: Vec<ChatToolCall>,
+    open: bool,
+    #[props(default)] identity: String,
+) -> Element {
+    let disclosure = if !identity.is_empty()
+        && calls
+            .first()
+            .is_some_and(|call| BlockIdentity::source(call.index).is_some())
+    {
+        format!("{identity}:finished")
+    } else {
+        String::new()
+    };
     let count = calls.len() as i64;
+    let mut paths = Vec::new();
+    for call in &calls {
+        for path in call.file_paths() {
+            if !paths.contains(&path) {
+                paths.push(path);
+            }
+        }
+    }
     rsx! {
-        details { class: "disclosure", open,
+        details { class: "disclosure", open, "data-vmux-disclosure-key": disclosure,
             summary { class: "flex cursor-pointer select-none items-center gap-2 rounded-xl px-2 py-1 text-xs text-muted-foreground list-none transition-colors hover:bg-foreground/[0.025] [&::-webkit-details-marker]:hidden",
+                DisclosureIcon {}
                 span { class: "font-medium",
                     {translate_with("agent-tool-calls", &[("count", TranslationValue::Number(count))])}
                 }
-                DisclosureIcon {}
+                ToolFiles { paths }
             }
             div { class: "mt-1 flex flex-col gap-1",
                 for call in calls {
-                    ToolCall { call }
+                    ToolCall { key: "{BlockIdentity::key(call.index)}", call }
                 }
             }
+        }
+    }
+}
+
+#[component]
+fn ToolFiles(paths: Vec<String>) -> Element {
+    rsx! {
+        span { class: "flex min-w-0 flex-wrap items-center gap-x-2 gap-y-0.5",
+            for path in paths {
+                span { class: "min-w-0 max-w-full", ToolFileLink { key: "{path}", path } }
+            }
+        }
+    }
+}
+
+#[component]
+fn ToolFileLink(path: String, #[props(default)] read: bool) -> Element {
+    let placement = try_consume_context::<FilePlacement>();
+    let menu = try_consume_context::<FileMenu>();
+    let binding =
+        try_consume_context::<vmux_ui::hooks::UiStateBinding<crate::state::ChatUiState>>();
+    let cwd = binding
+        .map(|binding| binding.state.read().composer.cwd.clone())
+        .unwrap_or_default();
+    let file = FileReference::new(&path, &cwd);
+    let label = if read {
+        translate_with(
+            "agent-tool-explore-read",
+            &[("path", TranslationValue::String(&file.label))],
+        )
+    } else {
+        file.label.clone()
+    };
+    let Some(url) = file.url else {
+        return rsx! { span { class: "truncate font-mono text-[11px]", title: file.path, "{label}" } };
+    };
+    let clicked_url = url.clone();
+    let link = rsx! {
+        a {
+                    href: url.clone(),
+                    title: file.path,
+                    class: "inline-block max-w-full truncate align-middle font-mono text-[11px] text-foreground/65 underline-offset-2 transition-colors hover:text-primary hover:underline",
+                    onclick: move |event: MouseEvent| {
+                        event.prevent_default();
+                        event.stop_propagation();
+                        let width = placement.map(|placement| *placement.0.peek()).unwrap_or(0.0);
+                        let target = NavigationGesture::from_mouse(&event).open_target();
+                        let open = (target != OpenTarget::InPlace).then_some(target);
+                        let _ = vmux_ui::hooks::send(&crate::event::ChatToolFileOpen { url: clicked_url.clone(), width, open });
+                    },
+                    oncontextmenu: move |_| {
+                        if let Some(menu) = menu {
+                            menu.select(url.clone());
+                        }
+                    },
+                    "{label}"
+        }
+    };
+    if menu.is_some() {
+        rsx! { ContextMenuTrigger { attributes: vec![], {link} } }
+    } else {
+        link
+    }
+}
+
+#[component]
+pub(super) fn ToolFileMenu(children: Element) -> Element {
+    let menu = FileMenu(use_signal(String::new));
+    use_context_provider(|| menu);
+    let url = (menu.0)();
+    rsx! {
+        ContextMenu { attributes: vec![],
+            {children}
+            ContextMenuContent { attributes: vec![],
+                if !url.is_empty() {
+                ToolFileOpenItem {
+                    index: 0usize, url: url.clone(),
+                    target: OpenTarget::InPane { direction: PaneDirection::Right, target: PaneTarget::NewSplit, mode: PaneOpenMode::NewStack },
+                    label: "agent-tool-open-in-pane-right",
+                }
+                ToolFileOpenItem { index: 1usize, url: url.clone(), target: OpenTarget::InNewStack, label: "agent-tool-open-in-stack" }
+                ToolFileOpenItem { index: 2usize, url, target: OpenTarget::InNewTab, label: "agent-tool-open-in-tab" }
+                }
+            }
+        }
+    }
+}
+
+#[derive(Clone, Copy)]
+struct FileMenu(Signal<String>);
+
+impl FileMenu {
+    fn select(mut self, url: String) {
+        self.0.set(url);
+    }
+}
+
+#[component]
+fn ToolFileOpenItem(index: usize, url: String, target: OpenTarget, label: &'static str) -> Element {
+    let value = use_signal(|| label.to_string());
+    rsx! {
+        ContextMenuItem {
+            index,
+            value: Into::<ReadSignal<String>>::into(value),
+            attributes: vec![],
+            on_select: move |_: String| {
+                let _ = vmux_ui::hooks::send(&OpenRequest { value: url.clone(), open: Some(target) });
+            },
+            {translate(label)}
+        }
+    }
+}
+
+struct FileReference {
+    path: String,
+    label: String,
+    url: Option<String>,
+}
+
+impl FileReference {
+    fn new(path: &str, cwd: &str) -> Self {
+        let existing = url::Url::parse(path).ok();
+        let path = if let Some(url) = &existing {
+            let Ok(path) = url.to_file_path() else {
+                return Self {
+                    path: path.to_string(),
+                    label: path.to_string(),
+                    url: None,
+                };
+            };
+            path
+        } else {
+            let path = std::path::PathBuf::from(path);
+            if path.is_absolute() || cwd.is_empty() {
+                path
+            } else {
+                std::path::Path::new(cwd).join(path)
+            }
+        };
+        let displayed = if !cwd.is_empty() {
+            path.strip_prefix(cwd).unwrap_or(&path)
+        } else {
+            &path
+        };
+        let label = if displayed.components().count() > 2 {
+            let name = displayed.file_name().unwrap_or_default();
+            match displayed.parent().and_then(std::path::Path::file_name) {
+                Some(parent) => std::path::Path::new(parent)
+                    .join(name)
+                    .to_string_lossy()
+                    .into_owned(),
+                None => name.to_string_lossy().into_owned(),
+            }
+        } else {
+            displayed.to_string_lossy().into_owned()
+        };
+        let url = match existing {
+            Some(url) => Some(url.to_string()),
+            None => url::Url::from_file_path(&path)
+                .ok()
+                .map(|url| url.to_string()),
+        };
+        Self {
+            path: path.to_string_lossy().into_owned(),
+            label,
+            url,
         }
     }
 }
@@ -693,15 +1533,17 @@ fn ToolExploration(steps: Vec<ExploreStep>) -> Element {
         div { class: "mt-1 flex min-w-0 flex-col gap-0.5 text-[11px] text-muted-foreground",
             for step in steps {
                 {
-                    let message = match step {
-                        ExploreStep::Read { path } => {
-                            let label = std::path::Path::new(&path).file_name().and_then(|name| name.to_str()).unwrap_or(&path);
-                            translate_with("agent-tool-explore-read", &[("path", TranslationValue::String(label))])
+                    match step {
+                        ExploreStep::Read { path } => rsx! { ToolFileLink { path, read: true } },
+                        ExploreStep::Search { query, path } => {
+                            let message = translate_with("agent-tool-explore-search", &[("query", TranslationValue::String(&query)), ("path", TranslationValue::String(&path))]);
+                            rsx! { div { class: "truncate", title: message.clone(), "{message}" } }
                         }
-                        ExploreStep::Search { query, path } => translate_with("agent-tool-explore-search", &[("query", TranslationValue::String(&query)), ("path", TranslationValue::String(&path))]),
-                        ExploreStep::List { path } => translate_with("agent-tool-explore-list", &[("path", TranslationValue::String(&path))]),
-                    };
-                    rsx! { div { class: "truncate", title: message.clone(), "{message}" } }
+                        ExploreStep::List { path } => {
+                            let message = translate_with("agent-tool-explore-list", &[("path", TranslationValue::String(&path))]);
+                            rsx! { div { class: "truncate", title: message.clone(), "{message}" } }
+                        }
+                    }
                 }
             }
         }
@@ -710,7 +1552,10 @@ fn ToolExploration(steps: Vec<ExploreStep>) -> Element {
 
 #[component]
 fn ToolCall(call: ChatToolCall) -> Element {
-    let key = call.index;
+    let key = BlockIdentity::key(call.index);
+    let anchor = BlockIdentity::anchor(call.index, "tool");
+    let disclosure = BlockIdentity::disclosure(call.index, "tool");
+    let paths = call.file_paths();
     let edits = call.edited_paths();
     let command = if edits.is_empty() {
         call.command()
@@ -724,26 +1569,43 @@ fn ToolCall(call: ChatToolCall) -> Element {
             &call.fallback_label,
         )
         .label
-    } else if exploration.is_some() {
-        translate("agent-tool-explored")
+    } else if let Some(steps) = &exploration {
+        ToolPresentation::for_exploration(steps).label
     } else {
         ToolPresentation::for_call(call.kind, &call.fallback_label).label
     };
     let children = call.children.clone();
+    let icon_kind = if !edits.is_empty() {
+        vmux_api::chat::ChatToolKind::WriteFile
+    } else if let Some(steps) = &exploration {
+        if steps
+            .iter()
+            .all(|step| matches!(step, ExploreStep::Read { .. }))
+        {
+            vmux_api::chat::ChatToolKind::ReadFile
+        } else {
+            vmux_api::chat::ChatToolKind::Search
+        }
+    } else {
+        call.kind
+    };
+    let icon_path = paths.first().cloned();
+    let shell = command.as_ref().and_then(|command| command.shell_icon());
     rsx! {
-        div { key: "{key}", class: "grid grid-cols-[1.5rem_minmax(0,1fr)] items-start gap-2.5 rounded-lg px-2 py-1.5 transition-colors hover:bg-foreground/[0.025]",
+        div { key: "{key}", id: anchor, "data-vmux-scroll-anchor": "", class: "grid grid-cols-[1.5rem_minmax(0,1fr)] items-start gap-2.5 rounded-lg px-2 py-1.5 transition-colors hover:bg-foreground/[0.025]",
             ToolActivityIcon {
                 name: call.name.clone(),
-                file_path: call.file_path.clone(),
+                file_path: icon_path,
+                kind: icon_kind,
+                shell,
                 activity: if !edits.is_empty() { vmux_api::chat::ChatActivityKind::WriteFile } else if exploration.is_some() { vmux_api::chat::ChatActivityKind::Search } else { call.activity },
             }
             div { class: "min-w-0",
-                details { open: false, class: "disclosure text-xs text-muted-foreground",
+                details { open: false, class: "disclosure text-xs text-muted-foreground", "data-vmux-disclosure-key": disclosure,
                     summary { class: ROW_SUMMARY,
+                        DisclosureIcon {}
                         span { class: "shrink-0 font-medium", "{label}" }
-                        if !edits.is_empty() {
-                            span { class: "truncate", {edits.join(", ")} }
-                        }
+                        ToolFiles { paths }
                         if exploration.is_none() && let Some(command) = &command {
                             div { class: "min-w-0 flex-1 overflow-hidden",
                                 ShellCode {
@@ -753,7 +1615,6 @@ fn ToolCall(call: ChatToolCall) -> Element {
                                 }
                             }
                         }
-                        DisclosureIcon {}
                     }
                     if let Some(command) = command {
                         div { class: "mt-1.5 max-h-56 overflow-auto rounded-lg bg-foreground/[0.035] px-2.5 py-2",
@@ -764,12 +1625,12 @@ fn ToolCall(call: ChatToolCall) -> Element {
                         div { class: "mt-1 text-[11px] font-medium text-foreground/45", "{call.name}" }
                         ToolArguments { arguments: call.arguments.clone() }
                     }
+                    if let Some(steps) = exploration { ToolExploration { steps } }
                 }
-                if let Some(steps) = exploration { ToolExploration { steps } }
                 if !children.is_empty() {
                     div { class: "mt-1.5 flex flex-col gap-1",
                         for child in children {
-                            ToolChild { key: "{child.index()}", child }
+                            ToolChild { key: "{BlockIdentity::key(child.index())}", child }
                         }
                     }
                 }
@@ -780,7 +1641,8 @@ fn ToolCall(call: ChatToolCall) -> Element {
 
 #[component]
 fn SubagentRow(subagent: ChatSubagentState) -> Element {
-    let key = subagent.index;
+    let key = BlockIdentity::key(subagent.index);
+    let disclosure = BlockIdentity::disclosure(subagent.index, "subagent");
     let status_label = subagent_status_label(subagent.status);
     let status_class = subagent_status_class(subagent.status);
     let title = if subagent.title.is_empty() {
@@ -793,11 +1655,11 @@ fn SubagentRow(subagent: ChatSubagentState) -> Element {
         div { key: "{key}", class: "grid grid-cols-[1.5rem_minmax(0,1fr)] items-start gap-2.5 rounded-xl bg-violet-500/[0.025] px-2 py-1.5 ring-1 ring-inset ring-violet-500/10 transition-colors hover:bg-violet-500/[0.05]",
             ActivityIconView { kind: ActivityIcon::Subagent }
             div { class: "min-w-0",
-                details { open: subagent.status == ChatSubagentStatus::Running, class: "disclosure text-sm text-muted-foreground",
+                details { open: subagent.status == ChatSubagentStatus::Running, class: "disclosure text-sm text-muted-foreground", "data-vmux-disclosure-key": disclosure,
                     summary { class: "{ROW_SUMMARY} flex-wrap",
+                        DisclosureIcon {}
                         span { class: "font-medium text-foreground/85", "{title}" }
                         span { class: "rounded-full px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide {status_class}", "{status_label}" }
-                        DisclosureIcon {}
                     }
                     div { class: "mt-2 flex flex-wrap gap-1.5 text-[10px]",
                         span { class: "rounded-full bg-violet-500/10 px-2 py-0.5 font-semibold text-violet-700 dark:text-violet-300", "{subagent.provider}" }
@@ -835,8 +1697,8 @@ fn SubagentRow(subagent: ChatSubagentState) -> Element {
                     if !subagent.raw_input.is_empty() && subagent.raw_input != "{}" {
                         details { class: "disclosure mt-2 text-[11px] text-muted-foreground",
                             summary { class: ROW_SUMMARY,
-                                span { class: "font-medium", {translate("agent-raw-event")} }
                                 DisclosureIcon {}
+                                span { class: "font-medium", {translate("agent-raw-event")} }
                             }
                             pre { class: "agent-code-panel mt-1.5 max-h-56 overflow-auto whitespace-pre-wrap rounded-lg p-2 font-mono text-[11px] text-muted-foreground", "{subagent.raw_input}" }
                         }
@@ -845,7 +1707,7 @@ fn SubagentRow(subagent: ChatSubagentState) -> Element {
                 if !children.is_empty() {
                     div { class: "mt-2 flex flex-col gap-1 rounded-lg bg-foreground/[0.025] px-2 py-1",
                         for child in children {
-                            ToolChild { key: "{child.index()}", child }
+                            ToolChild { key: "{BlockIdentity::key(child.index())}", child }
                         }
                     }
                 }
@@ -857,23 +1719,28 @@ fn SubagentRow(subagent: ChatSubagentState) -> Element {
 #[component]
 pub fn TurnBlock(
     row: ChatTurnRow,
+    #[props(default)] identity: String,
+    #[props(default)] turn_index: usize,
     #[props(default)] streaming: bool,
     #[props(default)] expanded: bool,
 ) -> Element {
     let key = row.index();
+    let stable = BlockIdentity::key(key);
     match row {
         ChatTurnRow::Text { text, .. } => {
             rsx! {
-                StreamingMarkdown { key: "{key}", text, streaming }
+                div { key: "{stable}", id: "chat-response-{turn_index}-{key}",
+                    StreamingMarkdown { text, streaming }
+                }
             }
         }
         ChatTurnRow::Thinking { text, .. } => rsx! {
             div { key: "{key}", class: "agent-row-hover grid grid-cols-[1.5rem_minmax(0,1fr)] items-start gap-2.5 rounded-xl px-2 py-1.5 transition-colors",
                 ActivityIconView { kind: ActivityIcon::Thinking }
-                details { open: false, class: "disclosure min-w-0 text-xs text-muted-foreground",
+                details { open: false, class: "disclosure min-w-0 text-xs text-muted-foreground", "data-vmux-disclosure-key": BlockIdentity::disclosure(key, "thinking"),
                     summary { class: ROW_SUMMARY,
-                        span { class: "font-medium", {translate("agent-thinking")} }
                         DisclosureIcon {}
+                        span { class: "font-medium", {translate("agent-thinking")} }
                     }
                     div { class: "mt-2 whitespace-pre-wrap border-l border-foreground/15 pl-3 text-xs leading-relaxed", "{text}" }
                 }
@@ -881,7 +1748,7 @@ pub fn TurnBlock(
         },
         ChatTurnRow::Tool(call) => rsx! { ToolCall { call } },
         ChatTurnRow::FinishedTools { calls, .. } => {
-            rsx! { FinishedToolCalls { calls, open: expanded } }
+            rsx! { FinishedToolCalls { calls, open: expanded, identity } }
         }
         ChatTurnRow::Subagent(subagent) => rsx! { SubagentRow { subagent } },
         ChatTurnRow::Plan { steps, .. } => {
@@ -889,8 +1756,9 @@ pub fn TurnBlock(
             rsx! {
                 div { key: "{key}", class: "grid grid-cols-[1.5rem_minmax(0,1fr)] items-start gap-2.5 rounded-xl px-2 py-1.5 transition-colors hover:bg-indigo-500/[0.035]",
                     ActivityIconView { kind: ActivityIcon::Plan }
-                    details { open: true, class: "disclosure min-w-0 text-sm",
+                    details { open: true, class: "disclosure min-w-0 text-sm", "data-vmux-disclosure-key": BlockIdentity::disclosure(key, "plan"),
                         summary { class: ROW_SUMMARY,
+                            DisclosureIcon {}
                             span { class: "font-medium text-foreground/80", {translate("agent-plan")} }
                             span {
                                 class: "text-xs text-muted-foreground",
@@ -899,7 +1767,6 @@ pub fn TurnBlock(
                                     &[("count", TranslationValue::Number(n as i64))],
                                 )}
                             }
-                            DisclosureIcon {}
                         }
                         ul { class: "mt-2 flex flex-col gap-1.5 border-l border-indigo-500/20 pl-3",
                             for (i , step) in steps.iter().enumerate() {
@@ -917,11 +1784,11 @@ pub fn TurnBlock(
             rsx! {
                 div { key: "{key}", class: "grid grid-cols-[1.5rem_minmax(0,1fr)] items-start gap-2.5 rounded-xl px-2 py-1.5 transition-colors hover:bg-success/[0.035]",
                     FileActivityIcon { path: diff.path.clone(), write: true }
-                    details { class: "disclosure min-w-0 text-sm text-muted-foreground",
+                    details { class: "disclosure min-w-0 text-sm text-muted-foreground", "data-vmux-disclosure-key": BlockIdentity::disclosure(key, "diff"),
                         summary { class: ROW_SUMMARY,
+                            DisclosureIcon {}
                             span { class: "font-medium", {format!("{} ", translate("agent-edited"))} }
                             code { class: "truncate font-mono text-xs text-foreground/70", "{diff.name}" }
-                            DisclosureIcon {}
                         }
                         div { class: "mt-2 overflow-hidden rounded-lg ring-1 ring-inset ring-foreground/10",
                             div { class: "overflow-x-auto bg-foreground/[0.02] py-1 font-mono text-[11px] leading-relaxed",
@@ -959,7 +1826,8 @@ pub fn TurnBlock(
 
 #[component]
 fn ToolChild(child: ChatToolChild) -> Element {
-    match child {
+    let anchor = BlockIdentity::anchor(child.index(), "child");
+    rsx! { div { id: anchor, "data-vmux-scroll-anchor": "", {match child {
         ChatToolChild::Tool(call) => rsx! { ToolChildCall { call } },
         ChatToolChild::Subagent(subagent) => rsx! { SubagentChild { subagent } },
         ChatToolChild::Result {
@@ -969,11 +1837,14 @@ fn ToolChild(child: ChatToolChild) -> Element {
         } => rsx! {
             NestedToolResult { result_key: index as usize, content, is_error }
         },
-    }
+    }} } }
 }
 
 #[component]
 fn ToolChildCall(call: ChatToolChildCall) -> Element {
+    let anchor = BlockIdentity::anchor(call.index, "tool");
+    let disclosure = BlockIdentity::disclosure(call.index, "tool");
+    let paths = call.file_paths();
     let edits = call.edited_paths();
     let command = if edits.is_empty() {
         call.command()
@@ -987,15 +1858,17 @@ fn ToolChildCall(call: ChatToolChildCall) -> Element {
             &call.fallback_label,
         )
         .label
-    } else if exploration.is_some() {
-        translate("agent-tool-explored")
+    } else if let Some(steps) = &exploration {
+        ToolPresentation::for_exploration(steps).label
     } else {
         ToolPresentation::for_call(call.kind, &call.fallback_label).label
     };
     rsx! {
-        details { class: "disclosure text-xs text-muted-foreground",
+        details { class: "disclosure text-xs text-muted-foreground", id: anchor, "data-vmux-scroll-anchor": "", "data-vmux-disclosure-key": disclosure,
             summary { class: "flex cursor-pointer select-none items-center gap-2 py-0.5 list-none [&::-webkit-details-marker]:hidden",
+                DisclosureIcon {}
                 span { class: "shrink-0 font-medium", "{label}" }
+                ToolFiles { paths }
                 if exploration.is_none() && let Some(command) = &command {
                     div { class: "min-w-0 flex-1 overflow-hidden",
                         ShellCode {
@@ -1005,7 +1878,6 @@ fn ToolChildCall(call: ChatToolChildCall) -> Element {
                         }
                     }
                 }
-                DisclosureIcon {}
             }
             if let Some(command) = command {
                 div { class: "mt-1.5 max-h-56 overflow-auto rounded-lg bg-foreground/[0.035] px-2.5 py-2",
@@ -1016,13 +1888,14 @@ fn ToolChildCall(call: ChatToolChildCall) -> Element {
                 div { class: "mt-1 text-[11px] font-medium text-foreground/45", "{call.name}" }
                 ToolArguments { arguments: call.arguments }
             }
+            if let Some(steps) = exploration { ToolExploration { steps } }
         }
-        if let Some(steps) = exploration { ToolExploration { steps } }
     }
 }
 
 #[component]
 fn SubagentChild(subagent: ChatSubagentSummary) -> Element {
+    let disclosure = BlockIdentity::disclosure(subagent.index, "subagent");
     let status_label = subagent_status_label(subagent.status);
     let status_class = subagent_status_class(subagent.status);
     let title = if subagent.title.is_empty() {
@@ -1031,11 +1904,11 @@ fn SubagentChild(subagent: ChatSubagentSummary) -> Element {
         subagent.title.clone()
     };
     rsx! {
-        details { class: "disclosure text-xs text-muted-foreground",
+        details { class: "disclosure text-xs text-muted-foreground", "data-vmux-disclosure-key": disclosure,
             summary { class: "flex cursor-pointer select-none flex-wrap items-center gap-2 py-0.5 list-none [&::-webkit-details-marker]:hidden",
+                DisclosureIcon {}
                 span { class: "font-medium", "{title}" }
                 span { class: "rounded-full px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-wide {status_class}", "{status_label}" }
-                DisclosureIcon {}
             }
             div { class: "mt-1 flex flex-wrap gap-1 text-[10px]",
                 span { class: "rounded-full bg-violet-500/10 px-1.5 py-0.5 text-violet-700 dark:text-violet-300", "{subagent.provider}" }
@@ -1070,8 +1943,11 @@ fn subagent_status_class(status: ChatSubagentStatus) -> &'static str {
 
 #[component]
 fn NestedToolResult(result_key: usize, content: String, is_error: bool) -> Element {
-    let key = result_key;
+    let key = BlockIdentity::key(result_key as u32);
+    let anchor = BlockIdentity::anchor(result_key as u32, "result");
+    let disclosure = BlockIdentity::disclosure(result_key as u32, "result");
     let content = content.as_str();
+    let preview = OutputPreview::new(content);
     let tone = if is_error {
         "text-red-500"
     } else {
@@ -1088,10 +1964,11 @@ fn NestedToolResult(result_key: usize, content: String, is_error: bool) -> Eleme
         translate("common-output")
     };
     rsx! {
-        details { key: "{key}", class: "disclosure rounded-lg px-2 py-1 text-xs {tone} {panel}",
+        details { key: "{key}", id: anchor, "data-vmux-scroll-anchor": "", "data-vmux-disclosure-key": disclosure, class: "disclosure group/output rounded-lg px-0 py-1 text-xs {tone} {panel}",
             summary { class: "flex cursor-pointer select-none items-center gap-2 list-none [&::-webkit-details-marker]:hidden",
-                span { class: "font-medium", "{label}" }
                 DisclosureIcon {}
+                span { class: "font-medium", "{label}" }
+                span { class: "min-w-0 flex-1 truncate font-mono text-[11px] text-muted-foreground group-open/output:hidden", "{preview.0}" }
             }
             pre { class: "mt-1.5 max-h-72 overflow-auto whitespace-pre-wrap px-0.5 pb-1 font-mono text-[11px] leading-relaxed text-muted-foreground", "{content}" }
         }
@@ -1100,8 +1977,20 @@ fn NestedToolResult(result_key: usize, content: String, is_error: bool) -> Eleme
 
 #[component]
 fn StandaloneToolResult(result_key: usize, content: String, is_error: bool) -> Element {
-    let key = result_key;
+    let key = BlockIdentity::key(result_key as u32);
+    let anchor = BlockIdentity::anchor(result_key as u32, "result");
+    let disclosure = BlockIdentity::disclosure(result_key as u32, "result");
     let content = content.as_str();
+    let incoming = if is_error {
+        None
+    } else {
+        AgentDelegationEnvelope::new(content).input()
+    };
+    let content = match incoming {
+        Some(input) => AgentPromptEnvelope::new(input).display().unwrap_or(input),
+        None => content,
+    };
+    let preview = OutputPreview::new(content);
     let tone = if is_error {
         "text-red-500"
     } else {
@@ -1119,6 +2008,8 @@ fn StandaloneToolResult(result_key: usize, content: String, is_error: bool) -> E
     };
     let label = if is_error {
         translate("common-error")
+    } else if incoming.is_some() {
+        translate("agent-incoming-message")
     } else {
         translate("common-output")
     };
@@ -1129,15 +2020,54 @@ fn StandaloneToolResult(result_key: usize, content: String, is_error: bool) -> E
     };
     rsx! {
         div { key: "{key}", class: "grid grid-cols-[1.5rem_minmax(0,1fr)] items-start gap-2.5 rounded-xl px-2 py-1.5 transition-colors {row}",
-            ActivityIconView { kind: icon }
-            details { class: "disclosure min-w-0 rounded-lg px-2 py-1 text-sm {tone} {panel}",
+            if incoming.is_some() {
+                span { class: "flex h-6 w-6 shrink-0 items-center justify-center text-muted-foreground/75", aria_hidden: "true",
+                    LineIconView { icon: LineIcon::MessagesRound, class: "h-4 w-4" }
+                }
+            } else {
+                ActivityIconView { kind: icon }
+            }
+            details { class: "disclosure group/output min-w-0 rounded-lg px-0 py-1 text-sm {tone} {panel}", id: anchor, "data-vmux-scroll-anchor": "", "data-vmux-disclosure-key": disclosure,
                 summary { class: "flex cursor-pointer select-none items-center gap-2 list-none [&::-webkit-details-marker]:hidden",
-                    span { class: "font-medium", "{label}" }
                     DisclosureIcon {}
+                    span { class: "font-medium", "{label}" }
+                    span { class: "min-w-0 flex-1 truncate font-mono text-[11px] text-muted-foreground group-open/output:hidden", "{preview.0}" }
                 }
                 pre { class: "mt-1.5 max-h-72 overflow-auto whitespace-pre-wrap px-0.5 pb-1 font-mono text-[11px] leading-relaxed text-muted-foreground", "{content}" }
             }
         }
+    }
+}
+
+struct OutputPreview(String);
+
+impl OutputPreview {
+    fn new(content: &str) -> Self {
+        let mut body = content.trim();
+        if (body.starts_with("Script completed") || body.starts_with("Script running"))
+            && let Some((_, output)) = body.split_once("\nOutput:\n")
+        {
+            body = output.trim();
+        } else if let Some(output) = body.strip_prefix("Script completed\n\n") {
+            body = output.trim();
+        }
+        if let Ok(serde_json::Value::Object(value)) = serde_json::from_str(body)
+            && (value.contains_key("exit_code") || value.contains_key("chunk_id"))
+            && let Some(output) = value.get("output").and_then(serde_json::Value::as_str)
+        {
+            return Self::line(output);
+        }
+        Self::line(body)
+    }
+
+    fn line(content: &str) -> Self {
+        for line in content.lines() {
+            let line = line.trim();
+            if !line.is_empty() {
+                return Self(line.to_string());
+            }
+        }
+        Self(String::new())
     }
 }
 

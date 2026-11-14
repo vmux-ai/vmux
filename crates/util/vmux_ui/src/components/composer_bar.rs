@@ -206,18 +206,10 @@ pub fn ComposerBar(props: ComposerBarProps) -> Element {
                     }
                 }
                 if let Some(chip) = project {
-                    ComposerChipSlot {
-                        kind: ComposerMenuKind::Project,
-                        chip,
-                        open: opened == Some(ComposerMenuKind::Project),
-                    }
+                    ComposerChipSlot { kind: ComposerMenuKind::Project, chip, open: opened == Some(ComposerMenuKind::Project) }
                 }
                 if let Some(chip) = branch {
-                    ComposerChipSlot {
-                        kind: ComposerMenuKind::Branch,
-                        chip,
-                        open: opened == Some(ComposerMenuKind::Branch),
-                    }
+                    ComposerChipSlot { kind: ComposerMenuKind::Branch, chip, open: opened == Some(ComposerMenuKind::Branch) }
                 }
                 WorkspaceBadges {
                     is_git_repo,

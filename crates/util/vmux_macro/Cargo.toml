@@ -15,5 +15,9 @@ ron = { workspace = true }
 serde = { workspace = true }
 syn = { version = "2", features = ["full", "visit"] }
 
+[dev-dependencies]
+dioxus-rsx = "=0.7.9"
+serde_json = { workspace = true }
+
 [lints]
 workspace = true

@@ -8,14 +8,19 @@ impl WindowPointerPolicy {
         over_windowed_page: bool,
         was_over_windowed_page: bool,
         key_window: bool,
+        page_changed: bool,
     ) -> bool {
-        dragging || !over_windowed_page || !was_over_windowed_page || !key_window
+        dragging || page_changed || !over_windowed_page || !was_over_windowed_page || !key_window
     }
 
     pub(super) fn scroll_should_wake(
         layout_pointer_inside: bool,
         sampled_over_windowed_page: bool,
+        native_webview: bool,
     ) -> bool {
+        if native_webview {
+            return false;
+        }
         layout_pointer_inside || !sampled_over_windowed_page
     }
 }
@@ -196,10 +201,13 @@ mod tests {
     #[test]
     fn native_pane_drag_wakes_while_ordinary_pointer_motion_stays_asleep() {
         assert!(WindowPointerPolicy::motion_should_wake(
-            true, true, true, true
+            true, true, true, true, false
         ));
         assert!(!WindowPointerPolicy::motion_should_wake(
-            false, true, true, true
+            false, true, true, true, false
+        ));
+        assert!(WindowPointerPolicy::motion_should_wake(
+            false, true, true, true, true
         ));
         for (over, previous, key) in [
             (false, true, true),
@@ -207,7 +215,7 @@ mod tests {
             (true, true, false),
         ] {
             assert!(WindowPointerPolicy::motion_should_wake(
-                false, over, previous, key
+                false, over, previous, key, false
             ));
         }
     }
@@ -289,10 +297,22 @@ mod tests {
     }
 
     #[test]
-    fn scroll_wakes_bevy_only_for_layout_or_non_windowed_content() {
-        assert!(!WindowPointerPolicy::scroll_should_wake(false, true));
-        assert!(WindowPointerPolicy::scroll_should_wake(true, true));
-        assert!(WindowPointerPolicy::scroll_should_wake(false, false));
+    fn native_webview_scroll_does_not_wake_layout_when_its_pointer_cache_is_stale() {
+        for (layout, windowed, native, wake) in [
+            (false, false, false, true),
+            (false, true, false, false),
+            (true, false, false, true),
+            (true, true, false, true),
+            (false, false, true, false),
+            (false, true, true, false),
+            (true, false, true, false),
+            (true, true, true, false),
+        ] {
+            assert_eq!(
+                WindowPointerPolicy::scroll_should_wake(layout, windowed, native),
+                wake
+            );
+        }
     }
 
     #[test]

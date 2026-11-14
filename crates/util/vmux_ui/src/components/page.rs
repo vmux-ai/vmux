@@ -37,28 +37,27 @@ pub fn PageSidebarToggle(open: bool, label: String, ontoggle: EventHandler<()>) 
     rsx! {
         button {
             r#type: "button",
-            class: "flex size-6 shrink-0 cursor-default items-center justify-center rounded-md text-foreground/60 transition-[color,background-color,transform] duration-100 hover:bg-foreground/[0.045] hover:text-foreground active:scale-95 motion-reduce:transition-none",
+            class: "group/sidebar-toggle flex size-6 shrink-0 cursor-default items-center justify-center rounded-md text-foreground transition-[background-color,transform] duration-100 hover:bg-foreground/[0.045] active:scale-95 motion-reduce:transition-none",
             title: label.clone(),
             aria_label: label,
             aria_expanded: open,
             onclick: move |_| ontoggle.call(()),
             svg {
-                class: "h-4 w-4",
+                class: "h-4 w-4 opacity-60 transition-opacity duration-100 group-hover/sidebar-toggle:opacity-100 motion-reduce:transition-none",
                 view_box: "0 0 24 24",
                 fill: "none",
                 stroke: "currentColor",
                 stroke_width: "1.5",
                 stroke_linecap: "round",
                 stroke_linejoin: "round",
-                rect { x: "3", y: "3", width: "18", height: "18", rx: "2" }
-                rect { x: "4", y: "4", width: "4", height: "16", fill: "currentColor", stroke: "none",
+                path { d: "M5 3h4v18H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2Z", fill: "currentColor", stroke: "none",
                     class: if open {
-                        "origin-[4px_12px] scale-x-100 opacity-100 transition-[transform,opacity] duration-100 motion-reduce:transition-none"
+                        "origin-[3px_12px] scale-x-100 opacity-100 transition-[transform,opacity] duration-100 motion-reduce:transition-none"
                     } else {
-                        "origin-[4px_12px] scale-x-0 opacity-0 transition-[transform,opacity] duration-100 motion-reduce:transition-none"
+                        "origin-[3px_12px] scale-x-0 opacity-0 transition-[transform,opacity] duration-100 motion-reduce:transition-none"
                     },
                 }
-                line { x1: "9", y1: "3", x2: "9", y2: "21" }
+                path { d: "M5 3h14a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2Z M9 3v18" }
             }
         }
     }

@@ -124,6 +124,11 @@ pub struct ChatToolCall {
 }
 
 impl ChatToolCall {
+    pub fn file_paths(&self) -> Vec<String> {
+        self.kind
+            .file_paths(&self.arguments, self.file_path.as_deref())
+    }
+
     pub fn edited_paths(&self) -> Vec<String> {
         if let ChatToolArguments::Raw(raw) = &self.arguments {
             return Source::edited_paths(raw);
@@ -144,6 +149,25 @@ pub struct ChatCommand {
 }
 
 impl ChatCommand {
+    pub fn shell_icon(&self) -> Option<crate::BuiltinIcon> {
+        let program = self
+            .source
+            .split_whitespace()
+            .next()?
+            .trim_matches(['\'', '"']);
+        if let Some(icon) = crate::BuiltinIcon::for_shell(program) {
+            return Some(icon);
+        }
+        if let ChatToolArguments::Fields(arguments) = &self.metadata {
+            for argument in arguments {
+                if argument.name == "shell" {
+                    return crate::BuiltinIcon::for_shell(argument.value.text()?);
+                }
+            }
+        }
+        None
+    }
+
     pub fn exploration(&self) -> Option<Vec<ExploreStep>> {
         let mut steps = ExploreStep::commands(&self.source)?;
         for step in &mut steps {
@@ -187,7 +211,17 @@ impl ChatCommand {
                 (source, metadata)
             }
             ChatToolArguments::Value(value) => (value.text()?.to_string(), ChatToolArguments::None),
-            ChatToolArguments::Raw(raw) => (Source::from_raw(raw)?, ChatToolArguments::None),
+            ChatToolArguments::Raw(raw) => {
+                let metadata = match Source::shell(raw) {
+                    Some(shell) => ChatToolArguments::Fields(vec![ChatToolArgument {
+                        name: "shell".into(),
+                        label: "shell".into(),
+                        value: ChatToolArgumentValue::Text(shell),
+                    }]),
+                    None => ChatToolArguments::None,
+                };
+                (Source::from_raw(raw)?, metadata)
+            }
         };
         let preview = CommandPreview::from(&source)?;
         Some(Self {
@@ -231,6 +265,11 @@ pub struct ChatToolChildCall {
 }
 
 impl ChatToolChildCall {
+    pub fn file_paths(&self) -> Vec<String> {
+        self.kind
+            .file_paths(&self.arguments, self.file_path.as_deref())
+    }
+
     pub fn edited_paths(&self) -> Vec<String> {
         if let ChatToolArguments::Raw(raw) = &self.arguments {
             return Source::edited_paths(raw);
@@ -333,6 +372,29 @@ pub enum ChatToolKind {
     Other,
 }
 
+impl ChatToolKind {
+    fn file_paths(self, arguments: &ChatToolArguments, hint: Option<&str>) -> Vec<String> {
+        if matches!(self, Self::ReadFile | Self::ReadSkill | Self::WriteFile)
+            && let ChatToolArguments::Value(ChatToolArgumentValue::Path(path)) = arguments
+            && !path.trim().is_empty()
+        {
+            return vec![path.clone()];
+        }
+        let mut paths = arguments.file_paths();
+        if paths.is_empty()
+            && matches!(self, Self::ReadFile | Self::ReadSkill | Self::WriteFile)
+            && let Some(path) = hint
+            && !path.trim().is_empty()
+        {
+            let script = matches!(arguments, ChatToolArguments::Raw(raw) if Source::is_script(raw));
+            if !script {
+                paths.push(path.to_string());
+            }
+        }
+        paths
+    }
+}
+
 #[vmux_api::contract(Default, Eq)]
 pub enum ChatActivityKind {
     #[default]
@@ -369,6 +431,67 @@ pub enum ChatToolArguments {
     Fields(Vec<ChatToolArgument>),
     Value(ChatToolArgumentValue),
     Raw(String),
+}
+
+impl ChatToolArguments {
+    pub fn file_paths(&self) -> Vec<String> {
+        let mut paths = Vec::new();
+        if let Self::Raw(raw) = self {
+            paths = Source::edited_paths(raw);
+            for path in Source::file_paths(raw) {
+                let Some(path) = CommandPreview::from(&path) else {
+                    continue;
+                };
+                if !paths.contains(&path) {
+                    paths.push(path);
+                }
+            }
+            return paths;
+        }
+        let mut directory = None;
+        if let Self::Fields(arguments) = self {
+            for argument in arguments {
+                if matches!(argument.name.as_str(), "workdir" | "cwd") {
+                    directory = argument.value.text();
+                    break;
+                }
+            }
+        }
+        if let Some(command) = ChatCommand::from_arguments(ChatToolKind::Command, self) {
+            if let Some(steps) = command.exploration() {
+                for mut step in steps {
+                    if let Some(directory) = directory {
+                        step.in_directory(std::path::Path::new(directory));
+                    }
+                    if let ExploreStep::Read { path } = step
+                        && !paths.contains(&path)
+                    {
+                        paths.push(path);
+                    }
+                }
+            }
+            return paths;
+        }
+        match self {
+            Self::Fields(arguments) => {
+                for argument in arguments {
+                    argument.collect_paths(&mut paths, false);
+                }
+            }
+            Self::Value(value) => value.collect_paths(&mut paths, false),
+            Self::None | Self::Raw(_) => {}
+        }
+        if let Some(directory) = directory {
+            for path in &mut paths {
+                let mut step = ExploreStep::Read { path: path.clone() };
+                step.in_directory(std::path::Path::new(directory));
+                if let ExploreStep::Read { path: resolved } = step {
+                    *path = resolved;
+                }
+            }
+        }
+        paths
+    }
 }
 
 struct CommandPreview;
@@ -533,6 +656,27 @@ pub struct ChatToolArgument {
     pub value: ChatToolArgumentValue,
 }
 
+impl ChatToolArgument {
+    fn collect_paths(&self, paths: &mut Vec<String>, parent_path: bool) {
+        if matches!(self.name.as_str(), "cwd" | "workdir" | "dir" | "directory") {
+            return;
+        }
+        let named = parent_path
+            || matches!(
+                self.name.as_str(),
+                "path"
+                    | "paths"
+                    | "file"
+                    | "files"
+                    | "file_path"
+                    | "file_paths"
+                    | "filename"
+                    | "filenames"
+            );
+        self.value.collect_paths(paths, named);
+    }
+}
+
 #[vmux_api::contract(recursive, Eq)]
 pub enum ChatToolArgumentValue {
     Path(String),
@@ -546,6 +690,24 @@ pub enum ChatToolArgumentValue {
 }
 
 impl ChatToolArgumentValue {
+    fn collect_paths(&self, paths: &mut Vec<String>, named: bool) {
+        match self {
+            Self::Path(path) | Self::Text(path)
+                if (named || matches!(self, Self::Path(_)))
+                    && !path.trim().is_empty()
+                    && !paths.contains(path) =>
+            {
+                paths.push(path.clone());
+            }
+            Self::List(arguments) | Self::Object(arguments) => {
+                for argument in arguments {
+                    argument.collect_paths(paths, named);
+                }
+            }
+            _ => {}
+        }
+    }
+
     fn text(&self) -> Option<&str> {
         match self {
             Self::Path(value) | Self::Code(value) | Self::Text(value) => Some(value),
@@ -557,6 +719,180 @@ impl ChatToolArgumentValue {
 #[cfg(test)]
 mod command_preview_tests {
     use super::*;
+
+    #[test]
+    fn read_wrappers_name_the_read_file_instead_of_script_identifiers() {
+        let call = ChatToolCall {
+            kind: ChatToolKind::ReadFile,
+            file_path: Some("x.name".into()),
+            arguments: ChatToolArguments::Raw(r#"const matches = ALL_TOOLS.filter(x => /skill.*read/.test(x.name));
+text(matches);
+text(await tools.exec_command({cmd:"cat /work/skills/caveman/SKILL.md",shell:"/bin/bash",login:false}));"#.into()),
+            ..Default::default()
+        };
+        assert_eq!(call.file_paths(), ["/work/skills/caveman/SKILL.md"]);
+    }
+
+    #[test]
+    fn file_arguments_keep_all_files_and_exclude_the_working_directory() {
+        let call = ChatToolChildCall {
+            kind: ChatToolKind::ReadFile,
+            arguments: ChatToolArguments::Fields(vec![
+                ChatToolArgument {
+                    name: "files".into(),
+                    label: String::new(),
+                    value: ChatToolArgumentValue::List(vec![
+                        ChatToolArgument {
+                            name: "1".into(),
+                            label: String::new(),
+                            value: ChatToolArgumentValue::Text("src/one.rs".into()),
+                        },
+                        ChatToolArgument {
+                            name: "2".into(),
+                            label: String::new(),
+                            value: ChatToolArgumentValue::Path("src/two.rs".into()),
+                        },
+                    ]),
+                },
+                ChatToolArgument {
+                    name: "cwd".into(),
+                    label: String::new(),
+                    value: ChatToolArgumentValue::Path("/work/project".into()),
+                },
+                ChatToolArgument {
+                    name: "path".into(),
+                    label: String::new(),
+                    value: ChatToolArgumentValue::Path("src/one.rs".into()),
+                },
+            ]),
+            ..Default::default()
+        };
+        assert_eq!(
+            call.file_paths(),
+            ["/work/project/src/one.rs", "/work/project/src/two.rs"]
+        );
+    }
+
+    #[test]
+    fn shell_reads_resolve_the_directory_and_keep_every_sed_input() {
+        let call = ChatToolCall {
+            kind: ChatToolKind::Command,
+            arguments: ChatToolArguments::Raw(
+                r#"bash -c "cd /work/project && sed -n '1,20p' src/one.rs src/two.rs""#.into(),
+            ),
+            ..Default::default()
+        };
+        assert_eq!(
+            call.file_paths(),
+            ["/work/project/src/one.rs", "/work/project/src/two.rs"]
+        );
+    }
+
+    #[test]
+    fn wrapped_reads_keep_each_calls_working_directory() {
+        let call = ChatToolCall {
+            kind: ChatToolKind::ReadFile,
+            arguments: ChatToolArguments::Raw(
+                r#"text(await tools.exec_command({cmd:"cat src/one.rs",workdir:"/work/one"}));
+text(await tools.exec_command({cmd:"cat src/two.rs",workdir:"/work/two"}));"#
+                    .into(),
+            ),
+            ..Default::default()
+        };
+        assert_eq!(
+            call.file_paths(),
+            ["/work/one/src/one.rs", "/work/two/src/two.rs"]
+        );
+    }
+
+    #[test]
+    fn direct_reads_resolve_paths_against_the_supplied_working_directory() {
+        let call = ChatToolCall {
+            kind: ChatToolKind::ReadFile,
+            arguments: ChatToolArguments::Fields(vec![
+                ChatToolArgument {
+                    name: "path".into(),
+                    label: String::new(),
+                    value: ChatToolArgumentValue::Path("src/main.rs".into()),
+                },
+                ChatToolArgument {
+                    name: "cwd".into(),
+                    label: String::new(),
+                    value: ChatToolArgumentValue::Path("/work/feature".into()),
+                },
+            ]),
+            ..Default::default()
+        };
+        assert_eq!(call.file_paths(), ["/work/feature/src/main.rs"]);
+    }
+
+    #[test]
+    fn nonreading_commands_do_not_turn_path_shaped_arguments_into_file_links() {
+        for arguments in [
+            ChatToolArguments::Value(ChatToolArgumentValue::Path("/usr/bin/git status".into())),
+            ChatToolArguments::Fields(vec![
+                ChatToolArgument {
+                    name: "cmd".into(),
+                    label: String::new(),
+                    value: ChatToolArgumentValue::Code("git status".into()),
+                },
+                ChatToolArgument {
+                    name: "log".into(),
+                    label: String::new(),
+                    value: ChatToolArgumentValue::Path("/work/not-read.log".into()),
+                },
+            ]),
+        ] {
+            let call = ChatToolCall {
+                kind: ChatToolKind::Command,
+                arguments,
+                ..Default::default()
+            };
+            assert!(call.command().is_some());
+            assert!(call.file_paths().is_empty());
+        }
+        let read = ChatToolCall {
+            kind: ChatToolKind::ReadFile,
+            arguments: ChatToolArguments::Value(ChatToolArgumentValue::Path(
+                "/work/read.rs".into(),
+            )),
+            ..Default::default()
+        };
+        assert_eq!(read.file_paths(), ["/work/read.rs"]);
+    }
+
+    #[test]
+    fn command_shell_icons_follow_the_execution_shell_instead_of_file_arguments() {
+        for (shell, expected) in [
+            ("/bin/bash", Some(crate::BuiltinIcon::Bash)),
+            ("/bin/zsh", Some(crate::BuiltinIcon::Zsh)),
+            ("/opt/homebrew/bin/nu", Some(crate::BuiltinIcon::Nushell)),
+            ("/usr/bin/fish", None),
+        ] {
+            let arguments = ChatToolArguments::Raw(format!(
+                "{{\"cmd\":\"tail -10 /tmp/build.log\",\"shell\":\"{shell}\"}}"
+            ));
+            let command = ChatCommand::from_arguments(ChatToolKind::Command, &arguments).unwrap();
+            assert_eq!(command.shell_icon(), expected);
+        }
+        let arguments = ChatToolArguments::Raw(
+            r#"text(await tools.exec_command({cmd:"tail -10 /tmp/build.log",shell:"/bin/bash"}));"#
+                .into(),
+        );
+        assert_eq!(
+            ChatCommand::from_arguments(ChatToolKind::Command, &arguments)
+                .unwrap()
+                .shell_icon(),
+            Some(crate::BuiltinIcon::Bash)
+        );
+        let arguments = ChatToolArguments::Raw("bash -c 'cargo test'".into());
+        assert_eq!(
+            ChatCommand::from_arguments(ChatToolKind::Command, &arguments)
+                .unwrap()
+                .shell_icon(),
+            Some(crate::BuiltinIcon::Bash)
+        );
+    }
 
     #[test]
     fn command_call_accepts_path_arguments() {
@@ -698,6 +1034,8 @@ mod command_preview_tests {
 #[vmux_api::contract(Eq)]
 pub enum ChatItem {
     User {
+        #[serde(default, skip_serializing_if = "String::is_empty")]
+        event_id: String,
         text: String,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         context: Option<String>,
@@ -710,8 +1048,25 @@ pub enum ChatItem {
 }
 
 impl ChatItem {
+    pub fn identity_keys(&self) -> Vec<String> {
+        match self {
+            Self::User { event_id, .. } if !event_id.is_empty() => vec![event_id.clone()],
+            Self::Turn(turn) => {
+                let mut ids = Vec::new();
+                for id in &turn.block_ids {
+                    if !id.is_empty() {
+                        ids.push(id.clone());
+                    }
+                }
+                ids
+            }
+            _ => Vec::new(),
+        }
+    }
+
     pub fn user(text: impl Into<String>) -> Self {
         Self::User {
+            event_id: String::new(),
             text: text.into(),
             context: None,
             attachments: Vec::new(),
@@ -723,6 +1078,8 @@ impl ChatItem {
 #[vmux_api::contract(Default, Eq)]
 pub struct ChatTurn {
     pub blocks: Vec<ChatBlock>,
+    #[serde(default)]
+    pub block_ids: Vec<String>,
     #[serde(default)]
     pub rows: Vec<ChatTurnRow>,
     #[serde(default)]

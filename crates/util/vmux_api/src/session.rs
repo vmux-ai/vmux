@@ -198,11 +198,19 @@ impl ConversationEvent {
         created_at_ms: u64,
         messages: &[Message],
     ) -> Vec<Self> {
+        Self::from_owned_messages(session_id, created_at_ms, messages.to_vec())
+    }
+
+    pub fn from_owned_messages(
+        session_id: &SessionId,
+        created_at_ms: u64,
+        messages: Vec<Message>,
+    ) -> Vec<Self> {
         let local_member = MemberId::local(session_id);
         let agent_member = MemberId::agent(session_id);
         let mut events = Vec::with_capacity(messages.len());
         let mut reply_to = None;
-        for (index, message) in messages.iter().enumerate() {
+        for (index, message) in messages.into_iter().enumerate() {
             let server_seq = index as u64 + 1;
             let event_id = EventId::new(format!(
                 "session:{}:event:{server_seq}",
@@ -221,7 +229,7 @@ impl ConversationEvent {
                 server_seq,
                 created_at_ms: created_at_ms.saturating_add(index as u64),
                 reply_to: if is_user { None } else { reply_to.clone() },
-                message: message.clone(),
+                message,
             });
             if is_user {
                 reply_to = Some(event_id);

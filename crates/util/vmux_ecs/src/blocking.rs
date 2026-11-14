@@ -345,8 +345,12 @@ impl Drop for CancellationParticipant {
         let Some(member) = &self.member else {
             return;
         };
-        if let Ok(mut members) = self.group.0.lock() {
-            members.retain(|candidate| !Weak::ptr_eq(candidate, member));
+        if let Ok(mut members) = self.group.0.lock()
+            && let Some(index) = members
+                .iter()
+                .position(|candidate| Weak::ptr_eq(candidate, member))
+        {
+            members.swap_remove(index);
         }
     }
 }
@@ -404,6 +408,27 @@ mod tests {
     use std::time::{Duration, Instant};
 
     use super::*;
+    #[test]
+    fn dropping_one_of_two_participants_keeps_the_uncanceled_task_in_the_group() {
+        let group = CancellationGroup::default();
+        let active = Arc::new(AtomicBool::new(false));
+        let previous =
+            CANCELLATION.with(|current| current.borrow_mut().replace(Arc::clone(&active)));
+        let scope = CancellationScope { previous };
+        let first = group.join();
+        let second = group.join();
+        drop(scope);
+        let canceled = Arc::new(AtomicBool::new(true));
+        let previous =
+            CANCELLATION.with(|current| current.borrow_mut().replace(Arc::clone(&canceled)));
+        let scope = CancellationScope { previous };
+        let peer = group.join();
+        drop(first);
+        assert!(!peer.run(BlockingCancellation::canceled));
+        drop(second);
+        assert!(peer.run(BlockingCancellation::canceled));
+        drop(scope);
+    }
 
     struct PublicationWake {
         task: Mutex<Option<BlockingTask<u32>>>,

@@ -107,12 +107,7 @@ impl VmuxPlugin {
     }
 
     fn window_title() -> String {
-        match env!("VMUX_BUILD_PROFILE") {
-            "release" => "Vmux".to_string(),
-            "local" => format!("Vmux ({})", env!("VMUX_GIT_HASH")),
-            "dev" => format!("Vmux Dev ({})", env!("VMUX_GIT_HASH")),
-            other => format!("Vmux ({})", other),
-        }
+        env!("VMUX_BUILD_TITLE").to_string()
     }
 }
 

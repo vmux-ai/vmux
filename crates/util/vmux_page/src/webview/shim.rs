@@ -132,7 +132,52 @@ pub(crate) const WRY_HOST_SHIM: &str = r#"
       const synchronous = interpreter.sendSerializedEvent.bind(interpreter);
       const pending = new Map();
       let scheduled = false;
+      const chatPending = new Map();
+      let chatTimer = null;
+      let lastChat = -200;
+      let lastInput = -200;
+      let inputSeen = false;
+      const send = (event, sync) => {
+        if (window.interpreter !== interpreter || !requestMatchesDocument(event)) return;
+        if (sync) { synchronous(event.body); return; }
+        const xhr = new XMLHttpRequest();
+        xhr.open('POST', interpreter.eventsPath, true);
+        xhr.setRequestHeader('Content-Type', 'application/json');
+        xhr.setRequestHeader('dioxus-data', toBase64(encoder.encode(JSON.stringify(event.body))));
+        xhr.send();
+      };
+      const flushChat = (sync = false) => {
+        if (chatTimer !== null) clearTimeout(chatTimer);
+        chatTimer = null;
+        const events = [...chatPending.values()];
+        chatPending.clear();
+        lastChat = Date.now();
+        events.sort((a, b) => Number(a.body.name === 'scroll' || a.body.name === 'scrollend') - Number(b.body.name === 'scroll' || b.body.name === 'scrollend'));
+        for (const event of events) send(event, sync);
+      };
       interpreter.sendSerializedEvent = (body) => {
+        const scrolling = ['wheel', 'touchmove', 'scroll', 'scrollend'].includes(body.name);
+        const chat = scrolling && interpreter.getNode?.(body.element)?.closest?.('#chat-scroll');
+        if (chat) {
+          if (body.name === 'wheel' || body.name === 'touchmove') {
+            const now = Date.now();
+            const notify = !inputSeen || now - lastInput >= 200 || chat.scrollTop <= 0;
+            lastInput = now;
+            inputSeen = true;
+            if (!notify) return { preventDefault: false, stopPropagation: false };
+          }
+          const key = body.name + ':' + body.element;
+          chatPending.delete(key);
+          chatPending.set(key, {
+            body,
+            revision: applyingRevision ?? navigationRevision,
+            epoch: applyingEpoch ?? globalThis.__vmuxIpcEpoch,
+          });
+          if (body.name === 'scrollend') { inputSeen = false; flushChat(); }
+          else if (chatTimer === null) chatTimer = setTimeout(() => flushChat(), Math.max(0, 200 - (Date.now() - lastChat)));
+          return { preventDefault: false, stopPropagation: false };
+        }
+        if (!scrolling && chatPending.size) flushChat(true);
         if (body.name !== 'scroll' && body.name !== 'scrollend') return synchronous(body);
         const key = body.name + ':' + body.element;
         pending.delete(key);
@@ -149,12 +194,7 @@ pub(crate) const WRY_HOST_SHIM: &str = r#"
             pending.clear();
             if (window.interpreter !== interpreter) return;
             for (const event of events) {
-              if (!requestMatchesDocument(event)) continue;
-              const xhr = new XMLHttpRequest();
-              xhr.open('POST', interpreter.eventsPath, true);
-              xhr.setRequestHeader('Content-Type', 'application/json');
-              xhr.setRequestHeader('dioxus-data', toBase64(encoder.encode(JSON.stringify(event.body))));
-              xhr.send();
+              send(event, false);
             }
           });
         }
@@ -274,13 +314,47 @@ pub(crate) const WRY_HOST_SHIM: &str = r#"
     const ratio = Math.min(Math.max((x - rect.left) / rect.width, 0), 1);
     return [Math.round(ratio * length), 0, 0, 0];
   };
+  class ComposerHandoff {
+    static active = new WeakMap();
+    static capture(root) {
+      if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) return null;
+      const composer = root.querySelector?.('.vmux-agent-composer-shared');
+      if (!composer) return null;
+      const rect = composer.getBoundingClientRect();
+      this.active.get(composer)?.cancel();
+      this.active.delete(composer);
+      if (![rect.left, rect.top, rect.width, rect.height].every(Number.isFinite) || rect.width <= 0 || rect.height <= 0) return null;
+      return rect;
+    }
+    static apply(previous, root) {
+      if (!previous || window.matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+      const composer = root.querySelector?.('.vmux-agent-composer-shared');
+      if (!composer || typeof composer.animate !== 'function') return;
+      const next = composer.getBoundingClientRect();
+      if (![next.left, next.top, next.width, next.height].every(Number.isFinite) || next.width <= 0 || next.height <= 0) return;
+      const dx = previous.left - next.left;
+      const dy = previous.top - next.top;
+      const sx = previous.width / next.width;
+      const sy = previous.height / next.height;
+      if (Math.abs(dx) + Math.abs(dy) + Math.abs(previous.width - next.width) + Math.abs(previous.height - next.height) < 0.5) return;
+      this.active.get(composer)?.cancel();
+      const animation = composer.animate([
+        { transform: `translate(${dx}px, ${dy}px) scale(${sx}, ${sy})`, transformOrigin: 'top left' },
+        { transform: 'translate(0px, 0px) scale(1, 1)', transformOrigin: 'top left' },
+      ], { duration: __VMUX_MOTION_LAYOUT_MS__, fill: 'backwards', easing: 'cubic-bezier(0.2, 0, 0, 1)' });
+      this.active.set(composer, animation);
+      animation.finished.finally(() => { if (this.active.get(composer) === animation) this.active.delete(composer); }).catch(() => {});
+    }
+  }
   const prepareRemount = () => {
     const previous = window.interpreter;
+    let composer = null;
+    try { composer = ComposerHandoff.capture(previous.root); } catch (e) {}
     const root = previous.root.cloneNode(false);
     const interpreter = window.vmuxCreateInterpreter();
     interpreter.initialize(root);
     ScrollEvents.install(interpreter);
-    return { previousRoot: previous.root, root, interpreter };
+    return { previousRoot: previous.root, root, interpreter, composer };
   };
   const sectionAtTop = (element) => {
     const container = document.getElementById(element);
@@ -301,7 +375,9 @@ pub(crate) const WRY_HOST_SHIM: &str = r#"
   const commitRemount = (remount, revision) => {
     remount.previousRoot.replaceWith(remount.root);
     window.interpreter = remount.interpreter;
-    return commitNavigationRevision(revision);
+    const committed = commitNavigationRevision(revision);
+    try { ComposerHandoff.apply(remount.composer, remount.root); } catch (e) {}
+    return committed;
   };
   const visibleScrollAnchor = (container, viewport) => {
     for (const y of [viewport.top + 1, viewport.top + 24, viewport.top + (viewport.bottom - viewport.top) / 4]) {
@@ -619,8 +695,11 @@ pub(crate) const WRY_HOST_SHIM: &str = r#"
       for (const request of requests) {
         if (request.kind !== 'animateLayout') continue;
         const container = document.getElementById(request.element);
-        if (!container) continue;
         const rects = new Map();
+        if (!container) {
+          captures.push({ request, rects });
+          continue;
+        }
         const bounds = container.getBoundingClientRect();
         for (const element of this.items(container)) {
           const rect = element.getBoundingClientRect();
@@ -656,7 +735,12 @@ pub(crate) const WRY_HOST_SHIM: &str = r#"
       for (const { request, rects } of captures) {
         if (!requestMatchesDocument(request)) continue;
         const container = document.getElementById(request.element);
-        if (!container) continue;
+        if (!container) {
+          if (document.body) {
+            for (const capture of rects.values()) this.retire(document.body, capture);
+          }
+          continue;
+        }
         const items = [...this.items(container)];
         const present = new Set(items.map(element => this.key(element)));
         let retired = false;
@@ -669,7 +753,16 @@ pub(crate) const WRY_HOST_SHIM: &str = r#"
         const delay = retired ? Math.min(__VMUX_MOTION_FEEDBACK_MS__ / 2, __VMUX_MOTION_MAX_MS__ - duration) : 0;
         for (const element of items) {
           const previous = rects.get(this.key(element))?.rect;
-          if (!previous || typeof element.animate !== 'function') continue;
+          if (typeof element.animate !== 'function') continue;
+          if (!previous) {
+            const animation = element.animate([
+              { opacity: 0, transform: 'translateY(4px) scale(0.96)' },
+              { opacity: 1, transform: 'translateY(0px) scale(1)' },
+            ], { duration, fill: 'backwards', easing: 'cubic-bezier(0.2, 0, 0, 1)' });
+            this.active.set(element, animation);
+            animation.finished.finally(() => { if (this.active.get(element) === animation) this.active.delete(element); }).catch(() => {});
+            continue;
+          }
           const next = element.getBoundingClientRect();
           const dx = previous.left - next.left;
           const dy = previous.top - next.top;
@@ -737,7 +830,8 @@ pub(crate) const WRY_HOST_SHIM: &str = r#"
           const container = document.getElementById(request.container);
           const element = document.getElementById(request.element);
           if (!container || !element || !container.contains(element)) return;
-          const top = element.getBoundingClientRect().top - container.getBoundingClientRect().top + container.scrollTop - 16;
+          const padding = Math.max(16, parseFloat(getComputedStyle(container).scrollPaddingTop) || 0);
+          const top = element.getBoundingClientRect().top - container.getBoundingClientRect().top + container.scrollTop - padding;
           container.scrollTo({ top: Math.max(0, top), behavior: window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 'instant' : request.behavior });
         });
         return;
@@ -945,6 +1039,7 @@ pub(crate) const WRY_HOST_SHIM: &str = r#"
         } else if (edits.byteLength) {
           window.interpreter.run_from_bytes(edits);
         }
+        window.__vmuxDisclosures?.flush?.();
         globalThis.__vmuxPopupPresentation.apply(popupCaptures);
         HeightAnimation.apply(heightAnimations);
         LayoutMovement.apply(layoutMovements);
@@ -1137,6 +1232,11 @@ mod tests {
     }
 
     #[test]
+    fn sticky_reference_navigation_respects_the_containers_scroll_padding() {
+        RuntimeProbe::verify(include_str!("scroll_section_test.js"));
+    }
+
+    #[test]
     fn content_growth_and_scroll_clamping_preserve_position_before_the_next_input() {
         RuntimeProbe::verify(include_str!("scroll_retention_test.js"));
     }
@@ -1144,5 +1244,15 @@ mod tests {
     #[test]
     fn first_layout_presents_without_waiting_for_background_data_or_fonts() {
         RuntimeProbe::verify(include_str!("presentation_test.js"));
+    }
+
+    #[test]
+    fn composer_handoff_preserves_final_layout_and_does_not_delay_navigation() {
+        RuntimeProbe::verify(include_str!("composer_handoff_test.js"));
+    }
+
+    #[test]
+    fn composer_handoff_uses_native_browser_layout_and_animation() {
+        RuntimeProbe::verify(include_str!("composer_handoff_browser_test.js"));
     }
 }

@@ -478,93 +478,6 @@ impl Chat {
         });
         Some(ComposerChip::ready(label, title).opens(open))
     }
-
-    pub fn project_chip(&self) -> Option<ComposerChip> {
-        if !(self.projects.context.ready)() {
-            return Some(ComposerChip::loading());
-        }
-        let context = self.slash.context();
-        let active_project = context.projects.iter().find(|project| project.is_active);
-        let label = if let Some(project) = active_project {
-            project.label.clone()
-        } else if context.workspace_selected && !context.workspace_name.is_empty() {
-            context.workspace_name.clone()
-        } else {
-            translate("agent-project-select")
-        };
-        if context.can_manage_workspace {
-            let workspace_path = active_project
-                .map(|project| project.path.as_str())
-                .filter(|path| !path.is_empty())
-                .unwrap_or(&context.cwd);
-            let title = if workspace_path.is_empty() {
-                translate("agent-project-choose")
-            } else {
-                format!("{} · {}", translate("agent-project-choose"), workspace_path)
-            };
-            let selected = context
-                .projects
-                .iter()
-                .filter(|project| project.depth == 0)
-                .position(|project| project.is_active)
-                .unwrap_or(0);
-            let chat = *self;
-            let open =
-                EventHandler::new(move |()| chat.open_menu_at(ComposerMenuKind::Project, selected));
-            return Some(
-                ComposerChip::ready(label, title)
-                    .with_identity(
-                        active_project
-                            .map(|project| project.identity_seed())
-                            .unwrap_or(workspace_path)
-                            .to_string(),
-                    )
-                    .opens(open),
-            );
-        }
-        if context.cwd.is_empty() {
-            return None;
-        }
-        let seed = active_project
-            .map(|project| project.identity_seed())
-            .unwrap_or(&context.cwd)
-            .to_string();
-        Some(ComposerChip::ready(label, context.cwd.clone()).with_identity(seed))
-    }
-
-    pub fn branch_chip(&self) -> Option<ComposerChip> {
-        if !(self.projects.context.ready)() {
-            return Some(ComposerChip::loading());
-        }
-        let context = self.slash.context();
-        if !context.is_git_repo {
-            return None;
-        }
-        let chat = *self;
-        let open = EventHandler::new(move |()| {
-            chat.open_menu(ComposerMenuKind::Branch);
-        });
-        if context.branch.is_empty() {
-            return Some(
-                ComposerChip::ready(
-                    translate("composer-git"),
-                    translate("composer-git-repository"),
-                )
-                .with_identity("HEAD")
-                .opens(open),
-            );
-        }
-        let title = translate_with(
-            "composer-branch-name",
-            &[("branch", TranslationValue::String(&context.branch))],
-        );
-        let branch_seed = context.branch.clone();
-        Some(
-            ComposerChip::ready(context.branch, title)
-                .with_identity(branch_seed)
-                .opens(open),
-        )
-    }
 }
 
 impl Chat {
@@ -703,6 +616,14 @@ impl Transcript {
         self.root.read().transcript.clone()
     }
 
+    pub fn activity_counts(self) -> (u32, u32) {
+        let root = self.root.read();
+        (
+            root.transcript.active_subagents,
+            root.transcript.active_tasks,
+        )
+    }
+
     pub fn ready(self) -> bool {
         let root = self.root.read();
         root.transcript_revision > 0
@@ -733,12 +654,32 @@ impl Transcript {
         }
     }
 
+    pub(super) fn scroll_input(self) {
+        self.note_scroll_input();
+        if *self.last_top.peek() <= 0
+            && (self.root.peek().transcript.loaded_start > 0
+                || self.root.peek().transcript.has_older)
+        {
+            self.stop_following();
+            self.request_history();
+        }
+    }
+
     fn stop_following(self) {
         self.note_scroll_input();
         if *self.at_bottom.peek() {
             let mut at_bottom = self.at_bottom;
             at_bottom.set(false);
         }
+    }
+
+    pub(super) fn reveal(self, target: &str) {
+        self.stop_following();
+        vmux_ui::scroll::ScrollIntoView::section(
+            "chat-scroll",
+            target,
+            dioxus::html::ScrollBehavior::Smooth,
+        );
     }
 
     pub(super) fn observe_scroll(self, top: i32, distance: i32, height: i32) {
@@ -781,6 +722,18 @@ impl Transcript {
         }
     }
 
+    pub(super) fn scrolled(self, event: &dioxus::html::ScrollData) {
+        if event.client_height() <= 0 {
+            return;
+        }
+        let top = event.scroll_top() as i32;
+        let distance = event.scroll_height() - top - event.client_height();
+        self.observe_scroll(top, distance, event.client_height());
+        if vmux_ui::scroll::ScrollPreload::HISTORY.reached_start(event) {
+            self.request_history();
+        }
+    }
+
     pub(super) fn follow(self) {
         if !self.ready() || self.scroll_container.peek().is_none() {
             return;
@@ -820,8 +773,12 @@ impl Transcript {
         if *self.initial_follow.peek() {
             return;
         }
-        let transcript = self.current();
-        if transcript.loading || transcript.loaded_start == 0 {
+        let unavailable = {
+            let root = self.root.peek();
+            root.transcript.loading
+                || root.transcript.loaded_start == 0 && !root.transcript.has_older
+        };
+        if unavailable {
             return;
         }
         let _ = send(&ChatHistoryMoreRequest);

@@ -1,3 +1,4 @@
+use bevy::prelude::Commands;
 use std::path::PathBuf;
 use std::time::{Duration, Instant};
 
@@ -994,6 +995,7 @@ fn resolve_pending_cwd(
 }
 
 fn send_service_requests(
+    grids: Query<&TerminalGridSize>,
     pending_create: Query<
         (
             Entity,
@@ -1032,8 +1034,8 @@ fn send_service_requests(
             args: launch.args.clone(),
             cwd: launch.cwd.clone(),
             env,
-            cols: 80,
-            rows: 24,
+            cols: grids.get(entity).map(|grid| grid.cols).unwrap_or(80),
+            rows: grids.get(entity).map(|grid| grid.rows).unwrap_or(24),
         }));
         commands
             .entity(entity)
@@ -1045,6 +1047,13 @@ fn send_service_requests(
         service_requests.write(ServiceRequest(ClientMessage::AttachProcess {
             process_id: *pid,
         }));
+        if let Ok(grid) = grids.get(entity) {
+            service_requests.write(ServiceRequest(ClientMessage::ResizeProcess {
+                process_id: *pid,
+                cols: grid.cols,
+                rows: grid.rows,
+            }));
+        }
         service_requests.write(ServiceRequest(ClientMessage::RequestSnapshot {
             process_id: *pid,
         }));
@@ -1053,6 +1062,7 @@ fn send_service_requests(
 }
 
 fn apply_process_start(
+    grids: Query<&TerminalGridSize>,
     mut created: MessageReader<TerminalProcessCreated>,
     mut failed: MessageReader<TerminalProcessCreateFailed>,
     awaiting_create: Query<(), (With<Terminal>, With<AwaitingProcessCreated>)>,
@@ -1068,6 +1078,13 @@ fn apply_process_start(
             service_requests.write(ServiceRequest(ClientMessage::AttachProcess {
                 process_id: created.process_id,
             }));
+            if let Ok(grid) = grids.get(entity) {
+                service_requests.write(ServiceRequest(ClientMessage::ResizeProcess {
+                    process_id: created.process_id,
+                    cols: grid.cols,
+                    rows: grid.rows,
+                }));
+            }
             commands
                 .entity(entity)
                 .insert(created.process_id)
@@ -1179,6 +1196,7 @@ fn apply_process_exits(
 }
 
 fn apply_service_errors(
+    grids: Query<&TerminalGridSize>,
     mut errors: MessageReader<TerminalServiceError>,
     terminals: Query<(), ServiceTerminalFilter>,
     process_index: Single<&TerminalProcessIndex>,
@@ -1211,8 +1229,8 @@ fn apply_service_errors(
                 args: launch.args,
                 cwd: launch.cwd,
                 env: launch.env,
-                cols: 80,
-                rows: 24,
+                cols: grids.get(entity).map(|grid| grid.cols).unwrap_or(80),
+                rows: grids.get(entity).map(|grid| grid.rows).unwrap_or(24),
             }));
             commands.entity(entity).insert(new_id);
             commands.trigger(TerminalRestartRequest { terminal: entity });
@@ -2289,7 +2307,7 @@ mod tests {
             layout: LayoutSettings {
                 radius: 0.0,
                 window: WindowSettings { padding: 0.0 },
-                pane: PaneSettings { gap: 0.0 },
+                pane: PaneSettings::default(),
                 side_sheet: SideSheetSettings::default(),
                 focus_ring: FocusRingSettings::default(),
             },

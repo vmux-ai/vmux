@@ -506,6 +506,42 @@ impl Entries<'_, '_> {
         None
     }
 
+    pub fn resolve(&self, kind: &str, sid: &str) -> Option<Record<'_>> {
+        let exact = self.get(kind, sid);
+        let family = if let Some(record) = exact.as_ref() {
+            AgentFamily::of(&record.agent.0)
+        } else {
+            AgentFamily::of(kind.strip_prefix("acp:")?)
+        };
+        let fallback = self.allows_fallback(&family);
+        let mut selected = None;
+        let mut priority = None;
+        for (entity, parent, entry_kind, id, agent, _, _, _, _, updated, _, _, _, _) in
+            &self.records
+        {
+            if id.0 != sid || AgentFamily::of(&agent.0) != family {
+                continue;
+            }
+            let Ok((_, origin, _, _)) = self.sources.get(parent.parent()) else {
+                continue;
+            };
+            if *origin == Origin::Native && !fallback {
+                continue;
+            }
+            let candidate = (
+                *origin == Origin::Acp,
+                entry_kind.0 == kind,
+                updated.0,
+                entity,
+            );
+            if priority.is_none_or(|previous| candidate > previous) {
+                priority = Some(candidate);
+                selected = Some(entity);
+            }
+        }
+        self.record(selected?)
+    }
+
     pub fn selected(&self) -> Vec<Entity> {
         let mut selected = HashMap::<(AgentFamily, String), (i64, Entity)>::new();
         for (entity, parent, _, id, agent, _, _, _, _, updated, _, _, _, _) in &self.records {
@@ -1264,6 +1300,43 @@ mod tests {
                 .map(|name| name.as_str().to_string())
                 .collect()
         }
+    }
+
+    #[test]
+    fn alias_resolution_stays_within_the_agent_family() {
+        let mut fixture = Fixture::new();
+        fixture
+            .app
+            .world_mut()
+            .entity_mut(fixture.source)
+            .insert((Origin::Acp, AgentId("claude-code".into())));
+        let read = fixture.read(1);
+        fixture.receive(
+            read,
+            Ok(vec![ProviderSession {
+                kind: "acp:claude-code".into(),
+                sid: "shared-id".into(),
+                agent: "claude-code".into(),
+                name: "Original task".into(),
+                cwd: "/work".into(),
+                ..Default::default()
+            }]),
+        );
+        let resolved = fixture
+            .app
+            .world_mut()
+            .run_system_once(|entries: Entries| {
+                (
+                    entries
+                        .resolve("acp:claude", "shared-id")
+                        .map(|entry| entry.kind.0.clone()),
+                    entries
+                        .resolve("acp:codex", "shared-id")
+                        .map(|entry| entry.kind.0.clone()),
+                )
+            })
+            .unwrap();
+        assert_eq!(resolved, (Some("acp:claude-code".into()), None));
     }
 
     #[test]

@@ -53,7 +53,13 @@ impl SubmoduleCheckout {
             };
             let relative = PathBuf::from(OsString::from_vec(record[separator + 1..].to_vec()));
             let root = checkout.join(&relative);
-            if CheckoutInfo::try_from(root.as_path()).is_err() {
+            let Ok(submodule) = CheckoutInfo::try_from(root.as_path()) else {
+                continue;
+            };
+            let Ok(canonical_root) = root.canonicalize() else {
+                continue;
+            };
+            if submodule.root != canonical_root {
                 continue;
             }
             let Ok((branch, _, true)) =

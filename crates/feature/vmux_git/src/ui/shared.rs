@@ -656,13 +656,7 @@ pub fn DiffView(
                             }
                             div { "data-vmux-height-body": "",
                             if placeholder {
-                                div { class: "flex h-36 flex-col px-3 py-3",
-                                    for width in ["w-2/5", "w-3/5", "w-1/3", "w-1/2"] {
-                                        div { class: "flex h-5 shrink-0 items-center",
-                                            Skeleton { class: "h-1.5 {width} bg-foreground/[0.03]" }
-                                        }
-                                    }
-                                }
+                                DiffPlaceholderLines {}
                             } else if !collapsed {
                                 if section.top_spacer > 0.0 {
                                     DiffVirtualRows { height: section.top_spacer }
@@ -772,56 +766,28 @@ pub fn DiffView(
 
 #[component]
 fn DiffVirtualSpacer(height: f64) -> Element {
-    let preview_height = height.min(820.0);
     rsx! {
         div { class: "relative w-full min-w-0", style: "height:{height}px;overflow-anchor:none;",
-            div {
-                class: "pointer-events-none sticky top-0 flex shrink-0 flex-col gap-3 overflow-hidden py-3",
-                style: "height:{preview_height}px;",
-                for index in 0..5 {
-                    div { key: "virtual-diff-{index}", class: "h-36 shrink-0 overflow-hidden rounded-lg bg-foreground/[0.028]",
-                        div { class: "flex h-9 items-center gap-2 bg-foreground/[0.025] px-3",
-                            div { class: "size-3.5 rounded-sm bg-foreground/[0.07]" }
-                            div { class: "h-2.5 w-5/12 rounded bg-foreground/[0.07]" }
-                        }
-                        div { class: "flex flex-col px-3 py-3",
-                            for width in ["w-2/5", "w-3/5", "w-1/3", "w-1/2"] {
-                                div { class: "flex h-5 shrink-0 items-center",
-                                    div { class: "h-1.5 {width} rounded bg-foreground/[0.03]" }
-                                }
-                            }
-                        }
-                    }
-                }
-            }
+            div { class: "pointer-events-none sticky top-0", DiffPlaceholderLines {} }
         }
     }
 }
 
 #[component]
 fn DiffLoadingSurface(height: f64) -> Element {
-    let rows = ((height - DIFF_FILE_HEADER_HEIGHT).max(DIFF_LINE_HEIGHT) / DIFF_LINE_HEIGHT).ceil()
-        as usize;
-    let widths = ["w-2/5", "w-3/5", "w-1/3", "w-1/2"];
     rsx! {
-        div {
-            class: "min-h-full overflow-hidden",
-            style: "height:{height}px;",
-            "data-vmux-loading-surface": "",
-            div { class: "flex h-9 items-center gap-2 bg-foreground/[0.025] px-3",
-                Skeleton { class: "size-3.5 shrink-0 rounded-sm bg-foreground/[0.07]" }
-                Skeleton { class: "h-2.5 w-32 bg-foreground/[0.07]" }
-            }
-            for index in 0..rows.min(14) {
-                div { key: "initial-diff-{index}", class: "flex h-5 items-center gap-3 px-3",
-                    if index % 4 != 3 {
-                        div { class: "flex w-16 shrink-0 gap-2",
-                            Skeleton { class: "h-1.5 w-5 bg-foreground/[0.025]" }
-                            Skeleton { class: "h-1.5 w-7 bg-foreground/[0.02]" }
-                        }
-                        Skeleton { class: "h-1.5 {widths[index % widths.len()]} bg-foreground/[0.03]" }
-                    }
-                }
+        div { class: "min-h-full overflow-hidden", style: "height:{height}px;", "data-vmux-loading-surface": "", aria_busy: true,
+            DiffPlaceholderLines {}
+        }
+    }
+}
+
+#[component]
+fn DiffPlaceholderLines() -> Element {
+    rsx! {
+        div { class: "flex flex-col gap-1.5 px-3 py-3",
+            for width in ["w-3/5", "w-[54%]", "w-[57%]", "w-3/4"] {
+                Skeleton { class: "h-2.5 {width} rounded-sm bg-foreground/[0.055]" }
             }
         }
     }
@@ -829,28 +795,9 @@ fn DiffLoadingSurface(height: f64) -> Element {
 
 #[component]
 fn DiffVirtualRows(height: f64) -> Element {
-    let preview_height = height.min(820.0);
-    let rows = ((preview_height / DIFF_LINE_HEIGHT).ceil() as usize).clamp(1, 14);
-    let widths = ["w-2/5", "w-3/5", "w-1/3", "w-1/2"];
     rsx! {
-        div {
-            class: "pointer-events-none relative w-full bg-foreground/[0.012]",
-            style: "height:{height}px;overflow-anchor:none;",
-            div {
-                class: "sticky top-9 flex flex-col",
-                style: "height:{preview_height}px;",
-                for index in 0..rows {
-                    div { key: "virtual-row-{index}", class: "flex h-5 shrink-0 items-center gap-3 px-3",
-                        if index % 4 != 3 {
-                            div { class: "flex w-16 shrink-0 gap-2",
-                                div { class: "h-1.5 w-5 rounded-md bg-foreground/[0.025]" }
-                                div { class: "h-1.5 w-7 rounded-md bg-foreground/[0.02]" }
-                            }
-                            div { class: "h-1.5 {widths[index % widths.len()]} rounded-md bg-foreground/[0.03]" }
-                        }
-                    }
-                }
-            }
+        div { class: "pointer-events-none relative w-full", style: "height:{height}px;overflow-anchor:none;",
+            div { class: "sticky top-9", DiffPlaceholderLines {} }
         }
     }
 }

@@ -29,7 +29,7 @@ bevy = { workspace = true }
 bevy_cef = { workspace = true }
 bevy_cef_core = { workspace = true }
 libc = "0.2"
-notify = { workspace = true }
+notify = "8.2"
 rfd = { workspace = true }
 syntect = { workspace = true }
 similar = "2"

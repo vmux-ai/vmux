@@ -16,6 +16,7 @@ pub(super) struct ChatMessages<'a> {
     message_times: &'a [u64],
     durations: &'a [u32],
     running: bool,
+    event_ids: &'a [vmux_api::session::EventId],
 }
 
 impl<'a> ChatMessages<'a> {
@@ -32,7 +33,13 @@ impl<'a> ChatMessages<'a> {
             message_times,
             durations,
             running,
+            event_ids: &[],
         }
+    }
+
+    pub(super) fn with_event_ids(mut self, event_ids: &'a [vmux_api::session::EventId]) -> Self {
+        self.event_ids = event_ids;
+        self
     }
 
     pub(super) fn item_count(&self) -> usize {
@@ -64,6 +71,19 @@ impl<'a> ChatMessages<'a> {
         self.page(PageRange::new(total.saturating_sub(limit), total, total))
     }
 
+    pub(super) fn tail_with_prompt(&self, limit: usize) -> ChatItemPage {
+        let mut page = self.tail(limit);
+        if page.start == 0 || !matches!(page.items.first(), Some(ChatItem::Turn(_))) {
+            return page;
+        }
+        let previous = self.before(page.start, 1);
+        if matches!(previous.items.first(), Some(ChatItem::User { .. })) {
+            page.start = previous.start;
+            page.items.splice(0..0, previous.items);
+        }
+        page
+    }
+
     pub(super) fn before(&self, before: usize, limit: usize) -> ChatItemPage {
         let total = self.item_count();
         let end = before.min(total);
@@ -90,7 +110,16 @@ impl<'a> ChatMessages<'a> {
                 .and_then(|index| self.message_times.get(index))
                 .copied()
                 .unwrap_or_default();
-            builder.push(message, created_at_ms);
+            let event_id = index
+                .checked_sub(self.imported.len())
+                .and_then(|index| self.event_ids.get(index));
+            builder.push(
+                message,
+                created_at_ms,
+                event_id
+                    .map(vmux_api::session::EventId::as_str)
+                    .unwrap_or_default(),
+            );
         }
         builder.flush_turn();
         if self.running
@@ -125,7 +154,7 @@ impl PageRange {
 }
 
 impl PageBuilder<'_> {
-    fn push(&mut self, message: &Message, created_at_ms: u64) {
+    fn push(&mut self, message: &Message, created_at_ms: u64, event_id: &str) {
         match message {
             Message::User { text, attachments } => {
                 self.flush_turn();
@@ -134,14 +163,14 @@ impl PageBuilder<'_> {
                     .map(|(context, display)| (Some(context), display))
                     .unwrap_or((None, text));
                 if !text.trim().is_empty() || !attachments.is_empty() {
-                    self.push_user(text, context, attachments, created_at_ms);
+                    self.push_user(text, context, attachments, created_at_ms, event_id);
                 }
                 self.start_turn(created_at_ms);
             }
             Message::Assistant { blocks } => {
                 self.start_agent_turn(created_at_ms);
                 if let Some(turn) = self.current.as_mut() {
-                    Self::push_assistant_blocks(turn, blocks);
+                    Self::push_assistant_blocks(turn, blocks, event_id);
                 }
             }
             Message::ToolResult {
@@ -156,6 +185,7 @@ impl PageBuilder<'_> {
                         content: content.clone(),
                         is_error: *is_error,
                     });
+                    turn.block_ids.push(event_id.to_string());
                 }
             }
         }
@@ -223,9 +253,11 @@ impl<'a> PageBuilder<'a> {
         context: Option<&str>,
         attachments: &[AgentAttachment],
         created_at_ms: u64,
+        event_id: &str,
     ) {
         if self.captures() {
             self.items.push(ChatItem::User {
+                event_id: event_id.to_string(),
                 text: text.to_string(),
                 context: context.map(str::to_string),
                 attachments: attachments
@@ -236,6 +268,7 @@ impl<'a> PageBuilder<'a> {
                         mime_type: attachment.mime_type.clone(),
                         size: attachment.size,
                         preview_data_url: String::new(),
+                        media_url: String::new(),
                     })
                     .collect(),
                 created_at_ms,
@@ -249,16 +282,6 @@ impl<'a> PageBuilder<'a> {
             return;
         }
         if let Some(mut turn) = self.current.take() {
-            turn.step_count = turn
-                .blocks
-                .iter()
-                .enumerate()
-                .filter(|(index, block)| {
-                    !matches!(block, ChatBlock::Text(_))
-                        && super::projection::ChatTurnProjection::parent_tool_index(&turn, *index)
-                            .is_none()
-                })
-                .count() as u32;
             turn.duration_secs = self.durations.get(self.turn_ordinal).copied();
             super::projection::ChatTurnProjection::apply(&mut turn);
             self.items.push(ChatItem::Turn(turn));
@@ -271,8 +294,9 @@ impl<'a> PageBuilder<'a> {
 }
 
 impl PageBuilder<'_> {
-    fn push_assistant_blocks(turn: &mut ChatTurn, blocks: &[AssistantBlock]) {
-        for block in blocks {
+    fn push_assistant_blocks(turn: &mut ChatTurn, blocks: &[AssistantBlock], event_id: &str) {
+        for (ordinal, block) in blocks.iter().enumerate() {
+            let start = turn.blocks.len();
             match block {
                 AssistantBlock::Text(text) => Self::push_assistant_text(turn, text),
                 AssistantBlock::Thinking(text) => {
@@ -309,6 +333,14 @@ impl PageBuilder<'_> {
                 AssistantBlock::Plan { steps } => turn.blocks.push(ChatBlock::Plan {
                     steps: steps.iter().map(Self::map_plan_step).collect(),
                 }),
+            }
+            for part in 0..turn.blocks.len().saturating_sub(start) {
+                let id = if event_id.is_empty() {
+                    String::new()
+                } else {
+                    format!("{event_id}:{ordinal}:{part}")
+                };
+                turn.block_ids.push(id);
             }
         }
     }
@@ -381,7 +413,7 @@ impl PageBuilder<'_> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::host::projection::ChatTurnProjection;
+    use vmux_api::chat::{ChatToolChild, ChatTurnRow};
 
     fn assistant(blocks: Vec<AssistantBlock>) -> Message {
         Message::Assistant { blocks }
@@ -415,6 +447,45 @@ mod tests {
             reasoning_effort: None,
             raw_input: "{}".into(),
         }))
+    }
+
+    #[test]
+    fn inter_agent_requests_remain_agent_activity_without_creating_user_prompts() {
+        let content = "<codex_delegation><source_thread_id>peer</source_thread_id><input>Review the next PR</input></codex_delegation>";
+        let messages = vec![
+            Message::user("My actual request"),
+            Message::ToolResult {
+                call_id: "fco_peer".into(),
+                content: content.into(),
+                is_error: false,
+            },
+            assistant(vec![AssistantBlock::Text("Reviewing it".into())]),
+        ];
+        let ids = vec![
+            vmux_api::session::EventId::new("human"),
+            vmux_api::session::EventId::new("peer"),
+            vmux_api::session::EventId::new("response"),
+        ];
+        let items = ChatMessages::new(&[], &messages, &[], &[], false)
+            .with_event_ids(&ids)
+            .all();
+        assert_eq!(items.len(), 2);
+        assert!(
+            matches!(&items[0], ChatItem::User { text, event_id, .. } if text == "My actual request" && event_id == "human")
+        );
+        let ChatItem::Turn(turn) = &items[1] else {
+            panic!("peer requests belong to agent activity");
+        };
+        assert!(
+            matches!(&turn.blocks[0], ChatBlock::ToolResult { content: actual, .. } if actual == content)
+        );
+        assert_eq!(turn.block_ids[0], "peer");
+        let only_agents = ChatMessages::new(&[], &messages[1..], &[], &[], false).all();
+        assert!(
+            only_agents
+                .iter()
+                .all(|item| matches!(item, ChatItem::Turn(_)))
+        );
     }
 
     #[test]
@@ -485,6 +556,25 @@ mod tests {
         };
         assert_eq!(t0.duration_secs, Some(5));
         assert_eq!(t1.duration_secs, Some(9));
+    }
+
+    #[test]
+    fn recent_window_retains_the_prompt_for_its_leading_assistant_turn() {
+        let messages = vec![
+            Message::user("a"),
+            assistant(vec![AssistantBlock::Text("one".into())]),
+            Message::user("b"),
+            assistant(vec![AssistantBlock::Text("two".into())]),
+            Message::user("c"),
+            assistant(vec![AssistantBlock::Text("three".into())]),
+        ];
+        let page = ChatMessages::new(&[], &messages, &[], &[], false).tail_with_prompt(3);
+        assert_eq!((page.start, page.end, page.total), (2, 6, 6));
+        assert!(matches!(&page.items[0], ChatItem::User { text, .. } if text == "b"));
+        assert!(matches!(&page.items[1], ChatItem::Turn(turn) if turn.copy_text == "two"));
+        let page = ChatMessages::new(&[], &messages, &[], &[], false).tail_with_prompt(2);
+        assert_eq!((page.start, page.end, page.total), (4, 6, 6));
+        assert!(matches!(&page.items[0], ChatItem::User { text, .. } if text == "c"));
     }
 
     #[test]
@@ -765,9 +855,12 @@ mod tests {
         };
         assert_eq!(turn.step_count, 1);
         assert!(matches!(&turn.blocks[0], ChatBlock::Subagent(_)));
-        assert_eq!(ChatTurnProjection::parent_tool_index(turn, 1), Some(0));
-        assert_eq!(ChatTurnProjection::parent_tool_index(turn, 2), Some(0));
-        assert_eq!(ChatTurnProjection::parent_tool_index(turn, 3), Some(0));
+        let [ChatTurnRow::Subagent(subagent)] = turn.rows.as_slice() else {
+            panic!("expected one visible subagent");
+        };
+        assert!(
+            matches!(subagent.children.as_slice(), [ChatToolChild::Tool(call), ChatToolChild::Result { index: 2, content, .. }, ChatToolChild::Result { index: 3, .. }] if call.index == 1 && content == "file contents")
+        );
     }
 
     #[test]

@@ -3,14 +3,9 @@ use std::process::Command;
 
 pub fn emit() {
     println!("cargo::rerun-if-env-changed=VMUX_TARGET_DESTINATION");
-    let hash = Command::new("git")
-        .args(["rev-parse", "--short=7", "HEAD"])
-        .output()
-        .ok()
-        .filter(|o| o.status.success())
-        .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string())
-        .unwrap_or_else(|| "unknown".to_string());
-    println!("cargo::rustc-env=VMUX_GIT_HASH={hash}");
+    let identity = BuildIdentity::read();
+    println!("cargo::rustc-env=VMUX_GIT_HASH={}", identity.hash);
+    println!("cargo::rustc-env=VMUX_GIT_BRANCH={}", identity.branch);
 
     let worktree =
         git_stdout(&["rev-parse", "--show-toplevel"]).unwrap_or_else(|| "unknown".to_string());
@@ -26,6 +21,10 @@ pub fn emit() {
         }
     });
     println!("cargo::rustc-env=VMUX_BUILD_PROFILE={profile}");
+    println!(
+        "cargo::rustc-env=VMUX_BUILD_TITLE={}",
+        identity.title(&profile)
+    );
     println!("cargo::rerun-if-env-changed=VMUX_BUILD_PROFILE");
 
     let mut refs = vec!["HEAD".to_string(), "logs/HEAD".to_string()];
@@ -37,6 +36,35 @@ pub fn emit() {
             && Path::new(&p).exists()
         {
             println!("cargo::rerun-if-changed={p}");
+        }
+    }
+}
+
+struct BuildIdentity {
+    hash: String,
+    branch: String,
+}
+
+impl BuildIdentity {
+    fn read() -> Self {
+        Self {
+            hash: git_stdout(&["rev-parse", "--short=7", "HEAD"])
+                .unwrap_or_else(|| "unknown".to_string()),
+            branch: git_stdout(&["symbolic-ref", "--quiet", "--short", "HEAD"]).unwrap_or_default(),
+        }
+    }
+
+    fn title(&self, profile: &str) -> String {
+        let source = if self.branch.is_empty() {
+            &self.hash
+        } else {
+            &self.branch
+        };
+        match profile {
+            "release" => "Vmux".to_string(),
+            "local" => format!("Vmux ({source})"),
+            "dev" => format!("Vmux Dev ({source})"),
+            other => format!("Vmux ({other})"),
         }
     }
 }

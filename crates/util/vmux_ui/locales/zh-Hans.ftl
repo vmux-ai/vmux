@@ -668,6 +668,9 @@ agent-tool-explored = 已探索
 agent-tool-explore-read = 读取 { $path }
 agent-tool-explore-search = 在 { $path } 中搜索 { $query }
 agent-tool-explore-list = 列出 { $path }
+agent-tool-open-in-pane-right = 在右侧窗格中打开
+agent-tool-open-in-stack = 在新堆栈中打开
+agent-tool-open-in-tab = 在新标签页中打开
 agent-thinking = 正在思考
 agent-subagent = 子智能体
 agent-prompt = 提示
@@ -1122,3 +1125,24 @@ project-new-repository = 空仓库
 project-local-folder = 本地文件夹
 project-github-repository = GitHub 仓库
 project-edit-conflict = 项目已更改。请重新打开编辑界面。
+
+agent-video-play = 播放视频
+
+command-toggle-url-bar = Layout > 布局 > 切换地址栏
+
+project-rename = 重命名项目
+project-all = 所有项目
+project-remove = 移除项目
+project-remove-description = 从项目列表中移除。保留本地文件。
+
+agent-tool-slept = 已等待
+
+project-directory-unavailable = 项目目录不可用
+
+session-turn-view-prompt = 查看提示
+session-turn-view-response = 查看回复
+agent-incoming-message = 智能体消息
+
+schema-focus-follows-mouse = 焦点跟随鼠标
+
+terminal-directory-input-pending = 更改目录前，请完成或取消当前命令或输入。

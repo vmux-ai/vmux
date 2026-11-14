@@ -671,6 +671,9 @@ agent-tool-explored = Verkend
 agent-tool-explore-read = Gelezen: { $path }
 agent-tool-explore-search = Zoek { $query } in { $path }
 agent-tool-explore-list = Lijst van { $path }
+agent-tool-open-in-pane-right = Openen in het rechterpaneel
+agent-tool-open-in-stack = Openen in een nieuwe stapel
+agent-tool-open-in-tab = Openen in een nieuw tabblad
 agent-thinking = Denken
 agent-subagent = Subagent
 agent-prompt = Prompt
@@ -1125,3 +1128,24 @@ project-new-repository = Lege repository
 project-local-folder = Lokale map
 project-github-repository = GitHub-repository
 project-edit-conflict = Dit project is gewijzigd. Open de editor opnieuw.
+
+agent-video-play = Video afspelen
+
+command-toggle-url-bar = Layout > Indeling > Adresbalk schakelen
+
+project-rename = Project hernoemen
+project-all = Alle projecten
+project-remove = Project verwijderen
+project-remove-description = Uit de projectlijst verwijderen. Lokale bestanden blijven behouden.
+
+agent-tool-slept = Gewacht
+
+project-directory-unavailable = De projectmap is niet beschikbaar
+
+session-turn-view-prompt = Invoer bekijken
+session-turn-view-response = Antwoord bekijken
+agent-incoming-message = Agentbericht
+
+schema-focus-follows-mouse = Focus volgt de muis
+
+terminal-directory-input-pending = Voltooi of annuleer de huidige opdracht of invoer voordat u van map wisselt.

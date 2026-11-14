@@ -243,7 +243,7 @@ pub(crate) fn test_app_settings_with_radius(radius: f32) -> AppSettings {
         layout: vmux_layout::settings::LayoutSettings {
             radius,
             window: vmux_layout::settings::WindowSettings { padding: 0.0 },
-            pane: vmux_layout::settings::PaneSettings { gap: 0.0 },
+            pane: vmux_layout::settings::PaneSettings::default(),
             side_sheet: vmux_layout::settings::SideSheetSettings::default(),
             focus_ring: vmux_layout::settings::FocusRingSettings::default(),
         },
@@ -362,7 +362,7 @@ mod browser_navigate_flow {
             layout: LayoutSettings {
                 radius: 0.0,
                 window: WindowSettings { padding: 0.0 },
-                pane: PaneSettings { gap: 0.0 },
+                pane: PaneSettings::default(),
                 side_sheet: SideSheetSettings::default(),
                 focus_ring: FocusRingSettings::default(),
             },

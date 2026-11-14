@@ -27,7 +27,7 @@ impl ComposerChips {
                 model: Some(ComposerChip::loading()),
                 permission: None,
                 project: ComposerChip::loading(),
-                branch: Some(ComposerChip::loading()),
+                branch: None,
             };
         }
 
@@ -42,13 +42,6 @@ impl ComposerChips {
         } else {
             composer.agent_url.clone()
         };
-        let project_seed = composer
-            .projects
-            .iter()
-            .find(|project| project.depth == 0 && project.is_active)
-            .map(|project| project.identity_seed())
-            .unwrap_or(&composer.project)
-            .to_string();
         let agent = ComposerChip::ready(
             composer.agent_title.clone(),
             translate("composer-choose-agent"),
@@ -68,26 +61,6 @@ impl ComposerChips {
                     })),
             ),
         };
-        let project = ComposerChip::ready(
-            composer.workspace_label.clone(),
-            composer.workspace_title.clone(),
-        )
-        .with_identity(project_seed.clone())
-        .opens(EventHandler::new(move |()| {
-            let _ = send(&CommandPaletteProjectMenuToggleRequest { open_id });
-            PromptFocus::end(PROMPT_INPUT_ID);
-        }));
-        let branch = match composer.is_git_repo {
-            false => None,
-            true => Some(
-                ComposerChip::ready(composer.branch_label.clone(), composer.branch_title.clone())
-                    .with_identity(composer.branch_label.clone())
-                    .opens(EventHandler::new(move |()| {
-                        let _ = send(&CommandPaletteBranchMenuToggleRequest { open_id });
-                        PromptFocus::end(PROMPT_INPUT_ID);
-                    })),
-            ),
-        };
         let permission = if composer.permission_modes.is_empty() {
             None
         } else {
@@ -102,6 +75,28 @@ impl ComposerChips {
                 })),
             )
         };
+
+        let project_seed =
+            match vmux_api::space::ProjectRow::for_directory(&composer.projects, &composer.project)
+            {
+                Some(project) => project.identity_seed(),
+                None => composer.project.as_str(),
+            };
+        let project = ComposerChip::ready(
+            composer.workspace_label.clone(),
+            composer.workspace_title.clone(),
+        )
+        .with_identity(project_seed)
+        .opens(EventHandler::new(move |()| {
+            let _ = send(&CommandPaletteProjectMenuToggleRequest { open_id });
+        }));
+        let branch = composer.is_git_repo.then(|| {
+            ComposerChip::ready(composer.branch_label.clone(), composer.branch_title.clone())
+                .with_identity(composer.branch_label.clone())
+                .opens(EventHandler::new(move |()| {
+                    let _ = send(&CommandPaletteBranchMenuToggleRequest { open_id });
+                }))
+        });
 
         Self {
             agent,

@@ -644,6 +644,7 @@ agent-choosing = Choosing…
 agent-choose-folder = Choose folder
 agent-queued = queued
 agent-attached = Attached:
+agent-video-play = Play video
 agent-cancel-queued = Cancel queued prompt
 agent-resume-queued = Resume queued prompts
 agent-clear-queue = Clear queue
@@ -682,6 +683,9 @@ agent-tool-explored = Explored
 agent-tool-explore-read = Read { $path }
 agent-tool-explore-search = Search { $query } in { $path }
 agent-tool-explore-list = List { $path }
+agent-tool-open-in-pane-right = Open in the Right Pane
+agent-tool-open-in-stack = Open in a New Stack
+agent-tool-open-in-tab = Open in a New Tab
 agent-thinking = Thinking
 agent-subagent = Subagent
 agent-prompt = Prompt
@@ -1114,3 +1118,22 @@ project-new-repository = Empty repository
 project-local-folder = Local folder
 project-github-repository = GitHub repository
 project-edit-conflict = This project changed. Reopen the editor to try again.
+
+command-toggle-url-bar = Layout > Layout > Toggle URL Bar
+
+project-rename = Rename project
+project-all = All projects
+project-remove = Remove project
+project-remove-description = Remove from the project list. Local files are kept.
+
+agent-tool-slept = Slept
+
+project-directory-unavailable = The project directory is unavailable
+
+session-turn-view-prompt = View prompt
+session-turn-view-response = View response
+agent-incoming-message = Agent message
+
+schema-focus-follows-mouse = Focus follows mouse
+
+terminal-directory-input-pending = Finish or cancel the current command or input before changing directories.

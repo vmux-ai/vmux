@@ -59,6 +59,8 @@ mod state;
 mod tool;
 #[cfg(host)]
 mod transcript;
+#[cfg(host)]
+mod video;
 
 #[vmux_page::page]
 pub struct SessionPlugin;

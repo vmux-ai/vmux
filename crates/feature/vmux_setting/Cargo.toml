@@ -13,6 +13,7 @@ default = []
 path = "src/lib.rs"
 
 [dependencies]
+uuid = { workspace = true }
 rkyv = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }

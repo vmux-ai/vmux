@@ -196,7 +196,11 @@ fn publish(
                 .parent()
                 .is_some_and(|parent| parent == std::path::Path::new(directory))
             {
-                "..".to_string()
+                let name = std::path::Path::new(directory)
+                    .file_name()
+                    .map(|name| name.to_string_lossy().into_owned())
+                    .unwrap_or_else(|| "/".to_string());
+                format!("↑ {name}")
             } else {
                 std::path::Path::new(directory)
                     .file_name()

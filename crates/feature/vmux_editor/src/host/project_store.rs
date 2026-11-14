@@ -113,12 +113,20 @@ impl Registrations<'_, '_> {
             Err(error) => return Some(Err(ErrorMessage(error).localized())),
         };
         if let Some(directory) = directory {
-            if !directory.is_dir() {
-                return Some(Err(ErrorMessage(vmux_project::Error::NotFound).localized()));
-            }
             return Some(Ok(directory));
         }
         ProjectRoute::resolve(url, root)
+    }
+
+    pub(super) fn canonical_id(&self, root: &Path, url: &str) -> Option<vmux_project::ProjectId> {
+        let path = self.resolve(url, root)?.ok()?;
+        let id = if self.get(root, url).is_some() {
+            url.to_string()
+        } else {
+            self.url_for_directory(root, &path)
+                .unwrap_or_else(|| url.to_string())
+        };
+        Some(vmux_project::ProjectId(id))
     }
 
     pub(super) fn url_for_directory(&self, root: &Path, directory: &Path) -> Option<String> {

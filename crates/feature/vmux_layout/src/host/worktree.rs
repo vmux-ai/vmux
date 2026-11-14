@@ -63,6 +63,18 @@ pub struct TabWorktreeActivation {
     pub ready: TabWorktreeReady,
 }
 
+pub struct BranchCheckout(Box<TabWorktreeCheckout>);
+
+impl BranchCheckout {
+    pub fn commit(self) -> TabWorktreeActivation {
+        let (activation, cleanup) = self.0.into_parts();
+        if let Some(mut cleanup) = cleanup {
+            cleanup.commit();
+        }
+        activation
+    }
+}
+
 pub(crate) struct TabWorktreeCheckout {
     activation: Option<TabWorktreeActivation>,
     cleanup: Option<ManagedCheckoutCleanup>,
@@ -145,6 +157,19 @@ pub(crate) enum TabWorktreeCheckoutResult {
 impl TabWorktreeCheckoutResult {
     fn ready(checkout: TabWorktreeCheckout) -> Self {
         Self::Ready(Box::new(checkout))
+    }
+}
+
+pub enum BranchSelection {
+    Ready(BranchCheckout),
+    Waiting(BranchWait),
+}
+
+pub struct BranchWait(ManagedCheckoutWait);
+
+impl BranchWait {
+    pub fn is_ready(&self) -> bool {
+        self.0.is_ready()
     }
 }
 
@@ -259,6 +284,9 @@ impl TabWorktreeActivation {
         #[cfg(not(unix))]
         let digest = Sha256::digest(checkout.common_dir.to_string_lossy().as_bytes());
         let hash = format!("{digest:x}");
+        let managed_root = managed_root
+            .canonicalize()
+            .unwrap_or_else(|_| managed_root.to_path_buf());
         managed_root.join(format!("{repository_name}-{}", &hash[..12]))
     }
 
@@ -498,6 +526,23 @@ impl TabWorktreeActivation {
             branch,
             &base_ref,
         )
+    }
+
+    pub fn select_branch(
+        base_dir: &Path,
+        branch: &str,
+        managed_root: &Path,
+        wake: Option<EventLoopProxy<WinitUserEvent>>,
+    ) -> Result<BranchSelection, String> {
+        match Self::checkout_branch(base_dir, branch, managed_root)? {
+            TabWorktreeCheckoutResult::Ready(checkout) => {
+                Ok(BranchSelection::Ready(BranchCheckout(checkout)))
+            }
+            TabWorktreeCheckoutResult::Retry(wait) => {
+                wait.subscribe(wake);
+                Ok(BranchSelection::Waiting(BranchWait(wait)))
+            }
+        }
     }
 
     pub(crate) fn checkout_branch(
@@ -1850,7 +1895,7 @@ mod tests {
         let (path, branch) =
             TabWorktreeActivation::plan_worktree(&checkout, managed_root.path(), "feat");
         assert_eq!(branch, "vmux/feat-2");
-        assert!(path.starts_with(managed_root.path()));
+        assert!(path.starts_with(managed_root.path().canonicalize().unwrap()));
         assert!(path.ends_with("feat-2"), "{path:?}");
     }
 

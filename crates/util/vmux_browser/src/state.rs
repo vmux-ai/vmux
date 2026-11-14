@@ -1,3 +1,4 @@
+use bevy::prelude::{Changed, Query, Window};
 use bevy::{ecs::entity::EntityHashMap, ecs::relationship::Relationship, prelude::*};
 use bevy_cef::prelude::*;
 use vmux_api::bookmark::{
@@ -33,7 +34,7 @@ use vmux_layout::{
     stack::{ActiveTabParam, FocusedStack, LayoutFocus, Stack},
     state::LayoutUiState,
     tab::Tab,
-    toggle::LayoutHidden,
+    toggle::{LayoutHidden, UrlBarHidden},
     window::{FocusedWindow, VmuxWindow, WindowHierarchy},
 };
 
@@ -436,6 +437,7 @@ type LayoutGeometryChanged = Or<(
     Changed<SideSheetPosition>,
     Changed<HostWindow>,
     Changed<LayoutHidden>,
+    Changed<UrlBarHidden>,
 )>;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -503,7 +505,7 @@ type LayoutMarkerChanged = Or<(
     Changed<Space>,
     Changed<CurrentSpace>,
     Changed<Active>,
-    Changed<LayoutHidden>,
+    Or<(Changed<LayoutHidden>, Changed<UrlBarHidden>)>,
     Changed<Retiring>,
 )>;
 
@@ -593,6 +595,7 @@ struct PageStateRemovals<'w, 's> {
     smart_folder: RemovedComponents<'w, 's, SmartBookmarkFolder>,
     expanded_projects: RemovedComponents<'w, 's, ExpandedProjectDirs>,
     layout_hidden: RemovedComponents<'w, 's, LayoutHidden>,
+    url_bar_hidden: RemovedComponents<'w, 's, UrlBarHidden>,
     retiring: RemovedComponents<'w, 's, Retiring>,
 }
 
@@ -608,6 +611,7 @@ impl PageStateRemovals<'_, '_> {
         let node = self.node.read().count() > 0;
         let host_window = self.host_window.read().count() > 0;
         let layout_hidden = self.layout_hidden.read().count() > 0;
+        let url_bar_hidden = self.url_bar_hidden.read().count() > 0;
         let geometry = header
             || open
             || side_sheet
@@ -616,7 +620,8 @@ impl PageStateRemovals<'_, '_> {
             || window
             || node
             || host_window
-            || layout_hidden;
+            || layout_hidden
+            || url_bar_hidden;
         let mut state = geometry;
         state |= self.current.read().count() > 0;
         state |= self.browser.read().count() > 0;
@@ -717,7 +722,7 @@ fn push_layout_emit(
     header_q: Query<(Entity, Has<Open>, Option<&ComputedNode>), With<Header>>,
     side_sheet_q: Query<(Entity, &SideSheetPosition, Has<Open>, &Node), With<SideSheet>>,
     window_q: Query<(&HostWindow, &Node), With<VmuxWindow>>,
-    windows: Query<(&Window, Has<LayoutHidden>)>,
+    windows: Query<(&Window, Has<LayoutHidden>, Has<UrlBarHidden>)>,
     settings: Res<AppSettings>,
 ) {
     let Some(target) = projection.target_for_revision(geometry_revision.0, false) else {
@@ -735,11 +740,11 @@ fn push_layout_emit(
     let header_open = header_q.iter().any(|(entity, is_open, _)| {
         is_open && projection.layout.hierarchy.get(entity) == Some(host_window)
     });
-    let (window_width_px, zen) = windows
+    let (window_width_px, zen, url_bar_hidden) = windows
         .get(host_window)
         .ok()
-        .map(|(window, zen)| (window.resolution.physical_width() as f32, zen))
-        .unwrap_or((0.0, false));
+        .map(|(window, zen, url)| (window.resolution.physical_width() as f32, zen, url))
+        .unwrap_or((0.0, false, false));
     let header_offsets = header_q.iter().find_map(|(entity, _, computed)| {
         if projection.layout.hierarchy.get(entity) == Some(host_window) {
             LayoutFixedOffsets::from_node(computed?, window_width_px)
@@ -764,8 +769,17 @@ fn push_layout_emit(
         break;
     }
 
+    let pane_gap = window_q
+        .iter()
+        .find(|(host, _)| host.0 == host_window)
+        .and_then(|(_, node)| match node.column_gap {
+            Val::Px(gap) => Some(gap),
+            _ => None,
+        })
+        .unwrap_or(SIDE_SHEET_GAP_PX);
     let payload = LayoutGeometry {
         zen,
+        url_bar_hidden,
         header_open,
         side_sheet_open,
         header_height: header_offsets
@@ -776,7 +790,7 @@ fn push_layout_emit(
             settings.layout.side_sheet.width,
         )
         .clamped(),
-        pane_gap: SIDE_SHEET_GAP_PX,
+        pane_gap,
         radius: settings.layout.radius,
         header_left: header_offsets.map(|offsets| offsets.left),
         header_top: header_offsets.map(|offsets| offsets.top),

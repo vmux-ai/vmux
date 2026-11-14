@@ -17,7 +17,7 @@ use vmux_ui::components::button::{Button, ButtonSize, ButtonVariant};
 use vmux_ui::components::input::Input;
 use vmux_ui::components::manager::{
     ManagerEmpty, ManagerSearch, ManagerSearchRow, ManagerSelect, ManagerSelectItem,
-    ManagerSkeleton, WorkspaceLayout,
+    ManagerSidebarItem, ManagerSkeleton, WorkspaceLayout,
 };
 use vmux_ui::components::page_address::PageBreadcrumbs;
 use vmux_ui::components::switch::{Switch, SwitchThumb};
@@ -127,27 +127,20 @@ pub fn Page() -> Element {
                     }
                 },
                 sidebar: rsx! {
-                    nav { class: "flex flex-col gap-0.5 px-2 py-4",
+                    nav { class: "flex flex-col gap-0.5 py-4",
                         for section in &sections {
-                            button {
+                            ManagerSidebarItem {
                                 key: "{section.id}",
-                                r#type: "button",
-                                class: if section.id == active_section() {
-                                    "flex items-center gap-2 rounded-md bg-foreground/[0.065] px-2 py-1.5 text-left text-sm text-foreground"
-                                } else {
-                                    "flex items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm text-muted-foreground transition-colors hover:bg-foreground/[0.04] hover:text-foreground"
-                                },
+                                label: section.title.clone(),
+                                selected: section.id == active_section(),
+                                count: 0,
+                                show_count: false,
+                                text_class: "text-sm".to_string(),
+                                builtin_icon: Some(section.icon()),
                                 onclick: {
                                     let id = section.id.clone();
-                                    move |_| {
-                                        navigation.select(id.clone());
-                                    }
+                                    move |_| navigation.select(id.clone())
                                 },
-                                vmux_ui::icon::BuiltinIconView {
-                                    icon: section.icon(),
-                                    class: "size-3.5 shrink-0".to_string(),
-                                }
-                                span { class: "min-w-0 truncate", "{section.title}" }
                             }
                         }
                     }

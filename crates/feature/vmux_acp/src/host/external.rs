@@ -111,7 +111,13 @@ impl bevy::prelude::Plugin for ImportPlugin {
             .add_message::<TabLayoutSpawnRequest>()
             .add_observer(open)
             .add_observer(opening)
-            .add_observer(imported);
+            .add_observer(imported)
+            .add_systems(
+                Update,
+                (resume_sources, publish_provider_status)
+                    .chain()
+                    .after(CatalogReady),
+            );
     }
 }
 
@@ -156,6 +162,8 @@ impl bevy::prelude::Plugin for HistoryReadPlugin {
                 Update,
                 (
                     reset_source,
+                    cancel_pages,
+                    start_history_reads,
                     queue_initial_conversations,
                     queue_failed_conversations,
                     queue_conversation_refreshes,
@@ -306,6 +314,15 @@ fn register(
 
 fn request_catalogs(
     activity: Activity<SessionManagerView>,
+    provider_pages: Query<
+        &vmux_ecs::PageMetadata,
+        (
+            With<SessionView>,
+            With<PageReady>,
+            With<vmux_ecs::KeyboardOwner>,
+            Without<vmux_layout::hosted_page::SurfaceBlocked>,
+        ),
+    >,
     connected: Query<Ref<ServiceConnected>>,
     unavailable: Query<(), With<vmux_ecs::service::ServiceUnavailable>>,
     agents: Query<Ref<RegistryAgent>>,
@@ -349,7 +366,10 @@ fn request_catalogs(
         tool_changed |= changed.0.is("acp");
     }
     let registry_changed = agents.iter().any(|agent| agent.is_changed());
-    let present = Activity::present(activity);
+    let present = Activity::present(activity)
+        || provider_pages
+            .iter()
+            .any(|page| matches!(Route::parse(&page.url), Some(Route::Provider { .. })));
     let online = !connected.is_empty();
     if connected.iter().any(|connected| connected.is_added()) {
         state.refresh = true;
@@ -937,6 +957,25 @@ struct ConversationSource {
 }
 
 impl ConversationSource {
+    fn before(
+        &self,
+        path: &Path,
+        boundary: vmux_session::history::Boundary,
+        known: &FileFacts,
+    ) -> Result<conversation::ReadResult, String> {
+        let family = AgentFamily::of(self.kind.trim_start_matches("acp:"));
+        match SourceKind::for_family(&family) {
+            Some(SourceKind::Codex) => codex::Reader::before(path, boundary, Some(known)),
+            Some(SourceKind::Claude | SourceKind::Vibe) => conversation::FileConversation::before(
+                path,
+                boundary,
+                Some(known),
+                conversation::ChatDecoder,
+            ),
+            None => Err("unsupported history source".into()),
+        }
+    }
+
     fn new(kind: &ProviderKind, sid: &ProviderSessionId, created_at: i64) -> Option<Self> {
         let agent = kind.0.strip_prefix("acp:")?;
         let family = AgentFamily::of(agent);
@@ -2163,12 +2202,138 @@ fn reset_source(
                 ConversationFile,
                 ConversationWatchPaths,
                 ConversationRevision,
+                vmux_session::history::Window,
             )>();
         if matches!(state, Some(RunState::Errored(_))) {
             commands
                 .entity(session)
                 .insert(FailedConversationReadRequested);
         }
+    }
+}
+
+fn cancel_pages(
+    views: Query<
+        Entity,
+        (
+            With<SessionView>,
+            With<PageReady>,
+            Without<vmux_layout::hosted_page::SurfaceBlocked>,
+        ),
+    >,
+    bindings: SessionViews,
+    reads: Query<(Entity, &ChildOf, &vmux_session::history::Page)>,
+    targets: Query<&EntityTarget<HistoryRead>>,
+    mut windows: Query<&mut vmux_session::history::Window>,
+    mut commands: Commands,
+) {
+    let mut visible = HashSet::new();
+    for view in &views {
+        if let Some(session) = bindings.session(view) {
+            visible.insert(session);
+        }
+    }
+    for (operation, parent, page) in &reads {
+        let session = parent.parent();
+        if visible.contains(&session) {
+            continue;
+        }
+        if let Ok(mut window) = windows.get_mut(session) {
+            window.finish(*page);
+        }
+        if targets
+            .get(session)
+            .is_ok_and(|target| target.entity() == operation)
+        {
+            commands
+                .entity(session)
+                .remove::<(EntityTarget<HistoryRead>, ConversationLoadPending)>();
+        }
+        commands.entity(operation).despawn();
+    }
+}
+
+fn start_history_reads(
+    mut requests: MessageReader<vmux_session::history::MoreRequest>,
+    views: Query<
+        Entity,
+        (
+            With<SessionView>,
+            With<PageReady>,
+            Without<vmux_layout::hosted_page::SurfaceBlocked>,
+        ),
+    >,
+    bindings: SessionViews,
+    mut sessions: Query<
+        (
+            Entity,
+            &SessionId,
+            &ProviderKind,
+            &ProviderSessionId,
+            &CreatedAt,
+            &ConversationFile,
+            &mut vmux_session::history::Window,
+        ),
+        (
+            With<Session>,
+            Without<TranscriptLoading>,
+            Without<ConversationLoadPending>,
+            Without<SessionDuplicate>,
+        ),
+    >,
+    versions: HistoryVersions,
+    workers: Res<BlockingRuntime>,
+    proxy: Option<Res<EventLoopProxyWrapper>>,
+    mut commands: Commands,
+) {
+    let mut visible = HashSet::new();
+    for view in &views {
+        if let Some(session) = bindings.session(view) {
+            visible.insert(session);
+        }
+    }
+    for request in requests.read() {
+        let Some((session, _, kind, provider, created, file, mut window)) =
+            sessions.iter_mut().find(|(session, id, _, _, _, _, _)| {
+                **id == request.session && visible.contains(session)
+            })
+        else {
+            continue;
+        };
+        let Some(source) = ConversationSource::new(kind, provider, created.0) else {
+            continue;
+        };
+        let Some(known) = versions.file(session) else {
+            continue;
+        };
+        let Some(read) = versions.capture(session, false) else {
+            continue;
+        };
+        let Some(page) = window.begin(request.generation) else {
+            continue;
+        };
+        let path = file.0.clone();
+        let wake = proxy.as_deref().map(|proxy| (**proxy).clone());
+        let Some(task) = workers
+            .spawn_long(vmux_ecs::wake::Wake::optional_waker(wake), move || {
+                source.before(&path, page.before, &known)
+            })
+        else {
+            window.finish(page);
+            continue;
+        };
+        let operation = commands
+            .spawn((
+                ChildOf(session),
+                read,
+                page,
+                ConversationLoadTask { revision: 0, task },
+            ))
+            .id();
+        commands.entity(session).insert((
+            EntityTarget::<HistoryRead>::new(operation),
+            ConversationLoadPending,
+        ));
     }
 }
 
@@ -2459,11 +2624,15 @@ fn commit_conversations(
         Option<&HistoryRead>,
         Option<&ConversationReadReady>,
         Has<FailedConversationRead>,
+        Option<&vmux_session::history::Page>,
     )>,
     pending: Query<&EntityTarget<HistoryRead>>,
     versions: HistoryVersions,
     files: Query<&ConversationFile>,
     watched: Query<&ConversationWatchPaths>,
+    mut windows: Query<&mut vmux_session::history::Window>,
+    mut more: MessageWriter<vmux_session::history::MoreRequest>,
+    sessions: Query<&SessionId>,
     mut commands: Commands,
 ) {
     let mut handled = HashSet::new();
@@ -2472,14 +2641,36 @@ fn commit_conversations(
         if !handled.insert(operation) {
             continue;
         }
-        let Ok((parent, read, ready, failed)) = reads.get(operation) else {
+        let Ok((parent, read, ready, failed, page)) = reads.get(operation) else {
             continue;
         };
         let session = parent.parent();
-        if !pending
+        let current = pending
             .get(session)
-            .is_ok_and(|pending| pending.entity() == operation)
+            .is_ok_and(|pending| pending.entity() == operation);
+        if let Some(page) = page
+            && let Ok(mut window) = windows.get_mut(session)
         {
+            let owns = window.generation == page.generation && window.request_id == page.request_id;
+            if current || pending.get(session).is_err() {
+                window.finish(*page);
+            }
+            if current
+                && owns
+                && matches!(completed.result, Ok(true))
+                && window.has_older
+                && read.is_some_and(|read| {
+                    versions.matches(session, read) && versions.unchanged(session, read)
+                })
+                && let Ok(id) = sessions.get(session)
+            {
+                more.write(vmux_session::history::MoreRequest {
+                    session: id.clone(),
+                    generation: window.generation,
+                });
+            }
+        }
+        if !current {
             commands.entity(operation).despawn();
             continue;
         }
@@ -2487,6 +2678,13 @@ fn commit_conversations(
         commands
             .entity(session)
             .remove::<(ConversationLoadPending, EntityTarget<HistoryRead>)>();
+        if page.is_some() {
+            if let Err(error) = &completed.result {
+                bevy::log::warn!("failed to read older provider history: {error}");
+            }
+            commands.entity(operation).despawn();
+            continue;
+        }
         match &completed.result {
             Ok(true) if source_matches => {
                 if let Some(ready) = ready {
@@ -2548,7 +2746,7 @@ fn open(
             Entity,
             &SessionId,
             &AgentId,
-            &AcpSessionId,
+            Option<&AcpSessionId>,
             Option<&ProviderKind>,
             Option<&ProviderSessionId>,
         ),
@@ -2565,9 +2763,6 @@ fn open(
     if tombstones.contains(&request.kind, &request.sid) {
         return;
     }
-    let Some(source) = catalog.get(&request.kind, &request.sid) else {
-        return;
-    };
     let Ok(parent) = parents.get(trigger.event().webview) else {
         return;
     };
@@ -2584,24 +2779,174 @@ fn open(
         window: windows.get(trigger.event().webview),
         open: request.open.unwrap_or_default(),
     };
-    let family = AgentFamily::of(&source.agent.0);
+    let family = AgentFamily::of(request.kind.trim_start_matches("acp:"));
     if let Some((_, id, _, _, _, _)) =
         existing
             .iter()
             .find(|(_, _, agent, resume, kind, provider_sid)| {
-                kind.is_some_and(|kind| kind == source.kind)
-                    && provider_sid.is_some_and(|sid| sid == source.id)
-                    || AgentFamily::of(&agent.0) == family && resume.0 == source.id.0
+                (AgentFamily::of(&agent.0) == family
+                    || kind.is_some_and(|kind| {
+                        AgentFamily::of(kind.0.trim_start_matches("acp:")) == family
+                    }))
+                    && (provider_sid.is_some_and(|sid| sid.0 == request.sid)
+                        || resume.is_some_and(|resume| resume.0 == request.sid))
             })
     {
         opener.open(destination, Route::Session(id.clone()).url());
         return;
     }
+    let Some(source) = catalog.resolve(&request.kind, &request.sid) else {
+        return;
+    };
     imports.write(ImportRequested {
         entry: source.entity,
         agent: agents.resolve(&source.agent.0),
         destination,
     });
+}
+
+#[derive(Component)]
+struct ProviderResumePending;
+
+#[derive(Component, Clone, Copy, PartialEq, Eq)]
+enum ProviderResumeStatus {
+    Loading,
+    Failed,
+}
+
+fn resume_sources(
+    views: Query<
+        (
+            Entity,
+            &vmux_ecs::PageMetadata,
+            Has<ProviderResumePending>,
+            Option<&ProviderResumeStatus>,
+            Option<&ProviderKind>,
+            Option<&ProviderSessionId>,
+        ),
+        (
+            With<SessionView>,
+            With<PageReady>,
+            With<vmux_ecs::KeyboardOwner>,
+            Without<vmux_layout::hosted_page::SurfaceBlocked>,
+        ),
+    >,
+    catalog: ProviderEntries,
+    sessions: Query<
+        (
+            &AgentId,
+            Option<&AcpSessionId>,
+            Option<&ProviderKind>,
+            Option<&ProviderSessionId>,
+        ),
+        (With<Session>, Without<SessionDuplicate>),
+    >,
+    tombstones: Res<ProviderSessionTombstones>,
+    mut commands: Commands,
+) {
+    for (view, page, pending, status, page_kind, page_sid) in &views {
+        let Some(Route::Provider { kind, sid }) = Route::parse(&page.url) else {
+            if pending || status.is_some() {
+                commands.entity(view).remove::<(
+                    ProviderResumePending,
+                    ProviderResumeStatus,
+                    ProviderKind,
+                    ProviderSessionId,
+                )>();
+            }
+            continue;
+        };
+        let current = page_kind.is_some_and(|current| current.0 == kind)
+            && page_sid.is_some_and(|current| current.0 == sid);
+        if pending && current {
+            continue;
+        }
+        let family = AgentFamily::of(kind.trim_start_matches("acp:"));
+        let existing = sessions
+            .iter()
+            .any(|(agent, resume, source_kind, source_sid)| {
+                (AgentFamily::of(&agent.0) == family
+                    || source_kind.is_some_and(|source| {
+                        AgentFamily::of(source.0.trim_start_matches("acp:")) == family
+                    }))
+                    && (resume.is_some_and(|resume| resume.0 == sid)
+                        || source_sid.is_some_and(|source| source.0 == sid))
+            });
+        let source = catalog.resolve(&kind, &sid);
+        let cwd = source
+            .as_ref()
+            .and_then(|source| source.cwd.0.canonicalize().ok())
+            .filter(|cwd| cwd.is_dir());
+        let removed = tombstones.contains(&kind, &sid);
+        let ready = !removed && (existing || cwd.is_some());
+        let failed = removed || !ready && !catalog.loading();
+        let next = if failed {
+            ProviderResumeStatus::Failed
+        } else {
+            ProviderResumeStatus::Loading
+        };
+        if !current || status != Some(&next) {
+            commands.entity(view).insert((
+                ProviderKind(kind.clone()),
+                ProviderSessionId(sid.clone()),
+                next,
+            ));
+        }
+        if !ready {
+            continue;
+        }
+        commands.entity(view).insert(ProviderResumePending);
+        commands.trigger(UiInput {
+            webview: view,
+            payload: ResumeSession {
+                kind: source.map_or(kind, |source| source.kind.0.clone()),
+                sid,
+                cwd: cwd
+                    .map(|cwd| cwd.to_string_lossy().into_owned())
+                    .unwrap_or_default(),
+                open: Some(OpenTarget::InPlace),
+            },
+        });
+    }
+}
+
+fn publish_provider_status(
+    pages: Query<
+        (
+            Entity,
+            &ProviderResumeStatus,
+            &ProviderKind,
+            &ProviderSessionId,
+        ),
+        With<SessionView>,
+    >,
+    published: Query<&vmux_ecs::UiState<vmux_session::state::SessionDetailUiState>>,
+    mut commands: Commands,
+) {
+    for (view, status, kind, sid) in &pages {
+        let pending = vmux_session::state::PendingProvider {
+            kind: kind.0.clone(),
+            sid: sid.0.clone(),
+            failed: *status == ProviderResumeStatus::Failed,
+        };
+        if published
+            .get(view)
+            .ok()
+            .and_then(vmux_ecs::UiState::current)
+            .is_some_and(|state| state.pending_provider.as_ref() == Some(&pending))
+        {
+            continue;
+        }
+        commands.trigger(vmux_ecs::UiStateWrite::<
+            vmux_session::state::SessionDetailUiState,
+        >::from_event(
+            view,
+            &vmux_session::state::SessionDetailUiState {
+                pending_provider: Some(pending),
+                ..Default::default()
+            },
+        ));
+    }
 }
 
 fn opening(
@@ -2733,6 +3078,7 @@ mod tests {
     use super::*;
     use bevy_ecs::system::RunSystemOnce;
     use std::io::Write;
+    use vmux_ecs::PageMetadata;
 
     struct ImportFixture {
         app: App,
@@ -3003,6 +3349,243 @@ mod tests {
             events.receiver.recv_timeout(CONVERSATION_POLL_INTERVAL * 3),
             Err(mpsc::RecvTimeoutError::Timeout)
         ));
+    }
+
+    struct PagingFixture {
+        app: App,
+        session: Entity,
+        view: Entity,
+        file: PathBuf,
+        directory: tempfile::TempDir,
+    }
+
+    impl PagingFixture {
+        fn new(count: usize) -> Self {
+            let directory = tempfile::tempdir().unwrap();
+            let file = directory.path().join("history.jsonl");
+            let mut body = String::new();
+            for index in 0..count {
+                let role = if index == 0 { "user" } else { "assistant" };
+                let text = if index == 0 {
+                    "First request".to_string()
+                } else {
+                    format!("Answer {index}")
+                };
+                body.push_str(&serde_json::json!({"role": role, "content": text}).to_string());
+                body.push('\n');
+            }
+            std::fs::write(&file, body).unwrap();
+            let mut app = App::new();
+            app.add_plugins((MinimalPlugins, HistoryReadPlugin));
+            app.world_mut().spawn(SourcePaths {
+                codex: directory.path().join("codex"),
+                claude: directory.path().to_path_buf(),
+                vibe: directory.path().join("vibe"),
+            });
+            let id = SessionId::new("paged");
+            let session = app
+                .world_mut()
+                .spawn((
+                    Session,
+                    id.clone(),
+                    ProviderKind("acp:claude".into()),
+                    ProviderSessionId("history".into()),
+                    CreatedAt(0),
+                    RunState::Idle,
+                    ConversationFile(file.clone()),
+                    ConversationSourceScope(ProviderSessionKey::new(
+                        ProviderKind("acp:claude".into()),
+                        ProviderSessionId("history".into()),
+                    )),
+                ))
+                .id();
+            let stack = app
+                .world_mut()
+                .spawn(EntityTarget::<Session>::new(session))
+                .id();
+            let view = app
+                .world_mut()
+                .spawn((
+                    SessionView,
+                    PageReady,
+                    ChildOf(stack),
+                    PageMetadata {
+                        url: Route::Session(id).url(),
+                        ..Default::default()
+                    },
+                ))
+                .id();
+            app.update();
+            let read = app
+                .world_mut()
+                .run_system_once(move |versions: HistoryVersions| versions.capture(session, false))
+                .unwrap()
+                .unwrap();
+            let operation = app.world_mut().spawn((ChildOf(session), read)).id();
+            app.world_mut()
+                .entity_mut(session)
+                .insert(EntityTarget::<HistoryRead>::new(operation));
+            let mut tail = conversation::FileConversation::read(
+                &file,
+                None,
+                None,
+                conversation::FileConversation::TAIL_BYTES,
+                conversation::ChatDecoder,
+            )
+            .unwrap()
+            .history;
+            tail.operation = operation;
+            app.world_mut().write_message(tail);
+            app.update();
+            Self {
+                app,
+                session,
+                view,
+                file,
+                directory,
+            }
+        }
+
+        fn request(&mut self) {
+            let generation = self
+                .app
+                .world()
+                .get::<vmux_session::history::Window>(self.session)
+                .unwrap()
+                .generation;
+            self.app
+                .world_mut()
+                .write_message(vmux_session::history::MoreRequest {
+                    session: SessionId::new("paged"),
+                    generation,
+                });
+            self.app.update();
+        }
+
+        fn finish(&mut self) {
+            let deadline = Instant::now() + Duration::from_secs(3);
+            loop {
+                self.app.update();
+                if !self
+                    .app
+                    .world()
+                    .get::<vmux_session::history::Window>(self.session)
+                    .unwrap()
+                    .loading
+                {
+                    return;
+                }
+                assert!(
+                    Instant::now() < deadline,
+                    "older-history operation did not finish"
+                );
+                std::thread::sleep(Duration::from_millis(2));
+            }
+        }
+
+        fn transcript(&mut self) -> vmux_session::Transcript {
+            let session = self.session;
+            self.app
+                .world_mut()
+                .run_system_once(move |transcripts: Transcripts| transcripts.get(session))
+                .unwrap()
+        }
+    }
+
+    #[test]
+    fn nonfocused_history_retries_a_failed_page_and_reaches_the_first_prompt() {
+        let mut fixture = PagingFixture::new(1230);
+        let tail = fixture.transcript();
+        assert_eq!(tail.messages.len(), 512);
+        let missing = fixture
+            .directory
+            .path()
+            .join("temporarily-unavailable.jsonl");
+        std::fs::rename(&fixture.file, &missing).unwrap();
+        fixture.request();
+        fixture.finish();
+        assert!(
+            fixture
+                .app
+                .world()
+                .get::<vmux_session::history::Window>(fixture.session)
+                .unwrap()
+                .has_older
+        );
+        assert_eq!(fixture.transcript(), tail);
+        std::fs::rename(&missing, &fixture.file).unwrap();
+        while fixture
+            .app
+            .world()
+            .get::<vmux_session::history::Window>(fixture.session)
+            .unwrap()
+            .has_older
+        {
+            fixture.request();
+            fixture.finish();
+        }
+        let full = fixture.transcript();
+        assert_eq!(full.messages.len(), 1230);
+        assert_eq!(
+            full.messages[0],
+            vmux_api::session::Message::user("First request")
+        );
+        for (index, message) in full.messages.iter().enumerate().skip(1) {
+            assert_eq!(
+                *message,
+                vmux_api::session::Message::Assistant {
+                    blocks: vec![vmux_api::session::AssistantBlock::Text(format!(
+                        "Answer {index}"
+                    ))],
+                }
+            );
+        }
+        assert_eq!(&full.event_ids[718..], tail.event_ids.as_slice());
+        assert_eq!(
+            full.event_ids.iter().collect::<HashSet<_>>().len(),
+            full.event_ids.len()
+        );
+        assert!(
+            !fixture
+                .app
+                .world()
+                .entity(fixture.view)
+                .contains::<vmux_ecs::KeyboardOwner>()
+        );
+    }
+
+    #[test]
+    fn closing_the_last_history_view_cancels_its_pending_page() {
+        let mut fixture = PagingFixture::new(1230);
+        let tail = fixture.transcript();
+        fixture.request();
+        fixture.app.world_mut().despawn(fixture.view);
+        fixture.app.update();
+        assert!(
+            !fixture
+                .app
+                .world()
+                .get::<vmux_session::history::Window>(fixture.session)
+                .unwrap()
+                .loading
+        );
+        assert!(
+            fixture
+                .app
+                .world()
+                .get::<EntityTarget<HistoryRead>>(fixture.session)
+                .is_none()
+        );
+        assert_eq!(fixture.transcript(), tail);
+        assert_eq!(
+            fixture
+                .app
+                .world_mut()
+                .query::<&vmux_session::history::Page>()
+                .iter(fixture.app.world())
+                .count(),
+            0
+        );
     }
 
     struct FailedReadFixture {
@@ -3688,6 +4271,261 @@ mod tests {
                 .count(),
             0
         );
+    }
+
+    #[test]
+    fn a_native_provider_click_survives_pending_acp_discovery() {
+        let cwd = tempfile::tempdir().unwrap();
+        let mut fixture = ImportFixture::new(cwd.path().to_path_buf());
+        let source = fixture
+            .app
+            .world_mut()
+            .spawn((
+                CatalogSource,
+                CatalogOrigin::Acp,
+                CatalogCapability::Pending,
+                CatalogGeneration(1),
+                AgentId("codex-acp".into()),
+            ))
+            .id();
+        let view = fixture.origin();
+        fixture.app.world_mut().entity_mut(view).insert((
+            SessionView,
+            PageReady,
+            vmux_ecs::KeyboardOwner,
+            PageMetadata {
+                url: Route::Provider {
+                    kind: "acp:codex".into(),
+                    sid: "provider-session".into(),
+                }
+                .url(),
+                ..Default::default()
+            },
+        ));
+        fixture.app.update();
+        assert!(fixture.created.lock().unwrap().is_empty());
+        let operation = fixture
+            .app
+            .world_mut()
+            .spawn((
+                CatalogRead {
+                    generation: 2,
+                    wire_id: 0,
+                },
+                ChildOf(source),
+                vmux_ecs::Operation::bundle("provider catalog")
+                    .unwrap()
+                    .running(),
+            ))
+            .id();
+        fixture.app.world_mut().entity_mut(source).insert((
+            CatalogGeneration(2),
+            EntityTarget::<CatalogRead>::new(operation),
+        ));
+        fixture.app.world_mut().write_message(CatalogReceived {
+            operation,
+            supported: true,
+            result: Ok(vec![ProviderSession {
+                kind: "acp:codex-acp".into(),
+                sid: "provider-session".into(),
+                agent: "codex-acp".into(),
+                name: "ACP session".into(),
+                cwd: cwd.path().to_string_lossy().into_owned(),
+                ..Default::default()
+            }]),
+        });
+        fixture.app.update();
+        fixture.app.update();
+        let created = fixture.created.lock().unwrap().clone();
+        assert_eq!(created.len(), 1);
+        let id = fixture
+            .app
+            .world()
+            .get::<SessionId>(created[0].0)
+            .unwrap()
+            .clone();
+        let pages = fixture.pages();
+        assert_eq!(pages.len(), 1);
+        assert_eq!(pages[0].url, Route::Session(id).url());
+    }
+
+    #[test]
+    fn a_waiting_provider_page_resumes_when_its_catalog_result_arrives() {
+        let cwd = tempfile::tempdir().unwrap();
+        let mut fixture = ImportFixture::new(cwd.path().to_path_buf());
+        let source = fixture
+            .app
+            .world()
+            .get::<ChildOf>(fixture.entry)
+            .unwrap()
+            .parent();
+        fixture.app.world_mut().despawn(fixture.entry);
+        let operation = fixture
+            .app
+            .world_mut()
+            .spawn((
+                CatalogRead {
+                    generation: 2,
+                    wire_id: 0,
+                },
+                ChildOf(source),
+                vmux_ecs::Operation::bundle("provider catalog")
+                    .unwrap()
+                    .running(),
+            ))
+            .id();
+        fixture.app.world_mut().entity_mut(source).insert((
+            CatalogGeneration(2),
+            EntityTarget::<CatalogRead>::new(operation),
+            CatalogCapability::Pending,
+        ));
+        let view = fixture.origin();
+        fixture.app.world_mut().entity_mut(view).insert((
+            SessionView,
+            PageReady,
+            vmux_ecs::KeyboardOwner,
+            PageMetadata {
+                url: Route::Provider {
+                    kind: "acp:codex".into(),
+                    sid: "provider-session".into(),
+                }
+                .url(),
+                ..Default::default()
+            },
+        ));
+        fixture.app.update();
+        assert!(matches!(
+            fixture.app.world().get::<ProviderResumeStatus>(view),
+            Some(ProviderResumeStatus::Loading)
+        ));
+        assert!(fixture.pages().is_empty());
+        fixture.app.world_mut().write_message(CatalogReceived {
+            operation,
+            supported: true,
+            result: Ok(vec![ProviderSession {
+                kind: "acp:codex".into(),
+                sid: "provider-session".into(),
+                agent: "codex".into(),
+                name: "Provider task".into(),
+                cwd: cwd.path().to_string_lossy().into_owned(),
+                ..Default::default()
+            }]),
+        });
+        fixture.app.update();
+        fixture.app.update();
+        let created = fixture.created.lock().unwrap().clone();
+        assert_eq!(created.len(), 1);
+        let id = fixture
+            .app
+            .world()
+            .get::<SessionId>(created[0].0)
+            .unwrap()
+            .clone();
+        let pages = fixture.pages();
+        assert_eq!(pages.len(), 1);
+        assert_eq!(pages[0].url, Route::Session(id).url());
+    }
+
+    #[test]
+    fn provider_waiting_page_retains_catalog_work_without_a_manager() {
+        let mut app = App::new();
+        app.add_plugins((MinimalPlugins, CatalogPlugin));
+        app.world_mut().spawn(ServiceConnected);
+        let source = app
+            .world_mut()
+            .spawn((
+                CatalogSource,
+                CatalogOrigin::Acp,
+                CatalogCapability::Pending,
+                CatalogGeneration(1),
+                AgentId("codex".into()),
+            ))
+            .id();
+        let operation = app
+            .world_mut()
+            .spawn((
+                AcpCatalogRead,
+                CatalogRead {
+                    generation: 1,
+                    wire_id: 7,
+                },
+                CatalogStarted(Instant::now()),
+                vmux_ecs::Operation::bundle("provider catalog")
+                    .unwrap()
+                    .running(),
+                ChildOf(source),
+            ))
+            .id();
+        app.world_mut()
+            .entity_mut(source)
+            .insert(EntityTarget::<CatalogRead>::new(operation));
+        let page = app
+            .world_mut()
+            .spawn((
+                SessionView,
+                PageReady,
+                vmux_ecs::KeyboardOwner,
+                PageMetadata {
+                    url: Route::Provider {
+                        kind: "acp:codex".into(),
+                        sid: "pending".into(),
+                    }
+                    .url(),
+                    ..Default::default()
+                },
+            ))
+            .id();
+        app.update();
+        assert_eq!(
+            app.world().get::<vmux_ecs::OperationState>(operation),
+            Some(&vmux_ecs::OperationState::Running)
+        );
+        assert_eq!(
+            app.world()
+                .get::<EntityTarget<CatalogRead>>(source)
+                .unwrap()
+                .entity(),
+            operation
+        );
+        app.world_mut().despawn(page);
+        app.update();
+        assert_eq!(
+            app.world().get::<vmux_ecs::OperationState>(operation),
+            Some(&vmux_ecs::OperationState::Canceled)
+        );
+        assert!(
+            app.world()
+                .get::<EntityTarget<CatalogRead>>(source)
+                .is_none()
+        );
+    }
+
+    #[test]
+    fn retained_session_opens_after_its_provider_entry_disappears() {
+        let cwd = tempfile::tempdir().unwrap();
+        let mut fixture = ImportFixture::new(cwd.path().to_path_buf());
+        let origin = fixture.origin();
+        fixture.open(origin, None);
+        fixture.app.update();
+        let session = fixture.created.lock().unwrap()[0].0;
+        let id = fixture
+            .app
+            .world()
+            .get::<SessionId>(session)
+            .unwrap()
+            .clone();
+        assert_eq!(fixture.pages().len(), 1);
+        fixture.app.world_mut().despawn(fixture.entry);
+        fixture
+            .app
+            .world_mut()
+            .entity_mut(session)
+            .insert(AgentId("codex-cli".into()));
+        fixture.open(origin, None);
+        let pages = fixture.pages();
+        assert_eq!(pages.len(), 1);
+        assert_eq!(pages[0].url, Route::Session(id).url());
+        assert_eq!(fixture.created.lock().unwrap().len(), 1);
     }
 
     #[test]

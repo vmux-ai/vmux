@@ -25,6 +25,17 @@ impl NativeBridge {
             && point.y <= frame.bottom()
     }
 
+    #[cfg(any(target_os = "macos", test))]
+    pub(crate) fn crosses_frames(frames: &[WindowedFrameRect], from: Vec2, to: Vec2) -> bool {
+        let previous = frames
+            .iter()
+            .position(|frame| Self::frame_contains(*frame, from));
+        let current = frames
+            .iter()
+            .position(|frame| Self::frame_contains(*frame, to));
+        previous != current
+    }
+
     #[cfg(target_os = "macos")]
     pub(crate) fn frames_union(frames: &[WindowedFrameRect]) -> Option<WindowedFrameRect> {
         let first = *frames.first()?;
@@ -53,3 +64,46 @@ mod platform;
 #[cfg(not(target_os = "macos"))]
 #[path = "native_bridge/other.rs"]
 mod platform;
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn crossing_native_surfaces_wakes_but_motion_within_one_surface_does_not() {
+        let frames = [
+            WindowedFrameRect {
+                left: 0.0,
+                top: 0.0,
+                width: 100.0,
+                height: 100.0,
+            },
+            WindowedFrameRect {
+                left: 108.0,
+                top: 0.0,
+                width: 100.0,
+                height: 100.0,
+            },
+        ];
+        assert!(!NativeBridge::crosses_frames(
+            &frames,
+            Vec2::new(10.0, 10.0),
+            Vec2::new(90.0, 90.0)
+        ));
+        assert!(NativeBridge::crosses_frames(
+            &frames,
+            Vec2::new(90.0, 50.0),
+            Vec2::new(120.0, 50.0)
+        ));
+        assert!(NativeBridge::crosses_frames(
+            &frames,
+            Vec2::new(120.0, 50.0),
+            Vec2::new(104.0, 50.0)
+        ));
+        assert!(NativeBridge::crosses_frames(
+            &frames,
+            Vec2::new(104.0, 50.0),
+            Vec2::new(90.0, 50.0)
+        ));
+    }
+}

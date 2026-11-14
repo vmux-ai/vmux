@@ -63,6 +63,39 @@ pub enum PageIcon {
 }
 
 impl PageIcon {
+    pub fn normalize_persisted(body: &str) -> Option<(String, Vec<String>)> {
+        let mut normalized = String::with_capacity(body.len());
+        let mut unknown = Vec::new();
+        for line in body.split_inclusive('\n') {
+            let (content, newline) = line
+                .strip_suffix('\n')
+                .map(|content| (content, "\n"))
+                .unwrap_or((line, ""));
+            let trimmed = content.trim();
+            let Some(name) = trimmed
+                .strip_prefix("icon: Builtin(")
+                .and_then(|value| value.strip_suffix("),"))
+            else {
+                normalized.push_str(line);
+                continue;
+            };
+            if serde_json::from_value::<BuiltinIcon>(serde_json::Value::String(name.into())).is_ok()
+            {
+                normalized.push_str(line);
+                continue;
+            }
+            normalized.push_str(&content[..content.len() - content.trim_start().len()]);
+            normalized.push_str("icon: r#None,");
+            normalized.push_str(newline);
+            unknown.push(name.to_string());
+        }
+        if unknown.is_empty() {
+            None
+        } else {
+            Some((normalized, unknown))
+        }
+    }
+
     pub fn favicon(url: impl Into<String>) -> Self {
         let url = url.into();
         if url.is_empty() {

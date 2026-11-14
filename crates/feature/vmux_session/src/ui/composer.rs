@@ -9,7 +9,7 @@ use crate::event::{ChatPasteMedia, ChatPickFiles};
 use dioxus::prelude::*;
 use vmux_ui::agent_accent::AgentAccent;
 use vmux_ui::components::composer::PromptComposer;
-use vmux_ui::components::composer_bar::ComposerBar;
+use vmux_ui::components::composer_bar::{ComposerBar, ComposerChip};
 use vmux_ui::components::mcp_menu::McpMenu;
 use vmux_ui::hooks::send;
 use vmux_ui::i18n::translate;
@@ -101,12 +101,31 @@ fn ChatComposer(chat: Chat) -> Element {
 #[component]
 fn ComposerFooter(chat: Chat) -> Element {
     let context = chat.slash.context();
-    let transcript = chat.transcript.current();
+    let (active_subagents, active_tasks) = chat.transcript.activity_counts();
     let queued = chat.queue.queued();
     let mut status = chat.status();
     let mut model = chat.model_chip();
     let mut effort = chat.effort_chip();
     let mut permission = chat.permission_chip();
+    let project_seed =
+        match vmux_api::space::ProjectRow::for_directory(&context.projects, &context.cwd) {
+            Some(project) => project.identity_seed(),
+            None => context.cwd.as_str(),
+        };
+    let project = if !chat.projects.context_ready() {
+        Some(ComposerChip::loading())
+    } else if context.cwd.is_empty() {
+        None
+    } else {
+        Some(
+            ComposerChip::ready(context.workspace_name.clone(), context.cwd.clone())
+                .with_identity(project_seed),
+        )
+    };
+    let branch = (!context.branch.is_empty()).then(|| {
+        ComposerChip::ready(context.branch.clone(), context.branch.clone())
+            .with_identity(context.branch.clone())
+    });
     if chat.in_use() {
         status.clear();
         model = model.map(|chip| chip.readonly());
@@ -120,15 +139,15 @@ fn ComposerFooter(chat: Chat) -> Element {
             model,
             effort,
             permission,
-            project: chat.project_chip(),
-            branch: chat.branch_chip(),
+            project,
+            branch,
             is_git_repo: context.is_git_repo,
             workspace_known: context.workspace_selected,
             uncommitted: 0,
             ahead: 0,
             status,
-            active_subagents: transcript.active_subagents as usize,
-            active_tasks: transcript.active_tasks as usize,
+            active_subagents: active_subagents as usize,
+            active_tasks: active_tasks as usize,
             queued_count: queued.len(),
         }
     }
@@ -147,8 +166,8 @@ mod tests {
     use crate::state::{ChatUiState, ChatUiStatePatch};
     use crate::ui::keys::use_chat_keys;
     use crate::ui::state::use_chat;
-    use dioxus::core::{AttributeValue, Mutation, VirtualDom};
-    use dioxus_html::{EventData, SerializedHtmlEventConverter, SerializedMouseData};
+    use dioxus::core::VirtualDom;
+    use dioxus_html::SerializedHtmlEventConverter;
     use std::{cell::RefCell, rc::Rc};
     use vmux_api::{BinEvent, UiStateFrame};
     use vmux_ecs::event::ProjectRow;
@@ -204,6 +223,8 @@ mod tests {
                 composer_draft: "Unsent draft".into(),
                 composer: ComposerContext {
                     cwd: "/tmp/current".into(),
+                    workspace_name: "Current project".into(),
+                    branch: "feature/current".into(),
                     workspace_selected: true,
                     can_manage_workspace: true,
                     projects: vec![
@@ -232,7 +253,7 @@ mod tests {
     }
 
     #[test]
-    fn busy_sessions_can_open_project_navigation_while_the_prompt_stays_disabled() {
+    fn busy_sessions_keep_drafts_and_show_their_own_workspace_without_selectors() {
         let runtime = tokio::runtime::Builder::new_current_thread()
             .enable_time()
             .build()
@@ -245,37 +266,15 @@ mod tests {
         dom.rebuild_in_place();
         dom.render_immediate_to_vec();
         host.show(None);
-        let loaded = dom.render_immediate_to_vec();
+        dom.render_immediate_to_vec();
         dom.render_immediate_to_vec();
         let title = format!("{} · /tmp/current", translate("agent-project-choose"));
-        let button = loaded
-            .edits
-            .iter()
-            .find_map(|edit| match edit {
-                Mutation::SetAttribute {
-                    name: "title",
-                    value: AttributeValue::Text(value),
-                    id,
-                    ..
-                } if value == &title => Some(*id),
-                _ => None,
-            })
-            .expect("the project navigation control must render");
-        dom.runtime().handle_event(
-            "click",
-            Event::new(
-                EventData::Mouse(SerializedMouseData::default()).into_any(),
-                true,
-            ),
-            button,
-        );
-        dom.render_immediate_to_vec();
-        assert_eq!(*host.menus.borrow(), [Some(ChatComposerMenuKind::Project)]);
-        host.show(Some(ChatComposerMenuKind::Project));
-        dom.render_immediate_to_vec();
-        dom.render_immediate_to_vec();
         let html = dioxus_ssr::render(&dom);
-        assert!(html.contains("Another project"), "{html}");
+        assert!(!html.contains(&title), "{html}");
+        assert!(!html.contains("Another project"), "{html}");
+        assert!(html.contains("Current project"), "{html}");
+        assert!(html.contains("feature/current"), "{html}");
+        assert!(host.menus.borrow().is_empty());
         assert!(html.contains("Unsent draft"));
         let textarea = html
             .split("<textarea")

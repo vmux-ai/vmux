@@ -57,12 +57,20 @@ impl SessionCatalogUiState {
     }
 }
 
-#[vmux_api::ui_state(Default, Eq, version = 2)]
+#[vmux_api::ui_state(Default, Eq, version = 3)]
 pub struct SessionDetailUiState {
     pub session: Option<SessionSummary>,
     pub repository: Option<SessionRepository>,
     pub stages: Vec<StageSummary>,
     pub navigation: Navigation,
+    pub pending_provider: Option<PendingProvider>,
+}
+
+#[vmux_api::contract(Default, Eq)]
+pub struct PendingProvider {
+    pub kind: String,
+    pub sid: String,
+    pub failed: bool,
 }
 
 impl SessionDetailUiState {
@@ -184,6 +192,7 @@ pub struct ChatUiStatePatch {
     pub composer_menu: Option<ChatComposerMenuState>,
     pub selector: Option<ChatSelectorState>,
     pub transcript: Option<Box<ChatTranscriptState>>,
+    pub history_status: Option<crate::event::ChatHistoryStatus>,
     pub viewport: Option<ChatViewportState>,
     pub attachments: Option<Box<ChatAttachments>>,
     pub media: Option<Box<ChatMediaState>>,
@@ -195,7 +204,7 @@ pub struct ChatUiStatePatch {
     pub mcp: Option<Box<McpServersUiState>>,
 }
 
-#[vmux_api::ui_state(Default, patch = ChatUiStatePatch, version = 7)]
+#[vmux_api::ui_state(Default, patch = ChatUiStatePatch, version = 8)]
 pub struct ChatUiState {
     pub session_directory: Option<SessionDirectorySelection>,
     pub snapshot: ChatSnapshot,
@@ -260,6 +269,12 @@ impl vmux_api::UiStateProjection<ChatUiStatePatch> for ChatUiState {
         }
         if let Some(viewport) = patch.viewport {
             self.viewport = viewport;
+        }
+        if let Some(history) = patch.history_status
+            && self.viewport.session == history.session
+        {
+            self.transcript.has_older = history.has_older;
+            self.transcript.loading = history.loading;
         }
         if let Some(attachments) = patch.attachments {
             self.attachments = *attachments;

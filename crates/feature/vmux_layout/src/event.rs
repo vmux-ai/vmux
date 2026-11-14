@@ -14,6 +14,8 @@ pub struct LayoutGeometry {
     #[serde(default)]
     pub zen: bool,
     #[serde(default)]
+    pub url_bar_hidden: bool,
+    #[serde(default)]
     pub header_open: bool,
     #[serde(default)]
     pub side_sheet_open: bool,
@@ -73,11 +75,7 @@ impl LayoutGeometry {
     }
 
     pub fn tab_row_pad_left(&self) -> f32 {
-        if self.side_sheet_open {
-            8.0
-        } else {
-            TRAFFIC_LIGHTS_PAD_PX
-        }
+        (TRAFFIC_LIGHTS_PAD_PX - self.header_left()).max(8.0)
     }
 }
 
@@ -325,6 +323,7 @@ mod tests {
         };
         let open = LayoutGeometry {
             side_sheet_open: true,
+            side_sheet_width: 280.0,
             ..Default::default()
         };
 
@@ -659,7 +658,7 @@ pub struct SideSheetProjectOpenRequest {
 #[vmux_api::ui_event(Eq)]
 pub struct SideSheetProjectPageOpenRequest {
     pub pane_id: u64,
-    pub path: String,
+    pub project: Option<vmux_project::ProjectId>,
 }
 
 #[vmux_api::ui_event(Eq)]

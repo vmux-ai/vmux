@@ -27,9 +27,10 @@
             (
                 path: "layout.pane",
                 label: Some("schema-pane"),
-                order: ["gap"],
+                order: ["gap", "focus_follows_mouse"],
             ),
             (path: "layout.pane.gap", label: Some("schema-gap")),
+            (path: "layout.pane.focus_follows_mouse", label: Some("schema-focus-follows-mouse")),
             (
                 path: "layout.side_sheet",
                 label: Some("schema-side-sheet"),
@@ -129,6 +130,8 @@
                 "SpaceCreateRequest",
                 "ProjectActivateRequest",
                 "ProjectPickerRequest",
+                "ProjectRenameRequest",
+                "ProjectRemoveRequest",
                 "ProjectTreeToggle",
                 "ExtensionsUiState",
                 "ExtensionPopupOpenRequest",
@@ -662,6 +665,7 @@
                 group: "Layout > Layout",
                 shortcuts: [(shortcut: Direct("Super+Shift+S"), when: None)],
             ),
+            (id: "toggle_url_bar", label: "Toggle URL Bar", group: "Layout > Layout"),
             (
                 id: "minimize_window",
                 label: "Minimize Window",
