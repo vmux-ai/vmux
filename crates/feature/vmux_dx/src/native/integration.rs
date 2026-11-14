@@ -143,6 +143,10 @@ impl Native {
             ],
         ] {
             let mut command = self.command(self.get("CARGO_BIN", "cargo"));
+            command.env(
+                "CARGO_INCREMENTAL",
+                self.environment.incremental(Some(OsStr::new(args[0]))),
+            );
             command.args(args);
             Execution::new(command).run()?;
         }

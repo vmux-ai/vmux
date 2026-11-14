@@ -1,5 +1,5 @@
 use std::collections::HashSet;
-use std::fs::{self, OpenOptions, TryLockError};
+use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
@@ -93,6 +93,10 @@ impl Storage {
         for profile in self.profiles()? {
             paths.extend(profile.cache_paths()?);
         }
+        self.bytes(&paths)
+    }
+
+    fn bytes(&self, paths: &[PathBuf]) -> Result<u64> {
         if paths.is_empty() {
             return Ok(0);
         }
@@ -127,46 +131,26 @@ impl Storage {
             println!("Build storage: no Cargo cache tag; cache deletion skipped");
             return Ok(());
         }
-        let mut removed = false;
         for profile in self.profiles()? {
             Signals::check()?;
-            if processes.uses(profile.path()) {
-                println!(
-                    "Build storage: keeping active profile {}",
-                    profile.path().display()
-                );
+            let Some(_lock) = profile.lock()? else {
                 continue;
-            }
-            let lock = OpenOptions::new()
-                .create(true)
-                .read(true)
-                .write(true)
-                .truncate(false)
-                .open(profile.path().join(".cargo-lock"))?;
-            match lock.try_lock() {
-                Ok(()) => {}
-                Err(TryLockError::WouldBlock) => {
-                    println!(
-                        "Build storage: keeping locked profile {}",
-                        profile.path().display()
-                    );
-                    continue;
-                }
-                Err(TryLockError::Error(error)) => return Err(error.into()),
-            }
+            };
+            let active = processes.uses(profile.path());
             for path in profile.cache_paths()? {
                 Signals::check()?;
+                if active && path.file_name().is_none_or(|name| name != "incremental") {
+                    continue;
+                }
+                if processes.uses(&path) {
+                    continue;
+                }
                 let operation = if apply { "removing" } else { "would remove" };
                 println!("Build storage: {operation} {}", path.display());
                 if !apply {
                     continue;
                 }
-                if !removed {
-                    if let Some(directory) = Directory::open(self.target.join(".vmux-seed"))? {
-                        self.remove(directory.path())?;
-                    }
-                    removed = true;
-                }
+                self.invalidate_seed()?;
                 if path.file_name().is_some_and(|name| name == "deps") {
                     for entry in fs::read_dir(&path)? {
                         Signals::check()?;
@@ -184,6 +168,78 @@ impl Storage {
                     self.remove(&path)?;
                 }
             }
+        }
+        Ok(())
+    }
+
+    fn invalidate_seed(&self) -> Result<()> {
+        if let Some(directory) = Directory::open(self.target.join(".vmux-seed"))? {
+            self.remove(directory.path())?;
+        }
+        Ok(())
+    }
+
+    fn incremental_bytes(&self) -> Result<u64> {
+        let mut paths = Vec::new();
+        for profile in self.profiles()? {
+            if let Some(directory) = profile.incremental()? {
+                paths.push(directory.path().to_path_buf());
+            }
+        }
+        self.bytes(&paths)
+    }
+
+    fn prune_incremental(&self, processes: &Processes) -> Result<()> {
+        if !self.cargo_target()? {
+            return Ok(());
+        }
+        let mut total = self.incremental_bytes()?;
+        if total <= self.policy.incremental_limit {
+            return Ok(());
+        }
+        let mut locks = Vec::new();
+        let mut entries = Vec::new();
+        for profile in self.profiles()? {
+            Signals::check()?;
+            let Some(lock) = profile.lock()? else {
+                continue;
+            };
+            let Some(directory) = profile.incremental()? else {
+                continue;
+            };
+            if processes.uses(directory.path()) {
+                continue;
+            }
+            locks.push(lock);
+            for entry in fs::read_dir(directory.path())? {
+                let entry = entry?;
+                if entry.file_type()?.is_dir() {
+                    entries.push((entry.metadata()?.modified()?, entry.path()));
+                }
+            }
+        }
+        entries.sort_by_key(|entry| entry.0);
+        for (_, path) in entries {
+            if total <= self.policy.incremental_limit {
+                break;
+            }
+            Signals::check()?;
+            if processes.uses(&path) {
+                continue;
+            }
+            let size = self.bytes(std::slice::from_ref(&path))?;
+            println!(
+                "Build storage: removing old incremental cache {}",
+                path.display()
+            );
+            self.invalidate_seed()?;
+            self.remove(&path)?;
+            total = total.saturating_sub(size);
+        }
+        if total > self.policy.incremental_limit {
+            eprintln!(
+                "Build storage: incremental cache exceeds its budget; active caches were kept"
+            );
         }
         Ok(())
     }
@@ -280,6 +336,9 @@ impl Storage {
     }
 
     pub fn preflight(&self) -> Result<()> {
+        if self.incremental_bytes()? > self.policy.incremental_limit {
+            self.prune_incremental(&Processes::capture()?)?;
+        }
         if self.available()? < self.policy.minimum {
             self.prune_caches(&Processes::capture()?, true)?;
         }
@@ -304,6 +363,7 @@ impl Storage {
     }
 
     fn finish_caches(&self, processes: &Processes, profile: &str) -> Result<()> {
+        self.prune_incremental(processes)?;
         let size = self.cache_bytes()?;
         if size > self.policy.cache_limit || self.available()? < self.policy.minimum {
             println!(
@@ -362,6 +422,7 @@ mod tests {
                 minimum: 0,
                 warning: 0,
                 cache_limit: u64::MAX,
+                incremental_limit: u64::MAX,
                 local_keep: 3,
             };
             let storage = Storage::new(root, target, policy).unwrap();
@@ -420,6 +481,25 @@ mod tests {
                 .unwrap();
             path
         }
+
+        fn incremental(&self, profile: &str, name: &str, timestamp: u64) -> PathBuf {
+            let path = self
+                .storage
+                .target
+                .join(profile)
+                .join("incremental")
+                .join(name);
+            fs::create_dir_all(&path).unwrap();
+            fs::write(path.join("query-cache.bin"), vec![b'x'; 512 * 1024]).unwrap();
+            File::open(&path)
+                .unwrap()
+                .set_times(
+                    FileTimes::new()
+                        .set_modified(SystemTime::UNIX_EPOCH + Duration::from_secs(timestamp)),
+                )
+                .unwrap();
+            path
+        }
     }
 
     impl Drop for Fixture {
@@ -459,7 +539,7 @@ mod tests {
     }
 
     #[test]
-    fn active_profile_is_preserved() {
+    fn active_app_keeps_runtime_and_build_outputs_but_releases_incremental_cache() {
         let fixture = Fixture::new();
         fixture.caches("debug");
         fixture.caches("release");
@@ -474,6 +554,22 @@ mod tests {
         let processes = Processes::parse("12 vmux_desktop", &opened, 99).unwrap();
         fixture.storage.prune_caches(&processes, true).unwrap();
         assert!(fixture.storage.target.join("debug/deps/object.o").is_file());
+        assert!(
+            fixture
+                .storage
+                .target
+                .join("debug/deps/current.dylib")
+                .is_file()
+        );
+        assert!(
+            fixture
+                .storage
+                .target
+                .join("debug/build/out/generated")
+                .is_file()
+        );
+        assert!(fixture.storage.target.join("debug/vmux_desktop").is_file());
+        assert!(!fixture.storage.target.join("debug/incremental").exists());
         assert!(
             !fixture
                 .storage
@@ -494,6 +590,13 @@ mod tests {
             .prune_caches(&Processes::idle(), true)
             .unwrap();
         assert!(fixture.storage.target.join("debug/deps/object.o").exists());
+        assert!(
+            fixture
+                .storage
+                .target
+                .join("debug/incremental/state")
+                .exists()
+        );
         assert!(
             fixture
                 .storage
@@ -539,6 +642,7 @@ mod tests {
             minimum: 0,
             warning: 0,
             cache_limit: 1,
+            incremental_limit: u64::MAX,
             local_keep: 3,
         };
         assert!(Storage::new(fixture.storage.root.clone(), link, policy).is_err());
@@ -548,6 +652,7 @@ mod tests {
             minimum: 0,
             warning: 0,
             cache_limit: 1,
+            incremental_limit: u64::MAX,
             local_keep: 3,
         };
         assert!(Storage::new(fixture.storage.root.clone(), dangling, policy).is_err());
@@ -662,12 +767,83 @@ mod tests {
     }
 
     #[test]
+    fn incremental_budget_evicts_old_crates_while_an_app_is_running() {
+        let mut fixture = Fixture::new();
+        fixture.storage.policy.incremental_limit = 768 * 1024;
+        let old = fixture.incremental("debug", "old-crate", 1);
+        let recent = fixture.incremental("debug", "recent-crate", 2);
+        let app = fixture.write(
+            "debug/Vmux Dev.app/Contents/MacOS/vmux_desktop",
+            "ready app",
+        );
+        let processes =
+            Processes::parse("12 vmux_desktop", &format!("p12\nn{}\n", app.display()), 99).unwrap();
+        fixture.storage.finish_caches(&processes, "dev").unwrap();
+        assert!(!old.exists());
+        assert_eq!(
+            fs::read(recent.join("query-cache.bin")).unwrap(),
+            vec![b'x'; 512 * 1024]
+        );
+        assert_eq!(fs::read_to_string(app).unwrap(), "ready app");
+    }
+
+    #[test]
+    fn incremental_budget_does_not_evict_a_locked_compilation() {
+        let mut fixture = Fixture::new();
+        fixture.storage.policy.incremental_limit = 1;
+        let cache = fixture.incremental("debug", "compiling-crate", 1);
+        let lock = File::create(fixture.storage.target.join("debug/.cargo-lock")).unwrap();
+        lock.lock().unwrap();
+        fixture
+            .storage
+            .finish_caches(&Processes::idle(), "dev")
+            .unwrap();
+        assert_eq!(
+            fs::read(cache.join("query-cache.bin")).unwrap(),
+            vec![b'x'; 512 * 1024]
+        );
+    }
+
+    #[test]
+    fn incremental_budget_preserves_recent_caches_within_budget() {
+        let mut fixture = Fixture::new();
+        fixture.storage.policy.incremental_limit = 2 * 1024 * 1024;
+        let cache = fixture.incremental("debug", "warm-crate", 1);
+        fixture
+            .storage
+            .finish_caches(&Processes::idle(), "dev")
+            .unwrap();
+        assert_eq!(
+            fs::read(cache.join("query-cache.bin")).unwrap(),
+            vec![b'x'; 512 * 1024]
+        );
+    }
+
+    #[test]
+    fn incremental_budget_evicts_the_oldest_crate_across_profiles() {
+        let mut fixture = Fixture::new();
+        fixture.storage.policy.incremental_limit = 768 * 1024;
+        let recent = fixture.incremental("debug", "recent-crate", 2);
+        let old = fixture.incremental("release", "old-crate", 1);
+        fixture
+            .storage
+            .finish_caches(&Processes::idle(), "dev")
+            .unwrap();
+        assert!(!old.exists());
+        assert_eq!(
+            fs::read(recent.join("query-cache.bin")).unwrap(),
+            vec![b'x'; 512 * 1024]
+        );
+    }
+
+    #[test]
     fn workspace_and_outside_deletion_are_refused() {
         let fixture = Fixture::new();
         let policy = Policy {
             minimum: 0,
             warning: 0,
             cache_limit: 1,
+            incremental_limit: u64::MAX,
             local_keep: 3,
         };
         assert!(

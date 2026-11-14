@@ -445,14 +445,8 @@ impl Native {
                     && !self.environment.present("RUSTC_WRAPPER")
                 {
                     self.environment.set("RUSTC_WRAPPER", "sccache");
-                    if !self.environment.present("CARGO_INCREMENTAL") {
-                        self.environment.set("CARGO_INCREMENTAL", "0");
-                    }
                 }
             }
-        }
-        if self.environment.get("VMUX_BUILD_PROFILE") == Some(OsStr::new("dev")) {
-            self.environment.set("CARGO_INCREMENTAL", "1");
         }
         Ok(())
     }

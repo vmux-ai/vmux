@@ -127,7 +127,25 @@ impl Native {
     }
 
     pub fn cargo(&mut self, args: &[OsString]) -> Result<()> {
+        let original = self
+            .environment
+            .get("CARGO_INCREMENTAL")
+            .map(OsStr::to_os_string);
+        let incremental = self
+            .environment
+            .incremental(args.first().map(OsString::as_os_str))
+            .to_os_string();
         self.cargo_environment()?;
+        self.environment.set("CARGO_INCREMENTAL", incremental);
+        let result = self.cargo_configured(args);
+        match original {
+            Some(value) => self.environment.set("CARGO_INCREMENTAL", value),
+            None => self.environment.remove("CARGO_INCREMENTAL"),
+        }
+        result
+    }
+
+    fn cargo_configured(&mut self, args: &[OsString]) -> Result<()> {
         self.tool(OsStr::new("cargo"), args)?;
         if matches!(
             args.first().and_then(|arg| arg.to_str()),

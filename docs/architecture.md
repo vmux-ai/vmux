@@ -2047,7 +2047,9 @@ Step lifetime follows `ChildOf`, so shared operation retention cannot expire a p
 during a long compilation.
 
 Debug uses full desktop features, Bevy dynamic linking, no LTO, and incremental
-compilation. `build` prepares and signs; `run` verifies the completed artifacts and
+compilation. Explicit `CARGO_INCREMENTAL` values take precedence; tests, checks,
+Clippy, benchmarks, CI, and pre-push validation default to non-incremental compilation.
+`build` prepares and signs; `run` verifies the completed artifacts and
 never compiles or kills an existing app. Local launch selects the newest completed local
 product bundle independently of subsequent Git commits. Explicit runtime data/profile/relay
 environment values take precedence over dotenv and are passed to dev and local GUI launches.
@@ -2067,9 +2069,14 @@ that success.
 Storage warns below 50 GiB and refuses below 20 GiB after reclaiming unused compile
 caches. Local builds retain three local bundles plus running apps. A 50 GiB compile
 cache budget preserves prepared executables, runtime libraries, and distribution files.
-Active processes and Cargo locks prevent pruning. Cleanup stays within the accepted
+Cargo locks prevent pruning during compilation. Running apps retain their build outputs
+and runtime libraries, while their unused incremental caches remain reclaimable. Each
+target has a configurable 8 GiB incremental budget; build completion evicts older crate
+caches first without stopping the app. Cleanup stays within the accepted
 target and invalidates its seed marker. `vmux cache clean` previews deletion;
-`--apply` applies it. Thresholds remain configurable through `VMUX_BUILD_STORAGE_*`.
+`--apply` applies it. Thresholds remain configurable through `VMUX_BUILD_STORAGE_*`,
+including `VMUX_BUILD_STORAGE_INCREMENTAL_GIB`. Active or locked caches may temporarily
+exceed the budget and are retained with a warning.
 
 The first-clone CLI is built directly with Cargo and the `dx` feature, independently
 of CEF, the desktop, and the product service. Tool builds live in `.build-tools`.

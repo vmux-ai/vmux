@@ -7,6 +7,39 @@ use predicates::prelude::*;
 #[cfg(unix)]
 use std::os::unix::fs::PermissionsExt;
 
+#[cfg(unix)]
+#[test]
+fn cargo_children_receive_command_specific_incremental_defaults_and_overrides() {
+    let fixture = Fixture::new();
+    fixture.script("cargo", "#!/bin/sh\ncase \"$1\" in -V|--version) printf 'cargo 1.95.0\\n';; *) printf '%s' \"${CARGO_INCREMENTAL:-unset}\" > \"$TEST_INCREMENTAL_LOG\";; esac\n");
+    let log = fixture.root.join("incremental.log");
+    for (command, ci, override_value, expected) in [
+        ("build", false, None, "1"),
+        ("test", false, None, "0"),
+        ("check", false, None, "0"),
+        ("clippy", false, None, "0"),
+        ("build", true, None, "0"),
+        ("build", false, Some("0"), "0"),
+        ("test", false, Some("1"), "1"),
+    ] {
+        let mut invocation = fixture.command();
+        invocation
+            .env("TEST_INCREMENTAL_LOG", &log)
+            .env("VMUX_BUILD_PROFILE", "dev")
+            .env_remove("CARGO_INCREMENTAL")
+            .env_remove("CI")
+            .args(["internal", "cargo", "--", command]);
+        if ci {
+            invocation.env("CI", "true");
+        }
+        if let Some(value) = override_value {
+            invocation.env("CARGO_INCREMENTAL", value);
+        }
+        invocation.assert().success();
+        assert_eq!(std::fs::read_to_string(&log).unwrap(), expected);
+    }
+}
+
 #[cfg(not(feature = "runtime"))]
 struct WorkspaceFixture {
     _directory: tempfile::TempDir,
