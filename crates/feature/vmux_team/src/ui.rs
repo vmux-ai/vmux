@@ -3,8 +3,9 @@
 use dioxus::prelude::*;
 use vmux_api::team::{
     ProfileRow, TeamAgentPresentation, TeamAgentSubtitle, TeamMemberRow, TeamProfileCreateRequest,
-    TeamProfileForm, TeamProfileFormCloseRequest, TeamProfileFormInputRequest,
-    TeamProfileFormOpenRequest, TeamProfileSwitchRequest, TeamProfileUpdateRequest, TeamUiState,
+    TeamProfileError, TeamProfileForm, TeamProfileFormCloseRequest, TeamProfileFormInputRequest,
+    TeamProfileFormOpenRequest, TeamProfileSwitchRequest, TeamProfileUpdateRequest,
+    TeamProfilesRetryRequest, TeamUiState,
 };
 use vmux_ui::components::avatar::{AgentThumbnail, Avatar};
 use vmux_ui::components::badge::Badge;
@@ -179,13 +180,15 @@ fn ProfileSection(
                     }
                 }
             }
+            if let Some(error) = form.as_ref().and_then(|form| form.error.clone()) {
+                ProfileError { error }
+            }
         }
     }
 }
 
 #[component]
 fn ProfileFormView(form: TeamProfileForm, color: String) -> Element {
-    let mut finished = use_signal(|| false);
     let submission = ProfileFormSubmission(form.clone());
     let enter = submission.clone();
     let click = submission.clone();
@@ -194,7 +197,8 @@ fn ProfileFormView(form: TeamProfileForm, color: String) -> Element {
     } else {
         form.draft.clone()
     };
-    let disabled = form.draft.trim().is_empty();
+    let pending = form.pending;
+    let disabled = pending || form.draft.trim().is_empty();
     rsx! {
         Avatar {
             src: None,
@@ -215,14 +219,12 @@ fn ProfileFormView(form: TeamProfileForm, color: String) -> Element {
                 let _ = send(&TeamProfileFormInputRequest { draft: event.value() });
             },
             onkeydown: move |event: KeyboardEvent| match event.key() {
-                Key::Enter if !finished() => {
+                Key::Enter if !pending => {
                     event.prevent_default();
-                    finished.set(true);
                     enter.submit();
                 }
-                Key::Escape if !finished() => {
+                Key::Escape => {
                     event.prevent_default();
-                    finished.set(true);
                     let _ = send(&TeamProfileFormCloseRequest);
                 }
                 _ => {}
@@ -235,10 +237,7 @@ fn ProfileFormView(form: TeamProfileForm, color: String) -> Element {
             aria_label: translate("common-save"),
             disabled,
             onclick: move |_| {
-                if !finished() {
-                    finished.set(true);
-                    click.submit();
-                }
+                if !pending { click.submit(); }
             },
             LineIconView { icon: LineIcon::Check, class: "size-4" }
         }
@@ -252,7 +251,6 @@ impl ProfileFormSubmission {
     fn submit(&self) {
         let name = self.0.draft.trim().to_string();
         if name.is_empty() {
-            let _ = send(&TeamProfileFormCloseRequest);
             return;
         }
         match &self.0.profile_id {
@@ -266,7 +264,6 @@ impl ProfileFormSubmission {
                 let _ = send(&TeamProfileCreateRequest { name });
             }
         }
-        let _ = send(&TeamProfileFormCloseRequest);
     }
 }
 
@@ -326,6 +323,27 @@ fn AgentAvatar(member: TeamMemberRow) -> Element {
                 span { class: "absolute -bottom-0.5 -right-0.5 size-3 rounded-full bg-success ring-2 ring-background animate-pulse" }
             } else if member.is_done_unseen {
                 span { class: "absolute -bottom-0.5 -right-0.5 size-3 rounded-full bg-amber-400 ring-2 ring-background animate-pulse" }
+            }
+        }
+    }
+}
+
+#[component]
+fn ProfileError(error: TeamProfileError) -> Element {
+    let message = match error {
+        TeamProfileError::InvalidName => "team-profile-invalid-name",
+        TeamProfileError::Unavailable => "team-profiles-unavailable",
+        TeamProfileError::Conflict => "team-profile-conflict",
+        TeamProfileError::SaveFailed => "team-profile-save-failed",
+    };
+    rsx! {
+        div { class: "mt-2 flex items-center gap-2 px-0.5 text-xs text-destructive", role: "alert",
+            span { {translate(message)} }
+            if matches!(error, TeamProfileError::Unavailable) {
+                button { r#type: "button", class: "shrink-0 underline underline-offset-2",
+                    onclick: move |_| { let _ = send(&TeamProfilesRetryRequest); },
+                    {translate("common-retry")}
+                }
             }
         }
     }

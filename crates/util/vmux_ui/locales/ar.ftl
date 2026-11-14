@@ -1164,3 +1164,8 @@ media-permission-devices = { $kind ->
     [6] الميكروفون والشاشة
     [7] الكاميرا والميكروفون والشاشة
     }
+
+team-profile-invalid-name = أدخل اسمًا يتكون من حرف واحد إلى 256 حرفًا.
+team-profiles-unavailable = الملفات الشخصية غير متاحة. أعد محاولة تحميلها.
+team-profile-conflict = تم حفظ تعديل آخر. احفظ مرة أخرى لتطبيق تعديلك.
+team-profile-save-failed = تعذّر حفظ الملف الشخصي. حاول مرة أخرى.

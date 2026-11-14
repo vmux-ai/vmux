@@ -24,6 +24,7 @@
                 "TeamProfileFormOpenRequest",
                 "TeamProfileFormInputRequest",
                 "TeamProfileFormCloseRequest",
+                "TeamProfilesRetryRequest",
             ],
         ),
     ],
