@@ -11281,9 +11281,8 @@ dependencies = [
  "dioxus",
  "dioxus-html",
  "dioxus-primitives",
- "moonshine-save",
-
  "dioxus-ssr",
+ "moonshine-save",
  "rfd 0.15.4",
  "rkyv",
  "serde",
