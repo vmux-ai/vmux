@@ -1866,7 +1866,14 @@ The libkrun worker and gvproxy are child process entities; `ConnectionPlugin` ow
 transport, SSH, Docker readiness and port-refresh tasks. Launch, connection, observation
 and retirement run in ordered system sets. Blocking waits belong to `EngineClient`, the
 CLI and GUI adapter. The worker enters the VMM in its own process because libkrun consumes
-that process's lifecycle. Closing the invoking CLI or page does not close the VM.
+that process's lifecycle. Closing the invoking CLI or page does not close the VM. A newly
+GUI-started engine records its profile owner; explicit Quit cancels preparation and stops
+engines owned by that profile, including engines preserved through a same-profile restart.
+`Lifetime` owns only the global profile cancellation token; shutdown reads canonical
+`Settings` on `EngineView` entities instead of retaining a second VM-directory registry.
+CLI-started engines and other profiles remain independent. Shutdown waits for machine and
+network leases even if the supervisor has already exited. Preparation and detached helpers
+isolate inherited descriptors, and cancelled preparation kills and reaps its process group.
 
 The network entity runs `NetworkProxy`, which owns gvproxy behind a parent-held stdin
 channel. Closing that channel, including an unexpected supervisor exit, reaps gvproxy
