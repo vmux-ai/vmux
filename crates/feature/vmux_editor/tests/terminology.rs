@@ -25,6 +25,11 @@ fn browser_brand_terms_stay_in_browser_compatibility_code() {
             .iter()
             .any(|prefix| relative.starts_with(prefix))
             || ALLOWED_FILES.contains(&relative.as_ref())
+            || matches!(
+                relative.as_ref(),
+                "crates/feature/vmux_dx/src/native/cef_source.rs"
+                    | "crates/feature/vmux_dx/src/native/conformance.rs"
+            )
         {
             continue;
         }

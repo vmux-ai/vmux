@@ -17,6 +17,8 @@ pub struct CliPlugin;
 
 impl Plugin for CliPlugin {
     fn build(&self, app: &mut App) {
+        #[cfg(feature = "dx")]
+        app.add_plugins(vmux_dx::Plugin);
         app.add_plugins((
             FeaturePlugin::<Feature>::default(),
             vmux_app::VmuxPlugin::builder().cli().build(),

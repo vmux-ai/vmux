@@ -1,0 +1,82 @@
+(
+    cli: Some((commands: [
+        (id: "dx.update", name: "update", about: Some("Update the standalone CLI and select its release channel"), arguments: [
+            (id: "channel", long: Some("channel"), short: Some('c'), values: ["stable", "preview"]),
+            (id: "auto", long: Some("auto"), values: ["on", "off"]),
+            (id: "check", long: Some("check"), flag: true),
+        ]),
+        (id: "dx.reset-layout", name: "reset-layout", about: Some("Reset inactive local layout files"), arguments: [
+            (id: "profile", long: Some("profile"), short: Some('p'), default: Some("dev"), values: ["dev", "local", "release"]),
+            (id: "branch", long: Some("branch"), short: Some('b'), value_name: Some("BRANCH")),
+            (id: "root", long: Some("root"), value_name: Some("PATH")),
+        ]),
+        (id: "dx.setup", name: "setup", about: Some("Prepare development tools"), arguments: [
+            (id: "profile", long: Some("profile"), short: Some('p'), default: Some("dev"), values: ["dev", "local", "release"]),
+            (id: "platform", long: Some("platform"), short: Some('P'), default: Some("desktop"), values: ["desktop", "ios", "android", "web"]),
+            (id: "branch", long: Some("branch"), short: Some('b'), value_name: Some("BRANCH")),
+            (id: "root", long: Some("root"), value_name: Some("PATH")),
+        ]),
+        (id: "dx.internal", name: "internal", hidden: true, arguments: [
+            (id: "root", long: Some("root"), value_name: Some("PATH")),
+            (id: "task", index: Some(1), required: true),
+            (id: "forward", index: Some(2), trailing: true),
+        ]),
+        (id: "dx.build", name: "build", about: Some("Build without launching"), arguments: [
+                (id: "profile", long: Some("profile"), short: Some('p'), default: Some("dev"), values: ["dev", "local", "release"]),
+                (id: "platform", long: Some("platform"), short: Some('P'), default: Some("desktop"), values: ["desktop", "ios", "android", "web"]),
+                (id: "branch", long: Some("branch"), short: Some('b'), value_name: Some("BRANCH")),
+                (id: "root", long: Some("root"), value_name: Some("PATH")),
+                (id: "features", long: Some("features"), value_name: Some("FEATURES")),
+                (id: "user-profile", long: Some("user-profile"), value_name: Some("NAME")),
+                (id: "forward", index: Some(1), trailing: true)
+            ]),
+        (id: "dx.run", name: "run", about: Some("Run a completed artifact"), arguments: [
+                (id: "profile", long: Some("profile"), short: Some('p'), default: Some("dev"), values: ["dev", "local", "release"]),
+                (id: "platform", long: Some("platform"), short: Some('P'), default: Some("desktop"), values: ["desktop", "ios", "android", "web"]),
+                (id: "branch", long: Some("branch"), short: Some('b'), value_name: Some("BRANCH")),
+                (id: "root", long: Some("root"), value_name: Some("PATH")),
+                (id: "features", long: Some("features"), value_name: Some("FEATURES")),
+                (id: "user-profile", long: Some("user-profile"), value_name: Some("NAME")),
+                (id: "forward", index: Some(1), trailing: true)
+            ]),
+        (id: "dx.stop", name: "stop", about: Some("Stop the selected development service"), arguments: [
+                (id: "profile", long: Some("profile"), short: Some('p'), default: Some("dev"), values: ["dev", "local", "release"]),
+                (id: "platform", long: Some("platform"), short: Some('P'), default: Some("desktop"), values: ["desktop", "ios", "android", "web"]),
+                (id: "branch", long: Some("branch"), short: Some('b'), value_name: Some("BRANCH")),
+                (id: "root", long: Some("root"), value_name: Some("PATH")),
+                (id: "features", long: Some("features"), value_name: Some("FEATURES")),
+                (id: "user-profile", long: Some("user-profile"), value_name: Some("NAME")),
+                (id: "forward", index: Some(1), trailing: true)
+            ]),
+        (id: "dx.test", name: "test", about: Some("Run Rust tests"), arguments: [
+                (id: "profile", long: Some("profile"), short: Some('p'), default: Some("dev"), values: ["dev", "local", "release"]),
+                (id: "platform", long: Some("platform"), short: Some('P'), default: Some("desktop"), values: ["desktop", "ios", "android", "web"]),
+                (id: "branch", long: Some("branch"), short: Some('b'), value_name: Some("BRANCH")),
+                (id: "root", long: Some("root"), value_name: Some("PATH")),
+                (id: "features", long: Some("features"), value_name: Some("FEATURES")),
+                (id: "user-profile", long: Some("user-profile"), value_name: Some("NAME")),
+                (id: "forward", index: Some(1), trailing: true)
+            ]),
+        (id: "dx.lint", name: "lint", about: Some("Check formatting and Rust lints"), arguments: [
+                (id: "profile", long: Some("profile"), short: Some('p'), default: Some("dev"), values: ["dev", "local", "release"]),
+                (id: "platform", long: Some("platform"), short: Some('P'), default: Some("desktop"), values: ["desktop", "ios", "android", "web"]),
+                (id: "branch", long: Some("branch"), short: Some('b'), value_name: Some("BRANCH")),
+                (id: "root", long: Some("root"), value_name: Some("PATH")),
+                (id: "features", long: Some("features"), value_name: Some("FEATURES")),
+                (id: "user-profile", long: Some("user-profile"), value_name: Some("NAME")),
+                (id: "forward", index: Some(1), trailing: true)
+            ]),
+        (id: "dx.doctor", name: "doctor", about: Some("Inspect development tools"), arguments: [
+                (id: "profile", long: Some("profile"), short: Some('p'), default: Some("dev"), values: ["dev", "local", "release"]),
+                (id: "platform", long: Some("platform"), short: Some('P'), default: Some("desktop"), values: ["desktop", "ios", "android", "web"]),
+                (id: "branch", long: Some("branch"), short: Some('b'), value_name: Some("BRANCH")),
+                (id: "root", long: Some("root"), value_name: Some("PATH")),
+                (id: "features", long: Some("features"), value_name: Some("FEATURES")),
+                (id: "user-profile", long: Some("user-profile"), value_name: Some("NAME")),
+                (id: "forward", index: Some(1), trailing: true)
+            ]),
+        (id: "dx.cache", name: "cache", subcommand_required: true, arguments: [(id: "profile", long: Some("profile"), short: Some('p'), global: true, default: Some("dev"), values: ["dev", "local", "release"]), (id: "branch", long: Some("branch"), short: Some('b'), global: true, value_name: Some("BRANCH")), (id: "root", long: Some("root"), global: true, value_name: Some("PATH"))], commands: [(id: "dx.cache.status", name: "status"), (id: "dx.cache.clean", name: "clean", arguments: [(id: "apply", long: Some("apply"), flag: true)])]),
+        (id: "dx.ci-scope", name: "ci-scope", arguments: [(id: "root", long: Some("root"), value_name: Some("PATH")), (id: "forward", index: Some(1), trailing: true)]),
+        (id: "dx.framework-consumer", name: "framework-consumer", arguments: [(id: "root", long: Some("root"), value_name: Some("PATH")), (id: "forward", index: Some(1), trailing: true)])
+    ])),
+)

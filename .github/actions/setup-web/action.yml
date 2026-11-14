@@ -42,13 +42,13 @@ runs:
 
     - name: Install dioxus-cli
       shell: bash
-      run: ./scripts/install-dioxus-cli.sh
+      run: vmux internal install-dioxus
 
     - name: Install binaryen
       shell: bash
-      run: ./scripts/install-dioxus-binaryen.sh
+      run: vmux internal install-binaryen
 
     - name: Install tailwindcss
       if: inputs.tailwind == 'true'
       shell: bash
-      run: TAILWINDCSS_INSTALL_DIR="$HOME/.local/bin" ./scripts/install-tailwindcss.sh
+      run: TAILWINDCSS_INSTALL_DIR="$HOME/.local/bin" vmux internal install-tailwindcss

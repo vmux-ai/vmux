@@ -99,10 +99,14 @@ jobs:
           APPLE_IOS_PROVISIONING_PROFILE: ${{ secrets.APPLE_IOS_PROVISIONING_PROFILE }}
           VMUX_IOS_BUILD_NUMBER: ${{ github.run_number }}
           VMUX_IOS_UPLOAD: ${{ inputs.upload_ios && '1' || '' }}
-        run: ./scripts/build-ios-release.sh
+        run: |
+          vmux build -P ios -p release
+          if [ "$VMUX_IOS_UPLOAD" = "1" ]; then
+            vmux internal ios-upload
+          fi
 
       - name: Verify bundle layout
-        run: ./scripts/test-ios-bundle-layout.sh --signed
+        run: vmux internal ios-verify -- --signed
 
   publish:
     name: Publish Release
@@ -114,10 +118,12 @@ jobs:
     steps:
       - uses: actions/checkout@v5
 
+      - uses: ./.github/actions/setup-rust
+
       - name: Verify release assets and committed metadata
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: ./scripts/update-release-metadata.sh --check
+        run: vmux internal update-release-metadata -- --check
 
       - name: Re-target tag to current main HEAD
         env:

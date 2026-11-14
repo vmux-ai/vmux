@@ -250,8 +250,8 @@ copyright = "Copyright 2024-2025 Junichi Sugiura. GPL-3.0-or-later."
 homepage = "https://vmux.ai"
 formats = ["app", "dmg"]
 icons = ["../../../packaging/macos/Vmux.icns"]
-before-packaging-command = "bash ../../../scripts/build-package-binaries.sh"
-before-each-package-command = "bash ../../../scripts/before-each-package.sh"
+before-packaging-command = "\"$VMUX_DX_BIN\" internal package-binaries"
+before-each-package-command = "\"$VMUX_DX_BIN\" internal before-package"
 binaries = [
     { path = "vmux_desktop", main = true },
     { path = "vmux" },

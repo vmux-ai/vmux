@@ -41,9 +41,9 @@ runs:
     - name: Install dioxus-cli
       if: inputs.dioxus == 'true'
       shell: bash
-      run: ./scripts/install-dioxus-cli.sh
+      run: vmux internal install-dioxus
 
     - name: Install tailwindcss
       if: inputs.tailwind == 'true'
       shell: bash
-      run: TAILWINDCSS_INSTALL_DIR="$HOME/.local/bin" ./scripts/install-tailwindcss.sh
+      run: TAILWINDCSS_INSTALL_DIR="$HOME/.local/bin" vmux internal install-tailwindcss

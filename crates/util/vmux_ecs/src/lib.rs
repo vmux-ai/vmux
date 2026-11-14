@@ -78,7 +78,7 @@ mod archive;
 pub mod blocking;
 #[cfg(all(host, feature = "host"))]
 pub mod browser;
-#[cfg(all(host, feature = "host"))]
+#[cfg(feature = "cli")]
 pub mod cli;
 mod component;
 #[cfg(feature = "contracts")]
@@ -93,7 +93,7 @@ mod identity;
 pub mod jobs;
 #[cfg(all(host, feature = "host"))]
 pub mod launcher;
-#[cfg(all(host, feature = "host"))]
+#[cfg(feature = "cli")]
 pub mod manifest;
 #[cfg(all(host, feature = "host"))]
 pub mod notify;
@@ -115,7 +115,7 @@ mod primitives;
 pub mod process_id;
 #[cfg(all(host, feature = "host"))]
 pub mod profile;
-#[cfg(all(host, feature = "host"))]
+#[cfg(feature = "cli")]
 mod registry;
 pub mod revision;
 pub mod scroll;

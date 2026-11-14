@@ -75,13 +75,33 @@ Exact behavior remains defined by code, tests, typed contracts, and `feature.ron
 ## Development
 
 ```sh
-make doctor
-make
+cargo install --path crates/app/vmux_cli --no-default-features --features dx
+vmux setup
+vmux doctor
+vmux build
+vmux run
 ```
 
-The first build through `make` in a linked worktree seeds its build cache from the main
-worktree. See [Makefile](Makefile) for all targets and [AGENTS.md](AGENTS.md) for repository
-rules.
+Use `vmux build -b navigation -p local` to build a branch in its existing worktree.
+`-P/--platform` selects desktop, ios, android, or web; `-p/--profile` selects dev,
+local, or release. Worktree directory names are accepted as unambiguous aliases.
+Builds seed compatible caches and preserve target locks. See `vmux --help` for
+commands and [AGENTS.md](AGENTS.md) for repository rules.
+
+Standalone CLI releases use the same `stable` (default) and `preview` channels as
+the desktop. `vmux update --channel preview` switches to preview;
+`vmux update --channel stable` switches back. `vmux update --check` checks without
+installing, and `vmux update --auto off` disables automatic release updates.
+Preferences persist between commands. Signed standalone CLIs check at most hourly
+on invocation and continue with the installed CLI when an automatic update fails.
+Release artifacts currently cover macOS Apple Silicon.
+
+The selected checkout's development CLI refreshes automatically when its source
+changes. Cargo source installs without `VMUX_UPDATE_PUBLIC_KEY` use that mechanism
+and can inspect release metadata; installing a release requires its verification
+key. Standalone release CLIs embed the same key used by desktop updates.
+The standalone archive contains the DX-only CLI. Runtime-enabled and app-bundled
+CLIs retain their existing source/application update owner.
 
 ## License
 

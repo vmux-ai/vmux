@@ -1,7 +1,8 @@
 use std::any::TypeId;
 use std::marker::PhantomData;
 
-use bevy::prelude::*;
+use bevy_app::{App, Plugin};
+use bevy_ecs::prelude::*;
 use ron::value::RawValue;
 use serde::Deserialize;
 use serde::de::DeserializeOwned;
@@ -472,7 +473,7 @@ mod tests {
     #[test]
     fn one_feature_entity_owns_all_parsed_sections() {
         let mut app = App::new();
-        app.add_plugins((MinimalPlugins, FeaturePlugin::<Feature>::default()));
+        app.add_plugins(FeaturePlugin::<Feature>::default());
         app.update();
 
         let manifests = app
@@ -513,7 +514,6 @@ mod tests {
     fn identical_sources_for_distinct_features_create_distinct_entities() {
         let mut app = App::new();
         app.add_plugins((
-            MinimalPlugins,
             FeaturePlugin::<Feature>::default(),
             FeaturePlugin::<OtherFeature>::default(),
         ));
@@ -531,7 +531,6 @@ mod tests {
     fn repeated_feature_registration_reuses_the_source_entity() {
         let mut app = App::new();
         app.add_plugins((
-            MinimalPlugins,
             FeaturePlugin::<Feature>::default(),
             FeaturePlugin::<Feature>::default(),
         ));

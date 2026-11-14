@@ -92,6 +92,9 @@ stay with their existing ECS owners; product metadata adds no runtime Resources.
 Packaging consumes the same build metadata; host binaries must be built and packaged from
 the same product inputs. Compiled window/menu and packaged bundle titles use the accepted product
 name and the same local/dev source label; release titles retain the product name alone.
+DX native IO reuses the compiler's accepted product metadata for bundle names, selected assets,
+service plists and signing inputs. Host consumer probes clear environment and `.env` product
+overrides before compiling each namespace, so one configured checkout cannot contaminate another probe.
 Custom data/configuration and runtime paths derive from the namespace,
 even when two hosts share a display name. Changing product identity never imports Vmux data or
 credentials. `examples/host-consumer` exercises the explicit host facade without a renderer;
@@ -1893,58 +1896,87 @@ React-style, in one atomic transaction.
 
 ## Platforms
 
-### Manual iteration
+### Development commands
+
+The CLI's release updater is an independent `vmux_dx::updates::Plugin` composed
+before product startup and alongside DX for explicit `update` requests. Accepted
+operations own `Request`, `Installation`, persisted `Preferences`, and `Release`.
+Child `Step` entities own bounded IO receipts and process/installation leases;
+private systems apply channel/version policy and advance only accepted results.
+The standalone CLI uses stable/preview endpoints and a separate signed CLI map
+in the existing desktop manifests. Releases embed `VMUX_UPDATE_PUBLIC_KEY`.
+`update_io` translates HTTPS, minisign, constrained tar decoding, executable probes,
+file locks, atomic replacement/rollback, and one child-command handoff. Its temporary
+handles expire on completion; failed restoration retains the reported backup.
+Automatic checks are hourly on invocation; failures preserve command availability.
+Channel selection and auto-update settings live in `.vmux/cli/update.json` beneath
+the user's home. Source builds without a trust key retain checkout refresh;
+build-cache and application-bundle executables are excluded from standalone update.
+The CLI runtime feature propagates `vmux_dx/runtime-cli`, so its installation snapshot
+also refuses replacing a runtime-enabled CLI with a DX-only release artifact.
+Help/version and handoff invocations bypass release checks. Release compilation and
+signed CLI archive publication are predecessor-linked DX `Work` entities, with
+staged filesystem publication shared with the packaging adapter.
 
 ```text
-agent: make build-dev -> signed Vmux Dev.app -> user: make <worktree>
-standalone client: make run-dev
+agent: vmux build -b navigation -> signed Vmux Dev.app -> user: vmux run -b navigation
+local package: vmux build -b navigation -p local
+mobile: vmux build -b navigation -P ios
 ```
 
-Debug uses the full desktop feature set, Bevy dynamic linking, no LTO, and incremental
-compilation. Build and launch are separate: plain run-dev verifies the completed artifacts
-and never compiles or kills an existing app. The cloud launcher requests build-if-needed,
-which builds only when the completion stamp is missing or invalid. Unchanged signed inputs
-reuse their bundled executables so a no-op build does not replace the daemon identity.
-After a successful build, a launch link under `target/release/` lets the existing vmux-cloud
-`make <worktree>` launcher find the debug app
-without depending on cloud-specific files or changing the public client's build prerequisites.
-Failed builds remove that link; real release bundles are never replaced. build-local remains
-the bundle/OS-integration gate.
+`vmux_cli` selects the DX-only composition before installing product plugins.
+`vmux_dx::Plugin` registers the shared command manifest and owns each accepted
+`CliInvocation` as a shared `Operation`. `Checkout`, `Settings`, and `Storage`
+hold the selected paths, opaque process environment, and storage policy. A Git branch
+resolves to its existing worktree; exact branch names precede directory aliases, and
+ambiguous aliases or branches without a checkout are refused.
 
-Dev, local, and release builds share a storage preflight and hold the target-cache lock
-through dependency preparation, compilation, signing, and cleanup. Builds warn below
-50 GiB free and refuse below 20 GiB after attempting to reclaim unused compile caches.
-Successful local builds retain three local app bundles plus running apps; all builds prune compile
-caches above a 50 GiB budget. Ready executables, runtime libraries, and release distribution
-artifacts survive cleanup; active profiles and raw Cargo locks prevent cache deletion.
-Removing compile caches invalidates their seed marker and requires recompilation on the
-next build. The thresholds are configurable with `VMUX_BUILD_STORAGE_*`; cache size uses
-allocated blocks, which can count shared APFS clones more than once. Storage cleanup stays
-inside the selected Cargo target and never walks sibling worktrees or application data.
+Each `Work` is a child entity with an `OperationState`, an attempt, and an explicit
+`Predecessor`. Registered systems accept requests, collect bounded native completion
+messages, cancel operations, start ready steps, and finish only after their children.
+Failed prerequisites prevent later effects; stale receipts cannot advance a new attempt.
+Verified output paths become `Artifact` entities with `Ready` on the owning operation.
+Step lifetime follows `ChildOf`, so shared operation retention cannot expire a predecessor
+during a long compilation.
 
-The dependency-free `vmux_builder` Rust command owns build sequencing, storage policy,
-target locks, and local/release launch paths. `scripts/vmux-builder` only bootstraps a
-missing host binary; Rust checks the embedded source snapshot and compiler, rebuilds
-itself when needed, and caches binaries under `.build-tools/`. Capacity checks therefore
-do not resolve Cargo dependencies or compile into the application target.
-The launcher refreshes through `--print-bin` before forwarding arguments, so an older
-binary can upgrade before parsing a newly added command.
+Debug uses full desktop features, Bevy dynamic linking, no LTO, and incremental
+compilation. `build` prepares and signs; `run` verifies the completed artifacts and
+never compiles or kills an existing app. Signature input/output stamps preserve unchanged
+bundled executables and daemon identity. A failed build invalidates its debug readiness
+stamp and launch alias. Local/release packages use an isolated output directory and raw
+packager configuration; source manifests and plists are never rewritten. Publication
+rolls back earlier moves on failure and refuses replacement of active artifacts.
 
-The builder preserves the existing lock protocol: PID files on macOS and file locks on
-Linux. Lock waits remain cancellable. Each build command gets a separate process group;
-minimal POSIX signal handlers record cancellation and forward it to that group without
-allocating. The builder waits for its child, skips successful-build cleanup on failure or
-cancellation, and releases its locks before returning the original exit code.
-Preflight failures refuse the build. After the command succeeds, cleanup inspection or
-filesystem failures warn and preserve that success; cancellation still returns its signal code.
+Builds hold the target lock across preparation, compilation, signing, validation, and
+cleanup. PID locks on macOS and file locks on Linux remain compatible with existing
+caches; waits and process groups are cancellable. A native group guard kills leftover
+descendants and releases tracking on all exits. CLI results retain tool exit status and
+signal codes. Cleanup inspection after a successful build can warn without changing
+that success.
 
-Debug preparation and macOS package orchestration are Rust stages. Debug owns Cargo
-command order and the ready stamp/launch alias; macOS packaging owns env overrides,
-temporary signing keychains, restoration, and certificate verification. Environment
-overrides are attached to child commands without changing process-global env. Signing
-keychains and private certificate files live in scoped temporary directories and are
-removed on failure or cancellation. The legacy build scripts only delegate to these stages;
-platform tools and the existing bundle/sign adapters remain subprocesses.
+Storage warns below 50 GiB and refuses below 20 GiB after reclaiming unused compile
+caches. Local builds retain three local bundles plus running apps. A 50 GiB compile
+cache budget preserves prepared executables, runtime libraries, and distribution files.
+Active processes and Cargo locks prevent pruning. Cleanup stays within the accepted
+target and invalidates its seed marker. `vmux cache clean` previews deletion;
+`--apply` applies it. Thresholds remain configurable through `VMUX_BUILD_STORAGE_*`.
+
+The first-clone CLI is built directly with Cargo and the `dx` feature, independently
+of CEF, the desktop, and the product service. Tool builds live in `.build-tools`.
+An installed tool checks the selected checkout's compiler input snapshot and refreshes
+through the minimal CLI before accepting work. Pinned Dioxus and Tailwind downloads
+use versioned tool caches and explicit child paths. The Git hook is a transport to this
+Rust command; CI and packager callbacks invoke the same implementation. The website
+installer remains the delivery bootstrap for machines without an installed CLI.
+
+Native adapters translate process, Cargo/Git, filesystem, certificate/keychain, CEF,
+packager, Xcode, and GitHub release interfaces. They retain only bounded IO buffers,
+opaque handles, immutable accepted inputs, and filesystem rollback records. Signing
+credentials and temporary keychains stay outside reflection, persistence, and CLI output.
+Root `Settings` holds an opaque OS environment; installed tool path receipts update
+that owner only after a matching step completion. Subprocess waits run outside the ECS
+schedule and wake the host when complete. Rust invokes the real tools directly; there
+is no Make or Vmux-owned shell task engine.
 
 Local and debug share the workspace store and a stable Chromium directory per named profile,
 not per worktree. On first use the most recently modified legacy local profile is reused
@@ -2433,7 +2465,7 @@ for a run against another base. A joined failure or cancellation fails the PR; m
 stale or incomplete evidence starts normal checks. Forks and release PRs always run normal checks. Each event cancels
 its own superseded feature runs without cancelling the branch run a PR is joining or main builds.
 
-`vmux_builder ci-scope` compares a PR with its merge base and selects changed workspace
+`vmux ci-scope` compares a PR with its merge base and selects changed workspace
 packages plus their transitive reverse dependencies, including optional, build, and test
 dependencies. Formatting and Clippy use the same selection while excluding vendored patches.
 Formatting runs before Linux SDK preparation in its own job. Linux Cargo checks share a

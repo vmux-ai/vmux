@@ -48,7 +48,7 @@ impl<'a> CliParser<'a> {
     }
 
     fn command(manifest: &CliCommandManifest) -> Command {
-        let mut command = Command::new(manifest.name.clone());
+        let mut command = Command::new(manifest.name.clone()).hide(manifest.hidden);
         if let Some(about) = &manifest.about {
             command = command.about(about.clone());
         }
@@ -77,6 +77,12 @@ impl<'a> CliParser<'a> {
         }
         if let Some(index) = manifest.index {
             argument = argument.index(index);
+        }
+        if manifest.trailing {
+            argument = argument.num_args(0..).last(true);
+        }
+        if manifest.global {
+            argument = argument.global(true);
         }
         if manifest.required {
             argument = argument.required(true);

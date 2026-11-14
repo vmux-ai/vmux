@@ -7,7 +7,7 @@ tailwind_output = "assets/tailwind.out.css"
 # Supplies the whole plist rather than merging. `[ios.plist]` is appended after the keys dx
 # hardcodes and a duplicate key loses on parse, so UIDeviceFamily, the orientations and
 # CFBundleVersion cannot be set that way. Read relative to the working directory, so dx has to
-# be invoked from the repo root — `make mobile-ios` is.
+# be invoked from the repo root; `vmux build -P ios` resolves that checkout.
 ios_info_plist = "packaging/ios/Info.plist"
 
 [bundle]

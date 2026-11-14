@@ -114,7 +114,7 @@ jobs:
         id: scope
         env:
           VMUX_CI_BASE: ${{ needs.plan.outputs.base }}
-        run: ./scripts/vmux-builder ci-scope >> "$GITHUB_OUTPUT"
+        run: vmux ci-scope >> "$GITHUB_OUTPUT"
 
       - name: Check formatting
         run: cargo fmt ${{ steps.scope.outputs.lint_args }} -- --check
@@ -146,7 +146,7 @@ jobs:
         id: scope
         env:
           VMUX_CI_BASE: ${{ needs.plan.outputs.base }}
-        run: ./scripts/vmux-builder ci-scope >> "$GITHUB_OUTPUT"
+        run: vmux ci-scope >> "$GITHUB_OUTPUT"
 
       - name: Clippy
         run: VMUX_SKIP_DX_BUILD=1 cargo clippy ${{ steps.scope.outputs.lint_args }} --all-targets -- -D warnings
@@ -181,7 +181,7 @@ jobs:
         id: scope
         env:
           VMUX_CI_BASE: ${{ needs.plan.outputs.base }}
-        run: ./scripts/vmux-builder ci-scope >> "$GITHUB_OUTPUT"
+        run: vmux ci-scope >> "$GITHUB_OUTPUT"
 
       - name: Run tests
         run: VMUX_SKIP_DX_BUILD=1 cargo test --locked ${{ steps.scope.outputs.args }}
@@ -215,9 +215,8 @@ jobs:
       - name: Test build preparation and source ownership
         run: |
           node --test scripts/ci-preflight.test.js
-          cargo test --locked -p vmux_builder
-          bash scripts/test-dev-bundle.sh --fixture
-          bash scripts/test-dev-sign.sh
+          cargo test --locked -p vmux_dx --lib
+          cargo test --locked -p vmux_cli --no-default-features --features dx --test dx
           cargo test --locked -p vmux_macro --test source_conventions --test ecs_ownership
 
   test-sdk-path:
@@ -240,9 +239,9 @@ jobs:
         with:
           cache-key: sdk-path
           cef-version: ${{ needs.cef-version.outputs.version }}
-      - run: bash scripts/test-framework-consumer.sh
+      - run: vmux framework-consumer
       - name: Test isolated product hosts without a renderer
-        run: bash scripts/test-framework-consumer.sh --host
+        run: vmux framework-consumer -- --host
 
   test-sdk-git:
     name: Test SDK from immutable Git dependencies
@@ -264,9 +263,9 @@ jobs:
         with:
           cache-key: sdk-git
           cef-version: ${{ needs.cef-version.outputs.version }}
-      - run: bash scripts/test-framework-consumer.sh --git
+      - run: vmux framework-consumer -- --git
       - name: Test product hosts from immutable Git dependencies
-        run: bash scripts/test-framework-consumer.sh --host --git
+        run: vmux framework-consumer -- --host --git
 
   test-headless:
     name: Test headless application profiles
@@ -330,7 +329,6 @@ jobs:
               - 'patches/**'
               - 'Cargo.toml'
               - 'Cargo.lock'
-              - 'Makefile'
               - 'rust-toolchain.toml'
               - 'tool-versions.env'
               - 'scripts/**'
@@ -349,7 +347,6 @@ jobs:
               - '.github/actions/**'
               - 'Cargo.toml'
               - 'Cargo.lock'
-              - 'Makefile'
               - 'rust-toolchain.toml'
               - 'tool-versions.env'
               - '.github/workflows/ci.yml'
@@ -358,11 +355,10 @@ jobs:
               - '.github/workflows/release.yml'
               - '!crates/app/vmux_mobile/**'
               - '!packaging/ios/**'
-              - '!scripts/*ios*'
             macos_package:
               - 'crates/app/vmux_desktop/**'
               - 'crates/app/vmux_cli/**'
-              - 'crates/app/vmux_builder/**'
+              - 'crates/feature/vmux_dx/**'
               - 'crates/util/vmux_app/**'
               - 'crates/util/vmux_browser/**'
               - 'crates/util/vmux_clipboard/**'
@@ -383,21 +379,18 @@ jobs:
               - '.github/workflows/release.yml'
               - 'Cargo.toml'
               - 'Cargo.lock'
-              - 'Makefile'
               - 'rust-toolchain.toml'
               - 'tool-versions.env'
               - '!crates/app/vmux_mobile/**'
               - '!packaging/ios/**'
-              - '!scripts/*ios*'
             ios:
               - 'crates/**'
               - 'packaging/ios/**'
               - 'Cargo.toml'
               - 'Cargo.lock'
-              - 'Makefile'
               - 'rust-toolchain.toml'
               - 'tool-versions.env'
-              - 'scripts/*ios*'
+              - 'crates/feature/vmux_dx/src/native/ios.rs'
               - '.github/actions/**'
               - '.github/workflows/ci.yml'
               - '!crates/app/vmux_desktop/**'
@@ -774,13 +767,13 @@ jobs:
           packaging: "false"
 
       - name: Check desktop, CLI, and daemon
-        run: ./scripts/cargo-with-cef-cache.sh check --locked -p vmux_desktop -p vmux_cli -p vmux_app --all-targets --features vmux_desktop/package,vmux_app/service-daemon
+        run: vmux internal cargo -- check --locked -p vmux_desktop -p vmux_cli -p vmux_app --all-targets --features vmux_desktop/package,vmux_app/service-daemon
 
       - name: Verify generated UI assets
-        run: ./scripts/verify-web-bundle.sh
+        run: vmux internal verify-web-bundle
 
       - name: Check lean macOS desktop features
-        run: ./scripts/cargo-with-cef-cache.sh check --locked -p vmux_desktop --no-default-features --features dev
+        run: vmux internal cargo -- check --locked -p vmux_desktop --no-default-features --features dev
 
   build-mac:
     name: Build macOS App
@@ -804,6 +797,8 @@ jobs:
           base: ${{ needs.plan.outputs.base }}
           tree: ${{ needs.plan.outputs.tree }}
 
+      - uses: ./.github/actions/setup-rust
+
       - name: Detect release PR + idempotency
         id: relprep
         env:
@@ -812,8 +807,8 @@ jobs:
         run: |
           set -euo pipefail
           VERSION=$(grep -m1 '^version' Cargo.toml | sed 's/.*"\(.*\)".*/\1/')
-          . ./scripts/release-artifacts.sh
-          vmux_release_artifacts "$VERSION"
+          vmux internal release-artifacts -- "$VERSION" > "$RUNNER_TEMP/dx-release.env"
+          while IFS="=" read -r key value; do export "$key=$value"; done < "$RUNNER_TEMP/dx-release.env"
           {
             echo "VERSION=$VERSION"
             echo "TAG=$VMUX_RELEASE_TAG"
@@ -821,6 +816,8 @@ jobs:
             echo "BINARY_ARCHIVE_NAME=$VMUX_BINARY_ARCHIVE_NAME"
             echo "APP_ARCHIVE_NAME=$VMUX_APP_ARCHIVE_NAME"
             echo "APP_SIGNATURE_NAME=$VMUX_APP_SIGNATURE_NAME"
+            echo "CLI_ARCHIVE_NAME=$VMUX_CLI_ARCHIVE_NAME"
+            echo "CLI_SIGNATURE_NAME=$VMUX_CLI_SIGNATURE_NAME"
             echo "DMG_URL=$VMUX_DMG_URL"
           } >> "$GITHUB_ENV"
 
@@ -843,7 +840,7 @@ jobs:
           if gh release view "$VMUX_RELEASE_TAG" --json isDraft,assets >/tmp/r.json 2>/dev/null; then
             asset_count=$(jq '.assets | length' /tmp/r.json)
             CASK_URL=$(grep -m1 '^  url' Casks/vmux.rb | sed 's/.*"\(.*\)".*/\1/')
-            if [ "$asset_count" -ge 4 ] && [ "$CASK_URL" = "$VMUX_DMG_URL" ]; then
+            if [ "$asset_count" -ge 6 ] && [ "$CASK_URL" = "$VMUX_DMG_URL" ]; then
               echo "Draft release ready and cask matches; release prep already complete."
               echo "PREP_DONE=1" >> "$GITHUB_ENV"
             fi
@@ -865,7 +862,7 @@ jobs:
           cef-version: ${{ needs.cef-version.outputs.version }}
 
       - name: Check lean macOS desktop features
-        run: env VMUX_SKIP_DX_BUILD=1 ./scripts/cargo-with-cef-cache.sh check -p vmux_desktop --no-default-features --features dev
+        run: env VMUX_SKIP_DX_BUILD=1 vmux internal cargo -- check -p vmux_desktop --no-default-features --features dev
 
       - name: Build, sign, notarize, and package DMG
         if: env.PREP_DONE != '1'
@@ -881,7 +878,7 @@ jobs:
           if [ "$IS_RELEASE_PR" != "1" ]; then
             export SKIP_NOTARIZE=1
           fi
-          ./scripts/build-mac-release.sh
+          vmux build -p release
 
       - name: Smoke test bundled app
         if: env.PREP_DONE != '1'
@@ -959,6 +956,14 @@ jobs:
           cd target/release
           tar czf "$APP_ARCHIVE_NAME" Vmux.app
 
+      - name: Build and sign standalone CLI release
+        if: env.PREP_DONE != '1' && env.IS_RELEASE_PR == '1'
+        env:
+          VMUX_UPDATE_PUBLIC_KEY: ${{ secrets.VMUX_UPDATE_PUBLIC_KEY }}
+          VMUX_UPDATE_PRIVATE_KEY: ${{ secrets.VMUX_UPDATE_PRIVATE_KEY }}
+          VMUX_UPDATE_PRIVATE_KEY_PASSWORD: ${{ secrets.VMUX_UPDATE_PRIVATE_KEY_PASSWORD }}
+        run: vmux internal cli-release
+
       - name: Sign update artifact (minisign)
         if: env.PREP_DONE != '1' && env.IS_RELEASE_PR == '1'
         env:
@@ -982,6 +987,8 @@ jobs:
             "target/release/${BINARY_ARCHIVE_NAME}"
             "target/release/${APP_ARCHIVE_NAME}"
             "target/release/${APP_SIGNATURE_NAME}"
+            ".build-tools/standalone/release/${CLI_ARCHIVE_NAME}"
+            ".build-tools/standalone/release/${CLI_SIGNATURE_NAME}"
           )
           if gh release view "$TAG" --json isDraft >/tmp/r.json 2>/dev/null; then
             is_draft=$(jq -r .isDraft /tmp/r.json)
@@ -1003,7 +1010,7 @@ jobs:
         if: env.IS_RELEASE_PR == '1'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: ./scripts/update-release-metadata.sh --check
+        run: vmux internal update-release-metadata -- --check
 
   record-preflight:
     name: Record preflight
