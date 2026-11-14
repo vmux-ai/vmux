@@ -2151,6 +2151,8 @@ Once a view is bound and synchronized, queue-only changes publish the queue cont
 attachment snapshot without reading or mutating its current transcript projection.
 The Session-owned push component tracks optional input presence. Context removals and agent
 identity changes invalidate that fast path before the next queue publication.
+Promptless setup publishes without transcript children; setup lifecycle changes invalidate
+the context before the next queue publication.
 Accepted Session starts retain their request on an Operation entity until creation commits,
 fails or is canceled. A successful creation appends the first prompt before runtime attachment
 and marks that queued entity as already echoed, so later delivery and replay do not duplicate it.
