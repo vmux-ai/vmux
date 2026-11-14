@@ -459,10 +459,10 @@ mod tests {
             let requests = daemon.response.join().unwrap();
             let mut starts = Vec::new();
             for request in requests {
-                if let Some(line) = request.lines().next() {
-                    if line.starts_with("POST ") {
-                        starts.push(line.to_string());
-                    }
+                if let Some(line) = request.lines().next()
+                    && line.starts_with("POST ")
+                {
+                    starts.push(line.to_string());
                 }
             }
             let expected = if ready {
